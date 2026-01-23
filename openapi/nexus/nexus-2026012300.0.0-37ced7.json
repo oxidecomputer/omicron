@@ -20238,15 +20238,6 @@
             "description": "Reserve a specific subnet.",
             "type": "object",
             "properties": {
-              "pool": {
-                "nullable": true,
-                "description": "The pool containing this subnet. If not specified, the default subnet pool for the subnet's IP version is used.",
-                "allOf": [
-                  {
-                    "$ref": "#/components/schemas/NameOrId"
-                  }
-                ]
-              },
               "subnet": {
                 "description": "The subnet CIDR to reserve. Must be available in the pool.",
                 "allOf": [
@@ -27727,15 +27718,6 @@
           },
           "name": {
             "$ref": "#/components/schemas/Name"
-          },
-          "pool_type": {
-            "description": "Type of subnet pool (defaults to Unicast)",
-            "default": "unicast",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/IpPoolType"
-              }
-            ]
           }
         },
         "required": [
@@ -27839,9 +27821,6 @@
         "description": "Add a member (subnet) to a subnet pool",
         "type": "object",
         "properties": {
-          "description": {
-            "type": "string"
-          },
           "max_prefix_length": {
             "nullable": true,
             "description": "Maximum prefix length for allocations from this subnet; a larger prefix means smaller allocations are allowed (e.g. a /24 prefix yields smaller subnet allocations than a /16 prefix).\n\nValid values: 0-32 for IPv4, 0-128 for IPv6. Default if not specified is 32 for IPv4 and 128 for IPv6.",
@@ -27856,9 +27835,6 @@
             "format": "uint8",
             "minimum": 0
           },
-          "name": {
-            "$ref": "#/components/schemas/Name"
-          },
           "subnet": {
             "description": "The subnet to add to the pool",
             "allOf": [
@@ -27869,8 +27845,6 @@
           }
         },
         "required": [
-          "description",
-          "name",
           "subnet"
         ]
       },

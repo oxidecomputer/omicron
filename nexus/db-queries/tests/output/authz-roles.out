@@ -236,6 +236,23 @@ resource: authz::AuditLog
   unauthenticated                   !  !  !  !  !  !  !  !
   scim                              ✘  ✘  ✘  ✘  ✘  ✘  ✔  ✘
 
+resource: authz::SubnetPoolList
+
+  USER                              Q  R LC RP  M MP CC  D
+  fleet-admin                       ✘  ✘  ✔  ✘  ✔  ✔  ✔  ✔
+  fleet-collaborator                ✘  ✘  ✔  ✘  ✘  ✘  ✘  ✘
+  fleet-viewer                      ✘  ✘  ✔  ✘  ✘  ✘  ✘  ✘
+  silo1-admin                       ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-collaborator                ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-limited-collaborator        ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-viewer                      ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-proj1-admin                 ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-proj1-collaborator          ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-proj1-limited-collaborator  ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-proj1-viewer                ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  unauthenticated                   !  !  !  !  !  !  !  !
+  scim                              ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+
 resource: Silo "silo1"
 
   USER                              Q  R LC RP  M MP CC  D
@@ -763,6 +780,23 @@ resource: InternetGatewayIpAddress "silo1-proj1-igw1-address1"
   unauthenticated                   !  !  !  !  !  !  !  !
   scim                              ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
 
+resource: ExternalSubnet id "762e3d39-cd8a-4c59-ae6a-6efc9b2421df"
+
+  USER                              Q  R LC RP  M MP CC  D
+  fleet-admin                       ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  fleet-collaborator                ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  fleet-viewer                      ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-admin                       ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
+  silo1-collaborator                ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
+  silo1-limited-collaborator        ✘  ✔  ✔  ✔  ✘  ✘  ✘  ✘
+  silo1-viewer                      ✘  ✔  ✔  ✔  ✘  ✘  ✘  ✘
+  silo1-proj1-admin                 ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
+  silo1-proj1-collaborator          ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
+  silo1-proj1-limited-collaborator  ✘  ✔  ✔  ✔  ✘  ✘  ✘  ✘
+  silo1-proj1-viewer                ✘  ✔  ✔  ✔  ✘  ✘  ✘  ✘
+  unauthenticated                   !  !  !  !  !  !  !  !
+  scim                              ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+
 resource: Project "silo1-proj2"
 
   USER                              Q  R LC RP  M MP CC  D
@@ -1019,6 +1053,23 @@ resource: InternetGatewayIpPool "silo1-proj2-igw1-pool1"
   scim                              ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
 
 resource: InternetGatewayIpAddress "silo1-proj2-igw1-address1"
+
+  USER                              Q  R LC RP  M MP CC  D
+  fleet-admin                       ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  fleet-collaborator                ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  fleet-viewer                      ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-admin                       ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
+  silo1-collaborator                ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
+  silo1-limited-collaborator        ✘  ✔  ✔  ✔  ✘  ✘  ✘  ✘
+  silo1-viewer                      ✘  ✔  ✔  ✔  ✘  ✘  ✘  ✘
+  silo1-proj1-admin                 ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-proj1-collaborator          ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-proj1-limited-collaborator  ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-proj1-viewer                ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  unauthenticated                   !  !  !  !  !  !  !  !
+  scim                              ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+
+resource: ExternalSubnet id "762e3d39-cd8a-4c59-ae6a-6efc9b2421df"
 
   USER                              Q  R LC RP  M MP CC  D
   fleet-admin                       ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
@@ -1596,6 +1647,23 @@ resource: InternetGatewayIpAddress "silo2-proj1-igw1-address1"
   unauthenticated                   !  !  !  !  !  !  !  !
   scim                              ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
 
+resource: ExternalSubnet id "762e3d39-cd8a-4c59-ae6a-6efc9b2421df"
+
+  USER                              Q  R LC RP  M MP CC  D
+  fleet-admin                       ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  fleet-collaborator                ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  fleet-viewer                      ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-admin                       ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-collaborator                ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-limited-collaborator        ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-viewer                      ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-proj1-admin                 ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-proj1-collaborator          ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-proj1-limited-collaborator  ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-proj1-viewer                ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  unauthenticated                   !  !  !  !  !  !  !  !
+  scim                              ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+
 resource: ScimClientBearerToken id "7885144e-9c75-47f7-a97d-7dfc58e1186c"
 
   USER                              Q  R LC RP  M MP CC  D
@@ -1925,6 +1993,23 @@ resource: WebhookSecret id "0c3e55cb-fcee-46e9-a2e3-0901dbd3b997"
   fleet-admin                       ✘  ✔  ✘  ✔  ✔  ✔  ✘  ✔
   fleet-collaborator                ✘  ✔  ✘  ✔  ✘  ✘  ✘  ✘
   fleet-viewer                      ✘  ✔  ✘  ✔  ✘  ✘  ✘  ✘
+  silo1-admin                       ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-collaborator                ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-limited-collaborator        ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-viewer                      ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-proj1-admin                 ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-proj1-collaborator          ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-proj1-limited-collaborator  ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-proj1-viewer                ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  unauthenticated                   !  !  !  !  !  !  !  !
+  scim                              ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+
+resource: SubnetPool id "e3a6e04e-ad41-483c-8ee9-3958c3ffb4e5"
+
+  USER                              Q  R LC RP  M MP CC  D
+  fleet-admin                       ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
+  fleet-collaborator                ✘  ✔  ✔  ✔  ✘  ✘  ✘  ✘
+  fleet-viewer                      ✘  ✔  ✔  ✔  ✘  ✘  ✘  ✘
   silo1-admin                       ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   silo1-collaborator                ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   silo1-limited-collaborator        ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
