@@ -190,7 +190,11 @@ impl DataStore {
         let temp_ip = self.allocate_external_ip(opctx, data).await;
         if let Err(e) = temp_ip {
             let eip = self
-                .instance_lookup_ephemeral_ip(opctx, instance_id)
+                .instance_lookup_ephemeral_ip(
+                    opctx,
+                    instance_id,
+                    ip_version.map(Into::into),
+                )
                 .await?
                 .ok_or(e)?;
 
@@ -221,7 +225,11 @@ impl DataStore {
             Ok(None) => {
                 self.deallocate_external_ip(opctx, temp_ip.id).await?;
                 let eip = self
-                    .instance_lookup_ephemeral_ip(opctx, instance_id)
+                    .instance_lookup_ephemeral_ip(
+                        opctx,
+                        instance_id,
+                        Some(ip_version.into()),
+                    )
                     .await?
                     .ok_or_else(|| Error::internal_error(
                         "failed to lookup current ephemeral IP for idempotent attach"
@@ -960,18 +968,53 @@ impl DataStore {
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 
-    /// Fetch the ephmeral IP address assigned to the provided instance, if this
-    /// has been configured.
+    /// Fetch the ephemeral IP address assigned to the provided instance.
+    ///
+    /// If `ip_version` is specified, returns the ephemeral IP of that version.
+    /// If `ip_version` is `None`:
+    /// - Returns the ephemeral IP if there is exactly one
+    /// - Returns an error if there are multiple (caller must specify version)
+    /// - Returns `Ok(None)` if there are none
     pub async fn instance_lookup_ephemeral_ip(
         &self,
         opctx: &OpContext,
         instance_id: InstanceUuid,
+        ip_version: Option<omicron_common::api::external::IpVersion>,
     ) -> LookupResult<Option<ExternalIp>> {
-        Ok(self
+        let ephemeral_ips: Vec<_> = self
             .instance_lookup_external_ips(opctx, instance_id)
             .await?
             .into_iter()
-            .find(|v| v.kind == IpKind::Ephemeral))
+            .filter(|v| v.kind == IpKind::Ephemeral)
+            .collect();
+
+        match ip_version {
+            Some(version) => {
+                // Filter by requested version
+                Ok(ephemeral_ips.into_iter().find(|ip| {
+                    let ip_v = match ip.ip {
+                        ipnetwork::IpNetwork::V4(_) => {
+                            omicron_common::api::external::IpVersion::V4
+                        }
+                        ipnetwork::IpNetwork::V6(_) => {
+                            omicron_common::api::external::IpVersion::V6
+                        }
+                    };
+                    ip_v == version
+                }))
+            }
+            None => {
+                // No version specified - must have 0 or 1 ephemeral IP
+                match ephemeral_ips.len() {
+                    0 => Ok(None),
+                    1 => Ok(ephemeral_ips.into_iter().next()),
+                    _ => Err(Error::invalid_request(
+                        "instance has multiple ephemeral IPs; \
+                         specify ip_version to select which to detach",
+                    )),
+                }
+            }
+        }
     }
 
     /// Fetch all external IP addresses of any kind for the provided probe.

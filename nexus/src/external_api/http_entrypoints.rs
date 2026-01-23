@@ -4990,7 +4990,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
     async fn instance_ephemeral_ip_detach(
         rqctx: RequestContext<ApiContext>,
         path_params: Path<params::InstancePath>,
-        query_params: Query<params::OptionalProjectSelector>,
+        query_params: Query<params::EphemeralIpDetachSelector>,
     ) -> Result<HttpResponseDeleted, HttpError> {
         audit_and_time(&rqctx, |opctx, nexus| async move {
             let path = path_params.into_inner();
@@ -5005,7 +5005,9 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 .instance_detach_external_ip(
                     &opctx,
                     &instance_lookup,
-                    &params::ExternalIpDetach::Ephemeral,
+                    &params::ExternalIpDetach::Ephemeral {
+                        ip_version: query.ip_version,
+                    },
                 )
                 .await?;
             Ok(HttpResponseDeleted())

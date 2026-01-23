@@ -75,9 +75,9 @@ async fn siid_begin_detach_ip(
     let instance_id =
         InstanceUuid::from_untyped_uuid(params.authz_instance.id());
     match &params.delete_params {
-        params::ExternalIpDetach::Ephemeral => {
+        params::ExternalIpDetach::Ephemeral { ip_version } => {
             let eip = datastore
-                .instance_lookup_ephemeral_ip(&opctx, instance_id)
+                .instance_lookup_ephemeral_ip(&opctx, instance_id, *ip_version)
                 .await
                 .map_err(ActionError::action_failed)?;
 
@@ -318,7 +318,7 @@ pub(crate) mod test {
                 floating_ip: FIP_NAME.parse::<Name>().unwrap().into(),
             }
         } else {
-            params::ExternalIpDetach::Ephemeral
+            params::ExternalIpDetach::Ephemeral { ip_version: None }
         };
 
         let (.., authz_project, authz_instance) =

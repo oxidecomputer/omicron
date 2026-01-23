@@ -646,17 +646,33 @@ impl super::Nexus {
             )));
         }
 
-        if params
+        // Collect ephemeral IP selectors for validation
+        let ephemeral_selectors: Vec<_> = params
             .external_ips
             .iter()
-            .filter(|v| matches!(v, params::ExternalIpCreate::Ephemeral { .. }))
-            .count()
-            > MAX_EPHEMERAL_IPS_PER_INSTANCE
-        {
+            .filter_map(|v| match v {
+                params::ExternalIpCreate::Ephemeral { pool_selector } => {
+                    Some(pool_selector)
+                }
+                _ => None,
+            })
+            .collect();
+
+        if ephemeral_selectors.len() > MAX_EPHEMERAL_IPS_PER_INSTANCE {
             return Err(Error::invalid_request(&format!(
-                "An instance may not have more than {} ephemeral IP address",
+                "An instance may not have more than {} ephemeral IP addresses",
                 MAX_EPHEMERAL_IPS_PER_INSTANCE,
             )));
+        }
+
+        // If requesting two ephemeral IPs, validate they specify different versions
+        if ephemeral_selectors.len() == 2 {
+            self.validate_ephemeral_ip_pair(
+                opctx,
+                ephemeral_selectors[0],
+                ephemeral_selectors[1],
+            )
+            .await?;
         }
 
         if let params::InstanceNetworkInterfaceAttachment::Create(ref ifaces) =
@@ -2276,6 +2292,168 @@ impl super::Nexus {
             ExternalIpAttach::Ephemeral { pool, ip_version },
         )
         .await
+    }
+
+    /// Validate that two ephemeral IP pool selectors specify different IP versions.
+    ///
+    /// This is used during instance creation to ensure dual-stack configurations
+    /// are valid (one IPv4 + one IPv6 ephemeral IP).
+    async fn validate_ephemeral_ip_pair(
+        &self,
+        opctx: &OpContext,
+        first: &params::PoolSelector,
+        second: &params::PoolSelector,
+    ) -> Result<(), Error> {
+        use params::PoolSelector;
+
+        match (first, second) {
+            // Two Auto with no version specified - ambiguous
+            (
+                PoolSelector::Auto { ip_version: None },
+                PoolSelector::Auto { ip_version: None },
+            ) => {
+                return Err(Error::invalid_request(
+                    "cannot request two ephemeral IPs with automatic pool \
+                     selection without specifying ip_version for each",
+                ));
+            }
+
+            // Two Auto with same version
+            (
+                PoolSelector::Auto { ip_version: Some(v1) },
+                PoolSelector::Auto { ip_version: Some(v2) },
+            ) if v1 == v2 => {
+                return Err(Error::invalid_request(format!(
+                    "cannot request two ephemeral IPs of the same version ({v1})"
+                )));
+            }
+
+            // Two Auto with different versions - valid
+            (
+                PoolSelector::Auto { ip_version: Some(_) },
+                PoolSelector::Auto { ip_version: Some(_) },
+            ) => {}
+
+            // Auto(None) + Auto(Some) - need to verify default of opposite exists
+            (
+                PoolSelector::Auto { ip_version: None },
+                PoolSelector::Auto { ip_version: Some(v) },
+            )
+            | (
+                PoolSelector::Auto { ip_version: Some(v) },
+                PoolSelector::Auto { ip_version: None },
+            ) => {
+                let opposite = match v {
+                    IpVersion::V4 => IpVersion::V6,
+                    IpVersion::V6 => IpVersion::V4,
+                };
+                if !self.default_ip_pool_exists(opctx, opposite).await {
+                    return Err(Error::invalid_request(format!(
+                        "cannot request two ephemeral IPs: one specifies {v}, \
+                         but no default pool exists for {opposite}"
+                    )));
+                }
+            }
+
+            // Two Explicit with same pool
+            (
+                PoolSelector::Explicit { pool: p1 },
+                PoolSelector::Explicit { pool: p2 },
+            ) if p1 == p2 => {
+                return Err(Error::invalid_request(
+                    "cannot request two ephemeral IPs from the same pool",
+                ));
+            }
+
+            // Two Explicit with different pools - verify different versions
+            (
+                PoolSelector::Explicit { pool: p1 },
+                PoolSelector::Explicit { pool: p2 },
+            ) => {
+                let v1 = self.get_pool_ip_version(opctx, p1).await?;
+                let v2 = self.get_pool_ip_version(opctx, p2).await?;
+                if v1 == v2 {
+                    return Err(Error::invalid_request(format!(
+                        "cannot request two ephemeral IPs of the same version \
+                         ({v1}): both pools are {v1}"
+                    )));
+                }
+            }
+
+            // Explicit + Auto(Some) - verify different versions
+            (
+                PoolSelector::Explicit { pool },
+                PoolSelector::Auto { ip_version: Some(v) },
+            )
+            | (
+                PoolSelector::Auto { ip_version: Some(v) },
+                PoolSelector::Explicit { pool },
+            ) => {
+                let pool_version =
+                    self.get_pool_ip_version(opctx, pool).await?;
+                if pool_version == *v {
+                    return Err(Error::invalid_request(format!(
+                        "cannot request two ephemeral IPs of the same version \
+                         ({v}): explicit pool and auto selection both specify {v}"
+                    )));
+                }
+            }
+
+            // Explicit + Auto(None) - verify default of opposite version exists
+            (
+                PoolSelector::Explicit { pool },
+                PoolSelector::Auto { ip_version: None },
+            )
+            | (
+                PoolSelector::Auto { ip_version: None },
+                PoolSelector::Explicit { pool },
+            ) => {
+                let pool_version =
+                    self.get_pool_ip_version(opctx, pool).await?;
+                let opposite = match pool_version {
+                    IpVersion::V4 => IpVersion::V6,
+                    IpVersion::V6 => IpVersion::V4,
+                };
+                if !self.default_ip_pool_exists(opctx, opposite).await {
+                    return Err(Error::invalid_request(format!(
+                        "cannot request two ephemeral IPs: explicit pool is \
+                         {pool_version}, but no default pool exists for {opposite}"
+                    )));
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Get the IP version of a pool by name or ID.
+    async fn get_pool_ip_version(
+        &self,
+        opctx: &OpContext,
+        pool: &NameOrId,
+    ) -> Result<IpVersion, Error> {
+        let (_, db_pool) = self
+            .ip_pool_lookup(opctx, pool)?
+            .fetch_for(authz::Action::CreateChild)
+            .await?;
+        Ok(db_pool.ip_version.into())
+    }
+
+    /// Check if a default IP pool exists for the given version.
+    async fn default_ip_pool_exists(
+        &self,
+        opctx: &OpContext,
+        version: IpVersion,
+    ) -> bool {
+        self.db_datastore
+            .resolve_pool_for_allocation(
+                opctx,
+                None, // no explicit pool - look for default
+                nexus_db_model::IpPoolType::Unicast,
+                Some(version.into()),
+            )
+            .await
+            .is_ok()
     }
 
     /// Attach a Floating IP to an instance.

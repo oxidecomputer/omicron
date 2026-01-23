@@ -3686,6 +3686,9 @@ pub trait NexusExternalApi {
     ) -> Result<HttpResponseAccepted<views::ExternalIp>, HttpError>;
 
     /// Detach and deallocate ephemeral IP from instance
+    ///
+    /// When an instance has both IPv4 and IPv6 ephemeral IPs, the `ip_version`
+    /// query parameter must be specified to identify which IP to detach.
     #[endpoint {
         method = DELETE,
         path = "/v1/instances/{instance}/external-ips/ephemeral",
@@ -3694,7 +3697,7 @@ pub trait NexusExternalApi {
     async fn instance_ephemeral_ip_detach(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<params::InstancePath>,
-        query_params: Query<params::OptionalProjectSelector>,
+        query_params: Query<params::EphemeralIpDetachSelector>,
     ) -> Result<HttpResponseDeleted, HttpError>;
 
     // Instance Multicast Groups
