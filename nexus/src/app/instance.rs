@@ -2342,11 +2342,13 @@ impl super::Nexus {
                 PoolSelector::Auto { ip_version: Some(v) },
                 PoolSelector::Auto { ip_version: None },
             ) => {
+                // ephemeral IPs are always allocated from unicast pools
                 let default_version =
                     self.default_unicast_pool_version(opctx).await?;
                 if default_version == *v {
                     return Err(Error::invalid_request(format!(
-                        "cannot request two ephemeral IPs of the same version ({v})"
+                        "two ephemeral IPs would both be {v}: \
+                         auto selects default pool, which is {v}"
                     )));
                 }
             }
@@ -2406,12 +2408,13 @@ impl super::Nexus {
             ) => {
                 let pool_version =
                     self.get_pool_ip_version(opctx, pool).await?;
+                // ephemeral IPs are always allocated from unicast pools
                 let default_version =
                     self.default_unicast_pool_version(opctx).await?;
                 if default_version == pool_version {
                     return Err(Error::invalid_request(format!(
-                        "cannot request two ephemeral IPs of the same version \
-                         ({pool_version})"
+                        "two ephemeral IPs would both be {pool_version}: \
+                         auto selects default pool, which is {pool_version}"
                     )));
                 }
             }

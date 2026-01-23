@@ -43,6 +43,7 @@ use nexus_db_model::IpVersion;
 use nexus_db_model::NetworkInterfaceKind;
 use nexus_types::deployment::OmicronZoneExternalIp;
 use nexus_types::identity::Resource;
+use omicron_common::api::external;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::DeleteResult;
@@ -979,7 +980,7 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         instance_id: InstanceUuid,
-        ip_version: Option<omicron_common::api::external::IpVersion>,
+        ip_version: Option<external::IpVersion>,
     ) -> LookupResult<Option<ExternalIp>> {
         let ephemeral_ips: Vec<_> = self
             .instance_lookup_external_ips(opctx, instance_id)
@@ -993,12 +994,8 @@ impl DataStore {
                 // Filter by requested version
                 Ok(ephemeral_ips.into_iter().find(|ip| {
                     let ip_v = match ip.ip {
-                        ipnetwork::IpNetwork::V4(_) => {
-                            omicron_common::api::external::IpVersion::V4
-                        }
-                        ipnetwork::IpNetwork::V6(_) => {
-                            omicron_common::api::external::IpVersion::V6
-                        }
+                        ipnetwork::IpNetwork::V4(_) => external::IpVersion::V4,
+                        ipnetwork::IpNetwork::V6(_) => external::IpVersion::V6,
                     };
                     ip_v == version
                 }))
