@@ -15,8 +15,6 @@ use headers::authorization::Credentials;
 pub mod certificates;
 pub mod dev;
 
-pub use dev::db::COCKROACHDB_DEFAULT_LISTEN_PORT;
-
 #[macro_use]
 extern crate slog;
 

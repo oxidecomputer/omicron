@@ -33,7 +33,7 @@ const COCKROACHDB_START_TIMEOUT_DEFAULT: Duration = Duration::from_secs(30);
 // This is appropriate for the test suite and may be useful in some cases for
 // omicron-dev.  However, omicron-dev by default chooses a specific port so that
 // we can ship a Nexus configuration that will use the same port.
-pub const COCKROACHDB_DEFAULT_LISTEN_PORT: u16 = 0;
+const COCKROACHDB_DEFAULT_LISTEN_PORT: u16 = 0;
 
 /// CockroachDB database name
 // This MUST be kept in sync with dbinit.sql and dbwipe.sql.

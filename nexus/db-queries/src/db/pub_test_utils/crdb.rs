@@ -35,7 +35,7 @@ pub async fn test_setup_database(log: &Logger) -> dev::db::CockroachInstance {
     dev::test_setup_database(
         log,
         dev::StorageSource::CopyFromSeed { input_tar },
-        dev::db::COCKROACHDB_DEFAULT_LISTEN_PORT,
+        None,
     )
     .await
 }
@@ -46,12 +46,7 @@ pub async fn test_setup_database(log: &Logger) -> dev::db::CockroachInstance {
 pub async fn test_setup_database_empty(
     log: &Logger,
 ) -> dev::db::CockroachInstance {
-    dev::test_setup_database(
-        log,
-        dev::StorageSource::DoNotPopulate,
-        dev::db::COCKROACHDB_DEFAULT_LISTEN_PORT,
-    )
-    .await
+    dev::test_setup_database(log, dev::StorageSource::DoNotPopulate, None).await
 }
 
 /// Wrapper around [`dev::test_setup_database`] which uses a seed tarball
@@ -59,7 +54,7 @@ pub async fn test_setup_database_empty(
 pub async fn test_setup_database_from_seed(
     log: &Logger,
     input_tar: Utf8PathBuf,
-    listen_port: u16,
+    listen_port: Option<u16>,
 ) -> dev::db::CockroachInstance {
     dev::test_setup_database(
         log,

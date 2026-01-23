@@ -11,7 +11,6 @@ use libc::SIGINT;
 use nexus_config::NexusConfig;
 use nexus_test_interface::NexusServer;
 use nexus_test_utils::resource_helpers::DiskTest;
-use omicron_test_utils::COCKROACHDB_DEFAULT_LISTEN_PORT;
 use signal_hook_tokio::Signals;
 use std::fs;
 
@@ -49,12 +48,18 @@ enum OmicronDevCmd {
 
 #[derive(Clone, Debug, Args)]
 struct RunAllArgs {
-    /// Nexus external API listen port.  Use `0` to request any available port.
+    /// Nexus external API listen port. Use `0` to request any available port.
     #[clap(long, action)]
     nexus_listen_port: Option<u16>,
     /// CockroachDB listen port. Use `0` to request any available port.
-    #[clap(long, default_value_t = COCKROACHDB_DEFAULT_LISTEN_PORT)]
-    db_listen_port: u16,
+    #[clap(long)]
+    db_listen_port: Option<u16>,
+    /// Internal DNS listen port. Use `0` to request any available port.
+    #[clap(long)]
+    internal_dns_listen_port: Option<u16>,
+    /// Management gateway listen port. Use `0` to request any available port.
+    #[clap(long)]
+    mgs_listen_port: Option<u16>,
     /// Override the gateway server configuration file.
     #[clap(long, default_value = DEFAULT_SP_SIM_CONFIG)]
     gateway_config: Utf8PathBuf,
@@ -92,14 +97,18 @@ impl RunAllArgs {
         }
 
         println!("omicron-dev: setting up all services ... ");
-        let cptestctx =
-            nexus_test_utils::omicron_dev_setup_with_config::<
-                omicron_nexus::Server,
-            >(
-                &mut config, 0, self.gateway_config.clone(), self.db_listen_port
-            )
-            .await
-            .context("error setting up services")?;
+        let cptestctx = nexus_test_utils::omicron_dev_setup_with_config::<
+            omicron_nexus::Server,
+        >(
+            &mut config,
+            0,
+            self.gateway_config.clone(),
+            self.db_listen_port,
+            self.internal_dns_listen_port,
+            self.mgs_listen_port,
+        )
+        .await
+        .context("error setting up services")?;
 
         println!("omicron-dev: Adding disks to first sled agent");
 

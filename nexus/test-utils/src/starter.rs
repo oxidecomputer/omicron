@@ -167,7 +167,9 @@ pub struct ControlPlaneStarter<'a, N: NexusServer> {
 
     pub simulated_upstairs: Arc<sim::SimulatedUpstairs>,
 
-    db_listen_port: u16,
+    db_listen_port: Option<u16>,
+    internal_dns_listen_port: Option<u16>,
+    mgs_listen_port: Option<u16>,
 }
 
 type StepInitFn<'a, N> = Box<
@@ -218,12 +220,22 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
             simulated_upstairs: Arc::new(sim::SimulatedUpstairs::new(
                 simulated_upstairs_log,
             )),
-            db_listen_port: dev::db::COCKROACHDB_DEFAULT_LISTEN_PORT,
+            db_listen_port: None,
+            internal_dns_listen_port: None,
+            mgs_listen_port: None,
         }
     }
 
-    pub fn db_listen_port(&mut self, port: u16) {
+    pub fn db_listen_port(&mut self, port: Option<u16>) {
         self.db_listen_port = port;
+    }
+
+    pub fn internal_dns_listen_port(&mut self, port: Option<u16>) {
+        self.internal_dns_listen_port = port;
+    }
+
+    pub fn mgs_listen_port(&mut self, port: Option<u16>) {
+        self.mgs_listen_port = port;
     }
 
     pub async fn init_with_steps(
@@ -1212,7 +1224,18 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
     /// Set up an internal DNS server on the first sled agent
     pub async fn start_internal_dns(&mut self) {
         let log = self.logctx.log.new(o!("component" => "internal_dns_server"));
-        let dns = dns_server::TransientServer::new(&log).await.unwrap();
+        let dns_addr = SocketAddrV6::new(
+            Ipv6Addr::LOCALHOST,
+            self.internal_dns_listen_port.unwrap_or(0),
+            0,
+            0,
+        );
+        let dns = dns_server::TransientServer::new_with_address(
+            &log,
+            dns_addr.into(),
+        )
+        .await
+        .unwrap();
 
         let SocketAddr::V6(dns_address) = dns.dns_server.local_address() else {
             panic!("Unsupported IPv4 DNS address");
@@ -1633,7 +1656,7 @@ pub(crate) async fn setup_with_config_impl<N: NexusServer>(
                         builder
                             .start_gateway(
                                 SwitchLocation::Switch0,
-                                None,
+                                builder.mgs_listen_port,
                                 mgs_config,
                             )
                             .boxed()
@@ -1677,7 +1700,7 @@ pub(crate) async fn setup_with_config_impl<N: NexusServer>(
                             builder
                                 .start_gateway(
                                     SwitchLocation::Switch1,
-                                    None,
+                                    builder.mgs_listen_port,
                                     gateway_config_file,
                                 )
                                 .boxed()

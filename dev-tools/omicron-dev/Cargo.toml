@@ -22,7 +22,6 @@ nexus-config.workspace = true
 nexus-test-interface.workspace = true
 nexus-test-utils = { workspace = true, features = ["omicron-dev"] }
 omicron-nexus.workspace = true
-omicron-test-utils.workspace = true
 omicron-workspace-hack.workspace = true
 oxide-tokio-rt.workspace = true
 # See omicron-rpaths for more about the "pq-sys" dependency.
