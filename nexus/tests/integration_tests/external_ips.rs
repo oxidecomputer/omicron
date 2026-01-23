@@ -1674,7 +1674,7 @@ async fn test_ephemeral_ip_detach_requires_version_with_dual_stack(
         object_delete_error(client, &url, StatusCode::BAD_REQUEST).await;
     assert_eq!(
         error.message,
-        "instance has multiple ephemeral IPs; specify ip_version to select which to use"
+        "instance has two ephemeral IPs; specify ip_version to select which to detach"
     );
 
     ephemeral_ip_detach(client, instance_name, Some(views::IpVersion::V4))
@@ -2449,10 +2449,8 @@ async fn floating_ip_detach(
 /// ephemeral IPs.
 ///
 /// This is a regression test for a bug where the fallback lookup in
-/// `allocate_instance_ephemeral_ip` used `ip_version = None` (from the
-/// explicit pool request) when the allocation failed, which caused an error
-/// because `instance_lookup_ephemeral_ip(None)` fails when there are multiple
-/// ephemeral IPs.
+/// `allocate_instance_ephemeral_ip` didn't know which IP version to look up
+/// when allocation failed. The fix is to use the pool's IP version.
 #[nexus_test]
 async fn test_ephemeral_ip_idempotent_attach_with_exhausted_explicit_pool(
     cptestctx: &ControlPlaneTestContext,

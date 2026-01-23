@@ -12,9 +12,9 @@ use crate::app::sagas::declare_saga_actions;
 use crate::app::{authn, authz, db};
 use crate::external_api::params;
 use nexus_db_lookup::LookupPath;
-use nexus_db_model::IpAttachState;
+use nexus_db_model::{IpAttachState, IpKind};
 use nexus_types::external_api::views;
-use omicron_common::api::external::NameOrId;
+use omicron_common::api::external::{Error, NameOrId};
 use omicron_uuid_kinds::{GenericUuid, InstanceUuid};
 use ref_cast::RefCast;
 use serde::Deserialize;
@@ -76,10 +76,38 @@ async fn siid_begin_detach_ip(
         InstanceUuid::from_untyped_uuid(params.authz_instance.id());
     match &params.delete_params {
         params::ExternalIpDetach::Ephemeral { ip_version } => {
-            let eip = datastore
-                .instance_lookup_ephemeral_ip(&opctx, instance_id, *ip_version)
-                .await
-                .map_err(ActionError::action_failed)?;
+            // If ip_version is specified, look up by version directly.
+            // Otherwise, we need to figure out which ephemeral IP to detach.
+            let eip = match ip_version {
+                Some(v) => datastore
+                    .instance_lookup_ephemeral_ip(&opctx, instance_id, *v)
+                    .await
+                    .map_err(ActionError::action_failed)?,
+                None => {
+                    let ephemeral_ips: Vec<_> = datastore
+                        .instance_lookup_external_ips(&opctx, instance_id)
+                        .await
+                        .map_err(ActionError::action_failed)?
+                        .into_iter()
+                        .filter(|ip| ip.kind == IpKind::Ephemeral)
+                        .collect();
+
+                    match ephemeral_ips.len() {
+                        0 => None,
+                        1 => ephemeral_ips.into_iter().next(),
+                        // This is a catchall but says "two" because that's the
+                        // max (one per IP version).
+                        _ => {
+                            return Err(ActionError::action_failed(
+                                Error::invalid_request(
+                                    "instance has two ephemeral IPs; \
+                                     specify ip_version to select which to detach",
+                                ),
+                            ));
+                        }
+                    }
+                }
+            };
 
             if let Some(eph_ip) = eip {
                 datastore

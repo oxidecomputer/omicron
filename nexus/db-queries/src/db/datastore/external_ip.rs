@@ -199,7 +199,7 @@ impl DataStore {
                 .instance_lookup_ephemeral_ip(
                     opctx,
                     instance_id,
-                    Some(lookup_version.into()),
+                    lookup_version.into(),
                 )
                 .await?
                 .ok_or(e)?;
@@ -234,7 +234,7 @@ impl DataStore {
                     .instance_lookup_ephemeral_ip(
                         opctx,
                         instance_id,
-                        Some(ip_version.into()),
+                        ip_version.into(),
                     )
                     .await?
                     .ok_or_else(|| Error::internal_error(
@@ -974,49 +974,27 @@ impl DataStore {
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 
-    /// Fetch the ephemeral IP address assigned to the provided instance.
-    ///
-    /// If `ip_version` is specified, returns the ephemeral IP of that version.
-    /// If `ip_version` is `None`:
-    /// - Returns the ephemeral IP if there is exactly one
-    /// - Returns an error if there are multiple (caller must specify version)
-    /// - Returns `Ok(None)` if there are none
+    /// Fetch the ephemeral IP address of the given version assigned to the
+    /// provided instance, if any.
     pub async fn instance_lookup_ephemeral_ip(
         &self,
         opctx: &OpContext,
         instance_id: InstanceUuid,
-        ip_version: Option<external::IpVersion>,
+        ip_version: external::IpVersion,
     ) -> LookupResult<Option<ExternalIp>> {
-        let ephemeral_ips: Vec<_> = self
+        Ok(self
             .instance_lookup_external_ips(opctx, instance_id)
             .await?
             .into_iter()
-            .filter(|v| v.kind == IpKind::Ephemeral)
-            .collect();
-
-        match ip_version {
-            Some(version) => {
-                // Filter by requested version
-                Ok(ephemeral_ips.into_iter().find(|ip| {
+            .find(|ip| {
+                ip.kind == IpKind::Ephemeral && {
                     let ip_v = match ip.ip {
                         ipnetwork::IpNetwork::V4(_) => external::IpVersion::V4,
                         ipnetwork::IpNetwork::V6(_) => external::IpVersion::V6,
                     };
-                    ip_v == version
-                }))
-            }
-            None => {
-                // No version specified - must have 0 or 1 ephemeral IP
-                match ephemeral_ips.len() {
-                    0 => Ok(None),
-                    1 => Ok(ephemeral_ips.into_iter().next()),
-                    _ => Err(Error::invalid_request(
-                        "instance has multiple ephemeral IPs; \
-                         specify ip_version to select which to use",
-                    )),
+                    ip_v == ip_version
                 }
-            }
-        }
+            }))
     }
 
     /// Fetch all external IP addresses of any kind for the provided probe.
