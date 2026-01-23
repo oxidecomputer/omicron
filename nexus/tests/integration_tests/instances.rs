@@ -7863,13 +7863,13 @@ async fn test_instance_rejects_two_ephemeral_auto_without_version(
 
     assert_eq!(
         error.message,
-        "cannot request two ephemeral IPs with automatic pool \
-         selection without specifying ip_version for each"
+        "when requesting two ephemeral IPs, IP version or explicit \
+         pool name must be specified on each"
     );
 }
 
 #[nexus_test]
-async fn test_instance_rejects_two_ephemeral_auto_with_ambiguous_default(
+async fn test_instance_rejects_two_ephemeral_auto_none_with_explicit(
     cptestctx: &ControlPlaneTestContext,
 ) {
     let client = &cptestctx.external_client;
@@ -7877,6 +7877,8 @@ async fn test_instance_rejects_two_ephemeral_auto_with_ambiguous_default(
     create_project(&client, PROJECT_NAME).await;
     create_default_ip_pools(client).await;
 
+    // One explicit pool, one auto without version: rejected because the auto
+    // selector doesn't specify ip_version.
     let external_ips = vec![
         params::ExternalIpCreate::Ephemeral {
             pool_selector: params::PoolSelector::Auto { ip_version: None },
@@ -7889,8 +7891,8 @@ async fn test_instance_rejects_two_ephemeral_auto_with_ambiguous_default(
     ];
     let create_params = params::InstanceCreate {
         identity: IdentityMetadataCreateParams {
-            name: "auto-ambiguous-ephemeral".parse().unwrap(),
-            description: "instance auto-ambiguous-ephemeral".into(),
+            name: "explicit-plus-auto-ephemeral".parse().unwrap(),
+            description: "instance explicit-plus-auto-ephemeral".into(),
         },
         ncpus: InstanceCpuCount(4),
         memory: ByteCount::from_gibibytes_u32(1),
@@ -7918,9 +7920,8 @@ async fn test_instance_rejects_two_ephemeral_auto_with_ambiguous_default(
 
     assert_eq!(
         error.message,
-        "Multiple default unicast IP pools exist with different \
-         IP versions. Please specify ip_version (v4 or v6) or \
-         provide an explicit pool."
+        "when requesting two ephemeral IPs, IP version or explicit \
+         pool name must be specified on each"
     );
 }
 

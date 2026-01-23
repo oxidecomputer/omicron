@@ -2307,16 +2307,17 @@ impl super::Nexus {
         use params::PoolSelector;
 
         match (first, second) {
-            // Two Auto with no version specified - ambiguous
-            (
-                PoolSelector::Auto { ip_version: None },
-                PoolSelector::Auto { ip_version: None },
-            ) => {
+            // Reject any case where ip_version is not specified. This keeps
+            // the API predictable: if you want two ephemeral IPs, you must be
+            // explicit about what you want for both. No relying on defaults.
+            (PoolSelector::Auto { ip_version: None }, _)
+            | (_, PoolSelector::Auto { ip_version: None }) => {
                 return Err(Error::invalid_request(
-                    "cannot request two ephemeral IPs with automatic pool \
-                     selection without specifying ip_version for each",
+                    "when requesting two ephemeral IPs, IP version or explicit \
+                     pool name must be specified on each",
                 ));
             }
+
             // Two Auto with same version
             (
                 PoolSelector::Auto { ip_version: Some(v1) },
@@ -2332,26 +2333,6 @@ impl super::Nexus {
                 PoolSelector::Auto { ip_version: Some(_) },
                 PoolSelector::Auto { ip_version: Some(_) },
             ) => {}
-
-            // Auto(None) + Auto(Some) - default must be unambiguous and opposite
-            (
-                PoolSelector::Auto { ip_version: None },
-                PoolSelector::Auto { ip_version: Some(v) },
-            )
-            | (
-                PoolSelector::Auto { ip_version: Some(v) },
-                PoolSelector::Auto { ip_version: None },
-            ) => {
-                // ephemeral IPs are always allocated from unicast pools
-                let default_version =
-                    self.default_unicast_pool_version(opctx).await?;
-                if default_version == *v {
-                    return Err(Error::invalid_request(format!(
-                        "two ephemeral IPs would both be {v}: \
-                         auto selects default pool, which is {v}"
-                    )));
-                }
-            }
 
             // Two Explicit with same pool
             (
@@ -2396,28 +2377,6 @@ impl super::Nexus {
                     )));
                 }
             }
-
-            // Explicit + Auto(None) - default must be unambiguous and opposite
-            (
-                PoolSelector::Explicit { pool },
-                PoolSelector::Auto { ip_version: None },
-            )
-            | (
-                PoolSelector::Auto { ip_version: None },
-                PoolSelector::Explicit { pool },
-            ) => {
-                let pool_version =
-                    self.get_pool_ip_version(opctx, pool).await?;
-                // ephemeral IPs are always allocated from unicast pools
-                let default_version =
-                    self.default_unicast_pool_version(opctx).await?;
-                if default_version == pool_version {
-                    return Err(Error::invalid_request(format!(
-                        "two ephemeral IPs would both be {pool_version}: \
-                         auto selects default pool, which is {pool_version}"
-                    )));
-                }
-            }
         }
 
         Ok(())
@@ -2434,24 +2393,6 @@ impl super::Nexus {
             .fetch_for(authz::Action::CreateChild)
             .await?;
         Ok(db_pool.ip_version.into())
-    }
-
-    /// Resolve the default unicast pool version when no version is specified.
-    async fn default_unicast_pool_version(
-        &self,
-        opctx: &OpContext,
-    ) -> Result<IpVersion, Error> {
-        let authz_pool = self
-            .db_datastore
-            .resolve_pool_for_allocation(
-                opctx,
-                None, // no explicit pool - look for default
-                nexus_db_model::IpPoolType::Unicast,
-                None,
-            )
-            .await?;
-        let pool_id = NameOrId::Id(authz_pool.id());
-        self.get_pool_ip_version(opctx, &pool_id).await
     }
 
     /// Attach a Floating IP to an instance.
