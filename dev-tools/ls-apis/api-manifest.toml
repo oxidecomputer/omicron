@@ -593,3 +593,83 @@ note = """
 Sled Agent uses the Crucible Agent client types only, and only in the simulated
 sled agent.
 """
+
+################################################################################
+# Localhost-only edges
+#
+# These edges are excluded from the deployment unit dependency graph because
+# they represent communication that only happens locally within a deployment
+# unit, not across deployment unit boundaries. A single deployment unit is
+# updated atomically, so there's no risk of version skew with localhost-only
+# edges.
+################################################################################
+
+[[localhost_only_edges]]
+server = "ddmd"
+client = "dpd-client"
+note = "still to verify: ddmd communicates with dendrite locally within the switch zone"
+
+[[localhost_only_edges]]
+server = "dpd"
+client = "gateway-client"
+note = "still to verify: dendrite communicates with MGS locally"
+
+[[localhost_only_edges]]
+server = "lldpd"
+client = "dpd-client"
+note = "still to verify: lldpd communicates with dendrite locally within the switch zone"
+
+[[localhost_only_edges]]
+server = "mgd"
+client = "ddm-admin-client"
+note = "still to verify: mgd communicates with ddmd locally within the switch zone"
+
+[[localhost_only_edges]]
+server = "mgd"
+client = "dpd-client"
+note = "still to verify: mgd communicates with dendrite locally within the switch zone"
+
+[[localhost_only_edges]]
+server = "mgd"
+client = "gateway-client"
+note = "still to verify: mgd communicates with MGS locally"
+
+[[localhost_only_edges]]
+server = "omicron-sled-agent"
+client = "gateway-client"
+note = "still to verify: sled-agent communicates with MGS locally"
+
+[[localhost_only_edges]]
+server = "omicron-sled-agent"
+client = "ddm-admin-client"
+note = "still to verify: sled-agent communicates with ddmd locally"
+
+[[localhost_only_edges]]
+server = "omicron-sled-agent"
+client = "dpd-client"
+note = "still to verify: sled-agent communicates with dendrite locally"
+
+[[localhost_only_edges]]
+server = "omicron-sled-agent"
+client = "mg-admin-client"
+note = "still to verify: sled-agent communicates with mgd locally"
+
+[[localhost_only_edges]]
+server = "omicron-sled-agent"
+client = "propolis-client"
+note = "still to verify: sled-agent communicates with propolis instances locally"
+
+[[localhost_only_edges]]
+server = "tfportd"
+client = "dpd-client"
+note = "still to verify: tfportd communicates with dendrite locally within the switch zone"
+
+[[localhost_only_edges]]
+server = "tfportd"
+client = "lldpd-client"
+note = "still to verify: tfportd communicates with lldpd locally within the switch zone"
+
+[[localhost_only_edges]]
+server = "wicketd"
+client = "*"
+note = "still to verify: wicketd communicates with local services; enumerate specific clients later"

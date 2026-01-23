@@ -30,6 +30,7 @@ pub struct AllApiMetadata {
     deployment_units: BTreeMap<DeploymentUnitName, DeploymentUnitInfo>,
     dependency_rules: BTreeMap<ClientPackageName, Vec<DependencyFilterRule>>,
     ignored_non_clients: BTreeSet<ClientPackageName>,
+    localhost_only_edges: Vec<LocalhostOnlyEdge>,
 }
 
 impl AllApiMetadata {
@@ -71,6 +72,11 @@ impl AllApiMetadata {
     /// Progenitor-based clients
     pub fn ignored_non_clients(&self) -> &BTreeSet<ClientPackageName> {
         &self.ignored_non_clients
+    }
+
+    /// Returns the list of localhost-only edges
+    pub fn localhost_only_edges(&self) -> &[LocalhostOnlyEdge] {
+        &self.localhost_only_edges
     }
 
     /// Returns how we should filter the given dependency
@@ -138,6 +144,7 @@ struct RawApiMetadata {
     deployment_units: Vec<DeploymentUnitInfo>,
     dependency_filter_rules: Vec<DependencyFilterRule>,
     ignored_non_clients: Vec<ClientPackageName>,
+    localhost_only_edges: Vec<LocalhostOnlyEdge>,
 }
 
 impl TryFrom<RawApiMetadata> for AllApiMetadata {
@@ -188,9 +195,33 @@ impl TryFrom<RawApiMetadata> for AllApiMetadata {
         for client_pkg in raw.ignored_non_clients {
             if !ignored_non_clients.insert(client_pkg.clone()) {
                 bail!(
-                    "entry in ignored_non_clients appearead twice: {:?}",
+                    "entry in ignored_non_clients appeared twice: {:?}",
                     &client_pkg
                 );
+            }
+        }
+
+        // Validate localhost_only_edges reference known server components and
+        // APIs.
+        let known_components: BTreeSet<_> = deployment_units
+            .values()
+            .flat_map(|u| u.packages.iter())
+            .collect();
+        for edge in &raw.localhost_only_edges {
+            if !known_components.contains(&edge.server) {
+                bail!(
+                    "localhost_only_edges: unknown server component {:?}",
+                    edge.server
+                );
+            }
+            // Validate non-wildcard clients reference known APIs.
+            if let Some(client_name) = edge.client.as_specific() {
+                if !apis.contains_key(client_name) {
+                    bail!(
+                        "localhost_only_edges: unknown client {:?}",
+                        client_name
+                    );
+                }
             }
         }
 
@@ -199,6 +230,7 @@ impl TryFrom<RawApiMetadata> for AllApiMetadata {
             deployment_units,
             dependency_rules,
             ignored_non_clients,
+            localhost_only_edges: raw.localhost_only_edges,
         })
     }
 }
@@ -415,4 +447,70 @@ pub enum Evaluation {
     NonDag,
     /// This dependency should be part of the update DAG
     Dag,
+}
+
+/// Specifies which client(s) to match in a localhost-only edge rule.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum ClientMatcher {
+    /// Match all clients (represented as "*" in TOML).
+    Wildcard,
+    /// Match a specific client package.
+    Specific(ClientPackageName),
+}
+
+impl<'de> Deserialize<'de> for ClientMatcher {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let s = String::deserialize(deserializer)?;
+        if s == "*" {
+            Ok(ClientMatcher::Wildcard)
+        } else {
+            Ok(ClientMatcher::Specific(ClientPackageName::from(s)))
+        }
+    }
+}
+
+impl ClientMatcher {
+    /// Returns true if this matcher matches the given client package.
+    pub fn matches(&self, client: &ClientPackageName) -> bool {
+        match self {
+            ClientMatcher::Wildcard => true,
+            ClientMatcher::Specific(name) => name == client,
+        }
+    }
+
+    /// Returns the specific client name, if not a wildcard.
+    pub fn as_specific(&self) -> Option<&ClientPackageName> {
+        match self {
+            ClientMatcher::Wildcard => None,
+            ClientMatcher::Specific(name) => Some(name),
+        }
+    }
+}
+
+/// An edge that should be excluded from the deployment unit dependency graph
+/// because it represents communication that only happens locally within a
+/// deployment unit.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct LocalhostOnlyEdge {
+    /// The server component that consumes the API.
+    pub server: ServerComponentName,
+    /// The client package consumed, or "*" to match all clients.
+    pub client: ClientMatcher,
+    /// Explanation of why this edge is localhost-only.
+    pub note: String,
+}
+
+impl LocalhostOnlyEdge {
+    /// Returns true if this rule matches the given (server, client) pair.
+    pub fn matches(
+        &self,
+        server: &ServerComponentName,
+        client: &ClientPackageName,
+    ) -> bool {
+        self.server == *server && self.client.matches(client)
+    }
 }

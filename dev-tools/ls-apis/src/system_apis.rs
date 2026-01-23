@@ -330,6 +330,32 @@ impl SystemApis {
         &self.api_metadata
     }
 
+    /// Returns true if this (server, client) pair is a localhost-only edge.
+    ///
+    /// Localhost-only edges are excluded from the deployment unit dependency
+    /// graph because they represent communication that only happens locally
+    /// within a deployment unit, not across deployment unit boundaries.
+    fn is_localhost_only_edge(
+        &self,
+        server: &ServerComponentName,
+        client: &ClientPackageName,
+    ) -> bool {
+        self.localhost_only_edge_note(server, client).is_some()
+    }
+
+    /// Returns the note for a localhost-only edge, if one matches.
+    pub fn localhost_only_edge_note(
+        &self,
+        server: &ServerComponentName,
+        client: &ClientPackageName,
+    ) -> Option<&str> {
+        self.api_metadata
+            .localhost_only_edges()
+            .iter()
+            .find(|edge| edge.matches(server, client))
+            .map(|edge| edge.note.as_str())
+    }
+
     /// Given a server component, return the APIs consumed by this component
     pub fn component_apis_consumed(
         &self,
@@ -515,24 +541,11 @@ impl SystemApis {
                             continue;
                         }
 
-                        // XXX-dap relationships we want to ignore because
-                        // they're local-machine only
-                        match (server_pkg.as_str(), client_pkg.as_str()) {
-                            ("ddmd", "dpd-client")
-                            | ("dpd", "gateway-client")
-                            | ("lldpd", "dpd-client")
-                            | ("mgd", "ddm-admin-client")
-                            | ("mgd", "dpd-client")
-                            | ("mgd", "gateway-client")
-                            | ("omicron-sled-agent", "gateway-client")
-                            | ("omicron-sled-agent", "ddm-admin-client")
-                            | ("omicron-sled-agent", "dpd-client") // XXX-dap
-                            | ("omicron-sled-agent", "mg-admin-client")
-                            | ("omicron-sled-agent", "propolis-client")
-                            | ("tfportd", "dpd-client")
-                            | ("tfportd", "lldpd-client")
-                            | ("wicketd", _) => continue,
-                            _ => (),
+                        // Skip edges that represent localhost-only communication
+                        // (communication within a deployment unit that doesn't
+                        // cross deployment unit boundaries).
+                        if self.is_localhost_only_edge(server_pkg, client_pkg) {
+                            continue;
                         }
                     }
 
