@@ -2443,3 +2443,79 @@ async fn floating_ip_detach(
     .parsed_body()
     .unwrap()
 }
+
+/// Test that attaching an ephemeral IP from an explicit pool is idempotent
+/// when the pool is exhausted and the instance already has both v4 and v6
+/// ephemeral IPs.
+///
+/// This is a regression test for a bug where the fallback lookup in
+/// `allocate_instance_ephemeral_ip` used `ip_version = None` (from the
+/// explicit pool request) when the allocation failed, which caused an error
+/// because `instance_lookup_ephemeral_ip(None)` fails when there are multiple
+/// ephemeral IPs.
+#[nexus_test]
+async fn test_ephemeral_ip_idempotent_attach_with_exhausted_explicit_pool(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+    let silo_id = DEFAULT_SILO.id();
+
+    // Create default IP pools (required for dual-stack instance creation)
+    create_default_ip_pools(&client).await;
+
+    // Create a v4 pool with only 1 IP address
+    let v4_range = IpRange::try_from((
+        Ipv4Addr::new(10, 1, 0, 1),
+        Ipv4Addr::new(10, 1, 0, 1), // Only 1 IP!
+    ))
+    .unwrap();
+    create_ip_pool(&client, "small-v4-pool", Some(v4_range)).await;
+    link_ip_pool(&client, "small-v4-pool", &silo_id, false).await;
+
+    // Create a v6 pool with a normal range
+    let v6_range = IpRange::try_from((
+        Ipv6Addr::new(0xfd00, 0, 0, 1, 0, 0, 0, 0),
+        Ipv6Addr::new(0xfd00, 0, 0, 1, 0, 0, 0, 0xff),
+    ))
+    .unwrap();
+    create_ip_pool(&client, "v6-pool", Some(v6_range)).await;
+    link_ip_pool(&client, "v6-pool", &silo_id, false).await;
+
+    create_project(client, PROJECT_NAME).await;
+
+    // Create a dual-stack instance (no ephemeral IPs yet)
+    let instance_name = INSTANCE_NAMES[0];
+    let _inst = instance_for_external_ips(
+        client,
+        instance_name,
+        false,
+        &params::InstanceNetworkInterfaceAttachment::DefaultDualStack,
+        None, // No ephemeral IP at creation
+        &[],
+    )
+    .await;
+
+    // Attach ephemeral IP from the v4 pool (explicit pool, no ip_version).
+    // This uses the only IP in the pool.
+    let eph_v4 =
+        ephemeral_ip_attach(client, instance_name, Some("small-v4-pool"), None)
+            .await;
+    assert!(eph_v4.ip().is_ipv4(), "Expected IPv4 ephemeral IP");
+
+    // Attach ephemeral IP from the v6 pool (explicit pool, no ip_version).
+    let eph_v6 =
+        ephemeral_ip_attach(client, instance_name, Some("v6-pool"), None).await;
+    assert!(eph_v6.ip().is_ipv6(), "Expected IPv6 ephemeral IP");
+
+    // Now the instance has both v4 and v6 ephemeral IPs, and the v4 pool is exhausted.
+    // Try to attach again from the exhausted v4 pool. This should be idempotent
+    // and return the existing v4 IP.
+    let eph_v4_again =
+        ephemeral_ip_attach(client, instance_name, Some("small-v4-pool"), None)
+            .await;
+    assert_eq!(
+        eph_v4.ip(),
+        eph_v4_again.ip(),
+        "Idempotent attach should return the same IP"
+    );
+}

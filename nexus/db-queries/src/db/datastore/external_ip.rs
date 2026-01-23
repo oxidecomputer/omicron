@@ -132,7 +132,7 @@ impl DataStore {
         pool: Option<authz::IpPool>,
         ip_version: Option<IpVersion>,
     ) -> CreateResult<ExternalIp> {
-        let authz_pool = self
+        let (authz_pool, _pool_version) = self
             .resolve_pool_for_allocation(
                 opctx,
                 pool,
@@ -176,7 +176,7 @@ impl DataStore {
         // Naturally, we now *need* to destroy the ephemeral IP if the newly alloc'd
         // IP was not attached, including on idempotent success.
 
-        let authz_pool = self
+        let (authz_pool, pool_version) = self
             .resolve_pool_for_allocation(
                 opctx,
                 pool,
@@ -184,17 +184,22 @@ impl DataStore {
                 ip_version,
             )
             .await?;
+
         let data = IncompleteExternalIp::for_ephemeral(ip_id, authz_pool.id());
 
         // We might not be able to acquire a new IP, but in the event of an
         // idempotent or double attach this failure is allowed.
         let temp_ip = self.allocate_external_ip(opctx, data).await;
         if let Err(e) = temp_ip {
+            // Use the pool's version for lookup when the request didn't
+            // specify one. This handles the case where an explicit pool was
+            // used and the instance already has both v4 and v6 ephemeral IPs.
+            let lookup_version = ip_version.unwrap_or(pool_version);
             let eip = self
                 .instance_lookup_ephemeral_ip(
                     opctx,
                     instance_id,
-                    ip_version.map(Into::into),
+                    Some(lookup_version.into()),
                 )
                 .await?
                 .ok_or(e)?;
@@ -289,7 +294,7 @@ impl DataStore {
                 (pool, Some(*ip))
             }
             FloatingIpAllocation::Auto { pool, ip_version } => {
-                let pool = self
+                let (pool, _pool_version) = self
                     .resolve_pool_for_allocation(
                         opctx,
                         pool.clone(),

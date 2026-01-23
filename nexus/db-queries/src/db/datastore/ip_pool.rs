@@ -498,10 +498,10 @@ impl DataStore {
         pool: Option<authz::IpPool>,
         pool_type: IpPoolType,
         ip_version: Option<IpVersion>,
-    ) -> LookupResult<authz::IpPool> {
+    ) -> LookupResult<(authz::IpPool, IpVersion)> {
         use nexus_db_schema::schema::ip_pool;
 
-        let authz_pool = match pool {
+        let (authz_pool, pool_version) = match pool {
             Some(authz_pool) => {
                 self.ip_pool_fetch_link(opctx, authz_pool.id())
                     .await
@@ -527,7 +527,7 @@ impl DataStore {
                     )));
                 }
 
-                authz_pool
+                (authz_pool, pool_record.ip_version)
             }
             // If no pool specified, find a pool of the specified type.
             //
@@ -537,7 +537,7 @@ impl DataStore {
             //
             // For unicast pools, require the default pool (existing behavior).
             None => {
-                let (authz_pool, ..) = match pool_type {
+                let (authz_pool, pool_record) = match pool_type {
                     IpPoolType::Multicast => {
                         self.ip_pools_fetch_any_by_type(
                             opctx, pool_type, ip_version,
@@ -551,11 +551,11 @@ impl DataStore {
                         .await?
                     }
                 };
-                authz_pool
+                (authz_pool, pool_record.ip_version)
             }
         };
         opctx.authorize(authz::Action::CreateChild, &authz_pool).await?;
-        Ok(authz_pool)
+        Ok((authz_pool, pool_version))
     }
 
     /// Find the IP pool containing a specific IP address.
