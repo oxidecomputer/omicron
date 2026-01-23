@@ -2317,7 +2317,6 @@ impl super::Nexus {
                      selection without specifying ip_version for each",
                 ));
             }
-
             // Two Auto with same version
             (
                 PoolSelector::Auto { ip_version: Some(v1) },
@@ -2334,7 +2333,7 @@ impl super::Nexus {
                 PoolSelector::Auto { ip_version: Some(_) },
             ) => {}
 
-            // Auto(None) + Auto(Some) - need to verify default of opposite exists
+            // Auto(None) + Auto(Some) - default must be unambiguous and opposite
             (
                 PoolSelector::Auto { ip_version: None },
                 PoolSelector::Auto { ip_version: Some(v) },
@@ -2343,14 +2342,11 @@ impl super::Nexus {
                 PoolSelector::Auto { ip_version: Some(v) },
                 PoolSelector::Auto { ip_version: None },
             ) => {
-                let opposite = match v {
-                    IpVersion::V4 => IpVersion::V6,
-                    IpVersion::V6 => IpVersion::V4,
-                };
-                if !self.default_ip_pool_exists(opctx, opposite).await {
+                let default_version =
+                    self.default_unicast_pool_version(opctx).await?;
+                if default_version == *v {
                     return Err(Error::invalid_request(format!(
-                        "cannot request two ephemeral IPs: one specifies {v}, \
-                         but no default pool exists for {opposite}"
+                        "cannot request two ephemeral IPs of the same version ({v})"
                     )));
                 }
             }
@@ -2399,7 +2395,7 @@ impl super::Nexus {
                 }
             }
 
-            // Explicit + Auto(None) - verify default of opposite version exists
+            // Explicit + Auto(None) - default must be unambiguous and opposite
             (
                 PoolSelector::Explicit { pool },
                 PoolSelector::Auto { ip_version: None },
@@ -2410,14 +2406,12 @@ impl super::Nexus {
             ) => {
                 let pool_version =
                     self.get_pool_ip_version(opctx, pool).await?;
-                let opposite = match pool_version {
-                    IpVersion::V4 => IpVersion::V6,
-                    IpVersion::V6 => IpVersion::V4,
-                };
-                if !self.default_ip_pool_exists(opctx, opposite).await {
+                let default_version =
+                    self.default_unicast_pool_version(opctx).await?;
+                if default_version == pool_version {
                     return Err(Error::invalid_request(format!(
-                        "cannot request two ephemeral IPs: explicit pool is \
-                         {pool_version}, but no default pool exists for {opposite}"
+                        "cannot request two ephemeral IPs of the same version \
+                         ({pool_version})"
                     )));
                 }
             }
@@ -2439,21 +2433,22 @@ impl super::Nexus {
         Ok(db_pool.ip_version.into())
     }
 
-    /// Check if a default IP pool exists for the given version.
-    async fn default_ip_pool_exists(
+    /// Resolve the default unicast pool version when no version is specified.
+    async fn default_unicast_pool_version(
         &self,
         opctx: &OpContext,
-        version: IpVersion,
-    ) -> bool {
-        self.db_datastore
+    ) -> Result<IpVersion, Error> {
+        let authz_pool = self
+            .db_datastore
             .resolve_pool_for_allocation(
                 opctx,
                 None, // no explicit pool - look for default
                 nexus_db_model::IpPoolType::Unicast,
-                Some(version.into()),
+                None,
             )
-            .await
-            .is_ok()
+            .await?;
+        let pool_id = NameOrId::Id(authz_pool.id());
+        self.get_pool_ip_version(opctx, &pool_id).await
     }
 
     /// Attach a Floating IP to an instance.

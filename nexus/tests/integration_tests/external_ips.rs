@@ -1637,6 +1637,95 @@ async fn test_ephemeral_ip_ip_version_conflict(
 }
 
 #[nexus_test]
+async fn test_ephemeral_ip_detach_requires_version_with_dual_stack(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+    create_project(&client, PROJECT_NAME).await;
+    create_default_ip_pools(&client).await;
+
+    let instance_name = INSTANCE_NAMES[0];
+    let _inst = instance_for_external_ips(
+        client,
+        instance_name,
+        false,
+        &params::InstanceNetworkInterfaceAttachment::DefaultDualStack,
+        None,
+        &[],
+    )
+    .await;
+    let url = instance_ephemeral_ip_url(instance_name, PROJECT_NAME);
+
+    let eph_v4: views::ExternalIp = NexusRequest::new(
+        RequestBuilder::new(client, Method::POST, &url)
+            .body(Some(&params::EphemeralIpCreate {
+                pool_selector: params::PoolSelector::Auto {
+                    ip_version: Some(views::IpVersion::V4),
+                },
+            }))
+            .expect_status(Some(StatusCode::ACCEPTED)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap()
+    .parsed_body()
+    .unwrap();
+    assert!(
+        matches!(&eph_v4, views::ExternalIp::Ephemeral { ip, .. } if ip.is_ipv4()),
+        "Expected IPv4 ephemeral IP"
+    );
+
+    let eph_v6: views::ExternalIp = NexusRequest::new(
+        RequestBuilder::new(client, Method::POST, &url)
+            .body(Some(&params::EphemeralIpCreate {
+                pool_selector: params::PoolSelector::Auto {
+                    ip_version: Some(views::IpVersion::V6),
+                },
+            }))
+            .expect_status(Some(StatusCode::ACCEPTED)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap()
+    .parsed_body()
+    .unwrap();
+    assert!(
+        matches!(&eph_v6, views::ExternalIp::Ephemeral { ip, .. } if ip.is_ipv6()),
+        "Expected IPv6 ephemeral IP"
+    );
+
+    let error: HttpErrorResponseBody = NexusRequest::new(
+        RequestBuilder::new(client, Method::DELETE, &url)
+            .expect_status(Some(StatusCode::BAD_REQUEST)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap()
+    .parsed_body()
+    .unwrap();
+    assert_eq!(
+        error.message,
+        "instance has multiple ephemeral IPs; specify ip_version to select which to use"
+    );
+
+    ephemeral_ip_detach_with_version(
+        client,
+        instance_name,
+        Some(views::IpVersion::V4),
+    )
+    .await;
+    ephemeral_ip_detach_with_version(
+        client,
+        instance_name,
+        Some(views::IpVersion::V6),
+    )
+    .await;
+}
+
+#[nexus_test]
 async fn cannot_attach_floating_ipv4_to_instance_missing_ipv4_stack(
     cptestctx: &ControlPlaneTestContext,
 ) {
@@ -2346,8 +2435,30 @@ async fn ephemeral_ip_attach(
 }
 
 async fn ephemeral_ip_detach(client: &ClientTestContext, instance_name: &str) {
-    let url = instance_ephemeral_ip_url(instance_name, PROJECT_NAME);
-    object_delete(client, &url).await;
+    ephemeral_ip_detach_with_version(client, instance_name, None).await;
+}
+
+async fn ephemeral_ip_detach_with_version(
+    client: &ClientTestContext,
+    instance_name: &str,
+    ip_version: Option<views::IpVersion>,
+) {
+    let mut url = instance_ephemeral_ip_url(instance_name, PROJECT_NAME);
+    if let Some(version) = ip_version {
+        let version_param = match version {
+            views::IpVersion::V4 => "v4",
+            views::IpVersion::V6 => "v6",
+        };
+        url = format!("{url}&ip_version={version_param}");
+    }
+    NexusRequest::new(
+        RequestBuilder::new(client, Method::DELETE, &url)
+            .expect_status(Some(StatusCode::NO_CONTENT)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap();
 }
 
 async fn floating_ip_attach(

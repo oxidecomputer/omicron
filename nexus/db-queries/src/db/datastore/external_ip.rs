@@ -1010,7 +1010,7 @@ impl DataStore {
                     1 => Ok(ephemeral_ips.into_iter().next()),
                     _ => Err(Error::invalid_request(
                         "instance has multiple ephemeral IPs; \
-                         specify ip_version to select which to detach",
+                         specify ip_version to select which to use",
                     )),
                 }
             }
