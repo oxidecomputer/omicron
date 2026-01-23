@@ -7,7 +7,6 @@
 use crate::db::model::IpPoolRange;
 use chrono::DateTime;
 use chrono::Utc;
-use diesel::Column;
 use diesel::Insertable;
 use diesel::QueryResult;
 use diesel::pg::Pg;
@@ -17,7 +16,6 @@ use diesel::query_builder::QueryId;
 use diesel::sql_types;
 use ipnetwork::IpNetwork;
 use nexus_db_schema::schema::ip_pool_range::dsl;
-use nexus_db_schema::schema::subnet_pool_member::dsl as member_dsl;
 use uuid::Uuid;
 
 /// A query for filtering out candidate IP ranges that overlap with any
@@ -181,26 +179,30 @@ fn push_record_contains_candidate_subquery<'a>(
 //      time_deleted IS NULL
 // LIMIT 1
 // ```
-fn push_candidate_contains_ip_pool_range_record_subquery<'a, C>(
+fn push_candidate_contains_ip_pool_range_record_subquery<'a>(
     out: AstPass<'_, 'a, Pg>,
     first_address: &'a IpNetwork,
     last_address: &'a IpNetwork,
-) -> QueryResult<()>
-where
-    C: Column<Table = dsl::ip_pool_range>,
-{
-    push_candidate_contains_record_subquery(out, first_address, last_address, "ip_pool_range")
+) -> QueryResult<()> {
+    push_candidate_contains_record_subquery(
+        out,
+        first_address,
+        last_address,
+        "ip_pool_range",
+    )
 }
 
-fn push_candidate_contains_subnet_pool_member_record_subquery<'a, C>(
+fn push_candidate_contains_subnet_pool_member_record_subquery<'a>(
     out: AstPass<'_, 'a, Pg>,
     first_address: &'a IpNetwork,
     last_address: &'a IpNetwork,
-) -> QueryResult<()>
-where
-    C: Column<Table = member_dsl::subnet_pool_member>,
-{
-    push_candidate_contains_record_subquery(out, first_address, last_address, "subnet_pool_member")
+) -> QueryResult<()> {
+    push_candidate_contains_record_subquery(
+        out,
+        first_address,
+        last_address,
+        "subnet_pool_member",
+    )
 }
 
 fn push_candidate_contains_record_subquery<'a>(
@@ -249,13 +251,13 @@ impl QueryFragment<Pg> for FilterOverlappingIpRanges {
 
         // Filter out ranges that overlap with existing ranges.
         out.push_sql(" WHERE NOT EXISTS(");
-        push_candidate_contains_ip_pool_range_record_subquery::<dsl::first_address>(
+        push_candidate_contains_ip_pool_range_record_subquery(
             out.reborrow(),
             &self.range.first_address,
             &self.range.last_address,
         )?;
         out.push_sql(") AND NOT EXISTS(");
-        push_candidate_contains_ip_pool_range_record_subquery::<dsl::last_address>(
+        push_candidate_contains_ip_pool_range_record_subquery(
             out.reborrow(),
             &self.range.first_address,
             &self.range.last_address,
@@ -273,13 +275,13 @@ impl QueryFragment<Pg> for FilterOverlappingIpRanges {
 
         // Or overlap with existing Subnet Pool Members.
         out.push_sql(" ) AND NOT EXISTS(");
-        push_candidate_contains_subnet_pool_member_record_subquery::<member_dsl::first_address>(
+        push_candidate_contains_subnet_pool_member_record_subquery(
             out.reborrow(),
             &self.range.first_address,
             &self.range.last_address,
         )?;
         out.push_sql(") AND NOT EXISTS(");
-        push_candidate_contains_subnet_pool_member_record_subquery::<member_dsl::last_address>(
+        push_candidate_contains_subnet_pool_member_record_subquery(
             out.reborrow(),
             &self.range.first_address,
             &self.range.last_address,

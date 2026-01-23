@@ -451,11 +451,7 @@ pub fn insert_external_subnet_query(
     builder.sql(", ");
     push_cte_to_update_subnet_pool_member_rcgen(&mut builder);
     builder.sql(", ");
-    push_cte_to_insert_actual_ip_subnet(
-        &mut builder,
-        project_id,
-        identity,
-    );
+    push_cte_to_insert_actual_ip_subnet(&mut builder, project_id, identity);
     builder.sql(" SELECT * FROM new_record");
     builder.query()
 }

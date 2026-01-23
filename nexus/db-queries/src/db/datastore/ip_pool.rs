@@ -2514,7 +2514,9 @@ mod test {
     use nexus_types::deployment::{
         OmicronZoneExternalFloatingIp, OmicronZoneExternalIp,
     };
-    use nexus_types::external_api::params::{self, SubnetPoolCreate, SubnetPoolMemberAdd};
+    use nexus_types::external_api::params::{
+        self, SubnetPoolCreate, SubnetPoolMemberAdd,
+    };
     use nexus_types::identity::Resource;
     use nexus_types::silo::INTERNAL_SILO_ID;
     use omicron_common::address::{IpRange, Ipv4Range, Ipv6Range};
@@ -6014,7 +6016,7 @@ mod test {
             .await
             .expect_err(
                 "should fail to insert IP Pool range that overlaps \
-                subnet Pool member"
+                subnet Pool member",
             );
         let Error::InvalidRequest { message } = &err else {
             panic!("Expected InvalidRequest, found {err:#?}");

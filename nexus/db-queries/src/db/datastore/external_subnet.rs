@@ -267,6 +267,9 @@ impl DataStore {
                 )
                 .filter(project_dsl::silo_id.eq(authz_silo.id()))
                 .filter(project_dsl::time_deleted.is_null())
+                .filter(
+                    dsl::subnet_pool_id.eq(to_db_typed_uuid(authz_pool.id())),
+                )
                 .filter(dsl::time_deleted.is_null()),
         ))
         .get_result_async::<bool>(&*conn)
@@ -2819,7 +2822,7 @@ mod tests {
                 name: "my-pool".parse().unwrap(),
                 description: String::new(),
             },
-            ip_version: IpVersion::V6.into(),
+            ip_version: IpVersion::V6,
         };
         let db_pool = datastore
             .create_subnet_pool(opctx, params)

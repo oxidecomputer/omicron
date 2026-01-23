@@ -29,6 +29,7 @@ static KNOWN_VERSIONS: LazyLock<Vec<KnownVersion>> = LazyLock::new(|| {
         // v
         // KnownVersion::new(next_int, "unique-dirname-with-the-sql-files"),
         KnownVersion::new(224, "add-external-subnets"),
+        KnownVersion::new(223, "ip-pool-range-by-pool-id-index"),
         KnownVersion::new(222, "audit-log-credential-id"),
         KnownVersion::new(221, "audit-log-auth-method-enum"),
         KnownVersion::new(220, "multicast-implicit-lifecycle"),
