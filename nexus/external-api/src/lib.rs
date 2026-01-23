@@ -75,6 +75,7 @@ api_versions!([
     // |  date-based version should be at the top of the list.
     // v
     // (next_yyyymmddnn, IDENT),
+    (2026012300, DUAL_STACK_EPHEMERAL_IP),
     (2026012200, FLOATING_IP_ALLOCATOR_UPDATE),
     (2026012100, TRUST_QUORUM_ADD_SLEDS_AND_GET_LATEST_CONFIG),
     (2026011601, EXTERNAL_SUBNET_ATTACHMENT),
