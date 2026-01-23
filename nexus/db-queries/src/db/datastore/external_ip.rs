@@ -43,7 +43,6 @@ use nexus_db_model::IpVersion;
 use nexus_db_model::NetworkInterfaceKind;
 use nexus_types::deployment::OmicronZoneExternalIp;
 use nexus_types::identity::Resource;
-use omicron_common::api::external;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::DeleteResult;
@@ -62,6 +61,26 @@ use sled_agent_types::inventory::ZoneKind;
 use slog::debug;
 use std::net::IpAddr;
 use uuid::Uuid;
+
+/// Ephemeral IPs for an instance, with one slot per IP version.
+///
+/// Only used to have something nice to return from the ephemeral IPs lookup
+/// function. The canonical data structure for representing these to the user is
+/// the list of all external IPs on an instance.
+#[derive(Debug, Clone, Default)]
+pub struct InstanceEphemeralIps {
+    pub v4: Option<ExternalIp>,
+    pub v6: Option<ExternalIp>,
+}
+
+impl InstanceEphemeralIps {
+    pub fn get(self, version: IpVersion) -> Option<ExternalIp> {
+        match version {
+            IpVersion::V4 => self.v4,
+            IpVersion::V6 => self.v6,
+        }
+    }
+}
 
 /// Floating IP allocation method.
 ///
@@ -195,19 +214,13 @@ impl DataStore {
             // specify one. This handles the case where an explicit pool was
             // used and the instance already has both v4 and v6 ephemeral IPs.
             let lookup_version = ip_version.unwrap_or(pool_version);
-            let eip = self
-                .instance_lookup_ephemeral_ip(
-                    opctx,
-                    instance_id,
-                    lookup_version.into(),
-                )
-                .await?
-                .ok_or(e)?;
-
+            let eph_ips =
+                self.instance_lookup_ephemeral_ips(opctx, instance_id).await?;
+            let eip = eph_ips.get(lookup_version).ok_or(e)?;
             return Ok((eip, false));
         }
         let temp_ip = temp_ip?;
-        let ip_version = match temp_ip.ip {
+        let allocated_version = match temp_ip.ip {
             ipnetwork::IpNetwork::V4(_) => IpVersion::V4,
             ipnetwork::IpNetwork::V6(_) => IpVersion::V6,
         };
@@ -217,7 +230,7 @@ impl DataStore {
                 opctx,
                 temp_ip.id,
                 instance_id,
-                ip_version,
+                allocated_version,
                 IpKind::Ephemeral,
                 creating_instance,
             )
@@ -230,16 +243,14 @@ impl DataStore {
             // Idempotent case: attach failed due to a caught UniqueViolation.
             Ok(None) => {
                 self.deallocate_external_ip(opctx, temp_ip.id).await?;
-                let eip = self
-                    .instance_lookup_ephemeral_ip(
-                        opctx,
-                        instance_id,
-                        ip_version.into(),
+                let eph_ips = self
+                    .instance_lookup_ephemeral_ips(opctx, instance_id)
+                    .await?;
+                let eip = eph_ips.get(allocated_version).ok_or_else(|| {
+                    Error::internal_error(
+                        "failed to lookup current ephemeral IP for idempotent attach",
                     )
-                    .await?
-                    .ok_or_else(|| Error::internal_error(
-                        "failed to lookup current ephemeral IP for idempotent attach"
-                    ))?;
+                })?;
                 let do_saga = eip.state != IpAttachState::Attached;
                 Ok((eip, do_saga))
             }
@@ -974,27 +985,22 @@ impl DataStore {
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 
-    /// Fetch the ephemeral IP address of the given version assigned to the
-    /// provided instance, if any.
-    pub async fn instance_lookup_ephemeral_ip(
+    /// Fetch the ephemeral IPs assigned to the provided instance.
+    pub async fn instance_lookup_ephemeral_ips(
         &self,
         opctx: &OpContext,
         instance_id: InstanceUuid,
-        ip_version: external::IpVersion,
-    ) -> LookupResult<Option<ExternalIp>> {
-        Ok(self
-            .instance_lookup_external_ips(opctx, instance_id)
-            .await?
-            .into_iter()
-            .find(|ip| {
-                ip.kind == IpKind::Ephemeral && {
-                    let ip_v = match ip.ip {
-                        ipnetwork::IpNetwork::V4(_) => external::IpVersion::V4,
-                        ipnetwork::IpNetwork::V6(_) => external::IpVersion::V6,
-                    };
-                    ip_v == ip_version
+    ) -> LookupResult<InstanceEphemeralIps> {
+        let mut result = InstanceEphemeralIps { v4: None, v6: None };
+        for ip in self.instance_lookup_external_ips(opctx, instance_id).await? {
+            if ip.kind == IpKind::Ephemeral {
+                match ip.ip {
+                    ipnetwork::IpNetwork::V4(_) => result.v4 = Some(ip),
+                    ipnetwork::IpNetwork::V6(_) => result.v6 = Some(ip),
                 }
-            }))
+            }
+        }
+        Ok(result)
     }
 
     /// Fetch all external IP addresses of any kind for the provided probe.
