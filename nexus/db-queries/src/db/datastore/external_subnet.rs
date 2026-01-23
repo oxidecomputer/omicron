@@ -2773,6 +2773,9 @@ mod tests {
             oxnet::IpNet::from(subnet.subnet),
             "255.255.255.0/26".parse::<oxnet::IpNet>().unwrap()
         );
+
+        db.terminate().await;
+        logctx.cleanup_successful();
     }
 
     #[tokio::test]
