@@ -1229,6 +1229,49 @@ impl AuthorizedResource for ScimClientBearerTokenList {
     }
 }
 
+/// Synthetic resource for authorization to list Subnet Pools.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct SubnetPoolList;
+
+/// Singleton representing the [`SubnetPoolList`] itself for authz
+/// purposes.
+pub const SUBNET_POOL_LIST: SubnetPoolList = SubnetPoolList;
+
+impl oso::PolarClass for SubnetPoolList {
+    fn get_polar_class_builder() -> oso::ClassBuilder<Self> {
+        oso::Class::builder()
+            .with_equality_check()
+            .add_attribute_getter("fleet", |_: &SubnetPoolList| FLEET)
+    }
+}
+
+impl AuthorizedResource for SubnetPoolList {
+    fn load_roles<'fut>(
+        &'fut self,
+        opctx: &'fut OpContext,
+        authn: &'fut authn::Context,
+        roleset: &'fut mut RoleSet,
+    ) -> futures::future::BoxFuture<'fut, Result<(), Error>> {
+        // There are no roles on the SubnetPoolList, only permissions.
+        // But we still need to load the Fleet-related roles to verify that
+        // the actor's role on the Fleet (possibly conferred from a Silo role).
+        load_roles_for_resource_tree(&FLEET, opctx, authn, roleset).boxed()
+    }
+
+    fn on_unauthorized(
+        &self,
+        _: &Authz,
+        error: Error,
+        _: AnyActor,
+        _: Action,
+    ) -> Error {
+        error
+    }
+
+    fn polar_class(&self) -> oso::Class {
+        Self::get_polar_class()
+    }
+}
 // Main resource hierarchy: Projects and their resources
 
 authz_resource! {
@@ -1322,7 +1365,8 @@ authz_resource! {
 // resources (instances, disks, etc.) within the existing network.
 //
 // Resources in this category: VPCs, Subnets, Routers, Router Routes,
-// Internet Gateways, and their child resources (IP pools, IP addresses)
+// Internet Gateways, and their child resources (IP pools, IP addresses),
+// Floating IPs, and External Subnets.
 // ============================================================================
 
 authz_resource! {
@@ -1389,6 +1433,14 @@ authz_resource! {
     polar_snippet = InProjectLimited,
 }
 
+authz_resource! {
+    name = "ExternalSubnet",
+    parent = "Project",
+    primary_key = { uuid_kind = ExternalSubnetKind },
+    roles_allowed = false,
+    polar_snippet = InProjectFull,
+}
+
 // MulticastGroup Authorization
 //
 // MulticastGroups are **fleet-scoped resources** with an implicit lifecycle:
@@ -1446,6 +1498,14 @@ authz_resource! {
     name = "SwitchPortSettings",
     parent = "Fleet",
     primary_key = Uuid,
+    roles_allowed = false,
+    polar_snippet = FleetChild,
+}
+
+authz_resource! {
+    name = "SubnetPool",
+    parent = "Fleet",
+    primary_key = { uuid_kind = SubnetPoolKind },
     roles_allowed = false,
     polar_snippet = FleetChild,
 }

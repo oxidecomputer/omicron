@@ -43,6 +43,7 @@ mod v2026010300;
 mod v2026010500;
 mod v2026011501;
 mod v2026011600;
+mod v2026012200;
 
 #[cfg(test)]
 mod test_utils;
@@ -75,6 +76,7 @@ api_versions!([
     // |  date-based version should be at the top of the list.
     // v
     // (next_yyyymmddnn, IDENT),
+    (2026012201, EXTERNAL_SUBNET_ALLOCATOR_UPDATE),
     (2026012200, FLOATING_IP_ALLOCATOR_UPDATE),
     (2026012100, TRUST_QUORUM_ADD_SLEDS_AND_GET_LATEST_CONFIG),
     (2026011601, EXTERNAL_SUBNET_ATTACHMENT),
@@ -1315,12 +1317,29 @@ pub trait NexusExternalApi {
         method = POST,
         path = "/v1/system/subnet-pools",
         tags = ["system/subnet-pools"],
-        versions = VERSION_EXTERNAL_SUBNET_ATTACHMENT..,
+        versions = VERSION_EXTERNAL_SUBNET_ALLOCATOR_UPDATE..,
     }]
     async fn subnet_pool_create(
         rqctx: RequestContext<Self::Context>,
         pool_params: TypedBody<params::SubnetPoolCreate>,
     ) -> Result<HttpResponseCreated<views::SubnetPool>, HttpError>;
+
+    /// Create a subnet pool
+    #[endpoint {
+        operation_id = "subnet_pool_create",
+        method = POST,
+        path = "/v1/system/subnet-pools",
+        tags = ["system/subnet-pools"],
+        versions =
+            VERSION_EXTERNAL_SUBNET_ATTACHMENT..VERSION_EXTERNAL_SUBNET_ALLOCATOR_UPDATE,
+    }]
+    async fn v2026012200_subnet_pool_create(
+        rqctx: RequestContext<Self::Context>,
+        pool_params: TypedBody<v2026012200::SubnetPoolCreate>,
+    ) -> Result<HttpResponseCreated<views::SubnetPool>, HttpError> {
+        let pool_params = pool_params.try_map(TryInto::try_into)?;
+        Self::subnet_pool_create(rqctx, pool_params).await
+    }
 
     /// Fetch a subnet pool
     #[endpoint {
@@ -1377,13 +1396,35 @@ pub trait NexusExternalApi {
         method = POST,
         path = "/v1/system/subnet-pools/{pool}/members/add",
         tags = ["system/subnet-pools"],
-        versions = VERSION_EXTERNAL_SUBNET_ATTACHMENT..,
+        versions = VERSION_EXTERNAL_SUBNET_ALLOCATOR_UPDATE..,
     }]
     async fn subnet_pool_member_add(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<params::SubnetPoolPath>,
         subnet_params: TypedBody<params::SubnetPoolMemberAdd>,
     ) -> Result<HttpResponseCreated<views::SubnetPoolMember>, HttpError>;
+
+    /// Add a member to a subnet pool
+    #[endpoint {
+        operation_id = "subnet_pool_member_add",
+        method = POST,
+        path = "/v1/system/subnet-pools/{pool}/members/add",
+        tags = ["system/subnet-pools"],
+        versions =
+            VERSION_EXTERNAL_SUBNET_ATTACHMENT..VERSION_EXTERNAL_SUBNET_ALLOCATOR_UPDATE,
+    }]
+    async fn v2026012200_subnet_pool_member_add(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::SubnetPoolPath>,
+        subnet_params: TypedBody<v2026012200::SubnetPoolMemberAdd>,
+    ) -> Result<HttpResponseCreated<views::SubnetPoolMember>, HttpError> {
+        Self::subnet_pool_member_add(
+            rqctx,
+            path_params,
+            subnet_params.map(Into::into),
+        )
+        .await
+    }
 
     /// Remove a member from a subnet pool
     #[endpoint {
@@ -1480,13 +1521,31 @@ pub trait NexusExternalApi {
         method = POST,
         path = "/v1/external-subnets",
         tags = ["external-subnets"],
-        versions = VERSION_EXTERNAL_SUBNET_ATTACHMENT..,
+        versions = VERSION_EXTERNAL_SUBNET_ALLOCATOR_UPDATE..,
     }]
     async fn external_subnet_create(
         rqctx: RequestContext<Self::Context>,
         query_params: Query<params::ProjectSelector>,
         subnet_params: TypedBody<params::ExternalSubnetCreate>,
     ) -> Result<HttpResponseCreated<views::ExternalSubnet>, HttpError>;
+
+    /// Create an external subnet
+    #[endpoint {
+        operation_id = "external_subnet_create",
+        method = POST,
+        path = "/v1/external-subnets",
+        tags = ["external-subnets"],
+        versions =
+            VERSION_EXTERNAL_SUBNET_ATTACHMENT..VERSION_EXTERNAL_SUBNET_ALLOCATOR_UPDATE,
+    }]
+    async fn v2026012200_external_subnet_create(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<params::ProjectSelector>,
+        subnet_params: TypedBody<v2026012200::ExternalSubnetCreate>,
+    ) -> Result<HttpResponseCreated<views::ExternalSubnet>, HttpError> {
+        let subnet_params = subnet_params.try_map(TryInto::try_into)?;
+        Self::external_subnet_create(rqctx, query_params, subnet_params).await
+    }
 
     /// Fetch an external subnet
     #[endpoint {

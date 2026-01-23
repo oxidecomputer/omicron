@@ -52,13 +52,13 @@ async fn test_subnet_pool_create_unimplemented(
 ) {
     let client = &cptestctx.external_client;
 
-    let create_params = params::SubnetPoolCreate::new(
-        IdentityMetadataCreateParams {
+    let create_params = params::SubnetPoolCreate {
+        identity: IdentityMetadataCreateParams {
             name: "test-pool".parse().unwrap(),
             description: String::from("A test subnet pool"),
         },
-        IpVersion::V4,
-    );
+        ip_version: IpVersion::V4,
+    };
 
     NexusRequest::expect_failure_with_body(
         client,
@@ -203,10 +203,6 @@ async fn test_subnet_pool_member_add_unimplemented(
     let url = format!("{}/test-pool/members/add", SUBNET_POOLS_URL);
 
     let add_params = params::SubnetPoolMemberAdd {
-        identity: IdentityMetadataCreateParams {
-            name: "test-subnet".parse().unwrap(),
-            description: String::from("A test subnet"),
-        },
         subnet: "10.0.0.0/16".parse().unwrap(),
         min_prefix_length: None,
         max_prefix_length: None,

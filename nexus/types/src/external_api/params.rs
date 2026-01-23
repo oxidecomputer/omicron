@@ -1508,27 +1508,6 @@ pub struct SubnetPoolCreate {
     /// The IP version for this pool (IPv4 or IPv6). All subnets in the pool
     /// must match this version.
     pub ip_version: IpVersion,
-    /// Type of subnet pool (defaults to Unicast)
-    #[serde(default)]
-    pub pool_type: shared::IpPoolType,
-}
-
-impl SubnetPoolCreate {
-    /// Create parameters for a unicast subnet pool (the default)
-    pub fn new(
-        identity: IdentityMetadataCreateParams,
-        ip_version: IpVersion,
-    ) -> Self {
-        Self { identity, ip_version, pool_type: shared::IpPoolType::Unicast }
-    }
-
-    /// Create parameters for a multicast subnet pool
-    pub fn new_multicast(
-        identity: IdentityMetadataCreateParams,
-        ip_version: IpVersion,
-    ) -> Self {
-        Self { identity, ip_version, pool_type: shared::IpPoolType::Multicast }
-    }
 }
 
 /// Update a subnet pool
@@ -1541,8 +1520,6 @@ pub struct SubnetPoolUpdate {
 /// Add a member (subnet) to a subnet pool
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct SubnetPoolMemberAdd {
-    #[serde(flatten)]
-    pub identity: IdentityMetadataCreateParams,
     /// The subnet to add to the pool
     pub subnet: IpNet,
     /// Minimum prefix length for allocations from this subnet; a smaller prefix
@@ -1606,9 +1583,6 @@ pub enum ExternalSubnetAllocator {
     Explicit {
         /// The subnet CIDR to reserve. Must be available in the pool.
         subnet: IpNet,
-        /// The pool containing this subnet. If not specified, the default
-        /// subnet pool for the subnet's IP version is used.
-        pool: Option<NameOrId>,
     },
     /// Automatically allocate a subnet with the specified prefix length.
     Auto {

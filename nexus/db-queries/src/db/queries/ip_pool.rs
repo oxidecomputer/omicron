@@ -7,7 +7,6 @@
 use crate::db::model::IpPoolRange;
 use chrono::DateTime;
 use chrono::Utc;
-use diesel::Column;
 use diesel::Insertable;
 use diesel::QueryResult;
 use diesel::pg::Pg;
@@ -85,6 +84,10 @@ use uuid::Uuid;
 ///             time_deleted IS NULL
 ///         LIMIT 1
 ///     )
+///
+///     -- The query repeats the exact same 4 expressions above, but referring
+///     -- to the `subnet_pool_member` table. This ensures we have no overlap
+///     -- between external addresses within those tables or between them.
 /// ```
 ///
 /// That's a lot of duplication, but it's to help with the scalability of the
@@ -133,25 +136,32 @@ impl QueryId for FilterOverlappingIpRanges {
 //      time_deleted IS NULL
 //  LIMIT 1
 // ```
+fn push_ip_pool_range_record_contains_candidate_subquery<'a>(
+    out: AstPass<'_, 'a, Pg>,
+    address: &'a IpNetwork,
+) -> QueryResult<()> {
+    push_record_contains_candidate_subquery(out, address, "ip_pool_range")
+}
+
+fn push_subnet_pool_member_record_contains_candidate_subquery<'a>(
+    out: AstPass<'_, 'a, Pg>,
+    address: &'a IpNetwork,
+) -> QueryResult<()> {
+    push_record_contains_candidate_subquery(out, address, "subnet_pool_member")
+}
+
 fn push_record_contains_candidate_subquery<'a>(
     mut out: AstPass<'_, 'a, Pg>,
     address: &'a IpNetwork,
+    table_name: &'static str,
 ) -> QueryResult<()> {
-    out.push_sql("SELECT ");
-    out.push_identifier(dsl::id::NAME)?;
-    out.push_sql(" FROM ");
-    IP_POOL_RANGE_FROM_CLAUSE.walk_ast(out.reborrow())?;
+    out.push_sql("SELECT 1 FROM ");
+    out.push_identifier(table_name)?;
     out.push_sql(" WHERE ");
-    out.push_bind_param::<sql_types::Inet, IpNetwork>(address)?;
-    out.push_sql(" >= ");
-    out.push_identifier(dsl::first_address::NAME)?;
-    out.push_sql(" AND ");
-    out.push_bind_param::<sql_types::Inet, IpNetwork>(address)?;
-    out.push_sql(" <= ");
-    out.push_identifier(dsl::last_address::NAME)?;
-    out.push_sql(" AND ");
-    out.push_identifier(dsl::time_deleted::NAME)?;
-    out.push_sql(" IS NULL LIMIT 1");
+    out.push_bind_param::<sql_types::Inet, _>(address)?;
+    out.push_sql(" >= first_address AND ");
+    out.push_bind_param::<sql_types::Inet, _>(address)?;
+    out.push_sql(" <= last_address AND time_deleted IS NULL LIMIT 1");
     Ok(())
 }
 
@@ -169,29 +179,45 @@ fn push_record_contains_candidate_subquery<'a>(
 //      time_deleted IS NULL
 // LIMIT 1
 // ```
-fn push_candidate_contains_record_subquery<'a, C>(
+fn push_candidate_contains_ip_pool_range_record_subquery<'a>(
+    out: AstPass<'_, 'a, Pg>,
+    first_address: &'a IpNetwork,
+    last_address: &'a IpNetwork,
+) -> QueryResult<()> {
+    push_candidate_contains_record_subquery(
+        out,
+        first_address,
+        last_address,
+        "ip_pool_range",
+    )
+}
+
+fn push_candidate_contains_subnet_pool_member_record_subquery<'a>(
+    out: AstPass<'_, 'a, Pg>,
+    first_address: &'a IpNetwork,
+    last_address: &'a IpNetwork,
+) -> QueryResult<()> {
+    push_candidate_contains_record_subquery(
+        out,
+        first_address,
+        last_address,
+        "subnet_pool_member",
+    )
+}
+
+fn push_candidate_contains_record_subquery<'a>(
     mut out: AstPass<'_, 'a, Pg>,
     first_address: &'a IpNetwork,
     last_address: &'a IpNetwork,
-) -> QueryResult<()>
-where
-    C: Column<Table = dsl::ip_pool_range>,
-{
-    out.push_sql("SELECT ");
-    out.push_identifier(dsl::id::NAME)?;
-    out.push_sql(" FROM ");
-    IP_POOL_RANGE_FROM_CLAUSE.walk_ast(out.reborrow())?;
-    out.push_sql(" WHERE ");
-    out.push_identifier(C::NAME)?;
-    out.push_sql(" >= ");
-    out.push_bind_param::<sql_types::Inet, IpNetwork>(first_address)?;
-    out.push_sql(" AND ");
-    out.push_identifier(C::NAME)?;
-    out.push_sql(" <= ");
-    out.push_bind_param::<sql_types::Inet, IpNetwork>(last_address)?;
-    out.push_sql(" AND ");
-    out.push_identifier(dsl::time_deleted::NAME)?;
-    out.push_sql(" IS NULL LIMIT 1");
+    table_name: &'static str,
+) -> QueryResult<()> {
+    out.push_sql("SELECT 1 FROM ");
+    out.push_identifier(table_name)?;
+    out.push_sql(" WHERE first_address >= ");
+    out.push_bind_param::<sql_types::Inet, _>(first_address)?;
+    out.push_sql(" AND last_address <= ");
+    out.push_bind_param::<sql_types::Inet, _>(last_address)?;
+    out.push_sql(" AND time_deleted IS NULL LIMIT 1");
     Ok(())
 }
 
@@ -223,28 +249,54 @@ impl QueryFragment<Pg> for FilterOverlappingIpRanges {
         out.push_sql(", ");
         out.push_bind_param::<sql_types::BigInt, i64>(&self.range.rcgen)?;
 
+        // Filter out ranges that overlap with existing ranges.
         out.push_sql(" WHERE NOT EXISTS(");
-        push_candidate_contains_record_subquery::<dsl::first_address>(
+        push_candidate_contains_ip_pool_range_record_subquery(
             out.reborrow(),
             &self.range.first_address,
             &self.range.last_address,
         )?;
         out.push_sql(") AND NOT EXISTS(");
-        push_candidate_contains_record_subquery::<dsl::last_address>(
+        push_candidate_contains_ip_pool_range_record_subquery(
             out.reborrow(),
             &self.range.first_address,
             &self.range.last_address,
         )?;
         out.push_sql(") AND NOT EXISTS(");
-        push_record_contains_candidate_subquery(
+        push_ip_pool_range_record_contains_candidate_subquery(
             out.reborrow(),
             &self.range.first_address,
         )?;
         out.push_sql(") AND NOT EXISTS(");
-        push_record_contains_candidate_subquery(
+        push_ip_pool_range_record_contains_candidate_subquery(
             out.reborrow(),
             &self.range.last_address,
         )?;
+
+        // Or overlap with existing Subnet Pool Members.
+        out.push_sql(" ) AND NOT EXISTS(");
+        push_candidate_contains_subnet_pool_member_record_subquery(
+            out.reborrow(),
+            &self.range.first_address,
+            &self.range.last_address,
+        )?;
+        out.push_sql(") AND NOT EXISTS(");
+        push_candidate_contains_subnet_pool_member_record_subquery(
+            out.reborrow(),
+            &self.range.first_address,
+            &self.range.last_address,
+        )?;
+        out.push_sql(") AND NOT EXISTS(");
+        push_subnet_pool_member_record_contains_candidate_subquery(
+            out.reborrow(),
+            &self.range.first_address,
+        )?;
+        out.push_sql(") AND NOT EXISTS(");
+        push_subnet_pool_member_record_contains_candidate_subquery(
+            out.reborrow(),
+            &self.range.last_address,
+        )?;
+
         out.push_sql(")");
         Ok(())
     }
@@ -282,9 +334,3 @@ impl QueryFragment<Pg> for FilterOverlappingIpRangesValues {
         self.0.walk_ast(out.reborrow())
     }
 }
-
-type FromClause<T> =
-    diesel::internal::table_macro::StaticQueryFragmentInstance<T>;
-type IpPoolRangeFromClause = FromClause<dsl::ip_pool_range>;
-const IP_POOL_RANGE_FROM_CLAUSE: IpPoolRangeFromClause =
-    IpPoolRangeFromClause::new();
