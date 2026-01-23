@@ -800,14 +800,22 @@ impl NexusExternalApi for NexusExternalApiImpl {
         query_params: Query<params::SiloSelector>,
     ) -> Result<HttpResponseOk<Vec<views::ScimClientBearerToken>>, HttpError>
     {
-        audit_and_time(&rqctx, |opctx, nexus| async move {
-            let query = query_params.into_inner();
+        let apictx = rqctx.context();
+        let nexus = &apictx.context.nexus;
+        let query = query_params.into_inner();
+        let handler = async {
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
             let silo_lookup = nexus.silo_lookup(&opctx, query.silo)?;
             let tokens =
                 nexus.scim_idp_get_tokens(&opctx, &silo_lookup).await?;
             Ok(HttpResponseOk(tokens))
-        })
-        .await
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
     }
 
     async fn scim_token_create(
@@ -830,16 +838,24 @@ impl NexusExternalApi for NexusExternalApiImpl {
         path_params: Path<params::ScimV2TokenPathParam>,
         query_params: Query<params::SiloSelector>,
     ) -> Result<HttpResponseOk<views::ScimClientBearerToken>, HttpError> {
-        audit_and_time(&rqctx, |opctx, nexus| async move {
-            let query = query_params.into_inner();
-            let path = path_params.into_inner();
+        let apictx = rqctx.context();
+        let nexus = &apictx.context.nexus;
+        let query = query_params.into_inner();
+        let path = path_params.into_inner();
+        let handler = async {
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
             let silo_lookup = nexus.silo_lookup(&opctx, query.silo)?;
             let token = nexus
                 .scim_idp_get_token_by_id(&opctx, &silo_lookup, path.token_id)
                 .await?;
             Ok(HttpResponseOk(token))
-        })
-        .await
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
     }
 
     async fn scim_token_delete(
@@ -5622,16 +5638,24 @@ impl NexusExternalApi for NexusExternalApiImpl {
         // TODO: Check If-Match and fail if the ETag doesn't match anymore.
         // Without this check, if firewall rules change while someone is listing
         // the rules, they will see a mix of the old and new rules.
-        audit_and_time(&rqctx, |opctx, nexus| async move {
-            let query = query_params.into_inner();
+        let apictx = rqctx.context();
+        let nexus = &apictx.context.nexus;
+        let query = query_params.into_inner();
+        let handler = async {
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
             let vpc_lookup = nexus.vpc_lookup(&opctx, query)?;
             let rules =
                 nexus.vpc_list_firewall_rules(&opctx, &vpc_lookup).await?;
             Ok(HttpResponseOk(VpcFirewallRules {
                 rules: rules.into_iter().map(|rule| rule.into()).collect(),
             }))
-        })
-        .await
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
     }
 
     // Note: the limits in the below comment come from the firewall rules model
@@ -5699,9 +5723,13 @@ impl NexusExternalApi for NexusExternalApiImpl {
         path_params: Path<params::RouterPath>,
         query_params: Query<params::OptionalVpcSelector>,
     ) -> Result<HttpResponseOk<VpcRouter>, HttpError> {
-        audit_and_time(&rqctx, |opctx, nexus| async move {
-            let path = path_params.into_inner();
-            let query = query_params.into_inner();
+        let apictx = rqctx.context();
+        let nexus = &apictx.context.nexus;
+        let path = path_params.into_inner();
+        let query = query_params.into_inner();
+        let handler = async {
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
             let router_selector = params::RouterSelector {
                 project: query.project,
                 vpc: query.vpc,
@@ -5712,8 +5740,12 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 .fetch()
                 .await?;
             Ok(HttpResponseOk(vpc_router.into()))
-        })
-        .await
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
     }
 
     async fn vpc_router_create(
@@ -5825,9 +5857,13 @@ impl NexusExternalApi for NexusExternalApiImpl {
         path_params: Path<params::RoutePath>,
         query_params: Query<params::OptionalRouterSelector>,
     ) -> Result<HttpResponseOk<RouterRoute>, HttpError> {
-        audit_and_time(&rqctx, |opctx, nexus| async move {
-            let path = path_params.into_inner();
-            let query = query_params.into_inner();
+        let apictx = rqctx.context();
+        let nexus = &apictx.context.nexus;
+        let path = path_params.into_inner();
+        let query = query_params.into_inner();
+        let handler = async {
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
             let route_selector = params::RouteSelector {
                 project: query.project,
                 vpc: query.vpc,
@@ -5839,8 +5875,12 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 .fetch()
                 .await?;
             Ok(HttpResponseOk(route.into()))
-        })
-        .await
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
     }
 
     async fn vpc_router_route_create(
@@ -5957,9 +5997,13 @@ impl NexusExternalApi for NexusExternalApiImpl {
         path_params: Path<params::InternetGatewayPath>,
         query_params: Query<params::OptionalVpcSelector>,
     ) -> Result<HttpResponseOk<views::InternetGateway>, HttpError> {
-        audit_and_time(&rqctx, |opctx, nexus| async move {
-            let path = path_params.into_inner();
-            let query = query_params.into_inner();
+        let apictx = rqctx.context();
+        let nexus = &apictx.context.nexus;
+        let path = path_params.into_inner();
+        let query = query_params.into_inner();
+        let handler = async {
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
             let selector = params::InternetGatewaySelector {
                 project: query.project,
                 vpc: query.vpc,
@@ -5970,8 +6014,12 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 .fetch()
                 .await?;
             Ok(HttpResponseOk(internet_gateway.into()))
-        })
-        .await
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
     }
 
     /// Create VPC internet gateway
@@ -6292,12 +6340,20 @@ impl NexusExternalApi for NexusExternalApiImpl {
         rqctx: RequestContext<ApiContext>,
         path_params: Path<params::RackPath>,
     ) -> Result<HttpResponseOk<Rack>, HttpError> {
-        audit_and_time(&rqctx, |opctx, nexus| async move {
-            let path = path_params.into_inner();
+        let apictx = rqctx.context();
+        let nexus = &apictx.context.nexus;
+        let path = path_params.into_inner();
+        let handler = async {
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
             let rack_info = nexus.rack_lookup(&opctx, &path.rack_id).await?;
             Ok(HttpResponseOk(rack_info.into()))
-        })
-        .await
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
     }
 
     async fn sled_list_uninitialized(
@@ -6376,13 +6432,21 @@ impl NexusExternalApi for NexusExternalApiImpl {
         rqctx: RequestContext<ApiContext>,
         path_params: Path<params::SledPath>,
     ) -> Result<HttpResponseOk<Sled>, HttpError> {
-        audit_and_time(&rqctx, |opctx, nexus| async move {
-            let path = path_params.into_inner();
+        let apictx = rqctx.context();
+        let nexus = &apictx.context.nexus;
+        let path = path_params.into_inner();
+        let handler = async {
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
             let (.., sled) =
                 nexus.sled_lookup(&opctx, &path.sled_id)?.fetch().await?;
             Ok(HttpResponseOk(sled.into()))
-        })
-        .await
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
     }
 
     async fn sled_set_provision_policy(
@@ -6535,8 +6599,12 @@ impl NexusExternalApi for NexusExternalApiImpl {
         rqctx: RequestContext<ApiContext>,
         path_params: Path<params::SwitchPath>,
     ) -> Result<HttpResponseOk<views::Switch>, HttpError> {
-        audit_and_time(&rqctx, |opctx, nexus| async move {
-            let path = path_params.into_inner();
+        let apictx = rqctx.context();
+        let nexus = &apictx.context.nexus;
+        let path = path_params.into_inner();
+        let handler = async {
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
             let (.., switch) = nexus
                 .switch_lookup(
                     &opctx,
@@ -6545,8 +6613,12 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 .fetch()
                 .await?;
             Ok(HttpResponseOk(switch.into()))
-        })
-        .await
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
     }
 
     async fn sled_physical_disk_list(
@@ -6595,11 +6667,15 @@ impl NexusExternalApi for NexusExternalApiImpl {
         other_params: Query<params::OptionalSiloSelector>,
     ) -> Result<HttpResponseOk<ResultsPage<oximeter_db::Measurement>>, HttpError>
     {
+        let apictx = rqctx.context();
+        let nexus = &apictx.context.nexus;
         let pagination = pag_params.into_inner();
         let limit = rqctx.page_limit(&pagination)?;
-        audit_and_time(&rqctx, |opctx, nexus| async move {
-            let metric_name = path_params.into_inner().metric_name;
-            let silo_selector = other_params.into_inner().silo;
+        let metric_name = path_params.into_inner().metric_name;
+        let silo_selector = other_params.into_inner().silo;
+        let handler = async {
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
             let silo_lookup = match silo_selector {
                 Some(silo) => Some(nexus.silo_lookup(&opctx, silo)?),
                 _ => None,
@@ -6616,8 +6692,12 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 .await?;
 
             Ok(HttpResponseOk(result))
-        })
-        .await
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
     }
 
     async fn silo_metric(
@@ -6629,11 +6709,15 @@ impl NexusExternalApi for NexusExternalApiImpl {
         other_params: Query<params::OptionalProjectSelector>,
     ) -> Result<HttpResponseOk<ResultsPage<oximeter_db::Measurement>>, HttpError>
     {
+        let apictx = rqctx.context();
+        let nexus = &apictx.context.nexus;
         let pagination = pag_params.into_inner();
         let limit = rqctx.page_limit(&pagination)?;
-        audit_and_time(&rqctx, |opctx, nexus| async move {
-            let metric_name = path_params.into_inner().metric_name;
-            let project_selector = other_params.into_inner().project;
+        let metric_name = path_params.into_inner().metric_name;
+        let project_selector = other_params.into_inner().project;
+        let handler = async {
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
             let project_lookup = match project_selector {
                 Some(project) => {
                     let project_selector = params::ProjectSelector { project };
@@ -6653,8 +6737,12 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 .await?;
 
             Ok(HttpResponseOk(result))
-        })
-        .await
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
     }
 
     async fn system_timeseries_schema_list(
@@ -6664,16 +6752,24 @@ impl NexusExternalApi for NexusExternalApiImpl {
         HttpResponseOk<ResultsPage<oximeter_db::TimeseriesSchema>>,
         HttpError,
     > {
+        let apictx = rqctx.context();
+        let nexus = &apictx.context.nexus;
         let pagination = pag_params.into_inner();
         let limit = rqctx.page_limit(&pagination)?;
-        audit_and_time(&rqctx, |opctx, nexus| async move {
+        let handler = async {
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
             nexus
                 .timeseries_schema_list(&opctx, &pagination, limit)
                 .await
                 .map(HttpResponseOk)
                 .map_err(HttpError::from)
-        })
-        .await
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
     }
 
     async fn system_timeseries_query(
@@ -6786,14 +6882,22 @@ impl NexusExternalApi for NexusExternalApiImpl {
         rqctx: RequestContext<ApiContext>,
         path_params: Path<params::UpdatesGetRepositoryParams>,
     ) -> Result<HttpResponseOk<views::TufRepo>, HttpError> {
-        audit_and_time(&rqctx, |opctx, nexus| async move {
-            let params = path_params.into_inner();
+        let apictx = rqctx.context();
+        let nexus = &apictx.context.nexus;
+        let params = path_params.into_inner();
+        let handler = async {
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
             let repo = nexus
                 .updates_get_repository(&opctx, params.system_version)
                 .await?;
             Ok(HttpResponseOk(repo.into()))
-        })
-        .await
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
     }
 
     async fn system_update_repository_list(

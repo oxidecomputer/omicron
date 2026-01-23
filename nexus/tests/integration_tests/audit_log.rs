@@ -439,10 +439,11 @@ async fn test_audit_log_coverage(ctx: &ControlPlaneTestContext) {
     let t_start = Utc::now();
 
     let mut missing_audit: BTreeMap<String, (String, String)> = BTreeMap::new();
+    let mut unexpected_get_audit: BTreeMap<String, (String, String)> =
+        BTreeMap::new();
 
     for endpoint in &*VERIFY_ENDPOINTS {
         for method in &endpoint.allowed_methods {
-            // Only test mutating methods
             let is_mutating = match method {
                 AllowedMethod::Post(_)
                 | AllowedMethod::Put(_)
@@ -453,9 +454,6 @@ async fn test_audit_log_coverage(ctx: &ControlPlaneTestContext) {
                 | AllowedMethod::GetVolatile
                 | AllowedMethod::GetWebsocket => false,
             };
-            if !is_mutating {
-                continue;
-            }
 
             let before = fetch_log(client, t_start, None).await.items.len();
 
@@ -490,26 +488,37 @@ async fn test_audit_log_coverage(ctx: &ControlPlaneTestContext) {
 
             let after = fetch_log(client, t_start, None).await.items.len();
 
-            if after <= before {
-                // Find the operation info from the OpenAPI spec
-                let method_str = http_method.to_string().to_uppercase();
-                let url_path = endpoint.url.split('?').next().unwrap();
+            // Find the operation info from the OpenAPI spec
+            let method_str = http_method.to_string().to_uppercase();
+            let url_path = endpoint.url.split('?').next().unwrap();
 
-                let (op_id, path_template) = spec_operations
-                    .iter()
-                    .find(|((m, regex), _)| {
-                        *m == method_str
-                            && regex::Regex::new(regex)
-                                .unwrap()
-                                .is_match(url_path)
-                    })
-                    .map(|(_, (op_id, path))| (op_id.clone(), path.clone()))
-                    .unwrap_or_else(|| {
-                        (String::from("unknown"), url_path.to_string())
-                    });
+            let (op_id, path_template) = spec_operations
+                .iter()
+                .find(|((m, regex), _)| {
+                    *m == method_str
+                        && regex::Regex::new(regex).unwrap().is_match(url_path)
+                })
+                .map(|(_, (op_id, path))| (op_id.clone(), path.clone()))
+                .unwrap_or_else(|| {
+                    (String::from("unknown"), url_path.to_string())
+                });
 
-                missing_audit
-                    .insert(op_id, (method_str.to_lowercase(), path_template));
+            if is_mutating {
+                // Mutating endpoints SHOULD have audit logging
+                if after <= before {
+                    missing_audit.insert(
+                        op_id,
+                        (method_str.to_lowercase(), path_template),
+                    );
+                }
+            } else {
+                // GET endpoints should NOT have audit logging
+                if after > before {
+                    unexpected_get_audit.insert(
+                        op_id,
+                        (method_str.to_lowercase(), path_template),
+                    );
+                }
             }
         }
     }
@@ -563,6 +572,52 @@ async fn test_audit_log_coverage(ctx: &ControlPlaneTestContext) {
     }
 
     assert_contents(expected_path, &output);
+
+    // Check for GET endpoints that unexpectedly have audit logging
+    let mut get_output = String::from("GET endpoints with audit logging:\n");
+    for (op_id, (method, path)) in &unexpected_get_audit {
+        get_output
+            .push_str(&format!("{:44} ({:6} {:?})\n", op_id, method, path));
+    }
+
+    let get_expected_path = "tests/output/audited-get-endpoints.txt";
+    let get_expected =
+        std::fs::read_to_string(get_expected_path).unwrap_or_default();
+    let get_expected_ops: std::collections::HashSet<&str> = get_expected
+        .lines()
+        .skip(1) // skip the header line
+        .filter_map(|line| line.split_whitespace().next())
+        .collect();
+    let unexpected_audited: Vec<_> = unexpected_get_audit
+        .keys()
+        .filter(|op| !get_expected_ops.contains(op.as_str()))
+        .collect();
+    if !unexpected_audited.is_empty() {
+        eprintln!();
+        eprintln!(
+            "======================================================================="
+        );
+        eprintln!("GET ENDPOINTS WITH UNEXPECTED AUDIT LOGGING:");
+        for op in &unexpected_audited {
+            eprintln!("  - {}", op);
+        }
+        eprintln!();
+        eprintln!(
+            "GET endpoints should not have audit logging because they don't"
+        );
+        eprintln!(
+            "modify state. If this endpoint was intentionally audited (rare),"
+        );
+        eprintln!(
+            "rerun the test with EXPECTORATE=overwrite to update the list."
+        );
+        eprintln!(
+            "======================================================================="
+        );
+        eprintln!();
+    }
+
+    assert_contents(get_expected_path, &get_output);
 }
 
 fn verify_entry(
