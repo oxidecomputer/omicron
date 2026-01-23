@@ -110,10 +110,20 @@ impl SubnetPoolMember {
                 ID of zero.",
             ));
         }
+        let (version, max_for_version) = if params.subnet.is_ipv4() {
+            (IpVersion::V4, std::net::Ipv4Addr::BITS)
+        } else {
+            // NOTE: Depending on which RFC you read or what the context is, a
+            // /64 is the smallest IPv6 subnet you can create. Still, we don't
+            // really control how this is used, the guest does, so we should try
+            // to be permissive here.
+            (IpVersion::V6, std::net::Ipv6Addr::BITS)
+        };
         let min_prefix_length =
-            params.min_prefix_length.unwrap_or(params.subnet.width());
-        let max_prefix_length =
-            params.max_prefix_length.unwrap_or(params.subnet.width());
+            params.min_prefix_length.unwrap_or_else(|| params.subnet.width());
+        let max_prefix_length = params
+            .max_prefix_length
+            .unwrap_or_else(|| u8::try_from(max_for_version).unwrap());
 
         // Sanity checks on the prefix lengths.
         //
@@ -126,15 +136,6 @@ impl SubnetPoolMember {
                 "The minimum prefix length must be no greater than the maximum",
             ));
         }
-        let (version, max_for_version) = if params.subnet.is_ipv4() {
-            (IpVersion::V4, std::net::Ipv4Addr::BITS)
-        } else {
-            // NOTE: Depending on which RFC you read or what the context is, a
-            // /64 is the smallest IPv6 subnet you can create. Still, we don't
-            // really control how this is used, the guest does, so we should try
-            // to be permissive here.
-            (IpVersion::V6, std::net::Ipv6Addr::BITS)
-        };
         if u32::from(max_prefix_length) > max_for_version {
             return Err(Error::invalid_request(&format!(
                 "Cannot create an IP{} subnet with a max prefix length \
