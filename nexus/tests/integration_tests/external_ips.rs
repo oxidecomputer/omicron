@@ -906,6 +906,7 @@ async fn test_external_ip_live_attach_detach(
             client,
             instance_name,
             Some(v4_pool.identity.name.as_str()),
+            None,
         )
         .await;
         let fip_resp = floating_ip_attach(
@@ -937,6 +938,7 @@ async fn test_external_ip_live_attach_detach(
             client,
             instance_name,
             Some(v4_pool.identity.name.as_str()),
+            None,
         )
         .await;
         let fip_resp_2 = floating_ip_attach(
@@ -959,7 +961,7 @@ async fn test_external_ip_live_attach_detach(
     // Detach a floating IP and ephemeral IP from each instance.
     for (instance, fip) in instances.iter().zip(&fips) {
         let instance_name = instance.identity.name.as_str();
-        ephemeral_ip_detach(client, instance_name).await;
+        ephemeral_ip_detach(client, instance_name, None).await;
         let fip_resp =
             floating_ip_detach(client, fip.identity.name.as_str()).await;
 
@@ -1381,6 +1383,7 @@ async fn test_external_ip_attach_ephemeral_at_pool_exhaustion(
         client,
         INSTANCE_NAMES[0],
         Some(pool_name.as_str()),
+        None,
     )
     .await;
     assert_eq!(eph_resp.ip(), other_pool_range.first_address());
@@ -1413,6 +1416,7 @@ async fn test_external_ip_attach_ephemeral_at_pool_exhaustion(
         client,
         INSTANCE_NAMES[0],
         Some(pool_name.as_str()),
+        None,
     )
     .await;
     assert_eq!(eph_resp_2, eph_resp);
@@ -1654,75 +1658,29 @@ async fn test_ephemeral_ip_detach_requires_version_with_dual_stack(
         &[],
     )
     .await;
+    let eph_v4 =
+        ephemeral_ip_attach(client, instance_name, None, Some(IpVersion::V4))
+            .await;
+    assert!(eph_v4.ip().is_ipv4(), "Expected IPv4 ephemeral IP");
+
+    let eph_v6 =
+        ephemeral_ip_attach(client, instance_name, None, Some(IpVersion::V6))
+            .await;
+    assert!(eph_v6.ip().is_ipv6(), "Expected IPv6 ephemeral IP");
+
+    // Detaching without specifying version should fail when multiple ephemeral IPs exist
     let url = instance_ephemeral_ip_url(instance_name, PROJECT_NAME);
-
-    let eph_v4: views::ExternalIp = NexusRequest::new(
-        RequestBuilder::new(client, Method::POST, &url)
-            .body(Some(&params::EphemeralIpCreate {
-                pool_selector: params::PoolSelector::Auto {
-                    ip_version: Some(views::IpVersion::V4),
-                },
-            }))
-            .expect_status(Some(StatusCode::ACCEPTED)),
-    )
-    .authn_as(AuthnMode::PrivilegedUser)
-    .execute()
-    .await
-    .unwrap()
-    .parsed_body()
-    .unwrap();
-    assert!(
-        matches!(&eph_v4, views::ExternalIp::Ephemeral { ip, .. } if ip.is_ipv4()),
-        "Expected IPv4 ephemeral IP"
-    );
-
-    let eph_v6: views::ExternalIp = NexusRequest::new(
-        RequestBuilder::new(client, Method::POST, &url)
-            .body(Some(&params::EphemeralIpCreate {
-                pool_selector: params::PoolSelector::Auto {
-                    ip_version: Some(views::IpVersion::V6),
-                },
-            }))
-            .expect_status(Some(StatusCode::ACCEPTED)),
-    )
-    .authn_as(AuthnMode::PrivilegedUser)
-    .execute()
-    .await
-    .unwrap()
-    .parsed_body()
-    .unwrap();
-    assert!(
-        matches!(&eph_v6, views::ExternalIp::Ephemeral { ip, .. } if ip.is_ipv6()),
-        "Expected IPv6 ephemeral IP"
-    );
-
-    let error: HttpErrorResponseBody = NexusRequest::new(
-        RequestBuilder::new(client, Method::DELETE, &url)
-            .expect_status(Some(StatusCode::BAD_REQUEST)),
-    )
-    .authn_as(AuthnMode::PrivilegedUser)
-    .execute()
-    .await
-    .unwrap()
-    .parsed_body()
-    .unwrap();
+    let error: HttpErrorResponseBody =
+        object_delete_error(client, &url, StatusCode::BAD_REQUEST).await;
     assert_eq!(
         error.message,
         "instance has multiple ephemeral IPs; specify ip_version to select which to use"
     );
 
-    ephemeral_ip_detach_with_version(
-        client,
-        instance_name,
-        Some(views::IpVersion::V4),
-    )
-    .await;
-    ephemeral_ip_detach_with_version(
-        client,
-        instance_name,
-        Some(views::IpVersion::V6),
-    )
-    .await;
+    ephemeral_ip_detach(client, instance_name, Some(views::IpVersion::V4))
+        .await;
+    ephemeral_ip_detach(client, instance_name, Some(views::IpVersion::V6))
+        .await;
 }
 
 #[nexus_test]
@@ -2413,13 +2371,14 @@ async fn ephemeral_ip_attach(
     client: &ClientTestContext,
     instance_name: &str,
     pool_name: Option<&str>,
+    ip_version: Option<IpVersion>,
 ) -> views::ExternalIp {
     let url = instance_ephemeral_ip_url(instance_name, PROJECT_NAME);
     let pool_selector = match pool_name {
         Some(name) => params::PoolSelector::Explicit {
             pool: name.parse::<Name>().unwrap().into(),
         },
-        None => params::PoolSelector::Auto { ip_version: None },
+        None => params::PoolSelector::Auto { ip_version },
     };
     NexusRequest::new(
         RequestBuilder::new(client, Method::POST, &url)
@@ -2434,31 +2393,16 @@ async fn ephemeral_ip_attach(
     .unwrap()
 }
 
-async fn ephemeral_ip_detach(client: &ClientTestContext, instance_name: &str) {
-    ephemeral_ip_detach_with_version(client, instance_name, None).await;
-}
-
-async fn ephemeral_ip_detach_with_version(
+async fn ephemeral_ip_detach(
     client: &ClientTestContext,
     instance_name: &str,
     ip_version: Option<views::IpVersion>,
 ) {
     let mut url = instance_ephemeral_ip_url(instance_name, PROJECT_NAME);
     if let Some(version) = ip_version {
-        let version_param = match version {
-            views::IpVersion::V4 => "v4",
-            views::IpVersion::V6 => "v6",
-        };
-        url = format!("{url}&ip_version={version_param}");
+        url = format!("{url}&ip_version={version}");
     }
-    NexusRequest::new(
-        RequestBuilder::new(client, Method::DELETE, &url)
-            .expect_status(Some(StatusCode::NO_CONTENT)),
-    )
-    .authn_as(AuthnMode::PrivilegedUser)
-    .execute()
-    .await
-    .unwrap();
+    object_delete(client, &url).await;
 }
 
 async fn floating_ip_attach(
