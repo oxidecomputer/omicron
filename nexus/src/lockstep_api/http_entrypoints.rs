@@ -1100,7 +1100,7 @@ impl NexusLockstepApi for NexusLockstepApiImpl {
         let epoch = query_params.into_inner().epoch;
         let handler = async {
             let opctx =
-                crate::context::op_context_for_external_api(&rqctx).await?;
+                crate::context::op_context_for_internal_api(&rqctx).await;
             let config = if let Some(epoch) = epoch {
                 nexus.datastore().tq_get_config(&opctx, rack_id, epoch).await?
             } else {
@@ -1110,7 +1110,7 @@ impl NexusLockstepApi for NexusLockstepApiImpl {
                 Ok(HttpResponseOk(config))
             } else {
                 Err(Error::non_resourcetype_not_found(
-                    "could not find rack membership",
+                    "could not find trust quorum config",
                 ))?
             }
         };

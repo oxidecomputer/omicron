@@ -4509,7 +4509,7 @@ async fn cmd_nexus_trust_quorum_get_config(
 ) -> Result<(), anyhow::Error> {
     let config = match args.epoch {
         TrustQuorumEpochOrLatest::Latest => client
-            .trust_quorum_get_latest_config(&args.rack_id.as_untyped_uuid())
+            .trust_quorum_get_config(&args.rack_id.as_untyped_uuid(), None)
             .await
             .with_context(|| {
                 format!(
@@ -4518,7 +4518,10 @@ async fn cmd_nexus_trust_quorum_get_config(
                 )
             })?,
         TrustQuorumEpochOrLatest::Epoch(epoch) => client
-            .trust_quorum_get_config(&args.rack_id.as_untyped_uuid(), epoch.0)
+            .trust_quorum_get_config(
+                &args.rack_id.as_untyped_uuid(),
+                Some(epoch.0),
+            )
             .await
             .with_context(|| {
                 format!(
