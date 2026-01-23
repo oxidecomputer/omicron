@@ -39,6 +39,7 @@ use repo_depot_api::*;
 use sha2::{Digest, Sha256};
 use sled_agent_config_reconciler::ConfigReconcilerHandle;
 use sled_agent_config_reconciler::InternalDisksReceiver;
+use sled_agent_config_reconciler::SledAgentArtifactStore;
 use sled_agent_types::artifact::ArtifactConfig;
 use sled_agent_types::artifact::{ArtifactListResponse, ArtifactPutResponse};
 use slog::{Logger, error, info};
@@ -53,6 +54,22 @@ use tufaceous_artifact::ArtifactHash;
 // hexadecimal-encoded SHA-256 checksums.
 const LEDGER_PATH: &str = "artifact-config.json";
 const TEMP_SUBDIR: &str = "tmp";
+
+// Workaround wrapper for orphan rules.
+#[derive(Clone)]
+pub(crate) struct SledAgentArtifactStoreWrapper(
+    pub Arc<ArtifactStore<InternalDisksReceiver>>,
+);
+
+impl SledAgentArtifactStore for SledAgentArtifactStoreWrapper {
+    async fn get_artifact(
+        &self,
+        artifact: ArtifactHash,
+    ) -> anyhow::Result<tokio::fs::File> {
+        let file = self.0.get(artifact).await?;
+        Ok(file)
+    }
+}
 
 /// Content-addressable local storage for software artifacts.
 ///
