@@ -1819,6 +1819,18 @@ table! {
 }
 
 table! {
+    inv_single_measurements
+        (inv_collection_id, sled_id, path)
+    {
+        inv_collection_id -> Uuid,
+        sled_id -> Uuid,
+
+        path -> Text,
+        error_message -> Nullable<Text>
+    }
+}
+
+table! {
     inv_last_reconciliation_measurements
         (inv_collection_id, sled_id, file_name)
     {

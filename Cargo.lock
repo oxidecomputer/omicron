@@ -539,7 +539,7 @@ dependencies = [
 [[package]]
 name = "attest-data"
 version = "0.5.0"
-source = "git+https://github.com/oxidecomputer/dice-util?rev=173a5d19ee354cc8f0bc00d4e477923f8d2dc4be#173a5d19ee354cc8f0bc00d4e477923f8d2dc4be"
+source = "git+https://github.com/oxidecomputer/dice-util?rev=6e0ef48f72ff85ba50fc8286c8e89dc5f9c822dd#6e0ef48f72ff85ba50fc8286c8e89dc5f9c822dd"
 dependencies = [
  "const-oid",
  "der",
@@ -2700,7 +2700,7 @@ dependencies = [
 [[package]]
 name = "dice-mfg-msgs"
 version = "0.3.0"
-source = "git+https://github.com/oxidecomputer/dice-util?rev=173a5d19ee354cc8f0bc00d4e477923f8d2dc4be#173a5d19ee354cc8f0bc00d4e477923f8d2dc4be"
+source = "git+https://github.com/oxidecomputer/dice-util?rev=6e0ef48f72ff85ba50fc8286c8e89dc5f9c822dd#6e0ef48f72ff85ba50fc8286c8e89dc5f9c822dd"
 dependencies = [
  "const-oid",
  "corncobs",
@@ -2716,7 +2716,7 @@ dependencies = [
 [[package]]
 name = "dice-util-barcode"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/dice-util?rev=173a5d19ee354cc8f0bc00d4e477923f8d2dc4be#173a5d19ee354cc8f0bc00d4e477923f8d2dc4be"
+source = "git+https://github.com/oxidecomputer/dice-util?rev=6e0ef48f72ff85ba50fc8286c8e89dc5f9c822dd#6e0ef48f72ff85ba50fc8286c8e89dc5f9c822dd"
 dependencies = [
  "thiserror 2.0.17",
 ]
@@ -2724,12 +2724,13 @@ dependencies = [
 [[package]]
 name = "dice-verifier"
 version = "0.3.0-pre0"
-source = "git+https://github.com/oxidecomputer/dice-util?rev=173a5d19ee354cc8f0bc00d4e477923f8d2dc4be#173a5d19ee354cc8f0bc00d4e477923f8d2dc4be"
+source = "git+https://github.com/oxidecomputer/dice-util?rev=6e0ef48f72ff85ba50fc8286c8e89dc5f9c822dd#6e0ef48f72ff85ba50fc8286c8e89dc5f9c822dd"
 dependencies = [
- "attest-data 0.5.0 (git+https://github.com/oxidecomputer/dice-util?rev=173a5d19ee354cc8f0bc00d4e477923f8d2dc4be)",
+ "attest-data 0.5.0 (git+https://github.com/oxidecomputer/dice-util?rev=6e0ef48f72ff85ba50fc8286c8e89dc5f9c822dd)",
  "const-oid",
  "ed25519-dalek",
  "env_logger",
+ "hex",
  "hubpack",
  "libipcc 0.1.0 (git+https://github.com/oxidecomputer/ipcc-rs?rev=dbaad520e1f5ae32c10db16ce176f9c24de95652)",
  "log",
@@ -13137,6 +13138,7 @@ dependencies = [
  "anyhow",
  "bytes",
  "camino",
+ "iddqd",
  "key-manager",
  "omicron-workspace-hack",
  "serde",
@@ -13679,10 +13681,10 @@ dependencies = [
 [[package]]
 name = "sprockets-tls"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/sprockets.git?rev=9122d6eb288dc88bfdbcd98cc93cb02cc8c89f96#9122d6eb288dc88bfdbcd98cc93cb02cc8c89f96"
+source = "git+https://github.com/oxidecomputer/sprockets.git?rev=8ba93f6e785e11175059b3303bfd7e8b52ad12f8#8ba93f6e785e11175059b3303bfd7e8b52ad12f8"
 dependencies = [
  "anyhow",
- "attest-data 0.5.0 (git+https://github.com/oxidecomputer/dice-util?rev=173a5d19ee354cc8f0bc00d4e477923f8d2dc4be)",
+ "attest-data 0.5.0 (git+https://github.com/oxidecomputer/dice-util?rev=6e0ef48f72ff85ba50fc8286c8e89dc5f9c822dd)",
  "camino",
  "cfg-if",
  "clap",
@@ -13712,7 +13714,7 @@ dependencies = [
 [[package]]
 name = "sprockets-tls-test-utils"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/sprockets.git?rev=9122d6eb288dc88bfdbcd98cc93cb02cc8c89f96#9122d6eb288dc88bfdbcd98cc93cb02cc8c89f96"
+source = "git+https://github.com/oxidecomputer/sprockets.git?rev=8ba93f6e785e11175059b3303bfd7e8b52ad12f8#8ba93f6e785e11175059b3303bfd7e8b52ad12f8"
 dependencies = [
  "camino",
  "pki-playground",

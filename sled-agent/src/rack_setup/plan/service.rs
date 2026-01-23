@@ -1539,6 +1539,7 @@ mod tests {
                 file_source_resolver:
                     OmicronFileSourceResolverInventory::new_fake(),
                 health_monitor: HealthMonitorInventory::new(),
+                reference_measurements: IdOrdMap::new(),
             },
             is_scrimlet,
         )];

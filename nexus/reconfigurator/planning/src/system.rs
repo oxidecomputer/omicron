@@ -1476,6 +1476,7 @@ impl Sled {
                 file_source_resolver:
                     OmicronFileSourceResolverInventory::new_fake(),
                 health_monitor: HealthMonitorInventory::new(),
+                reference_measurements: iddqd::IdOrdMap::new(),
             }
         };
 
@@ -1655,6 +1656,9 @@ impl Sled {
             last_reconciliation: inv_sled_agent.last_reconciliation.clone(),
             file_source_resolver: inv_sled_agent.file_source_resolver.clone(),
             health_monitor: HealthMonitorInventory::new(),
+            reference_measurements: inv_sled_agent
+                .reference_measurements
+                .clone(),
         };
 
         Sled {
