@@ -253,7 +253,10 @@ fn print_server_components<'a>(
         }
         for (c, path) in apis.component_apis_consumed(s, filter)? {
             if let Some(note) = apis.localhost_only_edge_note(s, c) {
-                println!("{}    consumes: {} (localhost-only: {})", prefix, c, note);
+                println!(
+                    "{}    consumes: {} (localhost-only: {})",
+                    prefix, c, note
+                );
             } else {
                 println!("{}    consumes: {}", prefix, c);
             }

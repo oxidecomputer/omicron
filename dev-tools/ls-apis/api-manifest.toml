@@ -607,69 +607,83 @@ sled agent.
 [[localhost_only_edges]]
 server = "ddmd"
 client = "dpd-client"
-note = "still to verify: ddmd communicates with dendrite locally within the switch zone"
+note = "verified: sled-agent configures ddmd with dpd_host=[::1] (services.rs:3127)"
 
 [[localhost_only_edges]]
 server = "dpd"
 client = "gateway-client"
-note = "still to verify: dendrite communicates with MGS locally"
+note = "verified: dpd defaults to [::1]:MGS_PORT (dendrite switch_identifiers.rs:60)"
 
 [[localhost_only_edges]]
 server = "lldpd"
 client = "dpd-client"
-note = "still to verify: lldpd communicates with dendrite locally within the switch zone"
+note = "verified: lldpd defaults to localhost for dpd (lldp dendrite.rs:194)"
 
 [[localhost_only_edges]]
 server = "mgd"
 client = "ddm-admin-client"
-note = "still to verify: mgd communicates with ddmd locally within the switch zone"
+note = "verified: mg-lower hardcodes localhost:8000 (mg-lower ddm.rs:110)"
 
 [[localhost_only_edges]]
 server = "mgd"
 client = "dpd-client"
-note = "still to verify: mgd communicates with dendrite locally within the switch zone"
+note = "verified: mg-lower hardcodes localhost (mg-lower dendrite.rs:491)"
 
 [[localhost_only_edges]]
 server = "mgd"
 client = "gateway-client"
-note = "still to verify: mgd communicates with MGS locally"
+note = "verified: mgd defaults to [::1]:12225 (mgd main.rs:93)"
+
+# NOTE: The following sled-agent edges are BUGS - they use underlay IPs, not
+# localhost. They are kept here to avoid breaking the build, but need to be
+# fixed, either through client-side versioning or by some other means.
 
 [[localhost_only_edges]]
 server = "omicron-sled-agent"
 client = "gateway-client"
-note = "still to verify: sled-agent communicates with MGS locally"
+note = "BUG: uses underlay IP, not localhost (early_networking.rs:376)"
 
 [[localhost_only_edges]]
 server = "omicron-sled-agent"
 client = "ddm-admin-client"
-note = "still to verify: sled-agent communicates with ddmd locally"
+note = "verified: uses Client::localhost() (ddm_reconciler.rs:56)"
 
 [[localhost_only_edges]]
 server = "omicron-sled-agent"
 client = "dpd-client"
-note = "still to verify: sled-agent communicates with dendrite locally"
+note = "BUG: uses underlay IP, not localhost (services.rs:1090)"
 
 [[localhost_only_edges]]
 server = "omicron-sled-agent"
 client = "mg-admin-client"
-note = "still to verify: sled-agent communicates with mgd locally"
+note = "BUG: uses underlay IP, not localhost (early_networking.rs:483)"
 
 [[localhost_only_edges]]
 server = "omicron-sled-agent"
 client = "propolis-client"
-note = "still to verify: sled-agent communicates with propolis instances locally"
+note = "BUG: uses zone IP, not localhost (instance.rs:2283)"
 
 [[localhost_only_edges]]
 server = "tfportd"
 client = "dpd-client"
-note = "still to verify: tfportd communicates with dendrite locally within the switch zone"
+note = "verified: configured with dpd_host=[::1] (services.rs:2852)"
 
 [[localhost_only_edges]]
 server = "tfportd"
 client = "lldpd-client"
-note = "still to verify: tfportd communicates with lldpd locally within the switch zone"
+note = "verified: hardcodes localhost (tfportd tfport.rs:88)"
 
 [[localhost_only_edges]]
 server = "wicketd"
-client = "*"
-note = "still to verify: wicketd communicates with local services; enumerate specific clients later"
+client = "ddm-admin-client"
+note = "verified: uses DdmAdminClient::localhost() (bootstrap_addrs.rs:162)"
+
+[[localhost_only_edges]]
+server = "wicketd"
+client = "dpd-client"
+note = "verified: hardcodes [::1]:DENDRITE_PORT (preflight_check/uplink.rs:83)"
+
+[[localhost_only_edges]]
+server = "wicketd"
+client = "gateway-client"
+note = "verified: --mgs-address CLI expects localhost (bin/wicketd.rs:35)"

@@ -15,6 +15,7 @@ use crate::api_metadata::ApiConsumerStatus;
 use crate::api_metadata::ApiExpectedConsumer;
 use crate::api_metadata::ApiExpectedConsumers;
 use crate::api_metadata::ApiMetadata;
+use crate::api_metadata::ClientMatcher;
 use crate::api_metadata::Evaluation;
 use crate::api_metadata::VersionedHow;
 use crate::cargo::DepPath;
@@ -330,19 +331,6 @@ impl SystemApis {
         &self.api_metadata
     }
 
-    /// Returns true if this (server, client) pair is a localhost-only edge.
-    ///
-    /// Localhost-only edges are excluded from the deployment unit dependency
-    /// graph because they represent communication that only happens locally
-    /// within a deployment unit, not across deployment unit boundaries.
-    fn is_localhost_only_edge(
-        &self,
-        server: &ServerComponentName,
-        client: &ClientPackageName,
-    ) -> bool {
-        self.localhost_only_edge_note(server, client).is_some()
-    }
-
     /// Returns the note for a localhost-only edge, if one matches.
     pub fn localhost_only_edge_note(
         &self,
@@ -500,7 +488,7 @@ impl SystemApis {
     /// Returns a string that can be passed to `dot(1)` to render a graph of
     /// API dependencies among deployment units
     pub fn dot_by_unit(&self, filter: ApiDependencyFilter) -> Result<String> {
-        let (graph, _) = self.make_deployment_unit_graph(filter, false)?;
+        let (graph, _) = self.make_deployment_unit_graph(filter, None)?;
         Ok(Dot::new(&graph).to_string())
     }
 
@@ -510,7 +498,9 @@ impl SystemApis {
     fn make_deployment_unit_graph(
         &self,
         dependency_filter: ApiDependencyFilter,
-        versioned_on_server_only: bool,
+        localhost_only_edges: Option<
+            &BTreeSet<(ServerComponentName, ClientPackageName)>,
+        >,
     ) -> Result<(
         petgraph::graph::Graph<&DeploymentUnitName, &ClientPackageName>,
         BTreeMap<&DeploymentUnitName, NodeIndex>,
@@ -532,7 +522,9 @@ impl SystemApis {
                 for (client_pkg, _) in
                     self.component_apis_consumed(server_pkg, dependency_filter)?
                 {
-                    if versioned_on_server_only {
+                    // When localhost_only_edges is provided, we're building a
+                    // graph of server-side-versioned API dependencies only.
+                    if let Some(localhost_edges) = localhost_only_edges {
                         let api = self
                             .api_metadata
                             .client_pkgname_lookup(client_pkg)
@@ -544,7 +536,9 @@ impl SystemApis {
                         // Skip edges that represent localhost-only communication
                         // (communication within a deployment unit that doesn't
                         // cross deployment unit boundaries).
-                        if self.is_localhost_only_edge(server_pkg, client_pkg) {
+                        if localhost_edges
+                            .contains(&(server_pkg.clone(), client_pkg.clone()))
+                        {
                             continue;
                         }
                     }
@@ -631,6 +625,112 @@ impl SystemApis {
         Ok((graph, nodes))
     }
 
+    /// Computes the set of (server, client) edges that must be excluded from
+    /// the deployment unit dependency graph because they represent intra-unit
+    /// communication for server-side-versioned APIs.
+    ///
+    /// These are edges where all of the below are true:
+    ///
+    /// 1. The server consumes the client.
+    /// 2. The API is server-side-versioned.
+    /// 3. The server and API producer are in the same deployment unit.
+    ///
+    /// Returns a set of (server, client) pairs.
+    fn compute_required_localhost_edges(
+        &self,
+    ) -> Result<BTreeSet<(ServerComponentName, ClientPackageName)>> {
+        let filter = ApiDependencyFilter::Default;
+        let mut required = BTreeSet::new();
+
+        for server in self.server_component_units.keys() {
+            let Some(server_unit) = self.server_component_units.get(server)
+            else {
+                continue;
+            };
+
+            for (client, _) in self.component_apis_consumed(server, filter)? {
+                // Only consider server-side-versioned APIs.
+                let Some(api) = self.api_metadata.client_pkgname_lookup(client)
+                else {
+                    continue;
+                };
+                if api.versioned_how != VersionedHow::Server {
+                    continue;
+                }
+
+                // Check if any producer is in the same deployment unit.
+                for producer in self.api_producers(client) {
+                    let Some(producer_unit) =
+                        self.server_component_units.get(producer)
+                    else {
+                        continue;
+                    };
+
+                    if server_unit == producer_unit {
+                        // This edge would create an intra-unit dependency for
+                        // a server-versioned API, so it must be in the
+                        // localhost-only list.
+                        required.insert((server.clone(), client.clone()));
+                        break;
+                    }
+                }
+            }
+        }
+
+        Ok(required)
+    }
+
+    /// Validates that the configured localhost_only_edges exactly match the
+    /// required set of edges that must be excluded.
+    ///
+    /// Returns the validated set of edges for use by make_deployment_unit_graph.
+    fn validate_localhost_only_edges(
+        &self,
+    ) -> Result<BTreeSet<(ServerComponentName, ClientPackageName)>> {
+        let required = self.compute_required_localhost_edges()?;
+
+        // Build the configured set from the manifest.
+        let mut configured = BTreeSet::new();
+        for edge in self.api_metadata.localhost_only_edges() {
+            let ClientMatcher::Specific(client) = &edge.client;
+            configured.insert((edge.server.clone(), client.clone()));
+        }
+
+        // Compare the two sets.
+        let missing: BTreeSet<_> = required.difference(&configured).collect();
+        let extra: BTreeSet<_> = configured.difference(&required).collect();
+
+        if !missing.is_empty() || !extra.is_empty() {
+            let mut msg = String::from(
+                "localhost_only_edges configuration does not match required edges:\n",
+            );
+
+            if !missing.is_empty() {
+                msg.push_str("\nMissing entries (these edges exist and need localhost-only exclusion):\n");
+                for (server, client) in &missing {
+                    msg.push_str(&format!(
+                        "  - server = {:?}, client = {:?}\n",
+                        server, client
+                    ));
+                }
+            }
+
+            if !extra.is_empty() {
+                msg.push_str("\nExtra entries (these edges don't exist or don't need exclusion):\n");
+                for (server, client) in &extra {
+                    msg.push_str(&format!(
+                        "  - server = {:?}, client = {:?}\n",
+                        server, client
+                    ));
+                }
+            }
+
+            bail!("{}", msg);
+        }
+
+        Ok(required)
+    }
+
     /// Verifies various important properties about the assignment of which APIs
     /// are server-managed vs. client-managed.
     ///
@@ -685,6 +785,10 @@ impl SystemApis {
         // can't be part of a cycle.
         let filter = ApiDependencyFilter::Default;
 
+        // Validate that all configured localhost_only_edges are correct and
+        // match the required set exactly.
+        let localhost_only_edges = self.validate_localhost_only_edges()?;
+
         // Construct a graph where:
         //
         // - nodes are all the API producer and consumer components
@@ -704,7 +808,8 @@ impl SystemApis {
         }
 
         // Do the same with a graph of deployment units.
-        let (graph, nodes) = self.make_deployment_unit_graph(filter, true)?;
+        let (graph, nodes) = self
+            .make_deployment_unit_graph(filter, Some(&localhost_only_edges))?;
         let reverse_nodes: BTreeMap<_, _> =
             nodes.iter().map(|(d_u, node)| (node, d_u)).collect();
         if let Err(error) = petgraph::algo::toposort(&graph, None) {

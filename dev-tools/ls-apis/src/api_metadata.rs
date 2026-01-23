@@ -203,10 +203,8 @@ impl TryFrom<RawApiMetadata> for AllApiMetadata {
 
         // Validate localhost_only_edges reference known server components and
         // APIs.
-        let known_components: BTreeSet<_> = deployment_units
-            .values()
-            .flat_map(|u| u.packages.iter())
-            .collect();
+        let known_components: BTreeSet<_> =
+            deployment_units.values().flat_map(|u| u.packages.iter()).collect();
         for edge in &raw.localhost_only_edges {
             if !known_components.contains(&edge.server) {
                 bail!(
@@ -214,14 +212,9 @@ impl TryFrom<RawApiMetadata> for AllApiMetadata {
                     edge.server
                 );
             }
-            // Validate non-wildcard clients reference known APIs.
-            if let Some(client_name) = edge.client.as_specific() {
-                if !apis.contains_key(client_name) {
-                    bail!(
-                        "localhost_only_edges: unknown client {:?}",
-                        client_name
-                    );
-                }
+            let client_name = edge.client.as_specific();
+            if !apis.contains_key(client_name) {
+                bail!("localhost_only_edges: unknown client {:?}", client_name);
             }
         }
 
@@ -449,11 +442,9 @@ pub enum Evaluation {
     Dag,
 }
 
-/// Specifies which client(s) to match in a localhost-only edge rule.
+/// Specifies which client to match in a localhost-only edge rule.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ClientMatcher {
-    /// Match all clients (represented as "*" in TOML).
-    Wildcard,
     /// Match a specific client package.
     Specific(ClientPackageName),
 }
@@ -464,11 +455,7 @@ impl<'de> Deserialize<'de> for ClientMatcher {
         D: serde::Deserializer<'de>,
     {
         let s = String::deserialize(deserializer)?;
-        if s == "*" {
-            Ok(ClientMatcher::Wildcard)
-        } else {
-            Ok(ClientMatcher::Specific(ClientPackageName::from(s)))
-        }
+        Ok(ClientMatcher::Specific(ClientPackageName::from(s)))
     }
 }
 
@@ -476,16 +463,14 @@ impl ClientMatcher {
     /// Returns true if this matcher matches the given client package.
     pub fn matches(&self, client: &ClientPackageName) -> bool {
         match self {
-            ClientMatcher::Wildcard => true,
             ClientMatcher::Specific(name) => name == client,
         }
     }
 
-    /// Returns the specific client name, if not a wildcard.
-    pub fn as_specific(&self) -> Option<&ClientPackageName> {
+    /// Returns the specific client name.
+    pub fn as_specific(&self) -> &ClientPackageName {
         match self {
-            ClientMatcher::Wildcard => None,
-            ClientMatcher::Specific(name) => Some(name),
+            ClientMatcher::Specific(name) => name,
         }
     }
 }
@@ -498,7 +483,7 @@ impl ClientMatcher {
 pub struct LocalhostOnlyEdge {
     /// The server component that consumes the API.
     pub server: ServerComponentName,
-    /// The client package consumed, or "*" to match all clients.
+    /// The client package consumed.
     pub client: ClientMatcher,
     /// Explanation of why this edge is localhost-only.
     pub note: String,
