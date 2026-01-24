@@ -264,6 +264,18 @@ pub struct OptionalProjectSelector {
     pub project: Option<NameOrId>,
 }
 
+/// Query parameters for ephemeral IP detach endpoint
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
+pub struct EphemeralIpDetachSelector {
+    /// Name or ID of the project
+    pub project: Option<NameOrId>,
+    /// The IP version of the ephemeral IP to detach.
+    ///
+    /// Required when the instance has both IPv4 and IPv6 ephemeral IPs.
+    /// If only one ephemeral IP is attached, this field may be omitted.
+    pub ip_version: Option<IpVersion>,
+}
+
 #[derive(Deserialize, JsonSchema, Clone)]
 pub struct FloatingIpSelector {
     /// Name or ID of the project, only required if `floating_ip` is provided as a `Name`
@@ -1818,8 +1830,17 @@ pub struct EphemeralIpCreate {
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ExternalIpDetach {
-    Ephemeral,
-    Floating { floating_ip: NameOrId },
+    Ephemeral {
+        /// The IP version of the ephemeral IP to detach.
+        ///
+        /// Required when the instance has both IPv4 and IPv6 ephemeral IPs.
+        /// If only one ephemeral IP is attached, this field may be omitted.
+        #[serde(default)]
+        ip_version: Option<IpVersion>,
+    },
+    Floating {
+        floating_ip: NameOrId,
+    },
 }
 
 /// Create-time parameters for an `Instance`
