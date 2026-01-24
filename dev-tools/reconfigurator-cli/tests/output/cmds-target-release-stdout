@@ -9096,6 +9096,12 @@ parent:    05685571-d61f-4754-a2b2-604ea8c45dff
     B      artifact: version 1.0.0
 
 
+    measurements:
+    ----------------------
+    hash   version   prune
+    ----------------------
+
+
     physical disks:
     ------------------------------------------------------------------------------------
     vendor        model        serial                                        disposition
@@ -9177,6 +9183,12 @@ parent:    05685571-d61f-4754-a2b2-604ea8c45dff
     B      artifact: version 1.0.0
 
 
+    measurements:
+    ----------------------
+    hash   version   prune
+    ----------------------
+
+
     physical disks:
     ------------------------------------------------------------------------------------
     vendor        model        serial                                        disposition
@@ -9255,6 +9267,12 @@ parent:    05685571-d61f-4754-a2b2-604ea8c45dff
     ------------------------------
     A      current contents       
     B      artifact: version 1.0.0
+
+
+    measurements:
+    ----------------------
+    hash   version   prune
+    ----------------------
 
 
     physical disks:

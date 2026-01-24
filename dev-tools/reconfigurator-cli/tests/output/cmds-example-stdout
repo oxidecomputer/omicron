@@ -96,6 +96,12 @@ parent:    02697f74-b14a-4418-90f0-c28b2a3a6aa9
     B      current contents 
 
 
+    measurements:
+    ----------------------
+    hash   version   prune
+    ----------------------
+
+
     physical disks:
     ------------------------------------------------------------------------------------
     vendor        model        serial                                        disposition
@@ -214,6 +220,12 @@ parent:    02697f74-b14a-4418-90f0-c28b2a3a6aa9
     B      current contents 
 
 
+    measurements:
+    ----------------------
+    hash   version   prune
+    ----------------------
+
+
     physical disks:
     ------------------------------------------------------------------------------------
     vendor        model        serial                                        disposition
@@ -327,6 +339,12 @@ parent:    02697f74-b14a-4418-90f0-c28b2a3a6aa9
     ------------------------
     A      current contents 
     B      current contents 
+
+
+    measurements:
+    ----------------------
+    hash   version   prune
+    ----------------------
 
 
     physical disks:
@@ -521,6 +539,12 @@ parent:    02697f74-b14a-4418-90f0-c28b2a3a6aa9
     ------------------------
     A      current contents 
     B      current contents 
+
+
+    measurements:
+    ----------------------
+    hash   version   prune
+    ----------------------
 
 
     physical disks:
@@ -1179,6 +1203,12 @@ parent:    02697f74-b14a-4418-90f0-c28b2a3a6aa9
     B      current contents 
 
 
+    measurements:
+    ----------------------
+    hash   version   prune
+    ----------------------
+
+
     physical disks:
     ------------------------------------------------------------------------------------
     vendor        model        serial                                        disposition
@@ -1235,6 +1265,12 @@ parent:    02697f74-b14a-4418-90f0-c28b2a3a6aa9
     B      current contents 
 
 
+    measurements:
+    ----------------------
+    hash   version   prune
+    ----------------------
+
+
     physical disks:
     ------------------------------------------------------------------------------------
     vendor        model        serial                                        disposition
@@ -1289,6 +1325,12 @@ parent:    02697f74-b14a-4418-90f0-c28b2a3a6aa9
     ------------------------
     A      current contents 
     B      current contents 
+
+
+    measurements:
+    ----------------------
+    hash   version   prune
+    ----------------------
 
 
     physical disks:
