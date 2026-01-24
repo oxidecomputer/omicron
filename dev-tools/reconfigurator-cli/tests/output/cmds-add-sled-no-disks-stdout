@@ -50,6 +50,8 @@ planning report:
 * no zpools in service for NTP zones on sleds: 00320471-945d-413c-85e7-03e091a70b3c
 * discretionary zone placement waiting for NTP zones on sleds: 00320471-945d-413c-85e7-03e091a70b3c
 * zone updates waiting on zone add blockers
+Measurement updates:
+Blocked on add/updates
 
 
 
@@ -358,6 +360,8 @@ planning report:
 * no zpools in service for NTP zones on sleds: 00320471-945d-413c-85e7-03e091a70b3c
 * discretionary zone placement waiting for NTP zones on sleds: 00320471-945d-413c-85e7-03e091a70b3c
 * zone updates waiting on zone add blockers
+Measurement updates:
+Blocked on add/updates
 
 
 

@@ -30,6 +30,8 @@ use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::BlueprintArtifactVersion;
 use nexus_types::deployment::BlueprintHostPhase2DesiredContents;
 use nexus_types::deployment::BlueprintHostPhase2DesiredSlots;
+use nexus_types::deployment::BlueprintMeasurements;
+use nexus_types::deployment::BlueprintSingleMeasurement;
 use nexus_types::deployment::BlueprintSource;
 use nexus_types::deployment::ClickhouseMode;
 use nexus_types::deployment::ClickhousePolicy;
@@ -944,6 +946,24 @@ impl ExampleSystemBuilder {
                                     hash: host_phase_2_artifact.hash,
                                 },
                         },
+                    )
+                    .expect("sled is present in blueprint");
+
+                let measurement_artifact = artifacts_by_kind
+                    .get(&ArtifactKind::MEASUREMENT_CORPUS)
+                    .unwrap();
+
+                let mut artifacts = BTreeSet::new();
+                artifacts.insert(BlueprintSingleMeasurement {
+                    version: BlueprintArtifactVersion::Available {
+                        version: measurement_artifact.id.version.clone(),
+                    },
+                    hash: measurement_artifact.hash,
+                });
+                builder
+                    .sled_set_measurements(
+                        sled_id,
+                        BlueprintMeasurements::Artifacts { artifacts },
                     )
                     .expect("sled is present in blueprint");
             };

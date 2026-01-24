@@ -686,5 +686,7 @@ planning report:
   * nexus zone on sled affab35f-600a-4109-8ea0-34a067a4e0bc from source install dataset
   * nexus zone on sled affab35f-600a-4109-8ea0-34a067a4e0bc from source install dataset
 * zone updates waiting on discretionary zones
+Measurement updates:
+Blocked on add/updates
 
 

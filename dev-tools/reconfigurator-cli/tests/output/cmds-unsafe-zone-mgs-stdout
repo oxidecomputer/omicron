@@ -124,20 +124,29 @@ generated inventory collection eb0796d5-ab8a-4f7b-a884-b4aeacb8ab51 from configu
 INFO performed noop zone image source checks on sled, sled_id: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c, num_total: 9, num_already_artifact: 0, num_eligible: 9, num_ineligible: 0
 INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c, slot: a, expected_hash: 0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a
 INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c, slot: b, expected_hash: 0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b
+INFO measurement may be eligible for noop image source conversion, sled_id: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c, new_image_source: 8a0e23157bae655fceec7376926c9758efee6511c7b7ff8355bbb49545a2257f version 1.0.0
+
 INFO performed noop zone image source checks on sled, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, num_total: 8, num_already_artifact: 0, num_eligible: 8, num_ineligible: 0
 INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, slot: a, expected_hash: 0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a
 INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, slot: b, expected_hash: 0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b
+INFO measurement may be eligible for noop image source conversion, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, new_image_source: 8a0e23157bae655fceec7376926c9758efee6511c7b7ff8355bbb49545a2257f version 1.0.0
+
 INFO performed noop zone image source checks on sled, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, num_total: 8, num_already_artifact: 0, num_eligible: 8, num_ineligible: 0
 INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, slot: a, expected_hash: 0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a
 INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, slot: b, expected_hash: 0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b
+INFO measurement may be eligible for noop image source conversion, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, new_image_source: 8a0e23157bae655fceec7376926c9758efee6511c7b7ff8355bbb49545a2257f version 1.0.0
+
 INFO configuring MGS-driven update, artifact_version: 0.0.1, artifact_hash: 244d553f832cf74043bbcc8a747c8d05384a0f89f7809dcab28c3f707b11f985, expected_transient_boot_preference: None, expected_pending_persistent_boot_preference: None, expected_persistent_boot_preference: A, expected_active_slot: ExpectedActiveRotSlot { slot: A, version: ArtifactVersion("0.0.2") }, expected_inactive_version: NoValidVersion, component: rot, sp_slot: 0, sp_type: Sled, serial_number: serial0, part_number: 913-0000019
 INFO reached maximum number of pending MGS-driven updates, max: 1
 generated blueprint 8da82a8e-bf97-4fbd-8ddd-9f6462732cf1 based on parent blueprint dbcbd3d6-41ff-48ae-ac0b-1becc9b2fd21
 blueprint source: planner with report:
 planning report:
 * noop converting 9/9 install-dataset zones to artifact store on sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c
+* noop converting current measurements to Artifact on sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c
 * noop converting 8/8 install-dataset zones to artifact store on sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6
+* noop converting current measurements to Artifact on sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6
 * noop converting 8/8 install-dataset zones to artifact store on sled d81c6a84-79b8-4958-ae41-ea46c9b19763
+* noop converting current measurements to Artifact on sled d81c6a84-79b8-4958-ae41-ea46c9b19763
 * 1 pending MGS update:
   * 913-0000019:serial0: Rot(PendingMgsUpdateRotDetails { expected_active_slot: ExpectedActiveRotSlot { slot: A, version: ArtifactVersion("0.0.2") }, expected_inactive_version: NoValidVersion, expected_persistent_boot_preference: A, expected_pending_persistent_boot_preference: None, expected_transient_boot_preference: None })
 * zone updates waiting on pending MGS updates (RoT bootloader / RoT / SP / Host OS)
@@ -153,10 +162,10 @@ to:   blueprint 8da82a8e-bf97-4fbd-8ddd-9f6462732cf1
   sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c (active, config generation 2 -> 3):
 
     measurements:
-    ------------------------------
-    hash              version     
-    ------------------------------
-    install dataset   (no version)
+    --------------------------------------------------------------------------------
+    hash                                                               version      
+    --------------------------------------------------------------------------------
++   8a0e23157bae655fceec7376926c9758efee6511c7b7ff8355bbb49545a2257f   version 1.0.0
 
 
     host phase 2 contents:
@@ -236,10 +245,10 @@ to:   blueprint 8da82a8e-bf97-4fbd-8ddd-9f6462732cf1
   sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 (active, config generation 2 -> 3):
 
     measurements:
-    ------------------------------
-    hash              version     
-    ------------------------------
-    install dataset   (no version)
+    --------------------------------------------------------------------------------
+    hash                                                               version      
+    --------------------------------------------------------------------------------
++   8a0e23157bae655fceec7376926c9758efee6511c7b7ff8355bbb49545a2257f   version 1.0.0
 
 
     host phase 2 contents:
@@ -315,10 +324,10 @@ to:   blueprint 8da82a8e-bf97-4fbd-8ddd-9f6462732cf1
   sled d81c6a84-79b8-4958-ae41-ea46c9b19763 (active, config generation 2 -> 3):
 
     measurements:
-    ------------------------------
-    hash              version     
-    ------------------------------
-    install dataset   (no version)
+    --------------------------------------------------------------------------------
+    hash                                                               version      
+    --------------------------------------------------------------------------------
++   8a0e23157bae655fceec7376926c9758efee6511c7b7ff8355bbb49545a2257f   version 1.0.0
 
 
     host phase 2 contents:
@@ -676,7 +685,9 @@ LEDGERED SLED CONFIG
         ad6a3a03-8d0f-4504-99a4-cbf73d69b973     crucible_pantry     artifact: 6055871bfa626d582162302bf027102d90a03a42866867df2582f8eba231fc6d 
         bd354eef-d8a6-4165-9124-283fb5e46d77     crucible            artifact: f3694b20fa1de79fb1f7c3a9f89f9f9eb5ebaaefc3caba7e1991e7e2b3191ed4 
         e2fdefe7-95b2-4fd2-ae37-56929a06d58c     crucible            artifact: f3694b20fa1de79fb1f7c3a9f89f9f9eb5ebaaefc3caba7e1991e7e2b3191ed4 
-    measurement empty
+    MEASUREMENTS: 9
+      HASH                                                                      
+      artifact 8a0e23157bae655fceec7376926c9758efee6511c7b7ff8355bbb49545a2257f 
     zone image resolver status:
         zone manifest:
             path on boot disk: /fake/path/install/zones.json
@@ -864,7 +875,9 @@ LEDGERED SLED CONFIG
         803bfb63-c246-41db-b0da-d3b87ddfc63d     external_dns        artifact: 584217eae459e4c2bd00621cf1910d06edb8258948a4832ab0329cf42067c0c7 
         ba4994a8-23f9-4b1a-a84f-a08d74591389     crucible_pantry     artifact: 6055871bfa626d582162302bf027102d90a03a42866867df2582f8eba231fc6d 
         dfac80b4-a887-430a-ae87-a4e065dba787     crucible            artifact: f3694b20fa1de79fb1f7c3a9f89f9f9eb5ebaaefc3caba7e1991e7e2b3191ed4 
-    measurement empty
+    MEASUREMENTS: 8
+      HASH                                                                      
+      artifact 8a0e23157bae655fceec7376926c9758efee6511c7b7ff8355bbb49545a2257f 
     zone image resolver status:
         zone manifest:
             path on boot disk: /fake/path/install/zones.json
@@ -1052,7 +1065,9 @@ LEDGERED SLED CONFIG
         f10a4fb9-759f-4a65-b25e-5794ad2d07d8     internal_ntp        artifact: b661b5d1370f5ac593b4c15b5fcd22c904991cf33b6db32f886374bc022a3531 
         f55647d4-5500-4ad3-893a-df45bd50d622     crucible            artifact: f3694b20fa1de79fb1f7c3a9f89f9f9eb5ebaaefc3caba7e1991e7e2b3191ed4 
         f6ec9c67-946a-4da3-98d5-581f72ce8bf0     external_dns        artifact: 584217eae459e4c2bd00621cf1910d06edb8258948a4832ab0329cf42067c0c7 
-    measurement empty
+    MEASUREMENTS: 8
+      HASH                                                                      
+      artifact 8a0e23157bae655fceec7376926c9758efee6511c7b7ff8355bbb49545a2257f 
     zone image resolver status:
         zone manifest:
             path on boot disk: /fake/path/install/zones.json
@@ -1193,10 +1208,10 @@ parent:    8da82a8e-bf97-4fbd-8ddd-9f6462732cf1
 
 
     measurements:
-    ------------------------------
-    hash              version     
-    ------------------------------
-    install dataset   (no version)
+    --------------------------------------------------------------------------------
+    hash                                                               version      
+    --------------------------------------------------------------------------------
+    8a0e23157bae655fceec7376926c9758efee6511c7b7ff8355bbb49545a2257f   version 1.0.0
 
 
     physical disks:
@@ -1272,10 +1287,10 @@ parent:    8da82a8e-bf97-4fbd-8ddd-9f6462732cf1
 
 
     measurements:
-    ------------------------------
-    hash              version     
-    ------------------------------
-    install dataset   (no version)
+    --------------------------------------------------------------------------------
+    hash                                                               version      
+    --------------------------------------------------------------------------------
+    8a0e23157bae655fceec7376926c9758efee6511c7b7ff8355bbb49545a2257f   version 1.0.0
 
 
     physical disks:
@@ -1348,10 +1363,10 @@ parent:    8da82a8e-bf97-4fbd-8ddd-9f6462732cf1
 
 
     measurements:
-    ------------------------------
-    hash              version     
-    ------------------------------
-    install dataset   (no version)
+    --------------------------------------------------------------------------------
+    hash                                                               version      
+    --------------------------------------------------------------------------------
+    8a0e23157bae655fceec7376926c9758efee6511c7b7ff8355bbb49545a2257f   version 1.0.0
 
 
     physical disks:
@@ -1451,10 +1466,10 @@ to:   blueprint af934083-59b5-4bf6-8966-6fb5292c29e1
   sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c (active, config generation 3 -> 4):
 
     measurements:
-    ------------------------------
-    hash              version     
-    ------------------------------
-    install dataset   (no version)
+    --------------------------------------------------------------------------------
+    hash                                                               version      
+    --------------------------------------------------------------------------------
+    8a0e23157bae655fceec7376926c9758efee6511c7b7ff8355bbb49545a2257f   version 1.0.0
 
 
     host phase 2 contents:
@@ -1579,12 +1594,15 @@ external DNS:
 INFO performed noop zone image source checks on sled, sled_id: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c, num_total: 8, num_already_artifact: 8, num_eligible: 0, num_ineligible: 0
 INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c, slot: a, expected_hash: 0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a
 INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c, slot: b, expected_hash: 0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b
+INFO measurement has its image source set to Artifact already, sled_id: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c
 INFO performed noop zone image source checks on sled, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, num_total: 8, num_already_artifact: 8, num_eligible: 0, num_ineligible: 0
 INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, slot: a, expected_hash: 0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a
 INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, slot: b, expected_hash: 0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b
+INFO measurement has its image source set to Artifact already, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6
 INFO performed noop zone image source checks on sled, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, num_total: 8, num_already_artifact: 8, num_eligible: 0, num_ineligible: 0
 INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, slot: a, expected_hash: 0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a
 INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, slot: b, expected_hash: 0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b
+INFO measurement has its image source set to Artifact already, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763
 INFO configuring MGS-driven update, artifact_version: 1.0.0, artifact_hash: 5b0f601b1fbb8674db9c751a02f8b14f8e6d4e8470f4f7b686fecb2c49ec11f9, expected_stage0_next_version: NoValidVersion, expected_stage0_version: 0.0.1, component: rot_bootloader, sp_slot: 0, sp_type: Sled, serial_number: serial0, part_number: 913-0000019
 INFO reached maximum number of pending MGS-driven updates, max: 1
 generated blueprint df06bb57-ad42-4431-9206-abff322896c7 based on parent blueprint af934083-59b5-4bf6-8966-6fb5292c29e1
@@ -1640,12 +1658,15 @@ external DNS:
 INFO performed noop zone image source checks on sled, sled_id: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c, num_total: 8, num_already_artifact: 8, num_eligible: 0, num_ineligible: 0
 INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c, slot: a, expected_hash: 0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a
 INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c, slot: b, expected_hash: 0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b
+INFO measurement has its image source set to Artifact already, sled_id: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c
 INFO performed noop zone image source checks on sled, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, num_total: 8, num_already_artifact: 8, num_eligible: 0, num_ineligible: 0
 INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, slot: a, expected_hash: 0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a
 INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, slot: b, expected_hash: 0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b
+INFO measurement has its image source set to Artifact already, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6
 INFO performed noop zone image source checks on sled, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, num_total: 8, num_already_artifact: 8, num_eligible: 0, num_ineligible: 0
 INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, slot: a, expected_hash: 0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a
 INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, slot: b, expected_hash: 0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b
+INFO measurement has its image source set to Artifact already, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763
 INFO MGS-driven update not yet completed (will keep it), artifact_version: 1.0.0, artifact_hash: 5b0f601b1fbb8674db9c751a02f8b14f8e6d4e8470f4f7b686fecb2c49ec11f9, expected_stage0_next_version: NoValidVersion, expected_stage0_version: 0.0.1, component: rot_bootloader, sp_slot: 0, sp_type: Sled, serial_number: serial0, part_number: 913-0000019
 INFO reached maximum number of pending MGS-driven updates, max: 1
 generated blueprint 7f976e0d-d2a5-4eeb-9e82-c82bc2824aba based on parent blueprint df06bb57-ad42-4431-9206-abff322896c7
@@ -1709,12 +1730,15 @@ generated inventory collection b1bda47d-2c19-4fba-96e3-d9df28db7436 from configu
 INFO performed noop zone image source checks on sled, sled_id: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c, num_total: 8, num_already_artifact: 8, num_eligible: 0, num_ineligible: 0
 INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c, slot: a, expected_hash: 0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a
 INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c, slot: b, expected_hash: 0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b
+INFO measurement has its image source set to Artifact already, sled_id: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c
 INFO performed noop zone image source checks on sled, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, num_total: 8, num_already_artifact: 8, num_eligible: 0, num_ineligible: 0
 INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, slot: a, expected_hash: 0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a
 INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, slot: b, expected_hash: 0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b
+INFO measurement has its image source set to Artifact already, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6
 INFO performed noop zone image source checks on sled, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, num_total: 8, num_already_artifact: 8, num_eligible: 0, num_ineligible: 0
 INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, slot: a, expected_hash: 0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a
 INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, slot: b, expected_hash: 0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b
+INFO measurement has its image source set to Artifact already, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763
 INFO MGS-driven update completed (will remove it and re-evaluate board), artifact_version: 1.0.0, artifact_hash: 5b0f601b1fbb8674db9c751a02f8b14f8e6d4e8470f4f7b686fecb2c49ec11f9, expected_stage0_next_version: NoValidVersion, expected_stage0_version: 0.0.1, component: rot_bootloader, sp_slot: 0, sp_type: Sled, serial_number: serial0, part_number: 913-0000019
 INFO configuring MGS-driven update, artifact_version: 1.0.0, artifact_hash: d11e65f934bf0de51df2e5b484f61ee72072417b43ac87f33e958008428e7b02, expected_transient_boot_preference: None, expected_pending_persistent_boot_preference: None, expected_persistent_boot_preference: A, expected_active_slot: ExpectedActiveRotSlot { slot: A, version: ArtifactVersion("0.0.2") }, expected_inactive_version: NoValidVersion, component: rot, sp_slot: 0, sp_type: Sled, serial_number: serial0, part_number: 913-0000019
 INFO reached maximum number of pending MGS-driven updates, max: 1
@@ -1786,12 +1810,15 @@ generated inventory collection a71f7a73-35a6-45e8-acbe-f1c5925eed69 from configu
 INFO performed noop zone image source checks on sled, sled_id: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c, num_total: 8, num_already_artifact: 8, num_eligible: 0, num_ineligible: 0
 INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c, slot: a, expected_hash: 0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a
 INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c, slot: b, expected_hash: 0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b
+INFO measurement has its image source set to Artifact already, sled_id: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c
 INFO performed noop zone image source checks on sled, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, num_total: 8, num_already_artifact: 8, num_eligible: 0, num_ineligible: 0
 INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, slot: a, expected_hash: 0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a
 INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, slot: b, expected_hash: 0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b
+INFO measurement has its image source set to Artifact already, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6
 INFO performed noop zone image source checks on sled, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, num_total: 8, num_already_artifact: 8, num_eligible: 0, num_ineligible: 0
 INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, slot: a, expected_hash: 0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a
 INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, slot: b, expected_hash: 0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b
+INFO measurement has its image source set to Artifact already, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763
 INFO MGS-driven update completed (will remove it and re-evaluate board), artifact_version: 1.0.0, artifact_hash: d11e65f934bf0de51df2e5b484f61ee72072417b43ac87f33e958008428e7b02, expected_transient_boot_preference: None, expected_pending_persistent_boot_preference: None, expected_persistent_boot_preference: A, expected_active_slot: ExpectedActiveRotSlot { slot: A, version: ArtifactVersion("0.0.2") }, expected_inactive_version: NoValidVersion, component: rot, sp_slot: 0, sp_type: Sled, serial_number: serial0, part_number: 913-0000019
 INFO skipping board for MGS-driven update (found issues), serial_number: serial0, part_number: 913-0000019
 INFO configuring MGS-driven update, artifact_version: 1.0.0, artifact_hash: 68465b8e3f808f475510b525cfd62086d37ddd57688bd854184fdafb2b2198a4, expected_inactive_version: NoValidVersion, expected_active_version: 0.0.1, component: sp, sp_slot: 1, sp_type: Sled, serial_number: serial1, part_number: 913-0000019
@@ -1872,12 +1899,15 @@ generated inventory collection 0b5efbb3-0b1b-4bbf-b7d8-a2d6fca074c6 from configu
 > blueprint-plan latest latest
 INFO performed noop zone image source checks on sled, sled_id: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c, num_total: 8, num_already_artifact: 8, num_eligible: 0, num_ineligible: 0
 INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c, slot: a, expected_hash: 0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a
+INFO measurement has its image source set to Artifact already, sled_id: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c
 INFO performed noop zone image source checks on sled, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, num_total: 8, num_already_artifact: 8, num_eligible: 0, num_ineligible: 0
 INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, slot: a, expected_hash: 0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a
 INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, slot: b, expected_hash: 0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b
+INFO measurement has its image source set to Artifact already, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6
 INFO performed noop zone image source checks on sled, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, num_total: 8, num_already_artifact: 8, num_eligible: 0, num_ineligible: 0
 INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, slot: a, expected_hash: 0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a
 INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, slot: b, expected_hash: 0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b
+INFO measurement has its image source set to Artifact already, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763
 INFO MGS-driven update completed (will remove it and re-evaluate board), artifact_version: 1.0.0, artifact_hash: 68465b8e3f808f475510b525cfd62086d37ddd57688bd854184fdafb2b2198a4, expected_inactive_version: NoValidVersion, expected_active_version: 0.0.1, component: sp, sp_slot: 1, sp_type: Sled, serial_number: serial1, part_number: 913-0000019
 INFO skipping board for MGS-driven update (no update necessary), serial_number: serial1, part_number: 913-0000019
 INFO skipping board for MGS-driven update (found issues), serial_number: serial0, part_number: 913-0000019
@@ -1904,10 +1934,10 @@ to:   blueprint a5a8f242-ffa5-473c-8efd-2acf2dc0b736
   sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c (active, config generation 4 -> 5):
 
     measurements:
-    ------------------------------
-    hash              version     
-    ------------------------------
-    install dataset   (no version)
+    --------------------------------------------------------------------------------
+    hash                                                               version      
+    --------------------------------------------------------------------------------
+    8a0e23157bae655fceec7376926c9758efee6511c7b7ff8355bbb49545a2257f   version 1.0.0
 
 
     host phase 2 contents:

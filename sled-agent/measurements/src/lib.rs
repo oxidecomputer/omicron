@@ -16,8 +16,8 @@ use iddqd::IdOrdMap;
 use sled_agent_config_reconciler::{ConfigReconcilerHandle, InventoryError};
 use sled_agent_resolvable_files::ZoneImageSourceResolver;
 use sled_agent_types::inventory::{
-    ConfigReconcilerInventoryResult, OmicronSledConfig,
-    SingleMeasurementInventory, OmicronSingleMeasurement,
+    ConfigReconcilerInventoryResult, OmicronSingleMeasurement,
+    OmicronSledConfig, SingleMeasurementInventory,
 };
 use sled_agent_types::resolvable_files::{
     ManifestHashError, MupdateOverrideReadError,
