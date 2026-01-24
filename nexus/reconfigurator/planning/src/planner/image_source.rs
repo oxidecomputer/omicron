@@ -2,14 +2,18 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use std::{collections::HashMap, fmt};
+use std::{
+    collections::{BTreeSet, HashMap},
+    fmt,
+};
 
 use anyhow::anyhow;
 use iddqd::{IdOrdItem, IdOrdMap, id_ord_map::RefMut, id_upcast};
 use nexus_types::{
     deployment::{
-        BlueprintArtifactVersion, BlueprintHostPhase2DesiredContents,
-        BlueprintHostPhase2DesiredSlots, BlueprintZoneConfig,
+        BlueprintArtifactMeasurements, BlueprintArtifactVersion,
+        BlueprintHostPhase2DesiredContents, BlueprintHostPhase2DesiredSlots,
+        BlueprintMeasurements, BlueprintSingleMeasurement, BlueprintZoneConfig,
         BlueprintZoneImageSource, PlanningInput, SledFilter,
         TargetReleaseDescription,
     },
@@ -93,6 +97,98 @@ impl NoopConvertInfo {
                 }
             };
 
+            let measurement_manifest = inv_sled
+                .file_source_resolver
+                .measurement_manifest
+                .boot_inventory
+                .as_ref();
+
+            let measurements = blueprint.current_sled_measurements(sled_id)?;
+
+            let measurements = NoopConvertMeasurements::new(
+                measurements,
+                measurement_manifest,
+                &artifacts_by_hash,
+            );
+
+            // Errors with measurements are treated differently than other
+            // parts of the sytem because in many cases we can attempt to
+            // hobble along but if measurements are incorrect we will not be
+            // able to do anything. This means being stricter about which
+            // errors are global sled ineligible vs just measurement ineligible
+            //
+            // NOTE: as of this commit missing measurements are technically
+            // not hard enforced but it's easier if we can establish
+            // the conditions we want in the future (and this comment should
+            // get updated later)
+            match measurements {
+                // A missing manifest when we are requiring it is a hard error
+                // is a hard error
+                NoopConvertMeasurements::Ineligible(
+                    NoopConvertMeasurementsIneligibleReason::ManifestRequiredAndMissing { message },
+                ) => {
+                    sleds
+                        .insert_unique(NoopConvertSledInfo {
+                            sled_id,
+                            status: NoopConvertSledStatus::Ineligible(
+                                NoopConvertSledIneligibleReason::ManifestError {
+                                    message,
+                                },
+                            ),
+                       })
+                        .expect("sled IDs are unique");
+                    continue;
+                }
+                // If we don't have any entries in the manifest that's the same as no
+                // manifest at all
+                NoopConvertMeasurements::Ineligible(
+                    NoopConvertMeasurementsIneligibleReason::ManifestEmpty,
+                ) => {
+                    sleds
+                        .insert_unique(NoopConvertSledInfo {
+                            sled_id,
+                            status: NoopConvertSledStatus::Ineligible(
+                                NoopConvertSledIneligibleReason::ManifestError {
+                                    message: "measurement manifest contained no entries".to_string(),
+                                },
+                            ),
+                       })
+                        .expect("sled IDs are unique");
+                    continue;
+                }
+                // If there's a known issue with an artifact we won't be able to boot
+                NoopConvertMeasurements::Ineligible(
+                    NoopConvertMeasurementsIneligibleReason::ArtifactError { hash, message },
+                ) => {
+                    sleds
+                        .insert_unique(NoopConvertSledInfo {
+                            sled_id,
+                            status: NoopConvertSledStatus::Ineligible(
+                                NoopConvertSledIneligibleReason::ManifestError {
+                                    message: format!("measurement artifact {hash} has error {message}"),
+                                },
+                            ),
+                       })
+                        .expect("sled IDs are unique");
+                    continue;
+                }
+                // A measurement not in the TUF repo will certainly block measurements from
+                // proceeding but it may be possible to still proceed with other noop conversions
+                // so no need to treat this as a global error
+                NoopConvertMeasurements::Ineligible(
+                    NoopConvertMeasurementsIneligibleReason::NotInTufRepo { .. },
+                ) => {}
+                // This is _not_ a hard error. This means the current blueprint state is
+                // `unknown` meaning we can't rely on the install dataset but can continue
+                // to update normally
+                NoopConvertMeasurements::Ineligible(
+                    NoopConvertMeasurementsIneligibleReason::FoundUnknown,
+                ) => {}
+                // Nothing to do here
+                NoopConvertMeasurements::AlreadyArtifact => {}
+                // The good case
+                NoopConvertMeasurements::Eligible(_) => {}
+            }
             // Out of these, which zones' hashes (as reported in the zone
             // manifest) match the corresponding ones in the TUF repo?
             let zones = blueprint
@@ -123,12 +219,14 @@ impl NoopConvertInfo {
                         mupdate_override_id,
                         zones,
                         host_phase_2: Box::new(host_phase_2),
+                        measurements,
                     },
                 )
             } else {
                 NoopConvertSledStatus::Eligible(NoopConvertSledEligible {
                     zones,
                     host_phase_2,
+                    measurements,
                 })
             };
 
@@ -276,6 +374,7 @@ impl NoopConvertSledStatus {
 pub(crate) struct NoopConvertSledEligible {
     pub(crate) zones: IdOrdMap<NoopConvertZoneInfo>,
     pub(crate) host_phase_2: NoopConvertHostPhase2Slots,
+    pub(crate) measurements: NoopConvertMeasurements,
 }
 
 impl NoopConvertSledEligible {
@@ -302,6 +401,7 @@ impl NoopConvertSledEligible {
         }
 
         self.host_phase_2.log_to(log);
+        self.measurements.log_to(log);
     }
 }
 
@@ -372,6 +472,9 @@ pub(crate) enum NoopConvertSledIneligibleReason {
         ///
         /// Stored for reasons similar to `zones` above.
         host_phase_2: Box<NoopConvertHostPhase2Slots>,
+
+        /// Information about measurements
+        measurements: NoopConvertMeasurements,
     },
 
     /// An error was obtained while retrieving mupdate override information.
@@ -766,4 +869,176 @@ pub(crate) enum NoopConvertHostPhase2IneligibleReason {
     /// An artifact matching the host phase 2 contents was not found in the TUF
     /// repository.
     NotInTufRepo { expected_hash: ArtifactHash },
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) enum NoopConvertMeasurements {
+    AlreadyArtifact,
+    Ineligible(NoopConvertMeasurementsIneligibleReason),
+    Eligible(BlueprintArtifactMeasurements),
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) enum NoopConvertMeasurementsIneligibleReason {
+    /// No measurement manifest was available when needed
+    ManifestRequiredAndMissing { message: String },
+    /// Measurement manifest contained no entries
+    ManifestEmpty,
+    /// An artifact matching one of the measurements was not found in
+    /// the TUF repository
+    NotInTufRepo { expected_hash: ArtifactHash },
+    /// Current measurement state is unknown, we can't rely on the
+    /// install dataset
+    FoundUnknown,
+    /// Error with the artifact in the manifest
+    ArtifactError { hash: ArtifactHash, message: String },
+}
+
+impl NoopConvertMeasurements {
+    fn new(
+        current: BlueprintMeasurements,
+        measurement_manifest: Result<&ManifestBootInventory, &String>,
+        artifacts_by_hash: &HashMap<ArtifactHash, &TufArtifactMeta>,
+    ) -> Self {
+        use NoopConvertMeasurementsIneligibleReason as IneligibleReason;
+
+        match current {
+            BlueprintMeasurements::InstallDataset => {
+                let mut artifacts = BTreeSet::new();
+                let measurement_manifest = match measurement_manifest {
+                    Ok(m) => m,
+                    Err(message) => {
+                        return Self::Ineligible(
+                            IneligibleReason::ManifestRequiredAndMissing {
+                                message: message.to_owned(),
+                            },
+                        );
+                    }
+                };
+                for artifact in &measurement_manifest.artifacts {
+                    if let Some(meta) =
+                        artifacts_by_hash.get(&artifact.expected_hash)
+                    {
+                        artifacts.insert(BlueprintSingleMeasurement {
+                            version: BlueprintArtifactVersion::Available {
+                                version: meta.id.version.clone(),
+                            },
+                            hash: meta.hash,
+                        });
+                    } else {
+                        return Self::Ineligible(
+                            IneligibleReason::NotInTufRepo {
+                                expected_hash: artifact.expected_hash,
+                            },
+                        );
+                    }
+
+                    if let Err(message) = &artifact.status {
+                        // The artifact is somehow invalid and corrupt.
+                        return Self::Ineligible(
+                            IneligibleReason::ArtifactError {
+                                hash: artifact.expected_hash,
+                                message: message.to_owned(),
+                            },
+                        );
+                    };
+                }
+                let artifacts =
+                    match BlueprintArtifactMeasurements::new(artifacts) {
+                        Some(m) => m,
+                        None => {
+                            return Self::Ineligible(
+                                IneligibleReason::ManifestEmpty,
+                            );
+                        }
+                    };
+                Self::Eligible(artifacts)
+            }
+            BlueprintMeasurements::Artifacts { .. } => Self::AlreadyArtifact,
+            BlueprintMeasurements::Unknown => {
+                Self::Ineligible(IneligibleReason::FoundUnknown)
+            }
+        }
+    }
+
+    pub(crate) fn is_already_artifact(&self) -> bool {
+        matches!(self, Self::AlreadyArtifact { .. })
+    }
+
+    pub(crate) fn is_eligible(&self) -> bool {
+        matches!(self, Self::Eligible(_))
+    }
+
+    fn log_to(&self, log: &slog::Logger) {
+        match self {
+            NoopConvertMeasurements::AlreadyArtifact => {
+                // Use debug to avoid spamming reconfigurator-cli output for
+                // this generally expected case.
+                debug!(
+                    log,
+                    "measurement has its image source set to Artifact already";
+                );
+            }
+            NoopConvertMeasurements::Eligible(new_measurement_source) => {
+                info!(
+                    log,
+                    "measurement is eligible for noop image source conversion";
+                    "new_measurement_source" => %new_measurement_source,
+                );
+            }
+            NoopConvertMeasurements::Ineligible(
+                NoopConvertMeasurementsIneligibleReason::ManifestEmpty,
+            ) => {
+                info!(
+                    log,
+                    "install dataset contained no entries in the measurement manifest";
+                );
+            }
+            NoopConvertMeasurements::Ineligible(
+                NoopConvertMeasurementsIneligibleReason::ManifestRequiredAndMissing { message },
+            ) => {
+                info!(
+                    log,
+                    "measurement manifest missing when required by install dataset";
+                    "error message" => %message
+                );
+            }
+            NoopConvertMeasurements::Ineligible(
+                NoopConvertMeasurementsIneligibleReason::FoundUnknown,
+            ) => {
+                info!(
+                    log,
+                    "current sled measurements are in an unknown state";
+                );
+            }
+            NoopConvertMeasurements::Ineligible(
+                NoopConvertMeasurementsIneligibleReason::ArtifactError { hash, message },
+            ) => {
+                info!(
+                    log,
+                    "error with an artifact in the measurement manifest";
+                    "hash" => %hash,
+                    "message" => %message,
+                );
+            }
+            NoopConvertMeasurements::Ineligible(
+                NoopConvertMeasurementsIneligibleReason::NotInTufRepo {
+                    expected_hash,
+                },
+            ) => {
+                // If a MUPdate happens, sleds should all be MUPdated to the
+                // same version, so the TUF repo is expected to contain all the
+                // hashes. The only time that isn't the case is right after a
+                // MUPdate when the TUF repo hasn't been uploaded yet. This
+                // isn't quite a warning or error case, so log this at the INFO
+                // level.
+                info!(
+                    log,
+                    "measurement install dataset artifact hash not found in TUF repo, \
+                     ignoring for noop checks";
+                    "expected_hash" => %expected_hash,
+                );
+            }
+        }
+    }
 }

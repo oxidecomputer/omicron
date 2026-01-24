@@ -1,0 +1,44 @@
+# Load an example system.
+load-example --nsleds 3 --ndisks-per-sled 1
+
+sled-list
+
+# Create a TUF repository from a fake manifest. (The output TUF repo is
+# written to a temporary directory that this invocation of `reconfigurator-cli`
+# is running out of as its working directory.)
+tuf-assemble ../../update-common/manifests/fake.toml
+
+# Load the target release from the first TUF repository.
+set target-release repo-1.0.0.zip
+
+# On 4 sleds, update the install dataset.
+# The blueprints should start with the measurements in an 'unknown' state
+sled-update-install-dataset serial0 --to-target-release
+sled-update-install-dataset serial1 --to-target-release
+sled-update-install-dataset serial2 --to-target-release
+
+# Generate an inventory and run a blueprint planning step.
+inventory-generate
+blueprint-plan latest latest
+
+# This diff should show all sleds with measurements as artifacts.
+# This represents a reconfigurator based update from a system with
+# no knowledge of measurements in blueprints.
+blueprint-diff latest
+
+# Next plan should show waiting on inventory to have the measurements
+inventory-generate
+blueprint-plan latest latest
+blueprint-diff latest
+
+# Actually set the inventory to have the measurements we expect
+sled-set serial0 omicron-config latest
+sled-set serial1 omicron-config latest
+sled-set serial2 omicron-config latest
+
+# Inventory should show a pending MGS update
+inventory-generate
+blueprint-plan latest latest
+blueprint-show latest
+
+

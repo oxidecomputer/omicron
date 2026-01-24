@@ -130,6 +130,17 @@ blueprint-diff latest
 sled-update-install-dataset serial1 --to-target-release
 inventory-generate
 
+# First get our new measurements
+blueprint-plan latest latest
+blueprint-show latest
+blueprint-diff latest
+
+# Need to make sure measurements are up-to-date
+sled-set serial0 omicron-config latest
+sled-set serial1 omicron-config latest
+sled-set serial2 omicron-config latest
+inventory-generate
+
 # This will attempt to update the RoT bootloader on the first sled.
 blueprint-plan latest latest
 blueprint-show latest
