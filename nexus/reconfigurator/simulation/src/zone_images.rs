@@ -26,6 +26,9 @@ pub struct SimTufRepoDescription {
     /// The description and manifest source, or a simulated error.
     pub source: Result<SimTufRepoSource, String>,
 
+    /// A simulated error for just the measurement manifest
+    pub measurement_error: Option<String>,
+
     /// A message describing the operation.
     pub message: String,
 }
@@ -34,13 +37,27 @@ impl SimTufRepoDescription {
     /// Creates a new `SimTufRepoDescription`.
     pub fn new(source: SimTufRepoSource) -> Self {
         let message = source.full_message();
-        Self { source: Ok(source), message }
+        Self { source: Ok(source), measurement_error: None, message }
+    }
+
+    /// Creates a new `SimTufRepoDescription` with a simulated error with
+    /// the measurement manifest but a valid zone manifest
+    pub fn new_measurement_error(
+        source: SimTufRepoSource,
+        measurement_error: String,
+    ) -> Self {
+        let message = source.full_message();
+        Self {
+            source: Ok(source),
+            measurement_error: Some(measurement_error),
+            message,
+        }
     }
 
     /// Creates a new description with a simulated error reading the zone
     /// manifest.
     pub fn new_error(message: String) -> Self {
-        Self { source: Err(message.clone()), message }
+        Self { source: Err(message.clone()), measurement_error: None, message }
     }
 
     /// Generates a simulated [`ManifestBootInventory`] for zones or an error.
@@ -60,7 +77,12 @@ impl SimTufRepoDescription {
         &self,
     ) -> Result<ManifestBootInventory, String> {
         match &self.source {
-            Ok(source) => Ok(source.to_measurement_boot_inventory()),
+            Ok(source) => match &self.measurement_error {
+                None => Ok(source.to_measurement_boot_inventory()),
+                Some(error) => Err(format!(
+                    "reconfigurator-sim simulated measurement error: {error}"
+                )),
+            },
             Err(error) => {
                 Err(format!("reconfigurator-sim simulated error: {error}"))
             }

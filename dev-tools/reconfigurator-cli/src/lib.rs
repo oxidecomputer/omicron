@@ -34,6 +34,7 @@ use nexus_reconfigurator_simulation::{
 };
 use nexus_reconfigurator_simulation::{SimStateBuilder, SimTufRepoSource};
 use nexus_reconfigurator_simulation::{SimTufRepoDescription, Simulator};
+use nexus_types::deployment::BlueprintMeasurements;
 use nexus_types::deployment::ExpectedVersion;
 use nexus_types::deployment::execution::blueprint_external_dns_config;
 use nexus_types::deployment::execution::blueprint_internal_dns_config;
@@ -720,8 +721,12 @@ struct SledMupdateSource {
     mupdate_id: Option<MupdateUuid>,
 
     /// simulate an error reading the zone manifest
-    #[clap(long, conflicts_with = "sled-mupdate-valid-source")]
+    #[clap(long, conflicts_with_all = ["sled-mupdate-valid-source", "with_measurement_manifest_error"])]
     with_manifest_error: bool,
+
+    /// simulate an error reading the measurement manifest
+    #[clap(long, conflicts_with = "with_manifest_error")]
+    with_measurement_manifest_error: bool,
 
     /// simulate an error validating zones by this artifact ID name
     ///
@@ -732,6 +737,13 @@ struct SledMupdateSource {
         requires = "sled-mupdate-valid-source"
     )]
     with_zone_error: Vec<String>,
+    /// simulator a measurement corpus error
+    #[clap(
+        long,
+        value_name = "ARTIFACT_ID_NAME",
+        requires = "sled-mupdate-valid-source"
+    )]
+    with_corpus_error: Vec<String>,
 }
 
 #[derive(Debug, Args)]
@@ -1014,6 +1026,12 @@ enum BlueprintEditCommands {
     /// This initiates a handoff from the current generation of Nexus zones to
     /// the next generation of Nexus zones.
     BumpNexusGeneration,
+    /// Set a sleds measurements to the `unknown` state indicating we can't
+    /// rely on the install dataset
+    SetSledMeasurementsUnknown {
+        /// sled to set the field on
+        sled_id: SledOpt,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -2726,6 +2744,15 @@ fn cmd_blueprint_edit(
             builder.pending_mgs_update_delete(baseboard_id);
             format!("deleted configured update for serial {serial}")
         }
+        BlueprintEditCommands::SetSledMeasurementsUnknown { sled_id } => {
+            let sled_id = sled_id.to_sled_id(system.description())?;
+            builder.sled_set_measurements(
+                sled_id,
+                BlueprintMeasurements::Unknown,
+            )?;
+            format!("set sled measurements to 'unknown' {}", sled_id)
+        }
+
         BlueprintEditCommands::Debug {
             command: BlueprintEditDebugCommands::RemoveSled { sled },
         } => {
@@ -3475,7 +3502,14 @@ fn mupdate_source_to_description(
             format!("from repo at {repo_path}"),
         )?;
         sim_source.simulate_zone_errors(&source.with_zone_error)?;
-        Ok(SimTufRepoDescription::new(sim_source))
+        if source.with_measurement_manifest_error {
+            Ok(SimTufRepoDescription::new_measurement_error(
+                sim_source,
+                "simulated error with measurement manifest".to_owned(),
+            ))
+        } else {
+            Ok(SimTufRepoDescription::new(sim_source))
+        }
     } else if source.valid.to_target_release {
         let description = sim
             .current_state()
@@ -3498,7 +3532,14 @@ fn mupdate_source_to_description(
                     "to target release".to_owned(),
                 )?;
                 sim_source.simulate_zone_errors(&source.with_zone_error)?;
-                Ok(SimTufRepoDescription::new(sim_source))
+                if source.with_measurement_manifest_error {
+                    Ok(SimTufRepoDescription::new_measurement_error(
+                        sim_source,
+                        "simulated error with measurement manifest".to_owned(),
+                    ))
+                } else {
+                    Ok(SimTufRepoDescription::new(sim_source))
+                }
             }
         }
     } else if source.with_manifest_error {

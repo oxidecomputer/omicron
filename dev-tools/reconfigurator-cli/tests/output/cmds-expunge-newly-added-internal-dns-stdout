@@ -808,6 +808,8 @@ planning report:
 * discretionary zones placed:
   * internal_dns zone on sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c from source install dataset
 * zone updates waiting on discretionary zones
+Measurement updates:
+Blocked on add/updates
 
 
 

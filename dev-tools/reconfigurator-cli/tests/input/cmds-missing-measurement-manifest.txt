@@ -1,0 +1,29 @@
+# Load an example system.
+load-example --nsleds 4 --ndisks-per-sled 1
+
+sled-list
+
+# Create a TUF repository from a fake manifest. (The output TUF repo is
+# written to a temporary directory that this invocation of `reconfigurator-cli`
+# is running out of as its working directory.)
+tuf-assemble ../../update-common/manifests/fake.toml
+# Create a second TUF repository from a different fake manifest.
+tuf-assemble ../../update-common/manifests/fake-non-semver.toml --allow-non-semver
+
+# Load the target release from the first TUF repository.
+set target-release repo-1.0.0.zip
+
+# On 3 sleds, update the install dataset.
+sled-update-install-dataset serial0 --to-target-release
+sled-update-install-dataset serial1 --to-target-release
+sled-update-install-dataset serial2 --to-target-release
+
+# On a fourth sled, simulate an error with the measurement manifest 
+sled-update-install-dataset serial3 --to-target-release --with-measurement-manifest-error
+
+# Generate an inventory and run a blueprint planning step.
+inventory-generate
+blueprint-plan latest latest
+
+# This diff should show expected changes to the blueprint.
+blueprint-diff latest
