@@ -2257,114 +2257,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
             .await
     }
 
-    async fn v2025121200_multicast_group_view(
-        rqctx: RequestContext<ApiContext>,
-        path_params: Path<v2025121200::MulticastGroupPath>,
-    ) -> Result<HttpResponseOk<v2025121200::MulticastGroup>, HttpError> {
-        // Cannot delegate inline: path types differ (NameOrId vs MulticastGroupIdentifier)
-        // and can't construct Path<T> (Dropshot extractor with private fields).
-        let apictx = rqctx.context();
-        let handler = async {
-            let path = path_params.into_inner();
-            let opctx =
-                crate::context::op_context_for_external_api(&rqctx).await?;
-            let group_selector = params::MulticastGroupSelector {
-                multicast_group: path.multicast_group.into(),
-            };
-            let group = apictx
-                .context
-                .nexus
-                .multicast_group_view(&opctx, &group_selector)
-                .await?;
-            Ok(HttpResponseOk(group.into()))
-        };
-        apictx
-            .context
-            .external_latencies
-            .instrument_dropshot_handler(&rqctx, handler)
-            .await
-    }
-
-    async fn v2025121200_lookup_multicast_group_by_ip(
-        rqctx: RequestContext<ApiContext>,
-        path_params: Path<v2025121200::MulticastGroupByIpPath>,
-    ) -> Result<HttpResponseOk<v2025121200::MulticastGroup>, HttpError> {
-        // Cannot delegate inline: need to transform IP → MulticastGroupIdentifier
-        // and can't construct Path<T> (Dropshot extractor with private fields).
-        let apictx = rqctx.context();
-        let handler = async {
-            let path = path_params.into_inner();
-            let opctx =
-                crate::context::op_context_for_external_api(&rqctx).await?;
-            let group_selector = params::MulticastGroupSelector {
-                multicast_group: path.address.into(),
-            };
-            let group = apictx
-                .context
-                .nexus
-                .multicast_group_view(&opctx, &group_selector)
-                .await?;
-            Ok(HttpResponseOk(group.into()))
-        };
-        apictx
-            .context
-            .external_latencies
-            .instrument_dropshot_handler(&rqctx, handler)
-            .await
-    }
-
     // Multicast Group Member Management
-
-    async fn v2025121200_multicast_group_member_list(
-        rqctx: RequestContext<ApiContext>,
-        path_params: Path<v2025121200::MulticastGroupPath>,
-        query_params: Query<PaginatedById>,
-    ) -> Result<
-        HttpResponseOk<ResultsPage<v2025121200::MulticastGroupMember>>,
-        HttpError,
-    > {
-        // Cannot delegate inline: path types differ (NameOrId vs MulticastGroupIdentifier)
-        // and can't construct Path<T> (Dropshot extractor with private fields).
-        let apictx = rqctx.context();
-        let handler = async {
-            let path = path_params.into_inner();
-            let query = query_params.into_inner();
-            let opctx =
-                crate::context::op_context_for_external_api(&rqctx).await?;
-            let pag_params = data_page_params_for(&rqctx, &query)?;
-            let group_selector = params::MulticastGroupSelector {
-                multicast_group: path.multicast_group.into(),
-            };
-            let group_lookup = apictx
-                .context
-                .nexus
-                .multicast_group_lookup(&opctx, &group_selector)
-                .await?;
-            let members = apictx
-                .context
-                .nexus
-                .multicast_group_members_list(
-                    &opctx,
-                    &group_lookup,
-                    &pag_params,
-                )
-                .await?;
-            let results = members
-                .into_iter()
-                .map(views::MulticastGroupMember::try_from)
-                .collect::<Result<Vec<_>, _>>()?;
-            Ok(HttpResponseOk(ScanById::results_page(
-                &query,
-                results.into_iter().map(Into::into).collect(),
-                &|_, member: &v2025121200::MulticastGroupMember| member.id,
-            )?))
-        };
-        apictx
-            .context
-            .external_latencies
-            .instrument_dropshot_handler(&rqctx, handler)
-            .await
-    }
 
     async fn multicast_group_member_list(
         rqctx: RequestContext<ApiContext>,
@@ -5104,57 +4997,6 @@ impl NexusExternalApi for NexusExternalApiImpl {
         .await
     }
 
-    async fn v2025121200_instance_multicast_group_leave(
-        rqctx: RequestContext<ApiContext>,
-        path_params: Path<v2025121200::InstanceMulticastGroupPath>,
-        query_params: Query<params::OptionalProjectSelector>,
-    ) -> Result<HttpResponseDeleted, HttpError> {
-        // Cannot delegate inline: path types differ (NameOrId vs MulticastGroupIdentifier)
-        // and can't construct Path<T> (Dropshot extractor with private fields).
-        let apictx = rqctx.context();
-        let handler = async {
-            let path: params::InstanceMulticastGroupPath =
-                path_params.into_inner().into();
-            let query = query_params.into_inner();
-            let opctx =
-                crate::context::op_context_for_external_api(&rqctx).await?;
-            let instance_selector = params::InstanceSelector {
-                project: match &path.instance {
-                    NameOrId::Name(_) => query.project.clone(),
-                    NameOrId::Id(_) => None,
-                },
-                instance: path.instance.clone(),
-            };
-            let instance_lookup = apictx
-                .context
-                .nexus
-                .instance_lookup(&opctx, instance_selector)?;
-            let group_selector = params::MulticastGroupSelector {
-                multicast_group: path.multicast_group,
-            };
-            let group_lookup = apictx
-                .context
-                .nexus
-                .multicast_group_lookup(&opctx, &group_selector)
-                .await?;
-            apictx
-                .context
-                .nexus
-                .instance_leave_multicast_group(
-                    &opctx,
-                    &group_lookup,
-                    &instance_lookup,
-                )
-                .await?;
-            Ok(HttpResponseDeleted())
-        };
-        apictx
-            .context
-            .external_latencies
-            .instrument_dropshot_handler(&rqctx, handler)
-            .await
-    }
-
     async fn instance_multicast_group_leave(
         rqctx: RequestContext<ApiContext>,
         path_params: Path<params::InstanceMulticastGroupPath>,
@@ -5189,6 +5031,9 @@ impl NexusExternalApi for NexusExternalApiImpl {
         .await
     }
 
+    // Cannot delegate to lib.rs: old API version has no body parameter, but the
+    // new `instance_multicast_group_join` requires `TypedBody<InstanceMulticastGroupJoin>`.
+    // TypedBody has no public constructor, so we can't create a default body for delegation.
     async fn v2025121200_instance_multicast_group_join(
         rqctx: RequestContext<ApiContext>,
         path_params: Path<v2025121200::InstanceMulticastGroupPath>,
