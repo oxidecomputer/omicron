@@ -6,6 +6,14 @@
 
 use crate::{ExecutionError, PFEXEC, execute_async};
 use camino::{Utf8Path, Utf8PathBuf};
+use chrono::DateTime;
+use chrono::Utc;
+use schemars::JsonSchema;
+use serde::Deserialize;
+use serde::Serialize;
+use slog::Logger;
+use slog::error;
+use slog::info;
 use std::str::FromStr;
 use tokio::process::Command;
 
@@ -60,7 +68,10 @@ pub struct GetInfoError {
     err: Error,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(
+    Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema,
+)]
+#[serde(rename_all = "snake_case")]
 pub enum ZpoolHealth {
     /// The device is online and functioning.
     Online,
@@ -198,6 +209,95 @@ pub struct PathInPool {
     pub path: Utf8PathBuf,
 }
 
+/// Associates a zpool with the health state it is in.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub struct ZpoolState {
+    pub zpool: String,
+    pub state: ZpoolHealth,
+}
+
+/// Lists unhealthy zpools, parsing errors if any, and the time the health check
+/// for zpools ran.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub struct UnhealthyZpoolsResult {
+    pub zpools: Vec<ZpoolState>,
+    pub errors: Vec<String>,
+    pub time_of_status: DateTime<Utc>,
+}
+
+impl UnhealthyZpoolsResult {
+    pub fn new() -> Self {
+        Self { zpools: vec![], errors: vec![], time_of_status: Utc::now() }
+    }
+
+    #[cfg_attr(not(target_os = "illumos"), allow(dead_code))]
+    fn parse(log: &Logger, data: &[u8]) -> Self {
+        let mut zpools = vec![];
+        let mut errors = vec![];
+        if data.is_empty() {
+            return Self { zpools, errors, time_of_status: Utc::now() };
+        }
+
+        // Example of the response from running `zpool list -Hpo health,name`
+        //
+        // FAULTED fakepool1
+        // FAULTED fakepool2
+        // ONLINE  rpool
+        let s = String::from_utf8_lossy(data);
+        let lines = s.trim().lines();
+
+        for line in lines {
+            let line = line.trim();
+            let mut pool = line.split_whitespace();
+
+            if let Some(state_str) = pool.next() {
+                // Only attempt to parse a zpool that is in a non-functional
+                // state.
+                match ZpoolHealth::from_str(state_str) {
+                    Ok(state) => match state {
+                        ZpoolHealth::Faulted
+                        | ZpoolHealth::Degraded
+                        | ZpoolHealth::Offline
+                        | ZpoolHealth::Removed
+                        | ZpoolHealth::Unavailable => {
+                            if let Some(name) = pool.next() {
+                                zpools.push(ZpoolState {
+                                    zpool: name.to_string(),
+                                    state,
+                                });
+                            } else {
+                                errors.push(format!(
+                                    "Unexpected output line: {line}"
+                                ));
+                                error!(
+                                    log,
+                                    "unable to parse; output line missing zpool name";
+                                    "line" => line,
+                                );
+                                continue;
+                            }
+                        }
+                        // Pool is in a healthy state, skip it.
+                        ZpoolHealth::Online => {}
+                    },
+                    Err(e) => {
+                        errors.push(format!("{e}"));
+                        info!(
+                            log,
+                            "output from 'zpool list' contains a zpool with \
+                            an unknown state: {state_str}",
+                        );
+                    }
+                }
+            }
+        }
+
+        Self { zpools, errors, time_of_status: Utc::now() }
+    }
+}
+
 /// Wraps commands for interacting with ZFS pools.
 pub struct Zpool(());
 
@@ -330,11 +430,148 @@ impl Zpool {
         })?;
         Ok(zpool)
     }
+
+    /// Lists zpools that are in a unhealthy non-functional state. Specifically
+    /// if they are in the following states:
+    ///
+    ///  - Faulted
+    ///  - Offline
+    ///  - Removed
+    ///  - Unavailable
+    #[cfg(target_os = "illumos")]
+    pub async fn status_unhealthy(
+        log: &Logger,
+    ) -> Result<UnhealthyZpoolsResult, ExecutionError> {
+        let mut command = Command::new(ZPOOL);
+        let cmd = command.args(&["list", "-Hpo", "health,name"]);
+        info!(log, "Retrieving information from zpools");
+        let output = execute_async(cmd).await?;
+        let zpool_result = UnhealthyZpoolsResult::parse(&log, &output.stdout);
+        info!(log, "Successfully retrieved unhealthy zpools");
+        Ok(zpool_result)
+    }
+
+    #[cfg(not(target_os = "illumos"))]
+    pub async fn status_unhealthy(
+        log: &Logger,
+    ) -> Result<UnhealthyZpoolsResult, ExecutionError> {
+        info!(log, "OS not illumos, will not retrieve zpool information");
+        let zpool_result = UnhealthyZpoolsResult::new();
+        Ok(zpool_result)
+    }
 }
 
 #[cfg(test)]
 mod test {
     use super::*;
+    use slog::Drain;
+    use slog::o;
+    use slog_term::FullFormat;
+    use slog_term::PlainDecorator;
+    use slog_term::TestStdoutWriter;
+
+    fn log() -> slog::Logger {
+        let decorator = PlainDecorator::new(TestStdoutWriter);
+        let drain = FullFormat::new(decorator).build().fuse();
+        let drain = slog_async::Async::new(drain).build().fuse();
+        slog::Logger::root(drain, o!())
+    }
+
+    #[test]
+    fn test_unhealthy_zpool_parse_success() {
+        let output = r#"FAULTED fakepool1
+UNAVAIL fakepool2
+ONLINE  rpool
+"#;
+
+        let log = log();
+        let result = UnhealthyZpoolsResult::parse(&log, output.as_bytes());
+
+        // We want to make sure we only have two unhealthy pools
+        assert_eq!(
+            result.zpools,
+            vec![
+                ZpoolState {
+                    zpool: "fakepool1".to_string(),
+                    state: ZpoolHealth::Faulted,
+                },
+                ZpoolState {
+                    zpool: "fakepool2".to_string(),
+                    state: ZpoolHealth::Unavailable,
+                },
+            ]
+        );
+        assert_eq!(result.errors.len(), 0);
+    }
+
+    #[test]
+    fn test_unhealthy_zpool_parse_none_success() {
+        let output = r#"ONLINE fakepool1
+ONLINE   fakepool2
+ONLINE   rpool
+"#;
+
+        let log = log();
+        let result = UnhealthyZpoolsResult::parse(&log, output.as_bytes());
+
+        // We want to make sure we only have zero unhealthy pools
+        assert_eq!(result.zpools.len(), 0);
+        assert_eq!(result.errors.len(), 0);
+    }
+
+    #[test]
+    fn test_unhealthy_zpool_empty_success() {
+        let output = r#""#;
+
+        let log = log();
+        let result = UnhealthyZpoolsResult::parse(&log, output.as_bytes());
+
+        // We want to make sure we have zero unhealthy pools
+        assert_eq!(result.zpools.len(), 0);
+        assert_eq!(result.errors.len(), 0);
+    }
+
+    #[test]
+    fn test_unhealthy_zpool_parse_unknown_status_fail() {
+        let output = r#"BARNACLES! fakepool1
+FAULTED fakepool2
+ONLINE  rpool
+"#;
+
+        let log = log();
+        let result = UnhealthyZpoolsResult::parse(&log, output.as_bytes());
+
+        assert_eq!(
+            result.zpools,
+            vec![ZpoolState {
+                zpool: "fakepool2".to_string(),
+                state: ZpoolHealth::Faulted,
+            },]
+        );
+        assert_eq!(
+            result.errors,
+            vec![
+                "Failed to parse output: Unrecognized zpool 'health': BARNACLES!"
+                .to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn test_unhealthy_zpool_parse_zpool_fail() {
+        let output = r#"FAULTED
+ONLINE  rpool
+"#;
+
+        let log = log();
+        let result = UnhealthyZpoolsResult::parse(&log, output.as_bytes());
+
+        assert_eq!(result.zpools.len(), 0);
+        assert_eq!(
+            result.errors,
+            vec!["Unexpected output line: FAULTED".to_string(),],
+        );
+    }
 
     #[test]
     fn test_parse_zpool() {
