@@ -29,7 +29,7 @@ use nexus_db_queries::context::OpContext;
 use nexus_test_utils::http_testing::{AuthnMode, NexusRequest, RequestBuilder};
 use nexus_test_utils::resource_helpers::{
     create_default_ip_pools, create_instance, create_project, object_create,
-    object_delete, object_get,
+    object_delete, object_get, object_put_upsert,
 };
 use nexus_test_utils_macros::nexus_test;
 use nexus_types::external_api::params::{
@@ -1575,7 +1575,7 @@ async fn test_source_ips_preserved_on_instance_restart(
     };
 
     let member_before: MulticastGroupMember =
-        put_upsert(client, &join_url, &join_body).await;
+        object_put_upsert(client, &join_url, &join_body).await;
 
     // Verify source_ips are set
     assert_eq!(
@@ -1745,7 +1745,7 @@ async fn test_source_ips_preserved_on_instance_reconfigure(
     };
 
     let member_before: MulticastGroupMember =
-        put_upsert(client, &join_url, &join_body).await;
+        object_put_upsert(client, &join_url, &join_body).await;
 
     // Verify source_ips are set
     let ssm_group_name = format!("mcast-{}", ssm_ip.replace('.', "-"));
@@ -2186,9 +2186,12 @@ async fn test_member_state_transitions_on_reactivation(
     let join_url = format!(
         "/v1/instances/{instance_name}/multicast-groups/{multicast_ip}?project={project_name}"
     );
-    let member: MulticastGroupMember =
-        put_upsert(client, &join_url, &InstanceMulticastGroupJoin::default())
-            .await;
+    let member: MulticastGroupMember = object_put_upsert(
+        client,
+        &join_url,
+        &InstanceMulticastGroupJoin::default(),
+    )
+    .await;
 
     // Case: Stopped instance -> member in "Left" state
     wait_for_member_state(
@@ -2386,7 +2389,7 @@ async fn test_multicast_ipv6_lifecycle(cptestctx: &ControlPlaneTestContext) {
         "/v1/instances/{}/multicast-groups/{group_name}?project={project_name}",
         instance.identity.id
     );
-    let member: MulticastGroupMember = put_upsert(
+    let member: MulticastGroupMember = object_put_upsert(
         client,
         &join_url,
         &nexus_types::external_api::params::InstanceMulticastGroupJoin {
