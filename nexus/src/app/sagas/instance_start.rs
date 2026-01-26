@@ -20,6 +20,7 @@ use crate::app::sagas::declare_saga_actions;
 use chrono::Utc;
 use nexus_db_lookup::LookupPath;
 use nexus_db_queries::db::datastore::Disk;
+use nexus_db_queries::db::datastore::LocalStorageAllocation;
 use nexus_db_queries::db::datastore::LocalStorageDisk;
 use nexus_db_queries::db::identity::Resource;
 use nexus_db_queries::{authn, authz, db};
@@ -623,26 +624,27 @@ async fn sis_ensure_local_storage(
         disk,
         disk_type_local_storage: _,
         local_storage_dataset_allocation,
-        local_storage_unencrypted_dataset_allocation,
     } = &local_storage_records[which];
 
     // Make sure this was a complete allocation.
 
-    if local_storage_dataset_allocation.is_some() {
-        // No longer supporting creating encrypted zvols for local storage, but
-        // this field has been left in pending an investigation of how we're
-        // going to support encryption at rest.
-        return Err(ActionError::action_failed(format!(
-            "local storage record {which} has a encrypted allocation!",
-        )));
-    }
-
-    let Some(local_storage_unencrypted_dataset_allocation) =
-        local_storage_unencrypted_dataset_allocation
-    else {
+    let Some(allocation) = local_storage_dataset_allocation else {
         return Err(ActionError::action_failed(format!(
             "local storage record {which} has a None unencrypted allocation!",
         )));
+    };
+
+    let local_storage_unencrypted_dataset_allocation = match allocation {
+        LocalStorageAllocation::Unencrypted(allocation) => allocation,
+
+        LocalStorageAllocation::Encrypted(_) => {
+            // This enum variant has been left in pending an investigation of
+            // how we're going to support encryption at rest, but right now we
+            // don't support this yet.
+            return Err(ActionError::action_failed(format!(
+                "local storage record {which} has a encrypted allocation!",
+            )));
+        }
     };
 
     // All local storage volumes will be created with 4k blocks. Double check

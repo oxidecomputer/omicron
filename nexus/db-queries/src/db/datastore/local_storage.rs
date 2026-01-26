@@ -10,6 +10,8 @@ use crate::context::OpContext;
 use crate::db::collection_insert::AsyncInsertError;
 use crate::db::collection_insert::DatastoreCollection;
 use crate::db::datastore::DbConnection;
+use crate::db::datastore::LocalStorageAllocation;
+use crate::db::datastore::LocalStorageDisk;
 use crate::db::datastore::SQL_BATCH_SIZE;
 use crate::db::model::LocalStorageDatasetAllocation;
 use crate::db::model::LocalStorageUnencryptedDatasetAllocation;
@@ -278,47 +280,18 @@ impl DataStore {
         Ok(())
     }
 
-    pub(super) async fn delete_local_storage_dataset_allocations_in_txn(
-        conn: &async_bb8_diesel::Connection<DbConnection>,
-        local_storage_dataset_allocation_id: Option<DatasetUuid>,
-        local_storage_unencrypted_dataset_allocation_id: Option<DatasetUuid>,
-    ) -> Result<(), diesel::result::Error> {
-        if let Some(local_storage_dataset_allocation_id) =
-            local_storage_dataset_allocation_id
-        {
-            Self::delete_local_storage_dataset_allocation_in_txn(
-                conn,
-                local_storage_dataset_allocation_id,
-            )
-            .await?;
-        }
-
-        if let Some(local_storage_unencrypted_dataset_allocation_id) =
-            local_storage_unencrypted_dataset_allocation_id
-        {
-            Self::delete_local_storage_unencrypted_dataset_allocation_in_txn(
-                conn,
-                local_storage_unencrypted_dataset_allocation_id,
-            )
-            .await?;
-        }
-
-        Ok(())
-    }
-
     /// Mark the local storage dataset allocations as deleted, and re-compute
     /// the appropriate dataset size_used columns.
     pub async fn delete_local_storage_dataset_allocations(
         &self,
         opctx: &OpContext,
-        local_storage_dataset_allocation_id: Option<DatasetUuid>,
-        local_storage_unencrypted_dataset_allocation_id: Option<DatasetUuid>,
+        local_storage_disk: &LocalStorageDisk,
     ) -> Result<(), Error> {
-        if local_storage_dataset_allocation_id.is_none()
-            && local_storage_unencrypted_dataset_allocation_id.is_none()
-        {
+        let Some(local_storage_dataset_allocation) =
+            &local_storage_disk.local_storage_dataset_allocation
+        else {
             return Ok(());
-        }
+        };
 
         let conn = self.pool_connection_authorized(opctx).await?;
 
@@ -326,12 +299,23 @@ impl DataStore {
             "delete_local_storage_dataset_allocations",
         )
         .transaction(&conn, |conn| async move {
-            Self::delete_local_storage_dataset_allocations_in_txn(
-                &conn,
-                local_storage_dataset_allocation_id,
-                local_storage_unencrypted_dataset_allocation_id,
-            )
-            .await
+            match local_storage_dataset_allocation {
+                LocalStorageAllocation::Unencrypted(allocation) => {
+                    Self::delete_local_storage_unencrypted_dataset_allocation_in_txn(
+                        &conn,
+                        allocation.local_storage_unencrypted_dataset_id(),
+                    )
+                    .await
+                }
+
+                LocalStorageAllocation::Encrypted(allocation) => {
+                    Self::delete_local_storage_dataset_allocation_in_txn(
+                        &conn,
+                        allocation.local_storage_dataset_id(),
+                    )
+                    .await
+                }
+            }
         })
         .await
         .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;

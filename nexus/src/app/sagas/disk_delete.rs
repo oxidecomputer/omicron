@@ -219,20 +219,25 @@ async fn sdd_delete_local_storage(
         );
     };
 
-    // If all disks backed by local storage have not been deleted before the PR
-    // to change to using the unencrypted dataset, bail out here, as this will
-    // require manual deletion.
-
-    if disk.local_storage_dataset_allocation.is_some() {
-        return Err(ActionError::action_failed(format!(
-            "disk {disk_id} is backed by the encrypted local storage dataset",
-        )));
-    }
-
-    let Some(allocation) = disk.local_storage_unencrypted_dataset_allocation
-    else {
+    let Some(allocation) = disk.local_storage_dataset_allocation else {
         // Nothing to do!
         return Ok(());
+    };
+
+    let allocation = match allocation {
+        datastore::LocalStorageAllocation::Unencrypted(allocation) => {
+            allocation
+        }
+
+        datastore::LocalStorageAllocation::Encrypted(_) => {
+            // If all disks backed by local storage have not been deleted before
+            // the PR to change to using the unencrypted dataset, bail out here,
+            // as this will require manual deletion.
+            return Err(ActionError::action_failed(format!(
+                "disk {disk_id} is backed by the encrypted local storage \
+                dataset",
+            )));
+        }
     };
 
     let dataset_id = allocation.id();
@@ -295,13 +300,7 @@ async fn sdd_deallocate_local_storage(
 
     osagactx
         .datastore()
-        .delete_local_storage_dataset_allocations(
-            &opctx,
-            disk.local_storage_dataset_allocation
-                .map(|allocation| allocation.id()),
-            disk.local_storage_unencrypted_dataset_allocation
-                .map(|allocation| allocation.id()),
-        )
+        .delete_local_storage_dataset_allocations(&opctx, &disk)
         .await
         .map_err(ActionError::action_failed)?;
 

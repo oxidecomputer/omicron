@@ -57,7 +57,9 @@ use omicron_common::api::external::ResourceType;
 use omicron_common::api::external::UpdateResult;
 use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::zpool_name::ZpoolName;
+use omicron_uuid_kinds::ExternalZpoolUuid;
 use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::VolumeUuid;
 use ref_cast::RefCast;
 use serde::Deserialize;
@@ -170,21 +172,51 @@ impl CrucibleDisk {
     }
 }
 
+/// A Disk backed by local storage can have an allocation in either the
+/// associated unencrypted or encrypted dataset.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum LocalStorageAllocation {
+    /// A portion of a `DatasetKind::LocalStorageUnencrypted` dataset has been
+    /// allocated for a Disk backed by local storage.
+    Unencrypted(LocalStorageUnencryptedDatasetAllocation),
+
+    /// A portion of a `DatasetKind::LocalStorage` dataset has been allocated
+    /// for a Disk backed by local storage.
+    Encrypted(LocalStorageDatasetAllocation),
+}
+
+impl LocalStorageAllocation {
+    pub fn sled_id(&self) -> SledUuid {
+        match &self {
+            LocalStorageAllocation::Unencrypted(allocation) => {
+                allocation.sled_id()
+            }
+
+            LocalStorageAllocation::Encrypted(allocation) => {
+                allocation.sled_id()
+            }
+        }
+    }
+
+    pub fn pool_id(&self) -> ExternalZpoolUuid {
+        match &self {
+            LocalStorageAllocation::Unencrypted(allocation) => {
+                allocation.pool_id()
+            }
+
+            LocalStorageAllocation::Encrypted(allocation) => {
+                allocation.pool_id()
+            }
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LocalStorageDisk {
     pub disk: model::Disk,
     pub disk_type_local_storage: DiskTypeLocalStorage,
 
-    /// If there is an allocation in the encrypted local storage dataset, this
-    /// will be Some. There should only be one allocation type per
-    /// LocalStorageDisk.
-    pub local_storage_dataset_allocation: Option<LocalStorageDatasetAllocation>,
-
-    /// If there is an allocation in the unencrypted local storage dataset, this
-    /// will be Some. There should only be one allocation type per
-    /// LocalStorageDisk.
-    pub local_storage_unencrypted_dataset_allocation:
-        Option<LocalStorageUnencryptedDatasetAllocation>,
+    pub local_storage_dataset_allocation: Option<LocalStorageAllocation>,
 }
 
 impl LocalStorageDisk {
@@ -197,7 +229,6 @@ impl LocalStorageDisk {
             disk,
             disk_type_local_storage,
             local_storage_dataset_allocation: None,
-            local_storage_unencrypted_dataset_allocation: None,
         }
     }
 
@@ -243,37 +274,15 @@ impl LocalStorageDisk {
 
     /// Return the full path to the local storage zvol's device
     pub fn zvol_path(&self) -> Result<String, Error> {
-        match (
-            &self.local_storage_dataset_allocation,
-            &self.local_storage_unencrypted_dataset_allocation,
-        ) {
-            (Some(_), Some(_)) => {
-                return Err(Error::internal_error(&format!(
-                    "LocalStorageDisk {} has multiple allocations!",
-                    self.id(),
-                )));
-            }
+        let Some(allocation) = &self.local_storage_dataset_allocation else {
+            return Err(Error::internal_error(&format!(
+                "LocalStorageDisk {} not allocated!",
+                self.id(),
+            )));
+        };
 
-            (Some(encrypted_allocation), None) => {
-                let pool_id = encrypted_allocation.pool_id();
-                let dataset_id = encrypted_allocation.id();
-
-                let zpool_name = ZpoolName::External(pool_id);
-
-                let path = [
-                    // Each zvol's path to the device starts with this
-                    String::from("/dev/zvol/rdsk"),
-                    // All local storage datasets have the same path template,
-                    // and will all be called "vol" for now.
-                    format!("{zpool_name}/crypt/local_storage"),
-                    format!("{dataset_id}/vol"),
-                ]
-                .join("/");
-
-                Ok(path)
-            }
-
-            (None, Some(unencrypted_allocation)) => {
+        match allocation {
+            LocalStorageAllocation::Unencrypted(unencrypted_allocation) => {
                 let pool_id = unencrypted_allocation.pool_id();
                 let dataset_id = unencrypted_allocation.id();
 
@@ -292,11 +301,23 @@ impl LocalStorageDisk {
                 Ok(path)
             }
 
-            (None, None) => {
-                return Err(Error::internal_error(&format!(
-                    "LocalStorageDisk {} not allocated!",
-                    self.id(),
-                )));
+            LocalStorageAllocation::Encrypted(encrypted_allocation) => {
+                let pool_id = encrypted_allocation.pool_id();
+                let dataset_id = encrypted_allocation.id();
+
+                let zpool_name = ZpoolName::External(pool_id);
+
+                let path = [
+                    // Each zvol's path to the device starts with this
+                    String::from("/dev/zvol/rdsk"),
+                    // All local storage datasets have the same path template,
+                    // and will all be called "vol" for now.
+                    format!("{zpool_name}/crypt/local_storage"),
+                    format!("{dataset_id}/vol"),
+                ]
+                .join("/");
+
+                Ok(path)
             }
         }
     }
@@ -326,7 +347,6 @@ impl Into<api::external::Disk> for Disk {
                 disk,
                 disk_type_local_storage: _,
                 local_storage_dataset_allocation: _,
-                local_storage_unencrypted_dataset_allocation: _,
             }) => {
                 // XXX can we remove this?
                 let device_path = format!("/mnt/{}", disk.name().as_str());
@@ -354,7 +374,7 @@ impl DataStore {
     ) -> LookupResult<LocalStorageDisk> {
         let disk_id = disk.id();
 
-        let local_storage_dataset_allocation = if let Some(allocation_id) =
+        let encrypted_allocation = if let Some(allocation_id) =
             disk_type_local_storage.local_storage_dataset_allocation_id()
         {
             use nexus_db_schema::schema::local_storage_dataset_allocation::dsl;
@@ -377,9 +397,7 @@ impl DataStore {
             None
         };
 
-        let local_storage_unencrypted_dataset_allocation = if let Some(
-            allocation_id,
-        ) =
+        let unencrypted_allocation = if let Some(allocation_id) =
             disk_type_local_storage
                 .local_storage_unencrypted_dataset_allocation_id()
         {
@@ -403,11 +421,31 @@ impl DataStore {
             None
         };
 
+        let local_storage_dataset_allocation =
+            match (encrypted_allocation, unencrypted_allocation) {
+                (None, None) => None,
+
+                (Some(encrypted_allocation), None) => Some(
+                    LocalStorageAllocation::Encrypted(encrypted_allocation),
+                ),
+
+                (None, Some(unencrypted_allocation)) => Some(
+                    LocalStorageAllocation::Unencrypted(unencrypted_allocation),
+                ),
+
+                (Some(_), Some(_)) => {
+                    return Err(Error::internal_error(&format!(
+                        "local storage disk {} has multiple dataset \
+                        allocations!",
+                        disk.id(),
+                    )));
+                }
+            };
+
         Ok(LocalStorageDisk {
             disk,
             disk_type_local_storage,
             local_storage_dataset_allocation,
-            local_storage_unencrypted_dataset_allocation,
         })
     }
 
@@ -677,7 +715,6 @@ impl DataStore {
                 disk,
                 disk_type_local_storage,
                 local_storage_dataset_allocation,
-                local_storage_unencrypted_dataset_allocation,
             }) => {
                 if local_storage_dataset_allocation.is_some() {
                     // This allocation is currently only performed during
@@ -686,22 +723,8 @@ impl DataStore {
                         internal_message: format!(
                             "local storage dataset allocation is only \
                             performed during instance allocation, but {} is \
-                            being created with an encrypted allocation when it \
-                            should be None",
-                            disk.id()
-                        ),
-                    }));
-                }
-
-                if local_storage_unencrypted_dataset_allocation.is_some() {
-                    // This allocation is currently only performed during
-                    // instance allocation, return an error here.
-                    return Err(err.bail(Error::InternalError {
-                        internal_message: format!(
-                            "local storage dataset allocation is only \
-                            performed during instance allocation, but {} is \
-                            being created with an unencrypted allocation when \
-                            it should be None",
+                            being created with an allocation when it should be \
+                            None",
                             disk.id()
                         ),
                     }));

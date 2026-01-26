@@ -15,6 +15,7 @@ use super::MIN_MEMORY_BYTES_PER_INSTANCE;
 use crate::app::sagas;
 use crate::app::sagas::NexusSaga;
 use crate::db::datastore::Disk;
+use crate::db::datastore::LocalStorageAllocation;
 use crate::external_api::params;
 use cancel_safe_futures::prelude::*;
 use futures::future::Fuse;
@@ -1436,9 +1437,8 @@ impl super::Nexus {
                 Disk::LocalStorage(local_storage_disk) => local_storage_disk,
             };
 
-            let Some(local_storage_unencrypted_dataset_allocation) =
-                &local_storage_disk
-                    .local_storage_unencrypted_dataset_allocation
+            let Some(local_storage_dataset_allocation) =
+                &local_storage_disk.local_storage_dataset_allocation
             else {
                 return Err(Error::internal_error(&format!(
                     "local storage disk {} allocation is None!",
@@ -1447,11 +1447,20 @@ impl super::Nexus {
                 .into());
             };
 
-            delegated_zvols.push(DelegatedZvol::LocalStorage {
-                zpool_id: local_storage_unencrypted_dataset_allocation
-                    .pool_id(),
-                dataset_id: local_storage_unencrypted_dataset_allocation.id(),
-            });
+            match local_storage_dataset_allocation {
+                LocalStorageAllocation::Unencrypted(allocation) => {
+                    delegated_zvols.push(DelegatedZvol::LocalStorage {
+                        zpool_id: allocation.pool_id(),
+                        dataset_id: allocation.id(),
+                    });
+                }
+
+                LocalStorageAllocation::Encrypted(_) => {
+                    let msg = "disks backed by encrypted local storage are \
+                        currently not supported";
+                    return Err(Error::invalid_request(msg).into());
+                }
+            }
         }
 
         let nics = self

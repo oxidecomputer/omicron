@@ -9,6 +9,7 @@ use super::SQL_BATCH_SIZE;
 use crate::authz;
 use crate::context::OpContext;
 use crate::db;
+use crate::db::datastore;
 use crate::db::datastore::LocalStorageDisk;
 use crate::db::datastore::ValidateTransition;
 use crate::db::datastore::zpool::ZpoolGetForSledReservationResult;
@@ -373,22 +374,21 @@ impl<'a> CompleteLocalStorageAllocationLists<'a> {
         let local_storage_allocation_required: Vec<&LocalStorageDisk> =
             local_storage_disks
                 .iter()
-                .filter(|disk| {
-                    disk.local_storage_unencrypted_dataset_allocation.is_none()
-                })
+                .filter(|disk| disk.local_storage_dataset_allocation.is_none())
                 .collect();
 
         // First, each request for local storage can possibly be satisfied by a
         // number of zpools on the sled. Find this list of candidate zpools for
         // each required local storage allocation.
 
-        // If there's an existing local storage allocation on a zpool, remove
-        // that from the list of candidates. Local storage for the same Instance
-        // should not share any zpools.
+        // If there's an existing local storage allocation on a zpool
+        // (regardless of whether or not it's an encrypted or unencrypted
+        // allocation), remove that pool from the list of candidates. Local
+        // storage for the same Instance should not share any zpools.
         let local_storage_zpools_used: HashSet<ZpoolUuid> = local_storage_disks
             .iter()
             .filter_map(|disk| {
-                disk.local_storage_unencrypted_dataset_allocation.as_ref().map(
+                disk.local_storage_dataset_allocation.as_ref().map(
                     |allocation| {
                         ZpoolUuid::from_untyped_uuid(
                             allocation.pool_id().into_untyped_uuid(),
@@ -889,13 +889,13 @@ impl DataStore {
         // constrains VMM placement and where other unallocated local storage
         // must be.
         let maybe_must_use_sleds = if !local_storage_disks.is_empty() {
-            // Any local storage disk that was allocated already will have a
-            // sled_id.
+            // Any local storage disk that was allocated already (encrypted or
+            // unencrypted) will have a sled_id.
             let local_storage_allocation_sleds: HashSet<SledUuid> =
                 local_storage_disks
                     .iter()
                     .filter_map(|disk| {
-                        disk.local_storage_unencrypted_dataset_allocation
+                        disk.local_storage_dataset_allocation
                             .as_ref()
                             .map(|allocation| allocation.sled_id())
                     })
@@ -1052,25 +1052,41 @@ impl DataStore {
             }
         }
 
-        // Bail out here if we're going to be allocating an instance for a local
-        // storage disk that has an existing allocation under the encrypted
-        // local storage dataset.
-        if local_storage_disks
-            .iter()
-            .any(|disk| disk.local_storage_dataset_allocation.is_some())
-        {
-            info!(&log, "disk.local_storage_dataset_allocation.is_some()");
-            return Err(SledReservationTransactionError::Reservation(
-                SledReservationError::NotFound,
-            ));
+        // Prior to R18, all Disks using the encrypted local storage dataset
+        // should have been deleted, and we will be revisiting how to do
+        // encryption at rest. For now, bail out here if we're going to be
+        // allocating an instance with a disk that is using the encrypted local
+        // storage dataset.
+        for local_storage_disk in &local_storage_disks {
+            let Some(allocation) =
+                &local_storage_disk.local_storage_dataset_allocation
+            else {
+                continue;
+            };
+
+            match allocation {
+                datastore::LocalStorageAllocation::Unencrypted(_) => {
+                    // ok, nothing to do here
+                }
+
+                datastore::LocalStorageAllocation::Encrypted(_) => {
+                    error!(
+                        &log,
+                        "disk has an unsupported encrypted dataset allocation"
+                    );
+
+                    return Err(SledReservationTransactionError::Reservation(
+                        SledReservationError::NotFound,
+                    ));
+                }
+            }
         }
 
         info!(&log, "sled targets: {sled_targets:?}");
 
-        let local_storage_allocation_required =
-            local_storage_disks.iter().any(|disk| {
-                disk.local_storage_unencrypted_dataset_allocation.is_none()
-            });
+        let local_storage_allocation_required = local_storage_disks
+            .iter()
+            .any(|disk| disk.local_storage_dataset_allocation.is_none());
 
         info!(
             &log,
@@ -5074,9 +5090,7 @@ pub(in crate::db::datastore) mod test {
                     panic!("wrong disk type");
                 };
 
-                assert!(
-                    disk.local_storage_unencrypted_dataset_allocation.is_none()
-                );
+                assert!(disk.local_storage_dataset_allocation.is_none());
             }
         }
 
