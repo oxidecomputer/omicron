@@ -5,6 +5,8 @@
 //! [`DataStore`] methods on Subnet Pools and External Subnets.
 
 use crate::db::DataStore;
+use crate::db::datastore::SQL_BATCH_SIZE;
+use crate::db::pagination::Paginator;
 use crate::db::pagination::paginated;
 use crate::db::queries::external_subnet::decode_delete_external_subnet_error;
 use crate::db::queries::external_subnet::decode_insert_external_subnet_error;
@@ -16,12 +18,15 @@ use crate::db::queries::external_subnet::link_subnet_pool_to_silo_query;
 use crate::db::queries::external_subnet::unlink_subnet_pool_from_silo_query;
 use async_bb8_diesel::AsyncRunQueryDsl as _;
 use chrono::Utc;
+use diesel::BoolExpressionMethods as _;
 use diesel::ExpressionMethods as _;
 use diesel::JoinOnDsl as _;
+use diesel::NullableExpressionMethods as _;
 use diesel::QueryDsl as _;
 use diesel::SelectableHelper as _;
 use diesel::result::DatabaseErrorKind;
 use diesel::result::Error as DieselError;
+use dropshot::PaginationOrder;
 use nexus_auth::authz;
 use nexus_auth::authz::SUBNET_POOL_LIST;
 use nexus_auth::context::OpContext;
@@ -35,11 +40,15 @@ use nexus_db_model::ExternalSubnetUpdate;
 use nexus_db_model::IpAttachState;
 use nexus_db_model::IpNet;
 use nexus_db_model::IpVersion;
+use nexus_db_model::Ipv6Addr;
+use nexus_db_model::MacAddr;
 use nexus_db_model::Name;
+use nexus_db_model::NetworkInterfaceKind;
 use nexus_db_model::SubnetPool;
 use nexus_db_model::SubnetPoolMember;
 use nexus_db_model::SubnetPoolSiloLink;
 use nexus_db_model::SubnetPoolUpdate;
+use nexus_db_model::Vni;
 use nexus_db_model::to_db_typed_uuid;
 use nexus_types::external_api::params;
 use nexus_types::external_api::params::ExternalSubnetCreate;
@@ -53,8 +62,14 @@ use omicron_common::api::external::NameOrId;
 use omicron_common::api::external::ResourceType;
 use omicron_common::api::external::UpdateResult;
 use omicron_common::api::external::http_pagination::PaginatedBy;
+use omicron_common::api::internal::shared::AttachedSubnet;
+use omicron_common::api::internal::shared::AttachedSubnetId;
 use omicron_uuid_kinds::ExternalSubnetUuid;
 use omicron_uuid_kinds::GenericUuid as _;
+use omicron_uuid_kinds::InstanceUuid;
+use omicron_uuid_kinds::PropolisUuid;
+use omicron_uuid_kinds::RackUuid;
+use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::SubnetPoolUuid;
 use ref_cast::RefCast as _;
 use uuid::Uuid;
@@ -608,6 +623,155 @@ impl DataStore {
             .get_results_async(&*self.pool_connection_authorized(opctx).await?)
             .await
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+    }
+
+    /// List all subnets attached to an Instance.
+    ///
+    /// In contrast to `instance_lookup_external_subnets`, this fetches all
+    /// attached subnets (external or VPC), and joins it with the data needed to
+    /// actually send those attachment details to other components, mostly
+    /// Dendrite and, through the sled-agent, OPTE.
+    ///
+    /// This makes as many requests as needed, in pages, to get all the results.
+    /// It can be useful in latency-insensitive contexts like background tasks.
+    pub async fn list_all_attached_subnets_batched(
+        &self,
+        opctx: &OpContext,
+    ) -> ListResultVec<AttachedSubnet> {
+        let mut paginator =
+            Paginator::new(SQL_BATCH_SIZE, PaginationOrder::Ascending);
+        let mut results = Vec::new();
+        while let Some(page) = paginator.next() {
+            let mut attachments = self
+                .list_attached_external_subnets(
+                    opctx,
+                    &page.current_pagparams(),
+                )
+                .await?;
+            paginator = page.found_batch(&attachments, &|a| {
+                let AttachedSubnetId::External(id) = a.subnet_id else {
+                    unreachable!();
+                };
+                id
+            });
+            results.append(&mut attachments);
+        }
+
+        // TODO-completeness: We need to fetch the attached VPC Subnets here
+        // too. See https://github.com/oxidecomputer/omicron/issues/9580.
+        Ok(results)
+    }
+
+    /// List a page of External Subnets that are attached to an instance.
+    pub async fn list_attached_external_subnets(
+        &self,
+        opctx: &OpContext,
+        pagparams: &DataPageParams<'_, ExternalSubnetUuid>,
+    ) -> ListResultVec<AttachedSubnet> {
+        // This query JOINs a mass of tables together, since the external subnet
+        // attachment information is quite scattered today.
+        //
+        // Specifically, we start with `external_subnet` and join
+        //
+        // - `instance`, to get the VMM record ...
+        // - `vmm`, to get the sled ID ...
+        // - `sled`, to get the sled underlay IP and rack ID ...
+        // - `network_interface` to get the VPC Subnet ID ...
+        // - `vpc_subnet` to get the VPC ID ...
+        // - and `vpc` to get the VNI.
+        use nexus_db_schema::schema::external_subnet;
+        use nexus_db_schema::schema::instance;
+        use nexus_db_schema::schema::network_interface;
+        use nexus_db_schema::schema::sled;
+        use nexus_db_schema::schema::vmm;
+        use nexus_db_schema::schema::vpc;
+        use nexus_db_schema::schema::vpc_subnet;
+
+        // Helper for querying the result of the join below.
+        #[derive(diesel::Queryable, diesel::Selectable)]
+        struct AttachedSubnetDetails {
+            #[diesel(select_expression = external_subnet::id)]
+            subnet_id: Uuid,
+            #[diesel(select_expression = instance::id)]
+            instance_id: Uuid,
+            #[diesel(select_expression = sled::rack_id)]
+            rack_id: Uuid,
+            #[diesel(select_expression = sled::id)]
+            sled_id: Uuid,
+            #[diesel(select_expression = sled::ip)]
+            sled_ip: Ipv6Addr,
+            #[diesel(select_expression = vmm::id)]
+            vmm_id: Uuid,
+            #[diesel(select_expression = external_subnet::subnet)]
+            ip_subnet: IpNet,
+            #[diesel(select_expression = network_interface::mac)]
+            mac: MacAddr,
+            #[diesel(select_expression = vpc::vni)]
+            vni: Vni,
+        }
+
+        impl From<AttachedSubnetDetails> for AttachedSubnet {
+            fn from(value: AttachedSubnetDetails) -> Self {
+                Self {
+                    _rack_id: RackUuid::from_untyped_uuid(value.rack_id),
+                    sled_id: SledUuid::from_untyped_uuid(value.sled_id),
+                    sled_ip: value.sled_ip.into(),
+                    vmm_id: PropolisUuid::from_untyped_uuid(value.vmm_id),
+                    instance_id: InstanceUuid::from_untyped_uuid(
+                        value.instance_id,
+                    ),
+                    subnet_id: AttachedSubnetId::External(
+                        ExternalSubnetUuid::from_untyped_uuid(value.subnet_id),
+                    ),
+                    subnet: value.ip_subnet.into(),
+                    mac: value.mac.0,
+                    vni: value.vni.0,
+                }
+            }
+        }
+
+        paginated(
+            external_subnet::dsl::external_subnet,
+            external_subnet::dsl::id,
+            &pagparams.map_name(|id| id.as_untyped_uuid()),
+        )
+        .inner_join(instance::dsl::instance.on(
+            instance::dsl::id.nullable().eq(external_subnet::dsl::instance_id),
+        ))
+        .inner_join(
+            vmm::dsl::vmm.on(vmm::dsl::id
+                .nullable()
+                .eq(instance::dsl::active_propolis_id)),
+        )
+        .inner_join(sled::dsl::sled.on(vmm::dsl::sled_id.eq(sled::dsl::id)))
+        .inner_join(
+            network_interface::dsl::network_interface.on(
+                network_interface::dsl::kind
+                    .eq(NetworkInterfaceKind::Instance)
+                    .and(
+                        network_interface::dsl::parent_id.eq(instance::dsl::id),
+                    )
+                    .and(network_interface::dsl::is_primary.eq(true)),
+            ),
+        )
+        .inner_join(
+            vpc_subnet::dsl::vpc_subnet
+                .on(vpc_subnet::dsl::id.eq(network_interface::dsl::subnet_id)),
+        )
+        .inner_join(vpc::dsl::vpc.on(vpc::dsl::id.eq(vpc_subnet::dsl::vpc_id)))
+        .filter(external_subnet::dsl::time_deleted.is_null())
+        .filter(external_subnet::dsl::attach_state.eq(IpAttachState::Attached))
+        .filter(instance::dsl::time_deleted.is_null())
+        .filter(network_interface::dsl::time_deleted.is_null())
+        .filter(vpc_subnet::dsl::time_deleted.is_null())
+        .filter(vpc::dsl::time_deleted.is_null())
+        .select(AttachedSubnetDetails::as_select())
+        .get_results_async::<AttachedSubnetDetails>(
+            &*self.pool_connection_authorized(opctx).await?,
+        )
+        .await
+        .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+        .map(|rows| rows.into_iter().map(Into::into).collect())
     }
 }
 

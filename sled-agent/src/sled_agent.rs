@@ -67,9 +67,9 @@ use sled_agent_config_reconciler::{
 };
 use sled_agent_health_monitor::handle::HealthMonitorHandle;
 use sled_agent_measurements::MeasurementsHandle;
-use sled_agent_types::dataset::LocalStorageDatasetDeleteRequest;
 use sled_agent_types::attached_subnet::AttachedSubnet;
 use sled_agent_types::attached_subnet::AttachedSubnets;
+use sled_agent_types::dataset::LocalStorageDatasetDeleteRequest;
 use sled_agent_types::dataset::LocalStorageDatasetEnsureRequest;
 use sled_agent_types::disk::DiskStateRequested;
 use sled_agent_types::early_networking::EarlyNetworkConfig;

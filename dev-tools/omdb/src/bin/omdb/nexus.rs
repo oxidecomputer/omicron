@@ -52,6 +52,7 @@ use nexus_types::deployment::OximeterReadMode;
 use nexus_types::deployment::OximeterReadPolicy;
 use nexus_types::fm;
 use nexus_types::internal_api::background::AbandonedVmmReaperStatus;
+use nexus_types::internal_api::background::AttachedSubnetManagerStatus;
 use nexus_types::internal_api::background::BlueprintPlannerStatus;
 use nexus_types::internal_api::background::BlueprintRendezvousStats;
 use nexus_types::internal_api::background::BlueprintRendezvousStatus;
@@ -1204,6 +1205,9 @@ fn print_task_details(bgtask: &BackgroundTask, details: &serde_json::Value) {
         "abandoned_vmm_reaper" => {
             print_task_abandoned_vmm_reaper(details);
         }
+        "attached_subnet_manager" => {
+            print_task_attached_subnet_manager_status(details);
+        }
         "blueprint_planner" => {
             print_task_blueprint_planner(details);
         }
@@ -2223,6 +2227,50 @@ fn print_task_probe_distributor(details: &serde_json::Value) {
                     "      sled_id={} sled_ip={} error={}",
                     err.sled_id, err.sled_ip, err.error,
                 );
+            }
+        }
+    };
+}
+
+fn print_task_attached_subnet_manager_status(details: &serde_json::Value) {
+    match serde_json::from_value::<Result<AttachedSubnetManagerStatus, String>>(
+        details.clone(),
+    ) {
+        Err(error) => eprintln!(
+            "warning: failed to interpret task details: {:?}: {:?}",
+            error, details
+        ),
+        Ok(Err(message)) => {
+            eprintln!("   failed to update any attached subnets: error:");
+            eprintln!("   {message}");
+        }
+        Ok(Ok(AttachedSubnetManagerStatus { dendrite, sled })) => {
+            if dendrite.is_empty() {
+                println!("   no dendrite instances found");
+            } else {
+                for (loc, details) in dendrite.iter() {
+                    println!("   dendrite instance on switch {loc}");
+                    println!(
+                        "     n_subnets_removed={}",
+                        details.n_subnets_removed
+                    );
+                    println!(
+                        "     n_subnets_added={}",
+                        details.n_subnets_added
+                    );
+                    println!(
+                        "     n_subnets_total={}",
+                        details.n_total_subnets
+                    );
+                }
+            }
+            if sled.is_empty() {
+                println!("   no sleds found");
+            } else {
+                for (sled_id, details) in sled.iter() {
+                    println!("   sled {sled_id}");
+                    println!("     n_subnets={}", details.n_subnets);
+                }
             }
         }
     };
