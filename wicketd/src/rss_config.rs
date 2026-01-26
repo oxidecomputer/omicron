@@ -20,10 +20,9 @@ use display_error_chain::DisplayErrorChain;
 use omicron_certificates::CertificateError;
 use omicron_common::address;
 use omicron_common::address::Ipv4Range;
-use omicron_common::address::Ipv6Subnet;
-use omicron_common::address::RACK_PREFIX;
 use omicron_common::api::external::AllowedSourceIps;
 use omicron_common::api::external::SwitchLocation;
+use oxnet::Ipv6Net;
 use sled_hardware_types::Baseboard;
 use slog::debug;
 use slog::warn;
@@ -33,7 +32,6 @@ use std::collections::btree_map;
 use std::mem;
 use std::net::IpAddr;
 use std::net::Ipv6Addr;
-use std::sync::LazyLock;
 use thiserror::Error;
 use wicket_common::inventory::MgsV1Inventory;
 use wicket_common::inventory::SpType;
@@ -51,14 +49,6 @@ use wicketd_api::CertificateUploadResponse;
 use wicketd_api::CurrentRssUserConfig;
 use wicketd_api::CurrentRssUserConfigSensitive;
 use wicketd_api::SetBgpAuthKeyStatus;
-
-// TODO-correctness For now, we always use the same rack subnet when running
-// RSS. When we get to multirack, this will be wrong, but there are many other
-// RSS-related things that need to change then too.
-static RACK_SUBNET: LazyLock<Ipv6Subnet<RACK_PREFIX>> = LazyLock::new(|| {
-    let ip = Ipv6Addr::new(0xfd00, 0x1122, 0x3344, 0x0100, 0, 0, 0, 0);
-    Ipv6Subnet::new(ip)
-});
 
 const RECOVERY_SILO_NAME: &str = "recovery";
 const RECOVERY_SILO_USERNAME: &str = "recovery";
@@ -659,10 +649,15 @@ fn validate_rack_network_config(
         }
     }
 
+    let rack_subnet = match validate_rack_subnet(config.rack_subnet_address) {
+        Ok(v) => v,
+        Err(e) => bail!(e),
+    };
+
     // TODO Add more client side checks on `rack_network_config` contents?
 
     Ok(bootstrap_agent_client::types::RackNetworkConfigV2 {
-        rack_subnet: RACK_SUBNET.net(),
+        rack_subnet,
         infra_ip_first: config.infra_ip_first,
         infra_ip_last: config.infra_ip_last,
         ports: config
@@ -684,6 +679,49 @@ fn validate_rack_network_config(
         //TODO bfd config in wicket
         bfd: vec![],
     })
+}
+
+pub fn validate_rack_subnet(
+    subnet_address: Option<Ipv6Addr>,
+) -> Result<Ipv6Net, String> {
+    use rand::prelude::*;
+
+    let rack_subnet_address = match subnet_address {
+        Some(addr) => addr,
+        None => {
+            let mut rng = rand::rng();
+            let a: u16 = 0xfd00 + Into::<u16>::into(rng.random::<u8>());
+            Ipv6Addr::new(
+                a,
+                rng.random::<u16>(),
+                rng.random::<u16>(),
+                0x0100,
+                0,
+                0,
+                0,
+                0,
+            )
+        }
+    };
+
+    // first octet must be fd
+    if rack_subnet_address.octets()[0] != 0xfd {
+        return Err("rack subnet address must begin with 0xfd".into());
+    };
+
+    // Do not allow rack0
+    if rack_subnet_address.octets()[6] == 0x00 {
+        return Err("rack number (seventh octet) cannot be 0".into());
+    };
+
+    // Do not allow addresses more specific than /56
+    if rack_subnet_address.octets()[7..].iter().any(|x| *x != 0x00) {
+        return Err("rack subnet address is /56, \
+                   but a more specific prefix was provided"
+            .into());
+    };
+
+    Ipv6Net::new(rack_subnet_address, 56).map_err(|e| e.to_string())
 }
 
 /// Builds a `BaPortConfigV2` from a `UserSpecifiedPortConfig`.

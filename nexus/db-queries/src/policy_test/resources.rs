@@ -82,6 +82,7 @@ pub async fn make_resources(
     builder.new_resource(authz::TARGET_RELEASE_CONFIG);
     builder.new_resource(authz::ALERT_CLASS_LIST);
     builder.new_resource(authz::AUDIT_LOG);
+    builder.new_resource(authz::SUBNET_POOL_LIST);
 
     // Silo/organization/project hierarchy
     make_silo(&mut builder, "silo1", main_silo_id, true).await;
@@ -197,6 +198,14 @@ pub async fn make_resources(
     ));
 
     make_webhook_rx(&mut builder).await;
+
+    let subnet_pool_id =
+        "e3a6e04e-ad41-483c-8ee9-3958c3ffb4e5".parse().unwrap();
+    builder.new_resource(authz::SubnetPool::new(
+        authz::FLEET,
+        subnet_pool_id,
+        LookupType::by_id(subnet_pool_id),
+    ));
 
     builder.build()
 }
@@ -434,6 +443,14 @@ async fn make_project(
         igw.clone(),
         Uuid::new_v4(),
         LookupType::ByName(igw_ip_address_name),
+    ));
+
+    let external_subnet_id =
+        "762e3d39-cd8a-4c59-ae6a-6efc9b2421df".parse().unwrap();
+    builder.new_resource(authz::ExternalSubnet::new(
+        project,
+        external_subnet_id,
+        LookupType::by_id(external_subnet_id),
     ));
 }
 

@@ -658,8 +658,11 @@ async fn cannot_unlink_ip_pool_with_outstanding_floating_ips(
         client,
         "fip",
         proj.name().as_str(),
-        None,
-        Some(POOL_NAME),
+        params::AddressAllocator::Auto {
+            pool_selector: params::PoolSelector::Explicit {
+                pool: NameOrId::Name(POOL_NAME.parse().unwrap()),
+            },
+        },
     )
     .await;
 
@@ -1153,7 +1156,8 @@ async fn test_bad_ip_ranges(
         .parsed_body()
         .unwrap();
         let expected_message = format!(
-            "The provided IP range {}-{} overlaps with an existing range",
+            "The provided IP range {}-{} overlaps with an existing \
+            IP Pool range or Subnet Pool member",
             bad_range.first_address(),
             bad_range.last_address(),
         );

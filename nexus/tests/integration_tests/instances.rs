@@ -7692,7 +7692,13 @@ async fn test_instance_attach_several_external_ips(
     for i in 1..8 {
         let name = format!("fip-{i}");
         fips.push(
-            create_floating_ip(&client, &name, PROJECT_NAME, None, None).await,
+            create_floating_ip(
+                &client,
+                &name,
+                PROJECT_NAME,
+                params::AddressAllocator::default(),
+            )
+            .await,
         );
         external_ip_create.push(params::ExternalIpCreate::Floating {
             floating_ip: name.parse::<Name>().unwrap().into(),

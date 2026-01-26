@@ -115,6 +115,7 @@ Query the control plane database (CockroachDB)
 Usage: omdb db [OPTIONS] <COMMAND>
 
 Commands:
+  sql                          Launch `cockroach-sql`
   blueprints                   Print information about blueprints
   db-metadata                  Commands for database metadata
   crucible-dataset             Commands relevant to Crucible datasets
@@ -180,6 +181,7 @@ Query the control plane database (CockroachDB)
 Usage: omdb db [OPTIONS] <COMMAND>
 
 Commands:
+  sql                          Launch `cockroach-sql`
   blueprints                   Print information about blueprints
   db-metadata                  Commands for database metadata
   crucible-dataset             Commands relevant to Crucible datasets

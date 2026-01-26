@@ -19,8 +19,8 @@ use nexus_test_utils::resource_helpers::{
 };
 use nexus_test_utils_macros::nexus_test;
 use nexus_types::external_api::params::{
-    EphemeralIpCreate, ExternalIpCreate, FloatingIpAttach, InstanceCreate,
-    InstanceNetworkInterfaceAttachment, PoolSelector,
+    self, EphemeralIpCreate, ExternalIpCreate, FloatingIpAttach,
+    InstanceCreate, InstanceNetworkInterfaceAttachment, PoolSelector,
 };
 use nexus_types::external_api::views::FloatingIp;
 use omicron_common::api::external::IpVersion;
@@ -499,8 +499,11 @@ async fn test_multicast_with_floating_ip_basic(
         client,
         floating_ip_name,
         project_name,
-        None,
-        Some(v4_pool.identity.name.as_str()),
+        params::AddressAllocator::Auto {
+            pool_selector: params::PoolSelector::Explicit {
+                pool: v4_pool.identity.name.clone().into(),
+            },
+        },
     )
     .await;
 

@@ -18,6 +18,9 @@ use nexus_db_queries::db::fixed_data::silo::DEFAULT_SILO;
 use nexus_test_interface::NexusServer;
 use nexus_types::deployment::Blueprint;
 use nexus_types::external_api::params;
+use nexus_types::external_api::params::{
+    DeviceAccessTokenRequest, DeviceAuthRequest, DeviceAuthVerify,
+};
 use nexus_types::external_api::shared;
 use nexus_types::external_api::shared::Baseboard;
 use nexus_types::external_api::shared::IpRange;
@@ -33,6 +36,9 @@ use nexus_types::external_api::views::IpPool;
 use nexus_types::external_api::views::IpPoolRange;
 use nexus_types::external_api::views::User;
 use nexus_types::external_api::views::VpcSubnet;
+use nexus_types::external_api::views::{
+    DeviceAccessTokenGrant, DeviceAuthResponse,
+};
 use nexus_types::external_api::views::{Project, Silo, Vpc, VpcRouter};
 use nexus_types::identity::Resource;
 use nexus_types::internal_api::params as internal_params;
@@ -378,8 +384,7 @@ pub async fn create_floating_ip(
     client: &ClientTestContext,
     fip_name: &str,
     project: &str,
-    ip: Option<IpAddr>,
-    parent_pool_name: Option<&str>,
+    address_allocator: params::AddressAllocator,
 ) -> FloatingIp {
     object_create(
         client,
@@ -389,22 +394,7 @@ pub async fn create_floating_ip(
                 name: fip_name.parse().unwrap(),
                 description: String::from("a floating ip"),
             },
-            address_selector: match (ip, parent_pool_name) {
-                (Some(ip), pool) => params::AddressSelector::Explicit {
-                    ip,
-                    pool: pool.map(|v| NameOrId::Name(v.parse().unwrap())),
-                },
-                (None, Some(pool)) => params::AddressSelector::Auto {
-                    pool_selector: params::PoolSelector::Explicit {
-                        pool: NameOrId::Name(pool.parse().unwrap()),
-                    },
-                },
-                (None, None) => params::AddressSelector::Auto {
-                    pool_selector: params::PoolSelector::Auto {
-                        ip_version: None,
-                    },
-                },
-            },
+            address_allocator,
         },
     )
     .await
@@ -1364,6 +1354,54 @@ pub async fn create_console_session<N: NexusServer>(
         TEST_SUITE_PASSWORD,
     )
     .await
+}
+
+/// Get a device access token via the OAuth device flow.
+pub async fn get_device_token(
+    client: &ClientTestContext,
+    authn_mode: AuthnMode,
+) -> DeviceAccessTokenGrant {
+    let client_id = uuid::Uuid::new_v4();
+    let auth_response: DeviceAuthResponse =
+        RequestBuilder::new(client, Method::POST, "/device/auth")
+            .allow_non_dropshot_errors()
+            .body_urlencoded(Some(&DeviceAuthRequest {
+                client_id,
+                ttl_seconds: None,
+            }))
+            .expect_status(Some(StatusCode::OK))
+            .execute()
+            .await
+            .unwrap()
+            .parsed_body()
+            .unwrap();
+
+    NexusRequest::new(
+        RequestBuilder::new(client, Method::POST, "/device/confirm")
+            .body(Some(&DeviceAuthVerify {
+                user_code: auth_response.user_code,
+            }))
+            .expect_status(Some(StatusCode::NO_CONTENT)),
+    )
+    .authn_as(authn_mode)
+    .execute()
+    .await
+    .unwrap();
+
+    RequestBuilder::new(client, Method::POST, "/device/token")
+        .allow_non_dropshot_errors()
+        .body_urlencoded(Some(&DeviceAccessTokenRequest {
+            grant_type: "urn:ietf:params:oauth:grant-type:device_code"
+                .to_string(),
+            device_code: auth_response.device_code,
+            client_id,
+        }))
+        .expect_status(Some(StatusCode::OK))
+        .execute()
+        .await
+        .unwrap()
+        .parsed_body()
+        .unwrap()
 }
 
 #[derive(Debug)]

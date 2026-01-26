@@ -917,7 +917,6 @@ mod tests {
         let active_group = multicast::create_test_group_with_state(
             &opctx,
             &datastore,
-            &setup,
             "active-group",
             "224.10.1.5",
             true, // make_active
@@ -931,18 +930,13 @@ mod tests {
                 description: "Creating test group".to_string(),
             },
             multicast_ip: Some("224.10.1.6".parse().unwrap()),
-            // Pool resolved via authz_pool argument to datastore call
             mvlan: None,
             has_sources: false,
             ip_version: None,
         };
 
         let creating_group = datastore
-            .multicast_group_create(
-                &opctx,
-                &creating_group_params,
-                Some(setup.authz_pool.clone()),
-            )
+            .multicast_group_create(&opctx, &creating_group_params)
             .await
             .expect("Should create creating multicast group");
 
@@ -1139,7 +1133,6 @@ mod tests {
         let group1 = multicast::create_test_group_with_state(
             &opctx,
             &datastore,
-            &setup,
             "group1",
             "224.10.1.5",
             true, // make_active
@@ -1148,7 +1141,6 @@ mod tests {
         let group2 = multicast::create_test_group_with_state(
             &opctx,
             &datastore,
-            &setup,
             "group2",
             "224.10.1.6",
             true, // make_active
@@ -1339,7 +1331,6 @@ mod tests {
         let group = multicast::create_test_group_with_state(
             &opctx,
             &datastore,
-            &setup,
             "parent-id-test-group",
             "224.0.2.5",
             true,
@@ -1430,7 +1421,6 @@ mod tests {
         let group = multicast::create_test_group_with_state(
             &opctx,
             &datastore,
-            &setup,
             "duplicate-test-group",
             "224.10.1.5",
             true,
@@ -1510,7 +1500,6 @@ mod tests {
         let group = multicast::create_test_group_with_state(
             &opctx,
             &datastore,
-            &setup,
             "lifecycle-test-group",
             "224.10.1.5",
             true,
@@ -1652,7 +1641,6 @@ mod tests {
         let group = multicast::create_test_group_with_state(
             &opctx,
             &datastore,
-            &setup,
             "state-test-group",
             "224.2.1.5",
             true,
@@ -1724,7 +1712,6 @@ mod tests {
         let group = multicast::create_test_group_with_state(
             &opctx,
             &datastore,
-            &setup,
             "cleanup-test-group",
             "224.10.1.5",
             true,
@@ -1983,7 +1970,6 @@ mod tests {
         let group = multicast::create_test_group_with_state(
             &opctx,
             &datastore,
-            &setup,
             "error-test-group",
             "224.10.1.6",
             true,
@@ -2136,7 +2122,6 @@ mod tests {
         let group = multicast::create_test_group_with_state(
             &opctx,
             &datastore,
-            &setup,
             "start-test-group",
             "224.10.1.100",
             true,
@@ -2338,7 +2323,6 @@ mod tests {
         let group1 = multicast::create_test_group_with_state(
             &opctx,
             &datastore,
-            &setup,
             "removal-group1",
             "224.10.1.100",
             true,
@@ -2348,7 +2332,6 @@ mod tests {
         let group2 = multicast::create_test_group_with_state(
             &opctx,
             &datastore,
-            &setup,
             "removal-group2",
             "224.10.1.101",
             true,
@@ -2503,7 +2486,6 @@ mod tests {
         let group1 = multicast::create_test_group_with_state(
             &opctx,
             &datastore,
-            &setup,
             "delete-group1",
             "224.10.1.100",
             true,
@@ -2513,7 +2495,6 @@ mod tests {
         let group2 = multicast::create_test_group_with_state(
             &opctx,
             &datastore,
-            &setup,
             "delete-group2",
             "224.10.1.101",
             true,
@@ -2731,7 +2712,6 @@ mod tests {
         let group = multicast::create_test_group_with_state(
             &opctx,
             &datastore,
-            &setup,
             "test-group",
             "224.10.1.5",
             true, // make_active
@@ -2840,7 +2820,6 @@ mod tests {
         let group = multicast::create_test_group_with_state(
             &opctx,
             &datastore,
-            &setup,
             "test-group",
             "224.10.1.6",
             true, // make_active
@@ -2888,7 +2867,6 @@ mod tests {
         let creating_group = multicast::create_test_group_with_state(
             &opctx,
             &datastore,
-            &setup,
             "creating-group",
             "224.10.1.7",
             false, // leave in Creating state
@@ -2922,7 +2900,6 @@ mod tests {
         let deleting_group = multicast::create_test_group_with_state(
             &opctx,
             &datastore,
-            &setup,
             "deleting-group",
             "224.10.1.8",
             true, // make_active first
@@ -2976,7 +2953,6 @@ mod tests {
         let group = multicast::create_test_group_with_state(
             &opctx,
             &datastore,
-            &setup,
             "test-group",
             "224.10.1.8",
             true, // make_active
@@ -3090,7 +3066,6 @@ mod tests {
         let group = multicast::create_test_group_with_state(
             &opctx,
             &datastore,
-            &setup,
             "test-group",
             "224.10.1.9",
             true,
@@ -3270,7 +3245,6 @@ mod tests {
         let group = multicast::create_test_group_with_state(
             &opctx,
             &datastore,
-            &setup,
             "test-group",
             "224.10.1.10",
             true, // make_active
@@ -3418,7 +3392,6 @@ mod tests {
         let group = multicast::create_test_group_with_state(
             &opctx,
             &datastore,
-            &setup,
             "test-group",
             "224.10.1.11",
             true, // make_active
@@ -3486,7 +3459,6 @@ mod tests {
         let group = multicast::create_test_group_with_state(
             &opctx,
             &datastore,
-            &setup,
             "union-group",
             "224.10.1.100",
             true, // make_active
@@ -3633,7 +3605,7 @@ mod tests {
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
 
-        let setup = multicast::create_test_setup(
+        multicast::create_test_setup(
             &opctx,
             &datastore,
             "no-members-pool",
@@ -3645,7 +3617,6 @@ mod tests {
         let group = multicast::create_test_group_with_state(
             &opctx,
             &datastore,
-            &setup,
             "empty-group",
             "224.10.1.1",
             true, // make_active

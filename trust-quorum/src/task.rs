@@ -13,12 +13,14 @@ use crate::ledgers::PersistentStateLedger;
 use crate::proxy;
 use camino::Utf8PathBuf;
 use omicron_uuid_kinds::RackUuid;
+use sled_agent_measurements::MeasurementsHandle;
 use sled_hardware_types::BaseboardId;
 use slog::{Logger, debug, error, info, o, warn};
 use slog_error_chain::SlogInlineError;
 use sprockets_tls::keys::SprocketsConfig;
 use std::collections::BTreeSet;
 use std::net::SocketAddrV6;
+use std::sync::Arc;
 use thiserror::Error;
 use tokio::sync::mpsc::error::SendError;
 use tokio::sync::oneshot::error::RecvError;
@@ -32,7 +34,6 @@ use trust_quorum_types::configuration::Configuration;
 use trust_quorum_types::messages::{LrtqUpgradeMsg, ReconfigureMsg};
 use trust_quorum_types::status::{CommitStatus, CoordinatorStatus, NodeStatus};
 use trust_quorum_types::types::Epoch;
-
 // TODO: Move to this crate
 // https://github.com/oxidecomputer/omicron/issues/9311
 use bootstore::schemes::v0::NetworkConfig;
@@ -75,10 +76,27 @@ pub enum NodeApiRequest {
     CoordinatorStatus { tx: oneshot::Sender<Option<CoordinatorStatus>> },
 
     /// Load a rack secret for the given epoch
+    ///
+    /// Returns `None` if share collection is still in progress.
     LoadRackSecret {
         epoch: Epoch,
         tx: oneshot::Sender<
             Result<Option<ReconstructedRackSecret>, LoadRackSecretError>,
+        >,
+    },
+
+    /// Load the rack secret for the latest committed epoch
+    ///
+    /// Returns `(Epoch, ReconstructedRackSecret)` if available, or `None` if
+    /// share collection is still in progress. The epoch is guaranteed to match
+    /// the secret returned, though subsequent actions could cause the returned
+    /// epoch to be superseded.
+    LoadLatestRackSecret {
+        tx: oneshot::Sender<
+            Result<
+                Option<(Epoch, ReconstructedRackSecret)>,
+                LoadRackSecretError,
+            >,
         >,
     },
 
@@ -258,6 +276,22 @@ impl NodeTaskHandle {
         Ok(rs)
     }
 
+    /// Load the rack secret for the latest committed epoch
+    ///
+    /// Returns the epoch and secret together, or `None` if share collection is
+    /// still in progress. This operation atomically determines the latest epoch
+    /// and loads its secret. Note that it is still possible for the rack secret
+    /// to be superseded at any time after this call returns; it is only
+    /// guaranteed to be the latest as of the moment it is retrieved internally.
+    pub async fn load_latest_rack_secret(
+        &self,
+    ) -> Result<Option<(Epoch, ReconstructedRackSecret)>, NodeApiError> {
+        let (tx, rx) = oneshot::channel();
+        self.tx.send(NodeApiRequest::LoadLatestRackSecret { tx }).await?;
+        let rs = rx.await??;
+        Ok(rs)
+    }
+
     /// Attempt to prepare and commit the given configuration
     ///
     /// Must be accessible via a sled-agent API endpoint
@@ -379,12 +413,15 @@ pub struct NodeTask {
 
     /// A tracker for API requests proxied to other nodes
     proxy_tracker: proxy::Tracker,
+    /// Handle to receive updates to new reference measurements
+    measurements: Arc<MeasurementsHandle>,
 }
 
 impl NodeTask {
     pub async fn new(
         config: Config,
         log: &Logger,
+        measurements: Arc<MeasurementsHandle>,
     ) -> (NodeTask, NodeTaskHandle) {
         let log = log.new(o!(
             "component" => "trust-quorum",
@@ -441,6 +478,7 @@ impl NodeTask {
                 rx,
                 network_config,
                 proxy_tracker: proxy::Tracker::new(),
+                measurements,
             },
             NodeTaskHandle { baseboard_id, tx, listen_addr },
         )
@@ -451,8 +489,13 @@ impl NodeTask {
     /// This should be spawned into its own tokio task
     pub async fn run(&mut self) {
         while !self.shutdown {
-            // TODO: Real corpus
-            let corpus = vec![];
+            let corpus = match self.measurements.current_measurements() {
+                Ok(c) => c,
+                Err(e) => {
+                    error!(self.log, "measurement error"; e);
+                    vec![]
+                }
+            };
             tokio::select! {
                 Some(request) = self.rx.recv() => {
                     self.on_api_request(request).await;
@@ -598,8 +641,13 @@ impl NodeTask {
         match request {
             NodeApiRequest::BootstrapAddresses(addrs) => {
                 info!(self.log, "Updated Peer Addresses: {addrs:?}");
-                // TODO: real corpus
-                let corpus = vec![];
+                let corpus = match self.measurements.current_measurements() {
+                    Ok(c) => c,
+                    Err(e) => {
+                        error!(self.log, "measurement error"; e);
+                        vec![]
+                    }
+                };
                 let disconnected = self
                     .conn_mgr
                     .update_bootstrap_connections(addrs, corpus)
@@ -631,6 +679,26 @@ impl NodeTask {
             }
             NodeApiRequest::LoadRackSecret { epoch, tx } => {
                 let res = self.node.load_rack_secret(&mut self.ctx, epoch);
+                let _ = tx.send(res);
+            }
+            NodeApiRequest::LoadLatestRackSecret { tx } => {
+                // Atomically determine the latest committed epoch and load its
+                // secret, avoiding a commit occurring in between the epoch
+                // check and the secret retrieval.
+                let res = match self
+                    .ctx
+                    .persistent_state()
+                    .latest_committed_epoch()
+                {
+                    Some(epoch) => {
+                        match self.node.load_rack_secret(&mut self.ctx, epoch) {
+                            Ok(Some(secret)) => Ok(Some((epoch, secret))),
+                            Ok(None) => Ok(None),
+                            Err(e) => Err(e),
+                        }
+                    }
+                    None => Err(LoadRackSecretError::NoCommittedConfigurations),
+                };
                 let _ = tx.send(res);
             }
             NodeApiRequest::LrtqUpgrade { msg, tx } => {
@@ -995,8 +1063,9 @@ mod tests {
             let mut node_handles = vec![];
             let mut join_handles = vec![];
             for config in configs.clone() {
+                let measurements = Arc::new(MeasurementsHandle::new_fake());
                 let (mut task, handle) =
-                    NodeTask::new(config, &logctx.log).await;
+                    NodeTask::new(config, &logctx.log, measurements).await;
                 node_handles.push(handle);
                 join_handles
                     .push(tokio::spawn(async move { task.run().await }));
@@ -1056,8 +1125,9 @@ mod tests {
             for (config, share_pkg) in
                 configs.clone().into_iter().zip(share_pkgs)
             {
+                let measurements = Arc::new(MeasurementsHandle::new_fake());
                 let (mut task, handle) =
-                    NodeTask::new(config, &logctx.log).await;
+                    NodeTask::new(config, &logctx.log, measurements).await;
                 task.ctx.update_persistent_state(|ps| {
                     ps.lrtq = Some(share_pkg);
                     // We are modifying the persistent state, but not in a way
@@ -1093,9 +1163,11 @@ mod tests {
         }
 
         pub async fn simulate_restart_of_last_node(&mut self) {
+            let measurements = Arc::new(MeasurementsHandle::new_fake());
             let (mut task, handle) = NodeTask::new(
                 self.configs.last().unwrap().clone(),
                 &self.logctx.log,
+                measurements,
             )
             .await;
             let listen_addr = handle.listen_addr();
@@ -1253,10 +1325,12 @@ mod tests {
 
         debug!(logctx.log, "AFTER poll for conns with node down");
 
+        let measurements = Arc::new(MeasurementsHandle::new_fake());
         // Now let's bring back up the old node and ensure full connectivity again
         let (mut task, handle) = NodeTask::new(
             setup.configs.last().unwrap().clone(),
             &setup.logctx.log,
+            measurements,
         )
         .await;
         setup.node_handles.push(handle.clone());

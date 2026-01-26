@@ -58,8 +58,39 @@ use omicron_uuid_kinds::InstanceUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use ref_cast::RefCast;
 use sled_agent_types::inventory::ZoneKind;
+use slog::debug;
 use std::net::IpAddr;
 use uuid::Uuid;
+
+/// Floating IP allocation method.
+///
+/// Separate from `params::AddressAllocator` because pool resolution requires
+/// async authz lookup. The app layer converts API params to this type.
+#[derive(Debug, Clone)]
+pub enum FloatingIpAllocation {
+    /// Use a specific IP address. Pool is inferred from the address since
+    /// IP pool ranges cannot overlap.
+    Explicit { ip: IpAddr },
+    /// Auto-allocate from a pool.
+    Auto {
+        /// Explicit pool to allocate from. If None, uses the silo's default.
+        pool: Option<authz::IpPool>,
+        /// IP version for default pool selection.
+        /// Required if both IPv4 and IPv6 default pools exist and no explicit
+        /// pool is specified.
+        ip_version: Option<IpVersion>,
+    },
+}
+
+impl std::fmt::Display for FloatingIpAllocation {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Explicit { .. } => write!(f, "inferred"),
+            Self::Auto { pool: Some(_), .. } => write!(f, "explicit"),
+            Self::Auto { pool: None, .. } => write!(f, "default"),
+        }
+    }
+}
 
 // NOTE: This number includes the automatically-created SNAT IP for every
 // instance. We need to change that allocation so that it's only when necessary,
@@ -220,31 +251,56 @@ impl DataStore {
     }
 
     /// Allocates a floating IP address for instance usage.
-    ///
-    /// If `ip_version` is provided and no pool is specified, the default pool
-    /// lookup will be filtered to that version. If both IPv4 and IPv6 default
-    /// pools exist and `ip_version` is `None`, an error is returned.
     pub async fn allocate_floating_ip(
         &self,
         opctx: &OpContext,
         project_id: Uuid,
         identity: IdentityMetadataCreateParams,
-        ip: Option<IpAddr>,
-        pool: Option<authz::IpPool>,
-        ip_version: Option<IpVersion>,
+        allocation: FloatingIpAllocation,
     ) -> CreateResult<ExternalIp> {
         let ip_id = Uuid::new_v4();
 
-        let authz_pool = self
-            .resolve_pool_for_allocation(
-                opctx,
-                pool,
-                IpPoolType::Unicast,
-                ip_version,
-            )
-            .await?;
+        let (authz_pool, explicit_ip) = match &allocation {
+            FloatingIpAllocation::Explicit { ip } => {
+                let pool = self
+                    .ip_pool_fetch_containing_address(
+                        opctx,
+                        *ip,
+                        IpPoolType::Unicast,
+                    )
+                    .await
+                    .map_err(|e| match e {
+                        Error::ObjectNotFound { .. } => {
+                            Error::invalid_request(format!(
+                                "IP address {ip} is not in any configured pool"
+                            ))
+                        }
+                        other => other,
+                    })?;
+                (pool, Some(*ip))
+            }
+            FloatingIpAllocation::Auto { pool, ip_version } => {
+                let pool = self
+                    .resolve_pool_for_allocation(
+                        opctx,
+                        pool.clone(),
+                        IpPoolType::Unicast,
+                        *ip_version,
+                    )
+                    .await?;
+                (pool, None)
+            }
+        };
 
-        let data = if let Some(ip) = ip {
+        debug!(
+            opctx.log,
+            "floating IP allocation";
+            "pool_selection" => %allocation,
+            "pool_id" => %authz_pool.id(),
+            "project_id" => %project_id,
+        );
+
+        let data = if let Some(ip) = explicit_ip {
             IncompleteExternalIp::for_floating_explicit(
                 ip_id,
                 &Name(identity.name),
@@ -1699,7 +1755,7 @@ mod tests {
             .await
             .expect("Should link multicast pool");
 
-        // Try to allocate floating IP
+        // Try to allocate floating IP from default pool (no pool, no IP version)
         let res = datastore
             .allocate_floating_ip(
                 &opctx,
@@ -1708,9 +1764,7 @@ mod tests {
                     name: "my-floating-ip".parse().unwrap(),
                     description: "A floating IP".to_string(),
                 },
-                None, // No specific IP
-                None, // No specific pool - use default
-                None, // No specific IP version
+                FloatingIpAllocation::Auto { pool: None, ip_version: None },
             )
             .await;
 
@@ -1773,7 +1827,7 @@ mod tests {
             .await
             .expect("Should link unicast pool");
 
-        // Now floating IP allocation should succeed
+        // Now floating IP allocation from default pool should succeed
         let floating_ip = datastore
             .allocate_floating_ip(
                 &opctx,
@@ -1782,9 +1836,7 @@ mod tests {
                     name: "my-floating-ip".parse().unwrap(),
                     description: "A floating IP".to_string(),
                 },
-                None, // No specific IP
-                None, // No specific pool - use default
-                None, // No specific IP version, but just 1 default pool
+                FloatingIpAllocation::Auto { pool: None, ip_version: None },
             )
             .await
             .expect("Floating IP allocation should succeed with unicast default pool");
