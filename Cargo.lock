@@ -971,7 +971,6 @@ dependencies = [
  "hex",
  "hkdf",
  "omicron-common",
- "omicron-rpaths",
  "omicron-workspace-hack",
  "proptest",
  "rand 0.8.5",
