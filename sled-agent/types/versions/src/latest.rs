@@ -141,6 +141,16 @@ pub mod rack_init {
     pub use crate::bootstrap_v1::rack_init::RecoverySiloConfig;
 }
 
+pub mod rot {
+    pub use crate::v17::attestation::Attestation;
+    pub use crate::v17::attestation::CertificateChain;
+    pub use crate::v17::attestation::Ed25519Signature;
+    pub use crate::v17::attestation::Measurement;
+    pub use crate::v17::attestation::MeasurementLog;
+    pub use crate::v17::attestation::Nonce;
+    pub use crate::v17::attestation::Sha3_256Digest;
+}
+
 pub mod sled {
     pub use crate::v1::sled::AddSledRequest;
     pub use crate::v1::sled::StartSledAgentRequest;
