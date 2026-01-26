@@ -1156,7 +1156,8 @@ async fn test_bad_ip_ranges(
         .parsed_body()
         .unwrap();
         let expected_message = format!(
-            "The provided IP range {}-{} overlaps with an existing range",
+            "The provided IP range {}-{} overlaps with an existing \
+            IP Pool range or Subnet Pool member",
             bad_range.first_address(),
             bad_range.last_address(),
         );

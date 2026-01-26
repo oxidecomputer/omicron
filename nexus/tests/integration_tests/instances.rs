@@ -7761,7 +7761,7 @@ async fn test_instance_attach_several_external_ips(
 }
 
 #[nexus_test]
-async fn test_instance_allow_only_one_ephemeral_ip(
+async fn test_instance_rejects_three_ephemeral_ips(
     cptestctx: &ControlPlaneTestContext,
 ) {
     let client = &cptestctx.external_client;
@@ -7789,7 +7789,11 @@ async fn test_instance_allow_only_one_ephemeral_ip(
         ssh_public_keys: None,
         network_interfaces:
             params::InstanceNetworkInterfaceAttachment::DefaultIpv4,
-        external_ips: vec![ephemeral_create.clone(), ephemeral_create],
+        external_ips: vec![
+            ephemeral_create.clone(),
+            ephemeral_create.clone(),
+            ephemeral_create,
+        ],
         disks: vec![],
         boot_disk: None,
         cpu_platform: None,
@@ -7808,7 +7812,172 @@ async fn test_instance_allow_only_one_ephemeral_ip(
 
     assert_eq!(
         error.message,
-        "An instance may not have more than 1 ephemeral IP address"
+        "An instance may not have more than 2 ephemeral IP addresses"
+    );
+}
+
+#[nexus_test]
+async fn test_instance_rejects_two_ephemeral_auto_without_version(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+
+    let _ = create_project(&client, PROJECT_NAME).await;
+
+    let external_ips = vec![
+        params::ExternalIpCreate::Ephemeral {
+            pool_selector: params::PoolSelector::Auto { ip_version: None },
+        },
+        params::ExternalIpCreate::Ephemeral {
+            pool_selector: params::PoolSelector::Auto { ip_version: None },
+        },
+    ];
+    let create_params = params::InstanceCreate {
+        identity: IdentityMetadataCreateParams {
+            name: "two-auto-ephemeral".parse().unwrap(),
+            description: "instance two-auto-ephemeral".into(),
+        },
+        ncpus: InstanceCpuCount(4),
+        memory: ByteCount::from_gibibytes_u32(1),
+        hostname: "the-host".parse().unwrap(),
+        user_data: vec![],
+        ssh_public_keys: None,
+        network_interfaces:
+            params::InstanceNetworkInterfaceAttachment::DefaultIpv4,
+        external_ips,
+        disks: vec![],
+        boot_disk: None,
+        cpu_platform: None,
+        start: true,
+        auto_restart_policy: Default::default(),
+        anti_affinity_groups: Vec::new(),
+        multicast_groups: Vec::new(),
+    };
+    let error = object_create_error(
+        client,
+        &get_instances_url(),
+        &create_params,
+        StatusCode::BAD_REQUEST,
+    )
+    .await;
+
+    assert_eq!(
+        error.message,
+        "when requesting two ephemeral IPs, IP version or explicit \
+         pool name must be specified on each"
+    );
+}
+
+#[nexus_test]
+async fn test_instance_rejects_two_ephemeral_auto_none_with_explicit(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+
+    create_project(&client, PROJECT_NAME).await;
+    create_default_ip_pools(client).await;
+
+    // One explicit pool, one auto without version: rejected because the auto
+    // selector doesn't specify ip_version.
+    let external_ips = vec![
+        params::ExternalIpCreate::Ephemeral {
+            pool_selector: params::PoolSelector::Auto { ip_version: None },
+        },
+        params::ExternalIpCreate::Ephemeral {
+            pool_selector: params::PoolSelector::Explicit {
+                pool: "default-v4".parse::<Name>().unwrap().into(),
+            },
+        },
+    ];
+    let create_params = params::InstanceCreate {
+        identity: IdentityMetadataCreateParams {
+            name: "explicit-plus-auto-ephemeral".parse().unwrap(),
+            description: "instance explicit-plus-auto-ephemeral".into(),
+        },
+        ncpus: InstanceCpuCount(4),
+        memory: ByteCount::from_gibibytes_u32(1),
+        hostname: "the-host".parse().unwrap(),
+        user_data: vec![],
+        ssh_public_keys: None,
+        network_interfaces:
+            params::InstanceNetworkInterfaceAttachment::DefaultDualStack,
+        external_ips,
+        disks: vec![],
+        boot_disk: None,
+        cpu_platform: None,
+        start: true,
+        auto_restart_policy: Default::default(),
+        anti_affinity_groups: Vec::new(),
+        multicast_groups: Vec::new(),
+    };
+    let error = object_create_error(
+        client,
+        &get_instances_url(),
+        &create_params,
+        StatusCode::BAD_REQUEST,
+    )
+    .await;
+
+    assert_eq!(
+        error.message,
+        "when requesting two ephemeral IPs, IP version or explicit \
+         pool name must be specified on each"
+    );
+}
+
+#[nexus_test]
+async fn test_instance_rejects_two_ephemeral_same_pool(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+
+    create_project(&client, PROJECT_NAME).await;
+    create_default_ip_pools(client).await;
+
+    let external_ips = vec![
+        params::ExternalIpCreate::Ephemeral {
+            pool_selector: params::PoolSelector::Explicit {
+                pool: "default-v4".parse::<Name>().unwrap().into(),
+            },
+        },
+        params::ExternalIpCreate::Ephemeral {
+            pool_selector: params::PoolSelector::Explicit {
+                pool: "default-v4".parse::<Name>().unwrap().into(),
+            },
+        },
+    ];
+    let create_params = params::InstanceCreate {
+        identity: IdentityMetadataCreateParams {
+            name: "same-pool-ephemeral".parse().unwrap(),
+            description: "instance same-pool-ephemeral".into(),
+        },
+        ncpus: InstanceCpuCount(4),
+        memory: ByteCount::from_gibibytes_u32(1),
+        hostname: "the-host".parse().unwrap(),
+        user_data: vec![],
+        ssh_public_keys: None,
+        network_interfaces:
+            params::InstanceNetworkInterfaceAttachment::DefaultIpv4,
+        external_ips,
+        disks: vec![],
+        boot_disk: None,
+        cpu_platform: None,
+        start: true,
+        auto_restart_policy: Default::default(),
+        anti_affinity_groups: Vec::new(),
+        multicast_groups: Vec::new(),
+    };
+    let error = object_create_error(
+        client,
+        &get_instances_url(),
+        &create_params,
+        StatusCode::BAD_REQUEST,
+    )
+    .await;
+
+    assert_eq!(
+        error.message,
+        "cannot request two ephemeral IPs from the same pool"
     );
 }
 

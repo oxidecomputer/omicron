@@ -136,6 +136,7 @@ members = [
     "sled-agent/bootstrap-agent-api",
     "sled-agent/config-reconciler",
     "sled-agent/health-monitor",
+    "sled-agent/measurements",
     "sled-agent/repo-depot-api",
     "sled-agent/types",
     "sled-agent/types/versions",
@@ -308,6 +309,7 @@ default-members = [
     "sled-agent/bootstrap-agent-api",
     "sled-agent/config-reconciler",
     "sled-agent/health-monitor",
+    "sled-agent/measurements",
     "sled-agent/repo-depot-api",
     "sled-agent/types",
     "sled-agent/types/versions",
@@ -745,6 +747,7 @@ sled-agent-api = { path = "sled-agent/api" }
 sled-agent-client = { path = "clients/sled-agent-client" }
 sled-agent-config-reconciler = { path = "sled-agent/config-reconciler" }
 sled-agent-health-monitor = { path = "sled-agent/health-monitor" }
+sled-agent-measurements = { path = "sled-agent/measurements" }
 sled-agent-types = { path = "sled-agent/types" }
 sled-agent-types-versions = { path = "sled-agent/types/versions" }
 sled-agent-resolvable-files = { path = "sled-agent/resolvable-files" }
