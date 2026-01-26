@@ -36,6 +36,7 @@ api_versions!([
     // |  example for the next person.
     // v
     // (next_int, IDENT),
+    (18, ADD_ROT_ATTESTATION),
     (17, TWO_TYPES_OF_DELEGATED_ZVOL),
     (16, MEASUREMENT_PROPER_INVENTORY),
     (15, ADD_TRUST_QUORUM_STATUS),
@@ -1312,4 +1313,32 @@ pub trait SledAgentApi {
         request_context: RequestContext<Self::Context>,
         body: TypedBody<latest::trust_quorum::TrustQuorumNetworkConfig>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
+
+    #[endpoint {
+        method = GET,
+        path = "/rot/measurement-log",
+        versions = VERSION_ADD_ROT_ATTESTATION..,
+    }]
+    async fn rot_measurement_log(
+        request_context: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<latest::rot::MeasurementLog>, HttpError>;
+
+    #[endpoint {
+        method = GET,
+        path = "/rot/certificate-chain",
+        versions = VERSION_ADD_ROT_ATTESTATION..,
+    }]
+    async fn rot_certificate_chain(
+        request_context: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<latest::rot::CertificateChain>, HttpError>;
+
+    #[endpoint {
+        method = POST,
+        path = "/rot/attest",
+        versions = VERSION_ADD_ROT_ATTESTATION..,
+    }]
+    async fn rot_attest(
+        request_context: RequestContext<Self::Context>,
+        body: TypedBody<latest::rot::Nonce>,
+    ) -> Result<HttpResponseOk<latest::rot::Attestation>, HttpError>;
 }

@@ -8,6 +8,7 @@ license = "MPL-2.0"
 workspace = true
 
 [dependencies]
+attest-data.workspace = true
 camino.workspace = true
 chrono.workspace = true
 dropshot.workspace = true
@@ -27,3 +28,4 @@ sled-hardware-types.workspace = true
 tufaceous-artifact.workspace = true
 trust-quorum-types.workspace = true
 uuid.workspace = true
+x509-cert.workspace = true

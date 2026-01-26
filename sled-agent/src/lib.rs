@@ -30,6 +30,7 @@ mod nexus;
 mod probe_manager;
 mod profile;
 pub mod rack_setup;
+pub(crate) mod rot;
 pub mod server;
 pub mod services;
 mod sled_agent;
