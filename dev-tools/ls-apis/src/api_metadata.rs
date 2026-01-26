@@ -30,7 +30,6 @@ pub struct AllApiMetadata {
     deployment_units: BTreeMap<DeploymentUnitName, DeploymentUnitInfo>,
     dependency_rules: BTreeMap<ClientPackageName, Vec<DependencyFilterRule>>,
     ignored_non_clients: BTreeSet<ClientPackageName>,
-    localhost_only_edges: Vec<LocalhostOnlyEdge>,
 }
 
 impl AllApiMetadata {
@@ -74,48 +73,91 @@ impl AllApiMetadata {
         &self.ignored_non_clients
     }
 
-    /// Returns the list of localhost-only edges
-    pub fn localhost_only_edges(&self) -> &[LocalhostOnlyEdge] {
-        &self.localhost_only_edges
+    /// Returns an iterator over rules that have `SameDeploymentUnit`
+    /// evaluation.
+    pub fn same_deployment_unit_rules(
+        &self,
+    ) -> impl Iterator<Item = &DependencyFilterRule> {
+        self.dependency_rules
+            .values()
+            .flatten()
+            .filter(|r| r.evaluation == Evaluation::SameDeploymentUnit)
     }
 
-    /// Returns how we should filter the given dependency
+    /// Returns how we should filter the given dependency.
+    ///
+    /// Returns all matching evaluations: a dependency may match up to one
+    /// server rule and up to one ancestor rule. This allows filters to check if
+    /// any matching rule would cause exclusion.
     pub(crate) fn evaluate_dependency(
         &self,
         workspaces: &Workspaces,
+        server: &ServerComponentName,
         client_pkgname: &ClientPackageName,
         dep_path: &DepPath,
-    ) -> Result<Evaluation> {
+    ) -> Result<DependencyEvaluation> {
         let Some(rules) = self.dependency_rules.get(client_pkgname) else {
-            return Ok(Evaluation::default());
+            return Ok(DependencyEvaluation::default());
         };
 
-        let which_rules: Vec<_> = rules
+        let mut result = DependencyEvaluation::default();
+
+        let server_rules: Vec<_> = rules
             .iter()
-            .filter(|r| {
-                assert_eq!(r.client, *client_pkgname);
-                let pkgids = workspaces.workspace_pkgids(&r.ancestor);
-                dep_path.contains_any(&pkgids)
+            .filter(|r| match &r.matcher {
+                RuleMatcher::Server(s) => s == server,
+                RuleMatcher::Ancestor(_) => false,
             })
             .collect();
 
-        if which_rules.is_empty() {
-            return Ok(Evaluation::default());
+        if server_rules.len() > 1 {
+            bail!(
+                "client package {:?}: dependency matched multiple server \
+                 filters for server {:?}",
+                client_pkgname,
+                server
+            );
         }
 
-        if which_rules.len() > 1 {
+        if let Some(rule) = server_rules.first() {
+            result.server = Some(rule.evaluation);
+        }
+
+        let ancestor_rules: Vec<_> = rules
+            .iter()
+            .filter(|r| {
+                assert_eq!(r.client, *client_pkgname);
+                match &r.matcher {
+                    RuleMatcher::Ancestor(ancestor) => {
+                        let pkgids = workspaces.workspace_pkgids(ancestor);
+                        dep_path.contains_any(&pkgids)
+                    }
+                    RuleMatcher::Server(_) => false,
+                }
+            })
+            .collect();
+
+        if ancestor_rules.len() > 1 {
             bail!(
-                "client package {:?}: dependency matched multiple filters: {}",
+                "client package {:?}: dependency matched multiple ancestor \
+                 filters: {}",
                 client_pkgname,
-                which_rules
+                ancestor_rules
                     .into_iter()
-                    .map(|r| r.ancestor.as_str())
+                    .map(|r| match &r.matcher {
+                        RuleMatcher::Ancestor(a) => a.as_str(),
+                        RuleMatcher::Server(_) => unreachable!(),
+                    })
                     .collect::<Vec<_>>()
                     .join(", ")
             );
         }
 
-        Ok(which_rules[0].evaluation)
+        if let Some(rule) = ancestor_rules.first() {
+            result.ancestor = Some(rule.evaluation);
+        }
+
+        Ok(result)
     }
 
     /// Returns the list of APIs that have non-DAG dependency rules
@@ -142,9 +184,8 @@ impl AllApiMetadata {
 struct RawApiMetadata {
     apis: Vec<ApiMetadata>,
     deployment_units: Vec<DeploymentUnitInfo>,
-    dependency_filter_rules: Vec<DependencyFilterRule>,
+    dependency_filter_rules: Vec<RawDependencyFilterRule>,
     ignored_non_clients: Vec<ClientPackageName>,
-    localhost_only_edges: Vec<LocalhostOnlyEdge>,
 }
 
 impl TryFrom<RawApiMetadata> for AllApiMetadata {
@@ -176,13 +217,31 @@ impl TryFrom<RawApiMetadata> for AllApiMetadata {
             }
         }
 
+        // Build set of known server components for validation.
+        let known_components: BTreeSet<_> =
+            deployment_units.values().flat_map(|u| u.packages.iter()).collect();
+
         let mut dependency_rules = BTreeMap::new();
-        for rule in raw.dependency_filter_rules {
-            if !apis.contains_key(&rule.client) {
+        for raw_rule in raw.dependency_filter_rules {
+            if !apis.contains_key(&raw_rule.client) {
                 bail!(
                     "dependency rule references unknown client: {:?}",
-                    rule.client
+                    raw_rule.client
                 );
+            }
+
+            let rule = DependencyFilterRule::try_from_raw(raw_rule)?;
+
+            // Validate that server matchers reference known server components.
+            if let RuleMatcher::Server(ref server) = rule.matcher {
+                if !known_components.contains(server) {
+                    bail!(
+                        "dependency filter rule for client {:?}: \
+                         unknown server component {:?}",
+                        rule.client,
+                        server
+                    );
+                }
             }
 
             dependency_rules
@@ -201,31 +260,22 @@ impl TryFrom<RawApiMetadata> for AllApiMetadata {
             }
         }
 
-        // Validate localhost_only_edges reference known server components and
-        // APIs.
-        let known_components: BTreeSet<_> =
-            deployment_units.values().flat_map(|u| u.packages.iter()).collect();
-        for edge in &raw.localhost_only_edges {
-            if !known_components.contains(&edge.server) {
-                bail!(
-                    "localhost_only_edges: unknown server component {:?}",
-                    edge.server
-                );
-            }
-            let client_name = edge.client.as_specific();
-            if !apis.contains_key(client_name) {
-                bail!("localhost_only_edges: unknown client {:?}", client_name);
-            }
-        }
-
         Ok(AllApiMetadata {
             apis,
             deployment_units,
             dependency_rules,
             ignored_non_clients,
-            localhost_only_edges: raw.localhost_only_edges,
         })
     }
+}
+
+/// Specifies which aspect of a dependency to match against.
+#[derive(Clone, Debug)]
+pub enum RuleMatcher {
+    /// Match when the dependency path contains this ancestor package.
+    Ancestor(String),
+    /// Match when the server component equals this value.
+    Server(ServerComponentName),
 }
 
 /// Describes how an API in the system manages drift between client and server
@@ -409,19 +459,94 @@ pub struct DeploymentUnitInfo {
     pub packages: Vec<ServerComponentName>,
 }
 
+/// Raw deserialization struct for dependency filter rules.
+///
+/// This is validated into `DependencyFilterRule`.
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct DependencyFilterRule {
-    pub ancestor: String,
-    pub client: ClientPackageName,
+struct RawDependencyFilterRule {
+    // Only one of `ancestor` and `server` should be specified.
+    ancestor: Option<String>,
+    server: Option<ServerComponentName>,
+    client: ClientPackageName,
     #[serde(default)]
+    evaluation: Evaluation,
+    note: String,
+    #[serde(default)]
+    permalinks: Vec<String>,
+}
+
+/// A validated dependency filter rule.
+#[derive(Clone, Debug)]
+pub struct DependencyFilterRule {
+    pub matcher: RuleMatcher,
+    pub client: ClientPackageName,
     pub evaluation: Evaluation,
-    // These notes are not currently used, but they are required.  They could as
-    // well just be TOML comments.  But it seems nice to enforce that they're
-    // present.  And this would let us include this explanation in output in the
-    // future (e.g., to explain why some dependency was filtered out).
-    #[allow(dead_code)]
+    // These notes and permalinks are not currently used, but they are required.
+    // They could as well just be TOML comments. But it seems nice to enforce
+    // that they're present. And this would let us include this explanation in
+    // output in the future (e.g., to explain why some dependency was filtered
+    // out).
+    #[expect(dead_code)]
     pub note: String,
+    #[expect(dead_code)]
+    pub permalinks: Vec<String>,
+}
+
+impl DependencyFilterRule {
+    fn try_from_raw(raw: RawDependencyFilterRule) -> Result<Self> {
+        let matcher = match (raw.ancestor, raw.server) {
+            (Some(a), None) => RuleMatcher::Ancestor(a),
+            (None, Some(s)) => RuleMatcher::Server(s),
+            (Some(_), Some(_)) => bail!(
+                "dependency filter rule for client {:?} cannot have both \
+                 'ancestor' and 'server'",
+                raw.client
+            ),
+            (None, None) => bail!(
+                "dependency filter rule for client {:?} must have either \
+                 'ancestor' or 'server'",
+                raw.client
+            ),
+        };
+
+        // SameDeploymentUnit requires the server matcher since it goes through
+        // explicit validation.
+        if raw.evaluation == Evaluation::SameDeploymentUnit {
+            if !matches!(matcher, RuleMatcher::Server(_)) {
+                bail!(
+                    "dependency filter rule for client {:?}: \
+                     'same-deployment-unit' evaluation requires 'server' field, found {:?}",
+                    raw.client,
+                    matcher,
+                );
+            }
+        }
+
+        Ok(DependencyFilterRule {
+            matcher,
+            client: raw.client,
+            evaluation: raw.evaluation,
+            note: raw.note,
+            permalinks: raw.permalinks,
+        })
+    }
+}
+
+/// Result of evaluating a dependency against all matching rules.
+#[derive(Clone, Debug, Default)]
+pub struct DependencyEvaluation {
+    /// Evaluation from a server rule, if one matched.
+    pub server: Option<Evaluation>,
+    /// Evaluation from an ancestor rule, if one matched.
+    pub ancestor: Option<Evaluation>,
+}
+
+impl DependencyEvaluation {
+    /// Returns true if any matching rule has the given evaluation.
+    pub fn any_matches(&self, target: Evaluation) -> bool {
+        self.server == Some(target) || self.ancestor == Some(target)
+    }
 }
 
 #[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq)]
@@ -440,62 +565,7 @@ pub enum Evaluation {
     NonDag,
     /// This dependency should be part of the update DAG
     Dag,
-}
-
-/// Specifies which client to match in a localhost-only edge rule.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub enum ClientMatcher {
-    /// Match a specific client package.
-    Specific(ClientPackageName),
-}
-
-impl<'de> Deserialize<'de> for ClientMatcher {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        let s = String::deserialize(deserializer)?;
-        Ok(ClientMatcher::Specific(ClientPackageName::from(s)))
-    }
-}
-
-impl ClientMatcher {
-    /// Returns true if this matcher matches the given client package.
-    pub fn matches(&self, client: &ClientPackageName) -> bool {
-        match self {
-            ClientMatcher::Specific(name) => name == client,
-        }
-    }
-
-    /// Returns the specific client name.
-    pub fn as_specific(&self) -> &ClientPackageName {
-        match self {
-            ClientMatcher::Specific(name) => name,
-        }
-    }
-}
-
-/// An edge that should be excluded from the deployment unit dependency graph
-/// because it represents communication that only happens locally within a
-/// deployment unit.
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct LocalhostOnlyEdge {
-    /// The server component that consumes the API.
-    pub server: ServerComponentName,
-    /// The client package consumed.
-    pub client: ClientMatcher,
-    /// Explanation of why this edge is localhost-only.
-    pub note: String,
-}
-
-impl LocalhostOnlyEdge {
-    /// Returns true if this rule matches the given (server, client) pair.
-    pub fn matches(
-        &self,
-        server: &ServerComponentName,
-        client: &ClientPackageName,
-    ) -> bool {
-        self.server == *server && self.client.matches(client)
-    }
+    /// Intra-deployment-unit communication. Only valid with the `server`
+    /// matcher and server-side-versioned APIs. Subject to auto-validation.
+    SameDeploymentUnit,
 }

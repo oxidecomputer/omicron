@@ -252,10 +252,10 @@ fn print_server_components<'a>(
             );
         }
         for (c, path) in apis.component_apis_consumed(s, filter)? {
-            if let Some(note) = apis.localhost_only_edge_note(s, c) {
+            if apis.is_same_deployment_unit_edge(s, c) {
                 println!(
-                    "{}    consumes: {} (localhost-only: {})",
-                    prefix, c, note
+                    "{}    consumes: {} (same-deployment-unit)",
+                    prefix, c
                 );
             } else {
                 println!("{}    consumes: {}", prefix, c);
