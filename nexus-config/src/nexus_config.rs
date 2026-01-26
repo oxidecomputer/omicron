@@ -433,6 +433,8 @@ pub struct BackgroundTaskConfig {
     pub multicast_reconciler: MulticastGroupReconcilerConfig,
     /// configuration for trust quorum manager task
     pub trust_quorum: TrustQuorumConfig,
+    /// configuration for the attached subnet manager
+    pub attached_subnet_manager: AttachedSubnetManagerConfig,
 }
 
 #[serde_as]
@@ -1016,6 +1018,15 @@ pub struct PackageConfig {
     pub default_region_allocation_strategy: RegionAllocationStrategy,
 }
 
+#[serde_as]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct AttachedSubnetManagerConfig {
+    /// period (in seconds) for periodic activations of the background task that
+    /// pushes attached subnets to the switches and sleds.
+    #[serde_as(as = "DurationSeconds<u64>")]
+    pub period_secs: Duration,
+}
+
 // Re-export SchemeName from nexus-types for use in config parsing.
 pub use nexus_types::authn::SchemeName;
 
@@ -1499,6 +1510,9 @@ mod test {
                             backplane_cache_ttl_secs: MulticastGroupReconcilerConfig::default_backplane_cache_ttl_secs(),
                         },
                         trust_quorum: TrustQuorumConfig {
+                            period_secs: Duration::from_secs(60),
+                        },
+                        attached_subnet_manager: AttachedSubnetManagerConfig {
                             period_secs: Duration::from_secs(60),
                         },
                     },
