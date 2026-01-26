@@ -8,6 +8,7 @@ license = "MPL-2.0"
 workspace = true
 
 [dependencies]
+attest-data.workspace = true
 camino.workspace = true
 chrono.workspace = true
 daft.workspace = true
@@ -16,6 +17,7 @@ illumos-utils.workspace = true
 indent_write.workspace = true
 async-trait.workspace = true
 bootstore.workspace = true
+hex.workspace = true
 omicron-common.workspace = true
 omicron-passwords.workspace = true
 omicron-uuid-kinds.workspace = true
@@ -37,6 +39,7 @@ thiserror.workspace = true
 trust-quorum-types-versions.workspace = true
 tufaceous-artifact.workspace = true
 uuid.workspace = true
+x509-cert.workspace = true
 
 [dev-dependencies]
 omicron-test-utils.workspace = true

@@ -2,24 +2,31 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-// Copyright 2023 Oxide Computer Company
+// Copyright 2026 Oxide Computer Company
 
 //! An interface to libipcc (inter-processor communications channel) which
-//! currently supports looking up values stored in the SP by key. These
-//! values are variously static, passed from the control plane to the SP
-//! (through MGS) or set from userland via libipcc.
+//! currently supports looking up values stored in the SP by key as well as RoT
+//! attestation operations.
+//! The looked up SP values are variously static, passed from the control plane
+//! to the SP (through MGS) or set from userland via libipcc.
 
-use libipcc::{IpccError, IpccHandle};
+use attest_data::messages::{HostToRotCommand, MAX_REQUEST_SIZE, RotToHost};
+use attest_data::{Attestation, Log, Nonce};
+use libipcc::IPCC_MAX_DATA_SIZE;
 use omicron_uuid_kinds::MupdateUuid;
 use serde::Deserialize;
 use serde::Serialize;
 use thiserror::Error;
 use tufaceous_artifact::ArtifactHash;
 
+pub use libipcc::IpccError;
+
 #[cfg(test)]
 use proptest::arbitrary::any;
 #[cfg(test)]
 use proptest::strategy::Strategy;
+use x509_cert::PkiPath;
+use x509_cert::der::{self, Decode, Reader};
 
 /// Supported keys.
 ///
@@ -134,6 +141,18 @@ pub enum InstallinatorImageIdError {
     DeserializationFailed(String),
 }
 
+#[derive(Debug, Error)]
+pub enum AttestError {
+    #[error(transparent)]
+    Ipcc(#[from] IpccError),
+    #[error("failed to send ipcc message to RoT: {0}")]
+    HostToRot(#[from] attest_data::messages::HostToRotError),
+    #[error("deserializing {0:?} failed: {1}")]
+    Deserialize(RotToHost, String),
+    #[error(transparent)]
+    Certificate(#[from] x509_cert::der::Error),
+}
+
 /// These are the IPCC keys we can look up.
 /// NB: These keys match the definitions found in libipcc (RFD 316) and should
 /// match the values in `[ipcc::Key]` one-to-one.
@@ -151,13 +170,13 @@ enum IpccKey {
 /// Interface to the inter-processor communications channel.
 /// For more information see rfd 316.
 pub struct Ipcc {
-    handle: IpccHandle,
+    handle: libipcc::IpccHandle,
 }
 
 impl Ipcc {
     /// Creates a new `Ipcc` instance.
     pub fn new() -> Result<Self, IpccError> {
-        let handle = IpccHandle::new()?;
+        let handle = libipcc::IpccHandle::new()?;
         Ok(Self { handle })
     }
 
@@ -172,6 +191,112 @@ impl Ipcc {
         let id = InstallinatorImageId::deserialize(&buf[..n])
             .map_err(InstallinatorImageIdError::DeserializationFailed)?;
         Ok(id)
+    }
+
+    pub fn get_measurement_log(&self) -> Result<Log, AttestError> {
+        let mut rot_message = vec![0; MAX_REQUEST_SIZE];
+        let mut rot_resp = vec![0; IPCC_MAX_DATA_SIZE];
+        // Serializing is infallible
+        let rot_req = match attest_data::messages::serialize(
+            &mut rot_message,
+            &HostToRotCommand::GetMeasurementLog,
+            |_| 0,
+        ) {
+            Ok(len) => &rot_message[..len],
+            Err(err) => unreachable!(
+                "failed to serialize GetMeasurementLog command: {err}"
+            ),
+        };
+        let resp_len = self.handle.rot_request(rot_req, &mut rot_resp)?;
+        let data = attest_data::messages::parse_response(
+            &rot_resp[..resp_len],
+            RotToHost::RotMeasurementLog,
+        )?;
+        let log = match hubpack::deserialize(data) {
+            Ok((log, _)) => log,
+            Err(err) => {
+                return Err(AttestError::Deserialize(
+                    RotToHost::RotMeasurementLog,
+                    format!("{err}"),
+                ));
+            }
+        };
+        Ok(log)
+    }
+
+    pub fn get_certificates(&self) -> Result<PkiPath, AttestError> {
+        let mut rot_message = vec![0; MAX_REQUEST_SIZE];
+        let mut rot_resp = vec![0; IPCC_MAX_DATA_SIZE];
+        // Serializing is infallible
+        let rot_req = match attest_data::messages::serialize(
+            &mut rot_message,
+            &HostToRotCommand::GetCertificates,
+            |_| 0,
+        ) {
+            Ok(len) => &rot_message[..len],
+            Err(err) => unreachable!(
+                "failed to serialize GetCertificates command: {err}"
+            ),
+        };
+        let resp_len = self.handle.rot_request(rot_req, &mut rot_resp)?;
+        let data = attest_data::messages::parse_response(
+            &rot_resp[..resp_len],
+            RotToHost::RotCertificates,
+        )?;
+
+        // The returned payload is the DER encoded certificate chain itself
+        // which we decode into a more usable `PkiPath`
+        let mut certs = PkiPath::new();
+        assert!(data.len() < u32::from(der::Length::MAX) as usize);
+        let mut reader = der::SliceReader::new(data).unwrap();
+        while !reader.is_finished() {
+            let cert = reader
+                .tlv_bytes()
+                .and_then(|bytes| x509_cert::Certificate::from_der(bytes))
+                .map_err(|err| {
+                    AttestError::Deserialize(
+                        RotToHost::RotCertificates,
+                        format!("[{}] {err}", certs.len()),
+                    )
+                })?;
+            certs.push(cert);
+        }
+
+        Ok(certs)
+    }
+
+    pub fn attest(&self, nonce: Nonce) -> Result<Attestation, AttestError> {
+        let mut rot_message = vec![0; MAX_REQUEST_SIZE];
+        let mut rot_resp = vec![0; IPCC_MAX_DATA_SIZE];
+        // Serializing is infallible
+        let rot_req = match attest_data::messages::serialize(
+            &mut rot_message,
+            &HostToRotCommand::Attest,
+            |buf| {
+                buf[..Nonce::LENGTH].copy_from_slice(nonce.as_ref());
+                Nonce::LENGTH
+            },
+        ) {
+            Ok(len) => &rot_message[..len],
+            Err(err) => {
+                unreachable!("failed to serialize Attest command: {err}")
+            }
+        };
+        let resp_len = self.handle.rot_request(rot_req, &mut rot_resp)?;
+        let data = attest_data::messages::parse_response(
+            &rot_resp[..resp_len],
+            RotToHost::RotAttestation,
+        )?;
+        let attestation = match hubpack::deserialize(data) {
+            Ok((attestation, _)) => attestation,
+            Err(err) => {
+                return Err(AttestError::Deserialize(
+                    RotToHost::RotAttestation,
+                    format!("{err}"),
+                ));
+            }
+        };
+        Ok(attestation)
     }
 }
 

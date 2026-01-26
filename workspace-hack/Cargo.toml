@@ -130,6 +130,7 @@ similar = { version = "2.7.0", features = ["bytes", "inline", "unicode"] }
 slog = { version = "2.8.2", features = ["dynamic-keys", "max_level_trace", "release_max_level_debug", "release_max_level_trace"] }
 smallvec = { version = "1.15.1", default-features = false, features = ["const_new"] }
 spin = { version = "0.9.8" }
+spki = { version = "0.7.3", default-features = false, features = ["pem", "std"] }
 string_cache = { version = "0.8.9" }
 strum-2f80eeee3b1b6c7e = { package = "strum", version = "0.26.3", features = ["derive"] }
 strum-754bda37e0fb3874 = { package = "strum", version = "0.27.2", features = ["derive"] }
@@ -273,6 +274,7 @@ similar = { version = "2.7.0", features = ["bytes", "inline", "unicode"] }
 slog = { version = "2.8.2", features = ["dynamic-keys", "max_level_trace", "release_max_level_debug", "release_max_level_trace"] }
 smallvec = { version = "1.15.1", default-features = false, features = ["const_new"] }
 spin = { version = "0.9.8" }
+spki = { version = "0.7.3", default-features = false, features = ["pem", "std"] }
 string_cache = { version = "0.8.9" }
 strum-2f80eeee3b1b6c7e = { package = "strum", version = "0.26.3", features = ["derive"] }
 strum-754bda37e0fb3874 = { package = "strum", version = "0.27.2", features = ["derive"] }
