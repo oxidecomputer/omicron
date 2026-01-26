@@ -43,7 +43,7 @@ pub(crate) async fn reconcile_local_storage_unencrypted_datasets(
     let mut stats = DatasetsRendezvousStats::default();
 
     for bp_dataset in blueprint_datasets {
-        // Filter down to LocalStorage datasets...
+        // Filter down to LocalStorageUnencrypted datasets...
         let dataset = match (&bp_dataset.kind, bp_dataset.address) {
             (DatasetKind::LocalStorageUnencrypted, None) => {
                 RendezvousLocalStorageUnencryptedDataset::new(
