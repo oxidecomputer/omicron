@@ -4,7 +4,6 @@
 
 //! Tests that EarlyNetworkConfig deserializes across versions.
 
-use std::net::{IpAddr, Ipv4Addr};
 use std::str::FromStr;
 
 use bootstore::schemes::v0 as bootstore;
@@ -15,7 +14,7 @@ use omicron_common::api::{
     external::{ImportExportPolicy, SwitchLocation},
     internal::shared::{
         BgpConfig, BgpPeerConfig, PortConfig, PortFec, PortSpeed,
-        RackNetworkConfig, RouteConfig,
+        RackNetworkConfig,
     },
 };
 use omicron_test_utils::dev::test_setup_log;
