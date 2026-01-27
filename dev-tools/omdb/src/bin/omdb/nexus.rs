@@ -4541,10 +4541,8 @@ async fn cmd_nexus_trust_quorum_lrtq_upgrade(
     client: &nexus_lockstep_client::Client,
     _destruction_token: DestructiveOperationToken,
 ) -> Result<(), anyhow::Error> {
-    // We already know the uuid at Nexus. Don't make the user type it.
-    let fake_uuid = Uuid::nil();
     let epoch = client
-        .trust_quorum_lrtq_upgrade(&fake_uuid)
+        .trust_quorum_lrtq_upgrade()
         .await
         .context("lrtq upgrade")?
         .into_inner();

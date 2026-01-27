@@ -448,7 +448,7 @@ impl NodeTask {
                 ps_ledger.generation,
             )
         } else if let Some(lrtq_share_data) =
-            PersistentFsmState::load_for_trust_quorum(
+            PersistentFsmState::load_for_trust_quorum_upgrade(
                 &log,
                 config.lrtq_ledger_paths.clone(),
             )

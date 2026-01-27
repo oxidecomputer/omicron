@@ -1389,7 +1389,7 @@
         }
       }
     },
-    "/trust-quorum/{rack_id}/config": {
+    "/trust-quorum/config/{rack_id}": {
       "get": {
         "summary": "Retrieve the trust quorum configuration for the given epoch, or latest",
         "operationId": "trust_quorum_get_config",
@@ -1434,22 +1434,11 @@
         }
       }
     },
-    "/trust-quorum/{rack_id}/lrtq-upgrade": {
+    "/trust-quorum/lrtq-upgrade": {
       "post": {
         "summary": "Initiate an LRTQ upgrade",
         "description": "Return the epoch of the proposed configuration, so it can be polled asynchronously.",
         "operationId": "trust_quorum_lrtq_upgrade",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "rack_id",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
-          }
-        ],
         "responses": {
           "200": {
             "description": "successful operation",

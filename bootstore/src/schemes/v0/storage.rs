@@ -88,35 +88,30 @@ impl PersistentFsmState {
     }
 
     /// Load the ledger for use by trust quorum
-    pub async fn load_for_trust_quorum(
+    pub async fn load_for_trust_quorum_upgrade(
         log: &Logger,
         paths: Vec<Utf8PathBuf>,
     ) -> Option<SharePkgCommon> {
-        if let Some(ledger) =
-            Ledger::<PersistentFsmState>::new(&log, paths).await
-        {
-            let persistent_state = ledger.into_inner();
-            info!(
-                log,
-                "Loaded LRTQ PersistentFsmState from ledger in state {} with generation {}",
-                persistent_state.state.name(),
-                persistent_state.generation
-            );
+        let ledger = Ledger::<PersistentFsmState>::new(&log, paths).await?;
+        let persistent_state = ledger.into_inner();
+        info!(
+            log,
+            "Loaded LRTQ PersistentFsmState from ledger in state {} with generation {}",
+            persistent_state.state.name(),
+            persistent_state.generation
+        );
 
-            match persistent_state.state {
-                State::Uninitialized | State::Learning => {
-                    warn!(
-                        log,
-                        "Unexpected LRTQ state: {}. No share available.",
-                        persistent_state.state.name()
-                    );
-                    None
-                }
-                State::InitialMember { pkg, .. } => Some(pkg.common.clone()),
-                State::Learned { pkg } => Some(pkg.common.clone()),
+        match persistent_state.state {
+            State::Uninitialized | State::Learning => {
+                warn!(
+                    log,
+                    "Unexpected LRTQ state: {}. No share available.",
+                    persistent_state.state.name()
+                );
+                None
             }
-        } else {
-            None
+            State::InitialMember { pkg, .. } => Some(pkg.common.clone()),
+            State::Learned { pkg } => Some(pkg.common.clone()),
         }
     }
 }

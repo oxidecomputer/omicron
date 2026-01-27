@@ -1643,6 +1643,9 @@ mod tests {
         assert!(read_config.members.iter().all(|(_, info)| {
             info.state == TrustQuorumMemberState::Unacked
         }));
+
+        db.terminate().await;
+        logctx.cleanup_successful();
     }
 
     #[tokio::test]

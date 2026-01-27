@@ -569,7 +569,7 @@ pub trait NexusLockstepApi {
     // if no epoch is given
     #[endpoint {
         method = GET,
-        path = "/trust-quorum/{rack_id}/config",
+        path = "/trust-quorum/config/{rack_id}",
     }]
     async fn trust_quorum_get_config(
         rqctx: RequestContext<Self::Context>,
@@ -583,11 +583,10 @@ pub trait NexusLockstepApi {
     /// asynchronously.
     #[endpoint {
         method = POST,
-        path = "/trust-quorum/{rack_id}/lrtq-upgrade"
+        path = "/trust-quorum/lrtq-upgrade"
     }]
     async fn trust_quorum_lrtq_upgrade(
         rqctx: RequestContext<Self::Context>,
-        path_params: Path<RackPathParam>,
     ) -> Result<HttpResponseOk<Epoch>, HttpError>;
 }
 

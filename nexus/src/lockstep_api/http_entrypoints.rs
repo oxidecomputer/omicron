@@ -1126,7 +1126,6 @@ impl NexusLockstepApi for NexusLockstepApiImpl {
     // know from Nexus.
     async fn trust_quorum_lrtq_upgrade(
         rqctx: RequestContext<Self::Context>,
-        _path_params: Path<RackPathParam>,
     ) -> Result<HttpResponseOk<Epoch>, HttpError> {
         let apictx = &rqctx.context().context;
         let nexus = &apictx.nexus;
