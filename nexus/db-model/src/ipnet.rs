@@ -12,6 +12,7 @@ use diesel::sql_types;
 use ipnetwork::IpNetwork;
 use serde::Deserialize;
 use serde::Serialize;
+use crate::IpVersion;
 
 #[derive(
     Clone,
@@ -28,6 +29,15 @@ use serde::Serialize;
 pub enum IpNet {
     V4(crate::Ipv4Net),
     V6(crate::Ipv6Net),
+}
+
+impl IpNet {
+    pub fn ip_version(&self) -> IpVersion {
+        match self {
+            IpNet::V4(_) => IpVersion::V4,
+            IpNet::V6(_) => IpVersion::V6,
+        }
+    }
 }
 
 impl ::std::fmt::Display for IpNet {

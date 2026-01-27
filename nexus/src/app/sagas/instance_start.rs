@@ -16,6 +16,7 @@ use crate::app::instance::{
     InstanceEnsureRegisteredApiResources, InstanceRegisterReason,
     InstanceStateChangeError,
 };
+use crate::app::instance_network::InstanceNetworkFilters;
 use crate::app::sagas::declare_saga_actions;
 use chrono::Utc;
 use nexus_db_lookup::LookupPath;
@@ -741,7 +742,12 @@ async fn sis_dpd_ensure(
 
     osagactx
         .nexus()
-        .instance_ensure_dpd_config(&opctx, instance_id, &sled.address(), None)
+        .instance_ensure_dpd_config(
+            &opctx,
+            instance_id,
+            &sled.address(),
+            InstanceNetworkFilters::all(),
+        )
         .await
         .map_err(ActionError::action_failed)?;
 

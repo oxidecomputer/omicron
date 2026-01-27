@@ -826,6 +826,12 @@ table! {
 }
 
 allow_tables_to_appear_in_same_query!(external_subnet, project);
+allow_tables_to_appear_in_same_query!(external_subnet, instance);
+allow_tables_to_appear_in_same_query!(external_subnet, vmm);
+allow_tables_to_appear_in_same_query!(external_subnet, sled);
+allow_tables_to_appear_in_same_query!(external_subnet, network_interface);
+allow_tables_to_appear_in_same_query!(external_subnet, vpc);
+allow_tables_to_appear_in_same_query!(external_subnet, vpc_subnet);
 
 table! {
     silo (id) {
