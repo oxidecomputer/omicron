@@ -47,8 +47,11 @@ pub(super) async fn find_expunged_and_unreferenced_zones(
         let is_referenced = match &zone.zone_type {
             BlueprintZoneType::BoundaryNtp(boundary_ntp) => {
                 is_boundary_ntp_referenced(boundary_ntp, &bp_refs)
-                    || is_external_ip_referenced(zone.id, external_ip_rows)
-                    || is_service_nic_referenced(zone.id, service_nic_rows)
+                    || is_external_networking_referenced(
+                        zone.id,
+                        external_ip_rows,
+                        service_nic_rows,
+                    )
             }
             BlueprintZoneType::ClickhouseKeeper(_)
             | BlueprintZoneType::ClickhouseServer(_) => {
@@ -56,13 +59,19 @@ pub(super) async fn find_expunged_and_unreferenced_zones(
             }
             BlueprintZoneType::ExternalDns(external_dns) => {
                 is_external_dns_referenced(external_dns, &bp_refs)
-                    || is_external_ip_referenced(zone.id, external_ip_rows)
-                    || is_service_nic_referenced(zone.id, service_nic_rows)
+                    || is_external_networking_referenced(
+                        zone.id,
+                        external_ip_rows,
+                        service_nic_rows,
+                    )
             }
             BlueprintZoneType::Nexus(_) => {
                 is_nexus_referenced(opctx, datastore, zone.id).await?
-                    || is_external_ip_referenced(zone.id, external_ip_rows)
-                    || is_service_nic_referenced(zone.id, service_nic_rows)
+                    || is_external_networking_referenced(
+                        zone.id,
+                        external_ip_rows,
+                        service_nic_rows,
+                    )
             }
             BlueprintZoneType::Oximeter(_) => {
                 is_oximeter_referenced(opctx, datastore, zone.id).await?
@@ -107,20 +116,18 @@ pub(super) async fn find_expunged_and_unreferenced_zones(
     Ok(expunged_and_unreferenced)
 }
 
-fn is_external_ip_referenced(
+fn is_external_networking_referenced(
     zone_id: OmicronZoneUuid,
     external_ip_rows: &[nexus_db_model::ExternalIp],
-) -> bool {
-    let zone_id = zone_id.into_untyped_uuid();
-    external_ip_rows.iter().any(|row| row.parent_id == Some(zone_id))
-}
-
-fn is_service_nic_referenced(
-    zone_id: OmicronZoneUuid,
     service_nic_rows: &[nexus_db_model::ServiceNetworkInterface],
 ) -> bool {
+    // Check
+    // BlueprintExpungedZoneAccessReason::DeallocateExternalNetworkingResources;
+    // if this zone's external IP or NIC are still present in the DB, then it's
+    // the zone is still referenced.
     let zone_id = zone_id.into_untyped_uuid();
-    service_nic_rows.iter().any(|row| row.service_id == zone_id)
+    external_ip_rows.iter().any(|row| row.parent_id == Some(zone_id))
+        || service_nic_rows.iter().any(|row| row.service_id == zone_id)
 }
 
 fn is_boundary_ntp_referenced(
@@ -357,26 +364,61 @@ impl<'a> BlueprintReferencesCache<'a> {
     }
 }
 
-// TODO-john
+// This is a no-op function that exists solely to ensure this file is considered
+// when there are any changes to `BlueprintExpungedZoneAccessReason` variants.
+//
+// If you're adding a new variant and that variant affects whether it's safe to
+// prune an expunged zone from the blueprint, you _must_ also update the code
+// above to check for whatever your new variant is. If your new variant does not
+// affect pruning, put it in one of the appropriate sections below (or a new one
+// with a relevant comment).
 fn static_check_all_reasons_handled(reason: BlueprintExpungedZoneAccessReason) {
+    // Help rustfmt out (with the full enum name it gives up on formatting).
+    use BlueprintExpungedZoneAccessReason as Reason;
+
     match reason {
-        BlueprintExpungedZoneAccessReason::BoundaryNtpUpstreamConfig => {},
-        BlueprintExpungedZoneAccessReason::ClickhouseKeeperServerConfigIps => {},
-        BlueprintExpungedZoneAccessReason::CockroachDecommission => {},
-        BlueprintExpungedZoneAccessReason::DeallocateExternalNetworkingResources => {},
-        BlueprintExpungedZoneAccessReason::ExternalDnsExternalIps => {},
-        BlueprintExpungedZoneAccessReason::NexusDeleteMetadataRecord => {},
-        BlueprintExpungedZoneAccessReason::NexusExternalConfig => {},
-        BlueprintExpungedZoneAccessReason::NexusSelfIsQuiescing => {},
-        BlueprintExpungedZoneAccessReason::NexusSagaReassignment => {},
-        BlueprintExpungedZoneAccessReason::NexusSupportBundleReassign => {},
-        BlueprintExpungedZoneAccessReason::OximeterExpungeAndReassignProducers => {},
-        BlueprintExpungedZoneAccessReason::PlannerCheckReadyForCleanup => {},
-        BlueprintExpungedZoneAccessReason::PlanningInputDetermineUnreferenced => {},
-        BlueprintExpungedZoneAccessReason::PlanningInputExpungedZoneGuard => {},
-        BlueprintExpungedZoneAccessReason::Blippy => {},
-        BlueprintExpungedZoneAccessReason::Omdb => {},
-        BlueprintExpungedZoneAccessReason::ReconfiguratorCli => {},
-        BlueprintExpungedZoneAccessReason::Test => {},
+        // Checked by is_boundary_ntp_referenced()
+        Reason::BoundaryNtpUpstreamConfig => {}
+
+        // Checked by is_multinode_clickhouse_referenced()
+        Reason::ClickhouseKeeperServerConfigIps => {}
+
+        // NOT CHECKED: find_expunged_and_unreferenced_zones() will never
+        // consider a cockroach node "unreferenced", because we have currently
+        // disabled decommissioning (see
+        // https://github.com/oxidecomputer/omicron/issues/8447).
+        Reason::CockroachDecommission => {}
+
+        // Checked by is_external_networking_referenced(), which is called for
+        // each zone type with external networking (boundary NTP, external DNS,
+        // Nexus)
+        Reason::DeallocateExternalNetworkingResources => {}
+
+        // Checked by is_external_dns_referenced()
+        Reason::ExternalDnsExternalIps => {}
+
+        // Each of these are checked by is_nexus_referenced()
+        Reason::NexusDeleteMetadataRecord
+        | Reason::NexusSagaReassignment
+        | Reason::NexusSupportBundleReassign => {}
+
+        // Checked by is_oximeter_referenced()
+        Reason::OximeterExpungeAndReassignProducers => {}
+
+        // Nexus-related reasons that don't need to be checked (see
+        // `BlueprintExpungedZoneAccessReason` for specifics)
+        Reason::NexusExternalConfig | Reason::NexusSelfIsQuiescing => {}
+
+        // Planner-related reasons that don't need to be checked (see
+        // `BlueprintExpungedZoneAccessReason` for specifics)
+        Reason::PlannerCheckReadyForCleanup
+        | Reason::PlanningInputDetermineUnreferenced
+        | Reason::PlanningInputExpungedZoneGuard => {}
+
+        // Test / development reasons that don't need to be checked
+        Reason::Blippy
+        | Reason::Omdb
+        | Reason::ReconfiguratorCli
+        | Reason::Test => {}
     }
 }
