@@ -316,7 +316,7 @@ pub type PageSelectorById<Selector = ()> =
 #[derive(Clone, Debug, Deserialize, JsonSchema, PartialEq, Serialize)]
 pub struct ScanById<Selector = ()> {
     #[serde(default = "default_id_sort_mode")]
-    pub sort_by: IdSortMode,
+    sort_by: IdSortMode,
     #[serde(flatten)]
     pub selector: Selector,
 }

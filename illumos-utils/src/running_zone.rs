@@ -13,19 +13,20 @@ use crate::contract;
 use crate::dladm::Etherstub;
 use crate::link::{Link, VnicAllocator};
 use crate::opte::{Port, PortTicket};
-use crate::zone::AddressRequest;
 use crate::zone::Zones;
+use crate::zone::{AddressRequest, ROUTE};
 use crate::zpool::{PathInPool, ZpoolOrRamdisk};
 use camino::{Utf8Path, Utf8PathBuf};
 use camino_tempfile::Utf8TempDir;
 use debug_ignore::DebugIgnore;
 use ipnetwork::IpNetwork;
+use omicron_common::address::{AZ_PREFIX, Ipv6Subnet};
 use omicron_common::backoff;
 use omicron_common::resolvable_files::ResolvableFileSource;
 use omicron_uuid_kinds::OmicronZoneUuid;
 pub use oxlog::is_oxide_smf_log_file;
 use slog::{Logger, error, info, o, warn};
-use std::net::{Ipv4Addr, Ipv6Addr};
+use std::net::Ipv6Addr;
 use std::sync::Arc;
 #[cfg(target_os = "illumos")]
 use std::sync::OnceLock;
@@ -387,7 +388,7 @@ impl RunningZone {
             let gateway_ip = gateway.to_string();
             let private_ip = addr.ip();
             self.run_cmd(&[
-                "/usr/sbin/route",
+                ROUTE,
                 "add",
                 "-host",
                 &gateway_ip,
@@ -396,13 +397,7 @@ impl RunningZone {
                 "-ifp",
                 port.name(),
             ])?;
-            self.run_cmd(&[
-                "/usr/sbin/route",
-                "add",
-                "-inet",
-                "default",
-                &gateway_ip,
-            ])?;
+            self.run_cmd(&[ROUTE, "add", "-inet", "default", &gateway_ip])?;
             Ok(addr)
         } else {
             // If the port is using IPv6 addressing we still want it to use
@@ -462,50 +457,22 @@ impl RunningZone {
         }
     }
 
-    pub fn add_default_route(
+    pub fn add_underlay_route(
         &self,
         gateway: Ipv6Addr,
     ) -> Result<(), RunCommandError> {
+        // Route to the underlay AZ's /48 by deriving it from the gateway IP.
+        let underlay_az: Ipv6Subnet<AZ_PREFIX> = Ipv6Subnet::new(gateway);
         self.run_cmd([
-            "/usr/sbin/route",
+            ROUTE,
             "add",
             "-inet6",
-            "default",
+            &underlay_az.to_string(),
             "-inet6",
             &gateway.to_string(),
-        ])?;
-        Ok(())
-    }
-
-    pub fn add_default_route4(
-        &self,
-        gateway: Ipv4Addr,
-    ) -> Result<(), RunCommandError> {
-        self.run_cmd([
-            "/usr/sbin/route",
-            "add",
-            "default",
-            &gateway.to_string(),
-        ])?;
-        Ok(())
-    }
-
-    pub fn add_bootstrap_route(
-        &self,
-        bootstrap_prefix: u16,
-        gz_bootstrap_addr: Ipv6Addr,
-        zone_vnic_name: &str,
-    ) -> Result<(), RunCommandError> {
-        let args = [
-            "/usr/sbin/route",
-            "add",
-            "-inet6",
-            &format!("{bootstrap_prefix:x}::/16"),
-            &gz_bootstrap_addr.to_string(),
             "-ifp",
-            zone_vnic_name,
-        ];
-        self.run_cmd(args)?;
+            self.inner.control_vnic.name(),
+        ])?;
         Ok(())
     }
 
