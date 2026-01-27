@@ -148,8 +148,14 @@ pub struct PlanningInput {
     /// quiesce.
     not_yet_nexus_zones: BTreeSet<OmicronZoneUuid>,
 
-    /// TODO-john
-    /// add blippy: any zone id here must be expunged in `parent_blueprint`
+    /// IDs of zones that are:
+    ///
+    /// * Expunged
+    /// * Confirmed shutdown and will never restart
+    /// * Not referenced elsewhere in Cockroach
+    ///
+    /// and can therefore be pruned from the blueprint, because any potential
+    /// cleanup required from their expungement has completed.
     expunged_and_unreferenced_zones: BTreeSet<OmicronZoneUuid>,
 }
 
@@ -1747,6 +1753,14 @@ impl PlanningInputBuilder {
         self.not_yet_nexus_zones = not_yet_nexus_zones;
     }
 
+    /// Insert a zone that is expunged and unreferenced.
+    ///
+    /// # Errors
+    ///
+    /// Fails if this zone:
+    ///
+    /// * Does not exist in the parent blueprint
+    /// * Exists in the parent blueprint but is not expunged and shutdown
     pub fn insert_expunged_and_unreferenced_zone(
         &mut self,
         zone_id: OmicronZoneUuid,
@@ -1755,11 +1769,12 @@ impl PlanningInputBuilder {
 
         // We have no way to confirm that this zone is "unreferenced" - that's a
         // property of the system at large, mostly CRDB state - but we can
-        // confirm that it's expunged by looking at the parent blueprint.
+        // confirm that it's expunged and ready for cleanup by looking at the
+        // parent blueprint.
         if !self
             .parent_blueprint
             .expunged_zones(
-                ZoneRunningStatus::Any,
+                ZoneRunningStatus::Shutdown,
                 PlanningInputExpungedZoneGuard,
             )
             .any(|(_sled_id, zone)| zone.id == zone_id)

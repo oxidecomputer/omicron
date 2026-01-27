@@ -5,7 +5,30 @@
 //! Helpers for identifying when expunged zones are no longer referenced in the
 //! database.
 //!
-//! TODO-john more explanation
+//! When a zone is expunged, the expunged zone is still present in the
+//! blueprint. Two high-level conditions must be satisfied before it's safe to
+//! prune an expunged zone from the blueprint (i.e., delete it entirely):
+//!
+//! 1. The sled-agent responsible for running the zone must confirm the zone is
+//!    no longer running and that it's ledgered an `OmicronSledConfig` with a
+//!    generation past the point in which the zone was expunged. This guarantees
+//!    the zone will never run again. This is tracked in the blueprint as the
+//!    `ready_for_cleanup` field inside the expunged zone disposition, and can
+//!    be queried by asking for expunged zones with the
+//!    `ZoneRunningStatus::Shutdown` state.
+//! 2. Any cleanup work that operates on expunged zones must be complete. This
+//!    is zone-type-specific. Some zone types have no cleanup work at all and
+//!    can be pruned as soon as the first condition is satisfied. Others have
+//!    multiple, disparate cleanup work, all of which must be completed.
+//!
+//! This module is primarily considered with checking the second condition. The
+//! [`BlueprintExpungedZoneAccessReason`] enum tracks a variant for every reason
+//! a caller wants to access the expunged zones of a blueprint, including all
+//! known cleanup actions. For each zone type, if the zone-type-specific cleanup
+//! work is complete, we included the zone ID in the "expunged and unreferenced"
+//! zone set in the `PlanningInput`. The planner can cheaply act on this set:
+//! for every zone ID present, it can safely prune it from the blueprint (i.e.,
+//! do not include it in the child blueprint it emits).
 
 use nexus_db_model::SupportBundleState;
 use nexus_db_queries::context::OpContext;
