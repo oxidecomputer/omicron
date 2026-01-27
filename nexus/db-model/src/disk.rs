@@ -79,8 +79,6 @@ pub struct Disk {
     /// For `Crucible` disks, see the DiskTypeCrucible model. For `LocalStorage`
     /// disks, see the DiskTypeLocalStorage model.
     pub disk_type: DiskType,
-
-    // XXX read-only flag
 }
 
 impl Disk {
