@@ -504,7 +504,7 @@ pub trait NexusExternalApi {
         HttpError,
     >;
 
-    /// Lists resource quotas for all silos
+    /// List resource quotas for all silos
     #[endpoint {
         method = GET,
         path = "/v1/system/silo-quotas",
@@ -2545,7 +2545,7 @@ pub trait NexusExternalApi {
 
     // External Subnets
 
-    /// List external subnets in a project
+    /// List external subnets
     #[endpoint {
         method = GET,
         path = "/v1/external-subnets",
@@ -2562,7 +2562,7 @@ pub trait NexusExternalApi {
         HttpError,
     >;
 
-    /// Create an external subnet
+    /// Create external subnet
     #[endpoint {
         method = POST,
         path = "/v1/external-subnets",
@@ -2578,7 +2578,7 @@ pub trait NexusExternalApi {
         HttpError,
     >;
 
-    /// Create an external subnet
+    /// Create external subnet
     #[endpoint {
         operation_id = "external_subnet_create",
         method = POST,
@@ -2601,7 +2601,7 @@ pub trait NexusExternalApi {
         Self::external_subnet_create(rqctx, query_params, subnet_params).await
     }
 
-    /// Fetch an external subnet
+    /// Fetch external subnet
     #[endpoint {
         method = GET,
         path = "/v1/external-subnets/{external_subnet}",
@@ -2617,7 +2617,7 @@ pub trait NexusExternalApi {
         HttpError,
     >;
 
-    /// Update an external subnet
+    /// Update external subnet
     #[endpoint {
         method = PUT,
         path = "/v1/external-subnets/{external_subnet}",
@@ -2634,7 +2634,7 @@ pub trait NexusExternalApi {
         HttpError,
     >;
 
-    /// Delete an external subnet
+    /// Delete external subnet
     #[endpoint {
         method = DELETE,
         path = "/v1/external-subnets/{external_subnet}",
@@ -2647,7 +2647,7 @@ pub trait NexusExternalApi {
         query_params: Query<latest::project::OptionalProjectSelector>,
     ) -> Result<HttpResponseDeleted, HttpError>;
 
-    /// Attach an external subnet to an instance
+    /// Attach external subnet to instance
     #[endpoint {
         method = POST,
         path = "/v1/external-subnets/{external_subnet}/attach",
@@ -2664,7 +2664,7 @@ pub trait NexusExternalApi {
         HttpError,
     >;
 
-    /// Detach an external subnet from an instance
+    /// Detach external subnet from instance
     #[endpoint {
         method = POST,
         path = "/v1/external-subnets/{external_subnet}/detach",
@@ -2698,7 +2698,7 @@ pub trait NexusExternalApi {
         HttpError,
     >;
 
-    /// Create a floating IP
+    /// Create floating IP
     ///
     /// A specific IP address can be reserved, or an IP can be auto-allocated
     /// from a specific pool or the silo's default pool.
@@ -2931,7 +2931,7 @@ pub trait NexusExternalApi {
         )
     }
 
-    /// Create a multicast group
+    /// Create multicast group
     ///
     /// Deprecated: Groups are created implicitly when adding members in newer
     /// API versions.
@@ -2974,7 +2974,7 @@ pub trait NexusExternalApi {
         path_params: Path<latest::multicast::MulticastGroupPath>,
     ) -> Result<HttpResponseOk<latest::multicast::MulticastGroup>, HttpError>;
 
-    /// Fetch a multicast group
+    /// Fetch multicast group
     ///
     /// The group can be specified by name or UUID.
     #[endpoint {
@@ -2997,7 +2997,7 @@ pub trait NexusExternalApi {
             .map(|resp| resp.map(Into::into))
     }
 
-    /// Update a multicast group
+    /// Update multicast group
     ///
     /// Deprecated: groups are managed implicitly through member operations.
     #[endpoint {
@@ -3308,7 +3308,7 @@ pub trait NexusExternalApi {
     }
 
     // TODO-correctness See note about instance create.  This should be async.
-    /// Create a disk
+    /// Create disk
     #[endpoint {
         operation_id = "disk_create",
         method = POST,
@@ -4259,7 +4259,7 @@ pub trait NexusExternalApi {
         HttpError,
     >;
 
-    /// Create new system-wide x.509 certificate
+    /// Create system-wide x.509 certificate
     ///
     /// This certificate is automatically used by the Oxide Control plane to serve
     /// external connections.
@@ -4724,7 +4724,7 @@ pub trait NexusExternalApi {
         .await
     }
 
-    /// Fetch the LLDP configuration for a switch port
+    /// Fetch LLDP configuration for switch port
     #[endpoint {
         method = GET,
         path = "/v1/system/hardware/switch-port/{port}/lldp/config",
@@ -4737,7 +4737,7 @@ pub trait NexusExternalApi {
         query_params: Query<latest::networking::SwitchPortSelector>,
     ) -> Result<HttpResponseOk<LldpLinkConfig>, HttpError>;
 
-    /// Fetch the LLDP configuration for a switch port
+    /// Fetch LLDP configuration for switch port
     #[endpoint {
         operation_id = "networking_switch_port_lldp_config_view",
         method = GET,
@@ -4759,7 +4759,7 @@ pub trait NexusExternalApi {
         .await
     }
 
-    /// Update the LLDP configuration for a switch port
+    /// Update LLDP configuration for switch port
     #[endpoint {
         method = POST,
         path = "/v1/system/hardware/switch-port/{port}/lldp/config",
@@ -4773,7 +4773,7 @@ pub trait NexusExternalApi {
         config: TypedBody<LldpLinkConfig>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
 
-    /// Update the LLDP configuration for a switch port
+    /// Update LLDP configuration for switch port
     #[endpoint {
         operation_id = "networking_switch_port_lldp_config_update",
         method = POST,
@@ -4797,7 +4797,7 @@ pub trait NexusExternalApi {
         .await
     }
 
-    /// Fetch the LLDP neighbors seen on a switch port
+    /// Fetch LLDP neighbors for switch port
     #[endpoint {
         method = GET,
         path = "/v1/system/hardware/rack-switch-port/{rack_id}/{switch_slot}/{port}/lldp/neighbors",
@@ -4810,7 +4810,7 @@ pub trait NexusExternalApi {
         query_params: Query<PaginatedById>,
     ) -> Result<HttpResponseOk<ResultsPage<LldpNeighbor>>, HttpError>;
 
-    /// Fetch the LLDP neighbors seen on a switch port
+    /// Fetch LLDP neighbors for switch port
     #[endpoint {
         operation_id = "networking_switch_port_lldp_neighbors",
         method = GET,
@@ -4832,7 +4832,7 @@ pub trait NexusExternalApi {
         .await
     }
 
-    /// Create new BGP configuration
+    /// Create BGP configuration
     #[endpoint {
         method = POST,
         path = "/v1/system/networking/bgp",
@@ -4844,7 +4844,7 @@ pub trait NexusExternalApi {
         config: TypedBody<latest::networking::BgpConfigCreate>,
     ) -> Result<HttpResponseCreated<latest::networking::BgpConfig>, HttpError>;
 
-    /// Create new BGP configuration
+    /// Create BGP configuration
     #[endpoint {
         operation_id = "networking_bgp_config_create",
         method = POST,
@@ -6437,7 +6437,7 @@ pub trait NexusExternalApi {
         path_params: Path<latest::path_params::RackPath>,
     ) -> Result<HttpResponseOk<latest::rack::RackMembershipStatus>, HttpError>;
 
-    /// Retrieve the rack cluster membership status
+    /// Fetch rack cluster membership status
     ///
     /// Returns the status for the most recent change, or a specific version if
     /// one is specified.
@@ -6785,8 +6785,10 @@ pub trait NexusExternalApi {
         params: TypedBody<latest::update::SetTargetReleaseParams>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
 
+    /// Clear system recovery status
+    ///
     /// Instructs the system that a system recovery operation ("mupdate") was
-    /// completed using the software in the specified release
+    /// completed using the software in the specified release.
     ///
     /// The system recovery operation is used to bypass the control plane to
     /// deploy known-working software when the control plane itself is not
@@ -7210,7 +7212,7 @@ pub trait NexusExternalApi {
         HttpError,
     >;
 
-    /// Download the index of a support bundle
+    /// Download support bundle index
     #[endpoint {
         method = GET,
         path = "/experimental/v1/system/support-bundles/{bundle_id}/index",
@@ -7222,7 +7224,7 @@ pub trait NexusExternalApi {
         path_params: Path<latest::support_bundle::SupportBundlePath>,
     ) -> Result<Response<Body>, HttpError>;
 
-    /// Download the contents of a support bundle
+    /// Download support bundle contents
     #[endpoint {
         method = GET,
         path = "/experimental/v1/system/support-bundles/{bundle_id}/download",
@@ -7234,7 +7236,7 @@ pub trait NexusExternalApi {
         path_params: Path<latest::support_bundle::SupportBundlePath>,
     ) -> Result<Response<Body>, HttpError>;
 
-    /// Download a file within a support bundle
+    /// Download file from support bundle
     #[endpoint {
         method = GET,
         path = "/experimental/v1/system/support-bundles/{bundle_id}/download/{file}",
@@ -7246,7 +7248,7 @@ pub trait NexusExternalApi {
         path_params: Path<latest::support_bundle::SupportBundleFilePath>,
     ) -> Result<Response<Body>, HttpError>;
 
-    /// Download the metadata of a support bundle
+    /// Download support bundle metadata
     #[endpoint {
         method = HEAD,
         path = "/experimental/v1/system/support-bundles/{bundle_id}/download",
@@ -7258,7 +7260,7 @@ pub trait NexusExternalApi {
         path_params: Path<latest::support_bundle::SupportBundlePath>,
     ) -> Result<Response<Body>, HttpError>;
 
-    /// Download the metadata of a file within the support bundle
+    /// Download metadata of file in support bundle
     #[endpoint {
         method = HEAD,
         path = "/experimental/v1/system/support-bundles/{bundle_id}/download/{file}",
@@ -7270,7 +7272,7 @@ pub trait NexusExternalApi {
         path_params: Path<latest::support_bundle::SupportBundleFilePath>,
     ) -> Result<Response<Body>, HttpError>;
 
-    /// Create a new support bundle
+    /// Create support bundle
     #[endpoint {
         method = POST,
         path = "/experimental/v1/system/support-bundles",
@@ -7284,7 +7286,7 @@ pub trait NexusExternalApi {
         HttpError,
     >;
 
-    /// Delete an existing support bundle
+    /// Delete support bundle
     ///
     /// May also be used to cancel a support bundle which is currently being
     /// collected, or to remove metadata for a support bundle that has failed.
@@ -7298,7 +7300,7 @@ pub trait NexusExternalApi {
         path_params: Path<latest::support_bundle::SupportBundlePath>,
     ) -> Result<HttpResponseDeleted, HttpError>;
 
-    /// Update a support bundle
+    /// Update support bundle
     #[endpoint {
         method = PUT,
         path = "/experimental/v1/system/support-bundles/{bundle_id}",
@@ -7480,7 +7482,7 @@ pub trait NexusExternalApi {
         query_params: Query<latest::console::LoginUrlQuery>,
     ) -> Result<Response<Body>, HttpError>;
 
-    /// Get a redirect straight to the IdP
+    /// Get redirect to IdP
     ///
     /// Console uses this to avoid having to ask the API anything about the IdP. It
     /// already knows the IdP name from the path, so it can just link to this path
@@ -7497,7 +7499,7 @@ pub trait NexusExternalApi {
         query_params: Query<latest::console::LoginUrlQuery>,
     ) -> Result<HttpResponseFound, HttpError>;
 
-    /// Authenticate a user via SAML
+    /// Authenticate user via SAML
     #[endpoint {
         method = POST,
         path = "/login/{silo_name}/saml/{provider_name}",
@@ -7521,7 +7523,7 @@ pub trait NexusExternalApi {
         query_params: Query<latest::console::LoginUrlQuery>,
     ) -> Result<Response<Body>, HttpError>;
 
-    /// Authenticate a user via username and password
+    /// Authenticate user via username and password
     #[endpoint {
         method = POST,
         path = "/v1/login/{silo_name}/local",
