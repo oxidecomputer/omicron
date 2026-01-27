@@ -1456,7 +1456,7 @@ pub struct Disk {
     pub state: DiskState,
     pub device_path: String,
     pub disk_type: DiskType,
-    /// If `true`, this disk is read-only when attached to an instance.
+    /// Whether or not this disk is read-only.
     pub read_only: bool,
 }
 
