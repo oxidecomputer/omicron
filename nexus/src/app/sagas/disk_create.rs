@@ -138,9 +138,7 @@ impl NexusSaga for SagaDiskCreate {
                         read_only: true, ..
                     } => {
                         return Err(SagaInitError::InvalidParameter(
-                            "a read-only disk created from a snapshot does \
-                             not require a saga"
-                                .to_string(),
+                            READONLY_FROM_SNAPSHOT_ERR.to_string(),
                         ));
                     }
                     _ => {}
@@ -158,8 +156,8 @@ impl NexusSaga for SagaDiskCreate {
 
 // disk create saga: action implementations
 
-const READONLY_FROM_SNAPSHOT_ERR: &str = "creating a read-only disk from a snapshot should not involve a \
-     disk_create saga";
+const READONLY_FROM_SNAPSHOT_ERR: &str = "creating a read-only disk from a \
+    snapshot should not involve a disk_create saga";
 
 async fn sdc_create_crucible_disk_record(
     sagactx: NexusActionContext,

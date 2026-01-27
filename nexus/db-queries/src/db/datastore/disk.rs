@@ -121,7 +121,8 @@ impl Disk {
     pub fn is_read_only(&self) -> bool {
         match self {
             Self::Crucible(disk) => disk.is_read_only(),
-            Self::LocalStorage(_) => false, // local disks cannot currently be read-only
+            // local disks cannot currently be read-only
+            Self::LocalStorage(_) => false,
         }
     }
 }
@@ -309,7 +310,8 @@ impl Into<api::external::Disk> for Disk {
                     state: disk.state().into(),
                     device_path,
                     disk_type: api::external::DiskType::Local,
-                    read_only: false, // Local disks are (currently) never read-only
+                    // Local disks are (currently) never read-only
+                    read_only: false,
                 }
             }
         }
@@ -1663,7 +1665,7 @@ impl DataStore {
         } = params.disk_backend
         else {
             return Err(Error::InternalError {
-                // WHEW+
+                // WHEW!
                 internal_message: format!(
                     "`project_create_read_only_disk_from_snapshot` may only be \
                      called with `DiskBackend::Distributed` containing a \
