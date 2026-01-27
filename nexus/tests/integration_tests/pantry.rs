@@ -129,7 +129,6 @@ async fn create_disk_with_state_importing_blocks(client: &ClientTestContext) {
                 disk_source: params::DiskSource::ImportingBlocks {
                     block_size: params::BlockSize::try_from(512).unwrap(),
                 },
-                
             },
             size: ByteCount::from_gibibytes_u32(1),
         },
@@ -359,7 +358,6 @@ async fn test_disk_create_for_importing(cptestctx: &ControlPlaneTestContext) {
             disk_source: params::DiskSource::ImportingBlocks {
                 block_size: params::BlockSize::try_from(512).unwrap(),
             },
-            
         },
         size: ByteCount::from_gibibytes_u32(1),
     };
