@@ -365,7 +365,7 @@ async fn sfd_clear_pantry_address(
 }
 
 async fn sfd_set_read_only_in_vcr(
-    sagactx: NexusActionContext,
+    _sagactx: NexusActionContext,
 ) -> Result<(), ActionError> {
     // blah blah some comment about setting this before setting state to
     // Detached, because no instance can use it until then

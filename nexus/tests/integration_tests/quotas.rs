@@ -187,6 +187,7 @@ impl ResourceAllocator {
                     disk_source: params::DiskSource::Blank {
                         block_size: params::BlockSize::try_from(512).unwrap(),
                     },
+                    read_only: false,
                 },
             })),
         )

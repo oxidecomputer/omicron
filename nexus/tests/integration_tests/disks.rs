@@ -364,6 +364,7 @@ async fn test_disk_create_disk_that_already_exists_fails(
             disk_source: params::DiskSource::Blank {
                 block_size: params::BlockSize::try_from(512).unwrap(),
             },
+            read_only: false,
         },
         size: ByteCount::from_gibibytes_u32(1),
     };
@@ -770,6 +771,7 @@ async fn test_disk_region_creation_failure(
             disk_source: params::DiskSource::Blank {
                 block_size: params::BlockSize::try_from(512).unwrap(),
             },
+            read_only: false,
         },
         size: disk_size,
     };
@@ -823,6 +825,7 @@ async fn test_disk_invalid_block_size_rejected(
             disk_source: params::DiskSource::Blank {
                 block_size: params::BlockSize(1024),
             },
+            read_only: false,
         },
         size: disk_size,
     };
@@ -868,6 +871,7 @@ async fn test_disk_reject_total_size_not_divisible_by_block_size(
             disk_source: params::DiskSource::Blank {
                 block_size: params::BlockSize::try_from(512).unwrap(),
             },
+            read_only: false,
         },
         size: disk_size,
     };
@@ -904,6 +908,7 @@ async fn test_disk_reject_total_size_less_than_min_disk_size_bytes(
             disk_source: params::DiskSource::Blank {
                 block_size: params::BlockSize::try_from(512).unwrap(),
             },
+            read_only: false,
         },
         size: disk_size,
     };
@@ -949,6 +954,7 @@ async fn test_disk_reject_total_size_greater_than_max_disk_size_bytes(
             disk_source: params::DiskSource::Blank {
                 block_size: params::BlockSize::try_from(512).unwrap(),
             },
+            read_only: false,
         },
         size: disk_size,
     };
@@ -995,6 +1001,7 @@ async fn test_disk_reject_total_size_not_divisible_by_min_disk_size(
             disk_source: params::DiskSource::Blank {
                 block_size: params::BlockSize::try_from(512).unwrap(),
             },
+            read_only: false,
         },
         size: disk_size,
     };
@@ -1047,6 +1054,7 @@ async fn test_disk_backed_by_multiple_region_sets(
             disk_source: params::DiskSource::Blank {
                 block_size: params::BlockSize::try_from(512).unwrap(),
             },
+            read_only: false,
         },
         size: disk_size,
     };
@@ -1085,6 +1093,7 @@ async fn test_disk_too_big(cptestctx: &ControlPlaneTestContext) {
             disk_source: params::DiskSource::Blank {
                 block_size: params::BlockSize::try_from(512).unwrap(),
             },
+            read_only: false,
         },
         size: disk_size,
     };
@@ -1174,6 +1183,7 @@ async fn test_disk_virtual_provisioning_collection(
             disk_source: params::DiskSource::Blank {
                 block_size: params::BlockSize::try_from(512).unwrap(),
             },
+            read_only: false,
         },
         size: disk_size,
     };
@@ -1235,6 +1245,7 @@ async fn test_disk_virtual_provisioning_collection(
             disk_source: params::DiskSource::Blank {
                 block_size: params::BlockSize::try_from(512).unwrap(),
             },
+            read_only: false,
         },
         size: disk_size,
     };
@@ -1339,6 +1350,7 @@ async fn test_disk_virtual_provisioning_collection_failed_delete(
             disk_source: params::DiskSource::Blank {
                 block_size: params::BlockSize::try_from(512).unwrap(),
             },
+            read_only: false,
         },
         size: disk_size,
     };
@@ -1475,6 +1487,7 @@ async fn test_phantom_disk_rename(cptestctx: &ControlPlaneTestContext) {
             disk_source: params::DiskSource::Blank {
                 block_size: params::BlockSize::try_from(512).unwrap(),
             },
+            read_only: false,
         },
         size: disk_size,
     };
@@ -1617,6 +1630,7 @@ async fn test_disk_size_accounting(cptestctx: &ControlPlaneTestContext) {
             disk_source: params::DiskSource::Blank {
                 block_size: params::BlockSize::try_from(512).unwrap(),
             },
+            read_only: false,
         },
         size: disk_size,
     };
@@ -1654,6 +1668,7 @@ async fn test_disk_size_accounting(cptestctx: &ControlPlaneTestContext) {
             disk_source: params::DiskSource::Blank {
                 block_size: params::BlockSize::try_from(512).unwrap(),
             },
+            read_only: false,
         },
         size: disk_size,
     };
@@ -1708,6 +1723,7 @@ async fn test_disk_size_accounting(cptestctx: &ControlPlaneTestContext) {
             disk_source: params::DiskSource::Blank {
                 block_size: params::BlockSize::try_from(512).unwrap(),
             },
+            read_only: false,
         },
         size: disk_size,
     };
@@ -1761,6 +1777,7 @@ async fn test_multiple_disks_multiple_zpools(
             disk_source: params::DiskSource::Blank {
                 block_size: params::BlockSize::try_from(512).unwrap(),
             },
+            read_only: false,
         },
         size: disk_size,
     };
@@ -1786,6 +1803,7 @@ async fn test_multiple_disks_multiple_zpools(
             disk_source: params::DiskSource::Blank {
                 block_size: params::BlockSize::try_from(512).unwrap(),
             },
+            read_only: false,
         },
         size: disk_size,
     };
@@ -1817,6 +1835,7 @@ async fn test_disk_create_for_importing(cptestctx: &ControlPlaneTestContext) {
             disk_source: params::DiskSource::ImportingBlocks {
                 block_size: params::BlockSize::try_from(512).unwrap(),
             },
+            read_only: false,
         },
         size: ByteCount::from_gibibytes_u32(1),
     };
@@ -1864,6 +1883,7 @@ async fn test_project_delete_disk_no_auth_idempotent(
             disk_source: params::DiskSource::Blank {
                 block_size: params::BlockSize::try_from(512).unwrap(),
             },
+            read_only: false,
         },
         size: ByteCount::from_gibibytes_u32(1),
     };
@@ -2494,6 +2514,7 @@ async fn test_do_not_provision_on_dataset_not_enough(
             disk_source: params::DiskSource::Blank {
                 block_size: params::BlockSize::try_from(512).unwrap(),
             },
+            read_only: false,
         },
         size: ByteCount::from_gibibytes_u32(1),
     };
@@ -2561,6 +2582,7 @@ async fn test_zpool_control_plane_storage_buffer(
             disk_source: params::DiskSource::Blank {
                 block_size: params::BlockSize::try_from(512).unwrap(),
             },
+            read_only: false,
         },
         size: ByteCount::from_gibibytes_u32(8),
     };
@@ -2586,6 +2608,7 @@ async fn test_zpool_control_plane_storage_buffer(
             disk_source: params::DiskSource::Blank {
                 block_size: params::BlockSize::try_from(512).unwrap(),
             },
+            read_only: false,
         },
         size: ByteCount::from_gibibytes_u32(4),
     };
@@ -2685,6 +2708,7 @@ async fn test_list_all_types_of_disk(cptestctx: &ControlPlaneTestContext) {
             disk_source: params::DiskSource::Blank {
                 block_size: params::BlockSize::try_from(512).unwrap(),
             },
+            read_only: false,
         },
         size: ByteCount::from_gibibytes_u32(1),
     };

@@ -153,6 +153,7 @@ async fn create_base_disk(
             disk_source: params::DiskSource::Image {
                 image_id: image.identity.id,
             },
+            read_only: false,
         },
         size: disk_size,
     };
@@ -417,6 +418,7 @@ async fn test_snapshot_prevents_other_disk(
             disk_source: params::DiskSource::Image {
                 image_id: image.identity.id,
             },
+            read_only: false,
         },
         size: disk_size,
     };
@@ -487,6 +489,7 @@ async fn test_multiple_disks_multiple_snapshots_order_1(
             disk_source: params::DiskSource::Blank {
                 block_size: params::BlockSize::try_from(512).unwrap(),
             },
+            read_only: false,
         },
         size: disk_size,
     };
@@ -531,6 +534,7 @@ async fn test_multiple_disks_multiple_snapshots_order_1(
             disk_source: params::DiskSource::Blank {
                 block_size: params::BlockSize::try_from(512).unwrap(),
             },
+            read_only: false,
         },
         size: disk_size,
     };
@@ -626,6 +630,7 @@ async fn test_multiple_disks_multiple_snapshots_order_2(
             disk_source: params::DiskSource::Blank {
                 block_size: params::BlockSize::try_from(512).unwrap(),
             },
+            read_only: false,
         },
         size: disk_size,
     };
@@ -670,6 +675,7 @@ async fn test_multiple_disks_multiple_snapshots_order_2(
             disk_source: params::DiskSource::Blank {
                 block_size: params::BlockSize::try_from(512).unwrap(),
             },
+            read_only: false,
         },
         size: disk_size,
     };
@@ -760,6 +766,7 @@ async fn prepare_for_test_multiple_layers_of_snapshots(
             disk_source: params::DiskSource::Blank {
                 block_size: params::BlockSize::try_from(512).unwrap(),
             },
+            read_only: false,
         },
         size: disk_size,
     };
@@ -804,6 +811,7 @@ async fn prepare_for_test_multiple_layers_of_snapshots(
             disk_source: params::DiskSource::Snapshot {
                 snapshot_id: layer_1_snapshot.identity.id,
             },
+            read_only: false,
         },
         size: disk_size,
     };
@@ -848,6 +856,7 @@ async fn prepare_for_test_multiple_layers_of_snapshots(
             disk_source: params::DiskSource::Snapshot {
                 snapshot_id: layer_2_snapshot.identity.id,
             },
+            read_only: false,
         },
         size: disk_size,
     };
@@ -1203,6 +1212,7 @@ async fn delete_image_test(
             disk_source: params::DiskSource::Blank {
                 block_size: params::BlockSize::try_from(512).unwrap(),
             },
+            read_only: false,
         },
         size: disk_size,
     };
@@ -2500,6 +2510,7 @@ async fn test_disk_create_saga_unwinds_correctly(
             disk_source: params::DiskSource::Blank {
                 block_size: params::BlockSize::try_from(512).unwrap(),
             },
+            read_only: false,
         },
         size: disk_size,
     };
@@ -2546,6 +2557,7 @@ async fn test_snapshot_create_saga_unwinds_correctly(
             disk_source: params::DiskSource::Blank {
                 block_size: params::BlockSize::try_from(512).unwrap(),
             },
+            read_only: false,
         },
         size: disk_size,
     };
@@ -3348,6 +3360,7 @@ async fn test_cte_returns_regions(cptestctx: &ControlPlaneTestContext) {
             disk_source: params::DiskSource::Blank {
                 block_size: params::BlockSize::try_from(512).unwrap(),
             },
+            read_only: false,
         },
         size: ByteCount::from_gibibytes_u32(2),
     };
