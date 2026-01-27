@@ -2109,14 +2109,11 @@ pub trait NexusExternalApi {
         rqctx: RequestContext<Self::Context>,
         query_params: Query<PaginatedByNameOrId<params::ProjectSelector>>,
     ) -> Result<HttpResponseOk<ResultsPage<v2026012300::Disk>>, HttpError> {
-        Self::disk_list(rqctx, query_params).await.and_then(
+        Self::disk_list(rqctx, query_params).await.map(
             |HttpResponseOk(page)| {
                 let items: Vec<_> =
                     page.items.into_iter().map(Into::into).collect();
-                Ok(HttpResponseOk(ResultsPage {
-                    next_page: page.next_page,
-                    items,
-                }))
+                HttpResponseOk(ResultsPage { next_page: page.next_page, items })
             },
         )
     }
@@ -2617,16 +2614,13 @@ pub trait NexusExternalApi {
         >,
         path_params: Path<params::InstancePath>,
     ) -> Result<HttpResponseOk<ResultsPage<v2026012300::Disk>>, HttpError> {
-        Self::instance_disk_list(rqctx, query_params, path_params)
-            .await
-            .and_then(|HttpResponseOk(page)| {
+        Self::instance_disk_list(rqctx, query_params, path_params).await.map(
+            |HttpResponseOk(page)| {
                 let items: Vec<_> =
                     page.items.into_iter().map(Into::into).collect();
-                Ok(HttpResponseOk(ResultsPage {
-                    next_page: page.next_page,
-                    items,
-                }))
-            })
+                HttpResponseOk(ResultsPage { next_page: page.next_page, items })
+            },
+        )
     }
 
     /// List disks for instance

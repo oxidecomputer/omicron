@@ -192,8 +192,8 @@ impl From<InstanceCreate> for v2026010100::InstanceCreate {
                 .map(Into::into)
                 .collect(),
             multicast_groups: old.multicast_groups,
-            disks: old.disks.into_iter().map(Into::into).collect(),
-            boot_disk: old.boot_disk.map(Into::into),
+            disks: old.disks,
+            boot_disk: old.boot_disk,
             ssh_public_keys: old.ssh_public_keys,
             start: old.start,
             auto_restart_policy: old.auto_restart_policy,

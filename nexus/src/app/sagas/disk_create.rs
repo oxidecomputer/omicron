@@ -127,7 +127,7 @@ impl NexusSaga for SagaDiskCreate {
         builder.append(finalize_disk_record_action());
 
         match &params.create_params.disk_backend {
-            params::DiskBackend::Distributed { disk_source } => {
+            params::DiskBackend::Distributed { disk_source, read_only: _ } => {
                 match disk_source {
                     params::DiskSource::ImportingBlocks { .. } => {
                         builder.append(get_pantry_address_action());
@@ -163,7 +163,9 @@ async fn sdc_create_crucible_disk_record(
     );
 
     let disk_source = match &params.create_params.disk_backend {
-        params::DiskBackend::Distributed { disk_source } => disk_source,
+        params::DiskBackend::Distributed { disk_source, read_only: _ } => {
+            disk_source
+        }
 
         params::DiskBackend::Local {} => {
             // This should be unreachable given the match performed in
@@ -367,7 +369,9 @@ async fn sdc_alloc_regions(
     let strategy = &osagactx.nexus().default_region_allocation_strategy;
 
     let disk_source = match &params.create_params.disk_backend {
-        params::DiskBackend::Distributed { disk_source } => disk_source,
+        params::DiskBackend::Distributed { disk_source, read_only: _ } => {
+            disk_source
+        }
 
         params::DiskBackend::Local {} => {
             // This should be unreachable given the match performed in
@@ -495,7 +499,9 @@ async fn sdc_regions_ensure(
     );
 
     let disk_source = match &params.create_params.disk_backend {
-        params::DiskBackend::Distributed { disk_source } => disk_source,
+        params::DiskBackend::Distributed { disk_source, read_only: _ } => {
+            disk_source
+        }
 
         params::DiskBackend::Local {} => {
             // This should be unreachable given the match performed in
@@ -801,7 +807,7 @@ async fn sdc_finalize_disk_record(
     // It would be better if this were better guaranteed.
 
     match params.create_params.disk_backend {
-        params::DiskBackend::Distributed { disk_source } => {
+        params::DiskBackend::Distributed { disk_source, read_only: _ } => {
             let disk_created = db::datastore::Disk::Crucible(
                 sagactx
                     .lookup::<db::datastore::CrucibleDisk>("crucible_disk")?,
@@ -1025,6 +1031,7 @@ pub(crate) mod test {
                 disk_source: params::DiskSource::Blank {
                     block_size: params::BlockSize(512),
                 },
+                read_only: false,
             },
             size: ByteCount::from_gibibytes_u32(1),
         }

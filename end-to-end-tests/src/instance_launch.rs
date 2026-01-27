@@ -46,9 +46,12 @@ async fn instance_launch() -> Result<()> {
         .body(DiskCreate {
             name: disk_name.clone(),
             description: String::new(),
-            disk_backend: DiskBackend::Distributed(DiskSource::Image {
-                image_id: ctx.get_silo_image_id("debian11").await?,
-            }),
+            disk_backend: DiskBackend::Distributed {
+                disk_source: DiskSource::Image {
+                    image_id: ctx.get_silo_image_id("debian11").await?,
+                },
+                read_only: false,
+            },
             size: ByteCount(2048 * 1024 * 1024),
         })
         .send()
