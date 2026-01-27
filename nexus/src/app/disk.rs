@@ -293,7 +293,8 @@ impl super::Nexus {
         self.validate_disk_create_params(opctx, &authz_project, params).await?;
 
         // If we are creating a read-only disk from a snapshot, no saga is
-        // required --- we can just create the disk pointed at that snapshot.
+        // required --- we can just create the disk using a copy of the
+        // snapshot's volume.
         if let params::DiskBackend::Distributed {
             disk_source: params::DiskSource::Snapshot { read_only: true, .. },
         } = params.disk_backend

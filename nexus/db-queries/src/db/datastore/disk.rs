@@ -1733,9 +1733,10 @@ impl DataStore {
         };
 
         let Some(snapshot) = maybe_snapshot else {
-            return Err(err.bail(Error::non_resourcetype_not_found(format!(
-                "snapshot {snapshot_id}"
-            ))));
+            return Err(err.bail(Error::not_found_by_id(
+                ResourceType::Snapshot,
+                &snapshot_id,
+            )));
         };
 
         let sub_err = OptionalError::new();
