@@ -681,11 +681,8 @@ async fn sdc_regions_ensure(
 
                 control: None,
 
-                // Hey you, don't set it just yet! Otherwise you can't import
-                // blocks into the disk!
-                //
-                // XXX when set to true, does this play well with region
-                // replacement?
+                // Read-only disks are created from snapshots, outside of this
+                // saga.
                 read_only: false,
             },
         }],
