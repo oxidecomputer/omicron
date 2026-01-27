@@ -33,6 +33,7 @@ mod ip_pools;
 mod local_storage;
 mod metrics;
 mod metrics_querier;
+#[cfg(feature = "multicast")]
 mod multicast;
 mod oximeter;
 mod pantry;
