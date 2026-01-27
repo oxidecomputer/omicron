@@ -5,6 +5,7 @@
 use super::impl_enum_type;
 use crate::typed_uuid::DbTypedUuid;
 use nexus_db_schema::schema::support_bundle;
+use nexus_db_schema::schema::support_bundle_config;
 
 use chrono::{DateTime, Utc};
 use nexus_types::external_api::shared::SupportBundleInfo as SupportBundleView;
@@ -135,4 +136,19 @@ impl From<SupportBundle> for SupportBundleView {
             state: bundle.state.into(),
         }
     }
+}
+
+/// Configuration for automatic support bundle deletion.
+///
+/// This table uses a singleton pattern - exactly one row exists, created by
+/// the schema migration. The row is only updated, never inserted or deleted.
+#[derive(Clone, Debug, Queryable, Selectable, Serialize, Deserialize)]
+#[diesel(table_name = support_bundle_config)]
+pub struct SupportBundleConfig {
+    pub singleton: bool,
+    /// Percentage (0-100) of total datasets to keep free for new allocations.
+    pub target_free_percent: i64,
+    /// Percentage (0-100) of total datasets to retain as bundles (minimum).
+    pub min_keep_percent: i64,
+    pub time_modified: DateTime<Utc>,
 }

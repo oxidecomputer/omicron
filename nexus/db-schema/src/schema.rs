@@ -1589,6 +1589,15 @@ table! {
     }
 }
 
+table! {
+    support_bundle_config (singleton) {
+        singleton -> Bool,
+        target_free_percent -> Int8,
+        min_keep_percent -> Int8,
+        time_modified -> Timestamptz,
+    }
+}
+
 /* hardware inventory */
 
 table! {
