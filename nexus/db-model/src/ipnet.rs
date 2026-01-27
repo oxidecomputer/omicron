@@ -2,6 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+use crate::IpVersion;
 use diesel::backend::Backend;
 use diesel::deserialize;
 use diesel::deserialize::FromSql;
@@ -28,6 +29,15 @@ use serde::Serialize;
 pub enum IpNet {
     V4(crate::Ipv4Net),
     V6(crate::Ipv6Net),
+}
+
+impl IpNet {
+    pub fn ip_version(&self) -> IpVersion {
+        match self {
+            IpNet::V4(_) => IpVersion::V4,
+            IpNet::V6(_) => IpVersion::V6,
+        }
+    }
 }
 
 impl ::std::fmt::Display for IpNet {
