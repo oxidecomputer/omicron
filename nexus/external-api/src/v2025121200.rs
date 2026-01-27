@@ -38,7 +38,7 @@ use serde::{Deserialize, Serialize};
 use nexus_types::external_api::params;
 use omicron_common::api::external;
 
-use crate::{v2026010100, v2026010300};
+use crate::{v2026010100, v2026010300, v2026012300};
 
 // Re-export multicast types from v2025122300.
 // They're identical for both versions (both use NameOrId, explicit
@@ -157,10 +157,10 @@ pub struct InstanceCreate {
     pub multicast_groups: Vec<external::NameOrId>,
     /// A list of disks to be attached to the instance.
     #[serde(default)]
-    pub disks: Vec<params::InstanceDiskAttachment>,
+    pub disks: Vec<v2026012300::InstanceDiskAttachment>,
     /// The disk the instance is configured to boot from.
     #[serde(default)]
-    pub boot_disk: Option<params::InstanceDiskAttachment>,
+    pub boot_disk: Option<v2026012300::InstanceDiskAttachment>,
     /// An allowlist of SSH public keys to be transferred to the instance.
     pub ssh_public_keys: Option<Vec<external::NameOrId>>,
     /// Should this instance be started upon creation; true by default.
@@ -192,8 +192,8 @@ impl From<InstanceCreate> for v2026010100::InstanceCreate {
                 .map(Into::into)
                 .collect(),
             multicast_groups: old.multicast_groups,
-            disks: old.disks,
-            boot_disk: old.boot_disk,
+            disks: old.disks.into_iter().map(Into::into).collect(),
+            boot_disk: old.boot_disk.map(Into::into),
             ssh_public_keys: old.ssh_public_keys,
             start: old.start,
             auto_restart_policy: old.auto_restart_policy,

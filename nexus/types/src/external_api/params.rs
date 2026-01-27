@@ -2380,6 +2380,8 @@ pub enum DiskBackend {
     Distributed {
         /// The initial source for this disk
         disk_source: DiskSource,
+        /// If `true`, the disk will be read-only once it is created.
+        read_only: bool,
     },
 }
 

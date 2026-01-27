@@ -6,6 +6,7 @@
 
 use crate::v2025121200;
 use crate::v2026010100;
+use crate::v2026012300;
 use nexus_types::external_api::params;
 use omicron_common::api::external;
 use schemars::JsonSchema;
@@ -56,6 +57,7 @@ impl From<Disk> for external::Disk {
             state: old.state,
             device_path: old.device_path,
             disk_type: old.disk_type.into(),
+            read_only: false, // read_only defaults to false
         }
     }
 }
@@ -64,6 +66,53 @@ impl TryFrom<external::Disk> for Disk {
     type Error = dropshot::HttpError;
 
     fn try_from(new: external::Disk) -> Result<Disk, Self::Error> {
+        Ok(Disk {
+            identity: new.identity,
+            project_id: new.project_id,
+            snapshot_id: new.snapshot_id,
+            image_id: new.image_id,
+            size: new.size,
+            block_size: new.block_size,
+            state: new.state,
+            device_path: new.device_path,
+            disk_type: match new.disk_type {
+                external::DiskType::Distributed => DiskType::Crucible,
+
+                _ => {
+                    // Cannot display any other variant for this old client
+                    return Err(dropshot::HttpError::for_client_error(
+                        Some(String::from("Not Acceptable")),
+                        dropshot::ClientErrorStatusCode::NOT_ACCEPTABLE,
+                        String::from(
+                            "disk type variant not supported for client version",
+                        ),
+                    ));
+                }
+            },
+        })
+    }
+}
+
+impl From<Disk> for v2026012300::Disk {
+    fn from(old: Disk) -> v2026012300::Disk {
+        v2026012300::Disk {
+            identity: old.identity,
+            project_id: old.project_id,
+            snapshot_id: old.snapshot_id,
+            image_id: old.image_id,
+            size: old.size,
+            block_size: old.block_size,
+            state: old.state,
+            device_path: old.device_path,
+            disk_type: old.disk_type.into(),
+        }
+    }
+}
+
+impl TryFrom<v2026012300::Disk> for Disk {
+    type Error = dropshot::HttpError;
+
+    fn try_from(new: v2026012300::Disk) -> Result<Disk, Self::Error> {
         Ok(Disk {
             identity: new.identity,
             project_id: new.project_id,
@@ -154,6 +203,19 @@ impl From<DiskCreate> for params::DiskCreate {
             identity: old.identity,
             disk_backend: params::DiskBackend::Distributed {
                 disk_source: old.disk_source.into(),
+                read_only: false,
+            },
+            size: old.size,
+        }
+    }
+}
+
+impl From<DiskCreate> for v2026012300::DiskCreate {
+    fn from(old: DiskCreate) -> v2026012300::DiskCreate {
+        v2026012300::DiskCreate {
+            identity: old.identity,
+            disk_backend: v2026012300::DiskBackend::Distributed {
+                disk_source: old.disk_source.into(),
             },
             size: old.size,
         }
@@ -180,6 +242,22 @@ impl From<InstanceDiskAttachment> for params::InstanceDiskAttachment {
 
             InstanceDiskAttachment::Attach(attach) => {
                 params::InstanceDiskAttachment::Attach(attach)
+            }
+        }
+    }
+}
+
+impl From<InstanceDiskAttachment> for v2026012300::InstanceDiskAttachment {
+    fn from(
+        old: InstanceDiskAttachment,
+    ) -> v2026012300::InstanceDiskAttachment {
+        match old {
+            InstanceDiskAttachment::Create(create) => {
+                v2026012300::InstanceDiskAttachment::Create(create.into())
+            }
+
+            InstanceDiskAttachment::Attach(attach) => {
+                v2026012300::InstanceDiskAttachment::Attach(attach)
             }
         }
     }

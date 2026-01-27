@@ -275,6 +275,7 @@ impl Into<api::external::Disk> for Disk {
                     state: disk.state().into(),
                     device_path,
                     disk_type: api::external::DiskType::Distributed,
+                    read_only: false, // TODO ELIZA THIS SHOULD EVENTUALLY NOT BE FALSE
                 }
             }
 
@@ -295,6 +296,7 @@ impl Into<api::external::Disk> for Disk {
                     state: disk.state().into(),
                     device_path,
                     disk_type: api::external::DiskType::Local,
+                    read_only: false, // Local disks are (currently) never read-only
                 }
             }
         }
@@ -1680,6 +1682,7 @@ mod tests {
             },
             disk_backend: params::DiskBackend::Distributed {
                 disk_source: disk_source.clone(),
+                read_only: false,
             },
             size: external::ByteCount::from(2147483648),
         };
