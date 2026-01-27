@@ -122,15 +122,16 @@ impl<'a> EarlyNetworkSetup<'a> {
     /// * If `rack_network_config` specifies only one switch with an uplink,
     ///   blocks until we can find that switch zone's underlay address.
     /// * If `rack_network_config` specifies two switches with uplinks, we will
-    ///   block for a while (~5 minutes, currently) trying to find both
-    ///   corresponding switch zones. If we pass our deadline without having
+    ///   block up to the `wait_for_at_least_one` duration trying to find both
+    ///   corresponding switch zones. If we pass the deadline without having
     ///   found both, we will return as soon after that as we can find one of
     ///   the switch zone's addresses.
     pub async fn lookup_uplinked_switch_zone_underlay_addrs(
         &self,
         resolver: &DnsResolver,
         config: &RackNetworkConfig,
-    ) -> HashSet<Ipv6Addr> {
+        wait_for_at_least_one: Duration,
+    ) -> HashMap<SwitchLocation, Ipv6Addr> {
         // Which switches have configured ports?
         let uplinked_switches = config
             .ports
@@ -140,58 +141,17 @@ impl<'a> EarlyNetworkSetup<'a> {
 
         // If we have no uplinks, we have nothing to look up.
         if uplinked_switches.is_empty() {
-            return HashSet::new();
+            return HashMap::new();
         }
 
-        let uplinked_switch_zone_addrs = self
-            .lookup_switch_zone_underlay_addrs_impl(
-                resolver,
-                Some(uplinked_switches),
-            )
-            .await;
-
-        // lookup_switch_zone_underlay_addrs_impl should not return until it
-        // finds at least one of the uplinked_switches
-        assert!(!uplinked_switch_zone_addrs.is_empty());
-
-        uplinked_switch_zone_addrs.into_values().collect()
-    }
-
-    /// Dynamically looks up (via internal DNS and queries to MGS) the underlay
-    /// addresses of the switch zones.
-    ///
-    /// Blocks until either:
-    ///
-    /// * We found the location and underlay addresses of all switch zones
-    ///   reported by internal DNS
-    /// * We've passed a substantial deadline (~5 minutes, currently) and have
-    ///   found the location and underlay address of one switch zone reported by
-    ///   internal DNS
-    pub async fn lookup_switch_zone_underlay_addrs(
-        &self,
-        resolver: &DnsResolver,
-    ) -> HashMap<SwitchLocation, Ipv6Addr> {
-        self.lookup_switch_zone_underlay_addrs_impl(resolver, None).await
-    }
-
-    async fn lookup_switch_zone_underlay_addrs_impl(
-        &self,
-        resolver: &DnsResolver,
-        switches_to_find: Option<HashSet<SwitchLocation>>,
-    ) -> HashMap<SwitchLocation, Ipv6Addr> {
-        // We will wait up to 5 minutes to try to find all switches; if we pass
-        // the 5 minute mark, we will return as soon as we find at least one
-        // switch.
-        const MAX_SWITCH_ZONE_WAIT_TIME: Duration = Duration::from_secs(60 * 5);
-
         let query_start = Instant::now();
-        retry_notify(
+        let uplinked_switch_zone_addrs = retry_notify(
             retry_policy_switch_mapping(),
             || async {
                 match self
                     .lookup_switch_zone_underlay_addrs_one_attempt(
                         resolver,
-                        switches_to_find.as_ref(),
+                        &uplinked_switches,
                     )
                     .await?
                 {
@@ -206,16 +166,16 @@ impl<'a> EarlyNetworkSetup<'a> {
                     }
                     LookupSwitchZoneAddrsResult::PartialSuccess(map) => {
                         let elapsed = query_start.elapsed();
-                        if elapsed >= MAX_SWITCH_ZONE_WAIT_TIME {
+                        if elapsed >= wait_for_at_least_one {
                             // We only found one switch when we are expecting
                             // two, but we've been waiting for too long: go with
                             // just one.
                             warn!(
                                 self.log,
                                 "Only found one switch (expected two), \
-                                 but passed wait time of \
-                                 {MAX_SWITCH_ZONE_WAIT_TIME:?}: returning";
+                                 but passed requested wait time: returning";
                                 "switch_found" => ?map,
+                                "requested_wait_time" => ?wait_for_at_least_one,
                                 "total_elapsed" => ?elapsed,
                             );
                             Ok(map)
@@ -231,16 +191,25 @@ impl<'a> EarlyNetworkSetup<'a> {
                 }
             },
             |error, delay| {
+                let elapsed = query_start.elapsed();
                 warn!(
                     self.log,
                     "Failed to look up switch zone locations";
                     "error" => #%error,
                     "retry_after" => ?delay,
+                    "requested_wait_time" => ?wait_for_at_least_one,
+                    "total_elapsed" => ?elapsed,
                 );
             },
         )
         .await
-        .expect("Expected an infinite retry loop finding switch zones")
+        .expect("Expected an infinite retry loop finding switch zones");
+
+        // lookup_switch_zone_underlay_addrs_impl should not return until it
+        // finds at least one of the uplinked_switches
+        assert!(!uplinked_switch_zone_addrs.is_empty());
+
+        uplinked_switch_zone_addrs
     }
 
     // TODO: #3601 Audit switch location discovery logic for robustness
@@ -250,14 +219,12 @@ impl<'a> EarlyNetworkSetup<'a> {
     async fn lookup_switch_zone_underlay_addrs_one_attempt(
         &self,
         resolver: &DnsResolver,
-        switches_to_find: Option<&HashSet<SwitchLocation>>,
+        switches_to_find: &HashSet<SwitchLocation>,
     ) -> Result<LookupSwitchZoneAddrsResult, BackoffError<String>> {
-        if let Some(switches_to_find) = switches_to_find {
-            // We should only be called with a nonempty `switches_to_find`;
-            // otherwise we'll never return: we always want to find at least one
-            // of these switches.
-            assert!(!switches_to_find.is_empty());
-        }
+        // We should only be called with a nonempty `switches_to_find`;
+        // otherwise we'll never return: we always want to find at least one
+        // of these switches.
+        assert!(!switches_to_find.is_empty());
 
         // We might have stale DNS results; clear our resolver's cache.
         resolver.clear_cache();
@@ -313,45 +280,19 @@ impl<'a> EarlyNetworkSetup<'a> {
             }
         }
 
-        if let Some(switches_to_find) = switches_to_find {
-            // Were we tasked with finding _specific_ switches? If so, filter
-            // `switch_location_map` down to just the ones we care about, and
-            // then return total/partial/no success based on what's left.
-            switch_location_map
-                .retain(|location, _addr| switches_to_find.contains(location));
+        // Filter `switch_location_map` down to just the ones we care about,
+        // and then return total/partial/no success based on what's left.
+        switch_location_map
+            .retain(|location, _addr| switches_to_find.contains(location));
 
-            if switch_location_map.is_empty() {
-                Err(BackoffError::transient(
-                    "No switch locations found".to_string(),
-                ))
-            } else if switch_location_map.len() == switches_to_find.len() {
-                Ok(LookupSwitchZoneAddrsResult::TotalSuccess(
-                    switch_location_map,
-                ))
-            } else {
-                Ok(LookupSwitchZoneAddrsResult::PartialSuccess(
-                    switch_location_map,
-                ))
-            }
+        if switch_location_map.is_empty() {
+            Err(BackoffError::transient(
+                "No switch locations found".to_string(),
+            ))
+        } else if switch_location_map.len() == switches_to_find.len() {
+            Ok(LookupSwitchZoneAddrsResult::TotalSuccess(switch_location_map))
         } else {
-            // We were not tasked with finding specific switches: we're done if
-            // we found both, or if we found one and internal DNS only gave us
-            // one IP address (e.g., in test environments with just one switch).
-            if switch_location_map.is_empty() {
-                Err(BackoffError::transient(
-                    "No switch locations found".to_string(),
-                ))
-            } else if switch_location_map.len() == 1
-                && switch_zone_addrs.len() > 1
-            {
-                Ok(LookupSwitchZoneAddrsResult::PartialSuccess(
-                    switch_location_map,
-                ))
-            } else {
-                Ok(LookupSwitchZoneAddrsResult::TotalSuccess(
-                    switch_location_map,
-                ))
-            }
+            Ok(LookupSwitchZoneAddrsResult::PartialSuccess(switch_location_map))
         }
     }
 
