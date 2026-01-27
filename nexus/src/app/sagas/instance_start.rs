@@ -16,6 +16,7 @@ use crate::app::instance::{
     InstanceEnsureRegisteredApiResources, InstanceRegisterReason,
     InstanceStateChangeError,
 };
+use crate::app::instance_network::InstanceNetworkFilters;
 use crate::app::sagas::declare_saga_actions;
 use chrono::Utc;
 use nexus_db_lookup::LookupPath;
@@ -117,6 +118,10 @@ declare_saga_actions! {
         + sis_ensure_registered
         - sis_ensure_registered_undo
     }
+
+    // TODO(ben) Add node pushing attached subnets to OPTE.
+    // Add test specifically for this, create stopped instance, attach subnet,
+    // and then start it and make sure the subnets exist.
 
     UPDATE_MULTICAST_SLED_ID -> "multicast_sled_id" {
         + sis_update_multicast_sled_id
@@ -741,7 +746,12 @@ async fn sis_dpd_ensure(
 
     osagactx
         .nexus()
-        .instance_ensure_dpd_config(&opctx, instance_id, &sled.address(), None)
+        .instance_ensure_dpd_config(
+            &opctx,
+            instance_id,
+            &sled.address(),
+            InstanceNetworkFilters::all(),
+        )
         .await
         .map_err(ActionError::action_failed)?;
 

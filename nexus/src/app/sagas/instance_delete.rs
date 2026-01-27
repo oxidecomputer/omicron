@@ -47,6 +47,8 @@ declare_saga_actions! {
     INSTANCE_DELETE_NAT -> "no_result5" {
         + sid_delete_nat
     }
+    // TODO(ben) Delete attached subnets
+    // TODO(ben) notify Dendrite to detach them
 }
 
 // instance delete saga: definition

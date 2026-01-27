@@ -1106,6 +1106,7 @@ pub enum AttachedSubnetId {
 }
 
 /// All details about an attached subnet and the Instance it's attached to.
+#[derive(Debug)]
 pub struct AttachedSubnet {
     /// ID of the rack hosting this instance.
     ///

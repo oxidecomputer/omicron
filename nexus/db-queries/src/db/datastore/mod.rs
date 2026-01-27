@@ -142,6 +142,8 @@ pub use dns::DataStoreDnsTest;
 pub use dns::DnsVersionUpdateBuilder;
 pub use ereport::EreportFilters;
 pub use external_ip::FloatingIpAllocation;
+pub use external_subnet::ExternalSubnetAttachResult;
+pub use external_subnet::ExternalSubnetBeginAttachResult;
 pub use instance::{
     InstanceAndActiveVmm, InstanceGestalt, InstanceStateComputer,
 };
