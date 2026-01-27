@@ -717,6 +717,7 @@ impl super::Nexus {
             project_id: authz_proj.id(),
             disk,
             snapshot_name: finalize_params.snapshot_name.clone(),
+            read_only: false, // XXX get this out of `disk.read_only()`
         };
 
         self.sagas

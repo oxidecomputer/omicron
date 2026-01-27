@@ -35,6 +35,7 @@ pub(crate) struct Params {
     pub project_id: Uuid,
     pub disk: datastore::CrucibleDisk,
     pub snapshot_name: Option<Name>,
+    pub read_only: bool,
 }
 
 declare_saga_actions! {
@@ -51,6 +52,9 @@ declare_saga_actions! {
     }
     CLEAR_PANTRY_ADDRESS -> "clear_pantry_address" {
         + sfd_clear_pantry_address
+    }
+    SET_READ_ONLY_IN_VCR -> "unused" {
+        + sfd_set_read_only_in_vcr
     }
     SET_DETACHED_STATE -> "set_detached_state" {
         + sfd_set_detached_state
@@ -126,6 +130,10 @@ impl NexusSaga for SagaFinalizeDisk {
         builder.append(call_pantry_detach_for_disk_action());
 
         builder.append(clear_pantry_address_action());
+
+        if params.read_only {
+            builder.append(set_read_only_in_vcr_action());
+        }
 
         builder.append(set_detached_state_action());
 
@@ -354,6 +362,14 @@ async fn sfd_clear_pantry_address(
         .map_err(ActionError::action_failed)?;
 
     Ok(())
+}
+
+async fn sfd_set_read_only_in_vcr(
+    sagactx: NexusActionContext,
+) -> Result<(), ActionError> {
+    // blah blah some comment about setting this before setting state to
+    // Detached, because no instance can use it until then
+    todo!("change the VCR to set read_only = true")
 }
 
 async fn sfd_set_detached_state(

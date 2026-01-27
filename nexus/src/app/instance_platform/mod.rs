@@ -264,7 +264,7 @@ impl DisksByIdBuilder {
     ) -> Result<(), Error> {
         let backend =
             ComponentV0::CrucibleStorageBackend(CrucibleStorageBackend {
-                readonly: false,
+                readonly: false, // XXX eliza
                 request_json: volume.data().to_owned(),
             });
 
@@ -278,7 +278,7 @@ impl DisksByIdBuilder {
     ) -> Result<(), Error> {
         let backend = ComponentV0::FileStorageBackend(FileStorageBackend {
             path,
-            readonly: false,
+            readonly: false, // XXX eliza
             block_size: disk.block_size().to_bytes(),
             workers: Some(LOCAL_STORAGE_WORKERS),
         });
