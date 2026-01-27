@@ -127,13 +127,22 @@ impl NexusSaga for SagaDiskCreate {
         builder.append(finalize_disk_record_action());
 
         match &params.create_params.disk_backend {
-            params::DiskBackend::Distributed { disk_source, read_only: _ } => {
+            params::DiskBackend::Distributed { disk_source } => {
                 match disk_source {
                     params::DiskSource::ImportingBlocks { .. } => {
                         builder.append(get_pantry_address_action());
                         builder.append(call_pantry_attach_for_disk_action());
                     }
 
+                    params::DiskSource::Snapshot {
+                        read_only: true, ..
+                    } => {
+                        return Err(SagaInitError::InvalidParameter(
+                            "a read-only disk created from a snapshot does \
+                             not require a saga"
+                                .to_string(),
+                        ));
+                    }
                     _ => {}
                 }
             }
@@ -149,6 +158,9 @@ impl NexusSaga for SagaDiskCreate {
 
 // disk create saga: action implementations
 
+const READONLY_FROM_SNAPSHOT_ERR: &str = "creating a read-only disk from a snapshot should not involve a \
+     disk_create saga";
+
 async fn sdc_create_crucible_disk_record(
     sagactx: NexusActionContext,
 ) -> Result<db::datastore::CrucibleDisk, ActionError> {
@@ -162,10 +174,8 @@ async fn sdc_create_crucible_disk_record(
         &params.serialized_authn,
     );
 
-    let (disk_source, read_only) = match params.create_params.disk_backend {
-        params::DiskBackend::Distributed { ref disk_source, read_only } => {
-            (disk_source, *read_only)
-        }
+    let disk_source = match &params.create_params.disk_backend {
+        params::DiskBackend::Distributed { disk_source } => disk_source,
 
         params::DiskBackend::Local {} => {
             // This should be unreachable given the match performed in
@@ -184,7 +194,12 @@ async fn sdc_create_crucible_disk_record(
                 ))
             })?
         }
-        params::DiskSource::Snapshot { snapshot_id } => {
+        params::DiskSource::Snapshot { read_only: true, .. } => {
+            return Err(ActionError::action_failed(Error::internal_error(
+                READONLY_FROM_SNAPSHOT_ERR,
+            )));
+        }
+        params::DiskSource::Snapshot { snapshot_id, read_only: false } => {
             let (.., db_snapshot) =
                 LookupPath::new(&opctx, osagactx.datastore())
                     .snapshot_id(*snapshot_id)
@@ -236,7 +251,6 @@ async fn sdc_create_crucible_disk_record(
         // state until the saga has completed.
         sagactx.lookup::<VolumeUuid>("volume_id")?,
         &disk_source,
-        read_only,
     );
 
     let crucible_disk =
@@ -370,9 +384,7 @@ async fn sdc_alloc_regions(
     let strategy = &osagactx.nexus().default_region_allocation_strategy;
 
     let disk_source = match &params.create_params.disk_backend {
-        params::DiskBackend::Distributed { disk_source, read_only: _ } => {
-            disk_source
-        }
+        params::DiskBackend::Distributed { disk_source } => disk_source,
 
         params::DiskBackend::Local {} => {
             // This should be unreachable given the match performed in
@@ -500,9 +512,7 @@ async fn sdc_regions_ensure(
     );
 
     let disk_source = match &params.create_params.disk_backend {
-        params::DiskBackend::Distributed { disk_source, read_only: _ } => {
-            disk_source
-        }
+        params::DiskBackend::Distributed { disk_source } => disk_source,
 
         params::DiskBackend::Local {} => {
             // This should be unreachable given the match performed in
@@ -516,7 +526,13 @@ async fn sdc_regions_ensure(
     let mut read_only_parent: Option<Box<VolumeConstructionRequest>> =
         match disk_source {
             params::DiskSource::Blank { block_size: _ } => None,
-            params::DiskSource::Snapshot { snapshot_id } => {
+            params::DiskSource::Snapshot { read_only: true, .. } => {
+                return Err(ActionError::action_failed(Error::internal_error(
+                    READONLY_FROM_SNAPSHOT_ERR,
+                )));
+            }
+
+            params::DiskSource::Snapshot { snapshot_id, read_only: false } => {
                 debug!(log, "grabbing snapshot {}", snapshot_id);
 
                 let (.., db_snapshot) =
@@ -808,7 +824,7 @@ async fn sdc_finalize_disk_record(
     // It would be better if this were better guaranteed.
 
     match params.create_params.disk_backend {
-        params::DiskBackend::Distributed { disk_source, read_only: _ } => {
+        params::DiskBackend::Distributed { disk_source } => {
             let disk_created = db::datastore::Disk::Crucible(
                 sagactx
                     .lookup::<db::datastore::CrucibleDisk>("crucible_disk")?,
@@ -1032,7 +1048,6 @@ pub(crate) mod test {
                 disk_source: params::DiskSource::Blank {
                     block_size: params::BlockSize(512),
                 },
-                read_only: false,
             },
             size: ByteCount::from_gibibytes_u32(1),
         }

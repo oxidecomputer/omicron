@@ -169,7 +169,10 @@ impl From<DiskSource> for params::DiskSource {
             }
 
             DiskSource::Snapshot { snapshot_id } => {
-                params::DiskSource::Snapshot { snapshot_id }
+                params::DiskSource::Snapshot {
+                    snapshot_id,
+                    read_only: false, // read only defaults to false if the client doesn't know about it
+                }
             }
 
             DiskSource::Image { image_id } => {
@@ -203,7 +206,6 @@ impl From<DiskCreate> for params::DiskCreate {
             identity: old.identity,
             disk_backend: params::DiskBackend::Distributed {
                 disk_source: old.disk_source.into(),
-                read_only: false,
             },
             size: old.size,
         }
@@ -215,7 +217,7 @@ impl From<DiskCreate> for v2026012300::DiskCreate {
         v2026012300::DiskCreate {
             identity: old.identity,
             disk_backend: v2026012300::DiskBackend::Distributed {
-                disk_source: old.disk_source.into(),
+                disk_source: old.disk_source,
             },
             size: old.size,
         }

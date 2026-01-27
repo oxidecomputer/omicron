@@ -109,7 +109,6 @@ async fn test_snapshot_basic(cptestctx: &ControlPlaneTestContext) {
             disk_source: params::DiskSource::Image {
                 image_id: image.identity.id,
             },
-            read_only: false,
         },
         size: disk_size,
     };
@@ -225,7 +224,6 @@ async fn test_snapshot_without_instance(cptestctx: &ControlPlaneTestContext) {
             disk_source: params::DiskSource::Image {
                 image_id: image.identity.id,
             },
-            read_only: false,
         },
         size: disk_size,
     };
@@ -327,7 +325,6 @@ async fn test_snapshot_stopped_instance(cptestctx: &ControlPlaneTestContext) {
             disk_source: params::DiskSource::Image {
                 image_id: image.identity.id,
             },
-            read_only: false,
         },
         size: disk_size,
     };
@@ -422,7 +419,6 @@ async fn test_delete_snapshot(cptestctx: &ControlPlaneTestContext) {
             disk_source: params::DiskSource::Blank {
                 block_size: params::BlockSize::try_from(512).unwrap(),
             },
-            read_only: false,
         },
         size: disk_size,
     };
@@ -486,7 +482,6 @@ async fn test_delete_snapshot(cptestctx: &ControlPlaneTestContext) {
             disk_source: params::DiskSource::Blank {
                 block_size: params::BlockSize::try_from(512).unwrap(),
             },
-            read_only: false,
         },
         size: disk_size,
     };
@@ -631,8 +626,8 @@ async fn test_reject_creating_disk_from_snapshot(
                 disk_backend: params::DiskBackend::Distributed {
                     disk_source: params::DiskSource::Snapshot {
                         snapshot_id: snapshot.id(),
+                        read_only: false,
                     },
-                    read_only: false,
                 },
 
                 size: ByteCount::try_from(
@@ -666,8 +661,8 @@ async fn test_reject_creating_disk_from_snapshot(
                 disk_backend: params::DiskBackend::Distributed {
                     disk_source: params::DiskSource::Snapshot {
                         snapshot_id: snapshot.id(),
+                        read_only: false,
                     },
-                    read_only: false,
                 },
 
                 size: ByteCount::try_from(MIN_DISK_SIZE_BYTES).unwrap(),
@@ -702,8 +697,8 @@ async fn test_reject_creating_disk_from_snapshot(
                 disk_backend: params::DiskBackend::Distributed {
                     disk_source: params::DiskSource::Snapshot {
                         snapshot_id: snapshot.id(),
+                        read_only: false,
                     },
-                    read_only: false,
                 },
 
                 size: ByteCount::try_from(
@@ -802,8 +797,8 @@ async fn test_reject_creating_disk_from_illegal_snapshot(
                 disk_backend: params::DiskBackend::Distributed {
                     disk_source: params::DiskSource::Snapshot {
                         snapshot_id: snapshot.id(),
+                        read_only: false,
                     },
-                    read_only: false,
                 },
 
                 size: ByteCount::try_from(
@@ -894,8 +889,8 @@ async fn test_reject_creating_disk_from_other_project_snapshot(
                 disk_backend: params::DiskBackend::Distributed {
                     disk_source: params::DiskSource::Snapshot {
                         snapshot_id: snapshot.id(),
+                        read_only: false,
                     },
-                    read_only: false,
                 },
 
                 size: ByteCount::try_from(MIN_DISK_SIZE_BYTES).unwrap(),
@@ -933,7 +928,6 @@ async fn test_cannot_snapshot_if_no_space(cptestctx: &ControlPlaneTestContext) {
             disk_source: params::DiskSource::Blank {
                 block_size: params::BlockSize::try_from(512).unwrap(),
             },
-            read_only: false,
         },
         size: disk_size,
     };
@@ -1007,7 +1001,6 @@ async fn test_snapshot_unwind(cptestctx: &ControlPlaneTestContext) {
             disk_source: params::DiskSource::Image {
                 image_id: image.identity.id,
             },
-            read_only: false,
         },
         size: disk_size,
     };
@@ -1305,7 +1298,6 @@ async fn test_multiple_deletes_not_sent(cptestctx: &ControlPlaneTestContext) {
             disk_source: params::DiskSource::Blank {
                 block_size: params::BlockSize::try_from(512).unwrap(),
             },
-            read_only: false,
         },
         size: disk_size,
     };

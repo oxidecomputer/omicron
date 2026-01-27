@@ -5,9 +5,9 @@
 //! Types from API version 2026012300 (`DUAL_STACK_EPHEMERAL_IP`) that changed
 //! in version 2026012600 (`READ_ONLY_DISKS`).
 
+use crate::v2025112000;
 use api_identity::ObjectIdentity;
 use nexus_types::external_api::params;
-use nexus_types::external_api::params::DiskSource;
 use omicron_common::api::external;
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::DiskState;
@@ -49,7 +49,7 @@ pub enum DiskBackend {
 
     Distributed {
         /// The initial source for this disk
-        disk_source: DiskSource,
+        disk_source: v2025112000::DiskSource,
     },
 }
 
@@ -59,9 +59,7 @@ impl From<DiskBackend> for params::DiskBackend {
             DiskBackend::Local {} => params::DiskBackend::Local {},
             DiskBackend::Distributed { disk_source } => {
                 params::DiskBackend::Distributed {
-                    disk_source,
-                    // Default to read/write
-                    read_only: false,
+                    disk_source: disk_source.into(),
                 }
             }
         }

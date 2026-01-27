@@ -2638,7 +2638,7 @@ async fn test_instance_using_image_from_other_project_fails(
                             disk_source: params::DiskSource::Image {
                                 image_id: image.identity.id,
                             },
-                            read_only: false,
+                            
                         },
                         size: ByteCount::from_gibibytes_u32(4),
                     },
@@ -4446,7 +4446,7 @@ async fn test_instance_create_attach_disks(
                     disk_source: params::DiskSource::Blank {
                         block_size: params::BlockSize::try_from(512).unwrap(),
                     },
-                    read_only: false,
+                    
                 },
             },
         )),
@@ -4464,7 +4464,7 @@ async fn test_instance_create_attach_disks(
                     disk_source: params::DiskSource::Blank {
                         block_size: params::BlockSize::try_from(512).unwrap(),
                     },
-                    read_only: false,
+                    
                 },
             }),
             params::InstanceDiskAttachment::Attach(
@@ -4566,7 +4566,7 @@ async fn test_instance_create_attach_disks_undo(
                     disk_source: params::DiskSource::Blank {
                         block_size: params::BlockSize::try_from(512).unwrap(),
                     },
-                    read_only: false,
+                    
                 },
             }),
             params::InstanceDiskAttachment::Attach(
@@ -9173,7 +9173,7 @@ async fn test_instance_with_max_disks(cptestctx: &ControlPlaneTestContext) {
                 disk_source: params::DiskSource::Blank {
                     block_size: params::BlockSize::try_from(512).unwrap(),
                 },
-                read_only: false,
+                
             },
             size: ByteCount::from_gibibytes_u32(1),
         };

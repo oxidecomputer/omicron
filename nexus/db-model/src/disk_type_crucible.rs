@@ -47,11 +47,12 @@ impl DiskTypeCrucible {
         disk_id: Uuid,
         volume_id: VolumeUuid,
         disk_source: &params::DiskSource,
-        read_only: bool,
     ) -> Self {
-        let create_snapshot_id = match disk_source {
-            params::DiskSource::Snapshot { snapshot_id } => Some(*snapshot_id),
-            _ => None,
+        let (create_snapshot_id, read_only) = match disk_source {
+            &params::DiskSource::Snapshot { snapshot_id, read_only } => {
+                (Some(snapshot_id), read_only)
+            }
+            _ => (None, false),
         };
 
         // XXX further enum here for different image types?

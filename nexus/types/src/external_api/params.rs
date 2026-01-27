@@ -2361,7 +2361,11 @@ pub enum DiskSource {
     },
 
     /// Create a disk from a disk snapshot
-    Snapshot { snapshot_id: Uuid },
+    Snapshot {
+        snapshot_id: Uuid,
+        /// If `true`, the disk will be read-only once it is created.
+        read_only: bool,
+    },
 
     /// Create a disk from an image
     Image { image_id: Uuid },
@@ -2380,8 +2384,6 @@ pub enum DiskBackend {
     Distributed {
         /// The initial source for this disk
         disk_source: DiskSource,
-        /// If `true`, the disk will be read-only once it is created.
-        read_only: bool,
     },
 }
 

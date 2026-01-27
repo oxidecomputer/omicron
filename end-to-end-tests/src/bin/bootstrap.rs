@@ -136,12 +136,9 @@ async fn run_test() -> Result<()> {
                 .body(DiskCreate {
                     name: disk_name.clone(),
                     description: String::new(),
-                    disk_backend: DiskBackend::Distributed {
-                        disk_source: DiskSource::Blank {
-                            block_size: 512.try_into().unwrap(),
-                        },
-                        read_only: false,
-                    },
+                    disk_backend: DiskBackend::Distributed(DiskSource::Blank {
+                        block_size: 512.try_into().unwrap(),
+                    }),
                     size: ByteCount(1024 * 1024 * 1024),
                 })
                 .send()

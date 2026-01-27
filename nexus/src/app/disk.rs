@@ -84,14 +84,13 @@ impl super::Nexus {
         authz_project: &authz::Project,
         disk_source: &params::DiskSource,
         size: ByteCount,
-        read_only: bool,
     ) -> Result<u64, Error> {
         let block_size: u64 = match disk_source {
             params::DiskSource::Blank { block_size }
             | params::DiskSource::ImportingBlocks { block_size } => {
                 (*block_size).into()
             }
-            params::DiskSource::Snapshot { snapshot_id } => {
+            params::DiskSource::Snapshot { snapshot_id, read_only: _ } => {
                 let (.., db_snapshot) =
                     LookupPath::new(opctx, &self.db_datastore)
                         .snapshot_id(*snapshot_id)
@@ -148,15 +147,6 @@ impl super::Nexus {
             }
         };
 
-        // Creating a read-only blank disk is obviously nonsensical, why would
-        // you do it?
-        if read_only && let params::DiskSource::Blank { .. } = disk_source {
-            return Err(Error::invalid_request(
-                "if a blank disk is created as read-only, it will remain \
-                blank forever",
-            ));
-        }
-
         Ok(block_size)
     }
 
@@ -167,16 +157,12 @@ impl super::Nexus {
         params: &params::DiskCreate,
     ) -> Result<(), Error> {
         let block_size: u64 = match &params.disk_backend {
-            &params::DiskBackend::Distributed {
-                ref disk_source,
-                read_only,
-            } => {
+            params::DiskBackend::Distributed { disk_source } => {
                 self.validate_crucible_disk_create_params(
                     opctx,
                     &authz_project,
                     disk_source,
                     params.size,
-                    read_only,
                 )
                 .await?
             }
@@ -305,6 +291,22 @@ impl super::Nexus {
             project_lookup.lookup_for(authz::Action::CreateChild).await?;
 
         self.validate_disk_create_params(opctx, &authz_project, params).await?;
+
+        // If we are creating a read-only disk from a snapshot, no saga is
+        // required --- we can just create the disk pointed at that snapshot.
+        if let params::DiskBackend::Distributed {
+            disk_source: params::DiskSource::Snapshot { read_only: true, .. },
+        } = params.disk_backend
+        {
+            return self
+                .db_datastore
+                .project_create_read_only_disk_from_snapshot(
+                    opctx,
+                    &authz_project,
+                    params,
+                )
+                .await;
+        }
 
         let saga_params = sagas::disk_create::Params {
             serialized_authn: authn::saga::Serialized::for_opctx(opctx),
@@ -731,7 +733,6 @@ impl super::Nexus {
             project_id: authz_proj.id(),
             disk,
             snapshot_name: finalize_params.snapshot_name.clone(),
-            read_only: disk.is_read_only(),
         };
 
         self.sagas

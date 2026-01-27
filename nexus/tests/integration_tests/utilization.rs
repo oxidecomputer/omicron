@@ -151,7 +151,7 @@ async fn test_utilization_view(cptestctx: &ControlPlaneTestContext) {
                     disk_source: params::DiskSource::Blank {
                         block_size: params::BlockSize::try_from(512).unwrap(),
                     },
-                    read_only: false,
+                    
                 },
             }))
             .expect_status(Some(StatusCode::CREATED)),

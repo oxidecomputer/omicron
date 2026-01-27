@@ -19414,10 +19414,6 @@
                   }
                 ]
               },
-              "read_only": {
-                "description": "If `true`, the disk will be read-only once it is created.",
-                "type": "boolean"
-              },
               "type": {
                 "type": "string",
                 "enum": [
@@ -19427,7 +19423,6 @@
             },
             "required": [
               "disk_source",
-              "read_only",
               "type"
             ]
           }
@@ -19535,6 +19530,10 @@
             "description": "Create a disk from a disk snapshot",
             "type": "object",
             "properties": {
+              "read_only": {
+                "description": "If `true`, the disk will be read-only once it is created.",
+                "type": "boolean"
+              },
               "snapshot_id": {
                 "type": "string",
                 "format": "uuid"
@@ -19547,6 +19546,7 @@
               }
             },
             "required": [
+              "read_only",
               "snapshot_id",
               "type"
             ]

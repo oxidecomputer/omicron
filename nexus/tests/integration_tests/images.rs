@@ -165,7 +165,7 @@ async fn test_make_disk_from_image(cptestctx: &ControlPlaneTestContext) {
             disk_source: params::DiskSource::Image {
                 image_id: alpine_image.identity.id,
             },
-            read_only: false,
+
         },
         size: ByteCount::from_gibibytes_u32(1),
     };
@@ -207,7 +207,7 @@ async fn test_make_disk_from_other_project_image_fails(
             disk_source: params::DiskSource::Image {
                 image_id: image.identity.id,
             },
-            read_only: false,
+
         },
         size: ByteCount::from_gibibytes_u32(1),
     };
@@ -261,7 +261,7 @@ async fn test_make_disk_from_image_too_small(
             disk_source: params::DiskSource::Image {
                 image_id: alpine_image.identity.id,
             },
-            read_only: false,
+
         },
         // Nexus defines YouCanBootAnythingAsLongAsItsAlpine size as 100M
         size: ByteCount::from(90 * 1024 * 1024),
@@ -432,7 +432,7 @@ async fn test_image_from_other_project_snapshot_fails(
             disk_source: params::DiskSource::Image {
                 image_id: image.identity.id,
             },
-            read_only: false,
+
         },
         size: ByteCount::from_gibibytes_u32(1),
     };
