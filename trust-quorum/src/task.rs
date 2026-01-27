@@ -27,8 +27,8 @@ use tokio::sync::oneshot::error::RecvError;
 use tokio::sync::{mpsc, oneshot};
 use trust_quorum_protocol::{
     CommitError, LoadRackSecretError, LrtqUpgradeError, Node,
-    NodeCallerCtx as _, NodeCommonCtx as _, NodeCtx, PrepareAndCommitError,
-    ReconfigurationError, ReconstructedRackSecret,
+    NodeCallerCtx as _, NodeCommonCtx as _, NodeCtx, PersistentState,
+    PrepareAndCommitError, ReconfigurationError, ReconstructedRackSecret,
 };
 use trust_quorum_types::configuration::Configuration;
 use trust_quorum_types::messages::{LrtqUpgradeMsg, ReconfigureMsg};
@@ -36,7 +36,7 @@ use trust_quorum_types::status::{CommitStatus, CoordinatorStatus, NodeStatus};
 use trust_quorum_types::types::Epoch;
 // TODO: Move to this crate
 // https://github.com/oxidecomputer/omicron/issues/9311
-use bootstore::schemes::v0::NetworkConfig;
+use bootstore::schemes::v0::{NetworkConfig, PersistentFsmState};
 
 /// We only expect a handful of messages at a time.
 const API_CHANNEL_BOUND: usize = 32;
@@ -56,6 +56,7 @@ pub struct Config {
     pub listen_addr: SocketAddrV6,
     pub tq_ledger_paths: Vec<Utf8PathBuf>,
     pub network_config_ledger_paths: Vec<Utf8PathBuf>,
+    pub lrtq_ledger_paths: Vec<Utf8PathBuf>,
     pub sprockets: SprocketsConfig,
 }
 
@@ -445,6 +446,21 @@ impl NodeTask {
                     ps_ledger.state,
                 ),
                 ps_ledger.generation,
+            )
+        } else if let Some(lrtq_share_data) =
+            PersistentFsmState::load_for_trust_quorum_upgrade(
+                &log,
+                config.lrtq_ledger_paths.clone(),
+            )
+            .await
+        {
+            let ps = PersistentState::new_lrtq_only(lrtq_share_data);
+            (
+                NodeCtx::new_with_persistent_state(
+                    config.baseboard_id.clone(),
+                    ps,
+                ),
+                0,
             )
         } else {
             (NodeCtx::new(config.baseboard_id.clone()), 0)
@@ -983,6 +999,7 @@ mod tests {
                     sprockets,
                     tq_ledger_paths,
                     network_config_ledger_paths,
+                    lrtq_ledger_paths: vec![],
                 }
             })
             .collect()
