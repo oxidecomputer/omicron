@@ -2,6 +2,6 @@
 -- backfilling existing data.
 ALTER TABLE
     omicron.public.disk_type_crucible
-ALTER COLUMN
+ALTER COLUMN IF EXISTS
     read_only
 DROP DEFAULT;
