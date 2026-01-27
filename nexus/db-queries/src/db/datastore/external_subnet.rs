@@ -5,9 +5,13 @@
 //! [`DataStore`] methods on Subnet Pools and External Subnets.
 
 use crate::db::DataStore;
+use crate::db::collection_attach::AttachError;
+use crate::db::collection_attach::DatastoreAttachTarget as _;
 use crate::db::datastore::SQL_BATCH_SIZE;
 use crate::db::pagination::Paginator;
 use crate::db::pagination::paginated;
+use crate::db::queries::external_ip::SAFE_TO_ATTACH_INSTANCE_STATES;
+use crate::db::queries::external_subnet::MAX_ATTACHED_SUBNETS;
 use crate::db::queries::external_subnet::decode_delete_external_subnet_error;
 use crate::db::queries::external_subnet::decode_insert_external_subnet_error;
 use crate::db::queries::external_subnet::delete_external_subnet_query;
@@ -15,6 +19,8 @@ use crate::db::queries::external_subnet::insert_external_subnet_query;
 use crate::db::queries::external_subnet::insert_subnet_pool_member_query;
 use crate::db::queries::external_subnet::link_subnet_pool_to_silo_query;
 use crate::db::queries::external_subnet::unlink_subnet_pool_from_silo_query;
+use crate::db::update_and_check::UpdateAndCheck as _;
+use crate::db::update_and_check::UpdateStatus;
 use async_bb8_diesel::AsyncRunQueryDsl as _;
 use chrono::Utc;
 use diesel::BoolExpressionMethods as _;
@@ -36,6 +42,8 @@ use nexus_db_lookup::lookup;
 use nexus_db_model::ExternalSubnet;
 use nexus_db_model::ExternalSubnetIdentity;
 use nexus_db_model::ExternalSubnetUpdate;
+use nexus_db_model::Instance;
+use nexus_db_model::IpAttachState;
 use nexus_db_model::IpNet;
 use nexus_db_model::Ipv6Addr;
 use nexus_db_model::MacAddr;
@@ -506,7 +514,24 @@ impl DataStore {
             })
     }
 
-    /// List all subnets attached to an Instance.
+    /// List subnets attached to a single instance by its ID.
+    pub async fn instance_lookup_attached_external_subnets(
+        &self,
+        opctx: &OpContext,
+        instance_id: InstanceUuid,
+    ) -> ListResultVec<ExternalSubnet> {
+        use nexus_db_schema::schema::external_subnet::dsl;
+        dsl::external_subnet
+            .filter(dsl::time_deleted.is_null())
+            .filter(dsl::attach_state.eq(IpAttachState::Attached))
+            .filter(dsl::instance_id.eq(to_db_typed_uuid(instance_id)))
+            .select(ExternalSubnet::as_select())
+            .get_results_async(&*self.pool_connection_authorized(opctx).await?)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+    }
+
+    /// List all subnets attached to any Instance.
     ///
     /// This makes as many requests as needed, in pages, to get all the results.
     /// It can be useful in latency-insensitive contexts like background tasks.
@@ -648,6 +673,201 @@ impl DataStore {
         .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
         .map(|rows| rows.into_iter().map(Into::into).collect())
     }
+
+    /// Start attaching an external subnet to an instance.
+    ///
+    /// This marks the subnet as in the "attaching" state and sets the parent to
+    /// the instance.
+    ///
+    /// If the attachment could not start, such as if the subnet was already
+    /// attached to another instance, or the instance was in an invalid state,
+    /// this returns an `Error`.
+    pub async fn begin_attach_subnet(
+        &self,
+        opctx: &OpContext,
+        authz_instance: &authz::Instance,
+        authz_subnet: &authz::ExternalSubnet,
+    ) -> Result<ExternalSubnetBeginAttachResult, Error> {
+        use nexus_db_schema::schema::external_subnet::dsl;
+        use nexus_db_schema::schema::instance::dsl as instance_dsl;
+
+        opctx.authorize(authz::Action::Modify, authz_instance).await?;
+        opctx.authorize(authz::Action::Modify, authz_subnet).await?;
+
+        let query = Instance::attach_resource(
+            authz_instance.id(),
+            authz_subnet.id().into_untyped_uuid(),
+            instance_dsl::instance
+                .into_boxed()
+                .filter(
+                    instance_dsl::state.eq_any(SAFE_TO_ATTACH_INSTANCE_STATES),
+                )
+                .filter(instance_dsl::migration_id.is_null()),
+            dsl::external_subnet
+                .into_boxed()
+                .filter(dsl::attach_state.eq(IpAttachState::Detached))
+                .filter(dsl::instance_id.is_null()),
+            MAX_ATTACHED_SUBNETS,
+            diesel::update(dsl::external_subnet).set((
+                dsl::time_modified.eq(Utc::now()),
+                dsl::instance_id.eq(Some(authz_instance.id())),
+                dsl::attach_state.eq(IpAttachState::Attaching),
+            )),
+        );
+        query
+            .attach_and_get_result_async(&*self.pool_connection_authorized(opctx).await?)
+            .await
+            .map(|(_instance, subnet)| ExternalSubnetBeginAttachResult { subnet, do_saga: true })
+            .or_else(|e| match e {
+                AttachError::CollectionNotFound => {
+                    Err(Error::not_found_by_id(
+                        ResourceType::Instance,
+                        &authz_instance.id(),
+                    ))
+                }
+                AttachError::ResourceNotFound => {
+                    Err(Error::not_found_by_id(
+                        ResourceType::ExternalSubnet,
+                        &authz_subnet.id().into_untyped_uuid(),
+                    ))
+                }
+                AttachError::NoUpdate {
+                    attached_count,
+                    update_condition_satisfied: _,
+                    resource,
+                    collection
+                } => {
+                    let resource_instance_id = resource.instance_id.map(GenericUuid::into_untyped_uuid);
+                    let instance_id = Some(authz_instance.id());
+                    match resource.attach_state {
+                        IpAttachState::Detached => {
+                            // Subnet was detached which means some other error
+                            // occurred. Fall through to detect it.
+                        }
+                        IpAttachState::Attached => {
+                            if resource_instance_id == instance_id {
+                                // We're already attached to this instance.
+                                // Return the record, but we are already done
+                                // with the attach saga here.
+                                return Ok(ExternalSubnetBeginAttachResult {
+                                    subnet: resource,
+                                    do_saga: false,
+                                });
+                            }
+                            // We're attached to some _other_ instance.
+                            return Err(Error::invalid_request(
+                                "External subnets cannot be attached to \
+                                one instance while still attached to another"
+                            ));
+                        }
+                        IpAttachState::Attaching if resource_instance_id == instance_id => {
+                            // The subnet is still being attached, e.g., the
+                            // saga node for doing the attachment is running
+                            // again. We need to continue the saga.
+                            return Ok(ExternalSubnetBeginAttachResult {
+                                subnet: resource,
+                                do_saga: true,
+                            });
+                        }
+                        IpAttachState::Detaching | IpAttachState::Attaching => {
+                            // This one is transient, and could be retried
+                            // safely in the future, in either direction.
+                            return Err(Error::unavail(
+                                "The external subnet is in the process of \
+                                attaching to or detaching from another \
+                                instance."
+                            ));
+                        }
+                    }
+
+                    // Attempt during a migration.
+                    if collection.runtime_state.migration_id.is_some() {
+                        return Err(Error::unavail(
+                            "Cannot attach a subnet while instance is migrating"
+                        ));
+                    }
+
+                    // Instance is in a transitory state, e.g., starting.
+                    if !SAFE_TO_ATTACH_INSTANCE_STATES
+                        .contains(&collection.runtime_state.nexus_state)
+                    {
+                        return Err(Error::invalid_request(&format!(
+                            "Cannot attach subnet to instance in {} state",
+                            collection.runtime_state.nexus_state,
+                        )));
+                    }
+
+                    // Too many subnets attached.
+                    if attached_count >= i64::from(MAX_ATTACHED_SUBNETS) {
+                        return Err(Error::invalid_request(&format!(
+                            "An instance may not have more than \
+                            {MAX_ATTACHED_SUBNETS} attached subnets"
+                        )));
+                    }
+
+                    Err(Error::internal_error("failed to attach subnet"))
+                }
+                AttachError::DatabaseError(e) => Err(public_error_from_diesel(e, ErrorHandler::Server))
+            })
+    }
+
+    pub async fn ensure_external_subnet_final_attach_state(
+        &self,
+        opctx: &OpContext,
+        id: ExternalSubnetUuid,
+        from: IpAttachState,
+        to: IpAttachState,
+    ) -> Result<ExternalSubnetAttachResult, Error> {
+        use nexus_db_schema::schema::external_subnet::dsl;
+        if !matches!(from, IpAttachState::Attaching | IpAttachState::Detaching)
+        {
+            return Err(Error::invalid_request(&format!(
+                "external subnet must be in a transitory state, not {from}"
+            )));
+        }
+        if !matches!(to, IpAttachState::Attached | IpAttachState::Detached) {
+            return Err(Error::invalid_request(&format!(
+                "external subnet must move to a final state, not {from}"
+            )));
+        }
+        diesel::update(
+            dsl::external_subnet
+                .filter(dsl::id.eq(to_db_typed_uuid(id)))
+                .filter(dsl::time_deleted.is_null())
+                .filter(dsl::attach_state.eq(from)),
+        )
+        .set((dsl::time_modified.eq(Utc::now()), dsl::attach_state.eq(to)))
+        .check_if_exists::<ExternalSubnet>(id.into_untyped_uuid())
+        .execute_and_check(&*self.pool_connection_authorized(opctx).await?)
+        .await
+        .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+        .and_then(|r| match r.status {
+            UpdateStatus::Updated => Ok(ExternalSubnetAttachResult::Modified),
+            UpdateStatus::NotUpdatedButExists
+                if r.found.attach_state == IpAttachState::Detached
+                    || r.found.identity.time_deleted.is_some() =>
+            {
+                Err(Error::internal_error(
+                    "external subnet was deleted concurrently",
+                ))
+            }
+            UpdateStatus::NotUpdatedButExists => {
+                Ok(ExternalSubnetAttachResult::NoChanges)
+            }
+        })
+    }
+}
+
+#[derive(Debug, serde::Deserialize, serde::Serialize)]
+pub struct ExternalSubnetBeginAttachResult {
+    pub subnet: ExternalSubnet,
+    pub do_saga: bool,
+}
+
+#[derive(Debug, serde::Deserialize, serde::Serialize)]
+pub enum ExternalSubnetAttachResult {
+    Modified,
+    NoChanges,
 }
 
 #[cfg(test)]
@@ -3018,5 +3238,32 @@ mod tests {
 
         db.terminate().await;
         logctx.cleanup_successful();
+    }
+
+    // TODO(ben) May be integration tests, easier to make all the records we
+    // need.
+    #[tokio::test]
+    async fn can_begin_subnet_attach() {
+        todo!();
+    }
+
+    #[tokio::test]
+    async fn handle_subnet_attach_already_started() {
+        todo!();
+    }
+
+    #[tokio::test]
+    async fn handle_subnet_attach_already_completed() {
+        todo!();
+    }
+
+    #[tokio::test]
+    async fn cannot_attach_subnet_to_multiple_instances() {
+        todo!();
+    }
+
+    #[tokio::test]
+    async fn cannot_attach_subnet_to_starting_instance() {
+        todo!();
     }
 }

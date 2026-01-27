@@ -355,6 +355,7 @@ use crate::app::db::model::InstanceState;
 use crate::app::db::model::MigrationState;
 use crate::app::db::model::Vmm;
 use crate::app::db::model::VmmState;
+use crate::app::instance_network::InstanceNetworkFilters;
 use crate::app::sagas::declare_saga_actions;
 use anyhow::Context;
 use chrono::Utc;
@@ -800,6 +801,9 @@ declare_saga_actions! {
         + siu_update_network_config
     }
 
+    // TODO(ben) add node to update _OPTE_ networking configuration, rename
+    // above node.
+
     // Deallocate virtual provisioning resources reserved by the instance, as it
     // is no longer running.
     RELEASE_VIRTUAL_PROVISIONING -> "release_virtual_provisioning" {
@@ -1068,7 +1072,7 @@ async fn siu_update_network_config(
                     &opctx,
                     instance_id,
                     &sled.address(),
-                    None,
+                    InstanceNetworkFilters::all(),
                 )
                 .await
                 .map_err(ActionError::action_failed)?;

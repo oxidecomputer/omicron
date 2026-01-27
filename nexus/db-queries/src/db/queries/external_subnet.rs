@@ -33,6 +33,9 @@ use oxnet::Ipv4Net;
 use oxnet::Ipv6Net;
 use uuid::Uuid;
 
+/// The maximum number of subnets that can be attached to an instance.
+pub const MAX_ATTACHED_SUBNETS: u32 = 32;
+
 /// Query to insert a member in a Subnet Pool, which checks for overlapping
 /// subnets.
 pub fn insert_subnet_pool_member_query(

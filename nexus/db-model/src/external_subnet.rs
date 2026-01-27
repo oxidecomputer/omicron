@@ -23,8 +23,11 @@ use nexus_db_schema::schema::subnet_pool;
 use nexus_db_schema::schema::subnet_pool_member;
 use nexus_db_schema::schema::subnet_pool_silo_link;
 use nexus_types::external_api::params;
+use nexus_types::external_api::views;
+use nexus_types::identity::Resource as _;
 use omicron_common::api::external;
 use omicron_common::api::external::Error;
+use omicron_uuid_kinds::GenericUuid as _;
 use omicron_uuid_kinds::InstanceKind;
 use omicron_uuid_kinds::SubnetPoolKind;
 use omicron_uuid_kinds::SubnetPoolMemberKind;
@@ -202,6 +205,20 @@ pub struct ExternalSubnet {
     pub subnet: IpNet,
     pub attach_state: IpAttachState,
     pub instance_id: Option<DbTypedUuid<InstanceKind>>,
+}
+
+impl From<ExternalSubnet> for views::ExternalSubnet {
+    fn from(value: ExternalSubnet) -> Self {
+        Self {
+            identity: value.identity(),
+            subnet: value.subnet.into(),
+            project_id: value.project_id,
+            subnet_pool_id: value.subnet_pool_id.into_untyped_uuid(),
+            subnet_pool_member_id:
+                value.subnet_pool_member_id.into_untyped_uuid(),
+            instance_id: value.instance_id.map(|id| id.into_untyped_uuid()),
+        }
+    }
 }
 
 #[derive(AsChangeset, Clone, Debug)]
