@@ -44,7 +44,6 @@ use nexus_db_model::InvHostPhase1FlashHash;
 use nexus_db_model::InvInternalDns;
 use nexus_db_model::InvLastReconciliationDatasetResult;
 use nexus_db_model::InvLastReconciliationDiskResult;
-use nexus_db_model::InvLastReconciliationMeasurements;
 use nexus_db_model::InvLastReconciliationOrphanedDataset;
 use nexus_db_model::InvLastReconciliationZoneResult;
 use nexus_db_model::InvMeasurementManifestNonBoot;
@@ -59,6 +58,7 @@ use nexus_db_model::InvPhysicalDisk;
 use nexus_db_model::InvRootOfTrust;
 use nexus_db_model::InvRotPage;
 use nexus_db_model::InvServiceProcessor;
+use nexus_db_model::InvSingleMeasurements;
 use nexus_db_model::InvSledAgent;
 use nexus_db_model::InvSledBootPartition;
 use nexus_db_model::InvSledConfigReconciler;
@@ -117,7 +117,7 @@ use sled_agent_types::inventory::ManifestNonBootInventory;
 use sled_agent_types::inventory::MupdateOverrideNonBootInventory;
 use sled_agent_types::inventory::OmicronSledConfig;
 use sled_agent_types::inventory::OrphanedDataset;
-use sled_agent_types::inventory::ReconciledSingleMeasurement;
+use sled_agent_types::inventory::SingleMeasurementInventory;
 use sled_agent_types::inventory::ZoneArtifactInventory;
 use sled_hardware_types::BaseboardId;
 use slog_error_chain::InlineErrorChain;
@@ -354,6 +354,22 @@ impl DataStore {
             })
             .collect();
 
+        // Pull reference measurementes out of all sled agents
+        let reference_measurements: Vec<_> = collection
+            .sled_agents
+            .iter()
+            .flat_map(|sled_agent| {
+                sled_agent.reference_measurements.iter().map(|measurement| {
+                    InvSingleMeasurements::new(
+                        collection_id,
+                        sled_agent.sled_id,
+                        measurement.path.to_string(),
+                        measurement.result.clone(),
+                    )
+                })
+            })
+            .collect();
+
         // Build up a list of `OmicronSledConfig`s we need to insert. Each sled
         // has 0-3:
         //
@@ -386,7 +402,6 @@ impl DataStore {
             zone_results: reconciler_zone_results,
             boot_partitions: reconciler_boot_partitions,
             mut config_reconciler_fields_by_sled,
-            measurements: reconciler_measurement_results,
         } = ConfigReconcilerRows::new(collection_id, collection)
             .map_err(|e| Error::internal_error(&format!("{e:#}")))?;
 
@@ -1310,19 +1325,19 @@ impl DataStore {
                 }
             }
 
-            // Insert rows for all the sled config reconciler measurements
+            // Insert rows for all the sled config reference measurements
             {
-                use nexus_db_schema::schema::inv_last_reconciliation_measurements::dsl;
+                use nexus_db_schema::schema::inv_single_measurements::dsl;
 
                 let batch_size = SQL_BATCH_SIZE.get().try_into().unwrap();
-                let mut measurement_results = reconciler_measurement_results.into_iter();
+                let mut measurement_results = reference_measurements.into_iter();
                 loop {
                     let some_measurement_results =
                         measurement_results.by_ref().take(batch_size).collect::<Vec<_>>();
                     if some_measurement_results.is_empty() {
                         break;
                     }
-                    let _ = diesel::insert_into(dsl::inv_last_reconciliation_measurements)
+                    let _ = diesel::insert_into(dsl::inv_single_measurements)
                         .values(some_measurement_results)
                         .execute_async(&conn)
                         .await?;
@@ -2208,8 +2223,8 @@ impl DataStore {
                         .await?
                     };
                     let nlast_reconciliation_measurements = {
-                        use nexus_db_schema::schema::inv_last_reconciliation_measurements::dsl;
-                        diesel::delete(dsl::inv_last_reconciliation_measurements.filter(
+                        use nexus_db_schema::schema::inv_single_measurements::dsl;
+                        diesel::delete(dsl::inv_single_measurements.filter(
                             dsl::inv_collection_id.eq(db_collection_id),
                         ))
                         .execute_async(&conn)
@@ -3709,11 +3724,11 @@ impl DataStore {
         };
 
         let mut last_reconciliation_measurements = {
-            use nexus_db_schema::schema::inv_last_reconciliation_measurements::dsl;
+            use nexus_db_schema::schema::inv_single_measurements::dsl;
 
             let mut measurements: BTreeMap<
                 SledUuid,
-                IdOrdMap<ReconciledSingleMeasurement>,
+                IdOrdMap<SingleMeasurementInventory>,
             > = BTreeMap::new();
 
             // TODO-performance This ought to be paginated like the other
@@ -3724,9 +3739,9 @@ impl DataStore {
             // (b) we expect a very small number of reconciled measurements
             //
             // so we just do the lazy thing and load all the rows at once.
-            let rows = dsl::inv_last_reconciliation_measurements
+            let rows = dsl::inv_single_measurements
                 .filter(dsl::inv_collection_id.eq(db_id))
-                .select(InvLastReconciliationMeasurements::as_select())
+                .select(InvSingleMeasurements::as_select())
                 .load_async(&*conn)
                 .await
                 .map_err(|e| {
@@ -3740,9 +3755,9 @@ impl DataStore {
                     .insert_unique(row.into())
                     .map_err(|err| {
                         // We should never get duplicates: the table's primary
-                        // key is the dataset name (same as the IdOrdMap)
+                        // key is the path
                         Error::internal_error(&format!(
-                            "unexpected duplicate orphaned dataset: {}",
+                            "unexpected duplicate path: {}",
                             InlineErrorChain::new(&err)
                         ))
                     })?;
@@ -4221,10 +4236,6 @@ impl DataStore {
                         zones: last_reconciliation_zone_results
                             .remove(&sled_id)
                             .unwrap_or_default(),
-                        measurements: last_reconciliation_measurements
-                            .remove(&sled_id)
-                            .unwrap_or_default(),
-
                         boot_partitions,
                         remove_mupdate_override,
                     })
@@ -4287,6 +4298,9 @@ impl DataStore {
                 // TODO-K[omicron#9516]: Actually query the DB when there is
                 // something there
                 health_monitor: HealthMonitorInventory::new(),
+                reference_measurements: last_reconciliation_measurements
+                    .remove(&sled_id)
+                    .unwrap_or_default(),
             };
             sled_agents
                 .insert_unique(sled_agent)
@@ -4466,7 +4480,6 @@ struct ConfigReconcilerRows {
     boot_partitions: Vec<InvSledBootPartition>,
     config_reconciler_fields_by_sled:
         BTreeMap<SledUuid, ConfigReconcilerFields>,
-    measurements: Vec<InvLastReconciliationMeasurements>,
 }
 
 impl ConfigReconcilerRows {
@@ -4536,17 +4549,6 @@ impl ConfigReconcilerRows {
                 remove_mupdate_override,
             ));
 
-            self.measurements.extend(
-                last_reconciliation.measurements.iter().map(|measurement| {
-                    InvLastReconciliationMeasurements::new(
-                        collection_id,
-                        sled_id,
-                        measurement.file_name.clone(),
-                        measurement.path.to_string(),
-                        measurement.result.clone(),
-                    )
-                }),
-            );
             // Boot partition _errors_ are kept in `InvSledConfigReconciler`
             // above, but non-errors get their own rows; handle those here.
             //
@@ -4788,7 +4790,6 @@ mod test {
     use async_bb8_diesel::AsyncConnection;
     use async_bb8_diesel::AsyncRunQueryDsl;
     use async_bb8_diesel::AsyncSimpleConnection;
-    use camino::Utf8PathBuf;
     use diesel::QueryDsl;
     use nexus_db_schema::schema;
     use nexus_inventory::examples::Representative;
@@ -4812,7 +4813,6 @@ mod test {
     use sled_agent_types::inventory::BootPartitionContents;
     use sled_agent_types::inventory::BootPartitionDetails;
     use sled_agent_types::inventory::OrphanedDataset;
-    use sled_agent_types::inventory::ReconciledSingleMeasurement;
     use sled_agent_types::inventory::{
         BootImageHeader, RemoveMupdateOverrideBootSuccessInventory,
         RemoveMupdateOverrideInventory,
@@ -4820,6 +4820,7 @@ mod test {
     use sled_agent_types::inventory::{
         ConfigReconcilerInventory, ConfigReconcilerInventoryResult,
         ConfigReconcilerInventoryStatus, OmicronZoneImageSource,
+        SingleMeasurementInventory,
     };
     use sled_hardware_types::BaseboardId;
     use std::num::NonZeroU32;
@@ -5572,6 +5573,67 @@ mod test {
     }
 
     #[tokio::test]
+    async fn test_sled_agent_measurements() {
+        // Setup
+        let logctx = dev::test_setup_log("test_sled_agent_measurements");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        // Start with a representative collection.
+        let Representative { builder, .. } = representative();
+        let mut collection = builder.build();
+
+        // Mutate the sled-agent contents to test measurements
+        {
+            let mut sled_agents = collection.sled_agents.iter_mut();
+            let mut sa1 = sled_agents.next().expect("at least 1 sled agent");
+
+            let make_result = |i| {
+                if i % 2 == 0 {
+                    ConfigReconcilerInventoryResult::Ok
+                } else {
+                    ConfigReconcilerInventoryResult::Err {
+                        message: format!("fake measurement error {i}"),
+                    }
+                }
+            };
+
+            sa1.reference_measurements = (0..10)
+                .map(|i| SingleMeasurementInventory {
+                    path: format!("fake/path/file{i}").into(),
+                    result: make_result(i),
+                })
+                .collect();
+        }
+
+        // Write it to the db; read it back and check it survived.
+        datastore
+            .inventory_insert_collection(&opctx, &collection)
+            .await
+            .expect("failed to insert collection");
+        let collection_read = datastore
+            .inventory_collection_read(&opctx, collection.id)
+            .await
+            .expect("failed to read collection back");
+        assert_eq!(collection, collection_read);
+
+        // Now delete it and ensure we remove everything.
+        datastore
+            .inventory_delete_collection(&opctx, collection.id)
+            .await
+            .expect("failed to prune collections");
+
+        // Read all "inv_" tables and ensure that they're empty
+        check_all_inv_tables(&datastore, AllInvTables::AreEmpty).await.expect(
+            "All inv_... tables should be deleted alongside collection",
+        );
+
+        // Clean up.
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
     async fn test_reconciler_status_fields() {
         // Setup
         let logctx = dev::test_setup_log("reconciler_status_fields");
@@ -5646,15 +5708,6 @@ mod test {
                     zones: (0..10)
                         .map(|i| {
                             (OmicronZoneUuid::new_v4(), make_result("zone", i))
-                        })
-                        .collect(),
-                    measurements: (0..5)
-                        .map(|i| {
-                            ReconciledSingleMeasurement {
-                                file_name: format!("file-{}", i),
-                                path: Utf8PathBuf::from(format!("path/to/{}", i)),
-                                result: make_result("measurement", i),
-                            }
                         })
                         .collect(),
                     boot_partitions: BootPartitionContents {

@@ -61,10 +61,11 @@ use sled_agent_types::instance::{
     VmmPutStateResponse, VmmStateRequested, VmmUnregisterResponse,
 };
 use sled_agent_types::inventory::{
-    ConfigReconcilerInventory, ConfigReconcilerInventoryStatus,
-    HostPhase2DesiredSlots, Inventory, InventoryDataset, InventoryDisk,
-    InventoryZpool, OmicronFileSourceResolverInventory, OmicronSledConfig,
-    OmicronZonesConfig, SledRole,
+    ConfigReconcilerInventory, ConfigReconcilerInventoryResult,
+    ConfigReconcilerInventoryStatus, HostPhase2DesiredSlots, Inventory,
+    InventoryDataset, InventoryDisk, InventoryZpool,
+    OmicronFileSourceResolverInventory, OmicronSledConfig, OmicronZonesConfig,
+    SingleMeasurementInventory, SledRole,
 };
 use sled_agent_types::support_bundle::SupportBundleMetadata;
 
@@ -829,6 +830,21 @@ impl SledAgent {
             measurements: Default::default(),
         };
 
+        let reference_measurements = vec![
+            SingleMeasurementInventory {
+                path: "this/is/fake1".into(),
+                result: ConfigReconcilerInventoryResult::Ok,
+            },
+            SingleMeasurementInventory {
+                path: "this/is/fake2".into(),
+                result: ConfigReconcilerInventoryResult::Err {
+                    message: "this is an error".to_string(),
+                },
+            },
+        ]
+        .into_iter()
+        .collect();
+
         Ok(Inventory {
             sled_id: self.id,
             sled_agent_address,
@@ -903,6 +919,7 @@ impl SledAgent {
             file_source_resolver: OmicronFileSourceResolverInventory::new_fake(
             ),
             health_monitor,
+            reference_measurements,
         })
     }
 

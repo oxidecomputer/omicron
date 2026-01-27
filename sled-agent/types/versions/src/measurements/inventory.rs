@@ -32,7 +32,7 @@ use crate::v1::inventory::{
 };
 use crate::v11::inventory::OmicronZoneConfig;
 use crate::v12;
-use crate::v12::inventory::HealthMonitorInventory;
+pub use crate::v12::inventory::HealthMonitorInventory;
 use camino::Utf8PathBuf;
 use schemars::SchemaGenerator;
 use schemars::schema::{Schema, SchemaObject};

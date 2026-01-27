@@ -35,15 +35,15 @@ use nexus_db_schema::schema::{
     inv_cockroachdb_status, inv_collection, inv_collection_error, inv_dataset,
     inv_host_phase_1_active_slot, inv_host_phase_1_flash_hash,
     inv_internal_dns, inv_last_reconciliation_dataset_result,
-    inv_last_reconciliation_disk_result, inv_last_reconciliation_measurements,
+    inv_last_reconciliation_disk_result,
     inv_last_reconciliation_orphaned_dataset,
     inv_last_reconciliation_zone_result, inv_measurement_manifest_non_boot,
     inv_mupdate_override_non_boot, inv_ntp_timesync, inv_nvme_disk_firmware,
     inv_omicron_sled_config, inv_omicron_sled_config_dataset,
     inv_omicron_sled_config_disk, inv_omicron_sled_config_zone,
     inv_omicron_sled_config_zone_nic, inv_physical_disk, inv_root_of_trust,
-    inv_root_of_trust_page, inv_service_processor, inv_sled_agent,
-    inv_sled_boot_partition, inv_sled_config_reconciler,
+    inv_root_of_trust_page, inv_service_processor, inv_single_measurements,
+    inv_sled_agent, inv_sled_boot_partition, inv_sled_config_reconciler,
     inv_zone_manifest_measurement, inv_zpool, sw_caboose,
     sw_root_of_trust_page,
 };
@@ -89,9 +89,9 @@ use sled_agent_types::inventory::MupdateOverrideNonBootInventory;
 use sled_agent_types::inventory::OmicronFileSourceResolverInventory;
 use sled_agent_types::inventory::OmicronSingleMeasurement;
 use sled_agent_types::inventory::OrphanedDataset;
-use sled_agent_types::inventory::ReconciledSingleMeasurement;
 use sled_agent_types::inventory::RemoveMupdateOverrideBootSuccessInventory;
 use sled_agent_types::inventory::RemoveMupdateOverrideInventory;
+use sled_agent_types::inventory::SingleMeasurementInventory;
 use sled_agent_types::inventory::ZoneArtifactInventory;
 use sled_agent_types::inventory::{
     ConfigReconcilerInventoryResult, OmicronSledConfig, OmicronZoneConfig,
@@ -1376,21 +1376,19 @@ impl From<InvLastReconciliationDiskResult> for ConfigReconcilerInventoryResult {
 }
 
 #[derive(Queryable, Clone, Debug, Selectable, Insertable)]
-#[diesel(table_name = inv_last_reconciliation_measurements)]
-pub struct InvLastReconciliationMeasurements {
+#[diesel(table_name = inv_single_measurements)]
+pub struct InvSingleMeasurements {
     pub inv_collection_id: DbTypedUuid<CollectionKind>,
     pub sled_id: DbTypedUuid<SledKind>,
 
-    pub file_name: String,
     pub path: String,
     pub error_message: Option<String>,
 }
 
-impl InvLastReconciliationMeasurements {
+impl InvSingleMeasurements {
     pub fn new(
         inv_collection_id: CollectionUuid,
         sled_id: SledUuid,
-        file_name: String,
         path: String,
         result: ConfigReconcilerInventoryResult,
     ) -> Self {
@@ -1403,16 +1401,14 @@ impl InvLastReconciliationMeasurements {
             sled_id: sled_id.into(),
 
             path,
-            file_name,
             error_message,
         }
     }
 }
 
-impl From<InvLastReconciliationMeasurements> for ReconciledSingleMeasurement {
-    fn from(row: InvLastReconciliationMeasurements) -> Self {
+impl From<InvSingleMeasurements> for SingleMeasurementInventory {
+    fn from(row: InvSingleMeasurements) -> Self {
         Self {
-            file_name: row.file_name,
             path: row.path.into(),
             result: match row.error_message {
                 None => ConfigReconcilerInventoryResult::Ok,
@@ -1424,10 +1420,8 @@ impl From<InvLastReconciliationMeasurements> for ReconciledSingleMeasurement {
     }
 }
 
-impl From<InvLastReconciliationMeasurements>
-    for ConfigReconcilerInventoryResult
-{
-    fn from(result: InvLastReconciliationMeasurements) -> Self {
+impl From<InvSingleMeasurements> for ConfigReconcilerInventoryResult {
+    fn from(result: InvSingleMeasurements) -> Self {
         match result.error_message {
             None => Self::Ok,
             Some(message) => Self::Err { message },
