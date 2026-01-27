@@ -115,6 +115,13 @@ impl Disk {
     pub fn block_size(&self) -> model::BlockSize {
         self.model().block_size
     }
+
+    pub fn is_read_only(&self) -> bool {
+        match self {
+            Self::Crucible(disk) => disk.is_read_only(),
+            Self::LocalStorage(_) => false, // local disks cannot currently be read-only
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -166,6 +173,10 @@ impl CrucibleDisk {
 
     pub fn pantry_address(&self) -> Option<SocketAddrV6> {
         self.disk_type_crucible.pantry_address()
+    }
+
+    pub fn is_read_only(&self) -> bool {
+        self.disk_type_crucible.read_only
     }
 }
 
@@ -275,7 +286,7 @@ impl Into<api::external::Disk> for Disk {
                     state: disk.state().into(),
                     device_path,
                     disk_type: api::external::DiskType::Distributed,
-                    read_only: false, // TODO ELIZA THIS SHOULD EVENTUALLY NOT BE FALSE
+                    read_only: disk_type_crucible.read_only,
                 }
             }
 
@@ -1700,6 +1711,7 @@ mod tests {
             disk_id,
             VolumeUuid::new_v4(),
             &disk_source,
+            false,
         );
 
         let disk = db_datastore

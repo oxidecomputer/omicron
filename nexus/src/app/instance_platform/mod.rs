@@ -264,7 +264,7 @@ impl DisksByIdBuilder {
     ) -> Result<(), Error> {
         let backend =
             ComponentV0::CrucibleStorageBackend(CrucibleStorageBackend {
-                readonly: false, // XXX eliza
+                readonly: disk.is_read_only(),
                 request_json: volume.data().to_owned(),
             });
 
@@ -278,7 +278,9 @@ impl DisksByIdBuilder {
     ) -> Result<(), Error> {
         let backend = ComponentV0::FileStorageBackend(FileStorageBackend {
             path,
-            readonly: false, // XXX eliza
+            // Presently, this will always be false for local storage disks, but
+            // we may as well ask the disk rather than hard-coding it...
+            readonly: disk.is_read_only(),
             block_size: disk.block_size().to_bytes(),
             workers: Some(LOCAL_STORAGE_WORKERS),
         });

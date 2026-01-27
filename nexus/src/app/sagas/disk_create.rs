@@ -162,9 +162,9 @@ async fn sdc_create_crucible_disk_record(
         &params.serialized_authn,
     );
 
-    let disk_source = match &params.create_params.disk_backend {
-        params::DiskBackend::Distributed { disk_source, read_only: _ } => {
-            disk_source
+    let (disk_source, read_only) = match params.create_params.disk_backend {
+        params::DiskBackend::Distributed { ref disk_source, read_only } => {
+            (disk_source, *read_only)
         }
 
         params::DiskBackend::Local {} => {
@@ -236,6 +236,7 @@ async fn sdc_create_crucible_disk_record(
         // state until the saga has completed.
         sagactx.lookup::<VolumeUuid>("volume_id")?,
         &disk_source,
+        read_only,
     );
 
     let crucible_disk =

@@ -84,6 +84,7 @@ impl super::Nexus {
         authz_project: &authz::Project,
         disk_source: &params::DiskSource,
         size: ByteCount,
+        read_only: bool,
     ) -> Result<u64, Error> {
         let block_size: u64 = match disk_source {
             params::DiskSource::Blank { block_size }
@@ -147,6 +148,15 @@ impl super::Nexus {
             }
         };
 
+        // Creating a read-only blank disk is obviously nonsensical, why would
+        // you do it?
+        if read_only && let params::DiskSource::Blank { .. } = disk_source {
+            return Err(Error::invalid_request(
+                "if a blank disk is created as read-only, it will remain \
+                blank forever",
+            ));
+        }
+
         Ok(block_size)
     }
 
@@ -157,12 +167,16 @@ impl super::Nexus {
         params: &params::DiskCreate,
     ) -> Result<(), Error> {
         let block_size: u64 = match &params.disk_backend {
-            params::DiskBackend::Distributed { disk_source, .. } => {
+            &params::DiskBackend::Distributed {
+                ref disk_source,
+                read_only,
+            } => {
                 self.validate_crucible_disk_create_params(
                     opctx,
                     &authz_project,
-                    &disk_source,
+                    disk_source,
                     params.size,
+                    read_only,
                 )
                 .await?
             }
@@ -717,7 +731,7 @@ impl super::Nexus {
             project_id: authz_proj.id(),
             disk,
             snapshot_name: finalize_params.snapshot_name.clone(),
-            read_only: false, // XXX get this out of `disk.read_only()`
+            read_only: disk.is_read_only(),
         };
 
         self.sagas

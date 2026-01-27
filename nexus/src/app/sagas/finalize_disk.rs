@@ -35,7 +35,6 @@ pub(crate) struct Params {
     pub project_id: Uuid,
     pub disk: datastore::CrucibleDisk,
     pub snapshot_name: Option<Name>,
-    pub read_only: bool,
 }
 
 declare_saga_actions! {
@@ -131,7 +130,7 @@ impl NexusSaga for SagaFinalizeDisk {
 
         builder.append(clear_pantry_address_action());
 
-        if params.read_only {
+        if params.disk.is_read_only() {
             builder.append(set_read_only_in_vcr_action());
         }
 
@@ -365,10 +364,21 @@ async fn sfd_clear_pantry_address(
 }
 
 async fn sfd_set_read_only_in_vcr(
-    _sagactx: NexusActionContext,
+    sagactx: NexusActionContext,
 ) -> Result<(), ActionError> {
     // blah blah some comment about setting this before setting state to
     // Detached, because no instance can use it until then
+    let log = sagactx.user_data().log();
+    let osagactx = sagactx.user_data();
+    let params = sagactx.saga_params::<Params>()?;
+
+    if !params.disk.is_read_only() {
+        return Err(ActionError::action_failed(Error::internal_error(
+            "sfd_set_read_only_in_vcr should not be added to a saga unless \
+            the disk is read-only",
+        )));
+    }
+
     todo!("change the VCR to set read_only = true")
 }
 
