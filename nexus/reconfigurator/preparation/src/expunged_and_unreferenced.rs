@@ -7,6 +7,7 @@
 //!
 //! TODO-john more explanation
 
+use nexus_db_model::SupportBundleState;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
 use nexus_types::deployment::Blueprint;
@@ -74,6 +75,16 @@ pub(super) async fn find_expunged_and_unreferenced_zones(
                 // decommission cockroach nodes (tracked by
                 // <https://github.com/oxidecomputer/omicron/issues/8447>). We
                 // therefore always consider cockroach nodes "still referenced".
+                //
+                // This shouldn't be a huge deal in practice; Cockroach zones
+                // are updated in place, not by an expunge/add pair, so a
+                // typical update does not produce an expunged Cockroach zone
+                // that needs pruning. Only expunging a disk or sled can produce
+                // an expunged Cockroach node, and we expect the number of those
+                // to remain relatively small for any given deployment.
+                // Hopefully we can revisit decommissioning Cockroach nodes long
+                // before we need to worry about the amount of garbage leftover
+                // from expunged disks/sleds.
                 true
             }
 
@@ -135,6 +146,8 @@ fn is_multinode_clickhouse_referenced(
     // still referenced.
     let Some(clickhouse_config) = &parent_blueprint.clickhouse_cluster_config
     else {
+        // If there is no clickhouse cluster config at all, the zone isn't
+        // referenced in it!
         return false;
     };
 
@@ -160,7 +173,79 @@ async fn is_nexus_referenced(
     datastore: &DataStore,
     zone_id: OmicronZoneUuid,
 ) -> Result<bool, Error> {
-    unimplemented!()
+    // Check BlueprintExpungedZoneAccessReason::NexusDeleteMetadataRecord: is
+    // this Nexus zone still present in the `db_metadata_nexus` table?
+    if !datastore
+        .database_nexus_access_all(opctx, &BTreeSet::from([zone_id]))
+        .await?
+        .is_empty()
+    {
+        return Ok(true);
+    }
+
+    // Check BlueprintExpungedZoneAccessReason::NexusSagaReassignment: does
+    // this Nexus zone still have unfinished sagas assigned?
+    if !datastore
+        .saga_list_recovery_candidates(
+            opctx,
+            zone_id.into(),
+            &single_item_pagparams(),
+        )
+        .await?
+        .is_empty()
+    {
+        return Ok(true);
+    }
+
+    // This is a no-op match that exists solely to ensure we update our logic if
+    // the possible support bundle states change. We need to query for any
+    // support bundle assigned to the `zone_id` Nexus in any state that might
+    // require cleanup work; currently, that means "any state other than
+    // `Failed`".
+    //
+    // If updating this match, you must also ensure you update the query below!
+    match SupportBundleState::Active {
+        SupportBundleState::Collecting
+        | SupportBundleState::Active
+        | SupportBundleState::Destroying
+        | SupportBundleState::Failing => {
+            // We need to query for these states.
+        }
+        SupportBundleState::Failed => {
+            // The sole state we don't care about.
+        }
+    }
+
+    // Check BlueprintExpungedZoneAccessReason::NexusSupportBundleReassign: does
+    // this Nexus zone still have support bundles assigned to it in any state
+    // that requires cleanup work? This requires explicitly listing the states
+    // we care about; the no-op match statement above will hopefully keep this
+    // in sync with any changes to the enum.
+    if !datastore
+        .support_bundle_list_assigned_to_nexus(
+            opctx,
+            &single_item_pagparams(),
+            zone_id,
+            vec![
+                SupportBundleState::Collecting,
+                SupportBundleState::Active,
+                SupportBundleState::Destroying,
+                SupportBundleState::Failing,
+            ],
+        )
+        .await?
+        .is_empty()
+    {
+        return Ok(true);
+    }
+
+    // These Nexus-related zone access reasons are documented as "planner does
+    // not need to account for this", so we don't check anything:
+    //
+    // * BlueprintExpungedZoneAccessReason::NexusExternalConfig
+    // * BlueprintExpungedZoneAccessReason::NexusSelfIsQuiescing
+
+    Ok(false)
 }
 
 async fn is_oximeter_referenced(
@@ -191,16 +276,20 @@ async fn is_oximeter_referenced(
         .producers_list_by_oximeter_id(
             opctx,
             zone_id.into_untyped_uuid(),
-            &DataPageParams {
-                marker: None,
-                direction: PaginationOrder::Ascending,
-                limit: NonZeroU32::new(1).expect("1 is not 0"),
-            },
+            &single_item_pagparams(),
         )
         .await?;
 
     // This oximeter is referenced if our set of assigned producers is nonempty.
     Ok(!assigned_producers.is_empty())
+}
+
+fn single_item_pagparams<T>() -> DataPageParams<'static, T> {
+    DataPageParams {
+        marker: None,
+        direction: PaginationOrder::Ascending,
+        limit: NonZeroU32::new(1).expect("1 is not 0"),
+    }
 }
 
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]

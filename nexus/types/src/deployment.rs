@@ -818,8 +818,10 @@ pub enum BlueprintExpungedZoneAccessReason {
     /// Carrying forward the external Nexus configuration provided by the
     /// operator during rack setup; see [`Blueprint::operator_nexus_config()`].
     ///
-    /// The planner must not prune a Nexus zone if it's the last zone
-    /// remaining with the set of configuration.
+    /// The planner does not need to account for this when pruning Nexus zones.
+    /// (The planner runs _inside Nexus_, which guarantees a Nexus exists that
+    /// is not ready for cleanup, which guarantees there's still a Nexus present
+    /// in the blueprint with the external Nexus configuration.)
     NexusExternalConfig,
 
     /// Nexus needs to whether it itself should be quiescing. If the
