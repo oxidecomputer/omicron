@@ -170,9 +170,6 @@ pub enum KeyRotationError {
         #[source]
         err: anyhow::Error,
     },
-    #[cfg(test)]
-    #[error("test error: {0}")]
-    TestError(&'static str),
 }
 
 /// Request to rotate the encryption key for a dataset.
@@ -1439,6 +1436,7 @@ impl ZfsImpl for RealZfs {
 mod tests {
     use super::*;
     use crate::CurrentlyManagedZpoolsReceiver;
+    use anyhow::anyhow;
     use assert_matches::assert_matches;
     use illumos_utils::zfs::DestroyDatasetErrorVariant;
     use omicron_common::api::external::ByteCount;
@@ -1630,10 +1628,12 @@ mod tests {
             let mut state = self.inner.lock().unwrap();
 
             // Verify dataset exists and update its epoch
-            let props = state
-                .datasets
-                .get_mut(dataset)
-                .ok_or(KeyRotationError::TestError("dataset does not exist"))?;
+            let props = state.datasets.get_mut(dataset).ok_or(
+                KeyRotationError::ChangeKeyFailed {
+                    dataset: dataset.to_string(),
+                    err: anyhow!("dataset does not exist"),
+                },
+            )?;
             props.epoch = Some(key.epoch());
             Ok(())
         }
