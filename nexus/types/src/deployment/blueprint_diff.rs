@@ -1643,7 +1643,7 @@ impl<'a> BpDiffMeasurements<'a> {
         }
     }
 
-    /// Return a [`BpTable`] for the given `sled_id`
+    /// Return a BpTable for the given `sled_id`
     pub fn to_bp_sled_subtable(&self, sled_id: &SledUuid) -> Option<BpTable> {
         let mut rows = vec![];
         if let Some(diff) = self.common.get(sled_id) {
