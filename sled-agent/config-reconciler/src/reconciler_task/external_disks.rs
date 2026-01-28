@@ -293,6 +293,14 @@ impl ExternalDisks {
         Arc::clone(&*self.currently_managed_zpools_tx.borrow())
     }
 
+    /// Returns an iterator over successfully managed disks.
+    pub(super) fn managed_disks(&self) -> impl Iterator<Item = &Disk> {
+        self.disks.iter().filter_map(|disk_state| match &disk_state.state {
+            DiskState::Managed(disk) => Some(disk),
+            DiskState::FailedToManage(_) => None,
+        })
+    }
+
     fn update_output_watch_channels(&self) {
         let current_disks = self
             .disks

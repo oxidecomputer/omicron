@@ -37,6 +37,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use std::time::Instant;
 use tokio::sync::watch;
+use trust_quorum_types::types::Epoch;
 
 use crate::InternalDisksReceiver;
 use crate::SledAgentArtifactStore;
@@ -74,6 +75,7 @@ pub(crate) fn spawn<T: SledAgentFacilities, U: SledAgentArtifactStore>(
     external_disks_tx: watch::Sender<HashSet<Disk>>,
     former_zone_root_archiver: FormerZoneRootArchiver,
     raw_disks_rx: RawDisksReceiver,
+    committed_epoch_rx: watch::Receiver<Option<Epoch>>,
     sled_agent_facilities: T,
     sled_agent_artifact_store: U,
     log: Logger,
@@ -100,6 +102,7 @@ pub(crate) fn spawn<T: SledAgentFacilities, U: SledAgentArtifactStore>(
             datasets,
             zones,
             boot_partitions,
+            committed_epoch_rx,
             log,
         }
         .run(sled_agent_facilities, sled_agent_artifact_store),
@@ -295,6 +298,9 @@ struct ReconcilerTask {
     datasets: OmicronDatasets,
     zones: OmicronZones,
     boot_partitions: BootPartitionReconciler,
+    /// Receiver for committed epoch notifications from trust quorum.
+    /// When a new epoch is committed, we need to rotate ZFS encryption keys.
+    committed_epoch_rx: watch::Receiver<Option<Epoch>>,
     log: Logger,
 }
 
@@ -316,6 +322,11 @@ impl ReconcilerTask {
         // particular kind of failure we're retrying"). For now we'll just take
         // this pretty aggressive policy.
         const SLEEP_BETWEEN_RETRIES: Duration = Duration::from_secs(5);
+
+        // Ensure we process the initial epoch on startup. Using mark_unchanged()
+        // means that changed() will fire on the first value, allowing us to
+        // catch any missed rekeys from crashes.
+        self.committed_epoch_rx.mark_unchanged();
 
         loop {
             let result = self
@@ -397,6 +408,45 @@ impl ReconcilerTask {
                         "starting reconciliation due to retryable error"
                     );
                     continue;
+                }
+
+                // Cancel-safe per docs on `changed()`
+                //
+                // Handle committed epoch changes from trust quorum. When a new
+                // epoch is committed, we need to rotate ZFS encryption keys for
+                // all managed U.2 crypt datasets.
+                //
+                // IMPORTANT: We do NOT call `continue` here - we don't want to
+                // trigger a full reconciliation. The rekey operation is
+                // independent of normal reconciliation.
+                result = self.committed_epoch_rx.changed() => {
+                    match result {
+                        Ok(()) => {
+                            // Copy the epoch out of the borrow before awaiting
+                            let epoch = *self.committed_epoch_rx.borrow();
+                            if let Some(epoch) = epoch {
+                                info!(
+                                    self.log,
+                                    "ZFS key rotation triggered";
+                                    "epoch" => %epoch
+                                );
+                                self.datasets.rekey_for_epoch(
+                                    epoch,
+                                    self.external_disks.managed_disks(),
+                                    &self.key_requester,
+                                    &self.log,
+                                ).await;
+                            }
+                            // Note: NOT calling continue - we don't want to
+                            // trigger do_reconciliation
+                        }
+                        Err(_closed) => {
+                            warn!(
+                                self.log,
+                                "committed_epoch watch channel closed"
+                            );
+                        }
+                    }
                 }
             }
         }

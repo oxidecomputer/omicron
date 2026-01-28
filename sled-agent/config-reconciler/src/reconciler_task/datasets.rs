@@ -15,11 +15,13 @@ use super::CurrentlyManagedZpools;
 use crate::dataset_serialization_task::DatasetEnsureError;
 use crate::dataset_serialization_task::DatasetEnsureResult;
 use crate::dataset_serialization_task::DatasetTaskHandle;
+use crate::dataset_serialization_task::RekeyRequest;
 use iddqd::IdOrdItem;
 use iddqd::IdOrdMap;
 use iddqd::id_upcast;
 use illumos_utils::zpool::PathInPool;
 use illumos_utils::zpool::ZpoolOrRamdisk;
+use key_manager::StorageKeyRequester;
 use omicron_common::disk::DatasetConfig;
 use omicron_common::disk::DatasetKind;
 use omicron_common::disk::DatasetName;
@@ -28,13 +30,17 @@ use sled_agent_types::inventory::ConfigReconcilerInventoryResult;
 use sled_agent_types::inventory::OmicronZoneConfig;
 use sled_agent_types::inventory::OrphanedDataset;
 use sled_storage::config::MountConfig;
+use sled_storage::dataset::CRYPT_DATASET;
 use sled_storage::dataset::ZONE_DATASET;
+use sled_storage::disk::Disk;
 use slog::Logger;
+use slog::error;
 use slog::info;
 use slog::warn;
 use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
 use std::sync::Arc;
+use trust_quorum_types::types::Epoch;
 
 #[derive(Debug, thiserror::Error)]
 pub(super) enum ZoneDatasetDependencyError {
@@ -298,6 +304,93 @@ impl OmicronDatasets {
 
     pub(crate) fn orphaned_datasets(&self) -> &IdOrdMap<OrphanedDataset> {
         &self.orphaned_datasets
+    }
+
+    /// Rotate encryption keys for all managed U.2 crypt datasets to the new epoch.
+    ///
+    /// This is called when Trust Quorum commits a new epoch. The operation is
+    /// idempotent: datasets already at the target epoch are skipped.
+    pub(super) async fn rekey_for_epoch<'a>(
+        &self,
+        epoch: Epoch,
+        disks: impl Iterator<Item = &'a Disk>,
+        key_requester: &StorageKeyRequester,
+        log: &Logger,
+    ) {
+        // Build rekey requests for each managed disk's crypt dataset
+        let mut requests = Vec::new();
+        for disk in disks {
+            let zpool_name = disk.zpool_name();
+            let dataset_name = format!("{}/{}", zpool_name, CRYPT_DATASET);
+
+            // Derive the new encryption key for this disk
+            let key = match key_requester
+                .get_key(epoch.0, disk.identity().clone())
+                .await
+            {
+                Ok(k) => k,
+                Err(e) => {
+                    error!(
+                        log,
+                        "Failed to derive key for zpool, skipping rekey";
+                        "zpool" => %zpool_name,
+                        "error" => %e,
+                    );
+                    continue;
+                }
+            };
+
+            requests.push(RekeyRequest { dataset_name, key });
+        }
+
+        if requests.is_empty() {
+            info!(log, "No datasets to rekey for epoch"; "epoch" => %epoch);
+            return;
+        }
+
+        info!(
+            log,
+            "Rotating encryption keys for datasets";
+            "count" => requests.len(),
+            "epoch" => %epoch,
+        );
+
+        // Send to dataset operation serialization task, requesting that all the
+        // collected datasets be rekeyed in a single batch with no interceding
+        // operations
+        match self.dataset_task.rekey_datasets(requests).await {
+            Ok(results) => {
+                let mut success_count = 0;
+                let mut error_count = 0;
+                for result in results {
+                    match result {
+                        Ok(()) => success_count += 1,
+                        Err(e) => {
+                            error_count += 1;
+                            error!(
+                                log,
+                                "Failed to rekey dataset";
+                                "error" => %e,
+                            );
+                        }
+                    }
+                }
+                info!(
+                    log,
+                    "Key rotation complete";
+                    "success" => success_count,
+                    "errors" => error_count,
+                    "epoch" => %epoch,
+                );
+            }
+            Err(e) => {
+                error!(
+                    log,
+                    "Failed to send rekey request to dataset task";
+                    "error" => %e,
+                );
+            }
+        }
     }
 }
 
