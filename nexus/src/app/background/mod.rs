@@ -110,7 +110,7 @@
 //!   instances.  Thus, having reconcilers accept an explicit hint about what
 //!   changed (and then doing something differently based on that) bifurcates
 //!   the code: there's the common case where that hint is available and the
-//!   rarely-exercised case when it's not. This is what we're trying to avoid.
+//!   rarely-exercised case when it's not.  This is what we're trying to avoid.
 //! * We do allow reconcilers to be triggered by a `tokio::sync::watch` channel
 //!   -- but again, not using the _data_ from that channel.  There are two big
 //!   advantages here: (1) reduced latency from when a change is made to when
