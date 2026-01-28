@@ -20,11 +20,10 @@ workspace = true
 [dependencies]
 ahash = { version = "0.8.12" }
 aho-corasick = { version = "1.1.3" }
-anyhow = { version = "1.0.99", features = ["backtrace"] }
+anyhow = { version = "1.0.100", features = ["backtrace"] }
 aws-lc-rs = { version = "1.12.4", features = ["prebuilt-nasm"] }
 base16ct = { version = "0.2.0", default-features = false, features = ["alloc"] }
 base64 = { version = "0.22.1" }
-base64ct = { version = "1.6.0", default-features = false, features = ["std"] }
 bitflags-dff4ba8e3ae991db = { package = "bitflags", version = "1.3.2" }
 bitflags-f595c2ba2a3f28df = { package = "bitflags", version = "2.9.4", default-features = false, features = ["serde"] }
 bstr = { version = "1.10.0" }
@@ -33,8 +32,8 @@ byteorder = { version = "1.5.0" }
 bytes = { version = "1.10.1", features = ["serde"] }
 chrono = { version = "0.4.42", features = ["serde"] }
 cipher = { version = "0.4.4", default-features = false, features = ["block-padding", "zeroize"] }
-clap = { version = "4.5.48", features = ["cargo", "derive", "env", "wrap_help"] }
-clap_builder = { version = "4.5.48", default-features = false, features = ["cargo", "color", "env", "std", "suggestions", "usage", "wrap_help"] }
+clap = { version = "4.5.54", features = ["cargo", "derive", "env", "wrap_help"] }
+clap_builder = { version = "4.5.54", default-features = false, features = ["cargo", "color", "env", "std", "suggestions", "usage", "wrap_help"] }
 const-oid = { version = "0.9.6", default-features = false, features = ["db", "std"] }
 crossbeam-epoch = { version = "0.9.18" }
 crossbeam-utils = { version = "0.8.21" }
@@ -44,8 +43,10 @@ curve25519-dalek = { version = "4.1.3", features = ["digest", "legacy_compatibil
 daft = { version = "0.1.4", features = ["derive", "newtype-uuid1", "oxnet01", "uuid1"] }
 data-encoding = { version = "2.9.0" }
 der = { version = "0.7.10", default-features = false, features = ["derive", "flagset", "oid", "pem", "std"] }
+dice-verifier = { git = "https://github.com/oxidecomputer/dice-util", rev = "6e0ef48f72ff85ba50fc8286c8e89dc5f9c822dd", default-features = false, features = ["ipcc", "mock"] }
 digest = { version = "0.10.7", features = ["mac", "oid", "std"] }
 ecdsa = { version = "0.16.9", features = ["pem", "signing", "std", "verifying"] }
+ed25519 = { version = "2.2.3", default-features = false, features = ["pem", "std"] }
 ed25519-dalek = { version = "2.1.1", features = ["digest", "pem", "rand_core"] }
 either = { version = "1.15.0", features = ["use_std"] }
 elliptic-curve = { version = "0.13.8", features = ["ecdh", "hazmat", "pem", "std"] }
@@ -135,6 +136,7 @@ strum-2f80eeee3b1b6c7e = { package = "strum", version = "0.26.3", features = ["d
 strum-754bda37e0fb3874 = { package = "strum", version = "0.27.2", features = ["derive"] }
 subtle = { version = "2.6.1" }
 syn-f595c2ba2a3f28df = { package = "syn", version = "2.0.111", features = ["extra-traits", "fold", "full", "visit", "visit-mut"] }
+tempfile = { version = "3.24.0" }
 time = { version = "0.3.43", features = ["formatting", "local-offset", "macros", "parsing"] }
 tokio = { version = "1.48.0", features = ["full", "test-util"] }
 tokio-postgres = { version = "0.7.13", features = ["with-chrono-0_4", "with-serde_json-1", "with-uuid-1"] }
@@ -160,11 +162,10 @@ zip-3b31131e45eafb45 = { package = "zip", version = "0.6.6", default-features = 
 [build-dependencies]
 ahash = { version = "0.8.12" }
 aho-corasick = { version = "1.1.3" }
-anyhow = { version = "1.0.99", features = ["backtrace"] }
+anyhow = { version = "1.0.100", features = ["backtrace"] }
 aws-lc-rs = { version = "1.12.4", features = ["prebuilt-nasm"] }
 base16ct = { version = "0.2.0", default-features = false, features = ["alloc"] }
 base64 = { version = "0.22.1" }
-base64ct = { version = "1.6.0", default-features = false, features = ["std"] }
 bitflags-dff4ba8e3ae991db = { package = "bitflags", version = "1.3.2" }
 bitflags-f595c2ba2a3f28df = { package = "bitflags", version = "2.9.4", default-features = false, features = ["serde"] }
 bstr = { version = "1.10.0" }
@@ -174,8 +175,8 @@ bytes = { version = "1.10.1", features = ["serde"] }
 cc = { version = "1.2.30", default-features = false, features = ["parallel"] }
 chrono = { version = "0.4.42", features = ["serde"] }
 cipher = { version = "0.4.4", default-features = false, features = ["block-padding", "zeroize"] }
-clap = { version = "4.5.48", features = ["cargo", "derive", "env", "wrap_help"] }
-clap_builder = { version = "4.5.48", default-features = false, features = ["cargo", "color", "env", "std", "suggestions", "usage", "wrap_help"] }
+clap = { version = "4.5.54", features = ["cargo", "derive", "env", "wrap_help"] }
+clap_builder = { version = "4.5.54", default-features = false, features = ["cargo", "color", "env", "std", "suggestions", "usage", "wrap_help"] }
 const-oid = { version = "0.9.6", default-features = false, features = ["db", "std"] }
 crossbeam-epoch = { version = "0.9.18" }
 crossbeam-utils = { version = "0.8.21" }
@@ -185,8 +186,10 @@ curve25519-dalek = { version = "4.1.3", features = ["digest", "legacy_compatibil
 daft = { version = "0.1.4", features = ["derive", "newtype-uuid1", "oxnet01", "uuid1"] }
 data-encoding = { version = "2.9.0" }
 der = { version = "0.7.10", default-features = false, features = ["derive", "flagset", "oid", "pem", "std"] }
+dice-verifier = { git = "https://github.com/oxidecomputer/dice-util", rev = "6e0ef48f72ff85ba50fc8286c8e89dc5f9c822dd", default-features = false, features = ["ipcc", "mock"] }
 digest = { version = "0.10.7", features = ["mac", "oid", "std"] }
 ecdsa = { version = "0.16.9", features = ["pem", "signing", "std", "verifying"] }
+ed25519 = { version = "2.2.3", default-features = false, features = ["pem", "std"] }
 ed25519-dalek = { version = "2.1.1", features = ["digest", "pem", "rand_core"] }
 either = { version = "1.15.0", features = ["use_std"] }
 elliptic-curve = { version = "0.13.8", features = ["ecdh", "hazmat", "pem", "std"] }
@@ -279,6 +282,7 @@ strum-754bda37e0fb3874 = { package = "strum", version = "0.27.2", features = ["d
 subtle = { version = "2.6.1" }
 syn-dff4ba8e3ae991db = { package = "syn", version = "1.0.109", features = ["extra-traits", "fold", "full", "visit"] }
 syn-f595c2ba2a3f28df = { package = "syn", version = "2.0.111", features = ["extra-traits", "fold", "full", "visit", "visit-mut"] }
+tempfile = { version = "3.24.0" }
 time = { version = "0.3.43", features = ["formatting", "local-offset", "macros", "parsing"] }
 time-macros = { version = "0.2.24", default-features = false, features = ["formatting", "parsing"] }
 tokio = { version = "1.48.0", features = ["full", "test-util"] }
