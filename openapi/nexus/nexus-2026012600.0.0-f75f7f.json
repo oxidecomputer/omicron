@@ -19345,7 +19345,7 @@
             "format": "uuid"
           },
           "read_only": {
-            "description": "If `true`, this disk is read-only when attached to an instance.",
+            "description": "Whether or not this disk is read-only.",
             "type": "boolean"
           },
           "size": {
