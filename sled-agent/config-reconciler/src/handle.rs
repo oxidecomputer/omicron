@@ -503,6 +503,31 @@ impl AvailableDatasetsReceiver {
         }
     }
 
+    pub fn all_mounted_local_storage_datasets(&self) -> Vec<PathInPool> {
+        match &self.inner {
+            AvailableDatasetsReceiverInner::Real(receiver) => {
+                receiver.borrow().all_mounted_local_storage_datasets().collect()
+            }
+            #[cfg(feature = "testing")]
+            AvailableDatasetsReceiverInner::FakeTempDir { zpool, tempdir } => {
+                vec![PathInPool {
+                    pool: zpool.clone(),
+                    path: tempdir
+                        .path()
+                        .join(DatasetKind::LocalStorage.to_string()),
+                }]
+            }
+            #[cfg(feature = "testing")]
+            AvailableDatasetsReceiverInner::FakeStatic(pools) => pools
+                .iter()
+                .map(|(pool, path)| PathInPool {
+                    pool: ZpoolOrRamdisk::Zpool(*pool),
+                    path: path.join(DatasetKind::LocalStorage.to_string()),
+                })
+                .collect(),
+        }
+    }
+
     pub fn all_mounted_local_storage_unencrypted_datasets(
         &self,
     ) -> Vec<PathInPool> {

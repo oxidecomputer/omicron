@@ -164,6 +164,12 @@ impl ReconcilerResult {
         (status, latest_result)
     }
 
+    pub(crate) fn all_mounted_local_storage_datasets(
+        &self,
+    ) -> impl Iterator<Item = PathInPool> + '_ {
+        self.all_mounted_datasets_of_kind(DatasetKind::LocalStorage)
+    }
+
     pub(crate) fn all_mounted_local_storage_unencrypted_datasets(
         &self,
     ) -> impl Iterator<Item = PathInPool> + '_ {

@@ -16,6 +16,7 @@ use omicron_common::api::external::DiskState;
 use omicron_common::progenitor_operation_retry::ProgenitorOperationRetry;
 use serde::Deserialize;
 use serde::Serialize;
+use sled_agent_client::types::LocalStorageDatasetDeleteRequest;
 use steno::ActionError;
 use steno::Node;
 use uuid::Uuid;
@@ -210,8 +211,6 @@ async fn sdd_delete_local_storage(
         &params.serialized_authn,
     );
 
-    let disk_id = params.disk.id();
-
     let datastore::Disk::LocalStorage(disk) = params.disk else {
         unreachable!(
             "check during `make_saga_dag` should have ensured disk type is \
@@ -224,25 +223,31 @@ async fn sdd_delete_local_storage(
         return Ok(());
     };
 
-    let allocation = match allocation {
+    let (sled_id, request) = match allocation {
         datastore::LocalStorageAllocation::Unencrypted(allocation) => {
-            allocation
+            let sled_id = allocation.sled_id();
+
+            let request = LocalStorageDatasetDeleteRequest {
+                zpool_id: allocation.pool_id(),
+                dataset_id: allocation.id(),
+                encrypted_at_rest: false,
+            };
+
+            (sled_id, request)
         }
 
-        datastore::LocalStorageAllocation::Encrypted(_) => {
-            // If all disks backed by local storage have not been deleted before
-            // the PR to change to using the unencrypted dataset, bail out here,
-            // as this will require manual deletion.
-            return Err(ActionError::action_failed(format!(
-                "disk {disk_id} is backed by the encrypted local storage \
-                dataset",
-            )));
+        datastore::LocalStorageAllocation::Encrypted(allocation) => {
+            let sled_id = allocation.sled_id();
+
+            let request = LocalStorageDatasetDeleteRequest {
+                zpool_id: allocation.pool_id(),
+                dataset_id: allocation.id(),
+                encrypted_at_rest: true,
+            };
+
+            (sled_id, request)
         }
     };
-
-    let dataset_id = allocation.id();
-    let pool_id = allocation.pool_id();
-    let sled_id = allocation.sled_id();
 
     // Get a sled agent client
 
@@ -255,9 +260,7 @@ async fn sdd_delete_local_storage(
     // Ensure that the local storage is deleted
 
     let delete_operation = || async {
-        sled_agent_client
-            .local_storage_dataset_delete(&pool_id, &dataset_id)
-            .await
+        sled_agent_client.local_storage_dataset_delete(&request).await
     };
 
     let gone_check = || async {

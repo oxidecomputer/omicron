@@ -40,8 +40,8 @@ use omicron_common::disk::{
     DisksManagementResult, OmicronPhysicalDisksConfig,
 };
 use omicron_uuid_kinds::{
-    DatasetUuid, ExternalZpoolUuid, GenericUuid, PhysicalDiskUuid,
-    PropolisUuid, SledUuid, SupportBundleUuid, ZpoolUuid,
+    DatasetUuid, GenericUuid, PhysicalDiskUuid, PropolisUuid, SledUuid,
+    SupportBundleUuid, ZpoolUuid,
 };
 use oxnet::Ipv6Net;
 use propolis_client::instance_spec::FileStorageBackend;
@@ -1112,12 +1112,14 @@ impl SledAgent {
 
     pub fn ensure_local_storage_dataset(
         &self,
-        zpool_id: ExternalZpoolUuid,
-        dataset_id: DatasetUuid,
         request: LocalStorageDatasetEnsureRequest,
     ) {
+        assert!(!request.encrypted_at_rest);
+
         self.storage.lock().ensure_local_storage_unencrypted_dataset(
-            zpool_id, dataset_id, request,
+            request.zpool_id,
+            request.dataset_id,
+            request,
         );
     }
 }

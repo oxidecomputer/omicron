@@ -1449,10 +1449,12 @@ impl super::Nexus {
 
             match local_storage_dataset_allocation {
                 LocalStorageAllocation::Unencrypted(allocation) => {
-                    delegated_zvols.push(DelegatedZvol::LocalStorage {
-                        zpool_id: allocation.pool_id(),
-                        dataset_id: allocation.id(),
-                    });
+                    delegated_zvols.push(
+                        DelegatedZvol::LocalStorageUnencrypted {
+                            zpool_id: allocation.pool_id(),
+                            dataset_id: allocation.id(),
+                        },
+                    );
                 }
 
                 LocalStorageAllocation::Encrypted(_) => {

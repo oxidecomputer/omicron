@@ -4,9 +4,9 @@
 
 use std::net::SocketAddr;
 
-use omicron_common::api::external;
 use omicron_common::api::external::Hostname;
 use omicron_common::api::internal::nexus::VmmRuntimeState;
+use omicron_common::api::internal::shared::DelegatedZvol;
 use omicron_common::api::internal::shared::DhcpConfig;
 use omicron_common::api::internal::shared::ExternalIpConfig;
 use omicron_common::api::internal::shared::NetworkInterface;
@@ -19,8 +19,9 @@ use uuid::Uuid;
 use crate::v1::instance::InstanceMetadata;
 use crate::v1::instance::VmmSpec;
 use crate::v7::instance::InstanceMulticastMembership;
-use crate::v9::instance::DelegatedZvol;
-use crate::v10;
+
+use crate::v9;
+use crate::v11;
 
 /// The body of a request to ensure that a instance and VMM are known to a sled
 /// agent.
@@ -65,52 +66,51 @@ pub struct InstanceSledLocalConfig {
     pub delegated_zvols: Vec<DelegatedZvol>,
 }
 
-impl TryFrom<v10::instance::InstanceEnsureBody> for InstanceEnsureBody {
-    type Error = external::Error;
-
-    fn try_from(
-        v10: v10::instance::InstanceEnsureBody,
-    ) -> Result<Self, Self::Error> {
-        Ok(Self {
-            vmm_spec: v10.vmm_spec,
-            local_config: v10.local_config.try_into()?,
-            vmm_runtime: v10.vmm_runtime,
-            instance_id: v10.instance_id,
-            migration_id: v10.migration_id,
-            propolis_addr: v10.propolis_addr,
-            metadata: v10.metadata,
-        })
+impl From<v9::instance::DelegatedZvol> for DelegatedZvol {
+    fn from(v9: v9::instance::DelegatedZvol) -> Self {
+        match v9 {
+            v9::instance::DelegatedZvol::LocalStorage {
+                zpool_id,
+                dataset_id,
+            } => {
+                // The previous version of this API was meant to allocate local
+                // storage from the encrypted dataset.
+                DelegatedZvol::LocalStorageEncrypted { zpool_id, dataset_id }
+            }
+        }
     }
 }
 
-impl TryFrom<v10::instance::InstanceSledLocalConfig>
-    for InstanceSledLocalConfig
-{
-    type Error = external::Error;
+impl From<v11::instance::InstanceEnsureBody> for InstanceEnsureBody {
+    fn from(v11: v11::instance::InstanceEnsureBody) -> InstanceEnsureBody {
+        InstanceEnsureBody {
+            vmm_spec: v11.vmm_spec,
+            local_config: v11.local_config.into(),
+            vmm_runtime: v11.vmm_runtime,
+            instance_id: v11.instance_id,
+            migration_id: v11.migration_id,
+            propolis_addr: v11.propolis_addr,
+            metadata: v11.metadata,
+        }
+    }
+}
 
-    fn try_from(
-        v10: v10::instance::InstanceSledLocalConfig,
-    ) -> Result<Self, Self::Error> {
-        // v10.source_nat is already a v1::SourceNatConfig, so we can use it directly
-        let external_ips = ExternalIpConfig::try_from_generic(
-            Some(v10.source_nat),
-            v10.ephemeral_ip,
-            v10.floating_ips.clone(),
-        )
-        .map_err(|e| {
-            external::Error::invalid_request(format!(
-                "invalid external IP config: {e}"
-            ))
-        })?;
-
-        Ok(Self {
-            hostname: v10.hostname,
-            nics: v10.nics,
-            external_ips: Some(external_ips),
-            multicast_groups: v10.multicast_groups,
-            firewall_rules: v10.firewall_rules,
-            dhcp_config: v10.dhcp_config,
-            delegated_zvols: v10.delegated_zvols,
-        })
+impl From<v11::instance::InstanceSledLocalConfig> for InstanceSledLocalConfig {
+    fn from(
+        v11: v11::instance::InstanceSledLocalConfig,
+    ) -> InstanceSledLocalConfig {
+        InstanceSledLocalConfig {
+            hostname: v11.hostname,
+            nics: v11.nics,
+            external_ips: v11.external_ips,
+            multicast_groups: v11.multicast_groups,
+            firewall_rules: v11.firewall_rules,
+            dhcp_config: v11.dhcp_config,
+            delegated_zvols: v11
+                .delegated_zvols
+                .into_iter()
+                .map(Into::into)
+                .collect(),
+        }
     }
 }

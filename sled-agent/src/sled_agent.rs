@@ -57,8 +57,7 @@ use omicron_common::backoff::{
 use omicron_common::zpool_name::ZpoolName;
 use omicron_ddm_admin_client::Client as DdmAdminClient;
 use omicron_uuid_kinds::{
-    DatasetUuid, ExternalZpoolUuid, GenericUuid, MupdateOverrideUuid,
-    PropolisUuid, SledUuid,
+    GenericUuid, MupdateOverrideUuid, PropolisUuid, SledUuid,
 };
 use sled_agent_config_reconciler::{
     ConfigReconcilerHandle, ConfigReconcilerSpawnToken, InternalDisks,
@@ -66,6 +65,7 @@ use sled_agent_config_reconciler::{
     ReconcilerInventory, SledAgentArtifactStore, SledAgentFacilities,
 };
 use sled_agent_health_monitor::handle::HealthMonitorHandle;
+use sled_agent_types::dataset::LocalStorageDatasetDeleteRequest;
 use sled_agent_types::dataset::LocalStorageDatasetEnsureRequest;
 use sled_agent_types::disk::DiskStateRequested;
 use sled_agent_types::early_networking::EarlyNetworkConfig;
@@ -1242,10 +1242,25 @@ impl SledAgent {
 
     pub(crate) async fn create_local_storage_dataset(
         &self,
-        zpool_id: ExternalZpoolUuid,
-        dataset_id: DatasetUuid,
         request: LocalStorageDatasetEnsureRequest,
     ) -> Result<(), HttpError> {
+        let LocalStorageDatasetEnsureRequest {
+            zpool_id,
+            dataset_id,
+            dataset_size,
+            volume_size,
+            encrypted_at_rest,
+        } = request;
+
+        // For now, a request from Nexus to create a local storage dataset is
+        // only supported for unencrypted local storage. Reject this request
+        // otherwise.
+        if encrypted_at_rest {
+            let error =
+                String::from("using encrypted local storage not supported");
+            return Err(HttpError::for_bad_request(Some(error.clone()), error));
+        }
+
         // Ensure that the local storage dataset we want to use is still present
         let present = self
             .inner
@@ -1271,10 +1286,7 @@ impl SledAgent {
         }
 
         let delegated_zvol =
-            DelegatedZvol::LocalStorage { zpool_id, dataset_id };
-
-        let LocalStorageDatasetEnsureRequest { dataset_size, volume_size } =
-            request;
+            DelegatedZvol::LocalStorageUnencrypted { zpool_id, dataset_id };
 
         Zfs::ensure_dataset(DatasetEnsureArgs {
             name: &delegated_zvol.parent_dataset_name(),
@@ -1312,35 +1324,68 @@ impl SledAgent {
 
     pub(crate) async fn delete_local_storage_dataset(
         &self,
-        zpool_id: ExternalZpoolUuid,
-        dataset_id: DatasetUuid,
+        request: LocalStorageDatasetDeleteRequest,
     ) -> Result<(), HttpError> {
-        // Ensure that the local storage dataset we want to use is still present
-        let present = self
-            .inner
-            .config_reconciler
-            .available_datasets_rx()
-            .all_mounted_local_storage_unencrypted_datasets()
-            .into_iter()
-            .any(|path_in_pool| match path_in_pool.pool {
-                ZpoolOrRamdisk::Zpool(zpool_name) => {
-                    zpool_name == ZpoolName::External(zpool_id)
-                }
-                ZpoolOrRamdisk::Ramdisk => false,
-            });
+        let LocalStorageDatasetDeleteRequest {
+            zpool_id,
+            dataset_id,
+            encrypted_at_rest,
+        } = request;
 
-        if !present {
-            // We cannot destroy a child dataset of the local storage dataset if
-            // it's not present! Return a 503.
-            let error = format!(
-                "local storage unencrypted dataset for pool {zpool_id} \
-                missing!"
-            );
-            return Err(HttpError::for_unavail(Some(error.clone()), error));
-        }
+        let delegated_zvol = if encrypted_at_rest {
+            // Ensure that the local storage dataset we want to use is still
+            // present
+            let present = self
+                .inner
+                .config_reconciler
+                .available_datasets_rx()
+                .all_mounted_local_storage_datasets()
+                .into_iter()
+                .any(|path_in_pool| match path_in_pool.pool {
+                    ZpoolOrRamdisk::Zpool(zpool_name) => {
+                        zpool_name == ZpoolName::External(zpool_id)
+                    }
+                    ZpoolOrRamdisk::Ramdisk => false,
+                });
 
-        let delegated_zvol =
-            DelegatedZvol::LocalStorage { zpool_id, dataset_id };
+            if !present {
+                // We cannot destroy a child dataset of the local storage
+                // dataset if it's not present! Return a 503.
+                let error = format!(
+                    "local storage dataset for pool {zpool_id} missing!"
+                );
+                return Err(HttpError::for_unavail(Some(error.clone()), error));
+            }
+
+            DelegatedZvol::LocalStorageEncrypted { zpool_id, dataset_id }
+        } else {
+            // Ensure that the local storage dataset we want to use is still
+            // present
+            let present = self
+                .inner
+                .config_reconciler
+                .available_datasets_rx()
+                .all_mounted_local_storage_unencrypted_datasets()
+                .into_iter()
+                .any(|path_in_pool| match path_in_pool.pool {
+                    ZpoolOrRamdisk::Zpool(zpool_name) => {
+                        zpool_name == ZpoolName::External(zpool_id)
+                    }
+                    ZpoolOrRamdisk::Ramdisk => false,
+                });
+
+            if !present {
+                // We cannot destroy a child dataset of the local storage
+                // dataset if it's not present! Return a 503.
+                let error = format!(
+                    "local storage unencrypted dataset for pool {zpool_id} \
+                    missing!"
+                );
+                return Err(HttpError::for_unavail(Some(error.clone()), error));
+            }
+
+            DelegatedZvol::LocalStorageUnencrypted { zpool_id, dataset_id }
+        };
 
         Zfs::destroy_dataset(&delegated_zvol.parent_dataset_name())
             .await
