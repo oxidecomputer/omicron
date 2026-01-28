@@ -537,13 +537,12 @@ async fn allocate_subnets_and_start_sled_agents(
         datastore,
         rack_id,
         epoch,
-        committed_config.members.keys().cloned().collect(),
+        last_committed_config.members.keys().cloned().collect(),
         allocations_by_baseboard_id,
     )
     .await
 }
 
-#[allow(clippy::too_many_arguments)]
 async fn start_sled_agents(
     log: Logger,
     opctx: OpContext,
@@ -673,6 +672,7 @@ async fn send_start_sled_agent_requests(
 /// Retrieve up to `num_clients` clients for commissioned sled agents.
 ///
 /// Returns an error if no clients are available.
+#[allow(clippy::too_many_arguments)]
 async fn get_sled_agent_clients(
     log: &Logger,
     opctx: &OpContext,
