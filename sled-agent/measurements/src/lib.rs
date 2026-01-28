@@ -16,14 +16,17 @@ use iddqd::IdOrdMap;
 use sled_agent_config_reconciler::{ConfigReconcilerHandle, InventoryError};
 use sled_agent_resolvable_files::ZoneImageSourceResolver;
 use sled_agent_types::inventory::{
-    ConfigReconcilerInventoryResult, OmicronSledConfig,
-    SingleMeasurementInventory,
+    ConfigReconcilerInventoryResult, OmicronSingleMeasurement,
+    OmicronSledConfig, SingleMeasurementInventory,
 };
-use sled_agent_types::resolvable_files::ManifestHashError;
+use sled_agent_types::resolvable_files::{
+    ManifestHashError, MupdateOverrideReadError,
+};
 use slog::Logger;
-use slog::error;
+use slog::{error, info, warn};
 use slog_error_chain::InlineErrorChain;
 use slog_error_chain::SlogInlineError;
+use std::collections::BTreeSet;
 use std::sync::Arc;
 use thiserror::Error;
 use tokio::sync::oneshot;
@@ -42,6 +45,8 @@ pub enum MeasurementError {
     ManifestHashError(#[source] ManifestHashError),
     #[error("Error notification from ledger start")]
     LedgerStartFailure,
+    #[error("mupdate override error")]
+    MupdateOverrideError(#[source] MupdateOverrideReadError),
 }
 
 #[derive(Clone)]
@@ -191,10 +196,114 @@ impl MeasurementsHandle {
     }
 }
 
-// Right now we only take into account the install dataset/MUPdate case.
-// Future work will also give artifact hashes.
 fn measurements_from_sled_config(
-    _config: &OmicronSledConfig,
+    config: &OmicronSledConfig,
+    log: &Logger,
+    config_reconciler: &Arc<ConfigReconcilerHandle>,
+    zone_image_resolver: &ZoneImageSourceResolver,
+) -> Result<Vec<Utf8PathBuf>, MeasurementError> {
+    let status = zone_image_resolver.status();
+    let use_install = config.measurements.is_empty();
+
+    match (&status.mupdate_override.boot_disk_override, use_install) {
+        // We are set to use the install dataset and there is a MUPdate override
+        (Ok(Some(override_info)), true) => {
+            info!(log, "mupdate override active, already using install dataset";
+                        "mupdate_override_id" => %override_info.mupdate_uuid);
+            measurements_from_install_dataset(
+                log,
+                config_reconciler,
+                zone_image_resolver,
+            )
+        }
+        // Actual override case! Use the install dataset
+        (Ok(Some(override_info)), false) => {
+            info!(log, "mupdate override active, redirecting to install \
+                        dataset from artifacts";
+                        "mupdate_override_id" => %override_info.mupdate_uuid);
+            measurements_from_install_dataset(
+                log,
+                config_reconciler,
+                zone_image_resolver,
+            )
+        }
+        // No override is active but we're still using the install dataset
+        (Ok(None), true) => measurements_from_install_dataset(
+            log,
+            config_reconciler,
+            zone_image_resolver,
+        ),
+        // No override and we're not using the install dataset
+        (Ok(None), false) => measurements_from_artifact_dataset(
+            config_reconciler,
+            &config.measurements,
+        ),
+        // Error getting the mupdate override but we're still set to use
+        // the install dataset
+        (Err(error), true) => {
+            warn!(log, "error obtaining mupdate override but we're still \
+                        using install dataset, proceeding with caution";
+                        "error" => InlineErrorChain::new(error));
+            measurements_from_install_dataset(
+                log,
+                config_reconciler,
+                zone_image_resolver,
+            )
+        }
+        // Error getting the mupdate override but we're supposed to
+        // use the artifacts
+        (Err(error), false) => {
+            error!(log, "error obtaining mupdate override, can't use the \
+                        artifacts, returning an error";
+                        "error" => InlineErrorChain::new(error));
+
+            Err(MeasurementError::MupdateOverrideError(error.clone()))
+        }
+    }
+}
+
+fn measurements_from_artifact_dataset(
+    config_reconciler: &Arc<ConfigReconcilerHandle>,
+    measurements: &BTreeSet<OmicronSingleMeasurement>,
+) -> Result<Vec<Utf8PathBuf>, MeasurementError> {
+    let mut valid = Vec::new();
+    let mut errors = Vec::new();
+
+    for m in measurements {
+        // We have mulitple possible artifact paths. We only need one per hash
+        let mut found = false;
+        for dataset in config_reconciler
+            .internal_disks_rx()
+            .current()
+            .all_artifact_datasets()
+        {
+            let potential_path = dataset.join(m.hash.to_string());
+
+            // This could technically be a TOCTOU issue but arguably all the paths we
+            // return have the same potential issue and hopefully the callers handle
+            // the failure gracefully
+            if potential_path.is_file() {
+                found = true;
+                valid.push(potential_path);
+                break;
+            }
+        }
+        if !found {
+            errors.push(format!(
+                "artifact {} missing from all artifact datasets",
+                m.hash
+            ));
+        }
+    }
+
+    if errors.is_empty() {
+        Ok(valid)
+    } else {
+        Err(MeasurementError::Paths { valid, errors })
+    }
+}
+
+fn measurements_from_install_dataset(
     log: &Logger,
     config_reconciler: &Arc<ConfigReconcilerHandle>,
     zone_image_resolver: &ZoneImageSourceResolver,
