@@ -25,6 +25,12 @@ parent:    1b013011-2062-4b48-b544-a32b23bce83a
     B      current contents 
 
 
+    measurements:
+    ----------------------
+    hash   version   prune
+    ----------------------
+
+
     physical disks:
     ------------------------------------------------------------------------------------
     vendor        model        serial                                        disposition
@@ -149,6 +155,12 @@ parent:    9766ca20-38d4-4380-b005-e7c43c797e7c
     ------------------------
     A      current contents 
     B      current contents 
+
+
+    measurements:
+    ----------------------
+    hash   version   prune
+    ----------------------
 
 
     physical disks:
@@ -391,6 +403,12 @@ parent:    bb128f06-a2e1-44c1-8874-4f789d0ff896
     ------------------------
     A      current contents 
     B      current contents 
+
+
+    measurements:
+    ----------------------
+    hash   version   prune
+    ----------------------
 
 
     physical disks:

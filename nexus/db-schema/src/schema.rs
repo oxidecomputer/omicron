@@ -2215,6 +2215,19 @@ table! {
 }
 
 table! {
+    bp_single_measurements (blueprint_id, id) {
+        blueprint_id -> Uuid,
+        sled_id -> Uuid,
+        id -> Uuid,
+
+        image_artifact_sha256 -> Nullable<Text>,
+        prune -> Bool,
+    }
+}
+
+allow_tables_to_appear_in_same_query!(bp_single_measurements, tuf_artifact);
+
+table! {
     bp_omicron_zone (blueprint_id, id) {
         blueprint_id -> Uuid,
         sled_id -> Uuid,
@@ -2606,6 +2619,7 @@ allow_tables_to_appear_in_same_query!(
     affinity_group_instance_membership,
     bp_omicron_zone,
     bp_target,
+    bp_single_measurements,
     rendezvous_debug_dataset,
     crucible_dataset,
     disk,

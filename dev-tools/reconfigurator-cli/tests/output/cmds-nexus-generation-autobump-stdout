@@ -1114,6 +1114,12 @@ parent:    8da82a8e-bf97-4fbd-8ddd-9f6462732cf1
     B      current contents       
 
 
+    measurements:
+    ----------------------
+    hash   version   prune
+    ----------------------
+
+
     physical disks:
     ------------------------------------------------------------------------------------
     vendor        model        serial                                        disposition
@@ -1183,6 +1189,12 @@ parent:    8da82a8e-bf97-4fbd-8ddd-9f6462732cf1
     B      current contents       
 
 
+    measurements:
+    ----------------------
+    hash   version   prune
+    ----------------------
+
+
     physical disks:
     ------------------------------------------------------------------------------------
     vendor        model        serial                                        disposition
@@ -1247,6 +1259,12 @@ parent:    8da82a8e-bf97-4fbd-8ddd-9f6462732cf1
     ------------------------------
     A      artifact: version 1.0.0
     B      current contents       
+
+
+    measurements:
+    ----------------------
+    hash   version   prune
+    ----------------------
 
 
     physical disks:
