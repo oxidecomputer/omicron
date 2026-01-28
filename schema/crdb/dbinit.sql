@@ -42,7 +42,6 @@ ALTER DEFAULT PRIVILEGES GRANT INSERT, SELECT, UPDATE, DELETE ON TABLES to omicr
  */
 ALTER RANGE default CONFIGURE ZONE USING num_replicas = 5;
 
-
 /*
  * The deployment strategy for clickhouse
  */
@@ -2371,6 +2370,26 @@ CREATE UNIQUE INDEX IF NOT EXISTS lookup_pool_range_by_last_address ON omicron.p
 STORING (first_address)
 WHERE time_deleted IS NULL;
 
+/*
+ * Index to support efficient lookups of ip_pool_range rows by ip_pool_id.
+ *
+ * This index benefits several important queries:
+ * - ip_pool_fetch_containing_address: finds pools containing a specific IP
+ * - ip_pool_delete: checks for remaining ranges before pool deletion
+ * - ip_pool_list_ranges_batched_on_connection: lists all ranges in a pool
+ * - ip_pools_fetch_ssm_multicast_pool / ip_pools_fetch_asm_multicast_pool:
+ *   joins ip_pool_range to ip_pool for multicast pool lookups
+ *
+ * The STORING clause includes first_address and last_address because these
+ * columns are commonly filtered or selected alongside ip_pool_id, allowing
+ * the query to be satisfied entirely from the index without an additional
+ * lookup to the primary table.
+ */
+CREATE INDEX IF NOT EXISTS ip_pool_range_by_pool_id ON omicron.public.ip_pool_range (
+    ip_pool_id
+) STORING (first_address, last_address)
+WHERE time_deleted IS NULL;
+
 /* The kind of external IP address. */
 CREATE TYPE IF NOT EXISTS omicron.public.ip_kind AS ENUM (
     /*
@@ -2530,9 +2549,11 @@ CREATE UNIQUE INDEX IF NOT EXISTS lookup_external_ip_by_parent ON omicron.public
 )
     WHERE parent_id IS NOT NULL AND time_deleted IS NULL;
 
-/* Enforce a limit of one Ephemeral IP per instance */
-CREATE UNIQUE INDEX IF NOT EXISTS one_ephemeral_ip_per_instance ON omicron.public.external_ip (
-    parent_id
+/* Enforce a limit of one Ephemeral IP per IP version per instance.
+   This allows dual-stack configurations with one IPv4 and one IPv6 ephemeral IP. */
+CREATE UNIQUE INDEX IF NOT EXISTS one_ephemeral_ip_per_instance_per_version ON omicron.public.external_ip (
+    parent_id,
+    (family(ip::INET))
 )
     WHERE kind = 'ephemeral' AND parent_id IS NOT NULL AND time_deleted IS NULL;
 
@@ -2572,6 +2593,230 @@ FROM
 WHERE
     omicron.public.external_ip.kind = 'floating' AND
     project_id IS NOT NULL;
+
+/*******************************************************************/
+
+/*
+ * Subnet pools, members, and external subnets.
+ */
+
+CREATE TABLE IF NOT EXISTS omicron.public.subnet_pool (
+    /* Resource identity metadata */
+    id UUID PRIMARY KEY,
+    name STRING(63) NOT NULL,
+    description STRING(512) NOT NULL,
+    time_created TIMESTAMPTZ NOT NULL,
+    time_modified TIMESTAMPTZ NOT NULL,
+    time_deleted TIMESTAMPTZ,
+
+    /* The collection's child-resource generation number */
+    rcgen INT8 NOT NULL,
+
+    /* The IP version of the subnets contained in this pool. */
+    ip_version omicron.public.ip_version NOT NULL
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS subnet_pool_name_key
+ON omicron.public.subnet_pool (name)
+WHERE
+    time_deleted IS NULL;
+
+CREATE TABLE IF NOT EXISTS omicron.public.subnet_pool_member (
+    id UUID PRIMARY KEY,
+    time_created TIMESTAMPTZ NOT NULL,
+    time_modified TIMESTAMPTZ NOT NULL,
+    time_deleted TIMESTAMPTZ,
+
+    /* FK into the `subnet_pool` table. */
+    subnet_pool_id UUID NOT NULL,
+
+    /* The actual IP subnet. */
+    subnet INET NOT NULL,
+
+    /*
+     * Virtual computed columns with the first / last address in the subnet.
+     *
+     * These columns cannot be directly inserted, and we don't read them from
+     * the database. They are only used in the secondary index below that helps
+     * enforce that we have non-overlapping subnets in this table. That cannot
+     * be done with an index just on the subnet column, since the check we need
+     * isn't equality or ordering.
+     */
+    first_address INET AS (subnet & netmask(subnet)) VIRTUAL,
+    last_address INET AS (
+        /*
+         * This bit-masking is performing the `network()` function, which
+         * CockroachDB unfortunat lacks. We're or-ing the netmask and the
+         * hostmask, which together results in an all-1s bit pattern of either
+         * 32- or 128-bits.
+         */
+        broadcast(subnet) & (netmask(subnet) | hostmask(subnet))
+    ) VIRTUAL,
+
+    /* The minimum and maximum prefix of allocated subnets out of this external
+     * subnet.
+     *
+     * NOTE: These are the _prefix_ lengths, so /24, /64 etc, not sizes. The
+     * `min_prefix_length` is the smallest prefix length that can be sliced out
+     * of this subnet, i.e., the largest subnet. The `max_prefix_length` is the
+     * _largest_ prefix length, i.e., the smallest subnet.
+     */
+    min_prefix_length INT2 NOT NULL,
+    max_prefix_length INT2 NOT NULL,
+
+    /* Tracks child resources, subnets allocated out of this subnet. */
+    rcgen INT8 NOT NULL,
+
+    -- Ensures the prefixes are within the limits of the IP subnet.
+    CONSTRAINT valid_prefix_sizes CHECK (
+        -- Both min / max are non-negative
+        min_prefix_length >= 0 AND
+        max_prefix_length >= 0 AND
+        -- min and max are less than the subnet prefix, which depends on the
+        -- IP family.
+        (
+            (family(subnet) = 4 AND min_prefix_length <= 32) OR
+            (family(subnet) = 6 AND min_prefix_length <= 128)
+        ) AND
+        (
+            (family(subnet) = 4 AND max_prefix_length <= 32) OR
+            (family(subnet) = 6 AND max_prefix_length <= 128)
+        )
+    ),
+
+    -- Ensures that the minimum and maximum prefix lengths are valid. Again,
+    -- these refer to the bit-length of the subnet prefix, so the minimum prefix
+    -- implies the maximum-sized subnet. The min length must be no larger than
+    -- the max length.
+    CONSTRAINT min_prefix_no_larger_than_max_prefix CHECK (
+        min_prefix_length <= max_prefix_length
+    )
+);
+
+CREATE INDEX IF NOT EXISTS lookup_subnet_pool_member_by_subnet_pool_id
+ON omicron.public.subnet_pool_member (subnet_pool_id);
+
+/*
+ * Indexes for quickly looking up overlapping subnets.
+ */
+CREATE UNIQUE INDEX IF NOT EXISTS lookup_subnet_pool_member_by_subnet
+ON omicron.public.subnet_pool_member (subnet)
+WHERE
+    time_deleted IS NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS lookup_subnet_pool_member_by_first_and_last_address
+ON omicron.public.subnet_pool_member (first_address, last_address)
+WHERE
+    time_deleted IS NULL;
+
+/*
+ * Links between Silos and Subnet Pools.
+ */
+CREATE TABLE IF NOT EXISTS omicron.public.subnet_pool_silo_link (
+    subnet_pool_id UUID NOT NULL,
+    silo_id UUID NOT NULL,
+    ip_version omicron.public.ip_version NOT NULL,
+    is_default BOOL NOT NULL,
+    PRIMARY KEY (subnet_pool_id, silo_id)
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS single_default_per_silo
+ON omicron.public.subnet_pool_silo_link (silo_id, ip_version)
+WHERE
+    is_default = TRUE;
+
+CREATE INDEX IF NOT EXISTS lookup_subnet_pool_silo_link_by_silo_id
+ON omicron.public.subnet_pool_silo_link (silo_id);
+
+/*
+ * An external subnet is a Project-scoped portion of an external subnet pool
+ * member.
+ */
+CREATE TABLE IF NOT EXISTS omicron.public.external_subnet (
+    /* Resource identity metadata */
+    id UUID PRIMARY KEY,
+    name STRING(63) NOT NULL,
+    description STRING(512) NOT NULL,
+    time_created TIMESTAMPTZ NOT NULL,
+    time_modified TIMESTAMPTZ NOT NULL,
+    time_deleted TIMESTAMPTZ,
+
+    /* FK into parent subnet_pool table. */
+    subnet_pool_id UUID NOT NULL,
+
+    /* FK into parent subnet_pool_member table. */
+    subnet_pool_member_id UUID NOT NULL,
+
+    /* FK into the project table. */
+    project_id UUID NOT NULL,
+
+    /* The actual IP subnet. */
+    subnet INET NOT NULL,
+    /*
+     * Virtual computed columns with the first / last address in the subnet.
+     *
+     * These columns cannot be directly inserted, and we don't read them from
+     * the database. They are only used in the secondary index below that helps
+     * enforce that we have non-overlapping subnets in this table. That cannot
+     * be done with an index just on the subnet column, since the check we need
+     * isn't equality or ordering.
+     *
+     * Note that it's important that these become true addresses, i.e., /32s or
+     * /128s. CRDB sorts INET types just using the prefix, so we have to ensure
+     * we're using the full address width to get the actual first and last
+     * address. This works for IPv4 and IPv6 addresses.
+     */
+    first_address INET AS (subnet & netmask(subnet)) VIRTUAL,
+    last_address INET AS (
+        /*
+         * This bit-masking is performing the `network()` function, which
+         * CockroachDB unfortunat lacks. We're or-ing the netmask and the
+         * hostmask, which together results in an all-1s bit pattern of either
+         * 32- or 128-bits.
+         */
+        broadcast(subnet) & (netmask(subnet) | hostmask(subnet))
+    ) VIRTUAL,
+
+    /* The state of the subnet, while attaching to an instance. */
+    attach_state omicron.public.ip_attach_state NOT NULL,
+
+    /* The instance to which the subnet is attached, if any */
+    instance_id UUID
+);
+
+/*
+ * External subnets have unique names within a project.
+ */
+CREATE UNIQUE INDEX IF NOT EXISTS external_subnet_project_id_name_key
+ON omicron.public.external_subnet (
+    project_id,
+    name
+)
+WHERE
+    time_deleted IS NULL;
+
+CREATE INDEX IF NOT EXISTS lookup_external_subnet_by_subnet_pool_member_id
+ON omicron.public.external_subnet (subnet_pool_member_id)
+WHERE
+    time_deleted IS NULL;
+
+CREATE INDEX IF NOT EXISTS lookup_external_subnet_by_instance_id
+ON omicron.public.external_subnet (instance_id)
+WHERE
+    instance_id IS NOT NULL AND
+    time_deleted IS NULL;
+
+/*
+ * Indexes for quickly looking up overlapping subnets.
+ */
+CREATE UNIQUE INDEX IF NOT EXISTS lookup_external_subnet_by_subnet
+ON omicron.public.external_subnet (subnet)
+WHERE
+    time_deleted IS NULL;
+
+CREATE UNIQUE INDEX IF NOT EXISTS lookup_external_subnet_by_first_and_last_address
+ON omicron.public.external_subnet (first_address, last_address)
+WHERE
+    time_deleted IS NULL;
 
 /*******************************************************************/
 
@@ -3971,7 +4216,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_sled_agent (
     -- similar to `usable_hardware_threads` and friends above.
     cpu_family omicron.public.sled_cpu_family NOT NULL,
 
-    -- Columns making up the resolver's measurement manifest description 
+    -- Columns making up the resolver's measurement manifest description
     --
     -- The path to the boot disk file
     measurement_manifest_boot_disk_path TEXT NOT NULL,
@@ -4293,24 +4538,21 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_omicron_sled_config (
     -- NULL is translated to `HostPhase2DesiredContents::CurrentContents`
     host_phase_2_desired_slot_a STRING(64),
     host_phase_2_desired_slot_b STRING(64),
-    
+
     -- the set of artifact hashes used with trust quorum, can be empty
     measurements STRING(64)[],
 
     PRIMARY KEY (inv_collection_id, id)
 );
 
-CREATE TABLE IF NOT EXISTS omicron.public.inv_last_reconciliation_measurements (
+CREATE TABLE IF NOT EXISTS omicron.public.inv_single_measurements (
     -- where this observation came from
     -- (foreign key into `inv_collection` table)
     inv_collection_id UUID NOT NULL,
- 
+
     -- unique id for this sled (should be foreign keys into `sled` table, though
     -- it's conceivable a sled will report an id that we don't know about)
     sled_id UUID NOT NULL,
-
-    -- file name of the measurement file
-    file_name TEXT NOT NULL,
 
     -- full path to the measurement file
     path TEXT NOT NULL,
@@ -4318,7 +4560,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_last_reconciliation_measurements (
     -- error message; if NULL, an "ok" result
     error_message TEXT,
 
-    PRIMARY KEY (inv_collection_id, sled_id, file_name)
+    PRIMARY KEY (inv_collection_id, sled_id, path)
 );
 
 
@@ -4430,10 +4672,10 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_zone_manifest_measurement (
 
     -- The full path to the file.
     path TEXT NOT NULL,
-    
+
     -- The expected file size.
     expected_size INT8 NOT NULL,
-    
+
     -- The expected hash.
     expected_sha256 STRING(64) NOT NULL,
 
@@ -7929,7 +8171,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '223.0.0', NULL)
+    (TRUE, NOW(), NOW(), '227.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

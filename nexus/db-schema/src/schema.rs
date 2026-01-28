@@ -770,6 +770,63 @@ table! {
 }
 
 table! {
+    subnet_pool (id) {
+        id -> Uuid,
+        name -> Text,
+        description -> Text,
+        time_created -> Timestamptz,
+        time_modified -> Timestamptz,
+        time_deleted -> Nullable<Timestamptz>,
+        rcgen -> Int8,
+        ip_version -> crate::enums::IpVersionEnum,
+    }
+}
+
+table! {
+    subnet_pool_silo_link (subnet_pool_id, silo_id) {
+        subnet_pool_id -> Uuid,
+        silo_id -> Uuid,
+        ip_version -> crate::enums::IpVersionEnum,
+        is_default -> Bool,
+    }
+}
+
+table! {
+    subnet_pool_member (id) {
+        id -> Uuid,
+        time_created -> Timestamptz,
+        time_modified -> Timestamptz,
+        time_deleted -> Nullable<Timestamptz>,
+        subnet_pool_id -> Uuid,
+        subnet -> Inet,
+        first_address -> Inet,
+        last_address -> Inet,
+        min_prefix_length -> Int2,
+        max_prefix_length -> Int2,
+        rcgen -> Int8,
+    }
+}
+
+table! {
+    external_subnet (id) {
+        id -> Uuid,
+        name -> Text,
+        description -> Text,
+        time_created -> Timestamptz,
+        time_modified -> Timestamptz,
+        time_deleted -> Nullable<Timestamptz>,
+        subnet_pool_id -> Uuid,
+        subnet_pool_member_id -> Uuid,
+        project_id -> Uuid,
+        subnet -> Inet,
+        attach_state -> crate::enums::IpAttachStateEnum,
+        instance_id -> Nullable<Uuid>,
+    }
+}
+
+allow_tables_to_appear_in_same_query!(external_subnet, project);
+
+table! {
     silo (id) {
         id -> Uuid,
         name -> Text,
@@ -1758,6 +1815,18 @@ table! {
         dataset_id -> Uuid,
 
         error_message -> Nullable<Text>,
+    }
+}
+
+table! {
+    inv_single_measurements
+        (inv_collection_id, sled_id, path)
+    {
+        inv_collection_id -> Uuid,
+        sled_id -> Uuid,
+
+        path -> Text,
+        error_message -> Nullable<Text>
     }
 }
 

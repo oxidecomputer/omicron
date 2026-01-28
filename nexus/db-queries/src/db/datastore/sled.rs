@@ -741,6 +741,32 @@ impl DataStore {
         Ok(rack_id.map(RackUuid::from))
     }
 
+    // Return the commissioned sled if it exists in the given rack, given its
+    // `BaseboardId`.
+    pub async fn sled_get_commissioned_by_baseboard_and_rack_id(
+        &self,
+        opctx: &OpContext,
+        rack_id: RackUuid,
+        baseboard_id: BaseboardId,
+    ) -> Result<Option<Sled>, Error> {
+        opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
+        let conn = &*self.pool_connection_authorized(opctx).await?;
+        use nexus_db_schema::schema::sled::dsl;
+        let sled = dsl::sled
+            .filter(dsl::time_deleted.is_null())
+            .filter(dsl::part_number.eq(baseboard_id.part_number))
+            .filter(dsl::serial_number.eq(baseboard_id.serial_number))
+            .filter(dsl::rack_id.eq(rack_id.into_untyped_uuid()))
+            .sled_filter(SledFilter::Commissioned)
+            .select(Sled::as_select())
+            .get_result_async::<Sled>(conn)
+            .await
+            .optional()
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+
+        Ok(sled)
+    }
+
     pub async fn sled_list(
         &self,
         opctx: &OpContext,

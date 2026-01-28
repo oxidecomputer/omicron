@@ -355,10 +355,28 @@
         }
       }
     },
-    "/local-storage": {
+    "/local-storage/{zpool_id}/{dataset_id}": {
       "post": {
         "summary": "Create a local storage dataset",
         "operationId": "local_storage_dataset_ensure",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "dataset_id",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/DatasetUuid"
+            }
+          },
+          {
+            "in": "path",
+            "name": "zpool_id",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/ExternalZpoolUuid"
+            }
+          }
+        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -384,16 +402,24 @@
       "delete": {
         "summary": "Delete a local storage dataset",
         "operationId": "local_storage_dataset_delete",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/LocalStorageDatasetDeleteRequest"
-              }
+        "parameters": [
+          {
+            "in": "path",
+            "name": "dataset_id",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/DatasetUuid"
             }
           },
-          "required": true
-        },
+          {
+            "in": "path",
+            "name": "zpool_id",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/ExternalZpoolUuid"
+            }
+          }
+        ],
         "responses": {
           "204": {
             "description": "resource updated"
@@ -4192,24 +4218,6 @@
           "last_reconciled_config": {
             "$ref": "#/components/schemas/OmicronSledConfig"
           },
-          "measurements": {
-            "title": "IdOrdMap",
-            "x-rust-type": {
-              "crate": "iddqd",
-              "parameters": [
-                {
-                  "$ref": "#/components/schemas/ReconciledSingleMeasurement"
-                }
-              ],
-              "path": "iddqd::IdOrdMap",
-              "version": "*"
-            },
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/ReconciledSingleMeasurement"
-            },
-            "uniqueItems": true
-          },
           "orphaned_datasets": {
             "title": "IdOrdMap",
             "x-rust-type": {
@@ -4249,7 +4257,6 @@
           "datasets",
           "external_disks",
           "last_reconciled_config",
-          "measurements",
           "orphaned_datasets",
           "zones"
         ]
@@ -4670,7 +4677,7 @@
         "description": "Delegate a ZFS volume to a zone",
         "oneOf": [
           {
-            "description": "Delegate a slice of the _unencrypted_ local storage dataset present on this pool into the zone.",
+            "description": "Delegate a slice of the local storage dataset present on this pool into the zone.",
             "type": "object",
             "properties": {
               "dataset_id": {
@@ -4679,30 +4686,7 @@
               "type": {
                 "type": "string",
                 "enum": [
-                  "local_storage_unencrypted"
-                ]
-              },
-              "zpool_id": {
-                "$ref": "#/components/schemas/ExternalZpoolUuid"
-              }
-            },
-            "required": [
-              "dataset_id",
-              "type",
-              "zpool_id"
-            ]
-          },
-          {
-            "description": "Delegate a slice of the _encrypted_ local storage dataset present on this pool into the zone.",
-            "type": "object",
-            "properties": {
-              "dataset_id": {
-                "$ref": "#/components/schemas/DatasetUuid"
-              },
-              "type": {
-                "type": "string",
-                "enum": [
-                  "local_storage_encrypted"
+                  "local_storage"
                 ]
               },
               "zpool_id": {
@@ -6194,6 +6178,24 @@
           "reconciler_status": {
             "$ref": "#/components/schemas/ConfigReconcilerInventoryStatus"
           },
+          "reference_measurements": {
+            "title": "IdOrdMap",
+            "x-rust-type": {
+              "crate": "iddqd",
+              "parameters": [
+                {
+                  "$ref": "#/components/schemas/SingleMeasurementInventory"
+                }
+              ],
+              "path": "iddqd::IdOrdMap",
+              "version": "*"
+            },
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SingleMeasurementInventory"
+            },
+            "uniqueItems": true
+          },
           "reservoir_size": {
             "$ref": "#/components/schemas/ByteCount"
           },
@@ -6229,6 +6231,7 @@
           "file_source_resolver",
           "health_monitor",
           "reconciler_status",
+          "reference_measurements",
           "reservoir_size",
           "sled_agent_address",
           "sled_id",
@@ -6508,44 +6511,10 @@
           "status"
         ]
       },
-      "LocalStorageDatasetDeleteRequest": {
-        "description": "Dataset details for a Local Storage dataset delete request.",
-        "type": "object",
-        "properties": {
-          "dataset_id": {
-            "description": "ID of the local storage dataset allocation, not the local storage dataset!",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/DatasetUuid"
-              }
-            ]
-          },
-          "encrypted_at_rest": {
-            "description": "Whether or not to use the encrypted dataset",
-            "type": "boolean"
-          },
-          "zpool_id": {
-            "$ref": "#/components/schemas/ExternalZpoolUuid"
-          }
-        },
-        "required": [
-          "dataset_id",
-          "encrypted_at_rest",
-          "zpool_id"
-        ]
-      },
       "LocalStorageDatasetEnsureRequest": {
         "description": "Dataset and Volume details for a Local Storage dataset ensure request.",
         "type": "object",
         "properties": {
-          "dataset_id": {
-            "description": "ID of the local storage dataset allocation, not the local storage dataset!",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/DatasetUuid"
-              }
-            ]
-          },
           "dataset_size": {
             "description": "Size of the parent dataset",
             "allOf": [
@@ -6554,10 +6523,6 @@
               }
             ]
           },
-          "encrypted_at_rest": {
-            "description": "Whether or not to use the encrypted dataset",
-            "type": "boolean"
-          },
           "volume_size": {
             "description": "Size of the zvol",
             "allOf": [
@@ -6565,17 +6530,11 @@
                 "$ref": "#/components/schemas/ByteCount"
               }
             ]
-          },
-          "zpool_id": {
-            "$ref": "#/components/schemas/ExternalZpoolUuid"
           }
         },
         "required": [
-          "dataset_id",
           "dataset_size",
-          "encrypted_at_rest",
-          "volume_size",
-          "zpool_id"
+          "volume_size"
         ]
       },
       "LrtqUpgradeMsg": {
@@ -8584,27 +8543,6 @@
         "type": "string",
         "format": "uuid"
       },
-      "ReconciledSingleMeasurement": {
-        "description": "An attempt at resolving a single measurement file to a valid path",
-        "type": "object",
-        "properties": {
-          "file_name": {
-            "type": "string"
-          },
-          "path": {
-            "type": "string",
-            "format": "Utf8PathBuf"
-          },
-          "result": {
-            "$ref": "#/components/schemas/ConfigReconcilerInventoryResult"
-          }
-        },
-        "required": [
-          "file_name",
-          "path",
-          "result"
-        ]
-      },
       "ReconfigureMsg": {
         "description": "A request from Nexus informing a node to start coordinating a reconfiguration.",
         "type": "object",
@@ -9045,6 +8983,23 @@
           "com2",
           "com3",
           "com4"
+        ]
+      },
+      "SingleMeasurementInventory": {
+        "description": "An attempt at resolving a single measurement file to a valid path",
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "format": "Utf8PathBuf"
+          },
+          "result": {
+            "$ref": "#/components/schemas/ConfigReconcilerInventoryResult"
+          }
+        },
+        "required": [
+          "path",
+          "result"
         ]
       },
       "SledCpuFamily": {

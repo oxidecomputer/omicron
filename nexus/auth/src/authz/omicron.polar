@@ -861,3 +861,22 @@ resource VpcList {
 }
 has_relation(project: Project, "containing_project", collection: VpcList)
 	if collection.project = project;
+
+# Describes the policy for accessing "/v1/system/subnet-pools" in the API
+resource SubnetPoolList {
+	permissions = [
+	    "list_children",
+	    "modify",
+	    "create_child",
+	];
+
+	# Fleet Administrators can create or modify the Subnet Pools list.
+	relations = { parent_fleet: Fleet };
+	"modify" if "admin" on "parent_fleet";
+	"create_child" if "admin" on "parent_fleet";
+
+	# Fleet Viewers can list External Subnet Pools
+	"list_children" if "viewer" on "parent_fleet";
+}
+has_relation(fleet: Fleet, "parent_fleet", subnet_pool_list: SubnetPoolList)
+	if subnet_pool_list.fleet = fleet;

@@ -71,6 +71,7 @@ mod disk;
 mod dns;
 mod ereport;
 mod external_ip;
+mod external_subnet;
 pub mod fm;
 mod identity_provider;
 mod image;
@@ -140,6 +141,7 @@ pub use disk::LocalStorageDisk;
 pub use dns::DataStoreDnsTest;
 pub use dns::DnsVersionUpdateBuilder;
 pub use ereport::EreportFilters;
+pub use external_ip::FloatingIpAllocation;
 pub use instance::{
     InstanceAndActiveVmm, InstanceGestalt, InstanceStateComputer,
 };

@@ -13,7 +13,6 @@ use std::convert::TryFrom;
 use uuid::Uuid;
 
 pub use propolis_client::{CrucibleOpts, VolumeConstructionRequest};
-
 progenitor::generate_api!(
     spec = "../../openapi/sled-agent/sled-agent-latest.json",
     interface = Positional,
@@ -47,7 +46,11 @@ progenitor::generate_api!(
     },
     replace = {
         Baseboard = sled_agent_types_versions::latest::inventory::Baseboard,
+        BaseboardId = sled_hardware_types::BaseboardId,
         ByteCount = omicron_common::api::external::ByteCount,
+        CommitRequest = trust_quorum_types::messages::CommitRequest,
+        CommitStatus = trust_quorum_types::status::CommitStatus,
+        CoordinatorStatus = trust_quorum_types::status::CoordinatorStatus,
         DatasetsConfig = omicron_common::disk::DatasetsConfig,
         DatasetManagementStatus = omicron_common::disk::DatasetManagementStatus,
         DatasetKind = omicron_common::api::internal::shared::DatasetKind,
@@ -55,6 +58,7 @@ progenitor::generate_api!(
         DiskManagementStatus = omicron_common::disk::DiskManagementStatus,
         DiskManagementError = omicron_common::disk::DiskManagementError,
         DiskVariant = omicron_common::disk::DiskVariant,
+        Epoch = trust_quorum_types::types::Epoch,
         ExternalIpGatewayMap = omicron_common::api::internal::shared::ExternalIpGatewayMap,
         ExternalIpConfig = omicron_common::api::internal::shared::ExternalIpConfig,
         ExternalIpv4Config = omicron_common::api::internal::shared::ExternalIpv4Config,
@@ -65,6 +69,7 @@ progenitor::generate_api!(
         Inventory = sled_agent_types_versions::latest::inventory::Inventory,
         InventoryDisk = sled_agent_types_versions::latest::inventory::InventoryDisk,
         InventoryZpool = sled_agent_types_versions::latest::inventory::InventoryZpool,
+        LrtqUpgradeMsg = trust_quorum_types::messages::LrtqUpgradeMsg,
         MacAddr = omicron_common::api::external::MacAddr,
         MupdateOverrideBootInventory = sled_agent_types_versions::latest::inventory::MupdateOverrideBootInventory,
         Name = omicron_common::api::external::Name,
@@ -79,15 +84,18 @@ progenitor::generate_api!(
         OmicronZonesConfig = sled_agent_types_versions::latest::inventory::OmicronZonesConfig,
         PortFec = omicron_common::api::internal::shared::PortFec,
         PortSpeed = omicron_common::api::internal::shared::PortSpeed,
-        RouterId = omicron_common::api::internal::shared::RouterId,
+        PrepareAndCommitRequest = trust_quorum_types::messages::PrepareAndCommitRequest,
+        ReconfigureMsg = trust_quorum_types::messages::ReconfigureMsg,
         ResolvedVpcFirewallRule = omicron_common::api::internal::shared::ResolvedVpcFirewallRule,
         ResolvedVpcRoute = omicron_common::api::internal::shared::ResolvedVpcRoute,
         ResolvedVpcRouteSet = omicron_common::api::internal::shared::ResolvedVpcRouteSet,
+        RouterId = omicron_common::api::internal::shared::RouterId,
         RouterTarget = omicron_common::api::internal::shared::RouterTarget,
         RouterVersion = omicron_common::api::internal::shared::RouterVersion,
         SledRole = sled_agent_types_versions::latest::inventory::SledRole,
         SourceNatConfigGeneric = omicron_common::api::internal::shared::SourceNatConfigGeneric,
         SwitchLocation = omicron_common::api::external::SwitchLocation,
+        Threshold = trust_quorum_types::types::Threshold,
         Vni = omicron_common::api::external::Vni,
         VpcFirewallIcmpFilter = omicron_common::api::external::VpcFirewallIcmpFilter,
         ZpoolKind = omicron_common::zpool_name::ZpoolKind,

@@ -61,7 +61,7 @@ use sled_agent_types::inventory::OmicronFileSourceResolverInventory;
 use sled_agent_types::inventory::OmicronSledConfig;
 use sled_agent_types::inventory::OmicronZonesConfig;
 use sled_agent_types::inventory::OrphanedDataset;
-use sled_agent_types::inventory::ReconciledSingleMeasurement;
+use sled_agent_types::inventory::SingleMeasurementInventory;
 use sled_agent_types::inventory::SledCpuFamily;
 use sled_agent_types::inventory::SledRole;
 use sled_agent_types::resolvable_files::MeasurementManifestStatus;
@@ -1048,17 +1048,6 @@ pub fn sled_agent(
             artifact_size: 10_000 + 4096,
         });
 
-        inv.measurements.insert_overwrite(ReconciledSingleMeasurement {
-            file_name: "file1".to_string(),
-            path: Utf8PathBuf::from("/this/path"),
-            result: ConfigReconcilerInventoryResult::Ok,
-        });
-        inv.measurements.insert_overwrite(ReconciledSingleMeasurement {
-            file_name: "file2".to_string(),
-            path: Utf8PathBuf::from("/this/path2"),
-            result: ConfigReconcilerInventoryResult::Ok,
-        });
-
         inv
     });
 
@@ -1070,6 +1059,17 @@ pub fn sled_agent(
     } else {
         ConfigReconcilerInventoryStatus::NotYetRun
     };
+
+    let mut reference_measurements = iddqd::IdOrdMap::new();
+
+    reference_measurements.insert_overwrite(SingleMeasurementInventory {
+        path: Utf8PathBuf::from("/this/path"),
+        result: ConfigReconcilerInventoryResult::Ok,
+    });
+    reference_measurements.insert_overwrite(SingleMeasurementInventory {
+        path: Utf8PathBuf::from("/this/path2"),
+        result: ConfigReconcilerInventoryResult::Ok,
+    });
 
     Inventory {
         baseboard,
@@ -1091,5 +1091,6 @@ pub fn sled_agent(
         // here in a future PR. This will be more useful when we add this
         // information to the DB.
         health_monitor: HealthMonitorInventory::new(),
+        reference_measurements,
     }
 }

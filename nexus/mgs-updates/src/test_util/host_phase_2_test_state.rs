@@ -368,7 +368,6 @@ mod api_impl {
                     datasets: BTreeMap::new(),
                     orphaned_datasets: IdOrdMap::new(),
                     zones: BTreeMap::new(),
-                    measurements: IdOrdMap::new(),
                     remove_mupdate_override: None,
                     boot_partitions,
                 }),
@@ -399,6 +398,7 @@ mod api_impl {
                     },
                 },
                 health_monitor: HealthMonitorInventory::new(),
+                reference_measurements: IdOrdMap::new(),
             }))
         }
 

@@ -92,7 +92,7 @@ impl BackgroundTask for Ipv4NatGarbageCollector {
             }
 
             for client in dpd_clients.values() {
-                let response = client.ipv4_nat_generation().await;
+                let response = client.nat_generation().await;
                 match response {
                     Ok(r#gen) => min_gen = std::cmp::min(min_gen, *r#gen),
                     Err(error) => {

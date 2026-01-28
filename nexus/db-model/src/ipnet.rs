@@ -39,6 +39,19 @@ impl ::std::fmt::Display for IpNet {
     }
 }
 
+impl From<::std::net::IpAddr> for IpNet {
+    fn from(value: ::std::net::IpAddr) -> Self {
+        match value {
+            ::std::net::IpAddr::V4(v4) => {
+                Self::from(oxnet::Ipv4Net::host_net(v4))
+            }
+            ::std::net::IpAddr::V6(v6) => {
+                Self::from(oxnet::Ipv6Net::host_net(v6))
+            }
+        }
+    }
+}
+
 impl From<IpNet> for ::std::net::IpAddr {
     fn from(value: IpNet) -> Self {
         match value {
@@ -78,6 +91,15 @@ impl From<oxnet::IpNet> for IpNet {
             oxnet::IpNet::V6(ipv6_net) => {
                 Self::V6(crate::Ipv6Net::from(ipv6_net))
             }
+        }
+    }
+}
+
+impl From<IpNet> for oxnet::IpNet {
+    fn from(value: IpNet) -> Self {
+        match value {
+            IpNet::V4(ipv4_net) => Self::V4(oxnet::Ipv4Net::from(ipv4_net)),
+            IpNet::V6(ipv6_net) => Self::V6(oxnet::Ipv6Net::from(ipv6_net)),
         }
     }
 }
