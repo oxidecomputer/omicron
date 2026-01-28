@@ -787,7 +787,7 @@ impl DataStore {
         rack_id: RackUuid,
         epoch: Epoch,
         acked_commits: BTreeSet<BaseboardId>,
-    ) -> Result<(), Error> {
+    ) -> Result<TrustQuorumConfigState, Error> {
         opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
         let conn = &*self.pool_connection_authorized(opctx).await?;
 
@@ -873,9 +873,11 @@ impl DataStore {
                         )
                         .await
                         .map_err(|txn_error| txn_error.into_diesel(&err))?;
+
+                        return Ok(TrustQuorumConfigState::Committed);
                     }
 
-                    Ok(())
+                    Ok(TrustQuorumConfigState::Committing)
                 }
             })
             .await
