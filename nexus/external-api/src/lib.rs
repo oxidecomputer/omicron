@@ -3733,6 +3733,27 @@ pub trait NexusExternalApi {
     ) -> Result<HttpResponseAccepted<views::ExternalIp>, HttpError>;
 
     /// Detach and deallocate ephemeral IP from instance
+    #[endpoint {
+        method = DELETE,
+        path = "/v1/instances/{instance}/external-ips/ephemeral",
+        tags = ["instances"],
+        versions = ..VERSION_DUAL_STACK_EPHEMERAL_IP,
+    }]
+    async fn v2026012200_instance_ephemeral_ip_detach(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::InstancePath>,
+        query_params: Query<params::OptionalProjectSelector>,
+    ) -> Result<HttpResponseDeleted, HttpError> {
+        let query_params =
+            query_params.map(|q| params::EphemeralIpDetachSelector {
+                project: q.project,
+                ip_version: None,
+            });
+        Self::instance_ephemeral_ip_detach(rqctx, path_params, query_params)
+            .await
+    }
+
+    /// Detach and deallocate ephemeral IP from instance
     ///
     /// When an instance has both IPv4 and IPv6 ephemeral IPs, the `ip_version`
     /// query parameter must be specified to identify which IP to detach.
@@ -3740,6 +3761,7 @@ pub trait NexusExternalApi {
         method = DELETE,
         path = "/v1/instances/{instance}/external-ips/ephemeral",
         tags = ["instances"],
+        versions = VERSION_DUAL_STACK_EPHEMERAL_IP..,
     }]
     async fn instance_ephemeral_ip_detach(
         rqctx: RequestContext<Self::Context>,
@@ -3759,12 +3781,22 @@ pub trait NexusExternalApi {
     }]
     async fn v2025121200_instance_multicast_group_list(
         rqctx: RequestContext<Self::Context>,
-        query_params: Query<PaginatedById<params::OptionalProjectSelector>>,
+        query_params: Query<params::OptionalProjectSelector>,
         path_params: Path<params::InstancePath>,
     ) -> Result<
         HttpResponseOk<ResultsPage<v2025121200::MulticastGroupMember>>,
         HttpError,
     > {
+        let query_params =
+            query_params.try_map(|params| {
+                // Easiest to deserialize and serialize the params, since some
+                // fields are private (they really should not be, having them
+                // accessible by serde makes them de-facto public).
+                serde_json::from_value(serde_json::to_value(params).map_err(
+                    |e| HttpError::for_bad_request(None, e.to_string()),
+                )?)
+                .map_err(|e| HttpError::for_bad_request(None, e.to_string()))
+            })?;
         Self::instance_multicast_group_list(rqctx, query_params, path_params)
             .await
             .map(|HttpResponseOk(page)| {
