@@ -46,6 +46,7 @@ use slog_error_chain::InlineErrorChain;
 use std::collections::HashMap;
 use std::net::SocketAddrV6;
 use std::net::{IpAddr, Ipv6Addr};
+use std::num::NonZeroU32;
 use std::sync::Arc;
 use std::sync::OnceLock;
 use tokio::sync::mpsc;
@@ -71,6 +72,7 @@ mod disk;
 mod external_dns;
 pub(crate) mod external_endpoints;
 mod external_ip;
+mod external_subnet;
 mod iam;
 mod image;
 mod instance;
@@ -97,11 +99,13 @@ mod sled;
 mod sled_instance;
 mod snapshot;
 mod ssh_key;
+mod subnet_pool;
 pub(crate) mod support_bundles;
 mod switch;
 mod switch_interface;
 mod switch_port;
 pub mod test_interfaces;
+mod trust_quorum;
 mod update;
 mod utilization;
 mod volume;
@@ -132,7 +136,7 @@ use sagas::demo::CompletingDemoSagas;
 pub(crate) const MAX_EXTERNAL_IPS_PER_INSTANCE: usize =
     nexus_db_queries::db::queries::external_ip::MAX_EXTERNAL_IPS_PER_INSTANCE
         as usize;
-pub(crate) const MAX_EPHEMERAL_IPS_PER_INSTANCE: usize = 1;
+pub(crate) const MAX_EPHEMERAL_IPS_PER_INSTANCE: usize = 2;
 pub(crate) const MAX_MULTICAST_GROUPS_PER_INSTANCE: usize = 32;
 
 pub const MAX_VCPU_PER_INSTANCE: u16 = 254;
@@ -156,6 +160,12 @@ pub const MAX_MEMORY_BYTES_PER_INSTANCE: u64 = 1536 * (1 << 30); // 1.5 TiB
 
 pub const MIN_DISK_SIZE_BYTES: u32 = 1 << 30; // 1 GiB
 pub const MAX_DISK_SIZE_BYTES: u64 = 1023 * (1 << 30); // 1023 GiB
+
+/// This was number was chosen as the best-ish measured on a Cosmo when more or
+/// less fully dedicating an SN861 as a disk for a single VM. This is certainly
+/// higher than necessary for Gimlet, and is chosen far higher than may be
+/// appropriate if the disk is shared across several or more instances.
+pub const LOCAL_STORAGE_WORKERS: NonZeroU32 = NonZeroU32::new(30).unwrap();
 
 /// This value is aribtrary
 pub const MAX_SSH_KEYS_PER_INSTANCE: u32 = 100;
@@ -1323,7 +1333,7 @@ async fn switch_zone_address_mappings(
             return Err(e.to_string());
         }
     };
-    Ok(map_switch_zone_addrs(&log, switch_zone_addresses).await)
+    Ok(map_switch_zone_addrs(&log, switch_zone_addresses, resolver).await)
 }
 
 // TODO: #3596 Allow updating of Nexus from `handoff_to_nexus()`
@@ -1347,14 +1357,33 @@ async fn switch_zone_address_mappings(
 async fn map_switch_zone_addrs(
     log: &Logger,
     switch_zone_addresses: Vec<Ipv6Addr>,
+    resolver: &internal_dns_resolver::Resolver,
 ) -> HashMap<SwitchLocation, Ipv6Addr> {
     use gateway_client::Client as MgsClient;
     info!(log, "Determining switch slots managed by switch zones");
     let mut switch_zone_addrs = HashMap::new();
 
     for addr in switch_zone_addresses {
+        let port = match resolver
+            .lookup_all_socket_v6(ServiceName::ManagementGatewayService)
+            .await
+        {
+            Ok(addrs) => {
+                let port_map: HashMap<Ipv6Addr, u16> = addrs
+                    .into_iter()
+                    .map(|sockaddr| (*sockaddr.ip(), sockaddr.port()))
+                    .collect();
+
+                *port_map.get(&addr).unwrap_or(&MGS_PORT)
+            }
+            Err(e) => {
+                error!(log, "failed to resolve MGS addresses"; "error" => %e);
+                MGS_PORT
+            }
+        };
+
         let mgs_client = MgsClient::new(
-            &format!("http://[{}]:{}", addr, MGS_PORT),
+            &format!("http://[{}]:{}", addr, port),
             log.new(o!("component" => "MgsClient")),
         );
 

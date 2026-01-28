@@ -7,15 +7,14 @@
 
 use crate::blueprint_builder::BlueprintBuilder;
 use itertools::Itertools;
-use nexus_sled_agent_shared::inventory::ZoneKind;
 use nexus_types::deployment::BlueprintZoneConfig;
-use nexus_types::deployment::BlueprintZoneDisposition;
 use nexus_types::deployment::CockroachdbUnsafeToShutdown;
 use nexus_types::deployment::PlanningInput;
 use nexus_types::deployment::ZoneUnsafeToShutdown;
 use nexus_types::inventory::Collection;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::SledUuid;
+use sled_agent_types::inventory::ZoneKind;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 
@@ -126,9 +125,7 @@ impl<'a> ZoneSafetyChecksBuilder<'a> {
 
         // Precalculate sets of particular zone kinds that we care about in
         // other checks below.
-        for (_sled_id, zone) in
-            blueprint.current_zones(BlueprintZoneDisposition::is_in_service)
-        {
+        for (_sled_id, zone) in blueprint.current_in_service_zones() {
             match zone.zone_type.kind() {
                 ZoneKind::BoundaryNtp => {
                     boundary_ntp_zones.insert(zone.id);
@@ -151,10 +148,7 @@ impl<'a> ZoneSafetyChecksBuilder<'a> {
     }
 
     fn build(mut self) -> ZoneSafetyChecks {
-        for (sled_id, zone) in self
-            .blueprint
-            .current_zones(BlueprintZoneDisposition::is_in_service)
-        {
+        for (sled_id, zone) in self.blueprint.current_in_service_zones() {
             if let Some(reason) = self.reason_zone_unsafe_to_shut_down(zone) {
                 self.checks.insert(sled_id, zone.id, reason);
             }

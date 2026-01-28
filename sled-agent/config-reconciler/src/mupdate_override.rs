@@ -7,17 +7,17 @@
 use crate::InternalDisks;
 use crate::host_phase_2::HostPhase2PreparedContents;
 use camino::Utf8PathBuf;
-use nexus_sled_agent_shared::inventory::HostPhase2DesiredContents;
-use nexus_sled_agent_shared::inventory::OmicronZoneConfig;
-use nexus_sled_agent_shared::inventory::OmicronZoneImageSource;
-use nexus_sled_agent_shared::inventory::ZoneKind;
-use omicron_common::zone_images::ZoneImageFileSource;
-use sled_agent_types::zone_images::OmicronZoneFileSource;
-use sled_agent_types::zone_images::OmicronZoneImageLocation;
-use sled_agent_types::zone_images::PreparedOmicronZone;
-use sled_agent_types::zone_images::RAMDISK_IMAGE_PATH;
-use sled_agent_types::zone_images::ResolverStatus;
-use sled_agent_types::zone_images::ZoneImageLocationError;
+use omicron_common::resolvable_files::ResolvableFileSource;
+use sled_agent_types::inventory::HostPhase2DesiredContents;
+use sled_agent_types::inventory::OmicronZoneConfig;
+use sled_agent_types::inventory::OmicronZoneImageSource;
+use sled_agent_types::inventory::ZoneKind;
+use sled_agent_types::resolvable_files::OmicronResolvableFileLocation;
+use sled_agent_types::resolvable_files::OmicronResolvableFileSource;
+use sled_agent_types::resolvable_files::PreparedOmicronZone;
+use sled_agent_types::resolvable_files::RAMDISK_IMAGE_PATH;
+use sled_agent_types::resolvable_files::ResolverStatus;
+use sled_agent_types::resolvable_files::ZoneImageLocationError;
 use slog::error;
 use slog::info;
 use slog::warn;
@@ -35,7 +35,7 @@ pub trait ResolverStatusExt {
         zone_kind: ZoneKind,
         image_source: &OmicronZoneImageSource,
         internal_disks: &InternalDisks,
-    ) -> OmicronZoneFileSource;
+    ) -> OmicronResolvableFileSource;
 
     /// Prepare an Omicron zone for installation.
     fn prepare_omicron_zone<'a>(
@@ -67,7 +67,7 @@ impl ResolverStatusExt for ResolverStatus {
         zone_kind: ZoneKind,
         image_source: &OmicronZoneImageSource,
         internal_disks: &InternalDisks,
-    ) -> OmicronZoneFileSource {
+    ) -> OmicronResolvableFileSource {
         match image_source {
             OmicronZoneImageSource::InstallDataset => {
                 match &self.mupdate_override.boot_disk_override {
@@ -121,9 +121,11 @@ impl ResolverStatusExt for ResolverStatus {
                 // production, just in development or test workflows.
                 search_paths.push(Utf8PathBuf::from(RAMDISK_IMAGE_PATH));
 
-                OmicronZoneFileSource {
-                    location: OmicronZoneImageLocation::InstallDataset { hash },
-                    file_source: ZoneImageFileSource {
+                OmicronResolvableFileSource {
+                    location: OmicronResolvableFileLocation::InstallDataset {
+                        hash,
+                    },
+                    file_source: ResolvableFileSource {
                         file_name: file_name.to_owned(),
                         search_paths,
                     },
@@ -160,12 +162,12 @@ impl ResolverStatusExt for ResolverStatus {
                             "search_paths" => ?search_paths,
                         );
 
-                        OmicronZoneFileSource {
+                        OmicronResolvableFileSource {
                             location:
-                                OmicronZoneImageLocation::InstallDataset {
+                                OmicronResolvableFileLocation::InstallDataset {
                                     hash: install_dataset_hash,
                                 },
-                            file_source: ZoneImageFileSource {
+                            file_source: ResolvableFileSource {
                                 file_name: zone_kind
                                     .artifact_in_install_dataset()
                                     .to_owned(),
@@ -179,11 +181,11 @@ impl ResolverStatusExt for ResolverStatus {
                         // and then is followed by all other disks.
                         let search_paths =
                             internal_disks.all_artifact_datasets().collect();
-                        OmicronZoneFileSource {
-                            location: OmicronZoneImageLocation::Artifact {
+                        OmicronResolvableFileSource {
+                            location: OmicronResolvableFileLocation::Artifact {
                                 hash: Ok(*hash),
                             },
-                            file_source: ZoneImageFileSource {
+                            file_source: ResolvableFileSource {
                                 file_name: hash.to_string(),
                                 search_paths,
                             },
@@ -201,11 +203,11 @@ impl ResolverStatusExt for ResolverStatus {
                             "zone_kind" => zone_kind.report_str(),
                             "error" => InlineErrorChain::new(error),
                         );
-                        OmicronZoneFileSource {
-                            location: OmicronZoneImageLocation::Artifact {
+                        OmicronResolvableFileSource {
+                            location: OmicronResolvableFileLocation::Artifact {
                                 hash: Err(error.clone()),
                             },
-                            file_source: ZoneImageFileSource {
+                            file_source: ResolvableFileSource {
                                 file_name: hash.to_string(),
                                 search_paths: Vec::new(),
                             },

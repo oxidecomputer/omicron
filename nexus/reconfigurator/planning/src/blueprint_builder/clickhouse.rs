@@ -5,10 +5,10 @@
 //! A mechanism for allocating clickhouse keeper and server nodes for clustered
 //! clickhouse setups during blueprint planning
 
-use clickhouse_admin_types::{ClickhouseKeeperClusterMembership, KeeperId};
-use nexus_types::deployment::{
-    BlueprintZoneDisposition, BlueprintZoneType, ClickhouseClusterConfig,
+use clickhouse_admin_types::keeper::{
+    ClickhouseKeeperClusterMembership, KeeperId,
 };
+use nexus_types::deployment::{BlueprintZoneType, ClickhouseClusterConfig};
 use omicron_uuid_kinds::OmicronZoneUuid;
 use slog::{Logger, error};
 use std::collections::BTreeSet;
@@ -27,9 +27,7 @@ impl ClickhouseZonesThatShouldBeRunning {
     pub fn new(blueprint: &BlueprintBuilder<'_>) -> Self {
         let mut keepers = BTreeSet::new();
         let mut servers = BTreeSet::new();
-        for (_, zone) in
-            blueprint.current_zones(BlueprintZoneDisposition::is_in_service)
-        {
+        for (_, zone) in blueprint.current_in_service_zones() {
             match zone.zone_type {
                 BlueprintZoneType::ClickhouseKeeper(_) => {
                     keepers.insert(zone.id);
@@ -291,7 +289,7 @@ impl ClickhouseAllocator {
 #[cfg(test)]
 pub mod test {
     use super::*;
-    use clickhouse_admin_types::ServerId;
+    use clickhouse_admin_types::server::ServerId;
     use omicron_common::api::external::Generation;
     use omicron_test_utils::dev::test_setup_log;
     use std::collections::BTreeMap;

@@ -4,7 +4,7 @@
 
 //! Sled agent implementation
 
-use crate::artifact_store::ArtifactStore;
+use crate::artifact_store::{ArtifactStore, SledAgentArtifactStoreWrapper};
 use crate::bootstrap::config::BOOTSTRAP_AGENT_RACK_INIT_PORT;
 use crate::bootstrap::early_networking::EarlyNetworkSetupError;
 use crate::config::Config;
@@ -40,9 +40,6 @@ use illumos_utils::zfs::Zfs;
 use illumos_utils::zpool::PathInPool;
 use illumos_utils::zpool::ZpoolOrRamdisk;
 use itertools::Itertools as _;
-use nexus_sled_agent_shared::inventory::{
-    Inventory, OmicronSledConfig, SledRole,
-};
 use omicron_common::address::{
     Ipv6Subnet, SLED_PREFIX, get_sled_address, get_switch_zone_address,
 };
@@ -66,27 +63,32 @@ use omicron_uuid_kinds::{
 use sled_agent_config_reconciler::{
     ConfigReconcilerHandle, ConfigReconcilerSpawnToken, InternalDisks,
     InternalDisksReceiver, LedgerNewConfigError, LedgerTaskError,
-    ReconcilerInventory, SledAgentArtifactStore, SledAgentFacilities,
+    ReconcilerInventory, SledAgentFacilities,
 };
+use sled_agent_health_monitor::handle::HealthMonitorHandle;
+use sled_agent_measurements::MeasurementsHandle;
+use sled_agent_types::dataset::LocalStorageDatasetEnsureRequest;
 use sled_agent_types::disk::DiskStateRequested;
 use sled_agent_types::early_networking::EarlyNetworkConfig;
 use sled_agent_types::instance::{
     InstanceEnsureBody, InstanceExternalIpBody, InstanceMulticastBody,
     VmmPutStateResponse, VmmStateRequested, VmmUnregisterResponse,
 };
+use sled_agent_types::inventory::{Inventory, OmicronSledConfig, SledRole};
 use sled_agent_types::probes::ProbeCreate;
-use sled_agent_types::sled::{BaseboardId, StartSledAgentRequest};
+use sled_agent_types::resolvable_files::{
+    PreparedOmicronZone, RemoveMupdateOverrideResult, ResolverStatus,
+};
+use sled_agent_types::sled::StartSledAgentRequest;
 use sled_agent_types::zone_bundle::{
     BundleUtilization, CleanupContext, CleanupCount, CleanupPeriod,
     PriorityOrder, StorageLimit, ZoneBundleMetadata,
-};
-use sled_agent_types::zone_images::{
-    PreparedOmicronZone, RemoveMupdateOverrideResult, ResolverStatus,
 };
 use sled_diagnostics::SledDiagnosticsCmdError;
 use sled_diagnostics::SledDiagnosticsCmdOutput;
 use sled_hardware::{HardwareManager, MemoryReservations, underlay};
 use sled_hardware_types::Baseboard;
+use sled_hardware_types::BaseboardId;
 use sled_hardware_types::underlay::BootstrapInterface;
 use slog::Logger;
 use slog_error_chain::{InlineErrorChain, SlogInlineError};
@@ -94,7 +96,6 @@ use sprockets_tls::keys::SprocketsConfig;
 use std::collections::BTreeMap;
 use std::net::{Ipv6Addr, SocketAddrV6};
 use std::sync::Arc;
-use tufaceous_artifact::ArtifactHash;
 use uuid::Uuid;
 
 use illumos_utils::dladm::{Dladm, EtherstubVnic};
@@ -370,8 +371,14 @@ struct SledAgentInner {
     // A handle to the bootstore.
     bootstore: bootstore::NodeHandle,
 
+    // A handle to the trust quorum.
+    trust_quorum: trust_quorum::NodeTaskHandle,
+
     // A handle to the hardware monitor.
     hardware_monitor: HardwareMonitorHandle,
+
+    // A handle to the health monitor.
+    health_monitor: HealthMonitorHandle,
 
     // Object handling production of metrics for oximeter.
     _metrics_manager: MetricsManager,
@@ -381,6 +388,9 @@ struct SledAgentInner {
 
     // Component of Sled Agent responsible for managing the artifact store.
     repo_depot: dropshot::HttpServer<Arc<ArtifactStore<InternalDisksReceiver>>>,
+
+    // Handle to access reference measurements for Sprockets/TrustQuorum
+    measurements: Arc<MeasurementsHandle>,
 }
 
 impl SledAgentInner {
@@ -603,15 +613,6 @@ impl SledAgent {
                  network config from bootstore",
             );
 
-        let artifact_store = Arc::new(
-            ArtifactStore::new(
-                &log,
-                config_reconciler.internal_disks_rx().clone(),
-                Some(Arc::clone(&config_reconciler)),
-            )
-            .await,
-        );
-
         // Start reconciling against our ledgered sled config.
         config_reconciler.spawn_reconciliation_task(
             ReconcilerFacilities {
@@ -619,7 +620,9 @@ impl SledAgent {
                 service_manager: services.clone(),
                 metrics_queue: metrics_manager.request_queue(),
             },
-            SledAgentArtifactStoreWrapper(Arc::clone(&artifact_store)),
+            SledAgentArtifactStoreWrapper(Arc::clone(
+                &long_running_task_handles.artifact_store,
+            )),
             config_reconciler_spawn_token,
         );
 
@@ -634,8 +637,10 @@ impl SledAgent {
             )
             .await?;
 
-        let repo_depot =
-            artifact_store.start(sled_address, &config.dropshot).await?;
+        let repo_depot = long_running_task_handles
+            .artifact_store
+            .start(sled_address, &config.dropshot)
+            .await?;
 
         // Spawn a background task for managing notifications to nexus
         // about this sled-agent.
@@ -680,11 +685,16 @@ impl SledAgent {
                 rack_network_config,
                 zone_bundler: long_running_task_handles.zone_bundler.clone(),
                 bootstore: long_running_task_handles.bootstore.clone(),
+                trust_quorum: long_running_task_handles.trust_quorum.clone(),
                 hardware_monitor: long_running_task_handles
                     .hardware_monitor
                     .clone(),
+                health_monitor: long_running_task_handles
+                    .health_monitor
+                    .clone(),
                 _metrics_manager: metrics_manager,
                 repo_depot,
+                measurements: long_running_task_handles.measurements.clone(),
             }),
             log: log.clone(),
             sprockets: config.sprockets.clone(),
@@ -1042,6 +1052,10 @@ impl SledAgent {
         self.inner.bootstore.clone()
     }
 
+    pub fn trust_quorum(&self) -> trust_quorum::NodeTaskHandle {
+        self.inner.trust_quorum.clone()
+    }
+
     pub fn list_vpc_routes(&self) -> Vec<ResolvedVpcRouteState> {
         self.inner.port_manager.vpc_routes_list()
     }
@@ -1089,6 +1103,10 @@ impl SledAgent {
         Ok(())
     }
 
+    pub(crate) fn measurements(&self) -> Arc<MeasurementsHandle> {
+        self.inner.measurements.clone()
+    }
+
     /// Return identifiers for this sled.
     ///
     /// This is mostly used to identify timeseries data with the originating
@@ -1126,8 +1144,10 @@ impl SledAgent {
         let reservoir_size = self.inner.instances.reservoir_size();
         let sled_role =
             if is_scrimlet { SledRole::Scrimlet } else { SledRole::Gimlet };
-        let zone_image_resolver =
+        let file_source_resolver =
             self.inner.services.zone_image_resolver().status().to_inventory();
+
+        let health_monitor = self.inner.health_monitor.to_inventory();
 
         let ReconcilerInventory {
             disks,
@@ -1153,7 +1173,9 @@ impl SledAgent {
             ledgered_sled_config,
             reconciler_status,
             last_reconciliation,
-            zone_image_resolver,
+            file_source_resolver,
+            health_monitor,
+            reference_measurements: self.inner.measurements.to_inventory(),
         })
     }
 
@@ -1226,7 +1248,7 @@ impl SledAgent {
         &self,
         zpool_id: ExternalZpoolUuid,
         dataset_id: DatasetUuid,
-        request: sled_agent_api::LocalStorageDatasetEnsureRequest,
+        request: LocalStorageDatasetEnsureRequest,
     ) -> Result<(), HttpError> {
         // Ensure that the local storage dataset we want to use is still present
         let present = self
@@ -1253,10 +1275,8 @@ impl SledAgent {
         let delegated_zvol =
             DelegatedZvol::LocalStorage { zpool_id, dataset_id };
 
-        let sled_agent_api::LocalStorageDatasetEnsureRequest {
-            dataset_size,
-            volume_size,
-        } = request;
+        let LocalStorageDatasetEnsureRequest { dataset_size, volume_size } =
+            request;
 
         Zfs::ensure_dataset(DatasetEnsureArgs {
             name: &delegated_zvol.parent_dataset_name(),
@@ -1355,6 +1375,7 @@ pub enum AddSledError {
 pub async fn sled_add(
     log: Logger,
     sprockets_config: SprocketsConfig,
+    measurements: Arc<MeasurementsHandle>,
     sled_id: BaseboardId,
     request: StartSledAgentRequest,
 ) -> Result<(), AddSledError> {
@@ -1415,6 +1436,7 @@ pub async fn sled_add(
     let client = crate::bootstrap::client::Client::new(
         bootstrap_addr,
         sprockets_config,
+        measurements,
         log.new(o!("BootstrapAgentClient" => bootstrap_addr.to_string())),
     );
 
@@ -1457,7 +1479,7 @@ impl SledAgentFacilities for ReconcilerFacilities {
         Ok(zone)
     }
 
-    fn zone_image_resolver_status(&self) -> ResolverStatus {
+    fn file_source_resolver_status(&self) -> ResolverStatus {
         self.service_manager.zone_image_resolver().status()
     }
 
@@ -1493,19 +1515,5 @@ impl SledAgentFacilities for ReconcilerFacilities {
         self.service_manager
             .ddm_reconciler()
             .remove_internal_dns_subnet(prefix);
-    }
-}
-
-// Workaround wrapper for orphan rules.
-#[derive(Clone)]
-struct SledAgentArtifactStoreWrapper(Arc<ArtifactStore<InternalDisksReceiver>>);
-
-impl SledAgentArtifactStore for SledAgentArtifactStoreWrapper {
-    async fn get_artifact(
-        &self,
-        artifact: ArtifactHash,
-    ) -> anyhow::Result<tokio::fs::File> {
-        let file = self.0.get(artifact).await?;
-        Ok(file)
     }
 }

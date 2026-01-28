@@ -18,7 +18,6 @@ use nexus_reconfigurator_planning::blueprint_builder::BlueprintBuilder;
 use nexus_reconfigurator_planning::blueprint_editor::ExternalNetworkingAllocator;
 use nexus_reconfigurator_preparation::PlanningInputFromDb;
 use nexus_types::deployment::Blueprint;
-use nexus_types::deployment::BlueprintZoneDisposition;
 use nexus_types::deployment::BlueprintZoneImageSource;
 use nexus_types::deployment::BlueprintZoneType;
 use nexus_types::deployment::PlannerConfig;
@@ -36,6 +35,7 @@ use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::net::IpAddr;
 use std::net::SocketAddr;
+use std::sync::Arc;
 use std::time::Duration;
 
 #[live_test]
@@ -68,7 +68,7 @@ async fn test_nexus_handoff(lc: &LiveTestContext) {
     // there exist no Nexus zones with a generation newer than the blueprint's
     // `nexus_generation`.
     let new_zones = blueprint_initial
-        .all_omicron_zones(BlueprintZoneDisposition::is_in_service)
+        .in_service_zones()
         .filter_map(|(_sled_id, z)| {
             let BlueprintZoneType::Nexus(blueprint_zone_type::Nexus {
                 nexus_generation,
@@ -101,7 +101,7 @@ async fn test_nexus_handoff(lc: &LiveTestContext) {
         cfg: &'a blueprint_zone_type::Nexus,
     }
     let current_nexus_zones: BTreeMap<OmicronZoneUuid, _> = blueprint_initial
-        .all_omicron_zones(BlueprintZoneDisposition::is_in_service)
+        .in_service_zones()
         .filter_map(|(sled_id, z)| {
             let BlueprintZoneType::Nexus(
                 cfg @ blueprint_zone_type::Nexus { nexus_generation, .. },
@@ -163,10 +163,18 @@ async fn test_nexus_handoff(lc: &LiveTestContext) {
         .await
         .expect("obtained latest reconfigurator config")
         .map_or_else(PlannerConfig::default, |cs| cs.config.planner_config);
-    let planning_input =
-        PlanningInputFromDb::assemble(opctx, datastore, planner_config)
-            .await
-            .expect("planning input");
+    let (_, parent_blueprint) = datastore
+        .blueprint_target_get_current_full(opctx)
+        .await
+        .expect("getting latest target blueprint");
+    let planning_input = PlanningInputFromDb::assemble(
+        opctx,
+        datastore,
+        planner_config,
+        Arc::new(parent_blueprint),
+    )
+    .await
+    .expect("planning input");
     let (_blueprint_initial, blueprint_new_nexus) =
         blueprint_edit_current_target(
             log,
@@ -206,7 +214,7 @@ async fn test_nexus_handoff(lc: &LiveTestContext) {
 
     // Find the new Nexus zones and make clients for them.
     let new_nexus_clients = blueprint_new_nexus
-        .all_nexus_zones(BlueprintZoneDisposition::is_in_service)
+        .in_service_nexus_zones()
         .filter_map(|(_sled_id, zone_cfg, nexus_config)| {
             (nexus_config.nexus_generation == next_generation).then(|| {
                 (
@@ -486,7 +494,7 @@ async fn check_internal_dns(
     // Compute what we expect to find, based on which Nexus instances in the
     // blueprint have the specified generation.
     let expected_nexus_addrs = blueprint
-        .all_nexus_zones(BlueprintZoneDisposition::is_in_service)
+        .in_service_nexus_zones()
         .filter_map(|(_sled_id, _zone_cfg, nexus_config)| {
             (nexus_config.nexus_generation == active_generation)
                 .then_some(nexus_config.internal_address)
@@ -495,7 +503,7 @@ async fn check_internal_dns(
 
     // Find the DNS server based on what's currently in the blueprint.
     let dns_sockaddr = blueprint
-        .all_omicron_zones(BlueprintZoneDisposition::is_in_service)
+        .in_service_zones()
         .find_map(|(_sled_id, zone_cfg)| {
             if let BlueprintZoneType::InternalDns(
                 blueprint_zone_type::InternalDns { dns_address, .. },
@@ -550,7 +558,7 @@ async fn check_external_dns(
     // Compute which Nexus instances we expect to find in external DNS based on
     // what's in-service in the blueprint.
     let expected_nexus_addrs = blueprint
-        .all_nexus_zones(BlueprintZoneDisposition::is_in_service)
+        .in_service_nexus_zones()
         .filter_map(|(_sled_id, _zone_cfg, nexus_config)| {
             (nexus_config.nexus_generation == active_generation)
                 .then_some(nexus_config.external_ip.ip)
@@ -559,7 +567,7 @@ async fn check_external_dns(
 
     // Find the DNS server based on what's currently in the blueprint.
     let dns_http_sockaddr = blueprint
-        .all_omicron_zones(BlueprintZoneDisposition::is_in_service)
+        .in_service_zones()
         .find_map(|(_sled_id, zone_cfg)| {
             if let BlueprintZoneType::ExternalDns(
                 blueprint_zone_type::ExternalDns { http_address, .. },

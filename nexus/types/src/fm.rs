@@ -8,11 +8,14 @@
 //! structure containing fault management state.
 
 pub mod ereport;
-pub use ereport::Ereport;
+pub use ereport::{Ereport, EreportId};
+
+pub mod case;
+pub use case::Case;
 
 use chrono::{DateTime, Utc};
+use iddqd::IdOrdMap;
 use omicron_uuid_kinds::{CollectionUuid, OmicronZoneUuid, SitrepUuid};
-use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 /// A fault management situation report, or _sitrep_.
@@ -30,12 +33,24 @@ use serde::{Deserialize, Serialize};
 /// The sitrep, how it is represented in the database, and how the fault
 /// management subsystem creates and interacts with sitreps, is described in
 /// detail in [RFD 603](https://rfd.shared.oxide.computer/rfd/0603).
-#[derive(Clone, Debug, Eq, PartialEq, JsonSchema, Deserialize, Serialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize)]
 pub struct Sitrep {
     /// Metadata describing this sitrep, when it was created, its parent sitrep
     /// ID, and which Nexus produced it.
     pub metadata: SitrepMetadata,
-    // TODO(eliza): draw the rest of the sitrep
+    pub cases: IdOrdMap<Case>,
+    //
+    // NOTE FOR FUTURE GENERATIONS: If you add more database tables whose
+    // records are top-level children of a sitrep (i.e., like cases), please
+    // make sure to update the tests in `nexus_db_queries::db::datastore::fm` to
+    // also include those records. In particular, make sure to update the
+    // `assert_sitreps_eq` function to also assert that your new records are
+    // contained in both sitreps. Also, the tests for sitrep deletion and for
+    // roundtripping sitreps through the database should also
+    // create/delete/assert any new records added.
+    //
+    // Thank you for your cooperation!
+    //
 }
 
 impl Sitrep {
@@ -46,12 +61,20 @@ impl Sitrep {
     pub fn parent_id(&self) -> Option<SitrepUuid> {
         self.metadata.parent_sitrep_id
     }
+
+    /// Iterate over all the open cases in this sitrep.
+    ///
+    /// All cases returned by this iterator will be copied forward into any
+    /// child sitreps that descend from this one.
+    pub fn open_cases(&self) -> impl Iterator<Item = &Case> + '_ {
+        self.cases.iter().filter(|c| c.is_open())
+    }
 }
 
 /// Metadata describing a sitrep.
 ///
 /// This corresponds to the records stored in the `fm_sitrep` database table.
-#[derive(Clone, Debug, Eq, PartialEq, JsonSchema, Deserialize, Serialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize)]
 pub struct SitrepMetadata {
     /// The ID of this sitrep.
     pub id: SitrepUuid,
@@ -91,9 +114,26 @@ pub struct SitrepMetadata {
 }
 
 /// An entry in the sitrep version history.
-#[derive(Clone, Debug, Eq, PartialEq, JsonSchema, Deserialize, Serialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize)]
 pub struct SitrepVersion {
     pub id: SitrepUuid,
     pub version: u32,
     pub time_made_current: DateTime<Utc>,
+}
+
+#[derive(
+    Copy,
+    Clone,
+    Debug,
+    PartialEq,
+    Eq,
+    Hash,
+    serde::Serialize,
+    serde::Deserialize,
+    strum::Display,
+)]
+#[serde(rename_all = "snake_case")]
+#[strum(serialize_all = "snake_case")]
+pub enum DiagnosisEngineKind {
+    PowerShelf,
 }

@@ -13,33 +13,30 @@ use crate::ledgers::PersistentStateLedger;
 use crate::proxy;
 use camino::Utf8PathBuf;
 use omicron_uuid_kinds::RackUuid;
-use serde::{Deserialize, Serialize};
+use sled_agent_measurements::MeasurementsHandle;
+use sled_hardware_types::BaseboardId;
 use slog::{Logger, debug, error, info, o, warn};
 use slog_error_chain::SlogInlineError;
 use sprockets_tls::keys::SprocketsConfig;
 use std::collections::BTreeSet;
 use std::net::SocketAddrV6;
+use std::sync::Arc;
 use thiserror::Error;
 use tokio::sync::mpsc::error::SendError;
 use tokio::sync::oneshot::error::RecvError;
 use tokio::sync::{mpsc, oneshot};
 use trust_quorum_protocol::{
-    Alarm, BaseboardId, CommitError, Configuration, Epoch, ExpungedMetadata,
-    LoadRackSecretError, LrtqUpgradeError, LrtqUpgradeMsg, Node, NodeCallerCtx,
-    NodeCommonCtx, NodeCtx, PersistentState, PrepareAndCommitError,
-    ReconfigurationError, ReconfigureMsg, ReconstructedRackSecret,
+    CommitError, LoadRackSecretError, LrtqUpgradeError, Node,
+    NodeCallerCtx as _, NodeCommonCtx as _, NodeCtx, PersistentState,
+    PrepareAndCommitError, ReconfigurationError, ReconstructedRackSecret,
 };
-
+use trust_quorum_types::configuration::Configuration;
+use trust_quorum_types::messages::{LrtqUpgradeMsg, ReconfigureMsg};
+use trust_quorum_types::status::{CommitStatus, CoordinatorStatus, NodeStatus};
+use trust_quorum_types::types::Epoch;
 // TODO: Move to this crate
 // https://github.com/oxidecomputer/omicron/issues/9311
-use bootstore::schemes::v0::NetworkConfig;
-
-/// Whether or not a configuration has committed or is still underway.
-#[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub enum CommitStatus {
-    Committed,
-    Pending,
-}
+use bootstore::schemes::v0::{NetworkConfig, PersistentFsmState};
 
 /// We only expect a handful of messages at a time.
 const API_CHANNEL_BOUND: usize = 32;
@@ -59,47 +56,8 @@ pub struct Config {
     pub listen_addr: SocketAddrV6,
     pub tq_ledger_paths: Vec<Utf8PathBuf>,
     pub network_config_ledger_paths: Vec<Utf8PathBuf>,
+    pub lrtq_ledger_paths: Vec<Utf8PathBuf>,
     pub sprockets: SprocketsConfig,
-}
-
-/// Status of the node coordinating the `Prepare` phase of a reconfiguration or
-/// LRTQ upgrade.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct CoordinatorStatus {
-    pub config: Configuration,
-    pub acked_prepares: BTreeSet<BaseboardId>,
-}
-
-// Details about a given node's status
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-pub struct NodeStatus {
-    pub connected_peers: BTreeSet<BaseboardId>,
-    pub alarms: BTreeSet<Alarm>,
-    pub persistent_state: NodePersistentStateSummary,
-    pub proxied_requests: u64,
-}
-
-/// A summary of a node's persistent state, leaving out things like key shares
-/// and hashes.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-pub struct NodePersistentStateSummary {
-    pub has_lrtq_share: bool,
-    pub configs: BTreeSet<Epoch>,
-    pub shares: BTreeSet<Epoch>,
-    pub commits: BTreeSet<Epoch>,
-    pub expunged: Option<ExpungedMetadata>,
-}
-
-impl From<&PersistentState> for NodePersistentStateSummary {
-    fn from(value: &PersistentState) -> Self {
-        Self {
-            has_lrtq_share: value.lrtq.is_some(),
-            configs: value.configs.iter().map(|c| c.epoch).collect(),
-            shares: value.shares.keys().cloned().collect(),
-            commits: value.commits.clone(),
-            expunged: value.expunged.clone(),
-        }
-    }
 }
 
 /// A request sent to the `NodeTask` from the `NodeTaskHandle`
@@ -119,10 +77,27 @@ pub enum NodeApiRequest {
     CoordinatorStatus { tx: oneshot::Sender<Option<CoordinatorStatus>> },
 
     /// Load a rack secret for the given epoch
+    ///
+    /// Returns `None` if share collection is still in progress.
     LoadRackSecret {
         epoch: Epoch,
         tx: oneshot::Sender<
             Result<Option<ReconstructedRackSecret>, LoadRackSecretError>,
+        >,
+    },
+
+    /// Load the rack secret for the latest committed epoch
+    ///
+    /// Returns `(Epoch, ReconstructedRackSecret)` if available, or `None` if
+    /// share collection is still in progress. The epoch is guaranteed to match
+    /// the secret returned, though subsequent actions could cause the returned
+    /// epoch to be superseded.
+    LoadLatestRackSecret {
+        tx: oneshot::Sender<
+            Result<
+                Option<(Epoch, ReconstructedRackSecret)>,
+                LoadRackSecretError,
+            >,
         >,
     },
 
@@ -244,11 +219,16 @@ impl NodeTaskHandle {
 
     /// Return a [`proxy::Proxy`] that allows callers to proxy certain API requests
     /// to other nodes.
+    ///
+    /// Each of these operations on `Proxy` should be accessible via its own
+    /// sled agent API endpoint
     pub fn proxy(&self) -> proxy::Proxy {
         proxy::Proxy::new(self.tx.clone())
     }
 
     /// Initiate a trust quorum reconfiguration at this node
+    ///
+    /// Must be accessible via a sled-agent API endpoint
     pub async fn reconfigure(
         &self,
         msg: ReconfigureMsg,
@@ -260,6 +240,8 @@ impl NodeTaskHandle {
     }
 
     /// Initiate an LRTQ upgrade at this node
+    ///
+    /// Must be accessible via a sled-agent API endpoint
     pub async fn upgrade_from_lrtq(
         &self,
         msg: LrtqUpgradeMsg,
@@ -273,6 +255,8 @@ impl NodeTaskHandle {
     /// Return the status of this node if it is coordinating the `Prepare` phase
     /// of a reconfiguration or LRTQ upgrade. Return `Ok(None)` or an error
     /// otherwise.
+    ///
+    /// Must be accessible via a sled-agent API endpoint
     pub async fn coordinator_status(
         &self,
     ) -> Result<Option<CoordinatorStatus>, NodeApiError> {
@@ -293,7 +277,25 @@ impl NodeTaskHandle {
         Ok(rs)
     }
 
+    /// Load the rack secret for the latest committed epoch
+    ///
+    /// Returns the epoch and secret together, or `None` if share collection is
+    /// still in progress. This operation atomically determines the latest epoch
+    /// and loads its secret. Note that it is still possible for the rack secret
+    /// to be superseded at any time after this call returns; it is only
+    /// guaranteed to be the latest as of the moment it is retrieved internally.
+    pub async fn load_latest_rack_secret(
+        &self,
+    ) -> Result<Option<(Epoch, ReconstructedRackSecret)>, NodeApiError> {
+        let (tx, rx) = oneshot::channel();
+        self.tx.send(NodeApiRequest::LoadLatestRackSecret { tx }).await?;
+        let rs = rx.await??;
+        Ok(rs)
+    }
+
     /// Attempt to prepare and commit the given configuration
+    ///
+    /// Must be accessible via a sled-agent API endpoint
     pub async fn prepare_and_commit(
         &self,
         config: Configuration,
@@ -305,6 +307,8 @@ impl NodeTaskHandle {
     }
 
     /// Attempt to commit the configuration at epoch `epoch`
+    ///
+    /// Must be accessible via a sled-agent API endpoint
     pub async fn commit(
         &self,
         rack_id: RackUuid,
@@ -344,6 +348,8 @@ impl NodeTaskHandle {
     }
 
     /// Return internal information for the [`Node`]
+    ///
+    /// Must be accessible via a sled-agent API endpoint
     pub async fn status(&self) -> Result<NodeStatus, NodeApiError> {
         let (tx, rx) = oneshot::channel();
         self.tx.send(NodeApiRequest::NodeStatus { tx }).await?;
@@ -358,6 +364,8 @@ impl NodeTaskHandle {
     }
 
     /// Update network config needed for bringing up the control plane
+    ///
+    /// Must be accessible via a sled-agent API endpoint
     pub async fn update_network_config(
         &self,
         config: NetworkConfig,
@@ -371,6 +379,8 @@ impl NodeTaskHandle {
     }
 
     /// Retrieve the current network config
+    ///
+    /// Must be accessible via a sled-agent API endpoint
     pub async fn network_config(
         &self,
     ) -> Result<Option<NetworkConfig>, NodeApiError> {
@@ -404,12 +414,15 @@ pub struct NodeTask {
 
     /// A tracker for API requests proxied to other nodes
     proxy_tracker: proxy::Tracker,
+    /// Handle to receive updates to new reference measurements
+    measurements: Arc<MeasurementsHandle>,
 }
 
 impl NodeTask {
     pub async fn new(
         config: Config,
         log: &Logger,
+        measurements: Arc<MeasurementsHandle>,
     ) -> (NodeTask, NodeTaskHandle) {
         let log = log.new(o!(
             "component" => "trust-quorum",
@@ -433,6 +446,21 @@ impl NodeTask {
                     ps_ledger.state,
                 ),
                 ps_ledger.generation,
+            )
+        } else if let Some(lrtq_share_data) =
+            PersistentFsmState::load_for_trust_quorum_upgrade(
+                &log,
+                config.lrtq_ledger_paths.clone(),
+            )
+            .await
+        {
+            let ps = PersistentState::new_lrtq_only(lrtq_share_data);
+            (
+                NodeCtx::new_with_persistent_state(
+                    config.baseboard_id.clone(),
+                    ps,
+                ),
+                0,
             )
         } else {
             (NodeCtx::new(config.baseboard_id.clone()), 0)
@@ -466,6 +494,7 @@ impl NodeTask {
                 rx,
                 network_config,
                 proxy_tracker: proxy::Tracker::new(),
+                measurements,
             },
             NodeTaskHandle { baseboard_id, tx, listen_addr },
         )
@@ -476,8 +505,13 @@ impl NodeTask {
     /// This should be spawned into its own tokio task
     pub async fn run(&mut self) {
         while !self.shutdown {
-            // TODO: Real corpus
-            let corpus = vec![];
+            let corpus = match self.measurements.current_measurements() {
+                Ok(c) => c,
+                Err(e) => {
+                    error!(self.log, "measurement error"; e);
+                    vec![]
+                }
+            };
             tokio::select! {
                 Some(request) = self.rx.recv() => {
                     self.on_api_request(request).await;
@@ -623,8 +657,13 @@ impl NodeTask {
         match request {
             NodeApiRequest::BootstrapAddresses(addrs) => {
                 info!(self.log, "Updated Peer Addresses: {addrs:?}");
-                // TODO: real corpus
-                let corpus = vec![];
+                let corpus = match self.measurements.current_measurements() {
+                    Ok(c) => c,
+                    Err(e) => {
+                        error!(self.log, "measurement error"; e);
+                        vec![]
+                    }
+                };
                 let disconnected = self
                     .conn_mgr
                     .update_bootstrap_connections(addrs, corpus)
@@ -656,6 +695,26 @@ impl NodeTask {
             }
             NodeApiRequest::LoadRackSecret { epoch, tx } => {
                 let res = self.node.load_rack_secret(&mut self.ctx, epoch);
+                let _ = tx.send(res);
+            }
+            NodeApiRequest::LoadLatestRackSecret { tx } => {
+                // Atomically determine the latest committed epoch and load its
+                // secret, avoiding a commit occurring in between the epoch
+                // check and the secret retrieval.
+                let res = match self
+                    .ctx
+                    .persistent_state()
+                    .latest_committed_epoch()
+                {
+                    Some(epoch) => {
+                        match self.node.load_rack_secret(&mut self.ctx, epoch) {
+                            Ok(Some(secret)) => Ok(Some((epoch, secret))),
+                            Ok(None) => Ok(None),
+                            Err(e) => Err(e),
+                        }
+                    }
+                    None => Err(LoadRackSecretError::NoCommittedConfigurations),
+                };
                 let _ = tx.send(res);
             }
             NodeApiRequest::LrtqUpgrade { msg, tx } => {
@@ -896,6 +955,7 @@ mod tests {
     use std::time::Duration;
     use tokio::task::JoinHandle;
     use trust_quorum_protocol::NodeHandlerCtx;
+    use trust_quorum_types::types::Threshold;
 
     fn pki_doc_to_node_configs(dir: Utf8PathBuf, n: usize) -> Vec<Config> {
         (1..=n)
@@ -924,8 +984,8 @@ mod tests {
                             &alias_key_name,
                         ),
                         cert_chain: certlist_path(dir.clone(), &alias_key_name),
-                        // TODO: We need attest-mock to generate a real log
                         log: dir.join("log.bin"),
+                        test_corpus: vec![dir.join("corim.cbor")],
                     },
                     roots: vec![cert_path(dir.clone(), &root_prefix())],
                 };
@@ -939,6 +999,7 @@ mod tests {
                     sprockets,
                     tq_ledger_paths,
                     network_config_ledger_paths,
+                    lrtq_ledger_paths: vec![],
                 }
             })
             .collect()
@@ -969,6 +1030,29 @@ mod tests {
         // Write out the log document to the filesystem
         let out = attest_mock::log::mock(attest_log_doc).unwrap();
         std::fs::write(dir.join("log.bin"), &out).unwrap();
+
+        let corim_doc = attest_mock::corim::Document {
+            vendor: "Test Bed".into(),
+            tag_id: "test-v0.0.99999".into(),
+            id: "corim-test-v0.0.99999".into(),
+            measurements: vec![
+                // fake SP digest from the log
+                attest_mock::corim::Measurement {
+                    mkey: "fake-sp".into(),
+                    algorithm: 10,
+                    digest: "be4df4e085175f3de0c8ac4837e1c2c9a34e8983209dac6b549e94154f7cdd9c".into()
+                },
+                // fake fwid from the cert-chain (this is constant currently)
+                attest_mock::corim::Measurement {
+                    mkey: "fake-fwid".into(),
+                    algorithm: 10,
+                    digest: "72fa8f8ea84a42251031366002cbb36281d0131f78cd680436116a720cdd9de5".into()
+                },
+            ],
+        };
+
+        let corim = attest_mock::corim::mock(corim_doc).unwrap();
+        std::fs::write(dir.join("corim.cbor"), &corim).unwrap();
     }
 
     struct TestSetup {
@@ -996,8 +1080,9 @@ mod tests {
             let mut node_handles = vec![];
             let mut join_handles = vec![];
             for config in configs.clone() {
+                let measurements = Arc::new(MeasurementsHandle::new_fake());
                 let (mut task, handle) =
-                    NodeTask::new(config, &logctx.log).await;
+                    NodeTask::new(config, &logctx.log, measurements).await;
                 node_handles.push(handle);
                 join_handles
                     .push(tokio::spawn(async move { task.run().await }));
@@ -1057,8 +1142,9 @@ mod tests {
             for (config, share_pkg) in
                 configs.clone().into_iter().zip(share_pkgs)
             {
+                let measurements = Arc::new(MeasurementsHandle::new_fake());
                 let (mut task, handle) =
-                    NodeTask::new(config, &logctx.log).await;
+                    NodeTask::new(config, &logctx.log, measurements).await;
                 task.ctx.update_persistent_state(|ps| {
                     ps.lrtq = Some(share_pkg);
                     // We are modifying the persistent state, but not in a way
@@ -1094,9 +1180,11 @@ mod tests {
         }
 
         pub async fn simulate_restart_of_last_node(&mut self) {
+            let measurements = Arc::new(MeasurementsHandle::new_fake());
             let (mut task, handle) = NodeTask::new(
                 self.configs.last().unwrap().clone(),
                 &self.logctx.log,
+                measurements,
             )
             .await;
             let listen_addr = handle.listen_addr();
@@ -1254,10 +1342,12 @@ mod tests {
 
         debug!(logctx.log, "AFTER poll for conns with node down");
 
+        let measurements = Arc::new(MeasurementsHandle::new_fake());
         // Now let's bring back up the old node and ensure full connectivity again
         let (mut task, handle) = NodeTask::new(
             setup.configs.last().unwrap().clone(),
             &setup.logctx.log,
+            measurements,
         )
         .await;
         setup.node_handles.push(handle.clone());
@@ -1326,7 +1416,7 @@ mod tests {
             epoch: Epoch(1),
             last_committed_epoch: None,
             members: setup.members().cloned().collect(),
-            threshold: trust_quorum_protocol::Threshold(3),
+            threshold: Threshold(3),
         };
 
         // Tell nodes how to reach each other
@@ -1408,7 +1498,7 @@ mod tests {
             epoch: Epoch(1),
             last_committed_epoch: None,
             members: setup.members().cloned().collect(),
-            threshold: trust_quorum_protocol::Threshold(3),
+            threshold: Threshold(3),
         };
 
         // Tell all but the last node how to reach each other
@@ -1543,7 +1633,7 @@ mod tests {
             epoch: Epoch(1),
             last_committed_epoch: None,
             members: setup.members().cloned().collect(),
-            threshold: trust_quorum_protocol::Threshold(3),
+            threshold: Threshold(3),
         };
 
         // Tell all but the last node how to reach each other
@@ -1756,7 +1846,7 @@ mod tests {
             rack_id,
             epoch: Epoch(2),
             members: setup.members().cloned().collect(),
-            threshold: trust_quorum_protocol::Threshold(3),
+            threshold: Threshold(3),
         };
 
         // Tell nodes how to reach each other
@@ -1845,7 +1935,7 @@ mod tests {
             epoch: Epoch(1),
             last_committed_epoch: None,
             members: setup.members().cloned().collect(),
-            threshold: trust_quorum_protocol::Threshold(3),
+            threshold: Threshold(3),
         };
 
         // Tell nodes how to reach each other
@@ -2130,7 +2220,7 @@ mod tests {
             epoch: Epoch(1),
             last_committed_epoch: None,
             members: setup.members().cloned().collect(),
-            threshold: trust_quorum_protocol::Threshold(3),
+            threshold: Threshold(3),
         };
 
         // Tell nodes how to reach each other
@@ -2219,7 +2309,7 @@ mod tests {
         );
 
         // PrepareAndCommit should return pending, because it has to compute
-        // it's own keyshare for the new config, which will eventually fail.
+        // its own keyshare for the new config, which will eventually fail.
         //
         // Nexus will never actually send a `PrepareAndCommit` when there hasn't
         // been a commit. This is just here to check the behavior of the proxy
@@ -2266,11 +2356,26 @@ mod tests {
             .unwrap();
 
         // Now ensure we can get the status for the last node again.
-        let status = proxy
-            .status(destination.clone())
-            .await
-            .expect("successful status request");
-        assert_matches!(status, NodeStatus { .. });
+        //
+        // We must wait for connection here, because we don't know if the unlock
+        // at the last node (4) was a result of receiving the share from the proxy node
+        // (node 1).
+        wait_for_condition(
+            async || {
+                let Ok(status) = proxy.status(destination.clone()).await else {
+                    return Err(CondCheckError::<()>::NotYet);
+                };
+                if matches!(status, NodeStatus { .. }) {
+                    Ok(())
+                } else {
+                    Err(CondCheckError::<()>::NotYet)
+                }
+            },
+            &poll_interval,
+            &poll_max,
+        )
+        .await
+        .unwrap();
 
         setup.cleanup_successful();
     }

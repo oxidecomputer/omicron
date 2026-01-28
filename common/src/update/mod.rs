@@ -3,9 +3,9 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 mod artifact_id;
+mod install_manifest;
 mod mupdate_override;
-mod zone_manifest;
 
 pub use artifact_id::*;
+pub use install_manifest::*;
 pub use mupdate_override::*;
-pub use zone_manifest::*;

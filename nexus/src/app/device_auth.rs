@@ -51,7 +51,7 @@ use nexus_db_queries::authn::{Actor, Reason};
 use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::model::{DeviceAccessToken, DeviceAuthRequest};
-use omicron_uuid_kinds::SiloUserUuid;
+use omicron_uuid_kinds::{GenericUuid, SiloUserUuid};
 
 use anyhow::anyhow;
 use nexus_types::external_api::params;
@@ -240,12 +240,12 @@ impl super::Nexus {
 
     /// Look up the actor for which a token was granted.
     /// Corresponds to a request *after* completing the flow above.
-    /// Returns the actor and the token's expiration time (if any).
+    /// Returns the actor, the token's expiration time (if any), and the token ID.
     pub(crate) async fn authenticate_token(
         &self,
         opctx: &OpContext,
         token: String,
-    ) -> Result<(Actor, Option<chrono::DateTime<Utc>>), Reason> {
+    ) -> Result<(Actor, Option<chrono::DateTime<Utc>>, Uuid), Reason> {
         let (.., db_access_token) = self
             .db_datastore
             .device_token_lookup_by_token(opctx, token)
@@ -271,6 +271,7 @@ impl super::Nexus {
         let silo_id = db_silo_user.silo_id;
 
         let expiration = db_access_token.time_expires;
+        let token_id = db_access_token.id().into_untyped_uuid();
 
         if let Some(time_expires) = expiration {
             let now = Utc::now();
@@ -286,7 +287,7 @@ impl super::Nexus {
             }
         }
 
-        Ok((Actor::SiloUser { silo_user_id, silo_id }, expiration))
+        Ok((Actor::SiloUser { silo_user_id, silo_id }, expiration, token_id))
     }
 
     pub(crate) async fn device_access_token(

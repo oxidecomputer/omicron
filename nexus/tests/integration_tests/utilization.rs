@@ -5,7 +5,7 @@ use nexus_test_utils::http_testing::AuthnMode;
 use nexus_test_utils::http_testing::NexusRequest;
 use nexus_test_utils::http_testing::RequestBuilder;
 use nexus_test_utils::resource_helpers::DiskTest;
-use nexus_test_utils::resource_helpers::create_default_ip_pool;
+use nexus_test_utils::resource_helpers::create_default_ip_pools;
 use nexus_test_utils::resource_helpers::create_instance;
 use nexus_test_utils::resource_helpers::create_local_user;
 use nexus_test_utils::resource_helpers::create_project;
@@ -38,7 +38,7 @@ type ControlPlaneTestContext =
 async fn test_utilization_list(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
 
-    create_default_ip_pool(&client).await;
+    let (v4_pool, _v6_pool) = create_default_ip_pools(&client).await;
 
     // default-silo has quotas, but is explicitly filtered out by ID in the
     // DB query to avoid user confusion. test-suite-silo also exists, but is
@@ -66,7 +66,8 @@ async fn test_utilization_list(cptestctx: &ControlPlaneTestContext) {
     );
 
     // create the resources that should change the utilization
-    create_resources_in_test_suite_silo(client).await;
+    create_resources_in_test_suite_silo(client, v4_pool.identity.name.as_str())
+        .await;
 
     // list response shows provisioned resources
     let current_util = util_list(client).await;
@@ -99,7 +100,7 @@ async fn test_utilization_list(cptestctx: &ControlPlaneTestContext) {
 async fn test_utilization_view(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
 
-    create_default_ip_pool(&client).await;
+    create_default_ip_pools(&client).await;
 
     let _ = create_project(&client, &PROJECT_NAME).await;
     let _ = create_instance(client, &PROJECT_NAME, &INSTANCE_NAME).await;
@@ -146,8 +147,10 @@ async fn test_utilization_view(cptestctx: &ControlPlaneTestContext) {
                     description: "".into(),
                 },
                 size: ByteCount::from_gibibytes_u32(2),
-                disk_source: params::DiskSource::Blank {
-                    block_size: params::BlockSize::try_from(512).unwrap(),
+                disk_backend: params::DiskBackend::Distributed {
+                    disk_source: params::DiskSource::Blank {
+                        block_size: params::BlockSize::try_from(512).unwrap(),
+                    },
                 },
             }))
             .expect_status(Some(StatusCode::CREATED)),
@@ -176,12 +179,15 @@ async fn util_list(client: &ClientTestContext) -> Vec<SiloUtilization> {
 }
 
 /// Could be inlined, but pulling it out makes the test much clearer
-async fn create_resources_in_test_suite_silo(client: &ClientTestContext) {
+async fn create_resources_in_test_suite_silo(
+    client: &ClientTestContext,
+    pool_name: &str,
+) {
     // in order to create resources in test-suite-silo, we have to create a user
     // with the right perms so we have a user ID on hand to use in the authn_as
     let silo_url = "/v1/system/silos/test-suite-silo";
     let test_suite_silo: Silo = object_get(client, silo_url).await;
-    link_ip_pool(client, "default", &test_suite_silo.identity.id, true).await;
+    link_ip_pool(client, pool_name, &test_suite_silo.identity.id, true).await;
     let user1 = create_local_user(
         client,
         &test_suite_silo,
@@ -227,7 +233,8 @@ async fn create_resources_in_test_suite_silo(client: &ClientTestContext) {
         hostname: "test-inst".parse().unwrap(),
         user_data: vec![],
         ssh_public_keys: None,
-        network_interfaces: params::InstanceNetworkInterfaceAttachment::Default,
+        network_interfaces:
+            params::InstanceNetworkInterfaceAttachment::DefaultIpv4,
         external_ips: vec![],
         disks: vec![],
         boot_disk: None,

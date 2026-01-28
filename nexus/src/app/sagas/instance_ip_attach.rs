@@ -94,7 +94,7 @@ async fn siia_begin_attach_ip(
         InstanceUuid::from_untyped_uuid(params.authz_instance.id());
     match &params.create_params {
         // Allocate a new IP address from the target, possibly default, pool
-        ExternalIpAttach::Ephemeral { pool } => {
+        ExternalIpAttach::Ephemeral { pool, ip_version } => {
             let pool = if let Some(name_or_id) = pool {
                 Some(
                     osagactx
@@ -116,6 +116,7 @@ async fn siia_begin_attach_ip(
                     Uuid::new_v4(),
                     instance_id,
                     pool,
+                    ip_version.map(Into::into),
                     false,
                 )
                 .await
@@ -126,8 +127,14 @@ async fn siia_begin_attach_ip(
                 })
         }
         // Set the parent of an existing floating IP to the new instance's ID.
-        ExternalIpAttach::Floating { floating_ip } => datastore
-            .floating_ip_begin_attach(&opctx, &floating_ip, instance_id, false)
+        ExternalIpAttach::Floating { floating_ip, ip_version } => datastore
+            .floating_ip_begin_attach(
+                &opctx,
+                floating_ip,
+                (*ip_version).into(),
+                instance_id,
+                false,
+            )
             .await
             .map_err(ActionError::action_failed)
             .map(|(external_ip, do_saga)| ModifyStateForExternalIp {
@@ -331,13 +338,14 @@ pub(crate) mod test {
     };
     use dropshot::test_util::ClientTestContext;
     use nexus_db_lookup::LookupPath;
-    use nexus_db_model::{ExternalIp, IpKind};
+    use nexus_db_model::{ExternalIp, IpKind, IpVersion};
     use nexus_db_queries::context::OpContext;
     use nexus_test_utils::resource_helpers::{
-        create_default_ip_pool, create_floating_ip, create_instance,
+        create_default_ip_pools, create_floating_ip, create_instance,
         create_project,
     };
     use nexus_test_utils_macros::nexus_test;
+    use nexus_types::external_api::params;
     use omicron_common::api::external::SimpleIdentityOrName;
     use sled_agent_types::instance::InstanceExternalIpBody;
 
@@ -349,14 +357,17 @@ pub(crate) mod test {
     const FIP_NAME: &str = "affogato";
 
     pub async fn ip_manip_test_setup(client: &ClientTestContext) -> Uuid {
-        create_default_ip_pool(&client).await;
+        let (v4_pool, _v6_pool) = create_default_ip_pools(&client).await;
         let project = create_project(client, PROJECT_NAME).await;
         create_floating_ip(
             client,
             FIP_NAME,
             &project.identity.id.to_string(),
-            None,
-            None,
+            params::AddressAllocator::Auto {
+                pool_selector: params::PoolSelector::Explicit {
+                    pool: v4_pool.identity.name.clone().into(),
+                },
+            },
         )
         .await;
 
@@ -370,15 +381,23 @@ pub(crate) mod test {
     ) -> Params {
         let project_name = db::model::Name(PROJECT_NAME.parse().unwrap());
         let create_params = if use_floating {
-            let (.., floating_ip) = LookupPath::new(opctx, datastore)
+            let (.., floating_ip, db_fip) = LookupPath::new(opctx, datastore)
                 .project_name(&project_name)
                 .floating_ip_name(&db::model::Name(FIP_NAME.parse().unwrap()))
-                .lookup_for(authz::Action::Modify)
+                .fetch_for(authz::Action::Modify)
                 .await
                 .unwrap();
-            ExternalIpAttach::Floating { floating_ip }
+            let ip_version = match db_fip.ip {
+                ipnetwork::IpNetwork::V4(_) => IpVersion::V4,
+                ipnetwork::IpNetwork::V6(_) => IpVersion::V6,
+            }
+            .into();
+            ExternalIpAttach::Floating { floating_ip, ip_version }
         } else {
-            ExternalIpAttach::Ephemeral { pool: None }
+            ExternalIpAttach::Ephemeral {
+                pool: None,
+                ip_version: Some(IpVersion::V4.into()),
+            }
         };
 
         let (.., authz_project, authz_instance) =

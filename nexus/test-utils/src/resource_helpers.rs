@@ -18,6 +18,9 @@ use nexus_db_queries::db::fixed_data::silo::DEFAULT_SILO;
 use nexus_test_interface::NexusServer;
 use nexus_types::deployment::Blueprint;
 use nexus_types::external_api::params;
+use nexus_types::external_api::params::{
+    DeviceAccessTokenRequest, DeviceAuthRequest, DeviceAuthVerify,
+};
 use nexus_types::external_api::shared;
 use nexus_types::external_api::shared::Baseboard;
 use nexus_types::external_api::shared::IpRange;
@@ -33,6 +36,9 @@ use nexus_types::external_api::views::IpPool;
 use nexus_types::external_api::views::IpPoolRange;
 use nexus_types::external_api::views::User;
 use nexus_types::external_api::views::VpcSubnet;
+use nexus_types::external_api::views::{
+    DeviceAccessTokenGrant, DeviceAuthResponse,
+};
 use nexus_types::external_api::views::{Project, Silo, Vpc, VpcRouter};
 use nexus_types::identity::Resource;
 use nexus_types::internal_api::params as internal_params;
@@ -347,21 +353,38 @@ pub async fn link_ip_pool(
     .await;
 }
 
+/// Create a default IPv4 and IPv6 IP Pool.
+///
 /// What you want for any test that is not testing IP logic specifically
-pub async fn create_default_ip_pool(
+pub async fn create_default_ip_pools(
     client: &ClientTestContext,
-) -> views::IpPool {
-    let (pool, ..) = create_ip_pool(&client, "default", None).await;
-    link_ip_pool(&client, "default", &DEFAULT_SILO.id(), true).await;
-    pool
+) -> (views::IpPool, views::IpPool) {
+    let ranges = [
+        IpRange::try_from((
+            std::net::Ipv4Addr::new(10, 0, 0, 0),
+            std::net::Ipv4Addr::new(10, 0, 255, 255),
+        ))
+        .unwrap(),
+        IpRange::try_from((
+            std::net::Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 0),
+            std::net::Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 0xffff),
+        ))
+        .unwrap(),
+    ];
+    let (v4_pool, ..) =
+        create_ip_pool(&client, "default-v4", Some(ranges[0])).await;
+    link_ip_pool(&client, "default-v4", &DEFAULT_SILO.id(), true).await;
+    let (v6_pool, ..) =
+        create_ip_pool(&client, "default-v6", Some(ranges[1])).await;
+    link_ip_pool(&client, "default-v6", &DEFAULT_SILO.id(), true).await;
+    (v4_pool, v6_pool)
 }
 
 pub async fn create_floating_ip(
     client: &ClientTestContext,
     fip_name: &str,
     project: &str,
-    ip: Option<IpAddr>,
-    parent_pool_name: Option<&str>,
+    address_allocator: params::AddressAllocator,
 ) -> FloatingIp {
     object_create(
         client,
@@ -371,8 +394,7 @@ pub async fn create_floating_ip(
                 name: fip_name.parse().unwrap(),
                 description: String::from("a floating ip"),
             },
-            ip,
-            pool: parent_pool_name.map(|v| NameOrId::Name(v.parse().unwrap())),
+            address_allocator,
         },
     )
     .await
@@ -538,6 +560,7 @@ pub async fn create_project(
     .await
 }
 
+/// Create a regular Crucible disk
 pub async fn create_disk(
     client: &ClientTestContext,
     project_name: &str,
@@ -552,8 +575,10 @@ pub async fn create_disk(
                 name: disk_name.parse().unwrap(),
                 description: String::from("sells rainsticks"),
             },
-            disk_source: params::DiskSource::Blank {
-                block_size: params::BlockSize::try_from(512).unwrap(),
+            disk_backend: params::DiskBackend::Distributed {
+                disk_source: params::DiskSource::Blank {
+                    block_size: params::BlockSize::try_from(512).unwrap(),
+                },
             },
             size: ByteCount::from_gibibytes_u32(1),
         },
@@ -576,7 +601,9 @@ pub async fn create_disk_from_snapshot(
                 name: disk_name.parse().unwrap(),
                 description: String::from("sells rainsticks"),
             },
-            disk_source: params::DiskSource::Snapshot { snapshot_id },
+            disk_backend: params::DiskBackend::Distributed {
+                disk_source: params::DiskSource::Snapshot { snapshot_id },
+            },
             size: ByteCount::from_gibibytes_u32(1),
         },
     )
@@ -692,7 +719,7 @@ pub async fn create_instance(
         client,
         project_name,
         instance_name,
-        &params::InstanceNetworkInterfaceAttachment::Default,
+        &params::InstanceNetworkInterfaceAttachment::DefaultIpv4,
         // Disks=
         Vec::<params::InstanceDiskAttachment>::new(),
         // External IPs=
@@ -701,7 +728,7 @@ pub async fn create_instance(
         Default::default(),
         None,
         // Multicast groups=
-        Vec::<NameOrId>::new(),
+        Vec::<params::MulticastGroupJoinSpec>::new(),
     )
     .await
 }
@@ -719,7 +746,7 @@ pub async fn create_instance_with(
     start: bool,
     auto_restart_policy: Option<InstanceAutoRestartPolicy>,
     cpu_platform: Option<InstanceCpuPlatform>,
-    multicast_groups: Vec<NameOrId>,
+    multicast_groups: Vec<params::MulticastGroupJoinSpec>,
 ) -> Instance {
     let url = format!("/v1/instances?project={}", project_name);
 
@@ -1329,6 +1356,54 @@ pub async fn create_console_session<N: NexusServer>(
     .await
 }
 
+/// Get a device access token via the OAuth device flow.
+pub async fn get_device_token(
+    client: &ClientTestContext,
+    authn_mode: AuthnMode,
+) -> DeviceAccessTokenGrant {
+    let client_id = uuid::Uuid::new_v4();
+    let auth_response: DeviceAuthResponse =
+        RequestBuilder::new(client, Method::POST, "/device/auth")
+            .allow_non_dropshot_errors()
+            .body_urlencoded(Some(&DeviceAuthRequest {
+                client_id,
+                ttl_seconds: None,
+            }))
+            .expect_status(Some(StatusCode::OK))
+            .execute()
+            .await
+            .unwrap()
+            .parsed_body()
+            .unwrap();
+
+    NexusRequest::new(
+        RequestBuilder::new(client, Method::POST, "/device/confirm")
+            .body(Some(&DeviceAuthVerify {
+                user_code: auth_response.user_code,
+            }))
+            .expect_status(Some(StatusCode::NO_CONTENT)),
+    )
+    .authn_as(authn_mode)
+    .execute()
+    .await
+    .unwrap();
+
+    RequestBuilder::new(client, Method::POST, "/device/token")
+        .allow_non_dropshot_errors()
+        .body_urlencoded(Some(&DeviceAccessTokenRequest {
+            grant_type: "urn:ietf:params:oauth:grant-type:device_code"
+                .to_string(),
+            device_code: auth_response.device_code,
+            client_id,
+        }))
+        .expect_status(Some(StatusCode::OK))
+        .execute()
+        .await
+        .unwrap()
+        .parsed_body()
+        .unwrap()
+}
+
 #[derive(Debug)]
 pub struct TestDataset {
     pub id: DatasetUuid,
@@ -1568,9 +1643,27 @@ impl<'a, N: NexusServer> DiskTest<'a, N> {
     ///
     /// Does not inform sled agents to use these pools.
     ///
-    /// See: [Self::propagate_datasets_to_sleds] if you want to send
-    /// this configuration to a simulated sled agent.
+    /// See: [Self::propagate_datasets_to_sleds] if you want to send this
+    /// configuration to a simulated sled agent.
     pub async fn add_zpool_with_datasets(&mut self, sled_id: SledUuid) {
+        self.add_sized_zpool_with_datasets(
+            sled_id,
+            Self::DEFAULT_ZPOOL_SIZE_GIB,
+        )
+        .await
+    }
+
+    /// Adds the zpool (of arbitrary size) and datasets into the database.
+    ///
+    /// Does not inform sled agents to use these pools.
+    ///
+    /// See: [Self::propagate_datasets_to_sleds] if you want to send this
+    /// configuration to a simulated sled agent.
+    pub async fn add_sized_zpool_with_datasets(
+        &mut self,
+        sled_id: SledUuid,
+        gibibytes: u32,
+    ) {
         self.add_zpool_with_datasets_ext(
             sled_id,
             PhysicalDiskUuid::new_v4(),
@@ -1585,7 +1678,7 @@ impl<'a, N: NexusServer> DiskTest<'a, N> {
                     kind: DatasetKind::Debug,
                 },
             ],
-            Self::DEFAULT_ZPOOL_SIZE_GIB,
+            gibibytes,
         )
         .await
     }

@@ -12,14 +12,11 @@ use anyhow::Context;
 use anyhow::anyhow;
 use chrono::DateTime;
 use chrono::Utc;
-use clickhouse_admin_types::ClickhouseKeeperClusterMembership;
-use cockroach_admin_types::NodeId;
+use clickhouse_admin_types::keeper::ClickhouseKeeperClusterMembership;
+use cockroach_admin_types::node::InternalNodeId;
 use gateway_client::types::SpComponentCaboose;
 use gateway_client::types::SpState;
 use iddqd::IdOrdMap;
-use nexus_sled_agent_shared::inventory::Baseboard;
-use nexus_sled_agent_shared::inventory::Inventory;
-use nexus_types::inventory::BaseboardId;
 use nexus_types::inventory::Caboose;
 use nexus_types::inventory::CabooseFound;
 use nexus_types::inventory::CabooseWhich;
@@ -41,6 +38,9 @@ use omicron_cockroach_metrics::CockroachMetric;
 use omicron_cockroach_metrics::PrometheusMetrics;
 use omicron_common::disk::M2Slot;
 use omicron_uuid_kinds::CollectionKind;
+use sled_agent_types::inventory::Baseboard;
+use sled_agent_types::inventory::Inventory;
+use sled_hardware_types::BaseboardId;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::hash::Hash;
@@ -128,7 +128,7 @@ pub struct CollectionBuilder {
     sleds: IdOrdMap<SledAgent>,
     clickhouse_keeper_cluster_membership:
         BTreeSet<ClickhouseKeeperClusterMembership>,
-    cockroach_status: BTreeMap<NodeId, CockroachStatus>,
+    cockroach_status: BTreeMap<InternalNodeId, CockroachStatus>,
     ntp_timesync: IdOrdMap<TimeSync>,
     internal_dns_generation_status: IdOrdMap<InternalDnsGenerationStatus>,
     // CollectionBuilderRng is taken by value, rather than passed in as a
@@ -674,7 +674,9 @@ impl CollectionBuilder {
             ledgered_sled_config: inventory.ledgered_sled_config,
             reconciler_status: inventory.reconciler_status,
             last_reconciliation: inventory.last_reconciliation,
-            zone_image_resolver: inventory.zone_image_resolver,
+            file_source_resolver: inventory.file_source_resolver,
+            health_monitor: inventory.health_monitor,
+            reference_measurements: inventory.reference_measurements,
         };
 
         self.sleds
@@ -708,7 +710,7 @@ impl CollectionBuilder {
     /// Record metrics from a CockroachDB node
     pub fn found_cockroach_metrics(
         &mut self,
-        node_id: NodeId,
+        node_id: InternalNodeId,
         metrics: PrometheusMetrics,
     ) {
         let mut status = CockroachStatus::default();
@@ -735,10 +737,9 @@ impl CollectionBuilder {
     /// Returns all zones of a kind from the ledgers of observed sleds
     pub fn ledgered_zones_of_kind(
         &self,
-        kind: nexus_sled_agent_shared::inventory::ZoneKind,
-    ) -> impl Iterator<
-        Item = &nexus_sled_agent_shared::inventory::OmicronZoneConfig,
-    > + '_ {
+        kind: sled_agent_types::inventory::ZoneKind,
+    ) -> impl Iterator<Item = &sled_agent_types::inventory::OmicronZoneConfig> + '_
+    {
         self.sleds.iter().flat_map(move |sled| {
             sled.ledgered_sled_config.as_ref().into_iter().flat_map(
                 move |sled_config| {
@@ -756,10 +757,9 @@ impl CollectionBuilder {
     /// created by the sled reconciliation process
     pub fn last_reconciled_zones_of_kind(
         &self,
-        kind: nexus_sled_agent_shared::inventory::ZoneKind,
-    ) -> impl Iterator<
-        Item = &nexus_sled_agent_shared::inventory::OmicronZoneConfig,
-    > + '_ {
+        kind: sled_agent_types::inventory::ZoneKind,
+    ) -> impl Iterator<Item = &sled_agent_types::inventory::OmicronZoneConfig> + '_
+    {
         self.sleds.iter().flat_map(move |sled| {
             sled.last_reconciliation.as_ref().into_iter().flat_map(
                 move |sled_config| {
@@ -798,14 +798,14 @@ mod test {
     use gateway_client::types::SpComponentCaboose;
     use gateway_client::types::SpState;
     use gateway_types::rot::RotSlot;
-    use nexus_sled_agent_shared::inventory::SledRole;
-    use nexus_types::inventory::BaseboardId;
     use nexus_types::inventory::Caboose;
     use nexus_types::inventory::CabooseWhich;
     use nexus_types::inventory::RotPage;
     use nexus_types::inventory::RotPageWhich;
     use nexus_types::inventory::SpType;
     use omicron_common::api::external::ByteCount;
+    use sled_agent_types::inventory::SledRole;
+    use sled_hardware_types::BaseboardId;
 
     // Verify the contents of an empty collection.
     #[test]

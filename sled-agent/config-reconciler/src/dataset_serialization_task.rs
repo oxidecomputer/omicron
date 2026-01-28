@@ -26,14 +26,14 @@ use illumos_utils::zfs::DestroyDatasetError;
 use illumos_utils::zfs::Mountpoint;
 use illumos_utils::zfs::WhichDatasets;
 use illumos_utils::zfs::Zfs;
-use nexus_sled_agent_shared::inventory::InventoryDataset;
-use nexus_sled_agent_shared::inventory::OrphanedDataset;
 use omicron_common::disk::DatasetConfig;
 use omicron_common::disk::DatasetKind;
 use omicron_common::disk::DatasetName;
 use omicron_common::disk::SharedDatasetConfig;
 use omicron_common::zpool_name::ZpoolName;
 use omicron_uuid_kinds::DatasetUuid;
+use sled_agent_types::inventory::InventoryDataset;
+use sled_agent_types::inventory::OrphanedDataset;
 use sled_storage::config::MountConfig;
 use sled_storage::dataset::CRYPT_DATASET;
 use sled_storage::dataset::ZONE_DATASET;
@@ -2356,7 +2356,7 @@ mod illumos_tests {
     #[async_trait::async_trait]
     impl SecretRetriever for HardcodedSecretRetriever {
         async fn get_latest(
-            &self,
+            &mut self,
         ) -> Result<key_manager::VersionedIkm, SecretRetrieverError> {
             let epoch = 0;
             let salt = [0u8; 32];
@@ -2366,7 +2366,7 @@ mod illumos_tests {
         }
 
         async fn get(
-            &self,
+            &mut self,
             epoch: u64,
         ) -> Result<key_manager::SecretState, SecretRetrieverError> {
             if epoch != 0 {

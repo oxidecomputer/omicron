@@ -9,10 +9,10 @@ use iddqd::id_ord_map::RefMut;
 use iddqd::{IdOrdItem, IdOrdMap, id_upcast};
 use omicron_uuid_kinds::RackUuid;
 use serde::{Deserialize, Serialize};
+use sled_hardware_types::BaseboardId;
 use std::collections::BTreeSet;
-use trust_quorum_protocol::{
-    BaseboardId, Epoch, LrtqUpgradeMsg, ReconfigureMsg, Threshold,
-};
+use trust_quorum_types::messages::{LrtqUpgradeMsg, ReconfigureMsg};
+use trust_quorum_types::types::{Epoch, Threshold};
 
 // The operational state of nexus for a given configuration
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Diffable)]

@@ -11,8 +11,10 @@ use crate::external_api::views::FloatingIp;
 use nexus_db_lookup::LookupPath;
 use nexus_db_lookup::lookup;
 use nexus_db_model::IpAttachState;
+use nexus_db_model::IpVersion;
 use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
+use nexus_db_queries::db::datastore::FloatingIpAllocation;
 use nexus_types::external_api::params;
 use nexus_types::external_api::views;
 use omicron_common::api::external::CreateResult;
@@ -113,22 +115,43 @@ impl super::Nexus {
         let (.., authz_project) =
             project_lookup.lookup_for(authz::Action::CreateChild).await?;
 
-        let params::FloatingIpCreate { identity, pool, ip } = params;
+        let params::FloatingIpCreate { identity, address_allocator } = params;
 
-        // resolve NameOrId into authz::IpPool
-        let pool = match pool {
-            Some(pool) => Some(
-                self.ip_pool_lookup(opctx, &pool)?
-                    .lookup_for(authz::Action::CreateChild)
-                    .await?
-                    .0,
-            ),
-            None => None,
+        let allocation = match address_allocator {
+            params::AddressAllocator::Explicit { ip } => {
+                FloatingIpAllocation::Explicit { ip }
+            }
+            params::AddressAllocator::Auto { pool_selector } => {
+                match pool_selector {
+                    params::PoolSelector::Explicit { pool } => {
+                        let authz_pool = self
+                            .ip_pool_lookup(opctx, &pool)?
+                            .lookup_for(authz::Action::CreateChild)
+                            .await?
+                            .0;
+                        FloatingIpAllocation::Auto {
+                            pool: Some(authz_pool),
+                            ip_version: None,
+                        }
+                    }
+                    params::PoolSelector::Auto { ip_version } => {
+                        FloatingIpAllocation::Auto {
+                            pool: None,
+                            ip_version: ip_version.map(Into::into),
+                        }
+                    }
+                }
+            }
         };
 
         Ok(self
             .db_datastore
-            .allocate_floating_ip(opctx, authz_project.id(), identity, ip, pool)
+            .allocate_floating_ip(
+                opctx,
+                authz_project.id(),
+                identity,
+                allocation,
+            )
             .await?
             .try_into()
             .unwrap())
@@ -168,8 +191,8 @@ impl super::Nexus {
         target: params::FloatingIpAttach,
     ) -> UpdateResult<views::FloatingIp> {
         let fip_lookup = self.floating_ip_lookup(opctx, fip_selector)?;
-        let (.., authz_project, authz_fip) =
-            fip_lookup.lookup_for(authz::Action::Modify).await?;
+        let (.., authz_project, authz_fip, db_fip) =
+            fip_lookup.fetch_for(authz::Action::Modify).await?;
 
         match target.kind {
             params::FloatingIpParentKind::Instance => {
@@ -188,10 +211,15 @@ impl super::Nexus {
                 let instance =
                     self.instance_lookup(opctx, instance_selector)?;
 
+                let ip_version = match db_fip.ip {
+                    ipnetwork::IpNetwork::V4(_) => IpVersion::V4,
+                    ipnetwork::IpNetwork::V6(_) => IpVersion::V6,
+                };
                 self.instance_attach_floating_ip(
                     opctx,
                     &instance,
                     authz_fip,
+                    ip_version.into(),
                     authz_project,
                 )
                 .await

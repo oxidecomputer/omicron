@@ -14,12 +14,16 @@ use super::MAX_VCPU_PER_INSTANCE;
 use super::MIN_MEMORY_BYTES_PER_INSTANCE;
 use crate::app::sagas;
 use crate::app::sagas::NexusSaga;
+use crate::db::datastore::Disk;
 use crate::external_api::params;
 use cancel_safe_futures::prelude::*;
 use futures::future::Fuse;
 use futures::{FutureExt, SinkExt, StreamExt};
+use itertools::Either;
+use itertools::Itertools as _;
 use nexus_db_lookup::LookupPath;
 use nexus_db_lookup::lookup;
+use nexus_db_model::ExternalIp;
 use nexus_db_model::InstanceIntendedState as IntendedState;
 use nexus_db_model::InstanceUpdate;
 use nexus_db_model::IpAttachState;
@@ -36,6 +40,7 @@ use nexus_db_queries::db::datastore::InstanceAndActiveVmm;
 use nexus_db_queries::db::datastore::InstanceStateComputer;
 use nexus_db_queries::db::identity::Resource;
 use nexus_types::external_api::views;
+use omicron_common::address::ConcreteIp;
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DataPageParams;
@@ -45,13 +50,17 @@ use omicron_common::api::external::Hostname;
 use omicron_common::api::external::InstanceCpuCount;
 use omicron_common::api::external::InstanceState;
 use omicron_common::api::external::InternalContext;
+use omicron_common::api::external::IpVersion;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::NameOrId;
 use omicron_common::api::external::UpdateResult;
 use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::internal::nexus;
-use omicron_common::api::internal::shared::SourceNatConfig;
+use omicron_common::api::internal::shared::ExternalIpConfig;
+use omicron_common::api::internal::shared::ExternalIpConfigBuilder;
+use omicron_common::api::internal::shared::ExternalIps;
+use omicron_common::api::internal::shared::external_ip::SourceNatConfig;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::InstanceUuid;
 use omicron_uuid_kinds::MulticastGroupUuid;
@@ -66,10 +75,12 @@ use propolis_client::support::tungstenite::protocol::frame::coding::CloseCode;
 use sagas::instance_common::ExternalIpAttach;
 use sagas::instance_start;
 use sagas::instance_update;
+use sled_agent_client::types::DelegatedZvol;
 use sled_agent_client::types::InstanceMigrationTargetParams;
 use sled_agent_client::types::VmmPutStateBody;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::matches;
+use std::net::IpAddr;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::io::{AsyncRead, AsyncWrite};
@@ -363,11 +374,11 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
         authz_instance: &authz::Instance,
-        multicast_groups: &[NameOrId],
+        multicast_groups: &[params::MulticastGroupJoinSpec],
     ) -> Result<(), Error> {
         let instance_id = authz_instance.id();
 
-        // Check if multicast is enabled - if not, skip all multicast operations
+        // Check if multicast is enabled -> if not, skip all multicast operations
         if !self.multicast_enabled() {
             debug!(opctx.log,
                    "multicast not enabled, skipping multicast group changes";
@@ -390,7 +401,7 @@ impl super::Nexus {
             .multicast_group_members_list_by_instance(
                 opctx,
                 InstanceUuid::from_untyped_uuid(instance_id),
-                false,
+                &DataPageParams::max_page(),
             )
             .await?;
         let current_group_ids: HashSet<_> =
@@ -404,18 +415,61 @@ impl super::Nexus {
             "current_group_ids" => ?current_group_ids
         );
 
-        // Resolve new multicast group names/IDs to group records
+        // Resolve multicast group identifiers to group IDs.
+        //
+        // For existing memberships (group already in current_group_ids), we just
+        // need the ID - no validation needed since source_ips: None means
+        // "preserve existing sources".
+        //
+        // For new memberships, we resolve (which creates groups if needed) and
+        // validation (address family + SSM) happens inside resolve.
         let mut new_group_ids = HashSet::new();
-        for group_name_or_id in multicast_groups {
-            let multicast_group_selector = params::MulticastGroupSelector {
-                multicast_group: group_name_or_id.clone(),
+        let mut group_source_ips: HashMap<Uuid, Option<Vec<std::net::IpAddr>>> =
+            HashMap::new();
+        for spec in multicast_groups {
+            // Check if this is an existing membership by looking up the group ID first
+            let group_uuid = match self
+                .resolve_multicast_group_identifier(opctx, &spec.group)
+                .await
+            {
+                Ok(id) => {
+                    let uuid = id.into_untyped_uuid();
+                    // If already a member, skip validation (None = preserve)
+                    if !current_group_ids.contains(&uuid) {
+                        // New membership - validate (address family + SSM)
+                        self.resolve_multicast_group_identifier_with_sources(
+                            opctx,
+                            &spec.group,
+                            spec.source_ips.as_deref(),
+                            spec.ip_version,
+                        )
+                        .await?;
+                    }
+                    uuid
+                }
+                Err(Error::ObjectNotFound { .. }) => {
+                    // Group doesn't exist: resolve will create it (and validate accordingly)
+                    let id = self
+                        .resolve_multicast_group_identifier_with_sources(
+                            opctx,
+                            &spec.group,
+                            spec.source_ips.as_deref(),
+                            spec.ip_version,
+                        )
+                        .await?;
+                    id.into_untyped_uuid()
+                }
+                Err(e) => return Err(e),
             };
-            let multicast_group_lookup =
-                self.multicast_group_lookup(opctx, &multicast_group_selector)?;
-            let (.., db_group) =
-                multicast_group_lookup.fetch_for(authz::Action::Read).await?;
-            let id = db_group.id();
-            new_group_ids.insert(id);
+            new_group_ids.insert(group_uuid);
+            group_source_ips.insert(group_uuid, spec.source_ips.clone());
+        }
+
+        // Validate no duplicate groups were specified
+        if new_group_ids.len() != multicast_groups.len() {
+            return Err(Error::invalid_request(
+                "Duplicate multicast group specified in request",
+            ));
         }
 
         // Determine which groups to leave and join
@@ -449,19 +503,27 @@ impl super::Nexus {
                 .await?;
         }
 
-        // Add members to new groups
+        // Add members to new groups with their source_ips.
+        // Validation (address family + SSM) already happened in resolve.
         for group_id in groups_to_join {
+            let source_ips = group_source_ips
+                .get(&group_id)
+                .cloned()
+                .expect("group_id must be in group_source_ips");
+
             debug!(
                 opctx.log,
                 "adding member to group (reconciler will handle dataplane updates)";
                 "instance_id" => %instance_id,
-                "group_id" => %group_id
+                "group_id" => %group_id,
+                "source_ips" => ?source_ips
             );
             self.datastore()
                 .multicast_group_member_attach_to_instance(
                     opctx,
                     MulticastGroupUuid::from_untyped_uuid(group_id),
                     InstanceUuid::from_untyped_uuid(instance_id),
+                    source_ips.as_deref(),
                 )
                 .await?;
         }
@@ -569,30 +631,50 @@ impl super::Nexus {
                 MAX_DISKS_PER_INSTANCE
             )));
         }
+
         for disk in all_disks.iter() {
             if let params::InstanceDiskAttachment::Create(create) = disk {
                 self.validate_disk_create_params(opctx, &authz_project, create)
                     .await?;
             }
         }
+
         if params.external_ips.len() > MAX_EXTERNAL_IPS_PER_INSTANCE {
             return Err(Error::invalid_request(&format!(
                 "An instance may not have more than {} external IP addresses",
                 MAX_EXTERNAL_IPS_PER_INSTANCE,
             )));
         }
-        if params
+
+        // Collect ephemeral IP selectors for validation
+        let ephemeral_selectors: Vec<_> = params
             .external_ips
             .iter()
-            .filter(|v| matches!(v, params::ExternalIpCreate::Ephemeral { .. }))
-            .count()
-            > MAX_EPHEMERAL_IPS_PER_INSTANCE
-        {
+            .filter_map(|v| match v {
+                params::ExternalIpCreate::Ephemeral { pool_selector } => {
+                    Some(pool_selector)
+                }
+                _ => None,
+            })
+            .collect();
+
+        if ephemeral_selectors.len() > MAX_EPHEMERAL_IPS_PER_INSTANCE {
             return Err(Error::invalid_request(&format!(
-                "An instance may not have more than {} ephemeral IP address",
+                "An instance may not have more than {} ephemeral IP addresses",
                 MAX_EPHEMERAL_IPS_PER_INSTANCE,
             )));
         }
+
+        // If requesting two ephemeral IPs, validate they specify different versions
+        if ephemeral_selectors.len() == 2 {
+            self.validate_ephemeral_ip_pair(
+                opctx,
+                ephemeral_selectors[0],
+                ephemeral_selectors[1],
+            )
+            .await?;
+        }
+
         if let params::InstanceNetworkInterfaceAttachment::Create(ref ifaces) =
             params.network_interfaces
         {
@@ -780,6 +862,32 @@ impl super::Nexus {
         Ok(())
     }
 
+    /// Returns true if any of the attached disks are type LocalStorage
+    pub(crate) async fn instance_uses_local_storage(
+        self: &Arc<Self>,
+        opctx: &OpContext,
+        authz_instance: &authz::Instance,
+    ) -> Result<bool, Error> {
+        let disks = self
+            .db_datastore
+            .instance_list_disks(
+                opctx,
+                authz_instance,
+                &PaginatedBy::Name(DataPageParams {
+                    marker: None,
+                    direction: dropshot::PaginationOrder::Ascending,
+                    limit: std::num::NonZeroU32::new(MAX_DISKS_PER_INSTANCE)
+                        .unwrap(),
+                }),
+            )
+            .await?;
+
+        Ok(disks.into_iter().any(|disk| match disk {
+            db::datastore::Disk::LocalStorage(_) => true,
+            db::datastore::Disk::Crucible(_) => false,
+        }))
+    }
+
     pub(crate) async fn instance_migrate(
         self: &Arc<Self>,
         opctx: &OpContext,
@@ -790,6 +898,14 @@ impl super::Nexus {
             .instance_id(id.into_untyped_uuid())
             .lookup_for(authz::Action::Modify)
             .await?;
+
+        // Cannot migrate instance if it has local storage
+        if self.instance_uses_local_storage(opctx, &authz_instance).await? {
+            return Err(Error::invalid_request(format!(
+                "cannot migrate instance {} as it uses local storage",
+                authz_instance.id()
+            )));
+        }
 
         let state = self
             .db_datastore
@@ -1323,80 +1439,50 @@ impl super::Nexus {
             )
             .await?;
 
+        // Each Disk::LocalStorage will require a delegated zvol entry.
+        let mut delegated_zvols: Vec<DelegatedZvol> =
+            Vec::with_capacity(disks.len());
+
+        for disk in &disks {
+            let local_storage_disk = match disk {
+                Disk::Crucible(_) => {
+                    continue;
+                }
+
+                Disk::LocalStorage(local_storage_disk) => local_storage_disk,
+            };
+
+            let Some(local_storage_dataset_allocation) =
+                &local_storage_disk.local_storage_dataset_allocation
+            else {
+                return Err(Error::internal_error(&format!(
+                    "local storage disk {} allocation is None!",
+                    disk.id()
+                ))
+                .into());
+            };
+
+            delegated_zvols.push(DelegatedZvol::LocalStorage {
+                zpool_id: local_storage_dataset_allocation.pool_id(),
+                dataset_id: local_storage_dataset_allocation.id(),
+            });
+        }
+
         let nics = self
             .db_datastore
             .derive_guest_network_interface_info(&opctx, &authz_instance)
             .await?;
 
-        // Collect the external IPs for the instance.
-        let (snat_ip, external_ips): (Vec<_>, Vec<_>) = self
+        // Collect the external IPs for the instance, and construct the external
+        // configuration for the sled-agent request.
+        let all_external_ips = self
             .db_datastore
             .instance_lookup_external_ips(
                 &opctx,
                 InstanceUuid::from_untyped_uuid(authz_instance.id()),
             )
-            .await?
-            .into_iter()
-            .partition(|ip| ip.kind == IpKind::SNat);
-
-        // Sanity checks on the number and kind of each IP address.
-        if external_ips.len() > MAX_EXTERNAL_IPS_PER_INSTANCE {
-            return Err(Error::internal_error(
-                format!(
-                    "Expected the number of external IPs to be limited to \
-                    {}, but found {}",
-                    MAX_EXTERNAL_IPS_PER_INSTANCE,
-                    external_ips.len(),
-                )
-                .as_str(),
-            )
-            .into());
-        }
-
-        // If there are any external IPs not yet fully attached/detached,then
-        // there are attach/detach sagas in progress. That should complete in
-        // its own time, so return a 503 to indicate a possible retry.
-        if external_ips.iter().any(|v| v.state != IpAttachState::Attached) {
-            return Err(Error::unavail(
-                "External IP attach/detach is in progress during instance_ensure_registered"
-            ).into());
-        }
-
-        // Partition remaining external IPs by class: we can have at most
-        // one ephemeral ip.
-        let (ephemeral_ips, floating_ips): (Vec<_>, Vec<_>) = external_ips
-            .into_iter()
-            .partition(|ip| ip.kind == IpKind::Ephemeral);
-
-        if ephemeral_ips.len() > MAX_EPHEMERAL_IPS_PER_INSTANCE {
-            return Err(Error::internal_error(
-                format!(
-                "Expected at most {} ephemeral IP for an instance, found {}",
-                MAX_EPHEMERAL_IPS_PER_INSTANCE,
-                ephemeral_ips.len()
-            )
-                .as_str(),
-            )
-            .into());
-        }
-
-        let ephemeral_ip = ephemeral_ips.get(0).map(|model| model.ip.ip());
-
-        let floating_ips =
-            floating_ips.into_iter().map(|model| model.ip.ip()).collect();
-        if snat_ip.len() != 1 {
-            return Err(Error::internal_error(
-                "Expected exactly one SNAT IP address for an instance",
-            )
-            .into());
-        }
-        let source_nat =
-            SourceNatConfig::try_from(snat_ip.into_iter().next().unwrap())
-                .map_err(|err| {
-                    Error::internal_error(&format!(
-                        "read invalid SNAT config from db: {err}"
-                    ))
-                })?;
+            .await?;
+        let external_ips = build_external_ip_config(&all_external_ips)?;
 
         // Gather the firewall rules for the VPC this instance is in.
         // The NIC info we gathered above doesn't have VPC information
@@ -1462,7 +1548,7 @@ impl super::Nexus {
                 .multicast_group_members_list_by_instance(
                     opctx,
                     InstanceUuid::from_untyped_uuid(authz_instance.id()),
-                    false, // include_removed
+                    &DataPageParams::max_page(),
                 )
                 .await
                 .map_err(|e| {
@@ -1483,10 +1569,11 @@ impl super::Nexus {
                     )
                     .await
                 {
+                    // Source IPs are per-member, not per-group
                     multicast_groups.push(
                         sled_agent_client::types::InstanceMulticastMembership {
                             group_ip: group.multicast_ip.ip(),
-                            sources: group
+                            sources: member
                                 .source_ips
                                 .into_iter()
                                 .map(|src_ip| src_ip.ip())
@@ -1500,9 +1587,7 @@ impl super::Nexus {
         let local_config = sled_agent_client::types::InstanceSledLocalConfig {
             hostname,
             nics,
-            source_nat,
-            ephemeral_ip,
-            floating_ips,
+            external_ips,
             firewall_rules,
             multicast_groups,
             dhcp_config: sled_agent_client::types::DhcpConfig {
@@ -1511,7 +1596,7 @@ impl super::Nexus {
                 host_domain: None,
                 search_domains: Vec::new(),
             },
-            delegated_zvols: vec![],
+            delegated_zvols,
         };
 
         let instance_id = InstanceUuid::from_untyped_uuid(db_instance.id());
@@ -2174,7 +2259,29 @@ impl super::Nexus {
         opctx: &OpContext,
         instance_lookup: &lookup::Instance<'_>,
         pool: Option<NameOrId>,
+        ip_version: Option<IpVersion>,
     ) -> UpdateResult<views::ExternalIp> {
+        // Validate pool/ip_version compatibility upfront for clear error
+        // communication.
+        //
+        // The saga will look up the pool again, but this ensures the user gets
+        // a direct error before any saga machinery starts, and without changing
+        // the `Ephemeral` type fields.
+        if let (Some(pool_id), Some(requested_version)) = (&pool, ip_version) {
+            let (_, db_pool) = self
+                .ip_pool_lookup(opctx, pool_id)?
+                .fetch_for(authz::Action::CreateChild)
+                .await?;
+            let db_version: IpVersion = db_pool.ip_version.into();
+            if db_version != requested_version {
+                return Err(Error::invalid_request(format!(
+                    "requested IP version ({requested_version}) does not match \
+                     pool '{}' version ({db_version})",
+                    db_pool.name().as_str(),
+                )));
+            }
+        }
+
         let (.., authz_project, authz_instance) =
             instance_lookup.lookup_for(authz::Action::Modify).await?;
 
@@ -2182,17 +2289,119 @@ impl super::Nexus {
             opctx,
             authz_instance,
             authz_project.id(),
-            ExternalIpAttach::Ephemeral { pool },
+            ExternalIpAttach::Ephemeral { pool, ip_version },
         )
         .await
     }
 
-    /// Attach an ephemeral IP to an instance.
+    /// Validate that two ephemeral IP pool selectors specify different IP versions.
+    ///
+    /// This is used during instance creation to ensure dual-stack configurations
+    /// are valid (one IPv4 + one IPv6 ephemeral IP).
+    async fn validate_ephemeral_ip_pair(
+        &self,
+        opctx: &OpContext,
+        first: &params::PoolSelector,
+        second: &params::PoolSelector,
+    ) -> Result<(), Error> {
+        use params::PoolSelector;
+
+        match (first, second) {
+            // Reject any case where ip_version is not specified. This keeps
+            // the API predictable: if you want two ephemeral IPs, you must be
+            // explicit about what you want for both. No relying on defaults.
+            (PoolSelector::Auto { ip_version: None }, _)
+            | (_, PoolSelector::Auto { ip_version: None }) => {
+                return Err(Error::invalid_request(
+                    "when requesting two ephemeral IPs, IP version or explicit \
+                     pool name must be specified on each",
+                ));
+            }
+
+            // Two Auto with same version
+            (
+                PoolSelector::Auto { ip_version: Some(v1) },
+                PoolSelector::Auto { ip_version: Some(v2) },
+            ) if v1 == v2 => {
+                return Err(Error::invalid_request(format!(
+                    "cannot request two ephemeral IPs of the same version ({v1})"
+                )));
+            }
+
+            // Two Auto with different versions - valid
+            (
+                PoolSelector::Auto { ip_version: Some(_) },
+                PoolSelector::Auto { ip_version: Some(_) },
+            ) => {}
+
+            // Two Explicit with same pool
+            (
+                PoolSelector::Explicit { pool: p1 },
+                PoolSelector::Explicit { pool: p2 },
+            ) if p1 == p2 => {
+                return Err(Error::invalid_request(
+                    "cannot request two ephemeral IPs from the same pool",
+                ));
+            }
+
+            // Two Explicit with different pools - verify different versions
+            (
+                PoolSelector::Explicit { pool: p1 },
+                PoolSelector::Explicit { pool: p2 },
+            ) => {
+                let v1 = self.get_pool_ip_version(opctx, p1).await?;
+                let v2 = self.get_pool_ip_version(opctx, p2).await?;
+                if v1 == v2 {
+                    return Err(Error::invalid_request(format!(
+                        "cannot request two ephemeral IPs of the same version \
+                         ({v1}): both pools are {v1}"
+                    )));
+                }
+            }
+
+            // Explicit + Auto(Some) - verify different versions
+            (
+                PoolSelector::Explicit { pool },
+                PoolSelector::Auto { ip_version: Some(v) },
+            )
+            | (
+                PoolSelector::Auto { ip_version: Some(v) },
+                PoolSelector::Explicit { pool },
+            ) => {
+                let pool_version =
+                    self.get_pool_ip_version(opctx, pool).await?;
+                if pool_version == *v {
+                    return Err(Error::invalid_request(format!(
+                        "cannot request two ephemeral IPs of the same version \
+                         ({v}): explicit pool and auto selection both specify {v}"
+                    )));
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Get the IP version of a pool by name or ID.
+    async fn get_pool_ip_version(
+        &self,
+        opctx: &OpContext,
+        pool: &NameOrId,
+    ) -> Result<IpVersion, Error> {
+        let (_, db_pool) = self
+            .ip_pool_lookup(opctx, pool)?
+            .fetch_for(authz::Action::CreateChild)
+            .await?;
+        Ok(db_pool.ip_version.into())
+    }
+
+    /// Attach a Floating IP to an instance.
     pub(crate) async fn instance_attach_floating_ip(
         self: &Arc<Self>,
         opctx: &OpContext,
         instance_lookup: &lookup::Instance<'_>,
         authz_fip: authz::FloatingIp,
+        ip_version: IpVersion,
         authz_fip_project: authz::Project,
     ) -> UpdateResult<views::ExternalIp> {
         let (.., authz_project, authz_instance) =
@@ -2208,7 +2417,7 @@ impl super::Nexus {
             opctx,
             authz_instance,
             authz_project.id(),
-            ExternalIpAttach::Floating { floating_ip: authz_fip },
+            ExternalIpAttach::Floating { floating_ip: authz_fip, ip_version },
         )
         .await
     }
@@ -2355,6 +2564,127 @@ impl super::Nexus {
     }
 }
 
+fn build_external_ip_config(
+    ips: &[ExternalIp],
+) -> Result<Option<ExternalIpConfig>, Error> {
+    // Partition into concrete IPv4 and IPv6 addresses, using subset of data
+    // needed for the concrete conversions only.
+    let (ipv4, ipv6): (Vec<_>, Vec<_>) =
+        ips.iter().partition_map(|ip| match ip.ip.ip() {
+            IpAddr::V4(v4) => Either::Left(ExternalIpData {
+                ip: v4,
+                first_port: ip.first_port.into(),
+                last_port: ip.last_port.into(),
+                kind: ip.kind,
+                attach_state: ip.state,
+            }),
+            IpAddr::V6(v6) => Either::Right(ExternalIpData {
+                ip: v6,
+                first_port: ip.first_port.into(),
+                last_port: ip.last_port.into(),
+                kind: ip.kind,
+                attach_state: ip.state,
+            }),
+        });
+    let ipv4_config = if ipv4.is_empty() {
+        None
+    } else {
+        Some(build_concrete_external_ip_config(ipv4)?)
+    };
+    let ipv6_config = if ipv6.is_empty() {
+        None
+    } else {
+        Some(build_concrete_external_ip_config(ipv6)?)
+    };
+    match (ipv4_config, ipv6_config) {
+        (None, None) => Ok(None),
+        (None, Some(v6)) => Ok(Some(ExternalIpConfig::V6(v6))),
+        (Some(v4), None) => Ok(Some(ExternalIpConfig::V4(v4))),
+        (Some(v4), Some(v6)) => {
+            Ok(Some(ExternalIpConfig::DualStack { v4, v6 }))
+        }
+    }
+}
+
+// Subset of an `ExternalIp` needed to build the `ExternalIpConfig` for the
+// concrete address version.
+struct ExternalIpData<T: ConcreteIp> {
+    ip: T,
+    first_port: u16,
+    last_port: u16,
+    kind: IpKind,
+    attach_state: IpAttachState,
+}
+
+fn build_concrete_external_ip_config<T>(
+    ips: Vec<ExternalIpData<T>>,
+) -> Result<ExternalIps<T>, Error>
+where
+    T: ConcreteIp,
+{
+    let mut builder = ExternalIpConfigBuilder::new();
+    let mut seen_snat_ip = false;
+    let mut seen_ephemeral_ip = false;
+    let mut floating_ips = Vec::new();
+    for ip in ips.iter() {
+        if ip.attach_state != IpAttachState::Attached {
+            return Err(Error::unavail(
+                "External IP attach/detach is in progress \
+            during instance_ensure_registered",
+            ));
+        }
+        match ip.kind {
+            IpKind::SNat if !seen_snat_ip => {
+                seen_snat_ip = true;
+                let source_nat =
+                    SourceNatConfig::new(ip.ip, ip.first_port, ip.last_port)
+                        .map_err(|e| {
+                            Error::internal_error(
+                                format!(
+                                    "Failed to build source NAT config: {e}"
+                                )
+                                .as_str(),
+                            )
+                        })?;
+                builder = builder.with_source_nat(source_nat);
+            }
+            IpKind::SNat => {
+                return Err(Error::internal_error(
+                    "Expected at most one SNAT IP address for an instance",
+                ));
+            }
+            IpKind::Ephemeral if !seen_ephemeral_ip => {
+                seen_ephemeral_ip = true;
+                builder = builder.with_ephemeral_ip(ip.ip);
+            }
+            IpKind::Ephemeral => {
+                return Err(Error::internal_error(
+                    "Expected at most 1 Ephemeral IP for an instance",
+                ));
+            }
+            IpKind::Floating => floating_ips.push(ip.ip),
+        }
+    }
+
+    // Ensure limit to the number of non-SNAT IPs.
+    let n_external_ips = usize::from(seen_ephemeral_ip) + floating_ips.len();
+    if n_external_ips > MAX_EXTERNAL_IPS_PER_INSTANCE {
+        return Err(Error::internal_error(
+            format!(
+                "Expected the number of external IPs per IP version to \
+            be limited to {}, but found {}",
+                MAX_EXTERNAL_IPS_PER_INSTANCE, n_external_ips
+            )
+            .as_str(),
+        ));
+    }
+    builder.with_floating_ips(floating_ips).build().map_err(|e| {
+        Error::internal_error(
+            format!("Failed to build external IPs: {e}").as_str(),
+        )
+    })
+}
+
 /// Writes the VMM and migration state supplied in `new_runtime_state` to the
 /// database (provided that it's newer than what's already there).
 ///
@@ -2453,7 +2783,10 @@ fn check_instance_cpu_memory_sizes(
 
     // Reject instances where the memory is not divisible by
     // MIN_MEMORY_BYTES_PER_INSTANCE
-    if (memory.to_bytes() % u64::from(MIN_MEMORY_BYTES_PER_INSTANCE)) != 0 {
+    if !memory
+        .to_bytes()
+        .is_multiple_of(u64::from(MIN_MEMORY_BYTES_PER_INSTANCE))
+    {
         return Err(Error::invalid_value(
             "size",
             format!(

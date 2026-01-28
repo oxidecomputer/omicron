@@ -16,10 +16,10 @@ use nexus_db_lookup::LookupPath;
 use nexus_db_model::NatEntryValues;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
-use nexus_sled_agent_shared::inventory::OmicronZoneType;
 use nexus_types::inventory::Collection;
 use omicron_common::address::{MAX_PORT, MIN_PORT};
 use serde_json::json;
+use sled_agent_types::inventory::OmicronZoneType;
 use std::sync::Arc;
 use tokio::sync::watch;
 
@@ -275,7 +275,7 @@ impl BackgroundTask for ServiceZoneNatTracker {
                 };
 
                 for (_location, client) in dpd_clients {
-                    if let Err(e) = client.ipv4_nat_trigger_update().await {
+                    if let Err(e) = client.nat_trigger_update().await {
                         error!(
                             &log,
                             "failed to trigger dpd rpw workflow";

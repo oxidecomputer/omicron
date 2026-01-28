@@ -4,6 +4,7 @@
 
 //! Tests Nexus' interactions with Crucible's pantry
 
+use crate::integration_tests::instances::instance_simulate;
 use crate::integration_tests::instances::instance_wait_for_state;
 use dropshot::test_util::ClientTestContext;
 use http::StatusCode;
@@ -13,7 +14,7 @@ use nexus_test_utils::http_testing::NexusRequest;
 use nexus_test_utils::http_testing::RequestBuilder;
 use nexus_test_utils::identity_eq;
 use nexus_test_utils::resource_helpers::DiskTest;
-use nexus_test_utils::resource_helpers::create_default_ip_pool;
+use nexus_test_utils::resource_helpers::create_default_ip_pools;
 use nexus_test_utils::resource_helpers::create_instance;
 use nexus_test_utils::resource_helpers::create_project;
 use nexus_test_utils::resource_helpers::object_create;
@@ -27,10 +28,8 @@ use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::Instance;
 use omicron_common::api::external::InstanceState;
 use omicron_nexus::Nexus;
-use omicron_nexus::TestInterfaces as _;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::InstanceUuid;
-use sled_agent_client::TestInterfaces as _;
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -59,7 +58,7 @@ fn get_disk_attach_url(instance_name: &str) -> String {
 }
 
 async fn create_project_and_pool(client: &ClientTestContext) -> Uuid {
-    create_default_ip_pool(client).await;
+    create_default_ip_pools(client).await;
     let project = create_project(client, PROJECT_NAME).await;
     project.identity.id
 }
@@ -85,15 +84,6 @@ async fn set_instance_state(
     .unwrap()
     .parsed_body()
     .unwrap()
-}
-
-async fn instance_simulate(nexus: &Arc<Nexus>, id: &InstanceUuid) {
-    let info = nexus
-        .active_instance_info(id, None)
-        .await
-        .unwrap()
-        .expect("instance must be on a sled to simulate a state change");
-    info.sled_client.vmm_finish_transition(info.propolis_id).await;
 }
 
 async fn disk_get(client: &ClientTestContext, disk_url: &str) -> Disk {
@@ -135,8 +125,10 @@ async fn create_disk_with_state_importing_blocks(client: &ClientTestContext) {
                 name: DISK_NAME.parse().unwrap(),
                 description: String::from("sells rainsticks"),
             },
-            disk_source: params::DiskSource::ImportingBlocks {
-                block_size: params::BlockSize::try_from(512).unwrap(),
+            disk_backend: params::DiskBackend::Distributed {
+                disk_source: params::DiskSource::ImportingBlocks {
+                    block_size: params::BlockSize::try_from(512).unwrap(),
+                },
             },
             size: ByteCount::from_gibibytes_u32(1),
         },
@@ -362,8 +354,10 @@ async fn test_disk_create_for_importing(cptestctx: &ControlPlaneTestContext) {
             name: DISK_NAME.parse().unwrap(),
             description: String::from("sells rainsticks"),
         },
-        disk_source: params::DiskSource::ImportingBlocks {
-            block_size: params::BlockSize::try_from(512).unwrap(),
+        disk_backend: params::DiskBackend::Distributed {
+            disk_source: params::DiskSource::ImportingBlocks {
+                block_size: params::BlockSize::try_from(512).unwrap(),
+            },
         },
         size: ByteCount::from_gibibytes_u32(1),
     };

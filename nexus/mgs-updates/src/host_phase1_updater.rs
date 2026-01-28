@@ -130,6 +130,7 @@
 
 use super::MgsClients;
 use crate::SpComponentUpdateHelperImpl;
+use crate::common_sp_update::ExpectedArtifactKind;
 use crate::common_sp_update::PostUpdateError;
 use crate::common_sp_update::PrecheckError;
 use crate::common_sp_update::PrecheckStatus;
@@ -138,18 +139,17 @@ use futures::future::BoxFuture;
 use gateway_client::HostPhase1HashError;
 use gateway_client::SpComponent;
 use gateway_client::types::SpComponentFirmwareSlot;
-use nexus_sled_agent_shared::inventory::BootPartitionContents;
 use nexus_types::deployment::PendingMgsUpdate;
 use nexus_types::deployment::PendingMgsUpdateHostPhase1Details;
 use nexus_types::inventory::SpType;
 use omicron_common::disk::M2Slot;
 use sled_agent_client::Client as SledAgentClient;
+use sled_agent_types::inventory::BootPartitionContents;
 use slog::Logger;
 use slog::debug;
 use slog_error_chain::InlineErrorChain;
 use std::time::Duration;
 use tufaceous_artifact::ArtifactHash;
-use tufaceous_artifact::ArtifactKind;
 
 // Hashing the current phase 1 contents on the SP is an asynchronous operation:
 // we request a hash and then poll until the hashing completes. We have to pick
@@ -266,7 +266,7 @@ impl ReconfiguratorHostPhase1Updater {
         // blueprint.)
         if current_active_slot_hash != *expected_active_phase_1_hash {
             return Err(PrecheckError::WrongActiveArtifact {
-                kind: ArtifactKind::GIMLET_HOST_PHASE_1,
+                kind: ExpectedArtifactKind::HostPhase1,
                 expected: *expected_active_phase_1_hash,
                 found: current_active_slot_hash,
             });
@@ -298,7 +298,7 @@ impl ReconfiguratorHostPhase1Updater {
             Ok(PrecheckStatus::ReadyForUpdate)
         } else {
             Err(PrecheckError::WrongInactiveArtifact {
-                kind: ArtifactKind::GIMLET_HOST_PHASE_1,
+                kind: ExpectedArtifactKind::HostPhase1,
                 expected: *expected_inactive_phase_1_hash,
                 found: found_inactive_artifact,
             })
@@ -334,7 +334,7 @@ impl ReconfiguratorHostPhase1Updater {
                 err @ (HostPhase1HashError::Timeout(_)
                 | HostPhase1HashError::ContentsModifiedWhileHashing),
             ) => Err(PrecheckError::DeterminingActiveArtifact {
-                kind: ArtifactKind::GIMLET_HOST_PHASE_1,
+                kind: ExpectedArtifactKind::HostPhase1,
                 err: InlineErrorChain::new(&err).to_string(),
             }),
         }
@@ -421,14 +421,14 @@ impl ReconfiguratorHostPhase1Updater {
             Ok(details) => details.artifact_hash,
             Err(err) => {
                 return Err(PrecheckError::DeterminingActiveArtifact {
-                    kind: ArtifactKind::HOST_PHASE_2,
+                    kind: ExpectedArtifactKind::HostPhase2,
                     err,
                 });
             }
         };
         if active != *expected_active_phase_2_hash {
             return Err(PrecheckError::WrongActiveArtifact {
-                kind: ArtifactKind::HOST_PHASE_2,
+                kind: ExpectedArtifactKind::HostPhase2,
                 expected: *expected_active_phase_2_hash,
                 found: active,
             });
@@ -444,7 +444,7 @@ impl ReconfiguratorHostPhase1Updater {
         };
         if inactive != *expected_inactive_phase_2_hash {
             return Err(PrecheckError::WrongInactiveArtifact {
-                kind: ArtifactKind::HOST_PHASE_2,
+                kind: ExpectedArtifactKind::HostPhase2,
                 expected: *expected_inactive_phase_2_hash,
                 found: inactive,
             });

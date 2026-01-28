@@ -6,6 +6,7 @@
 //! running a full VM.
 
 use crate::metrics::MetricsRequestQueue;
+use anyhow::Context as _;
 use anyhow::{Result, anyhow};
 use dropshot::HttpError;
 use iddqd::IdHashItem;
@@ -20,6 +21,7 @@ use omicron_common::api::external::{
     VpcFirewallRuleAction, VpcFirewallRuleDirection, VpcFirewallRulePriority,
     VpcFirewallRuleStatus,
 };
+use omicron_common::api::internal::shared::ExternalIpConfigBuilder;
 use omicron_common::api::internal::shared::{
     NetworkInterface, ResolvedVpcFirewallRule,
 };
@@ -30,12 +32,13 @@ use sled_agent_config_reconciler::{
     AvailableDatasetsReceiver, CurrentlyManagedZpools,
     CurrentlyManagedZpoolsReceiver,
 };
+use sled_agent_resolvable_files::ramdisk_file_source;
 use sled_agent_types::probes::ExternalIp;
 use sled_agent_types::probes::ProbeCreate;
-use sled_agent_zone_images::ramdisk_file_source;
 use slog::{Logger, error, warn};
 use std::collections::{HashMap, HashSet};
 use std::hash::{Hash, Hasher};
+use std::net::IpAddr;
 use std::sync::Arc;
 use tokio::sync::watch;
 use tokio::task::JoinHandle;
@@ -334,16 +337,32 @@ impl ProbeManagerInner {
             .as_ref()
             .ok_or(anyhow!("no interface specified for probe"))?;
 
+        // NOTE: The Nexus probe API only supports constructing an Ephemeral
+        // address, so ensure that's the case here and us it as such.
         let eip = probe
             .external_ips
             .get(0)
             .ok_or(anyhow!("expected an external ip"))?;
+        anyhow::ensure!(
+            matches!(eip.kind, sled_agent_types::probes::IpKind::Ephemeral),
+            "Probes are expected to have an Ephemeral IP address",
+        );
+        let external_ips = match eip.ip {
+            IpAddr::V4(ipv4) => ExternalIpConfigBuilder::new()
+                .with_ephemeral_ip(ipv4)
+                .build()
+                .context("building ExternalIpConfig")?
+                .into(),
+            IpAddr::V6(ipv6) => ExternalIpConfigBuilder::new()
+                .with_ephemeral_ip(ipv6)
+                .build()
+                .context("building ExternalIpConfig")?
+                .into(),
+        };
 
         let port = self.port_manager.create_port(PortCreateParams {
             nic,
-            source_nat: None,
-            ephemeral_ip: Some(eip.ip),
-            floating_ips: &[],
+            external_ips: &Some(external_ips),
             firewall_rules: &[ResolvedVpcFirewallRule {
                 status: VpcFirewallRuleStatus::Enabled,
                 direction: VpcFirewallRuleDirection::Inbound,

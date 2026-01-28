@@ -18,6 +18,7 @@ parent:    184f10b3-61cb-41ef-9b93-3489b2bac559
     state:::::::::::::   active
     config generation:   2
     subnet::::::::::::   fd00:1122:3344:102::/64
+    last allocated IP:   fd00:1122:3344:102::28
 
     host phase 2 contents:
     ------------------------
@@ -86,6 +87,7 @@ parent:    184f10b3-61cb-41ef-9b93-3489b2bac559
     state:::::::::::::   active
     config generation:   2
     subnet::::::::::::   fd00:1122:3344:101::/64
+    last allocated IP:   fd00:1122:3344:101::27
 
     host phase 2 contents:
     ------------------------
@@ -151,6 +153,7 @@ parent:    184f10b3-61cb-41ef-9b93-3489b2bac559
     state:::::::::::::   active
     config generation:   2
     subnet::::::::::::   fd00:1122:3344:103::/64
+    last allocated IP:   fd00:1122:3344:103::27
 
     host phase 2 contents:
     ------------------------

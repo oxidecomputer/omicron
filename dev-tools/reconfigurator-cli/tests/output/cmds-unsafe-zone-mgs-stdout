@@ -42,6 +42,7 @@ INFO added artifact, name: internal-dns, kind: zone, version: 0.0.1, hash: c29c2
 INFO added artifact, name: ntp, kind: zone, version: 0.0.1, hash: b661b5d1370f5ac593b4c15b5fcd22c904991cf33b6db32f886374bc022a3531, length: 1682
 INFO added artifact, name: nexus, kind: zone, version: 0.0.1, hash: 5f0b97b090966bb754485c3d397d0918d54bf4ffdc6fa691b77f61686f2ac8cc, length: 1683
 INFO added artifact, name: oximeter, kind: zone, version: 0.0.1, hash: 7ea25be50cd4e98e2ba20916cb98fe8ea457372f5973eb6ac691b5bc90dbddc0, length: 1683
+INFO added artifact, name: fake-corpus, kind: measurement_corpus, version: 1.0.0, hash: 8a0e23157bae655fceec7376926c9758efee6511c7b7ff8355bbb49545a2257f, length: 1048576
 INFO added artifact, name: fake-psc-sp, kind: psc_sp, version: 0.0.1, hash: 3a63db2465b433f7b2f2816f833dcce90e0aa7e7472b1735c63faf93a48bb2ab, length: 726
 INFO added artifact, name: fake-psc-rot, kind: psc_rot_image_a, version: 0.0.1, hash: 9bdc198ad072c74cfc1e145355eef307028067776b19f9e2a7830934176fe406, length: 770
 INFO added artifact, name: fake-psc-rot, kind: psc_rot_image_b, version: 0.0.1, hash: 9bdc198ad072c74cfc1e145355eef307028067776b19f9e2a7830934176fe406, length: 770
@@ -50,7 +51,7 @@ INFO added artifact, name: fake-switch-sp, kind: switch_sp, version: 0.0.1, hash
 INFO added artifact, name: fake-switch-rot, kind: switch_rot_image_a, version: 0.0.1, hash: 7776db817d1f1b1a2f578050742e33bd4e805a4c76f36bce84dcb509b900249c, length: 776
 INFO added artifact, name: fake-switch-rot, kind: switch_rot_image_b, version: 0.0.1, hash: 7776db817d1f1b1a2f578050742e33bd4e805a4c76f36bce84dcb509b900249c, length: 776
 INFO added artifact, name: fake-switch-rot-bootloader, kind: switch_rot_bootloader, version: 0.0.1, hash: 0686443d50db2247077dc70b6543cea9a90a9792de00e06c06cff4c91fa5a4a8, length: 792
-INFO added artifact, name: installinator_document, kind: installinator_document, version: 0.0.1, hash: 657aaebc9c2f451446af0411a67a4bd057f39fa1b8a7fdc429ca4a2facd9344c, length: 367
+INFO added artifact, name: installinator_document, kind: installinator_document, version: 0.0.1, hash: 6f0eebe1001e3d00b02b2dcac5b3d883cb88222fde16a028f5431e87a5feee72, length: 526
 set target release based on repo-0.0.1.zip
 
 
@@ -83,6 +84,7 @@ target release (generation 2): 0.0.1 (system-update-v0.0.1.zip)
     artifact: b661b5d1370f5ac593b4c15b5fcd22c904991cf33b6db32f886374bc022a3531 zone (ntp version 0.0.1)
     artifact: 5f0b97b090966bb754485c3d397d0918d54bf4ffdc6fa691b77f61686f2ac8cc zone (nexus version 0.0.1)
     artifact: 7ea25be50cd4e98e2ba20916cb98fe8ea457372f5973eb6ac691b5bc90dbddc0 zone (oximeter version 0.0.1)
+    artifact: 8a0e23157bae655fceec7376926c9758efee6511c7b7ff8355bbb49545a2257f measurement_corpus (fake-corpus version 1.0.0)
     artifact: 3a63db2465b433f7b2f2816f833dcce90e0aa7e7472b1735c63faf93a48bb2ab psc_sp (fake-psc-sp version 0.0.1)
     artifact: 9bdc198ad072c74cfc1e145355eef307028067776b19f9e2a7830934176fe406 psc_rot_image_a (fake-psc-rot version 0.0.1)
     artifact: 9bdc198ad072c74cfc1e145355eef307028067776b19f9e2a7830934176fe406 psc_rot_image_b (fake-psc-rot version 0.0.1)
@@ -91,7 +93,7 @@ target release (generation 2): 0.0.1 (system-update-v0.0.1.zip)
     artifact: 7776db817d1f1b1a2f578050742e33bd4e805a4c76f36bce84dcb509b900249c switch_rot_image_a (fake-switch-rot version 0.0.1)
     artifact: 7776db817d1f1b1a2f578050742e33bd4e805a4c76f36bce84dcb509b900249c switch_rot_image_b (fake-switch-rot version 0.0.1)
     artifact: 0686443d50db2247077dc70b6543cea9a90a9792de00e06c06cff4c91fa5a4a8 switch_rot_bootloader (fake-switch-rot-bootloader version 0.0.1)
-    artifact: 657aaebc9c2f451446af0411a67a4bd057f39fa1b8a7fdc429ca4a2facd9344c installinator_document (installinator_document version 0.0.1)
+    artifact: 6f0eebe1001e3d00b02b2dcac5b3d883cb88222fde16a028f5431e87a5feee72 installinator_document (installinator_document version 0.0.1)
 active nexus zone generation: 1
 active nexus zones: inferred from generation
 not-yet nexus zones: inferred from generation
@@ -632,6 +634,7 @@ LEDGERED SLED CONFIG
         ad6a3a03-8d0f-4504-99a4-cbf73d69b973     crucible_pantry     artifact: 6055871bfa626d582162302bf027102d90a03a42866867df2582f8eba231fc6d 
         bd354eef-d8a6-4165-9124-283fb5e46d77     crucible            artifact: f3694b20fa1de79fb1f7c3a9f89f9f9eb5ebaaefc3caba7e1991e7e2b3191ed4 
         e2fdefe7-95b2-4fd2-ae37-56929a06d58c     crucible            artifact: f3694b20fa1de79fb1f7c3a9f89f9f9eb5ebaaefc3caba7e1991e7e2b3191ed4 
+    measurement empty
     zone image resolver status:
         zone manifest:
             path on boot disk: /fake/path/install/zones.json
@@ -649,6 +652,12 @@ LEDGERED SLED CONFIG
                   - nexus.tar.gz (expected 1683 bytes with hash 5f0b97b090966bb754485c3d397d0918d54bf4ffdc6fa691b77f61686f2ac8cc): ok
                   - ntp.tar.gz (expected 1682 bytes with hash b661b5d1370f5ac593b4c15b5fcd22c904991cf33b6db32f886374bc022a3531): ok
                   - oximeter.tar.gz (expected 1683 bytes with hash 7ea25be50cd4e98e2ba20916cb98fe8ea457372f5973eb6ac691b5bc90dbddc0): ok
+            no non-boot disks
+        measurement manifest:
+            path on boot disk: /fake/path/install/zones.json
+            boot disk inventory:
+                manifest generated by installinator (mupdate ID: 00000000-0000-0000-0000-000000000000)
+                no artifacts in install dataset (this should only be seen in simulated systems)
             no non-boot disks
         mupdate override:
             path on boot disk: /fake/path/install/mupdate_override.json
@@ -670,6 +679,8 @@ LEDGERED SLED CONFIG
         all datasets reconciled successfully
         all zones reconciled successfully
     reconciler task status: idle (finished at <REDACTED_TIMESTAMP> after running for <REDACTED_DURATION>s)
+    reference measurements:
+        (measurement set is empty)
 
 sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 (role = Gimlet, serial serial0)
     found at:    <REDACTED_TIMESTAMP> from fake sled agent
@@ -798,6 +809,7 @@ LEDGERED SLED CONFIG
         803bfb63-c246-41db-b0da-d3b87ddfc63d     external_dns        artifact: 584217eae459e4c2bd00621cf1910d06edb8258948a4832ab0329cf42067c0c7 
         ba4994a8-23f9-4b1a-a84f-a08d74591389     crucible_pantry     artifact: 6055871bfa626d582162302bf027102d90a03a42866867df2582f8eba231fc6d 
         dfac80b4-a887-430a-ae87-a4e065dba787     crucible            artifact: f3694b20fa1de79fb1f7c3a9f89f9f9eb5ebaaefc3caba7e1991e7e2b3191ed4 
+    measurement empty
     zone image resolver status:
         zone manifest:
             path on boot disk: /fake/path/install/zones.json
@@ -815,6 +827,12 @@ LEDGERED SLED CONFIG
                   - nexus.tar.gz (expected 1683 bytes with hash 5f0b97b090966bb754485c3d397d0918d54bf4ffdc6fa691b77f61686f2ac8cc): ok
                   - ntp.tar.gz (expected 1682 bytes with hash b661b5d1370f5ac593b4c15b5fcd22c904991cf33b6db32f886374bc022a3531): ok
                   - oximeter.tar.gz (expected 1683 bytes with hash 7ea25be50cd4e98e2ba20916cb98fe8ea457372f5973eb6ac691b5bc90dbddc0): ok
+            no non-boot disks
+        measurement manifest:
+            path on boot disk: /fake/path/install/zones.json
+            boot disk inventory:
+                manifest generated by installinator (mupdate ID: 00000000-0000-0000-0000-000000000000)
+                no artifacts in install dataset (this should only be seen in simulated systems)
             no non-boot disks
         mupdate override:
             path on boot disk: /fake/path/install/mupdate_override.json
@@ -836,6 +854,8 @@ LEDGERED SLED CONFIG
         all datasets reconciled successfully
         all zones reconciled successfully
     reconciler task status: idle (finished at <REDACTED_TIMESTAMP> after running for <REDACTED_DURATION>s)
+    reference measurements:
+        (measurement set is empty)
 
 sled d81c6a84-79b8-4958-ae41-ea46c9b19763 (role = Gimlet, serial serial2)
     found at:    <REDACTED_TIMESTAMP> from fake sled agent
@@ -964,6 +984,7 @@ LEDGERED SLED CONFIG
         f10a4fb9-759f-4a65-b25e-5794ad2d07d8     internal_ntp        artifact: b661b5d1370f5ac593b4c15b5fcd22c904991cf33b6db32f886374bc022a3531 
         f55647d4-5500-4ad3-893a-df45bd50d622     crucible            artifact: f3694b20fa1de79fb1f7c3a9f89f9f9eb5ebaaefc3caba7e1991e7e2b3191ed4 
         f6ec9c67-946a-4da3-98d5-581f72ce8bf0     external_dns        artifact: 584217eae459e4c2bd00621cf1910d06edb8258948a4832ab0329cf42067c0c7 
+    measurement empty
     zone image resolver status:
         zone manifest:
             path on boot disk: /fake/path/install/zones.json
@@ -981,6 +1002,12 @@ LEDGERED SLED CONFIG
                   - nexus.tar.gz (expected 1683 bytes with hash 5f0b97b090966bb754485c3d397d0918d54bf4ffdc6fa691b77f61686f2ac8cc): ok
                   - ntp.tar.gz (expected 1682 bytes with hash b661b5d1370f5ac593b4c15b5fcd22c904991cf33b6db32f886374bc022a3531): ok
                   - oximeter.tar.gz (expected 1683 bytes with hash 7ea25be50cd4e98e2ba20916cb98fe8ea457372f5973eb6ac691b5bc90dbddc0): ok
+            no non-boot disks
+        measurement manifest:
+            path on boot disk: /fake/path/install/zones.json
+            boot disk inventory:
+                manifest generated by installinator (mupdate ID: 00000000-0000-0000-0000-000000000000)
+                no artifacts in install dataset (this should only be seen in simulated systems)
             no non-boot disks
         mupdate override:
             path on boot disk: /fake/path/install/mupdate_override.json
@@ -1002,6 +1029,8 @@ LEDGERED SLED CONFIG
         all datasets reconciled successfully
         all zones reconciled successfully
     reconciler task status: idle (finished at <REDACTED_TIMESTAMP> after running for <REDACTED_DURATION>s)
+    reference measurements:
+        (measurement set is empty)
 
 KEEPER MEMBERSHIP
     no membership retrieved
@@ -1054,6 +1083,7 @@ INFO added artifact, name: internal-dns, kind: zone, version: 1.0.0, hash: ffbf1
 INFO added artifact, name: ntp, kind: zone, version: 1.0.0, hash: 67593d686ed04a1709f93972b71f4ebc148a9362120f65d239943e814a9a7439, length: 1681
 INFO added artifact, name: nexus, kind: zone, version: 1.0.0, hash: 0e32b4a3e5d3668bb1d6a16fb06b74dc60b973fa479dcee0aae3adbb52bf1388, length: 1682
 INFO added artifact, name: oximeter, kind: zone, version: 1.0.0, hash: 048d8fe8cdef5b175aad714d0f148aa80ce36c9114ac15ce9d02ed3d37877a77, length: 1682
+INFO added artifact, name: fake-corpus, kind: measurement_corpus, version: 1.0.0, hash: 8a0e23157bae655fceec7376926c9758efee6511c7b7ff8355bbb49545a2257f, length: 1048576
 INFO added artifact, name: fake-psc-sp, kind: psc_sp, version: 1.0.0, hash: 89245fe2ac7e6a2ac8dfa4e7d6891a6e6df95e4141395c07c64026778f6d76d7, length: 721
 INFO added artifact, name: fake-psc-rot, kind: psc_rot_image_a, version: 1.0.0, hash: 5d8ea834dd6d42d386f1eb8a2c5f6e99b697c9958bb4ab8edf63e56003e25d8d, length: 775
 INFO added artifact, name: fake-psc-rot, kind: psc_rot_image_b, version: 1.0.0, hash: 5d8ea834dd6d42d386f1eb8a2c5f6e99b697c9958bb4ab8edf63e56003e25d8d, length: 775
@@ -1062,7 +1092,7 @@ INFO added artifact, name: fake-switch-sp, kind: switch_sp, version: 1.0.0, hash
 INFO added artifact, name: fake-switch-rot, kind: switch_rot_image_a, version: 1.0.0, hash: 32307d6d75c9707e8499ba4a4d379f99c0358237b6e190ff6a8024b470f62342, length: 774
 INFO added artifact, name: fake-switch-rot, kind: switch_rot_image_b, version: 1.0.0, hash: 32307d6d75c9707e8499ba4a4d379f99c0358237b6e190ff6a8024b470f62342, length: 774
 INFO added artifact, name: fake-switch-rot-bootloader, kind: switch_rot_bootloader, version: 1.0.0, hash: 70836d170abd5621f95bb4225987b27b3d3dd6168e73cd60e44309bdfeb94e98, length: 804
-INFO added artifact, name: installinator_document, kind: installinator_document, version: 1.0.0, hash: a6a636b5d57813578766b3f1c2559abf9af5d8c86187538167937c476beeefa3, length: 367
+INFO added artifact, name: installinator_document, kind: installinator_document, version: 1.0.0, hash: 16717c0caa420c7811666e720936c7ca913cd59a4d376331cc79a90544e5e2e8, length: 526
 set target release based on repo-1.0.0.zip
 
 
@@ -1083,6 +1113,7 @@ parent:    8da82a8e-bf97-4fbd-8ddd-9f6462732cf1
     state:::::::::::::   active
     config generation:   3
     subnet::::::::::::   fd00:1122:3344:102::/64
+    last allocated IP:   fd00:1122:3344:102::28
 
     host phase 2 contents:
     ------------------------
@@ -1151,6 +1182,7 @@ parent:    8da82a8e-bf97-4fbd-8ddd-9f6462732cf1
     state:::::::::::::   active
     config generation:   3
     subnet::::::::::::   fd00:1122:3344:101::/64
+    last allocated IP:   fd00:1122:3344:101::27
 
     host phase 2 contents:
     ------------------------
@@ -1216,6 +1248,7 @@ parent:    8da82a8e-bf97-4fbd-8ddd-9f6462732cf1
     state:::::::::::::   active
     config generation:   3
     subnet::::::::::::   fd00:1122:3344:103::/64
+    last allocated IP:   fd00:1122:3344:103::27
 
     host phase 2 contents:
     ------------------------

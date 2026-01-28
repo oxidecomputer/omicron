@@ -15,7 +15,6 @@ use nexus_types::deployment::BlueprintHostPhase2DesiredContents;
 use nexus_types::deployment::BlueprintMetadata;
 use nexus_types::deployment::BlueprintTarget;
 use nexus_types::deployment::BlueprintTargetSet;
-use nexus_types::deployment::BlueprintZoneDisposition;
 use nexus_types::deployment::BlueprintZoneImageSource;
 use nexus_types::deployment::PlannerConfig;
 use nexus_types::deployment::PlanningInput;
@@ -32,6 +31,7 @@ use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::LookupType;
 use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
+use std::sync::Arc;
 use uuid::Uuid;
 
 /// Common structure for collecting information that the planner needs
@@ -135,6 +135,10 @@ impl super::Nexus {
     ) -> Result<PlanningContext, Error> {
         let creator = self.id.to_string();
         let datastore = self.datastore();
+
+        let (_, parent_blueprint) =
+            self.db_datastore.blueprint_target_get_current_full(opctx).await?;
+
         // Load up the planner config from the db directly (rather than from,
         // say, the background task) to ensure we get the latest state.
         let planner_config = self
@@ -143,9 +147,13 @@ impl super::Nexus {
             .await?
             .map_or_else(PlannerConfig::default, |c| c.config.planner_config);
 
-        let planning_input =
-            PlanningInputFromDb::assemble(opctx, datastore, planner_config)
-                .await?;
+        let planning_input = PlanningInputFromDb::assemble(
+            opctx,
+            datastore,
+            planner_config,
+            Arc::new(parent_blueprint),
+        )
+        .await?;
 
         // The choice of which inventory collection to use here is not
         // necessarily trivial.  Inventory collections may be incomplete due to
@@ -180,16 +188,12 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
     ) -> CreateResult<Blueprint> {
-        let (_, parent_blueprint) =
-            self.db_datastore.blueprint_target_get_current_full(opctx).await?;
-
         let planning_context = self.blueprint_planning_context(opctx).await?;
         let inventory = planning_context.inventory.ok_or_else(|| {
             Error::internal_error("no recent inventory collection found")
         })?;
         let planner = Planner::new_based_on(
             opctx.log.clone(),
-            &parent_blueprint,
             &planning_context.planning_input,
             &planning_context.creator,
             &inventory,
@@ -308,7 +312,7 @@ fn is_target_release_change_allowed(
     let mut all_components_on_current_target_release = true;
 
     // Check sled configs first.
-    for sled_config in current_blueprint.active_sled_configs() {
+    for (_, sled_config) in current_blueprint.active_sled_configs() {
         if sled_config.remove_mupdate_override.is_some() {
             // A mupdate has occurred; we must allow a new target release.
             return true;
@@ -362,9 +366,7 @@ fn is_target_release_change_allowed(
     }
 
     // Now check zone configs.
-    for (_, zone_config) in current_blueprint
-        .all_omicron_zones(BlueprintZoneDisposition::is_in_service)
-    {
+    for (_, zone_config) in current_blueprint.in_service_zones() {
         match &zone_config.image_source {
             BlueprintZoneImageSource::InstallDataset => {
                 // A mupdate has occurred; we must allow a new target release.
@@ -413,6 +415,7 @@ mod tests {
     use super::*;
     use nexus_reconfigurator_planning::example::example;
     use nexus_types::deployment::BlueprintHostPhase2DesiredSlots;
+    use nexus_types::deployment::BlueprintZoneDisposition;
     use nexus_types::external_api::views::SledState;
     use omicron_common::api::external::Generation;
     use omicron_test_utils::dev::test_setup_log;

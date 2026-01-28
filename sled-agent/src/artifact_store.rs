@@ -37,11 +37,11 @@ use omicron_common::api::external::Generation;
 use omicron_common::ledger::Ledger;
 use repo_depot_api::*;
 use sha2::{Digest, Sha256};
-use sled_agent_api::{
-    ArtifactConfig, ArtifactListResponse, ArtifactPutResponse,
-};
 use sled_agent_config_reconciler::ConfigReconcilerHandle;
 use sled_agent_config_reconciler::InternalDisksReceiver;
+use sled_agent_config_reconciler::SledAgentArtifactStore;
+use sled_agent_types::artifact::ArtifactConfig;
+use sled_agent_types::artifact::{ArtifactListResponse, ArtifactPutResponse};
 use slog::{Logger, error, info};
 use slog_error_chain::{InlineErrorChain, SlogInlineError};
 use tokio::fs::File;
@@ -54,6 +54,22 @@ use tufaceous_artifact::ArtifactHash;
 // hexadecimal-encoded SHA-256 checksums.
 const LEDGER_PATH: &str = "artifact-config.json";
 const TEMP_SUBDIR: &str = "tmp";
+
+// Workaround wrapper for orphan rules.
+#[derive(Clone)]
+pub(crate) struct SledAgentArtifactStoreWrapper(
+    pub Arc<ArtifactStore<InternalDisksReceiver>>,
+);
+
+impl SledAgentArtifactStore for SledAgentArtifactStoreWrapper {
+    async fn get_artifact(
+        &self,
+        artifact: ArtifactHash,
+    ) -> anyhow::Result<tokio::fs::File> {
+        let file = self.0.get(artifact).await?;
+        Ok(file)
+    }
+}
 
 /// Content-addressable local storage for software artifacts.
 ///
@@ -896,7 +912,7 @@ mod test {
     use hex_literal::hex;
     use omicron_common::api::external::Generation;
     use omicron_test_utils::dev::test_setup_log;
-    use sled_agent_api::ArtifactConfig;
+    use sled_agent_types::artifact::ArtifactConfig;
     use tokio::io::AsyncReadExt;
     use tokio::sync::oneshot;
     use tokio::sync::watch;

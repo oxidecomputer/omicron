@@ -26,8 +26,8 @@ use crate::validators::{
     ValidatedLrtqUpgradeMsg, ValidatedReconfigureMsg,
 };
 use crate::{
-    Alarm, BaseboardId, Configuration, CoordinatorState, Epoch,
-    ExpungedMetadata, NodeHandlerCtx, messages::*,
+    BaseboardId, Configuration, CoordinatorState, Epoch, NodeHandlerCtx,
+    messages::*,
 };
 use daft::{Diffable, Leaf};
 use gfss::shamir::Share;
@@ -35,6 +35,9 @@ use omicron_uuid_kinds::RackUuid;
 use serde::{Deserialize, Serialize};
 use slog::{Logger, error, info, o, warn};
 use slog_error_chain::SlogInlineError;
+use trust_quorum_types::alarm::Alarm;
+use trust_quorum_types::messages::{LrtqUpgradeMsg, ReconfigureMsg};
+use trust_quorum_types::persistent_state::ExpungedMetadata;
 
 /// An entity capable of participating in trust quorum
 ///
@@ -1122,12 +1125,13 @@ pub enum PrepareAndCommitError {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{Epoch, NodeCallerCtx, NodeCommonCtx, NodeCtx, Threshold};
+    use crate::{Epoch, NodeCallerCtx, NodeCommonCtx, NodeCtx};
     use assert_matches::assert_matches;
     use omicron_test_utils::dev::test_setup_log;
     use omicron_uuid_kinds::RackUuid;
     use proptest::prelude::*;
     use test_strategy::{Arbitrary, proptest};
+    use trust_quorum_types::types::Threshold;
 
     fn arb_member() -> impl Strategy<Value = BaseboardId> {
         (0..255u8).prop_map(|serial| BaseboardId {

@@ -24,7 +24,8 @@ use nexus_types::{
 };
 use omicron_common::{api::external::Generation, disk::M2Slot};
 use omicron_uuid_kinds::{
-    BlueprintUuid, CollectionUuid, ReconfiguratorSimStateUuid, SledUuid,
+    BlueprintUuid, CollectionUuid, ReconfiguratorSimOpUuid,
+    ReconfiguratorSimStateUuid, SledUuid,
 };
 use strum::IntoEnumIterator as _;
 
@@ -285,21 +286,21 @@ impl SimSystem {
     pub fn resolve_blueprint_id(
         &self,
         original: BlueprintId,
-    ) -> Result<ResolvedBlueprintId, KeyError> {
+    ) -> ResolvedBlueprintId {
         let resolved = match original {
             BlueprintId::Target => self.blueprints.target().target_id,
             BlueprintId::Latest => self.blueprints.latest().id,
             BlueprintId::Id(id) => id,
         };
-        Ok(ResolvedBlueprintId { original, resolved })
+        ResolvedBlueprintId { original, resolved }
     }
 
     pub fn get_blueprint(
         &self,
         id: &ResolvedBlueprintId,
-    ) -> Result<&Blueprint, KeyError> {
+    ) -> Result<&Arc<Blueprint>, KeyError> {
         match self.blueprints.get(&id.resolved()) {
-            Some(b) => Ok(&**b),
+            Some(b) => Ok(b),
             None => Err(KeyError::resolved_blueprint(id.clone())),
         }
     }
@@ -311,8 +312,8 @@ impl SimSystem {
     pub fn resolve_and_get_blueprint(
         &self,
         original: BlueprintId,
-    ) -> Result<&Blueprint, KeyError> {
-        let id = self.resolve_blueprint_id(original)?;
+    ) -> Result<&Arc<Blueprint>, KeyError> {
+        let id = self.resolve_blueprint_id(original);
         self.get_blueprint(&id)
     }
 
@@ -421,7 +422,7 @@ impl SimSystemBuilder {
     pub fn resolve_blueprint_id(
         &self,
         original: BlueprintId,
-    ) -> Result<ResolvedBlueprintId, KeyError> {
+    ) -> ResolvedBlueprintId {
         self.inner.system.resolve_blueprint_id(original)
     }
 
@@ -429,7 +430,7 @@ impl SimSystemBuilder {
     pub fn get_blueprint(
         &self,
         id: &ResolvedBlueprintId,
-    ) -> Result<&Blueprint, KeyError> {
+    ) -> Result<&Arc<Blueprint>, KeyError> {
         self.inner.system.get_blueprint(id)
     }
 
@@ -683,6 +684,16 @@ pub enum ReconfiguratorSimId {
     Prefix(String),
 }
 
+/// An identifier for a reconfigurator sim operation.
+#[derive(Clone, Debug)]
+pub enum ReconfiguratorSimOpId {
+    /// The specified operation by full UUID.
+    Id(ReconfiguratorSimOpUuid),
+
+    /// The specified operation by UUID prefix.
+    Prefix(String),
+}
+
 /// A log entry corresponding to an individual operation on a
 /// [`SimSystemBuilder`].
 #[derive(Clone, Debug)]
@@ -881,14 +892,15 @@ impl SimSystemBuilderInner {
         // XXX: it's not normal, but hypothetically possible, that the initial
         // and target blueprints have the same ID. This will panic if so. Maybe
         // we should make it not panic.
-        self.add_blueprint_inner(Arc::new(example.initial_blueprint))
-            .unwrap_or_else(|_| {
+        self.add_blueprint_inner(example.initial_blueprint).unwrap_or_else(
+            |_| {
                 panic!(
                     "possible conflict between initial blueprint \
-                 (ID {initial_blueprint_id}) and target blueprint \
-                 (ID {target_blueprint_id})"
+                     (ID {initial_blueprint_id}) and target blueprint \
+                     (ID {target_blueprint_id})"
                 )
-            });
+            },
+        );
     }
 
     // This method MUST be infallible. It should only be called after checking

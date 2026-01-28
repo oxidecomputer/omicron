@@ -24,6 +24,7 @@ use omicron_common::api::external::Error;
 use omicron_uuid_kinds::RackInitUuid;
 use omicron_uuid_kinds::RackResetUuid;
 use sled_agent_config_reconciler::InternalDisksReceiver;
+use sled_agent_measurements::MeasurementsHandle;
 use sled_agent_types::rack_init::{
     RackInitializeRequest, RackInitializeRequestParams,
 };
@@ -33,6 +34,7 @@ use slog::Logger;
 use slog_error_chain::InlineErrorChain;
 use sprockets_tls::keys::SprocketsConfig;
 use std::net::Ipv6Addr;
+use std::sync::Arc;
 use tokio::sync::mpsc::error::TrySendError;
 use tokio::sync::{mpsc, oneshot};
 
@@ -47,6 +49,8 @@ pub(crate) struct BootstrapServerContext {
     pub(crate) sled_reset_tx:
         mpsc::Sender<oneshot::Sender<Result<(), BootstrapError>>>,
     pub(crate) sprockets: SprocketsConfig,
+    pub(crate) trust_quorum_handle: trust_quorum::NodeTaskHandle,
+    pub(crate) measurements: Arc<MeasurementsHandle>,
 }
 
 impl BootstrapServerContext {
@@ -59,7 +63,9 @@ impl BootstrapServerContext {
             self.sprockets.clone(),
             self.global_zone_bootstrap_ip,
             &self.internal_disks_rx,
+            self.measurements.clone(),
             &self.bootstore_node_handle,
+            &self.trust_quorum_handle,
             request,
         )
     }
@@ -131,6 +137,7 @@ impl BootstrapAgentApi for BootstrapAgentImpl {
                 &ctx.base_log,
                 ctx.sprockets.clone(),
                 ctx.global_zone_bootstrap_ip,
+                ctx.measurements.clone(),
             )
             .map_err(|err| HttpError::for_bad_request(None, err.to_string()))?;
         Ok(HttpResponseOk(id))

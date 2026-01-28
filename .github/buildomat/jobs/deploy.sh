@@ -2,7 +2,7 @@
 #:
 #: name = "helios / deploy"
 #: variety = "basic"
-#: target = "lab-2.0-opte-0.37"
+#: target = "lab-2.0-opte-0.38"
 #: output_rules = [
 #:  "%/var/svc/log/oxide-*.log*",
 #:  "%/zone/oxz_*/root/var/svc/log/oxide-*.log*",
@@ -343,7 +343,7 @@ E2E_TLS_CERT="/opt/oxide/sled-agent/pkg/initial-tls-cert.pem"
 #
 pfexec mkdir -p /usr/oxide
 pfexec curl -sSfL -o /usr/oxide/oxide \
-	http://catacomb.eng.oxide.computer:12346/oxide-v0.1.1
+	http://catacomb.eng.oxide.computer:12346/oxide-v2025112000
 pfexec chmod +x /usr/oxide/oxide
 
 curl -sSfL -o debian-11-genericcloud-amd64.raw \

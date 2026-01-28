@@ -71,6 +71,7 @@ mod disk;
 mod dns;
 mod ereport;
 mod external_ip;
+mod external_subnet;
 pub mod fm;
 mod identity_provider;
 mod image;
@@ -116,6 +117,7 @@ mod switch_port;
 mod target_release;
 #[cfg(test)]
 pub(crate) mod test_utils;
+mod trust_quorum;
 pub mod update;
 mod user_data_export;
 mod utilization;
@@ -134,9 +136,11 @@ pub use db_metadata::ValidatedDatastoreSetupAction;
 pub use deployment::BlueprintLimitReachedOutput;
 pub use disk::CrucibleDisk;
 pub use disk::Disk;
+pub use disk::LocalStorageDisk;
 pub use dns::DataStoreDnsTest;
 pub use dns::DnsVersionUpdateBuilder;
 pub use ereport::EreportFilters;
+pub use external_ip::FloatingIpAllocation;
 pub use instance::{
     InstanceAndActiveVmm, InstanceGestalt, InstanceStateComputer,
 };
@@ -288,9 +292,9 @@ impl DataStore {
             || async {
                 if let Some(try_for) = try_for {
                     if std::time::Instant::now() > start + try_for {
-                        return Err(BackoffError::permanent(
+                        return Err(BackoffError::permanent(String::from(
                             "Timeout waiting for DataStore::new_with_timeout",
-                        ));
+                        )));
                     }
                 }
 
@@ -307,9 +311,9 @@ impl DataStore {
                                 "Cannot check schema version / Nexus access";
                                 InlineErrorChain::new(err.as_ref()),
                             );
-                            BackoffError::transient(
-                                "Cannot check schema version / Nexus access",
-                            )
+                            BackoffError::transient(format!(
+                                "Cannot check schema version / Nexus access: {err:#}",
+                            ))
                         })?;
 
                     match checked_action.action() {
@@ -324,14 +328,11 @@ impl DataStore {
                                 .attempt_handoff(*nexus_id)
                                 .await
                                 .map_err(|err| {
-                                    warn!(
-                                        log,
-                                        "Could not handoff to new nexus";
-                                        err
+                                    let msg = format!(
+                                        "Could not handoff to new nexus: {err}"
                                     );
-                                    BackoffError::transient(
-                                        "Could not handoff to new nexus",
-                                    )
+                                    warn!(log, "{msg}");
+                                    BackoffError::transient(msg)
                                 })?;
 
                             // If the handoff was successful, immediately
@@ -341,9 +342,9 @@ impl DataStore {
                         }
                         DatastoreSetupAction::TryLater => {
                             error!(log, "Waiting for metadata; trying later");
-                            return Err(BackoffError::permanent(
+                            return Err(BackoffError::permanent(String::from(
                                 "Waiting for metadata; trying later",
-                            ));
+                            )));
                         }
                         DatastoreSetupAction::Update => {
                             info!(
@@ -353,23 +354,38 @@ impl DataStore {
                             datastore
                                 .update_schema(checked_action, config)
                                 .await
-                                .map_err(|err| {
-                                    warn!(
-                                        log,
-                                        "Failed to update schema version";
-                                        InlineErrorChain::new(err.as_ref())
-                                    );
-                                    BackoffError::transient(
-                                        "Failed to update schema version",
-                                    )
+                                .map_err(|err| match err {
+                                    BackoffError::Permanent(e) => {
+                                        error!(
+                                            log,
+                                            "Failed to update schema version \
+                                            (permanent error, will not retry)";
+                                            InlineErrorChain::new(e.as_ref())
+                                        );
+                                        BackoffError::permanent(format!(
+                                            "Failed to update schema version: {e:#}"
+                                        ))
+                                    }
+                                    BackoffError::Transient {
+                                        err: e, ..
+                                    } => {
+                                        warn!(
+                                            log,
+                                            "Failed to update schema version";
+                                            InlineErrorChain::new(e.as_ref())
+                                        );
+                                        BackoffError::transient(format!(
+                                            "Failed to update schema version: {e:#}"
+                                        ))
+                                    }
                                 })?;
                             return Ok(());
                         }
                         DatastoreSetupAction::Refuse => {
                             error!(log, "Datastore should not be used");
-                            return Err(BackoffError::permanent(
+                            return Err(BackoffError::permanent(String::from(
                                 "Datastore should not be used",
-                            ));
+                            )));
                         }
                     }
                 }
@@ -941,22 +957,6 @@ mod test {
             .unwrap();
     }
 
-    fn create_test_disk_create_params(
-        name: &str,
-        size: ByteCount,
-    ) -> params::DiskCreate {
-        params::DiskCreate {
-            identity: IdentityMetadataCreateParams {
-                name: Name::try_from(name.to_string()).unwrap(),
-                description: name.to_string(),
-            },
-            disk_source: params::DiskSource::Blank {
-                block_size: params::BlockSize::try_from(4096).unwrap(),
-            },
-            size,
-        }
-    }
-
     #[derive(Debug)]
     pub(crate) struct TestDatasets {
         // eligible and ineligible aren't currently used, but are probably handy
@@ -1163,10 +1163,10 @@ mod test {
         // Allocate regions from the datasets for this disk. Do it a few times
         // for good measure.
         for alloc_seed in 0..10 {
-            let params = create_test_disk_create_params(
-                &format!("disk{}", alloc_seed),
-                ByteCount::from_mebibytes_u32(1),
-            );
+            let disk_source = params::DiskSource::Blank {
+                block_size: params::BlockSize::try_from(4096).unwrap(),
+            };
+            let size = ByteCount::from_mebibytes_u32(1);
             let volume_id = VolumeUuid::new_v4();
 
             let expected_region_count = REGION_REDUNDANCY_THRESHOLD;
@@ -1174,8 +1174,8 @@ mod test {
                 .disk_region_allocate(
                     &opctx,
                     volume_id,
-                    &params.disk_source,
-                    params.size,
+                    &disk_source,
+                    size,
                     &RegionAllocationStrategy::Random {
                         seed: Some(alloc_seed),
                     },
@@ -1222,7 +1222,7 @@ mod test {
                 assert_eq!(ByteCount::from(4096), region.block_size());
                 let (_, extent_count) = DataStore::get_crucible_allocation(
                     &BlockSize::AdvancedFormat,
-                    params.size,
+                    size,
                 );
                 assert_eq!(extent_count, region.extent_count());
             }
@@ -1257,10 +1257,10 @@ mod test {
         // Allocate regions from the datasets for this disk. Do it a few times
         // for good measure.
         for alloc_seed in 0..10 {
-            let params = create_test_disk_create_params(
-                &format!("disk{}", alloc_seed),
-                ByteCount::from_mebibytes_u32(1),
-            );
+            let disk_source = params::DiskSource::Blank {
+                block_size: params::BlockSize::try_from(4096).unwrap(),
+            };
+            let size = ByteCount::from_mebibytes_u32(1);
             let volume_id = VolumeUuid::new_v4();
 
             let expected_region_count = REGION_REDUNDANCY_THRESHOLD;
@@ -1268,8 +1268,8 @@ mod test {
                 .disk_region_allocate(
                     &opctx,
                     volume_id,
-                    &params.disk_source,
-                    params.size,
+                    &disk_source,
+                    size,
                     &&RegionAllocationStrategy::RandomWithDistinctSleds {
                         seed: Some(alloc_seed),
                     },
@@ -1311,7 +1311,7 @@ mod test {
                 assert_eq!(ByteCount::from(4096), region.block_size());
                 let (_, extent_count) = DataStore::get_crucible_allocation(
                     &BlockSize::AdvancedFormat,
-                    params.size,
+                    size,
                 );
                 assert_eq!(extent_count, region.extent_count());
             }
@@ -1345,18 +1345,18 @@ mod test {
         // Allocate regions from the datasets for this disk. Do it a few times
         // for good measure.
         for alloc_seed in 0..10 {
-            let params = create_test_disk_create_params(
-                &format!("disk{}", alloc_seed),
-                ByteCount::from_mebibytes_u32(1),
-            );
+            let disk_source = params::DiskSource::Blank {
+                block_size: params::BlockSize::try_from(4096).unwrap(),
+            };
+            let size = ByteCount::from_mebibytes_u32(1);
             let volume_id = VolumeUuid::new_v4();
 
             let err = datastore
                 .disk_region_allocate(
                     &opctx,
                     volume_id,
-                    &params.disk_source,
-                    params.size,
+                    &disk_source,
+                    size,
                     &&RegionAllocationStrategy::RandomWithDistinctSleds {
                         seed: Some(alloc_seed),
                     },
@@ -1391,17 +1391,17 @@ mod test {
         .await;
 
         // Allocate regions from the datasets for this volume.
-        let params = create_test_disk_create_params(
-            "disk",
-            ByteCount::from_mebibytes_u32(500),
-        );
+        let disk_source = params::DiskSource::Blank {
+            block_size: params::BlockSize::try_from(4096).unwrap(),
+        };
+        let size = ByteCount::from_mebibytes_u32(500);
         let volume_id = VolumeUuid::new_v4();
         let mut dataset_and_regions1 = datastore
             .disk_region_allocate(
                 &opctx,
                 volume_id,
-                &params.disk_source,
-                params.size,
+                &disk_source,
+                size,
                 &RegionAllocationStrategy::Random { seed: Some(0) },
             )
             .await
@@ -1413,8 +1413,8 @@ mod test {
             .disk_region_allocate(
                 &opctx,
                 volume_id,
-                &params.disk_source,
-                params.size,
+                &disk_source,
+                size,
                 &RegionAllocationStrategy::Random { seed: Some(1) },
             )
             .await
@@ -1495,17 +1495,17 @@ mod test {
             .await;
 
         // Allocate regions from the datasets for this volume.
-        let params = create_test_disk_create_params(
-            "disk1",
-            ByteCount::from_mebibytes_u32(500),
-        );
+        let disk_source = params::DiskSource::Blank {
+            block_size: params::BlockSize::try_from(4096).unwrap(),
+        };
+        let size = ByteCount::from_mebibytes_u32(500);
         let volume1_id = VolumeUuid::new_v4();
         let err = datastore
             .disk_region_allocate(
                 &opctx,
                 volume1_id,
-                &params.disk_source,
-                params.size,
+                &disk_source,
+                size,
                 &RegionAllocationStrategy::Random { seed: Some(0) },
             )
             .await
@@ -1527,8 +1527,8 @@ mod test {
             .disk_region_allocate(
                 &opctx,
                 volume1_id,
-                &params.disk_source,
-                params.size,
+                &disk_source,
+                size,
                 &RegionAllocationStrategy::Random { seed: Some(0) },
             )
             .await
@@ -1589,17 +1589,17 @@ mod test {
             .await;
 
         // Allocate regions from the datasets for this volume.
-        let params = create_test_disk_create_params(
-            "disk1",
-            ByteCount::from_mebibytes_u32(500),
-        );
+        let disk_source = params::DiskSource::Blank {
+            block_size: params::BlockSize::try_from(4096).unwrap(),
+        };
+        let size = ByteCount::from_mebibytes_u32(500);
         let volume1_id = VolumeUuid::new_v4();
         let err = datastore
             .disk_region_allocate(
                 &opctx,
                 volume1_id,
-                &params.disk_source,
-                params.size,
+                &disk_source,
+                size,
                 &RegionAllocationStrategy::Random { seed: Some(0) },
             )
             .await
@@ -1681,10 +1681,10 @@ mod test {
         ];
 
         let volume_id = VolumeUuid::new_v4();
-        let params = create_test_disk_create_params(
-            "disk",
-            ByteCount::from_mebibytes_u32(500),
-        );
+        let disk_source = params::DiskSource::Blank {
+            block_size: params::BlockSize::try_from(4096).unwrap(),
+        };
+        let size = ByteCount::from_mebibytes_u32(500);
 
         for (policy, state, expected) in policy_state_combos {
             // Update policy/state only on a single physical disk.
@@ -1707,8 +1707,8 @@ mod test {
                 .disk_region_allocate(
                     &opctx,
                     volume_id,
-                    &params.disk_source,
-                    params.size,
+                    &disk_source,
+                    size,
                     &RegionAllocationStrategy::Random { seed: Some(0) },
                 )
                 .await;
@@ -1748,8 +1748,10 @@ mod test {
         .await;
 
         let disk_size = test_zpool_size();
+        let disk_source = params::DiskSource::Blank {
+            block_size: params::BlockSize::try_from(4096).unwrap(),
+        };
         let alloc_size = ByteCount::try_from(disk_size.to_bytes() * 2).unwrap();
-        let params = create_test_disk_create_params("disk1", alloc_size);
         let volume1_id = VolumeUuid::new_v4();
 
         assert!(
@@ -1757,8 +1759,8 @@ mod test {
                 .disk_region_allocate(
                     &opctx,
                     volume1_id,
-                    &params.disk_source,
-                    params.size,
+                    &disk_source,
+                    alloc_size,
                     &RegionAllocationStrategy::Random { seed: Some(0) },
                 )
                 .await

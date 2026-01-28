@@ -6,21 +6,21 @@ use std::{collections::HashMap, fmt};
 
 use anyhow::anyhow;
 use iddqd::{IdOrdItem, IdOrdMap, id_ord_map::RefMut, id_upcast};
-use nexus_sled_agent_shared::inventory::{
-    BootPartitionContents, BootPartitionDetails, ZoneKind,
-    ZoneManifestBootInventory,
-};
 use nexus_types::{
     deployment::{
         BlueprintArtifactVersion, BlueprintHostPhase2DesiredContents,
         BlueprintHostPhase2DesiredSlots, BlueprintZoneConfig,
-        BlueprintZoneDisposition, BlueprintZoneImageSource, PlanningInput,
-        SledFilter, TargetReleaseDescription,
+        BlueprintZoneImageSource, PlanningInput, SledFilter,
+        TargetReleaseDescription,
     },
     inventory::Collection,
 };
 use omicron_common::api::external::TufArtifactMeta;
 use omicron_uuid_kinds::{MupdateOverrideUuid, OmicronZoneUuid, SledUuid};
+use sled_agent_types::inventory::{
+    BootPartitionContents, BootPartitionDetails, ManifestBootInventory,
+    ZoneKind,
+};
 use slog::{debug, info, o, warn};
 use tufaceous_artifact::ArtifactHash;
 
@@ -73,7 +73,7 @@ impl NoopConvertInfo {
             };
 
             let zone_manifest = match &inv_sled
-                .zone_image_resolver
+                .file_source_resolver
                 .zone_manifest
                 .boot_inventory
             {
@@ -96,10 +96,7 @@ impl NoopConvertInfo {
             // Out of these, which zones' hashes (as reported in the zone
             // manifest) match the corresponding ones in the TUF repo?
             let zones = blueprint
-                .current_sled_zones(
-                    sled_id,
-                    BlueprintZoneDisposition::is_in_service,
-                )
+                .current_in_service_sled_zones(sled_id)
                 .map(|zone| {
                     NoopConvertZoneInfo::new(
                         zone,
@@ -422,7 +419,7 @@ pub(crate) struct NoopConvertZoneInfo {
 impl NoopConvertZoneInfo {
     fn new(
         zone: &BlueprintZoneConfig,
-        zone_manifest: &ZoneManifestBootInventory,
+        zone_manifest: &ManifestBootInventory,
         artifacts_by_hash: &HashMap<ArtifactHash, &TufArtifactMeta>,
     ) -> Self {
         let file_name = zone.kind().artifact_in_install_dataset();

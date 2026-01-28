@@ -7,6 +7,9 @@ license = "MPL-2.0"
 [lints]
 workspace = true
 
+[build-dependencies]
+omicron-rpaths.workspace = true
+
 [dependencies]
 futures.workspace = true
 ipnetwork.workspace = true
@@ -16,7 +19,10 @@ omicron-common.workspace = true
 oxnet.workspace = true
 reqwest.workspace = true
 sled-agent-client.workspace = true
+sled-hardware-types.workspace = true
 slog.workspace = true
 uuid.workspace = true
 omicron-workspace-hack.workspace = true
 omicron-uuid-kinds.workspace = true
+# See omicron-rpaths for more about the "pq-sys" dependency.
+pq-sys = "*"

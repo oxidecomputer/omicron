@@ -126,7 +126,7 @@ impl super::Nexus {
             AuditLogActor::UserBuiltin { .. }
             | AuditLogActor::SiloUser { .. }
             | AuditLogActor::Scim { .. } => {
-                opctx.authn.scheme_used().map(|s| s.to_string())
+                opctx.authn.scheme_used().map(Into::into)
             }
             // if we tried to pull it off the opctx this would be None anyway,
             // but it's better to be explicit
@@ -141,6 +141,7 @@ impl super::Nexus {
             user_agent,
             actor,
             auth_method,
+            credential_id: opctx.authn.credential_id(),
         };
         self.db_datastore.audit_log_entry_init(opctx, entry_params.into()).await
     }

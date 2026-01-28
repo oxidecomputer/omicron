@@ -13,8 +13,6 @@ use gateway_client::types::GetCfpaParams;
 use gateway_client::types::RotCfpaSlot;
 use gateway_messages::SpComponent;
 use itertools::Itertools;
-use nexus_sled_agent_shared::inventory::OmicronZoneType;
-use nexus_sled_agent_shared::inventory::ZoneKind;
 use nexus_types::inventory::CabooseWhich;
 use nexus_types::inventory::Collection;
 use nexus_types::inventory::InternalDnsGenerationStatus;
@@ -25,6 +23,8 @@ use omicron_cockroach_metrics::CockroachClusterAdminClient;
 use omicron_common::address::NTP_ADMIN_PORT;
 use omicron_common::disk::M2Slot;
 use omicron_uuid_kinds::OmicronZoneUuid;
+use sled_agent_types::inventory::OmicronZoneType;
+use sled_agent_types::inventory::ZoneKind;
 use slog::Logger;
 use slog::o;
 use slog::{debug, error};
@@ -721,13 +721,6 @@ mod test {
     use gateway_messages::SpPort;
     use iddqd::IdOrdMap;
     use iddqd::id_ord_map;
-    use nexus_sled_agent_shared::inventory::ConfigReconcilerInventoryStatus;
-    use nexus_sled_agent_shared::inventory::HostPhase2DesiredSlots;
-    use nexus_sled_agent_shared::inventory::OmicronSledConfig;
-    use nexus_sled_agent_shared::inventory::OmicronZoneConfig;
-    use nexus_sled_agent_shared::inventory::OmicronZoneImageSource;
-    use nexus_sled_agent_shared::inventory::OmicronZoneType;
-    use nexus_sled_agent_shared::inventory::SledCpuFamily;
     use nexus_types::inventory::Collection;
     use omicron_cockroach_metrics::CockroachClusterAdminClient;
     use omicron_common::api::external::Generation;
@@ -736,7 +729,15 @@ mod test {
     use omicron_uuid_kinds::OmicronZoneUuid;
     use omicron_uuid_kinds::SledUuid;
     use omicron_uuid_kinds::ZpoolUuid;
+    use sled_agent_types::inventory::ConfigReconcilerInventoryStatus;
+    use sled_agent_types::inventory::HostPhase2DesiredSlots;
+    use sled_agent_types::inventory::OmicronSledConfig;
+    use sled_agent_types::inventory::OmicronZoneConfig;
+    use sled_agent_types::inventory::OmicronZoneImageSource;
+    use sled_agent_types::inventory::OmicronZoneType;
+    use sled_agent_types::inventory::SledCpuFamily;
     use slog::o;
+    use std::collections::BTreeSet;
     use std::net::Ipv6Addr;
     use std::net::SocketAddrV6;
     use std::sync::Arc;
@@ -753,6 +754,7 @@ mod test {
             zones,
             remove_mupdate_override,
             host_phase_2,
+            measurements,
         } = config;
 
         swriteln!(s, "        generation: {generation}");
@@ -790,6 +792,14 @@ mod test {
                 zone.id,
                 zone.zone_type.kind().report_str(),
             );
+        }
+
+        swriteln!(s, "        measurements:");
+        for h in measurements {
+            swriteln!(s, "            artifact: {}", h.hash);
+        }
+        if measurements.is_empty() {
+            swriteln!(s, "            (empty)");
         }
     }
 
@@ -1004,6 +1014,7 @@ mod test {
                 },
                 remove_mupdate_override: None,
                 host_phase_2: HostPhase2DesiredSlots::current_contents(),
+                measurements: BTreeSet::new(),
             })
             .await
             .expect("failed to write initial zone version to fake sled agent");

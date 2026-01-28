@@ -12,17 +12,17 @@ use iddqd::IdOrdMap;
 use illumos_utils::zpool::PathInPool;
 use illumos_utils::zpool::ZpoolOrRamdisk;
 use key_manager::StorageKeyRequester;
-use nexus_sled_agent_shared::inventory::BootPartitionContents as BootPartitionContentsInventory;
-use nexus_sled_agent_shared::inventory::ConfigReconcilerInventory;
-use nexus_sled_agent_shared::inventory::ConfigReconcilerInventoryResult;
-use nexus_sled_agent_shared::inventory::ConfigReconcilerInventoryStatus;
-use nexus_sled_agent_shared::inventory::OmicronSledConfig;
-use nexus_sled_agent_shared::inventory::OrphanedDataset;
-use nexus_sled_agent_shared::inventory::RemoveMupdateOverrideInventory;
 use omicron_common::disk::DatasetKind;
 use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::PhysicalDiskUuid;
+use sled_agent_types::inventory::BootPartitionContents as BootPartitionContentsInventory;
+use sled_agent_types::inventory::ConfigReconcilerInventory;
+use sled_agent_types::inventory::ConfigReconcilerInventoryResult;
+use sled_agent_types::inventory::ConfigReconcilerInventoryStatus;
+use sled_agent_types::inventory::OmicronSledConfig;
+use sled_agent_types::inventory::OrphanedDataset;
+use sled_agent_types::inventory::RemoveMupdateOverrideInventory;
 use sled_storage::config::MountConfig;
 use sled_storage::dataset::LOCAL_STORAGE_DATASET;
 use sled_storage::dataset::U2_DEBUG_DATASET;
@@ -42,7 +42,7 @@ use crate::InternalDisksReceiver;
 use crate::SledAgentArtifactStore;
 use crate::TimeSyncConfig;
 use crate::dataset_serialization_task::DatasetTaskHandle;
-use crate::dump_setup_task::FormerZoneRootArchiver;
+use crate::debug_collector::FormerZoneRootArchiver;
 use crate::host_phase_2::BootPartitionReconciler;
 use crate::ledger::CurrentSledConfig;
 use crate::raw_disks::RawDisksReceiver;
@@ -468,7 +468,7 @@ impl ReconcilerTask {
         //
         // This status is obtained after remove_mupdate_override is processed.
         let resolver_status =
-            sled_agent_facilities.zone_image_resolver_status();
+            sled_agent_facilities.file_source_resolver_status();
 
         // Reconcile any changes to our boot partitions. This is typically a
         // no-op; if we've successfully read both boot partitions in a previous

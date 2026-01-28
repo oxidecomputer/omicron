@@ -15,6 +15,7 @@ use omicron_uuid_kinds::AlertReceiverUuid;
 use omicron_uuid_kinds::AlertUuid;
 use omicron_uuid_kinds::BlueprintUuid;
 use omicron_uuid_kinds::CollectionUuid;
+use omicron_uuid_kinds::SitrepUuid;
 use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::SupportBundleUuid;
 use omicron_uuid_kinds::TufRepoUuid;
@@ -161,8 +162,10 @@ pub struct MulticastGroupReconcilerStatus {
     /// Number of members processed ("Joining"→"Joined", "Left" with
     /// time_deleted→hard-deleted cleanup).
     pub members_processed: usize,
-    /// Number of members deleted (Left + time_deleted).
+    /// Number of members deleted ("Left" + time_deleted).
     pub members_deleted: usize,
+    /// Number of empty groups marked for deletion (implicit deletion).
+    pub empty_groups_marked: usize,
     /// Errors that occurred during reconciliation operations.
     pub errors: Vec<String>,
 }
@@ -272,18 +275,56 @@ pub struct SupportBundleCleanupReport {
 pub struct SupportBundleCollectionReport {
     pub bundle: SupportBundleUuid,
 
-    /// True iff we could list in-service sleds
-    pub listed_in_service_sleds: bool,
-
-    /// True iff we could list the service processors.
-    pub listed_sps: bool,
-
     /// True iff the bundle was successfully made 'active' in the database.
     pub activated_in_db_ok: bool,
+
+    /// All steps taken, alongside their timing information, when collecting the
+    /// bundle.
+    pub steps: Vec<SupportBundleCollectionStep>,
 
     /// Status of ereport collection, or `None` if no ereports were requested
     /// for this support bundle.
     pub ereports: Option<SupportBundleEreportStatus>,
+}
+
+#[derive(Debug, Deserialize, Serialize, PartialEq, Eq)]
+pub struct SupportBundleCollectionStep {
+    pub name: String,
+    pub start: DateTime<Utc>,
+    pub end: DateTime<Utc>,
+    pub status: SupportBundleCollectionStepStatus,
+}
+
+impl SupportBundleCollectionStep {
+    /// Step name constants for the main collection steps.
+    ///
+    /// These are used both when creating steps and when validating in tests.
+    pub const STEP_BUNDLE_ID: &'static str = "bundle id";
+    pub const STEP_USER_COMMENT: &'static str = "user comment";
+    pub const STEP_RECONFIGURATOR_STATE: &'static str = "reconfigurator state";
+    pub const STEP_EREPORTS: &'static str = "ereports";
+    pub const STEP_SLED_CUBBY_INFO: &'static str = "sled cubby info";
+    pub const STEP_SPAWN_SP_DUMPS: &'static str =
+        "spawn steps to query all SP dumps";
+    pub const STEP_SPAWN_SLEDS: &'static str = "spawn steps to query all sleds";
+}
+
+#[derive(Debug, Deserialize, Serialize, PartialEq, Eq)]
+pub enum SupportBundleCollectionStepStatus {
+    Ok,
+    Skipped,
+    Failed(String),
+}
+
+impl std::fmt::Display for SupportBundleCollectionStepStatus {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        use SupportBundleCollectionStepStatus::*;
+        match self {
+            Ok => write!(f, "ok"),
+            Skipped => write!(f, "skipped"),
+            Failed(why) => write!(f, "failed: {why}"),
+        }
+    }
 }
 
 #[derive(Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
@@ -306,9 +347,8 @@ impl SupportBundleCollectionReport {
     pub fn new(bundle: SupportBundleUuid) -> Self {
         Self {
             bundle,
-            listed_in_service_sleds: false,
-            listed_sps: false,
             activated_in_db_ok: false,
+            steps: vec![],
             ereports: None,
         }
     }
@@ -855,6 +895,25 @@ pub struct SitrepGcStatus {
     pub errors: Vec<String>,
 }
 
+/// The status of a `fm_sitrep_execution` background task activation.
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+pub enum SitrepExecutionStatus {
+    NoSitrep,
+    Executed { sitrep_id: SitrepUuid, alerts: SitrepAlertRequestStatus },
+}
+
+#[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
+pub struct SitrepAlertRequestStatus {
+    /// The total number of alerts requested by the current sitrep.
+    pub total_alerts_requested: usize,
+    /// The total number of alerts which were *first* requested in the current sitrep.
+    pub current_sitrep_alerts_requested: usize,
+    /// The number of alerts created by this activation.
+    pub alerts_created: usize,
+    /// Errors that occurred during this activation.
+    pub errors: Vec<String>,
+}
+
 #[derive(Debug, Deserialize, Serialize)]
 pub struct ProbeError {
     /// ID of the sled we failed to send a probe to.
@@ -871,6 +930,12 @@ pub struct ProbeDistributorStatus {
     pub probes_by_sled: HashMap<SledUuid, usize>,
     /// Errors when sending a probe.
     pub errors: Vec<ProbeError>,
+}
+
+#[derive(Serialize, Deserialize)]
+pub enum TrustQuorumManagerStatus {
+    PerRackStatus { statuses: Vec<String>, errors: Vec<String> },
+    Error(String),
 }
 
 #[cfg(test)]

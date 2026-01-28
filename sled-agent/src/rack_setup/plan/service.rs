@@ -15,9 +15,7 @@ use internal_dns_types::config::{
     DnsConfigBuilder, DnsConfigParams, Host, Zone,
 };
 use internal_dns_types::names::ServiceName;
-use nexus_sled_agent_shared::inventory::{
-    Inventory, OmicronZoneDataset, SledRole,
-};
+use nexus_types::deployment::LastAllocatedSubnetIpOffset;
 use nexus_types::deployment::{
     Blueprint, BlueprintDatasetConfig, BlueprintDatasetDisposition,
     BlueprintHostPhase2DesiredSlots, BlueprintPhysicalDiskConfig,
@@ -38,7 +36,7 @@ use omicron_common::address::{
 use omicron_common::api::external::{Generation, MacAddr, Vni};
 use omicron_common::api::internal::shared::{
     NetworkInterface, NetworkInterfaceKind, PrivateIpConfig,
-    PrivateIpConfigError, SourceNatConfig, SourceNatConfigError,
+    PrivateIpConfigError, SourceNatConfigError, SourceNatConfigGeneric,
 };
 use omicron_common::backoff::{
     BackoffError, retry_notify_ext, retry_policy_internal_service_aggressive,
@@ -63,6 +61,7 @@ use serde::{Deserialize, Serialize};
 use sled_agent_client::{
     Client as SledAgentClient, Error as SledAgentError, types as SledAgentTypes,
 };
+use sled_agent_types::inventory::{Inventory, OmicronZoneDataset, SledRole};
 use sled_agent_types::rack_init::RackInitializeRequest as Config;
 use sled_agent_types::sled::StartSledAgentRequest;
 use slog::Logger;
@@ -225,7 +224,7 @@ pub fn from_ipaddr_to_external_floating_ip(
 }
 
 pub fn from_source_nat_config_to_external_snat_ip(
-    snat_cfg: SourceNatConfig,
+    snat_cfg: SourceNatConfigGeneric,
 ) -> OmicronZoneExternalSnatIp {
     // This is pretty weird: IP IDs don't exist yet, so it's fine for us
     // to make them up (Nexus will record them as a part of the
@@ -911,11 +910,19 @@ impl Plan {
                     })?;
             }
 
+            // We could more carefully track which IPs we actually allocated to
+            // this sled, but in practice Reconfigurator treats the entire
+            // RSS_RESERVED_ADDRESSES range as reserved anyway, so it's fine for
+            // us to just start there.
+            let last_allocated_ip_subnet_offset =
+                LastAllocatedSubnetIpOffset::new(RSS_RESERVED_ADDRESSES);
+
             blueprint_sleds.insert(
                 sled_description.sled_id,
                 BlueprintSledConfig {
                     state: SledState::Active,
                     subnet: sled_description.subnet,
+                    last_allocated_ip_subnet_offset,
                     sled_agent_generation: sled_agent_config_generation,
                     disks: sled_config.disks.clone(),
                     datasets,
@@ -1242,7 +1249,7 @@ impl ServicePortBuilder {
     fn next_snat(
         &mut self,
         svc_id: OmicronZoneUuid,
-    ) -> Result<(NetworkInterface, SourceNatConfig), PlanError> {
+    ) -> Result<(NetworkInterface, SourceNatConfigGeneric), PlanError> {
         use omicron_common::address::{
             NTP_OPTE_IPV4_SUBNET, NTP_OPTE_IPV6_SUBNET,
         };
@@ -1261,7 +1268,7 @@ impl ServicePortBuilder {
         }
 
         let snat_cfg =
-            match SourceNatConfig::new(snat_ip, first_port, last_port) {
+            match SourceNatConfigGeneric::new(snat_ip, first_port, last_port) {
                 Ok(cfg) => cfg,
                 // We know our port pair is aligned, making this unreachable.
                 Err(err @ SourceNatConfigError::UnalignedPortPair { .. }) => {
@@ -1301,14 +1308,15 @@ impl ServicePortBuilder {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use nexus_sled_agent_shared::inventory::ConfigReconcilerInventoryStatus;
-    use nexus_sled_agent_shared::inventory::SledCpuFamily;
-    use nexus_sled_agent_shared::inventory::ZoneImageResolverInventory;
     use omicron_common::address::IpRange;
     use omicron_common::api::external::ByteCount;
     use omicron_common::api::internal::shared::AllowedSourceIps;
     use omicron_common::api::internal::shared::RackNetworkConfig;
     use oxnet::Ipv6Net;
+    use sled_agent_types::inventory::ConfigReconcilerInventoryStatus;
+    use sled_agent_types::inventory::HealthMonitorInventory;
+    use sled_agent_types::inventory::OmicronFileSourceResolverInventory;
+    use sled_agent_types::inventory::SledCpuFamily;
     use sled_agent_types::rack_init::BootstrapAddressDiscovery;
     use sled_agent_types::rack_init::RecoverySiloConfig;
     use sled_hardware_types::Baseboard;
@@ -1493,7 +1501,7 @@ mod tests {
 
         const DISK_COUNT: usize = 10;
         let disks: Vec<_> = (0..DISK_COUNT)
-            .map(|i| nexus_sled_agent_shared::inventory::InventoryDisk {
+            .map(|i| sled_agent_types::inventory::InventoryDisk {
                 identity: omicron_common::disk::DiskIdentity {
                     vendor: "vendor".to_string(),
                     model: "model".to_string(),
@@ -1528,7 +1536,10 @@ mod tests {
                 ledgered_sled_config: None,
                 reconciler_status: ConfigReconcilerInventoryStatus::NotYetRun,
                 last_reconciliation: None,
-                zone_image_resolver: ZoneImageResolverInventory::new_fake(),
+                file_source_resolver:
+                    OmicronFileSourceResolverInventory::new_fake(),
+                health_monitor: HealthMonitorInventory::new(),
+                reference_measurements: IdOrdMap::new(),
             },
             is_scrimlet,
         )];
