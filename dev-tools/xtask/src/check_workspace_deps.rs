@@ -14,6 +14,9 @@ const WORKSPACE_HACK_PACKAGE_NAME: &str = "omicron-workspace-hack";
 
 pub fn run_cmd() -> Result<()> {
     // Ignore issues with "pq-sys".  See the omicron-rpaths package for details.
+    //
+    // Excluding dpd-client is temporary. This is part of the workaround for
+    // #9704 in #9705. This should be removed as a part of addressing #9727.
     const EXCLUDED: &[&'static str] = &["pq-sys", "dpd-client"];
 
     // Collect a list of all packages used in any workspace package as a
