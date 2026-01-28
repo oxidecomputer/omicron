@@ -31,7 +31,10 @@ derive_more.workspace = true
 display-error-chain.workspace = true
 dns-server.workspace = true
 dns-service-client.workspace = true
-dpd-client.workspace = true
+# XXX NOTE this is due to https://github.com/oxidecomputer/omicron/issues/9704
+# This is the R17 dpd client
+# dpd-client.workspace = true
+dpd-client = { git = "https://github.com/oxidecomputer/dendrite", rev = "cc8e02a0800034c431c8cf96b889ea638da3d194" }
 dropshot.workspace = true
 flate2.workspace = true
 flume.workspace = true
