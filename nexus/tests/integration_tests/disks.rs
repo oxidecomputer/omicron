@@ -23,17 +23,20 @@ use nexus_test_utils::http_testing::AuthnMode;
 use nexus_test_utils::http_testing::NexusRequest;
 use nexus_test_utils::http_testing::RequestBuilder;
 use nexus_test_utils::identity_eq;
+use nexus_test_utils::resource_helpers;
 use nexus_test_utils::resource_helpers::create_default_ip_pools;
 use nexus_test_utils::resource_helpers::create_disk;
 use nexus_test_utils::resource_helpers::create_instance;
 use nexus_test_utils::resource_helpers::create_project;
 use nexus_test_utils_macros::nexus_test;
 use nexus_types::external_api::params;
+use nexus_types::external_api::views;
 use nexus_types::identity::Asset;
 use nexus_types::silo::DEFAULT_SILO_ID;
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::Disk;
 use omicron_common::api::external::DiskState;
+use omicron_common::api::external::DiskType;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::Instance;
 use omicron_common::api::external::InstanceState;
@@ -2731,6 +2734,117 @@ async fn test_list_all_types_of_disk(cptestctx: &ControlPlaneTestContext) {
     .execute()
     .await
     .unwrap();
+}
+
+#[nexus_test]
+async fn test_create_readonly_disk_from_snapshot(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+    DiskTest::new(&cptestctx).await;
+    create_project_and_pool(client).await;
+    let disks_url = get_disks_url();
+
+    // Define a global image
+    let image_create_params = params::ImageCreate {
+        identity: IdentityMetadataCreateParams {
+            name: "mycelium".parse().unwrap(),
+            description: String::from(
+                "you can boot any image, as long as it's alpine",
+            ),
+        },
+        source: params::ImageSource::YouCanBootAnythingAsLongAsItsAlpine,
+        os: "alpine".to_string(),
+        version: "edge".to_string(),
+    };
+
+    let images_url = format!("/v1/images?project={}", PROJECT_NAME);
+    let image =
+        NexusRequest::objects_post(client, &images_url, &image_create_params)
+            .authn_as(AuthnMode::PrivilegedUser)
+            .execute_and_parse_unwrap::<views::Image>()
+            .await;
+
+    // Create a base disk from this image, which we will then create a snapshot
+    // from in order to create our read-only disk from that snapshot.
+    let disk_size = ByteCount::from_gibibytes_u32(2);
+    let base_disk_name = "base-disk";
+    let base_disk = params::DiskCreate {
+        identity: IdentityMetadataCreateParams {
+            name: base_disk_name.parse().unwrap(),
+            description: String::from("sells rainsticks"),
+        },
+        disk_backend: params::DiskBackend::Distributed {
+            disk_source: params::DiskSource::Image {
+                image_id: image.identity.id,
+            },
+        },
+        size: disk_size,
+    };
+
+    NexusRequest::new(
+        RequestBuilder::new(client, Method::POST, &disks_url)
+            .body(Some(&base_disk))
+            .expect_status(Some(StatusCode::CREATED)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute_and_parse_unwrap::<Disk>()
+    .await;
+
+    // Assert the base disk is detached
+    let base_disk = disk_get(client, &get_disk_url(base_disk_name)).await;
+    assert_eq!(base_disk.state, DiskState::Detached);
+
+    // Create a snapshot of the base disk.
+    let snapshot = resource_helpers::create_snapshot(
+        client,
+        PROJECT_NAME,
+        base_disk_name,
+        "ro-snapshot",
+    )
+    .await;
+    assert_eq!(snapshot.disk_id, base_disk.identity.id);
+    assert_eq!(snapshot.size, base_disk.size);
+
+    // Okay, now make a read-only disk out of that snapshot.
+    let ro_disk = resource_helpers::create_disk_from_snapshot(
+        client,
+        PROJECT_NAME,
+        "ro-disk-from-snap",
+        &snapshot,
+        true,
+    )
+    .await;
+
+    assert!(ro_disk.read_only);
+    assert_eq!(ro_disk.snapshot_id, Some(snapshot.identity.id));
+    assert_eq!(ro_disk.size, snapshot.size);
+    assert_eq!(
+        ro_disk.state,
+        DiskState::Detached,
+        "read-only disks should be created in the detached state, ready for \
+         use."
+    );
+    assert!(
+        matches!(ro_disk.disk_type, DiskType::Distributed),
+        "read-only disks can only be distributed, but got: {:?}",
+        ro_disk.disk_type
+    );
+
+    // And, just to check, let's also make a read/write disk from the snapshot,
+    // and assert that it is *not* read-only.
+    let rw_disk = resource_helpers::create_disk_from_snapshot(
+        client,
+        PROJECT_NAME,
+        "rw-disk-from-snap",
+        &snapshot,
+        false,
+    )
+    .await;
+
+    assert!(!rw_disk.read_only);
+    assert_eq!(rw_disk.snapshot_id, Some(snapshot.identity.id));
+    assert_eq!(rw_disk.size, snapshot.size);
 }
 
 async fn disk_get(client: &ClientTestContext, disk_url: &str) -> Disk {

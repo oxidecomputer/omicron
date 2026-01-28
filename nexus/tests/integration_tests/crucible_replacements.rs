@@ -1358,7 +1358,8 @@ mod region_snapshot_replacement {
                 &client,
                 PROJECT_NAME,
                 "disk-from-snapshot",
-                snapshot.identity.id,
+                &snapshot,
+                false,
             )
             .await;
 
@@ -2069,7 +2070,8 @@ async fn test_replacement_sanity(cptestctx: &ControlPlaneTestContext) {
         &client,
         PROJECT_NAME,
         "disk-from-snap",
-        snapshot.identity.id,
+        &snapshot,
+        false,
     )
     .await;
 
@@ -2180,7 +2182,8 @@ async fn test_region_replacement_triple_sanity(
         &client,
         PROJECT_NAME,
         "disk-from-snap",
-        snapshot.identity.id,
+        &snapshot,
+        false,
     )
     .await;
 
@@ -2306,7 +2309,8 @@ async fn test_region_replacement_triple_sanity_2(
         &client,
         PROJECT_NAME,
         "disk-from-snap",
-        snapshot.identity.id,
+        &snapshot,
+        false,
     )
     .await;
 
@@ -2466,7 +2470,8 @@ async fn test_replacement_sanity_twice(cptestctx: &ControlPlaneTestContext) {
         &client,
         PROJECT_NAME,
         "disk-from-snap",
-        snapshot.identity.id,
+        &snapshot,
+        false,
     )
     .await;
 
@@ -2573,7 +2578,8 @@ async fn test_read_only_replacement_sanity(
         &client,
         PROJECT_NAME,
         "disk-from-snap",
-        snapshot.identity.id,
+        &snapshot,
+        false,
     )
     .await;
 
@@ -2705,21 +2711,24 @@ async fn test_replacement_sanity_twice_after_snapshot_delete(
         &client,
         PROJECT_NAME,
         "snap-disk-1",
-        snapshot.identity.id,
+        &snapshot,
+        false,
     )
     .await;
     create_disk_from_snapshot(
         &client,
         PROJECT_NAME,
         "snap-disk-2",
-        snapshot.identity.id,
+        &snapshot,
+        false,
     )
     .await;
     create_disk_from_snapshot(
         &client,
         PROJECT_NAME,
         "snap-disk-3",
-        snapshot.identity.id,
+        &snapshot,
+        false,
     )
     .await;
 
