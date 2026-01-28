@@ -166,6 +166,10 @@ pub(crate) enum TestFileKind {
         zone_name: String,
         zone_root: String,
     },
+    DebugDropbox {
+        zone_name: String,
+        zone_root: String,
+    },
     GlobalLogSmfRotated,
     GlobalLogSmfLive,
     GlobalLogSyslogRotated,
@@ -186,6 +190,7 @@ impl TestFileKind {
             | TestFileKind::LogSmfLive { .. }
             | TestFileKind::LogSyslogRotated { .. }
             | TestFileKind::LogSyslogLive { .. }
+            | TestFileKind::DebugDropbox { .. }
             | TestFileKind::GlobalLogSmfRotated
             | TestFileKind::GlobalLogSmfLive
             | TestFileKind::GlobalLogSyslogRotated
@@ -203,7 +208,8 @@ impl TestFileKind {
             TestFileKind::LogSmfRotated { zone_name, zone_root }
             | TestFileKind::LogSmfLive { zone_name, zone_root }
             | TestFileKind::LogSyslogRotated { zone_name, zone_root }
-            | TestFileKind::LogSyslogLive { zone_name, zone_root } => {
+            | TestFileKind::LogSyslogLive { zone_name, zone_root }
+            | TestFileKind::DebugDropbox { zone_name, zone_root } => {
                 Some((zone_name, Utf8Path::new(zone_root)))
             }
             TestFileKind::GlobalLogSmfRotated
@@ -253,6 +259,9 @@ impl TryFrom<&Utf8Path> for TestFileKind {
                 } else {
                     Ok(TestFileKind::LogSmfRotated { zone_name, zone_root })
                 }
+            } else if s.contains("/var/debug_drop") {
+                // XXX-dap find constant for this
+                Ok(TestFileKind::DebugDropbox { zone_name, zone_root })
             } else {
                 Err(anyhow!("unknown non-global zone test file kind"))
             }

@@ -155,6 +155,14 @@ pub(crate) static ALL_RULES: LazyLock<IdOrdMap<Rule>> = LazyLock::new(|| {
             delete_original: true,
             naming: &NameRotatedLogFile,
         },
+        Rule {
+            label: "debug dropbox",
+            rule_scope: RuleScope::ZoneAlways,
+            directory: "var/debug_drop".parse().unwrap(),
+            regex: "^.*$".parse().unwrap(),
+            delete_original: true,
+            naming: &NameDropbox,
+        },
     ];
 
     // We could do this more concisely with a `collect()` or `IdOrdMap::from`,
@@ -207,6 +215,10 @@ pub(crate) trait NamingRule {
         lister: &dyn FileLister,
         output_directory: &Utf8Path,
     ) -> Result<Filename, anyhow::Error>;
+
+    fn archived_subdir(&self) -> Option<Filename> {
+        None
+    }
 }
 
 pub(crate) const MAX_COLLIDING_FILENAMES: u16 = 30;
@@ -293,5 +305,46 @@ impl NamingRule for NameIdentity {
         _output_directory: &Utf8Path,
     ) -> Result<Filename, anyhow::Error> {
         Ok(source_file_name.clone())
+    }
+}
+
+/// `NamingRule` that's used for files from the debug dropbox
+pub(crate) struct NameDropbox;
+impl NamingRule for NameDropbox {
+    fn archived_file_name(
+        &self,
+        source_file_name: &Filename,
+        source_file_mtime: Option<DateTime<Utc>>,
+        lister: &dyn FileLister,
+        output_directory: &Utf8Path,
+    ) -> Result<Filename, anyhow::Error> {
+        // XXX-dap sync with RFD
+        let mtime_as_seconds =
+            source_file_mtime.unwrap_or_else(|| Utc::now()).timestamp();
+        for i in 0..MAX_COLLIDING_FILENAMES {
+            let rv =
+                format!("{}.{mtime_as_seconds}.{i}", source_file_name.as_ref());
+            let dest = output_directory.join(&rv);
+            if !lister.file_exists(&dest)? {
+                // unwrap(): we started with a valid `Filename` and did not add
+                // any slashes here.
+                return Ok(Filename::try_from(rv).unwrap());
+            }
+        }
+
+        Err(anyhow!(
+            "failed to choose archive file name for file {source_file_name:?} \
+             because there are too many files with colliding names (at least \
+             {MAX_COLLIDING_FILENAMES})"
+        ))
+    }
+
+    fn archived_subdir(&self) -> Option<Filename> {
+        // Within the per-zone directory in the debug dataset, we put debug
+        // dropbox data into a `debug_dropbox` subdirectory.
+        //
+        // unwrap(): this static str is a valid Filename
+        // (no slashes, not '.' or '..')
+        Some(Filename::try_from("debug_drop".to_string()).unwrap())
     }
 }

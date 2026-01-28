@@ -66,6 +66,9 @@
 # Rotated syslog files
 /pool/ext/2115b084-be0f-4fba-941b-33a659798a9e/crypt/zone/oxz_ntp_a700528f-f600-4908-94ac-9c06442ef6b4/root/var/adm/messages.0
 
+# Debug dropbox files
+/pool/ext/2115b084-be0f-4fba-941b-33a659798a9e/crypt/zone/oxz_ntp_a700528f-f600-4908-94ac-9c06442ef6b4/root/var/debug_drop/dummy1
+
 # Global zone: live syslog
 /var/adm/messages
 

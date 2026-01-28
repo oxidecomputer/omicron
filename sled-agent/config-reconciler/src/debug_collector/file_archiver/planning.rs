@@ -282,26 +282,50 @@ impl ArchivePlan<'_> {
                                 .map(|mtime| (group, input_path, mtime))
                         }
                     })
-                    .map(|entry| match entry {
+                    .flat_map(|entry| match entry {
                         // Errors are passed to the end of this pipeline.
-                        Err(error) => Err(error),
+                        Err(error) => vec![Err(error)],
 
                         // If we succeeded so far, we have a matching input
                         // file, its mtime and the associated group.  Construct
-                        // an archive step describing that we need to archive
-                        // this file.
+                        // archive steps describing that we need to archive this
+                        // file.
+                        //
+                        // If the file is in a subdirectory of the rule's output
+                        // directory, we'll need to create a Mkdir step as well.
                         Ok((group, input_path, mtime)) => {
-                            let output_directory =
+                            let rule_output_directory =
                                 group.output_directory(debug_dir);
-                            Ok(ArchiveStep::ArchiveFile(ArchiveFile {
-                                input_path,
-                                mtime,
-                                output_directory,
-                                namer: group.rule.naming,
-                                delete_original: group.rule.delete_original,
-                                #[cfg(test)]
-                                rule: group.rule.label,
-                            }))
+                            let (output_directory, mkdir_step) =
+                                match group.rule.naming.archived_subdir() {
+                                    Some(subdir) => {
+                                        let output_directory =
+                                            rule_output_directory
+                                                .join(subdir.as_ref());
+                                        (
+                                            output_directory.clone(),
+                                            Some(ArchiveStep::Mkdir {
+                                                output_directory,
+                                            }),
+                                        )
+                                    }
+                                    None => (rule_output_directory, None),
+                                };
+                            let file_step =
+                                ArchiveStep::ArchiveFile(ArchiveFile {
+                                    input_path,
+                                    mtime,
+                                    output_directory,
+                                    namer: group.rule.naming,
+                                    delete_original: group.rule.delete_original,
+                                    #[cfg(test)]
+                                    rule: group.rule.label,
+                                });
+                            if let Some(mkdir) = mkdir_step {
+                                vec![Ok(mkdir), Ok(file_step)]
+                            } else {
+                                vec![Ok(file_step)]
+                            }
                         }
                     }),
             )
@@ -368,11 +392,15 @@ impl ArchiveFile<'_> {
             .to_owned()
             .try_into()
             .context("file_name() returned a non-Filename")?;
+        let output_directory = match self.namer.archived_subdir() {
+            Some(subdir) => &self.output_directory.join(subdir.as_ref()),
+            None => &self.output_directory,
+        };
         self.namer.archived_file_name(
             &file_name,
             self.mtime,
             lister,
-            &self.output_directory,
+            output_directory,
         )
     }
 }
@@ -427,45 +455,52 @@ mod test {
             let step = step.expect("no errors with test lister");
 
             match step {
-                // For a `mkdir`, verify that the parent directory matches our
-                // output directory.  (For more on why, see the code where we
-                // process this Mkdir.)  Then record it.  We'll use that to
-                // verify that files are always archived into directories that
-                // already exist.
+                // For a `mkdir`, verify that the parent directory either:
+                //
+                // - *is* the overall output directory, or
+                // - is underneath the overall output directory _and_ has been
+                //   created by a previous `Mkdir` field
+                //
+                // We record the directories created so that we can verify the
+                // above, as well as to verify that files are always created
+                // inside directories that have been created.
                 ArchiveStep::Mkdir { output_directory } => {
                     let parent = output_directory
                         .parent()
                         .expect("output directory has a parent");
                     if parent != fake_output_dir {
-                        panic!(
-                            "archiver created an output directory \
-                             ({output_directory:?}) whose parent is not the \
-                             fake debug directory ({fake_output_dir:?}).  \
-                             This is not currently supported."
+                        assert!(
+                            parent.starts_with(fake_output_dir),
+                            "archiver created directory ({output_directory:?}) \
+                             that's not under the fake debug directory \
+                             ({fake_output_dir:?})",
+                        );
+                        assert!(
+                            directories_created.contains(parent),
+                            "archiver created directory ({output_directory:?}) \
+                             inside a directory that it did not also create \
+                             (and so may not exist at runtime)",
                         );
                     }
+
+                    println!("archive step: mkdir {output_directory:?}");
                     directories_created.insert(output_directory);
                 }
 
-                ArchiveStep::ArchiveFile(ArchiveFile {
-                    input_path,
-                    delete_original,
-                    output_directory,
-                    rule,
-                    ..
-                }) => {
-                    println!("archiving: {input_path}");
+                ArchiveStep::ArchiveFile(archive_file) => {
+                    println!("archive step: file {}", archive_file.input_path);
 
                     // Check that we have not already archived this file.
                     // That would imply that two rules matched the same file,
                     // which would be a bug in the rule definitions.
                     let test_file = unarchived_files
-                        .remove(input_path.as_path())
+                        .remove(archive_file.input_path.as_path())
                         .unwrap_or_else(|| {
                             panic!(
                                 "attempted to archive the same file multiple \
                                  times (or it was not in the test dataset): \
-                                 {input_path:?}",
+                                 {:?}",
+                                archive_file.input_path,
                             );
                         });
 
@@ -477,11 +512,12 @@ mod test {
                         TestFileKind::ProcessCoreDump { .. }
                         | TestFileKind::LogSmfRotated { .. }
                         | TestFileKind::LogSyslogRotated { .. }
+                        | TestFileKind::DebugDropbox { .. }
                         | TestFileKind::GlobalLogSmfRotated
                         | TestFileKind::GlobalLogSyslogRotated
                         | TestFileKind::Ignored => {
                             assert!(
-                                delete_original,
+                                archive_file.delete_original,
                                 "expected to delete original file when \
                                  archiving file of kind {:?}",
                                 test_file.kind,
@@ -493,7 +529,7 @@ mod test {
                         | TestFileKind::GlobalLogSmfLive
                         | TestFileKind::GlobalLogSyslogLive => {
                             assert!(
-                                !delete_original,
+                                !archive_file.delete_original,
                                 "expected not to delete original file when \
                                  archiving file of kind {:?}",
                                 test_file.kind,
@@ -504,8 +540,9 @@ mod test {
                     // The output directory must either match the overall output
                     // directory or else be one of the directories created by a
                     // Mkdir that we've already processed.
-                    if output_directory != fake_output_dir
-                        && !directories_created.contains(&output_directory)
+                    if archive_file.output_directory != fake_output_dir
+                        && !directories_created
+                            .contains(&archive_file.output_directory)
                     {
                         panic!(
                             "file was archived into a non-existent \
@@ -516,7 +553,7 @@ mod test {
 
                     // Mark that we've used this rule.  It's not a problem if
                     // we've already done so.
-                    let _ = rules_unused.remove(rule);
+                    let _ = rules_unused.remove(archive_file.rule);
                 }
             };
         }
@@ -572,6 +609,7 @@ mod test {
                     TestFileKind::ProcessCoreDump { .. }
                     | TestFileKind::LogSmfRotated { .. }
                     | TestFileKind::LogSyslogRotated { .. }
+                    | TestFileKind::DebugDropbox { .. }
                     | TestFileKind::GlobalLogSmfRotated
                     | TestFileKind::GlobalLogSyslogRotated => true,
                     TestFileKind::LogSmfLive { .. }
