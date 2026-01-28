@@ -615,6 +615,7 @@ pub struct BlueprintRendezvousStats {
     pub debug_dataset: DatasetsRendezvousStats,
     pub crucible_dataset: CrucibleDatasetsRendezvousStats,
     pub local_storage_dataset: DatasetsRendezvousStats,
+    pub local_storage_unencrypted_dataset: DatasetsRendezvousStats,
 }
 
 /// Stats for the rendezvous table that stores Crucible datasets

@@ -6,9 +6,11 @@ use std::net::{IpAddr, SocketAddr};
 
 use omicron_common::api::external::Hostname;
 use omicron_common::api::internal::nexus::VmmRuntimeState;
+use omicron_common::api::internal::shared::DhcpConfig;
 use omicron_common::api::internal::shared::external_ip::v1::SourceNatConfig;
 use omicron_common::api::internal::shared::network_interface::v1::NetworkInterface;
-use omicron_common::api::internal::shared::{DelegatedZvol, DhcpConfig};
+use omicron_uuid_kinds::DatasetUuid;
+use omicron_uuid_kinds::ExternalZpoolUuid;
 use omicron_uuid_kinds::InstanceUuid;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -67,6 +69,15 @@ pub struct InstanceSledLocalConfig {
     pub firewall_rules: Vec<ResolvedVpcFirewallRule>,
     pub dhcp_config: DhcpConfig,
     pub delegated_zvols: Vec<DelegatedZvol>,
+}
+
+/// Delegate a ZFS volume to a zone
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum DelegatedZvol {
+    /// Delegate a slice of the local storage dataset present on this pool into
+    /// the zone.
+    LocalStorage { zpool_id: ExternalZpoolUuid, dataset_id: DatasetUuid },
 }
 
 impl From<v7::instance::InstanceEnsureBody> for InstanceEnsureBody {

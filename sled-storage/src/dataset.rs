@@ -56,6 +56,10 @@ pub const DUMP_DATASET: &'static str = "crypt/debug";
 pub const U2_DEBUG_DATASET: &'static str = "crypt/debug";
 pub const LOCAL_STORAGE_DATASET: &'static str = "crypt/local_storage";
 
+// Some U.2 datasets do not inherit any encryption
+pub const LOCAL_STORAGE_UNENCRYPTED_DATASET: &'static str =
+    "local_storage_unencrypted";
+
 // This is the root dataset for all U.2 drives. Encryption is inherited.
 pub const CRYPT_DATASET: &'static str = "crypt";
 

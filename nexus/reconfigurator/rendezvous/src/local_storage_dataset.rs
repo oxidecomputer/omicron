@@ -45,7 +45,7 @@ pub(crate) async fn reconcile_local_storage_datasets(
     for bp_dataset in blueprint_datasets {
         // Filter down to LocalStorage datasets...
         let dataset = match (&bp_dataset.kind, bp_dataset.address) {
-            (DatasetKind::LocalStorage, None) => {
+            (DatasetKind::LocalStorage, _) => {
                 RendezvousLocalStorageDataset::new(
                     bp_dataset.id,
                     bp_dataset.pool.id(),
@@ -332,7 +332,7 @@ mod tests {
                     &inventory_datasets,
                 )
                 .await
-                .expect("reconciled debug dataset");
+                .expect("reconciled local storage dataset");
 
                  let datastore_datasets = datastore
                     .local_storage_dataset_list_all_batched(opctx)

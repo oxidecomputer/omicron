@@ -82,6 +82,7 @@ mod test {
     use nexus_db_model::PhysicalDiskState;
     use nexus_db_model::Region;
     use nexus_db_model::RendezvousLocalStorageDataset;
+    use nexus_db_model::RendezvousLocalStorageUnencryptedDataset;
     use nexus_db_model::Zpool;
     use nexus_db_queries::context::OpContext;
     use nexus_test_utils::SLED_AGENT_UUID;
@@ -193,6 +194,19 @@ mod test {
             .await
             .unwrap()
             .unwrap();
+
+        datastore
+            .local_storage_unencrypted_dataset_insert_if_not_exists(
+                opctx,
+                RendezvousLocalStorageUnencryptedDataset::new(
+                    DatasetUuid::new_v4(),
+                    zpool.id(),
+                    BlueprintUuid::new_v4(),
+                ),
+            )
+            .await
+            .unwrap()
+            .unwrap();
     }
 
     async fn get_pools(
@@ -240,6 +254,22 @@ mod test {
 
         use nexus_db_schema::schema::rendezvous_local_storage_dataset::dsl;
         dsl::rendezvous_local_storage_dataset
+            .filter(dsl::time_tombstoned.is_null())
+            .filter(dsl::pool_id.eq(id.into_untyped_uuid()))
+            .select(dsl::id)
+            .load_async(&*conn)
+            .await
+            .unwrap()
+    }
+
+    async fn get_local_storage_unencrypted_datasets(
+        datastore: &DataStore,
+        id: ZpoolUuid,
+    ) -> Vec<Uuid> {
+        let conn = datastore.pool_connection_for_tests().await.unwrap();
+
+        use nexus_db_schema::schema::rendezvous_local_storage_unencrypted_dataset::dsl;
+        dsl::rendezvous_local_storage_unencrypted_dataset
             .filter(dsl::time_tombstoned.is_null())
             .filter(dsl::pool_id.eq(id.into_untyped_uuid()))
             .select(dsl::id)
@@ -358,8 +388,11 @@ mod test {
         assert_eq!(regions.len(), 1);
 
         // Similarly, until instances are torn down and release the child
-        // datasets of the local storage parent dataset, these remain too.
+        // datasets of the local storage parent datasets, these remain too.
         let datasets = get_local_storage_datasets(&datastore, pools[0]).await;
+        assert_eq!(datasets.len(), 1);
+        let datasets =
+            get_local_storage_unencrypted_datasets(&datastore, pools[0]).await;
         assert_eq!(datasets.len(), 1);
 
         // Similarly, the "other disk" should still exist.
@@ -370,6 +403,9 @@ mod test {
         let regions = get_regions(&datastore, datasets[0]).await;
         assert_eq!(regions.len(), 1);
         let datasets = get_local_storage_datasets(&datastore, pools[0]).await;
+        assert_eq!(datasets.len(), 1);
+        let datasets =
+            get_local_storage_unencrypted_datasets(&datastore, pools[0]).await;
         assert_eq!(datasets.len(), 1);
     }
 }

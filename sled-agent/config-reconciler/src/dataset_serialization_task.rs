@@ -684,7 +684,8 @@ impl DatasetTask {
                 | DatasetKind::ExternalDns
                 | DatasetKind::InternalDns
                 | DatasetKind::Debug
-                | DatasetKind::LocalStorage => {
+                | DatasetKind::LocalStorage
+                | DatasetKind::LocalStorageUnencrypted => {
                     non_transient_zone_configs.push(dataset);
                 }
             }
@@ -1197,7 +1198,8 @@ fn reason_to_skip_orphaned_dataset_destruction(
         // disk. Refuse to remove them.
         DatasetKind::TransientZoneRoot
         | DatasetKind::Debug
-        | DatasetKind::LocalStorage => Some(format!(
+        | DatasetKind::LocalStorage
+        | DatasetKind::LocalStorageUnencrypted => Some(format!(
             "refusing to delete dataset of kind {kind:?} \
              (expected to exist for all managed disks)",
         )),

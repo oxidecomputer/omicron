@@ -28,6 +28,9 @@ pub struct DiskTypeLocalStorage {
     required_dataset_overhead: ByteCount,
 
     local_storage_dataset_allocation_id: Option<DbTypedUuid<DatasetKind>>,
+
+    local_storage_unencrypted_dataset_allocation_id:
+        Option<DbTypedUuid<DatasetKind>>,
 }
 
 impl DiskTypeLocalStorage {
@@ -55,6 +58,7 @@ impl DiskTypeLocalStorage {
             disk_id,
             required_dataset_overhead: required_dataset_overhead.into(),
             local_storage_dataset_allocation_id: None,
+            local_storage_unencrypted_dataset_allocation_id: None,
         })
     }
 
@@ -64,5 +68,11 @@ impl DiskTypeLocalStorage {
 
     pub fn local_storage_dataset_allocation_id(&self) -> Option<DatasetUuid> {
         self.local_storage_dataset_allocation_id.map(Into::into)
+    }
+
+    pub fn local_storage_unencrypted_dataset_allocation_id(
+        &self,
+    ) -> Option<DatasetUuid> {
+        self.local_storage_unencrypted_dataset_allocation_id.map(Into::into)
     }
 }

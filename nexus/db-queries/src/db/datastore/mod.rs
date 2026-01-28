@@ -136,6 +136,7 @@ pub use db_metadata::ValidatedDatastoreSetupAction;
 pub use deployment::BlueprintLimitReachedOutput;
 pub use disk::CrucibleDisk;
 pub use disk::Disk;
+pub use disk::LocalStorageAllocation;
 pub use disk::LocalStorageDisk;
 pub use dns::DataStoreDnsTest;
 pub use dns::DnsVersionUpdateBuilder;
