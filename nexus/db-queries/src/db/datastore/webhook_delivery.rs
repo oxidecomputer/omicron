@@ -493,6 +493,7 @@ mod test {
                 serde_json::json!({
                     "answer": 42,
                 }),
+                None,
             )
             .await
             .expect("can't create ye event");

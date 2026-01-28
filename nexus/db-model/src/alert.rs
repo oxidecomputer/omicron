@@ -3,9 +3,11 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use crate::AlertClass;
+use crate::DbTypedUuid;
 use chrono::{DateTime, Utc};
 use db_macros::Asset;
 use nexus_db_schema::schema::alert;
+use omicron_uuid_kinds::CaseKind;
 use serde::{Deserialize, Serialize};
 
 /// A webhook event.
@@ -40,6 +42,9 @@ pub struct Alert {
     pub payload: serde_json::Value,
 
     pub num_dispatched: i64,
+
+    /// The ID of the fault management case that created this alert, if any.
+    pub case_id: Option<DbTypedUuid<CaseKind>>,
 }
 
 impl Alert {

@@ -1211,7 +1211,7 @@ mod test {
     ) -> (authz::Alert, crate::db::model::Alert) {
         let id = AlertUuid::new_v4();
         datastore
-            .alert_create(opctx, id, alert_class, serde_json::json!({}))
+            .alert_create(opctx, id, alert_class, serde_json::json!({}), None)
             .await
             .expect("cant create ye event");
         LookupPath::new(opctx, datastore).alert_id(id).fetch().await.expect(

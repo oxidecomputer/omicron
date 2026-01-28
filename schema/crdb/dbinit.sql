@@ -6387,6 +6387,9 @@ CREATE TABLE IF NOT EXISTS omicron.public.alert (
     -- The number of receivers that this alart was dispatched to.
     num_dispatched INT8 NOT NULL,
 
+    -- The ID of the fault management case that created this alert, if any.
+    case_id UUID,
+
     CONSTRAINT time_dispatched_set_if_dispatched CHECK (
         (num_dispatched = 0) OR (time_dispatched IS NOT NULL)
     ),

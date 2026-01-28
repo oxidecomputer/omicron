@@ -92,7 +92,13 @@ impl FmRendezvous {
             let class = class.into();
             match self
                 .datastore
-                .alert_create(&opctx, id, class, payload.clone())
+                .alert_create(
+                    &opctx,
+                    id,
+                    class,
+                    payload.clone(),
+                    Some(case_id.into()),
+                )
                 .await
             {
                 // Alert already exists, that's fine.
@@ -220,8 +226,9 @@ mod tests {
         // Now, create a new sitrep with alert requests.
         let sitrep1_id = SitrepUuid::new_v4();
         let alert1_id = AlertUuid::new_v4();
+        let case1_id = CaseUuid::new_v4();
         let mut case1 = fm::Case {
-            id: CaseUuid::new_v4(),
+            id: case1_id,
             created_sitrep_id: sitrep1_id,
             closed_sitrep_id: None,
             de: fm::DiagnosisEngineKind::PowerShelf,
@@ -283,14 +290,20 @@ mod tests {
             .await
             .expect("alert1 must have been created");
         assert_eq!(db_alert1.class, db::model::AlertClass::TestFoo);
+        assert_eq!(
+            db_alert1.case_id.map(|id| id.into()),
+            Some(case1_id),
+            "alert1 should have case_id set to case1"
+        );
 
         // Now, create a second sitrep sitrep with more alert requests.
         let sitrep2_id = SitrepUuid::new_v4();
         let alert2_id = AlertUuid::new_v4();
         let alert3_id = AlertUuid::new_v4();
         // Make a new case with its own alert request.
+        let case2_id = CaseUuid::new_v4();
         let mut case2 = fm::Case {
-            id: CaseUuid::new_v4(),
+            id: case2_id,
             created_sitrep_id: sitrep1_id,
             closed_sitrep_id: None,
             de: fm::DiagnosisEngineKind::PowerShelf,
@@ -364,14 +377,29 @@ mod tests {
             .await
             .expect("alert1 must have been created");
         assert_eq!(db_alert1.class, db::model::AlertClass::TestFoo);
+        assert_eq!(
+            db_alert1.case_id.map(|id| id.into()),
+            Some(case1_id),
+            "alert1 should have case_id set to case1"
+        );
         let db_alert2 = fetch_alert(&datastore, alert2_id)
             .await
             .expect("alert2 must have been created");
         assert_eq!(db_alert2.class, db::model::AlertClass::TestFooBar);
+        assert_eq!(
+            db_alert2.case_id.map(|id| id.into()),
+            Some(case2_id),
+            "alert2 should have case_id set to case2"
+        );
         let db_alert3 = fetch_alert(&datastore, alert3_id)
             .await
             .expect("alert3 must have been created");
         assert_eq!(db_alert3.class, db::model::AlertClass::TestFooBaz);
+        assert_eq!(
+            db_alert3.case_id.map(|id| id.into()),
+            Some(case1_id),
+            "alert3 should have case_id set to case1"
+        );
 
         // Cleanup
         db.terminate().await;

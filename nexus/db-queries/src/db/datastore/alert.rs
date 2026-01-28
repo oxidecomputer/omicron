@@ -16,11 +16,12 @@ use diesel::result::Error as DieselError;
 use diesel::result::OptionalExtension;
 use nexus_db_errors::ErrorHandler;
 use nexus_db_errors::public_error_from_diesel;
+use nexus_db_model::DbTypedUuid;
 use nexus_db_schema::schema::alert::dsl as alert_dsl;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::UpdateResult;
-use omicron_uuid_kinds::{AlertUuid, GenericUuid};
+use omicron_uuid_kinds::{AlertUuid, CaseKind, GenericUuid};
 
 impl DataStore {
     pub async fn alert_create(
@@ -29,6 +30,7 @@ impl DataStore {
         id: AlertUuid,
         class: AlertClass,
         payload: serde_json::Value,
+        case_id: Option<DbTypedUuid<CaseKind>>,
     ) -> CreateResult<Alert> {
         let conn = self.pool_connection_authorized(&opctx).await?;
         let alert = diesel::insert_into(alert_dsl::alert)
@@ -38,6 +40,7 @@ impl DataStore {
                 class,
                 payload,
                 num_dispatched: 0,
+                case_id,
             })
             .returning(Alert::as_returning())
             .get_result_async(&*conn)

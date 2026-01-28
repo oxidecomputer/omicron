@@ -191,8 +191,10 @@ impl Nexus {
         class: AlertClass,
         event: serde_json::Value,
     ) -> Result<Alert, Error> {
-        let alert =
-            self.datastore().alert_create(opctx, id, class, event).await?;
+        let alert = self
+            .datastore()
+            .alert_create(opctx, id, class, event, None)
+            .await?;
         slog::debug!(
             &opctx.log,
             "published alert";
