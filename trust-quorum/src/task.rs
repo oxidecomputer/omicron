@@ -859,7 +859,8 @@ impl NodeTask {
             .await;
 
             // Notify subscribers if latest committed epoch changed
-            let new_epoch = self.ctx.persistent_state().latest_committed_epoch();
+            let new_epoch =
+                self.ctx.persistent_state().latest_committed_epoch();
             let log = &self.log;
             self.committed_epoch_tx.send_if_modified(|current| {
                 if *current != new_epoch {
