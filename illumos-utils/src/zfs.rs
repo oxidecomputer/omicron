@@ -4,6 +4,9 @@
 
 //! Utilities for poking at ZFS.
 
+use crate::dkio::DKIOCRAWVOLSTATUS;
+use crate::dkio::DKIOCRAWVOLSTOP;
+use crate::dkio::dk_rawvol_status;
 use crate::{PFEXEC, execute_async};
 use anyhow::Context;
 use anyhow::anyhow;
@@ -337,6 +340,12 @@ pub enum DeleteDatasetVolumeErrorInner {
 
     #[error("cannot cancel raw volume initialization, ioctl returned {err}")]
     CancellingInitialization { err: i32 },
+
+    #[error("not a raw zvol")]
+    NotARawZvol,
+
+    #[error("cannot get raw volume status, ioctl returned {err}")]
+    GettingStatus { err: i32 },
 }
 
 /// Error returned by [`Zfs::delete_dataset_volume`].
@@ -389,6 +398,20 @@ impl DeleteDatasetVolumeError {
             err: DeleteDatasetVolumeErrorInner::CancellingInitialization {
                 err,
             },
+        }
+    }
+
+    pub fn not_a_raw_zvol(name: String) -> Self {
+        DeleteDatasetVolumeError {
+            name,
+            err: DeleteDatasetVolumeErrorInner::NotARawZvol,
+        }
+    }
+
+    pub fn getting_status(name: String, err: i32) -> Self {
+        DeleteDatasetVolumeError {
+            name,
+            err: DeleteDatasetVolumeErrorInner::GettingStatus { err },
         }
     }
 }
@@ -1666,44 +1689,119 @@ impl Zfs {
         Ok(())
     }
 
-    pub async fn delete_dataset_volume(
-        params: DatasetVolumeDeleteArgs<'_>,
+    /// Returns Ok when a raw volume is ok to delete, and an error otherwise
+    pub async fn wait_for_raw_volume_ok_to_delete(
+        params: &DatasetVolumeDeleteArgs<'_>,
     ) -> Result<(), DeleteDatasetVolumeError> {
         let rdsk_path = format!("/dev/zvol/rdsk/{}", params.name);
 
-        // Open the raw zvol and check if it is still initializing. We can't
-        // delete it if it is, so stop the initialization before deleting.
-        //
-        // If the /dev/zvol/rdsk/... path is missing then skip this step, as the
-        // zvol is probably gone.
-        if params.raw && Utf8Path::new(&rdsk_path).exists() {
-            let fd = rustix::fs::open(
-                rdsk_path,
-                rustix::fs::OFlags::WRONLY,
-                rustix::fs::Mode::empty(),
+        // If the /dev/zvol/rdsk/... path is missing then skip additional checks
+        // as the zvol is probably gone.
+        if !Utf8Path::new(&rdsk_path).exists() {
+            return Ok(());
+        }
+
+        let fd = rustix::fs::open(
+            rdsk_path,
+            rustix::fs::OFlags::WRONLY,
+            rustix::fs::Mode::empty(),
+        )
+        .map_err(|e| {
+            DeleteDatasetVolumeError::from_raw_zvol_open(
+                params.name.to_string(),
+                e,
             )
-            .map_err(|e| {
-                DeleteDatasetVolumeError::from_raw_zvol_open(
-                    params.name.to_string(),
-                    e,
-                )
-            })?;
+        })?;
 
-            #[cfg(target_os = "illumos")]
-            const DKIOCRAWVOLSTOP: libc::c_int = (0x04 << 8) | 0x1f;
-            #[cfg(not(target_os = "illumos"))]
-            const DKIOCRAWVOLSTOP: libc::c_ulong = (0x04 << 8) | 0x1f;
+        // Check if it is still initializing. We can't delete it if it is, so
+        // we'll have to stop the initialization before deleting.
+        let mut status = dk_rawvol_status::default();
 
+        // Retry if EINTR is seen
+        for i in 0..2 {
+            // Safety: We are issuing the `DKIOCRAWVOLSTATUS` ioctl which is
+            // documented to take a struct of type `dk_rawvol_status`. Assuming
+            // our type definitions are correct, this call is safe.
+            if unsafe {
+                libc::ioctl(fd.as_raw_fd(), DKIOCRAWVOLSTATUS as _, &mut status)
+            } == -1
+            {
+                let err = std::io::Error::last_os_error();
+                match err.raw_os_error().unwrap() {
+                    libc::ENOTSUP => {
+                        // ENOTSUP is returned when this ioctl is issued against
+                        // a non-raw zvol
+                        return Err(DeleteDatasetVolumeError::not_a_raw_zvol(
+                            params.name.to_string(),
+                        ));
+                    }
+
+                    libc::EINTR if i == 0 => {
+                        // Retry once if EINTR is seen
+                        continue;
+                    }
+
+                    e => {
+                        // Unexpected error, return up the stack
+                        return Err(DeleteDatasetVolumeError::getting_status(
+                            params.name.to_string(),
+                            e,
+                        ));
+                    }
+                }
+            }
+        }
+
+        let zero_init_thread_needs_stopping = match status.drs_status {
+            0 => {
+                // The zero init thread was not running - it's either not been
+                // started or has finished.
+                false
+            }
+
+            libc::EINTR => {
+                // The zero init thread was running but was stopped.
+                false
+            }
+
+            libc::EINPROGRESS => {
+                // The zero init thread is currently running
+                true
+            }
+
+            _ => {
+                // The zero init thread encountered an error, we can proceed
+                // with deleting the raw vol
+                false
+            }
+        };
+
+        if !zero_init_thread_needs_stopping {
+            return Ok(());
+        }
+
+        // Retry if EINTR is seen
+        for i in 0..2 {
             // DKIOCRAWVOLSTOP will stop the initialization and block waiting
             // for the initialization thread to exit. If this returns 0, the
             // initialization thread has stopped and exited ok, proceed with
             // deletion.
-            if unsafe { libc::ioctl(fd.as_raw_fd(), DKIOCRAWVOLSTOP) } == -1 {
+            if unsafe { libc::ioctl(fd.as_raw_fd(), DKIOCRAWVOLSTOP as _) }
+                == -1
+            {
                 let err = std::io::Error::last_os_error();
                 match err.raw_os_error().unwrap() {
-                    libc::ENOENT => {
-                        // The raw volume was not initializing, proceed with
-                        // deletion.
+                    libc::ENOTSUP => {
+                        // ENOTSUP is returned when this ioctl is issued against
+                        // a non-raw zvol
+                        return Err(DeleteDatasetVolumeError::not_a_raw_zvol(
+                            params.name.to_string(),
+                        ));
+                    }
+
+                    libc::EINTR if i == 0 => {
+                        // Retry once if EINTR is seen
+                        continue;
                     }
 
                     e => {
@@ -1719,23 +1817,55 @@ impl Zfs {
             }
         }
 
+        // The zero init thread has been stopped
+        Ok(())
+    }
+
+    pub async fn delete_dataset_volume(
+        params: DatasetVolumeDeleteArgs<'_>,
+    ) -> Result<(), DeleteDatasetVolumeError> {
+        // If we're deleting a raw zvol, there are additional steps
+        if params.raw {
+            Self::wait_for_raw_volume_ok_to_delete(&params).await?;
+        }
+
         let mut command = Command::new(PFEXEC);
         let cmd = command.args(&[ZFS, "destroy", params.name]);
 
-        match execute_async(cmd).await {
-            Ok(_) => Ok(()),
+        // Retry twice in the face of "dataset is busy", another part of
+        // sled-agent may be accessing the list of datasets and volumes, or
+        // properties of the volume.
+        for i in 0..3 {
+            match execute_async(cmd).await {
+                Ok(_) => {
+                    return Ok(());
+                }
 
-            Err(crate::ExecutionError::CommandFailure(info))
-                if info.stderr.contains("dataset does not exist") =>
-            {
-                Ok(())
+                Err(crate::ExecutionError::CommandFailure(info))
+                    if info.stderr.contains("dataset does not exist") =>
+                {
+                    return Ok(());
+                }
+
+                Err(crate::ExecutionError::CommandFailure(info))
+                    if info.stderr.contains("dataset is busy") && i < 2 =>
+                {
+                    tokio::time::sleep(tokio::time::Duration::from_secs(1))
+                        .await;
+                    continue;
+                }
+
+                Err(err) => {
+                    return Err(DeleteDatasetVolumeError::execution(
+                        params.name.to_string(),
+                        err,
+                    ));
+                }
             }
-
-            Err(err) => Err(DeleteDatasetVolumeError::execution(
-                params.name.to_string(),
-                err,
-            )),
         }
+
+        // Execution should never reach here?
+        Ok(())
     }
 }
 
