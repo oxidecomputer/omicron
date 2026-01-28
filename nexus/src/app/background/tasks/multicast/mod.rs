@@ -130,7 +130,6 @@
 use std::collections::{BTreeMap, HashMap};
 use std::net::{IpAddr, Ipv6Addr};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 use futures::FutureExt;
@@ -145,7 +144,7 @@ use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
 use nexus_types::internal_api::background::MulticastGroupReconcilerStatus;
 use omicron_common::address::UNDERLAY_MULTICAST_SUBNET;
-use omicron_uuid_kinds::SledUuid;
+use omicron_uuid_kinds::{CollectionUuid, SledUuid};
 
 use crate::app::background::BackgroundTask;
 use crate::app::multicast::dataplane::MulticastDataplaneClient;
@@ -215,11 +214,15 @@ pub(crate) struct MulticastGroupReconciler {
     group_concurrency_limit: usize,
     /// Whether multicast functionality is enabled (or not).
     enabled: bool,
-    /// Flag to signal cache invalidation on next activation.
+    /// Last seen inventory collection ID for cache invalidation.
     ///
-    /// Set to `true` when topology changes occur (sled add/remove, inventory updates).
-    /// Checked and cleared at the start of each reconciliation pass.
-    invalidate_cache_on_next_run: Arc<AtomicBool>,
+    /// When the inventory collection ID changes, it indicates topology may have
+    /// changed (sled add/remove, inventory updates). The caches are invalidated
+    /// when a new collection ID is detected.
+    ///
+    /// This approach is database-driven and works across all Nexus instances,
+    /// unlike in-memory hints that only affect a single Nexus.
+    last_seen_collection_id: Option<CollectionUuid>,
 }
 
 impl MulticastGroupReconciler {
@@ -230,7 +233,6 @@ impl MulticastGroupReconciler {
         enabled: bool,
         sled_cache_ttl: Duration,
         backplane_cache_ttl: Duration,
-        invalidate_cache_flag: Arc<AtomicBool>,
     ) -> Self {
         Self {
             datastore,
@@ -246,7 +248,7 @@ impl MulticastGroupReconciler {
             member_concurrency_limit: 100,
             group_concurrency_limit: 100,
             enabled,
-            invalidate_cache_on_next_run: invalidate_cache_flag,
+            last_seen_collection_id: None,
         }
     }
 
@@ -277,6 +279,47 @@ impl MulticastGroupReconciler {
         let mut cache = self.sled_mapping_cache.write().await;
         // Set timestamp to past to force refresh on next check
         *cache = (Instant::now() - self.sled_cache_ttl, cache.1.clone());
+    }
+
+    /// Check if inventory collection changed and invalidate caches if so.
+    ///
+    /// This is database-driven and works across all Nexus instances.
+    async fn check_inventory_for_cache_invalidation(
+        &mut self,
+        opctx: &OpContext,
+    ) {
+        let latest_id = match self
+            .datastore
+            .inventory_get_latest_collection_id(opctx)
+            .await
+        {
+            Ok(Some(id)) => id,
+            Ok(None) => return,
+            Err(e) => {
+                error!(
+                    opctx.log,
+                    "failed to check inventory collection: {e:#}"
+                );
+                return;
+            }
+        };
+
+        if self.last_seen_collection_id == Some(latest_id) {
+            return;
+        }
+
+        // Invalidate caches (skip on first run when just initializing)
+        if self.last_seen_collection_id.is_some() {
+            info!(
+                opctx.log,
+                "invalidating multicast caches";
+                "new_collection_id" => %latest_id
+            );
+            self.invalidate_backplane_cache().await;
+            self.invalidate_sled_mapping_cache().await;
+        }
+
+        self.last_seen_collection_id = Some(latest_id);
     }
 }
 
@@ -463,19 +506,7 @@ impl MulticastGroupReconciler {
 
         trace!(opctx.log, "starting multicast reconciliation pass");
 
-        // Check if cache invalidation was requested
-        if self
-            .invalidate_cache_on_next_run
-            .compare_exchange(true, false, Ordering::SeqCst, Ordering::SeqCst)
-            .is_ok()
-        {
-            info!(
-                opctx.log,
-                "invalidating multicast caches due to topology change"
-            );
-            self.invalidate_backplane_cache().await;
-            self.invalidate_sled_mapping_cache().await;
-        }
+        self.check_inventory_for_cache_invalidation(opctx).await;
 
         // Create dataplane client (across switches) once for the entire
         // reconciliation pass (in case anything has changed)
