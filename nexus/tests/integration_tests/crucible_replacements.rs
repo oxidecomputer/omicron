@@ -2669,6 +2669,138 @@ async fn test_read_only_replacement_sanity(
     );
 }
 
+/// Basically the same as `test_read_only_replacement_sanity` but with a
+/// read-only disk backed directly by a snapshot.
+#[nexus_test(extra_sled_agents = 3)]
+async fn test_read_only_disk_snapshot_replacement_sanity(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let nexus = &cptestctx.server.server_context().nexus;
+    let datastore = nexus.datastore();
+    let opctx =
+        OpContext::for_tests(cptestctx.logctx.log.new(o!()), datastore.clone());
+    let lockstep_client = &cptestctx.lockstep_client;
+
+    // Create one zpool per sled, each with one dataset. This is required for
+    // region and region snapshot replacement to have somewhere to move the
+    // data.
+    DiskTestBuilder::new(&cptestctx)
+        .on_all_sleds()
+        .with_zpool_count(1)
+        .build()
+        .await;
+
+    // Any volumes sent to the Pantry for reconciliation should return active
+    // for this test
+    cptestctx
+        .first_sim_server()
+        .pantry_server
+        .as_ref()
+        .unwrap()
+        .pantry
+        .set_auto_activate_volumes();
+
+    // Create a disk and a snapshot and a disk from that snapshot
+    let client = &cptestctx.external_client;
+    let _project_id = create_project_and_pool(client).await;
+
+    let disk = create_disk(&client, PROJECT_NAME, "disk").await;
+    let snapshot = create_snapshot(&client, PROJECT_NAME, "disk", "snap").await;
+    let _disk_from_snapshot = create_disk_from_snapshot(
+        &client,
+        PROJECT_NAME,
+        "ro-disk-from-snap",
+        &snapshot,
+        true,
+    )
+    .await;
+
+    // Manually create region snapshot replacement requests for each region
+    // snapshot.
+
+    let Disk::Crucible(db_disk) =
+        datastore.disk_get(&opctx, disk.identity.id).await.unwrap()
+    else {
+        unreachable!()
+    };
+
+    assert_eq!(db_disk.id(), disk.identity.id);
+
+    let disk_allocated_regions =
+        datastore.get_allocated_regions(db_disk.volume_id()).await.unwrap();
+
+    for (_, region) in &disk_allocated_regions {
+        let region_snapshot = datastore
+            .region_snapshot_get(
+                region.dataset_id(),
+                region.id(),
+                snapshot.identity.id,
+            )
+            .await
+            .expect("found region snapshot")
+            .unwrap();
+
+        datastore
+            .create_region_snapshot_replacement_request(
+                &opctx,
+                &region_snapshot,
+            )
+            .await
+            .unwrap();
+
+        wait_for_all_replacements(&datastore, &lockstep_client).await;
+    }
+
+    // Now expunge a sled with read-only regions on it.
+
+    let (.., db_snapshot) = LookupPath::new(&opctx, datastore)
+        .snapshot_id(snapshot.identity.id)
+        .fetch()
+        .await
+        .unwrap();
+
+    assert_eq!(db_snapshot.id(), snapshot.identity.id);
+
+    let snapshot_allocated_regions =
+        datastore.get_allocated_regions(db_snapshot.volume_id()).await.unwrap();
+
+    let (dataset, region) = &snapshot_allocated_regions[0];
+    assert!(region.read_only());
+
+    let (_, db_zpool) = LookupPath::new(&opctx, datastore)
+        .zpool_id(dataset.pool_id())
+        .fetch()
+        .await
+        .unwrap();
+
+    datastore
+        .physical_disk_update_policy(
+            &opctx,
+            db_zpool.physical_disk_id(),
+            PhysicalDiskPolicy::Expunged,
+        )
+        .await
+        .unwrap();
+
+    wait_for_all_replacements(&datastore, &lockstep_client).await;
+
+    // Validate all regions are on non-expunged physical disks
+    assert!(
+        datastore
+            .find_read_write_regions_on_expunged_physical_disks(&opctx)
+            .await
+            .unwrap()
+            .is_empty()
+    );
+    assert!(
+        datastore
+            .find_read_only_regions_on_expunged_physical_disks(&opctx)
+            .await
+            .unwrap()
+            .is_empty()
+    );
+}
+
 /// `test_replacement_sanity_twice`, but delete the snapshot before doing the
 /// expungements
 #[nexus_test(extra_sled_agents = 3)]
