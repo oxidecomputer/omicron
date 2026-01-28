@@ -57,6 +57,7 @@ use omicron_common::api::external::ResourceType;
 use omicron_common::api::external::UpdateResult;
 use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::zpool_name::ZpoolName;
+use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::ExternalZpoolUuid;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::SledUuid;
@@ -186,6 +187,14 @@ pub enum LocalStorageAllocation {
 }
 
 impl LocalStorageAllocation {
+    pub fn id(&self) -> DatasetUuid {
+        match &self {
+            LocalStorageAllocation::Unencrypted(allocation) => allocation.id(),
+
+            LocalStorageAllocation::Encrypted(allocation) => allocation.id(),
+        }
+    }
+
     pub fn sled_id(&self) -> SledUuid {
         match &self {
             LocalStorageAllocation::Unencrypted(allocation) => {
@@ -207,6 +216,14 @@ impl LocalStorageAllocation {
             LocalStorageAllocation::Encrypted(allocation) => {
                 allocation.pool_id()
             }
+        }
+    }
+
+    pub fn encrypted_at_rest(&self) -> bool {
+        match &self {
+            LocalStorageAllocation::Unencrypted(_) => false,
+
+            LocalStorageAllocation::Encrypted(_) => true,
         }
     }
 }

@@ -1013,31 +1013,44 @@ pub enum DelegatedZvol {
 }
 
 impl DelegatedZvol {
-    /// Return the fully qualified dataset name that the volume is in.
-    pub fn parent_dataset_name(&self) -> String {
+    pub fn zpool_id(&self) -> ExternalZpoolUuid {
         match &self {
-            DelegatedZvol::LocalStorageUnencrypted { zpool_id, dataset_id } => {
-                // The unencrypted local storage dataset is the parent for an
-                // allocation
-                let local_storage_parent = DatasetName::new(
-                    ZpoolName::External(*zpool_id),
-                    DatasetKind::LocalStorageUnencrypted,
-                );
-
-                format!("{}/{}", local_storage_parent.full_name(), dataset_id)
-            }
-
-            DelegatedZvol::LocalStorageEncrypted { zpool_id, dataset_id } => {
-                // The encrypted local storage dataset is the parent for an
-                // allocation
-                let local_storage_parent = DatasetName::new(
-                    ZpoolName::External(*zpool_id),
-                    DatasetKind::LocalStorage,
-                );
-
-                format!("{}/{}", local_storage_parent.full_name(), dataset_id)
+            DelegatedZvol::LocalStorageUnencrypted { zpool_id, .. }
+            | DelegatedZvol::LocalStorageEncrypted { zpool_id, .. } => {
+                *zpool_id
             }
         }
+    }
+
+    pub fn dataset_id(&self) -> DatasetUuid {
+        match &self {
+            DelegatedZvol::LocalStorageUnencrypted { dataset_id, .. }
+            | DelegatedZvol::LocalStorageEncrypted { dataset_id, .. } => {
+                *dataset_id
+            }
+        }
+    }
+
+    pub fn dataset_kind(&self) -> DatasetKind {
+        match &self {
+            DelegatedZvol::LocalStorageUnencrypted { .. } => {
+                DatasetKind::LocalStorageUnencrypted
+            }
+
+            DelegatedZvol::LocalStorageEncrypted { .. } => {
+                DatasetKind::LocalStorage
+            }
+        }
+    }
+
+    /// Return the fully qualified dataset name that the volume is in.
+    pub fn parent_dataset_name(&self) -> String {
+        let local_storage_parent = DatasetName::new(
+            ZpoolName::External(self.zpool_id()),
+            self.dataset_kind(),
+        );
+
+        format!("{}/{}", local_storage_parent.full_name(), self.dataset_id())
     }
 
     /// Return the mountpoint for the parent dataset in the zone

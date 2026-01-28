@@ -223,30 +223,12 @@ async fn sdd_delete_local_storage(
         return Ok(());
     };
 
-    let (sled_id, request) = match allocation {
-        datastore::LocalStorageAllocation::Unencrypted(allocation) => {
-            let sled_id = allocation.sled_id();
+    let sled_id = allocation.sled_id();
 
-            let request = LocalStorageDatasetDeleteRequest {
-                zpool_id: allocation.pool_id(),
-                dataset_id: allocation.id(),
-                encrypted_at_rest: false,
-            };
-
-            (sled_id, request)
-        }
-
-        datastore::LocalStorageAllocation::Encrypted(allocation) => {
-            let sled_id = allocation.sled_id();
-
-            let request = LocalStorageDatasetDeleteRequest {
-                zpool_id: allocation.pool_id(),
-                dataset_id: allocation.id(),
-                encrypted_at_rest: true,
-            };
-
-            (sled_id, request)
-        }
+    let request = LocalStorageDatasetDeleteRequest {
+        zpool_id: allocation.pool_id(),
+        dataset_id: allocation.id(),
+        encrypted_at_rest: allocation.encrypted_at_rest(),
     };
 
     // Get a sled agent client
