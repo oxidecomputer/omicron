@@ -78,10 +78,9 @@ impl Args {
                 diagnose_measurements(&client).await?;
             }
         }
-    
+
         Ok(())
     }
-
 }
 
 fn parse_dropshot_log_level(
