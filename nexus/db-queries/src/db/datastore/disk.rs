@@ -611,6 +611,13 @@ impl DataStore {
     ) -> Result<Disk, diesel::result::Error> {
         use nexus_db_schema::schema::disk::dsl;
 
+        // In what state do we expect the disk record to be created? This will
+        // generally be `Creating`, save for read-only disks being created from
+        // snapshots, which pop into existence already `Detached` (as the
+        // snapshot backing them already exists). Thus, when we check for insert
+        // conflicts, we must compare the inserted state with the requested
+        // initial state, rather than assuming it will always be `Creating`.
+        let initial_state = disk.state();
         let generation = disk.runtime().generation;
         let name = disk.name().clone();
         let project_id = disk.project_id();
@@ -683,9 +690,10 @@ impl DataStore {
         // ensure that the newly created Disk is valid (even if there was an
         // insertion conflict).
 
-        if disk_model.state().state() != &api::external::DiskState::Creating {
+        if disk_model.state().state() != initial_state.state() {
             return Err(err.bail(Error::internal_error(&format!(
-                "newly-created Disk has unexpected state: {:?}",
+                "newly-created Disk has unexpected state: {:?} (expected \
+                 {initial_state:?})",
                 disk_model.state(),
             ))));
         }
@@ -1801,12 +1809,17 @@ impl DataStore {
 
         let disk_id = Uuid::new_v4();
 
+        // No additional work is required to create a read-only disk from a
+        // snapshot, as the snapshot already exists. Thus, the new disk begins
+        // its life in the `Detached` state, rather than `Creating`. As soon as
+        // the database records are created, the disk is ready for use.
+        let runtime_initial = db::model::DiskRuntimeState::new().detach();
         let disk = db::model::Disk::new(
             disk_id,
             authz_project.id(),
             &params,
             snapshot.block_size,
-            db::model::DiskRuntimeState::new(),
+            runtime_initial,
             db::model::DiskType::Crucible,
         );
 
