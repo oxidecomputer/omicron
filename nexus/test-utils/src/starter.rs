@@ -880,6 +880,7 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
         sled_id: SledUuid,
         sled_index: u16,
         sim_mode: sim::SimMode,
+        health_monitor: sim::ConfigHealthMonitor,
     ) {
         let nexus_address =
             self.nexus_internal_addr.expect("Must launch Nexus first");
@@ -896,6 +897,7 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
             tempdir.path(),
             sim_mode,
             &self.simulated_upstairs,
+            health_monitor,
         )
         .await
         .expect("Failed to start sled agent");
@@ -1000,6 +1002,7 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
         sled_id: SledUuid,
         sled_index: u16,
         sim_mode: sim::SimMode,
+        health_monitor: sim::ConfigHealthMonitor,
     ) {
         let nexus_address =
             self.nexus_internal_addr.expect("Must launch Nexus first");
@@ -1016,6 +1019,7 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
             tempdir.path(),
             sim_mode,
             &self.simulated_upstairs,
+            health_monitor,
         )
         .await
         .expect("Failed to start sled agent");
@@ -1534,15 +1538,26 @@ impl RackInitRequestBuilder {
     }
 }
 
+#[derive(Debug, Clone)]
+pub(crate) struct SledAgentOptions {
+    pub sim_mode: sim::SimMode,
+    pub extra_sled_agents: u16,
+    pub sled_agent_health_monitor: sim::ConfigHealthMonitor,
+}
+
 pub(crate) async fn setup_with_config_impl<N: NexusServer>(
     mut starter: ControlPlaneStarter<'_, N>,
     populate: PopulateCrdb,
-    sim_mode: sim::SimMode,
+    sled_agent_opts: SledAgentOptions,
     initial_cert: Option<Certificate>,
-    extra_sled_agents: u16,
     gateway_config_file: Utf8PathBuf,
     second_nexus: bool,
 ) -> ControlPlaneTestContext<N> {
+    let SledAgentOptions {
+        sim_mode,
+        extra_sled_agents,
+        sled_agent_health_monitor,
+    } = sled_agent_opts;
     const STEP_TIMEOUT: Duration = Duration::from_secs(600);
 
     // All setups will start with CRDB and clickhouse
@@ -1705,6 +1720,7 @@ pub(crate) async fn setup_with_config_impl<N: NexusServer>(
     // The first and second sled agents have special UUIDs, and any extra ones
     // after that are random.
 
+    let health_monitor = sled_agent_health_monitor.clone();
     starter
         .init_with_steps(
             vec![(
@@ -1715,6 +1731,7 @@ pub(crate) async fn setup_with_config_impl<N: NexusServer>(
                             SLED_AGENT_UUID.parse().unwrap(),
                             0,
                             sim_mode,
+                            health_monitor,
                         )
                         .boxed()
                 }),
@@ -1723,6 +1740,7 @@ pub(crate) async fn setup_with_config_impl<N: NexusServer>(
         )
         .await;
 
+    let health_monitor = sled_agent_health_monitor.clone();
     if extra_sled_agents > 0 {
         starter
             .init_with_steps(
@@ -1734,6 +1752,7 @@ pub(crate) async fn setup_with_config_impl<N: NexusServer>(
                                 SLED_AGENT2_UUID.parse().unwrap(),
                                 1,
                                 sim_mode,
+                                health_monitor,
                             )
                             .boxed()
                     }),
@@ -1743,7 +1762,9 @@ pub(crate) async fn setup_with_config_impl<N: NexusServer>(
             .await;
     }
 
+    let health_monitor = sled_agent_health_monitor.clone();
     for index in 1..extra_sled_agents {
+        let health_monitor = health_monitor.clone();
         starter
             .init_with_steps(
                 vec![(
@@ -1754,6 +1775,7 @@ pub(crate) async fn setup_with_config_impl<N: NexusServer>(
                                 SledUuid::new_v4(),
                                 index.checked_add(1).unwrap(),
                                 sim_mode,
+                                health_monitor.clone(),
                             )
                             .boxed()
                     }),
@@ -1839,6 +1861,7 @@ pub(crate) enum PopulateCrdb {
 ///
 /// Note: you should probably use the `extra_sled_agents` macro parameter on
 /// `nexus_test` instead!
+#[allow(clippy::too_many_arguments)]
 pub async fn start_sled_agent(
     log: Logger,
     nexus_address: SocketAddr,
@@ -1847,6 +1870,7 @@ pub async fn start_sled_agent(
     update_directory: &Utf8Path,
     sim_mode: sim::SimMode,
     simulated_upstairs: &Arc<sim::SimulatedUpstairs>,
+    health_monitor: sim::ConfigHealthMonitor,
 ) -> Result<sim::Server, String> {
     // Generate a baseboard serial number that matches the SP configuration
     // (SimGimlet00, SimGimlet01, etc.) so that inventory can link sled agents
@@ -1861,6 +1885,7 @@ pub async fn start_sled_agent(
         sim::ZpoolConfig::None,
         SledCpuFamily::AmdMilan,
         Some(baseboard_serial),
+        health_monitor,
     );
     start_sled_agent_with_config(log, &config, sled_index, simulated_upstairs)
         .await

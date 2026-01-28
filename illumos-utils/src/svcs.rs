@@ -199,8 +199,8 @@ impl From<String> for SvcState {
 #[serde(rename_all = "snake_case")]
 /// Information about an SMF service that is enabled but not running
 pub struct SvcInMaintenance {
-    fmri: String,
-    zone: String,
+    pub fmri: String,
+    pub zone: String,
 }
 
 impl SvcInMaintenance {
