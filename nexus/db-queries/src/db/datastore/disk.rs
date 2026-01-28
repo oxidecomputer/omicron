@@ -617,7 +617,23 @@ impl DataStore {
         // snapshot backing them already exists). Thus, when we check for insert
         // conflicts, we must compare the inserted state with the requested
         // initial state, rather than assuming it will always be `Creating`.
-        let initial_state = disk.state();
+        let expected_state = if let Disk::Crucible(CrucibleDisk {
+            disk_type_crucible:
+                // The state is expected to be `Detached` if and ONLY if the
+                // disk is read-only and backed by a preexisting snapshot.
+                DiskTypeCrucible {
+                    read_only: true,
+                    create_snapshot_id: Some(_),
+                    ..
+                },
+            ..
+        }) = disk
+        {
+            external::DiskState::Detached
+        } else {
+            external::DiskState::Creating
+        };
+
         let generation = disk.runtime().generation;
         let name = disk.name().clone();
         let project_id = disk.project_id();
@@ -690,10 +706,10 @@ impl DataStore {
         // ensure that the newly created Disk is valid (even if there was an
         // insertion conflict).
 
-        if disk_model.state().state() != initial_state.state() {
+        if disk_model.state().state() != &expected_state {
             return Err(err.bail(Error::internal_error(&format!(
                 "newly-created Disk has unexpected state: {:?} (expected \
-                 {initial_state:?})",
+                 {expected_state:?})",
                 disk_model.state(),
             ))));
         }
