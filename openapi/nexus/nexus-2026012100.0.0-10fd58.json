@@ -4601,7 +4601,6 @@
           "instances"
         ],
         "summary": "Detach and deallocate ephemeral IP from instance",
-        "description": "When an instance has both IPv4 and IPv6 ephemeral IPs, the `ip_version` query parameter must be specified to identify which IP to detach.",
         "operationId": "instance_ephemeral_ip_detach",
         "parameters": [
           {
@@ -4611,14 +4610,6 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
-            }
-          },
-          {
-            "in": "query",
-            "name": "ip_version",
-            "description": "The IP version of the ephemeral IP to detach.\n\nRequired when the instance has both IPv4 and IPv6 ephemeral IPs. If only one ephemeral IP is attached, this field may be omitted.",
-            "schema": {
-              "$ref": "#/components/schemas/IpVersion"
             }
           },
           {
