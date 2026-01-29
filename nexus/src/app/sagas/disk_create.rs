@@ -78,6 +78,9 @@ declare_saga_actions! {
         + sdc_call_pantry_attach_for_disk
         - sdc_call_pantry_attach_for_disk_undo
     }
+    CREATE_READONLY_DISK_RECORDS -> "created_disk" {
+        + sdc_create_readonly_disk_records
+    }
 }
 
 // disk create saga: definition
@@ -111,6 +114,17 @@ impl NexusSaga for SagaDiskCreate {
         builder.append(space_account_action());
 
         match &params.create_params.disk_backend {
+            params::DiskBackend::Distributed {
+                disk_source:
+                    params::DiskSource::Snapshot { read_only: true, .. },
+            } => {
+                builder.append(create_readonly_disk_records_action());
+
+                // Creating a read-only disk from a snapshot doesn't require any
+                // additional actions, so bail out early.
+                return Ok(builder.build()?);
+            }
+
             params::DiskBackend::Distributed { .. } => {
                 builder.append(create_crucible_disk_record_action());
                 builder.append(regions_alloc_action());
@@ -137,9 +151,10 @@ impl NexusSaga for SagaDiskCreate {
                     params::DiskSource::Snapshot {
                         read_only: true, ..
                     } => {
-                        return Err(SagaInitError::InvalidParameter(
-                            READONLY_FROM_SNAPSHOT_ERR.to_string(),
-                        ));
+                        unreachable!(
+                            "the previous match should have returned early if \
+                             the disk is readonly and created from a snapshot",
+                        )
                     }
                     _ => {}
                 }
@@ -155,9 +170,6 @@ impl NexusSaga for SagaDiskCreate {
 }
 
 // disk create saga: action implementations
-
-const READONLY_FROM_SNAPSHOT_ERR: &str = "creating a read-only disk from a \
-    snapshot should not involve a disk_create saga";
 
 async fn sdc_create_crucible_disk_record(
     sagactx: NexusActionContext,
@@ -194,7 +206,7 @@ async fn sdc_create_crucible_disk_record(
         }
         params::DiskSource::Snapshot { read_only: true, .. } => {
             return Err(ActionError::action_failed(Error::internal_error(
-                READONLY_FROM_SNAPSHOT_ERR,
+                "wrong DiskSource variant!",
             )));
         }
         params::DiskSource::Snapshot { snapshot_id, read_only: false } => {
@@ -526,7 +538,7 @@ async fn sdc_regions_ensure(
             params::DiskSource::Blank { block_size: _ } => None,
             params::DiskSource::Snapshot { read_only: true, .. } => {
                 return Err(ActionError::action_failed(Error::internal_error(
-                    READONLY_FROM_SNAPSHOT_ERR,
+                    "wrong DiskSource variant!",
                 )));
             }
 
@@ -954,6 +966,37 @@ async fn sdc_call_pantry_attach_for_disk_undo(
     .await?;
 
     Ok(())
+}
+
+async fn sdc_create_readonly_disk_records(
+    sagactx: NexusActionContext,
+) -> Result<db::datastore::Disk, ActionError> {
+    let osagactx = sagactx.user_data();
+    let params = sagactx.saga_params::<Params>()?;
+
+    let disk_id = sagactx.lookup::<Uuid>("disk_id")?;
+
+    let opctx = crate::context::op_context_for_saga_action(
+        &sagactx,
+        &params.serialized_authn,
+    );
+
+    let (.., authz_project) = LookupPath::new(&opctx, osagactx.datastore())
+        .project_id(params.project_id)
+        .lookup_for(authz::Action::CreateChild)
+        .await
+        .map_err(ActionError::action_failed)?;
+
+    osagactx
+        .datastore()
+        .project_create_read_only_disk_from_snapshot(
+            &opctx,
+            &authz_project,
+            &disk_id,
+            &params.create_params,
+        )
+        .await
+        .map_err(ActionError::action_failed)
 }
 
 // helper functions

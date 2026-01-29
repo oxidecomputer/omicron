@@ -1792,6 +1792,7 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         authz_project: &authz::Project,
+        disk_id: &Uuid,
         params: &params::DiskCreate,
     ) -> CreateResult<db::datastore::Disk> {
         // First, make sure we're actually making a read-only disk from a
@@ -1831,6 +1832,7 @@ impl DataStore {
                         &conn,
                         err,
                         authz_project,
+                        disk_id,
                         params,
                         snapshot_id,
                     )
@@ -1853,6 +1855,7 @@ impl DataStore {
         conn: &async_bb8_diesel::Connection<DbConnection>,
         err: OptionalError<Error>,
         authz_project: &authz::Project,
+        disk_id: &Uuid,
         params: &params::DiskCreate,
         snapshot_id: Uuid,
     ) -> Result<db::datastore::Disk, diesel::result::Error> {
@@ -1937,15 +1940,13 @@ impl DataStore {
             }
         })?;
 
-        let disk_id = Uuid::new_v4();
-
         // No additional work is required to create a read-only disk from a
         // snapshot, as the snapshot already exists. Thus, the new disk begins
         // its life in the `Detached` state, rather than `Creating`. As soon as
         // the database records are created, the disk is ready for use.
         let runtime_initial = db::model::DiskRuntimeState::new().detach();
         let disk = db::model::Disk::new(
-            disk_id,
+            *disk_id,
             authz_project.id(),
             &params,
             snapshot.block_size,
@@ -1962,7 +1963,7 @@ impl DataStore {
             )));
         };
         let disk_type_crucible = db::model::DiskTypeCrucible::new(
-            disk_id,
+            *disk_id,
             read_only_disk_volume.id(),
             &disk_source,
         );
