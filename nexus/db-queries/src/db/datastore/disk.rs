@@ -1864,6 +1864,40 @@ impl DataStore {
         use crate::db::datastore::read_only_resources_associated_with_volume;
         use sled_agent_client::VolumeConstructionRequest;
 
+        // For idempotency, first check if the disk already exists, and if it
+        // does, just return that.
+        let maybe_disk = {
+            use nexus_db_schema::schema::disk::dsl;
+            dsl::disk
+                .filter(dsl::id.eq(*disk_id))
+                .select(db::model::Disk::as_select())
+                .get_result_async(conn)
+                .await
+                .optional()?
+        };
+        if let Some(disk) = maybe_disk {
+            if disk.disk_type != db::model::DiskType::Crucible {
+                // this is *probably* a UUID collision. Seems bad.
+                return Err(err.bail(Error::InternalError {
+                    internal_message: format!(
+                        "weird! disk {disk_id} already exists, \
+                         but its type was {:?} (not Crucible)",
+                        disk.disk_type,
+                    ),
+                }));
+            }
+            use nexus_db_schema::schema::disk_type_crucible::dsl;
+            let disk_type_crucible = dsl::disk_type_crucible
+                .filter(dsl::disk_id.eq(*disk_id))
+                .select(db::model::DiskTypeCrucible::as_select())
+                .get_result_async(conn)
+                .await?;
+            return Ok(db::datastore::Disk::Crucible(CrucibleDisk {
+                disk,
+                disk_type_crucible,
+            }));
+        }
+
         let maybe_snapshot: Option<db::model::Snapshot> = {
             use nexus_db_schema::schema::snapshot::dsl;
             dsl::snapshot

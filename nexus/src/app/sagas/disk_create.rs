@@ -1051,6 +1051,7 @@ pub(crate) mod test {
     use crate::{
         app::saga::create_saga_dag, app::sagas::disk_create::Params,
         app::sagas::disk_create::SagaDiskCreate, external_api::params,
+        external_api::views,
     };
     use async_bb8_diesel::{AsyncRunQueryDsl, AsyncSimpleConnection};
     use diesel::{
@@ -1060,6 +1061,7 @@ pub(crate) mod test {
     use nexus_db_queries::context::OpContext;
     use nexus_db_queries::db;
     use nexus_db_queries::db::datastore::DataStore;
+    use nexus_test_utils::resource_helpers;
     use nexus_test_utils::resource_helpers::create_project;
     use nexus_test_utils_macros::nexus_test;
     use omicron_common::api::external::ByteCount;
@@ -1088,6 +1090,31 @@ pub(crate) mod test {
                 },
             },
             size: ByteCount::from_gibibytes_u32(1),
+        }
+    }
+
+    fn new_readonly_disk_create_params(
+        opctx: &OpContext,
+        project_id: Uuid,
+        snapshot: &views::Snapshot,
+    ) -> Params {
+        let create_params = params::DiskCreate {
+            identity: IdentityMetadataCreateParams {
+                name: DISK_NAME.parse().expect("Invalid disk name"),
+                description: "My disk".to_string(),
+            },
+            disk_backend: params::DiskBackend::Distributed {
+                disk_source: params::DiskSource::Snapshot {
+                    read_only: true,
+                    snapshot_id: snapshot.identity.id,
+                },
+            },
+            size: snapshot.size.into(),
+        };
+        Params {
+            serialized_authn: Serialized::for_opctx(opctx),
+            project_id,
+            create_params,
         }
     }
 
@@ -1127,6 +1154,50 @@ pub(crate) mod test {
             .lookup_node_output::<db::datastore::Disk>("created_disk")
             .unwrap();
         assert_eq!(disk.project_id(), project_id);
+    }
+
+    #[nexus_test(server = crate::Server)]
+    async fn test_saga_read_only_disk_basic_usage_succeeds(
+        cptestctx: &ControlPlaneTestContext,
+    ) {
+        DiskTest::new(cptestctx).await;
+
+        let client = &cptestctx.external_client;
+        let nexus = &cptestctx.server.server_context().nexus;
+        let project_id =
+            create_project(&client, PROJECT_NAME).await.identity.id;
+        resource_helpers::create_disk(&client, PROJECT_NAME, "base-disk").await;
+        let snapshot = resource_helpers::create_snapshot(
+            &client,
+            PROJECT_NAME,
+            "base-disk",
+            "sneepshnop",
+        )
+        .await;
+
+        // Build the saga DAG with the provided test parameters and run it.
+        let opctx = test_opctx(cptestctx);
+        let params =
+            new_readonly_disk_create_params(&opctx, project_id, &snapshot);
+        let output =
+            nexus.sagas.saga_execute::<SagaDiskCreate>(params).await.unwrap();
+        let disk = output
+            .lookup_node_output::<db::datastore::Disk>("created_disk")
+            .unwrap();
+        assert_eq!(disk.project_id(), project_id);
+
+        let db::datastore::Disk::Crucible(db::datastore::CrucibleDisk {
+            disk_type_crucible,
+            ..
+        }) = disk
+        else {
+            panic!("expected a Crucible disk, got: {disk:?}");
+        };
+        assert_eq!(
+            disk_type_crucible.create_snapshot_id,
+            Some(snapshot.identity.id)
+        );
+        assert!(disk_type_crucible.read_only);
     }
 
     async fn no_disk_records_exist(datastore: &DataStore) -> bool {
@@ -1346,6 +1417,91 @@ pub(crate) mod test {
         ).await;
     }
 
+    #[nexus_test(server = crate::Server)]
+    async fn test_readonly_disk_action_failure_can_unwind(
+        cptestctx: &ControlPlaneTestContext,
+    ) {
+        let test = DiskTest::new(cptestctx).await;
+        let log = &cptestctx.logctx.log;
+
+        let client = &cptestctx.external_client;
+        let nexus = &cptestctx.server.server_context().nexus;
+
+        let project_id =
+            create_project(&client, PROJECT_NAME).await.identity.id;
+        resource_helpers::create_disk(&client, PROJECT_NAME, "base-disk").await;
+        let snapshot = resource_helpers::create_snapshot(
+            &client,
+            PROJECT_NAME,
+            "base-disk",
+            "sneepshnop",
+        )
+        .await;
+
+        let opctx = test_opctx(cptestctx);
+
+        crate::app::sagas::test_helpers::action_failure_can_unwind::<
+            SagaDiskCreate,
+            _,
+            _,
+        >(
+            nexus,
+            || {
+                Box::pin(async {
+                    new_readonly_disk_create_params(
+                        &opctx, project_id, &snapshot,
+                    )
+                })
+            },
+            || {
+                Box::pin(async {
+                    verify_clean_slate(&cptestctx, &test).await;
+                })
+            },
+            log,
+        )
+        .await;
+    }
+
+    #[nexus_test(server = crate::Server)]
+    async fn test_readonly_disk_action_failure_can_unwind_idempotently(
+        cptestctx: &ControlPlaneTestContext,
+    ) {
+        let test = DiskTest::new(cptestctx).await;
+        let log = &cptestctx.logctx.log;
+
+        let client = &cptestctx.external_client;
+        let nexus = &cptestctx.server.server_context().nexus;
+
+        let project_id =
+            create_project(&client, PROJECT_NAME).await.identity.id;
+        resource_helpers::create_disk(&client, PROJECT_NAME, "base-disk").await;
+        let snapshot = resource_helpers::create_snapshot(
+            &client,
+            PROJECT_NAME,
+            "base-disk",
+            "sneepshnop",
+        )
+        .await;
+
+        let opctx = test_opctx(cptestctx);
+
+        crate::app::sagas::test_helpers::action_failure_can_unwind_idempotently::<
+            SagaDiskCreate,
+            _,
+            _
+        >(
+            nexus,
+            || Box::pin(async {
+                new_readonly_disk_create_params(
+                    &opctx, project_id, &snapshot,
+                )
+            }),
+            || Box::pin(async { verify_clean_slate(&cptestctx, &test).await; }),
+            log
+        ).await;
+    }
+
     async fn destroy_disk(cptestctx: &ControlPlaneTestContext) {
         let nexus = &cptestctx.server.server_context().nexus;
         let opctx = test_opctx(&cptestctx);
@@ -1378,6 +1534,41 @@ pub(crate) mod test {
         let opctx = test_opctx(&cptestctx);
 
         let params = new_test_params(&opctx, project_id);
+        let dag = create_saga_dag::<SagaDiskCreate>(params).unwrap();
+        crate::app::sagas::test_helpers::actions_succeed_idempotently(
+            nexus, dag,
+        )
+        .await;
+
+        destroy_disk(&cptestctx).await;
+        verify_clean_slate(&cptestctx, &test).await;
+    }
+
+    #[nexus_test(server = crate::Server)]
+    async fn test_readonly_disk_actions_succeed_idempotently(
+        cptestctx: &ControlPlaneTestContext,
+    ) {
+        let test = DiskTest::new(cptestctx).await;
+
+        let client = &cptestctx.external_client;
+        let nexus = &cptestctx.server.server_context().nexus;
+
+        let project_id =
+            create_project(&client, PROJECT_NAME).await.identity.id;
+        resource_helpers::create_disk(&client, PROJECT_NAME, "base-disk").await;
+        let snapshot = resource_helpers::create_snapshot(
+            &client,
+            PROJECT_NAME,
+            "base-disk",
+            "sneepshnop",
+        )
+        .await;
+
+        // Build the saga DAG with the provided test parameters
+        let opctx = test_opctx(&cptestctx);
+
+        let params =
+            new_readonly_disk_create_params(&opctx, project_id, &snapshot);
         let dag = create_saga_dag::<SagaDiskCreate>(params).unwrap();
         crate::app::sagas::test_helpers::actions_succeed_idempotently(
             nexus, dag,
