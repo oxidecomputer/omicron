@@ -120,6 +120,7 @@ use nexus_db_queries::db::datastore::CrucibleTargets;
 use nexus_db_queries::db::datastore::Disk;
 use nexus_db_queries::db::datastore::InstanceAndActiveVmm;
 use nexus_db_queries::db::datastore::InstanceStateComputer;
+use nexus_db_queries::db::datastore::LocalStorageAllocation;
 use nexus_db_queries::db::datastore::LocalStorageDisk;
 use nexus_db_queries::db::datastore::SQL_BATCH_SIZE;
 use nexus_db_queries::db::datastore::VolumeCookedResult;
@@ -2459,6 +2460,8 @@ async fn local_storage_disk_info(
         #[tabled(display_with = "display_option_blank")]
         time_deleted: Option<DateTime<Utc>>,
 
+        allocation_type: String,
+
         dataset_id: DatasetUuid,
         pool_id: ExternalZpoolUuid,
         sled_id: SledUuid,
@@ -2467,18 +2470,39 @@ async fn local_storage_disk_info(
     }
 
     if let Some(allocation) = &disk.local_storage_dataset_allocation {
-        let rows = vec![Row {
-            disk_name: disk.name().to_string(),
+        let row = match allocation {
+            LocalStorageAllocation::Unencrypted(allocation) => Row {
+                disk_name: disk.name().to_string(),
 
-            time_created: allocation.time_created,
-            time_deleted: allocation.time_deleted,
+                time_created: allocation.time_created,
+                time_deleted: allocation.time_deleted,
 
-            dataset_id: allocation.local_storage_dataset_id(),
-            pool_id: allocation.pool_id(),
-            sled_id: allocation.sled_id(),
+                allocation_type: String::from("unencrypted"),
 
-            dataset_size: allocation.dataset_size.to_bytes(),
-        }];
+                dataset_id: allocation.local_storage_unencrypted_dataset_id(),
+                pool_id: allocation.pool_id(),
+                sled_id: allocation.sled_id(),
+
+                dataset_size: allocation.dataset_size.to_bytes(),
+            },
+
+            LocalStorageAllocation::Encrypted(allocation) => Row {
+                disk_name: disk.name().to_string(),
+
+                time_created: allocation.time_created,
+                time_deleted: allocation.time_deleted,
+
+                allocation_type: String::from("encrypted"),
+
+                dataset_id: allocation.local_storage_dataset_id(),
+                pool_id: allocation.pool_id(),
+                sled_id: allocation.sled_id(),
+
+                dataset_size: allocation.dataset_size.to_bytes(),
+            },
+        };
+
+        let rows = vec![row];
 
         let table = tabled::Table::new(rows)
             .with(tabled::settings::Style::empty())
