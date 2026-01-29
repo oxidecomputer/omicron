@@ -521,7 +521,7 @@ impl DataStore {
         opctx: &OpContext,
         authz_subnet: &authz::ExternalSubnet,
         updates: ExternalSubnetUpdate,
-    ) -> UpdateResult<()> {
+    ) -> UpdateResult<ExternalSubnet> {
         use nexus_db_schema::schema::external_subnet::dsl;
         opctx.authorize(authz::Action::Modify, authz_subnet).await?;
         diesel::update(
@@ -530,10 +530,10 @@ impl DataStore {
                 .filter(dsl::time_deleted.is_null()),
         )
         .set(updates)
-        .execute_async(&*self.pool_connection_authorized(opctx).await?)
+        .returning(ExternalSubnet::as_returning())
+        .get_result_async(&*self.pool_connection_authorized(opctx).await?)
         .await
         .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
-        .map(|_| ())
     }
 
     /// Delete an External Subnet.
@@ -561,6 +561,33 @@ impl DataStore {
                     Ok(())
                 }
             })
+    }
+
+    /// List external subnets.
+    pub async fn list_external_subnets(
+        &self,
+        opctx: &OpContext,
+        authz_project: &authz::Project,
+        pagparams: &PaginatedBy<'_>,
+    ) -> ListResultVec<ExternalSubnet> {
+        opctx.authorize(authz::Action::ListChildren, authz_project).await?;
+        use nexus_db_schema::schema::external_subnet::dsl;
+        match pagparams {
+            PaginatedBy::Id(by_id) => {
+                paginated(dsl::external_subnet, dsl::id, by_id)
+            }
+            PaginatedBy::Name(by_name) => paginated(
+                dsl::external_subnet,
+                dsl::name,
+                &by_name.map_name(|n| Name::ref_cast(n)),
+            ),
+        }
+        .filter(dsl::project_id.eq(authz_project.id()))
+        .filter(dsl::time_deleted.is_null())
+        .select(ExternalSubnet::as_select())
+        .get_results_async(&*self.pool_connection_authorized(opctx).await?)
+        .await
+        .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 }
 

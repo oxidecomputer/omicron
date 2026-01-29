@@ -259,6 +259,16 @@ pub struct ExternalSubnetUpdate {
     pub time_modified: DateTime<Utc>,
 }
 
+impl From<params::ExternalSubnetUpdate> for ExternalSubnetUpdate {
+    fn from(value: params::ExternalSubnetUpdate) -> Self {
+        Self {
+            name: value.identity.name.map(Into::into),
+            description: value.identity.description,
+            time_modified: Utc::now(),
+        }
+    }
+}
+
 #[derive(
     Clone, Copy, Debug, Deserialize, PartialEq, Queryable, Selectable, Serialize,
 )]

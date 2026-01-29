@@ -1119,13 +1119,12 @@ pub static DEMO_SUBNET_POOL_MEMBER_REMOVE: LazyLock<
 > = LazyLock::new(|| params::SubnetPoolMemberRemove {
     subnet: "10.0.0.0/16".parse().unwrap(),
 });
-// TODO(#9453): These are stub endpoints that return "not implemented" errors.
 pub static DEMO_SUBNET_POOL_SILOS_URL: LazyLock<String> =
     LazyLock::new(|| format!("{}/silos", *DEMO_SUBNET_POOL_URL));
 pub static DEMO_SUBNET_POOL_LINK_SILO: LazyLock<params::SubnetPoolLinkSilo> =
     LazyLock::new(|| params::SubnetPoolLinkSilo {
         silo: NameOrId::Id(DEFAULT_SILO.identity().id),
-        is_default: false,
+        is_default: true,
     });
 pub static DEMO_SUBNET_POOL_SILO_URL: LazyLock<String> = LazyLock::new(|| {
     format!("{}/silos/{}", *DEMO_SUBNET_POOL_URL, *DEMO_SILO_NAME)
@@ -1861,14 +1860,12 @@ pub static VERIFY_ENDPOINTS: LazyLock<Vec<VerifyEndpoint>> = LazyLock::new(
                 allowed_methods: vec![AllowedMethod::GetUnimplemented],
             },
             /* External Subnets (project-scoped) */
-            // TODO(#9453): These are stub endpoints. Use GetUnimplemented
-            // since privileged GET requests will return 500 not 200.
             VerifyEndpoint {
                 url: &DEMO_EXTERNAL_SUBNETS_URL,
                 visibility: Visibility::Protected,
                 unprivileged_access: UnprivilegedAccess::None,
                 allowed_methods: vec![
-                    AllowedMethod::GetUnimplemented,
+                    AllowedMethod::Get,
                     AllowedMethod::Post(
                         serde_json::to_value(&*DEMO_EXTERNAL_SUBNET_CREATE)
                             .unwrap(),
@@ -1880,7 +1877,7 @@ pub static VERIFY_ENDPOINTS: LazyLock<Vec<VerifyEndpoint>> = LazyLock::new(
                 visibility: Visibility::Protected,
                 unprivileged_access: UnprivilegedAccess::None,
                 allowed_methods: vec![
-                    AllowedMethod::GetUnimplemented,
+                    AllowedMethod::Get,
                     AllowedMethod::Put(
                         serde_json::to_value(&*DEMO_EXTERNAL_SUBNET_UPDATE)
                             .unwrap(),

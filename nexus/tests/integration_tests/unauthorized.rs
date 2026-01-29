@@ -390,6 +390,18 @@ static SETUP_REQUESTS: LazyLock<Vec<SetupReq>> = LazyLock::new(|| {
             body: serde_json::to_value(&*DEMO_STOPPED_INSTANCE_CREATE).unwrap(),
             id_routes: vec!["/v1/instances/{id}"],
         },
+        // Link the subnet pool to the current Silo
+        SetupReq::Post {
+            url: &DEMO_SUBNET_POOL_SILOS_URL,
+            body: serde_json::to_value(&*DEMO_SUBNET_POOL_LINK_SILO).unwrap(),
+            id_routes: vec![],
+        },
+        // Create a External Subnet in the Project
+        SetupReq::Post {
+            url: &DEMO_EXTERNAL_SUBNETS_URL,
+            body: serde_json::to_value(&*DEMO_EXTERNAL_SUBNET_CREATE).unwrap(),
+            id_routes: vec![],
+        },
         // Create a multicast IP pool
         SetupReq::Post {
             url: &DEMO_IP_POOLS_URL,
