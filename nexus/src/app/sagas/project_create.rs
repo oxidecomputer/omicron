@@ -52,21 +52,39 @@ impl NexusSaga for SagaProjectCreate {
     }
 
     fn make_saga_dag(
-        _params: &Self::Params,
+        params: &Self::Params,
         mut builder: steno::DagBuilder,
     ) -> Result<steno::Dag, super::SagaInitError> {
         builder.append(project_create_record_action());
-        builder.append(project_create_vpc_params_action());
 
-        let subsaga_builder = steno::DagBuilder::new(steno::SagaName::new(
-            sagas::vpc_create::SagaVpcCreate::NAME,
-        ));
-        builder.append(steno::Node::subsaga(
-            "vpc",
-            sagas::vpc_create::create_dag(subsaga_builder)?,
-            "vpc_create_params",
-        ));
+        if let Some(vpc_defaults) = default_vpc_defaults(&params.project_create)
+        {
+            builder.append(project_create_vpc_params_action());
+
+            let subsaga_builder = steno::DagBuilder::new(steno::SagaName::new(
+                sagas::vpc_create::SagaVpcCreate::NAME,
+            ));
+            builder.append(steno::Node::subsaga(
+                "vpc",
+                sagas::vpc_create::create_dag(
+                    subsaga_builder,
+                    sagas::vpc_create::should_create_default_subnet(
+                        vpc_defaults,
+                    ),
+                )?,
+                "vpc_create_params",
+            ));
+        }
         Ok(builder.build()?)
+    }
+}
+
+fn default_vpc_defaults(
+    project_create: &project::ProjectCreate,
+) -> Option<Option<&vpc::VpcCreateDefaults>> {
+    match &project_create.defaults {
+        None => Some(None),
+        Some(defaults) => defaults.vpc.as_ref().map(Some),
     }
 }
 
@@ -141,6 +159,9 @@ async fn spc_create_vpc_params(
         // handle the logic around name and dns_name by making
         // dns_name optional
         dns_name: "default".parse().unwrap(),
+        defaults: default_vpc_defaults(&params.project_create)
+            .expect("default VPC parameters require a default VPC")
+            .cloned(),
     };
     let saga_params = sagas::vpc_create::Params {
         serialized_authn: authn::saga::Serialized::for_opctx(&opctx),
@@ -155,6 +176,7 @@ mod test {
     use crate::{
         app::sagas::project_create::Params,
         app::sagas::project_create::SagaProjectCreate,
+        app::sagas::project_create::default_vpc_defaults,
     };
     use async_bb8_diesel::{AsyncRunQueryDsl, AsyncSimpleConnection};
     use diesel::{
@@ -165,11 +187,52 @@ mod test {
         db::datastore::DataStore,
     };
     use nexus_test_utils_macros::nexus_test;
-    use nexus_types::external_api::project;
+    use nexus_types::external_api::{project, vpc};
     use omicron_common::api::external::IdentityMetadataCreateParams;
 
     type ControlPlaneTestContext =
         nexus_test_utils::ControlPlaneTestContext<crate::Server>;
+
+    #[test]
+    fn test_default_vpc_defaults() {
+        let mut project_create = project::ProjectCreate {
+            identity: IdentityMetadataCreateParams {
+                name: "my-project".parse().unwrap(),
+                description: String::new(),
+            },
+            defaults: None,
+        };
+
+        assert_eq!(default_vpc_defaults(&project_create), Some(None));
+
+        project_create.defaults =
+            Some(project::ProjectCreateDefaults { vpc: None });
+        assert_eq!(default_vpc_defaults(&project_create), None);
+
+        project_create.defaults = Some(project::ProjectCreateDefaults {
+            vpc: Some(vpc::VpcCreateDefaults { subnet: None }),
+        });
+        assert!(
+            default_vpc_defaults(&project_create)
+                .unwrap()
+                .unwrap()
+                .subnet
+                .is_none()
+        );
+
+        project_create.defaults = Some(project::ProjectCreateDefaults {
+            vpc: Some(vpc::VpcCreateDefaults {
+                subnet: Some(vpc::SubnetCreateDefaults {}),
+            }),
+        });
+        assert!(
+            default_vpc_defaults(&project_create)
+                .unwrap()
+                .unwrap()
+                .subnet
+                .is_some()
+        );
+    }
 
     // Helper for creating project create parameters
     fn new_test_params(opctx: &OpContext, authz_silo: authz::Silo) -> Params {
@@ -180,6 +243,7 @@ mod test {
                     name: "my-project".parse().unwrap(),
                     description: "My Project".to_string(),
                 },
+                defaults: None,
             },
             authz_silo,
         }

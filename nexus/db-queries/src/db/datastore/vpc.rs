@@ -3020,6 +3020,7 @@ mod tests {
                 name: "project".parse().unwrap(),
                 description: String::from("test project"),
             },
+            defaults: None,
         };
         let project = Project::new(Uuid::new_v4(), project_params);
         let (authz_project, _) = datastore
@@ -3044,6 +3045,7 @@ mod tests {
                     },
                     ipv6_prefix: None,
                     dns_name: name.clone(),
+                    defaults: None,
                 },
             )
             .expect("failed to create incomplete VPC");
@@ -3085,6 +3087,7 @@ mod tests {
                 },
                 ipv6_prefix: None,
                 dns_name: name.clone(),
+                defaults: None,
             },
         )
         .expect("failed to create incomplete VPC");
@@ -3125,6 +3128,7 @@ mod tests {
                 name: "project".parse().unwrap(),
                 description: String::from("test project"),
             },
+            defaults: None,
         };
         let project = Project::new(Uuid::new_v4(), project_params);
         let (authz_project, _) = datastore
@@ -3149,6 +3153,7 @@ mod tests {
                     },
                     ipv6_prefix: None,
                     dns_name: name.clone(),
+                    defaults: None,
                 },
             )
             .expect("failed to create incomplete VPC");
@@ -3191,6 +3196,7 @@ mod tests {
                 },
                 ipv6_prefix: None,
                 dns_name: name.clone(),
+                defaults: None,
             },
         )
         .expect("failed to create incomplete VPC");
@@ -3550,6 +3556,7 @@ mod tests {
                 name: "project".parse().unwrap(),
                 description: String::from("test project"),
             },
+            defaults: None,
         };
         let project = Project::new(DEFAULT_SILO.id(), project_params);
         let (authz_project, _) = datastore
@@ -3570,6 +3577,7 @@ mod tests {
                 },
                 ipv6_prefix: None,
                 dns_name: vpc_name.clone(),
+                defaults: None,
             },
         )
         .expect("failed to create incomplete VPC");
