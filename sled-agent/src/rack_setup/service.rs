@@ -1382,7 +1382,17 @@ impl ServiceInner {
 
         // Ask MGS in each switch zone which switch it is.
         let switch_mgmt_addrs = EarlyNetworkSetup::new(&self.log)
-            .lookup_switch_zone_underlay_addrs(&resolver)
+            .lookup_uplinked_switch_zone_underlay_addrs(
+                &resolver,
+                &config.rack_network_config,
+                // We willing to wait forever to find all the switches that have
+                // configured uplinks; if we attempt to proceed without doing
+                // so, we'll fail handing off to Nexus later. (Ideally we could
+                // complete RSS with only one switch up and then configure the
+                // second later, but that currently doesn't work.)
+                // <https://github.com/oxidecomputer/omicron/issues/9678>
+                Duration::MAX,
+            )
             .await;
 
         rss_step.update(RssStep::InitNtp);
@@ -1738,6 +1748,7 @@ impl<'a> OmicronZonesConfigGenerator<'a> {
 mod test {
     use super::*;
     use crate::rack_setup::plan::service::{Plan as ServicePlan, SledInfo};
+    use iddqd::IdOrdMap;
     use nexus_reconfigurator_blippy::{Blippy, BlippyReportSortKey};
     use omicron_common::{
         address::{Ipv6Subnet, SLED_PREFIX, get_sled_address},
@@ -1794,6 +1805,7 @@ mod test {
                 file_source_resolver:
                     OmicronFileSourceResolverInventory::new_fake(),
                 health_monitor: HealthMonitorInventory::new(),
+                reference_measurements: IdOrdMap::new(),
             },
             true,
         )

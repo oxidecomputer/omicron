@@ -12,9 +12,13 @@
 //! to be running on the system).
 
 use camino::Utf8PathBuf;
+use iddqd::IdOrdMap;
 use sled_agent_config_reconciler::{ConfigReconcilerHandle, InventoryError};
 use sled_agent_resolvable_files::ZoneImageSourceResolver;
-use sled_agent_types::inventory::OmicronSledConfig;
+use sled_agent_types::inventory::{
+    ConfigReconcilerInventoryResult, OmicronSledConfig,
+    SingleMeasurementInventory,
+};
 use sled_agent_types::resolvable_files::ManifestHashError;
 use slog::Logger;
 use slog::error;
@@ -87,6 +91,29 @@ impl MeasurementsHandle {
                 zone_image_resolver,
                 ledger_task_valid,
             },
+        }
+    }
+
+    pub fn to_inventory(&self) -> IdOrdMap<SingleMeasurementInventory> {
+        match self.current_measurements() {
+            Ok(paths) => paths
+                .into_iter()
+                .map(|path| SingleMeasurementInventory {
+                    path,
+                    result: ConfigReconcilerInventoryResult::Ok,
+                })
+                .collect(),
+            Err(e) => {
+                // We don't have a path for errors
+                vec![SingleMeasurementInventory {
+                    path: Utf8PathBuf::new(),
+                    result: ConfigReconcilerInventoryResult::Err {
+                        message: format!("{e}"),
+                    },
+                }]
+                .into_iter()
+                .collect()
+            }
         }
     }
 

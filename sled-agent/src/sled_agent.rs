@@ -1175,6 +1175,7 @@ impl SledAgent {
             last_reconciliation,
             file_source_resolver,
             health_monitor,
+            reference_measurements: self.inner.measurements.to_inventory(),
         })
     }
 
