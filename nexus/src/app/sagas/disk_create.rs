@@ -1277,6 +1277,25 @@ pub(crate) mod test {
             .is_none()
     }
 
+    async fn no_virtual_provisioning_resource_records_exist_except(
+        datastore: &DataStore,
+        id: Uuid,
+    ) -> bool {
+        use nexus_db_queries::db::model::VirtualProvisioningResource;
+        use nexus_db_schema::schema::virtual_provisioning_resource::dsl;
+
+        dsl::virtual_provisioning_resource
+            .select(VirtualProvisioningResource::as_select())
+            .filter(dsl::id.ne(id))
+            .first_async::<VirtualProvisioningResource>(
+                &*datastore.pool_connection_for_tests().await.unwrap(),
+            )
+            .await
+            .optional()
+            .unwrap()
+            .is_none()
+    }
+
     async fn no_virtual_provisioning_collection_records_using_storage(
         datastore: &DataStore,
     ) -> bool {
@@ -1362,6 +1381,31 @@ pub(crate) mod test {
         assert!(test.crucible_resources_deleted().await);
     }
 
+    // When a saga creating a readonly disk from a snapshot unwinds, we cannot
+    // verify that there are no crucible volumes or region allocations, because
+    // the snapshot from which the disk was being created will also have those,
+    // and we *don't* want them to be deleted if the saga fails.
+    async fn verify_cleanish_slate(
+        cptestctx: &ControlPlaneTestContext,
+        snapshot_id: Uuid,
+    ) {
+        let datastore = cptestctx.server.server_context().nexus.datastore();
+
+        crate::app::sagas::test_helpers::assert_no_failed_undo_steps(
+            &cptestctx.logctx.log,
+            datastore,
+        )
+        .await;
+        assert!(no_disk_records_exist(datastore).await);
+        assert!(
+            no_virtual_provisioning_resource_records_exist_except(
+                datastore,
+                snapshot_id
+            )
+            .await
+        );
+    }
+
     #[nexus_test(server = crate::Server)]
     async fn test_action_failure_can_unwind(
         cptestctx: &ControlPlaneTestContext,
@@ -1421,7 +1465,7 @@ pub(crate) mod test {
     async fn test_readonly_disk_action_failure_can_unwind(
         cptestctx: &ControlPlaneTestContext,
     ) {
-        let test = DiskTest::new(cptestctx).await;
+        let _test = DiskTest::new(cptestctx).await;
         let log = &cptestctx.logctx.log;
 
         let client = &cptestctx.external_client;
@@ -1437,6 +1481,9 @@ pub(crate) mod test {
             "sneepshnop",
         )
         .await;
+        // Nuke the base disk so that we can verify that no disk records exist
+        // after the rollback.
+        resource_helpers::delete_disk(&client, PROJECT_NAME, "base-disk").await;
 
         let opctx = test_opctx(cptestctx);
 
@@ -1455,7 +1502,8 @@ pub(crate) mod test {
             },
             || {
                 Box::pin(async {
-                    verify_clean_slate(&cptestctx, &test).await;
+                    verify_cleanish_slate(&cptestctx, snapshot.identity.id)
+                        .await;
                 })
             },
             log,
@@ -1467,7 +1515,7 @@ pub(crate) mod test {
     async fn test_readonly_disk_action_failure_can_unwind_idempotently(
         cptestctx: &ControlPlaneTestContext,
     ) {
-        let test = DiskTest::new(cptestctx).await;
+        let _test = DiskTest::new(cptestctx).await;
         let log = &cptestctx.logctx.log;
 
         let client = &cptestctx.external_client;
@@ -1483,6 +1531,9 @@ pub(crate) mod test {
             "sneepshnop",
         )
         .await;
+        // Nuke the base disk so that we can verify that no disk records exist
+        // after the rollback.
+        resource_helpers::delete_disk(&client, PROJECT_NAME, "base-disk").await;
 
         let opctx = test_opctx(cptestctx);
 
@@ -1497,7 +1548,9 @@ pub(crate) mod test {
                     &opctx, project_id, &snapshot,
                 )
             }),
-            || Box::pin(async { verify_clean_slate(&cptestctx, &test).await; }),
+            || Box::pin(async {
+                verify_cleanish_slate(&cptestctx, snapshot.identity.id).await;
+            }),
             log
         ).await;
     }
@@ -1548,7 +1601,7 @@ pub(crate) mod test {
     async fn test_readonly_disk_actions_succeed_idempotently(
         cptestctx: &ControlPlaneTestContext,
     ) {
-        let test = DiskTest::new(cptestctx).await;
+        let _test = DiskTest::new(cptestctx).await;
 
         let client = &cptestctx.external_client;
         let nexus = &cptestctx.server.server_context().nexus;
@@ -1564,6 +1617,10 @@ pub(crate) mod test {
         )
         .await;
 
+        // Nuke the base disk so that we can verify that no disk records exist
+        // after the rollback.
+        resource_helpers::delete_disk(&client, PROJECT_NAME, "base-disk").await;
+
         // Build the saga DAG with the provided test parameters
         let opctx = test_opctx(&cptestctx);
 
@@ -1576,6 +1633,6 @@ pub(crate) mod test {
         .await;
 
         destroy_disk(&cptestctx).await;
-        verify_clean_slate(&cptestctx, &test).await;
+        verify_cleanish_slate(&cptestctx, snapshot.identity.id).await;
     }
 }
