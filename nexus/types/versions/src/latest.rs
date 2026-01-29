@@ -366,9 +366,10 @@ pub mod probe {
 pub mod project {
     pub use crate::v2025_11_20_00::project::OptionalProjectSelector;
     pub use crate::v2025_11_20_00::project::Project;
-    pub use crate::v2025_11_20_00::project::ProjectCreate;
     pub use crate::v2025_11_20_00::project::ProjectSelector;
     pub use crate::v2025_11_20_00::project::ProjectUpdate;
+
+    pub use crate::v2026_08_04_00::project::ProjectCreate;
 }
 
 pub mod saml {

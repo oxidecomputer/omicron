@@ -27,6 +27,7 @@ pub static SERVICES_PROJECT: LazyLock<model::Project> = LazyLock::new(|| {
                 name: SERVICES_DB_NAME.parse().unwrap(),
                 description: "Built-in project for Oxide Services".to_string(),
             },
+            skip_default_vpc: false,
         },
     )
 });
