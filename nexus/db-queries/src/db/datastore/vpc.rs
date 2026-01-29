@@ -3026,6 +3026,7 @@ mod tests {
                 name: "project".parse().unwrap(),
                 description: String::from("test project"),
             },
+            skip_default_vpc: false,
         };
         let project = Project::new(Uuid::new_v4(), project_params);
         let (authz_project, _) = datastore
@@ -3131,6 +3132,7 @@ mod tests {
                 name: "project".parse().unwrap(),
                 description: String::from("test project"),
             },
+            skip_default_vpc: false,
         };
         let project = Project::new(Uuid::new_v4(), project_params);
         let (authz_project, _) = datastore
@@ -3546,6 +3548,7 @@ mod tests {
                 name: "project".parse().unwrap(),
                 description: String::from("test project"),
             },
+            skip_default_vpc: false,
         };
         let project = Project::new(DEFAULT_SILO.id(), project_params);
         let (authz_project, _) = datastore

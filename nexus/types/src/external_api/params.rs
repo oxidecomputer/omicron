@@ -1079,6 +1079,10 @@ pub struct AntiAffinityGroupSelector {
 pub struct ProjectCreate {
     #[serde(flatten)]
     pub identity: IdentityMetadataCreateParams,
+
+    /// Whether to skip creating the "default" VPC when the project is created.
+    #[serde(default)]
+    pub skip_default_vpc: bool,
 }
 
 /// Updateable properties of a `Project`

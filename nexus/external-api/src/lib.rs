@@ -47,6 +47,7 @@ mod v2026012200;
 mod v2026012300;
 mod v2026013000;
 mod v2026013001;
+mod v2026020100;
 
 #[cfg(test)]
 mod test_utils;
@@ -79,6 +80,7 @@ api_versions!([
     // |  date-based version should be at the top of the list.
     // v
     // (next_yyyymmddnn, IDENT),
+    (2026020100, SKIP_DEFAULT_VPC),
     (2026013100, READ_ONLY_DISKS_NULLABLE),
     (2026013001, READ_ONLY_DISKS),
     (2026013000, INSTANCES_EXTERNAL_SUBNETS),
@@ -942,11 +944,27 @@ pub trait NexusExternalApi {
         method = POST,
         path = "/v1/projects",
         tags = ["projects"],
+        versions = VERSION_SKIP_DEFAULT_VPC..,
     }]
     async fn project_create(
         rqctx: RequestContext<Self::Context>,
         new_project: TypedBody<params::ProjectCreate>,
     ) -> Result<HttpResponseCreated<views::Project>, HttpError>;
+
+    /// Create project
+    #[endpoint {
+        method = POST,
+        path = "/v1/projects",
+        tags = ["projects"],
+        operation_id = "project_create",
+        versions = ..VERSION_SKIP_DEFAULT_VPC,
+    }]
+    async fn v2026020100_project_create(
+        rqctx: RequestContext<Self::Context>,
+        new_project: TypedBody<v2026020100::ProjectCreate>,
+    ) -> Result<HttpResponseCreated<views::Project>, HttpError> {
+        Self::project_create(rqctx, new_project.map(Into::into)).await
+    }
 
     /// Fetch project
     #[endpoint {

@@ -197,6 +197,7 @@ async fn test_silos(cptestctx: &ControlPlaneTestContext) {
                 name: project_name.parse().unwrap(),
                 description: String::new(),
             },
+            skip_default_vpc: false,
         },
     )
     .authn_as(AuthnMode::SiloUser(new_silo_user_id))
@@ -358,6 +359,7 @@ async fn test_silo_admin_group(cptestctx: &ControlPlaneTestContext) {
                 name: "myproj".parse().unwrap(),
                 description: "some proj".into(),
             },
+            skip_default_vpc: false,
         },
     )
     .authn_as(AuthnMode::SiloUser(admin_group_user.id()))

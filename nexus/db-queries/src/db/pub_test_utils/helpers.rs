@@ -67,6 +67,7 @@ pub async fn create_project(
                 name: name.parse().unwrap(),
                 description: "desc".to_string(),
             },
+            skip_default_vpc: false,
         },
     );
     datastore.project_create(&opctx, project).await.unwrap()
