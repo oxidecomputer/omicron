@@ -1941,6 +1941,19 @@ pub struct BlueprintMeasurements {
     pub measurements: BTreeSet<BlueprintSingleMeasurement>,
 }
 
+impl Display for BlueprintMeasurements {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        if self.measurements.is_empty() {
+            writeln!(f, "(empty)")?;
+        } else {
+            for m in &self.measurements {
+                writeln!(f, "{m}")?;
+            }
+        }
+        Ok(())
+    }
+}
+
 impl From<BlueprintMeasurements> for BTreeSet<OmicronSingleMeasurement> {
     fn from(value: BlueprintMeasurements) -> Self {
         if value.measurements.is_empty() {
@@ -1955,6 +1968,18 @@ impl From<BlueprintMeasurements> for BTreeSet<OmicronSingleMeasurement> {
     }
 }
 
+impl From<BlueprintMeasurements> for BTreeSet<BlueprintSingleMeasurement> {
+    fn from(value: BlueprintMeasurements) -> Self {
+        value.measurements
+    }
+}
+
+impl From<BTreeSet<BlueprintSingleMeasurement>> for BlueprintMeasurements {
+    fn from(measurements: BTreeSet<BlueprintSingleMeasurement>) -> Self {
+        Self { measurements }
+    }
+}
+
 impl BlueprintMeasurements {
     pub fn default_contents() -> Self {
         Self { measurements: BTreeSet::new() }
@@ -1962,6 +1987,11 @@ impl BlueprintMeasurements {
 
     pub fn append_measurement(&mut self, single: BlueprintSingleMeasurement) {
         self.measurements.insert(single);
+    }
+
+    // An empty measurement set here corresponds to the install dataset
+    pub fn is_install_dataset(&self) -> bool {
+        self.measurements.is_empty()
     }
 }
 
