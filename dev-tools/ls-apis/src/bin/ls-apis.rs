@@ -252,7 +252,14 @@ fn print_server_components<'a>(
             );
         }
         for (c, path) in apis.component_apis_consumed(s, filter)? {
-            println!("{}    consumes: {}", prefix, c);
+            if apis.is_same_deployment_unit_edge(s, c) {
+                println!(
+                    "{}    consumes: {} (same-deployment-unit)",
+                    prefix, c
+                );
+            } else {
+                println!("{}    consumes: {}", prefix, c);
+            }
             if show_deps {
                 for p in path.nodes() {
                     println!("{}        via: {}", prefix, p);
