@@ -335,9 +335,6 @@ pub enum DeleteDatasetVolumeErrorInner {
     #[error(transparent)]
     RustixErrno(#[from] rustix::io::Errno),
 
-    #[error("created but not ready yet: {reason}")]
-    NotReady { reason: String },
-
     #[error("cannot cancel raw volume initialization, ioctl returned {err}")]
     CancellingInitialization { err: i32 },
 
@@ -358,10 +355,6 @@ pub struct DeleteDatasetVolumeError {
 }
 
 impl DeleteDatasetVolumeError {
-    pub fn is_not_ready(&self) -> bool {
-        matches!(&self.err, DeleteDatasetVolumeErrorInner::NotReady { .. })
-    }
-
     pub fn execution(name: String, err: crate::ExecutionError) -> Self {
         DeleteDatasetVolumeError {
             name,
@@ -373,22 +366,6 @@ impl DeleteDatasetVolumeError {
         DeleteDatasetVolumeError {
             name,
             err: DeleteDatasetVolumeErrorInner::RustixErrno(e),
-        }
-    }
-
-    pub fn from_raw_zvol_read(name: String, e: rustix::io::Errno) -> Self {
-        if e == rustix::io::Errno::INPROGRESS {
-            DeleteDatasetVolumeError {
-                name,
-                err: DeleteDatasetVolumeErrorInner::NotReady {
-                    reason: String::from("raw volume not done initializing"),
-                },
-            }
-        } else {
-            DeleteDatasetVolumeError {
-                name,
-                err: DeleteDatasetVolumeErrorInner::RustixErrno(e),
-            }
         }
     }
 

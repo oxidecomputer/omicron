@@ -1407,13 +1407,7 @@ impl SledAgent {
             raw: true,
         })
         .await
-        .map_err(|e| {
-            if e.is_not_ready() {
-                HttpError::for_unavail(None, e.to_string())
-            } else {
-                HttpError::for_internal_error(e.to_string())
-            }
-        })?;
+        .map_err(|e| HttpError::for_internal_error(e.to_string()))?;
 
         Zfs::destroy_dataset(&delegated_zvol.parent_dataset_name())
             .await
