@@ -654,11 +654,7 @@ impl SystemApis {
         let filter = ApiDependencyFilter::IncludeNonDag;
         let mut required = BTreeSet::new();
 
-        for server in self.server_component_units.keys() {
-            let Some(server_unit) = self.server_component_units.get(server)
-            else {
-                continue;
-            };
+        for (server, server_unit) in &self.server_component_units {
 
             for (client, _) in self.component_apis_consumed(server, filter)? {
                 // Only consider server-side-versioned APIs.
@@ -1483,7 +1479,14 @@ pub enum ApiDependencyFilter {
 
 impl ApiDependencyFilter {
     /// Return whether this filter should include a dependency on
-    /// `client_pkgname` that goes through dependency path `dep_path`
+    /// `client_pkgname` that goes through dependency path `dep_path`.
+    ///
+    /// Note: `Evaluation::SameDeploymentUnit` edges are included by all filters
+    /// here. These edges represent real dependencies and should appear in
+    /// component listings and graphs. They are only excluded when building the
+    /// deployment unit graph for cycle detection, which is handled separately
+    /// via `VersionedHowFilter::ServerSideOnly` in
+    /// `make_deployment_unit_graph`.
     fn should_include(
         &self,
         api_metadata: &AllApiMetadata,

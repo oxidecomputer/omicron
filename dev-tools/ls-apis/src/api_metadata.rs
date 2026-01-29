@@ -487,9 +487,7 @@ pub struct DependencyFilterRule {
     // that they're present. And this would let us include this explanation in
     // output in the future (e.g., to explain why some dependency was filtered
     // out).
-    #[expect(dead_code)]
     pub note: String,
-    #[expect(dead_code)]
     pub permalinks: Vec<String>,
 }
 
@@ -567,5 +565,12 @@ pub enum Evaluation {
     Dag,
     /// Intra-deployment-unit communication. Only valid with the `server`
     /// matcher and server-side-versioned APIs. Subject to auto-validation.
+    ///
+    /// Note: This evaluation is intentionally *not* filtered out by
+    /// `ApiDependencyFilter`. These edges are real dependencies that should
+    /// appear in component listings and most graphs. They are only excluded
+    /// when building the deployment unit dependency graph for cycle detection
+    /// (via `VersionedHowFilter::ServerSideOnly`), because intra-unit
+    /// communication doesn't create cross-unit version skew.
     SameDeploymentUnit,
 }
