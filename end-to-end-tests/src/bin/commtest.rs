@@ -270,6 +270,7 @@ async fn rack_prepare(
                 .body(ProjectCreate {
                     description: "A project for probes".into(),
                     name: "classone".parse().unwrap(),
+                    skip_default_vpc: false,
                 })
                 .send()
                 .await?;

@@ -86,6 +86,7 @@ api_versions!([
     // |  date-based version should be at the top of the list.
     // v
     // (next_yyyy_mm_dd_nn, IDENT),
+    (2026_07_07_00, SKIP_DEFAULT_VPC),
     (2026_06_10_00, BGP_CONFIGURATION_UPDATE),
     (2026_06_08_00, INSTANCE_CPU_TYPE_TURIN_V2),
     (2026_06_05_00, EXTERNAL_JUMBO_FRAMES),
@@ -1144,11 +1145,28 @@ pub trait NexusExternalApi {
         method = POST,
         path = "/v1/projects",
         tags = ["projects"],
+        versions = VERSION_SKIP_DEFAULT_VPC..,
     }]
     async fn project_create(
         rqctx: RequestContext<Self::Context>,
         new_project: TypedBody<latest::project::ProjectCreate>,
     ) -> Result<HttpResponseCreated<latest::project::Project>, HttpError>;
+
+    /// Create project
+    #[endpoint {
+        method = POST,
+        path = "/v1/projects",
+        tags = ["projects"],
+        operation_id = "project_create",
+        versions = ..VERSION_SKIP_DEFAULT_VPC,
+    }]
+    async fn project_create_v2025_11_20_00(
+        rqctx: RequestContext<Self::Context>,
+        new_project: TypedBody<v2025_11_20_00::project::ProjectCreate>,
+    ) -> Result<HttpResponseCreated<v2025_11_20_00::project::Project>, HttpError>
+    {
+        Self::project_create(rqctx, new_project.map(Into::into)).await
+    }
 
     /// Fetch project
     #[endpoint {

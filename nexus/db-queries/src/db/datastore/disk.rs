@@ -2104,6 +2104,7 @@ mod tests {
                             name: "testpost".parse().unwrap(),
                             description: "please ignore".to_string(),
                         },
+                        skip_default_vpc: false,
                     },
                 ),
             )

@@ -210,6 +210,7 @@ mod tests {
                             name: "stuff".parse().unwrap(),
                             description: "Where I keep my stuff".into(),
                         },
+                        skip_default_vpc: false,
                     },
                 ),
             )

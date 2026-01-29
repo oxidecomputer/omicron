@@ -7,7 +7,7 @@
       "url": "https://oxide.computer",
       "email": "api@oxide.computer"
     },
-    "version": "2026061000.0.0"
+    "version": "2026070700.0.0"
   },
   "paths": {
     "/device/auth": {
@@ -26383,11 +26383,15 @@
           },
           "name": {
             "$ref": "#/components/schemas/Name"
+          },
+          "skip_default_vpc": {
+            "type": "boolean"
           }
         },
         "required": [
           "description",
-          "name"
+          "name",
+          "skip_default_vpc"
         ]
       },
       "ProjectResultsPage": {
