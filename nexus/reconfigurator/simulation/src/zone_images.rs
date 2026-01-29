@@ -171,7 +171,7 @@ impl SimTufRepoSource {
                     return None;
                 }
 
-                let file_name = format!("{}", artifact.id.name);
+                let file_name = artifact.id.name.to_string();
                 let path = Utf8Path::new("/fake/path/install").join(&file_name);
                 let status =
                     if self.error_artifact_id_names.contains(&artifact.id.name)
