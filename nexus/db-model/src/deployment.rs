@@ -25,10 +25,11 @@ use nexus_db_schema::schema::{
     bp_omicron_physical_disk, bp_omicron_zone, bp_omicron_zone_nic,
     bp_oximeter_read_policy, bp_pending_mgs_update_host_phase_1,
     bp_pending_mgs_update_rot, bp_pending_mgs_update_rot_bootloader,
-    bp_pending_mgs_update_sp, bp_sled_metadata, bp_target,
-    debug_log_blueprint_planning,
+    bp_pending_mgs_update_sp, bp_single_measurements, bp_sled_metadata,
+    bp_target, debug_log_blueprint_planning,
 };
 use nexus_types::deployment::BlueprintPhysicalDiskDisposition;
+use nexus_types::deployment::BlueprintSingleMeasurement;
 use nexus_types::deployment::BlueprintTarget;
 use nexus_types::deployment::BlueprintZoneConfig;
 use nexus_types::deployment::BlueprintZoneDisposition;
@@ -64,8 +65,9 @@ use omicron_common::disk::DiskIdentity;
 use omicron_common::zpool_name::ZpoolName;
 use omicron_uuid_kinds::{
     BlueprintKind, BlueprintUuid, DatasetKind, ExternalIpKind, ExternalIpUuid,
-    GenericUuid, MupdateOverrideKind, OmicronZoneKind, OmicronZoneUuid,
-    PhysicalDiskKind, SledKind, SledUuid, ZpoolKind, ZpoolUuid,
+    GenericUuid, MeasurementKind, MupdateOverrideKind, OmicronZoneKind,
+    OmicronZoneUuid, PhysicalDiskKind, SledKind, SledUuid, ZpoolKind,
+    ZpoolUuid,
 };
 use sled_agent_types::inventory::OmicronZoneDataset;
 use sled_hardware_types::BaseboardId;
@@ -1215,6 +1217,52 @@ impl TryFrom<DbBpZoneImageSourceColumns> for BlueprintZoneImageSource {
             (DbBpZoneImageSource::InstallDataset, None) => {
                 Ok(Self::InstallDataset)
             }
+        }
+    }
+}
+
+#[derive(Queryable, Clone, Debug, Selectable, Insertable)]
+#[diesel(table_name = bp_single_measurements)]
+//#[diesel(check_for_backend(diesel::pg::Pg))]
+pub struct BpSingleMeasurement {
+    pub blueprint_id: DbTypedUuid<BlueprintKind>,
+    pub sled_id: DbTypedUuid<SledKind>,
+    pub id: DbTypedUuid<MeasurementKind>,
+
+    pub image_artifact_sha256: Option<ArtifactHash>,
+    pub prune: bool,
+}
+
+impl BpSingleMeasurement {
+    pub fn new(
+        blueprint_id: BlueprintUuid,
+        sled_id: SledUuid,
+        measurement: &BlueprintSingleMeasurement,
+    ) -> Self {
+        Self {
+            blueprint_id: blueprint_id.into(),
+            sled_id: sled_id.into(),
+            id: omicron_uuid_kinds::MeasurementUuid::new_v4().into(),
+            image_artifact_sha256: Some(measurement.hash.into()),
+            prune: measurement.prune,
+        }
+    }
+
+    pub fn to_measurement(
+        self,
+        artifact: Option<TufArtifact>,
+    ) -> BlueprintSingleMeasurement {
+        BlueprintSingleMeasurement {
+            version: match artifact {
+                Some(a) => {
+                    BlueprintArtifactVersion::Available { version: a.version.0 }
+                }
+                None => BlueprintArtifactVersion::Unknown,
+            },
+            hash: *self
+                .image_artifact_sha256
+                .expect("this should always be set"),
+            prune: self.prune,
         }
     }
 }

@@ -2205,6 +2205,21 @@
           "slot_b"
         ]
       },
+      "BlueprintMeasurements": {
+        "type": "object",
+        "properties": {
+          "measurements": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BlueprintSingleMeasurement"
+            },
+            "uniqueItems": true
+          }
+        },
+        "required": [
+          "measurements"
+        ]
+      },
       "BlueprintMetadata": {
         "description": "Describe high-level metadata about a blueprint",
         "type": "object",
@@ -2400,6 +2415,26 @@
           }
         ]
       },
+      "BlueprintSingleMeasurement": {
+        "type": "object",
+        "properties": {
+          "hash": {
+            "type": "string",
+            "format": "hex string (32 bytes)"
+          },
+          "prune": {
+            "type": "boolean"
+          },
+          "version": {
+            "$ref": "#/components/schemas/BlueprintArtifactVersion"
+          }
+        },
+        "required": [
+          "hash",
+          "prune",
+          "version"
+        ]
+      },
       "BlueprintSledConfig": {
         "description": "Information about the configuration of a sled as recorded in a blueprint.\n\nPart of [`Blueprint`].",
         "type": "object",
@@ -2449,6 +2484,9 @@
             "format": "uint16",
             "minimum": 0
           },
+          "measurements": {
+            "$ref": "#/components/schemas/BlueprintMeasurements"
+          },
           "remove_mupdate_override": {
             "nullable": true,
             "allOf": [
@@ -2495,6 +2533,7 @@
           "disks",
           "host_phase_2",
           "last_allocated_ip_subnet_offset",
+          "measurements",
           "sled_agent_generation",
           "state",
           "subnet",

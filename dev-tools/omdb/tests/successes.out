@@ -1582,6 +1582,12 @@ parent:    <none>
     B      current contents 
 
 
+    measurements:
+    ----------------------
+    hash   version   prune
+    ----------------------
+
+
     physical disks:
     -----------------------------------------------------------------
     vendor        model              serial               disposition
@@ -1623,6 +1629,12 @@ parent:    <none>
     ------------------------
     A      current contents 
     B      current contents 
+
+
+    measurements:
+    ----------------------
+    hash   version   prune
+    ----------------------
 
 
     physical disks:
@@ -1714,6 +1726,12 @@ parent:    <none>
     B      current contents 
 
 
+    measurements:
+    ----------------------
+    hash   version   prune
+    ----------------------
+
+
     physical disks:
     -----------------------------------------------------------------
     vendor        model              serial               disposition
@@ -1755,6 +1773,12 @@ parent:    <none>
     ------------------------
     A      current contents 
     B      current contents 
+
+
+    measurements:
+    ----------------------
+    hash   version   prune
+    ----------------------
 
 
     physical disks:

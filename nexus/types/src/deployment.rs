@@ -20,6 +20,7 @@ pub use crate::inventory::ZpoolName;
 use blueprint_diff::ClickhouseClusterConfigDiffTablesForSingleBlueprint;
 use blueprint_display::BpDatasetsTableSchema;
 use blueprint_display::BpHostPhase2TableSchema;
+use blueprint_display::BpMeasurementsTableSchema;
 use blueprint_display::BpTableColumn;
 use daft::Diffable;
 use gateway_types::component::SpType;
@@ -55,6 +56,7 @@ use serde::Deserialize;
 use serde::Serialize;
 use sled_agent_types_versions::latest::inventory::HostPhase2DesiredContents;
 use sled_agent_types_versions::latest::inventory::HostPhase2DesiredSlots;
+use sled_agent_types_versions::latest::inventory::OmicronSingleMeasurement;
 use sled_agent_types_versions::latest::inventory::OmicronSledConfig;
 use sled_agent_types_versions::latest::inventory::OmicronZoneConfig;
 use sled_agent_types_versions::latest::inventory::OmicronZoneImageSource;
@@ -86,6 +88,7 @@ mod zone_type;
 use anyhow::anyhow;
 use anyhow::bail;
 pub use blueprint_diff::BlueprintDiffSummary;
+pub use blueprint_diff::BpDiffMeasurements;
 use blueprint_display::BpPendingMgsUpdates;
 pub use clickhouse::ClickhouseClusterConfig;
 use gateway_types::rot::RotSlot;
@@ -967,6 +970,79 @@ impl BpTableData for BlueprintHostPhase2TableData<'_> {
     }
 }
 
+/// Wrapper to display a table of a `BlueprintSledConfig`'s measurements.
+#[derive(Clone, Debug)]
+struct BlueprintMeasurementsTableData<'a> {
+    measurements: &'a BlueprintMeasurements,
+}
+
+impl<'a> BlueprintMeasurementsTableData<'a> {
+    fn new(measurements: &'a BlueprintMeasurements) -> Self {
+        Self { measurements }
+    }
+
+    fn diff_rows<'b>(
+        diffs: &'b BlueprintMeasurementsDiff<'_>,
+    ) -> impl Iterator<Item = BpTableRow> + 'b {
+        let mut rows = vec![];
+        if !diffs.measurements.removed.is_empty() {
+            for entry in diffs.measurements.removed.iter() {
+                rows.push(BpTableRow::from_strings(
+                    BpDiffState::Removed,
+                    vec![
+                        entry.hash.to_string(),
+                        entry.version.to_string(),
+                        entry.prune.to_string(),
+                    ],
+                ));
+            }
+        }
+
+        if !diffs.measurements.added.is_empty() {
+            for entry in diffs.measurements.added.iter() {
+                rows.push(BpTableRow::from_strings(
+                    BpDiffState::Added,
+                    vec![
+                        entry.hash.to_string(),
+                        entry.version.to_string(),
+                        entry.prune.to_string(),
+                    ],
+                ));
+            }
+        }
+
+        if !diffs.measurements.common.is_empty() {
+            for entry in diffs.measurements.common.iter() {
+                rows.push(BpTableRow::from_strings(
+                    BpDiffState::Unchanged,
+                    vec![
+                        entry.hash.to_string(),
+                        entry.version.to_string(),
+                        entry.prune.to_string(),
+                    ],
+                ));
+            }
+        }
+
+        rows.into_iter()
+    }
+}
+
+impl BpTableData for BlueprintMeasurementsTableData<'_> {
+    fn rows(&self, state: BpDiffState) -> impl Iterator<Item = BpTableRow> {
+        self.measurements.measurements.iter().map(move |d| {
+            BpTableRow::from_strings(
+                state,
+                vec![
+                    d.hash.to_string(),
+                    d.version.to_string(),
+                    d.prune.to_string(),
+                ],
+            )
+        })
+    }
+}
+
 /// Wrapper to display a table of a `BlueprintSledConfig`'s disks.
 #[derive(Clone, Debug)]
 struct BlueprintPhysicalDisksTableData<'a> {
@@ -1224,6 +1300,7 @@ impl fmt::Display for BlueprintDisplay<'_> {
                 zones,
                 remove_mupdate_override,
                 host_phase_2,
+                measurements,
             } = config;
 
             // Report toplevel sled info
@@ -1250,6 +1327,16 @@ impl fmt::Display for BlueprintDisplay<'_> {
                     .collect(),
             );
             writeln!(f, "{host_phase_2_table}\n")?;
+
+            // Construct the desired host phase 2 contents table
+            let measurements_table = BpTable::new(
+                BpMeasurementsTableSchema {},
+                None,
+                BlueprintMeasurementsTableData::new(measurements)
+                    .rows(BpDiffState::Unchanged)
+                    .collect(),
+            );
+            writeln!(f, "{measurements_table}\n")?;
 
             // Construct the disks subtable
             let disks_table = BpTable::new(
@@ -1364,6 +1451,7 @@ pub struct BlueprintSledConfig {
     pub zones: IdOrdMap<BlueprintZoneConfig>,
     pub remove_mupdate_override: Option<MupdateOverrideUuid>,
     pub host_phase_2: BlueprintHostPhase2DesiredSlots,
+    pub measurements: BlueprintMeasurements,
 }
 
 impl BlueprintSledConfig {
@@ -1414,7 +1502,7 @@ impl BlueprintSledConfig {
                 .collect(),
             remove_mupdate_override: self.remove_mupdate_override,
             host_phase_2: self.host_phase_2.into(),
-            measurements: BTreeSet::new(),
+            measurements: self.measurements.into(),
         }
     }
 
@@ -1817,6 +1905,93 @@ impl fmt::Display for BlueprintArtifactVersion {
                 write!(f, "(unknown version)")
             }
         }
+    }
+}
+
+#[derive(
+    Clone,
+    Debug,
+    PartialEq,
+    Eq,
+    Hash,
+    PartialOrd,
+    Ord,
+    JsonSchema,
+    Deserialize,
+    Serialize,
+    Diffable,
+)]
+pub struct BlueprintSingleMeasurement {
+    pub version: BlueprintArtifactVersion,
+    pub hash: ArtifactHash,
+    pub prune: bool,
+}
+
+impl Display for BlueprintSingleMeasurement {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{} prune: {}", self.hash, self.prune)
+    }
+}
+
+#[derive(
+    Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq, Diffable,
+)]
+#[serde(rename_all = "snake_case")]
+pub struct BlueprintMeasurements {
+    pub measurements: BTreeSet<BlueprintSingleMeasurement>,
+}
+
+impl Display for BlueprintMeasurements {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        if self.measurements.is_empty() {
+            writeln!(f, "(empty)")?;
+        } else {
+            for m in &self.measurements {
+                writeln!(f, "{m}")?;
+            }
+        }
+        Ok(())
+    }
+}
+
+impl From<BlueprintMeasurements> for BTreeSet<OmicronSingleMeasurement> {
+    fn from(value: BlueprintMeasurements) -> Self {
+        if value.measurements.is_empty() {
+            BTreeSet::new()
+        } else {
+            value
+                .measurements
+                .into_iter()
+                .map(|x| OmicronSingleMeasurement { hash: x.hash })
+                .collect()
+        }
+    }
+}
+
+impl From<BlueprintMeasurements> for BTreeSet<BlueprintSingleMeasurement> {
+    fn from(value: BlueprintMeasurements) -> Self {
+        value.measurements
+    }
+}
+
+impl From<BTreeSet<BlueprintSingleMeasurement>> for BlueprintMeasurements {
+    fn from(measurements: BTreeSet<BlueprintSingleMeasurement>) -> Self {
+        Self { measurements }
+    }
+}
+
+impl BlueprintMeasurements {
+    pub fn default_contents() -> Self {
+        Self { measurements: BTreeSet::new() }
+    }
+
+    pub fn append_measurement(&mut self, single: BlueprintSingleMeasurement) {
+        self.measurements.insert(single);
+    }
+
+    // An empty measurement set here corresponds to the install dataset
+    pub fn is_install_dataset(&self) -> bool {
+        self.measurements.is_empty()
     }
 }
 

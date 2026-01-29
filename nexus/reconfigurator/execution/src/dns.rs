@@ -338,6 +338,7 @@ mod test {
     use nexus_test_utils_macros::nexus_test;
     use nexus_types::deployment::Blueprint;
     use nexus_types::deployment::BlueprintHostPhase2DesiredSlots;
+    use nexus_types::deployment::BlueprintMeasurements;
     use nexus_types::deployment::BlueprintSledConfig;
     use nexus_types::deployment::BlueprintSource;
     use nexus_types::deployment::BlueprintTarget;
@@ -705,6 +706,7 @@ mod test {
                     remove_mupdate_override: None,
                     host_phase_2:
                         BlueprintHostPhase2DesiredSlots::current_contents(),
+                    measurements: BlueprintMeasurements::default_contents(),
                 },
             );
         }
