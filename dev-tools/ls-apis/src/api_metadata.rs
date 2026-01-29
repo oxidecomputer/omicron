@@ -86,9 +86,8 @@ impl AllApiMetadata {
 
     /// Returns how we should filter the given dependency.
     ///
-    /// Returns all matching evaluations: a dependency may match up to one
-    /// server rule and up to one ancestor rule. This allows filters to check if
-    /// any matching rule would cause exclusion.
+    /// A dependency may match up to one server rule and up to one ancestor
+    /// rule. Filters can then check if any matching rule would cause exclusion.
     pub(crate) fn evaluate_dependency(
         &self,
         workspaces: &Workspaces,
@@ -482,11 +481,11 @@ pub struct DependencyFilterRule {
     pub matcher: RuleMatcher,
     pub client: ClientPackageName,
     pub evaluation: Evaluation,
-    // These notes and permalinks are not currently used, but they are required.
-    // They could as well just be TOML comments. But it seems nice to enforce
-    // that they're present. And this would let us include this explanation in
-    // output in the future (e.g., to explain why some dependency was filtered
-    // out).
+    // These notes and permalinks are not currently used, but are stored in
+    // api-manifest.toml (and notes are required). They could as well just be
+    // TOML comments. But it seems nice to enforce that notes are present. And
+    // this would let us include this explanation in output in the future (e.g.,
+    // to explain why some dependency was filtered out).
     pub note: String,
     pub permalinks: Vec<String>,
 }

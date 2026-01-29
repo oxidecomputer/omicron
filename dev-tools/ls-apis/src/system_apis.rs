@@ -35,6 +35,7 @@ use petgraph::graph::NodeIndex;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::fmt;
+use swrite::{SWrite, swriteln};
 
 /// Query information about the Dropshot/OpenAPI/Progenitor-based APIs within
 /// the Oxide system
@@ -62,6 +63,10 @@ pub struct SystemApis {
 
     /// maps an API name to the server component(s) that expose that API
     api_producers: BTreeMap<ClientPackageName, ApiProducerMap>,
+
+    /// index of (server, client) pairs configured as same-deployment-unit edges
+    same_deployment_unit_edges:
+        BTreeSet<(ServerComponentName, ClientPackageName)>,
 
     /// source of developer-maintained API metadata
     api_metadata: AllApiMetadata,
@@ -126,6 +131,22 @@ impl SystemApis {
         // Load the API manifest.
         let api_metadata: AllApiMetadata =
             parse_toml_file(&args.api_manifest_path)?;
+
+        // Build an index of configured same-deployment-unit edges. We use this
+        // index for validation and lookups.
+        let same_deployment_unit_edges: BTreeSet<_> = api_metadata
+            .same_deployment_unit_rules()
+            .filter_map(|rule| match &rule.matcher {
+                RuleMatcher::Server(server) => {
+                    Some((server.clone(), rule.client.clone()))
+                }
+                RuleMatcher::Ancestor(_) => {
+                    // This case is rejected at API construction time.
+                    None
+                }
+            })
+            .collect();
+
         // Load Cargo metadata and validate it against the manifest.
         let (workspaces, warnings) = Workspaces::load(&api_metadata)?;
         if !warnings.is_empty() {
@@ -295,6 +316,7 @@ impl SystemApis {
             api_consumers,
             missing_expected_consumers,
             api_producers,
+            same_deployment_unit_edges,
             api_metadata,
             workspaces,
         })
@@ -339,15 +361,8 @@ impl SystemApis {
         server: &ServerComponentName,
         client: &ClientPackageName,
     ) -> bool {
-        self.api_metadata.same_deployment_unit_rules().any(|rule| {
-            if rule.client != *client {
-                return false;
-            }
-            match &rule.matcher {
-                RuleMatcher::Server(s) => s == server,
-                RuleMatcher::Ancestor(_) => false,
-            }
-        })
+        self.same_deployment_unit_edges
+            .contains(&(server.clone(), client.clone()))
     }
 
     /// Given a server component, return the APIs consumed by this component
@@ -507,7 +522,7 @@ impl SystemApis {
     fn make_deployment_unit_graph(
         &self,
         dependency_filter: ApiDependencyFilter,
-        versioned_how_filter: VersionedHowFilter<'_>,
+        versioned_how_filter: VersionedHowFilter,
     ) -> Result<(
         Graph<&DeploymentUnitName, &ClientPackageName>,
         BTreeMap<&DeploymentUnitName, NodeIndex>,
@@ -532,9 +547,8 @@ impl SystemApis {
                     // When building a server-side-versioned-only graph,
                     // filter to only server-versioned APIs and skip edges
                     // that represent same-deployment-unit communication.
-                    if let VersionedHowFilter::ServerSideOnly {
-                        same_unit_edges,
-                    } = &versioned_how_filter
+                    if let VersionedHowFilter::ServerSideOnly =
+                        versioned_how_filter
                     {
                         let api = self
                             .api_metadata
@@ -544,7 +558,8 @@ impl SystemApis {
                             continue;
                         }
 
-                        if same_unit_edges
+                        if self
+                            .same_deployment_unit_edges
                             .contains(&(server_pkg.clone(), client_pkg.clone()))
                         {
                             continue;
@@ -644,7 +659,7 @@ impl SystemApis {
     /// 3. The server and API producer are in the same deployment unit.
     ///
     /// Returns a set of (server, client) pairs.
-    fn compute_required_localhost_edges(
+    fn compute_required_same_deployment_unit_edges(
         &self,
     ) -> Result<BTreeSet<(ServerComponentName, ClientPackageName)>> {
         // Use the IncludeNonDag filter to include SameDeploymentUnit edges. We
@@ -655,7 +670,6 @@ impl SystemApis {
         let mut required = BTreeSet::new();
 
         for (server, server_unit) in &self.server_component_units {
-
             for (client, _) in self.component_apis_consumed(server, filter)? {
                 // Only consider server-side-versioned APIs.
                 let Some(api) = self.api_metadata.client_pkgname_lookup(client)
@@ -677,7 +691,7 @@ impl SystemApis {
                     if server_unit == producer_unit {
                         // This edge would create an intra-unit dependency for
                         // a server-versioned API, so it must be in the
-                        // localhost-only list.
+                        // same-deployment-unit-only set.
                         required.insert((server.clone(), client.clone()));
                         break;
                     }
@@ -690,26 +704,11 @@ impl SystemApis {
 
     /// Validates that the configured same-deployment-unit rules exactly match
     /// the required set of edges that must be excluded.
-    ///
-    /// Returns the validated set of edges for use by `make_deployment_unit_graph`.
-    fn validate_same_deployment_unit_rules(
-        &self,
-    ) -> Result<BTreeSet<(ServerComponentName, ClientPackageName)>> {
-        let required = self.compute_required_localhost_edges()?;
+    fn validate_same_deployment_unit_rules(&self) -> Result<()> {
+        let required = self.compute_required_same_deployment_unit_edges()?;
+        let configured = &self.same_deployment_unit_edges;
 
-        // Build the configured set from the manifest.
-        let mut configured = BTreeSet::new();
-        for rule in self.api_metadata.same_deployment_unit_rules() {
-            let RuleMatcher::Server(server) = &rule.matcher else {
-                unreachable!(
-                    "same-deployment-unit rules must have server matcher \
-                    (validated in api_metadata.rs)"
-                );
-            };
-            configured.insert((server.clone(), rule.client.clone()));
-        }
-
-        let missing: BTreeSet<_> = required.difference(&configured).collect();
+        let missing: BTreeSet<_> = required.difference(configured).collect();
         let extra: BTreeSet<_> = configured.difference(&required).collect();
 
         if !missing.is_empty() || !extra.is_empty() {
@@ -718,29 +717,37 @@ impl SystemApis {
             );
 
             if !missing.is_empty() {
-                msg.push_str("\nmissing entries (these edges exist and need same-deployment-unit exclusion):\n");
+                swriteln!(
+                    msg,
+                    "\nmissing entries (these edges exist and need \
+                     same-deployment-unit exclusion):"
+                );
                 for (server, client) in &missing {
-                    msg.push_str(&format!(
-                        "  - server = {:?}, client = {:?}\n",
-                        server, client
-                    ));
+                    swriteln!(
+                        msg,
+                        "  - server = {server:?}, client = {client:?}"
+                    );
                 }
             }
 
             if !extra.is_empty() {
-                msg.push_str("\nextra entries (these edges don't exist or don't need exclusion):\n");
+                swriteln!(
+                    msg,
+                    "\nextra entries (these edges don't exist or don't need \
+                     exclusion):"
+                );
                 for (server, client) in &extra {
-                    msg.push_str(&format!(
-                        "  - server = {:?}, client = {:?}\n",
-                        server, client
-                    ));
+                    swriteln!(
+                        msg,
+                        "  - server = {server:?}, client = {client:?}"
+                    );
                 }
             }
 
             bail!("{}", msg);
         }
 
-        Ok(required)
+        Ok(())
     }
 
     /// Verifies various important properties about the assignment of which APIs
@@ -799,7 +806,7 @@ impl SystemApis {
 
         // Validate that all configured same-deployment-unit rules are correct
         // and match the required set exactly.
-        let same_unit_edges = self.validate_same_deployment_unit_rules()?;
+        self.validate_same_deployment_unit_rules()?;
 
         // Construct a graph where:
         //
@@ -822,9 +829,7 @@ impl SystemApis {
         // Do the same with a graph of deployment units.
         let (graph, nodes) = self.make_deployment_unit_graph(
             filter,
-            VersionedHowFilter::ServerSideOnly {
-                same_unit_edges: &same_unit_edges,
-            },
+            VersionedHowFilter::ServerSideOnly,
         )?;
         let reverse_nodes: BTreeMap<_, _> =
             nodes.iter().map(|(d_u, node)| (node, d_u)).collect();
@@ -1433,14 +1438,12 @@ impl<'a> ClientDependenciesTracker<'a> {
 /// Specifies whether to filter to only server-versioned APIs when building
 /// dependency graphs.
 #[derive(Clone, Debug)]
-pub enum VersionedHowFilter<'a> {
+pub enum VersionedHowFilter {
     /// Include all APIs regardless of versioning strategy.
     All,
     /// Include only APIs with server-side versioning, and skip edges that
     /// represent same-deployment-unit communication.
-    ServerSideOnly {
-        same_unit_edges: &'a BTreeSet<(ServerComponentName, ClientPackageName)>,
-    },
+    ServerSideOnly,
 }
 
 /// Specifies which API dependencies to include vs. ignore when iterating
@@ -1479,7 +1482,8 @@ pub enum ApiDependencyFilter {
 
 impl ApiDependencyFilter {
     /// Return whether this filter should include a dependency on
-    /// `client_pkgname` that goes through dependency path `dep_path`.
+    /// `client_pkgname` that goes either through `server` or through
+    /// `dep_path`.
     ///
     /// Note: `Evaluation::SameDeploymentUnit` edges are included by all filters
     /// here. These edges represent real dependencies and should appear in

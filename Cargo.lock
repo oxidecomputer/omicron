@@ -8342,6 +8342,7 @@ dependencies = [
  "petgraph 0.8.2",
  "serde",
  "subprocess",
+ "swrite",
  "toml 0.8.23",
 ]
 
