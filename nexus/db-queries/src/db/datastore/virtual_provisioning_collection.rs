@@ -395,6 +395,7 @@ mod test {
                             name: "myproject".parse().unwrap(),
                             description: "It's a project".into(),
                         },
+                        defaults: None,
                     },
                 ),
             )
