@@ -31,6 +31,7 @@ use omicron_common::api::external::InternalContext;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::LookupType;
+use omicron_uuid_kinds::GenericUuid;
 use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -86,6 +87,41 @@ impl super::Nexus {
         self.db_datastore.blueprint_target_get_current(opctx).await
     }
 
+    async fn assemble_state_for_new_target(
+        &self,
+        opctx: &OpContext,
+        new_target: BlueprintTarget,
+    ) -> Result<(Blueprint, String), Error> {
+        let planning_context = self.blueprint_planning_context(opctx).await?;
+        let inventory = planning_context.inventory.ok_or_else(|| {
+            Error::internal_error("no recent inventory collection found")
+        })?;
+        let datastore = self.datastore();
+        let blueprint = self
+            .blueprint_view(opctx, *new_target.target_id.as_untyped_uuid())
+            .await?;
+        let debug = reconfigurator_state_assemble(
+            opctx,
+            datastore,
+            planning_context.planning_input,
+            vec![inventory],
+            vec![blueprint.clone()],
+            new_target,
+        )
+        .await
+        .and_then(|s| {
+            serde_json::to_string(&s)
+                .context("serializing Reconfigurator state file")
+        })
+        .map_err(|error| {
+            Error::internal_error(&format!(
+                "error assembling Reconfigurator state: {}",
+                InlineErrorChain::new(&*error),
+            ))
+        })?;
+        Ok((blueprint, debug))
+    }
+
     pub async fn blueprint_target_set(
         &self,
         opctx: &OpContext,
@@ -97,6 +133,12 @@ impl super::Nexus {
             time_made_target: chrono::Utc::now(),
         };
 
+        // Assemble a Reconfigurator state file so that we have a record of the
+        // new target blueprint.
+        let (blueprint, debug) = self
+            .assemble_state_for_new_target(opctx, new_target.clone())
+            .await?;
+
         self.db_datastore
             .blueprint_target_set_current(opctx, new_target)
             .await?;
@@ -105,6 +147,23 @@ impl super::Nexus {
         // blueprint.
         self.background_tasks
             .activate(&self.background_tasks.task_blueprint_loader);
+
+        // Archive the Reconfigurator state file.
+        // XXX-dap commonize filename construction with autoplanner
+        let debug_name = format!(
+            "blueprint-target-{}-{}.json",
+            blueprint.time_created.format("%Y%m%dT%H%MZ"),
+            blueprint.id
+        );
+        self.debug_dropbox
+            .deposit_file_str(&debug_name, &debug)
+            .await
+            .map_err(|error| {
+                Error::internal_error(&format!(
+                    "error saving Reconfigurator state: {}",
+                    InlineErrorChain::new(&error),
+                ))
+            })?;
 
         Ok(new_target)
     }
@@ -120,6 +179,9 @@ impl super::Nexus {
             time_made_target: chrono::Utc::now(),
         };
 
+        // We don't need to create or archive a Reconfigurator state file here
+        // because one would have been created when this blueprint was made the
+        // target in the first place.
         self.db_datastore
             .blueprint_target_set_current_enabled(opctx, new_target)
             .await?;
@@ -248,14 +310,15 @@ impl super::Nexus {
             blueprint.time_created.format("%Y%m%dT%H%MZ"),
             blueprint.id
         );
-        self.debug_dropbox.deposit_file_str(&debug_name, &debug).await.map_err(
-            |error| {
+        self.debug_dropbox
+            .deposit_file_str(&debug_name, &debug)
+            .await
+            .map_err(|error| {
                 Error::internal_error(&format!(
                     "error saving Reconfigurator state: {}",
                     InlineErrorChain::new(&error),
                 ))
-            },
-        )?;
+            })?;
 
         Ok(blueprint)
     }
@@ -265,6 +328,15 @@ impl super::Nexus {
         opctx: &OpContext,
         blueprint: Blueprint,
     ) -> Result<(), Error> {
+        // We do not save a Reconfigurator state file for import.  The only
+        // reason to do so is for the historical record to contain this specific
+        // blueprint.  If it's made the target, the record will contain another
+        // state file for that operation and that will contain the blueprint.
+        // If not, it's not that important.  (We could generate one anyway, but
+        // most of the state in the state file would be useless: most of it is
+        // oriented around understanding a planning decision, but the state we
+        // would construct would not be associated with planning this
+        // blueprint.)
         let _ = self.blueprint_add(&opctx, &blueprint).await?;
         Ok(())
     }
