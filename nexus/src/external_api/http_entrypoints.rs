@@ -6118,6 +6118,27 @@ impl NexusExternalApi for NexusExternalApiImpl {
             .await
     }
 
+    async fn rack_membership_abort(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::RackPath>,
+    ) -> Result<HttpResponseOk<RackMembershipStatus>, HttpError> {
+        let apictx = rqctx.context();
+        let nexus = &apictx.context.nexus;
+        let rack_id =
+            RackUuid::from_untyped_uuid(path_params.into_inner().rack_id);
+        let handler = async {
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+            let status = nexus.tq_abort_latest_config(&opctx, rack_id).await?;
+            Ok(HttpResponseOk(status.into()))
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
     async fn rack_membership_status(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<params::RackMembershipConfigPathParams>,
