@@ -4,11 +4,13 @@
 
 //! Configuration of the deployment system
 
+use anyhow::Context;
 use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
 use nexus_reconfigurator_planning::planner::Planner;
 use nexus_reconfigurator_planning::planner::PlannerRng;
 use nexus_reconfigurator_preparation::PlanningInputFromDb;
+use nexus_reconfigurator_preparation::reconfigurator_state_assemble;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::BlueprintArtifactVersion;
 use nexus_types::deployment::BlueprintHostPhase2DesiredContents;
@@ -36,6 +38,7 @@ use uuid::Uuid;
 
 /// Common structure for collecting information that the planner needs
 struct PlanningContext {
+    target: BlueprintTarget,
     planning_input: PlanningInput,
     creator: String,
     inventory: Option<Collection>,
@@ -136,7 +139,7 @@ impl super::Nexus {
         let creator = self.id.to_string();
         let datastore = self.datastore();
 
-        let (_, parent_blueprint) =
+        let (target, parent_blueprint) =
             self.db_datastore.blueprint_target_get_current_full(opctx).await?;
 
         // Load up the planner config from the db directly (rather than from,
@@ -173,7 +176,7 @@ impl super::Nexus {
                 "fetching latest inventory collection for blueprint planner",
             )?;
 
-        Ok(PlanningContext { planning_input, creator, inventory })
+        Ok(PlanningContext { target, planning_input, creator, inventory })
     }
 
     async fn blueprint_add(
@@ -211,7 +214,49 @@ impl super::Nexus {
             ))
         })?;
 
+        // Assemble a Reconfigurator state file that we can archive for future
+        // debugging.
+        let parent = Blueprint::clone(
+            planning_context.planning_input.parent_blueprint(),
+        );
+        let debug = reconfigurator_state_assemble(
+            opctx,
+            self.datastore(),
+            planning_context.planning_input,
+            vec![inventory],
+            vec![parent, blueprint.clone()],
+            planning_context.target,
+        )
+        .await
+        .and_then(|s| {
+            serde_json::to_string(&s)
+                .context("serializing Reconfigurator state file")
+        })
+        .map_err(|error| {
+            Error::internal_error(&format!(
+                "error assembling Reconfigurator state: {}",
+                InlineErrorChain::new(&*error),
+            ))
+        })?;
+
         self.blueprint_add(&opctx, &blueprint).await?;
+
+        // Archive the Reconfigurator state file.
+        // XXX-dap commonize filename construction with autoplanner
+        let debug_name = format!(
+            "blueprint-plan-{}-{}.json",
+            blueprint.time_created.format("%Y%m%dT%H%MZ"),
+            blueprint.id
+        );
+        self.debug_dropbox.deposit_file_str(&debug_name, &debug).await.map_err(
+            |error| {
+                Error::internal_error(&format!(
+                    "error saving Reconfigurator state: {}",
+                    InlineErrorChain::new(&error),
+                ))
+            },
+        )?;
+
         Ok(blueprint)
     }
 

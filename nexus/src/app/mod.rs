@@ -313,6 +313,9 @@ pub struct Nexus {
 
     /// state of overall Nexus quiesce activity
     quiesce: NexusQuiesceHandle,
+
+    /// handle for archiving debug data
+    debug_dropbox: Arc<DebugDropbox>,
 }
 
 impl Nexus {
@@ -573,6 +576,7 @@ impl Nexus {
             update_status: UpdateStatusHandle::new(blueprint_load_rx),
             quiesce,
             sitrep_load_rx,
+            debug_dropbox: debug_dropbox.clone(),
         };
 
         // TODO-cleanup all the extra Arcs here seems wrong
