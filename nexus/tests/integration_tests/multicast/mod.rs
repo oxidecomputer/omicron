@@ -1182,12 +1182,19 @@ pub(crate) async fn cleanup_instances(
             let instance_id =
                 InstanceUuid::from_untyped_uuid(instance.identity.id);
 
-            // Simulate and wait for Running state
-            instance_helpers::instance_simulate(
+            // Use the fallible version during cleanup: if sled agent
+            // communication fails (e.g., because a test intentionally failed
+            // DPD or the sled), we log and continue rather than panic. Real
+            // issues are caught during test execution, not cleanup.
+            if let Err(e) = instance_helpers::try_instance_simulate(
                 &cptestctx.server.server_context().nexus,
                 &instance_id,
             )
-            .await;
+            .await
+            {
+                eprintln!("Warning: Failed to simulate instance {name}: {e:?}");
+                continue;
+            }
             instance_helpers::instance_wait_for_state_as(
                 client,
                 AuthnMode::PrivilegedUser,
@@ -1280,11 +1287,23 @@ pub(crate) async fn stop_instances(
 
                     match stop_result {
                         Ok(_) => {
-                            instance_helpers::instance_simulate(
-                                nexus,
-                                instance_id,
-                            )
-                            .await;
+                            // Use the fallible version during cleanup: if sled
+                            // agent communication fails (e.g., because a test
+                            // intentionally failed DPD or the sled), we log and
+                            // continue rather than panic. Real issues are caught
+                            // during test execution, not cleanup.
+                            if let Err(e) =
+                                instance_helpers::try_instance_simulate(
+                                    nexus,
+                                    instance_id,
+                                )
+                                .await
+                            {
+                                eprintln!(
+                                    "Warning: Failed to simulate stop for instance {name}: {e:?}"
+                                );
+                                return;
+                            }
                             instance_helpers::instance_wait_for_state(
                                 client,
                                 *instance_id,
