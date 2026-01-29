@@ -1456,6 +1456,8 @@ pub struct Disk {
     pub state: DiskState,
     pub device_path: String,
     pub disk_type: DiskType,
+    /// Whether or not this disk is read-only.
+    pub read_only: bool,
 }
 
 /// State of a Disk

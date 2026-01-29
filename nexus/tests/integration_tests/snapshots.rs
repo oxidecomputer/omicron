@@ -626,6 +626,7 @@ async fn test_reject_creating_disk_from_snapshot(
                 disk_backend: params::DiskBackend::Distributed {
                     disk_source: params::DiskSource::Snapshot {
                         snapshot_id: snapshot.id(),
+                        read_only: false,
                     },
                 },
 
@@ -660,6 +661,7 @@ async fn test_reject_creating_disk_from_snapshot(
                 disk_backend: params::DiskBackend::Distributed {
                     disk_source: params::DiskSource::Snapshot {
                         snapshot_id: snapshot.id(),
+                        read_only: false,
                     },
                 },
 
@@ -695,6 +697,7 @@ async fn test_reject_creating_disk_from_snapshot(
                 disk_backend: params::DiskBackend::Distributed {
                     disk_source: params::DiskSource::Snapshot {
                         snapshot_id: snapshot.id(),
+                        read_only: false,
                     },
                 },
 
@@ -794,6 +797,7 @@ async fn test_reject_creating_disk_from_illegal_snapshot(
                 disk_backend: params::DiskBackend::Distributed {
                     disk_source: params::DiskSource::Snapshot {
                         snapshot_id: snapshot.id(),
+                        read_only: false,
                     },
                 },
 
@@ -885,6 +889,7 @@ async fn test_reject_creating_disk_from_other_project_snapshot(
                 disk_backend: params::DiskBackend::Distributed {
                     disk_source: params::DiskSource::Snapshot {
                         snapshot_id: snapshot.id(),
+                        read_only: false,
                     },
                 },
 

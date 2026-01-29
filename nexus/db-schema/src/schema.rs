@@ -36,6 +36,7 @@ table! {
         origin_snapshot -> Nullable<Uuid>,
         origin_image -> Nullable<Uuid>,
         pantry_address -> Nullable<Text>,
+        read_only -> Bool,
     }
 }
 

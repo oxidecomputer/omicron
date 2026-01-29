@@ -134,6 +134,13 @@ impl NexusSaga for SagaDiskCreate {
                         builder.append(call_pantry_attach_for_disk_action());
                     }
 
+                    params::DiskSource::Snapshot {
+                        read_only: true, ..
+                    } => {
+                        return Err(SagaInitError::InvalidParameter(
+                            READONLY_FROM_SNAPSHOT_ERR.to_string(),
+                        ));
+                    }
                     _ => {}
                 }
             }
@@ -148,6 +155,9 @@ impl NexusSaga for SagaDiskCreate {
 }
 
 // disk create saga: action implementations
+
+const READONLY_FROM_SNAPSHOT_ERR: &str = "creating a read-only disk from a \
+    snapshot should not involve a disk_create saga";
 
 async fn sdc_create_crucible_disk_record(
     sagactx: NexusActionContext,
@@ -182,7 +192,12 @@ async fn sdc_create_crucible_disk_record(
                 ))
             })?
         }
-        params::DiskSource::Snapshot { snapshot_id } => {
+        params::DiskSource::Snapshot { read_only: true, .. } => {
+            return Err(ActionError::action_failed(Error::internal_error(
+                READONLY_FROM_SNAPSHOT_ERR,
+            )));
+        }
+        params::DiskSource::Snapshot { snapshot_id, read_only: false } => {
             let (.., db_snapshot) =
                 LookupPath::new(&opctx, osagactx.datastore())
                     .snapshot_id(*snapshot_id)
@@ -509,7 +524,13 @@ async fn sdc_regions_ensure(
     let mut read_only_parent: Option<Box<VolumeConstructionRequest>> =
         match disk_source {
             params::DiskSource::Blank { block_size: _ } => None,
-            params::DiskSource::Snapshot { snapshot_id } => {
+            params::DiskSource::Snapshot { read_only: true, .. } => {
+                return Err(ActionError::action_failed(Error::internal_error(
+                    READONLY_FROM_SNAPSHOT_ERR,
+                )));
+            }
+
+            params::DiskSource::Snapshot { snapshot_id, read_only: false } => {
                 debug!(log, "grabbing snapshot {}", snapshot_id);
 
                 let (.., db_snapshot) =
@@ -658,6 +679,8 @@ async fn sdc_regions_ensure(
 
                 control: None,
 
+                // Read-only disks are created from snapshots, outside of this
+                // saga.
                 read_only: false,
             },
         }],

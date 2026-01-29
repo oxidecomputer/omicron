@@ -37,6 +37,9 @@ pub struct DiskTypeCrucible {
     /// saga, then this field will contain the serialized SocketAddrV6 of that
     /// Pantry.
     pub pantry_address: Option<String>,
+
+    /// `true` if this disk should be read-only once created.
+    pub read_only: bool,
 }
 
 impl DiskTypeCrucible {
@@ -45,9 +48,11 @@ impl DiskTypeCrucible {
         volume_id: VolumeUuid,
         disk_source: &params::DiskSource,
     ) -> Self {
-        let create_snapshot_id = match disk_source {
-            params::DiskSource::Snapshot { snapshot_id } => Some(*snapshot_id),
-            _ => None,
+        let (create_snapshot_id, read_only) = match disk_source {
+            &params::DiskSource::Snapshot { snapshot_id, read_only } => {
+                (Some(snapshot_id), read_only)
+            }
+            _ => (None, false),
         };
 
         // XXX further enum here for different image types?
@@ -62,6 +67,7 @@ impl DiskTypeCrucible {
             create_snapshot_id,
             create_image_id,
             pantry_address: None,
+            read_only,
         }
     }
 

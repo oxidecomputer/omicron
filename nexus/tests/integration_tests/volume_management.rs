@@ -803,6 +803,7 @@ async fn prepare_for_test_multiple_layers_of_snapshots(
         disk_backend: params::DiskBackend::Distributed {
             disk_source: params::DiskSource::Snapshot {
                 snapshot_id: layer_1_snapshot.identity.id,
+                read_only: false,
             },
         },
         size: disk_size,
@@ -847,6 +848,7 @@ async fn prepare_for_test_multiple_layers_of_snapshots(
         disk_backend: params::DiskBackend::Distributed {
             disk_source: params::DiskSource::Snapshot {
                 snapshot_id: layer_2_snapshot.identity.id,
+                read_only: false,
             },
         },
         size: disk_size,
@@ -3953,7 +3955,8 @@ async fn test_read_only_region_reference_counting(
         &client,
         PROJECT_NAME,
         "disk-from-snapshot",
-        snapshot.identity.id,
+        &snapshot,
+        false,
     )
     .await;
 
@@ -4225,7 +4228,8 @@ async fn test_read_only_region_reference_counting_layers(
         &client,
         PROJECT_NAME,
         "disk-from-snapshot",
-        snapshot.identity.id,
+        &snapshot,
+        false,
     )
     .await;
 
@@ -4705,7 +4709,8 @@ async fn test_volume_remove_rop_respects_accounting(
         &client,
         PROJECT_NAME,
         "disk-from-snapshot",
-        snapshot.identity.id,
+        &snapshot,
+        false,
     )
     .await;
 
@@ -4872,7 +4877,8 @@ async fn test_volume_remove_rop_respects_accounting_no_modify_others(
         &client,
         PROJECT_NAME,
         "disk-from-snapshot",
-        snapshot.identity.id,
+        &snapshot,
+        false,
     )
     .await;
 
@@ -4893,7 +4899,8 @@ async fn test_volume_remove_rop_respects_accounting_no_modify_others(
         &client,
         PROJECT_NAME,
         "another-disk-from-snapshot",
-        snapshot.identity.id,
+        &snapshot,
+        false,
     )
     .await;
 
@@ -5141,7 +5148,8 @@ async fn test_migrate_to_ref_count_with_records(
         &client,
         PROJECT_NAME,
         "disk-from-snapshot",
-        snapshot.identity.id,
+        &snapshot,
+        false,
     )
     .await;
 
@@ -5491,7 +5499,8 @@ async fn test_double_layer_with_read_only_region_delete(
         &client,
         PROJECT_NAME,
         "disk-from-snapshot",
-        snapshot.identity.id,
+        &snapshot,
+        false,
     )
     .await;
 
@@ -5499,7 +5508,8 @@ async fn test_double_layer_with_read_only_region_delete(
         &client,
         PROJECT_NAME,
         "another-disk-from-snapshot",
-        snapshot.identity.id,
+        &snapshot,
+        false,
     )
     .await;
 
@@ -5701,7 +5711,8 @@ async fn test_double_layer_snapshot_with_read_only_region_delete_2(
         &client,
         PROJECT_NAME,
         "disk-from-snapshot",
-        snapshot.identity.id,
+        &snapshot,
+        false,
     )
     .await;
 
