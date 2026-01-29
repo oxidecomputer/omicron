@@ -65,6 +65,7 @@ use oxnet::IpNet;
 use sled_agent_client::types::AddSledRequest;
 use sled_agent_client::types::StartSledAgentRequest;
 use sled_agent_client::types::StartSledAgentRequestBody;
+use sled_hardware_types::BaseboardId;
 
 use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
@@ -737,6 +738,8 @@ impl super::Nexus {
                         .into(),
                     dns_update,
                     allowed_source_ips: request.allowed_source_ips,
+                    initial_trust_quorum_configuration: request
+                        .initial_trust_quorum_configuration,
                 },
             )
             .await?;
@@ -892,7 +895,7 @@ impl super::Nexus {
         };
 
         // Convert `UninitializedSledId` to the sled-agent type
-        let baseboard_id = sled_agent_client::types::BaseboardId {
+        let baseboard_id = BaseboardId {
             serial_number: sled.serial.clone(),
             part_number: sled.part.clone(),
         };

@@ -76,6 +76,7 @@ use nexus_db_schema::enums::HwM2SlotEnum;
 use nexus_db_schema::enums::HwRotSlotEnum;
 use nexus_db_schema::enums::SpTypeEnum;
 use nexus_types::deployment::Blueprint;
+use nexus_types::deployment::BlueprintExpungedZoneAccessReason;
 use nexus_types::deployment::BlueprintMetadata;
 use nexus_types::deployment::BlueprintSledConfig;
 use nexus_types::deployment::BlueprintSource;
@@ -83,6 +84,7 @@ use nexus_types::deployment::BlueprintTarget;
 use nexus_types::deployment::ClickhouseClusterConfig;
 use nexus_types::deployment::CockroachDbPreserveDowngrade;
 use nexus_types::deployment::ExpectedVersion;
+use nexus_types::deployment::LastAllocatedSubnetIpOffset;
 use nexus_types::deployment::OximeterReadMode;
 use nexus_types::deployment::PendingMgsUpdate;
 use nexus_types::deployment::PendingMgsUpdateDetails;
@@ -91,6 +93,7 @@ use nexus_types::deployment::PendingMgsUpdateRotBootloaderDetails;
 use nexus_types::deployment::PendingMgsUpdateRotDetails;
 use nexus_types::deployment::PendingMgsUpdateSpDetails;
 use nexus_types::deployment::PendingMgsUpdates;
+use nexus_types::deployment::ZoneRunningStatus;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::Generation;
@@ -260,6 +263,10 @@ impl DataStore {
                     .artifact_hash()
                     .map(ArtifactHash),
                 subnet: Ipv6Network::from(sled.subnet).into(),
+                last_allocated_ip_subnet_offset: sled
+                    .last_allocated_ip_subnet_offset
+                    .into_u16()
+                    .into(),
             })
             .collect::<Vec<_>>();
 
@@ -670,66 +677,27 @@ impl DataStore {
         let blueprint_id =
             BlueprintUuid::from_untyped_uuid(authz_blueprint.id());
 
-        // Read the metadata from the primary blueprint row, and ensure that it
-        // exists.
-        let (
-            parent_blueprint_id,
-            internal_dns_version,
-            external_dns_version,
-            target_release_minimum_generation,
-            nexus_generation,
-            cockroachdb_fingerprint,
-            cockroachdb_setting_preserve_downgrade,
-            time_created,
-            creator,
-            comment,
-            source,
-        ) = {
-            use nexus_db_schema::schema::blueprint::dsl;
+        // ================================================================
+        // STAGE 1: Load all raw database rows
+        //
+        // In this stage, we load data from the database but defer all parsing
+        // and validation. This is critical for handling concurrent deletes
+        // correctly: if we validate as we load, we may encounter validation
+        // errors when reading a partially deleted blueprint.
+        //
+        // By deferring validation until after we confirm the blueprint exists,
+        // we can return "not found" instead of any parsing errors from
+        // reading a torn blueprint.
+        // ================================================================
 
-            let Some(blueprint) = dsl::blueprint
-                .filter(dsl::id.eq(to_db_typed_uuid(blueprint_id)))
-                .select(DbBlueprint::as_select())
-                .get_result_async(&*conn)
-                .await
-                .optional()
-                .map_err(|e| {
-                    public_error_from_diesel(e, ErrorHandler::Server)
-                })?
-            else {
-                return Err(authz_blueprint.not_found());
-            };
-
-            (
-                blueprint.parent_blueprint_id.map(From::from),
-                *blueprint.internal_dns_version,
-                *blueprint.external_dns_version,
-                *blueprint.target_release_minimum_generation,
-                *blueprint.nexus_generation,
-                blueprint.cockroachdb_fingerprint,
-                blueprint.cockroachdb_setting_preserve_downgrade,
-                blueprint.time_created,
-                blueprint.creator,
-                blueprint.comment,
-                BlueprintSource::from(blueprint.source),
-            )
-        };
-        let cockroachdb_setting_preserve_downgrade =
-            CockroachDbPreserveDowngrade::from_optional_string(
-                &cockroachdb_setting_preserve_downgrade,
-            )
-            .map_err(|_| {
-                Error::internal_error(&format!(
-                    "unrecognized cluster version {:?}",
-                    cockroachdb_setting_preserve_downgrade
-                ))
-            })?;
-
-        // Load the sled metadata for this blueprint. We use this to prime our
-        // primary map of sled configs, but we leave the zones / disks /
-        // datasets maps empty (to be filled in when we query those tables
-        // below).
-        let mut sled_configs: BTreeMap<SledUuid, BlueprintSledConfig> = {
+        // Load sled metadata rows
+        //
+        // (sled metadata, slot A version, slot B version)
+        let raw_sled_metadata: Vec<(
+            BpSledMetadata,
+            Option<DbArtifactVersion>,
+            Option<DbArtifactVersion>,
+        )> = {
             use nexus_db_schema::schema::bp_sled_metadata::dsl;
             use nexus_db_schema::schema::tuf_artifact::dsl as tuf_artifact_dsl;
 
@@ -738,7 +706,7 @@ impl DataStore {
                 nexus_db_schema::schema::tuf_artifact as tuf_artifact_2,
             );
 
-            let mut sled_configs = BTreeMap::new();
+            let mut rows = Vec::new();
             let mut paginator = Paginator::new(
                 SQL_BATCH_SIZE,
                 dropshot::PaginationOrder::Ascending,
@@ -789,45 +757,16 @@ impl DataStore {
                 })?;
 
                 paginator = p.found_batch(&batch, &|(s, _, _)| s.sled_id);
-
-                for (s, slot_a_version, slot_b_version) in batch {
-                    let subnet = s.subnet().map_err(|e| {
-                        Error::internal_error(
-                            &InlineErrorChain::new(&*e).to_string(),
-                        )
-                    })?;
-                    let config = BlueprintSledConfig {
-                        state: s.sled_state.into(),
-                        subnet,
-                        sled_agent_generation: *s.sled_agent_generation,
-                        disks: IdOrdMap::new(),
-                        datasets: IdOrdMap::new(),
-                        zones: IdOrdMap::new(),
-                        remove_mupdate_override: s
-                            .remove_mupdate_override
-                            .map(|id| id.into()),
-                        host_phase_2: s
-                            .host_phase_2(slot_a_version, slot_b_version),
-                    };
-                    let old = sled_configs.insert(s.sled_id.into(), config);
-                    bail_unless!(
-                        old.is_none(),
-                        "found duplicate sled ID in bp_sled_metadata: {}",
-                        s.sled_id
-                    );
-                }
+                rows.extend(batch);
             }
-            sled_configs
+            rows
         };
 
-        // Assemble a mutable map of all the NICs found, by NIC id.  As we
-        // match these up with the corresponding zone below, we'll remove items
-        // from this set.  That way we can tell if the same NIC was used twice
-        // or not used at all.
-        let mut omicron_zone_nics = {
+        // Load zone NIC rows
+        let raw_zone_nics: Vec<BpOmicronZoneNic> = {
             use nexus_db_schema::schema::bp_omicron_zone_nic::dsl;
 
-            let mut omicron_zone_nics = BTreeMap::new();
+            let mut rows = Vec::new();
             let mut paginator = Paginator::new(
                 SQL_BATCH_SIZE,
                 dropshot::PaginationOrder::Ascending,
@@ -847,26 +786,17 @@ impl DataStore {
                 })?;
 
                 paginator = p.found_batch(&batch, &|n| n.id);
-
-                for n in batch {
-                    let nic_id = n.id;
-                    let old = omicron_zone_nics.insert(nic_id, n);
-                    bail_unless!(
-                        old.is_none(),
-                        "found duplicate NIC ID in bp_omicron_zone_nic: {}",
-                        nic_id,
-                    );
-                }
+                rows.extend(batch);
             }
-
-            omicron_zone_nics
+            rows
         };
 
-        // Load all the zones for each sled.
-        {
+        // Load zone rows
+        let raw_zones: Vec<(BpOmicronZone, Option<TufArtifact>)> = {
             use nexus_db_schema::schema::bp_omicron_zone::dsl;
             use nexus_db_schema::schema::tuf_artifact::dsl as tuf_artifact_dsl;
 
+            let mut rows = Vec::new();
             let mut paginator = Paginator::new(
                 SQL_BATCH_SIZE,
                 dropshot::PaginationOrder::Ascending,
@@ -902,71 +832,16 @@ impl DataStore {
                 })?;
 
                 paginator = p.found_batch(&batch, &|(z, _)| z.id);
-
-                for (z, artifact) in batch {
-                    let nic_row = z
-                        .bp_nic_id
-                        .map(|id| {
-                            // This error means that we found a row in
-                            // bp_omicron_zone that references a NIC by id but
-                            // there's no corresponding row in
-                            // bp_omicron_zone_nic with that id.  This should be
-                            // impossible and reflects either a bug or database
-                            // corruption.
-                            omicron_zone_nics.remove(&id).ok_or_else(|| {
-                                Error::internal_error(&format!(
-                                    "zone {:?}: expected to find NIC {:?}, \
-                                     but didn't",
-                                    z.id, z.bp_nic_id
-                                ))
-                            })
-                        })
-                        .transpose()?;
-                    let sled_id = SledUuid::from(z.sled_id);
-                    let zone_id = z.id;
-                    let sled_config =
-                        sled_configs.get_mut(&sled_id).ok_or_else(|| {
-                            // This error means that we found a row in
-                            // bp_omicron_zone with no associated record in
-                            // bp_sled_omicron_zones.  This should be
-                            // impossible and reflects either a bug or database
-                            // corruption.
-                            Error::internal_error(&format!(
-                                "zone {zone_id}: unknown sled: {sled_id}",
-                            ))
-                        })?;
-                    let zone = z
-                        .into_blueprint_zone_config(nic_row, artifact)
-                        .with_context(|| {
-                            format!("zone {zone_id}: parse from database")
-                        })
-                        .map_err(|e| {
-                            Error::internal_error(&format!(
-                                "{:#}",
-                                e.to_string()
-                            ))
-                        })?;
-                    sled_config.zones.insert_unique(zone).map_err(|e| {
-                        Error::internal_error(&format!(
-                            "duplicate zone ID found, but \
-                             database guarantees uniqueness: {}",
-                            InlineErrorChain::new(&e),
-                        ))
-                    })?;
-                }
+                rows.extend(batch);
             }
-        }
-
-        bail_unless!(
-            omicron_zone_nics.is_empty(),
-            "found extra Omicron zone NICs: {:?}",
-            omicron_zone_nics.keys()
-        );
+            rows
+        };
 
         // Load all the physical disks for each sled.
-        {
+        let raw_disks: Vec<BpOmicronPhysicalDisk> = {
             use nexus_db_schema::schema::bp_omicron_physical_disk::dsl;
 
+            let mut rows = Vec::new();
             let mut paginator = Paginator::new(
                 SQL_BATCH_SIZE,
                 dropshot::PaginationOrder::Ascending,
@@ -988,43 +863,16 @@ impl DataStore {
                 })?;
 
                 paginator = p.found_batch(&batch, &|d| d.id);
-
-                for d in batch {
-                    let sled_config = sled_configs
-                        .get_mut(&d.sled_id.into())
-                        .ok_or_else(|| {
-                        // This error means that we found a row in
-                        // bp_omicron_physical_disk with no associated
-                        // record in bp_sled_omicron_physical_disks.  This
-                        // should be impossible and reflects either a bug or
-                        // database corruption.
-                        Error::internal_error(&format!(
-                            "disk {}: unknown sled: {}",
-                            d.id, d.sled_id
-                        ))
-                    })?;
-                    let disk_id = d.id;
-                    let disk = d.try_into().map_err(|e| {
-                        Error::internal_error(&format!(
-                            "Cannot convert BpOmicronPhysicalDisk {}: {e}",
-                            disk_id
-                        ))
-                    })?;
-                    sled_config.disks.insert_unique(disk).map_err(|e| {
-                        Error::internal_error(&format!(
-                            "duplicate disk ID found, but \
-                             database guarantees uniqueness: {}",
-                            InlineErrorChain::new(&e),
-                        ))
-                    })?;
-                }
+                rows.extend(batch);
             }
-        }
+            rows
+        };
 
         // Load all the datasets for each sled
-        {
+        let raw_datasets: Vec<BpOmicronDataset> = {
             use nexus_db_schema::schema::bp_omicron_dataset::dsl;
 
+            let mut rows = Vec::new();
             let mut paginator = Paginator::new(
                 SQL_BATCH_SIZE,
                 dropshot::PaginationOrder::Ascending,
@@ -1046,47 +894,16 @@ impl DataStore {
                 })?;
 
                 paginator = p.found_batch(&batch, &|d| d.id);
-
-                for d in batch {
-                    let sled_config = sled_configs
-                        .get_mut(&d.sled_id.into())
-                        .ok_or_else(|| {
-                        // This error means that we found a row in
-                        // bp_omicron_dataset with no associated record in
-                        // bp_sled_omicron_datasets.  This should be
-                        // impossible and reflects either a bug or database
-                        // corruption.
-                        Error::internal_error(&format!(
-                            "dataset {}: unknown sled: {}",
-                            d.id, d.sled_id
-                        ))
-                    })?;
-
-                    let dataset_id = d.id;
-                    let dataset = d.try_into().map_err(|e| {
-                        Error::internal_error(&format!(
-                            "Cannot parse dataset {}: {e}",
-                            dataset_id
-                        ))
-                    })?;
-                    sled_config.datasets.insert_unique(dataset).map_err(
-                        |e| {
-                            Error::internal_error(&format!(
-                                "duplicate dataset ID found, but \
-                                 database guarantees uniqueness: {}",
-                                InlineErrorChain::new(&e),
-                            ))
-                        },
-                    )?;
-                }
+                rows.extend(batch);
             }
-        }
+            rows
+        };
 
         // Load our `ClickhouseClusterConfig` if it exists
-        let clickhouse_cluster_config: Option<ClickhouseClusterConfig> = {
+        let raw_clickhouse_config: Option<BpClickhouseClusterConfig> = {
             use nexus_db_schema::schema::bp_clickhouse_cluster_config::dsl;
 
-            let res = dsl::bp_clickhouse_cluster_config
+            dsl::bp_clickhouse_cluster_config
                 .filter(dsl::blueprint_id.eq(to_db_typed_uuid(blueprint_id)))
                 .select(BpClickhouseClusterConfig::as_select())
                 .get_result_async(&*conn)
@@ -1094,160 +911,84 @@ impl DataStore {
                 .optional()
                 .map_err(|e| {
                     public_error_from_diesel(e, ErrorHandler::Server)
-                })?;
-
-            match res {
-                None => None,
-                Some(bp_config) => {
-                    // Load our clickhouse keeper configs for the given blueprint
-                    let keepers: BTreeMap<OmicronZoneUuid, KeeperId> = {
-                        use nexus_db_schema::schema::bp_clickhouse_keeper_zone_id_to_node_id::dsl;
-                        let mut keepers = BTreeMap::new();
-                        let mut paginator = Paginator::new(
-                            SQL_BATCH_SIZE,
-                            dropshot::PaginationOrder::Ascending,
-                        );
-                        while let Some(p) = paginator.next() {
-                            let batch = paginated(
-                                dsl::bp_clickhouse_keeper_zone_id_to_node_id,
-                                dsl::omicron_zone_id,
-                                &p.current_pagparams(),
-                            )
-                            .filter(
-                                dsl::blueprint_id
-                                    .eq(to_db_typed_uuid(blueprint_id)),
-                            )
-                            .select(
-                                BpClickhouseKeeperZoneIdToNodeId::as_select(),
-                            )
-                            .load_async(&*conn)
-                            .await
-                            .map_err(|e| {
-                                public_error_from_diesel(
-                                    e,
-                                    ErrorHandler::Server,
-                                )
-                            })?;
-
-                            paginator =
-                                p.found_batch(&batch, &|k| k.omicron_zone_id);
-
-                            for k in batch {
-                                let keeper_id = KeeperId(
-                                    u64::try_from(k.keeper_id).map_err(
-                                        |_| {
-                                            Error::internal_error(&format!(
-                                                "keeper id is negative: {}",
-                                                k.keeper_id
-                                            ))
-                                        },
-                                    )?,
-                                );
-                                keepers.insert(
-                                    k.omicron_zone_id.into(),
-                                    keeper_id,
-                                );
-                            }
-                        }
-                        keepers
-                    };
-
-                    // Load our clickhouse server configs for the given blueprint
-                    let servers: BTreeMap<OmicronZoneUuid, ServerId> = {
-                        use nexus_db_schema::schema::bp_clickhouse_server_zone_id_to_node_id::dsl;
-                        let mut servers = BTreeMap::new();
-                        let mut paginator = Paginator::new(
-                            SQL_BATCH_SIZE,
-                            dropshot::PaginationOrder::Ascending,
-                        );
-                        while let Some(p) = paginator.next() {
-                            let batch = paginated(
-                                dsl::bp_clickhouse_server_zone_id_to_node_id,
-                                dsl::omicron_zone_id,
-                                &p.current_pagparams(),
-                            )
-                            .filter(
-                                dsl::blueprint_id
-                                    .eq(to_db_typed_uuid(blueprint_id)),
-                            )
-                            .select(
-                                BpClickhouseServerZoneIdToNodeId::as_select(),
-                            )
-                            .load_async(&*conn)
-                            .await
-                            .map_err(|e| {
-                                public_error_from_diesel(
-                                    e,
-                                    ErrorHandler::Server,
-                                )
-                            })?;
-
-                            paginator =
-                                p.found_batch(&batch, &|s| s.omicron_zone_id);
-
-                            for s in batch {
-                                let server_id = ServerId(
-                                    u64::try_from(s.server_id).map_err(
-                                        |_| {
-                                            Error::internal_error(&format!(
-                                                "server id is negative: {}",
-                                                s.server_id
-                                            ))
-                                        },
-                                    )?,
-                                );
-                                servers.insert(
-                                    s.omicron_zone_id.into(),
-                                    server_id,
-                                );
-                            }
-                        }
-                        servers
-                    };
-
-                    Some(ClickhouseClusterConfig {
-                        generation: bp_config.generation.into(),
-                        max_used_server_id: ServerId(
-                            u64::try_from(bp_config.max_used_server_id)
-                                .map_err(|_| {
-                                    Error::internal_error(&format!(
-                                        "max server id is negative: {}",
-                                        bp_config.max_used_server_id
-                                    ))
-                                })?,
-                        ),
-                        max_used_keeper_id: KeeperId(
-                            u64::try_from(bp_config.max_used_keeper_id)
-                                .map_err(|_| {
-                                    Error::internal_error(&format!(
-                                        "max keeper id is negative: {}",
-                                        bp_config.max_used_keeper_id
-                                    ))
-                                })?,
-                        ),
-                        cluster_name: bp_config.cluster_name,
-                        cluster_secret: bp_config.cluster_secret,
-                        highest_seen_keeper_leader_committed_log_index:
-                            u64::try_from(
-                                bp_config.highest_seen_keeper_leader_committed_log_index,
-                            )
-                            .map_err(|_| {
-                                Error::internal_error(&format!(
-                                    "max server id is negative: {}",
-                                    bp_config.highest_seen_keeper_leader_committed_log_index
-                                ))
-                            })?,
-                        keepers,
-                        servers,
-                    })
-                }
-            }
+                })?
         };
 
-        let (oximeter_read_version, oximeter_read_mode) = {
+        // Load clickhouse keepers and servers if config exists
+        let (raw_clickhouse_keepers, raw_clickhouse_servers) =
+            if raw_clickhouse_config.is_some() {
+                let keepers: Vec<BpClickhouseKeeperZoneIdToNodeId> = {
+                    use nexus_db_schema::schema::bp_clickhouse_keeper_zone_id_to_node_id::dsl;
+                    let mut rows = Vec::new();
+                    let mut paginator = Paginator::new(
+                        SQL_BATCH_SIZE,
+                        dropshot::PaginationOrder::Ascending,
+                    );
+                    while let Some(p) = paginator.next() {
+                        let batch = paginated(
+                            dsl::bp_clickhouse_keeper_zone_id_to_node_id,
+                            dsl::omicron_zone_id,
+                            &p.current_pagparams(),
+                        )
+                        .filter(
+                            dsl::blueprint_id
+                                .eq(to_db_typed_uuid(blueprint_id)),
+                        )
+                        .select(BpClickhouseKeeperZoneIdToNodeId::as_select())
+                        .load_async(&*conn)
+                        .await
+                        .map_err(|e| {
+                            public_error_from_diesel(e, ErrorHandler::Server)
+                        })?;
+
+                        paginator =
+                            p.found_batch(&batch, &|k| k.omicron_zone_id);
+                        rows.extend(batch);
+                    }
+                    rows
+                };
+
+                let servers: Vec<BpClickhouseServerZoneIdToNodeId> = {
+                    use nexus_db_schema::schema::bp_clickhouse_server_zone_id_to_node_id::dsl;
+                    let mut rows = Vec::new();
+                    let mut paginator = Paginator::new(
+                        SQL_BATCH_SIZE,
+                        dropshot::PaginationOrder::Ascending,
+                    );
+                    while let Some(p) = paginator.next() {
+                        let batch = paginated(
+                            dsl::bp_clickhouse_server_zone_id_to_node_id,
+                            dsl::omicron_zone_id,
+                            &p.current_pagparams(),
+                        )
+                        .filter(
+                            dsl::blueprint_id
+                                .eq(to_db_typed_uuid(blueprint_id)),
+                        )
+                        .select(BpClickhouseServerZoneIdToNodeId::as_select())
+                        .load_async(&*conn)
+                        .await
+                        .map_err(|e| {
+                            public_error_from_diesel(e, ErrorHandler::Server)
+                        })?;
+
+                        paginator =
+                            p.found_batch(&batch, &|s| s.omicron_zone_id);
+                        rows.extend(batch);
+                    }
+                    rows
+                };
+
+                (keepers, servers)
+            } else {
+                (Vec::new(), Vec::new())
+            };
+
+        // Load oximeter read policy
+        let raw_oximeter_policy: Option<BpOximeterReadPolicy> = {
             use nexus_db_schema::schema::bp_oximeter_read_policy::dsl;
 
-            let res = dsl::bp_oximeter_read_policy
+            dsl::bp_oximeter_read_policy
                 .filter(dsl::blueprint_id.eq(to_db_typed_uuid(blueprint_id)))
                 .select(BpOximeterReadPolicy::as_select())
                 .get_result_async(&*conn)
@@ -1255,27 +996,14 @@ impl DataStore {
                 .optional()
                 .map_err(|e| {
                     public_error_from_diesel(e, ErrorHandler::Server)
-                })?;
-
-            match res {
-                // If policy is empty, we can safely assume we are at version 1 which defaults
-                // to reading from a single node installation
-                None => (Generation::new(), OximeterReadMode::SingleNode),
-                Some(p) => (
-                    Generation::from(p.version),
-                    OximeterReadMode::from(p.oximeter_read_mode),
-                ),
-            }
+                })?
         };
 
-        // Load all pending RoT bootloader updates.
-        //
-        // Pagination is a little silly here because we will only allow one at a
-        // time in practice for a while, but it's easy enough to do.
-        let mut pending_updates_rot_bootloader = Vec::new();
-        {
+        // Load all pending MGS update rows
+        let raw_pending_rot_bootloader: Vec<BpPendingMgsUpdateRotBootloader> = {
             use nexus_db_schema::schema::bp_pending_mgs_update_rot_bootloader::dsl;
 
+            let mut rows = Vec::new();
             let mut paginator = Paginator::new(
                 SQL_BATCH_SIZE,
                 dropshot::PaginationOrder::Ascending,
@@ -1295,17 +1023,16 @@ impl DataStore {
                 })?;
 
                 paginator = p.found_batch(&batch, &|d| d.hw_baseboard_id);
-                for row in batch {
-                    pending_updates_rot_bootloader.push(row);
-                }
+                rows.extend(batch);
             }
-        }
+            rows
+        };
 
         // Load all pending RoT updates.
-        let mut pending_updates_rot = Vec::new();
-        {
+        let raw_pending_rot: Vec<BpPendingMgsUpdateRot> = {
             use nexus_db_schema::schema::bp_pending_mgs_update_rot::dsl;
 
+            let mut rows = Vec::new();
             let mut paginator = Paginator::new(
                 SQL_BATCH_SIZE,
                 dropshot::PaginationOrder::Ascending,
@@ -1325,17 +1052,16 @@ impl DataStore {
                 })?;
 
                 paginator = p.found_batch(&batch, &|d| d.hw_baseboard_id);
-                for row in batch {
-                    pending_updates_rot.push(row);
-                }
+                rows.extend(batch);
             }
-        }
+            rows
+        };
 
         // Load all pending SP updates.
-        let mut pending_updates_sp = Vec::new();
-        {
+        let raw_pending_sp: Vec<BpPendingMgsUpdateSp> = {
             use nexus_db_schema::schema::bp_pending_mgs_update_sp::dsl;
 
+            let mut rows = Vec::new();
             let mut paginator = Paginator::new(
                 SQL_BATCH_SIZE,
                 dropshot::PaginationOrder::Ascending,
@@ -1355,18 +1081,17 @@ impl DataStore {
                 })?;
 
                 paginator = p.found_batch(&batch, &|d| d.hw_baseboard_id);
-                for row in batch {
-                    pending_updates_sp.push(row);
-                }
+                rows.extend(batch);
             }
-        }
+            rows
+        };
 
         // Load all pending host_phase_1 updates.
-        let mut pending_updates_host_phase_1 = Vec::new();
-        {
+        let raw_pending_host_phase_1: Vec<BpPendingMgsUpdateHostPhase1> = {
             #[rustfmt::skip]
             use nexus_db_schema::schema::bp_pending_mgs_update_host_phase_1::dsl;
 
+            let mut rows = Vec::new();
             let mut paginator = Paginator::new(
                 SQL_BATCH_SIZE,
                 dropshot::PaginationOrder::Ascending,
@@ -1386,26 +1111,20 @@ impl DataStore {
                 })?;
 
                 paginator = p.found_batch(&batch, &|d| d.hw_baseboard_id);
-                for row in batch {
-                    pending_updates_host_phase_1.push(row);
-                }
+                rows.extend(batch);
             }
-        }
+            rows
+        };
 
         // Collect the unique baseboard ids referenced by pending updates.
-        let baseboard_id_ids: BTreeSet<_> = pending_updates_sp
+        let baseboard_id_ids: BTreeSet<_> = raw_pending_sp
             .iter()
             .map(|s| s.hw_baseboard_id)
-            .chain(pending_updates_rot.iter().map(|s| s.hw_baseboard_id))
-            .chain(
-                pending_updates_rot_bootloader
-                    .iter()
-                    .map(|s| s.hw_baseboard_id),
-            )
-            .chain(
-                pending_updates_host_phase_1.iter().map(|s| s.hw_baseboard_id),
-            )
+            .chain(raw_pending_rot.iter().map(|s| s.hw_baseboard_id))
+            .chain(raw_pending_rot_bootloader.iter().map(|s| s.hw_baseboard_id))
+            .chain(raw_pending_host_phase_1.iter().map(|s| s.hw_baseboard_id))
             .collect();
+
         // Fetch the corresponding baseboard records.
         let baseboards_by_id: BTreeMap<_, _> = {
             use nexus_db_schema::schema::hw_baseboard_id::dsl;
@@ -1440,9 +1159,297 @@ impl DataStore {
             bbs
         };
 
-        // Combine this information to assemble the set of pending MGS updates.
+        // ================================================================
+        // STAGE 2: Check if blueprint exists
+        //
+        // We read the blueprint metadata row AFTER loading all child data
+        // but BEFORE validation. If the blueprint has been concurrently
+        // deleted, the top-level row will be missing.
+        //
+        // In this case, we return "not found" rather than proceeding with
+        // validation that would fail on incomplete data.
+        // ================================================================
+
+        let blueprint_row: DbBlueprint = {
+            use nexus_db_schema::schema::blueprint::dsl;
+
+            let Some(blueprint) = dsl::blueprint
+                .filter(dsl::id.eq(to_db_typed_uuid(blueprint_id)))
+                .select(DbBlueprint::as_select())
+                .get_result_async(&*conn)
+                .await
+                .optional()
+                .map_err(|e| {
+                    public_error_from_diesel(e, ErrorHandler::Server)
+                })?
+            else {
+                return Err(authz_blueprint.not_found());
+            };
+
+            blueprint
+        };
+
+        // ================================================================
+        // STAGE 3: Parse and validate all loaded data
+        //
+        // At this point, we know the blueprint exists (wasn't deleted).
+        // Any validation errors from here indicate real database
+        // corruption, not a torn read from concurrent deletion.
+        // ================================================================
+
+        // Parse sled metadata into BlueprintSledConfig map
+        let mut sled_configs: BTreeMap<SledUuid, BlueprintSledConfig> =
+            BTreeMap::new();
+        for (s, slot_a_version, slot_b_version) in raw_sled_metadata {
+            let subnet = s.subnet().map_err(|e| {
+                Error::internal_error(&InlineErrorChain::new(&*e).to_string())
+            })?;
+            let last_allocated_ip_subnet_offset =
+                LastAllocatedSubnetIpOffset::new(
+                    *s.last_allocated_ip_subnet_offset,
+                );
+            let config = BlueprintSledConfig {
+                state: s.sled_state.into(),
+                subnet,
+                sled_agent_generation: *s.sled_agent_generation,
+                last_allocated_ip_subnet_offset,
+                disks: IdOrdMap::new(),
+                datasets: IdOrdMap::new(),
+                zones: IdOrdMap::new(),
+                remove_mupdate_override: s
+                    .remove_mupdate_override
+                    .map(|id| id.into()),
+                host_phase_2: s.host_phase_2(slot_a_version, slot_b_version),
+            };
+            let old = sled_configs.insert(s.sled_id.into(), config);
+            bail_unless!(
+                old.is_none(),
+                "found duplicate sled ID in bp_sled_metadata: {}",
+                s.sled_id
+            );
+        }
+
+        // Assemble a mutable map of all the NICs found, by NIC id.  As we
+        // match these up with the corresponding zone below, we'll remove items
+        // from this set.  That way we can tell if the same NIC was used twice
+        // or not used at all.
+        let mut omicron_zone_nics: BTreeMap<_, _> = BTreeMap::new();
+        for n in raw_zone_nics {
+            let nic_id = n.id;
+            let old = omicron_zone_nics.insert(nic_id, n);
+            bail_unless!(
+                old.is_none(),
+                "found duplicate NIC ID in bp_omicron_zone_nic: {}",
+                nic_id,
+            );
+        }
+
+        // Process zones: match NICs, validate sled references, parse
+        for (z, artifact) in raw_zones {
+            let nic_row = z
+                .bp_nic_id
+                .map(|id| {
+                    // This error means that we found a row in
+                    // bp_omicron_zone that references a NIC by id but
+                    // there's no corresponding row in
+                    // bp_omicron_zone_nic with that id.  This should be
+                    // impossible and reflects either a bug or database
+                    // corruption.
+                    omicron_zone_nics.remove(&id).ok_or_else(|| {
+                        Error::internal_error(&format!(
+                            "zone {:?}: expected to find NIC {:?}, \
+                             but didn't",
+                            z.id, z.bp_nic_id
+                        ))
+                    })
+                })
+                .transpose()?;
+            let sled_id = SledUuid::from(z.sled_id);
+            let zone_id = z.id;
+            let sled_config =
+                sled_configs.get_mut(&sled_id).ok_or_else(|| {
+                    // This error means that we found a row in
+                    // bp_omicron_zone with no associated record in
+                    // bp_sled_omicron_zones.  This should be
+                    // impossible and reflects either a bug or database
+                    // corruption.
+                    Error::internal_error(&format!(
+                        "zone {zone_id}: unknown sled: {sled_id}",
+                    ))
+                })?;
+            let zone = z
+                .into_blueprint_zone_config(nic_row, artifact)
+                .with_context(|| format!("zone {zone_id}: parse from database"))
+                .map_err(|e| {
+                    Error::internal_error(&format!("{:#}", e.to_string()))
+                })?;
+            sled_config.zones.insert_unique(zone).map_err(|e| {
+                Error::internal_error(&format!(
+                    "duplicate zone ID found, but \
+                     database guarantees uniqueness: {}",
+                    InlineErrorChain::new(&e),
+                ))
+            })?;
+        }
+
+        // Validate no extra NICs remain
+        bail_unless!(
+            omicron_zone_nics.is_empty(),
+            "found extra Omicron zone NICs: {:?}",
+            omicron_zone_nics.keys()
+        );
+
+        // Process disks: validate sled references, parse
+        for d in raw_disks {
+            let sled_config =
+                sled_configs.get_mut(&d.sled_id.into()).ok_or_else(|| {
+                    // This error means that we found a row in
+                    // bp_omicron_physical_disk with no associated
+                    // record in bp_sled_omicron_physical_disks.  This
+                    // should be impossible and reflects either a bug or
+                    // database corruption.
+                    Error::internal_error(&format!(
+                        "disk {}: unknown sled: {}",
+                        d.id, d.sled_id
+                    ))
+                })?;
+            let disk_id = d.id;
+            let disk = d.try_into().map_err(|e| {
+                Error::internal_error(&format!(
+                    "Cannot convert BpOmicronPhysicalDisk {}: {e}",
+                    disk_id
+                ))
+            })?;
+            sled_config.disks.insert_unique(disk).map_err(|e| {
+                Error::internal_error(&format!(
+                    "duplicate disk ID found, but \
+                     database guarantees uniqueness: {}",
+                    InlineErrorChain::new(&e),
+                ))
+            })?;
+        }
+
+        // Process datasets: validate sled references, parse
+        for d in raw_datasets {
+            let sled_config =
+                sled_configs.get_mut(&d.sled_id.into()).ok_or_else(|| {
+                    // This error means that we found a row in
+                    // bp_omicron_dataset with no associated record in
+                    // bp_sled_omicron_datasets.  This should be
+                    // impossible and reflects either a bug or database
+                    // corruption.
+                    Error::internal_error(&format!(
+                        "dataset {}: unknown sled: {}",
+                        d.id, d.sled_id
+                    ))
+                })?;
+
+            let dataset_id = d.id;
+            let dataset = d.try_into().map_err(|e| {
+                Error::internal_error(&format!(
+                    "Cannot parse dataset {}: {e}",
+                    dataset_id
+                ))
+            })?;
+            sled_config.datasets.insert_unique(dataset).map_err(|e| {
+                Error::internal_error(&format!(
+                    "duplicate dataset ID found, but \
+                     database guarantees uniqueness: {}",
+                    InlineErrorChain::new(&e),
+                ))
+            })?;
+        }
+
+        // Process clickhouse cluster config
+        let clickhouse_cluster_config: Option<ClickhouseClusterConfig> =
+            match raw_clickhouse_config {
+                None => None,
+                Some(bp_config) => {
+                    // Parse keepers
+                    let mut keepers: BTreeMap<OmicronZoneUuid, KeeperId> =
+                        BTreeMap::new();
+                    for k in raw_clickhouse_keepers {
+                        let keeper_id = KeeperId(
+                            u64::try_from(k.keeper_id).map_err(|_| {
+                                Error::internal_error(&format!(
+                                    "keeper id is negative: {}",
+                                    k.keeper_id
+                                ))
+                            })?,
+                        );
+                        keepers.insert(k.omicron_zone_id.into(), keeper_id);
+                    }
+
+                    // Parse servers
+                    let mut servers: BTreeMap<OmicronZoneUuid, ServerId> =
+                        BTreeMap::new();
+                    for s in raw_clickhouse_servers {
+                        let server_id = ServerId(
+                            u64::try_from(s.server_id).map_err(|_| {
+                                Error::internal_error(&format!(
+                                    "server id is negative: {}",
+                                    s.server_id
+                                ))
+                            })?,
+                        );
+                        servers.insert(s.omicron_zone_id.into(), server_id);
+                    }
+
+                    Some(ClickhouseClusterConfig {
+                        generation: bp_config.generation.into(),
+                        max_used_server_id: ServerId(
+                            u64::try_from(bp_config.max_used_server_id)
+                                .map_err(|_| {
+                                    Error::internal_error(&format!(
+                                        "max server id is negative: {}",
+                                        bp_config.max_used_server_id
+                                    ))
+                                })?,
+                        ),
+                        max_used_keeper_id: KeeperId(
+                            u64::try_from(bp_config.max_used_keeper_id)
+                                .map_err(|_| {
+                                    Error::internal_error(&format!(
+                                        "max keeper id is negative: {}",
+                                        bp_config.max_used_keeper_id
+                                    ))
+                                })?,
+                        ),
+                        cluster_name: bp_config.cluster_name,
+                        cluster_secret: bp_config.cluster_secret,
+                        highest_seen_keeper_leader_committed_log_index:
+                            u64::try_from(
+                                bp_config
+                                    .highest_seen_keeper_leader_committed_log_index,
+                            )
+                            .map_err(|_| {
+                                Error::internal_error(&format!(
+                                    "keeper committed log index is negative: {}",
+                                    bp_config
+                                        .highest_seen_keeper_leader_committed_log_index
+                                ))
+                            })?,
+                        keepers,
+                        servers,
+                    })
+                }
+            };
+
+        // Process oximeter read policy
+        let (oximeter_read_version, oximeter_read_mode) =
+            match raw_oximeter_policy {
+                // If policy is empty, we can safely assume we are at version 1
+                // which defaults to reading from a single node installation
+                None => (Generation::new(), OximeterReadMode::SingleNode),
+                Some(p) => (
+                    Generation::from(p.version),
+                    OximeterReadMode::from(p.oximeter_read_mode),
+                ),
+            };
+
+        // Process pending MGS updates
         let mut pending_mgs_updates = PendingMgsUpdates::new();
-        for row in pending_updates_rot_bootloader {
+        for row in raw_pending_rot_bootloader {
             process_update_row(
                 row,
                 &baseboards_by_id,
@@ -1450,7 +1457,7 @@ impl DataStore {
                 &blueprint_id,
             )?;
         }
-        for row in pending_updates_rot {
+        for row in raw_pending_rot {
             process_update_row(
                 row,
                 &baseboards_by_id,
@@ -1458,7 +1465,7 @@ impl DataStore {
                 &blueprint_id,
             )?;
         }
-        for row in pending_updates_sp {
+        for row in raw_pending_sp {
             process_update_row(
                 row,
                 &baseboards_by_id,
@@ -1466,7 +1473,7 @@ impl DataStore {
                 &blueprint_id,
             )?;
         }
-        for row in pending_updates_host_phase_1 {
+        for row in raw_pending_host_phase_1 {
             process_update_row(
                 row,
                 &baseboards_by_id,
@@ -1474,6 +1481,30 @@ impl DataStore {
                 &blueprint_id,
             )?;
         }
+
+        // Parse blueprint row fields
+        let parent_blueprint_id =
+            blueprint_row.parent_blueprint_id.map(From::from);
+        let internal_dns_version = *blueprint_row.internal_dns_version;
+        let external_dns_version = *blueprint_row.external_dns_version;
+        let target_release_minimum_generation =
+            *blueprint_row.target_release_minimum_generation;
+        let nexus_generation = *blueprint_row.nexus_generation;
+        let cockroachdb_fingerprint = blueprint_row.cockroachdb_fingerprint;
+        let cockroachdb_setting_preserve_downgrade =
+            CockroachDbPreserveDowngrade::from_optional_string(
+                &blueprint_row.cockroachdb_setting_preserve_downgrade,
+            )
+            .map_err(|_| {
+                Error::internal_error(&format!(
+                    "unrecognized cluster version {:?}",
+                    blueprint_row.cockroachdb_setting_preserve_downgrade
+                ))
+            })?;
+        let time_created = blueprint_row.time_created;
+        let creator = blueprint_row.creator;
+        let comment = blueprint_row.comment;
+        let source = BlueprintSource::from(blueprint_row.source);
 
         Ok(Blueprint {
             id: blueprint_id,
@@ -1956,10 +1987,21 @@ impl DataStore {
                 self.ensure_zone_external_networking_deallocated_on_connection(
                     &conn,
                     &opctx.log,
+                    // TODO-correctness Currently the planner _does not wait_
+                    // for zones using external IPs to be ready for cleanup
+                    // before reassigning the external IP to a new zone, so we
+                    // have to deallocate IPs for both "ready for cleanup" and
+                    // "not ready for cleanup" zones. We should fix the planner,
+                    // at which point we can operate on only "ready for cleanup"
+                    // zones here.
+                    //
+                    // <https://github.com/oxidecomputer/omicron/issues/9506>
                     blueprint
-                        .all_omicron_zones(|disposition| {
-                            !disposition.is_in_service()
-                        })
+                        .expunged_zones(
+                            ZoneRunningStatus::Any,
+                            BlueprintExpungedZoneAccessReason
+                                ::DeallocateExternalNetworkingResources
+                        )
                         .map(|(_sled_id, zone)| zone),
                 )
                 .await
@@ -1967,11 +2009,7 @@ impl DataStore {
                 self.ensure_zone_external_networking_allocated_on_connection(
                     &conn,
                     opctx,
-                    blueprint
-                        .all_omicron_zones(|disposition| {
-                            disposition.is_in_service()
-                        })
-                        .map(|(_sled_id, zone)| zone),
+                    blueprint.in_service_zones().map(|(_sled_id, zone)| zone),
                 )
                 .await
                 .map_err(|e| err.bail(e))?;
@@ -3084,7 +3122,6 @@ mod tests {
     use nexus_types::deployment::BlueprintHostPhase2DesiredContents;
     use nexus_types::deployment::BlueprintHostPhase2DesiredSlots;
     use nexus_types::deployment::BlueprintPhysicalDiskDisposition;
-    use nexus_types::deployment::BlueprintZoneDisposition;
     use nexus_types::deployment::BlueprintZoneImageSource;
     use nexus_types::deployment::ExpectedActiveRotSlot;
     use nexus_types::deployment::PendingMgsUpdate;
@@ -3313,7 +3350,7 @@ mod tests {
         );
         assert_eq!(blueprint1.sleds.len(), collection.sled_agents.len());
         assert_eq!(
-            blueprint1.all_omicron_zones(BlueprintZoneDisposition::any).count(),
+            blueprint1.in_service_zones().count(),
             collection.all_ledgered_omicron_zones().count()
         );
         // All zones should be in service.
@@ -3505,10 +3542,7 @@ mod tests {
         // Take the first two zones and set their image sources.
         {
             let zone_ids: Vec<OmicronZoneUuid> = builder
-                .current_sled_zones(
-                    new_sled_id,
-                    BlueprintZoneDisposition::is_in_service,
-                )
+                .current_in_service_sled_zones(new_sled_id)
                 .map(|zone| zone.id)
                 .take(2)
                 .collect();
@@ -3550,7 +3584,8 @@ mod tests {
         // 3. both slots set to a known version
         // 4. slot_a set to a known version; slot b set to an unknown version
         {
-            let sled_ids = builder.sled_ids_with_zones().collect::<Vec<_>>();
+            let sled_ids =
+                builder.current_commissioned_sleds().collect::<Vec<_>>();
             assert!(sled_ids.len() >= 4, "at least 4 sleds");
 
             let host_phase_2_samples = [
@@ -3645,9 +3680,8 @@ mod tests {
         );
         assert_eq!(blueprint1.sleds.len() + 1, blueprint2.sleds.len());
         assert_eq!(
-            blueprint1.all_omicron_zones(BlueprintZoneDisposition::any).count()
-                + num_new_sled_zones,
-            blueprint2.all_omicron_zones(BlueprintZoneDisposition::any).count()
+            blueprint1.in_service_zones().count() + num_new_sled_zones,
+            blueprint2.in_service_zones().count()
         );
 
         // All zones should be in service.
@@ -4297,7 +4331,7 @@ mod tests {
 
         // Insert an IP pool range covering the one Nexus IP.
         let nexus_ip = blueprint1
-            .all_omicron_zones(BlueprintZoneDisposition::is_in_service)
+            .in_service_zones()
             .find_map(|(_, zone_config)| {
                 zone_config
                     .zone_type
@@ -4517,7 +4551,10 @@ mod tests {
 
     fn assert_all_zones_in_service(blueprint: &Blueprint) {
         let not_in_service = blueprint
-            .all_omicron_zones(|disposition| !disposition.is_in_service())
+            .expunged_zones(
+                ZoneRunningStatus::Any,
+                BlueprintExpungedZoneAccessReason::Test,
+            )
             .collect::<Vec<_>>();
         assert!(
             not_in_service.is_empty(),
@@ -4755,6 +4792,194 @@ mod tests {
             explanation
         );
         eprintln!("{explanation}");
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    // Test that concurrent read and delete operations on blueprints do not
+    // result in torn reads. With the fix for issue #9594, blueprint_read
+    // checks for the top-level blueprint record at the END of reading, so
+    // if a concurrent delete has started (which deletes the top-level record
+    // first), the read will fail with "not found" rather than returning
+    // partial data.
+    //
+    // This test spawns concurrent readers and a deleter to exercise the race
+    // condition. Readers should either get the complete original blueprint
+    // OR a "not found" error - never partial/torn data.
+    #[tokio::test]
+    async fn test_concurrent_blueprint_read_delete() {
+        const TEST_NAME: &str = "test_concurrent_blueprint_read_delete";
+        let logctx = dev::test_setup_log(TEST_NAME);
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        // Create two blueprints - one to be the target (so it can't be deleted)
+        // and one to be deleted while being read.
+        let (_, _, target_blueprint) = representative(&logctx.log, TEST_NAME);
+        let authz_target = authz_blueprint_from_id(target_blueprint.id);
+
+        // Insert target blueprint and make it the current target
+        datastore
+            .blueprint_insert(&opctx, &target_blueprint)
+            .await
+            .expect("failed to insert target blueprint");
+        let target = BlueprintTarget {
+            target_id: target_blueprint.id,
+            enabled: true,
+            time_made_target: now_db_precision(),
+        };
+        datastore
+            .blueprint_target_set_current(&opctx, target)
+            .await
+            .expect("failed to set target");
+
+        // Create a second blueprint that we'll delete while reading
+        let blueprint_to_delete = {
+            let mut builder = BlueprintBuilder::new_based_on(
+                &logctx.log,
+                &target_blueprint,
+                "test blueprint to delete",
+                PlannerRng::from_entropy(),
+            )
+            .expect("failed to create builder");
+            builder.comment("blueprint that will be deleted");
+            builder.build(BlueprintSource::Test)
+        };
+        let authz_blueprint = authz_blueprint_from_id(blueprint_to_delete.id);
+
+        datastore
+            .blueprint_insert(&opctx, &blueprint_to_delete)
+            .await
+            .expect("failed to insert blueprint to delete");
+
+        // Verify we can read it back correctly
+        let read_back = datastore
+            .blueprint_read(&opctx, &authz_blueprint)
+            .await
+            .expect("failed to read blueprint");
+        assert_eq!(blueprint_to_delete, read_back);
+
+        // Track results from concurrent readers
+        let successful_reads = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let not_found_errors = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let other_errors = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let delete_completed = Arc::new(AtomicBool::new(false));
+
+        // Signal when at least one read has completed, so we know readers are
+        // running before we start deleting
+        let (first_read_tx, first_read_rx) =
+            tokio::sync::oneshot::channel::<()>();
+        let first_read_tx =
+            Arc::new(std::sync::Mutex::new(Some(first_read_tx)));
+
+        // Spawn reader tasks that loop until deletion completes
+        const NUM_READERS: usize = 10;
+        let mut reader_handles = Vec::new();
+
+        for _ in 0..NUM_READERS {
+            let datastore = datastore.clone();
+            let opctx = opctx.child(std::collections::BTreeMap::new());
+            let authz_blueprint = authz_blueprint.clone();
+            let blueprint_to_delete = blueprint_to_delete.clone();
+            let successful_reads = successful_reads.clone();
+            let not_found_errors = not_found_errors.clone();
+            let other_errors = other_errors.clone();
+            let delete_completed = delete_completed.clone();
+            let first_read_tx = first_read_tx.clone();
+
+            reader_handles.push(tokio::spawn(async move {
+                loop {
+                    match datastore
+                        .blueprint_read(&opctx, &authz_blueprint)
+                        .await
+                    {
+                        Ok(blueprint) => {
+                            // If we got a blueprint back, it MUST be complete
+                            // and match the original. Any mismatch would
+                            // indicate a torn read.
+                            assert_eq!(
+                                blueprint, blueprint_to_delete,
+                                "Read returned a blueprint that doesn't match \
+                                 the original - this indicates a torn read!"
+                            );
+                            successful_reads.fetch_add(1, Ordering::Relaxed);
+
+                            // Signal that at least one read completed (only
+                            // the first sender to take the channel will send)
+                            if let Some(tx) =
+                                first_read_tx.lock().unwrap().take()
+                            {
+                                let _ = tx.send(());
+                            }
+                        }
+                        Err(e) => {
+                            let error_str = e.to_string();
+                            if error_str.contains("not found") {
+                                not_found_errors
+                                    .fetch_add(1, Ordering::Relaxed);
+                            } else {
+                                eprintln!("Unexpected error: {e}");
+                                other_errors.fetch_add(1, Ordering::Relaxed);
+                            }
+                        }
+                    }
+
+                    // Stop reading after delete completes
+                    if delete_completed.load(Ordering::Relaxed) {
+                        break;
+                    }
+                }
+            }));
+        }
+
+        // Wait for at least one successful read before deleting, so we know
+        // the reader tasks have started
+        first_read_rx.await.expect("no reader completed a read");
+
+        // Delete the blueprint while readers are running
+        datastore
+            .blueprint_delete(&opctx, &authz_blueprint)
+            .await
+            .expect("failed to delete blueprint");
+        delete_completed.store(true, Ordering::Relaxed);
+
+        // Wait for all readers to complete
+        for handle in reader_handles {
+            handle.await.expect("reader task panicked");
+        }
+
+        // Log results for debugging.
+        let successful = successful_reads.load(Ordering::Relaxed);
+        let not_found = not_found_errors.load(Ordering::Relaxed);
+        let other = other_errors.load(Ordering::Relaxed);
+        eprintln!(
+            "Results: {} successful reads, {} not-found errors, {} other errors",
+            successful, not_found, other
+        );
+
+        // Key invariants:
+        // - At least one successful read (we waited for this before deleting)
+        // - Successful reads are validated inside the reader loop (must match
+        //   the original blueprint exactly, or the assert_eq! fails)
+        // - "Not found" errors are expected after deletion
+        // - No other errors should occur
+        assert!(
+            successful > 0,
+            "Expected at least one successful read (we wait for this)"
+        );
+        assert_eq!(other, 0, "No unexpected errors should occur");
+
+        // Verify the target blueprint is still intact
+        let target_read = datastore
+            .blueprint_read(&opctx, &authz_target)
+            .await
+            .expect("target blueprint should still be readable");
+        assert_eq!(target_blueprint, target_read);
+
+        // Verify the deleted blueprint is fully cleaned up
+        ensure_blueprint_fully_deleted(&datastore, blueprint_to_delete.id)
+            .await;
 
         db.terminate().await;
         logctx.cleanup_successful();

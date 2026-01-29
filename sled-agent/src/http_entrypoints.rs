@@ -31,7 +31,7 @@ use sled_agent_types::artifact::{
 };
 use sled_agent_types::bootstore::BootstoreStatus;
 use sled_agent_types::dataset::{
-    LocalStorageDatasetEnsureRequest, LocalStoragePathParam,
+    LocalStorageDatasetDeleteRequest, LocalStorageDatasetEnsureRequest,
 };
 use sled_agent_types::debug::OperatorSwitchZonePolicy;
 use sled_agent_types::diagnostics::{
@@ -56,7 +56,7 @@ use sled_agent_types::support_bundle::{
     SupportBundleTransferQueryParams,
 };
 use sled_agent_types::trust_quorum::{
-    ProxyCommitRequest, ProxyPrepareAndCommitRequest,
+    ProxyCommitRequest, ProxyPrepareAndCommitRequest, TrustQuorumNetworkConfig,
 };
 use sled_agent_types::zone_bundle::{
     BundleUtilization, CleanupContext, CleanupContextUpdate, CleanupCount,
@@ -844,6 +844,7 @@ impl SledAgentApi for SledAgentImpl {
         crate::sled_agent::sled_add(
             sa.logger().clone(),
             sa.sprockets().clone(),
+            sa.measurements().clone(),
             request.sled_id,
             request.start_request,
         )
@@ -1156,35 +1157,24 @@ impl SledAgentApi for SledAgentImpl {
 
     async fn local_storage_dataset_ensure(
         request_context: RequestContext<Self::Context>,
-        path_params: Path<LocalStoragePathParam>,
         body: TypedBody<LocalStorageDatasetEnsureRequest>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
         let sa = request_context.context();
-        let path_params = path_params.into_inner();
         let request = body.into_inner();
 
-        sa.create_local_storage_dataset(
-            path_params.zpool_id,
-            path_params.dataset_id,
-            request,
-        )
-        .await?;
+        sa.create_local_storage_dataset(request).await?;
 
         Ok(HttpResponseUpdatedNoContent())
     }
 
     async fn local_storage_dataset_delete(
         request_context: RequestContext<Self::Context>,
-        path_params: Path<LocalStoragePathParam>,
+        body: TypedBody<LocalStorageDatasetDeleteRequest>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
         let sa = request_context.context();
-        let path_params = path_params.into_inner();
+        let request = body.into_inner();
 
-        sa.delete_local_storage_dataset(
-            path_params.zpool_id,
-            path_params.dataset_id,
-        )
-        .await?;
+        sa.delete_local_storage_dataset(request).await?;
 
         Ok(HttpResponseUpdatedNoContent())
     }
@@ -1349,5 +1339,48 @@ impl SledAgentApi for SledAgentImpl {
             )?;
 
         Ok(HttpResponseOk(status))
+    }
+
+    async fn trust_quorum_status(
+        request_context: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<NodeStatus>, HttpError> {
+        let sa = request_context.context();
+
+        let status = sa.trust_quorum().status().await.map_err(|e| {
+            HttpError::for_internal_error(InlineErrorChain::new(&e).to_string())
+        })?;
+
+        Ok(HttpResponseOk(status))
+    }
+
+    async fn trust_quorum_network_config_get(
+        request_context: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<Option<TrustQuorumNetworkConfig>>, HttpError>
+    {
+        let sa = request_context.context();
+
+        let config = sa.trust_quorum().network_config().await.map_err(|e| {
+            HttpError::for_internal_error(InlineErrorChain::new(&e).to_string())
+        })?;
+
+        Ok(HttpResponseOk(config.map(TrustQuorumNetworkConfig::from)))
+    }
+
+    async fn trust_quorum_network_config_put(
+        request_context: RequestContext<Self::Context>,
+        body: TypedBody<TrustQuorumNetworkConfig>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        let sa = request_context.context();
+        let config = body.into_inner();
+
+        sa.trust_quorum().update_network_config(config.into()).await.map_err(
+            |e| {
+                HttpError::for_internal_error(
+                    InlineErrorChain::new(&e).to_string(),
+                )
+            },
+        )?;
+
+        Ok(HttpResponseUpdatedNoContent())
     }
 }

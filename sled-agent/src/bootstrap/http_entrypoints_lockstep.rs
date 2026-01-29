@@ -161,6 +161,7 @@ impl BootstrapAgentLockstepApi for BootstrapAgentLockstepImpl {
                 &ctx.base_log,
                 ctx.sprockets.clone(),
                 ctx.global_zone_bootstrap_ip,
+                ctx.measurements.clone(),
             )
             .map_err(|err| HttpError::for_bad_request(None, err.to_string()))?;
         Ok(HttpResponseOk(id))

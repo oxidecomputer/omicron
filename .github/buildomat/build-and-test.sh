@@ -18,7 +18,7 @@ target_os=$1
 # NOTE: This version should be in sync with the recommended version in
 # .config/nextest.toml. (Maybe build an automated way to pull the recommended
 # version in the future.)
-NEXTEST_VERSION='0.9.110'
+NEXTEST_VERSION='0.9.118'
 
 cargo --version
 rustc --version
@@ -133,7 +133,7 @@ ptime -m cargo build -Z unstable-options --timings=json \
 # the test would have worked but the system was too overloaded and tests
 # take longer than their default timeouts.
 banner test
-ptime -m timeout 2h cargo nextest run --profile ci --locked --verbose \
+ptime -m timeout 2h cargo nextest run --profile ci --locked \
     --test-threads -2
 
 #

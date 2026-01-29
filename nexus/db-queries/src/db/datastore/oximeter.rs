@@ -41,18 +41,19 @@ pub enum CollectorReassignment {
 impl DataStore {
     /// Lookup an oximeter instance by its ID.
     ///
-    /// Fails if the instance has been expunged.
+    /// Returns `Ok(None)` if the instance does not exist or has been expunged.
     pub async fn oximeter_lookup(
         &self,
         opctx: &OpContext,
         id: &Uuid,
-    ) -> Result<OximeterInfo, Error> {
+    ) -> Result<Option<OximeterInfo>, Error> {
         use nexus_db_schema::schema::oximeter::dsl;
         dsl::oximeter
             .filter(dsl::time_expunged.is_null())
             .find(*id)
             .first_async(&*self.pool_connection_authorized(opctx).await?)
             .await
+            .optional()
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 

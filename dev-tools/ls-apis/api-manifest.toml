@@ -29,7 +29,8 @@
 # neither included nor ignored so that we can be sure we're not missing
 # anything.
 #
-# TODO The metadata here overlaps with metadata hardcoded in `openapi-manager`.
+# TODO The metadata here overlaps with metadata hardcoded in
+# `dev-tools/dropshot-apis`.
 
 ################################################################################
 # Ignored non-client packages

@@ -12,7 +12,7 @@
 //! accept these `authz` types.
 //!
 //! The `authz` types can be passed to
-//! [`crate::context::OpContext::authorize()`] to do an authorization check --
+//! [`OpContext::authorize()`] to do an authorization check --
 //! is the caller allowed to perform some action on the resource?  This is the
 //! primary way of doing authz checks in Nexus.
 //!
@@ -153,7 +153,7 @@ where
 /// Fleets.
 ///
 /// This object is used for authorization checks on a Fleet by passing it as the
-/// `resource` argument to [`crate::context::OpContext::authorize()`].  You
+/// `resource` argument to [`OpContext::authorize()`].  You
 /// don't construct a `Fleet` yourself -- use the global [`FLEET`].
 #[derive(Clone, Copy, Debug, Serialize, Deserialize)]
 pub struct Fleet;
@@ -475,18 +475,16 @@ impl AuthorizedResource for IpPoolList {
 /// collection.
 ///
 /// **Authorization Model:**
-/// - Multicast groups are fleet-wide resources (similar to IP pools).
-/// - Any authenticated user within a silo in the fleet can create, list, read,
-///   and modify groups. This includes project collaborators, silo collaborators,
-///   and silo admins.
-/// - Cross-silo multicast communication is enabled by fleet-wide access.
+/// - Multicast groups are fleet-scoped resources.
+/// - Groups are created when the first instance joins and deleted when the last
+///   member leaves (implicit lifecycle).
+/// - **List**: Any authenticated user in the fleet (for discovery).
 ///
 /// The fleet-level collection endpoint (`/v1/multicast-groups`) allows:
-/// - Any authenticated user within the fleet's silos to create and list groups.
-/// - Instances from different projects and silos can join the same multicast groups.
+/// - Fleet-wide listing for all authenticated users (discovery).
+/// - Instances from different projects and silos can join the same groups.
 ///
-/// See `omicron.polar` for the detailed policy rules that grant fleet-wide
-/// access to authenticated silo users for multicast group operations.
+/// See `omicron.polar` for the detailed policy rules.
 #[derive(Clone, Copy, Debug)]
 pub struct MulticastGroupList;
 
@@ -1231,6 +1229,49 @@ impl AuthorizedResource for ScimClientBearerTokenList {
     }
 }
 
+/// Synthetic resource for authorization to list Subnet Pools.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct SubnetPoolList;
+
+/// Singleton representing the [`SubnetPoolList`] itself for authz
+/// purposes.
+pub const SUBNET_POOL_LIST: SubnetPoolList = SubnetPoolList;
+
+impl oso::PolarClass for SubnetPoolList {
+    fn get_polar_class_builder() -> oso::ClassBuilder<Self> {
+        oso::Class::builder()
+            .with_equality_check()
+            .add_attribute_getter("fleet", |_: &SubnetPoolList| FLEET)
+    }
+}
+
+impl AuthorizedResource for SubnetPoolList {
+    fn load_roles<'fut>(
+        &'fut self,
+        opctx: &'fut OpContext,
+        authn: &'fut authn::Context,
+        roleset: &'fut mut RoleSet,
+    ) -> futures::future::BoxFuture<'fut, Result<(), Error>> {
+        // There are no roles on the SubnetPoolList, only permissions.
+        // But we still need to load the Fleet-related roles to verify that
+        // the actor's role on the Fleet (possibly conferred from a Silo role).
+        load_roles_for_resource_tree(&FLEET, opctx, authn, roleset).boxed()
+    }
+
+    fn on_unauthorized(
+        &self,
+        _: &Authz,
+        error: Error,
+        _: AnyActor,
+        _: Action,
+    ) -> Error {
+        error
+    }
+
+    fn polar_class(&self) -> oso::Class {
+        Self::get_polar_class()
+    }
+}
 // Main resource hierarchy: Projects and their resources
 
 authz_resource! {
@@ -1324,7 +1365,8 @@ authz_resource! {
 // resources (instances, disks, etc.) within the existing network.
 //
 // Resources in this category: VPCs, Subnets, Routers, Router Routes,
-// Internet Gateways, and their child resources (IP pools, IP addresses)
+// Internet Gateways, and their child resources (IP pools, IP addresses),
+// Floating IPs, and External Subnets.
 // ============================================================================
 
 authz_resource! {
@@ -1391,37 +1433,31 @@ authz_resource! {
     polar_snippet = InProjectLimited,
 }
 
+authz_resource! {
+    name = "ExternalSubnet",
+    parent = "Project",
+    primary_key = { uuid_kind = ExternalSubnetKind },
+    roles_allowed = false,
+    polar_snippet = InProjectFull,
+}
+
 // MulticastGroup Authorization
 //
-// MulticastGroups are **fleet-scoped resources** (parent = "Fleet"), similar to
-// IP pools, to enable efficient cross-project and cross-silo multicast
-// communication.
+// MulticastGroups are **fleet-scoped resources** with an implicit lifecycle:
+// created when the first instance joins and deleted when the last member leaves.
 //
 // Authorization rules:
-// - Creating/modifying groups: Any authenticated user within a silo in the fleet.
-//   This includes project collaborators, silo collaborators, and silo admins.
-// - Listing groups: Any authenticated user within a silo in the fleet
-// - Viewing individual groups: Any authenticated user within a silo in the fleet
-// - Attaching instances to groups: only requires Instance::Modify permission
-//   (users can attach their own instances to any fleet-scoped group)
+// - List/Read: Any authenticated user in their fleet
+// - Attach/detach: Instance::Modify permission on the instance being attached
 //
-// Fleet::Admin role can also perform all operations via the parent Fleet relation.
-//
-// See omicron.polar for the special `has_permission` rules that grant create/modify/
-// list/read access to authenticated silo users (including project collaborators),
-// enabling cross-project and cross-silo multicast communication without requiring
-// Fleet::Admin or Fleet::Viewer roles.
-//
-// Member management: `MulticastGroup` member attachments/detachments (instances
-// joining/leaving groups) use the existing `MulticastGroup` and `Instance`
-// authz resources rather than creating a separate `MulticastGroupMember` authz
-// resource.
+// See omicron.polar for the custom authorization rules.
+
 authz_resource! {
     name = "MulticastGroup",
     parent = "Fleet",
     primary_key = Uuid,
     roles_allowed = false,
-    polar_snippet = FleetChild,
+    polar_snippet = Custom,
 }
 
 // Customer network integration resources nested below "Fleet"
@@ -1462,6 +1498,14 @@ authz_resource! {
     name = "SwitchPortSettings",
     parent = "Fleet",
     primary_key = Uuid,
+    roles_allowed = false,
+    polar_snippet = FleetChild,
+}
+
+authz_resource! {
+    name = "SubnetPool",
+    parent = "Fleet",
+    primary_key = { uuid_kind = SubnetPoolKind },
     roles_allowed = false,
     polar_snippet = FleetChild,
 }

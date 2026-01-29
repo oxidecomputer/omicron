@@ -120,6 +120,7 @@ use nexus_db_queries::db::datastore::CrucibleTargets;
 use nexus_db_queries::db::datastore::Disk;
 use nexus_db_queries::db::datastore::InstanceAndActiveVmm;
 use nexus_db_queries::db::datastore::InstanceStateComputer;
+use nexus_db_queries::db::datastore::LocalStorageAllocation;
 use nexus_db_queries::db::datastore::LocalStorageDisk;
 use nexus_db_queries::db::datastore::SQL_BATCH_SIZE;
 use nexus_db_queries::db::datastore::VolumeCookedResult;
@@ -131,6 +132,7 @@ use nexus_db_queries::db::pagination::paginated;
 use nexus_db_queries::db::queries::ALLOW_FULL_TABLE_SCAN_SQL;
 use nexus_db_queries::db::queries::region_allocation;
 use nexus_types::deployment::Blueprint;
+use nexus_types::deployment::BlueprintExpungedZoneAccessReason;
 use nexus_types::deployment::BlueprintZoneDisposition;
 use nexus_types::deployment::BlueprintZoneType;
 use nexus_types::deployment::DiskFilter;
@@ -173,6 +175,8 @@ use std::future::Future;
 use std::net::Ipv4Addr;
 use std::net::Ipv6Addr;
 use std::num::NonZeroU32;
+use std::os::unix::process::CommandExt;
+use std::process::Command;
 use std::str::FromStr;
 use std::sync::Arc;
 use tabled::Tabled;
@@ -351,6 +355,12 @@ pub struct DbFetchOptions {
 /// Subcommands that query or update the database
 #[derive(Debug, Subcommand, Clone)]
 enum DbCommands {
+    /// Launch `cockroach-sql`
+    ///
+    /// This launches with the session variable `default_transcation_read_only`
+    /// to on. Because this variable can be disabled, it is required to use
+    /// `--destructive` with this command.
+    Sql,
     /// Print information about blueprints
     ///
     /// Most blueprint information is available via `omdb nexus`, not `omdb db`.
@@ -479,7 +489,7 @@ enum DiskCommands {
     /// Get info for a specific disk
     Info(DiskInfoArgs),
     /// Summarize current disks
-    List,
+    List(DiskListArgs),
     /// Determine what crucible resources are on the given physical disk.
     Physical(DiskPhysicalArgs),
 }
@@ -488,6 +498,13 @@ enum DiskCommands {
 struct DiskInfoArgs {
     /// The UUID of the disk
     uuid: Uuid,
+}
+
+#[derive(Debug, Args, Clone)]
+struct DiskListArgs {
+    /// Include only disks of a given type.
+    #[clap(long = "type", short = 't', value_enum)]
+    disk_type: Option<DiskType>,
 }
 
 #[derive(Debug, Args, Clone)]
@@ -1155,10 +1172,25 @@ impl DbArgs {
         omdb: &Omdb,
         log: &slog::Logger,
     ) -> Result<(), anyhow::Error> {
+        if let DbCommands::Sql = &self.command {
+            let _token = omdb.check_allow_destructive()?;
+            let url = self.db_url_opts.resolve_pg_url(omdb, log).await?;
+            let url = format!(
+                "postgresql://root@{}/omicron?sslmode=disable",
+                url.address()
+            );
+            let mut command =
+                Command::new("/opt/oxide/cockroachdb/bin/cockroach-sql");
+            let error = command.args(["--read-only", "--url", &url]).exec();
+            return Err(error)
+                .with_context(|| format!("failed to exec {command:?}"));
+        }
+
         let fetch_opts = &self.fetch_opts;
         self.db_url_opts.with_datastore(omdb, log, |opctx, datastore| {
             async move {
                 match &self.command {
+                    DbCommands::Sql => unreachable!(),
                     DbCommands::Blueprints(args) => {
                         cmd_db_blueprints(&opctx, &datastore, &fetch_opts, &args).await
                     }
@@ -1210,8 +1242,8 @@ impl DbArgs {
                     DbCommands::Disks(DiskArgs {
                         command: DiskCommands::Info(uuid),
                     }) => cmd_db_disk_info(&opctx, &datastore, uuid).await,
-                    DbCommands::Disks(DiskArgs { command: DiskCommands::List }) => {
-                        cmd_db_disk_list(&datastore, &fetch_opts).await
+                    DbCommands::Disks(DiskArgs { command: DiskCommands::List(args) }) => {
+                        cmd_db_disk_list(&datastore, &fetch_opts, args).await
                     }
                     DbCommands::Disks(DiskArgs {
                         command: DiskCommands::Physical(uuid),
@@ -1622,16 +1654,19 @@ async fn lookup_service_info(
     service_id: Uuid,
     blueprint: &Blueprint,
 ) -> anyhow::Result<Option<ServiceInfo>> {
-    let Some(zone_config) = blueprint
-        .all_omicron_zones(BlueprintZoneDisposition::any)
-        .find_map(|(_sled_id, zone_config)| {
-            if zone_config.id.into_untyped_uuid() == service_id {
-                Some(zone_config)
-            } else {
-                None
-            }
-        })
-    else {
+    // We don't know anything about `service_id`; it may be in-service or it may
+    // be expunged. Check all the zone states.
+    let mut all_zones = blueprint.all_in_service_and_expunged_zones(
+        BlueprintExpungedZoneAccessReason::Omdb,
+    );
+
+    let Some(zone_config) = all_zones.find_map(|(_sled_id, zone_config)| {
+        if zone_config.id.into_untyped_uuid() == service_id {
+            Some(zone_config)
+        } else {
+            None
+        }
+    }) else {
         return Ok(None);
     };
 
@@ -1886,8 +1921,38 @@ async fn cmd_crucible_dataset_mark_provisionable(
 struct DiskIdentity {
     id: Uuid,
     size: String,
+    #[tabled(rename = "TYPE")]
+    disk_type: DiskType,
     state: String,
     name: String,
+}
+
+#[derive(
+    Debug, Copy, Clone, PartialEq, Eq, clap::ValueEnum, strum::Display,
+)]
+#[clap(rename_all = "snake_case")]
+#[strum(serialize_all = "snake_case")]
+enum DiskType {
+    Crucible,
+    Local,
+}
+
+impl From<db::model::DiskType> for DiskType {
+    fn from(disk_type: db::model::DiskType) -> Self {
+        match disk_type {
+            db::model::DiskType::Crucible => DiskType::Crucible,
+            db::model::DiskType::LocalStorage => DiskType::Local,
+        }
+    }
+}
+
+impl From<DiskType> for db::model::DiskType {
+    fn from(disk_type: DiskType) -> Self {
+        match disk_type {
+            DiskType::Crucible => db::model::DiskType::Crucible,
+            DiskType::Local => db::model::DiskType::LocalStorage,
+        }
+    }
 }
 
 impl From<&'_ db::model::Disk> for DiskIdentity {
@@ -1895,6 +1960,7 @@ impl From<&'_ db::model::Disk> for DiskIdentity {
         Self {
             name: disk.name().to_string(),
             id: disk.id(),
+            disk_type: disk.disk_type.into(),
             size: disk.size.to_string(),
             state: disk.runtime().disk_state,
         }
@@ -1905,6 +1971,7 @@ impl From<&'_ db::model::Disk> for DiskIdentity {
 async fn cmd_db_disk_list(
     datastore: &DataStore,
     fetch_opts: &DbFetchOptions,
+    args: &DiskListArgs,
 ) -> Result<(), anyhow::Error> {
     let ctx = || "listing disks".to_string();
 
@@ -1912,6 +1979,11 @@ async fn cmd_db_disk_list(
     let mut query = dsl::disk.into_boxed();
     if !fetch_opts.include_deleted {
         query = query.filter(dsl::time_deleted.is_null());
+    }
+
+    if let Some(disk_type) = args.disk_type {
+        let disk_type = db::model::DiskType::from(disk_type);
+        query = query.filter(dsl::disk_type.eq(disk_type));
     }
 
     #[derive(Tabled)]
@@ -2388,6 +2460,8 @@ async fn local_storage_disk_info(
         #[tabled(display_with = "display_option_blank")]
         time_deleted: Option<DateTime<Utc>>,
 
+        allocation_type: String,
+
         dataset_id: DatasetUuid,
         pool_id: ExternalZpoolUuid,
         sled_id: SledUuid,
@@ -2396,18 +2470,39 @@ async fn local_storage_disk_info(
     }
 
     if let Some(allocation) = &disk.local_storage_dataset_allocation {
-        let rows = vec![Row {
-            disk_name: disk.name().to_string(),
+        let row = match allocation {
+            LocalStorageAllocation::Unencrypted(allocation) => Row {
+                disk_name: disk.name().to_string(),
 
-            time_created: allocation.time_created,
-            time_deleted: allocation.time_deleted,
+                time_created: allocation.time_created,
+                time_deleted: allocation.time_deleted,
 
-            dataset_id: allocation.local_storage_dataset_id(),
-            pool_id: allocation.pool_id(),
-            sled_id: allocation.sled_id(),
+                allocation_type: String::from("unencrypted"),
 
-            dataset_size: allocation.dataset_size.to_bytes(),
-        }];
+                dataset_id: allocation.local_storage_unencrypted_dataset_id(),
+                pool_id: allocation.pool_id(),
+                sled_id: allocation.sled_id(),
+
+                dataset_size: allocation.dataset_size.to_bytes(),
+            },
+
+            LocalStorageAllocation::Encrypted(allocation) => Row {
+                disk_name: disk.name().to_string(),
+
+                time_created: allocation.time_created,
+                time_deleted: allocation.time_deleted,
+
+                allocation_type: String::from("encrypted"),
+
+                dataset_id: allocation.local_storage_dataset_id(),
+                pool_id: allocation.pool_id(),
+                sled_id: allocation.sled_id(),
+
+                dataset_size: allocation.dataset_size.to_bytes(),
+            },
+        };
+
+        let rows = vec![row];
 
         let table = tabled::Table::new(rows)
             .with(tabled::settings::Style::empty())
@@ -2428,7 +2523,20 @@ async fn cmd_db_disk_info(
     datastore: &DataStore,
     args: &DiskInfoArgs,
 ) -> Result<(), anyhow::Error> {
-    match datastore.disk_get(opctx, args.uuid).await? {
+    let disk = {
+        use nexus_db_schema::schema::disk::dsl;
+
+        let conn = datastore.pool_connection_for_tests().await?;
+
+        dsl::disk
+            .filter(dsl::id.eq(args.uuid))
+            .select(nexus_db_model::Disk::as_select())
+            .get_result_async(&*conn)
+            .await
+            .unwrap()
+    };
+
+    match datastore.disk_get_with_model(opctx, disk).await? {
         Disk::Crucible(disk) => {
             crucible_disk_info(opctx, datastore, disk).await
         }

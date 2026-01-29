@@ -40,8 +40,8 @@ use omicron_common::disk::{
     DisksManagementResult, OmicronPhysicalDisksConfig,
 };
 use omicron_uuid_kinds::{
-    DatasetUuid, ExternalZpoolUuid, GenericUuid, PhysicalDiskUuid,
-    PropolisUuid, SledUuid, SupportBundleUuid, ZpoolUuid,
+    DatasetUuid, GenericUuid, PhysicalDiskUuid, PropolisUuid, SledUuid,
+    SupportBundleUuid, ZpoolUuid,
 };
 use oxnet::Ipv6Net;
 use propolis_client::instance_spec::FileStorageBackend;
@@ -61,10 +61,11 @@ use sled_agent_types::instance::{
     VmmPutStateResponse, VmmStateRequested, VmmUnregisterResponse,
 };
 use sled_agent_types::inventory::{
-    ConfigReconcilerInventory, ConfigReconcilerInventoryStatus,
-    HostPhase2DesiredSlots, Inventory, InventoryDataset, InventoryDisk,
-    InventoryZpool, OmicronSledConfig, OmicronZonesConfig, SledRole,
-    ZoneImageResolverInventory,
+    ConfigReconcilerInventory, ConfigReconcilerInventoryResult,
+    ConfigReconcilerInventoryStatus, HostPhase2DesiredSlots, Inventory,
+    InventoryDataset, InventoryDisk, InventoryZpool,
+    OmicronFileSourceResolverInventory, OmicronSledConfig, OmicronZonesConfig,
+    SingleMeasurementInventory, SledRole,
 };
 use sled_agent_types::support_bundle::SupportBundleMetadata;
 
@@ -220,9 +221,10 @@ impl SledAgent {
             metadata,
             ..
         } = instance;
+        let v1_spec = crate::instance::spec_v0_to_v1(vmm_spec.0.clone());
         // respond with a fake 500 level failure if asked to ensure an instance
         // with more than 16 CPUs.
-        let ncpus = vmm_spec.0.board.cpus;
+        let ncpus = v1_spec.board.cpus;
         if ncpus > 16 {
             return Err(Error::internal_error(
                 &"could not allocate an instance: ran out of CPUs!",
@@ -238,13 +240,15 @@ impl SledAgent {
             // pool name.
             let dataset = path.strip_prefix("/dev/zvol/rdsk/oxp_").unwrap();
 
-            // what remains is: UUID/crypt/local_storage/UUID/vol
+            // what remains is: UUID/local_storage_unencrypted/UUID/vol
             let parts: Vec<&str> = dataset.split("/").collect();
             let zpool_id: ZpoolUuid = parts[0].parse().unwrap();
-            let dataset_id: DatasetUuid = parts[3].parse().unwrap();
+            let dataset_id: DatasetUuid = parts[2].parse().unwrap();
 
             // This panics if this dataset was not already created
-            self.storage.lock().get_local_storage_dataset(zpool_id, dataset_id);
+            self.storage
+                .lock()
+                .get_local_storage_unencrypted_dataset(zpool_id, dataset_id);
         }
 
         for (id, _disk) in vmm_spec.crucible_backends() {
@@ -289,36 +293,41 @@ impl SledAgent {
         let mock_lock = self.mock_propolis.lock().await;
         if let Some((_srv, client)) = mock_lock.as_ref() {
             if !self.vmms.contains_key(&instance_id.into_untyped_uuid()).await {
-                let metadata = propolis_client::types::InstanceMetadata {
-                    project_id: metadata.project_id,
-                    silo_id: metadata.silo_id,
-                    sled_id: self.id.into_untyped_uuid(),
-                    sled_model: self
-                        .config
-                        .hardware
-                        .baseboard
-                        .model()
-                        .to_string(),
-                    sled_revision: self.config.hardware.baseboard.revision(),
-                    sled_serial: self
-                        .config
-                        .hardware
-                        .baseboard
-                        .identifier()
-                        .to_string(),
-                };
-                let properties = propolis_client::types::InstanceProperties {
-                    id: propolis_id.into_untyped_uuid(),
-                    name: local_config.hostname.to_string(),
-                    description: "sled-agent-sim created instance".to_string(),
-                    metadata,
-                };
+                let metadata =
+                    propolis_client::instance_spec::InstanceMetadata {
+                        project_id: metadata.project_id,
+                        silo_id: metadata.silo_id,
+                        sled_id: self.id.into_untyped_uuid(),
+                        sled_model: self
+                            .config
+                            .hardware
+                            .baseboard
+                            .model()
+                            .to_string(),
+                        sled_revision: self
+                            .config
+                            .hardware
+                            .baseboard
+                            .revision(),
+                        sled_serial: self
+                            .config
+                            .hardware
+                            .baseboard
+                            .identifier()
+                            .to_string(),
+                    };
+                let properties =
+                    propolis_client::instance_spec::InstanceProperties {
+                        id: propolis_id.into_untyped_uuid(),
+                        name: local_config.hostname.to_string(),
+                        description: "sled-agent-sim created instance"
+                            .to_string(),
+                        metadata,
+                    };
 
                 let body = propolis_client::types::InstanceEnsureRequest {
                     properties,
-                    init: InstanceInitializationMethod::Spec {
-                        spec: vmm_spec.0.clone(),
-                    },
+                    init: InstanceInitializationMethod::Spec { spec: v1_spec },
                 };
 
                 // Try to create the instance
@@ -820,7 +829,23 @@ impl SledAgent {
             zones: zones_config.zones.into_iter().collect(),
             remove_mupdate_override: None,
             host_phase_2: HostPhase2DesiredSlots::current_contents(),
+            measurements: Default::default(),
         };
+
+        let reference_measurements = vec![
+            SingleMeasurementInventory {
+                path: "this/is/fake1".into(),
+                result: ConfigReconcilerInventoryResult::Ok,
+            },
+            SingleMeasurementInventory {
+                path: "this/is/fake2".into(),
+                result: ConfigReconcilerInventoryResult::Err {
+                    message: "this is an error".to_string(),
+                },
+            },
+        ]
+        .into_iter()
+        .collect();
 
         Ok(Inventory {
             sled_id: self.id,
@@ -892,9 +917,11 @@ impl SledAgent {
             last_reconciliation: Some(
                 ConfigReconcilerInventory::debug_assume_success(sled_config),
             ),
-            // TODO: simulate the zone image resolver with greater fidelity
-            zone_image_resolver: ZoneImageResolverInventory::new_fake(),
+            // TODO: simulate the file source resolver with greater fidelity
+            file_source_resolver: OmicronFileSourceResolverInventory::new_fake(
+            ),
             health_monitor,
+            reference_measurements,
         })
     }
 
@@ -1102,13 +1129,15 @@ impl SledAgent {
 
     pub fn ensure_local_storage_dataset(
         &self,
-        zpool_id: ExternalZpoolUuid,
-        dataset_id: DatasetUuid,
         request: LocalStorageDatasetEnsureRequest,
     ) {
-        self.storage
-            .lock()
-            .ensure_local_storage_dataset(zpool_id, dataset_id, request);
+        assert!(!request.encrypted_at_rest);
+
+        self.storage.lock().ensure_local_storage_unencrypted_dataset(
+            request.zpool_id,
+            request.dataset_id,
+            request,
+        );
     }
 }
 

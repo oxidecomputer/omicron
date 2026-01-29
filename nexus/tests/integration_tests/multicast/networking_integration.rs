@@ -2,13 +2,13 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! Integration tests for multicast groups with other networking features
+//! Integration tests for multicast groups with other networking features.
 //!
-//! This module contains tests that verify multicast functionality works correctly
-//! when combined with other networking features like external IPs, floating IPs,
-//! and complex network configurations.
-
-use std::net::{IpAddr, Ipv4Addr};
+//! Tests multicast + networking feature interactions:
+//!
+//! - External IPs: Instances with ephemeral/floating IPs can join multicast groups
+//! - Floating IP attach/detach: Multicast membership unaffected by IP changes
+//! - Complex network configs: Multiple NICs, VPCs, subnets with multicast
 
 use http::{Method, StatusCode};
 use nexus_test_utils::http_testing::{AuthnMode, NexusRequest, RequestBuilder};
@@ -18,14 +18,11 @@ use nexus_test_utils::resource_helpers::{
 };
 use nexus_test_utils_macros::nexus_test;
 use nexus_types::external_api::params::{
-    EphemeralIpCreate, ExternalIpCreate, FloatingIpAttach, InstanceCreate,
-    InstanceNetworkInterfaceAttachment, MulticastGroupCreate,
-    MulticastGroupMemberAdd,
+    self, EphemeralIpCreate, ExternalIpCreate, FloatingIpAttach,
+    InstanceCreate, InstanceNetworkInterfaceAttachment, PoolSelector,
 };
-use nexus_types::external_api::views::{
-    FloatingIp, MulticastGroup, MulticastGroupMember,
-};
-
+use nexus_types::external_api::views::FloatingIp;
+use omicron_common::api::external::IpVersion;
 use omicron_common::api::external::{
     ByteCount, IdentityMetadataCreateParams, Instance, InstanceCpuCount,
     InstanceState, NameOrId,
@@ -54,7 +51,7 @@ async fn test_multicast_with_external_ip_basic(
     let instance_name = "external-ip-mcast-instance";
 
     // Setup: project and IP pools in parallel
-    let (_, (v4_pool, _v6_pool), mcast_pool) = ops::join3(
+    ops::join3(
         create_project(client, project_name),
         create_default_ip_pools(client), // For external IPs
         create_multicast_ip_pool_with_range(
@@ -65,23 +62,6 @@ async fn test_multicast_with_external_ip_basic(
         ),
     )
     .await;
-
-    // Create multicast group
-    let multicast_ip = IpAddr::V4(Ipv4Addr::new(224, 100, 0, 50));
-    let group_url = "/v1/multicast-groups".to_string();
-    let group_params = MulticastGroupCreate {
-        identity: IdentityMetadataCreateParams {
-            name: group_name.parse().unwrap(),
-            description: "Group for external IP integration test".to_string(),
-        },
-        multicast_ip: Some(multicast_ip),
-        source_ips: None,
-        pool: Some(NameOrId::Name(mcast_pool.identity.name.clone())),
-        mvlan: None,
-    };
-
-    object_create::<_, MulticastGroup>(client, &group_url, &group_params).await;
-    wait_for_group_active(client, group_name).await;
 
     // Create instance (will start by default)
     let instance_params = InstanceCreate {
@@ -121,21 +101,10 @@ async fn test_multicast_with_external_ip_basic(
     ensure_multicast_test_ready(cptestctx).await;
     wait_for_multicast_reconciler(&cptestctx.lockstep_client).await;
 
-    // Add instance to multicast group
-    let member_add_url = format!(
-        "{}?project={project_name}",
-        mcast_group_members_url(group_name)
-    );
-    let member_params = MulticastGroupMemberAdd {
-        instance: NameOrId::Name(instance_name.parse().unwrap()),
-    };
-
-    object_create::<_, MulticastGroupMember>(
-        client,
-        &member_add_url,
-        &member_params,
-    )
-    .await;
+    // Add instance to multicast group via instance-centric API
+    multicast_group_attach(cptestctx, project_name, instance_name, group_name)
+        .await;
+    wait_for_group_active(client, group_name).await;
 
     // Wait for multicast member to reach "Joined" state
     wait_for_member_state(
@@ -157,8 +126,9 @@ async fn test_multicast_with_external_ip_basic(
     NexusRequest::new(
         RequestBuilder::new(client, Method::POST, &ephemeral_ip_url)
             .body(Some(&EphemeralIpCreate {
-                pool: Some(v4_pool.identity.name.clone().into()),
-                ip_version: None,
+                pool_selector: PoolSelector::Auto {
+                    ip_version: Some(IpVersion::V4),
+                },
             }))
             .expect_status(Some(StatusCode::ACCEPTED)),
     )
@@ -227,7 +197,7 @@ async fn test_multicast_with_external_ip_basic(
 
     // Cleanup
     cleanup_instances(cptestctx, client, project_name, &[instance_name]).await;
-    cleanup_multicast_groups(client, &[group_name]).await;
+    wait_for_group_deleted(cptestctx, group_name).await;
 }
 
 /// Verify external IP allocation/deallocation lifecycle for multicast group members.
@@ -247,7 +217,7 @@ async fn test_multicast_external_ip_lifecycle(
     let instance_name = "external-ip-lifecycle-instance";
 
     // Setup in parallel
-    let (_, (v4_pool, _v6_pool), mcast_pool) = ops::join3(
+    ops::join3(
         create_project(client, project_name),
         create_default_ip_pools(client),
         create_multicast_ip_pool_with_range(
@@ -259,23 +229,7 @@ async fn test_multicast_external_ip_lifecycle(
     )
     .await;
 
-    // Create multicast group and instance (similar to previous test)
-    let multicast_ip = IpAddr::V4(Ipv4Addr::new(224, 101, 0, 75));
-    let group_url = "/v1/multicast-groups".to_string();
-    let group_params = MulticastGroupCreate {
-        identity: IdentityMetadataCreateParams {
-            name: group_name.parse().unwrap(),
-            description: "Group for external IP lifecycle test".to_string(),
-        },
-        multicast_ip: Some(multicast_ip),
-        source_ips: None,
-        pool: Some(NameOrId::Name(mcast_pool.identity.name.clone())),
-        mvlan: None,
-    };
-
-    object_create::<_, MulticastGroup>(client, &group_url, &group_params).await;
-    wait_for_group_active(client, group_name).await;
-
+    // Create instance
     let instance_params = InstanceCreate {
         identity: IdentityMetadataCreateParams {
             name: instance_name.parse().unwrap(),
@@ -313,21 +267,19 @@ async fn test_multicast_external_ip_lifecycle(
     ensure_multicast_test_ready(cptestctx).await;
     wait_for_multicast_reconciler(&cptestctx.lockstep_client).await;
 
-    let member_add_url = format!(
-        "{}?project={project_name}",
-        mcast_group_members_url(group_name)
-    );
-    let member_params = MulticastGroupMemberAdd {
-        instance: NameOrId::Name(instance_name.parse().unwrap()),
-    };
+    // Add instance to multicast group via instance-centric API
+    multicast_group_attach(cptestctx, project_name, instance_name, group_name)
+        .await;
+    wait_for_group_active(client, group_name).await;
 
-    object_create::<_, MulticastGroupMember>(
-        client,
-        &member_add_url,
-        &member_params,
+    // Wait for member to transition from "Joining"->"Joined"
+    wait_for_member_state(
+        cptestctx,
+        group_name,
+        instance_id,
+        nexus_db_model::MulticastGroupMemberState::Joined,
     )
     .await;
-    wait_for_multicast_reconciler(&cptestctx.lockstep_client).await;
 
     // Verify initial multicast state
     let initial_members =
@@ -344,8 +296,9 @@ async fn test_multicast_external_ip_lifecycle(
         NexusRequest::new(
             RequestBuilder::new(client, Method::POST, &ephemeral_ip_url)
                 .body(Some(&EphemeralIpCreate {
-                    pool: Some(v4_pool.identity.name.clone().into()),
-                    ip_version: None,
+                    pool_selector: PoolSelector::Auto {
+                        ip_version: Some(IpVersion::V4),
+                    },
                 }))
                 .expect_status(Some(StatusCode::ACCEPTED)),
         )
@@ -411,12 +364,12 @@ async fn test_multicast_external_ip_lifecycle(
         );
     }
 
-    // Cleanup
     cleanup_instances(cptestctx, client, project_name, &[instance_name]).await;
-    cleanup_multicast_groups(client, &[group_name]).await;
+    wait_for_group_deleted(cptestctx, group_name).await;
 }
 
-/// Verify instances can be created with both external IP and multicast group simultaneously.
+/// Verify instances can be created with both external IP and multicast group
+/// simultaneously.
 ///
 /// Instance creation with both features works without conflicts during initial setup,
 /// and both features are properly configured from creation.
@@ -432,7 +385,7 @@ async fn test_multicast_with_external_ip_at_creation(
     let instance_name = "creation-mixed-instance";
 
     // Setup - parallelize project and pool creation
-    let (_, (v4_pool, _v6_pool), mcast_pool) = ops::join3(
+    ops::join3(
         create_project(client, project_name),
         create_default_ip_pools(client),
         create_multicast_ip_pool_with_range(
@@ -444,27 +397,9 @@ async fn test_multicast_with_external_ip_at_creation(
     )
     .await;
 
-    // Create multicast group first
-    let multicast_ip = IpAddr::V4(Ipv4Addr::new(224, 102, 0, 100));
-    let group_url = "/v1/multicast-groups".to_string();
-    let group_params = MulticastGroupCreate {
-        identity: IdentityMetadataCreateParams {
-            name: group_name.parse().unwrap(),
-            description: "Group for creation test".to_string(),
-        },
-        multicast_ip: Some(multicast_ip),
-        source_ips: None,
-        pool: Some(NameOrId::Name(mcast_pool.identity.name.clone())),
-        mvlan: None,
-    };
-
-    object_create::<_, MulticastGroup>(client, &group_url, &group_params).await;
-    wait_for_group_active(client, group_name).await;
-
     // Create instance with external IP specified at creation
     let external_ip_param = ExternalIpCreate::Ephemeral {
-        pool: Some(v4_pool.identity.name.clone().into()),
-        ip_version: None,
+        pool_selector: PoolSelector::Auto { ip_version: Some(IpVersion::V4) },
     };
     let instance_params = InstanceCreate {
         identity: IdentityMetadataCreateParams {
@@ -512,21 +447,10 @@ async fn test_multicast_with_external_ip_at_creation(
         "Instance should have external IP from creation"
     );
 
-    // Add to multicast group
-    let member_add_url = format!(
-        "{}?project={project_name}",
-        mcast_group_members_url(group_name)
-    );
-    let member_params = MulticastGroupMemberAdd {
-        instance: NameOrId::Name(instance_name.parse().unwrap()),
-    };
-
-    object_create::<_, MulticastGroupMember>(
-        client,
-        &member_add_url,
-        &member_params,
-    )
-    .await;
+    // Add to multicast group via instance-centric API
+    multicast_group_attach(cptestctx, project_name, instance_name, group_name)
+        .await;
+    wait_for_group_active(client, group_name).await;
 
     // Verify both features work together - wait for member to reach Joined state
     wait_for_member_state(
@@ -547,9 +471,8 @@ async fn test_multicast_with_external_ip_at_creation(
         "Instance should retain external IP"
     );
 
-    // Cleanup
     cleanup_instances(cptestctx, client, project_name, &[instance_name]).await;
-    cleanup_multicast_groups(client, &[group_name]).await;
+    wait_for_group_deleted(cptestctx, group_name).await;
 }
 
 /// Verify instances can have both floating IPs and multicast group membership.
@@ -570,7 +493,7 @@ async fn test_multicast_with_floating_ip_basic(
     let floating_ip_name = "floating-ip-mcast-ip";
 
     // Setup: project and IP pools - parallelize creation
-    let (_, (v4_pool, _v6_pool), mcast_pool) = ops::join3(
+    let (_, (v4_pool, _v6_pool), _) = ops::join3(
         create_project(client, project_name),
         create_default_ip_pools(client), // For floating IPs
         create_multicast_ip_pool_with_range(
@@ -582,32 +505,18 @@ async fn test_multicast_with_floating_ip_basic(
     )
     .await;
 
-    // Create floating IP
+    // Create floating IP (specify pool to avoid ambiguity with dual-stack default pools)
     let floating_ip = create_floating_ip(
         client,
         floating_ip_name,
         project_name,
-        None,
-        Some(v4_pool.identity.name.as_str()),
+        params::AddressAllocator::Auto {
+            pool_selector: params::PoolSelector::Explicit {
+                pool: v4_pool.identity.name.clone().into(),
+            },
+        },
     )
     .await;
-
-    // Create multicast group
-    let multicast_ip = IpAddr::V4(Ipv4Addr::new(224, 200, 0, 50));
-    let group_url = "/v1/multicast-groups".to_string();
-    let group_params = MulticastGroupCreate {
-        identity: IdentityMetadataCreateParams {
-            name: group_name.parse().unwrap(),
-            description: "Group for floating IP integration test".to_string(),
-        },
-        multicast_ip: Some(multicast_ip),
-        source_ips: None,
-        pool: Some(NameOrId::Name(mcast_pool.identity.name.clone())),
-        mvlan: None,
-    };
-
-    object_create::<_, MulticastGroup>(client, &group_url, &group_params).await;
-    wait_for_group_active(client, group_name).await;
 
     // Create instance (will start by default)
     let instance_params = InstanceCreate {
@@ -647,21 +556,10 @@ async fn test_multicast_with_floating_ip_basic(
     ensure_multicast_test_ready(cptestctx).await;
     wait_for_multicast_reconciler(&cptestctx.lockstep_client).await;
 
-    // Add instance to multicast group
-    let member_add_url = format!(
-        "{}?project={project_name}",
-        mcast_group_members_url(group_name)
-    );
-    let member_params = MulticastGroupMemberAdd {
-        instance: NameOrId::Name(instance_name.parse().unwrap()),
-    };
-
-    object_create::<_, MulticastGroupMember>(
-        client,
-        &member_add_url,
-        &member_params,
-    )
-    .await;
+    // Add instance to multicast group via instance-centric API
+    multicast_group_attach(cptestctx, project_name, instance_name, group_name)
+        .await;
+    wait_for_group_active(client, group_name).await;
 
     // Wait for multicast member to reach "Joined" state
     wait_for_member_state(
@@ -679,7 +577,7 @@ async fn test_multicast_with_floating_ip_basic(
     // Verify that inventory-based mapping correctly mapped sled → switch port
     verify_inventory_based_port_mapping(cptestctx, &instance_uuid)
         .await
-        .expect("port mapping verification should succeed");
+        .expect("Port mapping verification should succeed");
 
     // Attach floating IP to the same instance
     let attach_url = format!(
@@ -777,7 +675,6 @@ async fn test_multicast_with_floating_ip_basic(
         format!("/v1/floating-ips/{floating_ip_name}?project={project_name}");
     object_delete(client, &fip_delete_url).await;
 
-    // Cleanup
     cleanup_instances(cptestctx, client, project_name, &[instance_name]).await;
-    cleanup_multicast_groups(client, &[group_name]).await;
+    wait_for_group_deleted(cptestctx, group_name).await;
 }

@@ -13,19 +13,20 @@ use crate::contract;
 use crate::dladm::Etherstub;
 use crate::link::{Link, VnicAllocator};
 use crate::opte::{Port, PortTicket};
-use crate::zone::AddressRequest;
 use crate::zone::Zones;
+use crate::zone::{AddressRequest, ROUTE};
 use crate::zpool::{PathInPool, ZpoolOrRamdisk};
 use camino::{Utf8Path, Utf8PathBuf};
 use camino_tempfile::Utf8TempDir;
 use debug_ignore::DebugIgnore;
 use ipnetwork::IpNetwork;
+use omicron_common::address::{AZ_PREFIX, Ipv6Subnet};
 use omicron_common::backoff;
-use omicron_common::zone_images::ZoneImageFileSource;
+use omicron_common::resolvable_files::ResolvableFileSource;
 use omicron_uuid_kinds::OmicronZoneUuid;
 pub use oxlog::is_oxide_smf_log_file;
 use slog::{Logger, error, info, o, warn};
-use std::net::{Ipv4Addr, Ipv6Addr};
+use std::net::Ipv6Addr;
 use std::sync::Arc;
 #[cfg(target_os = "illumos")]
 use std::sync::OnceLock;
@@ -387,7 +388,7 @@ impl RunningZone {
             let gateway_ip = gateway.to_string();
             let private_ip = addr.ip();
             self.run_cmd(&[
-                "/usr/sbin/route",
+                ROUTE,
                 "add",
                 "-host",
                 &gateway_ip,
@@ -396,13 +397,7 @@ impl RunningZone {
                 "-ifp",
                 port.name(),
             ])?;
-            self.run_cmd(&[
-                "/usr/sbin/route",
-                "add",
-                "-inet",
-                "default",
-                &gateway_ip,
-            ])?;
+            self.run_cmd(&[ROUTE, "add", "-inet", "default", &gateway_ip])?;
         }
         if port.gateway().ipv6_addr().is_some() {
             let v6_name = format!("{}6", name);
@@ -470,50 +465,22 @@ impl RunningZone {
         Ok(())
     }
 
-    pub fn add_default_route(
+    pub fn add_underlay_route(
         &self,
         gateway: Ipv6Addr,
     ) -> Result<(), RunCommandError> {
+        // Route to the underlay AZ's /48 by deriving it from the gateway IP.
+        let underlay_az: Ipv6Subnet<AZ_PREFIX> = Ipv6Subnet::new(gateway);
         self.run_cmd([
-            "/usr/sbin/route",
+            ROUTE,
             "add",
             "-inet6",
-            "default",
+            &underlay_az.to_string(),
             "-inet6",
             &gateway.to_string(),
-        ])?;
-        Ok(())
-    }
-
-    pub fn add_default_route4(
-        &self,
-        gateway: Ipv4Addr,
-    ) -> Result<(), RunCommandError> {
-        self.run_cmd([
-            "/usr/sbin/route",
-            "add",
-            "default",
-            &gateway.to_string(),
-        ])?;
-        Ok(())
-    }
-
-    pub fn add_bootstrap_route(
-        &self,
-        bootstrap_prefix: u16,
-        gz_bootstrap_addr: Ipv6Addr,
-        zone_vnic_name: &str,
-    ) -> Result<(), RunCommandError> {
-        let args = [
-            "/usr/sbin/route",
-            "add",
-            "-inet6",
-            &format!("{bootstrap_prefix:x}::/16"),
-            &gz_bootstrap_addr.to_string(),
             "-ifp",
-            zone_vnic_name,
-        ];
-        self.run_cmd(args)?;
+            self.inner.control_vnic.name(),
+        ])?;
         Ok(())
     }
 
@@ -709,7 +676,7 @@ pub enum InstallZoneError {
         file_source.file_name,
         file_source.search_paths,
     )]
-    ImageNotFound { file_source: ZoneImageFileSource },
+    ImageNotFound { file_source: ResolvableFileSource },
     #[error("Attempted to call install() on underspecified ZoneBuilder")]
     IncompleteBuilder,
 }
@@ -875,7 +842,7 @@ pub struct ZoneBuilder<'a> {
     /// Filesystem path at which the installed zone will reside.
     zone_root_path: Option<PathInPool>,
     /// The file source.
-    file_source: Option<&'a ZoneImageFileSource>,
+    file_source: Option<&'a ResolvableFileSource>,
     /// The name of the type of zone being created (e.g. "propolis-server")
     zone_type: Option<&'a str>,
     /// Unique ID of the instance of the zone being created. (optional)
@@ -935,7 +902,7 @@ impl<'a> ZoneBuilder<'a> {
     /// The file name and image source.
     pub fn with_file_source(
         mut self,
-        file_source: &'a ZoneImageFileSource,
+        file_source: &'a ResolvableFileSource,
     ) -> Self {
         self.file_source = Some(file_source);
         self

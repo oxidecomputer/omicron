@@ -177,6 +177,7 @@ impl HostPhase2SledAgentContext {
 struct HostPhase2SledAgentImpl;
 
 mod api_impl {
+
     use super::HostPhase2SledAgentContext;
     use super::HostPhase2SledAgentImpl;
     use camino::Utf8PathBuf;
@@ -214,8 +215,8 @@ mod api_impl {
     use sled_agent_types::artifact::ArtifactPutResponse;
     use sled_agent_types::artifact::ArtifactQueryParam;
     use sled_agent_types::bootstore::BootstoreStatus;
+    use sled_agent_types::dataset::LocalStorageDatasetDeleteRequest;
     use sled_agent_types::dataset::LocalStorageDatasetEnsureRequest;
-    use sled_agent_types::dataset::LocalStoragePathParam;
     use sled_agent_types::debug::ChickenSwitchDestroyOrphanedDatasets;
     use sled_agent_types::debug::OperatorSwitchZonePolicy;
     use sled_agent_types::diagnostics::SledDiagnosticsLogsDownloadPathParm;
@@ -246,10 +247,10 @@ mod api_impl {
     use sled_agent_types::inventory::Inventory;
     use sled_agent_types::inventory::ManifestInventory;
     use sled_agent_types::inventory::MupdateOverrideInventory;
+    use sled_agent_types::inventory::OmicronFileSourceResolverInventory;
     use sled_agent_types::inventory::OmicronSledConfig;
     use sled_agent_types::inventory::SledCpuFamily;
     use sled_agent_types::inventory::SledRole;
-    use sled_agent_types::inventory::ZoneImageResolverInventory;
     use sled_agent_types::probes::ProbeSet;
     use sled_agent_types::sled::AddSledRequest;
     use sled_agent_types::support_bundle::RangeRequestHeaders;
@@ -269,6 +270,7 @@ mod api_impl {
     use sled_agent_types::zone_bundle::ZonePathParam;
     use sled_diagnostics::SledDiagnosticsQueryOutput;
     use std::collections::BTreeMap;
+    use std::collections::BTreeSet;
     use std::time::Duration;
 
     // We only implement endpoints required for testing host OS updates. All
@@ -340,6 +342,7 @@ mod api_impl {
                     slot_a: HostPhase2DesiredContents::CurrentContents,
                     slot_b: HostPhase2DesiredContents::CurrentContents,
                 },
+                measurements: BTreeSet::new(),
             };
 
             Ok(HttpResponseOk(Inventory {
@@ -368,8 +371,16 @@ mod api_impl {
                     remove_mupdate_override: None,
                     boot_partitions,
                 }),
-                zone_image_resolver: ZoneImageResolverInventory {
+                file_source_resolver: OmicronFileSourceResolverInventory {
                     zone_manifest: ManifestInventory {
+                        boot_disk_path: Utf8PathBuf::new(),
+                        boot_inventory: Err(
+                            "not implemented by HostPhase2SledAgentImpl"
+                                .to_string(),
+                        ),
+                        non_boot_status: IdOrdMap::new(),
+                    },
+                    measurement_manifest: ManifestInventory {
                         boot_disk_path: Utf8PathBuf::new(),
                         boot_inventory: Err(
                             "not implemented by HostPhase2SledAgentImpl"
@@ -387,6 +398,7 @@ mod api_impl {
                     },
                 },
                 health_monitor: HealthMonitorInventory::new(),
+                reference_measurements: IdOrdMap::new(),
             }))
         }
 
@@ -924,7 +936,6 @@ mod api_impl {
 
         async fn local_storage_dataset_ensure(
             _request_context: RequestContext<Self::Context>,
-            _path_params: Path<LocalStoragePathParam>,
             _body: TypedBody<LocalStorageDatasetEnsureRequest>,
         ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
             unimplemented!()
@@ -932,7 +943,7 @@ mod api_impl {
 
         async fn local_storage_dataset_delete(
             _request_context: RequestContext<Self::Context>,
-            _path_params: Path<LocalStoragePathParam>,
+            _body: TypedBody<LocalStorageDatasetDeleteRequest>,
         ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
             unimplemented!()
         }
@@ -1009,6 +1020,37 @@ mod api_impl {
             HttpResponseOk<trust_quorum_types::status::NodeStatus>,
             HttpError,
         > {
+            unimplemented!()
+        }
+
+        async fn trust_quorum_status(
+            _request_context: RequestContext<Self::Context>,
+        ) -> Result<
+            HttpResponseOk<trust_quorum_types::status::NodeStatus>,
+            HttpError,
+        > {
+            unimplemented!()
+        }
+
+        async fn trust_quorum_network_config_get(
+            _request_context: RequestContext<Self::Context>,
+        ) -> Result<
+            HttpResponseOk<
+                Option<
+                    sled_agent_types::trust_quorum::TrustQuorumNetworkConfig,
+                >,
+            >,
+            HttpError,
+        > {
+            unimplemented!()
+        }
+
+        async fn trust_quorum_network_config_put(
+            _request_context: RequestContext<Self::Context>,
+            _body: TypedBody<
+                sled_agent_types::trust_quorum::TrustQuorumNetworkConfig,
+            >,
+        ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
             unimplemented!()
         }
     }

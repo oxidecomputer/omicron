@@ -14,6 +14,7 @@ use nexus_db_model::IpAttachState;
 use nexus_db_model::IpVersion;
 use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
+use nexus_db_queries::db::datastore::FloatingIpAllocation;
 use nexus_types::external_api::params;
 use nexus_types::external_api::views;
 use omicron_common::api::external::CreateResult;
@@ -114,18 +115,33 @@ impl super::Nexus {
         let (.., authz_project) =
             project_lookup.lookup_for(authz::Action::CreateChild).await?;
 
-        let params::FloatingIpCreate { identity, pool, ip, ip_version } =
-            params;
+        let params::FloatingIpCreate { identity, address_allocator } = params;
 
-        // resolve NameOrId into authz::IpPool
-        let pool = match pool {
-            Some(pool) => Some(
-                self.ip_pool_lookup(opctx, &pool)?
-                    .lookup_for(authz::Action::CreateChild)
-                    .await?
-                    .0,
-            ),
-            None => None,
+        let allocation = match address_allocator {
+            params::AddressAllocator::Explicit { ip } => {
+                FloatingIpAllocation::Explicit { ip }
+            }
+            params::AddressAllocator::Auto { pool_selector } => {
+                match pool_selector {
+                    params::PoolSelector::Explicit { pool } => {
+                        let authz_pool = self
+                            .ip_pool_lookup(opctx, &pool)?
+                            .lookup_for(authz::Action::CreateChild)
+                            .await?
+                            .0;
+                        FloatingIpAllocation::Auto {
+                            pool: Some(authz_pool),
+                            ip_version: None,
+                        }
+                    }
+                    params::PoolSelector::Auto { ip_version } => {
+                        FloatingIpAllocation::Auto {
+                            pool: None,
+                            ip_version: ip_version.map(Into::into),
+                        }
+                    }
+                }
+            }
         };
 
         Ok(self
@@ -134,9 +150,7 @@ impl super::Nexus {
                 opctx,
                 authz_project.id(),
                 identity,
-                ip,
-                pool,
-                ip_version.map(Into::into),
+                allocation,
             )
             .await?
             .try_into()

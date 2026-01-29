@@ -66,13 +66,13 @@ pub struct BgpPeerAddrNotIpv4 {
     addr: std::net::IpAddr,
 }
 
-impl TryFrom<crate::v15::early_networking::EarlyNetworkConfig>
+impl TryFrom<crate::v19::early_networking::EarlyNetworkConfig>
     for EarlyNetworkConfig
 {
     type Error = BgpPeerAddrNotIpv4;
 
     fn try_from(
-        value: crate::v15::early_networking::EarlyNetworkConfig,
+        value: crate::v19::early_networking::EarlyNetworkConfig,
     ) -> Result<Self, Self::Error> {
         use omicron_common::api::internal::shared::rack_init::v1;
         use omicron_common::api::internal::shared::rack_init::v2;

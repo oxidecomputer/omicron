@@ -34,16 +34,16 @@ use nexus_reconfigurator_simulation::{
 };
 use nexus_reconfigurator_simulation::{SimStateBuilder, SimTufRepoSource};
 use nexus_reconfigurator_simulation::{SimTufRepoDescription, Simulator};
-use nexus_types::deployment::execution;
+use nexus_types::deployment::ExpectedVersion;
 use nexus_types::deployment::execution::blueprint_external_dns_config;
 use nexus_types::deployment::execution::blueprint_internal_dns_config;
 use nexus_types::deployment::{Blueprint, UnstableReconfiguratorState};
 use nexus_types::deployment::{BlueprintArtifactVersion, PendingMgsUpdate};
+use nexus_types::deployment::{BlueprintExpungedZoneAccessReason, execution};
 use nexus_types::deployment::{
     BlueprintHostPhase2DesiredContents, PlannerConfig,
 };
 use nexus_types::deployment::{BlueprintSource, SledFilter};
-use nexus_types::deployment::{BlueprintZoneDisposition, ExpectedVersion};
 use nexus_types::deployment::{
     BlueprintZoneImageSource, PendingMgsUpdateDetails,
 };
@@ -153,9 +153,7 @@ impl ReconfiguratorSim {
         builder.set_external_dns_version(parent_blueprint.external_dns_version);
 
         // Handle zone networking setup first
-        for (_, zone) in parent_blueprint
-            .all_omicron_zones(BlueprintZoneDisposition::is_in_service)
-        {
+        for (_, zone) in parent_blueprint.in_service_zones() {
             if let Some((external_ip, nic)) =
                 zone.zone_type.external_networking()
             {
@@ -207,9 +205,7 @@ impl ReconfiguratorSim {
             let active_nexus_gen =
                 state.config().active_nexus_zone_generation();
             let mut active_nexus_zones = BTreeSet::new();
-            for (_, zone, nexus) in parent_blueprint
-                .all_nexus_zones(BlueprintZoneDisposition::is_in_service)
-            {
+            for (_, zone, nexus) in parent_blueprint.in_service_nexus_zones() {
                 if nexus.nexus_generation == active_nexus_gen {
                     active_nexus_zones.insert(zone.id);
                 }
@@ -226,9 +222,7 @@ impl ReconfiguratorSim {
             let active_nexus_gen =
                 state.config().active_nexus_zone_generation();
             let mut not_yet_nexus_zones = BTreeSet::new();
-            for (_, zone) in parent_blueprint
-                .all_omicron_zones(BlueprintZoneDisposition::is_in_service)
-            {
+            for (_, zone) in parent_blueprint.in_service_zones() {
                 match &zone.zone_type {
                     nexus_types::deployment::BlueprintZoneType::Nexus(
                         nexus,
@@ -2584,17 +2578,12 @@ fn cmd_blueprint_edit(
         }
         BlueprintEditCommands::BumpNexusGeneration => {
             let current_generation = builder.nexus_generation();
-            let current_max = blueprint
-                .all_nexus_zones(BlueprintZoneDisposition::is_in_service)
-                .fold(
-                    current_generation,
-                    |current_max, (_sled_id, _zone_config, nexus_config)| {
-                        std::cmp::max(
-                            nexus_config.nexus_generation,
-                            current_max,
-                        )
-                    },
-                );
+            let current_max = blueprint.in_service_nexus_zones().fold(
+                current_generation,
+                |current_max, (_sled_id, _zone_config, nexus_config)| {
+                    std::cmp::max(nexus_config.nexus_generation, current_max)
+                },
+            );
             ensure!(
                 current_max > current_generation,
                 "cannot bump blueprint generation (currently \
@@ -2777,9 +2766,12 @@ fn sled_with_zone(
 ) -> anyhow::Result<SledUuid> {
     let mut parent_sled_id = None;
 
-    for sled_id in builder.sled_ids_with_zones() {
+    for sled_id in builder.current_commissioned_sleds() {
         if builder
-            .current_sled_zones(sled_id, BlueprintZoneDisposition::any)
+            .current_in_service_and_expunged_sled_zones(
+                sled_id,
+                BlueprintExpungedZoneAccessReason::ReconfiguratorCli,
+            )
             .any(|z| z.id == *zone_id)
         {
             parent_sled_id = Some(sled_id);

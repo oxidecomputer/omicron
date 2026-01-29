@@ -684,7 +684,8 @@ impl DatasetTask {
                 | DatasetKind::ExternalDns
                 | DatasetKind::InternalDns
                 | DatasetKind::Debug
-                | DatasetKind::LocalStorage => {
+                | DatasetKind::LocalStorage
+                | DatasetKind::LocalStorageUnencrypted => {
                     non_transient_zone_configs.push(dataset);
                 }
             }
@@ -1197,7 +1198,8 @@ fn reason_to_skip_orphaned_dataset_destruction(
         // disk. Refuse to remove them.
         DatasetKind::TransientZoneRoot
         | DatasetKind::Debug
-        | DatasetKind::LocalStorage => Some(format!(
+        | DatasetKind::LocalStorage
+        | DatasetKind::LocalStorageUnencrypted => Some(format!(
             "refusing to delete dataset of kind {kind:?} \
              (expected to exist for all managed disks)",
         )),
@@ -2356,7 +2358,7 @@ mod illumos_tests {
     #[async_trait::async_trait]
     impl SecretRetriever for HardcodedSecretRetriever {
         async fn get_latest(
-            &self,
+            &mut self,
         ) -> Result<key_manager::VersionedIkm, SecretRetrieverError> {
             let epoch = 0;
             let salt = [0u8; 32];
@@ -2366,7 +2368,7 @@ mod illumos_tests {
         }
 
         async fn get(
-            &self,
+            &mut self,
             epoch: u64,
         ) -> Result<key_manager::SecretState, SecretRetrieverError> {
             if epoch != 0 {
