@@ -294,6 +294,16 @@ impl Collection {
     }
 }
 
+impl IdOrdItem for Collection {
+    type Key<'a> = CollectionUuid;
+
+    fn key(&self) -> Self::Key<'_> {
+        self.id
+    }
+
+    id_upcast!();
+}
+
 /// Caboose contents found during a collection
 ///
 /// These are normalized in the database.  Each distinct `Caboose` is assigned a

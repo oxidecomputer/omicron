@@ -83,6 +83,7 @@ pub mod planning_report;
 mod reconfigurator_config;
 mod zone_type;
 
+use anyhow::Context;
 use anyhow::anyhow;
 use anyhow::bail;
 pub use blueprint_diff::BlueprintDiffSummary;
@@ -702,6 +703,16 @@ impl Blueprint {
         })
         .collect()
     }
+}
+
+impl IdOrdItem for Blueprint {
+    type Key<'a> = BlueprintUuid;
+
+    fn key(&self) -> Self::Key<'_> {
+        self.id
+    }
+
+    id_upcast!();
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -2853,6 +2864,289 @@ pub struct UnstableReconfiguratorState {
     pub external_dns: BTreeMap<Generation, DnsConfigParams>,
     pub silo_names: Vec<omicron_common::api::external::Name>,
     pub external_dns_zone_names: Vec<String>,
+}
+
+pub struct ReconfiguratorStateInput<'a, R> {
+    label: &'a str,
+    reader: R,
+}
+
+pub struct ReadSeries<'a> {
+    pub latest: &'a str,
+    pub warnings: Vec<anyhow::Error>,
+    pub state: UnstableReconfiguratorState,
+}
+
+impl UnstableReconfiguratorState {
+    pub fn read_series<'a, I, R>(
+        iter: I,
+    ) -> Result<ReadSeries<'a>, anyhow::Error>
+    where
+        I: IntoIterator<Item = ReconfiguratorStateInput<'a, R>>,
+        R: std::io::Read,
+    {
+        let mut collections = IdOrdMap::new();
+        let mut blueprints = IdOrdMap::new();
+        let mut non_targets: BTreeSet<BlueprintUuid> = BTreeSet::new();
+        let mut maybe_targets: BTreeSet<BlueprintUuid> = BTreeSet::new();
+        let mut internal_dns = BTreeMap::new();
+        let mut external_dns = BTreeMap::new();
+        let mut warnings = Vec::new();
+        let mut all_states: BTreeMap<BlueprintUuid, UniqueState<'_>> =
+            BTreeMap::new();
+
+        struct UniqueState<'a> {
+            planning_input: PlanningInput,
+            target_blueprint: BlueprintTarget,
+            external_dns_zone_names: Vec<String>,
+            silo_names: Vec<omicron_common::api::external::Name>,
+            label: &'a str,
+        }
+
+        // Read all the inputs and incorporate them into the state we're
+        // tracking.
+        for input in iter {
+            let p: UnstableReconfiguratorState =
+                serde_json::from_reader(input.reader)
+                    .with_context(|| format!("parse {:?}", input.label))?;
+
+            // Walk through the inventory collections.  If we've seen this one
+            // before, the contents should exactly match because these are
+            // immutable over time.  Otherwise, accumulate them into
+            // `collections`.
+            for c in p.collections {
+                match collections.entry(c.id) {
+                    Entry::Vacant(vacant_entry) => {
+                        vacant_entry.insert(c);
+                    }
+                    Entry::Occupied(occupied_entry) => {
+                        if *occupied_entry.get() != c {
+                            bail!(
+                                "input {:?}: collection {} does not match \
+                                 what we read in a different file",
+                                input.label,
+                                c.id
+                            );
+                        }
+                    }
+                };
+            }
+
+            // Do the same with blueprints.
+            for b in p.blueprints {
+                match blueprints.entry(b.id) {
+                    Entry::Vacant(vacant_entry) => {
+                        vacant_entry.insert(b);
+                    }
+                    Entry::Occupied(occupied_entry) => {
+                        if *occupied_entry.get() != b {
+                            bail!(
+                                "input {:?}: blueprint {} does not match \
+                                 what we read in a different file",
+                                input.label,
+                                b.id
+                            );
+                        }
+                    }
+                };
+            }
+
+            // Do the same with internal DNS.
+            for (generation, dns) in p.internal_dns {
+                match internal_dns.entry(generation) {
+                    std::collections::btree_map::Entry::Vacant(
+                        vacant_entry,
+                    ) => {
+                        vacant_entry.insert(dns);
+                    }
+                    std::collections::btree_map::Entry::Occupied(
+                        occupied_entry,
+                    ) => {
+                        if *occupied_entry.get() != dns {
+                            bail!(
+                                "input {:?}: internal DNS generation {} does \
+                                 not match what we read in a different file",
+                                input.label,
+                                generation,
+                            );
+                        }
+                    }
+                };
+            }
+
+            // Do the same with external DNS.
+            for (generation, dns) in p.external_dns {
+                match external_dns.entry(generation) {
+                    std::collections::btree_map::Entry::Vacant(
+                        vacant_entry,
+                    ) => {
+                        vacant_entry.insert(dns);
+                    }
+                    std::collections::btree_map::Entry::Occupied(
+                        occupied_entry,
+                    ) => {
+                        if *occupied_entry.get() != dns {
+                            bail!(
+                                "input {:?}: external DNS generation {} does \
+                                 not match what we read in a different file",
+                                input.label,
+                                generation,
+                            );
+                        }
+                    }
+                };
+            }
+
+            // We've merged in the state that's easy to merge.  For the rest of
+            // it: we'll end up choosing the state stored in whichever file is
+            // logically the latest one.  How do we know which one that is?  Its
+            // target blueprint is not referred to in the ancestry of any
+            // _other_ blueprint that we find.  There may be more than one of
+            // these, in the end.  More on this below.
+            //
+            // For now, update some structures that will help us quickly find
+            // candidates.  And store all of the state we _might_ take from this
+            // file into `all_states`.
+            let target_blueprint_id = p.target_blueprint.target_id;
+            match all_states.entry(target_blueprint_id) {
+                std::collections::btree_map::Entry::Vacant(vacant_entry) => {
+                    vacant_entry.insert(UniqueState {
+                        planning_input: p.planning_input,
+                        target_blueprint: p.target_blueprint,
+                        external_dns_zone_names: p.external_dns_zone_names,
+                        silo_names: p.silo_names,
+                        label: input.label,
+                    });
+                }
+                std::collections::btree_map::Entry::Occupied(
+                    occupied_entry,
+                ) => {
+                    warnings.push(anyhow!(
+                        "input {:?}: has target blueprint {}, which is the \
+                         same as previous input {:?} (will ignore this file \
+                         in terms of figuring out which one is latest)",
+                        input.label,
+                        target_blueprint_id,
+                        occupied_entry.get().label,
+                    ));
+                }
+            };
+
+            let Some(blueprint) = blueprints.get(&target_blueprint_id) else {
+                warnings.push(anyhow!(
+                    "input {:?}: file refers to target blueprint {} that is \
+                     missing from this file",
+                    input.label,
+                    target_blueprint_id,
+                ));
+                continue;
+            };
+
+            // The parent blueprint definitely can't be the latest target.
+            //
+            // Insert it into `non_targets` so that a subsequent iteration that
+            // finds this blueprint as the target know that it cannot be the
+            // final target.
+            //
+            // Remove it from `maybe_targets` in case a previous iteration
+            // thought that maybe it could have been the final target.
+            if let Some(parent_id) = blueprint.parent_blueprint_id {
+                non_targets.insert(parent_id);
+                maybe_targets.remove(&parent_id);
+            };
+
+            // If a previous iteration did not find this blueprint as its
+            // target's parent, then this one could be the latest target.
+            if !non_targets.contains(&target_blueprint_id) {
+                maybe_targets.insert(target_blueprint_id);
+            }
+        }
+
+        if all_states.is_empty() {
+            bail!("found no inputs containing a valid target blueprint id");
+        }
+
+        // It's time to figure out which blueprint is the latest target across
+        // all these files.
+        //
+        // At this point, `maybe_targets` contains the set of blueprint ids that
+        // were not observed to be the parent of any blueprint contained in
+        // these files.
+        //
+        let latest = match maybe_targets.len() {
+            0 => {
+                // If `maybe_targets` were empty, that would mean that either we
+                // had no blueprint ids at all (in which case we would have
+                // bailed out above after checking whether `all_states` was
+                // empty) or else every blueprint in all the files was reported
+                // as the parent of some other blueprint in the files.  This is
+                // not valid: it would imply a cycle in the blueprint history.
+                bail!(
+                    "no blueprint found that is not some other blueprint's \
+                     parent (this should be impossible)"
+                );
+            }
+
+            1 => {
+                // This is the easy, common case.
+                // unwrap(): we just checked that `maybe_targets` is not empty.
+                let latest_id = maybe_targets.into_iter().next().unwrap();
+                // unwrap(): for an entry to be in `maybe_targets`, it must have
+                // also been added to `all_states`.
+                all_states.remove(&latest_id).unwrap()
+            }
+
+            n => {
+                // It is possible to find more than candidate for the "latest"
+                // blueprint if there's a gap in the history.  For example, we
+                // may have been provided a sequence of blueprints: 1, 2, 4, 5.
+                // In that case, blueprints 2 and 5 will both look like
+                // candidates for the latest.  In that case, use
+                // `time_made_target` as the tiebreaker.  (One might wonder why
+                // we didn't just use that field to start with.  We want to
+                // avoid relying on timestamps for correctness.  If we have to
+                // resort to it here, we will generate a warning.)
+                let mut candidates: Vec<_> =
+                    maybe_targets.into_iter().collect();
+                warnings.push(anyhow!(
+                    "{n} blueprint ids found that were not the parent of some \
+                     other blueprint in these files (is there a gap in the \
+                     history here?) (will choose based on latest time made \
+                     target): {:?}",
+                    candidates,
+                ));
+                candidates.sort_by_key(|blueprint_id| {
+                    // unwrap(): for a value to be in `maybe_targets`, we must
+                    // have inserted it into `all_states`, too.
+                    all_states
+                        .get(blueprint_id)
+                        .unwrap()
+                        .target_blueprint
+                        .time_made_target
+                });
+                // unwrap(): we just checked that this list is not empty.
+                let latest_id = candidates.last().unwrap();
+                // unwrap(): as above, for a value to be in this list, it must
+                // have been added to `all_states`.
+                all_states.remove(latest_id).unwrap()
+            }
+        };
+
+        Ok(ReadSeries {
+            latest: latest.label,
+            warnings,
+            state: UnstableReconfiguratorState {
+                planning_input: latest.planning_input,
+                collections: collections.into_iter().collect(),
+                target_blueprint: latest.target_blueprint,
+                blueprints: blueprints.into_iter().collect(),
+                internal_dns,
+                external_dns,
+                silo_names: latest.silo_names,
+                external_dns_zone_names: latest.external_dns_zone_names,
+            },
+        })
+    }
 }
 
 #[cfg(test)]
