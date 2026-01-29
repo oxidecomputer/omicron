@@ -103,7 +103,9 @@ impl DataStore {
         opctx: &OpContext,
         params: params::SubnetPoolCreate,
     ) -> CreateResult<SubnetPool> {
-        opctx.authorize(authz::Action::CreateChild, &authz::FLEET).await?;
+        opctx
+            .authorize(authz::Action::CreateChild, &authz::SUBNET_POOL_LIST)
+            .await?;
         use nexus_db_schema::schema::subnet_pool::dsl;
         let pool = SubnetPool::new(params.identity, params.ip_version.into());
         diesel::insert_into(dsl::subnet_pool)
@@ -174,7 +176,7 @@ impl DataStore {
         opctx: &OpContext,
         authz_pool: &authz::SubnetPool,
         updates: SubnetPoolUpdate,
-    ) -> UpdateResult<()> {
+    ) -> UpdateResult<SubnetPool> {
         use nexus_db_schema::schema::subnet_pool::dsl;
         opctx.authorize(authz::Action::Modify, authz_pool).await?;
         let conn = self.pool_connection_authorized(opctx).await?;
@@ -184,10 +186,10 @@ impl DataStore {
                 .filter(dsl::time_deleted.is_null()),
         )
         .set(updates)
-        .execute_async(&*conn)
+        .returning(SubnetPool::as_returning())
+        .get_result_async(&*conn)
         .await
         .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
-        .map(|_| ())
     }
 
     /// Link a Subnet Pool to a Silo.
@@ -338,6 +340,7 @@ impl DataStore {
         opctx.authorize(authz::Action::ListChildren, pool).await?;
         paginated(dsl::subnet_pool_member, dsl::subnet, pagparams)
             .filter(dsl::subnet_pool_id.eq(to_db_typed_uuid(pool.id())))
+            .filter(dsl::time_deleted.is_null())
             .select(SubnetPoolMember::as_select())
             .get_results_async(&*self.pool_connection_authorized(opctx).await?)
             .await

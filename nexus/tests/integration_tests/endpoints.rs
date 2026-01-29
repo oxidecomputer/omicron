@@ -1081,7 +1081,6 @@ pub static DEMO_IP_POOL_SERVICE_RANGES_DEL_URL: LazyLock<String> =
     LazyLock::new(|| format!("{}/remove", *DEMO_IP_POOL_SERVICE_RANGES_URL));
 
 // Subnet Pools
-// TODO(#9453): These are stub endpoints that return "not implemented" errors.
 pub const DEMO_SUBNET_POOLS_URL: &'static str = "/v1/system/subnet-pools";
 pub static DEMO_SUBNET_POOL_NAME: LazyLock<Name> =
     LazyLock::new(|| "demo-subnet-pool".parse().unwrap());
@@ -1120,6 +1119,7 @@ pub static DEMO_SUBNET_POOL_MEMBER_REMOVE: LazyLock<
 > = LazyLock::new(|| params::SubnetPoolMemberRemove {
     subnet: "10.0.0.0/16".parse().unwrap(),
 });
+// TODO(#9453): These are stub endpoints that return "not implemented" errors.
 pub static DEMO_SUBNET_POOL_SILOS_URL: LazyLock<String> =
     LazyLock::new(|| format!("{}/silos", *DEMO_SUBNET_POOL_URL));
 pub static DEMO_SUBNET_POOL_LINK_SILO: LazyLock<params::SubnetPoolLinkSilo> =
@@ -1778,14 +1778,12 @@ pub static VERIFY_ENDPOINTS: LazyLock<Vec<VerifyEndpoint>> = LazyLock::new(
                 )],
             },
             /* Subnet Pools */
-            // TODO(#9453): These are stub endpoints. Use GetUnimplemented
-            // since privileged GET requests will return 500 not 200.
             VerifyEndpoint {
                 url: &DEMO_SUBNET_POOLS_URL,
                 visibility: Visibility::Public,
                 unprivileged_access: UnprivilegedAccess::None,
                 allowed_methods: vec![
-                    AllowedMethod::GetUnimplemented,
+                    AllowedMethod::Get,
                     AllowedMethod::Post(
                         serde_json::to_value(&*DEMO_SUBNET_POOL_CREATE)
                             .unwrap(),
@@ -1797,7 +1795,7 @@ pub static VERIFY_ENDPOINTS: LazyLock<Vec<VerifyEndpoint>> = LazyLock::new(
                 visibility: Visibility::Protected,
                 unprivileged_access: UnprivilegedAccess::None,
                 allowed_methods: vec![
-                    AllowedMethod::GetUnimplemented,
+                    AllowedMethod::Get,
                     AllowedMethod::Put(
                         serde_json::to_value(&*DEMO_SUBNET_POOL_UPDATE)
                             .unwrap(),
@@ -1810,7 +1808,7 @@ pub static VERIFY_ENDPOINTS: LazyLock<Vec<VerifyEndpoint>> = LazyLock::new(
                 url: &DEMO_SUBNET_POOL_MEMBERS_URL,
                 visibility: Visibility::Protected,
                 unprivileged_access: UnprivilegedAccess::None,
-                allowed_methods: vec![AllowedMethod::GetUnimplemented],
+                allowed_methods: vec![AllowedMethod::Get],
             },
             // Subnet pool members/add endpoint
             VerifyEndpoint {
