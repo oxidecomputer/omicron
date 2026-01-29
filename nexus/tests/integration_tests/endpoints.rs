@@ -1835,7 +1835,7 @@ pub static VERIFY_ENDPOINTS: LazyLock<Vec<VerifyEndpoint>> = LazyLock::new(
                 visibility: Visibility::Protected,
                 unprivileged_access: UnprivilegedAccess::None,
                 allowed_methods: vec![
-                    AllowedMethod::GetUnimplemented,
+                    AllowedMethod::Get,
                     AllowedMethod::Post(
                         serde_json::to_value(&*DEMO_SUBNET_POOL_LINK_SILO)
                             .unwrap(),

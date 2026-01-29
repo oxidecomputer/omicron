@@ -269,3 +269,13 @@ pub struct SubnetPoolSiloLink {
     pub ip_version: IpVersion,
     pub is_default: bool,
 }
+
+impl From<SubnetPoolSiloLink> for views::SubnetPoolSiloLink {
+    fn from(value: SubnetPoolSiloLink) -> Self {
+        Self {
+            subnet_pool_id: value.subnet_pool_id.into_untyped_uuid(),
+            silo_id: value.silo_id.into_untyped_uuid(),
+            is_default: value.is_default,
+        }
+    }
+}

@@ -16,6 +16,7 @@ use http::StatusCode;
 use nexus_test_utils::http_testing::AuthnMode;
 use nexus_test_utils::http_testing::NexusRequest;
 use nexus_test_utils::http_testing::RequestBuilder;
+use nexus_test_utils::resource_helpers::create_silo;
 use nexus_test_utils::resource_helpers::create_subnet_pool;
 use nexus_test_utils::resource_helpers::create_subnet_pool_member;
 use nexus_test_utils_macros::nexus_test;
@@ -23,11 +24,15 @@ use nexus_types::external_api::params;
 use nexus_types::external_api::params::SubnetPoolMemberAdd;
 use nexus_types::external_api::params::SubnetPoolMemberRemove;
 use nexus_types::external_api::params::SubnetPoolUpdate;
+use nexus_types::external_api::shared::SiloIdentityMode;
 use nexus_types::external_api::views::IpVersion;
 use nexus_types::external_api::views::SubnetPool;
 use nexus_types::external_api::views::SubnetPoolMember;
+use nexus_types::external_api::views::SubnetPoolSiloLink;
+use nexus_types::silo::DEFAULT_SILO_ID;
 use omicron_common::api::external::IdentityMetadataUpdateParams;
 use omicron_common::api::external::Name;
+use std::collections::BTreeSet;
 
 type ControlPlaneTestContext =
     nexus_test_utils::ControlPlaneTestContext<omicron_nexus::Server>;
@@ -274,22 +279,207 @@ async fn cannot_add_pool_member_of_different_ip_version(
 }
 
 #[nexus_test]
-async fn test_subnet_pool_silo_list_unimplemented(
-    cptestctx: &ControlPlaneTestContext,
-) {
+async fn test_subnet_pool_silo_list(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
-    let url = format!("{}/test-pool/silos", SUBNET_POOLS_URL);
+    let url = format!("{}/{}/silos", SUBNET_POOLS_URL, SUBNET_POOL_NAME);
 
-    NexusRequest::expect_failure(
+    // Create a pool and a bunch of silos.
+    let _pool =
+        create_subnet_pool(client, SUBNET_POOL_NAME, IpVersion::V4).await;
+    let n_silos = 100;
+    let mut silos = Vec::with_capacity(n_silos);
+    for i in 0..n_silos {
+        let silo = create_silo(
+            client,
+            &format!("test-silo-{i}"),
+            true,
+            SiloIdentityMode::LocalOnly,
+        )
+        .await;
+        silos.push(silo)
+    }
+
+    // There should be none linked to the pool at first.
+    let linked = NexusRequest::object_get(client, &url)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute_and_parse_unwrap::<ResultsPage<SubnetPoolSiloLink>>()
+        .await
+        .items;
+    assert!(linked.is_empty());
+
+    // Link the first few silos.
+    let n_to_link = 10;
+    let mut linked_silos = Vec::with_capacity(n_to_link);
+    for silo in silos.iter().take(n_to_link) {
+        let link_params = params::SubnetPoolLinkSilo {
+            silo: omicron_common::api::external::NameOrId::Id(silo.identity.id),
+            is_default: false,
+        };
+        let link = NexusRequest::objects_post(client, &url, &link_params)
+            .authn_as(AuthnMode::PrivilegedUser)
+            .execute_and_parse_unwrap::<SubnetPoolSiloLink>()
+            .await;
+        linked_silos.push(link);
+    }
+
+    // Now we should list all and only those in the list.
+    let linked = NexusRequest::object_get(client, &url)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute_and_parse_unwrap::<ResultsPage<SubnetPoolSiloLink>>()
+        .await
+        .items;
+    assert_eq!(linked.len(), linked_silos.len());
+    assert_eq!(
+        linked.iter().map(|link| link.silo_id).collect::<BTreeSet<_>>(),
+        linked_silos.iter().map(|link| link.silo_id).collect::<BTreeSet<_>>(),
+    );
+
+    // And if we unlink one, it no longer shows up.
+    NexusRequest::object_delete(
         client,
-        StatusCode::INTERNAL_SERVER_ERROR,
-        Method::GET,
-        &url,
+        &format!(
+            "{}/{}/silos/{}",
+            SUBNET_POOLS_URL, SUBNET_POOL_NAME, linked[0].silo_id
+        ),
     )
     .authn_as(AuthnMode::PrivilegedUser)
     .execute()
     .await
     .expect("failed to make request");
+
+    let new_linked = NexusRequest::object_get(client, &url)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute_and_parse_unwrap::<ResultsPage<SubnetPoolSiloLink>>()
+        .await
+        .items;
+    assert_eq!(new_linked.len(), linked.len() - 1);
+    assert!(!new_linked.iter().any(|new| new.silo_id == linked[0].silo_id))
+}
+
+#[nexus_test]
+async fn test_subnet_pool_silo_link(cptestctx: &ControlPlaneTestContext) {
+    let client = &cptestctx.external_client;
+    let pool =
+        create_subnet_pool(client, SUBNET_POOL_NAME, IpVersion::V6).await;
+    let link_params = params::SubnetPoolLinkSilo {
+        silo: omicron_common::api::external::NameOrId::Id(DEFAULT_SILO_ID),
+        is_default: false,
+    };
+
+    // Check we can make a basic link.
+    let link = NexusRequest::objects_post(
+        client,
+        &format!("{}/{}/silos", SUBNET_POOLS_URL, SUBNET_POOL_NAME),
+        &link_params,
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute_and_parse_unwrap::<SubnetPoolSiloLink>()
+    .await;
+    assert_eq!(link.subnet_pool_id, pool.identity.id);
+    assert_eq!(link.silo_id, DEFAULT_SILO_ID);
+    assert!(!link.is_default);
+
+    // We can make it the default now.
+    let params = params::SubnetPoolSiloUpdate { is_default: true };
+    let link = NexusRequest::object_put(
+        client,
+        &format!(
+            "{}/{}/silos/{}",
+            SUBNET_POOLS_URL, SUBNET_POOL_NAME, DEFAULT_SILO_ID,
+        ),
+        Some(&params),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute_and_parse_unwrap::<SubnetPoolSiloLink>()
+    .await;
+    assert_eq!(link.subnet_pool_id, pool.identity.id);
+    assert_eq!(link.silo_id, DEFAULT_SILO_ID);
+    assert!(link.is_default);
+
+    // We can link it to another silo.
+    let new_silo =
+        create_silo(client, "new-guy", false, SiloIdentityMode::LocalOnly)
+            .await;
+    let link_params = params::SubnetPoolLinkSilo {
+        silo: omicron_common::api::external::NameOrId::Id(new_silo.identity.id),
+        is_default: true,
+    };
+    let link = NexusRequest::objects_post(
+        client,
+        &format!("{}/{}/silos", SUBNET_POOLS_URL, SUBNET_POOL_NAME),
+        &link_params,
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute_and_parse_unwrap::<SubnetPoolSiloLink>()
+    .await;
+    assert_eq!(link.subnet_pool_id, pool.identity.id);
+    assert_eq!(link.silo_id, new_silo.identity.id);
+    assert!(link.is_default);
+
+    // We should be able to link another pool to the same silo.
+    let new_pool =
+        create_subnet_pool(client, "new-pool-guy", IpVersion::V6).await;
+    let link_params = params::SubnetPoolLinkSilo {
+        silo: omicron_common::api::external::NameOrId::Id(new_silo.identity.id),
+        is_default: false,
+    };
+    let link = NexusRequest::objects_post(
+        client,
+        &format!("{}/{}/silos", SUBNET_POOLS_URL, new_pool.identity.id),
+        &link_params,
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute_and_parse_unwrap::<SubnetPoolSiloLink>()
+    .await;
+    assert_eq!(link.subnet_pool_id, new_pool.identity.id);
+    assert_eq!(link.silo_id, new_silo.identity.id);
+    assert!(!link.is_default);
+
+    // But we should not be able to make that the default, since we already have
+    // one of this IP version.
+    let params = params::SubnetPoolSiloUpdate { is_default: true };
+    NexusRequest::expect_failure_with_body(
+        client,
+        StatusCode::BAD_REQUEST,
+        Method::PUT,
+        &format!(
+            "{}/{}/silos/{}",
+            SUBNET_POOLS_URL, new_pool.identity.id, new_silo.identity.id
+        ),
+        &params,
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .expect("failed to make request");
+
+    // But if we delete the link between the first pool and this silo, we should
+    // now be able to make the second link we made the default.
+    NexusRequest::object_delete(
+        client,
+        &format!(
+            "{}/{}/silos/{}",
+            SUBNET_POOLS_URL, pool.identity.id, new_silo.identity.id
+        ),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .expect("failed to make request");
+    let link = NexusRequest::object_put(
+        client,
+        &format!(
+            "{}/{}/silos/{}",
+            SUBNET_POOLS_URL, new_pool.identity.id, new_silo.identity.id,
+        ),
+        Some(&params),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute_and_parse_unwrap::<SubnetPoolSiloLink>()
+    .await;
+    assert_eq!(link.subnet_pool_id, new_pool.identity.id);
+    assert_eq!(link.silo_id, new_silo.identity.id);
+    assert!(link.is_default);
 }
 
 #[nexus_test]
@@ -303,74 +493,6 @@ async fn test_subnet_pool_utilization_unimplemented(
         client,
         StatusCode::INTERNAL_SERVER_ERROR,
         Method::GET,
-        &url,
-    )
-    .authn_as(AuthnMode::PrivilegedUser)
-    .execute()
-    .await
-    .expect("failed to make request");
-}
-
-#[nexus_test]
-async fn test_subnet_pool_silo_link_unimplemented(
-    cptestctx: &ControlPlaneTestContext,
-) {
-    let client = &cptestctx.external_client;
-    let url = format!("{}/test-pool/silos", SUBNET_POOLS_URL);
-
-    let link_params = params::SubnetPoolLinkSilo {
-        silo: omicron_common::api::external::NameOrId::Name(
-            "test-silo".parse().unwrap(),
-        ),
-        is_default: false,
-    };
-
-    NexusRequest::expect_failure_with_body(
-        client,
-        StatusCode::INTERNAL_SERVER_ERROR,
-        Method::POST,
-        &url,
-        &link_params,
-    )
-    .authn_as(AuthnMode::PrivilegedUser)
-    .execute()
-    .await
-    .expect("failed to make request");
-}
-
-#[nexus_test]
-async fn test_subnet_pool_silo_update_unimplemented(
-    cptestctx: &ControlPlaneTestContext,
-) {
-    let client = &cptestctx.external_client;
-    let url = format!("{}/test-pool/silos/test-silo", SUBNET_POOLS_URL);
-
-    let update_params = params::SubnetPoolSiloUpdate { is_default: true };
-
-    NexusRequest::expect_failure_with_body(
-        client,
-        StatusCode::INTERNAL_SERVER_ERROR,
-        Method::PUT,
-        &url,
-        &update_params,
-    )
-    .authn_as(AuthnMode::PrivilegedUser)
-    .execute()
-    .await
-    .expect("failed to make request");
-}
-
-#[nexus_test]
-async fn test_subnet_pool_silo_unlink_unimplemented(
-    cptestctx: &ControlPlaneTestContext,
-) {
-    let client = &cptestctx.external_client;
-    let url = format!("{}/test-pool/silos/test-silo", SUBNET_POOLS_URL);
-
-    NexusRequest::expect_failure(
-        client,
-        StatusCode::INTERNAL_SERVER_ERROR,
-        Method::DELETE,
         &url,
     )
     .authn_as(AuthnMode::PrivilegedUser)

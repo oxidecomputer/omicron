@@ -305,6 +305,59 @@ impl DataStore {
         })
     }
 
+    /// Update the link between a Subnet Pool and Silo.
+    pub async fn update_subnet_pool_silo_link(
+        &self,
+        opctx: &OpContext,
+        authz_pool: &authz::SubnetPool,
+        authz_silo: &authz::Silo,
+        is_default: bool,
+    ) -> UpdateResult<SubnetPoolSiloLink> {
+        opctx.authorize(authz::Action::Modify, authz_pool).await?;
+        opctx.authorize(authz::Action::Modify, authz_silo).await?;
+        use nexus_db_schema::schema::subnet_pool_silo_link::dsl;
+        diesel::update(
+            dsl::subnet_pool_silo_link
+                .filter(
+                    dsl::subnet_pool_id.eq(to_db_typed_uuid(authz_pool.id())),
+                )
+                .filter(dsl::silo_id.eq(authz_silo.id())),
+        )
+        .set(dsl::is_default.eq(is_default))
+        .returning(SubnetPoolSiloLink::as_returning())
+        .get_result_async(&*self.pool_connection_authorized(opctx).await?)
+        .await
+        .map_err(|e| match e {
+            DieselError::DatabaseError(
+                DatabaseErrorKind::UniqueViolation,
+                ref info,
+            ) if info.constraint_name() == Some("single_default_per_silo") => {
+                Error::invalid_request(
+                    "Can only have a single default Subnet Pool for a \
+                    Silo for each IP version.",
+                )
+            }
+            e => public_error_from_diesel(e, ErrorHandler::Server),
+        })
+    }
+
+    /// List silos linked to a subnet pool.
+    pub async fn list_silos_linked_to_subnet_pool(
+        &self,
+        opctx: &OpContext,
+        authz_pool: &authz::SubnetPool,
+        pagparams: &DataPageParams<'_, Uuid>,
+    ) -> ListResultVec<SubnetPoolSiloLink> {
+        opctx.authorize(authz::Action::ListChildren, authz_pool).await?;
+        use nexus_db_schema::schema::subnet_pool_silo_link::dsl;
+        paginated(dsl::subnet_pool_silo_link, dsl::silo_id, &pagparams)
+            .filter(dsl::subnet_pool_id.eq(to_db_typed_uuid(authz_pool.id())))
+            .select(SubnetPoolSiloLink::as_select())
+            .get_results_async(&*self.pool_connection_authorized(opctx).await?)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+    }
+
     /// Add a new Subnet Pool Member.
     ///
     /// IP subnets must be unique across all Subnet Pool Members, in all pools.
