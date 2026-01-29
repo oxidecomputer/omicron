@@ -1110,7 +1110,7 @@ pub static DEMO_SUBNET_POOL_MEMBERS_REMOVE_URL: LazyLock<String> =
     LazyLock::new(|| format!("{}/remove", *DEMO_SUBNET_POOL_MEMBERS_URL));
 pub static DEMO_SUBNET_POOL_MEMBER_ADD: LazyLock<params::SubnetPoolMemberAdd> =
     LazyLock::new(|| params::SubnetPoolMemberAdd {
-        subnet: "10.0.0.0/16".parse().unwrap(),
+        subnet: "10.1.0.0/16".parse().unwrap(),
         min_prefix_length: None,
         max_prefix_length: None,
     });

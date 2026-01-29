@@ -3,6 +3,15 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 //! Types that changed from v2026012300 to v2026012800.
+//!
+//! # Summary of changes
+//!
+//! - Remove the `pool_type` from subnet pools. It's not clear what that really
+//!   means, and no customers need it at this point.
+//! - Removed the identity metadata from subnet pool members. The name isn't
+//!   user-controllable, and the IP subnet itself is the identity. This is
+//!   similar to IP Pool Ranges.
+//! - Changed subnet pool member pagination to be by-IP-subnet.
 
 use api_identity::ObjectIdentity;
 use nexus_types::external_api::shared;
@@ -25,13 +34,6 @@ pub struct SubnetPool {
     pub ip_version: IpVersion,
     /// Type of subnet pool (unicast or multicast)
     pub pool_type: shared::IpPoolType,
-}
-
-impl From<SubnetPool> for views::SubnetPool {
-    fn from(value: SubnetPool) -> Self {
-        // Ignore pool type
-        Self { identity: value.identity, ip_version: value.ip_version }
-    }
 }
 
 impl From<views::SubnetPool> for SubnetPool {
@@ -65,22 +67,12 @@ pub struct SubnetPoolMember {
     pub max_prefix_length: u8,
 }
 
-impl From<SubnetPoolMember> for views::SubnetPoolMember {
-    fn from(value: SubnetPoolMember) -> Self {
-        // Ignore irrelevant fields.
-        Self {
-            id: value.identity.id,
-            time_created: value.identity.time_created,
-            subnet_pool_id: value.subnet_pool_id,
-            subnet: value.subnet,
-            min_prefix_length: value.min_prefix_length,
-            max_prefix_length: value.max_prefix_length,
-        }
-    }
-}
-
 impl From<views::SubnetPoolMember> for SubnetPoolMember {
     fn from(value: views::SubnetPoolMember) -> Self {
+        // The identity metadata has gone away in the newer version. The name
+        // wasn't user controllable, so we fake up a dummy name. Since the
+        // members can't be updated, the modification time is always the same as
+        // the creation time too.
         Self {
             identity: IdentityMetadata {
                 id: value.id,

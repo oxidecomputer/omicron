@@ -74,7 +74,7 @@ async fn basic_subnet_pool_crud(cptestctx: &ControlPlaneTestContext) {
     assert_eq!(listed.items.len(), 1);
     assert_eq!(listed.items[0], pool);
 
-    // Udpate it, and ensure the updates stick.
+    // Update it, and ensure the updates stick.
     let new_name = "granite".parse::<Name>().unwrap();
     let new_description = String::from("an updated pool");
     let updates = SubnetPoolUpdate {
@@ -240,6 +240,32 @@ async fn basic_subnet_pool_member_crd(cptestctx: &ControlPlaneTestContext) {
         StatusCode::BAD_REQUEST,
         Method::DELETE,
         format!("{}/{}", SUBNET_POOLS_URL, SUBNET_POOL_NAME).as_str(),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .expect("failed to make request");
+}
+
+#[nexus_test]
+async fn cannot_add_pool_member_of_different_ip_version(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+    let url = format!("{}/{}/members/add", SUBNET_POOLS_URL, SUBNET_POOL_NAME);
+    let _pool =
+        create_subnet_pool(client, SUBNET_POOL_NAME, IpVersion::V4).await;
+    let params = SubnetPoolMemberAdd {
+        subnet: "2001:db8::/48".parse().unwrap(),
+        min_prefix_length: None,
+        max_prefix_length: None,
+    };
+    NexusRequest::expect_failure_with_body(
+        client,
+        StatusCode::BAD_REQUEST,
+        Method::POST,
+        url.as_str(),
+        &params,
     )
     .authn_as(AuthnMode::PrivilegedUser)
     .execute()

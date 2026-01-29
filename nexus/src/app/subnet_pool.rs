@@ -142,13 +142,13 @@ impl super::Nexus {
         pool: &NameOrId,
         params: &params::SubnetPoolMemberAdd,
     ) -> Result<views::SubnetPoolMember, Error> {
-        let (authz_pool, _db_pool) = self
+        let (authz_pool, db_pool) = self
             .datastore()
             .lookup_subnet_pool(opctx, pool)
             .fetch_for(authz::Action::CreateChild)
             .await?;
         self.datastore()
-            .add_subnet_pool_member(opctx, &authz_pool, params)
+            .add_subnet_pool_member(opctx, &authz_pool, &db_pool, params)
             .await
             .map(Into::into)
     }

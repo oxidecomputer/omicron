@@ -77,7 +77,7 @@ api_versions!([
     // |  date-based version should be at the top of the list.
     // v
     // (next_yyyymmddnn, IDENT),
-    (2026012800, SUBNET_POOL_API_CLEANUP),
+    (2026012800, REMOVE_SUBNET_POOL_POOL_TYPE),
     (2026012300, DUAL_STACK_EPHEMERAL_IP),
     (2026012201, EXTERNAL_SUBNET_ALLOCATOR_UPDATE),
     (2026012200, FLOATING_IP_ALLOCATOR_UPDATE),
@@ -1307,7 +1307,7 @@ pub trait NexusExternalApi {
         method = GET,
         path = "/v1/system/subnet-pools",
         tags = ["system/subnet-pools"],
-        versions = VERSION_SUBNET_POOL_API_CLEANUP..,
+        versions = VERSION_REMOVE_SUBNET_POOL_POOL_TYPE..,
     }]
     async fn subnet_pool_list(
         rqctx: RequestContext<Self::Context>,
@@ -1320,7 +1320,7 @@ pub trait NexusExternalApi {
         method = GET,
         path = "/v1/system/subnet-pools",
         tags = ["system/subnet-pools"],
-        versions = VERSION_EXTERNAL_SUBNET_ATTACHMENT..VERSION_SUBNET_POOL_API_CLEANUP,
+        versions = VERSION_EXTERNAL_SUBNET_ATTACHMENT..VERSION_REMOVE_SUBNET_POOL_POOL_TYPE,
     }]
     async fn v2026012300_subnet_pool_list(
         rqctx: RequestContext<Self::Context>,
@@ -1338,7 +1338,7 @@ pub trait NexusExternalApi {
         method = POST,
         path = "/v1/system/subnet-pools",
         tags = ["system/subnet-pools"],
-        versions = VERSION_SUBNET_POOL_API_CLEANUP..,
+        versions = VERSION_REMOVE_SUBNET_POOL_POOL_TYPE..,
     }]
     async fn subnet_pool_create(
         rqctx: RequestContext<Self::Context>,
@@ -1352,7 +1352,7 @@ pub trait NexusExternalApi {
         path = "/v1/system/subnet-pools",
         tags = ["system/subnet-pools"],
         versions =
-            VERSION_EXTERNAL_SUBNET_ALLOCATOR_UPDATE..VERSION_SUBNET_POOL_API_CLEANUP,
+            VERSION_EXTERNAL_SUBNET_ALLOCATOR_UPDATE..VERSION_REMOVE_SUBNET_POOL_POOL_TYPE,
     }]
     async fn v2026012300_subnet_pool_create(
         rqctx: RequestContext<Self::Context>,
@@ -1387,7 +1387,7 @@ pub trait NexusExternalApi {
         method = GET,
         path = "/v1/system/subnet-pools/{pool}",
         tags = ["system/subnet-pools"],
-        versions = VERSION_SUBNET_POOL_API_CLEANUP..,
+        versions = VERSION_REMOVE_SUBNET_POOL_POOL_TYPE..,
     }]
     async fn subnet_pool_view(
         rqctx: RequestContext<Self::Context>,
@@ -1401,7 +1401,7 @@ pub trait NexusExternalApi {
         path = "/v1/system/subnet-pools/{pool}",
         tags = ["system/subnet-pools"],
         versions =
-            VERSION_EXTERNAL_SUBNET_ATTACHMENT..VERSION_SUBNET_POOL_API_CLEANUP,
+            VERSION_EXTERNAL_SUBNET_ATTACHMENT..VERSION_REMOVE_SUBNET_POOL_POOL_TYPE,
     }]
     async fn v2026012300_subnet_pool_view(
         rqctx: RequestContext<Self::Context>,
@@ -1417,7 +1417,7 @@ pub trait NexusExternalApi {
         method = PUT,
         path = "/v1/system/subnet-pools/{pool}",
         tags = ["system/subnet-pools"],
-        versions = VERSION_SUBNET_POOL_API_CLEANUP..,
+        versions = VERSION_REMOVE_SUBNET_POOL_POOL_TYPE..,
     }]
     async fn subnet_pool_update(
         rqctx: RequestContext<Self::Context>,
@@ -1432,7 +1432,7 @@ pub trait NexusExternalApi {
         path = "/v1/system/subnet-pools/{pool}",
         tags = ["system/subnet-pools"],
         versions =
-            VERSION_EXTERNAL_SUBNET_ATTACHMENT..VERSION_SUBNET_POOL_API_CLEANUP,
+            VERSION_EXTERNAL_SUBNET_ATTACHMENT..VERSION_REMOVE_SUBNET_POOL_POOL_TYPE,
     }]
     async fn v2026012300_subnet_pool_update(
         rqctx: RequestContext<Self::Context>,
@@ -1461,7 +1461,7 @@ pub trait NexusExternalApi {
         method = GET,
         path = "/v1/system/subnet-pools/{pool}/members",
         tags = ["system/subnet-pools"],
-        versions = VERSION_SUBNET_POOL_API_CLEANUP..,
+        versions = VERSION_REMOVE_SUBNET_POOL_POOL_TYPE..,
     }]
     async fn subnet_pool_member_list(
         rqctx: RequestContext<Self::Context>,
@@ -1485,7 +1485,7 @@ pub trait NexusExternalApi {
         path = "/v1/system/subnet-pools/{pool}/members",
         tags = ["system/subnet-pools"],
         versions =
-            VERSION_EXTERNAL_SUBNET_ATTACHMENT..VERSION_SUBNET_POOL_API_CLEANUP,
+            VERSION_EXTERNAL_SUBNET_ATTACHMENT..VERSION_REMOVE_SUBNET_POOL_POOL_TYPE,
     }]
     async fn v2026012300_subnet_pool_member_list(
         _rqctx: RequestContext<Self::Context>,
@@ -1505,7 +1505,7 @@ pub trait NexusExternalApi {
         method = POST,
         path = "/v1/system/subnet-pools/{pool}/members/add",
         tags = ["system/subnet-pools"],
-        versions = VERSION_SUBNET_POOL_API_CLEANUP..,
+        versions = VERSION_REMOVE_SUBNET_POOL_POOL_TYPE..,
     }]
     async fn subnet_pool_member_add(
         rqctx: RequestContext<Self::Context>,
@@ -1520,7 +1520,7 @@ pub trait NexusExternalApi {
         path = "/v1/system/subnet-pools/{pool}/members/add",
         tags = ["system/subnet-pools"],
         versions =
-            VERSION_EXTERNAL_SUBNET_ALLOCATOR_UPDATE..VERSION_SUBNET_POOL_API_CLEANUP,
+            VERSION_EXTERNAL_SUBNET_ALLOCATOR_UPDATE..VERSION_REMOVE_SUBNET_POOL_POOL_TYPE,
     }]
     async fn v2026012300_subnet_pool_member_add(
         rqctx: RequestContext<Self::Context>,
