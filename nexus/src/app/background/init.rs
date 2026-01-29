@@ -1075,15 +1075,13 @@ impl BackgroundTasksInitializer {
                 datastore.clone(),
                 resolver.clone(),
                 sagas.clone(),
+                inventory_load_watcher.clone(),
                 args.multicast_enabled,
                 config.multicast_reconciler.sled_cache_ttl_secs,
                 config.multicast_reconciler.backplane_cache_ttl_secs,
             )),
             opctx: opctx.child(BTreeMap::new()),
-            watchers: vec![
-                Box::new(inventory_collect_watcher.clone()),
-                Box::new(inventory_load_watcher.clone()),
-            ],
+            watchers: vec![Box::new(inventory_load_watcher.clone())],
             activator: task_multicast_reconciler,
         });
 

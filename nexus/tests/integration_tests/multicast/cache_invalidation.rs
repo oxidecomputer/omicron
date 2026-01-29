@@ -37,7 +37,7 @@ use crate::integration_tests::instances::instance_wait_for_state;
 /// - Verify the member is programmed on the correct rear port (based on original `sp_slot`)
 /// - Run reconciler multiple times without inventory change to verify no spurious invalidation
 /// - Insert a new inventory collection with a different `sp_slot` for the same sled
-/// - Reconciler detects new collection ID and invalidates caches automatically
+/// - Reconciler detects sled location change and invalidates caches automatically
 /// - Verify DPD now uses the new rear port matching the new `sp_slot`
 #[nexus_test(server = Server)]
 async fn test_sled_move_updates_multicast_port_mapping(
@@ -205,11 +205,11 @@ async fn test_sled_move_updates_multicast_port_mapping(
         .await
         .expect("Should insert new inventory collection");
 
-    // Activate the reconciler. It will detect the new inventory collection ID
-    // and invalidate caches automatically, then update port mappings.
+    // Activate the inventory loader to update the watch channel with the new
+    // collection, then activate the reconciler which will detect the sled
+    // location change and invalidate caches.
+    activate_inventory_loader(&cptestctx.lockstep_client).await;
     nexus.invalidate_multicast_caches();
-
-    // Wait for reconciler to process the cache invalidation and refresh mappings
     wait_for_multicast_reconciler(&cptestctx.lockstep_client).await;
 
     // Verify that DPD now uses the new rear port (matching new `sp_slot`)

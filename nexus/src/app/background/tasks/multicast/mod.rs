@@ -138,13 +138,16 @@ use internal_dns_resolver::Resolver;
 use serde_json::json;
 use slog::{error, info};
 use tokio::sync::RwLock;
+use tokio::sync::watch::Receiver;
 
 use nexus_db_model::MulticastGroup;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
 use nexus_types::internal_api::background::MulticastGroupReconcilerStatus;
+use nexus_types::inventory::{Collection, SpType};
 use omicron_common::address::UNDERLAY_MULTICAST_SUBNET;
-use omicron_uuid_kinds::{CollectionUuid, SledUuid};
+use omicron_uuid_kinds::SledUuid;
+use sled_hardware_types::BaseboardId;
 
 use crate::app::background::BackgroundTask;
 use crate::app::multicast::dataplane::MulticastDataplaneClient;
@@ -200,6 +203,8 @@ pub(crate) struct MulticastGroupReconciler {
     datastore: Arc<DataStore>,
     resolver: Resolver,
     sagas: Arc<dyn StartSaga>,
+    /// Receiver for inventory updates from the inventory loader background task.
+    rx_inventory: Receiver<Option<Arc<Collection>>>,
     /// Cache for sled-to-backplane-port mappings.
     /// Maps sled_id → rear backplane ports for multicast traffic routing.
     sled_mapping_cache: SledMappingCache,
@@ -214,15 +219,12 @@ pub(crate) struct MulticastGroupReconciler {
     group_concurrency_limit: usize,
     /// Whether multicast functionality is enabled (or not).
     enabled: bool,
-    /// Last seen inventory collection ID for cache invalidation.
+    /// Last seen sled baseboard→sp_slot mappings for cache invalidation.
     ///
-    /// When the inventory collection ID changes, it indicates topology may have
-    /// changed (sled add/remove, inventory updates). The caches are invalidated
-    /// when a new collection ID is detected.
-    ///
-    /// This approach is database-driven and works across all Nexus instances,
-    /// unlike in-memory hints that only affect a single Nexus.
-    last_seen_collection_id: Option<CollectionUuid>,
+    /// We track sled locations (keyed by baseboard identity), as sled
+    /// physical locations rarely change. Caches are only invalidated
+    /// when `sp_slot` values differ.
+    last_seen_sled_slots: HashMap<Arc<BaseboardId>, u16>,
 }
 
 impl MulticastGroupReconciler {
@@ -230,6 +232,7 @@ impl MulticastGroupReconciler {
         datastore: Arc<DataStore>,
         resolver: Resolver,
         sagas: Arc<dyn StartSaga>,
+        rx_inventory: Receiver<Option<Arc<Collection>>>,
         enabled: bool,
         sled_cache_ttl: Duration,
         backplane_cache_ttl: Duration,
@@ -238,6 +241,7 @@ impl MulticastGroupReconciler {
             datastore,
             resolver,
             sagas,
+            rx_inventory,
             sled_mapping_cache: Arc::new(RwLock::new((
                 Instant::now(),
                 HashMap::new(),
@@ -248,7 +252,7 @@ impl MulticastGroupReconciler {
             member_concurrency_limit: 100,
             group_concurrency_limit: 100,
             enabled,
-            last_seen_collection_id: None,
+            last_seen_sled_slots: HashMap::new(),
         }
     }
 
@@ -281,45 +285,48 @@ impl MulticastGroupReconciler {
         *cache = (Instant::now() - self.sled_cache_ttl, cache.1.clone());
     }
 
-    /// Check if inventory collection changed and invalidate caches if so.
+    /// Check if sled locations changed and invalidate caches if so.
     ///
-    /// This is database-driven and works across all Nexus instances.
-    async fn check_inventory_for_cache_invalidation(
+    /// Compares actual serial→sp_slot mappings since sled locations rarely
+    /// change. Uses the inventory watch channel for cheap access to latest
+    /// inventory.
+    async fn check_sled_locations_for_cache_invalidation(
         &mut self,
         opctx: &OpContext,
     ) {
-        let latest_id = match self
-            .datastore
-            .inventory_get_latest_collection_id(opctx)
-            .await
-        {
-            Ok(Some(id)) => id,
-            Ok(None) => return,
-            Err(e) => {
-                error!(
-                    opctx.log,
-                    "failed to check inventory collection: {e:#}"
-                );
-                return;
-            }
+        // Get inventory from watch channel (cheap Arc::clone, no DB query)
+        let Some(inventory) =
+            self.rx_inventory.borrow_and_update().as_ref().map(Arc::clone)
+        else {
+            debug!(
+                opctx.log,
+                "skipping cache invalidation check: no inventory available"
+            );
+            return;
         };
 
-        if self.last_seen_collection_id == Some(latest_id) {
-            return;
-        }
+        // Build current baseboard→sp_slot mapping for sleds only
+        let current_sled_slots: HashMap<Arc<BaseboardId>, u16> = inventory
+            .sps
+            .iter()
+            .filter(|(_, sp)| sp.sp_type == SpType::Sled)
+            .map(|(baseboard, sp)| (Arc::clone(baseboard), sp.sp_slot))
+            .collect();
 
-        // Invalidate caches (skip on first run when just initializing)
-        if self.last_seen_collection_id.is_some() {
-            info!(
-                opctx.log,
-                "invalidating multicast caches";
-                "new_collection_id" => %latest_id
-            );
-            self.invalidate_backplane_cache().await;
-            self.invalidate_sled_mapping_cache().await;
+        if current_sled_slots != self.last_seen_sled_slots {
+            // Skip invalidation on first run (just initializing)
+            if !self.last_seen_sled_slots.is_empty() {
+                info!(
+                    opctx.log,
+                    "invalidating multicast caches due to sled location change";
+                    "previous_sled_count" => self.last_seen_sled_slots.len(),
+                    "current_sled_count" => current_sled_slots.len()
+                );
+                self.invalidate_backplane_cache().await;
+                self.invalidate_sled_mapping_cache().await;
+            }
+            self.last_seen_sled_slots = current_sled_slots;
         }
-
-        self.last_seen_collection_id = Some(latest_id);
     }
 }
 
@@ -506,7 +513,7 @@ impl MulticastGroupReconciler {
 
         trace!(opctx.log, "starting multicast reconciliation pass");
 
-        self.check_inventory_for_cache_invalidation(opctx).await;
+        self.check_sled_locations_for_cache_invalidation(opctx).await;
 
         // Create dataplane client (across switches) once for the entire
         // reconciliation pass (in case anything has changed)

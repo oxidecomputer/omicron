@@ -173,7 +173,7 @@ impl TestInterfaces for super::Nexus {
 
     fn invalidate_multicast_caches(&self) {
         // Cache invalidation happens automatically when the reconciler detects
-        // a new inventory collection ID. Activating the reconciler is sufficient.
+        // sled location changes. Activating the reconciler is sufficient.
         self.background_tasks
             .activate(&self.background_tasks.task_multicast_reconciler);
     }
