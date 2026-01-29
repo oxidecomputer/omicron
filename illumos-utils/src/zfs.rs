@@ -202,6 +202,15 @@ pub struct GetValueError {
 #[error("Failed to list snapshots: {0}")]
 pub struct ListSnapshotsError(#[from] crate::ExecutionError);
 
+/// Error returned by [`Zfs::change_key`].
+#[derive(thiserror::Error, Debug)]
+#[error("Failed to change encryption key for dataset '{name}'")]
+pub struct ChangeKeyError {
+    pub name: String,
+    #[source]
+    pub err: anyhow::Error,
+}
+
 #[derive(Debug, thiserror::Error)]
 #[error(
     "Failed to create snapshot '{snap_name}' from filesystem '{filesystem}': {err}"
@@ -377,11 +386,14 @@ pub struct DatasetProperties {
     /// string so that unexpected compression formats don't prevent inventory
     /// from being collected.
     pub compression: String,
+    /// The encryption key epoch for this dataset.
+    ///
+    /// Only present on encrypted datasets (e.g., crypt datasets on U.2s).
+    pub epoch: Option<u64>,
 }
 
 impl DatasetProperties {
-    const ZFS_GET_PROPS: &'static str =
-        "oxide:uuid,name,mounted,avail,used,quota,reservation,compression";
+    const ZFS_GET_PROPS: &'static str = "oxide:uuid,oxide:epoch,name,mounted,avail,used,quota,reservation,compression";
 }
 
 impl TryFrom<&DatasetProperties> for SharedDatasetConfig {
@@ -502,6 +514,18 @@ impl DatasetProperties {
                     .get("compression")
                     .map(|(prop, _source)| prop.to_string())
                     .ok_or_else(|| anyhow!("Missing 'compression'"))?;
+                // The epoch property is only present on encrypted datasets.
+                // Like oxide:uuid, we ignore inherited values.
+                let epoch = props
+                    .get("oxide:epoch")
+                    .filter(|(prop, source)| {
+                        !source.starts_with("inherited") && *prop != "-"
+                    })
+                    .map(|(prop, _source)| {
+                        prop.parse::<u64>()
+                            .context("Failed to parse 'oxide:epoch'")
+                    })
+                    .transpose()?;
 
                 Ok(DatasetProperties {
                     id,
@@ -512,6 +536,7 @@ impl DatasetProperties {
                     quota,
                     reservation,
                     compression,
+                    epoch,
                 })
             })
             .collect::<Result<Vec<_>, _>>()
@@ -1352,6 +1377,36 @@ impl Zfs {
                 err,
             }
         })
+    }
+
+    /// Atomically change the encryption key and set the oxide:epoch property.
+    ///
+    /// This operation is used for ZFS key rotation when a new Trust Quorum
+    /// epoch is committed.
+    pub async fn change_key(
+        dataset: &str,
+        key: &key_manager::VersionedAes256GcmDiskEncryptionKey,
+    ) -> Result<(), ChangeKeyError> {
+        // FIXME: Replace the use of `zfs_atomic_change_key` with a native
+        // invocation of `zfs change-key` using the `-o oxide:epoch` option to
+        // set the epoch. At time of writing, the `zfs change-key` command does
+        // not support setting user properties inline, but a patch is pending to
+        // add this feature.
+
+        let ds = zfs_atomic_change_key::Dataset::new(dataset).map_err(|e| {
+            ChangeKeyError {
+                name: dataset.to_string(),
+                err: anyhow::anyhow!("invalid dataset name: {e}"),
+            }
+        })?;
+
+        ds.change_key(zfs_atomic_change_key::Key::hex(*key.expose_secret()))
+            .property("oxide:epoch", key.epoch().to_string())
+            .await
+            .map_err(|e| ChangeKeyError {
+                name: dataset.to_string(),
+                err: anyhow::anyhow!("{e}"),
+            })
     }
 
     /// Calls "zfs get" to acquire multiple values

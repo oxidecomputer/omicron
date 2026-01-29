@@ -24,6 +24,7 @@ use std::sync::Arc;
 use std::sync::OnceLock;
 use tokio::sync::oneshot;
 use tokio::sync::watch;
+use trust_quorum_types::types::Epoch;
 
 #[cfg(feature = "testing")]
 use camino_tempfile::Utf8TempDir;
@@ -254,8 +255,11 @@ impl ConfigReconcilerHandle {
     /// Spawn the primary config reconciliation task.
     ///
     /// This method can effectively only be called once, because the caller must
-    /// supply the `token` returned by `spawn_ledger_task()` when this handle was created.
+    /// supply the `token` returned by `spawn_ledger_task()` when this handle
+    /// was created.
     ///
+    /// The `committed_epoch_rx` is used to receive notifications when a new
+    /// Trust Quorum epoch is committed, triggering ZFS key rotation.
     pub fn spawn_reconciliation_task<
         T: SledAgentFacilities,
         U: SledAgentArtifactStore + Clone,
@@ -263,6 +267,7 @@ impl ConfigReconcilerHandle {
         &self,
         sled_agent_facilities: T,
         sled_agent_artifact_store: U,
+        committed_epoch_rx: watch::Receiver<Option<Epoch>>,
         token: ConfigReconcilerSpawnToken,
     ) {
         let ConfigReconcilerSpawnToken {
@@ -292,6 +297,7 @@ impl ConfigReconcilerHandle {
             external_disks_tx,
             former_zone_root_archiver,
             raw_disks_rx,
+            committed_epoch_rx,
             sled_agent_facilities,
             sled_agent_artifact_store,
             reconciler_task_log,
