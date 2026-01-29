@@ -3026,6 +3026,33 @@ allow_tables_to_appear_in_same_query!(
 );
 
 table! {
+    rendezvous_local_storage_unencrypted_dataset (id) {
+        id -> Uuid,
+
+        time_created -> Timestamptz,
+        time_tombstoned -> Nullable<Timestamptz>,
+
+        blueprint_id_when_created -> Uuid,
+        blueprint_id_when_tombstoned -> Nullable<Uuid>,
+
+        pool_id -> Uuid,
+
+        size_used -> Int8,
+
+        no_provision -> Bool,
+    }
+}
+
+allow_tables_to_appear_in_same_query!(
+    zpool,
+    rendezvous_local_storage_unencrypted_dataset
+);
+allow_tables_to_appear_in_same_query!(
+    physical_disk,
+    rendezvous_local_storage_unencrypted_dataset
+);
+
+table! {
     fm_sitrep (id) {
         id -> Uuid,
         parent_sitrep_id -> Nullable<Uuid>,
@@ -3055,6 +3082,8 @@ table! {
         required_dataset_overhead -> Int8,
 
         local_storage_dataset_allocation_id -> Nullable<Uuid>,
+
+        local_storage_unencrypted_dataset_allocation_id -> Nullable<Uuid>,
     }
 }
 
@@ -3073,14 +3102,39 @@ table! {
     }
 }
 
+table! {
+    local_storage_unencrypted_dataset_allocation (id) {
+        id -> Uuid,
+
+        time_created -> Timestamptz,
+        time_deleted -> Nullable<Timestamptz>,
+
+        local_storage_unencrypted_dataset_id -> Uuid,
+        pool_id -> Uuid,
+        sled_id -> Uuid,
+
+        dataset_size -> Int8,
+    }
+}
+
 allow_tables_to_appear_in_same_query!(
     disk_type_local_storage,
     local_storage_dataset_allocation
 );
 
 allow_tables_to_appear_in_same_query!(
+    disk_type_local_storage,
+    local_storage_unencrypted_dataset_allocation
+);
+
+allow_tables_to_appear_in_same_query!(
     rendezvous_local_storage_dataset,
     local_storage_dataset_allocation
+);
+
+allow_tables_to_appear_in_same_query!(
+    rendezvous_local_storage_unencrypted_dataset,
+    local_storage_unencrypted_dataset_allocation
 );
 
 table! {

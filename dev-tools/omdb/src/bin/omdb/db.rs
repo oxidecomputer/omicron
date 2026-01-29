@@ -120,6 +120,7 @@ use nexus_db_queries::db::datastore::CrucibleTargets;
 use nexus_db_queries::db::datastore::Disk;
 use nexus_db_queries::db::datastore::InstanceAndActiveVmm;
 use nexus_db_queries::db::datastore::InstanceStateComputer;
+use nexus_db_queries::db::datastore::LocalStorageAllocation;
 use nexus_db_queries::db::datastore::LocalStorageDisk;
 use nexus_db_queries::db::datastore::SQL_BATCH_SIZE;
 use nexus_db_queries::db::datastore::VolumeCookedResult;
@@ -488,7 +489,7 @@ enum DiskCommands {
     /// Get info for a specific disk
     Info(DiskInfoArgs),
     /// Summarize current disks
-    List,
+    List(DiskListArgs),
     /// Determine what crucible resources are on the given physical disk.
     Physical(DiskPhysicalArgs),
 }
@@ -497,6 +498,13 @@ enum DiskCommands {
 struct DiskInfoArgs {
     /// The UUID of the disk
     uuid: Uuid,
+}
+
+#[derive(Debug, Args, Clone)]
+struct DiskListArgs {
+    /// Include only disks of a given type.
+    #[clap(long = "type", short = 't', value_enum)]
+    disk_type: Option<DiskType>,
 }
 
 #[derive(Debug, Args, Clone)]
@@ -1234,8 +1242,8 @@ impl DbArgs {
                     DbCommands::Disks(DiskArgs {
                         command: DiskCommands::Info(uuid),
                     }) => cmd_db_disk_info(&opctx, &datastore, uuid).await,
-                    DbCommands::Disks(DiskArgs { command: DiskCommands::List }) => {
-                        cmd_db_disk_list(&datastore, &fetch_opts).await
+                    DbCommands::Disks(DiskArgs { command: DiskCommands::List(args) }) => {
+                        cmd_db_disk_list(&datastore, &fetch_opts, args).await
                     }
                     DbCommands::Disks(DiskArgs {
                         command: DiskCommands::Physical(uuid),
@@ -1913,8 +1921,38 @@ async fn cmd_crucible_dataset_mark_provisionable(
 struct DiskIdentity {
     id: Uuid,
     size: String,
+    #[tabled(rename = "TYPE")]
+    disk_type: DiskType,
     state: String,
     name: String,
+}
+
+#[derive(
+    Debug, Copy, Clone, PartialEq, Eq, clap::ValueEnum, strum::Display,
+)]
+#[clap(rename_all = "snake_case")]
+#[strum(serialize_all = "snake_case")]
+enum DiskType {
+    Crucible,
+    Local,
+}
+
+impl From<db::model::DiskType> for DiskType {
+    fn from(disk_type: db::model::DiskType) -> Self {
+        match disk_type {
+            db::model::DiskType::Crucible => DiskType::Crucible,
+            db::model::DiskType::LocalStorage => DiskType::Local,
+        }
+    }
+}
+
+impl From<DiskType> for db::model::DiskType {
+    fn from(disk_type: DiskType) -> Self {
+        match disk_type {
+            DiskType::Crucible => db::model::DiskType::Crucible,
+            DiskType::Local => db::model::DiskType::LocalStorage,
+        }
+    }
 }
 
 impl From<&'_ db::model::Disk> for DiskIdentity {
@@ -1922,6 +1960,7 @@ impl From<&'_ db::model::Disk> for DiskIdentity {
         Self {
             name: disk.name().to_string(),
             id: disk.id(),
+            disk_type: disk.disk_type.into(),
             size: disk.size.to_string(),
             state: disk.runtime().disk_state,
         }
@@ -1932,6 +1971,7 @@ impl From<&'_ db::model::Disk> for DiskIdentity {
 async fn cmd_db_disk_list(
     datastore: &DataStore,
     fetch_opts: &DbFetchOptions,
+    args: &DiskListArgs,
 ) -> Result<(), anyhow::Error> {
     let ctx = || "listing disks".to_string();
 
@@ -1939,6 +1979,11 @@ async fn cmd_db_disk_list(
     let mut query = dsl::disk.into_boxed();
     if !fetch_opts.include_deleted {
         query = query.filter(dsl::time_deleted.is_null());
+    }
+
+    if let Some(disk_type) = args.disk_type {
+        let disk_type = db::model::DiskType::from(disk_type);
+        query = query.filter(dsl::disk_type.eq(disk_type));
     }
 
     #[derive(Tabled)]
@@ -2421,6 +2466,8 @@ async fn local_storage_disk_info(
         #[tabled(display_with = "display_option_blank")]
         time_deleted: Option<DateTime<Utc>>,
 
+        allocation_type: String,
+
         dataset_id: DatasetUuid,
         pool_id: ExternalZpoolUuid,
         sled_id: SledUuid,
@@ -2429,18 +2476,39 @@ async fn local_storage_disk_info(
     }
 
     if let Some(allocation) = &disk.local_storage_dataset_allocation {
-        let rows = vec![Row {
-            disk_name: disk.name().to_string(),
+        let row = match allocation {
+            LocalStorageAllocation::Unencrypted(allocation) => Row {
+                disk_name: disk.name().to_string(),
 
-            time_created: allocation.time_created,
-            time_deleted: allocation.time_deleted,
+                time_created: allocation.time_created,
+                time_deleted: allocation.time_deleted,
 
-            dataset_id: allocation.local_storage_dataset_id(),
-            pool_id: allocation.pool_id(),
-            sled_id: allocation.sled_id(),
+                allocation_type: String::from("unencrypted"),
 
-            dataset_size: allocation.dataset_size.to_bytes(),
-        }];
+                dataset_id: allocation.local_storage_unencrypted_dataset_id(),
+                pool_id: allocation.pool_id(),
+                sled_id: allocation.sled_id(),
+
+                dataset_size: allocation.dataset_size.to_bytes(),
+            },
+
+            LocalStorageAllocation::Encrypted(allocation) => Row {
+                disk_name: disk.name().to_string(),
+
+                time_created: allocation.time_created,
+                time_deleted: allocation.time_deleted,
+
+                allocation_type: String::from("encrypted"),
+
+                dataset_id: allocation.local_storage_dataset_id(),
+                pool_id: allocation.pool_id(),
+                sled_id: allocation.sled_id(),
+
+                dataset_size: allocation.dataset_size.to_bytes(),
+            },
+        };
+
+        let rows = vec![row];
 
         let table = tabled::Table::new(rows)
             .with(tabled::settings::Style::empty())
