@@ -11514,6 +11514,7 @@ dependencies = [
  "dropshot",
  "expectorate",
  "gateway-types",
+ "glob",
  "humantime",
  "iddqd",
  "indent_write",

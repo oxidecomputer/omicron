@@ -2866,23 +2866,21 @@ pub struct UnstableReconfiguratorState {
     pub external_dns_zone_names: Vec<String>,
 }
 
-pub struct ReconfiguratorStateInput<'a, R> {
-    label: &'a str,
-    reader: R,
+pub struct ReconfiguratorStateInput<R> {
+    pub label: String,
+    pub reader: R,
 }
 
-pub struct ReadSeries<'a> {
-    pub latest: &'a str,
+pub struct ReadSeries {
+    pub latest: String,
     pub warnings: Vec<anyhow::Error>,
     pub state: UnstableReconfiguratorState,
 }
 
 impl UnstableReconfiguratorState {
-    pub fn read_series<'a, I, R>(
-        iter: I,
-    ) -> Result<ReadSeries<'a>, anyhow::Error>
+    pub fn read_series<I, R>(iter: I) -> Result<ReadSeries, anyhow::Error>
     where
-        I: IntoIterator<Item = ReconfiguratorStateInput<'a, R>>,
+        I: IntoIterator<Item = ReconfiguratorStateInput<R>>,
         R: std::io::Read,
     {
         let mut collections = IdOrdMap::new();
@@ -2892,15 +2890,15 @@ impl UnstableReconfiguratorState {
         let mut internal_dns = BTreeMap::new();
         let mut external_dns = BTreeMap::new();
         let mut warnings = Vec::new();
-        let mut all_states: BTreeMap<BlueprintUuid, UniqueState<'_>> =
+        let mut all_states: BTreeMap<BlueprintUuid, UniqueState> =
             BTreeMap::new();
 
-        struct UniqueState<'a> {
+        struct UniqueState {
             planning_input: PlanningInput,
             target_blueprint: BlueprintTarget,
             external_dns_zone_names: Vec<String>,
             silo_names: Vec<omicron_common::api::external::Name>,
-            label: &'a str,
+            label: String,
         }
 
         // Read all the inputs and incorporate them into the state we're
@@ -3015,7 +3013,7 @@ impl UnstableReconfiguratorState {
                         target_blueprint: p.target_blueprint,
                         external_dns_zone_names: p.external_dns_zone_names,
                         silo_names: p.silo_names,
-                        label: input.label,
+                        label: input.label.clone(),
                     });
                 }
                 std::collections::btree_map::Entry::Occupied(
@@ -3133,7 +3131,7 @@ impl UnstableReconfiguratorState {
         };
 
         Ok(ReadSeries {
-            latest: latest.label,
+            latest: latest.label.to_owned(),
             warnings,
             state: UnstableReconfiguratorState {
                 planning_input: latest.planning_input,

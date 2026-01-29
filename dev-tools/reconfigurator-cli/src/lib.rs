@@ -34,7 +34,6 @@ use nexus_reconfigurator_simulation::{
 };
 use nexus_reconfigurator_simulation::{SimStateBuilder, SimTufRepoSource};
 use nexus_reconfigurator_simulation::{SimTufRepoDescription, Simulator};
-use nexus_types::deployment::ExpectedVersion;
 use nexus_types::deployment::execution::blueprint_external_dns_config;
 use nexus_types::deployment::execution::blueprint_internal_dns_config;
 use nexus_types::deployment::{Blueprint, UnstableReconfiguratorState};
@@ -47,6 +46,7 @@ use nexus_types::deployment::{BlueprintSource, SledFilter};
 use nexus_types::deployment::{
     BlueprintZoneImageSource, PendingMgsUpdateDetails,
 };
+use nexus_types::deployment::{ExpectedVersion, ReconfiguratorStateInput};
 use nexus_types::deployment::{OmicronZoneNic, TargetReleaseDescription};
 use nexus_types::deployment::{PendingMgsUpdateSpDetails, PlanningInput};
 use nexus_types::external_api::views::SledPolicy;
@@ -1596,10 +1596,11 @@ struct TufAssembleArgs {
 #[derive(Debug, Args)]
 struct LoadArgs {
     /// input file
-    filename: Utf8PathBuf,
+    globs: Vec<glob::Pattern>,
 
     /// id of inventory collection to use for sled details
     /// (may be omitted only if the file contains only one collection)
+    #[clap(long)]
     collection_id: Option<CollectionUuid>,
 }
 
@@ -3567,20 +3568,64 @@ fn cmd_load(
         );
     }
 
-    let input_path = args.filename;
     let collection_id = args.collection_id;
-    let loaded = read_file(&input_path)?;
 
-    let result = state.load_serialized(loaded, collection_id)?;
+    let mut inputs = Vec::new();
+    for pattern in args.globs {
+        // Work around the lack of rust-lang/glob#148: there is no way to
+        // iterate the paths matching a compiled `Pattern`.  We have to pass the
+        // underlying string to `glob::glob` and have it compile the pattern
+        // again.  It would be very surprising to get an error here since we
+        // have already parsed the string as a pattern before.
+        let paths = glob::glob(pattern.as_str())
+            .with_context(|| format!("parsing glob pattern {pattern:?}"))?;
+        for maybe_path in paths {
+            let input_path = maybe_path.with_context(|| {
+                format!("error globbing pattern {pattern:?}")
+            })?;
+            let input_path = Utf8PathBuf::from_path_buf(input_path).map_err(
+                |input_path| {
+                    anyhow!(
+                        "path was not valid UTF-8: {:?}",
+                        input_path.display()
+                    )
+                },
+            )?;
+            let file = std::fs::File::open(&input_path)
+                .with_context(|| format!("open {:?}", &input_path))?;
+            let bufread = std::io::BufReader::new(file);
+            let input = ReconfiguratorStateInput {
+                label: input_path.as_str().to_owned(),
+                reader: bufread,
+            };
+            inputs.push(input);
+        }
+    }
+
+    let mut s = String::new();
+    let count = inputs.len();
+    let plural = if count == 1 { "" } else { "s" };
+    let loaded = UnstableReconfiguratorState::read_series(inputs.into_iter())
+        .context("loading {count} input{plural}")?;
+    for warning in loaded.warnings {
+        swriteln!(s, "  {}", warning);
+    }
+    if count > 1 {
+        swriteln!(s, "latest of {count} file{plural}: {}", loaded.latest);
+    }
+
+    let result = state.load_serialized(loaded.state, collection_id)?;
 
     sim.commit_and_bump(
-        format!("reconfigurator-sim: load {:?}", input_path),
+        format!("reconfigurator-sim: load {count} file{plural}",),
         state,
     );
 
-    let mut s = String::new();
-
-    swriteln!(s, "loaded data from {:?}", input_path);
+    if count == 1 {
+        swriteln!(s, "loaded data from {:?}", loaded.latest);
+    } else {
+        swriteln!(s, "loaded data from {count} files");
+    }
 
     if !result.warnings.is_empty() {
         swriteln!(s, "warnings:");
