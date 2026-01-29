@@ -2,12 +2,30 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! Nexus external types that changed from 2026010100 to 2026010300
+//! Nexus external types that changed from 2026010100 to 2026010300.
+//!
+//! ## Network Interface Changes
+//!
+//! This version adds dual-stack NIC support with [`InstanceNetworkInterfaceAttachment`]
+//! and [`InstanceNetworkInterfaceCreate`] changes.
+//!
+//! ## Multicast Changes
+//!
+//! `InstanceCreate.multicast_groups` uses `Vec<NameOrId>` instead of
+//! `Vec<MulticastGroupJoinSpec>`. The conversion adds default values for
+//! `source_ips` and `ip_version` fields.
+//!
+//! Affected endpoints:
+//! - `POST /v1/instances` (instance_create)
+//!
+//! [`InstanceNetworkInterfaceAttachment`]: self::InstanceNetworkInterfaceAttachment
+//! [`InstanceNetworkInterfaceCreate`]: self::InstanceNetworkInterfaceCreate
 
 use api_identity::ObjectIdentity;
 use itertools::Either;
 use itertools::Itertools as _;
 use nexus_types::external_api::params;
+
 use nexus_types::external_api::params::IpAssignment;
 use nexus_types::external_api::params::PrivateIpStackCreate;
 use nexus_types::external_api::params::PrivateIpv4StackCreate;
@@ -30,6 +48,8 @@ use serde::Deserialize;
 use serde::Serialize;
 use std::net::IpAddr;
 use uuid::Uuid;
+
+use crate::v2026010300;
 
 /// Describes an attachment of an `InstanceNetworkInterface` to an `Instance`,
 /// at the time the instance is created.
@@ -326,7 +346,7 @@ pub struct InstanceCreate {
     /// connectivity. These external addresses can be used to provide a fixed,
     /// known IP address for making inbound connections to the instance.
     #[serde(default)]
-    pub external_ips: Vec<params::ExternalIpCreate>,
+    pub external_ips: Vec<v2026010300::ExternalIpCreate>,
 
     /// The multicast groups this instance should join.
     ///
@@ -418,8 +438,20 @@ impl TryFrom<InstanceCreate> for params::InstanceCreate {
             hostname: value.hostname,
             user_data: value.user_data,
             network_interfaces,
-            external_ips: value.external_ips,
-            multicast_groups: value.multicast_groups,
+            external_ips: value
+                .external_ips
+                .into_iter()
+                .map(TryInto::try_into)
+                .collect::<Result<Vec<_>, _>>()?,
+            multicast_groups: value
+                .multicast_groups
+                .into_iter()
+                .map(|g| params::MulticastGroupJoinSpec {
+                    group: g.into(),
+                    source_ips: None,
+                    ip_version: None,
+                })
+                .collect(),
             disks: value.disks,
             boot_disk: value.boot_disk,
             ssh_public_keys: value.ssh_public_keys,

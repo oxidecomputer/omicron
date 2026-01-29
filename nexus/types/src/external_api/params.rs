@@ -9,7 +9,11 @@ use crate::external_api::shared;
 use base64::Engine;
 use chrono::{DateTime, Utc};
 use http::Uri;
-use omicron_common::address::ConcreteIp;
+use omicron_common::address::{
+    ConcreteIp, IPV6_INTERFACE_LOCAL_MULTICAST_SUBNET,
+    IPV6_LINK_LOCAL_MULTICAST_SUBNET, IPV6_RESERVED_SCOPE_MULTICAST_SUBNET,
+    MAX_SSM_SOURCE_IPS,
+};
 use omicron_common::api::external::{
     AddressLotKind, AffinityPolicy, AllowedSourceIps, BfdMode, BgpPeer,
     ByteCount, FailureDomain, Hostname, IdentityMetadataCreateParams,
@@ -29,8 +33,7 @@ use serde::{
     de::{self, Visitor},
 };
 use sled_hardware_types::BaseboardId;
-use std::collections::BTreeMap;
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::num::NonZeroU32;
 use std::{
     net::{IpAddr, Ipv4Addr, Ipv6Addr},
@@ -41,11 +44,14 @@ use uuid::Uuid;
 
 macro_rules! path_param {
     ($struct:ident, $param:ident, $name:tt) => {
+        path_param!($struct, $param, $name, NameOrId, "Name or ID of the ");
+    };
+    ($struct:ident, $param:ident, $name:tt, $type:ty, $doc_prefix:tt) => {
         #[derive(Serialize, Deserialize, JsonSchema)]
         pub struct $struct {
-            #[doc = "Name or ID of the "]
+            #[doc = $doc_prefix]
             #[doc = $name]
-            pub $param: NameOrId,
+            pub $param: $type,
         }
     };
 }
@@ -89,9 +95,30 @@ impl From<UninitializedSledId> for BaseboardId {
     }
 }
 
+#[derive(
+    Clone,
+    Debug,
+    Serialize,
+    Deserialize,
+    JsonSchema,
+    PartialOrd,
+    Ord,
+    PartialEq,
+    Eq,
+)]
+pub struct RackMembershipAddSledsRequest {
+    pub sled_ids: BTreeSet<BaseboardId>,
+}
+
 path_param!(AffinityGroupPath, affinity_group, "affinity group");
 path_param!(AntiAffinityGroupPath, anti_affinity_group, "anti affinity group");
-path_param!(MulticastGroupPath, multicast_group, "multicast group");
+path_param!(
+    MulticastGroupPath,
+    multicast_group,
+    "multicast group",
+    MulticastGroupIdentifier,
+    "Name, ID, or IP address of the "
+);
 path_param!(ProjectPath, project, "project");
 path_param!(InstancePath, instance, "instance");
 path_param!(NetworkInterfacePath, interface, "network interface");
@@ -237,6 +264,18 @@ pub struct OptionalProjectSelector {
     pub project: Option<NameOrId>,
 }
 
+/// Query parameters for ephemeral IP detach endpoint
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
+pub struct EphemeralIpDetachSelector {
+    /// Name or ID of the project
+    pub project: Option<NameOrId>,
+    /// The IP version of the ephemeral IP to detach.
+    ///
+    /// Required when the instance has both IPv4 and IPv6 ephemeral IPs.
+    /// If only one ephemeral IP is attached, this field may be omitted.
+    pub ip_version: Option<IpVersion>,
+}
+
 #[derive(Deserialize, JsonSchema, Clone)]
 pub struct FloatingIpSelector {
     /// Name or ID of the project, only required if `floating_ip` is provided as a `Name`
@@ -245,10 +284,114 @@ pub struct FloatingIpSelector {
     pub floating_ip: NameOrId,
 }
 
+/// Identifier for a multicast group: can be a Name, UUID, or IP address.
+///
+/// This type supports the join-by-IP pattern where users can specify
+/// a multicast IP address directly, and the system will auto-discover
+/// the pool and find or create the group.
+#[derive(Debug, Display, Clone, PartialEq)]
+#[display("{0}")]
+pub enum MulticastGroupIdentifier {
+    Id(Uuid),
+    Name(Name),
+    Ip(IpAddr),
+}
+
+impl TryFrom<String> for MulticastGroupIdentifier {
+    type Error = String;
+
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        if let Ok(id) = Uuid::parse_str(&value) {
+            Ok(MulticastGroupIdentifier::Id(id))
+        } else if let Ok(ip) = value.parse::<IpAddr>() {
+            Ok(MulticastGroupIdentifier::Ip(ip))
+        } else {
+            Ok(MulticastGroupIdentifier::Name(Name::try_from(value)?))
+        }
+    }
+}
+
+impl FromStr for MulticastGroupIdentifier {
+    type Err = String;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        MulticastGroupIdentifier::try_from(String::from(value))
+    }
+}
+
+impl From<Name> for MulticastGroupIdentifier {
+    fn from(name: Name) -> Self {
+        MulticastGroupIdentifier::Name(name)
+    }
+}
+
+impl From<Uuid> for MulticastGroupIdentifier {
+    fn from(id: Uuid) -> Self {
+        MulticastGroupIdentifier::Id(id)
+    }
+}
+
+impl From<IpAddr> for MulticastGroupIdentifier {
+    fn from(ip: IpAddr) -> Self {
+        MulticastGroupIdentifier::Ip(ip)
+    }
+}
+
+impl From<NameOrId> for MulticastGroupIdentifier {
+    fn from(value: NameOrId) -> Self {
+        match value {
+            NameOrId::Name(name) => MulticastGroupIdentifier::Name(name),
+            NameOrId::Id(id) => MulticastGroupIdentifier::Id(id),
+        }
+    }
+}
+
+impl Serialize for MulticastGroupIdentifier {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_str(&self.to_string())
+    }
+}
+
+impl<'de> Deserialize<'de> for MulticastGroupIdentifier {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let s = String::deserialize(deserializer)?;
+        MulticastGroupIdentifier::try_from(s).map_err(de::Error::custom)
+    }
+}
+
+impl JsonSchema for MulticastGroupIdentifier {
+    fn schema_name() -> String {
+        "MulticastGroupIdentifier".to_string()
+    }
+
+    fn json_schema(
+        _generator: &mut schemars::r#gen::SchemaGenerator,
+    ) -> schemars::schema::Schema {
+        schemars::schema::SchemaObject {
+            instance_type: Some(schemars::schema::InstanceType::String.into()),
+            metadata: Some(Box::new(schemars::schema::Metadata {
+                title: Some("A multicast group identifier".to_string()),
+                description: Some(
+                    "Can be a UUID, a name, or an IP address".to_string(),
+                ),
+                ..Default::default()
+            })),
+            ..Default::default()
+        }
+        .into()
+    }
+}
+
 #[derive(Deserialize, JsonSchema, Clone)]
 pub struct MulticastGroupSelector {
-    /// Name or ID of the multicast group (fleet-scoped)
-    pub multicast_group: NameOrId,
+    /// Name, ID, or IP address of the multicast group (fleet-scoped)
+    pub multicast_group: MulticastGroupIdentifier,
 }
 
 /// Path parameter for multicast group lookup by IP address.
@@ -1356,28 +1499,180 @@ pub struct IpPoolSiloUpdate {
     pub is_default: bool,
 }
 
+// Subnet Pools
+
+path_param!(SubnetPoolPath, pool, "subnet pool");
+
+/// Path parameters for subnet pool silo operations
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct SubnetPoolSiloPath {
+    /// Name or ID of the subnet pool
+    pub pool: NameOrId,
+    /// Name or ID of the silo
+    pub silo: NameOrId,
+}
+
+/// Create a subnet pool
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct SubnetPoolCreate {
+    #[serde(flatten)]
+    pub identity: IdentityMetadataCreateParams,
+    /// The IP version for this pool (IPv4 or IPv6). All subnets in the pool
+    /// must match this version.
+    pub ip_version: IpVersion,
+}
+
+/// Update a subnet pool
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct SubnetPoolUpdate {
+    #[serde(flatten)]
+    pub identity: IdentityMetadataUpdateParams,
+}
+
+/// Add a member (subnet) to a subnet pool
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct SubnetPoolMemberAdd {
+    /// The subnet to add to the pool
+    pub subnet: IpNet,
+    /// Minimum prefix length for allocations from this subnet; a smaller prefix
+    /// means larger allocations are allowed (e.g. a /16 prefix yields larger
+    /// subnet allocations than a /24 prefix).
+    ///
+    /// Valid values: 0-32 for IPv4, 0-128 for IPv6.
+    /// Default if not specified is equal to the subnet's prefix length.
+    pub min_prefix_length: Option<u8>,
+    /// Maximum prefix length for allocations from this subnet; a larger prefix
+    /// means smaller allocations are allowed (e.g. a /24 prefix yields smaller
+    /// subnet allocations than a /16 prefix).
+    ///
+    /// Valid values: 0-32 for IPv4, 0-128 for IPv6.
+    /// Default if not specified is 32 for IPv4 and 128 for IPv6.
+    pub max_prefix_length: Option<u8>,
+}
+
+/// Remove a subnet from a pool
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct SubnetPoolMemberRemove {
+    /// The subnet to remove from the pool. Must match an existing entry exactly.
+    pub subnet: IpNet,
+}
+
+/// Link a subnet pool to a silo
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct SubnetPoolLinkSilo {
+    /// The silo to link
+    pub silo: NameOrId,
+    /// Whether this is the default subnet pool for the silo. When true,
+    /// external subnet allocations that don't specify a pool use this one.
+    pub is_default: bool,
+}
+
+/// Update a subnet pool's silo link
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct SubnetPoolSiloUpdate {
+    /// Whether this is the default subnet pool for the silo
+    pub is_default: bool,
+}
+
+// External Subnets
+
+path_param!(ExternalSubnetPath, external_subnet, "external subnet");
+
+/// Selector for looking up an external subnet
+#[derive(Deserialize, JsonSchema, Clone)]
+pub struct ExternalSubnetSelector {
+    /// Name or ID of the project (required if `external_subnet` is a Name)
+    pub project: Option<NameOrId>,
+    /// Name or ID of the external subnet
+    pub external_subnet: NameOrId,
+}
+
+/// Specify how to allocate an external subnet.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum ExternalSubnetAllocator {
+    /// Reserve a specific subnet.
+    Explicit {
+        /// The subnet CIDR to reserve. Must be available in the pool.
+        subnet: IpNet,
+    },
+    /// Automatically allocate a subnet with the specified prefix length.
+    Auto {
+        /// The prefix length for the allocated subnet (e.g., 24 for a /24).
+        prefix_len: u8,
+        /// Pool selection.
+        ///
+        /// If omitted, this field uses the silo's default pool. If the
+        /// silo has default pools for both IPv4 and IPv6, the request will
+        /// fail unless `ip_version` is specified in the pool selector.
+        #[serde(default)]
+        pool_selector: PoolSelector,
+    },
+}
+
+/// Create an external subnet
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct ExternalSubnetCreate {
+    #[serde(flatten)]
+    pub identity: IdentityMetadataCreateParams,
+
+    /// Subnet allocation method.
+    pub allocator: ExternalSubnetAllocator,
+}
+
+/// Update an external subnet
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct ExternalSubnetUpdate {
+    #[serde(flatten)]
+    pub identity: IdentityMetadataUpdateParams,
+}
+
+/// Attach an external subnet to an instance
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct ExternalSubnetAttach {
+    /// Name or ID of the instance to attach to
+    pub instance: NameOrId,
+}
+
 // Floating IPs
+
+/// Specify how to allocate a floating IP address.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum AddressAllocator {
+    /// Reserve a specific IP address. The pool is inferred from the address
+    /// since IP pools cannot have overlapping ranges.
+    Explicit {
+        /// The IP address to reserve.
+        ip: IpAddr,
+    },
+    /// Automatically allocate an IP address from a pool.
+    Auto {
+        /// Pool selection.
+        ///
+        /// If omitted, the silo's default pool is used. If the silo has
+        /// default pools for both IPv4 and IPv6, the request will fail
+        /// unless `ip_version` is specified.
+        #[serde(default)]
+        pool_selector: PoolSelector,
+    },
+}
+
+impl Default for AddressAllocator {
+    fn default() -> Self {
+        AddressAllocator::Auto { pool_selector: PoolSelector::default() }
+    }
+}
+
 /// Parameters for creating a new floating IP address for instances.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct FloatingIpCreate {
     #[serde(flatten)]
     pub identity: IdentityMetadataCreateParams,
 
-    /// An IP address to reserve for use as a floating IP. This field is
-    /// optional: when not set, an address will be automatically chosen from
-    /// `pool`. If set, then the IP must be available in the resolved `pool`.
-    pub ip: Option<IpAddr>,
-
-    /// The parent IP pool that a floating IP is pulled from. If unset, the
-    /// default pool is selected.
-    pub pool: Option<NameOrId>,
-
-    /// IP version to use when allocating from the default pool.
-    /// Only used when both `ip` and `pool` are not specified. Required if
-    /// multiple default pools of different IP versions exist. Allocation
-    /// fails if no pool of the requested version is available.
+    /// IP address allocation method.
     #[serde(default)]
-    pub ip_version: Option<IpVersion>,
+    pub address_allocator: AddressAllocator,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
@@ -1481,21 +1776,40 @@ pub struct InstanceDiskAttach {
     pub name: Name,
 }
 
+/// Specify which IP or external subnet pool to allocate from.
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize, JsonSchema)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum PoolSelector {
+    /// Use the specified pool by name or ID.
+    Explicit {
+        /// The pool to allocate from.
+        pool: NameOrId,
+    },
+    /// Use the default pool for the silo.
+    Auto {
+        /// IP version to use when multiple default pools exist.
+        /// Required if both IPv4 and IPv6 default pools are configured.
+        #[serde(default)]
+        ip_version: Option<IpVersion>,
+    },
+}
+
+impl Default for PoolSelector {
+    fn default() -> Self {
+        PoolSelector::Auto { ip_version: None }
+    }
+}
+
 /// Parameters for creating an external IP address for instances.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ExternalIpCreate {
     /// An IP address providing both inbound and outbound access. The address is
-    /// automatically assigned from the provided IP pool or the default IP pool
-    /// if not specified.
+    /// automatically assigned from a pool.
     Ephemeral {
-        pool: Option<NameOrId>,
-        /// IP version to use when allocating from the default pool.
-        /// Only used when `pool` is not specified. Required if multiple default
-        /// pools of different IP versions exist. Allocation fails if no pool
-        /// of the requested version is available.
+        /// Pool to allocate from.
         #[serde(default)]
-        ip_version: Option<IpVersion>,
+        pool_selector: PoolSelector,
     },
     /// An IP address providing both inbound and outbound access. The address is
     /// an existing floating IP object assigned to the current project.
@@ -1506,26 +1820,27 @@ pub enum ExternalIpCreate {
 
 /// Parameters for creating an ephemeral IP address for an instance.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-#[serde(tag = "type", rename_all = "snake_case")]
 pub struct EphemeralIpCreate {
-    /// Name or ID of the IP pool used to allocate an address. If unspecified,
-    /// the default IP pool will be used.
-    pub pool: Option<NameOrId>,
-
-    /// IP version to use when allocating from the default pool.
-    /// Only used when `pool` is not specified. Required if multiple default
-    /// pools of different IP versions exist. Allocation fails if no pool
-    /// of the requested version is available.
+    /// Pool to allocate from.
     #[serde(default)]
-    pub ip_version: Option<IpVersion>,
+    pub pool_selector: PoolSelector,
 }
 
 /// Parameters for detaching an external IP from an instance.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ExternalIpDetach {
-    Ephemeral,
-    Floating { floating_ip: NameOrId },
+    Ephemeral {
+        /// The IP version of the ephemeral IP to detach.
+        ///
+        /// Required when the instance has both IPv4 and IPv6 ephemeral IPs.
+        /// If only one ephemeral IP is attached, this field may be omitted.
+        #[serde(default)]
+        ip_version: Option<IpVersion>,
+    },
+    Floating {
+        floating_ip: NameOrId,
+    },
 }
 
 /// Create-time parameters for an `Instance`
@@ -1566,13 +1881,12 @@ pub struct InstanceCreate {
     #[serde(default)]
     pub external_ips: Vec<ExternalIpCreate>,
 
-    /// The multicast groups this instance should join.
+    /// Multicast groups this instance should join at creation.
     ///
-    /// The instance will be automatically added as a member of the specified
-    /// multicast groups during creation, enabling it to send and receive
-    /// multicast traffic for those groups.
+    /// Groups can be specified by name, UUID, or IP address. Non-existent
+    /// groups are created automatically.
     #[serde(default)]
-    pub multicast_groups: Vec<NameOrId>,
+    pub multicast_groups: Vec<MulticastGroupJoinSpec>,
 
     /// A list of disks to be attached to the instance.
     ///
@@ -1695,10 +2009,15 @@ pub struct InstanceUpdate {
     /// membership with the new set of groups. The instance will leave any
     /// groups not listed here and join any new groups that are specified.
     ///
-    /// If not provided (None), the instance's multicast group membership
-    /// will not be changed.
+    /// Each entry can specify the group by name, UUID, or IP address, along with
+    /// optional source IP filtering for SSM (Source-Specific Multicast). When
+    /// a group doesn't exist, it will be implicitly created using the default
+    /// multicast pool (or you can specify `ip_version` to disambiguate if needed).
+    ///
+    /// If not provided, the instance's multicast group membership will not
+    /// be changed.
     #[serde(default)]
-    pub multicast_groups: Option<Vec<NameOrId>>,
+    pub multicast_groups: Option<Vec<MulticastGroupJoinSpec>>,
 }
 
 #[inline]
@@ -2810,7 +3129,9 @@ pub struct ProbeCreate {
     pub identity: IdentityMetadataCreateParams,
     #[schemars(with = "Uuid")]
     pub sled: SledUuid,
-    pub ip_pool: Option<NameOrId>,
+    /// Pool to allocate from.
+    #[serde(default)]
+    pub pool_selector: PoolSelector,
 }
 
 /// List probes with an optional name or id.
@@ -2863,6 +3184,11 @@ pub struct LoginUrlQuery {
 #[derive(Deserialize, JsonSchema)]
 pub struct LoginPath {
     pub silo_name: Name,
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub struct RackMembershipConfigPathParams {
+    pub rack_id: Uuid,
 }
 
 /// This is meant as a security feature. We want to ensure we never redirect to
@@ -3110,19 +3436,19 @@ pub struct AuditLog {
 pub struct MulticastGroupCreate {
     #[serde(flatten)]
     pub identity: IdentityMetadataCreateParams,
-    /// The multicast IP address to allocate. If None, one will be allocated
-    /// from the default pool.
+    /// The multicast IP address to allocate. If not provided, one will be
+    /// allocated from the default pool.
     #[serde(default, deserialize_with = "validate_multicast_ip_param")]
     pub multicast_ip: Option<IpAddr>,
     /// Source IP addresses for Source-Specific Multicast (SSM).
     ///
-    /// None uses default behavior (Any-Source Multicast).
-    /// Empty list explicitly allows any source (Any-Source Multicast).
-    /// Non-empty list restricts to specific sources (SSM).
+    /// If not provided, uses default behavior (Any-Source Multicast).
+    /// An empty list explicitly allows any source (Any-Source Multicast).
+    /// A non-empty list restricts to specific sources (SSM).
     #[serde(default, deserialize_with = "validate_source_ips_param")]
     pub source_ips: Option<Vec<IpAddr>>,
-    /// Name or ID of the IP pool to allocate from. If None, uses the default
-    /// multicast pool.
+    /// Name or ID of the IP pool to allocate from. If not provided, uses the
+    /// default multicast pool.
     #[serde(default)]
     pub pool: Option<NameOrId>,
     /// Multicast VLAN (MVLAN) for egress multicast traffic to upstream networks.
@@ -3160,9 +3486,11 @@ pub struct MulticastGroupUpdate {
 pub struct MulticastGroupMemberAdd {
     /// Name or ID of the instance to add to the multicast group
     pub instance: NameOrId,
+    /// Source IPs for source-filtered multicast (SSM). Optional for ASM groups,
+    /// required for SSM groups (232.0.0.0/8, ff3x::/32).
+    #[serde(default, deserialize_with = "validate_source_ips_param")]
+    pub source_ips: Option<Vec<IpAddr>>,
 }
-
-// MVLAN validators
 
 /// Dendrite requires VLAN IDs >= 2 (rejects 0 and 1)
 ///
@@ -3221,8 +3549,8 @@ pub struct MulticastGroupMemberRemove {
 /// Path parameters for multicast group member operations.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct MulticastGroupMemberPath {
-    /// Name or ID of the multicast group
-    pub multicast_group: NameOrId,
+    /// Name, ID, or IP address of the multicast group
+    pub multicast_group: MulticastGroupIdentifier,
     /// Name or ID of the instance
     pub instance: NameOrId,
 }
@@ -3232,8 +3560,45 @@ pub struct MulticastGroupMemberPath {
 pub struct InstanceMulticastGroupPath {
     /// Name or ID of the instance
     pub instance: NameOrId,
-    /// Name or ID of the multicast group
-    pub multicast_group: NameOrId,
+    /// Name, ID, or IP address of the multicast group
+    pub multicast_group: MulticastGroupIdentifier,
+}
+
+/// Parameters for joining an instance to a multicast group.
+///
+/// When joining by IP address, the pool containing the multicast IP is
+/// auto-discovered from all linked multicast pools.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, Default)]
+pub struct InstanceMulticastGroupJoin {
+    /// Source IPs for source-filtered multicast (SSM). Optional for ASM groups,
+    /// required for SSM groups (232.0.0.0/8, ff3x::/32).
+    #[serde(default, deserialize_with = "validate_source_ips_param")]
+    pub source_ips: Option<Vec<IpAddr>>,
+
+    /// IP version for pool selection when creating a group by name.
+    /// Required if both IPv4 and IPv6 default multicast pools are linked.
+    #[serde(default)]
+    pub ip_version: Option<IpVersion>,
+}
+
+/// Specification for joining a multicast group with optional source filtering.
+///
+/// Used in `InstanceCreate` and `InstanceUpdate` to specify multicast group
+/// membership along with per-member source IP configuration.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct MulticastGroupJoinSpec {
+    /// The multicast group to join, specified by name, UUID, or IP address.
+    pub group: MulticastGroupIdentifier,
+
+    /// Source IPs for source-filtered multicast (SSM). Optional for ASM groups,
+    /// required for SSM groups (232.0.0.0/8, ff3x::/32).
+    #[serde(default, deserialize_with = "validate_source_ips_param")]
+    pub source_ips: Option<Vec<IpAddr>>,
+
+    /// IP version for pool selection when creating a group by name.
+    /// Required if both IPv4 and IPv6 default multicast pools are linked.
+    #[serde(default)]
+    pub ip_version: Option<IpVersion>,
 }
 
 /// Validate that an IP address is suitable for use as a SSM source.
@@ -3326,27 +3691,22 @@ fn validate_ipv6_multicast(addr: Ipv6Addr) -> Result<(), String> {
         return Err(format!("{addr} is not a multicast address"));
     }
 
-    // Define reserved IPv6 multicast subnets using oxnet
-    let reserved_subnets = [
-        // Interface-local scope (ff01::/16)
-        Ipv6Net::new(Ipv6Addr::new(0xff01, 0, 0, 0, 0, 0, 0, 0), 16).unwrap(),
-        // Link-local scope (ff02::/16)
-        Ipv6Net::new(Ipv6Addr::new(0xff02, 0, 0, 0, 0, 0, 0, 0), 16).unwrap(),
-    ];
-
     // Check reserved subnets
-    for subnet in &reserved_subnets {
-        if subnet.contains(addr) {
-            return Err(format!(
-                "{} is in the reserved multicast subnet {}",
-                addr, subnet
-            ));
-        }
+    if IPV6_RESERVED_SCOPE_MULTICAST_SUBNET.contains(addr) {
+        return Err(format!(
+            "{addr} is in the reserved-scope multicast range (ff00::/16)"
+        ));
     }
-
-    // Note: Admin-local scope (ff04::/16) is allowed for on-premises deployments.
-    // Collision avoidance with underlay addresses is handled by the mapping
-    // function which sets a collision-avoidance bit in the underlay space.
+    if IPV6_INTERFACE_LOCAL_MULTICAST_SUBNET.contains(addr) {
+        return Err(format!(
+            "{addr} is in the interface-local multicast range (ff01::/16)"
+        ));
+    }
+    if IPV6_LINK_LOCAL_MULTICAST_SUBNET.contains(addr) {
+        return Err(format!(
+            "{addr} is in the link-local multicast range (ff02::/16)"
+        ));
+    }
 
     Ok(())
 }
@@ -3373,12 +3733,34 @@ where
     D: Deserializer<'de>,
 {
     let ips_opt = Option::<Vec<IpAddr>>::deserialize(deserializer)?;
-    if let Some(ref ips) = ips_opt {
-        for ip in ips {
-            validate_source_ip(*ip).map_err(|e| de::Error::custom(e))?;
+    if let Some(ips) = ips_opt {
+        // Validate each IP and deduplicate
+        let mut seen = HashSet::new();
+        for ip in &ips {
+            validate_source_ip(*ip).map_err(de::Error::custom)?;
+            seen.insert(*ip);
         }
+
+        // Check max limit after deduplication
+        if seen.len() > MAX_SSM_SOURCE_IPS {
+            return Err(de::Error::custom(format!(
+                "too many source IPs: {} exceeds maximum of {MAX_SSM_SOURCE_IPS} per RFC 3376",
+                seen.len(),
+            )));
+        }
+
+        // Return deduplicated list preserving original order
+        let mut deduped = Vec::with_capacity(seen.len());
+        let mut added = HashSet::new();
+        for ip in ips {
+            if added.insert(ip) {
+                deduped.push(ip);
+            }
+        }
+        Ok(Some(deduped))
+    } else {
+        Ok(None)
     }
-    Ok(ips_opt)
 }
 
 const fn is_unicast_v4(ip: &Ipv4Addr) -> bool {
@@ -3404,6 +3786,11 @@ pub struct ScimV2UserPathParam {
 #[derive(Deserialize, JsonSchema)]
 pub struct ScimV2GroupPathParam {
     pub group_id: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct RackMembershipVersionParam {
+    pub version: Option<shared::RackMembershipVersion>,
 }
 
 #[cfg(test)]
@@ -3878,5 +4265,69 @@ mod tests {
         let result: Result<MulticastGroupUpdate, _> =
             serde_json::from_str(json);
         assert!(result.is_err(), "Should reject reserved VLAN ID 1");
+    }
+
+    #[test]
+    fn test_address_allocator_explicit_requires_ip() {
+        // Explicit requires an IP address - pool-only is not valid
+        let json = r#"{"type": "explicit", "pool": "my-pool"}"#;
+        let result: Result<AddressAllocator, _> = serde_json::from_str(json);
+        assert!(result.is_err(), "explicit without ip should fail");
+    }
+
+    #[test]
+    fn test_address_allocator_explicit_with_ip() {
+        let json = r#"{"type": "explicit", "ip": "10.0.0.1"}"#;
+        let result: Result<AddressAllocator, _> = serde_json::from_str(json);
+        assert!(result.is_ok(), "explicit with ip should be valid");
+        match result.unwrap() {
+            AddressAllocator::Explicit { ip } => {
+                assert_eq!(ip, "10.0.0.1".parse::<std::net::IpAddr>().unwrap());
+            }
+            _ => panic!("Expected Explicit variant"),
+        }
+    }
+
+    #[test]
+    fn test_address_allocator_explicit_missing_ip() {
+        let json = r#"{"type": "explicit"}"#;
+        let result: Result<AddressAllocator, _> = serde_json::from_str(json);
+        assert!(result.is_err(), "explicit without ip should fail");
+    }
+
+    #[test]
+    fn test_address_allocator_auto_with_explicit_pool() {
+        // To allocate from a specific pool, use Auto with explicit pool_selector
+        let json = r#"{"type": "auto", "pool_selector": {"type": "explicit", "pool": "my-pool"}}"#;
+        let result: Result<AddressAllocator, _> = serde_json::from_str(json);
+        assert!(
+            result.is_ok(),
+            "auto with explicit pool_selector should be valid"
+        );
+        match result.unwrap() {
+            AddressAllocator::Auto { pool_selector } => {
+                assert!(matches!(pool_selector, PoolSelector::Explicit { .. }));
+            }
+            _ => panic!("Expected Auto variant"),
+        }
+    }
+
+    #[test]
+    fn test_address_allocator_auto_with_auto_pool() {
+        // Auto-allocate from default pool
+        let json = r#"{"type": "auto", "pool_selector": {"type": "auto"}}"#;
+        let result: Result<AddressAllocator, _> = serde_json::from_str(json);
+        assert!(result.is_ok(), "auto with auto pool_selector should be valid");
+    }
+
+    #[test]
+    fn test_address_allocator_auto_default() {
+        // Default pool_selector when omitted
+        let json = r#"{"type": "auto"}"#;
+        let result: Result<AddressAllocator, _> = serde_json::from_str(json);
+        assert!(
+            result.is_ok(),
+            "auto without pool_selector should use default"
+        );
     }
 }

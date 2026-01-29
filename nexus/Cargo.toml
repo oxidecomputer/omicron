@@ -109,6 +109,7 @@ slog.workspace = true
 slog-async.workspace = true
 slog-dtrace.workspace = true
 slog-error-chain.workspace = true
+swrite.workspace = true
 display-error-chain.workspace = true
 slog-term.workspace = true
 static_assertions.workspace = true
@@ -119,6 +120,7 @@ tokio = { workspace = true, features = ["full"] }
 tokio-postgres = { workspace = true, features = ["with-serde_json-1"] }
 tokio-util = { workspace = true, features = ["codec", "rt"] }
 tough.workspace = true
+trust-quorum-types.workspace = true
 tufaceous-artifact.workspace = true
 usdt.workspace = true
 uuid.workspace = true

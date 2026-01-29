@@ -131,6 +131,7 @@ use super::tasks::service_firewall_rules;
 use super::tasks::support_bundle_collector;
 use super::tasks::sync_service_zone_nat::ServiceZoneNatTracker;
 use super::tasks::sync_switch_configuration::SwitchPortSettingsManager;
+use super::tasks::trust_quorum;
 use super::tasks::tuf_artifact_replication;
 use super::tasks::tuf_repo_pruner;
 use super::tasks::v2p_mappings::V2PManager;
@@ -271,6 +272,7 @@ impl BackgroundTasksInitializer {
             task_fm_sitrep_gc: Activator::new(),
             task_probe_distributor: Activator::new(),
             task_multicast_reconciler: Activator::new(),
+            task_trust_quorum_manager: Activator::new(),
 
             // Handles to activate background tasks that do not get used by Nexus
             // at-large.  These background tasks are implementation details as far as
@@ -360,6 +362,7 @@ impl BackgroundTasksInitializer {
             task_fm_sitrep_gc,
             task_probe_distributor,
             task_multicast_reconciler,
+            task_trust_quorum_manager,
             // Add new background tasks here.  Be sure to use this binding in a
             // call to `Driver::register()` below.  That's what actually wires
             // up the Activator to the corresponding background task.
@@ -817,6 +820,7 @@ impl BackgroundTasksInitializer {
                     datastore.clone(),
                     sagas.clone(),
                     config.instance_reincarnation.disable,
+                    task_multicast_reconciler.clone(),
                 );
             driver.register(TaskDefinition {
                 name: "instance_reincarnation",
@@ -1141,12 +1145,24 @@ impl BackgroundTasksInitializer {
             description: "distributes networking probe zones to sleds",
             period: config.probe_distributor.period_secs,
             task_impl: Box::new(probe_distributor::ProbeDistributor::new(
-                datastore,
+                datastore.clone(),
                 vpc_route_manager_tx,
             )),
             opctx: opctx.child(BTreeMap::new()),
             watchers: vec![],
             activator: task_probe_distributor,
+        });
+
+        driver.register(TaskDefinition {
+            name: "trust_quorum_manager",
+            description: "Drive trust quorum reconfigurations to completion",
+            period: config.trust_quorum.period_secs,
+            task_impl: Box::new(trust_quorum::TrustQuorumManager::new(
+                datastore,
+            )),
+            opctx: opctx.child(BTreeMap::new()),
+            watchers: vec![],
+            activator: task_trust_quorum_manager,
         });
 
         driver

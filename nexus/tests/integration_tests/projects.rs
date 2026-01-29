@@ -249,8 +249,11 @@ async fn test_project_deletion_with_floating_ip(
         &client,
         "my-fip",
         &name,
-        None,
-        Some(v6_pool.identity.name.as_str()),
+        params::AddressAllocator::Auto {
+            pool_selector: params::PoolSelector::Explicit {
+                pool: v6_pool.identity.name.clone().into(),
+            },
+        },
     )
     .await;
     assert_eq!(

@@ -284,8 +284,6 @@ impl TryFrom<String> for Name {
 }
 
 impl FromStr for Name {
-    // TODO: We should have better error types here.
-    // See https://github.com/oxidecomputer/omicron/issues/347
     type Err = String;
 
     fn from_str(value: &str) -> Result<Self, Self::Err> {
@@ -376,8 +374,6 @@ impl TryFrom<String> for NameOrId {
 }
 
 impl FromStr for NameOrId {
-    // TODO: We should have better error types here.
-    // See https://github.com/oxidecomputer/omicron/issues/347
     type Err = String;
 
     fn from_str(value: &str) -> Result<Self, Self::Err> {
@@ -957,6 +953,7 @@ pub enum ResourceType {
     DeviceAccessToken,
     DeviceAuthRequest,
     Disk,
+    ExternalSubnet,
     Fleet,
     FloatingIp,
     IdentityProvider,
@@ -1000,6 +997,8 @@ pub enum ResourceType {
     Snapshot,
     SshKey,
     SupportBundle,
+    SubnetPool,
+    SubnetPoolMember,
     Switch,
     SwitchPort,
     SwitchPortSettings,
@@ -2557,6 +2556,11 @@ impl Vni {
     /// Create a new random VNI in the Oxide-reserved space.
     pub fn random_system() -> Self {
         Self(rand::rng().random_range(0..Self::MIN_GUEST_VNI))
+    }
+
+    /// Returns the VNI as a raw u32.
+    pub const fn as_u32(&self) -> u32 {
+        self.0
     }
 }
 

@@ -16,7 +16,7 @@ use std::{collections::BTreeMap, sync::LazyLock};
 ///
 /// This must be updated when you change the database schema.  Refer to
 /// schema/crdb/README.adoc in the root of this repository for details.
-pub const SCHEMA_VERSION: Version = Version::new(217, 0, 0);
+pub const SCHEMA_VERSION: Version = Version::new(227, 0, 0);
 
 /// List of all past database schema versions, in *reverse* order
 ///
@@ -28,6 +28,16 @@ static KNOWN_VERSIONS: LazyLock<Vec<KnownVersion>> = LazyLock::new(|| {
         // |  leaving the first copy as an example for the next person.
         // v
         // KnownVersion::new(next_int, "unique-dirname-with-the-sql-files"),
+        KnownVersion::new(227, "local-storage-unencrypted-dataset"),
+        KnownVersion::new(226, "measurement-proper-inventory"),
+        KnownVersion::new(225, "dual-stack-ephemeral-ip"),
+        KnownVersion::new(224, "add-external-subnets"),
+        KnownVersion::new(223, "ip-pool-range-by-pool-id-index"),
+        KnownVersion::new(222, "audit-log-credential-id"),
+        KnownVersion::new(221, "audit-log-auth-method-enum"),
+        KnownVersion::new(220, "multicast-implicit-lifecycle"),
+        KnownVersion::new(219, "blueprint-sled-last-used-ip"),
+        KnownVersion::new(218, "measurements"),
         KnownVersion::new(217, "multiple-default-ip-pools-per-silo"),
         KnownVersion::new(216, "add-trust-quorum"),
         KnownVersion::new(215, "support-up-to-12-disks"),

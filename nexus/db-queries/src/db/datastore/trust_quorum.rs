@@ -21,9 +21,11 @@ use nexus_db_model::DbTypedUuid;
 use nexus_db_model::HwBaseboardId;
 use nexus_db_model::TrustQuorumConfiguration as DbTrustQuorumConfiguration;
 use nexus_db_model::TrustQuorumMember as DbTrustQuorumMember;
+use nexus_types::trust_quorum::IsLrtqUpgrade;
 use nexus_types::trust_quorum::ProposedTrustQuorumConfig;
 use nexus_types::trust_quorum::{
-    TrustQuorumConfig, TrustQuorumMemberData, TrustQuorumMemberState,
+    TrustQuorumConfig, TrustQuorumConfigState, TrustQuorumMemberData,
+    TrustQuorumMemberState,
 };
 use omicron_common::api::external::Error;
 use omicron_common::api::external::OptionalLookupResult;
@@ -129,7 +131,7 @@ impl DataStore {
     ///
     /// For reconfiguration and lrtq upgrade we always call
     /// `tq_insert_latest_config`.
-    pub async fn insert_rss_config_after_handoff(
+    pub async fn tq_insert_rss_config_after_handoff(
         opctx: &OpContext,
         conn: &async_bb8_diesel::Connection<DbConnection>,
         rack_id: RackUuid,
@@ -161,6 +163,23 @@ impl DataStore {
         Self::tq_get_latest_config_with_members_conn(opctx, conn, rack_id)
             .await
             .map_err(|err| err.into_public_ignore_retries())
+    }
+
+    /// Get the trust quorum configuration from the database for the given Epoch
+    pub async fn tq_get_config(
+        &self,
+        opctx: &OpContext,
+        rack_id: RackUuid,
+        epoch: Epoch,
+    ) -> OptionalLookupResult<TrustQuorumConfig> {
+        opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
+        let conn = &*self.pool_connection_authorized(opctx).await?;
+
+        Self::tq_get_config_with_members_from_epoch_conn(
+            opctx, conn, rack_id, epoch,
+        )
+        .await
+        .map_err(|err| err.into_public_ignore_retries())
     }
 
     async fn tq_get_latest_config_with_members_conn(
@@ -417,10 +436,17 @@ impl DataStore {
         )
         .await?;
 
-        // Ensure that epochs are sequential
+        // Ensure that epochs are sequential or this is the inital attempt at an
+        // LRTQ upgrade.
+        //
+        // In the latter case the proposed epoch will be 2, as LRTQ has an epoch
+        // of 1 that is encoded as a ZFS dataset property.
         let latest_epoch = latest_config.as_ref().map(|c| c.epoch);
         bail_unless!(
-            latest_epoch == proposed.epoch.previous(),
+            latest_epoch == proposed.epoch.previous()
+                || (latest_epoch.is_none()
+                    && proposed.is_lrtq_upgrade == IsLrtqUpgrade::Yes
+                    && proposed.epoch == Epoch(2)),
             "Epochs for trust quorum configurations must be sequential. \
             Current epoch = {:?}, Proposed Epoch = {:?}",
             latest_epoch,
@@ -591,7 +617,7 @@ impl DataStore {
         opctx: &OpContext,
         config: trust_quorum_types::configuration::Configuration,
         acked_prepares: BTreeSet<BaseboardId>,
-    ) -> Result<(), Error> {
+    ) -> Result<TrustQuorumConfigState, Error> {
         opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
         let conn = &*self.pool_connection_authorized(opctx).await?;
 
@@ -739,9 +765,11 @@ impl DataStore {
                         )
                         .await
                         .map_err(|txn_error| txn_error.into_diesel(&err))?;
+
+                        return Ok(TrustQuorumConfigState::Committing);
                     }
 
-                    Ok(())
+                    Ok(db_config.state.into())
                 }
             })
             .await
@@ -1507,7 +1535,7 @@ mod tests {
         let coordinator = members.first().unwrap().clone();
 
         // Insert an initial config
-        DataStore::insert_rss_config_after_handoff(
+        DataStore::tq_insert_rss_config_after_handoff(
             opctx,
             &conn,
             rack_id,
@@ -1517,7 +1545,7 @@ mod tests {
         .await
         .unwrap();
 
-        // Last committed epoch is incoreect (should be 1)
+        // Last committed epoch is incorrect (should be 1)
         let bad_config = ProposedTrustQuorumConfig {
             rack_id,
             epoch: Epoch(2),
@@ -1576,6 +1604,51 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_tq_insert_initial_lrtq_upgrade() {
+        let logctx = test_setup_log("test_tq_update_prepare_and_commit");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        let hw_ids = insert_hw_baseboard_ids(&db).await;
+        let rack_id = RackUuid::new_v4();
+        let members: BTreeSet<_> =
+            hw_ids.iter().cloned().map(BaseboardId::from).collect();
+
+        // Propse a an LRTQ upgrade and successfully insert it
+        let config = ProposedTrustQuorumConfig {
+            rack_id,
+            epoch: Epoch(2),
+            is_lrtq_upgrade: IsLrtqUpgrade::Yes,
+            members: members.clone(),
+        };
+
+        // Insert should succeed
+        datastore.tq_insert_latest_config(opctx, config.clone()).await.unwrap();
+
+        // Read the config back and check that it's preparing for LRTQ upgrade
+        // with no acks.
+        let read_config = datastore
+            .tq_get_latest_config(opctx, rack_id)
+            .await
+            .expect("no error")
+            .expect("returned config");
+
+        // The read config should be preparing
+        assert_eq!(read_config.epoch, config.epoch);
+        assert_eq!(
+            read_config.state,
+            TrustQuorumConfigState::PreparingLrtqUpgrade
+        );
+        assert!(read_config.encrypted_rack_secrets.is_none());
+        assert!(read_config.members.iter().all(|(_, info)| {
+            info.state == TrustQuorumMemberState::Unacked
+        }));
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
     async fn test_tq_update_prepare_and_commit() {
         let logctx = test_setup_log("test_tq_update_prepare_and_commit");
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
@@ -1590,7 +1663,7 @@ mod tests {
         let coordinator = members.first().unwrap().clone();
 
         // Insert an initial config
-        DataStore::insert_rss_config_after_handoff(
+        DataStore::tq_insert_rss_config_after_handoff(
             opctx,
             &conn,
             rack_id,
@@ -1843,7 +1916,7 @@ mod tests {
         let coordinator = members.first().unwrap().clone();
 
         // Insert an initial config
-        DataStore::insert_rss_config_after_handoff(
+        DataStore::tq_insert_rss_config_after_handoff(
             opctx,
             &conn,
             rack_id,
@@ -2015,7 +2088,7 @@ mod tests {
                 rack2_members = members.clone();
             }
             let coordinator = members.first().unwrap().clone();
-            DataStore::insert_rss_config_after_handoff(
+            DataStore::tq_insert_rss_config_after_handoff(
                 opctx,
                 &conn,
                 rack_id,

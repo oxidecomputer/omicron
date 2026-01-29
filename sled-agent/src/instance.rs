@@ -35,13 +35,15 @@ use omicron_uuid_kinds::{
 };
 use propolis_api_types::ErrorCode as PropolisErrorCode;
 use propolis_client::Client as PropolisClient;
-use propolis_client::instance_spec::{ComponentV0, SpecKey};
+use propolis_client::instance_spec::{
+    ComponentV0, InstanceSpec, InstanceSpecV0, SpecKey,
+};
 use rand::SeedableRng;
 use rand::prelude::IteratorRandom;
 use sled_agent_config_reconciler::AvailableDatasetsReceiver;
+use sled_agent_resolvable_files::ramdisk_file_source;
 use sled_agent_types::instance::*;
 use sled_agent_types::zone_bundle::ZoneBundleCause;
-use sled_agent_zone_images::ramdisk_file_source;
 use slog::Logger;
 use std::net::IpAddr;
 use std::net::SocketAddr;
@@ -515,7 +517,7 @@ struct InstanceRunner {
     monitor_handle: Option<tokio::task::JoinHandle<()>>,
 
     // Properties visible to Propolis
-    properties: propolis_client::types::InstanceProperties,
+    properties: propolis_client::instance_spec::InstanceProperties,
 
     // The ID of the Propolis server (and zone) running this instance
     propolis_id: PropolisUuid,
@@ -562,6 +564,19 @@ struct InstanceRunner {
 
     // Zvols to delegate to the Propolis zone
     delegated_zvols: Vec<DelegatedZvol>,
+}
+
+/// Translate a `propolis-client` `InstanceSpecV0` into the newer
+/// `InstanceSpec`.
+///
+/// This can be done losslessly, and probably should be an `impl From` or
+/// inherent method in `propolis-client`, but Propolis itself converts between
+/// these types a little less directly. It hadn't occurred to me that this is
+/// useful for clients as well.
+pub(crate) fn spec_v0_to_v1(orig_spec: InstanceSpecV0) -> InstanceSpec {
+    let InstanceSpecV0 { board, components } = orig_spec;
+
+    InstanceSpec { board, components, smbios: None }
 }
 
 impl InstanceRunner {
@@ -1161,7 +1176,9 @@ impl InstanceRunner {
         } else {
             propolis_client::types::InstanceEnsureRequest {
                 properties: self.properties.clone(),
-                init: InstanceInitializationMethod::Spec { spec: spec.0 },
+                init: InstanceInitializationMethod::Spec {
+                    spec: spec_v0_to_v1(spec.0),
+                },
             }
         };
 
@@ -1746,7 +1763,7 @@ impl Instance {
         // the `InstanceRunner`) and awaiting a termination request.
         let (terminate_tx, terminate_rx) = mpsc::channel(QUEUE_SIZE);
 
-        let metadata = propolis_client::types::InstanceMetadata {
+        let metadata = propolis_client::instance_spec::InstanceMetadata {
             project_id: metadata.project_id,
             silo_id: metadata.silo_id,
             sled_id: sled_identifiers.sled_id,
@@ -1762,7 +1779,7 @@ impl Instance {
             tx_monitor,
             rx_monitor,
             monitor_handle: None,
-            properties: propolis_client::types::InstanceProperties {
+            properties: propolis_client::instance_spec::InstanceProperties {
                 id: id.into_untyped_uuid(),
                 name: local_config.hostname.to_string(),
                 description: "Omicron-managed VM".to_string(),
@@ -3352,7 +3369,7 @@ mod tests {
                 serial: "fake-serial".into(),
             };
 
-            let metadata = propolis_client::types::InstanceMetadata {
+            let metadata = propolis_client::instance_spec::InstanceMetadata {
                 project_id: metadata.project_id,
                 silo_id: metadata.silo_id,
                 sled_id: sled_identifiers.sled_id,
@@ -3388,12 +3405,13 @@ mod tests {
                 tx_monitor: monitor_tx,
                 rx_monitor: monitor_rx,
                 monitor_handle: None,
-                properties: propolis_client::types::InstanceProperties {
-                    id: propolis_id.into_untyped_uuid(),
-                    name: "test instance".to_string(),
-                    description: "test instance".to_string(),
-                    metadata,
-                },
+                properties:
+                    propolis_client::instance_spec::InstanceProperties {
+                        id: propolis_id.into_untyped_uuid(),
+                        name: "test instance".to_string(),
+                        description: "test instance".to_string(),
+                        metadata,
+                    },
                 propolis_spec: vmm_spec,
                 propolis_id,
                 propolis_addr,

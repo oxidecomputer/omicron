@@ -43,7 +43,7 @@ use sled_agent_types::artifact::{
 };
 use sled_agent_types::bootstore::BootstoreStatus;
 use sled_agent_types::dataset::{
-    LocalStorageDatasetEnsureRequest, LocalStoragePathParam,
+    LocalStorageDatasetDeleteRequest, LocalStorageDatasetEnsureRequest,
 };
 use sled_agent_types::debug::OperatorSwitchZonePolicy;
 use sled_agent_types::diagnostics::{
@@ -68,7 +68,7 @@ use sled_agent_types::support_bundle::{
     SupportBundleTransferQueryParams,
 };
 use sled_agent_types::trust_quorum::{
-    ProxyCommitRequest, ProxyPrepareAndCommitRequest,
+    ProxyCommitRequest, ProxyPrepareAndCommitRequest, TrustQuorumNetworkConfig,
 };
 use sled_agent_types::zone_bundle::{
     BundleUtilization, CleanupContext, CleanupContextUpdate, CleanupCount,
@@ -689,31 +689,28 @@ impl SledAgentApi for SledAgentSimImpl {
 
     async fn local_storage_dataset_ensure(
         rqctx: RequestContext<Self::Context>,
-        path_params: Path<LocalStoragePathParam>,
         body: TypedBody<LocalStorageDatasetEnsureRequest>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
         let sa = rqctx.context();
 
-        let LocalStoragePathParam { zpool_id, dataset_id } =
-            path_params.into_inner();
-
-        sa.ensure_local_storage_dataset(
-            zpool_id,
-            dataset_id,
-            body.into_inner(),
-        );
+        sa.ensure_local_storage_dataset(body.into_inner());
 
         Ok(HttpResponseUpdatedNoContent())
     }
 
     async fn local_storage_dataset_delete(
         rqctx: RequestContext<Self::Context>,
-        path_params: Path<LocalStoragePathParam>,
+        body: TypedBody<LocalStorageDatasetDeleteRequest>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
         let sa = rqctx.context();
 
-        let LocalStoragePathParam { zpool_id, dataset_id } =
-            path_params.into_inner();
+        let LocalStorageDatasetDeleteRequest {
+            zpool_id,
+            dataset_id,
+            // Ignored for now: dataset uuids will be unique enough to delete
+            // the correct thing
+            encrypted_at_rest: _,
+        } = body.into_inner();
 
         sa.drop_dataset(
             ZpoolUuid::from_untyped_uuid(zpool_id.into_untyped_uuid()),
@@ -985,6 +982,26 @@ impl SledAgentApi for SledAgentSimImpl {
         _request_context: RequestContext<Self::Context>,
         _query_params: Query<BaseboardId>,
     ) -> Result<HttpResponseOk<NodeStatus>, HttpError> {
+        method_unimplemented()
+    }
+
+    async fn trust_quorum_status(
+        _request_context: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<NodeStatus>, HttpError> {
+        method_unimplemented()
+    }
+
+    async fn trust_quorum_network_config_get(
+        _request_context: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<Option<TrustQuorumNetworkConfig>>, HttpError>
+    {
+        method_unimplemented()
+    }
+
+    async fn trust_quorum_network_config_put(
+        _request_context: RequestContext<Self::Context>,
+        _body: TypedBody<TrustQuorumNetworkConfig>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
         method_unimplemented()
     }
 }

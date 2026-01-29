@@ -7,10 +7,10 @@ use std::net::{IpAddr, SocketAddr};
 use omicron_common::api::external;
 use omicron_common::api::external::Hostname;
 use omicron_common::api::internal::nexus::VmmRuntimeState;
+use omicron_common::api::internal::shared::DhcpConfig;
 use omicron_common::api::internal::shared::NetworkInterface;
 use omicron_common::api::internal::shared::ResolvedVpcFirewallRule;
 use omicron_common::api::internal::shared::external_ip::v1::SourceNatConfig;
-use omicron_common::api::internal::shared::{DelegatedZvol, DhcpConfig};
 use omicron_uuid_kinds::InstanceUuid;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -19,6 +19,8 @@ use uuid::Uuid;
 use crate::v1::instance::InstanceMetadata;
 use crate::v1::instance::VmmSpec;
 use crate::v7::instance::InstanceMulticastMembership;
+use crate::v9::instance::DelegatedZvol;
+
 use crate::v9;
 
 /// The body of a request to ensure that a instance and VMM are known to a sled

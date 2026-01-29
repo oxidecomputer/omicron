@@ -20,8 +20,9 @@ pub mod bootstore {
 }
 
 pub mod dataset {
-    pub use crate::v9::dataset::LocalStorageDatasetEnsureRequest;
     pub use crate::v9::dataset::LocalStoragePathParam;
+    pub use crate::v17::dataset::LocalStorageDatasetDeleteRequest;
+    pub use crate::v17::dataset::LocalStorageDatasetEnsureRequest;
 }
 
 pub mod debug {
@@ -71,8 +72,8 @@ pub mod instance {
     pub use crate::v7::instance::InstanceMulticastBody;
     pub use crate::v7::instance::InstanceMulticastMembership;
 
-    pub use crate::v11::instance::InstanceEnsureBody;
-    pub use crate::v11::instance::InstanceSledLocalConfig;
+    pub use crate::v17::instance::InstanceEnsureBody;
+    pub use crate::v17::instance::InstanceSledLocalConfig;
 
     pub use omicron_common::api::internal::shared::ResolvedVpcFirewallRule;
 }
@@ -102,18 +103,23 @@ pub mod inventory {
     pub use crate::v1::inventory::SledCpuFamily;
     pub use crate::v1::inventory::SledRole;
     pub use crate::v1::inventory::ZoneArtifactInventory;
-    pub use crate::v1::inventory::ZoneImageResolverInventory;
     pub use crate::v1::inventory::ZoneKind;
 
-    pub use crate::v11::inventory::ConfigReconcilerInventory;
-    pub use crate::v11::inventory::ConfigReconcilerInventoryStatus;
-    pub use crate::v11::inventory::OmicronSledConfig;
     pub use crate::v11::inventory::OmicronZoneConfig;
     pub use crate::v11::inventory::OmicronZoneType;
     pub use crate::v11::inventory::OmicronZonesConfig;
 
     pub use crate::v12::inventory::HealthMonitorInventory;
-    pub use crate::v12::inventory::Inventory;
+
+    pub use crate::v14::inventory::ConfigReconcilerInventoryStatus;
+    pub use crate::v14::inventory::OmicronFileSourceResolverInventory;
+    pub use crate::v14::inventory::OmicronSingleMeasurement;
+    pub use crate::v14::inventory::OmicronSledConfig;
+    pub use crate::v14::inventory::ReconciledSingleMeasurement;
+
+    pub use crate::v16::inventory::ConfigReconcilerInventory;
+    pub use crate::v16::inventory::Inventory;
+    pub use crate::v16::inventory::SingleMeasurementInventory;
 
     pub use crate::impls::inventory::ManifestBootInventoryDisplay;
     pub use crate::impls::inventory::ManifestInventoryDisplay;
@@ -121,8 +127,8 @@ pub mod inventory {
     pub use crate::impls::inventory::MupdateOverrideBootInventoryDisplay;
     pub use crate::impls::inventory::MupdateOverrideInventoryDisplay;
     pub use crate::impls::inventory::MupdateOverrideNonBootInventoryDisplay;
+    pub use crate::impls::inventory::OmicronFileSourceResolverInventoryDisplay;
     pub use crate::impls::inventory::ZoneArtifactInventoryDisplay;
-    pub use crate::impls::inventory::ZoneImageResolverInventoryDisplay;
 }
 
 pub mod probes {
@@ -159,6 +165,8 @@ pub mod trust_quorum {
     // in the crate trust-quorum-types:
     pub use crate::v13::trust_quorum::ProxyCommitRequest;
     pub use crate::v13::trust_quorum::ProxyPrepareAndCommitRequest;
+
+    pub use crate::v15::trust_quorum::TrustQuorumNetworkConfig;
 }
 
 pub mod zone_bundle {
