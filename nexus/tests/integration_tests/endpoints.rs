@@ -2782,7 +2782,7 @@ pub static VERIFY_ENDPOINTS: LazyLock<Vec<VerifyEndpoint>> = LazyLock::new(
                 url: &HARDWARE_RACK_MEMBERSHIP_URL,
                 visibility: Visibility::Protected,
                 unprivileged_access: UnprivilegedAccess::None,
-                allowed_methods: vec![AllowedMethod::Get],
+                allowed_methods: vec![AllowedMethod::GetNonexistent],
             },
             VerifyEndpoint {
                 url: &HARDWARE_RACK_MEMBERSHIP_ADD_URL,
