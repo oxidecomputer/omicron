@@ -52,115 +52,124 @@ use std::net::IpAddr;
 use std::num::NonZeroU32;
 use strum::IntoEnumIterator;
 
-/// Find all Omicron zones within `parent_blueprint` that can be safely pruned
-/// by a future run of the planner.
-///
-/// A zone ID contained in the returned set satisfies both conditions for
-/// pruning:
-///
-/// 1. We know the zone is not running and will not run again.
-/// 2. Any cleanup work required after the zone has been expunged has been
-///    completed.
-///
-/// See this module's documentation for more details.
-pub(super) async fn find_expunged_and_unreferenced_zones(
-    opctx: &OpContext,
-    datastore: &DataStore,
-    parent_blueprint: &Blueprint,
-    external_ip_rows: &[nexus_db_model::ExternalIp],
-    service_nic_rows: &[nexus_db_model::ServiceNetworkInterface],
-) -> Result<BTreeSet<OmicronZoneUuid>, Error> {
-    let mut expunged_and_unreferenced = BTreeSet::new();
+pub(super) struct PruneableZones {
+    pruneable_zones: BTreeSet<OmicronZoneUuid>,
+    reason_checker: BlueprintExpungedZoneAccessReasonChecker,
+}
 
-    // It's critically important we confirm all known reasons for accessing
-    // expunged zones, as most of them are related to cleanup that has to happen
-    // (and that we have to confirm is complete!).
-    // `BlueprintExpungedZoneAccessReasonChecker` has both static and runtime
-    // components; for the runtime check, we initialize it here, tell it of
-    // particular reasons we check as we do so below, then call
-    // `assert_all_reasons_checked()` at the end, which will panic if we've
-    // missed any. Our checking is unconditional, so this should trip in tests
-    // if it's going to trip, and never in production.
-    let mut reasons_checked = BlueprintExpungedZoneAccessReasonChecker::new();
+impl PruneableZones {
+    /// Find all Omicron zones within `parent_blueprint` that can be safely
+    /// pruned by a future run of the planner.
+    ///
+    /// A zone ID contained in the returned set satisfies both conditions for
+    /// pruning:
+    ///
+    /// 1. We know the zone is not running and will not run again.
+    /// 2. Any cleanup work required after the zone has been expunged has been
+    ///    completed.
+    ///
+    /// See this module's documentation for more details.
+    pub async fn new(
+        opctx: &OpContext,
+        datastore: &DataStore,
+        parent_blueprint: &Blueprint,
+        external_ip_rows: &[nexus_db_model::ExternalIp],
+        service_nic_rows: &[nexus_db_model::ServiceNetworkInterface],
+    ) -> Result<Self, Error> {
+        // Help rustfmt out (with the full enum name it gives up on formatting).
+        use BlueprintExpungedZoneAccessReason as Reason;
 
-    let bp_refs = BlueprintReferencesCache::new(parent_blueprint);
+        let mut pruneable_zones = BTreeSet::new();
+        let mut reason_checker =
+            BlueprintExpungedZoneAccessReasonChecker::new();
 
-    for (_, zone) in parent_blueprint.expunged_zones(
-        ZoneRunningStatus::Shutdown,
-        BlueprintExpungedZoneAccessReason::PlanningInputDetermineUnreferenced,
-    ) {
-        let is_referenced = match &zone.zone_type {
-            BlueprintZoneType::BoundaryNtp(boundary_ntp) => {
-                is_boundary_ntp_referenced(boundary_ntp, &bp_refs)
-                    || is_external_networking_referenced(
+        let bp_refs = BlueprintReferencesCache::new(parent_blueprint);
+
+        for (_, zone) in parent_blueprint.expunged_zones(
+            ZoneRunningStatus::Shutdown,
+            Reason::PlanningInputDetermineUnreferenced,
+        ) {
+            let is_referenced = match &zone.zone_type {
+                BlueprintZoneType::BoundaryNtp(boundary_ntp) => {
+                    is_boundary_ntp_referenced(boundary_ntp, &bp_refs)
+                        || is_external_networking_referenced(
+                            zone.id,
+                            external_ip_rows,
+                            service_nic_rows,
+                        )
+                }
+                BlueprintZoneType::ClickhouseKeeper(_)
+                | BlueprintZoneType::ClickhouseServer(_) => {
+                    is_multinode_clickhouse_referenced(
                         zone.id,
-                        external_ip_rows,
-                        service_nic_rows,
+                        parent_blueprint,
                     )
-            }
-            BlueprintZoneType::ClickhouseKeeper(_)
-            | BlueprintZoneType::ClickhouseServer(_) => {
-                is_multinode_clickhouse_referenced(zone.id, parent_blueprint)
-            }
-            BlueprintZoneType::ExternalDns(external_dns) => {
-                is_external_dns_referenced(external_dns, &bp_refs)
-                    || is_external_networking_referenced(
-                        zone.id,
-                        external_ip_rows,
-                        service_nic_rows,
-                    )
-            }
-            BlueprintZoneType::Nexus(_) => {
-                is_nexus_referenced(opctx, datastore, zone.id).await?
-                    || is_external_networking_referenced(
-                        zone.id,
-                        external_ip_rows,
-                        service_nic_rows,
-                    )
-            }
-            BlueprintZoneType::Oximeter(_) => {
-                is_oximeter_referenced(opctx, datastore, zone.id).await?
-            }
-            BlueprintZoneType::CockroachDb(_) => {
-                // BlueprintExpungedZoneAccessReason::CockroachDecommission
-                // means we consider cockroach zones referenced until the
-                // cockroach cluster has decommissioned the node that was
-                // present in that zone; however, we don't currently
-                // decommission cockroach nodes (tracked by
-                // <https://github.com/oxidecomputer/omicron/issues/8447>). We
-                // therefore always consider cockroach nodes "still referenced".
-                //
-                // This shouldn't be a huge deal in practice; Cockroach zones
-                // are updated in place, not by an expunge/add pair, so a
-                // typical update does not produce an expunged Cockroach zone
-                // that needs pruning. Only expunging a disk or sled can produce
-                // an expunged Cockroach node, and we expect the number of those
-                // to remain relatively small for any given deployment.
-                // Hopefully we can revisit decommissioning Cockroach nodes long
-                // before we need to worry about the amount of garbage leftover
-                // from expunged disks/sleds.
-                true
-            }
+                }
+                BlueprintZoneType::ExternalDns(external_dns) => {
+                    is_external_dns_referenced(external_dns, &bp_refs)
+                        || is_external_networking_referenced(
+                            zone.id,
+                            external_ip_rows,
+                            service_nic_rows,
+                        )
+                }
+                BlueprintZoneType::Nexus(_) => {
+                    is_nexus_referenced(opctx, datastore, zone.id).await?
+                        || is_external_networking_referenced(
+                            zone.id,
+                            external_ip_rows,
+                            service_nic_rows,
+                        )
+                }
+                BlueprintZoneType::Oximeter(_) => {
+                    is_oximeter_referenced(opctx, datastore, zone.id).await?
+                }
+                BlueprintZoneType::CockroachDb(_) => {
+                    // BlueprintExpungedZoneAccessReason::CockroachDecommission
+                    // means we consider cockroach zones referenced until the
+                    // cockroach cluster has decommissioned the node that was
+                    // present in that zone; however, we don't currently
+                    // decommission cockroach nodes (tracked by
+                    // <https://github.com/oxidecomputer/omicron/issues/8447>).
+                    // We therefore always consider cockroach nodes "still
+                    // referenced".
+                    //
+                    // This shouldn't be a huge deal in practice; Cockroach
+                    // zones are updated in place, not by an expunge/add pair,
+                    // so a typical update does not produce an expunged
+                    // Cockroach zone that needs pruning. Only expunging a disk
+                    // or sled can produce an expunged Cockroach node, and we
+                    // expect the number of those to remain relatively small for
+                    // any given deployment. Hopefully we can revisit
+                    // decommissioning Cockroach nodes long before we need to
+                    // worry about the amount of garbage leftover from expunged
+                    // disks/sleds.
+                    true
+                }
 
-            // These zone types currently have no associated
-            // `BlueprintExpungedZoneAccessReason`; there is no cleanup action
-            // required for them, so they're considered "unreferenced" and may
-            // be pruned as soon as they've been expunged.
-            BlueprintZoneType::Clickhouse(_)
-            | BlueprintZoneType::Crucible(_)
-            | BlueprintZoneType::CruciblePantry(_)
-            | BlueprintZoneType::InternalDns(_)
-            | BlueprintZoneType::InternalNtp(_) => false,
-        };
+                // These zone types currently have no associated
+                // `BlueprintExpungedZoneAccessReason`; there is no cleanup
+                // action required for them, so they're considered
+                // "unreferenced" and may be pruned as soon as they've been
+                // expunged.
+                BlueprintZoneType::Clickhouse(_)
+                | BlueprintZoneType::Crucible(_)
+                | BlueprintZoneType::CruciblePantry(_)
+                | BlueprintZoneType::InternalDns(_)
+                | BlueprintZoneType::InternalNtp(_) => false,
+            };
 
-        if !is_referenced {
-            expunged_and_unreferenced.insert(zone.id);
+            if !is_referenced {
+                pruneable_zones.insert(zone.id);
+            }
         }
+
+        Ok(Self { pruneable_zones, reason_checker })
     }
 
-    reasons_checked.assert_all_reasons_checked();
-
-    Ok(expunged_and_unreferenced)
+    pub fn into_pruneable_zones(self) -> BTreeSet<OmicronZoneUuid> {
+        self.pruneable_zones
+    }
 }
 
 fn is_external_networking_referenced(
