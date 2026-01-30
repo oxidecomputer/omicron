@@ -83,20 +83,42 @@ impl PruneableZones {
         let mut reason_checker =
             BlueprintExpungedZoneAccessReasonChecker::new();
 
-        let bp_refs = BlueprintReferencesCache::new(parent_blueprint);
+        // Create several `BTreeSet<_>`s of information we need to check in the
+        // loop below. Each of these is lazily-initialized; we'll only actually
+        // do the work of constructing the set if we need it during iteration.
+        let in_service_boundary_ntp_configs =
+            InServiceBoundaryNtpUpstreamConfigs::new(parent_blueprint);
+        let in_service_external_dns_ips =
+            InServiceExternalDnsIps::new(parent_blueprint);
+        let zones_with_external_ip_rows =
+            ZonesWithExternalIpRows::new(external_ip_rows);
+        let zones_with_service_nice_rows =
+            ZonesWithServiceNicRows::new(service_nic_rows);
 
         for (_, zone) in parent_blueprint.expunged_zones(
             ZoneRunningStatus::Shutdown,
             Reason::PlanningInputDetermineUnreferenced,
         ) {
+            // Check
+            // BlueprintExpungedZoneAccessReason::DeallocateExternalNetworkingResources;
+            // this reason applies to multiple zone types, so we check it for
+            // them all. (Technically we only need to check it for zones that
+            // _can_ have external networking, but it's basically free to just
+            // check it for all.)
+            reason_checker.add_reason_checked(
+                Reason::DeallocateExternalNetworkingResources,
+            );
+            let has_external_ip_row =
+                zones_with_external_ip_rows.contains(&zone.id);
+            let has_service_nic_row =
+                zones_with_service_nice_rows.contains(&zone.id);
+
             let is_referenced = match &zone.zone_type {
                 BlueprintZoneType::BoundaryNtp(boundary_ntp) => {
-                    is_boundary_ntp_referenced(boundary_ntp, &bp_refs)
-                        || is_external_networking_referenced(
-                            zone.id,
-                            external_ip_rows,
-                            service_nic_rows,
-                        )
+                    is_boundary_ntp_referenced(
+                        boundary_ntp,
+                        &in_service_boundary_ntp_configs,
+                    )
                 }
                 BlueprintZoneType::ClickhouseKeeper(_)
                 | BlueprintZoneType::ClickhouseServer(_) => {
@@ -106,20 +128,13 @@ impl PruneableZones {
                     )
                 }
                 BlueprintZoneType::ExternalDns(external_dns) => {
-                    is_external_dns_referenced(external_dns, &bp_refs)
-                        || is_external_networking_referenced(
-                            zone.id,
-                            external_ip_rows,
-                            service_nic_rows,
-                        )
+                    is_external_dns_referenced(
+                        external_dns,
+                        &in_service_external_dns_ips,
+                    )
                 }
                 BlueprintZoneType::Nexus(_) => {
                     is_nexus_referenced(opctx, datastore, zone.id).await?
-                        || is_external_networking_referenced(
-                            zone.id,
-                            external_ip_rows,
-                            service_nic_rows,
-                        )
                 }
                 BlueprintZoneType::Oximeter(_) => {
                     is_oximeter_referenced(opctx, datastore, zone.id).await?
@@ -159,7 +174,7 @@ impl PruneableZones {
                 | BlueprintZoneType::InternalNtp(_) => false,
             };
 
-            if !is_referenced {
+            if !is_referenced && !has_external_ip_row && !has_service_nic_row {
                 pruneable_zones.insert(zone.id);
             }
         }
@@ -188,16 +203,14 @@ fn is_external_networking_referenced(
 
 fn is_boundary_ntp_referenced(
     boundary_ntp: &blueprint_zone_type::BoundaryNtp,
-    bp_refs: &BlueprintReferencesCache<'_>,
+    boundary_ntp_configs: &InServiceBoundaryNtpUpstreamConfigs<'_>,
 ) -> bool {
     // Check BlueprintExpungedZoneAccessReason::BoundaryNtpUpstreamConfig; if
     // this zone's upstream config is not covered by an in-service zone, then
     // it's still "referenced" (in that the planner needs to refer to it to set
     // up a new boundary NTP zone).
     let expunged_config = BoundaryNtpUpstreamConfig::new(boundary_ntp);
-    bp_refs
-        .in_service_boundary_ntp_upstream_configs()
-        .contains(&expunged_config)
+    boundary_ntp_configs.contains(&expunged_config)
 }
 
 fn is_multinode_clickhouse_referenced(
@@ -220,7 +233,7 @@ fn is_multinode_clickhouse_referenced(
 
 fn is_external_dns_referenced(
     external_dns: &blueprint_zone_type::ExternalDns,
-    bp_refs: &BlueprintReferencesCache<'_>,
+    external_dns_ips: &InServiceExternalDnsIps<'_>,
 ) -> bool {
     // Check BlueprintExpungedZoneAccessReason::ExternalDnsExternalIps; we
     // consider an external DNS zone "still referenced" if its IP is _not_
@@ -228,7 +241,7 @@ fn is_external_dns_referenced(
     // an in-service external DNS zone, the expunged zone is no longer
     // referenced and can be safely pruned.)
     let expunged_zone_ip = external_dns.dns_address.addr.ip();
-    !bp_refs.in_service_external_dns_ips().contains(&expunged_zone_ip)
+    !external_dns_ips.contains(&expunged_zone_ip)
 }
 
 async fn is_nexus_referenced(
@@ -370,43 +383,48 @@ impl<'a> BoundaryNtpUpstreamConfig<'a> {
     }
 }
 
-struct BlueprintReferencesCache<'a> {
+/// Lazily-initialized set of boundary NTP upstream configs from in-service
+/// zones in a blueprint.
+struct InServiceBoundaryNtpUpstreamConfigs<'a> {
     parent_blueprint: &'a Blueprint,
-    in_service_boundary_ntp_upstream_configs:
-        OnceCell<BTreeSet<BoundaryNtpUpstreamConfig<'a>>>,
-    in_service_external_dns_ips: OnceCell<BTreeSet<IpAddr>>,
+    configs: OnceCell<BTreeSet<BoundaryNtpUpstreamConfig<'a>>>,
 }
 
-impl<'a> BlueprintReferencesCache<'a> {
+impl<'a> InServiceBoundaryNtpUpstreamConfigs<'a> {
     fn new(parent_blueprint: &'a Blueprint) -> Self {
-        Self {
-            parent_blueprint,
-            in_service_boundary_ntp_upstream_configs: OnceCell::new(),
-            in_service_external_dns_ips: OnceCell::new(),
-        }
+        Self { parent_blueprint, configs: OnceCell::new() }
     }
 
-    fn in_service_boundary_ntp_upstream_configs(
-        &self,
-    ) -> &BTreeSet<BoundaryNtpUpstreamConfig<'a>> {
-        OnceCell::get_or_init(
-            &self.in_service_boundary_ntp_upstream_configs,
-            || {
-                self.parent_blueprint
-                    .in_service_zones()
-                    .filter_map(|(_, zone)| match &zone.zone_type {
-                        BlueprintZoneType::BoundaryNtp(config) => {
-                            Some(BoundaryNtpUpstreamConfig::new(config))
-                        }
-                        _ => None,
-                    })
-                    .collect()
-            },
-        )
+    fn contains(&self, config: &BoundaryNtpUpstreamConfig) -> bool {
+        let configs = self.configs.get_or_init(|| {
+            self.parent_blueprint
+                .in_service_zones()
+                .filter_map(|(_, zone)| match &zone.zone_type {
+                    BlueprintZoneType::BoundaryNtp(config) => {
+                        Some(BoundaryNtpUpstreamConfig::new(config))
+                    }
+                    _ => None,
+                })
+                .collect()
+        });
+        configs.contains(config)
+    }
+}
+
+/// Lazily-initialized set of external DNS IPs from in-service zones in a
+/// blueprint.
+struct InServiceExternalDnsIps<'a> {
+    parent_blueprint: &'a Blueprint,
+    ips: OnceCell<BTreeSet<IpAddr>>,
+}
+
+impl<'a> InServiceExternalDnsIps<'a> {
+    fn new(parent_blueprint: &'a Blueprint) -> Self {
+        Self { parent_blueprint, ips: OnceCell::new() }
     }
 
-    fn in_service_external_dns_ips(&self) -> &BTreeSet<IpAddr> {
-        OnceCell::get_or_init(&self.in_service_external_dns_ips, || {
+    fn contains(&self, ip: &IpAddr) -> bool {
+        let ips = self.ips.get_or_init(|| {
             self.parent_blueprint
                 .in_service_zones()
                 .filter_map(|(_, zone)| match &zone.zone_type {
@@ -416,10 +434,13 @@ impl<'a> BlueprintReferencesCache<'a> {
                     _ => None,
                 })
                 .collect()
-        })
+        });
+        ips.contains(ip)
     }
 }
 
+/// Lazily-initialized set of zone IDs that have external IP rows in the
+/// database.
 struct ZonesWithExternalIpRows<'a> {
     external_ip_rows: &'a [nexus_db_model::ExternalIp],
     zone_ids: OnceCell<BTreeSet<OmicronZoneUuid>>,
@@ -430,7 +451,7 @@ impl<'a> ZonesWithExternalIpRows<'a> {
         Self { external_ip_rows, zone_ids: OnceCell::new() }
     }
 
-    fn contains_zone_id(&self, zone_id: &OmicronZoneUuid) -> bool {
+    fn contains(&self, zone_id: &OmicronZoneUuid) -> bool {
         let zone_ids = self.zone_ids.get_or_init(|| {
             self.external_ip_rows
                 .iter()
@@ -443,17 +464,21 @@ impl<'a> ZonesWithExternalIpRows<'a> {
     }
 }
 
+/// Lazily-initialized set of zone IDs that have service NIC rows in the
+/// database.
 struct ZonesWithServiceNicRows<'a> {
     service_nic_rows: &'a [nexus_db_model::ServiceNetworkInterface],
     zone_ids: OnceCell<BTreeSet<OmicronZoneUuid>>,
 }
 
 impl<'a> ZonesWithServiceNicRows<'a> {
-    fn new(service_nic_rows: &'a [nexus_db_model::ServiceNetworkInterface]) -> Self {
+    fn new(
+        service_nic_rows: &'a [nexus_db_model::ServiceNetworkInterface],
+    ) -> Self {
         Self { service_nic_rows, zone_ids: OnceCell::new() }
     }
 
-    fn contains_zone_id(&self, zone_id: &OmicronZoneUuid) -> bool {
+    fn contains(&self, zone_id: &OmicronZoneUuid) -> bool {
         let zone_ids = self.zone_ids.get_or_init(|| {
             self.service_nic_rows
                 .iter()
@@ -591,8 +616,7 @@ mod tests {
         let db = TestDatabase::new_with_datastore(log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
 
-        let (example, blueprint) =
-            ExampleSystemBuilder::new(log, TEST_NAME).build();
+        let (_, blueprint) = ExampleSystemBuilder::new(log, TEST_NAME).build();
 
         let pruneable_zones =
             PruneableZones::new(opctx, datastore, &blueprint, &[], &[])
