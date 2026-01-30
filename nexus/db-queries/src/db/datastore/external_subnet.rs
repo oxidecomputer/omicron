@@ -897,7 +897,7 @@ mod tests {
             .link_subnet_pool_to_silo(opctx, &authz_pool, &authz_silo, true)
             .await
             .expect_err("able to link pool to silo");
-        let Error::InvalidRequest { message } = &err else {
+        let Error::Conflict { message } = &err else {
             panic!("Expected invalid request, found: {err:#?}");
         };
         assert_eq!(
@@ -2982,6 +2982,9 @@ mod tests {
         };
         assert!(id.contains(&authz_silo.id().to_string()));
         assert!(id.contains(&authz_pool.id().to_string()));
+
+        db.terminate().await;
+        logctx.cleanup_successful();
     }
 
     #[tokio::test]
@@ -3034,6 +3037,9 @@ mod tests {
         };
         assert!(id.contains(&authz_silo.id().to_string()));
         assert!(id.contains(&authz_pool.id().to_string()));
+
+        db.terminate().await;
+        logctx.cleanup_successful();
     }
 
     #[tokio::test]
@@ -3080,5 +3086,8 @@ mod tests {
         let Error::Conflict { .. } = &err else {
             panic!("Expected Conflict, found {err:#?}");
         };
+
+        db.terminate().await;
+        logctx.cleanup_successful();
     }
 }
