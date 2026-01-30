@@ -989,7 +989,7 @@ async fn sdc_create_readonly_disk_records(
 
     osagactx
         .datastore()
-        .project_create_read_only_disk_from_snapshot(
+        .project_create_read_only_disk(
             &opctx,
             &authz_project,
             &disk_id,
