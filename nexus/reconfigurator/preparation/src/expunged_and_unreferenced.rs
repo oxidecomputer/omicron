@@ -521,3 +521,49 @@ impl BlueprintExpungedZoneAccessReasonChecker {
         );
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use nexus_reconfigurator_planning::blueprint_builder::BlueprintBuilder;
+    use nexus_reconfigurator_planning::planner::PlannerRng;
+    use nexus_test_utils::db::TestDatabase;
+    use omicron_test_utils::dev;
+    use omicron_test_utils::dev::LogContext;
+    use std::sync::Arc;
+    use std::sync::LazyLock;
+
+    static EMPTY_BLUEPRINT: LazyLock<Blueprint> = LazyLock::new(|| {
+        BlueprintBuilder::build_empty_seeded(
+            "test",
+            PlannerRng::from_seed("empty blueprint for tests"),
+        )
+    });
+
+    // Helper to reduce boilerplate in the tests below. This sets up a blueprint
+    // builder with an empty parent blueprint, a single sled, and no zones.
+    struct Harness {
+        logctx: LogContext,
+        bp: BlueprintBuilder<'static>,
+    }
+
+    #[tokio::test]
+    async fn john_fixme() {
+        const TEST_NAME: &str = "john_fixme";
+
+        let logctx = dev::test_setup_log(TEST_NAME);
+        let log = &logctx.log;
+        let db = TestDatabase::new_with_datastore(log).await;
+
+        let builder = BlueprintBuilder::new_based_on(
+            log,
+            Arc::new(BlueprintBuilder::build_empty("test")),
+            "test",
+            PlannerRng::from_seed(TEST_NAME),
+        )
+        .expect("created builder");
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+}

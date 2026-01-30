@@ -7406,9 +7406,12 @@ dependencies = [
  "futures",
  "nexus-db-model",
  "nexus-db-queries",
+ "nexus-reconfigurator-planning",
+ "nexus-test-utils",
  "nexus-types",
  "omicron-common",
  "omicron-rpaths",
+ "omicron-test-utils",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
  "pq-sys",
@@ -7417,6 +7420,7 @@ dependencies = [
  "slog",
  "slog-error-chain",
  "strum 0.27.2",
+ "tokio",
 ]
 
 [[package]]
