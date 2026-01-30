@@ -126,25 +126,35 @@ fn test_unauthorized_coverage() {
         ));
     }
 
-    // If you're here because this assertion failed, check that if you've added
-    // any API operations to Nexus, you've also added a corresponding test in
-    // "unauthorized.rs" so that it will automatically be checked for its
-    // behavior for unauthenticated and unauthorized users.  DO NOT SKIP THIS.
-    // Even if you're just adding a stub, see [`Nexus::unimplemented_todo()`].
-    // If you _added_ a test that covered an endpoint from the allowlist --
-    // hooray!  Just delete the corresponding line from this file.  (Why is this
-    // not `expectorate::assert_contents`?  Because we only expect this file to
-    // ever shrink, which is easy enough to fix by hand, and we don't want to
-    // make it easy to accidentally add things to the allowlist.)
-    // let expected_uncovered_endpoints =
-    //     std::fs::read_to_string("tests/output/uncovered-authz-endpoints.txt")
-    //         .expect("failed to load file of allowed uncovered endpoints");
-
-    // TODO: Update this to remove overwrite capabilities
-    // See https://github.com/oxidecomputer/expectorate/pull/12
-    assert_contents(
-        "tests/output/uncovered-authz-endpoints.txt",
-        uncovered_endpoints.as_str(),
+    // If you're here because this assertion failed, you've added an API
+    // operation to Nexus without adding a corresponding test in
+    // "unauthorized.rs" to check its behavior for unauthenticated and
+    // unauthorized users. DO NOT SKIP THIS. Even if you're just adding a stub,
+    // see [`Nexus::unimplemented_todo()`].
+    //
+    // To fix this:
+    // 1. Add a VerifyEndpoint entry in endpoints.rs for your new endpoint
+    // 2. Run the test_unauthorized test to verify it works
+    //
+    // The allowed uncovered endpoints file should only ever SHRINK (when you
+    // add coverage for an endpoint). It should never grow. If you've added
+    // coverage for an endpoint, you can remove it from the allowlist file.
+    //
+    // NOTE: We intentionally do NOT use expectorate's assert_contents here
+    // because we don't want EXPECTORATE=overwrite to allow people to
+    // accidentally add uncovered endpoints to the allowlist.
+    let expected_uncovered_endpoints =
+        std::fs::read_to_string("tests/output/uncovered-authz-endpoints.txt")
+            .expect("failed to read uncovered-authz-endpoints.txt");
+    assert!(
+        uncovered_endpoints == expected_uncovered_endpoints,
+        "Uncovered endpoints list doesn't match expected.\n\n\
+         If you ADDED a new endpoint, add authz coverage in endpoints.rs.\n\n\
+         If you ADDED coverage for an existing endpoint, remove it from \
+         tests/output/uncovered-authz-endpoints.txt.\n\n\
+         Expected:\n{}\n\nActual:\n{}",
+        expected_uncovered_endpoints,
+        uncovered_endpoints
     );
 }
 
