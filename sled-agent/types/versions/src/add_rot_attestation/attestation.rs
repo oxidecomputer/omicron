@@ -10,6 +10,29 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use x509_cert::der::EncodePem;
 
+/// A Root of Trust (RoT) which provides measurments and signed attestations.
+#[derive(Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum Rot {
+    /// The per-sled RoT in an Oxide rack.
+    Oxide,
+}
+
+impl fmt::Display for Rot {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Rot::Oxide => write!(f, "oxide"),
+        }
+    }
+}
+
+/// Path parameters for RoT attestation requests.
+#[derive(Deserialize, Serialize, JsonSchema)]
+pub struct RotPathParams {
+    /// Which RoT to use
+    pub rot: Rot,
+}
+
 const SHA3_256_LEN: usize = attest_data::Sha3_256Digest::LENGTH;
 
 #[derive(Deserialize, Serialize, JsonSchema)]

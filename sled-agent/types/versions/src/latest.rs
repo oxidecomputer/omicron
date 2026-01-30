@@ -149,6 +149,8 @@ pub mod rot {
     pub use crate::v18::attestation::Measurement;
     pub use crate::v18::attestation::MeasurementLog;
     pub use crate::v18::attestation::Nonce;
+    pub use crate::v18::attestation::Rot;
+    pub use crate::v18::attestation::RotPathParams;
     pub use crate::v18::attestation::Sha3_256Digest;
 }
 

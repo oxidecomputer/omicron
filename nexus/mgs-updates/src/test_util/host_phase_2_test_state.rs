@@ -1056,6 +1056,7 @@ mod api_impl {
 
         async fn rot_measurement_log(
             _request_context: RequestContext<Self::Context>,
+            _path_params: Path<sled_agent_types::rot::RotPathParams>,
         ) -> Result<
             HttpResponseOk<sled_agent_types::rot::MeasurementLog>,
             HttpError,
@@ -1065,6 +1066,7 @@ mod api_impl {
 
         async fn rot_certificate_chain(
             _request_context: RequestContext<Self::Context>,
+            _path_params: Path<sled_agent_types::rot::RotPathParams>,
         ) -> Result<
             HttpResponseOk<sled_agent_types::rot::CertificateChain>,
             HttpError,
@@ -1074,6 +1076,7 @@ mod api_impl {
 
         async fn rot_attest(
             _request_context: RequestContext<Self::Context>,
+            _path_params: Path<sled_agent_types::rot::RotPathParams>,
             _body: TypedBody<sled_agent_types::rot::Nonce>,
         ) -> Result<HttpResponseOk<sled_agent_types::rot::Attestation>, HttpError>
         {

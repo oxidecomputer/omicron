@@ -80,6 +80,7 @@ use sled_agent_types::probes::ProbeCreate;
 use sled_agent_types::resolvable_files::{
     PreparedOmicronZone, RemoveMupdateOverrideResult, ResolverStatus,
 };
+use sled_agent_types::rot::Rot;
 use sled_agent_types::sled::StartSledAgentRequest;
 use sled_agent_types::zone_bundle::{
     BundleUtilization, CleanupContext, CleanupCount, CleanupPeriod,
@@ -763,7 +764,9 @@ impl SledAgent {
         &self.inner.hardware_monitor
     }
 
-    pub(crate) fn rot_attestor(&self) -> &RotAttestationHandle {
+    pub(crate) fn rot_attestor(&self, rot: Rot) -> &RotAttestationHandle {
+        // We currently only support the LPC55 RoT
+        let Rot::Oxide = rot;
         &self.inner.rot_attestor
     }
 

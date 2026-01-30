@@ -94,6 +94,7 @@ progenitor::generate_api!(
         ResolvedVpcFirewallRule = omicron_common::api::internal::shared::ResolvedVpcFirewallRule,
         ResolvedVpcRoute = omicron_common::api::internal::shared::ResolvedVpcRoute,
         ResolvedVpcRouteSet = omicron_common::api::internal::shared::ResolvedVpcRouteSet,
+        Rot = sled_agent_types_versions::latest::rot::Rot,
         RouterId = omicron_common::api::internal::shared::RouterId,
         RouterTarget = omicron_common::api::internal::shared::RouterTarget,
         RouterVersion = omicron_common::api::internal::shared::RouterVersion,
