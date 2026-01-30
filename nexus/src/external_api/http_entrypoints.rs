@@ -1658,7 +1658,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
     ) -> Result<HttpResponseCreated<views::SubnetPool>, HttpError> {
         audit_and_time(&rqctx, |opctx, nexus| async move {
             let pool_params = pool_params.into_inner();
-            let pool = nexus.subnet_pool_create(&opctx, &pool_params).await?;
+            let pool = nexus.subnet_pool_create(&opctx, pool_params).await?;
             Ok(HttpResponseCreated(pool))
         })
         .await
@@ -1693,7 +1693,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
             let path = path_params.into_inner();
             let updates = updates.into_inner();
             let pool =
-                nexus.subnet_pool_update(&opctx, &path.pool, &updates).await?;
+                nexus.subnet_pool_update(&opctx, &path.pool, updates).await?;
             Ok(HttpResponseOk(pool))
         })
         .await
@@ -1714,7 +1714,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
     async fn subnet_pool_member_list(
         rqctx: RequestContext<ApiContext>,
         path_params: Path<params::SubnetPoolPath>,
-        query_params: Query<PaginatedByNameOrId>,
+        query_params: Query<SubnetPoolMemberPaginationParams>,
     ) -> Result<HttpResponseOk<ResultsPage<views::SubnetPoolMember>>, HttpError>
     {
         let apictx = rqctx.context();
@@ -1723,18 +1723,28 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 crate::context::op_context_for_external_api(&rqctx).await?;
             let nexus = &apictx.context.nexus;
             let query = query_params.into_inner();
-            let pag_params = data_page_params_for(&rqctx, &query)?;
-            let scan_params = ScanByNameOrId::from_query(&query)?;
-            let paginated_by = name_or_id_pagination(&pag_params, scan_params)?;
+            let marker = match query.page {
+                WhichPage::First(_) => None,
+                WhichPage::Next(ref net) => Some(net),
+            };
+            let pag_params = DataPageParams {
+                limit: rqctx.page_limit(&query)?,
+                direction: PaginationOrder::Ascending,
+                marker,
+            };
             let path = path_params.into_inner();
-            let members = nexus
-                .subnet_pool_member_list(&opctx, &path.pool, &paginated_by)
-                .await?;
-            Ok(HttpResponseOk(ScanByNameOrId::results_page(
-                &query,
-                members,
-                &marker_for_name_or_id,
-            )?))
+            nexus
+                .subnet_pool_member_list(&opctx, &path.pool, &pag_params)
+                .await
+                .map_err(HttpError::from)
+                .and_then(|items| {
+                    ResultsPage::new(
+                        items,
+                        &EmptyScanParams {},
+                        |member: &views::SubnetPoolMember, _| member.subnet,
+                    )
+                })
+                .map(HttpResponseOk)
         };
         apictx
             .context

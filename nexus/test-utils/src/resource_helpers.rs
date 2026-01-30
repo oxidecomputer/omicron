@@ -34,6 +34,9 @@ use nexus_types::external_api::views::InternetGatewayIpAddress;
 use nexus_types::external_api::views::InternetGatewayIpPool;
 use nexus_types::external_api::views::IpPool;
 use nexus_types::external_api::views::IpPoolRange;
+use nexus_types::external_api::views::IpVersion;
+use nexus_types::external_api::views::SubnetPool;
+use nexus_types::external_api::views::SubnetPoolMember;
 use nexus_types::external_api::views::User;
 use nexus_types::external_api::views::VpcSubnet;
 use nexus_types::external_api::views::{
@@ -75,6 +78,7 @@ use omicron_uuid_kinds::SiloGroupUuid;
 use omicron_uuid_kinds::SiloUserUuid;
 use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::ZpoolUuid;
+use oxnet::IpNet;
 use oxnet::Ipv4Net;
 use oxnet::Ipv6Net;
 use slog::debug;
@@ -395,6 +399,63 @@ pub async fn create_floating_ip(
                 description: String::from("a floating ip"),
             },
             address_allocator,
+        },
+    )
+    .await
+}
+
+pub async fn create_subnet_pool(
+    client: &ClientTestContext,
+    pool_name: &str,
+    ip_version: IpVersion,
+) -> SubnetPool {
+    object_create(
+        client,
+        "/v1/system/subnet-pools/",
+        &params::SubnetPoolCreate {
+            identity: IdentityMetadataCreateParams {
+                name: pool_name.parse().unwrap(),
+                description: String::from("a subnet pool"),
+            },
+            ip_version,
+        },
+    )
+    .await
+}
+
+/// Create a subnet pool member, with the min / max prefix lengths taken from
+/// the subnet itself.
+pub async fn create_subnet_pool_member(
+    client: &ClientTestContext,
+    pool_name: &str,
+    subnet: IpNet,
+) -> SubnetPoolMember {
+    object_create(
+        client,
+        &format!("/v1/system/subnet-pools/{pool_name}/members/add"),
+        &params::SubnetPoolMemberAdd {
+            subnet,
+            min_prefix_length: None,
+            max_prefix_length: None,
+        },
+    )
+    .await
+}
+
+pub async fn create_subnet_pool_member_with_prefix_lengths(
+    client: &ClientTestContext,
+    pool_name: &str,
+    subnet: IpNet,
+    min_prefix_length: u8,
+    max_prefix_length: u8,
+) -> SubnetPoolMember {
+    object_create(
+        client,
+        &format!("/v1/system/subnet-pools/{pool_name}/members/add"),
+        &params::SubnetPoolMemberAdd {
+            subnet,
+            min_prefix_length: Some(min_prefix_length),
+            max_prefix_length: Some(max_prefix_length),
         },
     )
     .await
