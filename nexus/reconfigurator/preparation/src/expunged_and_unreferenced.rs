@@ -50,6 +50,7 @@ use std::cell::OnceCell;
 use std::collections::BTreeSet;
 use std::net::IpAddr;
 use std::num::NonZeroU32;
+use strum::IntoEnumIterator;
 
 /// Find all Omicron zones within `parent_blueprint` that can be safely pruned
 /// by a future run of the planner.
@@ -71,9 +72,16 @@ pub(super) async fn find_expunged_and_unreferenced_zones(
 ) -> Result<BTreeSet<OmicronZoneUuid>, Error> {
     let mut expunged_and_unreferenced = BTreeSet::new();
 
-    static_check_all_reasons_handled(
-        BlueprintExpungedZoneAccessReason::PlanningInputDetermineUnreferenced,
-    );
+    // It's critically important we confirm all known reasons for accessing
+    // expunged zones, as most of them are related to cleanup that has to happen
+    // (and that we have to confirm is complete!).
+    // `BlueprintExpungedZoneAccessReasonChecker` has both static and runtime
+    // components; for the runtime check, we initialize it here, tell it of
+    // particular reasons we check as we do so below, then call
+    // `assert_all_reasons_checked()` at the end, which will panic if we've
+    // missed any. Our checking is unconditional, so this should trip in tests
+    // if it's going to trip, and never in production.
+    let mut reasons_checked = BlueprintExpungedZoneAccessReasonChecker::new();
 
     let bp_refs = BlueprintReferencesCache::new(parent_blueprint);
 
@@ -149,6 +157,8 @@ pub(super) async fn find_expunged_and_unreferenced_zones(
             expunged_and_unreferenced.insert(zone.id);
         }
     }
+
+    reasons_checked.assert_all_reasons_checked();
 
     Ok(expunged_and_unreferenced)
 }
@@ -401,61 +411,113 @@ impl<'a> BlueprintReferencesCache<'a> {
     }
 }
 
-// This is a no-op function that exists solely to ensure this file is considered
-// when there are any changes to `BlueprintExpungedZoneAccessReason` variants.
-//
-// If you're adding a new variant and that variant affects whether it's safe to
-// prune an expunged zone from the blueprint, you _must_ also update the code
-// above to check for whatever your new variant is. If your new variant does not
-// affect pruning, put it in one of the appropriate sections below (or a new one
-// with a relevant comment).
-fn static_check_all_reasons_handled(reason: BlueprintExpungedZoneAccessReason) {
-    // Help rustfmt out (with the full enum name it gives up on formatting).
-    use BlueprintExpungedZoneAccessReason as Reason;
+/// Helper type to ensure we've covered every
+/// [`BlueprintExpungedZoneAccessReason`] in our checks above.
+///
+/// This type has both compile-time (the `match` in `new()`) and runtime (the
+/// `assert_all_reasons_checked()` function) guards that confirm we cover any
+/// new variants added to [`BlueprintExpungedZoneAccessReason`] in the future.
+struct BlueprintExpungedZoneAccessReasonChecker {
+    reasons_checked: BTreeSet<BlueprintExpungedZoneAccessReason>,
+}
 
-    match reason {
-        // Checked by is_boundary_ntp_referenced()
-        Reason::BoundaryNtpUpstreamConfig => {}
+impl BlueprintExpungedZoneAccessReasonChecker {
+    fn new() -> Self {
+        // Help rustfmt out (with the full enum name it gives up on formatting).
+        use BlueprintExpungedZoneAccessReason as Reason;
 
-        // Checked by is_multinode_clickhouse_referenced()
-        Reason::ClickhouseKeeperServerConfigIps => {}
+        let mut reasons_checked = BTreeSet::new();
 
-        // NOT CHECKED: find_expunged_and_unreferenced_zones() will never
-        // consider a cockroach node "unreferenced", because we have currently
-        // disabled decommissioning (see
-        // https://github.com/oxidecomputer/omicron/issues/8447).
-        Reason::CockroachDecommission => {}
+        for reason in Reason::iter() {
+            // This match exists for two purposes:
+            //
+            // 1. Force a compilation error if a new variant is added, leading
+            //    you to this module and this comment.
+            // 2. Seed `reasons_checked` with reasons we _don't_ explicitly
+            //    check, because they're documented as "they don't actually need
+            //    to be checked".
+            //
+            // If you're in case 1 and you've added a new variant to
+            // `BlueprintExpungedZoneAccessReason`, you must update the code in
+            // this module. Either update the match below to add the reason to
+            // the group of "doesn't need to be checked" cases, or update the
+            // checks above for zone-specific reasons and add an appropriate
+            // call to `add_reason_checked()`.
+            match reason {
+                // Checked by is_boundary_ntp_referenced()
+                Reason::BoundaryNtpUpstreamConfig => {}
 
-        // Checked by is_external_networking_referenced(), which is called for
-        // each zone type with external networking (boundary NTP, external DNS,
-        // Nexus)
-        Reason::DeallocateExternalNetworkingResources => {}
+                // Checked by is_multinode_clickhouse_referenced()
+                Reason::ClickhouseKeeperServerConfigIps => {}
 
-        // Checked by is_external_dns_referenced()
-        Reason::ExternalDnsExternalIps => {}
+                // TODO-john FIXME
+                // NOT CHECKED: find_expunged_and_unreferenced_zones() will
+                // never consider a cockroach node "unreferenced", because we
+                // have currently disabled decommissioning (see
+                // https://github.com/oxidecomputer/omicron/issues/8447).
+                Reason::CockroachDecommission => {}
 
-        // Each of these are checked by is_nexus_referenced()
-        Reason::NexusDeleteMetadataRecord
-        | Reason::NexusSagaReassignment
-        | Reason::NexusSupportBundleReassign => {}
+                // TODO-john FIXME
+                // Checked by is_external_networking_referenced(), which is
+                // called for each zone type with external networking (boundary
+                // NTP, external DNS, Nexus)
+                Reason::DeallocateExternalNetworkingResources => {}
 
-        // Checked by is_oximeter_referenced()
-        Reason::OximeterExpungeAndReassignProducers => {}
+                // Checked by is_external_dns_referenced()
+                Reason::ExternalDnsExternalIps => {}
 
-        // Nexus-related reasons that don't need to be checked (see
-        // `BlueprintExpungedZoneAccessReason` for specifics)
-        Reason::NexusExternalConfig | Reason::NexusSelfIsQuiescing => {}
+                // Each of these are checked by is_nexus_referenced()
+                Reason::NexusDeleteMetadataRecord
+                | Reason::NexusSagaReassignment
+                | Reason::NexusSupportBundleReassign => {}
 
-        // Planner-related reasons that don't need to be checked (see
-        // `BlueprintExpungedZoneAccessReason` for specifics)
-        Reason::PlannerCheckReadyForCleanup
-        | Reason::PlanningInputDetermineUnreferenced
-        | Reason::PlanningInputExpungedZoneGuard => {}
+                // Checked by is_oximeter_referenced()
+                Reason::OximeterExpungeAndReassignProducers => {}
 
-        // Test / development reasons that don't need to be checked
-        Reason::Blippy
-        | Reason::Omdb
-        | Reason::ReconfiguratorCli
-        | Reason::Test => {}
+                // Nexus-related reasons that don't need to be checked (see
+                // `BlueprintExpungedZoneAccessReason` for specifics)
+                Reason::NexusExternalConfig
+                    | Reason::NexusSelfIsQuiescing
+
+                // Planner-related reasons that don't need to be checked (see
+                // `BlueprintExpungedZoneAccessReason` for specifics)
+                |Reason::PlannerCheckReadyForCleanup
+                | Reason::PlanningInputDetermineUnreferenced
+                | Reason::PlanningInputExpungedZoneGuard
+
+                // Test / development reasons that don't need to be checked
+                | Reason::Blippy
+                | Reason::Omdb
+                | Reason::ReconfiguratorCli
+                | Reason::Test => {
+                    reasons_checked.insert(reason);
+                }
+            }
+        }
+
+        Self { reasons_checked }
+    }
+
+    fn add_reason_checked(
+        &mut self,
+        reason: BlueprintExpungedZoneAccessReason,
+    ) {
+        self.reasons_checked.insert(reason);
+    }
+
+    fn assert_all_reasons_checked(self) {
+        let mut unchecked = BTreeSet::new();
+
+        for reason in BlueprintExpungedZoneAccessReason::iter() {
+            if !self.reasons_checked.contains(&reason) {
+                unchecked.insert(reason);
+            }
+        }
+
+        assert!(
+            unchecked.is_empty(),
+            "Correctness error: Planning input construction failed to \
+             consider some `BlueprintExpungedZoneAccessReason`s: {unchecked:?}"
+        );
     }
 }

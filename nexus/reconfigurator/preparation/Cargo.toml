@@ -23,5 +23,6 @@ sled-agent-types.workspace = true
 sled-hardware-types.workspace = true
 slog.workspace = true
 slog-error-chain.workspace = true
+strum.workspace = true
 
 omicron-workspace-hack.workspace = true

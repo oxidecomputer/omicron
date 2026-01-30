@@ -763,7 +763,7 @@ pub enum ZoneRunningStatus {
 /// 1. Add a new variant to this enum.
 /// 2. Update the planner to account for it, to prevent the planner from pruning
 ///    the zone before whatever your use of it is completed.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, EnumIter)]
 pub enum BlueprintExpungedZoneAccessReason {
     // --------------------------------------------------------------------
     // Zone-kind-specific variants. Keep this sorted alphabetically, prefix
