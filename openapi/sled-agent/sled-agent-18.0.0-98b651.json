@@ -2965,8 +2965,10 @@
         ]
       },
       "Attestation": {
+        "description": "An RoT produced attestation that represents a signature over the provided [`Nonce`] combined with the [`MeasurementLog`] and signed by a key certified by the [`CertificateChain`].",
         "oneOf": [
           {
+            "description": "An Ed25519 signature.",
             "type": "object",
             "properties": {
               "ed25519": {
@@ -3678,6 +3680,7 @@
         "minimum": 0
       },
       "CertificateChain": {
+        "description": "A chain of PEM-encoded X.509 certificates (RFC5280) that link an attestation signing key to a trusted PKI root.",
         "type": "array",
         "items": {
           "type": "string"
@@ -6875,8 +6878,10 @@
         ]
       },
       "Measurement": {
+        "description": "An RoT provided measurement which represents a digest of some component in the trusted computing base (TCB) for the attestor.",
         "oneOf": [
           {
+            "description": "A SHA3-256 digest.",
             "type": "object",
             "properties": {
               "sha3_256": {
@@ -6892,6 +6897,7 @@
         ]
       },
       "MeasurementLog": {
+        "description": "The set of measurments provided by the RoT.",
         "type": "array",
         "items": {
           "$ref": "#/components/schemas/Measurement"
@@ -7331,6 +7337,7 @@
         ]
       },
       "Nonce": {
+        "description": "A random nonce provided as part of an attestation challenge to guarantee freshness thereby preventing replay attacks.",
         "type": "string",
         "format": "hex string (32 bytes)"
       },

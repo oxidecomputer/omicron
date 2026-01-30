@@ -26,9 +26,12 @@ impl fmt::Debug for Sha3_256Digest {
     }
 }
 
+/// An RoT provided measurement which represents a digest of some component
+/// in the trusted computing base (TCB) for the attestor.
 #[derive(Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum Measurement {
+    /// A SHA3-256 digest.
     Sha3_256(Sha3_256Digest),
 }
 
@@ -42,6 +45,7 @@ impl From<attest_data::Measurement> for Measurement {
     }
 }
 
+/// The set of measurments provided by the RoT.
 #[derive(Default, Deserialize, Serialize, JsonSchema)]
 pub struct MeasurementLog(
     #[schemars(length(max = "attest_data::LOG_CAPACITY"))] pub Vec<Measurement>,
@@ -53,6 +57,8 @@ impl From<attest_data::Log> for MeasurementLog {
     }
 }
 
+/// A chain of PEM-encoded X.509 certificates (RFC5280) that link an
+/// attestation signing key to a trusted PKI root.
 #[derive(Deserialize, Serialize, JsonSchema)]
 pub struct CertificateChain(pub Vec<String>);
 
@@ -67,6 +73,8 @@ impl TryFrom<x509_cert::PkiPath> for CertificateChain {
     }
 }
 
+/// A random nonce provided as part of an attestation challenge to guarantee
+/// freshness thereby preventing replay attacks.
 #[derive(Deserialize, Serialize, JsonSchema)]
 pub struct Nonce(pub Sha3_256Digest);
 
@@ -92,9 +100,13 @@ impl fmt::Debug for Ed25519Signature {
     }
 }
 
+/// An RoT produced attestation that represents a signature over the provided
+/// [`Nonce`] combined with the [`MeasurementLog`] and signed by a key certified
+/// by the [`CertificateChain`].
 #[derive(Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum Attestation {
+    /// An Ed25519 signature.
     Ed25519(Ed25519Signature),
 }
 
