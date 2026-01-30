@@ -38,7 +38,11 @@ pub struct DiskTypeCrucible {
     /// Pantry.
     pub pantry_address: Option<String>,
 
-    /// `true` if this disk should be read-only once created.
+    /// `true` if this disk is read-only.
+    ///
+    /// Read-only disks are backed by read-only volumes (created for an image or
+    /// snapshot), and are exposed to the guest as read-only block devices by
+    /// Propolis.
     pub read_only: bool,
 }
 
@@ -48,17 +52,19 @@ impl DiskTypeCrucible {
         volume_id: VolumeUuid,
         disk_source: &params::DiskSource,
     ) -> Self {
-        let (create_snapshot_id, read_only) = match disk_source {
+        let mut create_snapshot_id = None;
+        let mut create_image_id = None;
+        let read_only = match disk_source {
             &params::DiskSource::Snapshot { snapshot_id, read_only } => {
-                (Some(snapshot_id), read_only)
+                create_snapshot_id = Some(snapshot_id);
+                read_only
             }
-            _ => (None, false),
-        };
-
-        // XXX further enum here for different image types?
-        let create_image_id = match disk_source {
-            params::DiskSource::Image { image_id } => Some(*image_id),
-            _ => None,
+            &params::DiskSource::Image { image_id, read_only } => {
+                // XXX further enum here for different image types?
+                create_image_id = Some(image_id);
+                read_only
+            }
+            _ => false,
         };
 
         Self {

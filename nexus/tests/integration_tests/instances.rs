@@ -2637,6 +2637,7 @@ async fn test_instance_using_image_from_other_project_fails(
                         disk_backend: params::DiskBackend::Distributed {
                             disk_source: params::DiskSource::Image {
                                 image_id: image.identity.id,
+                                read_only: false,
                             },
                         },
                         size: ByteCount::from_gibibytes_u32(4),

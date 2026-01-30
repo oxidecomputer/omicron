@@ -108,6 +108,7 @@ async fn test_snapshot_basic(cptestctx: &ControlPlaneTestContext) {
         disk_backend: params::DiskBackend::Distributed {
             disk_source: params::DiskSource::Image {
                 image_id: image.identity.id,
+                read_only: false,
             },
         },
         size: disk_size,
@@ -223,6 +224,7 @@ async fn test_snapshot_without_instance(cptestctx: &ControlPlaneTestContext) {
         disk_backend: params::DiskBackend::Distributed {
             disk_source: params::DiskSource::Image {
                 image_id: image.identity.id,
+                read_only: false,
             },
         },
         size: disk_size,
@@ -324,6 +326,7 @@ async fn test_snapshot_stopped_instance(cptestctx: &ControlPlaneTestContext) {
         disk_backend: params::DiskBackend::Distributed {
             disk_source: params::DiskSource::Image {
                 image_id: image.identity.id,
+                read_only: false,
             },
         },
         size: disk_size,
@@ -1000,6 +1003,7 @@ async fn test_snapshot_unwind(cptestctx: &ControlPlaneTestContext) {
         disk_backend: params::DiskBackend::Distributed {
             disk_source: params::DiskSource::Image {
                 image_id: image.identity.id,
+                read_only: false,
             },
         },
         size: disk_size,

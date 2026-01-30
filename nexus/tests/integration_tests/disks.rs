@@ -2737,7 +2737,7 @@ async fn test_list_all_types_of_disk(cptestctx: &ControlPlaneTestContext) {
 }
 
 #[nexus_test]
-async fn test_create_readonly_disk_from_snapshot(
+async fn test_create_read_only_disk_from_snapshot(
     cptestctx: &ControlPlaneTestContext,
 ) {
     let client = &cptestctx.external_client;
@@ -2777,6 +2777,7 @@ async fn test_create_readonly_disk_from_snapshot(
         disk_backend: params::DiskBackend::Distributed {
             disk_source: params::DiskSource::Image {
                 image_id: image.identity.id,
+                read_only: false,
             },
         },
         size: disk_size,
@@ -2845,6 +2846,77 @@ async fn test_create_readonly_disk_from_snapshot(
     assert!(!rw_disk.read_only);
     assert_eq!(rw_disk.snapshot_id, Some(snapshot.identity.id));
     assert_eq!(rw_disk.size, snapshot.size);
+}
+
+#[nexus_test]
+async fn test_create_read_only_disk_from_image(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+    DiskTest::new(&cptestctx).await;
+    create_project_and_pool(client).await;
+
+    // Define a global image
+    let image_create_params = params::ImageCreate {
+        identity: IdentityMetadataCreateParams {
+            name: "mycelium".parse().unwrap(),
+            description: String::from(
+                "you can boot any image, as long as it's alpine",
+            ),
+        },
+        source: params::ImageSource::YouCanBootAnythingAsLongAsItsAlpine,
+        os: "alpine".to_string(),
+        version: "edge".to_string(),
+    };
+
+    let images_url = format!("/v1/images?project={}", PROJECT_NAME);
+    let image =
+        NexusRequest::objects_post(client, &images_url, &image_create_params)
+            .authn_as(AuthnMode::PrivilegedUser)
+            .execute_and_parse_unwrap::<views::Image>()
+            .await;
+
+    // Create a read-only disk from the image
+    let ro_disk = resource_helpers::create_disk_from_image(
+        client,
+        PROJECT_NAME,
+        "ro-disk-from-img",
+        &image,
+        true,
+    )
+    .await;
+
+    assert!(ro_disk.read_only);
+    assert_eq!(ro_disk.image_id, Some(image.identity.id));
+    assert_eq!(ro_disk.snapshot_id, None);
+    assert_eq!(ro_disk.size, image.size);
+    assert_eq!(
+        ro_disk.state,
+        DiskState::Detached,
+        "read-only disks should be created in the detached state, ready for \
+         use."
+    );
+    assert!(
+        matches!(ro_disk.disk_type, DiskType::Distributed),
+        "read-only disks can only be distributed, but got: {:?}",
+        ro_disk.disk_type
+    );
+
+    // And, just to check, let's also make a read/write disk from the same
+    // base image, and assert that it is *not* read-only.
+    let rw_disk = resource_helpers::create_disk_from_image(
+        client,
+        PROJECT_NAME,
+        "rw-disk-from-img",
+        &image,
+        false,
+    )
+    .await;
+
+    assert!(!rw_disk.read_only);
+    assert_eq!(rw_disk.image_id, Some(image.identity.id));
+    assert_eq!(rw_disk.snapshot_id, None);
+    assert_eq!(rw_disk.size, image.size);
 }
 
 async fn disk_get(client: &ClientTestContext, disk_url: &str) -> Disk {

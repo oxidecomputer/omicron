@@ -400,6 +400,11 @@ impl Into<api::external::Disk> for Disk {
     }
 }
 
+enum ReadOnlyDiskSource {
+    Image(authz::Image),
+    Snapshot(authz::Snapshot),
+}
+
 impl DataStore {
     async fn fill_in_local_storage_disk(
         conn: &async_bb8_diesel::Connection<DbConnection>,
@@ -1787,7 +1792,7 @@ impl DataStore {
         }))
     }
 
-    /// Create a read-only disk from an existing snapshot.
+    /// Create a read-only disk from an existing snapshot or image.
     pub async fn project_create_read_only_disk(
         &self,
         opctx: &OpContext,
@@ -1797,16 +1802,58 @@ impl DataStore {
     ) -> CreateResult<db::datastore::Disk> {
         opctx.authorize(authz::Action::CreateChild, authz_project).await?;
 
+        let params::DiskBackend::Distributed { ref disk_source } =
+            params.disk_backend
+        else {
+            // This is an internal error rather than an invalid argument or
+            // similar, because Nexus should not have called this function with
+            // a local storage backend.
+            return Err(Error::internal_error(
+                "invalid disk_backend for `project_create_readonly_disk` \
+                 (must be `Distributed`)",
+            ));
+        };
+        // Check that `params` refers either to an image or snapshot as the
+        // source, and look it up now to perform authz checks. We must pass the
+        // authz resource into the transaction so that it can refresh the lookup
+        // to insure the transaction still exists once the transaction executes.
+        let src = match disk_source {
+            &params::DiskSource::Image { image_id, read_only: true } => {
+                let (_, authz_image, _) = LookupPath::new(opctx, self)
+                    .image_id(image_id)
+                    .fetch()
+                    .await?;
+                ReadOnlyDiskSource::Image(authz_image)
+            }
+            &params::DiskSource::Snapshot { snapshot_id, read_only: true } => {
+                let (_, _, authz_snapshot, _) = LookupPath::new(opctx, self)
+                    .snapshot_id(snapshot_id)
+                    .fetch()
+                    .await?;
+                ReadOnlyDiskSource::Snapshot(authz_snapshot)
+            }
+            src => {
+                // This is an internal error rather than an invalid argument or
+                // similar, because Nexus should not have called this function with
+                // a non-readonly disk source
+                return Err(Error::InternalError {
+                    internal_message: format!(
+                        "invalid `DiskSource` for \
+                         `project_create_readonly_disk`: {src:?}"
+                    ),
+                });
+            }
+        };
+
         let err = OptionalError::new();
         let conn = self.pool_connection_authorized(opctx).await?;
 
         let disk = self
-            .transaction_retry_wrapper(
-                "project_create_read_only_disk_from_snapshot",
-            )
+            .transaction_retry_wrapper("project_create_read_only_disk")
             .transaction(&conn, |conn| {
                 let err = err.clone();
                 let params = &params;
+                let src = &src;
                 async move {
                     Self::project_create_read_only_disk_in_txn(
                         &conn,
@@ -1814,6 +1861,7 @@ impl DataStore {
                         authz_project,
                         disk_id,
                         params,
+                        src,
                     )
                     .await
                 }
@@ -1836,6 +1884,7 @@ impl DataStore {
         authz_project: &authz::Project,
         disk_id: &Uuid,
         params: &params::DiskCreate,
+        src: &ReadOnlyDiskSource,
     ) -> Result<db::datastore::Disk, diesel::result::Error> {
         use crate::db::datastore::CrucibleTargets;
         use crate::db::datastore::VolumeCheckoutReason;
@@ -1876,21 +1925,16 @@ impl DataStore {
             }));
         }
 
-        let params::DiskBackend::Distributed { ref disk_source } =
-            params.disk_backend
-        else {
-            return Err(err.bail(Error::internal_error(
-                "invalid disk_backend for \
-                 `project_create_readonly_disk_from_snapshot`",
-            )));
-        };
-        let (volume_id, block_size) = match disk_source {
-            params::DiskSource::Snapshot { snapshot_id, read_only: true } => {
+        // Re-fetch the source image or snapshot again within the transaction to
+        // ensure that it still exists (it could have been deleted since the
+        // lookup in `project_create_read_only_disk`...)
+        let (volume_id, block_size) = match src {
+            ReadOnlyDiskSource::Snapshot(authz_snapshot) => {
                 let maybe_snapshot: Option<db::model::Snapshot> = {
                     use nexus_db_schema::schema::snapshot::dsl;
                     dsl::snapshot
                         .filter(dsl::time_deleted.is_null())
-                        .filter(dsl::id.eq(snapshot_id))
+                        .filter(dsl::id.eq(authz_snapshot.id()))
                         .select(db::model::Snapshot::as_select())
                         .get_result_async(conn)
                         .await
@@ -1900,18 +1944,18 @@ impl DataStore {
                 let Some(snapshot) = maybe_snapshot else {
                     return Err(err.bail(Error::not_found_by_id(
                         ResourceType::Snapshot,
-                        &snapshot_id,
+                        &authz_snapshot.id(),
                     )));
                 };
 
                 (snapshot.volume_id(), snapshot.block_size)
             }
-            params::DiskSource::Image { image_id } => {
+            ReadOnlyDiskSource::Image(authz_image) => {
                 let maybe_image: Option<db::model::Image> = {
                     use nexus_db_schema::schema::image::dsl;
                     dsl::image
                         .filter(dsl::time_deleted.is_null())
-                        .filter(dsl::id.eq(image_id))
+                        .filter(dsl::id.eq(authz_image.id()))
                         .select(db::model::Image::as_select())
                         .get_result_async(conn)
                         .await
@@ -1921,14 +1965,11 @@ impl DataStore {
                 let Some(image) = maybe_image else {
                     return Err(err.bail(Error::not_found_by_id(
                         ResourceType::Image,
-                        &image_id,
+                        &authz_image.id(),
                     )));
                 };
                 (image.volume_id(), image.block_size)
-            },
-            src => return Err(err.bail(Error::InternalError {
-                internal_message: format!("invalid disk source for `project_create_readonly_disk`: {src:?}"),
-            }))
+            }
         };
 
         let sub_err = OptionalError::new();
@@ -2001,11 +2042,18 @@ impl DataStore {
             runtime_initial,
             db::model::DiskType::Crucible,
         );
-
+        let params::DiskBackend::Distributed { ref disk_source } =
+            params.disk_backend
+        else {
+            return Err(err.bail(Error::internal_error(
+                "`project_create_read_only_disk` called with \
+                 non-Distributed backend",
+            )));
+        };
         let disk_type_crucible = db::model::DiskTypeCrucible::new(
             *disk_id,
             read_only_disk_volume.id(),
-            &disk_source,
+            disk_source,
         );
 
         let crucible_disk =

@@ -171,12 +171,19 @@ impl From<DiskSource> for params::DiskSource {
             DiskSource::Snapshot { snapshot_id } => {
                 params::DiskSource::Snapshot {
                     snapshot_id,
-                    read_only: false, // read only defaults to false if the client doesn't know about it
+                    // read only defaults to false if the client doesn't know
+                    // about it
+                    read_only: false,
                 }
             }
 
             DiskSource::Image { image_id } => {
-                params::DiskSource::Image { image_id }
+                params::DiskSource::Image {
+                    image_id,
+                    // read only defaults to false if the client doesn't know
+                    // about it
+                    read_only: false,
+                }
             }
 
             DiskSource::ImportingBlocks { block_size } => {

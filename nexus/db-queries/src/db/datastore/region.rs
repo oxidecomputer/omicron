@@ -141,7 +141,7 @@ impl DataStore {
 
                 Ok(db_snapshot.block_size)
             }
-            params::DiskSource::Image { image_id } => {
+            params::DiskSource::Image { image_id, read_only: _ } => {
                 let (.., db_image) = LookupPath::new(opctx, self)
                     .image_id(*image_id)
                     .fetch()

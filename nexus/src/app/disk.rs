@@ -118,22 +118,22 @@ impl super::Nexus {
                     // anything ... with the extra space.
                     return Err(Error::invalid_request(&format!(
                         "read-only disk size {size} must be equal to \
-                         snapshot size {snapshot_size}",
+                         source snapshot size {snapshot_size}",
                     )));
                 } else if snapshot_size > size {
                     // If the size of the snapshot is greater than the size of
                     // the disk, return an error.
                     return Err(Error::invalid_request(&format!(
                         "disk size {size} must be greater than or equal to \
-                         snapshot size {snapshot_size}",
+                        snapshot size {snapshot_size}",
                     )));
                 }
 
                 db_snapshot.block_size.to_bytes().into()
             }
-            params::DiskSource::Image { image_id } => {
+            &params::DiskSource::Image { image_id, read_only } => {
                 let (.., db_image) = LookupPath::new(opctx, &self.db_datastore)
-                    .image_id(*image_id)
+                    .image_id(image_id)
                     .fetch()
                     .await?;
 
@@ -147,16 +147,29 @@ impl super::Nexus {
                     }
                 }
 
-                // If the size of the image is greater than the size of the
-                // disk, return an error.
-                if db_image.size.to_bytes() > size.to_bytes() {
+                // Check that the size of the disk and the size of the image
+                // are compatible.
+                let image_size = db_image.size.to_bytes();
+                let size = size.to_bytes();
+                if read_only && image_size != size {
+                    // Read-only disks are backed directly by the same Crucible
+                    // regions as the image, so they must be exactly the same
+                    // size as the image. Even if this were not the case,
+                    // making a read-only disk bigger than the image wouldn't
+                    // make sense, since you couldn't ... you know, *do*
+                    // anything ... with the extra space.
                     return Err(Error::invalid_request(&format!(
-                        "disk size {} must be greater than or equal to image size {}",
-                        size.to_bytes(),
-                        db_image.size.to_bytes(),
+                        "read-only disk size {size} must be equal to \
+                         source image size {image_size}",
+                    )));
+                } else if image_size > size {
+                    // If the size of the snapshot is greater than the size of
+                    // the disk, return an error.
+                    return Err(Error::invalid_request(&format!(
+                        "disk size {size} must be greater than or equal to \
+                        snapshot size {image_size}",
                     )));
                 }
-
                 db_image.block_size.to_bytes().into()
             }
         };

@@ -116,12 +116,13 @@ impl NexusSaga for SagaDiskCreate {
         match &params.create_params.disk_backend {
             params::DiskBackend::Distributed {
                 disk_source:
-                    params::DiskSource::Snapshot { read_only: true, .. },
+                    params::DiskSource::Snapshot { read_only: true, .. }
+                    | params::DiskSource::Image { read_only: true, .. },
             } => {
                 builder.append(create_readonly_disk_records_action());
 
-                // Creating a read-only disk from a snapshot doesn't require any
-                // additional actions, so bail out early.
+                // Creating a read-only disk from an image or snapshot doesn't
+                // require any additional actions, so bail out early.
                 return Ok(builder.build()?);
             }
 
@@ -171,6 +172,9 @@ impl NexusSaga for SagaDiskCreate {
 
 // disk create saga: action implementations
 
+const NOT_NEEDED_FOR_READONLY: &str = "this action should not have been added \
+    to a saga creating a read-only disk from an image or snapshot";
+
 async fn sdc_create_crucible_disk_record(
     sagactx: NexusActionContext,
 ) -> Result<db::datastore::CrucibleDisk, ActionError> {
@@ -204,11 +208,6 @@ async fn sdc_create_crucible_disk_record(
                 ))
             })?
         }
-        params::DiskSource::Snapshot { read_only: true, .. } => {
-            return Err(ActionError::action_failed(Error::internal_error(
-                "wrong DiskSource variant!",
-            )));
-        }
         params::DiskSource::Snapshot { snapshot_id, read_only: false } => {
             let (.., db_snapshot) =
                 LookupPath::new(&opctx, osagactx.datastore())
@@ -223,7 +222,7 @@ async fn sdc_create_crucible_disk_record(
 
             db_snapshot.block_size
         }
-        params::DiskSource::Image { image_id } => {
+        params::DiskSource::Image { image_id, read_only: false } => {
             let (.., image) = LookupPath::new(&opctx, osagactx.datastore())
                 .image_id(*image_id)
                 .fetch()
@@ -235,6 +234,12 @@ async fn sdc_create_crucible_disk_record(
                 })?;
 
             image.block_size
+        }
+        params::DiskSource::Image { read_only: true, .. }
+        | params::DiskSource::Snapshot { read_only: true, .. } => {
+            return Err(ActionError::action_failed(Error::internal_error(
+                NOT_NEEDED_FOR_READONLY,
+            )));
         }
         params::DiskSource::ImportingBlocks { block_size } => {
             db::model::BlockSize::try_from(*block_size).map_err(|e| {
@@ -536,9 +541,10 @@ async fn sdc_regions_ensure(
     let mut read_only_parent: Option<Box<VolumeConstructionRequest>> =
         match disk_source {
             params::DiskSource::Blank { block_size: _ } => None,
-            params::DiskSource::Snapshot { read_only: true, .. } => {
+            params::DiskSource::Snapshot { read_only: true, .. }
+            | params::DiskSource::Image { read_only: true, .. } => {
                 return Err(ActionError::action_failed(Error::internal_error(
-                    "wrong DiskSource variant!",
+                    NOT_NEEDED_FOR_READONLY,
                 )));
             }
 
@@ -586,7 +592,7 @@ async fn sdc_regions_ensure(
                     },
                 )?))
             }
-            params::DiskSource::Image { image_id } => {
+            params::DiskSource::Image { image_id, read_only: false } => {
                 debug!(log, "grabbing image {}", image_id);
 
                 let (.., image) = LookupPath::new(&opctx, osagactx.datastore())
@@ -971,8 +977,18 @@ async fn sdc_call_pantry_attach_for_disk_undo(
 async fn sdc_create_readonly_disk_records(
     sagactx: NexusActionContext,
 ) -> Result<db::datastore::Disk, ActionError> {
+    let log = sagactx.user_data().log();
     let osagactx = sagactx.user_data();
     let params = sagactx.saga_params::<Params>()?;
+    let create_params = &params.create_params;
+
+    let params::DiskBackend::Distributed { ref disk_source } =
+        create_params.disk_backend
+    else {
+        return Err(ActionError::action_failed(Error::internal_error(
+            "wrong DiskBackend variant!",
+        )));
+    };
 
     let disk_id = sagactx.lookup::<Uuid>("disk_id")?;
 
@@ -987,13 +1003,20 @@ async fn sdc_create_readonly_disk_records(
         .await
         .map_err(ActionError::action_failed)?;
 
+    info!(
+        log,
+        "creating read-only disk from {disk_source:?}";
+        "disk_id" => %disk_id,
+        "project_id" => %authz_project.id(),
+    );
+
     osagactx
         .datastore()
         .project_create_read_only_disk(
             &opctx,
             &authz_project,
             &disk_id,
-            &params.create_params,
+            &create_params,
         )
         .await
         .map_err(ActionError::action_failed)

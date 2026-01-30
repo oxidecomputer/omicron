@@ -152,6 +152,7 @@ async fn create_base_disk(
         disk_backend: params::DiskBackend::Distributed {
             disk_source: params::DiskSource::Image {
                 image_id: image.identity.id,
+                read_only: false,
             },
         },
         size: disk_size,
@@ -416,6 +417,7 @@ async fn test_snapshot_prevents_other_disk(
         disk_backend: params::DiskBackend::Distributed {
             disk_source: params::DiskSource::Image {
                 image_id: image.identity.id,
+                read_only: false,
             },
         },
         size: disk_size,
