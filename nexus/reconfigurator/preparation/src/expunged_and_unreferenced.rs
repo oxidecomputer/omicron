@@ -5,30 +5,33 @@
 //! Helpers for identifying when expunged zones are no longer referenced in the
 //! database.
 //!
-//! When a zone is expunged, the expunged zone is still present in the
+//! When a zone is first expunged, the expunged zone initially remains in the
 //! blueprint. Two high-level conditions must be satisfied before it's safe to
 //! prune an expunged zone from the blueprint (i.e., delete it entirely):
 //!
-//! 1. The sled-agent responsible for running the zone must confirm the zone is
-//!    no longer running and that it's ledgered an `OmicronSledConfig` with a
-//!    generation past the point in which the zone was expunged. This guarantees
-//!    the zone will never run again. This is tracked in the blueprint as the
-//!    `ready_for_cleanup` field inside the expunged zone disposition, and can
-//!    be queried by asking for expunged zones with the
-//!    `ZoneRunningStatus::Shutdown` state.
+//! 1. We must know the zone is not running and will never run again. The
+//!    typical case of this confirmation is that the sled-agent responsible for
+//!    running the zone has confirmed the zone is no longer running and that
+//!    it's ledgered an `OmicronSledConfig` with a generation past the point in
+//!    which the zone was expunged. The uncommon case of this confirmation is
+//!    that the sled where this zone ran has been expunged.
 //! 2. Any cleanup work that operates on expunged zones must be complete. This
 //!    is zone-type-specific. Some zone types have no cleanup work at all and
 //!    can be pruned as soon as the first condition is satisfied. Others have
-//!    multiple, disparate cleanup work, all of which must be completed.
+//!    multiple, disparate cleanup steps, all of which must be completed.
 //!
-//! This module is primarily considered with checking the second condition. The
-//! [`BlueprintExpungedZoneAccessReason`] enum tracks a variant for every reason
-//! a caller wants to access the expunged zones of a blueprint, including all
-//! known cleanup actions. For each zone type, if the zone-type-specific cleanup
-//! work is complete, we included the zone ID in the "expunged and unreferenced"
-//! zone set in the `PlanningInput`. The planner can cheaply act on this set:
-//! for every zone ID present, it can safely prune it from the blueprint (i.e.,
-//! do not include it in the child blueprint it emits).
+//! The first condition is tracked in the blueprint as the `ready_for_cleanup`
+//! field inside the expunged zone disposition. We query for it below by asking
+//! for expunged zones with the `ZoneRunningStatus::Shutdown` state.
+//!
+//! This bulk of this module is concerned with checking the second condition.
+//! The [`BlueprintExpungedZoneAccessReason`] enum tracks a variant for every
+//! reason a caller wants to access the expunged zones of a blueprint, including
+//! all known cleanup actions. For each zone type, if the zone-type-specific
+//! cleanup work is complete, we included the zone ID in the "expunged and
+//! unreferenced" zone set in the `PlanningInput`. The planner can cheaply act
+//! on this set: for every zone ID present, it can safely prune it from the
+//! blueprint (i.e., do not include it in the child blueprint it emits).
 
 use nexus_db_model::SupportBundleState;
 use nexus_db_queries::context::OpContext;
@@ -48,6 +51,17 @@ use std::collections::BTreeSet;
 use std::net::IpAddr;
 use std::num::NonZeroU32;
 
+/// Find all Omicron zones within `parent_blueprint` that can be safely pruned
+/// by a future run of the planner.
+///
+/// A zone ID contained in the returned set satisfies both conditions for
+/// pruning:
+///
+/// 1. We know the zone is not running and will not run again.
+/// 2. Any cleanup work required after the zone has been expunged has been
+///    completed.
+///
+/// See this module's documentation for more details.
 pub(super) async fn find_expunged_and_unreferenced_zones(
     opctx: &OpContext,
     datastore: &DataStore,

@@ -152,7 +152,6 @@ impl DataStore {
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 
-    /// many queries as needed (in batches) to get them all
     /// Returns a list of unfinished sagas assigned to SEC `sec_id`, making as
     /// many queries as needed (in batches) to get them all
     pub async fn saga_list_recovery_candidates_batched(
