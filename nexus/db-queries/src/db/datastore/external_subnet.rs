@@ -31,6 +31,7 @@ use nexus_db_lookup::lookup;
 use nexus_db_model::ExternalSubnet;
 use nexus_db_model::ExternalSubnetIdentity;
 use nexus_db_model::ExternalSubnetUpdate;
+use nexus_db_model::IpAttachState;
 use nexus_db_model::IpNet;
 use nexus_db_model::IpVersion;
 use nexus_db_model::Name;
@@ -508,6 +509,25 @@ impl DataStore {
                     Ok(())
                 }
             })
+    }
+
+    /// Fetch all external subnets attached to the provided instance.
+    pub async fn instance_lookup_external_subnets(
+        &self,
+        opctx: &OpContext,
+        authz_instance: &authz::Instance,
+    ) -> ListResultVec<ExternalSubnet> {
+        opctx.authorize(authz::Action::Read, authz_instance).await?;
+        use nexus_db_schema::schema::external_subnet::dsl;
+        dsl::external_subnet
+            .filter(dsl::instance_id.eq(authz_instance.id()))
+            .filter(dsl::time_deleted.is_null())
+            .filter(dsl::attach_state.eq(IpAttachState::Attached))
+            .order_by(dsl::id)
+            .select(ExternalSubnet::as_select())
+            .get_results_async(&*self.pool_connection_authorized(opctx).await?)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 }
 
