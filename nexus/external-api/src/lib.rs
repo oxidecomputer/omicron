@@ -77,6 +77,7 @@ api_versions!([
     // |  date-based version should be at the top of the list.
     // v
     // (next_yyyymmddnn, IDENT),
+    (2026013000, INSTANCES_EXTERNAL_SUBNETS),
     (2026012800, REMOVE_SUBNET_POOL_POOL_TYPE),
     (2026012300, DUAL_STACK_EPHEMERAL_IP),
     (2026012201, EXTERNAL_SUBNET_ALLOCATOR_UPDATE),
@@ -3903,6 +3904,21 @@ pub trait NexusExternalApi {
         path_params: Path<params::InstancePath>,
         query_params: Query<params::EphemeralIpDetachSelector>,
     ) -> Result<HttpResponseDeleted, HttpError>;
+
+    // Instance External Subnets
+
+    /// List external subnets attached to instance
+    #[endpoint {
+        method = GET,
+        path = "/v1/instances/{instance}/external-subnets",
+        tags = ["instances"],
+        versions = VERSION_INSTANCES_EXTERNAL_SUBNETS..,
+    }]
+    async fn instance_external_subnet_list(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<params::OptionalProjectSelector>,
+        path_params: Path<params::InstancePath>,
+    ) -> Result<HttpResponseOk<ResultsPage<views::ExternalSubnet>>, HttpError>;
 
     // Instance Multicast Groups
 

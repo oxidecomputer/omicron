@@ -4918,6 +4918,43 @@ impl NexusExternalApi for NexusExternalApiImpl {
         .await
     }
 
+    // Instance External Subnets
+
+    async fn instance_external_subnet_list(
+        rqctx: RequestContext<ApiContext>,
+        query_params: Query<params::OptionalProjectSelector>,
+        path_params: Path<params::InstancePath>,
+    ) -> Result<HttpResponseOk<ResultsPage<views::ExternalSubnet>>, HttpError>
+    {
+        let apictx = rqctx.context();
+        let handler = async {
+            let nexus = &apictx.context.nexus;
+            let path = path_params.into_inner();
+            let query = query_params.into_inner();
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+            let instance_selector = params::InstanceSelector {
+                project: query.project,
+                instance: path.instance,
+            };
+            let instance_lookup =
+                nexus.instance_lookup(&opctx, instance_selector)?;
+            let subnets = nexus
+                .instance_list_external_subnets(&opctx, &instance_lookup)
+                .await?;
+            // The number of external subnets attached to an instance is expected
+            // to be small, so pagination is not implemented.
+            // TODO: Add MAX_EXTERNAL_SUBNETS_PER_INSTANCE constant (similar to
+            // MAX_EXTERNAL_IPS_PER_INSTANCE) and enforce it in attach operations.
+            Ok(HttpResponseOk(ResultsPage { items: subnets, next_page: None }))
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
     // Instance Multicast Groups
 
     async fn instance_multicast_group_list(
