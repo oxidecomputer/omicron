@@ -1942,10 +1942,7 @@ impl DataStore {
                 };
 
                 let Some(snapshot) = maybe_snapshot else {
-                    return Err(err.bail(Error::not_found_by_id(
-                        ResourceType::Snapshot,
-                        &authz_snapshot.id(),
-                    )));
+                    return Err(err.bail(authz_snapshot.not_found()));
                 };
 
                 (snapshot.volume_id(), snapshot.block_size)
@@ -1963,10 +1960,7 @@ impl DataStore {
                 };
 
                 let Some(image) = maybe_image else {
-                    return Err(err.bail(Error::not_found_by_id(
-                        ResourceType::Image,
-                        &authz_image.id(),
-                    )));
+                    return Err(err.bail(authz_image.not_found()));
                 };
                 (image.volume_id(), image.block_size)
             }
@@ -1994,7 +1988,7 @@ impl DataStore {
             serde_json::from_str(copy_of_volume.data()).map_err(|e| {
                 err.bail(Error::InternalError {
                     internal_message: format!(
-                        "failed to deserialize snapshot VCR: {e}"
+                        "failed to deserialize base volume VCR: {e}"
                     ),
                 })
             })?;

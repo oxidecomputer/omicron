@@ -163,11 +163,11 @@ impl super::Nexus {
                          source image size {image_size}",
                     )));
                 } else if image_size > size {
-                    // If the size of the snapshot is greater than the size of
+                    // If the size of the image is greater than the size of
                     // the disk, return an error.
                     return Err(Error::invalid_request(&format!(
                         "disk size {size} must be greater than or equal to \
-                        snapshot size {image_size}",
+                        image size {image_size}",
                     )));
                 }
                 db_image.block_size.to_bytes().into()
