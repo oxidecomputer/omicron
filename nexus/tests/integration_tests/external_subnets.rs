@@ -9,6 +9,8 @@ use http::Method;
 use http::StatusCode;
 use nexus_test_utils::http_testing::AuthnMode;
 use nexus_test_utils::http_testing::NexusRequest;
+use nexus_test_utils::resource_helpers::create_default_ip_pools;
+use nexus_test_utils::resource_helpers::create_instance;
 use nexus_test_utils::resource_helpers::create_project;
 use nexus_test_utils::resource_helpers::create_subnet_pool;
 use nexus_test_utils::resource_helpers::create_subnet_pool_member;
@@ -17,6 +19,10 @@ use nexus_test_utils_macros::nexus_test;
 use nexus_types::external_api::params;
 use nexus_types::external_api::views::ExternalSubnet;
 use omicron_common::address::IpVersion;
+use nexus_test_utils::resource_helpers::objects_list_page_authz;
+use nexus_test_utils_macros::nexus_test;
+use nexus_types::external_api::params;
+use nexus_types::external_api::views;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::IdentityMetadataUpdateParams;
 use omicron_common::api::external::Name;
@@ -48,6 +54,10 @@ fn external_subnet_attach_url(name: &str, project: &str) -> String {
 
 fn external_subnet_detach_url(name: &str, project: &str) -> String {
     format!("/v1/external-subnets/{}/detach?project={}", name, project)
+}
+
+fn instance_external_subnets_url(instance: &str, project: &str) -> String {
+    format!("/v1/instances/{}/external-subnets?project={}", instance, project)
 }
 
 #[nexus_test]
@@ -287,4 +297,26 @@ async fn test_external_subnet_detach_unimplemented(
     .execute()
     .await
     .expect("failed to make request");
+}
+
+const INSTANCE_NAME: &str = "test-instance";
+
+#[nexus_test]
+async fn test_instance_external_subnet_list_empty(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+
+    // Create default IP pools, project, and instance
+    create_default_ip_pools(client).await;
+    let _ = create_project(client, PROJECT_NAME).await;
+    let _ = create_instance(client, PROJECT_NAME, INSTANCE_NAME).await;
+
+    // List external subnets for the instance - should return empty list
+    let subnets = objects_list_page_authz::<views::ExternalSubnet>(
+        client,
+        &instance_external_subnets_url(INSTANCE_NAME, PROJECT_NAME),
+    )
+    .await;
+    assert!(subnets.items.is_empty());
 }

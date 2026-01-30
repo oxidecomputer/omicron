@@ -198,4 +198,24 @@ impl super::Nexus {
             .unimplemented_todo(opctx, Unimpl::ProtectedLookup(not_found))
             .await)
     }
+
+    pub(crate) async fn instance_list_external_subnets(
+        &self,
+        opctx: &OpContext,
+        instance_lookup: &lookup::Instance<'_>,
+    ) -> ListResultVec<views::ExternalSubnet> {
+        let (.., authz_project, authz_instance) =
+            instance_lookup.lookup_for(authz::Action::Read).await?;
+
+        // External subnets are project-scoped, so check ListChildren on project
+        opctx.authorize(authz::Action::ListChildren, &authz_project).await?;
+
+        Ok(self
+            .db_datastore
+            .instance_lookup_external_subnets(opctx, &authz_instance)
+            .await?
+            .into_iter()
+            .map(|subnet| subnet.into())
+            .collect())
+    }
 }
