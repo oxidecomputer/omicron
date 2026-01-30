@@ -243,6 +243,21 @@ pub enum EnsureDatasetVolumeErrorInner {
 
     #[error("created but not ready yet: {reason}")]
     NotReady { reason: String },
+
+    #[error("not a raw zvol")]
+    NotARawZvol,
+
+    #[error("cannot get raw volume status, ioctl returned {err}")]
+    GettingStatus { err: i32 },
+
+    #[error("allocation failed, pool too fragmented")]
+    TooFragmented,
+
+    #[error("allocation error failed with status {err}")]
+    AllocationError { err: i32 },
+
+    #[error("allocation interrupted")]
+    AllocationInterrupted,
 }
 
 /// Error returned by [`Zfs::ensure_dataset_volume`].
@@ -303,26 +318,54 @@ impl EnsureDatasetVolumeError {
         }
     }
 
-    pub fn from_raw_zvol_open(name: String, e: rustix::io::Errno) -> Self {
+    pub fn from_rustix_errno(name: String, e: rustix::io::Errno) -> Self {
         EnsureDatasetVolumeError {
             name,
             err: EnsureDatasetVolumeErrorInner::RustixErrno(e),
         }
     }
 
-    pub fn from_raw_zvol_read(name: String, e: rustix::io::Errno) -> Self {
-        if e == rustix::io::Errno::INPROGRESS {
-            EnsureDatasetVolumeError {
-                name,
-                err: EnsureDatasetVolumeErrorInner::NotReady {
-                    reason: String::from("raw volume not done initializing"),
-                },
-            }
-        } else {
-            EnsureDatasetVolumeError {
-                name,
-                err: EnsureDatasetVolumeErrorInner::RustixErrno(e),
-            }
+    pub fn not_a_raw_zvol(name: String) -> Self {
+        EnsureDatasetVolumeError {
+            name,
+            err: EnsureDatasetVolumeErrorInner::NotARawZvol,
+        }
+    }
+
+    pub fn getting_status(name: String, err: i32) -> Self {
+        EnsureDatasetVolumeError {
+            name,
+            err: EnsureDatasetVolumeErrorInner::GettingStatus { err },
+        }
+    }
+
+    pub fn still_initializing(name: String) -> Self {
+        EnsureDatasetVolumeError {
+            name,
+            err: EnsureDatasetVolumeErrorInner::NotReady {
+                reason: String::from("still zero initializing"),
+            },
+        }
+    }
+
+    pub fn too_fragmented(name: String) -> Self {
+        EnsureDatasetVolumeError {
+            name,
+            err: EnsureDatasetVolumeErrorInner::TooFragmented,
+        }
+    }
+
+    pub fn allocation_error(name: String, err: i32) -> Self {
+        EnsureDatasetVolumeError {
+            name,
+            err: EnsureDatasetVolumeErrorInner::AllocationError { err },
+        }
+    }
+
+    pub fn allocation_interrupted(name: String) -> Self {
+        EnsureDatasetVolumeError {
+            name,
+            err: EnsureDatasetVolumeErrorInner::AllocationInterrupted,
         }
     }
 }
@@ -1635,10 +1678,6 @@ impl Zfs {
         }
 
         if params.raw {
-            // Open the raw zvol and read from it. If EINPROGRESS is seen from
-            // the read, then it's not done initializing yet. We can't use it
-            // until it's fully done, so return the `NotReady` variant to signal
-            // upstack that it should poll.
             let path = format!("/dev/zvol/rdsk/{}", params.name);
 
             let fd = rustix::fs::open(
@@ -1647,7 +1686,7 @@ impl Zfs {
                 rustix::fs::Mode::empty(),
             )
             .map_err(|e| {
-                EnsureDatasetVolumeError::from_raw_zvol_open(
+                EnsureDatasetVolumeError::from_rustix_errno(
                     params.name.to_string(),
                     e,
                 )
@@ -1655,12 +1694,117 @@ impl Zfs {
 
             // Raw zvols error for arbitrarily sized reads, so read the first 4k
             let mut buf = [0u8; 4096];
-            rustix::io::read(fd, &mut buf).map_err(|e| {
-                EnsureDatasetVolumeError::from_raw_zvol_read(
-                    params.name.to_string(),
-                    e,
-                )
-            })?;
+            match rustix::io::read(&fd, &mut buf) {
+                Ok(_) => {
+                    // Done initializing
+                    return Ok(());
+                }
+
+                Err(rustix::io::Errno::INPROGRESS) => {
+                    // The zero initialization thread is still running, fall
+                    // through to check the status ioctl.
+                }
+
+                Err(e) => {
+                    // Any other error should be bubbled up
+                    return Err(EnsureDatasetVolumeError::from_rustix_errno(
+                        params.name.to_string(),
+                        e,
+                    ));
+                }
+            }
+
+            // Check the values from the status ioctl. We have to wait until the
+            // zero initialization thread is complete before the vol can be
+            // used.
+            let mut status = dk_rawvol_status::default();
+
+            // Retry if EINTR is seen
+            for i in 0..2 {
+                // Safety: We are issuing the `DKIOCRAWVOLSTATUS` ioctl which is
+                // documented to take a struct of type `dk_rawvol_status`. Assuming
+                // our type definitions are correct, this call is safe.
+                if unsafe {
+                    libc::ioctl(
+                        fd.as_raw_fd(),
+                        DKIOCRAWVOLSTATUS as _,
+                        &mut status,
+                    )
+                } == -1
+                {
+                    let err = std::io::Error::last_os_error();
+                    match err.raw_os_error().unwrap() {
+                        libc::ENOTSUP => {
+                            // ENOTSUP is returned when this ioctl is issued against
+                            // a non-raw zvol
+                            return Err(
+                                EnsureDatasetVolumeError::not_a_raw_zvol(
+                                    params.name.to_string(),
+                                ),
+                            );
+                        }
+
+                        libc::EINTR if i == 0 => {
+                            // Retry once if EINTR is seen
+                            continue;
+                        }
+
+                        e => {
+                            // Unexpected error, return up the stack
+                            return Err(
+                                EnsureDatasetVolumeError::getting_status(
+                                    params.name.to_string(),
+                                    e,
+                                ),
+                            );
+                        }
+                    }
+                }
+            }
+
+            match status.drs_status {
+                0 => {
+                    // The zero init thread was not running - because we saw
+                    // EINPROGRESS before from the read, and now see 0, that
+                    // means it finished in the time between the read and that
+                    // ioctl.
+                    return Ok(());
+                }
+
+                libc::EINTR => {
+                    // The zero init thread was running but was interrupted.
+                    return Err(
+                        EnsureDatasetVolumeError::allocation_interrupted(
+                            params.name.to_string(),
+                        ),
+                    );
+                }
+
+                libc::EINPROGRESS => {
+                    // The zero init thread is currently running
+                    return Err(EnsureDatasetVolumeError::still_initializing(
+                        params.name.to_string(),
+                    ));
+                }
+
+                // usr/src/uts/common/fs/zfs/sys/zio.h defines EFRAGS == EBADR
+                libc::EBADR => {
+                    // EFRAGS means the zero init thread encountered an error
+                    // allocating a record. This is fatal! The pool is too
+                    // fragmented to continue.
+                    return Err(EnsureDatasetVolumeError::too_fragmented(
+                        params.name.to_string(),
+                    ));
+                }
+
+                e => {
+                    // Any other error should be bubbled up
+                    return Err(EnsureDatasetVolumeError::allocation_error(
+                        params.name.to_string(),
+                        e,
+                    ));
+                }
+            }
         }
 
         Ok(())
