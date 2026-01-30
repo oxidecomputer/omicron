@@ -1109,7 +1109,7 @@ pub(crate) mod test {
                     snapshot_id: snapshot.identity.id,
                 },
             },
-            size: snapshot.size.into(),
+            size: snapshot.size,
         };
         Params {
             serialized_authn: Serialized::for_opctx(opctx),
