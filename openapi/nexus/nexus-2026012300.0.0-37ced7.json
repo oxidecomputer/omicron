@@ -7,7 +7,7 @@
       "url": "https://oxide.computer",
       "email": "api@oxide.computer"
     },
-    "version": "2026011100.0.0"
+    "version": "2026012300.0.0"
   },
   "paths": {
     "/device/auth": {
@@ -2800,6 +2800,362 @@
         }
       }
     },
+    "/v1/external-subnets": {
+      "get": {
+        "tags": [
+          "external-subnets"
+        ],
+        "summary": "List external subnets in a project",
+        "operationId": "external_subnet_list",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "description": "Maximum number of items returned by a single call",
+            "schema": {
+              "nullable": true,
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 1
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "description": "Token returned by previous call to retrieve the subsequent page",
+            "schema": {
+              "nullable": true,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "project",
+            "description": "Name or ID of the project",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sort_by",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrIdSortMode"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExternalSubnetResultsPage"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-dropshot-pagination": {
+          "required": [
+            "project"
+          ]
+        }
+      },
+      "post": {
+        "tags": [
+          "external-subnets"
+        ],
+        "summary": "Create an external subnet",
+        "operationId": "external_subnet_create",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "project",
+            "description": "Name or ID of the project",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ExternalSubnetCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "successful creation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExternalSubnet"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/external-subnets/{external_subnet}": {
+      "get": {
+        "tags": [
+          "external-subnets"
+        ],
+        "summary": "Fetch an external subnet",
+        "operationId": "external_subnet_view",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "external_subnet",
+            "description": "Name or ID of the external subnet",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "project",
+            "description": "Name or ID of the project",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExternalSubnet"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "external-subnets"
+        ],
+        "summary": "Update an external subnet",
+        "operationId": "external_subnet_update",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "external_subnet",
+            "description": "Name or ID of the external subnet",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "project",
+            "description": "Name or ID of the project",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ExternalSubnetUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExternalSubnet"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "external-subnets"
+        ],
+        "summary": "Delete an external subnet",
+        "operationId": "external_subnet_delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "external_subnet",
+            "description": "Name or ID of the external subnet",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "project",
+            "description": "Name or ID of the project",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "successful deletion"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/external-subnets/{external_subnet}/attach": {
+      "post": {
+        "tags": [
+          "external-subnets"
+        ],
+        "summary": "Attach an external subnet to an instance",
+        "description": "Begins an asynchronous attach operation. Returns the subnet with `instance_id` set to the target instance. The attach completes asynchronously; poll the subnet to check completion.",
+        "operationId": "external_subnet_attach",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "external_subnet",
+            "description": "Name or ID of the external subnet",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "project",
+            "description": "Name or ID of the project",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ExternalSubnetAttach"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "description": "successfully enqueued operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExternalSubnet"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/external-subnets/{external_subnet}/detach": {
+      "post": {
+        "tags": [
+          "external-subnets"
+        ],
+        "summary": "Detach an external subnet from an instance",
+        "description": "Begins an asynchronous detach operation. Returns the subnet with `instance_id` cleared. The detach completes asynchronously.",
+        "operationId": "external_subnet_detach",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "external_subnet",
+            "description": "Name or ID of the external subnet",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "project",
+            "description": "Name or ID of the project",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "successfully enqueued operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExternalSubnet"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/v1/floating-ips": {
       "get": {
         "tags": [
@@ -2872,7 +3228,8 @@
         "tags": [
           "floating-ips"
         ],
-        "summary": "Create floating IP",
+        "summary": "Create a floating IP",
+        "description": "A specific IP address can be reserved, or an IP can be auto-allocated from a specific pool or the silo's default pool.",
         "operationId": "floating_ip_create",
         "parameters": [
           {
@@ -4245,7 +4602,8 @@
           "instances"
         ],
         "summary": "Detach and deallocate ephemeral IP from instance",
-        "operationId": "v2026012200_instance_ephemeral_ip_detach",
+        "description": "When an instance has both IPv4 and IPv6 ephemeral IPs, the `ip_version` query parameter must be specified to identify which IP to detach.",
+        "operationId": "instance_ephemeral_ip_detach",
         "parameters": [
           {
             "in": "path",
@@ -4254,6 +4612,14 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "ip_version",
+            "description": "The IP version of the ephemeral IP to detach.\n\nRequired when the instance has both IPv4 and IPv6 ephemeral IPs. If only one ephemeral IP is attached, this field may be omitted.",
+            "schema": {
+              "$ref": "#/components/schemas/IpVersion"
             }
           },
           {
@@ -7471,6 +7837,101 @@
         }
       }
     },
+    "/v1/system/hardware/racks/{rack_id}/membership": {
+      "get": {
+        "tags": [
+          "experimental"
+        ],
+        "summary": "Retrieve the rack cluster membership status",
+        "description": "Returns the status for the most recent change, or a specific version if one is specified.",
+        "operationId": "rack_membership_status",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "rack_id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "query",
+            "name": "version",
+            "schema": {
+              "$ref": "#/components/schemas/RackMembershipVersion"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RackMembershipStatus"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/system/hardware/racks/{rack_id}/membership/add": {
+      "post": {
+        "tags": [
+          "experimental"
+        ],
+        "summary": "Add new sleds to rack membership",
+        "operationId": "rack_membership_add_sleds",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "rack_id",
+            "description": "ID of the rack",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RackMembershipAddSledsRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RackMembershipStatus"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/v1/system/hardware/sleds": {
       "get": {
         "tags": [
@@ -10548,8 +11009,8 @@
         "tags": [
           "system/networking"
         ],
-        "summary": "Create switch port settings (old version with required BgpPeer.addr)",
-        "operationId": "v2026010300_networking_switch_port_settings_create",
+        "summary": "Create switch port settings",
+        "operationId": "networking_switch_port_settings_create",
         "requestBody": {
           "content": {
             "application/json": {
@@ -10613,8 +11074,8 @@
         "tags": [
           "system/networking"
         ],
-        "summary": "Get information about switch port (old version with required BgpPeer.addr)",
-        "operationId": "v2026010300_networking_switch_port_settings_view",
+        "summary": "Get information about switch port",
+        "operationId": "networking_switch_port_settings_view",
         "parameters": [
           {
             "in": "path",
@@ -11323,6 +11784,617 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/SiloQuotas"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/system/subnet-pools": {
+      "get": {
+        "tags": [
+          "system/subnet-pools"
+        ],
+        "summary": "List subnet pools",
+        "operationId": "subnet_pool_list",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "description": "Maximum number of items returned by a single call",
+            "schema": {
+              "nullable": true,
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 1
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "description": "Token returned by previous call to retrieve the subsequent page",
+            "schema": {
+              "nullable": true,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sort_by",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrIdSortMode"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SubnetPoolResultsPage"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-dropshot-pagination": {
+          "required": []
+        }
+      },
+      "post": {
+        "tags": [
+          "system/subnet-pools"
+        ],
+        "summary": "Create a subnet pool",
+        "operationId": "subnet_pool_create",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SubnetPoolCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "successful creation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SubnetPool"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/system/subnet-pools/{pool}": {
+      "get": {
+        "tags": [
+          "system/subnet-pools"
+        ],
+        "summary": "Fetch a subnet pool",
+        "operationId": "subnet_pool_view",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "pool",
+            "description": "Name or ID of the subnet pool",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SubnetPool"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "system/subnet-pools"
+        ],
+        "summary": "Update a subnet pool",
+        "operationId": "subnet_pool_update",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "pool",
+            "description": "Name or ID of the subnet pool",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SubnetPoolUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SubnetPool"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "system/subnet-pools"
+        ],
+        "summary": "Delete a subnet pool",
+        "operationId": "subnet_pool_delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "pool",
+            "description": "Name or ID of the subnet pool",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "successful deletion"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/system/subnet-pools/{pool}/members": {
+      "get": {
+        "tags": [
+          "system/subnet-pools"
+        ],
+        "summary": "List members in a subnet pool",
+        "operationId": "subnet_pool_member_list",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "pool",
+            "description": "Name or ID of the subnet pool",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "description": "Maximum number of items returned by a single call",
+            "schema": {
+              "nullable": true,
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 1
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "description": "Token returned by previous call to retrieve the subsequent page",
+            "schema": {
+              "nullable": true,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sort_by",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrIdSortMode"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SubnetPoolMemberResultsPage"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-dropshot-pagination": {
+          "required": []
+        }
+      }
+    },
+    "/v1/system/subnet-pools/{pool}/members/add": {
+      "post": {
+        "tags": [
+          "system/subnet-pools"
+        ],
+        "summary": "Add a member to a subnet pool",
+        "operationId": "subnet_pool_member_add",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "pool",
+            "description": "Name or ID of the subnet pool",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SubnetPoolMemberAdd"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "successful creation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SubnetPoolMember"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/system/subnet-pools/{pool}/members/remove": {
+      "post": {
+        "tags": [
+          "system/subnet-pools"
+        ],
+        "summary": "Remove a member from a subnet pool",
+        "operationId": "subnet_pool_member_remove",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "pool",
+            "description": "Name or ID of the subnet pool",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SubnetPoolMemberRemove"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/system/subnet-pools/{pool}/silos": {
+      "get": {
+        "tags": [
+          "system/subnet-pools"
+        ],
+        "summary": "List silos linked to a subnet pool",
+        "operationId": "subnet_pool_silo_list",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "pool",
+            "description": "Name or ID of the subnet pool",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "description": "Maximum number of items returned by a single call",
+            "schema": {
+              "nullable": true,
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 1
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "description": "Token returned by previous call to retrieve the subsequent page",
+            "schema": {
+              "nullable": true,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sort_by",
+            "schema": {
+              "$ref": "#/components/schemas/IdSortMode"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SubnetPoolSiloLinkResultsPage"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-dropshot-pagination": {
+          "required": []
+        }
+      },
+      "post": {
+        "tags": [
+          "system/subnet-pools"
+        ],
+        "summary": "Link a subnet pool to a silo",
+        "operationId": "subnet_pool_silo_link",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "pool",
+            "description": "Name or ID of the subnet pool",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SubnetPoolLinkSilo"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "successful creation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SubnetPoolSiloLink"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/system/subnet-pools/{pool}/silos/{silo}": {
+      "put": {
+        "tags": [
+          "system/subnet-pools"
+        ],
+        "summary": "Update a subnet pool's link to a silo",
+        "operationId": "subnet_pool_silo_update",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "pool",
+            "description": "Name or ID of the subnet pool",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "path",
+            "name": "silo",
+            "description": "Name or ID of the silo",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SubnetPoolSiloUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SubnetPoolSiloLink"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "system/subnet-pools"
+        ],
+        "summary": "Unlink a subnet pool from a silo",
+        "operationId": "subnet_pool_silo_unlink",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "pool",
+            "description": "Name or ID of the subnet pool",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "path",
+            "name": "silo",
+            "description": "Name or ID of the silo",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/system/subnet-pools/{pool}/utilization": {
+      "get": {
+        "tags": [
+          "system/subnet-pools"
+        ],
+        "summary": "Fetch subnet pool utilization",
+        "operationId": "subnet_pool_utilization_view",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "pool",
+            "description": "Name or ID of the subnet pool",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SubnetPoolUtilization"
                 }
               }
             }
@@ -14044,6 +15116,59 @@
           "address_lot"
         ]
       },
+      "AddressAllocator": {
+        "description": "Specify how to allocate a floating IP address.",
+        "oneOf": [
+          {
+            "description": "Reserve a specific IP address. The pool is inferred from the address since IP pools cannot have overlapping ranges.",
+            "type": "object",
+            "properties": {
+              "ip": {
+                "description": "The IP address to reserve.",
+                "type": "string",
+                "format": "ip"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "explicit"
+                ]
+              }
+            },
+            "required": [
+              "ip",
+              "type"
+            ]
+          },
+          {
+            "description": "Automatically allocate an IP address from a pool.",
+            "type": "object",
+            "properties": {
+              "pool_selector": {
+                "description": "Pool selection.\n\nIf omitted, the silo's default pool is used. If the silo has default pools for both IPv4 and IPv6, the request will fail unless `ip_version` is specified.",
+                "default": {
+                  "ip_version": null,
+                  "type": "auto"
+                },
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/PoolSelector"
+                  }
+                ]
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "auto"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          }
+        ]
+      },
       "AddressConfig": {
         "description": "A set of addresses associated with a port configuration.",
         "type": "object",
@@ -14306,68 +15431,6 @@
         "required": [
           "blocks",
           "lot"
-        ]
-      },
-      "AddressSelector": {
-        "description": "Specify how to allocate a floating IP address.",
-        "oneOf": [
-          {
-            "description": "Reserve a specific IP address.",
-            "type": "object",
-            "properties": {
-              "ip": {
-                "description": "The IP address to reserve. Must be available in the pool.",
-                "type": "string",
-                "format": "ip"
-              },
-              "pool": {
-                "nullable": true,
-                "description": "The pool containing this address. If not specified, the default pool for the address's IP version is used.",
-                "allOf": [
-                  {
-                    "$ref": "#/components/schemas/NameOrId"
-                  }
-                ]
-              },
-              "type": {
-                "type": "string",
-                "enum": [
-                  "explicit"
-                ]
-              }
-            },
-            "required": [
-              "ip",
-              "type"
-            ]
-          },
-          {
-            "description": "Automatically allocate an IP address from a specified pool.",
-            "type": "object",
-            "properties": {
-              "pool_selector": {
-                "description": "Pool selection.\n\nIf omitted, this field uses the silo's default pool. If the silo has default pools for both IPv4 and IPv6, the request will fail unless `ip_version` is specified in the pool selector.",
-                "default": {
-                  "ip_version": null,
-                  "type": "auto"
-                },
-                "allOf": [
-                  {
-                    "$ref": "#/components/schemas/PoolSelector"
-                  }
-                ]
-              },
-              "type": {
-                "type": "string",
-                "enum": [
-                  "auto"
-                ]
-              }
-            },
-            "required": [
-              "type"
-            ]
-          }
         ]
       },
       "AffinityGroup": {
@@ -15565,6 +16628,24 @@
           "serial"
         ]
       },
+      "BaseboardId": {
+        "description": "A representation of a Baseboard ID as used in the inventory subsystem.\n\nThis type is essentially the same as a `Baseboard` except it doesn't have a revision or HW type (Gimlet, PC, Unknown).",
+        "type": "object",
+        "properties": {
+          "part_number": {
+            "description": "Oxide Part Number",
+            "type": "string"
+          },
+          "serial_number": {
+            "description": "Serial number (unique for a given part number)",
+            "type": "string"
+          }
+        },
+        "required": [
+          "part_number",
+          "serial_number"
+        ]
+      },
       "BfdMode": {
         "description": "BFD connection mode.",
         "type": "string",
@@ -16149,7 +17230,6 @@
         ]
       },
       "BgpPeerConfig": {
-        "description": "BGP peer configuration for a link (old version with required addr).",
         "type": "object",
         "properties": {
           "link_name": {
@@ -19078,6 +20158,223 @@
           "items"
         ]
       },
+      "ExternalSubnet": {
+        "description": "An external subnet allocated from a subnet pool",
+        "type": "object",
+        "properties": {
+          "description": {
+            "description": "human-readable free-form text about a resource",
+            "type": "string"
+          },
+          "id": {
+            "description": "unique, immutable, system-controlled identifier for each resource",
+            "type": "string",
+            "format": "uuid"
+          },
+          "instance_id": {
+            "nullable": true,
+            "description": "The instance this subnet is attached to, if any",
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "description": "unique, mutable, user-controlled identifier for each resource",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Name"
+              }
+            ]
+          },
+          "project_id": {
+            "description": "The project this subnet belongs to",
+            "type": "string",
+            "format": "uuid"
+          },
+          "subnet": {
+            "description": "The allocated subnet CIDR",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/IpNet"
+              }
+            ]
+          },
+          "subnet_pool_id": {
+            "description": "The subnet pool this was allocated from",
+            "type": "string",
+            "format": "uuid"
+          },
+          "subnet_pool_member_id": {
+            "description": "The subnet pool member this subnet corresponds to",
+            "type": "string",
+            "format": "uuid"
+          },
+          "time_created": {
+            "description": "timestamp when this resource was created",
+            "type": "string",
+            "format": "date-time"
+          },
+          "time_modified": {
+            "description": "timestamp when this resource was last modified",
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "description",
+          "id",
+          "name",
+          "project_id",
+          "subnet",
+          "subnet_pool_id",
+          "subnet_pool_member_id",
+          "time_created",
+          "time_modified"
+        ]
+      },
+      "ExternalSubnetAllocator": {
+        "description": "Specify how to allocate an external subnet.",
+        "oneOf": [
+          {
+            "description": "Reserve a specific subnet.",
+            "type": "object",
+            "properties": {
+              "subnet": {
+                "description": "The subnet CIDR to reserve. Must be available in the pool.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/IpNet"
+                  }
+                ]
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "explicit"
+                ]
+              }
+            },
+            "required": [
+              "subnet",
+              "type"
+            ]
+          },
+          {
+            "description": "Automatically allocate a subnet with the specified prefix length.",
+            "type": "object",
+            "properties": {
+              "pool_selector": {
+                "description": "Pool selection.\n\nIf omitted, this field uses the silo's default pool. If the silo has default pools for both IPv4 and IPv6, the request will fail unless `ip_version` is specified in the pool selector.",
+                "default": {
+                  "ip_version": null,
+                  "type": "auto"
+                },
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/PoolSelector"
+                  }
+                ]
+              },
+              "prefix_len": {
+                "description": "The prefix length for the allocated subnet (e.g., 24 for a /24).",
+                "type": "integer",
+                "format": "uint8",
+                "minimum": 0
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "auto"
+                ]
+              }
+            },
+            "required": [
+              "prefix_len",
+              "type"
+            ]
+          }
+        ]
+      },
+      "ExternalSubnetAttach": {
+        "description": "Attach an external subnet to an instance",
+        "type": "object",
+        "properties": {
+          "instance": {
+            "description": "Name or ID of the instance to attach to",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/NameOrId"
+              }
+            ]
+          }
+        },
+        "required": [
+          "instance"
+        ]
+      },
+      "ExternalSubnetCreate": {
+        "description": "Create an external subnet",
+        "type": "object",
+        "properties": {
+          "allocator": {
+            "description": "Subnet allocation method.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ExternalSubnetAllocator"
+              }
+            ]
+          },
+          "description": {
+            "type": "string"
+          },
+          "name": {
+            "$ref": "#/components/schemas/Name"
+          }
+        },
+        "required": [
+          "allocator",
+          "description",
+          "name"
+        ]
+      },
+      "ExternalSubnetResultsPage": {
+        "description": "A single page of results",
+        "type": "object",
+        "properties": {
+          "items": {
+            "description": "list of items on this page of results",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ExternalSubnet"
+            }
+          },
+          "next_page": {
+            "nullable": true,
+            "description": "token used to fetch the next page of results (if any)",
+            "type": "string"
+          }
+        },
+        "required": [
+          "items"
+        ]
+      },
+      "ExternalSubnetUpdate": {
+        "description": "Update an external subnet",
+        "type": "object",
+        "properties": {
+          "description": {
+            "nullable": true,
+            "type": "string"
+          },
+          "name": {
+            "nullable": true,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Name"
+              }
+            ]
+          }
+        }
+      },
       "FailureDomain": {
         "description": "Describes the scope of affinity for the purposes of co-location.",
         "oneOf": [
@@ -19529,7 +20826,7 @@
         "description": "Parameters for creating a new floating IP address for instances.",
         "type": "object",
         "properties": {
-          "address_selector": {
+          "address_allocator": {
             "description": "IP address allocation method.",
             "default": {
               "pool_selector": {
@@ -19540,7 +20837,7 @@
             },
             "allOf": [
               {
-                "$ref": "#/components/schemas/AddressSelector"
+                "$ref": "#/components/schemas/AddressAllocator"
               }
             ]
           },
@@ -24514,6 +25811,94 @@
           "time_modified"
         ]
       },
+      "RackMembershipAddSledsRequest": {
+        "type": "object",
+        "properties": {
+          "sled_ids": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BaseboardId"
+            },
+            "uniqueItems": true
+          }
+        },
+        "required": [
+          "sled_ids"
+        ]
+      },
+      "RackMembershipChangeState": {
+        "type": "string",
+        "enum": [
+          "in_progress",
+          "committed",
+          "aborted"
+        ]
+      },
+      "RackMembershipStatus": {
+        "description": "Status of the rack membership uniquely identified by the (rack_id, version) pair",
+        "type": "object",
+        "properties": {
+          "members": {
+            "description": "All members of the rack for this version",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BaseboardId"
+            },
+            "uniqueItems": true
+          },
+          "rack_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "state": {
+            "$ref": "#/components/schemas/RackMembershipChangeState"
+          },
+          "time_aborted": {
+            "nullable": true,
+            "type": "string",
+            "format": "date-time"
+          },
+          "time_committed": {
+            "nullable": true,
+            "type": "string",
+            "format": "date-time"
+          },
+          "time_created": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "unacknowledged_members": {
+            "description": "All members that have not yet confirmed this membership version",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BaseboardId"
+            },
+            "uniqueItems": true
+          },
+          "version": {
+            "description": "Version that uniquely identifies the rack membership at a given point in time",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/RackMembershipVersion"
+              }
+            ]
+          }
+        },
+        "required": [
+          "members",
+          "rack_id",
+          "state",
+          "time_created",
+          "unacknowledged_members",
+          "version"
+        ]
+      },
+      "RackMembershipVersion": {
+        "description": "A unique, monotonically increasing number representing the set of active sleds in a rack at a given point in time.",
+        "type": "integer",
+        "format": "uint64",
+        "minimum": 0
+      },
       "RackResultsPage": {
         "description": "A single page of results",
         "type": "object",
@@ -26258,6 +27643,364 @@
           "items"
         ]
       },
+      "SubnetPool": {
+        "description": "A pool of subnets for external subnet allocation",
+        "type": "object",
+        "properties": {
+          "description": {
+            "description": "human-readable free-form text about a resource",
+            "type": "string"
+          },
+          "id": {
+            "description": "unique, immutable, system-controlled identifier for each resource",
+            "type": "string",
+            "format": "uuid"
+          },
+          "ip_version": {
+            "description": "The IP version for this pool",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/IpVersion"
+              }
+            ]
+          },
+          "name": {
+            "description": "unique, mutable, user-controlled identifier for each resource",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Name"
+              }
+            ]
+          },
+          "pool_type": {
+            "description": "Type of subnet pool (unicast or multicast)",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/IpPoolType"
+              }
+            ]
+          },
+          "time_created": {
+            "description": "timestamp when this resource was created",
+            "type": "string",
+            "format": "date-time"
+          },
+          "time_modified": {
+            "description": "timestamp when this resource was last modified",
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "description",
+          "id",
+          "ip_version",
+          "name",
+          "pool_type",
+          "time_created",
+          "time_modified"
+        ]
+      },
+      "SubnetPoolCreate": {
+        "description": "Create a subnet pool",
+        "type": "object",
+        "properties": {
+          "description": {
+            "type": "string"
+          },
+          "ip_version": {
+            "description": "The IP version for this pool (IPv4 or IPv6). All subnets in the pool must match this version.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/IpVersion"
+              }
+            ]
+          },
+          "name": {
+            "$ref": "#/components/schemas/Name"
+          }
+        },
+        "required": [
+          "description",
+          "ip_version",
+          "name"
+        ]
+      },
+      "SubnetPoolLinkSilo": {
+        "description": "Link a subnet pool to a silo",
+        "type": "object",
+        "properties": {
+          "is_default": {
+            "description": "Whether this is the default subnet pool for the silo. When true, external subnet allocations that don't specify a pool use this one.",
+            "type": "boolean"
+          },
+          "silo": {
+            "description": "The silo to link",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/NameOrId"
+              }
+            ]
+          }
+        },
+        "required": [
+          "is_default",
+          "silo"
+        ]
+      },
+      "SubnetPoolMember": {
+        "description": "A member (subnet) within a subnet pool",
+        "type": "object",
+        "properties": {
+          "description": {
+            "description": "human-readable free-form text about a resource",
+            "type": "string"
+          },
+          "id": {
+            "description": "unique, immutable, system-controlled identifier for each resource",
+            "type": "string",
+            "format": "uuid"
+          },
+          "max_prefix_length": {
+            "description": "Maximum prefix length for allocations from this subnet; a larger prefix means smaller allocations are allowed (e.g. a /24 prefix yields smaller subnet allocations than a /16 prefix).",
+            "type": "integer",
+            "format": "uint8",
+            "minimum": 0
+          },
+          "min_prefix_length": {
+            "description": "Minimum prefix length for allocations from this subnet; a smaller prefix means larger allocations are allowed (e.g. a /16 prefix yields larger subnet allocations than a /24 prefix).",
+            "type": "integer",
+            "format": "uint8",
+            "minimum": 0
+          },
+          "name": {
+            "description": "unique, mutable, user-controlled identifier for each resource",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Name"
+              }
+            ]
+          },
+          "subnet": {
+            "description": "The subnet CIDR",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/IpNet"
+              }
+            ]
+          },
+          "subnet_pool_id": {
+            "description": "ID of the parent subnet pool",
+            "type": "string",
+            "format": "uuid"
+          },
+          "time_created": {
+            "description": "timestamp when this resource was created",
+            "type": "string",
+            "format": "date-time"
+          },
+          "time_modified": {
+            "description": "timestamp when this resource was last modified",
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "description",
+          "id",
+          "max_prefix_length",
+          "min_prefix_length",
+          "name",
+          "subnet",
+          "subnet_pool_id",
+          "time_created",
+          "time_modified"
+        ]
+      },
+      "SubnetPoolMemberAdd": {
+        "description": "Add a member (subnet) to a subnet pool",
+        "type": "object",
+        "properties": {
+          "max_prefix_length": {
+            "nullable": true,
+            "description": "Maximum prefix length for allocations from this subnet; a larger prefix means smaller allocations are allowed (e.g. a /24 prefix yields smaller subnet allocations than a /16 prefix).\n\nValid values: 0-32 for IPv4, 0-128 for IPv6. Default if not specified is 32 for IPv4 and 128 for IPv6.",
+            "type": "integer",
+            "format": "uint8",
+            "minimum": 0
+          },
+          "min_prefix_length": {
+            "nullable": true,
+            "description": "Minimum prefix length for allocations from this subnet; a smaller prefix means larger allocations are allowed (e.g. a /16 prefix yields larger subnet allocations than a /24 prefix).\n\nValid values: 0-32 for IPv4, 0-128 for IPv6. Default if not specified is equal to the subnet's prefix length.",
+            "type": "integer",
+            "format": "uint8",
+            "minimum": 0
+          },
+          "subnet": {
+            "description": "The subnet to add to the pool",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/IpNet"
+              }
+            ]
+          }
+        },
+        "required": [
+          "subnet"
+        ]
+      },
+      "SubnetPoolMemberRemove": {
+        "description": "Remove a subnet from a pool",
+        "type": "object",
+        "properties": {
+          "subnet": {
+            "description": "The subnet to remove from the pool. Must match an existing entry exactly.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/IpNet"
+              }
+            ]
+          }
+        },
+        "required": [
+          "subnet"
+        ]
+      },
+      "SubnetPoolMemberResultsPage": {
+        "description": "A single page of results",
+        "type": "object",
+        "properties": {
+          "items": {
+            "description": "list of items on this page of results",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SubnetPoolMember"
+            }
+          },
+          "next_page": {
+            "nullable": true,
+            "description": "token used to fetch the next page of results (if any)",
+            "type": "string"
+          }
+        },
+        "required": [
+          "items"
+        ]
+      },
+      "SubnetPoolResultsPage": {
+        "description": "A single page of results",
+        "type": "object",
+        "properties": {
+          "items": {
+            "description": "list of items on this page of results",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SubnetPool"
+            }
+          },
+          "next_page": {
+            "nullable": true,
+            "description": "token used to fetch the next page of results (if any)",
+            "type": "string"
+          }
+        },
+        "required": [
+          "items"
+        ]
+      },
+      "SubnetPoolSiloLink": {
+        "description": "A link between a subnet pool and a silo",
+        "type": "object",
+        "properties": {
+          "is_default": {
+            "type": "boolean"
+          },
+          "silo_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "subnet_pool_id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "required": [
+          "is_default",
+          "silo_id",
+          "subnet_pool_id"
+        ]
+      },
+      "SubnetPoolSiloLinkResultsPage": {
+        "description": "A single page of results",
+        "type": "object",
+        "properties": {
+          "items": {
+            "description": "list of items on this page of results",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SubnetPoolSiloLink"
+            }
+          },
+          "next_page": {
+            "nullable": true,
+            "description": "token used to fetch the next page of results (if any)",
+            "type": "string"
+          }
+        },
+        "required": [
+          "items"
+        ]
+      },
+      "SubnetPoolSiloUpdate": {
+        "description": "Update a subnet pool's silo link",
+        "type": "object",
+        "properties": {
+          "is_default": {
+            "description": "Whether this is the default subnet pool for the silo",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "is_default"
+        ]
+      },
+      "SubnetPoolUpdate": {
+        "description": "Update a subnet pool",
+        "type": "object",
+        "properties": {
+          "description": {
+            "nullable": true,
+            "type": "string"
+          },
+          "name": {
+            "nullable": true,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Name"
+              }
+            ]
+          }
+        }
+      },
+      "SubnetPoolUtilization": {
+        "description": "Utilization information for a subnet pool",
+        "type": "object",
+        "properties": {
+          "allocated": {
+            "description": "Number of addresses allocated from this pool",
+            "type": "number",
+            "format": "double"
+          },
+          "capacity": {
+            "description": "Total capacity of this pool in addresses",
+            "type": "number",
+            "format": "double"
+          }
+        },
+        "required": [
+          "allocated",
+          "capacity"
+        ]
+      },
       "SupportBundleCreate": {
         "type": "object",
         "properties": {
@@ -26956,7 +28699,7 @@
         ]
       },
       "SwitchPortSettings": {
-        "description": "Switch port settings (old version with required BgpPeer.addr).",
+        "description": "This structure contains all port settings information in one place. It's a convenience data structure for getting a complete view of a particular port's settings.",
         "type": "object",
         "properties": {
           "addresses": {
@@ -27061,7 +28804,7 @@
         ]
       },
       "SwitchPortSettingsCreate": {
-        "description": "Parameters for creating switch port settings (old version with required BgpPeer.addr).",
+        "description": "Parameters for creating switch port settings. Switch port settings are the central data structure for setting up external networking. Switch port settings include link, interface, route, address and dynamic network protocol configuration.",
         "type": "object",
         "properties": {
           "addresses": {

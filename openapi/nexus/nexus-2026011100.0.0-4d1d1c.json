@@ -7,7 +7,7 @@
       "url": "https://oxide.computer",
       "email": "api@oxide.computer"
     },
-    "version": "2026011300.0.0"
+    "version": "2026011100.0.0"
   },
   "paths": {
     "/device/auth": {
@@ -400,7 +400,7 @@
         "tags": [
           "experimental"
         ],
-        "summary": "View support bundle",
+        "summary": "View a support bundle",
         "operationId": "support_bundle_view",
         "parameters": [
           {
@@ -2496,7 +2496,7 @@
         "tags": [
           "disks"
         ],
-        "summary": "Create disk",
+        "summary": "Create a disk",
         "operationId": "disk_create",
         "parameters": [
           {
@@ -4245,7 +4245,7 @@
           "instances"
         ],
         "summary": "Detach and deallocate ephemeral IP from instance",
-        "operationId": "v2026012200_instance_ephemeral_ip_detach",
+        "operationId": "instance_ephemeral_ip_detach",
         "parameters": [
           {
             "in": "path",
@@ -4283,7 +4283,7 @@
         "tags": [
           "experimental"
         ],
-        "summary": "List multicast groups for an instance",
+        "summary": "List multicast groups for an instance.",
         "operationId": "instance_multicast_group_list",
         "parameters": [
           {
@@ -4359,7 +4359,7 @@
         "tags": [
           "experimental"
         ],
-        "summary": "Join multicast group by name, IP address, or UUID",
+        "summary": "Join a multicast group by name, IP address, or UUID.",
         "description": "Groups can be referenced by name, IP address, or UUID. If the group doesn't exist, it's implicitly created with an auto-allocated IP from a multicast pool linked to the caller's silo. When referencing by UUID, the group must already exist.\n\nSource IPs are optional for ASM addresses but required for SSM addresses (232.0.0.0/8 for IPv4, ff3x::/32 for IPv6). Duplicate IPs in the request are automatically deduplicated, with a maximum of 64 source IPs allowed.",
         "operationId": "instance_multicast_group_join",
         "parameters": [
@@ -4423,7 +4423,7 @@
         "tags": [
           "experimental"
         ],
-        "summary": "Leave multicast group by name, IP address, or UUID",
+        "summary": "Leave a multicast group by name, IP address, or UUID.",
         "operationId": "instance_multicast_group_leave",
         "parameters": [
           {
@@ -4471,7 +4471,7 @@
         "tags": [
           "instances"
         ],
-        "summary": "Reboot instance",
+        "summary": "Reboot an instance",
         "operationId": "instance_reboot",
         "parameters": [
           {
@@ -6072,7 +6072,7 @@
         "tags": [
           "experimental"
         ],
-        "summary": "List multicast groups",
+        "summary": "List multicast groups.",
         "operationId": "multicast_group_list",
         "parameters": [
           {
@@ -6131,7 +6131,7 @@
         "tags": [
           "experimental"
         ],
-        "summary": "Fetch multicast group",
+        "summary": "Fetch a multicast group.",
         "description": "The group can be specified by name, UUID, or multicast IP address. (e.g., \"224.1.2.3\" or \"ff38::1\").",
         "operationId": "multicast_group_view",
         "parameters": [
@@ -6170,7 +6170,7 @@
         "tags": [
           "experimental"
         ],
-        "summary": "List members of multicast group",
+        "summary": "List members of a multicast group.",
         "description": "The group can be specified by name, UUID, or multicast IP address.",
         "operationId": "multicast_group_member_list",
         "parameters": [
@@ -6752,7 +6752,7 @@
         "tags": [
           "projects"
         ],
-        "summary": "Update project",
+        "summary": "Update a project",
         "operationId": "project_update",
         "parameters": [
           {
@@ -7252,7 +7252,7 @@
         "tags": [
           "system/hardware"
         ],
-        "summary": "Get physical disk",
+        "summary": "Get a physical disk",
         "operationId": "physical_disk_view",
         "parameters": [
           {
@@ -8871,7 +8871,7 @@
         "tags": [
           "system/ip-pools"
         ],
-        "summary": "Add range to an IP pool",
+        "summary": "Add range to IP pool.",
         "description": "IPv6 ranges are not allowed yet for unicast pools.\n\nFor multicast pools, all ranges must be either Any-Source Multicast (ASM) or Source-Specific Multicast (SSM), but not both. Mixing ASM and SSM ranges in the same pool is not allowed.\n\nASM: IPv4 addresses outside 232.0.0.0/8, IPv6 addresses with flag field != 3 SSM: IPv4 addresses in 232.0.0.0/8, IPv6 addresses with flag field = 3",
         "operationId": "ip_pool_range_add",
         "parameters": [
@@ -9744,7 +9744,7 @@
         "tags": [
           "system/networking"
         ],
-        "summary": "Disable BFD session",
+        "summary": "Disable a BFD session",
         "operationId": "networking_bfd_disable",
         "requestBody": {
           "content": {
@@ -9774,7 +9774,7 @@
         "tags": [
           "system/networking"
         ],
-        "summary": "Enable BFD session",
+        "summary": "Enable a BFD session",
         "operationId": "networking_bfd_enable",
         "requestBody": {
           "content": {
@@ -10548,8 +10548,8 @@
         "tags": [
           "system/networking"
         ],
-        "summary": "Create switch port settings (old version with required BgpPeer.addr)",
-        "operationId": "v2026010300_networking_switch_port_settings_create",
+        "summary": "Create switch port settings",
+        "operationId": "networking_switch_port_settings_create",
         "requestBody": {
           "content": {
             "application/json": {
@@ -10613,8 +10613,8 @@
         "tags": [
           "system/networking"
         ],
-        "summary": "Get information about switch port (old version with required BgpPeer.addr)",
-        "operationId": "v2026010300_networking_switch_port_settings_view",
+        "summary": "Get information about switch port",
+        "operationId": "networking_switch_port_settings_view",
         "parameters": [
           {
             "in": "path",
@@ -10997,7 +10997,7 @@
         "tags": [
           "system/silos"
         ],
-        "summary": "Create silo",
+        "summary": "Create a silo",
         "operationId": "silo_create",
         "requestBody": {
           "content": {
@@ -11071,7 +11071,7 @@
         "tags": [
           "system/silos"
         ],
-        "summary": "Delete silo",
+        "summary": "Delete a silo",
         "description": "Delete a silo by name or ID.",
         "operationId": "silo_delete",
         "parameters": [
@@ -13725,7 +13725,7 @@
         "tags": [
           "vpcs"
         ],
-        "summary": "Update VPC",
+        "summary": "Update a VPC",
         "operationId": "vpc_update",
         "parameters": [
           {
@@ -15240,18 +15240,8 @@
           },
           "auth_method": {
             "nullable": true,
-            "description": "How the user authenticated the request (access token, session, or SCIM token). Null for unauthenticated requests like login attempts.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/AuthMethod"
-              }
-            ]
-          },
-          "credential_id": {
-            "nullable": true,
-            "description": "ID of the credential used for authentication. Null for unauthenticated requests. The value of `auth_method` indicates what kind of credential it is (access token, session, or SCIM token).",
-            "type": "string",
-            "format": "uuid"
+            "description": "How the user authenticated the request. Possible values are \"session_cookie\" and \"access_token\". Optional because it will not be defined on unauthenticated requests like login attempts.",
+            "type": "string"
           },
           "id": {
             "description": "Unique identifier for the audit log entry",
@@ -15482,32 +15472,6 @@
         },
         "required": [
           "items"
-        ]
-      },
-      "AuthMethod": {
-        "description": "Authentication method used for a request",
-        "oneOf": [
-          {
-            "description": "Console session cookie",
-            "type": "string",
-            "enum": [
-              "session_cookie"
-            ]
-          },
-          {
-            "description": "Device access token (OAuth 2.0 device authorization flow)",
-            "type": "string",
-            "enum": [
-              "access_token"
-            ]
-          },
-          {
-            "description": "SCIM client bearer token",
-            "type": "string",
-            "enum": [
-              "scim_token"
-            ]
-          }
         ]
       },
       "AuthzScope": {
@@ -16149,7 +16113,6 @@
         ]
       },
       "BgpPeerConfig": {
-        "description": "BGP peer configuration for a link (old version with required addr).",
         "type": "object",
         "properties": {
           "link_name": {
@@ -23691,7 +23654,7 @@
         ]
       },
       "PoolSelector": {
-        "description": "Specify which IP or external subnet pool to allocate from.",
+        "description": "Specify which IP pool to allocate from.",
         "oneOf": [
           {
             "description": "Use the specified pool by name or ID.",
@@ -26956,7 +26919,7 @@
         ]
       },
       "SwitchPortSettings": {
-        "description": "Switch port settings (old version with required BgpPeer.addr).",
+        "description": "This structure contains all port settings information in one place. It's a convenience data structure for getting a complete view of a particular port's settings.",
         "type": "object",
         "properties": {
           "addresses": {
@@ -27061,7 +27024,7 @@
         ]
       },
       "SwitchPortSettingsCreate": {
-        "description": "Parameters for creating switch port settings (old version with required BgpPeer.addr).",
+        "description": "Parameters for creating switch port settings. Switch port settings are the central data structure for setting up external networking. Switch port settings include link, interface, route, address and dynamic network protocol configuration.",
         "type": "object",
         "properties": {
           "addresses": {
@@ -29526,13 +29489,6 @@
       }
     },
     {
-      "name": "external-subnets",
-      "description": "External subnets that can be attached to instances.",
-      "externalDocs": {
-        "url": "http://docs.oxide.computer/api/external-subnets"
-      }
-    },
-    {
       "name": "floating-ips",
       "description": "Floating IPs allow a project to allocate well-known IPs to instances.",
       "externalDocs": {
@@ -29663,13 +29619,6 @@
       "description": "Endpoints related to system health",
       "externalDocs": {
         "url": "http://docs.oxide.computer/api/system-status"
-      }
-    },
-    {
-      "name": "system/subnet-pools",
-      "description": "Subnet pools are collections of IP subnets that can be assigned to silos. When a pool is linked to a silo, users in that silo can allocate external subnets from the pool.",
-      "externalDocs": {
-        "url": "http://docs.oxide.computer/api/system-subnet-pools"
       }
     },
     {

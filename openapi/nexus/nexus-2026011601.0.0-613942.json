@@ -4601,7 +4601,7 @@
           "instances"
         ],
         "summary": "Detach and deallocate ephemeral IP from instance",
-        "operationId": "v2026012200_instance_ephemeral_ip_detach",
+        "operationId": "instance_ephemeral_ip_detach",
         "parameters": [
           {
             "in": "path",
@@ -10904,8 +10904,8 @@
         "tags": [
           "system/networking"
         ],
-        "summary": "Create switch port settings (old version with required BgpPeer.addr)",
-        "operationId": "v2026010300_networking_switch_port_settings_create",
+        "summary": "Create switch port settings",
+        "operationId": "networking_switch_port_settings_create",
         "requestBody": {
           "content": {
             "application/json": {
@@ -10969,8 +10969,8 @@
         "tags": [
           "system/networking"
         ],
-        "summary": "Get information about switch port (old version with required BgpPeer.addr)",
-        "operationId": "v2026010300_networking_switch_port_settings_view",
+        "summary": "Get information about switch port",
+        "operationId": "networking_switch_port_settings_view",
         "parameters": [
           {
             "in": "path",
@@ -17116,7 +17116,6 @@
         ]
       },
       "BgpPeerConfig": {
-        "description": "BGP peer configuration for a link (old version with required addr).",
         "type": "object",
         "properties": {
           "link_name": {
@@ -28524,7 +28523,7 @@
         ]
       },
       "SwitchPortSettings": {
-        "description": "Switch port settings (old version with required BgpPeer.addr).",
+        "description": "This structure contains all port settings information in one place. It's a convenience data structure for getting a complete view of a particular port's settings.",
         "type": "object",
         "properties": {
           "addresses": {
@@ -28629,7 +28628,7 @@
         ]
       },
       "SwitchPortSettingsCreate": {
-        "description": "Parameters for creating switch port settings (old version with required BgpPeer.addr).",
+        "description": "Parameters for creating switch port settings. Switch port settings are the central data structure for setting up external networking. Switch port settings include link, interface, route, address and dynamic network protocol configuration.",
         "type": "object",
         "properties": {
           "addresses": {

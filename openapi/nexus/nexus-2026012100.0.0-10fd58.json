@@ -7,7 +7,7 @@
       "url": "https://oxide.computer",
       "email": "api@oxide.computer"
     },
-    "version": "2026011700.0.0"
+    "version": "2026012100.0.0"
   },
   "paths": {
     "/device/auth": {
@@ -4601,7 +4601,7 @@
           "instances"
         ],
         "summary": "Detach and deallocate ephemeral IP from instance",
-        "operationId": "v2026012200_instance_ephemeral_ip_detach",
+        "operationId": "instance_ephemeral_ip_detach",
         "parameters": [
           {
             "in": "path",
@@ -7814,6 +7814,101 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/Rack"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/system/hardware/racks/{rack_id}/membership": {
+      "get": {
+        "tags": [
+          "experimental"
+        ],
+        "summary": "Retrieve the rack cluster membership status",
+        "description": "Returns the status for the most recent change, or a specific version if one is specified.",
+        "operationId": "rack_membership_status",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "rack_id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "query",
+            "name": "version",
+            "schema": {
+              "$ref": "#/components/schemas/RackMembershipVersion"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RackMembershipStatus"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/system/hardware/racks/{rack_id}/membership/add": {
+      "post": {
+        "tags": [
+          "experimental"
+        ],
+        "summary": "Add new sleds to rack membership",
+        "operationId": "rack_membership_add_sleds",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "rack_id",
+            "description": "ID of the rack",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RackMembershipAddSledsRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RackMembershipStatus"
                 }
               }
             }
@@ -16532,6 +16627,24 @@
           "serial"
         ]
       },
+      "BaseboardId": {
+        "description": "A representation of a Baseboard ID as used in the inventory subsystem.\n\nThis type is essentially the same as a `Baseboard` except it doesn't have a revision or HW type (Gimlet, PC, Unknown).",
+        "type": "object",
+        "properties": {
+          "part_number": {
+            "description": "Oxide Part Number",
+            "type": "string"
+          },
+          "serial_number": {
+            "description": "Serial number (unique for a given part number)",
+            "type": "string"
+          }
+        },
+        "required": [
+          "part_number",
+          "serial_number"
+        ]
+      },
       "BfdMode": {
         "description": "BFD connection mode.",
         "type": "string",
@@ -16980,8 +17093,7 @@
         "type": "object",
         "properties": {
           "addr": {
-            "nullable": true,
-            "description": "The address of the host to peer with. If not provided, this is an unnumbered BGP session that will be established over the interface specified by `interface_name`.",
+            "description": "The address of the host to peer with.",
             "type": "string",
             "format": "ip"
           },
@@ -17102,6 +17214,7 @@
           }
         },
         "required": [
+          "addr",
           "allowed_export",
           "allowed_import",
           "bgp_config",
@@ -25705,6 +25818,94 @@
           "time_created",
           "time_modified"
         ]
+      },
+      "RackMembershipAddSledsRequest": {
+        "type": "object",
+        "properties": {
+          "sled_ids": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BaseboardId"
+            },
+            "uniqueItems": true
+          }
+        },
+        "required": [
+          "sled_ids"
+        ]
+      },
+      "RackMembershipChangeState": {
+        "type": "string",
+        "enum": [
+          "in_progress",
+          "committed",
+          "aborted"
+        ]
+      },
+      "RackMembershipStatus": {
+        "description": "Status of the rack membership uniquely identified by the (rack_id, version) pair",
+        "type": "object",
+        "properties": {
+          "members": {
+            "description": "All members of the rack for this version",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BaseboardId"
+            },
+            "uniqueItems": true
+          },
+          "rack_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "state": {
+            "$ref": "#/components/schemas/RackMembershipChangeState"
+          },
+          "time_aborted": {
+            "nullable": true,
+            "type": "string",
+            "format": "date-time"
+          },
+          "time_committed": {
+            "nullable": true,
+            "type": "string",
+            "format": "date-time"
+          },
+          "time_created": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "unacknowledged_members": {
+            "description": "All members that have not yet confirmed this membership version",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BaseboardId"
+            },
+            "uniqueItems": true
+          },
+          "version": {
+            "description": "Version that uniquely identifies the rack membership at a given point in time",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/RackMembershipVersion"
+              }
+            ]
+          }
+        },
+        "required": [
+          "members",
+          "rack_id",
+          "state",
+          "time_created",
+          "unacknowledged_members",
+          "version"
+        ]
+      },
+      "RackMembershipVersion": {
+        "description": "A unique, monotonically increasing number representing the set of active sleds in a rack at a given point in time.",
+        "type": "integer",
+        "format": "uint64",
+        "minimum": 0
       },
       "RackResultsPage": {
         "description": "A single page of results",

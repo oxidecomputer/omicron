@@ -43,8 +43,8 @@ mod v2026010300;
 mod v2026010500;
 mod v2026011501;
 mod v2026011600;
-mod v2026011601;
 mod v2026012200;
+mod v2026013000;
 
 #[cfg(test)]
 mod test_utils;
@@ -77,11 +77,11 @@ api_versions!([
     // |  date-based version should be at the top of the list.
     // v
     // (next_yyyymmddnn, IDENT),
+    (2026013000, BGP_UNNUMBERED_PEERS),
     (2026012300, DUAL_STACK_EPHEMERAL_IP),
     (2026012201, EXTERNAL_SUBNET_ALLOCATOR_UPDATE),
     (2026012200, FLOATING_IP_ALLOCATOR_UPDATE),
     (2026012100, TRUST_QUORUM_ADD_SLEDS_AND_GET_LATEST_CONFIG),
-    (2026011700, BGP_UNNUMBERED_PEERS),
     (2026011601, EXTERNAL_SUBNET_ATTACHMENT),
     (2026011600, RENAME_ADDRESS_SELECTOR_TO_ADDRESS_ALLOCATOR),
     (2026011501, AUDIT_LOG_CREDENTIAL_ID),
@@ -3024,8 +3024,8 @@ pub trait NexusExternalApi {
     }]
     async fn v2026010300_networking_switch_port_settings_create(
         rqctx: RequestContext<Self::Context>,
-        new_settings: TypedBody<v2026011601::SwitchPortSettingsCreate>,
-    ) -> Result<HttpResponseCreated<v2026011601::SwitchPortSettings>, HttpError>
+        new_settings: TypedBody<v2026013000::SwitchPortSettingsCreate>,
+    ) -> Result<HttpResponseCreated<v2026013000::SwitchPortSettings>, HttpError>
     {
         match Self::networking_switch_port_settings_create(
             rqctx,
@@ -3089,7 +3089,7 @@ pub trait NexusExternalApi {
     async fn v2026010300_networking_switch_port_settings_view(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<params::SwitchPortSettingsInfoSelector>,
-    ) -> Result<HttpResponseOk<v2026011601::SwitchPortSettings>, HttpError>
+    ) -> Result<HttpResponseOk<v2026013000::SwitchPortSettings>, HttpError>
     {
         match Self::networking_switch_port_settings_view(rqctx, path_params)
             .await

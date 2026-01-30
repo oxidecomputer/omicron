@@ -7,7 +7,7 @@
       "url": "https://oxide.computer",
       "email": "api@oxide.computer"
     },
-    "version": "17.0.0"
+    "version": "16.0.0"
   },
   "paths": {
     "/artifacts": {
@@ -355,10 +355,28 @@
         }
       }
     },
-    "/local-storage": {
+    "/local-storage/{zpool_id}/{dataset_id}": {
       "post": {
         "summary": "Create a local storage dataset",
         "operationId": "local_storage_dataset_ensure",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "dataset_id",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/DatasetUuid"
+            }
+          },
+          {
+            "in": "path",
+            "name": "zpool_id",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/ExternalZpoolUuid"
+            }
+          }
+        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -384,16 +402,24 @@
       "delete": {
         "summary": "Delete a local storage dataset",
         "operationId": "local_storage_dataset_delete",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/LocalStorageDatasetDeleteRequest"
-              }
+        "parameters": [
+          {
+            "in": "path",
+            "name": "dataset_id",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/DatasetUuid"
             }
           },
-          "required": true
-        },
+          {
+            "in": "path",
+            "name": "zpool_id",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/ExternalZpoolUuid"
+            }
+          }
+        ],
         "responses": {
           "204": {
             "description": "resource updated"
@@ -411,7 +437,7 @@
       "get": {
         "summary": "This API endpoint is only reading the local sled agent's view of the",
         "description": "bootstore. The boostore is a distributed data store that is eventually consistent. Reads from individual nodes may not represent the latest state.",
-        "operationId": "read_network_bootstore_config_cache_v1",
+        "operationId": "read_network_bootstore_config_cache",
         "responses": {
           "200": {
             "description": "successful operation",
@@ -432,7 +458,7 @@
         }
       },
       "put": {
-        "operationId": "write_network_bootstore_config_v1",
+        "operationId": "write_network_bootstore_config",
         "requestBody": {
           "content": {
             "application/json": {
@@ -3055,7 +3081,7 @@
         "type": "object",
         "properties": {
           "addr": {
-            "description": "Address of the peer. Use `Ipv4Addr::UNSPECIFIED` to indicate an unnumbered BGP session established over the interface specified by `port`.",
+            "description": "Address of the peer.",
             "type": "string",
             "format": "ipv4"
           },
@@ -4651,7 +4677,7 @@
         "description": "Delegate a ZFS volume to a zone",
         "oneOf": [
           {
-            "description": "Delegate a slice of the _unencrypted_ local storage dataset present on this pool into the zone.",
+            "description": "Delegate a slice of the local storage dataset present on this pool into the zone.",
             "type": "object",
             "properties": {
               "dataset_id": {
@@ -4660,30 +4686,7 @@
               "type": {
                 "type": "string",
                 "enum": [
-                  "local_storage_unencrypted"
-                ]
-              },
-              "zpool_id": {
-                "$ref": "#/components/schemas/ExternalZpoolUuid"
-              }
-            },
-            "required": [
-              "dataset_id",
-              "type",
-              "zpool_id"
-            ]
-          },
-          {
-            "description": "Delegate a slice of the _encrypted_ local storage dataset present on this pool into the zone.",
-            "type": "object",
-            "properties": {
-              "dataset_id": {
-                "$ref": "#/components/schemas/DatasetUuid"
-              },
-              "type": {
-                "type": "string",
-                "enum": [
-                  "local_storage_encrypted"
+                  "local_storage"
                 ]
               },
               "zpool_id": {
@@ -5151,7 +5154,7 @@
             "nullable": true,
             "allOf": [
               {
-                "$ref": "#/components/schemas/RackNetworkConfig"
+                "$ref": "#/components/schemas/RackNetworkConfigV2"
               }
             ]
           }
@@ -5696,14 +5699,14 @@
             "description": "IP Address and prefix (e.g., `192.168.0.1/16`) to apply to switchport (must be in infra_ip pool).  May also include an optional VLAN ID.",
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/UplinkAddressConfig2"
+              "$ref": "#/components/schemas/UplinkAddressConfig"
             }
           },
           "lldp": {
             "nullable": true,
             "allOf": [
               {
-                "$ref": "#/components/schemas/LldpPortConfig2"
+                "$ref": "#/components/schemas/LldpPortConfig"
               }
             ]
           },
@@ -5715,7 +5718,7 @@
             "nullable": true,
             "allOf": [
               {
-                "$ref": "#/components/schemas/TxEqConfig2"
+                "$ref": "#/components/schemas/TxEqConfig"
               }
             ]
           }
@@ -6457,16 +6460,6 @@
           "tx_only"
         ]
       },
-      "LldpAdminStatus2": {
-        "description": "To what extent should this port participate in LLDP",
-        "type": "string",
-        "enum": [
-          "enabled",
-          "disabled",
-          "rx_only",
-          "tx_only"
-        ]
-      },
       "LldpPortConfig": {
         "description": "Per-port LLDP configuration settings.  Only the \"status\" setting is mandatory.  All other fields have natural defaults or may be inherited from the switch.",
         "type": "object",
@@ -6518,95 +6511,10 @@
           "status"
         ]
       },
-      "LldpPortConfig2": {
-        "description": "Per-port LLDP configuration settings.  Only the \"status\" setting is mandatory.  All other fields have natural defaults or may be inherited from the switch.",
-        "type": "object",
-        "properties": {
-          "chassis_id": {
-            "nullable": true,
-            "description": "Chassis ID to advertise.  If this is set, it will be advertised as a LocallyAssigned ID type.  If this is not set, it will be inherited from the switch-level settings.",
-            "type": "string"
-          },
-          "management_addrs": {
-            "nullable": true,
-            "description": "Management IP addresses to advertise.  If this is not set, it will be inherited from the switch-level settings.",
-            "type": "array",
-            "items": {
-              "type": "string",
-              "format": "ip"
-            }
-          },
-          "port_description": {
-            "nullable": true,
-            "description": "Port description to advertise.  If this is not set, no description will be advertised.",
-            "type": "string"
-          },
-          "port_id": {
-            "nullable": true,
-            "description": "Port ID to advertise.  If this is set, it will be advertised as a LocallyAssigned ID type.  If this is not set, it will be set to the port name. e.g., qsfp0/0.",
-            "type": "string"
-          },
-          "status": {
-            "description": "To what extent should this port participate in LLDP",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/LldpAdminStatus2"
-              }
-            ]
-          },
-          "system_description": {
-            "nullable": true,
-            "description": "System description to advertise.  If this is not set, it will be inherited from the switch-level settings.",
-            "type": "string"
-          },
-          "system_name": {
-            "nullable": true,
-            "description": "System name to advertise.  If this is not set, it will be inherited from the switch-level settings.",
-            "type": "string"
-          }
-        },
-        "required": [
-          "status"
-        ]
-      },
-      "LocalStorageDatasetDeleteRequest": {
-        "description": "Dataset details for a Local Storage dataset delete request.",
-        "type": "object",
-        "properties": {
-          "dataset_id": {
-            "description": "ID of the local storage dataset allocation, not the local storage dataset!",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/DatasetUuid"
-              }
-            ]
-          },
-          "encrypted_at_rest": {
-            "description": "Whether or not to use the encrypted dataset",
-            "type": "boolean"
-          },
-          "zpool_id": {
-            "$ref": "#/components/schemas/ExternalZpoolUuid"
-          }
-        },
-        "required": [
-          "dataset_id",
-          "encrypted_at_rest",
-          "zpool_id"
-        ]
-      },
       "LocalStorageDatasetEnsureRequest": {
         "description": "Dataset and Volume details for a Local Storage dataset ensure request.",
         "type": "object",
         "properties": {
-          "dataset_id": {
-            "description": "ID of the local storage dataset allocation, not the local storage dataset!",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/DatasetUuid"
-              }
-            ]
-          },
           "dataset_size": {
             "description": "Size of the parent dataset",
             "allOf": [
@@ -6615,10 +6523,6 @@
               }
             ]
           },
-          "encrypted_at_rest": {
-            "description": "Whether or not to use the encrypted dataset",
-            "type": "boolean"
-          },
           "volume_size": {
             "description": "Size of the zvol",
             "allOf": [
@@ -6626,17 +6530,11 @@
                 "$ref": "#/components/schemas/ByteCount"
               }
             ]
-          },
-          "zpool_id": {
-            "$ref": "#/components/schemas/ExternalZpoolUuid"
           }
         },
         "required": [
-          "dataset_id",
           "dataset_size",
-          "encrypted_at_rest",
-          "volume_size",
-          "zpool_id"
+          "volume_size"
         ]
       },
       "LrtqUpgradeMsg": {
@@ -8127,7 +8025,7 @@
         "type": "string",
         "format": "uuid"
       },
-      "PortConfig": {
+      "PortConfigV2": {
         "type": "object",
         "properties": {
           "addresses": {
@@ -8559,7 +8457,7 @@
         ],
         "additionalProperties": false
       },
-      "RackNetworkConfig": {
+      "RackNetworkConfigV2": {
         "description": "Initial network configuration",
         "type": "object",
         "properties": {
@@ -8592,7 +8490,7 @@
             "description": "Uplinks for connecting the rack to external networks",
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/PortConfig"
+              "$ref": "#/components/schemas/PortConfigV2"
             }
           },
           "rack_subnet": {
@@ -9702,62 +9600,7 @@
           }
         }
       },
-      "TxEqConfig2": {
-        "description": "Per-port tx-eq overrides.  This can be used to fine-tune the transceiver equalization settings to improve signal integrity.",
-        "type": "object",
-        "properties": {
-          "main": {
-            "nullable": true,
-            "description": "Main tap",
-            "type": "integer",
-            "format": "int32"
-          },
-          "post1": {
-            "nullable": true,
-            "description": "Post-cursor tap1",
-            "type": "integer",
-            "format": "int32"
-          },
-          "post2": {
-            "nullable": true,
-            "description": "Post-cursor tap2",
-            "type": "integer",
-            "format": "int32"
-          },
-          "pre1": {
-            "nullable": true,
-            "description": "Pre-cursor tap1",
-            "type": "integer",
-            "format": "int32"
-          },
-          "pre2": {
-            "nullable": true,
-            "description": "Pre-cursor tap2",
-            "type": "integer",
-            "format": "int32"
-          }
-        }
-      },
       "UplinkAddressConfig": {
-        "type": "object",
-        "properties": {
-          "address": {
-            "$ref": "#/components/schemas/IpNet"
-          },
-          "vlan_id": {
-            "nullable": true,
-            "description": "The VLAN id (if any) associated with this address.",
-            "default": null,
-            "type": "integer",
-            "format": "uint16",
-            "minimum": 0
-          }
-        },
-        "required": [
-          "address"
-        ]
-      },
-      "UplinkAddressConfig2": {
         "type": "object",
         "properties": {
           "address": {
