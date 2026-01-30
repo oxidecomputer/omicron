@@ -19524,7 +19524,7 @@
             "type": "object",
             "properties": {
               "read_only": {
-                "description": "If `true`, the disk will be read-only once it is created.",
+                "description": "If `true`, the disk created from this snapshot will be read-only.",
                 "type": "boolean"
               },
               "snapshot_id": {
@@ -19552,6 +19552,10 @@
                 "type": "string",
                 "format": "uuid"
               },
+              "read_only": {
+                "description": "If `true`, the disk created from this image will be read-only.",
+                "type": "boolean"
+              },
               "type": {
                 "type": "string",
                 "enum": [
@@ -19561,6 +19565,7 @@
             },
             "required": [
               "image_id",
+              "read_only",
               "type"
             ]
           },

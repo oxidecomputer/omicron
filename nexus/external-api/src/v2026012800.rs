@@ -2,8 +2,8 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! Types from API version 2026012300 (`DUAL_STACK_EPHEMERAL_IP`) that changed
-//! in version 2026012600 (`READ_ONLY_DISKS`).
+//! Types from API version 2026012800 (`REMOVE_SUBNET_POOL_POOL_TYPE`) that changed
+//! in version 2026013000 (`READ_ONLY_DISKS`).
 
 use crate::v2025112000;
 use api_identity::ObjectIdentity;

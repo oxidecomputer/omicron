@@ -2497,7 +2497,7 @@
           "disks"
         ],
         "summary": "Create disk",
-        "operationId": "v2026012800_disk_create",
+        "operationId": "disk_create",
         "parameters": [
           {
             "in": "query",
@@ -2545,7 +2545,7 @@
           "disks"
         ],
         "summary": "Fetch disk",
-        "operationId": "v2026012800_disk_view",
+        "operationId": "disk_view",
         "parameters": [
           {
             "in": "path",
@@ -3977,7 +3977,7 @@
           "instances"
         ],
         "summary": "Create instance",
-        "operationId": "v2026012800_instance_create",
+        "operationId": "instance_create",
         "parameters": [
           {
             "in": "query",
@@ -4314,7 +4314,7 @@
           "instances"
         ],
         "summary": "List disks for instance",
-        "operationId": "v2026012800_instance_disk_list",
+        "operationId": "instance_disk_list",
         "parameters": [
           {
             "in": "query",
@@ -4390,7 +4390,7 @@
           "instances"
         ],
         "summary": "Attach disk to instance",
-        "operationId": "v2026012800_instance_disk_attach",
+        "operationId": "instance_disk_attach",
         "parameters": [
           {
             "in": "path",
@@ -4446,7 +4446,7 @@
           "instances"
         ],
         "summary": "Detach disk from instance",
-        "operationId": "v2026012800_instance_disk_detach",
+        "operationId": "instance_disk_detach",
         "parameters": [
           {
             "in": "path",
@@ -19488,7 +19488,7 @@
         ]
       },
       "DiskSource": {
-        "description": "Different sources for a disk",
+        "description": "Different sources for a Distributed Disk",
         "oneOf": [
           {
             "description": "Create a blank disk",
