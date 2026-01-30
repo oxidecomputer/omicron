@@ -236,6 +236,19 @@ pub(crate) async fn activate_multicast_reconciler(
     .await
 }
 
+/// Activates the inventory loader and waits for it to complete.
+///
+/// This ensures the watch channel has the latest inventory collection from the database.
+pub(crate) async fn activate_inventory_loader(
+    lockstep_client: &ClientTestContext,
+) -> nexus_lockstep_client::types::BackgroundTask {
+    nexus_test_utils::background::activate_background_task(
+        lockstep_client,
+        "inventory_loader",
+    )
+    .await
+}
+
 /// Wait for a condition to be true, activating the reconciler periodically.
 ///
 /// This is like `wait_for_condition` but activates the multicast reconciler

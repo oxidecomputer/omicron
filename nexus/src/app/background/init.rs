@@ -155,7 +155,6 @@ use omicron_uuid_kinds::OmicronZoneUuid;
 use oximeter::types::ProducerRegistry;
 use std::collections::BTreeMap;
 use std::sync::Arc;
-use std::sync::atomic::AtomicBool;
 use tokio::sync::mpsc;
 use tokio::sync::watch;
 use update_common::artifacts::ArtifactsWithPlan;
@@ -169,8 +168,6 @@ pub(crate) struct BackgroundTasksInternal {
     pub(crate) external_endpoints:
         watch::Receiver<Option<external_endpoints::ExternalEndpoints>>,
     inventory_load_rx: watch::Receiver<Option<Arc<Collection>>>,
-    /// Flag to signal cache invalidation for multicast reconciler
-    pub(crate) multicast_invalidate_cache: Option<Arc<AtomicBool>>,
 }
 
 impl BackgroundTasksInternal {
@@ -193,7 +190,6 @@ pub struct BackgroundTasksInitializer {
     external_endpoints_tx:
         watch::Sender<Option<external_endpoints::ExternalEndpoints>>,
     inventory_load_tx: watch::Sender<Option<Arc<Collection>>>,
-    multicast_invalidate_flag: Arc<AtomicBool>,
 }
 
 impl BackgroundTasksInitializer {
@@ -212,15 +208,10 @@ impl BackgroundTasksInitializer {
             watch::channel(None);
         let (inventory_load_tx, inventory_load_rx) = watch::channel(None);
 
-        // Create the multicast cache invalidation flag that will be shared
-        // between the reconciler and Nexus (via `BackgroundTasksInternal`)
-        let multicast_invalidate_flag = Arc::new(AtomicBool::new(false));
-
         let initializer = BackgroundTasksInitializer {
             driver: Driver::new(),
             external_endpoints_tx,
             inventory_load_tx,
-            multicast_invalidate_flag: multicast_invalidate_flag.clone(),
         };
 
         let background_tasks = BackgroundTasks {
@@ -285,7 +276,6 @@ impl BackgroundTasksInitializer {
         let internal = BackgroundTasksInternal {
             external_endpoints: external_endpoints_rx,
             inventory_load_rx,
-            multicast_invalidate_cache: Some(multicast_invalidate_flag),
         };
 
         (initializer, background_tasks, internal)
@@ -1085,16 +1075,13 @@ impl BackgroundTasksInitializer {
                 datastore.clone(),
                 resolver.clone(),
                 sagas.clone(),
+                inventory_load_watcher.clone(),
                 args.multicast_enabled,
                 config.multicast_reconciler.sled_cache_ttl_secs,
                 config.multicast_reconciler.backplane_cache_ttl_secs,
-                self.multicast_invalidate_flag.clone(),
             )),
             opctx: opctx.child(BTreeMap::new()),
-            watchers: vec![
-                Box::new(inventory_collect_watcher.clone()),
-                Box::new(inventory_load_watcher.clone()),
-            ],
+            watchers: vec![Box::new(inventory_load_watcher.clone())],
             activator: task_multicast_reconciler,
         });
 
