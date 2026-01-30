@@ -54,6 +54,7 @@ use strum::IntoEnumIterator;
 
 pub(super) struct PruneableZones {
     pruneable_zones: BTreeSet<OmicronZoneUuid>,
+    #[allow(unused)] // only read by tests
     reason_checker: BlueprintExpungedZoneAccessReasonChecker,
 }
 
@@ -612,30 +613,19 @@ impl BlueprintExpungedZoneAccessReasonChecker {
     ) {
         self.reasons_checked.insert(reason);
     }
-
-    #[cfg(test)]
-    fn assert_all_reasons_checked(self) {
-        let mut unchecked = BTreeSet::new();
-
-        for reason in BlueprintExpungedZoneAccessReason::iter() {
-            if !self.reasons_checked.contains(&reason) {
-                unchecked.insert(reason);
-            }
-        }
-
-        assert!(
-            unchecked.is_empty(),
-            "Correctness error: Planning input construction failed to \
-             consider some `BlueprintExpungedZoneAccessReason`s: {unchecked:?}"
-        );
-    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use nexus_reconfigurator_planning::blueprint_builder::BlueprintBuilder;
     use nexus_reconfigurator_planning::example::ExampleSystemBuilder;
+    use nexus_reconfigurator_planning::planner::PlannerRng;
     use nexus_test_utils::db::TestDatabase;
+    use nexus_types::deployment::BlueprintSource;
+    use nexus_types::deployment::BlueprintZoneImageSource;
+    use nexus_types::deployment::BlueprintZoneType;
+    use nexus_types::deployment::SledFilter;
     use omicron_test_utils::dev;
 
     #[tokio::test]
@@ -647,14 +637,120 @@ mod tests {
         let db = TestDatabase::new_with_datastore(log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
 
-        let (_, blueprint) = ExampleSystemBuilder::new(log, TEST_NAME).build();
+        // Start with the base example system and build from there.
+        let (example, initial_blueprint) =
+            ExampleSystemBuilder::new(log, TEST_NAME)
+                .external_dns_count(1)
+                .expect("1 is a valid count of external DNS zones")
+                .set_boundary_ntp_count(1)
+                .expect("1 is a valid count of boundary NTP zones")
+                .build();
+        let mut builder = BlueprintBuilder::new_based_on(
+            log,
+            &initial_blueprint,
+            TEST_NAME,
+            PlannerRng::from_seed(("builder", TEST_NAME)),
+        )
+        .expect("failed to create builder");
 
+        // Pick the first sled to add missing zone types
+        let sled_id = example
+            .input
+            .all_sled_ids(SledFilter::Commissioned)
+            .next()
+            .expect("at least one sled");
+
+        // Add zones for types that aren't in the default example system
+        let image_source = BlueprintZoneImageSource::InstallDataset;
+
+        builder
+            .sled_add_zone_oximeter(sled_id, image_source.clone())
+            .expect("added oximeter zone");
+        builder
+            .sled_add_zone_cockroachdb(sled_id, image_source.clone())
+            .expect("added cockroach zone");
+        builder
+            .sled_add_zone_clickhouse_keeper(sled_id, image_source.clone())
+            .expect("added clickhouse keeper zone");
+        builder
+            .sled_add_zone_clickhouse_server(sled_id, image_source.clone())
+            .expect("added clickhouse server zone");
+
+        // Collect one zone ID of each type that has an associated
+        // `BlueprintExpungedZoneAccessReason` we ought to check.
+        let mut boundary_ntp_zone_id = None;
+        let mut clickhouse_keeper_zone_id = None;
+        let mut external_dns_zone_id = None;
+        let mut nexus_zone_id = None;
+        let mut oximeter_zone_id = None;
+        let mut cockroach_zone_id = None;
+
+        for (sled_id, zone) in builder.current_in_service_zones() {
+            match &zone.zone_type {
+                BlueprintZoneType::BoundaryNtp(_) => {
+                    boundary_ntp_zone_id = Some((sled_id, zone.id));
+                }
+                BlueprintZoneType::ClickhouseKeeper(_) => {
+                    clickhouse_keeper_zone_id = Some((sled_id, zone.id));
+                }
+                BlueprintZoneType::ExternalDns(_) => {
+                    external_dns_zone_id = Some((sled_id, zone.id));
+                }
+                BlueprintZoneType::Nexus(_) => {
+                    nexus_zone_id = Some((sled_id, zone.id));
+                }
+                BlueprintZoneType::Oximeter(_) => {
+                    oximeter_zone_id = Some((sled_id, zone.id));
+                }
+                BlueprintZoneType::CockroachDb(_) => {
+                    cockroach_zone_id = Some((sled_id, zone.id));
+                }
+                _ => {}
+            }
+        }
+
+        // Expunge and mark each zone as ready for cleanup
+        for (sled_id, zone_id) in [
+            boundary_ntp_zone_id.expect("found boundary ntp zone"),
+            clickhouse_keeper_zone_id.expect("found clickhouse keeper zone"),
+            external_dns_zone_id.expect("found external dns zone"),
+            nexus_zone_id.expect("found nexus zone"),
+            oximeter_zone_id.expect("found oximeter zone"),
+            cockroach_zone_id.expect("found cockroach zone"),
+        ] {
+            builder.sled_expunge_zone(sled_id, zone_id).expect("expunged zone");
+            builder
+                .sled_mark_expunged_zone_ready_for_cleanup(sled_id, zone_id)
+                .expect("marked zone ready for cleanup");
+        }
+
+        let blueprint = builder.build(BlueprintSource::Test);
+
+        // Check for pruneable zones; this test isn't primarily concerned with
+        // which ones actually are pruneable - it'll be a mix - but whether
+        // attempting to find PruneableZones did in fact check all possible
+        // `BlueprintExpungedZoneAccessReason`s. After this function returns, we
+        // interrogate the internal `reason_checker` and assert that it contains
+        // all known reasons.
         let pruneable_zones =
             PruneableZones::new(opctx, datastore, &blueprint, &[], &[])
                 .await
                 .expect("failed to find pruneable zones");
 
-        pruneable_zones.reason_checker.assert_all_reasons_checked();
+        let mut unchecked = BTreeSet::new();
+
+        for reason in BlueprintExpungedZoneAccessReason::iter() {
+            if !pruneable_zones.reason_checker.reasons_checked.contains(&reason)
+            {
+                unchecked.insert(reason);
+            }
+        }
+
+        assert!(
+            unchecked.is_empty(),
+            "PruneableZones failed to consider some \
+             `BlueprintExpungedZoneAccessReason`s: {unchecked:?}"
+        );
 
         db.terminate().await;
         logctx.cleanup_successful();
