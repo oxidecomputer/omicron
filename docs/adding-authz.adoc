@@ -110,7 +110,7 @@ In `nexus/db-queries/src/policy_test/resources.rs`, the test defines instances o
 
 ==== Example: Disk (project-level resource)
 
-**In nexus/auth/src/authz/api_resources.rs:**
+In `nexus/auth/src/authz/api_resources.rs`, the authz type is defined with:
 
 [source,rust]
 ----
@@ -123,7 +123,7 @@ authz_resource! {
 }
 ----
 
-**In nexus/auth/src/authz/oso_generic.rs,** add to the `generated_inits` array:
+In `nexus/auth/src/authz/oso_generic.rs`, the authz type is added to the `generated_inits` array:
 
 [source,rust]
 ----
@@ -138,7 +138,7 @@ for init in generated_inits {
 }
 ----
 
-**In nexus/db-queries/src/policy_test/resources.rs,** add instances in the parent's helper:
+In `nexus/db-queries/src/policy_test/resources.rs`, test instances are created in the parent's helper:
 
 [source,rust]
 ----
@@ -155,7 +155,7 @@ async fn make_project(/* ... */) {
 
 ==== Example: VpcSubnet (project networking resource, nested under Vpc)
 
-**In nexus/auth/src/authz/api_resources.rs:**
+In `nexus/auth/src/authz/api_resources.rs`, the authz type is defined with:
 
 [source,rust]
 ----
@@ -168,7 +168,7 @@ authz_resource! {
 }
 ----
 
-**In nexus/auth/src/authz/oso_generic.rs,** add to the `generated_inits` array:
+In `nexus/auth/src/authz/oso_generic.rs`, the authz type is added to the `generated_inits` array:
 
 [source,rust]
 ----
@@ -183,7 +183,7 @@ for init in generated_inits {
 }
 ----
 
-**In nexus/db-queries/src/policy_test/resources.rs,** add instances in the parent's helper.
+In `nexus/db-queries/src/policy_test/resources.rs`, test instances are created in the parent's helper.
 
 ==== Choosing the Right Polar Snippet
 
@@ -244,7 +244,7 @@ Singleton resources representing system-wide concepts or synthetic collections. 
 
 ==== Example: Inventory (static top-level resource)
 
-**In nexus/auth/src/authz/api_resources.rs:**
+In `nexus/auth/src/authz/api_resources.rs`, the type is defined with:
 
 [source,rust]
 ----
@@ -294,7 +294,7 @@ impl AuthorizedResource for Inventory {
 }
 ----
 
-**In nexus/auth/src/authz/omicron.polar:**
+In `nexus/auth/src/authz/omicron.polar`, the Polar policy is defined:
 
 [source,polar]
 ----
@@ -383,7 +383,7 @@ impl AuthorizedResource for SiloCertificateList {
 }
 ----
 
-**In nexus/auth/src/authz/omicron.polar:**
+In `nexus/auth/src/authz/omicron.polar`, the Polar policy is defined:
 
 [source,polar]
 ----
