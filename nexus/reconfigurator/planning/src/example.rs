@@ -212,6 +212,7 @@ pub struct ExampleSystemBuilder {
     internal_dns_count: ZoneCount,
     external_dns_count: ZoneCount,
     crucible_pantry_count: ZoneCount,
+    boundary_ntp_count: ZoneCount,
     create_zones: bool,
     create_disks_in_blueprint: bool,
     target_release: TargetReleaseDescription,
@@ -248,6 +249,9 @@ impl ExampleSystemBuilder {
             internal_dns_count: ZoneCount(INTERNAL_DNS_REDUNDANCY),
             external_dns_count: ZoneCount(Self::DEFAULT_EXTERNAL_DNS_COUNT),
             crucible_pantry_count: ZoneCount(CRUCIBLE_PANTRY_REDUNDANCY),
+            // By default we only set up internal NTP; callers that specifically
+            // want boundary NTP can ask for them.
+            boundary_ntp_count: ZoneCount(0),
             create_zones: true,
             create_disks_in_blueprint: true,
             target_release: TargetReleaseDescription::Initial,
@@ -324,6 +328,28 @@ impl ExampleSystemBuilder {
             );
         }
         self.external_dns_count = ZoneCount(external_dns_count);
+        Ok(self)
+    }
+
+    /// Set the number of boundary NTP instances in the example system.
+    ///
+    /// The default value is 0. A value anywhere between 0 and 30, inclusive, is
+    /// permitted. (The limit of 30 is primarily to simplify the
+    /// implementation.)
+    ///
+    /// Each NTP server is assigned an external SNAT address in the 198.51.100.x
+    /// range.
+    pub fn set_boundary_ntp_count(
+        mut self,
+        boundary_ntp_count: usize,
+    ) -> anyhow::Result<Self> {
+        if boundary_ntp_count > 30 {
+            anyhow::bail!(
+                "boundary_ntp_count {} is greater than 30",
+                boundary_ntp_count,
+            );
+        }
+        self.boundary_ntp_count = ZoneCount(boundary_ntp_count);
         Ok(self)
     }
 
@@ -428,6 +454,10 @@ impl ExampleSystemBuilder {
         self.external_dns_count.0
     }
 
+    pub fn boundary_ntp_zones(&self) -> usize {
+        self.boundary_ntp_count.0
+    }
+
     /// Create a new example system with the given modifications.
     ///
     /// Return the system, and the initial blueprint that matches it.
@@ -443,6 +473,7 @@ impl ExampleSystemBuilder {
             "internal_dns_count" => self.internal_dns_count.0,
             "external_dns_count" => self.external_dns_count.0,
             "crucible_pantry_count" => self.crucible_pantry_count.0,
+            "boundary_ntp_count" => self.boundary_ntp_count.0,
             "create_zones" => self.create_zones,
             "create_disks_in_blueprint" => self.create_disks_in_blueprint,
         );
@@ -517,16 +548,31 @@ impl ExampleSystemBuilder {
                     .unwrap(),
                 )
                 .unwrap();
-            for i in 0..self.external_dns_count.0 {
-                let lo = (i + 1)
-                    .try_into()
-                    .expect("external_dns_count is always <= 30");
+            for i in 1..=self.external_dns_count.0 {
+                let ip = format!("198.51.100.{i}");
                 builder
-                    .add_external_dns_ip(IpAddr::V4(Ipv4Addr::new(
-                        198, 51, 100, lo,
-                    )))
+                    .add_external_dns_ip(ip.parse().unwrap())
                     .expect("test IPs are valid service IPs");
             }
+            system.set_external_ip_policy(builder.build());
+        }
+
+        // Also add a 30-ip range for boundary NTP. It's very likely we'll
+        // actually allocate out of the leftover external DNS range, but if
+        // someone actually asked for 30 external DNS zones we'll shift up into
+        // this range.
+        if self.boundary_ntp_count.0 > 0 {
+            let mut builder =
+                system.external_ip_policy().clone().into_builder();
+            builder
+                .push_service_pool_ipv4_range(
+                    Ipv4Range::new(
+                        "198.51.100.31".parse::<Ipv4Addr>().unwrap(),
+                        "198.51.100.60".parse::<Ipv4Addr>().unwrap(),
+                    )
+                    .unwrap(),
+                )
+                .unwrap();
             system.set_external_ip_policy(builder.build());
         }
 
@@ -565,8 +611,8 @@ impl ExampleSystemBuilder {
         // * Create disks and non-discretionary zones on all sleds.
         // * Only create discretionary zones on discretionary sleds.
         let mut discretionary_ix = 0;
-        for (sled_id, sled_details) in
-            base_input.all_sleds(SledFilter::Commissioned)
+        for (sled_idx, (sled_id, sled_details)) in
+            base_input.all_sleds(SledFilter::Commissioned).enumerate()
         {
             if self.create_disks_in_blueprint {
                 let _ = builder
@@ -574,14 +620,34 @@ impl ExampleSystemBuilder {
                     .unwrap();
             }
             if self.create_zones {
-                let _ = builder
-                    .sled_ensure_zone_ntp(
-                        sled_id,
-                        self.target_release
-                            .zone_image_source(ZoneKind::BoundaryNtp)
-                            .expect("obtained BoundaryNtp image source"),
-                    )
-                    .unwrap();
+                // Add boundary NTP to the first `self.boundary_ntp_count` sleds
+                // and internal NTP to the rest.
+                if sled_idx < self.boundary_ntp_count.0 {
+                    let external_ip = external_networking_alloc
+                        .for_new_boundary_ntp()
+                        .expect("should have an external IP for boundary NTP");
+                    builder
+                        .sled_add_zone_boundary_ntp_with_config(
+                            sled_id,
+                            vec!["ntp.oxide.computer".to_string()],
+                            vec!["1.1.1.1".parse().unwrap()],
+                            None,
+                            self.target_release
+                                .zone_image_source(ZoneKind::BoundaryNtp)
+                                .expect("obtained BoundaryNtp image source"),
+                            external_ip,
+                        )
+                        .unwrap();
+                } else {
+                    let _ = builder
+                        .sled_ensure_zone_ntp(
+                            sled_id,
+                            self.target_release
+                                .zone_image_source(ZoneKind::BoundaryNtp)
+                                .expect("obtained BoundaryNtp image source"),
+                        )
+                        .unwrap();
+                }
 
                 // Create discretionary zones if allowed.
                 if sled_details.policy.matches(SledFilter::Discretionary) {
