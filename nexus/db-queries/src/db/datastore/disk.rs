@@ -732,25 +732,25 @@ impl DataStore {
 
         // In what state do we expect the disk record to be created? This will
         // generally be `Creating`, save for read-only disks being created from
-        // snapshots, which pop into existence already `Detached` (as the
-        // snapshot backing them already exists). Thus, when we check for insert
-        // conflicts, we must compare the inserted state with the requested
-        // initial state, rather than assuming it will always be `Creating`.
-        let expected_state = if let Disk::Crucible(CrucibleDisk {
-            disk_type_crucible:
-                // The state is expected to be `Detached` if and ONLY if the
-                // disk is read-only and backed by a preexisting snapshot.
-                DiskTypeCrucible {
-                    read_only: true,
-                    create_snapshot_id: Some(_),
-                    ..
-                },
-            ..
-        }) = disk
-        {
-            external::DiskState::Detached
-        } else {
-            external::DiskState::Creating
+        // existing images or snapshots, which pop into existence already
+        // `Detached` (as the read-only volume snapshot backing them already
+        // exists). Thus, when we check for insert conflicts, we must compare
+        // the inserted state with the requested initial state, rather than
+        // assuming it will always be `Creating`.
+        let expected_state = match disk {
+            Disk::Crucible(CrucibleDisk {
+                disk_type_crucible:
+                    DiskTypeCrucible {
+                        read_only: true,
+                        create_snapshot_id,
+                        create_image_id,
+                        ..
+                    },
+                ..
+            }) if create_snapshot_id.is_some() || create_image_id.is_some() => {
+                external::DiskState::Detached
+            }
+            _ => external::DiskState::Creating,
         };
 
         let generation = disk.runtime().generation;
