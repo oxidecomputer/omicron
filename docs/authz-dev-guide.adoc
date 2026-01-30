@@ -594,10 +594,10 @@ opctx.authorize(authz::Action::CreateChild, &authz_cert_list).await?;
 
 Most of the time when you're adding a new resource, you'll define the policy for that resource in terms of these existing roles and you can ignore this whole section.
 
-CAUTION: These instructions haven't really been tested since we've never added a _new_ resource with roles.  This is more of a tour of the implementation of a role.
+Taking Project as an example, here's how roles are implemented:
 
-1. Define the roles enum in `nexus/types/src/external_api/shared.rs`:
-+
+The roles enum is defined in `nexus/types/src/external_api/shared.rs`:
+
 [source,rust]
 ----
 #[derive(
@@ -614,47 +614,47 @@ CAUTION: These instructions haven't really been tested since we've never added a
     Serialize,
 )]
 #[serde(rename_all = "snake_case")]
-pub enum YourResourceRole {
+pub enum ProjectRole {
     Admin,
     Collaborator,
     Viewer,
 }
 
-impl DatabaseString for YourResourceRole {
-    type SqlType = YourResourceRoleEnum;
+impl DatabaseString for ProjectRole {
+    type SqlType = ProjectRoleEnum;
 }
 ----
 
-2. Add the SQL enum type in `nexus/db-model/src/schema_versions.rs` (follow the pattern for existing role enums).
+There's a corresponding SQL enum type in `nexus/db-model/src/schema_versions.rs` that mirrors the Rust enum for database storage.
 
-3. Set `roles_allowed = true` in your `authz_resource!` invocation:
-+
+The authz resource is configured with `roles_allowed = true`:
+
 [source,rust]
 ----
 authz_resource! {
-    name = "YourResource",
-    parent = "Fleet",
+    name = "Project",
+    parent = "Silo",
     primary_key = Uuid,
     roles_allowed = true,
-    polar_snippet = Custom,  // Usually need custom policy for resources with roles
+    polar_snippet = Custom,
 }
 ----
 
-4. Implement `ApiResourceWithRolesType`:
-+
+Resources with roles typically use `Custom` polar snippets since they need custom policy definitions.
+
+The `ApiResourceWithRolesType` trait is implemented to link the resource to its roles enum:
+
 [source,rust]
 ----
-impl ApiResourceWithRolesType for YourResource {
-    type AllowedRoles = YourResourceRole;
+impl ApiResourceWithRolesType for Project {
+    type AllowedRoles = ProjectRole;
 }
 ----
 
-5. Define custom Polar policy in `omicron.polar` that defines the roles and their permissions. See `Project` or `Silo` for examples.
+In `omicron.polar`, custom policy defines the roles and their permissions. For Project, this includes defining the role hierarchy (admin inherits collaborator, collaborator inherits viewer) and specifying which actions each role can perform.
 
-6. Define an API endpoint to read and update the policy on the resource.  You can use the existing examples as templates.  The bulk of the implementation is in common code that's generic over the resource type so you shouldn't need to do a lot of work here.
+API endpoints exist to read and update role assignments on the resource (`PUT` and `GET` "policy"). The implementation uses common code that's generic over the resource type, so most of the logic is shared across all resources with roles.
 
-== Defining New Roles
+To define a new role, you'll need to add it to the shared enum type and to the database enum type.  You may also need a schema migration to add the new role name.
 
-See <<_supporting_roles_on_resources>>.  To define a new role, you'll need to add it to the shared enum type and to the database enum type.  You may also need a schema migration to add the new role name.
-
-The enum definition drives most of the rest of the system, including the set of roles that a user is allowed to set on an object.  You don't need to change any of the endpoints that modify policy.
+The enum definition drives most of the rest of the system, including the set of roles that a user is allowed to set on an object.  You don't need to change any of the endpoints that modify policy if you're just adding a role.
