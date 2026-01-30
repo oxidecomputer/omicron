@@ -1788,33 +1788,13 @@ impl DataStore {
     }
 
     /// Create a read-only disk from an existing snapshot.
-    pub async fn project_create_read_only_disk_from_snapshot(
+    pub async fn project_create_read_only_disk(
         &self,
         opctx: &OpContext,
         authz_project: &authz::Project,
         disk_id: &Uuid,
         params: &params::DiskCreate,
     ) -> CreateResult<db::datastore::Disk> {
-        // First, make sure we're actually making a read-only disk from a
-        // snapshot, and not some other kind of disk from some other kind of
-        // source...
-        let params::DiskBackend::Distributed {
-            disk_source:
-                params::DiskSource::Snapshot { read_only: true, snapshot_id },
-        } = params.disk_backend
-        else {
-            return Err(Error::InternalError {
-                // WHEW!
-                internal_message: format!(
-                    "`project_create_read_only_disk_from_snapshot` may only be \
-                     called with `DiskBackend::Distributed` containing a \
-                     `DiskSource::Snapshot` with `read_only: true`, but you \
-                     called it with: {:?}",
-                    params.disk_backend
-                ),
-            });
-        };
-
         opctx.authorize(authz::Action::CreateChild, authz_project).await?;
 
         let err = OptionalError::new();
@@ -1828,13 +1808,12 @@ impl DataStore {
                 let err = err.clone();
                 let params = &params;
                 async move {
-                    Self::project_create_readonly_disk_from_snapshot_in_txn(
+                    Self::project_create_read_only_disk_in_txn(
                         &conn,
                         err,
                         authz_project,
                         disk_id,
                         params,
-                        snapshot_id,
                     )
                     .await
                 }
@@ -1851,13 +1830,12 @@ impl DataStore {
         Ok(disk)
     }
 
-    async fn project_create_readonly_disk_from_snapshot_in_txn(
+    async fn project_create_read_only_disk_in_txn(
         conn: &async_bb8_diesel::Connection<DbConnection>,
         err: OptionalError<Error>,
         authz_project: &authz::Project,
         disk_id: &Uuid,
         params: &params::DiskCreate,
-        snapshot_id: Uuid,
     ) -> Result<db::datastore::Disk, diesel::result::Error> {
         use crate::db::datastore::CrucibleTargets;
         use crate::db::datastore::VolumeCheckoutReason;
@@ -1898,96 +1876,6 @@ impl DataStore {
             }));
         }
 
-        let maybe_snapshot: Option<db::model::Snapshot> = {
-            use nexus_db_schema::schema::snapshot::dsl;
-            dsl::snapshot
-                .filter(dsl::time_deleted.is_null())
-                .filter(dsl::id.eq(snapshot_id))
-                .select(db::model::Snapshot::as_select())
-                .get_result_async(conn)
-                .await
-                .optional()?
-        };
-
-        let Some(snapshot) = maybe_snapshot else {
-            return Err(err.bail(Error::not_found_by_id(
-                ResourceType::Snapshot,
-                &snapshot_id,
-            )));
-        };
-
-        let sub_err = OptionalError::new();
-        let copy_of_snapshot_volume = Self::volume_checkout_in_txn(
-            conn,
-            sub_err.clone(),
-            snapshot.volume_id(),
-            VolumeCheckoutReason::ReadOnlyCopy,
-        )
-        .await
-        .map_err(|e| {
-            if let Some(sub_err) = sub_err.take() {
-                err.bail(
-                    Error::from(sub_err)
-                        .internal_context("failed to checkout snapshot volume"),
-                )
-            } else {
-                e
-            }
-        })?;
-
-        let copy_of_snapshot_vcr: VolumeConstructionRequest =
-            serde_json::from_str(copy_of_snapshot_volume.data()).map_err(
-                |e| {
-                    err.bail(Error::InternalError {
-                        internal_message: format!(
-                            "failed to deserialize snapshot VCR: {e}"
-                        ),
-                    })
-                },
-            )?;
-
-        let crucible_targets = {
-            let mut crucible_targets = CrucibleTargets::default();
-            read_only_resources_associated_with_volume(
-                &copy_of_snapshot_vcr,
-                &mut crucible_targets,
-            );
-            crucible_targets
-        };
-
-        let sub_err = OptionalError::new();
-        let read_only_disk_volume = Self::volume_create_in_txn(
-            conn,
-            sub_err.clone(),
-            VolumeUuid::new_v4(),
-            copy_of_snapshot_vcr,
-            crucible_targets,
-        )
-        .await
-        .map_err(|e| {
-            if let Some(sub_err) = sub_err.take() {
-                err.bail(Error::from(sub_err).internal_context(
-                    "failed to create read-only disk volume from snapshot",
-                ))
-            } else {
-                e
-            }
-        })?;
-
-        // No additional work is required to create a read-only disk from a
-        // snapshot, as the snapshot already exists. Thus, the new disk begins
-        // its life in the `Detached` state, rather than `Creating`. As soon as
-        // the database records are created, the disk is ready for use.
-        let runtime_initial = db::model::DiskRuntimeState::new().detach();
-        let disk = db::model::Disk::new(
-            *disk_id,
-            authz_project.id(),
-            &params,
-            snapshot.block_size,
-            runtime_initial,
-            db::model::DiskType::Crucible,
-        );
-
         let params::DiskBackend::Distributed { ref disk_source } =
             params.disk_backend
         else {
@@ -1996,6 +1884,124 @@ impl DataStore {
                  `project_create_readonly_disk_from_snapshot`",
             )));
         };
+        let (volume_id, block_size) = match disk_source {
+            params::DiskSource::Snapshot { snapshot_id, read_only: true } => {
+                let maybe_snapshot: Option<db::model::Snapshot> = {
+                    use nexus_db_schema::schema::snapshot::dsl;
+                    dsl::snapshot
+                        .filter(dsl::time_deleted.is_null())
+                        .filter(dsl::id.eq(snapshot_id))
+                        .select(db::model::Snapshot::as_select())
+                        .get_result_async(conn)
+                        .await
+                        .optional()?
+                };
+
+                let Some(snapshot) = maybe_snapshot else {
+                    return Err(err.bail(Error::not_found_by_id(
+                        ResourceType::Snapshot,
+                        &snapshot_id,
+                    )));
+                };
+
+                (snapshot.volume_id(), snapshot.block_size)
+            }
+            params::DiskSource::Image { image_id } => {
+                let maybe_image: Option<db::model::Image> = {
+                    use nexus_db_schema::schema::image::dsl;
+                    dsl::image
+                        .filter(dsl::time_deleted.is_null())
+                        .filter(dsl::id.eq(image_id))
+                        .select(db::model::Image::as_select())
+                        .get_result_async(conn)
+                        .await
+                        .optional()?
+                };
+
+                let Some(image) = maybe_image else {
+                    return Err(err.bail(Error::not_found_by_id(
+                        ResourceType::Image,
+                        &image_id,
+                    )));
+                };
+                (image.volume_id(), image.block_size)
+            },
+            src => return Err(err.bail(Error::InternalError {
+                internal_message: format!("invalid disk source for `project_create_readonly_disk`: {src:?}"),
+            }))
+        };
+
+        let sub_err = OptionalError::new();
+        let copy_of_volume = Self::volume_checkout_in_txn(
+            conn,
+            sub_err.clone(),
+            volume_id,
+            VolumeCheckoutReason::ReadOnlyCopy,
+        )
+        .await
+        .map_err(|e| {
+            if let Some(sub_err) = sub_err.take() {
+                err.bail(Error::from(sub_err).internal_context(
+                    "failed to checkout base volume for readonly disk",
+                ))
+            } else {
+                e
+            }
+        })?;
+
+        let copy_of_vcr: VolumeConstructionRequest =
+            serde_json::from_str(copy_of_volume.data()).map_err(|e| {
+                err.bail(Error::InternalError {
+                    internal_message: format!(
+                        "failed to deserialize snapshot VCR: {e}"
+                    ),
+                })
+            })?;
+
+        let crucible_targets = {
+            let mut crucible_targets = CrucibleTargets::default();
+            read_only_resources_associated_with_volume(
+                &copy_of_vcr,
+                &mut crucible_targets,
+            );
+            crucible_targets
+        };
+
+        let sub_err = OptionalError::new();
+        let read_only_disk_volume =
+            Self::volume_create_in_txn(
+                conn,
+                sub_err.clone(),
+                VolumeUuid::new_v4(),
+                copy_of_vcr,
+                crucible_targets,
+            )
+            .await
+            .map_err(|e| {
+                if let Some(sub_err) = sub_err.take() {
+                    err.bail(Error::from(sub_err).internal_context(
+                        "failed to create read-only disk volume",
+                    ))
+                } else {
+                    e
+                }
+            })?;
+
+        // No additional work is required to create a read-only disk from a
+        // snapshot or image, as the snapshot or image's volume already exists.
+        // Thus, the new disk begins its life in the `Detached` state, rather
+        // than `Creating`. As soon as the database records are created, the
+        // disk is ready for use.
+        let runtime_initial = db::model::DiskRuntimeState::new().detach();
+        let disk = db::model::Disk::new(
+            *disk_id,
+            authz_project.id(),
+            &params,
+            block_size,
+            runtime_initial,
+            db::model::DiskType::Crucible,
+        );
+
         let disk_type_crucible = db::model::DiskTypeCrucible::new(
             *disk_id,
             read_only_disk_volume.id(),
