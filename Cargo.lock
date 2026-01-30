@@ -759,7 +759,7 @@ dependencies = [
  "bitflags 2.9.4",
  "cexpr",
  "clang-sys",
- "itertools 0.10.5",
+ "itertools 0.12.1",
  "lazy_static",
  "lazycell",
  "log",
@@ -1733,7 +1733,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "117725a109d387c937a1533ce01b450cbde6b88abceea8473c4d7a85853cda3c"
 dependencies = [
  "lazy_static",
- "windows-sys 0.48.0",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -1742,7 +1742,7 @@ version = "3.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fde0e0ec90c9dfb3b4b1a0891a7dcd0e2bffde2f7efed5fe7c9bb00e5bfb915e"
 dependencies = [
- "windows-sys 0.48.0",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -2499,7 +2499,7 @@ dependencies = [
 [[package]]
 name = "ddm-admin-client"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/maghemite?rev=396bb3c570be65f4e8c73ea3243f4af6561a823a#396bb3c570be65f4e8c73ea3243f4af6561a823a"
+source = "git+https://github.com/oxidecomputer/maghemite?rev=3abfb8eb7f6d4ca4658981b4a7a76759a0a3f8ec#3abfb8eb7f6d4ca4658981b4a7a76759a0a3f8ec"
 dependencies = [
  "oxnet",
  "progenitor 0.11.2",
@@ -3483,7 +3483,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cea14ef9355e3beab063703aa9dab15afd25f0667c341310c1e5274bb1d0da18"
 dependencies = [
  "libc",
- "windows-sys 0.52.0",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -4955,7 +4955,7 @@ dependencies = [
  "libc",
  "percent-encoding",
  "pin-project-lite",
- "socket2 0.5.10",
+ "socket2 0.6.1",
  "system-configuration",
  "tokio",
  "tower-layer",
@@ -5181,7 +5181,7 @@ dependencies = [
 [[package]]
 name = "illumos-sys-hdrs"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/opte?rev=4bd8a40c0f5c05de7bb29b5f592f2dc99b4fd1d7#4bd8a40c0f5c05de7bb29b5f592f2dc99b4fd1d7"
+source = "git+https://github.com/oxidecomputer/opte?rev=e547d07b08c3f3d6c821c9eb7a958adcffce6e56#e547d07b08c3f3d6c821c9eb7a958adcffce6e56"
 dependencies = [
  "bitflags 2.9.4",
 ]
@@ -5730,7 +5730,7 @@ dependencies = [
  "portable-atomic",
  "portable-atomic-util",
  "serde",
- "windows-sys 0.52.0",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -5833,7 +5833,7 @@ dependencies = [
 [[package]]
 name = "kstat-macro"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/opte?rev=4bd8a40c0f5c05de7bb29b5f592f2dc99b4fd1d7#4bd8a40c0f5c05de7bb29b5f592f2dc99b4fd1d7"
+source = "git+https://github.com/oxidecomputer/opte?rev=e547d07b08c3f3d6c821c9eb7a958adcffce6e56#e547d07b08c3f3d6c821c9eb7a958adcffce6e56"
 dependencies = [
  "quote",
  "syn 2.0.114",
@@ -6004,7 +6004,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4979f22fdb869068da03c9f7528f8297c6fd2606bc3a4affe42e6a823fdb8da4"
 dependencies = [
  "cfg-if",
- "windows-targets 0.48.5",
+ "windows-targets 0.52.6",
 ]
 
 [[package]]
@@ -6425,7 +6425,7 @@ dependencies = [
 [[package]]
 name = "mg-admin-client"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/maghemite?rev=396bb3c570be65f4e8c73ea3243f4af6561a823a#396bb3c570be65f4e8c73ea3243f4af6561a823a"
+source = "git+https://github.com/oxidecomputer/maghemite?rev=3abfb8eb7f6d4ca4658981b4a7a76759a0a3f8ec#3abfb8eb7f6d4ca4658981b4a7a76759a0a3f8ec"
 dependencies = [
  "chrono",
  "colored 3.0.0",
@@ -9141,6 +9141,7 @@ dependencies = [
  "ipnet",
  "ipnetwork",
  "itertools 0.10.5",
+ "itertools 0.12.1",
  "itertools 0.13.0",
  "lalrpop-util",
  "lazy_static",
@@ -9228,7 +9229,7 @@ dependencies = [
  "vergen",
  "vergen-lib",
  "winnow 0.6.26",
- "winnow 0.7.13",
+ "winnow 0.7.14",
  "x509-cert",
  "zerocopy 0.7.35",
  "zerocopy 0.8.27",
@@ -9361,7 +9362,7 @@ dependencies = [
 [[package]]
 name = "opte"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/opte?rev=4bd8a40c0f5c05de7bb29b5f592f2dc99b4fd1d7#4bd8a40c0f5c05de7bb29b5f592f2dc99b4fd1d7"
+source = "git+https://github.com/oxidecomputer/opte?rev=e547d07b08c3f3d6c821c9eb7a958adcffce6e56#e547d07b08c3f3d6c821c9eb7a958adcffce6e56"
 dependencies = [
  "bitflags 2.9.4",
  "dyn-clone",
@@ -9380,7 +9381,7 @@ dependencies = [
 [[package]]
 name = "opte-api"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/opte?rev=4bd8a40c0f5c05de7bb29b5f592f2dc99b4fd1d7#4bd8a40c0f5c05de7bb29b5f592f2dc99b4fd1d7"
+source = "git+https://github.com/oxidecomputer/opte?rev=e547d07b08c3f3d6c821c9eb7a958adcffce6e56#e547d07b08c3f3d6c821c9eb7a958adcffce6e56"
 dependencies = [
  "illumos-sys-hdrs",
  "ingot",
@@ -9393,7 +9394,7 @@ dependencies = [
 [[package]]
 name = "opte-ioctl"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/opte?rev=4bd8a40c0f5c05de7bb29b5f592f2dc99b4fd1d7#4bd8a40c0f5c05de7bb29b5f592f2dc99b4fd1d7"
+source = "git+https://github.com/oxidecomputer/opte?rev=e547d07b08c3f3d6c821c9eb7a958adcffce6e56#e547d07b08c3f3d6c821c9eb7a958adcffce6e56"
 dependencies = [
  "libc",
  "libnet",
@@ -9495,7 +9496,7 @@ dependencies = [
 [[package]]
 name = "oxide-vpc"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/opte?rev=4bd8a40c0f5c05de7bb29b5f592f2dc99b4fd1d7#4bd8a40c0f5c05de7bb29b5f592f2dc99b4fd1d7"
+source = "git+https://github.com/oxidecomputer/opte?rev=e547d07b08c3f3d6c821c9eb7a958adcffce6e56#e547d07b08c3f3d6c821c9eb7a958adcffce6e56"
 dependencies = [
  "cfg-if",
  "illumos-sys-hdrs",
@@ -11520,7 +11521,7 @@ dependencies = [
 [[package]]
 name = "rdb-types"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/maghemite?rev=396bb3c570be65f4e8c73ea3243f4af6561a823a#396bb3c570be65f4e8c73ea3243f4af6561a823a"
+source = "git+https://github.com/oxidecomputer/maghemite?rev=3abfb8eb7f6d4ca4658981b4a7a76759a0a3f8ec#3abfb8eb7f6d4ca4658981b4a7a76759a0a3f8ec"
 dependencies = [
  "oxnet",
  "schemars 0.8.22",
@@ -12117,7 +12118,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys 0.11.0",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.1",
 ]
 
 [[package]]
@@ -13644,7 +13645,7 @@ version = "0.8.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "03c3c6b7927ffe7ecaa769ee0e3994da3b8cafc8f444578982c83ecb161af917"
 dependencies = [
- "heck 0.4.1",
+ "heck 0.5.0",
  "proc-macro2",
  "quote",
  "syn 2.0.114",
@@ -14289,7 +14290,7 @@ dependencies = [
  "getrandom 0.3.4",
  "once_cell",
  "rustix 1.1.3",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.1",
 ]
 
 [[package]]
@@ -14824,7 +14825,7 @@ dependencies = [
  "toml_datetime 0.7.5+spec-1.1.0",
  "toml_parser",
  "toml_writer",
- "winnow 0.7.13",
+ "winnow 0.7.14",
 ]
 
 [[package]]
@@ -14869,7 +14870,7 @@ dependencies = [
  "serde_spanned 0.6.9",
  "toml_datetime 0.6.11",
  "toml_write",
- "winnow 0.7.13",
+ "winnow 0.7.14",
 ]
 
 [[package]]
@@ -14878,7 +14879,7 @@ version = "1.0.6+spec-1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a3198b4b0a8e11f09dd03e133c0280504d0801269e9afa46362ffde1cbeebf44"
 dependencies = [
- "winnow 0.7.13",
+ "winnow 0.7.14",
 ]
 
 [[package]]
@@ -16573,7 +16574,7 @@ version = "0.1.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cf221c93e13a30d793f7645a0e7762c55d169dbb0a49671918a2319d289b10bb"
 dependencies = [
- "windows-sys 0.48.0",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -16937,9 +16938,9 @@ dependencies = [
 
 [[package]]
 name = "winnow"
-version = "0.7.13"
+version = "0.7.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "21a0236b59786fed61e2a80582dd500fe61f18b5dca67a4a067d0bc9039339cf"
+checksum = "5a5364e9d77fcdeeaa6062ced926ee3381faa2ee02d3eb83a5c27a8825540829"
 dependencies = [
  "memchr",
 ]
