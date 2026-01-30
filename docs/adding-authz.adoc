@@ -4,25 +4,44 @@
 
 == Overview
 
-This document explains how to add authorization (authz) support for new resources in Omicron. Authorization is based on role-based access control (RBAC) using the Oso policy engine.
+This document explains how to add authorization (authz) support for new resources in Nexus. Authorization is based on role-based access control (RBAC) using the Oso policy engine.
+
+== Principles
 
 Before implementing authz for a new resource, read the module comments in `nexus/auth/src/authz/mod.rs` and `nexus/auth/src/authz/api_resources.rs` to understand the basic concepts.
 
-Resources fall into three categories, each with a different implementation pattern. This document provides complete examples for each category that you can adapt for your resource.
+The most important thing to know is that every authz check we have today boils down to asking:
 
-== Principles
+* is this **actor** (a silo user or internal system user)
+* allowed to perform this **action**
+* on this **resource**
+
+It usually looks like this:
+
+```rust
+opctx.authorize(authz::Action::Modify, &authz::INVENTORY)
+```
+
+Here:
+
+- `opctx` is ubiquitous in Nexus.  Constructing it requires authenticating the user and it describes the actor for this check.
+- `authz::Action` is an enum with just a handful of standard actions.
+- `authz::Inventory` is the resource.  It's an **authz object**.
+
+=== Avoid Baking Policy Into Authz Checks
+
+This is important and non-obvious. It's tempting to take shortcuts like: "people can operate on my thing if they can operate on the Fleet." Instead, prefer creating a synthetic resource whose *policy* (in the Polar file) reflects that equivalence, while the authz check itself is almost a literal translation of the action you're taking: "I'm modifying the inventory, so I check if the user can perform the `modify` action on the `inventory` resource."
+
+For example, rather than checking Fleet authorization when modifying inventory, we define an `Inventory` resource whose Polar policy says that Fleet admins have modify permissions on Inventory. The code just checks `authorize(Action::Modify, &INVENTORY)` without knowing anything about the Fleet.
+
+This separation keeps policy decisions in the Polar file where they belong, making the system easier to understand and modify.
 
 === Authz Checks Should Be Close to the Action
 
 Perform authorization checks as close as possible to the code that takes the action. This ensures that authz checks cannot be accidentally separated from the operation they protect. For example, if you have a datastore function that modifies a resource, that function should accept the authz type and perform the authorization check, rather than expecting the caller to have done it.
 
-=== Avoid Baking Policy Into Authz Checks
 
-This is important and non-obvious. It's tempting to take shortcuts like: "people can operate on my thing if they can operate on the Fleet." Instead, prefer creating a synthetic resource whose *policy* (in the Polar file) reflects that equivalence, while the authz check itself is straightforward: "I'm modifying the inventory, so I check authorization on the inventory resource."
-
-For example, rather than checking Fleet authorization when modifying inventory, we define an `Inventory` resource whose Polar policy says that Fleet admins have modify permissions on Inventory. The code just checks `authorize(Action::Modify, &INVENTORY)` without knowing anything about the Fleet.
-
-This separation keeps policy decisions in the Polar file where they belong, making the system easier to understand and modify.
+Resources fall into three categories, each with a different implementation pattern. This document provides complete examples for each category that you can adapt for your resource.
 
 == Static Resources
 
