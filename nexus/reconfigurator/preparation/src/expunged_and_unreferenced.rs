@@ -411,6 +411,50 @@ impl<'a> BlueprintReferencesCache<'a> {
     }
 }
 
+struct ZonesWithExternalIpRows<'a> {
+    external_ip_rows: &'a [nexus_db_model::ExternalIp],
+    zone_ids: OnceCell<BTreeSet<OmicronZoneUuid>>,
+}
+
+impl<'a> ZonesWithExternalIpRows<'a> {
+    fn new(external_ip_rows: &'a [nexus_db_model::ExternalIp]) -> Self {
+        Self { external_ip_rows, zone_ids: OnceCell::new() }
+    }
+
+    fn contains_zone_id(&self, zone_id: &OmicronZoneUuid) -> bool {
+        let zone_ids = self.zone_ids.get_or_init(|| {
+            self.external_ip_rows
+                .iter()
+                .filter_map(|row| {
+                    row.parent_id.map(OmicronZoneUuid::from_untyped_uuid)
+                })
+                .collect()
+        });
+        zone_ids.contains(zone_id)
+    }
+}
+
+struct ZonesWithServiceNicRows<'a> {
+    service_nic_rows: &'a [nexus_db_model::ServiceNetworkInterface],
+    zone_ids: OnceCell<BTreeSet<OmicronZoneUuid>>,
+}
+
+impl<'a> ZonesWithServiceNicRows<'a> {
+    fn new(service_nic_rows: &'a [nexus_db_model::ServiceNetworkInterface]) -> Self {
+        Self { service_nic_rows, zone_ids: OnceCell::new() }
+    }
+
+    fn contains_zone_id(&self, zone_id: &OmicronZoneUuid) -> bool {
+        let zone_ids = self.zone_ids.get_or_init(|| {
+            self.service_nic_rows
+                .iter()
+                .map(|row| OmicronZoneUuid::from_untyped_uuid(row.service_id))
+                .collect()
+        });
+        zone_ids.contains(zone_id)
+    }
+}
+
 /// Helper type to ensure we've covered every
 /// [`BlueprintExpungedZoneAccessReason`] in our checks above.
 ///

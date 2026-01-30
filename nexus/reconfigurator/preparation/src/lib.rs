@@ -65,6 +65,8 @@ use std::sync::Arc;
 
 mod expunged_and_unreferenced;
 
+use expunged_and_unreferenced::PruneableZones;
+
 /// Given various pieces of database state that go into the blueprint planning
 /// process, produce a `PlanningInput` object encapsulating what the planner
 /// needs to generate a blueprint
@@ -272,15 +274,15 @@ impl PlanningInputFromDb<'_> {
             active_nexus_zones.into_iter().map(|n| n.nexus_id()).collect();
         let not_yet_nexus_zones =
             not_yet_nexus_zones.into_iter().map(|n| n.nexus_id()).collect();
-        let expunged_and_unreferenced_zones =
-            expunged_and_unreferenced::find_expunged_and_unreferenced_zones(
-                opctx,
-                datastore,
-                &parent_blueprint,
-                &external_ip_rows,
-                &service_nic_rows,
-            )
-            .await?;
+        let expunged_and_unreferenced_zones = PruneableZones::new(
+            opctx,
+            datastore,
+            &parent_blueprint,
+            &external_ip_rows,
+            &service_nic_rows,
+        )
+        .await?
+        .into_pruneable_zones();
 
         let planning_input = PlanningInputFromDb {
             parent_blueprint,
