@@ -53,7 +53,6 @@ use omicron_common::api::external::UpdateResult;
 use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_uuid_kinds::ExternalSubnetUuid;
 use omicron_uuid_kinds::GenericUuid as _;
-use omicron_uuid_kinds::InstanceUuid;
 use omicron_uuid_kinds::SubnetPoolUuid;
 use ref_cast::RefCast as _;
 use uuid::Uuid;
@@ -516,13 +515,15 @@ impl DataStore {
     pub async fn instance_lookup_external_subnets(
         &self,
         opctx: &OpContext,
-        instance_id: InstanceUuid,
+        authz_instance: &authz::Instance,
     ) -> ListResultVec<ExternalSubnet> {
+        opctx.authorize(authz::Action::Read, authz_instance).await?;
         use nexus_db_schema::schema::external_subnet::dsl;
         dsl::external_subnet
-            .filter(dsl::instance_id.eq(instance_id.into_untyped_uuid()))
+            .filter(dsl::instance_id.eq(authz_instance.id()))
             .filter(dsl::time_deleted.is_null())
             .filter(dsl::attach_state.eq(IpAttachState::Attached))
+            .order_by(dsl::id)
             .select(ExternalSubnet::as_select())
             .get_results_async(&*self.pool_connection_authorized(opctx).await?)
             .await

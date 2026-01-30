@@ -30,8 +30,6 @@ use omicron_common::api::external::NameOrId;
 use omicron_common::api::external::ResourceType;
 use omicron_common::api::external::UpdateResult;
 use omicron_common::api::external::http_pagination::PaginatedBy;
-use omicron_uuid_kinds::GenericUuid;
-use omicron_uuid_kinds::InstanceUuid;
 
 impl super::Nexus {
     /// Look up an external subnet by selector.
@@ -158,14 +156,15 @@ impl super::Nexus {
         opctx: &OpContext,
         instance_lookup: &lookup::Instance<'_>,
     ) -> ListResultVec<views::ExternalSubnet> {
-        let (.., authz_instance) =
+        let (.., authz_project, authz_instance) =
             instance_lookup.lookup_for(authz::Action::Read).await?;
+
+        // External subnets are project-scoped, so check ListChildren on project
+        opctx.authorize(authz::Action::ListChildren, &authz_project).await?;
+
         Ok(self
             .db_datastore
-            .instance_lookup_external_subnets(
-                opctx,
-                InstanceUuid::from_untyped_uuid(authz_instance.id()),
-            )
+            .instance_lookup_external_subnets(opctx, &authz_instance)
             .await?
             .into_iter()
             .map(|subnet| subnet.into())
