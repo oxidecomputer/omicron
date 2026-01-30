@@ -43,5 +43,6 @@
 #
 
 pfexec zfs create -o mountpoint=/var/tmp/omicron_tmp -o sync=disabled rpool/omicron_tmp
+pfexec chown build /var/tmp/omicron_tmp
 pfexec zfs set sync=disabled rpool/work
 exec .github/buildomat/build-and-test.sh illumos
