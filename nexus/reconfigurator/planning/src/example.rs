@@ -212,6 +212,9 @@ pub struct ExampleSystemBuilder {
     internal_dns_count: ZoneCount,
     external_dns_count: ZoneCount,
     crucible_pantry_count: ZoneCount,
+    oximeter_count: ZoneCount,
+    cockroachdb_count: ZoneCount,
+    clickhouse_policy: Option<nexus_types::deployment::ClickhousePolicy>,
     create_zones: bool,
     create_disks_in_blueprint: bool,
     target_release: TargetReleaseDescription,
@@ -248,6 +251,9 @@ impl ExampleSystemBuilder {
             internal_dns_count: ZoneCount(INTERNAL_DNS_REDUNDANCY),
             external_dns_count: ZoneCount(Self::DEFAULT_EXTERNAL_DNS_COUNT),
             crucible_pantry_count: ZoneCount(CRUCIBLE_PANTRY_REDUNDANCY),
+            oximeter_count: ZoneCount(0),
+            cockroachdb_count: ZoneCount(0),
+            clickhouse_policy: None,
             create_zones: true,
             create_disks_in_blueprint: true,
             target_release: TargetReleaseDescription::Initial,
@@ -335,6 +341,41 @@ impl ExampleSystemBuilder {
         crucible_pantry_count: usize,
     ) -> Self {
         self.crucible_pantry_count = ZoneCount(crucible_pantry_count);
+        self
+    }
+
+    /// Set the number of Oximeter instances in the example system.
+    ///
+    /// The default value is 0. A value of 0 is permitted.
+    ///
+    /// If [`Self::create_zones`] is set to `false`, this is ignored.
+    pub fn oximeter_count(mut self, oximeter_count: usize) -> Self {
+        self.oximeter_count = ZoneCount(oximeter_count);
+        self
+    }
+
+    /// Set the number of CockroachDB instances in the example system.
+    ///
+    /// The default value is 0. A value of 0 is permitted.
+    ///
+    /// If [`Self::create_zones`] is set to `false`, this is ignored.
+    pub fn cockroachdb_count(mut self, cockroachdb_count: usize) -> Self {
+        self.cockroachdb_count = ZoneCount(cockroachdb_count);
+        self
+    }
+
+    /// Set the Clickhouse policy for the example system.
+    ///
+    /// The default is `None`, which means single-node Clickhouse is deployed.
+    /// Use this to enable replicated Clickhouse with ClickhouseServer and
+    /// ClickhouseKeeper zones.
+    ///
+    /// If [`Self::create_zones`] is set to `false`, this is ignored.
+    pub fn clickhouse_policy(
+        mut self,
+        policy: nexus_types::deployment::ClickhousePolicy,
+    ) -> Self {
+        self.clickhouse_policy = Some(policy);
         self
     }
 
@@ -428,6 +469,14 @@ impl ExampleSystemBuilder {
         self.external_dns_count.0
     }
 
+    pub fn get_oximeter_zones(&self) -> usize {
+        self.oximeter_count.0
+    }
+
+    pub fn get_cockroachdb_zones(&self) -> usize {
+        self.cockroachdb_count.0
+    }
+
     /// Create a new example system with the given modifications.
     ///
     /// Return the system, and the initial blueprint that matches it.
@@ -443,6 +492,9 @@ impl ExampleSystemBuilder {
             "internal_dns_count" => self.internal_dns_count.0,
             "external_dns_count" => self.external_dns_count.0,
             "crucible_pantry_count" => self.crucible_pantry_count.0,
+            "oximeter_count" => self.oximeter_count.0,
+            "cockroachdb_count" => self.cockroachdb_count.0,
+            "clickhouse_policy" => ?self.clickhouse_policy,
             "create_zones" => self.create_zones,
             "create_disks_in_blueprint" => self.create_disks_in_blueprint,
         );
@@ -457,7 +509,14 @@ impl ExampleSystemBuilder {
             .set_target_internal_dns_zone_count(self.internal_dns_count.0)
             .set_target_crucible_pantry_zone_count(
                 self.crucible_pantry_count.0,
-            );
+            )
+            .set_target_oximeter_zone_count(self.oximeter_count.0)
+            .set_target_cockroachdb_zone_count(self.cockroachdb_count.0);
+
+        // Set the clickhouse policy if one was specified
+        if let Some(policy) = &self.clickhouse_policy {
+            system.clickhouse_policy(policy.clone());
+        }
 
         // Set the target release if one is available. We don't do this
         // unconditionally because we don't want the target release generation
@@ -667,6 +726,32 @@ impl ExampleSystemBuilder {
                                     .expect(
                                         "obtained CruciblePantry image source",
                                     ),
+                            )
+                            .unwrap();
+                    }
+                    for _ in 0..self
+                        .oximeter_count
+                        .on(discretionary_ix, discretionary_sled_count)
+                    {
+                        builder
+                            .sled_add_zone_oximeter(
+                                sled_id,
+                                self.target_release
+                                    .zone_image_source(ZoneKind::Oximeter)
+                                    .expect("obtained Oximeter image source"),
+                            )
+                            .unwrap();
+                    }
+                    for _ in 0..self
+                        .cockroachdb_count
+                        .on(discretionary_ix, discretionary_sled_count)
+                    {
+                        builder
+                            .sled_add_zone_cockroachdb(
+                                sled_id,
+                                self.target_release
+                                    .zone_image_source(ZoneKind::CockroachDb)
+                                    .expect("obtained CockroachDb image source"),
                             )
                             .unwrap();
                     }
@@ -1167,6 +1252,72 @@ mod tests {
         logctx.cleanup_successful();
     }
 
+    #[test]
+    fn builder_all_zone_types() {
+        static TEST_NAME: &str = "example_builder_all_zone_types";
+        let logctx = test_setup_log(TEST_NAME);
+
+        // Build an example system with all supported zone types, including
+        // Oximeter and CockroachDB zones that were previously not part of the
+        // default ExampleSystem.
+        let (example, blueprint) =
+            ExampleSystemBuilder::new(&logctx.log, TEST_NAME)
+                .nsleds(5)
+                .oximeter_count(3)
+                .cockroachdb_count(5)
+                .build();
+
+        // Check that the system's target counts are set correctly.
+        assert_eq!(example.system.target_oximeter_zone_count(), 3);
+        assert_eq!(example.system.target_cockroachdb_zone_count(), 5);
+
+        // Check that the right number of zones are present in both the
+        // blueprint and in the collection.
+        let oximeter_zones =
+            blueprint_zones_of_kind(&blueprint, ZoneKind::Oximeter);
+        assert_eq!(
+            oximeter_zones.len(),
+            3,
+            "expected 3 Oximeter zones in blueprint, got {}: {:#?}",
+            oximeter_zones.len(),
+            oximeter_zones,
+        );
+        let oximeter_zones = collection_ledgered_zones_of_kind(
+            &example.collection,
+            ZoneKind::Oximeter,
+        );
+        assert_eq!(
+            oximeter_zones.len(),
+            3,
+            "expected 3 Oximeter zones in collection, got {}: {:#?}",
+            oximeter_zones.len(),
+            oximeter_zones,
+        );
+
+        let cockroachdb_zones =
+            blueprint_zones_of_kind(&blueprint, ZoneKind::CockroachDb);
+        assert_eq!(
+            cockroachdb_zones.len(),
+            5,
+            "expected 5 CockroachDB zones in blueprint, got {}: {:#?}",
+            cockroachdb_zones.len(),
+            cockroachdb_zones,
+        );
+        let cockroachdb_zones = collection_ledgered_zones_of_kind(
+            &example.collection,
+            ZoneKind::CockroachDb,
+        );
+        assert_eq!(
+            cockroachdb_zones.len(),
+            5,
+            "expected 5 CockroachDB zones in collection, got {}: {:#?}",
+            cockroachdb_zones.len(),
+            cockroachdb_zones,
+        );
+
+        logctx.cleanup_successful();
+    }
+
     /// Test that services set up by the example system are reachable via DNS.
     ///
     /// This test catches issues like #9176, where a too-large DNS response can
@@ -1406,9 +1557,10 @@ mod tests {
                 }
                 // Services that are not currently part of the example system.
                 //
-                // TODO: They really should be part of the example system (at
-                // least in an optional mode). See
-                // https://github.com/oxidecomputer/omicron/issues/9349.
+                // These zone types can now be added via builder methods
+                // (oximeter_count, cockroachdb_count, clickhouse_server_count,
+                // clickhouse_keeper_count), but are not included by default to
+                // maintain backward compatibility with existing tests.
                 ServiceName::ClickhouseAdminKeeper
                 | ServiceName::ClickhouseAdminServer
                 | ServiceName::ClickhouseClusterNative
