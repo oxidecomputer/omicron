@@ -7100,6 +7100,7 @@ dependencies = [
  "omicron-workspace-hack",
  "schemars 0.8.22",
  "serde",
+ "sled-hardware-types",
  "trust-quorum-types",
  "uuid",
 ]

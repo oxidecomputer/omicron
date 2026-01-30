@@ -9,7 +9,7 @@ use nexus_types::trust_quorum::{
     IsLrtqUpgrade, ProposedTrustQuorumConfig, TrustQuorumConfig,
 };
 use omicron_common::api::external::Error;
-use omicron_uuid_kinds::{GenericUuid, RackUuid};
+use omicron_uuid_kinds::{GenericUuid, RackUuid, SledUuid};
 use sled_hardware_types::BaseboardId;
 use std::collections::BTreeSet;
 use std::time::Duration;
@@ -27,8 +27,9 @@ impl super::Nexus {
         rack_id: RackUuid,
         new_sleds: BTreeSet<BaseboardId>,
     ) -> Result<TrustQuorumConfig, Error> {
-        let (latest_committed_config, latest_epoch) =
-            self.load_latest_possible_committed_config(opctx, rack_id).await?;
+        let (latest_committed_config, latest_epoch) = self
+            .tq_load_latest_possible_committed_config(opctx, rack_id)
+            .await?;
         let new_epoch = latest_epoch.next();
         let proposed = self
             .add_sleds_proposed_config(
@@ -73,6 +74,75 @@ impl super::Nexus {
         client.trust_quorum_reconfigure(&req).await?;
 
         Ok(new_config)
+    }
+
+    /// Remove a sled from the trust quorum
+    ///
+    /// This will trigger a trust quorum reconfiguration. This is a required
+    /// first step towards expunging a sled.
+    ///
+    /// Returns the epoch of the proposed configuration so it can be polled
+    /// asynchronously.
+    pub(crate) async fn tq_remove_sled(
+        &self,
+        opctx: &OpContext,
+        sled_id: SledUuid,
+    ) -> Result<Epoch, Error> {
+        // Look up the sled to get its rack_id and baseboard_id
+        let (.., sled) = self.sled_lookup(opctx, &sled_id)?.fetch().await?;
+        let rack_id = RackUuid::from_untyped_uuid(sled.rack_id);
+        let sled_to_remove = BaseboardId {
+            part_number: sled.part_number().to_string(),
+            serial_number: sled.serial_number().to_string(),
+        };
+
+        let (latest_committed_config, latest_epoch) = self
+            .tq_load_latest_possible_committed_config(opctx, rack_id)
+            .await?;
+        let new_epoch = latest_epoch.next();
+        let proposed = self
+            .remove_sled_proposed_config(
+                latest_committed_config,
+                new_epoch,
+                sled_to_remove,
+            )
+            .await?;
+        self.db_datastore.tq_insert_latest_config(opctx, proposed).await?;
+
+        // Read back the real configuration from the database. Importantly this
+        // includes a chosen coordinator.
+        let Some(new_config) =
+            self.db_datastore.tq_get_config(opctx, rack_id, new_epoch).await?
+        else {
+            return Err(Error::internal_error(&format!(
+                "Cannot retrieve newly inserted trust quorum \
+                    configuration for rack {rack_id}, epoch {new_epoch}."
+            )));
+        };
+
+        // Retrieve the sled for the coordinator
+        let client = self
+            .get_coordinator_client(
+                opctx,
+                rack_id,
+                new_epoch,
+                &new_config.coordinator,
+            )
+            .await?;
+
+        // Now send the reconfiguration request to the coordinator. We do
+        // this directly in the API handler because this is a non-idempotent
+        // operation and we only want to issue it once.
+        let req = trust_quorum_types::messages::ReconfigureMsg {
+            rack_id: new_config.rack_id,
+            epoch: new_config.epoch,
+            last_committed_epoch: new_config.last_committed_epoch,
+            members: new_config.members.keys().cloned().collect(),
+            threshold: new_config.threshold,
+        };
+        client.trust_quorum_reconfigure(&req).await?;
+
+        Ok(new_epoch)
     }
 
     /// Abort the latest trust quorum configuration if it is still in the
@@ -281,6 +351,36 @@ impl super::Nexus {
         ))
     }
 
+    // Create a new `ProposedTrustQuorumConfig` with `sled_to_remove` removed
+    // from the membership. Return an error if the sled is not a member of the
+    // `latest_committed_config`.
+    async fn remove_sled_proposed_config(
+        &self,
+        latest_committed_config: TrustQuorumConfig,
+        new_epoch: Epoch,
+        sled_to_remove: BaseboardId,
+    ) -> Result<ProposedTrustQuorumConfig, Error> {
+        let rack_id = latest_committed_config.rack_id;
+        let mut members: BTreeSet<_> =
+            latest_committed_config.members.keys().cloned().collect();
+
+        if !members.remove(&sled_to_remove) {
+            return Err(Error::invalid_request(format!(
+                "Sled {} is not a member of the trust quorum.",
+                sled_to_remove
+            )));
+        }
+
+        Ok(ProposedTrustQuorumConfig {
+            rack_id,
+            epoch: new_epoch,
+            is_lrtq_upgrade: IsLrtqUpgrade::No {
+                last_committed_epoch: latest_committed_config.epoch,
+            },
+            members,
+        })
+    }
+
     // Create a new `ProposedTrustQuorumConfig` including `new_sleds` in
     // the membership. Return an error if any of the new sleds exist in the
     // `latest_committed_config` membership already.
@@ -322,7 +422,7 @@ impl super::Nexus {
     // Note that the configuration that comes back may not actually be committed
     // yet if it's the latest configuration. That is ok because we will perform
     // validation during insert of the any newly proposed config.
-    async fn load_latest_possible_committed_config(
+    pub async fn tq_load_latest_possible_committed_config(
         &self,
         opctx: &OpContext,
         rack_id: RackUuid,
