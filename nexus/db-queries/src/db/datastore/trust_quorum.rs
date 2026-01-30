@@ -793,7 +793,7 @@ impl DataStore {
         rack_id: RackUuid,
         epoch: Epoch,
         acked_commits: BTreeSet<BaseboardId>,
-    ) -> Result<(), Error> {
+    ) -> Result<TrustQuorumConfigState, Error> {
         let authz_rack = authz::Rack::new(
             authz::FLEET,
             rack_id.into_untyped_uuid(),
@@ -877,9 +877,11 @@ impl DataStore {
                         )
                         .await
                         .map_err(|txn_error| txn_error.into_diesel(&err))?;
+
+                        return Ok(TrustQuorumConfigState::Committed);
                     }
 
-                    Ok(())
+                    Ok(TrustQuorumConfigState::Committing)
                 }
             })
             .await
