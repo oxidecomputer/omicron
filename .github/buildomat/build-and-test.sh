@@ -30,7 +30,7 @@ curl -sSfL --retry 10 https://get.nexte.st/"$NEXTEST_VERSION"/"$1" | gunzip | ta
 #
 TEST_TMPDIR='/var/tmp/omicron_tmp'
 echo "tests will store ephemeral output in $TEST_TMPDIR" >&2
-mkdir "$TEST_TMPDIR"
+mkdir -p "$TEST_TMPDIR"
 
 OUTPUT_DIR='/work'
 echo "tests will store non-ephemeral output in $OUTPUT_DIR" >&2
