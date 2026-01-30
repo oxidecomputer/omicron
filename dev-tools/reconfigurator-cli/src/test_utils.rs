@@ -47,17 +47,8 @@ impl ReconfiguratorCliTestState {
     }
 
     /// Load the default example system.
-    ///
-    /// For test backward compatibility, this disables Oximeter, CockroachDB,
-    /// and InternalNtp zones. Tests that want to specifically test these zone
-    /// types should use `load_example_customized()` to enable them.
     pub fn load_example(&mut self) -> anyhow::Result<()> {
-        self.load_example_customized(|builder| {
-            Ok(builder
-                .oximeter_count(0)
-                .cockroachdb_count(0)
-                .internal_ntp_count(0))
-        })
+        self.load_example_customized(|builder| Ok(builder))
     }
 
     /// Load an example system.

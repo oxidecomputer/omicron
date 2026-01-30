@@ -2683,9 +2683,6 @@ pub mod test {
             &logctx.log,
             rng.next_system_rng(),
         )
-        .cockroachdb_count(0)
-        .oximeter_count(0)
-        .internal_ntp_count(0)
         .build();
         verify_blueprint(&blueprint1, &example.input);
 
@@ -3547,12 +3544,8 @@ pub mod test {
         let mut rng = SimRngState::from_seed(TEST_NAME);
 
         // Use our example system.
-        let (system, blueprint1) = ExampleSystemBuilder::new(&log, TEST_NAME)
-            .nsleds(1)
-            .cockroachdb_count(0)
-            .oximeter_count(0)
-            .internal_ntp_count(0)
-            .build();
+        let (system, blueprint1) =
+            ExampleSystemBuilder::new(&log, TEST_NAME).nsleds(1).build();
 
         // Find a zone and change its image source.
         let mut blueprint_builder = BlueprintBuilder::new_based_on(

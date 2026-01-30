@@ -254,9 +254,9 @@ impl ExampleSystemBuilder {
             internal_dns_count: ZoneCount(INTERNAL_DNS_REDUNDANCY),
             external_dns_count: ZoneCount(Self::DEFAULT_EXTERNAL_DNS_COUNT),
             crucible_pantry_count: ZoneCount(CRUCIBLE_PANTRY_REDUNDANCY),
-            oximeter_count: ZoneCount(OXIMETER_REDUNDANCY),
-            cockroachdb_count: ZoneCount(COCKROACHDB_REDUNDANCY),
-            internal_ntp_count: ZoneCount(1),
+            oximeter_count: ZoneCount(0),
+            cockroachdb_count: ZoneCount(0),
+            internal_ntp_count: ZoneCount(0),
             clickhouse_policy: None,
             create_zones: true,
             create_disks_in_blueprint: true,
@@ -350,8 +350,7 @@ impl ExampleSystemBuilder {
 
     /// Set the number of Oximeter instances in the example system.
     ///
-    /// The default value is [`OXIMETER_REDUNDANCY`]. A value of 0 is
-    /// permitted.
+    /// The default value is 0. A value of 0 is permitted.
     ///
     /// If [`Self::create_zones`] is set to `false`, this is ignored.
     pub fn oximeter_count(mut self, oximeter_count: usize) -> Self {
@@ -361,8 +360,7 @@ impl ExampleSystemBuilder {
 
     /// Set the number of CockroachDB instances in the example system.
     ///
-    /// The default value is [`COCKROACHDB_REDUNDANCY`]. A value of 0 is
-    /// permitted.
+    /// The default value is 0. A value of 0 is permitted.
     ///
     /// If [`Self::create_zones`] is set to `false`, this is ignored.
     pub fn cockroachdb_count(mut self, cockroachdb_count: usize) -> Self {
@@ -1626,12 +1624,10 @@ mod tests {
                 ServiceName::Clickhouse
                 | ServiceName::ClickhouseAdminSingleServer
                 | ServiceName::ClickhouseNative
-                | ServiceName::Cockroach
+                | ServiceName::OximeterReader
                 | ServiceName::InternalDns
                 | ServiceName::Nexus
                 | ServiceName::NexusLockstep
-                | ServiceName::Oximeter
-                | ServiceName::OximeterReader
                 | ServiceName::RepoDepot
                 | ServiceName::CruciblePantry => {
                     out.insert(service, Ok(()));
@@ -1642,11 +1638,17 @@ mod tests {
                 // Replicated Clickhouse zone types can be added via the
                 // clickhouse_policy() builder method, but are not included by
                 // default.
+                //
+                // Cockroach and Oximeter can be added via the
+                // cockroachdb_count() and oximeter_count() builder methods,
+                // but are not included by default.
                 ServiceName::ClickhouseAdminKeeper
                 | ServiceName::ClickhouseAdminServer
                 | ServiceName::ClickhouseClusterNative
                 | ServiceName::ClickhouseKeeper
                 | ServiceName::ClickhouseServer
+                | ServiceName::Cockroach
+                | ServiceName::Oximeter
                 | ServiceName::ExternalDns
                 | ServiceName::ManagementGatewayService
                 | ServiceName::Wicketd
