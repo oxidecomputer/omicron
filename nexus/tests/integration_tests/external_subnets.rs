@@ -10,13 +10,17 @@
 //!
 //! TODO(#9453): Replace stub tests with full implementation tests.
 
+use dropshot::ResultsPage;
 use http::Method;
 use http::StatusCode;
 use nexus_test_utils::http_testing::AuthnMode;
 use nexus_test_utils::http_testing::NexusRequest;
+use nexus_test_utils::resource_helpers::create_default_ip_pools;
+use nexus_test_utils::resource_helpers::create_instance;
 use nexus_test_utils::resource_helpers::create_project;
 use nexus_test_utils_macros::nexus_test;
 use nexus_types::external_api::params;
+use nexus_types::external_api::views;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 
 type ControlPlaneTestContext =
@@ -42,6 +46,10 @@ fn external_subnet_attach_url(name: &str, project: &str) -> String {
 
 fn external_subnet_detach_url(name: &str, project: &str) -> String {
     format!("/v1/external-subnets/{}/detach?project={}", name, project)
+}
+
+fn instance_external_subnets_url(instance: &str, project: &str) -> String {
+    format!("/v1/instances/{}/external-subnets?project={}", instance, project)
 }
 
 #[nexus_test]
@@ -214,4 +222,35 @@ async fn test_external_subnet_detach_unimplemented(
     .execute()
     .await
     .expect("failed to make request");
+}
+
+const INSTANCE_NAME: &str = "test-instance";
+
+#[nexus_test]
+async fn test_instance_external_subnet_list_empty(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+
+    // Create default IP pools, project, and instance
+    create_default_ip_pools(client).await;
+    let _ = create_project(client, PROJECT_NAME).await;
+    let _ = create_instance(client, PROJECT_NAME, INSTANCE_NAME).await;
+
+    // List external subnets for the instance - should return empty list
+    let subnets = NexusRequest::object_get(
+        client,
+        &instance_external_subnets_url(INSTANCE_NAME, PROJECT_NAME),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .expect("failed to list instance external subnets")
+    .parsed_body::<ResultsPage<views::ExternalSubnet>>()
+    .expect("failed to parse external subnets");
+
+    assert!(
+        subnets.items.is_empty(),
+        "expected no external subnets attached to new instance"
+    );
 }

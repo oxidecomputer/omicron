@@ -31,6 +31,7 @@ use nexus_db_lookup::lookup;
 use nexus_db_model::ExternalSubnet;
 use nexus_db_model::ExternalSubnetIdentity;
 use nexus_db_model::ExternalSubnetUpdate;
+use nexus_db_model::IpAttachState;
 use nexus_db_model::IpNet;
 use nexus_db_model::IpVersion;
 use nexus_db_model::Name;
@@ -52,6 +53,7 @@ use omicron_common::api::external::UpdateResult;
 use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_uuid_kinds::ExternalSubnetUuid;
 use omicron_uuid_kinds::GenericUuid as _;
+use omicron_uuid_kinds::InstanceUuid;
 use omicron_uuid_kinds::SubnetPoolUuid;
 use ref_cast::RefCast as _;
 use uuid::Uuid;
@@ -508,6 +510,23 @@ impl DataStore {
                     Ok(())
                 }
             })
+    }
+
+    /// Fetch all external subnets attached to the provided instance.
+    pub async fn instance_lookup_external_subnets(
+        &self,
+        opctx: &OpContext,
+        instance_id: InstanceUuid,
+    ) -> ListResultVec<ExternalSubnet> {
+        use nexus_db_schema::schema::external_subnet::dsl;
+        dsl::external_subnet
+            .filter(dsl::instance_id.eq(instance_id.into_untyped_uuid()))
+            .filter(dsl::time_deleted.is_null())
+            .filter(dsl::attach_state.eq(IpAttachState::Attached))
+            .select(ExternalSubnet::as_select())
+            .get_results_async(&*self.pool_connection_authorized(opctx).await?)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 }
 
