@@ -32,6 +32,7 @@ use nexus_db_model::ExternalSubnet;
 use nexus_db_model::ExternalSubnetIdentity;
 use nexus_db_model::ExternalSubnetUpdate;
 use nexus_db_model::IpNet;
+use nexus_db_model::IpVersion;
 use nexus_db_model::Name;
 use nexus_db_model::SubnetPool;
 use nexus_db_model::SubnetPoolMember;
@@ -103,7 +104,9 @@ impl DataStore {
         opctx: &OpContext,
         params: params::SubnetPoolCreate,
     ) -> CreateResult<SubnetPool> {
-        opctx.authorize(authz::Action::CreateChild, &authz::FLEET).await?;
+        opctx
+            .authorize(authz::Action::CreateChild, &authz::SUBNET_POOL_LIST)
+            .await?;
         use nexus_db_schema::schema::subnet_pool::dsl;
         let pool = SubnetPool::new(params.identity, params.ip_version.into());
         diesel::insert_into(dsl::subnet_pool)
@@ -174,7 +177,7 @@ impl DataStore {
         opctx: &OpContext,
         authz_pool: &authz::SubnetPool,
         updates: SubnetPoolUpdate,
-    ) -> UpdateResult<()> {
+    ) -> UpdateResult<SubnetPool> {
         use nexus_db_schema::schema::subnet_pool::dsl;
         opctx.authorize(authz::Action::Modify, authz_pool).await?;
         let conn = self.pool_connection_authorized(opctx).await?;
@@ -184,10 +187,10 @@ impl DataStore {
                 .filter(dsl::time_deleted.is_null()),
         )
         .set(updates)
-        .execute_async(&*conn)
+        .returning(SubnetPool::as_returning())
+        .get_result_async(&*conn)
         .await
         .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
-        .map(|_| ())
     }
 
     /// Link a Subnet Pool to a Silo.
@@ -310,9 +313,24 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         authz_pool: &authz::SubnetPool,
+        db_pool: &SubnetPool,
         params: &params::SubnetPoolMemberAdd,
     ) -> CreateResult<SubnetPoolMember> {
         opctx.authorize(authz::Action::CreateChild, authz_pool).await?;
+
+        // First check we're adding members of the same IP version.
+        let pool_version = db_pool.ip_version;
+        let member_version = match params.subnet {
+            oxnet::IpNet::V4(_) => IpVersion::V4,
+            oxnet::IpNet::V6(_) => IpVersion::V6,
+        };
+        if pool_version != member_version {
+            return Err(Error::invalid_request(&format!(
+                "Cannot add IP{} members to IP{} Subnet Pool",
+                member_version, pool_version,
+            )));
+        }
+
         let member = SubnetPoolMember::new(params, authz_pool.id())?;
         insert_subnet_pool_member_query(&member)
             .get_result_async(&*self.pool_connection_authorized(opctx).await?)
@@ -338,6 +356,7 @@ impl DataStore {
         opctx.authorize(authz::Action::ListChildren, pool).await?;
         paginated(dsl::subnet_pool_member, dsl::subnet, pagparams)
             .filter(dsl::subnet_pool_id.eq(to_db_typed_uuid(pool.id())))
+            .filter(dsl::time_deleted.is_null())
             .select(SubnetPoolMember::as_select())
             .get_results_async(&*self.pool_connection_authorized(opctx).await?)
             .await
@@ -680,7 +699,7 @@ mod tests {
             max_prefix_length: Some(24),
         };
         let member = datastore
-            .add_subnet_pool_member(opctx, &authz_pool, &params)
+            .add_subnet_pool_member(opctx, &authz_pool, &db_pool, &params)
             .await
             .expect("able to create subnet pool member");
 
@@ -742,7 +761,7 @@ mod tests {
         let pool_id = NameOrId::Id(pool.identity.id.into_untyped_uuid());
 
         // Re-fetch to get the authz object
-        let (authz_pool, _db_pool) = datastore
+        let (authz_pool, db_pool) = datastore
             .lookup_subnet_pool(opctx, &pool_id)
             .fetch()
             .await
@@ -755,7 +774,7 @@ mod tests {
             max_prefix_length: Some(24),
         };
         let _member = datastore
-            .add_subnet_pool_member(opctx, &authz_pool, &params)
+            .add_subnet_pool_member(opctx, &authz_pool, &db_pool, &params)
             .await
             .expect("able to create subnet pool member");
 
@@ -767,7 +786,7 @@ mod tests {
             max_prefix_length: Some(26),
         };
         let err = datastore
-            .add_subnet_pool_member(opctx, &authz_pool, &params)
+            .add_subnet_pool_member(opctx, &authz_pool, &db_pool, &params)
             .await
             .expect_err("failure to create overlapping subnet member");
         let Error::InvalidRequest { message } = &err else {
@@ -1071,6 +1090,7 @@ mod tests {
                 .add_subnet_pool_member(
                     opctx,
                     &authz_pool,
+                    &db_pool,
                     &SubnetPoolMemberAdd {
                         subnet,
                         min_prefix_length: Some(48),
@@ -2698,6 +2718,7 @@ mod tests {
             .add_subnet_pool_member(
                 opctx,
                 &authz_pool,
+                &db_pool,
                 &SubnetPoolMemberAdd {
                     subnet: "255.255.255.0/24".parse().unwrap(),
                     min_prefix_length: Some(24),
@@ -2841,6 +2862,7 @@ mod tests {
             .add_subnet_pool_member(
                 opctx,
                 &authz_pool,
+                &db_pool,
                 &SubnetPoolMemberAdd {
                     subnet: "fd00::/48".parse().unwrap(),
                     min_prefix_length: None,

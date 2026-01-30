@@ -306,6 +306,18 @@ static SETUP_REQUESTS: LazyLock<Vec<SetupReq>> = LazyLock::new(|| {
                 &*DEMO_SILO_USER_LOGOUT_URL,
             ],
         },
+        // Create the demo subnet pool
+        SetupReq::Post {
+            url: &DEMO_SUBNET_POOLS_URL,
+            body: serde_json::to_value(&*DEMO_SUBNET_POOL_CREATE).unwrap(),
+            id_routes: vec!["/v1/system/subnet-pools/{id}"],
+        },
+        // Create the demo member in the pool
+        SetupReq::Post {
+            url: &DEMO_SUBNET_POOL_MEMBERS_ADD_URL,
+            body: serde_json::to_value(&*DEMO_SUBNET_POOL_MEMBER_ADD).unwrap(),
+            id_routes: vec![],
+        },
         // Create the default IP pool
         SetupReq::Post {
             url: &DEMO_IP_POOLS_URL,
