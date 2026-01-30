@@ -654,6 +654,13 @@ pub static DEMO_INSTANCE_EXTERNAL_IPS_URL: LazyLock<String> =
             *DEMO_INSTANCE_NAME, *DEMO_PROJECT_SELECTOR
         )
     });
+pub static DEMO_INSTANCE_EXTERNAL_SUBNETS_URL: LazyLock<String> =
+    LazyLock::new(|| {
+        format!(
+            "/v1/instances/{}/external-subnets?{}",
+            *DEMO_INSTANCE_NAME, *DEMO_PROJECT_SELECTOR
+        )
+    });
 pub static DEMO_INSTANCE_CREATE: LazyLock<params::InstanceCreate> =
     LazyLock::new(|| params::InstanceCreate {
         identity: IdentityMetadataCreateParams {
@@ -2726,6 +2733,13 @@ pub static VERIFY_ENDPOINTS: LazyLock<Vec<VerifyEndpoint>> = LazyLock::new(
             /* Instance external IP addresses */
             VerifyEndpoint {
                 url: &DEMO_INSTANCE_EXTERNAL_IPS_URL,
+                visibility: Visibility::Protected,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![AllowedMethod::Get],
+            },
+            /* Instance external subnets */
+            VerifyEndpoint {
+                url: &DEMO_INSTANCE_EXTERNAL_SUBNETS_URL,
                 visibility: Visibility::Protected,
                 unprivileged_access: UnprivilegedAccess::None,
                 allowed_methods: vec![AllowedMethod::Get],
