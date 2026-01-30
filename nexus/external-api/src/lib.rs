@@ -76,6 +76,7 @@ api_versions!([
     // |  date-based version should be at the top of the list.
     // v
     // (next_yyyymmddnn, IDENT),
+    (2026012900, TRUST_QUORUM_ABORT_CONFIG),
     (2026012300, DUAL_STACK_EPHEMERAL_IP),
     (2026012201, EXTERNAL_SUBNET_ALLOCATOR_UPDATE),
     (2026012200, FLOATING_IP_ALLOCATOR_UPDATE),
@@ -4475,6 +4476,18 @@ pub trait NexusExternalApi {
         rqctx: RequestContext<Self::Context>,
         path_params: Path<params::RackPath>,
         req: TypedBody<params::RackMembershipAddSledsRequest>,
+    ) -> Result<HttpResponseOk<RackMembershipStatus>, HttpError>;
+
+    /// Abort the latest rack membership change
+    #[endpoint {
+        method = POST,
+        path = "/v1/system/hardware/racks/{rack_id}/membership/abort",
+        tags = ["experimental"],
+        versions = VERSION_TRUST_QUORUM_ABORT_CONFIG..
+    }]
+    async fn rack_membership_abort(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::RackPath>,
     ) -> Result<HttpResponseOk<RackMembershipStatus>, HttpError>;
 
     /// Retrieve the rack cluster membership status
