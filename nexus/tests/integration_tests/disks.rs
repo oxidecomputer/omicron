@@ -2748,7 +2748,7 @@ async fn test_create_read_only_disk_from_snapshot(
     // Define a global image
     let image_create_params = params::ImageCreate {
         identity: IdentityMetadataCreateParams {
-            name: "mycelium".parse().unwrap(),
+            name: "alpine".parse().unwrap(),
             description: String::from(
                 "you can boot any image, as long as it's alpine",
             ),
@@ -2856,25 +2856,40 @@ async fn test_create_read_only_disk_from_image(
     DiskTest::new(&cptestctx).await;
     create_project_and_pool(client).await;
 
-    // Define a global image
-    let image_create_params = params::ImageCreate {
-        identity: IdentityMetadataCreateParams {
-            name: "mycelium".parse().unwrap(),
-            description: String::from(
-                "you can boot any image, as long as it's alpine",
-            ),
-        },
-        source: params::ImageSource::YouCanBootAnythingAsLongAsItsAlpine,
-        os: "alpine".to_string(),
-        version: "edge".to_string(),
-    };
-
-    let images_url = format!("/v1/images?project={}", PROJECT_NAME);
-    let image =
-        NexusRequest::objects_post(client, &images_url, &image_create_params)
-            .authn_as(AuthnMode::PrivilegedUser)
-            .execute_and_parse_unwrap::<views::Image>()
+    // Define a global image.
+    let image = {
+        // We'll do this ourselves by snapshotting a blank disk, rather than
+        // reusing `YouCanBootAnythingYouLikeAsLongAsItsAlpine` as the other
+        // tests do, because the disk created from the image must be >= 1GiB,
+        // and alpine is teensy. Whatever, we're not trying to boot from it.
+        //
+        // We'll pretend it's my hobby OS, because I thought that would be
+        // funny.
+        let base_disk_name = "mycelium-disk";
+        resource_helpers::create_disk(&client, PROJECT_NAME, base_disk_name)
             .await;
+        let base_disk = disk_get(client, &get_disk_url(base_disk_name)).await;
+        assert_eq!(base_disk.state, DiskState::Detached);
+
+        // Create a snapshot of the base disk.
+        let snap_for_img_name = "mycelium-snap";
+        let snap_for_img = resource_helpers::create_snapshot(
+            client,
+            PROJECT_NAME,
+            base_disk_name,
+            snap_for_img_name,
+        )
+        .await;
+
+        // Finally, create the image.
+        resource_helpers::create_project_image_from_snapshot(
+            client,
+            PROJECT_NAME,
+            "mycelium",
+            snap_for_img.identity.id,
+        )
+        .await
+    };
 
     // Create a read-only disk from the image
     let ro_disk = resource_helpers::create_disk_from_image(
