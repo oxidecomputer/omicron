@@ -1,0 +1,1063 @@
+= Adding Authorization for Resources
+:toc: left
+:toclevels: 3
+
+== Overview
+
+This document explains how to add authorization (authz) support for new resources in Omicron. Authorization in Omicron is based on role-based access control (RBAC) using the Oso policy engine. The implementation spans multiple layers of the codebase, from defining Rust types to specifying Polar policy rules.
+
+Before implementing authz for a new resource, you should understand the basic concepts described in the module comments of `nexus/auth/src/authz/mod.rs` and `nexus/auth/src/authz/api_resources.rs`.
+
+== Resource Categories
+
+Resources in Omicron fall into four main categories, each requiring a slightly different approach:
+
+1. **Static top-level resources** - Singleton resources at the top of the hierarchy (e.g., Fleet, system inventory)
+2. **Dynamic top-level resources** - Multiple instances of a resource type at the top level (e.g., Silo)
+3. **Static child resources** - Synthetic collection resources beneath a dynamic parent (e.g., Silo's certificate list)
+4. **Dynamic nested resources** - Resources with multiple instances nested under other dynamic resources (e.g., Project under Silo, Instance under Project)
+
+The approach you take depends on which category your resource falls into.
+
+== Static Top-Level Resources
+
+Static top-level resources are singletons representing system-wide concepts. Examples include `Fleet`, `Inventory`, and `DnsConfig`.
+
+=== Characteristics
+
+* There is only one instance in the entire system
+* Typically represented as a unit struct or zero-sized type
+* Usually require fleet-level admin privileges
+* Do not support role assignments (roles are on the Fleet instead)
+
+=== Implementation Steps
+
+==== 1. Define the Rust Type
+
+In `nexus/auth/src/authz/api_resources.rs`, define your type as a unit struct and create a singleton constant:
+
+[source,rust]
+----
+/// Synthetic resource used for modeling access to low-level hardware inventory
+/// data
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct Inventory;
+pub const INVENTORY: Inventory = Inventory {};
+----
+
+==== 2. Implement PolarClass
+
+Implement `oso::PolarClass` to define how Oso interacts with this type. For most static resources, you'll want to:
+
+* Mark it with equality checking
+* Add a method to check roles (usually returns `false` since roles are on the parent)
+* Add an attribute getter for the parent (typically `fleet`)
+
+[source,rust]
+----
+impl oso::PolarClass for Inventory {
+    fn get_polar_class_builder() -> oso::ClassBuilder<Self> {
+        // Roles are not directly attached to Inventory
+        oso::Class::builder()
+            .with_equality_check()
+            .add_method(
+                "has_role",
+                |_: &Inventory, _actor: AuthenticatedActor, _role: String| {
+                    false
+                },
+            )
+            .add_attribute_getter("fleet", |_| FLEET)
+    }
+}
+----
+
+==== 3. Implement AuthorizedResource
+
+Implement the `AuthorizedResource` trait, which defines how to load roles and handle authorization errors:
+
+[source,rust]
+----
+impl AuthorizedResource for Inventory {
+    fn load_roles<'fut>(
+        &'fut self,
+        opctx: &'fut OpContext,
+        authn: &'fut authn::Context,
+        roleset: &'fut mut RoleSet,
+    ) -> futures::future::BoxFuture<'fut, Result<(), Error>> {
+        // Load roles from the Fleet since there are no roles on Inventory itself
+        load_roles_for_resource_tree(&FLEET, opctx, authn, roleset).boxed()
+    }
+
+    fn on_unauthorized(
+        &self,
+        _: &Authz,
+        error: Error,
+        _: AnyActor,
+        _: Action,
+    ) -> Error {
+        // For static resources, just return the error as-is
+        error
+    }
+
+    fn polar_class(&self) -> oso::Class {
+        Self::get_polar_class()
+    }
+}
+----
+
+==== 4. Define Polar Policy
+
+In `nexus/auth/src/authz/omicron.polar`, define the resource and its permissions:
+
+[source,polar]
+----
+# Describes the policy for reading and modifying low-level inventory
+resource Inventory {
+    permissions = [ "read", "modify" ];
+    relations = { parent_fleet: Fleet };
+    "read" if "viewer" on "parent_fleet";
+    "modify" if "admin" on "parent_fleet";
+}
+has_relation(fleet: Fleet, "parent_fleet", inventory: Inventory)
+    if inventory.fleet = fleet;
+----
+
+This policy says:
+
+* `Inventory` has two permissions: `read` and `modify`
+* It has a relationship to a `Fleet` (its parent)
+* The `read` permission is granted to anyone with the `viewer` role on the parent Fleet
+* The `modify` permission is granted to anyone with the `admin` role on the parent Fleet
+
+==== 5. Register with Oso
+
+Add your type to the `classes` array in `nexus/auth/src/authz/oso_generic.rs`, in the `make_omicron_oso()` function:
+
+[source,rust]
+----
+pub fn make_omicron_oso(log: &slog::Logger) -> Result<OsoInit, anyhow::Error> {
+    let mut oso_builder = OsoInitBuilder::new(log.clone());
+    let classes = [
+        // ... existing classes ...
+        Inventory::get_polar_class(),
+        // ... more classes ...
+    ];
+    for c in classes {
+        oso_builder = oso_builder.register_class(c)?;
+    }
+    // ...
+}
+----
+
+==== 6. Add to Policy Tests
+
+In `nexus/db-queries/src/policy_test/resources.rs`, add your resource to the `make_resources()` function:
+
+[source,rust]
+----
+pub async fn make_resources(
+    mut builder: ResourceBuilder<'_>,
+    main_silo_id: Uuid,
+) -> ResourceSet {
+    // Global resources
+    builder.new_resource(authz::INVENTORY);
+    // ...
+}
+----
+
+=== Example: Inventory
+
+See `nexus/auth/src/authz/api_resources.rs:641-682` for the complete `Inventory` implementation, and `nexus/auth/src/authz/omicron.polar:462-469` for its Polar policy.
+
+== Dynamic Top-Level Resources
+
+Dynamic top-level resources are those where you can have multiple instances at the top of the hierarchy. The primary example is `Silo`.
+
+=== Characteristics
+
+* Multiple instances can exist
+* Usually support role assignments
+* Identified by a UUID or unique key
+* Typically children of Fleet in the hierarchy
+
+=== Implementation Steps
+
+==== 1. Use the `authz_resource!` Macro
+
+For dynamic resources with database backing, use the `authz_resource!` macro. This generates most of the boilerplate:
+
+[source,rust]
+----
+authz_resource! {
+    name = "Silo",
+    parent = "Fleet",
+    primary_key = Uuid,
+    roles_allowed = true,
+    polar_snippet = Custom,
+}
+----
+
+Parameters:
+
+* `name`: Name of the resource type (must match a `ResourceType` enum variant)
+* `parent`: Name of the parent authz resource type
+* `primary_key`: Rust type for the resource's unique identifier (typically `Uuid`)
+* `roles_allowed`: Whether users can assign roles directly to this resource
+* `polar_snippet`: How to generate the Polar policy (see below)
+
+==== 2. Polar Snippet Options
+
+The `polar_snippet` parameter determines how Polar policy is generated:
+
+* `Custom`: You write the entire Polar policy manually in `omicron.polar`
+* `FleetChild`: Auto-generated policy for fleet-level resources requiring admin privileges
+* `InSilo`: Auto-generated policy for Silo-scoped resources
+* `InProjectLimited`: Auto-generated policy for Project resources accessible to `limited-collaborator`
+* `InProjectFull`: Auto-generated policy for Project resources requiring full `collaborator` role
+
+For top-level resources that support custom role assignments (like Silo), use `Custom` and write the policy manually.
+
+==== 3. Implement ApiResourceWithRolesType
+
+If `roles_allowed = true`, implement `ApiResourceWithRolesType` to specify which roles are allowed:
+
+[source,rust]
+----
+impl ApiResourceWithRolesType for Silo {
+    type AllowedRoles = SiloRole;
+}
+----
+
+The `AllowedRoles` type should be an enum implementing `serde::Serialize`, `serde::de::DeserializeOwned`, and `nexus_db_model::DatabaseString`.
+
+==== 4. Define Custom Polar Policy
+
+In `nexus/auth/src/authz/omicron.polar`, define the resource structure, permissions, roles, and relationships:
+
+[source,polar]
+----
+resource Silo {
+    permissions = [
+        "list_children",
+        "modify",
+        "read",
+        "create_child",
+    ];
+    roles = [ "admin", "collaborator", "limited-collaborator", "viewer" ];
+
+    # Roles implied by other roles on this resource
+    "viewer" if "limited-collaborator";
+    "limited-collaborator" if "collaborator";
+    "collaborator" if "admin";
+
+    # Permissions granted directly by roles on this resource
+    "list_children" if "viewer";
+    "read" if "viewer";
+    "create_child" if "collaborator";
+    "modify" if "admin";
+
+    # Permissions from parent (Fleet) roles
+    relations = { parent_fleet: Fleet };
+    "read" if "viewer" on "parent_fleet";
+    "modify" if "collaborator" on "parent_fleet";
+    "list_children" if "external-authenticator" on "parent_fleet";
+    "create_child" if "external-authenticator" on "parent_fleet";
+}
+
+has_relation(fleet: Fleet, "parent_fleet", silo: Silo)
+    if silo.fleet = fleet;
+----
+
+==== 5. Register with Oso
+
+Add your type to the `generated_inits` array in `make_omicron_oso()`:
+
+[source,rust]
+----
+let generated_inits = [
+    // ... existing resources ...
+    Silo::init(),
+    // ... more resources ...
+];
+
+for init in generated_inits {
+    oso_builder = oso_builder.register_class_with_snippet(init)?;
+}
+----
+
+==== 6. Add to Policy Tests
+
+Add representative instances of your resource to `make_resources()`:
+
+[source,rust]
+----
+make_silo(&mut builder, "silo1", main_silo_id, true).await;
+make_silo(&mut builder, "silo2", Uuid::new_v4(), false).await;
+----
+
+Create a helper function if your resource has a complex hierarchy beneath it.
+
+=== Example: Silo
+
+See `nexus/auth/src/authz/api_resources.rs:1563-1573` for the Silo definition and `nexus/auth/src/authz/omicron.polar:123-157` for its Polar policy.
+
+== Static Child Resources
+
+Static child resources are synthetic collection resources that exist conceptually but aren't stored as distinct entities in the database. Examples include `SiloCertificateList` (the collection of certificates for a Silo) and `VpcList` (the collection of VPCs in a Project).
+
+=== Characteristics
+
+* Represents a collection under a parent resource
+* Not stored directly in the database
+* Used to control permissions for creating child resources
+* Each parent resource has exactly one instance of the collection
+
+=== Implementation Steps
+
+==== 1. Define the Rust Type
+
+Create a struct that wraps the parent resource:
+
+[source,rust]
+----
+/// Synthetic resource describing the list of Certificates associated with a
+/// Silo
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SiloCertificateList(Silo);
+
+impl SiloCertificateList {
+    pub fn new(silo: Silo) -> SiloCertificateList {
+        SiloCertificateList(silo)
+    }
+
+    pub fn silo(&self) -> &Silo {
+        &self.0
+    }
+}
+----
+
+==== 2. Implement PolarClass
+
+Add an attribute getter that returns the parent:
+
+[source,rust]
+----
+impl oso::PolarClass for SiloCertificateList {
+    fn get_polar_class_builder() -> oso::ClassBuilder<Self> {
+        oso::Class::builder()
+            .with_equality_check()
+            .add_attribute_getter("silo", |list: &SiloCertificateList| {
+                list.0.clone()
+            })
+    }
+}
+----
+
+==== 3. Implement AuthorizedResource
+
+Delegate role loading to the parent:
+
+[source,rust]
+----
+impl AuthorizedResource for SiloCertificateList {
+    fn load_roles<'fut>(
+        &'fut self,
+        opctx: &'fut OpContext,
+        authn: &'fut authn::Context,
+        roleset: &'fut mut RoleSet,
+    ) -> futures::future::BoxFuture<'fut, Result<(), Error>> {
+        // There are no roles on this resource, but we still need to load the
+        // Silo-related roles.
+        self.silo().load_roles(opctx, authn, roleset)
+    }
+
+    fn on_unauthorized(
+        &self,
+        _: &Authz,
+        error: Error,
+        _: AnyActor,
+        _: Action,
+    ) -> Error {
+        error
+    }
+
+    fn polar_class(&self) -> oso::Class {
+        Self::get_polar_class()
+    }
+}
+----
+
+==== 4. Define Polar Policy
+
+Define permissions for the collection, typically based on parent roles:
+
+[source,polar]
+----
+# Describes the policy for creating and managing Silo certificates
+resource SiloCertificateList {
+    permissions = [ "list_children", "create_child" ];
+
+    relations = { parent_silo: Silo, parent_fleet: Fleet };
+
+    # Both Fleet and Silo administrators can see and modify the Silo's
+    # certificates.
+    "list_children" if "admin" on "parent_silo";
+    "list_children" if "admin" on "parent_fleet";
+    "create_child" if "admin" on "parent_silo";
+    "create_child" if "admin" on "parent_fleet";
+}
+
+has_relation(silo: Silo, "parent_silo", collection: SiloCertificateList)
+    if collection.silo = silo;
+has_relation(fleet: Fleet, "parent_fleet", collection: SiloCertificateList)
+    if collection.silo.fleet = fleet;
+----
+
+Note that collection resources often define relationships to multiple ancestors (both `parent_silo` and `parent_fleet` in this example).
+
+==== 5. Register with Oso
+
+Add to the `classes` array in `make_omicron_oso()`:
+
+[source,rust]
+----
+let classes = [
+    // ... existing classes ...
+    SiloCertificateList::get_polar_class(),
+    // ... more classes ...
+];
+----
+
+==== 6. Add to Policy Tests
+
+Instantiate the collection in the parent resource's test helper:
+
+[source,rust]
+----
+async fn make_silo(
+    builder: &mut ResourceBuilder<'_>,
+    silo_name: &str,
+    silo_id: Uuid,
+    first_branch: bool,
+) {
+    let silo = authz::Silo::new(/* ... */);
+    // ...
+    builder.new_resource(authz::SiloCertificateList::new(silo.clone()));
+    // ...
+}
+----
+
+=== Example: SiloCertificateList
+
+See `nexus/auth/src/authz/api_resources.rs:684-734` for the complete implementation and `nexus/auth/src/authz/omicron.polar:614-630` for the Polar policy.
+
+=== Example: VpcList
+
+`VpcList` is an interesting case because it enforces different permissions than its parent Project. While most Project resources can be created by users with the `limited-collaborator` role, creating VPCs requires the full `collaborator` role. This allows organizations to restrict who can reconfigure network topology.
+
+See `nexus/auth/src/authz/api_resources.rs:998-1045` and `nexus/auth/src/authz/omicron.polar:848-863`.
+
+== Dynamic Nested Resources
+
+Dynamic nested resources are the most common type: resources with multiple instances nested under other dynamic resources. Examples include Project (under Silo), Instance (under Project), and VpcSubnet (under Vpc).
+
+=== Characteristics
+
+* Multiple instances can exist under each parent
+* Identified by a UUID or unique key
+* May be nested multiple levels deep
+* Usually don't support direct role assignments (roles come from ancestor resources)
+
+=== Implementation Steps
+
+==== 1. Use the `authz_resource!` Macro
+
+The `authz_resource!` macro handles most of the work:
+
+[source,rust]
+----
+authz_resource! {
+    name = "Disk",
+    parent = "Project",
+    primary_key = Uuid,
+    roles_allowed = false,
+    polar_snippet = InProjectLimited,
+}
+----
+
+For resources directly under Project, choose between:
+
+* `InProjectLimited`: For compute resources (instances, disks, snapshots, images, floating IPs). Users with `limited-collaborator` role can create and modify these.
+* `InProjectFull`: For networking infrastructure (VPCs, subnets, routers, internet gateways). Requires full `collaborator` role to create or modify.
+
+The distinction allows organizations to give users access to compute resources while restricting who can reconfigure networking.
+
+==== 2. Resources Nested Deeper
+
+For resources nested under something other than Project (e.g., VpcSubnet under Vpc), use the same Polar snippet as the parent. The macro will automatically generate the appropriate policy that traces back to the containing Project:
+
+[source,rust]
+----
+authz_resource! {
+    name = "VpcSubnet",
+    parent = "Vpc",
+    primary_key = Uuid,
+    roles_allowed = false,
+    polar_snippet = InProjectFull,  // Same as Vpc
+}
+----
+
+==== 3. Resources Under Silo
+
+For resources directly under Silo, use `InSilo`:
+
+[source,rust]
+----
+authz_resource! {
+    name = "SiloImage",
+    parent = "Silo",
+    primary_key = Uuid,
+    roles_allowed = false,
+    polar_snippet = InSilo,
+}
+----
+
+This grants permissions based on Silo roles: `viewer` can read, `collaborator` can create/modify.
+
+==== 4. Resources Under Fleet
+
+For fleet-level resources requiring admin access, use `FleetChild`:
+
+[source,rust]
+----
+authz_resource! {
+    name = "Rack",
+    parent = "Fleet",
+    primary_key = Uuid,
+    roles_allowed = false,
+    polar_snippet = FleetChild,
+}
+----
+
+This grants `read` and `list_children` to `fleet.viewer`, and `modify` and `create_child` to `fleet.admin`.
+
+==== 5. Custom Nested Resources
+
+Some nested resources need custom Polar policy because they have unusual permission requirements. Use `polar_snippet = Custom` and write the policy manually in `omicron.polar`.
+
+Example: `SshKey` (under `SiloUser`) has custom policy because users can manage their own SSH keys, but SCIM IdP tokens cannot.
+
+==== 6. Register with Oso
+
+Add to the `generated_inits` array in `make_omicron_oso()`:
+
+[source,rust]
+----
+let generated_inits = [
+    // ... existing resources ...
+    Disk::init(),
+    VpcSubnet::init(),
+    // ... more resources ...
+];
+----
+
+==== 7. Add to Policy Tests
+
+Add instances in the appropriate parent resource's test helper:
+
+[source,rust]
+----
+async fn make_project(
+    builder: &mut ResourceBuilder<'_>,
+    silo: &authz::Silo,
+    project_name: &str,
+    first_branch: bool,
+) {
+    let project = authz::Project::new(/* ... */);
+    // ...
+
+    let disk_name = format!("{}-disk1", project_name);
+    builder.new_resource(authz::Disk::new(
+        project.clone(),
+        Uuid::new_v4(),
+        LookupType::ByName(disk_name.clone()),
+    ));
+
+    // ...
+}
+----
+
+=== Example: Disk (directly under Project)
+
+[source,rust]
+----
+authz_resource! {
+    name = "Disk",
+    parent = "Project",
+    primary_key = Uuid,
+    roles_allowed = false,
+    polar_snippet = InProjectLimited,
+}
+----
+
+This generates Polar policy granting permissions based on Project roles, where `limited-collaborator` is sufficient to manage disks.
+
+See `nexus/auth/src/authz/api_resources.rs:1300-1306` for the definition. The generated Polar policy is visible in the macro implementation at `nexus/authz-macros/src/lib.rs:394-415`.
+
+=== Example: VpcSubnet (nested two levels deep)
+
+[source,rust]
+----
+authz_resource! {
+    name = "VpcSubnet",
+    parent = "Vpc",
+    primary_key = Uuid,
+    roles_allowed = false,
+    polar_snippet = InProjectFull,
+}
+----
+
+This generates Polar policy that establishes both a `parent` relationship (to Vpc) and a `containing_project` relationship (to Project). Permissions are based on Project roles, requiring full `collaborator`.
+
+See `nexus/auth/src/authz/api_resources.rs:1396-1402`.
+
+=== Example: InstanceNetworkInterface (nested under Instance)
+
+[source,rust]
+----
+authz_resource! {
+    name = "InstanceNetworkInterface",
+    parent = "Instance",
+    primary_key = Uuid,
+    roles_allowed = false,
+    polar_snippet = InProjectLimited,
+}
+----
+
+Even though this is nested under Instance (which is under Project), the macro handles tracing back to the Project automatically.
+
+See `nexus/auth/src/authz/api_resources.rs:1348-1354`.
+
+== HTTP, App, and Datastore Layers
+
+Once you've defined the authz types and policies, you need to integrate them into the request flow through three layers.
+
+=== HTTP Layer
+
+At the HTTP layer (in `nexus/src/external_api/http_entrypoints.rs` or similar), endpoints accept raw identifiers from users:
+
+* UUID for resources identified by ID
+* String name for resources identified by name
+* Both for resources that can be looked up either way
+
+[source,rust]
+----
+#[endpoint {
+    method = GET,
+    path = "/v1/disks/{disk}",
+}]
+async fn disk_view(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    path_params: Path<params::DiskPath>,  // Contains name or ID
+) -> Result<HttpResponseOk<views::Disk>, HttpError> {
+    // ...
+}
+----
+
+=== App Layer: LookupPath
+
+At the application layer (in `nexus/src/app/` modules), use `LookupPath` to convert raw identifiers into authz types. `LookupPath` provides a fluent API for traversing the resource hierarchy.
+
+[source,rust]
+----
+use nexus_db_queries::db::lookup::LookupPath;
+
+// Start from the OpContext, which knows about the authenticated user
+let (.., authz_disk) = LookupPath::new(&opctx, &datastore)
+    .disk_id(disk_id)  // or .disk_name(name) for name-based lookup
+    .fetch()           // Performs the database query
+    .await?;           // authz_disk is an authz::Disk
+----
+
+For nested resources, build the path step by step:
+
+[source,rust]
+----
+let (.., authz_subnet) = LookupPath::new(&opctx, &datastore)
+    .project_id(project_id)
+    .vpc_id(vpc_id)
+    .vpc_subnet_id(subnet_id)
+    .fetch()
+    .await?;
+----
+
+Or, if you already have the parent authz type:
+
+[source,rust]
+----
+let (.., authz_vpc) = LookupPath::new(&opctx, &datastore)
+    .vpc_id(vpc_id)
+    .fetch()
+    .await?;
+
+// Later, use the parent to look up a child
+let (.., authz_subnet) = LookupPath::new(&opctx, &datastore)
+    .vpc_subnet_id(subnet_id)
+    .fetch_for(authz_vpc.lookup_type())
+    .await?;
+----
+
+==== Synthetic Resources
+
+For synthetic resources (like `SiloCertificateList`), construct them manually from their parent:
+
+[source,rust]
+----
+let (.., authz_silo) = LookupPath::new(&opctx, &datastore)
+    .silo_id(silo_id)
+    .fetch()
+    .await?;
+
+let authz_cert_list = authz::SiloCertificateList::new(authz_silo);
+----
+
+=== Performing Authorization Checks
+
+Once you have the authz type, authorize the action before proceeding:
+
+[source,rust]
+----
+// Authorize reading the disk
+opctx.authorize(authz::Action::Read, &authz_disk).await?;
+
+// Now it's safe to fetch the disk data from the datastore
+let disk = datastore.disk_fetch(&opctx, &authz_disk).await?;
+----
+
+Common actions:
+
+* `Action::Read`: Read a resource
+* `Action::Modify` / `Action::Delete`: Modify or delete a resource
+* `Action::ListChildren`: List child resources
+* `Action::CreateChild`: Create a child resource
+
+=== Datastore Layer
+
+Datastore functions (in `nexus/db-queries/src/db/datastore/`) accept authz types directly rather than raw UUIDs. This ensures:
+
+1. The resource has been looked up (and exists)
+2. Basic authz checks have been done (the caller can at least see it exists)
+3. The datastore can do additional authz checks if needed
+
+[source,rust]
+----
+impl DataStore {
+    pub async fn disk_fetch(
+        &self,
+        opctx: &OpContext,
+        authz_disk: &authz::Disk,  // Takes authz type, not UUID
+    ) -> Result<db::model::Disk, Error> {
+        // Can use authz_disk.id() to get the UUID if needed
+        let disk_id = authz_disk.id();
+        // ... query database ...
+    }
+
+    pub async fn disk_update(
+        &self,
+        opctx: &OpContext,
+        authz_disk: &authz::Disk,
+        updates: DiskUpdate,
+    ) -> Result<db::model::Disk, Error> {
+        // Might do additional authz checks here
+        opctx.authorize(authz::Action::Modify, authz_disk).await?;
+        // ... update database ...
+    }
+}
+----
+
+For operations that create resources, the datastore function typically accepts the parent's authz type:
+
+[source,rust]
+----
+impl DataStore {
+    pub async fn disk_create(
+        &self,
+        opctx: &OpContext,
+        authz_project: &authz::Project,  // Parent resource
+        disk: db::model::Disk,
+    ) -> Result<db::model::Disk, Error> {
+        // Verify the user can create children of the project
+        opctx.authorize(authz::Action::CreateChild, authz_project).await?;
+        // ... insert into database ...
+    }
+}
+----
+
+== Complete Example: Adding a New Resource
+
+Let's walk through adding a hypothetical `DiskSnapshot` resource that lives under `Disk`.
+
+=== Step 1: Determine the Category
+
+`DiskSnapshot` is a dynamic nested resource: multiple instances under each Disk, which is under Project. It's a compute resource (not networking), so users with `limited-collaborator` should be able to create them.
+
+=== Step 2: Define with `authz_resource!`
+
+In `nexus/auth/src/authz/api_resources.rs`:
+
+[source,rust]
+----
+authz_resource! {
+    name = "DiskSnapshot",
+    parent = "Disk",
+    primary_key = Uuid,
+    roles_allowed = false,
+    polar_snippet = InProjectLimited,
+}
+----
+
+=== Step 3: Register with Oso
+
+In `nexus/auth/src/authz/oso_generic.rs`, add to `generated_inits`:
+
+[source,rust]
+----
+let generated_inits = [
+    // ... existing resources ...
+    DiskSnapshot::init(),
+    // ... more resources ...
+];
+----
+
+=== Step 4: Add to Policy Tests
+
+In `nexus/db-queries/src/policy_test/resources.rs`, add to `make_project()`:
+
+[source,rust]
+----
+async fn make_project(
+    builder: &mut ResourceBuilder<'_>,
+    silo: &authz::Silo,
+    project_name: &str,
+    first_branch: bool,
+) {
+    // ... existing code ...
+
+    let disk_name = format!("{}-disk1", project_name);
+    let disk = authz::Disk::new(
+        project.clone(),
+        Uuid::new_v4(),
+        LookupType::ByName(disk_name.clone()),
+    );
+    builder.new_resource(disk.clone());
+
+    // Add disk snapshot
+    let snapshot_name = format!("{}-snapshot1", disk_name);
+    builder.new_resource(authz::DiskSnapshot::new(
+        disk.clone(),
+        Uuid::new_v4(),
+        LookupType::ByName(snapshot_name),
+    ));
+
+    // ...
+}
+----
+
+=== Step 5: Add LookupPath Support
+
+In `nexus/db-queries/src/db/lookup.rs`, add methods to look up disk snapshots:
+
+[source,rust]
+----
+impl<'a> LookupPath<'a> {
+    pub fn disk_snapshot_id(
+        self,
+        id: Uuid,
+    ) -> LookupPath<'a> {
+        // Implementation to look up by ID
+    }
+
+    pub fn disk_snapshot_name(
+        self,
+        name: &Name,
+    ) -> LookupPath<'a> {
+        // Implementation to look up by name
+    }
+}
+----
+
+=== Step 6: Implement HTTP Endpoints
+
+In `nexus/src/external_api/http_entrypoints.rs`:
+
+[source,rust]
+----
+#[endpoint {
+    method = GET,
+    path = "/v1/disks/{disk}/snapshots/{snapshot}",
+}]
+async fn disk_snapshot_view(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    path_params: Path<params::DiskSnapshotPath>,
+) -> Result<HttpResponseOk<views::DiskSnapshot>, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
+        let nexus = &apictx.nexus;
+
+        // Look up the disk snapshot using LookupPath
+        let (.., authz_snapshot) = LookupPath::new(&opctx, &nexus.datastore())
+            .disk_id(path_params.into_inner().disk_id)
+            .disk_snapshot_id(path_params.into_inner().snapshot_id)
+            .fetch()
+            .await?;
+
+        // Authorize the read
+        opctx.authorize(authz::Action::Read, &authz_snapshot).await?;
+
+        // Fetch from datastore
+        let snapshot = nexus.disk_snapshot_fetch(&opctx, &authz_snapshot).await?;
+
+        Ok(HttpResponseOk(snapshot.into()))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+----
+
+=== Step 7: Implement Datastore Methods
+
+In `nexus/db-queries/src/db/datastore/disk.rs`:
+
+[source,rust]
+----
+impl DataStore {
+    pub async fn disk_snapshot_fetch(
+        &self,
+        opctx: &OpContext,
+        authz_snapshot: &authz::DiskSnapshot,
+    ) -> Result<db::model::DiskSnapshot, Error> {
+        let snapshot_id = authz_snapshot.id();
+        // ... database query ...
+    }
+
+    pub async fn disk_snapshot_create(
+        &self,
+        opctx: &OpContext,
+        authz_disk: &authz::Disk,
+        snapshot: db::model::DiskSnapshot,
+    ) -> Result<db::model::DiskSnapshot, Error> {
+        opctx.authorize(authz::Action::CreateChild, authz_disk).await?;
+        // ... database insert ...
+    }
+
+    pub async fn disk_snapshot_delete(
+        &self,
+        opctx: &OpContext,
+        authz_snapshot: &authz::DiskSnapshot,
+    ) -> Result<(), Error> {
+        opctx.authorize(authz::Action::Delete, authz_snapshot).await?;
+        // ... database delete ...
+    }
+}
+----
+
+== Common Patterns and Tips
+
+=== When to Use Custom Polar Policy
+
+Use `polar_snippet = Custom` when:
+
+* The resource has unusual permission requirements not covered by the standard snippets
+* Multiple ancestor resources should grant permissions (e.g., both Fleet and Silo admins)
+* Permissions depend on custom logic or resource-specific attributes
+* The resource needs special actor-specific rules (e.g., users can modify their own SSH keys)
+
+=== Multiple Relations in Polar
+
+Some resources define multiple relationships in their Polar policy. For example, `Certificate` has relationships to both its Silo and the Fleet:
+
+[source,polar]
+----
+resource Certificate {
+    permissions = [ "read", "modify" ];
+    relations = { parent_silo: Silo, parent_fleet: Fleet };
+
+    # Both levels grant permissions
+    "read" if "admin" on "parent_silo";
+    "modify" if "admin" on "parent_silo";
+    "read" if "admin" on "parent_fleet";
+    "modify" if "admin" on "parent_fleet";
+}
+----
+
+This allows both Silo admins and Fleet admins to manage certificates.
+
+=== Typed UUIDs
+
+Modern resources should use typed UUIDs from the `omicron_uuid_kinds` crate for type safety:
+
+[source,rust]
+----
+authz_resource! {
+    name = "SiloUser",
+    parent = "Silo",
+    primary_key = { uuid_kind = SiloUserKind },
+    roles_allowed = false,
+    polar_snippet = Custom,
+}
+----
+
+This provides compile-time type checking that prevents mixing up IDs from different resource types.
+
+=== Testing Your Implementation
+
+After implementing authz for a resource:
+
+1. **Run the policy test**: `cargo nextest run -p omicron-nexus policy`
+   - This verifies that all authz types are registered and tested
+   - It exhaustively tests permission checks for all roles and resources
+
+2. **Run integration tests**: Create integration tests for your endpoints
+   - Test that unauthorized users get 403/404 errors
+   - Test that authorized users can perform allowed operations
+   - Test that users can't exceed their permissions
+
+3. **Check with clippy**: `cargo xtask clippy`
+
+4. **Format code**: `rustfmt` (wrapping at 80 columns)
+
+=== Error Handling: 404 vs 403
+
+The authz system automatically converts 403 errors to 404 when appropriate:
+
+* If a user tries an unauthorized action on a resource they can't even see, they get 404 (resource not found)
+* If a user tries an unauthorized action on a resource they can see, they get 403 (forbidden)
+
+This is handled by the `on_unauthorized` method in the `AuthorizedResource` trait, using the stored `lookup_type` to generate an appropriate "not found" error.
+
+== Key Files Reference
+
+* `nexus/auth/src/authz/mod.rs`: Overview of the authz subsystem
+* `nexus/auth/src/authz/api_resources.rs`: Authz type definitions
+* `nexus/auth/src/authz/omicron.polar`: Polar policy rules
+* `nexus/auth/src/authz/oso_generic.rs`: Oso initialization and registration
+* `nexus/authz-macros/src/lib.rs`: `authz_resource!` macro implementation
+* `nexus/db-queries/src/policy_test/resources.rs`: Policy test resource setup
+* `nexus/db-queries/src/db/lookup.rs`: LookupPath implementation
+
+== Summary
+
+To add authz for a new resource:
+
+1. **Identify the category**: Static top-level, dynamic top-level, static child, or dynamic nested
+2. **Define the Rust type**: Use `authz_resource!` macro for most resources, or hand-write for special cases
+3. **Choose or write Polar policy**: Use standard snippets (`FleetChild`, `InSilo`, `InProjectLimited`, `InProjectFull`) or write custom policy
+4. **Register with Oso**: Add to `make_omicron_oso()` in `oso_generic.rs`
+5. **Add to policy tests**: Add to `make_resources()` in `policy_test/resources.rs`
+6. **Integrate into request flow**:
+   - HTTP layer: Accept raw identifiers
+   - App layer: Use `LookupPath` to get authz types
+   - Datastore layer: Accept authz types in function signatures
+7. **Test thoroughly**: Run policy tests and write integration tests
+
+The authz system provides compile-time and runtime guarantees that every operation is properly authorized, helping prevent security vulnerabilities.
