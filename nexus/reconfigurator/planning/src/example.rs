@@ -39,8 +39,10 @@ use nexus_types::external_api::views::SledPolicy;
 use nexus_types::inventory::Collection;
 use omicron_common::address::Ipv4Range;
 use omicron_common::api::external::TufRepoDescription;
+use omicron_common::policy::COCKROACHDB_REDUNDANCY;
 use omicron_common::policy::CRUCIBLE_PANTRY_REDUNDANCY;
 use omicron_common::policy::INTERNAL_DNS_REDUNDANCY;
+use omicron_common::policy::OXIMETER_REDUNDANCY;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::SledKind;
 use omicron_uuid_kinds::VnicUuid;
@@ -214,6 +216,7 @@ pub struct ExampleSystemBuilder {
     crucible_pantry_count: ZoneCount,
     oximeter_count: ZoneCount,
     cockroachdb_count: ZoneCount,
+    internal_ntp_count: ZoneCount,
     clickhouse_policy: Option<nexus_types::deployment::ClickhousePolicy>,
     create_zones: bool,
     create_disks_in_blueprint: bool,
@@ -251,8 +254,9 @@ impl ExampleSystemBuilder {
             internal_dns_count: ZoneCount(INTERNAL_DNS_REDUNDANCY),
             external_dns_count: ZoneCount(Self::DEFAULT_EXTERNAL_DNS_COUNT),
             crucible_pantry_count: ZoneCount(CRUCIBLE_PANTRY_REDUNDANCY),
-            oximeter_count: ZoneCount(0),
-            cockroachdb_count: ZoneCount(0),
+            oximeter_count: ZoneCount(OXIMETER_REDUNDANCY),
+            cockroachdb_count: ZoneCount(COCKROACHDB_REDUNDANCY),
+            internal_ntp_count: ZoneCount(1),
             clickhouse_policy: None,
             create_zones: true,
             create_disks_in_blueprint: true,
@@ -346,7 +350,8 @@ impl ExampleSystemBuilder {
 
     /// Set the number of Oximeter instances in the example system.
     ///
-    /// The default value is 0. A value of 0 is permitted.
+    /// The default value is [`OXIMETER_REDUNDANCY`]. A value of 0 is
+    /// permitted.
     ///
     /// If [`Self::create_zones`] is set to `false`, this is ignored.
     pub fn oximeter_count(mut self, oximeter_count: usize) -> Self {
@@ -356,11 +361,25 @@ impl ExampleSystemBuilder {
 
     /// Set the number of CockroachDB instances in the example system.
     ///
-    /// The default value is 0. A value of 0 is permitted.
+    /// The default value is [`COCKROACHDB_REDUNDANCY`]. A value of 0 is
+    /// permitted.
     ///
     /// If [`Self::create_zones`] is set to `false`, this is ignored.
     pub fn cockroachdb_count(mut self, cockroachdb_count: usize) -> Self {
         self.cockroachdb_count = ZoneCount(cockroachdb_count);
+        self
+    }
+
+    /// Set the number of InternalNtp instances in the example system.
+    ///
+    /// The default value is 1. A value of 0 is permitted.
+    ///
+    /// Note: InternalNtp zones can cause DNS packet fragmentation issues if
+    /// too many are deployed. See issue #9178.
+    ///
+    /// If [`Self::create_zones`] is set to `false`, this is ignored.
+    pub fn internal_ntp_count(mut self, internal_ntp_count: usize) -> Self {
+        self.internal_ntp_count = ZoneCount(internal_ntp_count);
         self
     }
 
@@ -477,6 +496,10 @@ impl ExampleSystemBuilder {
         self.cockroachdb_count.0
     }
 
+    pub fn get_internal_ntp_zones(&self) -> usize {
+        self.internal_ntp_count.0
+    }
+
     /// Create a new example system with the given modifications.
     ///
     /// Return the system, and the initial blueprint that matches it.
@@ -494,6 +517,7 @@ impl ExampleSystemBuilder {
             "crucible_pantry_count" => self.crucible_pantry_count.0,
             "oximeter_count" => self.oximeter_count.0,
             "cockroachdb_count" => self.cockroachdb_count.0,
+            "internal_ntp_count" => self.internal_ntp_count.0,
             "clickhouse_policy" => ?self.clickhouse_policy,
             "create_zones" => self.create_zones,
             "create_disks_in_blueprint" => self.create_disks_in_blueprint,
@@ -511,7 +535,8 @@ impl ExampleSystemBuilder {
                 self.crucible_pantry_count.0,
             )
             .set_target_oximeter_zone_count(self.oximeter_count.0)
-            .set_target_cockroachdb_zone_count(self.cockroachdb_count.0);
+            .set_target_cockroachdb_zone_count(self.cockroachdb_count.0)
+            .set_target_internal_ntp_zone_count(self.internal_ntp_count.0);
 
         // Set the clickhouse policy if one was specified
         if let Some(policy) = &self.clickhouse_policy {
@@ -633,14 +658,20 @@ impl ExampleSystemBuilder {
                     .unwrap();
             }
             if self.create_zones {
-                let _ = builder
-                    .sled_ensure_zone_ntp(
-                        sled_id,
-                        self.target_release
-                            .zone_image_source(ZoneKind::BoundaryNtp)
-                            .expect("obtained BoundaryNtp image source"),
-                    )
-                    .unwrap();
+                // If internal_ntp_count is 0, use sled_ensure_zone_ntp which
+                // adds an InternalNtp zone to every sled. Otherwise,
+                // InternalNtp zones will be added below based on
+                // internal_ntp_count distribution.
+                if self.internal_ntp_count.0 == 0 {
+                    let _ = builder
+                        .sled_ensure_zone_ntp(
+                            sled_id,
+                            self.target_release
+                                .zone_image_source(ZoneKind::InternalNtp)
+                                .expect("obtained InternalNtp image source"),
+                        )
+                        .unwrap();
+                }
 
                 // Create discretionary zones if allowed.
                 if sled_details.policy.matches(SledFilter::Discretionary) {
@@ -746,12 +777,27 @@ impl ExampleSystemBuilder {
                         .cockroachdb_count
                         .on(discretionary_ix, discretionary_sled_count)
                     {
+                        // CockroachDB zones require zpools. If there are no
+                        // available zpools on this sled, skip creating this zone.
+                        // This can happen in small test systems with limited
+                        // resources.
+                        let _ = builder.sled_add_zone_cockroachdb(
+                            sled_id,
+                            self.target_release
+                                .zone_image_source(ZoneKind::CockroachDb)
+                                .expect("obtained CockroachDb image source"),
+                        );
+                    }
+                    for _ in 0..self
+                        .internal_ntp_count
+                        .on(discretionary_ix, discretionary_sled_count)
+                    {
                         builder
-                            .sled_add_zone_cockroachdb(
+                            .sled_add_zone_internal_ntp(
                                 sled_id,
                                 self.target_release
-                                    .zone_image_source(ZoneKind::CockroachDb)
-                                    .expect("obtained CockroachDb image source"),
+                                    .zone_image_source(ZoneKind::InternalNtp)
+                                    .expect("obtained InternalNtp image source"),
                             )
                             .unwrap();
                     }
@@ -1257,19 +1303,27 @@ mod tests {
         static TEST_NAME: &str = "example_builder_all_zone_types";
         let logctx = test_setup_log(TEST_NAME);
 
-        // Build an example system with all supported zone types, including
-        // Oximeter and CockroachDB zones that were previously not part of the
-        // default ExampleSystem.
+        // Build an example system with all supported zone types.
+        // Explicitly enable the new zone types (Oximeter, CockroachDB,
+        // InternalNtp) which default to 0 for backward compatibility.
         let (example, blueprint) =
             ExampleSystemBuilder::new(&logctx.log, TEST_NAME)
-                .nsleds(5)
-                .oximeter_count(3)
-                .cockroachdb_count(5)
+                .nsleds(3)
+                .oximeter_count(OXIMETER_REDUNDANCY)
+                .cockroachdb_count(COCKROACHDB_REDUNDANCY)
+                .internal_ntp_count(1)
                 .build();
 
         // Check that the system's target counts are set correctly.
-        assert_eq!(example.system.target_oximeter_zone_count(), 3);
-        assert_eq!(example.system.target_cockroachdb_zone_count(), 5);
+        assert_eq!(
+            example.system.target_oximeter_zone_count(),
+            OXIMETER_REDUNDANCY
+        );
+        assert_eq!(
+            example.system.target_cockroachdb_zone_count(),
+            COCKROACHDB_REDUNDANCY
+        );
+        assert_eq!(example.system.target_internal_ntp_zone_count(), 1);
 
         // Check that the right number of zones are present in both the
         // blueprint and in the collection.
@@ -1277,8 +1331,9 @@ mod tests {
             blueprint_zones_of_kind(&blueprint, ZoneKind::Oximeter);
         assert_eq!(
             oximeter_zones.len(),
-            3,
-            "expected 3 Oximeter zones in blueprint, got {}: {:#?}",
+            OXIMETER_REDUNDANCY,
+            "expected {} Oximeter zones in blueprint, got {}: {:#?}",
+            OXIMETER_REDUNDANCY,
             oximeter_zones.len(),
             oximeter_zones,
         );
@@ -1288,8 +1343,9 @@ mod tests {
         );
         assert_eq!(
             oximeter_zones.len(),
-            3,
-            "expected 3 Oximeter zones in collection, got {}: {:#?}",
+            OXIMETER_REDUNDANCY,
+            "expected {} Oximeter zones in collection, got {}: {:#?}",
+            OXIMETER_REDUNDANCY,
             oximeter_zones.len(),
             oximeter_zones,
         );
@@ -1298,8 +1354,9 @@ mod tests {
             blueprint_zones_of_kind(&blueprint, ZoneKind::CockroachDb);
         assert_eq!(
             cockroachdb_zones.len(),
-            5,
-            "expected 5 CockroachDB zones in blueprint, got {}: {:#?}",
+            COCKROACHDB_REDUNDANCY,
+            "expected {} CockroachDB zones in blueprint, got {}: {:#?}",
+            COCKROACHDB_REDUNDANCY,
             cockroachdb_zones.len(),
             cockroachdb_zones,
         );
@@ -1309,10 +1366,32 @@ mod tests {
         );
         assert_eq!(
             cockroachdb_zones.len(),
-            5,
-            "expected 5 CockroachDB zones in collection, got {}: {:#?}",
+            COCKROACHDB_REDUNDANCY,
+            "expected {} CockroachDB zones in collection, got {}: {:#?}",
+            COCKROACHDB_REDUNDANCY,
             cockroachdb_zones.len(),
             cockroachdb_zones,
+        );
+
+        let internal_ntp_zones =
+            blueprint_zones_of_kind(&blueprint, ZoneKind::InternalNtp);
+        assert_eq!(
+            internal_ntp_zones.len(),
+            1,
+            "expected 1 InternalNtp zone in blueprint, got {}: {:#?}",
+            internal_ntp_zones.len(),
+            internal_ntp_zones,
+        );
+        let internal_ntp_zones = collection_ledgered_zones_of_kind(
+            &example.collection,
+            ZoneKind::InternalNtp,
+        );
+        assert_eq!(
+            internal_ntp_zones.len(),
+            1,
+            "expected 1 InternalNtp zone in collection, got {}: {:#?}",
+            internal_ntp_zones.len(),
+            internal_ntp_zones,
         );
 
         logctx.cleanup_successful();
@@ -1543,32 +1622,32 @@ mod tests {
 
         for service in ServiceName::iter() {
             match service {
-                // Services that exist in the example system.
+                // Services that exist in the example system by default.
                 ServiceName::Clickhouse
                 | ServiceName::ClickhouseAdminSingleServer
                 | ServiceName::ClickhouseNative
+                | ServiceName::Cockroach
                 | ServiceName::InternalDns
                 | ServiceName::Nexus
                 | ServiceName::NexusLockstep
+                | ServiceName::Oximeter
                 | ServiceName::OximeterReader
                 | ServiceName::RepoDepot
                 | ServiceName::CruciblePantry => {
                     out.insert(service, Ok(()));
                 }
-                // Services that are not currently part of the example system.
+                // Services that are not currently part of the default example
+                // system.
                 //
-                // These zone types can now be added via builder methods
-                // (oximeter_count, cockroachdb_count, clickhouse_server_count,
-                // clickhouse_keeper_count), but are not included by default to
-                // maintain backward compatibility with existing tests.
+                // Replicated Clickhouse zone types can be added via the
+                // clickhouse_policy() builder method, but are not included by
+                // default.
                 ServiceName::ClickhouseAdminKeeper
                 | ServiceName::ClickhouseAdminServer
                 | ServiceName::ClickhouseClusterNative
                 | ServiceName::ClickhouseKeeper
                 | ServiceName::ClickhouseServer
-                | ServiceName::Cockroach
                 | ServiceName::ExternalDns
-                | ServiceName::Oximeter
                 | ServiceName::ManagementGatewayService
                 | ServiceName::Wicketd
                 | ServiceName::Dendrite

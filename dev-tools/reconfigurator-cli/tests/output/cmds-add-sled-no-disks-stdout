@@ -42,13 +42,17 @@ blueprint source: planner with report:
 planning report:
 * zone adds and updates are blocked:
   - sleds have deployment units with image sources not set to Artifact:
-    - sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c: 9 zones
-    - sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6: 8 zones
+    - sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c: 12 zones
+    - sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6: 9 zones
     - sled d81c6a84-79b8-4958-ae41-ea46c9b19763: 8 zones
 
 * adding zones despite being blocked, because: target release generation is 1
+* waiting for NTP zones to appear in inventory on sleds: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, d81c6a84-79b8-4958-ae41-ea46c9b19763
 * no zpools in service for NTP zones on sleds: 00320471-945d-413c-85e7-03e091a70b3c
 * discretionary zone placement waiting for NTP zones on sleds: 00320471-945d-413c-85e7-03e091a70b3c
+* sleds getting NTP zones and which have other services already, making them eligible for discretionary zones: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, d81c6a84-79b8-4958-ae41-ea46c9b19763
+* missing NTP zone on sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6
+* missing NTP zone on sled d81c6a84-79b8-4958-ae41-ea46c9b19763
 * zone updates waiting on zone add blockers
 
 
@@ -94,7 +98,7 @@ parent:    dbcbd3d6-41ff-48ae-ac0b-1becc9b2fd21
     state:::::::::::::   active
     config generation:   2
     subnet::::::::::::   fd00:1122:3344:102::/64
-    last allocated IP:   fd00:1122:3344:102::28
+    last allocated IP:   fd00:1122:3344:102::2b
 
     host phase 2 contents:
     ------------------------
@@ -117,24 +121,29 @@ parent:    dbcbd3d6-41ff-48ae-ac0b-1becc9b2fd21
     -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
     dataset name                                                                                                   dataset id                             disposition   quota     reservation   compression
     -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-    oxp_727522a7-934f-494d-b5b3-160968e74463/crucible                                                              feecfda1-9966-43d4-aaef-440b77f0b26d   in service    none      none          off        
-    oxp_72c59873-31ff-4e36-8d76-ff834009349a/crucible                                                              956966b9-8201-437b-81ba-3c8ad2032080   in service    none      none          off        
-    oxp_b5fd5bc1-099e-4e77-8028-a9793c11f43b/crucible                                                              4b0b09bf-94b7-45bf-a6b3-d46af53ae44a   in service    none      none          off        
-    oxp_727522a7-934f-494d-b5b3-160968e74463/crypt/clickhouse                                                      5ae11c7e-08fa-4d78-a4ea-14b4a9a10241   in service    none      none          off        
-    oxp_727522a7-934f-494d-b5b3-160968e74463/crypt/external_dns                                                    3e0d6188-c503-49cf-a441-fa7df40ceb43   in service    none      none          off        
-    oxp_727522a7-934f-494d-b5b3-160968e74463/crypt/internal_dns                                                    b8f2a09f-8bd2-4418-872b-a4457a3f958c   in service    none      none          off        
+    oxp_727522a7-934f-494d-b5b3-160968e74463/crypt/cockroachdb                                                     feecfda1-9966-43d4-aaef-440b77f0b26d   in service    none      none          off        
+    oxp_72c59873-31ff-4e36-8d76-ff834009349a/crypt/cockroachdb                                                     956966b9-8201-437b-81ba-3c8ad2032080   in service    none      none          off        
+    oxp_727522a7-934f-494d-b5b3-160968e74463/crucible                                                              db0ee3be-69c8-46e6-b7a1-2ae96e0b016f   in service    none      none          off        
+    oxp_72c59873-31ff-4e36-8d76-ff834009349a/crucible                                                              84236ada-22e5-490d-8e75-cd988c35f3ce   in service    none      none          off        
+    oxp_b5fd5bc1-099e-4e77-8028-a9793c11f43b/crucible                                                              04bfdaea-7faa-43a1-8b05-235f461a0494   in service    none      none          off        
+    oxp_727522a7-934f-494d-b5b3-160968e74463/crypt/clickhouse                                                      49f8fbb6-5bac-4609-907f-6e3dfc206059   in service    none      none          off        
+    oxp_727522a7-934f-494d-b5b3-160968e74463/crypt/external_dns                                                    78f34ce7-42f1-41da-995f-318f32054ad2   in service    none      none          off        
+    oxp_727522a7-934f-494d-b5b3-160968e74463/crypt/internal_dns                                                    2f204c50-a327-479c-8852-f53ec7a19c1f   in service    none      none          off        
     oxp_727522a7-934f-494d-b5b3-160968e74463/crypt/zone                                                            4829f422-aa31-41a8-ab73-95684ff1ef48   in service    none      none          off        
     oxp_72c59873-31ff-4e36-8d76-ff834009349a/crypt/zone                                                            3b66453b-7148-4c1b-84a9-499e43290ab4   in service    none      none          off        
     oxp_b5fd5bc1-099e-4e77-8028-a9793c11f43b/crypt/zone                                                            841d5648-05f0-47b0-b446-92f6b60fe9a6   in service    none      none          off        
-    oxp_727522a7-934f-494d-b5b3-160968e74463/crypt/zone/oxz_clickhouse_353b3b65-20f7-48c3-88f7-495bd5d31545        49f8fbb6-5bac-4609-907f-6e3dfc206059   in service    none      none          off        
-    oxp_b5fd5bc1-099e-4e77-8028-a9793c11f43b/crypt/zone/oxz_crucible_86a22a56-0168-453d-9df1-cb2a7c64b5d3          6e218d0a-13fd-4f70-884e-47e960fa8bb8   in service    none      none          off        
-    oxp_727522a7-934f-494d-b5b3-160968e74463/crypt/zone/oxz_crucible_bd354eef-d8a6-4165-9124-283fb5e46d77          9073fb6b-f973-4bbd-b7cc-ba1abf6cb238   in service    none      none          off        
-    oxp_72c59873-31ff-4e36-8d76-ff834009349a/crypt/zone/oxz_crucible_e2fdefe7-95b2-4fd2-ae37-56929a06d58c          0582030b-aab6-4d0e-b1d2-64562ee712cd   in service    none      none          off        
-    oxp_727522a7-934f-494d-b5b3-160968e74463/crypt/zone/oxz_crucible_pantry_ad6a3a03-8d0f-4504-99a4-cbf73d69b973   1640adb6-70bf-44cf-b05c-bff6dd300cf3   in service    none      none          off        
-    oxp_727522a7-934f-494d-b5b3-160968e74463/crypt/zone/oxz_external_dns_6c3ae381-04f7-41ea-b0ac-74db387dbc3a      78f34ce7-42f1-41da-995f-318f32054ad2   in service    none      none          off        
-    oxp_727522a7-934f-494d-b5b3-160968e74463/crypt/zone/oxz_internal_dns_99e2f30b-3174-40bf-a78a-90da8abba8ca      2f204c50-a327-479c-8852-f53ec7a19c1f   in service    none      none          off        
-    oxp_727522a7-934f-494d-b5b3-160968e74463/crypt/zone/oxz_nexus_466a9f29-62bf-4e63-924a-b9efdb86afec             8e0bd2bd-23b7-4bc6-9e73-c4d4ebc0bc8c   in service    none      none          off        
-    oxp_727522a7-934f-494d-b5b3-160968e74463/crypt/zone/oxz_ntp_62620961-fc4a-481e-968b-f5acbac0dc63               8c4fa711-1d5d-4e93-85f0-d17bff47b063   in service    none      none          off        
+    oxp_727522a7-934f-494d-b5b3-160968e74463/crypt/zone/oxz_clickhouse_466a9f29-62bf-4e63-924a-b9efdb86afec        8e0bd2bd-23b7-4bc6-9e73-c4d4ebc0bc8c   in service    none      none          off        
+    oxp_727522a7-934f-494d-b5b3-160968e74463/crypt/zone/oxz_cockroachdb_bd354eef-d8a6-4165-9124-283fb5e46d77       9073fb6b-f973-4bbd-b7cc-ba1abf6cb238   in service    none      none          off        
+    oxp_72c59873-31ff-4e36-8d76-ff834009349a/crypt/zone/oxz_cockroachdb_e2fdefe7-95b2-4fd2-ae37-56929a06d58c       0582030b-aab6-4d0e-b1d2-64562ee712cd   in service    none      none          off        
+    oxp_b5fd5bc1-099e-4e77-8028-a9793c11f43b/crypt/zone/oxz_crucible_80510139-0fe1-4168-936d-672cdeef55bd          ce916f20-f65d-47b7-ac37-cc3df6f312f2   in service    none      none          off        
+    oxp_72c59873-31ff-4e36-8d76-ff834009349a/crypt/zone/oxz_crucible_a41824be-1ebb-4889-a631-f8dc7164cfab          28356d88-8ed9-413e-addd-5da4310f1b49   in service    none      none          off        
+    oxp_727522a7-934f-494d-b5b3-160968e74463/crypt/zone/oxz_crucible_c49fabd6-b2ad-44c6-b760-90e614601b2b          4b0b09bf-94b7-45bf-a6b3-d46af53ae44a   in service    none      none          off        
+    oxp_727522a7-934f-494d-b5b3-160968e74463/crypt/zone/oxz_crucible_pantry_6c3ae381-04f7-41ea-b0ac-74db387dbc3a   3e0d6188-c503-49cf-a441-fa7df40ceb43   in service    none      none          off        
+    oxp_727522a7-934f-494d-b5b3-160968e74463/crypt/zone/oxz_external_dns_99e2f30b-3174-40bf-a78a-90da8abba8ca      b8f2a09f-8bd2-4418-872b-a4457a3f958c   in service    none      none          off        
+    oxp_727522a7-934f-494d-b5b3-160968e74463/crypt/zone/oxz_internal_dns_353b3b65-20f7-48c3-88f7-495bd5d31545      5ae11c7e-08fa-4d78-a4ea-14b4a9a10241   in service    none      none          off        
+    oxp_727522a7-934f-494d-b5b3-160968e74463/crypt/zone/oxz_nexus_62620961-fc4a-481e-968b-f5acbac0dc63             8c4fa711-1d5d-4e93-85f0-d17bff47b063   in service    none      none          off        
+    oxp_727522a7-934f-494d-b5b3-160968e74463/crypt/zone/oxz_ntp_86a22a56-0168-453d-9df1-cb2a7c64b5d3               6e218d0a-13fd-4f70-884e-47e960fa8bb8   in service    none      none          off        
+    oxp_727522a7-934f-494d-b5b3-160968e74463/crypt/zone/oxz_oximeter_ad6a3a03-8d0f-4504-99a4-cbf73d69b973          1640adb6-70bf-44cf-b05c-bff6dd300cf3   in service    none      none          off        
     oxp_727522a7-934f-494d-b5b3-160968e74463/crypt/debug                                                           93957ca0-9ed1-4e7b-8c34-2ce07a69541c   in service    100 GiB   none          gzip-9     
     oxp_72c59873-31ff-4e36-8d76-ff834009349a/crypt/debug                                                           318fae85-abcb-4259-b1b6-ac96d193f7b7   in service    100 GiB   none          gzip-9     
     oxp_b5fd5bc1-099e-4e77-8028-a9793c11f43b/crypt/debug                                                           b46de15d-33e7-4cd0-aa7c-e7be2a61e71b   in service    100 GiB   none          gzip-9     
@@ -150,23 +159,26 @@ parent:    dbcbd3d6-41ff-48ae-ac0b-1becc9b2fd21
     ---------------------------------------------------------------------------------------------------------------
     zone type         zone id                                image source      disposition   underlay IP           
     ---------------------------------------------------------------------------------------------------------------
-    clickhouse        353b3b65-20f7-48c3-88f7-495bd5d31545   install dataset   in service    fd00:1122:3344:102::23
-    crucible          86a22a56-0168-453d-9df1-cb2a7c64b5d3   install dataset   in service    fd00:1122:3344:102::28
-    crucible          bd354eef-d8a6-4165-9124-283fb5e46d77   install dataset   in service    fd00:1122:3344:102::26
-    crucible          e2fdefe7-95b2-4fd2-ae37-56929a06d58c   install dataset   in service    fd00:1122:3344:102::27
-    crucible_pantry   ad6a3a03-8d0f-4504-99a4-cbf73d69b973   install dataset   in service    fd00:1122:3344:102::25
-    external_dns      6c3ae381-04f7-41ea-b0ac-74db387dbc3a   install dataset   in service    fd00:1122:3344:102::24
-    internal_dns      99e2f30b-3174-40bf-a78a-90da8abba8ca   install dataset   in service    fd00:1122:3344:1::1   
-    internal_ntp      62620961-fc4a-481e-968b-f5acbac0dc63   install dataset   in service    fd00:1122:3344:102::21
-    nexus             466a9f29-62bf-4e63-924a-b9efdb86afec   install dataset   in service    fd00:1122:3344:102::22
+    clickhouse        466a9f29-62bf-4e63-924a-b9efdb86afec   install dataset   in service    fd00:1122:3344:102::22
+    cockroach_db      bd354eef-d8a6-4165-9124-283fb5e46d77   install dataset   in service    fd00:1122:3344:102::26
+    cockroach_db      e2fdefe7-95b2-4fd2-ae37-56929a06d58c   install dataset   in service    fd00:1122:3344:102::27
+    crucible          80510139-0fe1-4168-936d-672cdeef55bd   install dataset   in service    fd00:1122:3344:102::2b
+    crucible          a41824be-1ebb-4889-a631-f8dc7164cfab   install dataset   in service    fd00:1122:3344:102::2a
+    crucible          c49fabd6-b2ad-44c6-b760-90e614601b2b   install dataset   in service    fd00:1122:3344:102::29
+    crucible_pantry   6c3ae381-04f7-41ea-b0ac-74db387dbc3a   install dataset   in service    fd00:1122:3344:102::24
+    external_dns      99e2f30b-3174-40bf-a78a-90da8abba8ca   install dataset   in service    fd00:1122:3344:102::23
+    internal_dns      353b3b65-20f7-48c3-88f7-495bd5d31545   install dataset   in service    fd00:1122:3344:1::1   
+    internal_ntp      86a22a56-0168-453d-9df1-cb2a7c64b5d3   install dataset   in service    fd00:1122:3344:102::28
+    nexus             62620961-fc4a-481e-968b-f5acbac0dc63   install dataset   in service    fd00:1122:3344:102::21
+    oximeter          ad6a3a03-8d0f-4504-99a4-cbf73d69b973   install dataset   in service    fd00:1122:3344:102::25
 
 
 
   sled: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6
     state:::::::::::::   active
-    config generation:   2
+    config generation:   3
     subnet::::::::::::   fd00:1122:3344:101::/64
-    last allocated IP:   fd00:1122:3344:101::27
+    last allocated IP:   fd00:1122:3344:101::29
 
     host phase 2 contents:
     ------------------------
@@ -189,22 +201,26 @@ parent:    dbcbd3d6-41ff-48ae-ac0b-1becc9b2fd21
     -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
     dataset name                                                                                                   dataset id                             disposition   quota     reservation   compression
     -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-    oxp_073979dd-3248-44a5-9fa1-cc72a140d682/crucible                                                              335e1dc3-b610-48dd-90bb-9ca5cce1a6d0   in service    none      none          off        
-    oxp_c6d33b64-fb96-4129-bab1-7878a06a5f9b/crucible                                                              d5fef28b-4ee8-4443-8c06-7e872c2502f3   in service    none      none          off        
-    oxp_e4d937e1-6ddc-4eca-bb08-c1f73791e608/crucible                                                              6477f019-088c-43cf-8508-aa93f868830f   in service    none      none          off        
-    oxp_073979dd-3248-44a5-9fa1-cc72a140d682/crypt/external_dns                                                    02c56a30-7d97-406d-bd34-1eb437fd517d   in service    none      none          off        
-    oxp_073979dd-3248-44a5-9fa1-cc72a140d682/crypt/internal_dns                                                    4d7e3e8e-06bd-414c-a468-779e056a9b75   in service    none      none          off        
+    oxp_073979dd-3248-44a5-9fa1-cc72a140d682/crypt/cockroachdb                                                     90b46084-4238-45ba-9e26-d3f2623e640e   in service    none      none          off        
+    oxp_c6d33b64-fb96-4129-bab1-7878a06a5f9b/crypt/cockroachdb                                                     bcdc7bf3-bbae-4e7f-81b2-4d94c8f752a4   in service    none      none          off        
+    oxp_073979dd-3248-44a5-9fa1-cc72a140d682/crucible                                                              55a2a61a-1471-49b2-a6d0-b191ed94e057   in service    none      none          off        
+    oxp_c6d33b64-fb96-4129-bab1-7878a06a5f9b/crucible                                                              3d29444d-b348-46af-9a3e-63ce969d1729   in service    none      none          off        
+    oxp_e4d937e1-6ddc-4eca-bb08-c1f73791e608/crucible                                                              559f6431-2e95-4003-8d4d-54dcbed43da8   in service    none      none          off        
+    oxp_073979dd-3248-44a5-9fa1-cc72a140d682/crypt/external_dns                                                    ea8a11bf-a884-4c4f-8df0-3ef9b7aacf43   in service    none      none          off        
+    oxp_073979dd-3248-44a5-9fa1-cc72a140d682/crypt/internal_dns                                                    7b4ce6bf-95bb-42fe-a4a0-dff31211ab88   in service    none      none          off        
     oxp_073979dd-3248-44a5-9fa1-cc72a140d682/crypt/zone                                                            4617d206-4330-4dfa-b9f3-f63a3db834f9   in service    none      none          off        
     oxp_c6d33b64-fb96-4129-bab1-7878a06a5f9b/crypt/zone                                                            4f60b534-eaa3-40a1-b60f-bfdf147af478   in service    none      none          off        
     oxp_e4d937e1-6ddc-4eca-bb08-c1f73791e608/crypt/zone                                                            ad41be71-6c15-4428-b510-20ceacde4fa6   in service    none      none          off        
-    oxp_e4d937e1-6ddc-4eca-bb08-c1f73791e608/crypt/zone/oxz_crucible_058fd5f9-60a8-4e11-9302-15172782e17d          55a2a61a-1471-49b2-a6d0-b191ed94e057   in service    none      none          off        
-    oxp_073979dd-3248-44a5-9fa1-cc72a140d682/crypt/zone/oxz_crucible_5199c033-4cf9-4ab6-8ae7-566bd7606363          90b46084-4238-45ba-9e26-d3f2623e640e   in service    none      none          off        
-    oxp_c6d33b64-fb96-4129-bab1-7878a06a5f9b/crypt/zone/oxz_crucible_dfac80b4-a887-430a-ae87-a4e065dba787          bcdc7bf3-bbae-4e7f-81b2-4d94c8f752a4   in service    none      none          off        
-    oxp_073979dd-3248-44a5-9fa1-cc72a140d682/crypt/zone/oxz_crucible_pantry_ba4994a8-23f9-4b1a-a84f-a08d74591389   50b029e3-96aa-41e5-bf39-023193a4355e   in service    none      none          off        
-    oxp_073979dd-3248-44a5-9fa1-cc72a140d682/crypt/zone/oxz_external_dns_803bfb63-c246-41db-b0da-d3b87ddfc63d      ea8a11bf-a884-4c4f-8df0-3ef9b7aacf43   in service    none      none          off        
-    oxp_073979dd-3248-44a5-9fa1-cc72a140d682/crypt/zone/oxz_internal_dns_427ec88f-f467-42fa-9bbb-66a91a36103c      7b4ce6bf-95bb-42fe-a4a0-dff31211ab88   in service    none      none          off        
-    oxp_073979dd-3248-44a5-9fa1-cc72a140d682/crypt/zone/oxz_nexus_0c71b3b2-6ceb-4e8f-b020-b08675e83038             832fd140-d467-4bad-b5e9-63171634087c   in service    none      none          off        
-    oxp_073979dd-3248-44a5-9fa1-cc72a140d682/crypt/zone/oxz_ntp_6444f8a5-6465-4f0b-a549-1993c113569c               42430c80-7836-4191-a4f6-bcee749010fe   in service    none      none          off        
+    oxp_c6d33b64-fb96-4129-bab1-7878a06a5f9b/crypt/zone/oxz_cockroachdb_5199c033-4cf9-4ab6-8ae7-566bd7606363       335e1dc3-b610-48dd-90bb-9ca5cce1a6d0   in service    none      none          off        
+    oxp_073979dd-3248-44a5-9fa1-cc72a140d682/crypt/zone/oxz_cockroachdb_ba4994a8-23f9-4b1a-a84f-a08d74591389       50b029e3-96aa-41e5-bf39-023193a4355e   in service    none      none          off        
+    oxp_c6d33b64-fb96-4129-bab1-7878a06a5f9b/crypt/zone/oxz_crucible_058fd5f9-60a8-4e11-9302-15172782e17d          6477f019-088c-43cf-8508-aa93f868830f   in service    none      none          off        
+    oxp_e4d937e1-6ddc-4eca-bb08-c1f73791e608/crypt/zone/oxz_crucible_6e08bf87-8e2a-4950-aabb-01e4441010fe          c104f775-8172-4e6e-937f-733df4cf96af   in service    none      none          off        
+    oxp_073979dd-3248-44a5-9fa1-cc72a140d682/crypt/zone/oxz_crucible_dfac80b4-a887-430a-ae87-a4e065dba787          d5fef28b-4ee8-4443-8c06-7e872c2502f3   in service    none      none          off        
+    oxp_073979dd-3248-44a5-9fa1-cc72a140d682/crypt/zone/oxz_crucible_pantry_803bfb63-c246-41db-b0da-d3b87ddfc63d   02c56a30-7d97-406d-bd34-1eb437fd517d   in service    none      none          off        
+    oxp_073979dd-3248-44a5-9fa1-cc72a140d682/crypt/zone/oxz_external_dns_427ec88f-f467-42fa-9bbb-66a91a36103c      4d7e3e8e-06bd-414c-a468-779e056a9b75   in service    none      none          off        
+    oxp_073979dd-3248-44a5-9fa1-cc72a140d682/crypt/zone/oxz_internal_dns_0c71b3b2-6ceb-4e8f-b020-b08675e83038      832fd140-d467-4bad-b5e9-63171634087c   in service    none      none          off        
+    oxp_073979dd-3248-44a5-9fa1-cc72a140d682/crypt/zone/oxz_nexus_6444f8a5-6465-4f0b-a549-1993c113569c             42430c80-7836-4191-a4f6-bcee749010fe   in service    none      none          off        
+    oxp_073979dd-3248-44a5-9fa1-cc72a140d682/crypt/zone/oxz_ntp_43cbc3a6-e640-43f5-a9a2-f83eff427870               7f7a2971-de10-4d5a-a814-901adc52bb00   in service    none      none          off        
     oxp_073979dd-3248-44a5-9fa1-cc72a140d682/crypt/debug                                                           248c6c10-1ac6-45de-bb55-ede36ca56bbd   in service    100 GiB   none          gzip-9     
     oxp_c6d33b64-fb96-4129-bab1-7878a06a5f9b/crypt/debug                                                           686c19cf-a0d7-45f6-866f-c564612b2664   in service    100 GiB   none          gzip-9     
     oxp_e4d937e1-6ddc-4eca-bb08-c1f73791e608/crypt/debug                                                           1bca7f71-5e42-4749-91ec-fa40793a3a9a   in service    100 GiB   none          gzip-9     
@@ -220,22 +236,24 @@ parent:    dbcbd3d6-41ff-48ae-ac0b-1becc9b2fd21
     ---------------------------------------------------------------------------------------------------------------
     zone type         zone id                                image source      disposition   underlay IP           
     ---------------------------------------------------------------------------------------------------------------
+    cockroach_db      5199c033-4cf9-4ab6-8ae7-566bd7606363   install dataset   in service    fd00:1122:3344:101::25
+    cockroach_db      ba4994a8-23f9-4b1a-a84f-a08d74591389   install dataset   in service    fd00:1122:3344:101::24
     crucible          058fd5f9-60a8-4e11-9302-15172782e17d   install dataset   in service    fd00:1122:3344:101::27
-    crucible          5199c033-4cf9-4ab6-8ae7-566bd7606363   install dataset   in service    fd00:1122:3344:101::25
+    crucible          6e08bf87-8e2a-4950-aabb-01e4441010fe   install dataset   in service    fd00:1122:3344:101::28
     crucible          dfac80b4-a887-430a-ae87-a4e065dba787   install dataset   in service    fd00:1122:3344:101::26
-    crucible_pantry   ba4994a8-23f9-4b1a-a84f-a08d74591389   install dataset   in service    fd00:1122:3344:101::24
-    external_dns      803bfb63-c246-41db-b0da-d3b87ddfc63d   install dataset   in service    fd00:1122:3344:101::23
-    internal_dns      427ec88f-f467-42fa-9bbb-66a91a36103c   install dataset   in service    fd00:1122:3344:2::1   
-    internal_ntp      6444f8a5-6465-4f0b-a549-1993c113569c   install dataset   in service    fd00:1122:3344:101::21
-    nexus             0c71b3b2-6ceb-4e8f-b020-b08675e83038   install dataset   in service    fd00:1122:3344:101::22
+    crucible_pantry   803bfb63-c246-41db-b0da-d3b87ddfc63d   install dataset   in service    fd00:1122:3344:101::23
+    external_dns      427ec88f-f467-42fa-9bbb-66a91a36103c   install dataset   in service    fd00:1122:3344:101::22
+    internal_dns      0c71b3b2-6ceb-4e8f-b020-b08675e83038   install dataset   in service    fd00:1122:3344:2::1   
+    internal_ntp      43cbc3a6-e640-43f5-a9a2-f83eff427870   install dataset   in service    fd00:1122:3344:101::29
+    nexus             6444f8a5-6465-4f0b-a549-1993c113569c   install dataset   in service    fd00:1122:3344:101::21
 
 
 
   sled: d81c6a84-79b8-4958-ae41-ea46c9b19763
     state:::::::::::::   active
-    config generation:   2
+    config generation:   3
     subnet::::::::::::   fd00:1122:3344:103::/64
-    last allocated IP:   fd00:1122:3344:103::27
+    last allocated IP:   fd00:1122:3344:103::28
 
     host phase 2 contents:
     ------------------------
@@ -258,22 +276,24 @@ parent:    dbcbd3d6-41ff-48ae-ac0b-1becc9b2fd21
     -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
     dataset name                                                                                                   dataset id                             disposition   quota     reservation   compression
     -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-    oxp_18b20749-0748-4105-bb10-7b13cfc776e2/crucible                                                              ba9311dd-89ac-47db-a5e8-d64e8a5fcf70   in service    none      none          off        
-    oxp_30c16fe4-4229-49d0-ab01-3138f2c7dff2/crucible                                                              3c2cb304-a466-4ab5-8597-5db8172e2388   in service    none      none          off        
-    oxp_4930954e-9ac7-4453-b63f-5ab97c389a99/crucible                                                              41107868-c6cc-4ec4-9159-aed688c3ceaf   in service    none      none          off        
-    oxp_18b20749-0748-4105-bb10-7b13cfc776e2/crypt/external_dns                                                    429da94b-19f7-48bd-98e9-47842863ba7b   in service    none      none          off        
-    oxp_18b20749-0748-4105-bb10-7b13cfc776e2/crypt/internal_dns                                                    3443a368-199e-4d26-b59f-3f2bbd507761   in service    none      none          off        
+    oxp_18b20749-0748-4105-bb10-7b13cfc776e2/crypt/cockroachdb                                                     c895e8d5-1434-4ecf-8d46-9bf1ecc8cbc9   in service    none      none          off        
+    oxp_18b20749-0748-4105-bb10-7b13cfc776e2/crucible                                                              543fc3b8-08eb-4e5e-9e05-cf7a91732d5d   in service    none      none          off        
+    oxp_30c16fe4-4229-49d0-ab01-3138f2c7dff2/crucible                                                              3d9537b8-05be-4b1b-a051-f47becf8ec75   in service    none      none          off        
+    oxp_4930954e-9ac7-4453-b63f-5ab97c389a99/crucible                                                              717ac768-45e5-4081-b533-dab061d82ff6   in service    none      none          off        
+    oxp_18b20749-0748-4105-bb10-7b13cfc776e2/crypt/external_dns                                                    6f04dd20-5e2c-4fa8-8430-a886470ed140   in service    none      none          off        
+    oxp_18b20749-0748-4105-bb10-7b13cfc776e2/crypt/internal_dns                                                    7ea73f80-c4e0-450a-92dc-8397ce2af14f   in service    none      none          off        
     oxp_18b20749-0748-4105-bb10-7b13cfc776e2/crypt/zone                                                            45cd9687-20be-4247-b62a-dfdacf324929   in service    none      none          off        
     oxp_30c16fe4-4229-49d0-ab01-3138f2c7dff2/crypt/zone                                                            252ac39f-b9e2-4697-8c07-3a833115d704   in service    none      none          off        
     oxp_4930954e-9ac7-4453-b63f-5ab97c389a99/crypt/zone                                                            1cb0a47a-59ac-4892-8e92-cf87b4290f96   in service    none      none          off        
-    oxp_30c16fe4-4229-49d0-ab01-3138f2c7dff2/crypt/zone/oxz_crucible_694bd14f-cb24-4be4-bb19-876e79cda2c8          543fc3b8-08eb-4e5e-9e05-cf7a91732d5d   in service    none      none          off        
-    oxp_4930954e-9ac7-4453-b63f-5ab97c389a99/crypt/zone/oxz_crucible_7c252b64-c5af-4ec1-989e-9a03f3b0f111          3d9537b8-05be-4b1b-a051-f47becf8ec75   in service    none      none          off        
-    oxp_18b20749-0748-4105-bb10-7b13cfc776e2/crypt/zone/oxz_crucible_f55647d4-5500-4ad3-893a-df45bd50d622          c895e8d5-1434-4ecf-8d46-9bf1ecc8cbc9   in service    none      none          off        
-    oxp_18b20749-0748-4105-bb10-7b13cfc776e2/crypt/zone/oxz_crucible_pantry_75b220ba-a0f4-4872-8202-dc7c87f062d0   a50cd13a-5749-4e79-bb8b-19229500a8b3   in service    none      none          off        
-    oxp_18b20749-0748-4105-bb10-7b13cfc776e2/crypt/zone/oxz_external_dns_f6ec9c67-946a-4da3-98d5-581f72ce8bf0      6f04dd20-5e2c-4fa8-8430-a886470ed140   in service    none      none          off        
-    oxp_18b20749-0748-4105-bb10-7b13cfc776e2/crypt/zone/oxz_internal_dns_ea5b4030-b52f-44b2-8d70-45f15f987d01      7ea73f80-c4e0-450a-92dc-8397ce2af14f   in service    none      none          off        
-    oxp_18b20749-0748-4105-bb10-7b13cfc776e2/crypt/zone/oxz_nexus_3eeb8d49-eb1a-43f8-bb64-c2338421c2c6             50ea8c15-c4c0-4403-a490-d14b3405dfc2   in service    none      none          off        
-    oxp_18b20749-0748-4105-bb10-7b13cfc776e2/crypt/zone/oxz_ntp_f10a4fb9-759f-4a65-b25e-5794ad2d07d8               54bbadaf-ec04-41a2-a62f-f5ac5bf321be   in service    none      none          off        
+    oxp_18b20749-0748-4105-bb10-7b13cfc776e2/crypt/zone/oxz_cockroachdb_75b220ba-a0f4-4872-8202-dc7c87f062d0       a50cd13a-5749-4e79-bb8b-19229500a8b3   in service    none      none          off        
+    oxp_30c16fe4-4229-49d0-ab01-3138f2c7dff2/crypt/zone/oxz_crucible_694bd14f-cb24-4be4-bb19-876e79cda2c8          3c2cb304-a466-4ab5-8597-5db8172e2388   in service    none      none          off        
+    oxp_4930954e-9ac7-4453-b63f-5ab97c389a99/crypt/zone/oxz_crucible_7c252b64-c5af-4ec1-989e-9a03f3b0f111          41107868-c6cc-4ec4-9159-aed688c3ceaf   in service    none      none          off        
+    oxp_18b20749-0748-4105-bb10-7b13cfc776e2/crypt/zone/oxz_crucible_f55647d4-5500-4ad3-893a-df45bd50d622          ba9311dd-89ac-47db-a5e8-d64e8a5fcf70   in service    none      none          off        
+    oxp_18b20749-0748-4105-bb10-7b13cfc776e2/crypt/zone/oxz_crucible_pantry_f6ec9c67-946a-4da3-98d5-581f72ce8bf0   429da94b-19f7-48bd-98e9-47842863ba7b   in service    none      none          off        
+    oxp_18b20749-0748-4105-bb10-7b13cfc776e2/crypt/zone/oxz_external_dns_ea5b4030-b52f-44b2-8d70-45f15f987d01      3443a368-199e-4d26-b59f-3f2bbd507761   in service    none      none          off        
+    oxp_18b20749-0748-4105-bb10-7b13cfc776e2/crypt/zone/oxz_internal_dns_3eeb8d49-eb1a-43f8-bb64-c2338421c2c6      50ea8c15-c4c0-4403-a490-d14b3405dfc2   in service    none      none          off        
+    oxp_18b20749-0748-4105-bb10-7b13cfc776e2/crypt/zone/oxz_nexus_f10a4fb9-759f-4a65-b25e-5794ad2d07d8             54bbadaf-ec04-41a2-a62f-f5ac5bf321be   in service    none      none          off        
+    oxp_18b20749-0748-4105-bb10-7b13cfc776e2/crypt/zone/oxz_ntp_26fbf986-e560-4449-a351-547d1721b90e               e0b86bc5-6a64-432b-bcbe-482e228a4e7d   in service    none      none          off        
     oxp_18b20749-0748-4105-bb10-7b13cfc776e2/crypt/debug                                                           7a6a2058-ea78-49de-9730-cce5e28b4cfb   in service    100 GiB   none          gzip-9     
     oxp_30c16fe4-4229-49d0-ab01-3138f2c7dff2/crypt/debug                                                           21fd4f3a-ec31-469b-87b1-087c343a2422   in service    100 GiB   none          gzip-9     
     oxp_4930954e-9ac7-4453-b63f-5ab97c389a99/crypt/debug                                                           b1deff4b-51df-4a37-9043-afbd7c70a1cb   in service    100 GiB   none          gzip-9     
@@ -289,14 +309,15 @@ parent:    dbcbd3d6-41ff-48ae-ac0b-1becc9b2fd21
     ---------------------------------------------------------------------------------------------------------------
     zone type         zone id                                image source      disposition   underlay IP           
     ---------------------------------------------------------------------------------------------------------------
+    cockroach_db      75b220ba-a0f4-4872-8202-dc7c87f062d0   install dataset   in service    fd00:1122:3344:103::24
     crucible          694bd14f-cb24-4be4-bb19-876e79cda2c8   install dataset   in service    fd00:1122:3344:103::26
     crucible          7c252b64-c5af-4ec1-989e-9a03f3b0f111   install dataset   in service    fd00:1122:3344:103::27
     crucible          f55647d4-5500-4ad3-893a-df45bd50d622   install dataset   in service    fd00:1122:3344:103::25
-    crucible_pantry   75b220ba-a0f4-4872-8202-dc7c87f062d0   install dataset   in service    fd00:1122:3344:103::24
-    external_dns      f6ec9c67-946a-4da3-98d5-581f72ce8bf0   install dataset   in service    fd00:1122:3344:103::23
-    internal_dns      ea5b4030-b52f-44b2-8d70-45f15f987d01   install dataset   in service    fd00:1122:3344:3::1   
-    internal_ntp      f10a4fb9-759f-4a65-b25e-5794ad2d07d8   install dataset   in service    fd00:1122:3344:103::21
-    nexus             3eeb8d49-eb1a-43f8-bb64-c2338421c2c6   install dataset   in service    fd00:1122:3344:103::22
+    crucible_pantry   f6ec9c67-946a-4da3-98d5-581f72ce8bf0   install dataset   in service    fd00:1122:3344:103::23
+    external_dns      ea5b4030-b52f-44b2-8d70-45f15f987d01   install dataset   in service    fd00:1122:3344:103::22
+    internal_dns      3eeb8d49-eb1a-43f8-bb64-c2338421c2c6   install dataset   in service    fd00:1122:3344:3::1   
+    internal_ntp      26fbf986-e560-4449-a351-547d1721b90e   install dataset   in service    fd00:1122:3344:103::28
+    nexus             f10a4fb9-759f-4a65-b25e-5794ad2d07d8   install dataset   in service    fd00:1122:3344:103::21
 
 
  COCKROACHDB SETTINGS:
@@ -310,7 +331,7 @@ parent:    dbcbd3d6-41ff-48ae-ac0b-1becc9b2fd21
  METADATA:
     created by:::::::::::::   reconfigurator-sim
     created at:::::::::::::   <REDACTED_TIMESTAMP>
-    comment::::::::::::::::   (none)
+    comment::::::::::::::::   sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6: added zone: internal_ntp, sled d81c6a84-79b8-4958-ae41-ea46c9b19763: added zone: internal_ntp
     internal DNS version:::   1
     external DNS version:::   1
     target release min gen:   1
@@ -322,13 +343,17 @@ blueprint source: planner with report:
 planning report:
 * zone adds and updates are blocked:
   - sleds have deployment units with image sources not set to Artifact:
-    - sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c: 9 zones
-    - sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6: 8 zones
+    - sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c: 12 zones
+    - sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6: 9 zones
     - sled d81c6a84-79b8-4958-ae41-ea46c9b19763: 8 zones
 
 * adding zones despite being blocked, because: target release generation is 1
+* waiting for NTP zones to appear in inventory on sleds: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, d81c6a84-79b8-4958-ae41-ea46c9b19763
 * no zpools in service for NTP zones on sleds: 00320471-945d-413c-85e7-03e091a70b3c
 * discretionary zone placement waiting for NTP zones on sleds: 00320471-945d-413c-85e7-03e091a70b3c
+* sleds getting NTP zones and which have other services already, making them eligible for discretionary zones: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, d81c6a84-79b8-4958-ae41-ea46c9b19763
+* missing NTP zone on sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6
+* missing NTP zone on sled d81c6a84-79b8-4958-ae41-ea46c9b19763
 * zone updates waiting on zone add blockers
 
 

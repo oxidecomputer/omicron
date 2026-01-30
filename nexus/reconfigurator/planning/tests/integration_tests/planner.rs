@@ -1456,8 +1456,15 @@ fn test_nexus_allocation_skips_nonprovisionable_sleds() {
     // non-provisionable states in the future, we'll have to add more
     // sleds.)
     let mut sim = ReconfiguratorCliTestState::new(TEST_NAME, &logctx.log);
-    sim.load_example_customized(|builder| Ok(builder.nsleds(5).nexus_count(5)))
-        .expect("loaded example system");
+    sim.load_example_customized(|builder| {
+        Ok(builder
+            .nsleds(5)
+            .nexus_count(5)
+            .oximeter_count(0)
+            .cockroachdb_count(0)
+            .internal_ntp_count(0))
+    })
+    .expect("loaded example system");
     let blueprint1 = sim.assert_latest_blueprint_is_blippy_clean();
 
     // This blueprint should only have 5 Nexus zones: one on each sled.
@@ -3116,8 +3123,14 @@ fn test_update_crucible_pantry_before_nexus() {
 
     // Use our example system.
     let mut sim = ReconfiguratorCliTestState::new(TEST_NAME, &logctx.log);
-    sim.load_example_customized(|builder| builder.with_target_release_0_0_1())
-        .expect("loaded example system");
+    sim.load_example_customized(|builder| {
+        builder
+            .cockroachdb_count(0)
+            .oximeter_count(0)
+            .internal_ntp_count(0)
+            .with_target_release_0_0_1()
+    })
+    .expect("loaded example system");
     let blueprint1 = sim.assert_latest_blueprint_is_blippy_clean();
 
     // We should start with nothing to do.
@@ -3454,8 +3467,14 @@ fn test_update_cockroach() {
 
     // Use our example system.
     let mut sim = ReconfiguratorCliTestState::new(TEST_NAME, &logctx.log);
-    sim.load_example_customized(|builder| builder.with_target_release_0_0_1())
-        .expect("loaded example system");
+    sim.load_example_customized(|builder| {
+        builder
+            .cockroachdb_count(0)
+            .oximeter_count(0)
+            .internal_ntp_count(0)
+            .with_target_release_0_0_1()
+    })
+    .expect("loaded example system");
     let mut blueprint = sim.assert_latest_blueprint_is_blippy_clean();
 
     // Update the example system and blueprint, as a part of test set-up.
@@ -3723,8 +3742,14 @@ fn test_update_boundary_ntp() {
 
     // Use our example system.
     let mut sim = ReconfiguratorCliTestState::new(TEST_NAME, &logctx.log);
-    sim.load_example_customized(|builder| builder.with_target_release_0_0_1())
-        .expect("loaded example system");
+    sim.load_example_customized(|builder| {
+        builder
+            .cockroachdb_count(0)
+            .oximeter_count(0)
+            .internal_ntp_count(0)
+            .with_target_release_0_0_1()
+    })
+    .expect("loaded example system");
 
     // The example system creates three internal NTP zones, and zero
     // boundary NTP zones. This is a little arbitrary, but we're checking it
@@ -4249,8 +4274,14 @@ fn test_update_internal_dns() {
 
     // Use our example system.
     let mut sim = ReconfiguratorCliTestState::new(TEST_NAME, &logctx.log);
-    sim.load_example_customized(|builder| builder.with_target_release_0_0_1())
-        .expect("loaded example system");
+    sim.load_example_customized(|builder| {
+        builder
+            .cockroachdb_count(0)
+            .oximeter_count(0)
+            .internal_ntp_count(0)
+            .with_target_release_0_0_1()
+    })
+    .expect("loaded example system");
     let blueprint = sim.assert_latest_blueprint_is_blippy_clean();
 
     // All zones should be sourced from the initial TUF repo by default.
@@ -4501,8 +4532,14 @@ fn test_update_all_zones() {
 
     // Use our example system.
     let mut sim = ReconfiguratorCliTestState::new(TEST_NAME, &logctx.log);
-    sim.load_example_customized(|builder| builder.with_target_release_0_0_1())
-        .expect("loaded example system");
+    sim.load_example_customized(|builder| {
+        builder
+            .cockroachdb_count(0)
+            .oximeter_count(0)
+            .internal_ntp_count(0)
+            .with_target_release_0_0_1()
+    })
+    .expect("loaded example system");
     let blueprint1 = sim.assert_latest_blueprint_is_blippy_clean();
 
     // All zones should be sourced from the 0.0.1 repo by default.

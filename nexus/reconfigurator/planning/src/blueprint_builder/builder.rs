@@ -1705,6 +1705,32 @@ impl<'a> BlueprintBuilder<'a> {
         self.sled_add_zone(sled_id, zone)
     }
 
+    pub fn sled_add_zone_internal_ntp(
+        &mut self,
+        sled_id: SledUuid,
+        image_source: BlueprintZoneImageSource,
+    ) -> Result<(), Error> {
+        let zone_id = self.rng.sled_rng(sled_id).next_zone();
+        let ip = self.sled_alloc_ip(sled_id)?;
+        let port = omicron_common::address::NTP_PORT;
+        let address = SocketAddrV6::new(ip, port, 0, 0);
+        let zone_type =
+            BlueprintZoneType::InternalNtp(blueprint_zone_type::InternalNtp {
+                address,
+            });
+        let filesystem_pool =
+            self.sled_select_zpool(sled_id, zone_type.kind())?;
+
+        let zone = BlueprintZoneConfig {
+            disposition: BlueprintZoneDisposition::InService,
+            id: zone_id,
+            filesystem_pool,
+            zone_type,
+            image_source,
+        };
+        self.sled_add_zone(sled_id, zone)
+    }
+
     pub fn sled_add_zone_crucible_pantry(
         &mut self,
         sled_id: SledUuid,
@@ -2657,6 +2683,9 @@ pub mod test {
             &logctx.log,
             rng.next_system_rng(),
         )
+        .cockroachdb_count(0)
+        .oximeter_count(0)
+        .internal_ntp_count(0)
         .build();
         verify_blueprint(&blueprint1, &example.input);
 
@@ -3418,18 +3447,16 @@ pub mod test {
         let mut rng = SimRngState::from_seed(TEST_NAME);
 
         // Start with an example system (no CRDB zones).
-        let (example, parent) =
-            ExampleSystemBuilder::new(&logctx.log, TEST_NAME).build();
+        let (example, parent) = ExampleSystemBuilder::new(&logctx.log, TEST_NAME)
+            .cockroachdb_count(0)
+            .build();
         let input = example.input;
 
-        // Ensure no CRDB zones (currently `ExampleSystemBuilder` never
-        // provisions CRDB; this check makes sure we update our use of it if
-        // that changes).
+        // Ensure no CRDB zones are present initially (they default to 0).
         for (_, z) in parent.in_service_zones() {
             assert!(
                 !z.zone_type.is_cockroach(),
-                "unexpected cockroach zone \
-                 (update use of ExampleSystemBuilder?): {z:?}"
+                "unexpected cockroach zone: {z:?}"
             );
         }
 
@@ -3520,8 +3547,12 @@ pub mod test {
         let mut rng = SimRngState::from_seed(TEST_NAME);
 
         // Use our example system.
-        let (system, blueprint1) =
-            ExampleSystemBuilder::new(&log, TEST_NAME).nsleds(1).build();
+        let (system, blueprint1) = ExampleSystemBuilder::new(&log, TEST_NAME)
+            .nsleds(1)
+            .cockroachdb_count(0)
+            .oximeter_count(0)
+            .internal_ntp_count(0)
+            .build();
 
         // Find a zone and change its image source.
         let mut blueprint_builder = BlueprintBuilder::new_based_on(
