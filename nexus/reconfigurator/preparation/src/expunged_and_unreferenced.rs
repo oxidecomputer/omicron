@@ -103,8 +103,9 @@ impl PruneableZones {
             // BlueprintExpungedZoneAccessReason::DeallocateExternalNetworkingResources;
             // this reason applies to multiple zone types, so we check it for
             // them all. (Technically we only need to check it for zones that
-            // _can_ have external networking, but it's basically free to just
-            // check it for all.)
+            // _can_ have external networking, but it's fine to check ones that
+            // don't, and now we don't have to keep a list here of which zone
+            // types could have external networking rows present.)
             reason_checker.add_reason_checked(
                 Reason::DeallocateExternalNetworkingResources,
             );
@@ -113,68 +114,65 @@ impl PruneableZones {
             let has_service_nic_row =
                 zones_with_service_nice_rows.contains(&zone.id);
 
-            let is_referenced = match &zone.zone_type {
-                BlueprintZoneType::BoundaryNtp(boundary_ntp) => {
-                    is_boundary_ntp_referenced(
-                        boundary_ntp,
-                        &in_service_boundary_ntp_configs,
-                    )
-                }
-                BlueprintZoneType::ClickhouseKeeper(_)
-                | BlueprintZoneType::ClickhouseServer(_) => {
-                    is_multinode_clickhouse_referenced(
-                        zone.id,
-                        parent_blueprint,
-                    )
-                }
-                BlueprintZoneType::ExternalDns(external_dns) => {
-                    is_external_dns_referenced(
-                        external_dns,
-                        &in_service_external_dns_ips,
-                    )
-                }
-                BlueprintZoneType::Nexus(_) => {
-                    is_nexus_referenced(opctx, datastore, zone.id).await?
-                }
-                BlueprintZoneType::Oximeter(_) => {
-                    is_oximeter_referenced(opctx, datastore, zone.id).await?
-                }
-                BlueprintZoneType::CockroachDb(_) => {
-                    // BlueprintExpungedZoneAccessReason::CockroachDecommission
-                    // means we consider cockroach zones referenced until the
-                    // cockroach cluster has decommissioned the node that was
-                    // present in that zone; however, we don't currently
-                    // decommission cockroach nodes (tracked by
-                    // <https://github.com/oxidecomputer/omicron/issues/8447>).
-                    // We therefore always consider cockroach nodes "still
-                    // referenced".
-                    //
-                    // This shouldn't be a huge deal in practice; Cockroach
-                    // zones are updated in place, not by an expunge/add pair,
-                    // so a typical update does not produce an expunged
-                    // Cockroach zone that needs pruning. Only expunging a disk
-                    // or sled can produce an expunged Cockroach node, and we
-                    // expect the number of those to remain relatively small for
-                    // any given deployment. Hopefully we can revisit
-                    // decommissioning Cockroach nodes long before we need to
-                    // worry about the amount of garbage leftover from expunged
-                    // disks/sleds.
-                    true
-                }
+            let is_pruneable = !has_external_ip_row
+                && !has_service_nic_row
+                && match &zone.zone_type {
+                    BlueprintZoneType::BoundaryNtp(boundary_ntp) => {
+                        is_boundary_ntp_pruneable(
+                            boundary_ntp,
+                            &in_service_boundary_ntp_configs,
+                            &mut reason_checker,
+                        )
+                    }
+                    BlueprintZoneType::ClickhouseKeeper(_)
+                    | BlueprintZoneType::ClickhouseServer(_) => {
+                        is_multinode_clickhouse_pruneable(
+                            zone.id,
+                            parent_blueprint,
+                            &mut reason_checker,
+                        )
+                    }
+                    BlueprintZoneType::ExternalDns(external_dns) => {
+                        is_external_dns_pruneable(
+                            external_dns,
+                            &in_service_external_dns_ips,
+                            &mut reason_checker,
+                        )
+                    }
+                    BlueprintZoneType::Nexus(_) => {
+                        is_nexus_pruneable(
+                            opctx,
+                            datastore,
+                            zone.id,
+                            &mut reason_checker,
+                        )
+                        .await?
+                    }
+                    BlueprintZoneType::Oximeter(_) => {
+                        is_oximeter_pruneable(
+                            opctx,
+                            datastore,
+                            zone.id,
+                            &mut reason_checker,
+                        )
+                        .await?
+                    }
+                    BlueprintZoneType::CockroachDb(_) => {
+                        is_cockroach_pruneable(zone.id, &mut reason_checker)
+                    }
 
-                // These zone types currently have no associated
-                // `BlueprintExpungedZoneAccessReason`; there is no cleanup
-                // action required for them, so they're considered
-                // "unreferenced" and may be pruned as soon as they've been
-                // expunged.
-                BlueprintZoneType::Clickhouse(_)
-                | BlueprintZoneType::Crucible(_)
-                | BlueprintZoneType::CruciblePantry(_)
-                | BlueprintZoneType::InternalDns(_)
-                | BlueprintZoneType::InternalNtp(_) => false,
-            };
+                    // These zone types currently have no associated
+                    // `BlueprintExpungedZoneAccessReason`; there is no cleanup
+                    // action required for them, so they may be pruned as soon
+                    // as they've been expunged.
+                    BlueprintZoneType::Clickhouse(_)
+                    | BlueprintZoneType::Crucible(_)
+                    | BlueprintZoneType::CruciblePantry(_)
+                    | BlueprintZoneType::InternalDns(_)
+                    | BlueprintZoneType::InternalNtp(_) => true,
+                };
 
-            if !is_referenced && !has_external_ip_row && !has_service_nic_row {
+            if is_pruneable {
                 pruneable_zones.insert(zone.id);
             }
         }
@@ -187,80 +185,113 @@ impl PruneableZones {
     }
 }
 
-fn is_external_networking_referenced(
-    zone_id: OmicronZoneUuid,
-    external_ip_rows: &[nexus_db_model::ExternalIp],
-    service_nic_rows: &[nexus_db_model::ServiceNetworkInterface],
-) -> bool {
-    // Check
-    // BlueprintExpungedZoneAccessReason::DeallocateExternalNetworkingResources;
-    // if this zone's external IP or NIC are still present in the DB, then it's
-    // the zone is still referenced.
-    let zone_id = zone_id.into_untyped_uuid();
-    external_ip_rows.iter().any(|row| row.parent_id == Some(zone_id))
-        || service_nic_rows.iter().any(|row| row.service_id == zone_id)
-}
-
-fn is_boundary_ntp_referenced(
+fn is_boundary_ntp_pruneable(
     boundary_ntp: &blueprint_zone_type::BoundaryNtp,
     boundary_ntp_configs: &InServiceBoundaryNtpUpstreamConfigs<'_>,
+    reason_checker: &mut BlueprintExpungedZoneAccessReasonChecker,
 ) -> bool {
-    // Check BlueprintExpungedZoneAccessReason::BoundaryNtpUpstreamConfig; if
-    // this zone's upstream config is not covered by an in-service zone, then
-    // it's still "referenced" (in that the planner needs to refer to it to set
-    // up a new boundary NTP zone).
+    // If this zone's upstream config is also the config of an in-service zone,
+    // then it's pruneable. Note the reason we're checking here.
+    reason_checker.add_reason_checked(
+        BlueprintExpungedZoneAccessReason::BoundaryNtpUpstreamConfig,
+    );
     let expunged_config = BoundaryNtpUpstreamConfig::new(boundary_ntp);
     boundary_ntp_configs.contains(&expunged_config)
 }
 
-fn is_multinode_clickhouse_referenced(
+fn is_cockroach_pruneable(
+    _zone_id: OmicronZoneUuid,
+    reason_checker: &mut BlueprintExpungedZoneAccessReasonChecker,
+) -> bool {
+    // BlueprintExpungedZoneAccessReason::CockroachDecommission means we
+    // consider cockroach zones nonpruneable until the cockroach cluster has
+    // decommissioned the node that was present in that zone; however, we don't
+    // currently decommission cockroach nodes (tracked by
+    // <https://github.com/oxidecomputer/omicron/issues/8447>). We therefore
+    // never consider cockroach nodes pruneable
+    //
+    // This shouldn't be a huge deal in practice; Cockroach zones are updated in
+    // place, not by an expunge/add pair, so a typical update does not produce
+    // an expunged Cockroach zone that needs pruning. Only expunging a disk or
+    // sled can produce an expunged Cockroach node, and we expect the number of
+    // those to remain relatively small for any given deployment. Hopefully we
+    // can revisit decommissioning Cockroach nodes long before we need to worry
+    // about the amount of garbage leftover from expunged disks/sleds.
+    //
+    // Even though we do no work here, we claim we've checked this
+    // BlueprintExpungedZoneAccessReason. This allows our test to pass that
+    // we've _considered_ all relevant reasons; in this case, this reason means
+    // the zone is _never_ pruneable.
+    reason_checker.add_reason_checked(
+        BlueprintExpungedZoneAccessReason::CockroachDecommission,
+    );
+    false
+}
+
+fn is_multinode_clickhouse_pruneable(
     zone_id: OmicronZoneUuid,
     parent_blueprint: &Blueprint,
+    reason_checker: &mut BlueprintExpungedZoneAccessReasonChecker,
 ) -> bool {
-    // Check BlueprintExpungedZoneAccessReason::ClickhouseKeeperServerConfigIps;
-    // if this zone is still present in the clickhouse cluster config, it's
-    // still referenced.
+    // If this zone is still present in the clickhouse cluster config, it's
+    // not pruneable. If there is no config at all or there is but it doesn't
+    // contain this zone, it is prunable.
+    //
+    // Note the reason we've checked here.
+    reason_checker.add_reason_checked(
+        BlueprintExpungedZoneAccessReason::ClickhouseKeeperServerConfigIps,
+    );
     let Some(clickhouse_config) = &parent_blueprint.clickhouse_cluster_config
     else {
-        // If there is no clickhouse cluster config at all, the zone isn't
-        // referenced in it!
-        return false;
+        return true;
     };
 
-    clickhouse_config.keepers.contains_key(&zone_id)
-        || clickhouse_config.servers.contains_key(&zone_id)
+    !clickhouse_config.keepers.contains_key(&zone_id)
+        && !clickhouse_config.servers.contains_key(&zone_id)
 }
 
-fn is_external_dns_referenced(
+fn is_external_dns_pruneable(
     external_dns: &blueprint_zone_type::ExternalDns,
     external_dns_ips: &InServiceExternalDnsIps<'_>,
+    reason_checker: &mut BlueprintExpungedZoneAccessReasonChecker,
 ) -> bool {
-    // Check BlueprintExpungedZoneAccessReason::ExternalDnsExternalIps; we
-    // consider an external DNS zone "still referenced" if its IP is _not_
-    // assigned to an in-service external DNS zone. (If the IP _is_ assigned to
-    // an in-service external DNS zone, the expunged zone is no longer
-    // referenced and can be safely pruned.)
+    // We consider an external DNS zone pruneable if its IP has been reassigned
+    // to an in-service external DNS zone. (If the IP has not yet been
+    // reassigned, we have to keep it around so we don't forget it!).
+    //
+    // Note the reason we've checked here.
+    reason_checker.add_reason_checked(
+        BlueprintExpungedZoneAccessReason::ExternalDnsExternalIps,
+    );
     let expunged_zone_ip = external_dns.dns_address.addr.ip();
-    !external_dns_ips.contains(&expunged_zone_ip)
+    external_dns_ips.contains(&expunged_zone_ip)
 }
 
-async fn is_nexus_referenced(
+async fn is_nexus_pruneable(
     opctx: &OpContext,
     datastore: &DataStore,
     zone_id: OmicronZoneUuid,
+    reason_checker: &mut BlueprintExpungedZoneAccessReasonChecker,
 ) -> Result<bool, Error> {
-    // Check BlueprintExpungedZoneAccessReason::NexusDeleteMetadataRecord: is
-    // this Nexus zone still present in the `db_metadata_nexus` table?
+    // Nexus zones have multiple reasons they could be non-pruneable; check each
+    // of them below and note them as we do.
+
+    // Is this Nexus zone still present in the `db_metadata_nexus` table?
+    reason_checker.add_reason_checked(
+        BlueprintExpungedZoneAccessReason::NexusDeleteMetadataRecord,
+    );
     if !datastore
         .database_nexus_access_all(opctx, &BTreeSet::from([zone_id]))
         .await?
         .is_empty()
     {
-        return Ok(true);
+        return Ok(false);
     }
 
-    // Check BlueprintExpungedZoneAccessReason::NexusSagaReassignment: does
-    // this Nexus zone still have unfinished sagas assigned?
+    // Does this Nexus zone still have unfinished sagas assigned?
+    reason_checker.add_reason_checked(
+        BlueprintExpungedZoneAccessReason::NexusSagaReassignment,
+    );
     if !datastore
         .saga_list_recovery_candidates(
             opctx,
@@ -270,7 +301,7 @@ async fn is_nexus_referenced(
         .await?
         .is_empty()
     {
-        return Ok(true);
+        return Ok(false);
     }
 
     // This is a no-op match that exists solely to ensure we update our logic if
@@ -292,11 +323,13 @@ async fn is_nexus_referenced(
         }
     }
 
-    // Check BlueprintExpungedZoneAccessReason::NexusSupportBundleReassign: does
-    // this Nexus zone still have support bundles assigned to it in any state
-    // that requires cleanup work? This requires explicitly listing the states
-    // we care about; the no-op match statement above will hopefully keep this
-    // in sync with any changes to the enum.
+    // Does this Nexus zone still have support bundles assigned to it in any
+    // state that requires cleanup work? This requires explicitly listing the
+    // states we care about; the no-op match statement above will hopefully keep
+    // this in sync with any changes to the enum.
+    reason_checker.add_reason_checked(
+        BlueprintExpungedZoneAccessReason::NexusSupportBundleReassign,
+    );
     if !datastore
         .support_bundle_list_assigned_to_nexus(
             opctx,
@@ -312,32 +345,30 @@ async fn is_nexus_referenced(
         .await?
         .is_empty()
     {
-        return Ok(true);
+        return Ok(false);
     }
 
-    // These Nexus-related zone access reasons are documented as "planner does
-    // not need to account for this", so we don't check anything:
-    //
-    // * BlueprintExpungedZoneAccessReason::NexusExternalConfig
-    // * BlueprintExpungedZoneAccessReason::NexusSelfIsQuiescing
-
-    Ok(false)
+    Ok(true)
 }
 
-async fn is_oximeter_referenced(
+async fn is_oximeter_pruneable(
     opctx: &OpContext,
     datastore: &DataStore,
     zone_id: OmicronZoneUuid,
+    reason_checker: &mut BlueprintExpungedZoneAccessReasonChecker,
 ) -> Result<bool, Error> {
-    // Check
-    // BlueprintExpungedZoneAccessReason::OximeterExpungeAndReassignProducers:
-    // this zone ID should not refer to an in-service Oximeter collector, and it
+    // This zone ID should not refer to an in-service Oximeter collector, and it
     // should have no producers assigned to it.
+    //
+    // Note the reason we've checked here.
+    reason_checker.add_reason_checked(
+        BlueprintExpungedZoneAccessReason::OximeterExpungeAndReassignProducers,
+    );
     match datastore.oximeter_lookup(opctx, zone_id.as_untyped_uuid()).await? {
         Some(_info) => {
             // If the lookup succeeded, we haven't yet performed the necessary
             // cleanup to mark this oximeter as expunged.
-            return Ok(true);
+            return Ok(false);
         }
         None => {
             // Oximeter has been expunged (or was never inserted in the first
@@ -356,8 +387,8 @@ async fn is_oximeter_referenced(
         )
         .await?;
 
-    // This oximeter is referenced if our set of assigned producers is nonempty.
-    Ok(!assigned_producers.is_empty())
+    // This oximeter is pruneable if our set of assigned producers is empty.
+    Ok(assigned_producers.is_empty())
 }
 
 fn single_item_pagparams<T>() -> DataPageParams<'static, T> {
@@ -522,10 +553,10 @@ impl BlueprintExpungedZoneAccessReasonChecker {
             // checks above for zone-specific reasons and add an appropriate
             // call to `add_reason_checked()`.
             match reason {
-                // Checked by is_boundary_ntp_referenced()
+                // Checked by is_boundary_ntp_pruneable()
                 Reason::BoundaryNtpUpstreamConfig => {}
 
-                // Checked by is_multinode_clickhouse_referenced()
+                // Checked by is_multinode_clickhouse_pruneable()
                 Reason::ClickhouseKeeperServerConfigIps => {}
 
                 // TODO-john FIXME
@@ -535,31 +566,30 @@ impl BlueprintExpungedZoneAccessReasonChecker {
                 // https://github.com/oxidecomputer/omicron/issues/8447).
                 Reason::CockroachDecommission => {}
 
-                // TODO-john FIXME
-                // Checked by is_external_networking_referenced(), which is
-                // called for each zone type with external networking (boundary
-                // NTP, external DNS, Nexus)
+                // Checked directly by the main loop in `PruneableZones::new()`.
                 Reason::DeallocateExternalNetworkingResources => {}
 
-                // Checked by is_external_dns_referenced()
+                // Checked by is_external_dns_pruneable()
                 Reason::ExternalDnsExternalIps => {}
 
-                // Each of these are checked by is_nexus_referenced()
+                // Each of these are checked by is_nexus_pruneable()
                 Reason::NexusDeleteMetadataRecord
                 | Reason::NexusSagaReassignment
                 | Reason::NexusSupportBundleReassign => {}
 
-                // Checked by is_oximeter_referenced()
+                // Checked by is_oximeter_pruneable()
                 Reason::OximeterExpungeAndReassignProducers => {}
+
+                // ---------------------------------------------------------
 
                 // Nexus-related reasons that don't need to be checked (see
                 // `BlueprintExpungedZoneAccessReason` for specifics)
                 Reason::NexusExternalConfig
-                    | Reason::NexusSelfIsQuiescing
+                | Reason::NexusSelfIsQuiescing
 
                 // Planner-related reasons that don't need to be checked (see
                 // `BlueprintExpungedZoneAccessReason` for specifics)
-                |Reason::PlannerCheckReadyForCleanup
+                | Reason::PlannerCheckReadyForCleanup
                 | Reason::PlanningInputDetermineUnreferenced
                 | Reason::PlanningInputExpungedZoneGuard
 
@@ -583,6 +613,7 @@ impl BlueprintExpungedZoneAccessReasonChecker {
         self.reasons_checked.insert(reason);
     }
 
+    #[cfg(test)]
     fn assert_all_reasons_checked(self) {
         let mut unchecked = BTreeSet::new();
 
