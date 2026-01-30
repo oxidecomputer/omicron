@@ -8335,6 +8335,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "omicron-hist"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "crossterm 0.29.0",
+ "futures",
+ "omicron-workspace-hack",
+ "oxide-tokio-rt",
+ "quick-xml",
+ "ratatui",
+ "reqwest",
+ "serde_json",
+ "sigpipe",
+ "tokio",
+]
+
+[[package]]
 name = "omicron-live-tests"
 version = "0.1.0"
 dependencies = [
@@ -9174,6 +9192,7 @@ dependencies = [
  "predicates",
  "proc-macro2",
  "proptest",
+ "quick-xml",
  "rand 0.8.5",
  "rand 0.9.2",
  "rand_chacha 0.3.1",
