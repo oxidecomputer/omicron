@@ -999,6 +999,7 @@ pub enum ResourceType {
     SupportBundle,
     SubnetPool,
     SubnetPoolMember,
+    SubnetPoolSiloLink,
     Switch,
     SwitchPort,
     SwitchPortSettings,

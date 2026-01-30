@@ -334,6 +334,41 @@ async fn test_subnet_pool_silo_list(cptestctx: &ControlPlaneTestContext) {
         linked_silos.iter().map(|link| link.silo_id).collect::<BTreeSet<_>>(),
     );
 
+    // And fetching the list in two pages works too.
+    let mut as_pages = Vec::with_capacity(n_to_link);
+    let n_pages = 2;
+    let page_size = n_to_link / n_pages;
+    let mut page_token = None;
+    for _ in 0..n_pages {
+        let page_url = if let Some(token) = page_token {
+            format!("{url}?limit={page_size}&page_token={token}")
+        } else {
+            format!("{url}?limit={page_size}")
+        };
+        let ResultsPage { mut items, next_page } =
+            NexusRequest::object_get(client, &page_url)
+                .authn_as(AuthnMode::PrivilegedUser)
+                .execute_and_parse_unwrap::<ResultsPage<SubnetPoolSiloLink>>()
+                .await;
+        assert_eq!(items.len(), page_size);
+        as_pages.append(&mut items);
+        page_token = next_page;
+    }
+
+    // After fetching all pages, we should have the same set in the same order
+    // as fetching the full set in one page.
+    assert_eq!(as_pages, linked);
+
+    // And we should not fetch any more.
+    let page_url =
+        format!("{url}?limit={page_size}&page_token={}", page_token.unwrap());
+    let should_be_empty = NexusRequest::object_get(client, &page_url)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute_and_parse_unwrap::<ResultsPage<SubnetPoolSiloLink>>()
+        .await
+        .items;
+    assert!(should_be_empty.is_empty());
+
     // And if we unlink one, it no longer shows up.
     NexusRequest::object_delete(
         client,
@@ -480,6 +515,65 @@ async fn test_subnet_pool_silo_link(cptestctx: &ControlPlaneTestContext) {
     assert_eq!(link.subnet_pool_id, new_pool.identity.id);
     assert_eq!(link.silo_id, new_silo.identity.id);
     assert!(link.is_default);
+}
+
+#[nexus_test]
+async fn cannot_delete_nonexistent_silo_link(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+    let _pool =
+        create_subnet_pool(client, SUBNET_POOL_NAME, IpVersion::V6).await;
+
+    // It's not linked to the default silo, so what happens if we try to unlink
+    // it?
+    NexusRequest::expect_failure(
+        client,
+        StatusCode::NOT_FOUND,
+        Method::DELETE,
+        &format!(
+            "{}/{}/silos/{}",
+            SUBNET_POOLS_URL, SUBNET_POOL_NAME, DEFAULT_SILO_ID
+        ),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .expect("failed to make request");
+}
+
+#[nexus_test]
+async fn cannot_link_multiple_times(cptestctx: &ControlPlaneTestContext) {
+    let client = &cptestctx.external_client;
+    let _pool =
+        create_subnet_pool(client, SUBNET_POOL_NAME, IpVersion::V6).await;
+
+    // Now link it to the default silo.
+    let link_params = params::SubnetPoolLinkSilo {
+        silo: omicron_common::api::external::NameOrId::Id(DEFAULT_SILO_ID),
+        is_default: false,
+    };
+    let _link = NexusRequest::objects_post(
+        client,
+        &format!("{}/{}/silos", SUBNET_POOLS_URL, SUBNET_POOL_NAME),
+        &link_params,
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute_and_parse_unwrap::<SubnetPoolSiloLink>()
+    .await;
+
+    // Doing that again should fail.
+    let _err = NexusRequest::expect_failure_with_body(
+        client,
+        StatusCode::CONFLICT,
+        Method::POST,
+        &format!("{}/{}/silos", SUBNET_POOLS_URL, SUBNET_POOL_NAME),
+        &link_params,
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .expect("failed to make request");
 }
 
 #[nexus_test]
