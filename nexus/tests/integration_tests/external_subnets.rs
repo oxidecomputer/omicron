@@ -10,7 +10,6 @@
 //!
 //! TODO(#9453): Replace stub tests with full implementation tests.
 
-use dropshot::ResultsPage;
 use http::Method;
 use http::StatusCode;
 use nexus_test_utils::http_testing::AuthnMode;
@@ -18,6 +17,7 @@ use nexus_test_utils::http_testing::NexusRequest;
 use nexus_test_utils::resource_helpers::create_default_ip_pools;
 use nexus_test_utils::resource_helpers::create_instance;
 use nexus_test_utils::resource_helpers::create_project;
+use nexus_test_utils::resource_helpers::objects_list_page_authz;
 use nexus_test_utils_macros::nexus_test;
 use nexus_types::external_api::params;
 use nexus_types::external_api::views;
@@ -238,19 +238,10 @@ async fn test_instance_external_subnet_list_empty(
     let _ = create_instance(client, PROJECT_NAME, INSTANCE_NAME).await;
 
     // List external subnets for the instance - should return empty list
-    let subnets = NexusRequest::object_get(
+    let subnets = objects_list_page_authz::<views::ExternalSubnet>(
         client,
         &instance_external_subnets_url(INSTANCE_NAME, PROJECT_NAME),
     )
-    .authn_as(AuthnMode::PrivilegedUser)
-    .execute()
-    .await
-    .expect("failed to list instance external subnets")
-    .parsed_body::<ResultsPage<views::ExternalSubnet>>()
-    .expect("failed to parse external subnets");
-
-    assert!(
-        subnets.items.is_empty(),
-        "expected no external subnets attached to new instance"
-    );
+    .await;
+    assert!(subnets.items.is_empty());
 }

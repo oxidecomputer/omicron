@@ -4942,6 +4942,10 @@ impl NexusExternalApi for NexusExternalApiImpl {
             let subnets = nexus
                 .instance_list_external_subnets(&opctx, &instance_lookup)
                 .await?;
+            // The number of external subnets attached to an instance is expected
+            // to be small, so pagination is not implemented.
+            // TODO: Add MAX_EXTERNAL_SUBNETS_PER_INSTANCE constant (similar to
+            // MAX_EXTERNAL_IPS_PER_INSTANCE) and enforce it in attach operations.
             Ok(HttpResponseOk(ResultsPage { items: subnets, next_page: None }))
         };
         apictx
