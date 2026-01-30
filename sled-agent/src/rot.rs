@@ -18,6 +18,8 @@ use tokio::sync::{
     oneshot,
 };
 
+use crate::sled_agent::Error;
+
 #[derive(Debug, Error)]
 pub enum RotError {
     #[error(transparent)]
@@ -102,23 +104,37 @@ impl RotAttestationHandle {
 pub struct RotAttestationTask {
     log: Logger,
     rx: mpsc::Receiver<RotAttestationMessage>,
-    ipcc: ipcc::Ipcc,
+    ipcc: Option<ipcc::Ipcc>,
 }
 
 type RotAttestation = (RotAttestationTask, RotAttestationHandle);
 
 impl RotAttestationTask {
-    pub fn new(log: &Logger) -> Result<RotAttestation, RotError> {
-        let ipcc = ipcc::Ipcc::new()?;
+    pub fn new(log: &Logger) -> Result<RotAttestation, Error> {
+        let log = log.new(o!("component" => "RotAttestationTask"));
+
+        let ipcc = match ipcc::Ipcc::new() {
+            Ok(ipcc) => Some(ipcc),
+            Err(e) => {
+                // Only fail here if we're on an Oxide sled where we expect to
+                // have IPCC available. Otherwise, we just log the error and
+                // continue. Any subsequent attestation requests will fail as
+                // `RotAttestationTask::run` will bail without an Ipcc handle.
+                error!(log, "failed to get ipcc handle: {e}");
+                let is_oxide = sled_hardware::is_oxide_sled().map_err(|e| {
+                    Error::Underlay(
+                        sled_hardware::underlay::Error::SystemDetection(e),
+                    )
+                })?;
+                if is_oxide {
+                    return Err(RotError::Ipcc(e).into());
+                }
+                None
+            }
+        };
+
         let (tx, rx) = mpsc::channel(QUEUE_SIZE);
-        Ok((
-            RotAttestationTask {
-                log: log.new(o!("component" => "RotAttestationTask")),
-                rx,
-                ipcc,
-            },
-            RotAttestationHandle { tx },
-        ))
+        Ok((RotAttestationTask { log, rx, ipcc }, RotAttestationHandle { tx }))
     }
 
     /// Run the main request handler loop that processes incoming RoT
@@ -127,6 +143,10 @@ impl RotAttestationTask {
     /// This should be run via `spawn_blocking` as we perform ipcc operations
     /// via an ioctl and don't want to block any other tasks.
     pub fn run(mut self) {
+        let Some(ipcc) = self.ipcc.take() else {
+            warn!(self.log, "No ipcc handle. Exiting.");
+            return;
+        };
         loop {
             let Some(req) = self.rx.blocking_recv() else {
                 warn!(self.log, "All senders dropped. Exiting.");
@@ -135,20 +155,19 @@ impl RotAttestationTask {
 
             match req {
                 RotAttestationMessage::GetMeasurementLog(reply_tx) => {
-                    let log = self.ipcc.get_measurement_log();
+                    let log = ipcc.get_measurement_log();
                     let _ = reply_tx.send(log.map(Into::into));
                 }
                 RotAttestationMessage::GetCertificateChain(reply_tx) => {
-                    let chain =
-                        self.ipcc.get_certificates().and_then(|chain| {
-                            CertificateChain::try_from(chain)
-                                .map_err(AttestError::from)
-                        });
+                    let chain = ipcc.get_certificates().and_then(|chain| {
+                        CertificateChain::try_from(chain)
+                            .map_err(AttestError::from)
+                    });
                     let _ = reply_tx.send(chain);
                 }
                 RotAttestationMessage::Attest(nonce, reply_tx) => {
                     let Nonce::N32(nonce) = nonce;
-                    let attestation = self.ipcc.attest(nonce.into());
+                    let attestation = ipcc.attest(nonce.into());
                     let _ = reply_tx.send(attestation.map(Into::into));
                 }
             }
