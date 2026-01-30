@@ -147,6 +147,7 @@ impl RotAttestationTask {
                     let _ = reply_tx.send(chain);
                 }
                 RotAttestationMessage::Attest(nonce, reply_tx) => {
+                    let Nonce::N32(nonce) = nonce;
                     let attestation = self.ipcc.attest(nonce.into());
                     let _ = reply_tx.send(attestation.map(Into::into));
                 }

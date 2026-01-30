@@ -11,7 +11,7 @@
 //! to the SP (through MGS) or set from userland via libipcc.
 
 use attest_data::messages::{HostToRotCommand, MAX_REQUEST_SIZE, RotToHost};
-use attest_data::{Attestation, Log, Nonce};
+use attest_data::{Attestation, Log, Nonce32};
 use libipcc::IPCC_MAX_DATA_SIZE;
 use omicron_uuid_kinds::MupdateUuid;
 use serde::Deserialize;
@@ -265,7 +265,7 @@ impl Ipcc {
         Ok(certs)
     }
 
-    pub fn attest(&self, nonce: Nonce) -> Result<Attestation, AttestError> {
+    pub fn attest(&self, nonce: Nonce32) -> Result<Attestation, AttestError> {
         let mut rot_message = vec![0; MAX_REQUEST_SIZE];
         let mut rot_resp = vec![0; IPCC_MAX_DATA_SIZE];
         // Serializing is infallible
@@ -273,8 +273,8 @@ impl Ipcc {
             &mut rot_message,
             &HostToRotCommand::Attest,
             |buf| {
-                buf[..Nonce::LENGTH].copy_from_slice(nonce.as_ref());
-                Nonce::LENGTH
+                buf[..Nonce32::LENGTH].copy_from_slice(nonce.as_ref());
+                Nonce32::LENGTH
             },
         ) {
             Ok(len) => &rot_message[..len],
