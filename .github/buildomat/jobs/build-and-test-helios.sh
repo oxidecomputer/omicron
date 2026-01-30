@@ -36,4 +36,12 @@
 #: name = "live-tests-archive.tgz"
 #: from_output = "/work/oxidecomputer/omicron/target/live-tests-archive.tgz"
 
+#
+# Use sync=disabled for our tmpdir and for /work.  This is generally dangerous,
+# but okay in this context because all of this data will be lost anyway if this
+# environment crashes.
+#
+
+pfexec zfs create -o mountpoint=/var/tmp/omicron_tmp -o sync=disabled rpool/omicron_tmp
+pfexec zfs set sync=disabled rpool/work
 exec .github/buildomat/build-and-test.sh illumos
