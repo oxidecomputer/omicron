@@ -520,6 +520,25 @@ dependencies = [
 [[package]]
 name = "attest-data"
 version = "0.5.0"
+source = "git+https://github.com/oxidecomputer/dice-util?branch=generic-nonce#588030e6c545cd87f4402071714c2a112feea29b"
+dependencies = [
+ "const-oid",
+ "der",
+ "getrandom 0.3.4",
+ "hex",
+ "hubpack",
+ "rats-corim 0.1.0 (git+https://github.com/oxidecomputer/rats-corim)",
+ "salty",
+ "serde",
+ "serde_with",
+ "sha3",
+ "static_assertions",
+ "thiserror 2.0.18",
+]
+
+[[package]]
+name = "attest-data"
+version = "0.5.0"
 source = "git+https://github.com/oxidecomputer/dice-util?rev=10952e8d9599b735b85d480af3560a11700e5b64#10952e8d9599b735b85d480af3560a11700e5b64"
 dependencies = [
  "const-oid",
@@ -540,25 +559,6 @@ dependencies = [
 name = "attest-data"
 version = "0.5.0"
 source = "git+https://github.com/oxidecomputer/dice-util?rev=6e0ef48f72ff85ba50fc8286c8e89dc5f9c822dd#6e0ef48f72ff85ba50fc8286c8e89dc5f9c822dd"
-dependencies = [
- "const-oid",
- "der",
- "getrandom 0.3.4",
- "hex",
- "hubpack",
- "rats-corim 0.1.0 (git+https://github.com/oxidecomputer/rats-corim)",
- "salty",
- "serde",
- "serde_with",
- "sha3",
- "static_assertions",
- "thiserror 2.0.18",
-]
-
-[[package]]
-name = "attest-data"
-version = "0.5.0"
-source = "git+https://github.com/oxidecomputer/dice-util?rev=b04fa144cf810e3e4ecbf2bbab5df920afe76e26#b04fa144cf810e3e4ecbf2bbab5df920afe76e26"
 dependencies = [
  "const-oid",
  "der",
@@ -5613,7 +5613,7 @@ checksum = "fc6d6206008e25125b1f97fbe5d309eb7b85141cf9199d52dbd3729a1584dd16"
 name = "ipcc"
 version = "0.1.0"
 dependencies = [
- "attest-data 0.5.0 (git+https://github.com/oxidecomputer/dice-util?rev=b04fa144cf810e3e4ecbf2bbab5df920afe76e26)",
+ "attest-data 0.5.0 (git+https://github.com/oxidecomputer/dice-util?branch=generic-nonce)",
  "ciborium",
  "hubpack",
  "libipcc 0.1.0 (git+https://github.com/oxidecomputer/ipcc-rs?rev=7cdf2ab9c8d9e9267a8b366aa780c6c26f9a5ecf)",
@@ -13088,7 +13088,7 @@ dependencies = [
 name = "sled-agent-api"
 version = "0.1.0"
 dependencies = [
- "attest-data 0.5.0 (git+https://github.com/oxidecomputer/dice-util?rev=b04fa144cf810e3e4ecbf2bbab5df920afe76e26)",
+ "attest-data 0.5.0 (git+https://github.com/oxidecomputer/dice-util?branch=generic-nonce)",
  "camino",
  "chrono",
  "dropshot",
@@ -13320,7 +13320,7 @@ name = "sled-agent-types-versions"
 version = "0.1.0"
 dependencies = [
  "async-trait",
- "attest-data 0.5.0 (git+https://github.com/oxidecomputer/dice-util?rev=b04fa144cf810e3e4ecbf2bbab5df920afe76e26)",
+ "attest-data 0.5.0 (git+https://github.com/oxidecomputer/dice-util?branch=generic-nonce)",
  "bootstore",
  "camino",
  "chrono",

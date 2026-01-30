@@ -76,11 +76,19 @@ impl TryFrom<x509_cert::PkiPath> for CertificateChain {
 /// A random nonce provided as part of an attestation challenge to guarantee
 /// freshness thereby preventing replay attacks.
 #[derive(Deserialize, Serialize, JsonSchema)]
-pub struct Nonce(pub Sha3_256Digest);
+#[serde(untagged)]
+pub enum Nonce {
+    /// A 32-byte nonce.
+    #[serde(with = "serde_human_bytes::hex_array")]
+    #[schemars(schema_with = "omicron_common::hex_schema::<32>")]
+    N32([u8; 32]),
+}
 
 impl From<Nonce> for attest_data::Nonce {
     fn from(n: Nonce) -> Self {
-        n.0.0.into()
+        match n {
+            Nonce::N32(n32) => attest_data::Nonce::N32(n32.into()),
+        }
     }
 }
 

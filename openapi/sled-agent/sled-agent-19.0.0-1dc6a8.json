@@ -7549,8 +7549,13 @@
       },
       "Nonce": {
         "description": "A random nonce provided as part of an attestation challenge to guarantee freshness thereby preventing replay attacks.",
-        "type": "string",
-        "format": "hex string (32 bytes)"
+        "anyOf": [
+          {
+            "description": "A 32-byte nonce.",
+            "type": "string",
+            "format": "hex string (32 bytes)"
+          }
+        ]
       },
       "NvmeDisk": {
         "description": "A disk that presents an NVMe interface to the guest.",

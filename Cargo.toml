@@ -396,7 +396,7 @@ assert_cmd = "2.0.17"
 async-bb8-diesel = "0.2"
 async-recursion = "1.1.1"
 async-trait = "0.1.89"
-attest-data = { git = "https://github.com/oxidecomputer/dice-util", rev = "b04fa144cf810e3e4ecbf2bbab5df920afe76e26" }
+attest-data = { git = "https://github.com/oxidecomputer/dice-util", branch = "generic-nonce" }
 attest-mock = { git = "https://github.com/oxidecomputer/dice-util", rev = "10952e8d9599b735b85d480af3560a11700e5b64" }
 atomicwrites = "0.4.4"
 authz-macros = { path = "nexus/authz-macros" }
