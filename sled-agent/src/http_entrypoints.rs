@@ -1447,9 +1447,7 @@ impl SledAgentApi for SledAgentImpl {
     ) -> Result<HttpResponseOk<MeasurementLog>, HttpError> {
         let sa = request_context.context();
         let rot = sa.rot_attestor();
-        let log = rot.get_measurement_log().await.map_err(|e| {
-            HttpError::for_internal_error(InlineErrorChain::new(&e).to_string())
-        })?;
+        let log = rot.get_measurement_log().await?;
         Ok(HttpResponseOk(log))
     }
 
@@ -1458,9 +1456,7 @@ impl SledAgentApi for SledAgentImpl {
     ) -> Result<HttpResponseOk<CertificateChain>, HttpError> {
         let sa = request_context.context();
         let rot = sa.rot_attestor();
-        let chain = rot.get_certificate_chain().await.map_err(|e| {
-            HttpError::for_internal_error(InlineErrorChain::new(&e).to_string())
-        })?;
+        let chain = rot.get_certificate_chain().await?;
         Ok(HttpResponseOk(chain))
     }
 
@@ -1471,9 +1467,7 @@ impl SledAgentApi for SledAgentImpl {
         let sa = request_context.context();
         let rot = sa.rot_attestor();
         let nonce = body.into_inner();
-        let attestation = rot.attest(nonce).await.map_err(|e| {
-            HttpError::for_internal_error(InlineErrorChain::new(&e).to_string())
-        })?;
+        let attestation = rot.attest(nonce).await?;
         Ok(HttpResponseOk(attestation))
     }
 }
