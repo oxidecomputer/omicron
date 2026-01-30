@@ -4,9 +4,7 @@
 
 == Overview
 
-This document explains how to add authorization (authz) support for new resources in Nexus. Authorization is based on role-based access control (RBAC) using the Oso policy engine.
-
-Before implementing authz for a new resource, read the module comments in `nexus/auth/src/authz/mod.rs` and `nexus/auth/src/authz/api_resources.rs` to understand the basic concepts.
+This document explains how to work with the authorization (authz) subsystem in Nexus. Authorization is based on role-based access control (RBAC) using the Oso policy engine.  It's recommended to read the module comments in `nexus/auth/src/authz/mod.rs` and `nexus/auth/src/authz/api_resources.rs` to understand the basic concepts.
 
 The most important thing to know is that every authz check we have today boils down to asking:
 
@@ -24,7 +22,7 @@ Here:
 
 - `opctx` identifies the actor.  This object is ubiquitous in Nexus and constructing it requires authenticating the user.
 - `authz::Action` is an enum with just a handful of standard actions.
-- `authz::Inventory` is the resource.  It's an **authz type** (or **authz object**).
+- `authz::INVENTORY` is the resource.  It's an **authz object** (an instance of an **authz object**).  It contains enough information about the type to figure out what authz information needed to be loaded (namely, what role information) in order to perform the check.  (This is generally just its id and the ids of its parents in the resource hierarchy.)
 
 `opctx.authorize()` checks the system **policy**, which is the set of rules that produces a boolean answer to the question "can this actor perform this action on this resource?".  Our policy is defined in a language called Polar in a file called `omicron.polar`.
 
@@ -37,7 +35,7 @@ Altogether, the authz subsystem comprises:
 ** storage and queries for accessing role assignments in the database
 ** evaluation of Polar policy
 
-=== Authz types, synthetic resources
+=== Authz types
 
 Authz types are Rust types that represent **resources** on which we do authz checks.  They're exported from the `authz` module.  As local variables, we usually prefix them with `authz`, as in `authz_instance` to distinguish it from other representations (like `db_instance` for the database record for an instance).
 
@@ -51,11 +49,11 @@ Synthetic resources help us **separate policy from implementation**.  Suppose we
 opctx.authorize(authz::Action::ListChildren, &authz::IP_POOL_LIST).await;
 ```
 
-This is almost a literal translation of what we're doing: we're (listing the children) of the (IP pool list).  This is by design.  The question of _who is allowed to list the children of the IP pool list_ is a question of policy.  That doesn't belong in the code doing the authz checks.
+This is almost a literal translation of what we're doing: we're (listing the children) of the (IP pool list).  This is by design.  The question of "who _is_ allowed to list the children of the IP pool list" is a question of policy.  That doesn't belong in the code doing the authz checks.
 
 NOTE: There's another explanation for why we have synthetic resources: it allows us to have a uniform set of just a handful of actions: `read`, `modify`, etc.  The alternative would be to define a lot of different and heterogenous actions.  For example, instead of having `SiloCertificateList` and `SiloUserList` on which you can `list_children`, we'd have just `Silo` on which you could `list_certificates` and `list_users`, etc.  For various reasons it's been very helpful to have a small, uniform set of actions.
 
-It's tempting to take shortcuts like: "people can operate on my thing if they can operate on the Fleet.  I'll just use `authz::FLEET` ".  That's encoding the policy directly in the implementation.  Instead, prefer creating a synthetic resource whose policy (in the Polar file) reflects that it's equivalent to `Fleet`, while the authz check itself remains almost a literal translation of the action you're taking.  For example, rather than checking Fleet authorization when modifying inventory, we define an `Inventory` resource whose Polar policy says that Fleet admins have modify permissions on Inventory. The code just checks `authorize(Action::Modify, &INVENTORY)` without knowing anything about the Fleet.
+It's tempting to take shortcuts like: "people can operate on my thing if they can operate on the Fleet.  I'll just use `authz::FLEET` ".  Don't!  That's encoding the policy directly in the implementation.  Instead, prefer creating a synthetic resource whose policy (in the Polar file) reflects that it's _equivalent_ to `Fleet`, while the authz check itself remains almost a literal translation of the action you're taking.  For example, rather than checking Fleet authorization when modifying inventory, we define an `Inventory` resource whose Polar policy says that Fleet admins have modify permissions on Inventory. The code just checks `authorize(Action::Modify, &INVENTORY)` without knowing anything about the Fleet.
 
 This can sound like make-work, but this principle (separating policy from implementation) is very powerful:
 
@@ -87,41 +85,28 @@ async fn disk_view(
 
 ==== App Layer
 
-The details of authz at the app layer depend on the kind of resource.  See the section above.
+The details of authz at the app layer depend on the kind of resource.  See the section below.
 
-In the end, though, you'll wind up having resolved the user-provided identifier to an `authz` object that can be used for doing authz checks.
-
-==== Performing Authorization Checks
-
-Once you have the authz type (from LookupPath, a global constant, or a hand-constructed object based on one of those), you can check authorization using something like:
-
-[source,rust]
-----
-opctx.authorize(authz::Action::Read, &authz_disk).await?;
-let disk = datastore.disk_fetch(&opctx, &authz_disk).await?;
-----
-
-Available actions include: `Read`, `Modify`, `Delete`, `ListChildren`, `CreateChild`.
-
-Generally, authz checks should be performed as close as possible to the code that takes the action. This ensures that authz checks cannot be accidentally separated from the action they protect (leaving some code paths unchecked). For example, if you have a datastore function that modifies a resource, that function should do the authz check.  More in the next section.
+In the end, though, you'll wind up having resolved the user-provided identifier to an `authz` object that can be used for doing authz checks or (more often) passing to the datastore layer.
 
 ==== Datastore Layer
 
-Datastore functions accept authz types, not raw UUIDs. This provides the context needed to perform authz checks.
+Datastore functions should generally accept authz types, not raw UUIDs. This provides the context needed to perform authz checks.
 
 [source,rust]
 ----
 impl DataStore {
-    pub async fn disk_fetch(
+    pub async fn silo_delete(
         &self,
         opctx: &OpContext,
-        authz_disk: &authz::Disk,
-    ) -> Result<db::model::Disk, Error> {
-        let disk_id = authz_disk.id();
-        // ... query database ...
+        authz_silo: &authz::Silo,
+        // ...
+    ) -> DeleteResult {
+        opctx.authorize(authz::Action::Delete, authz_silo).await?;
+        // ... delete from database ...
     }
 
-    pub async fn disk_create(
+    pub async fn project_create_disk(
         &self,
         opctx: &OpContext,
         authz_project: &authz::Project,  // Parent resource
@@ -133,7 +118,20 @@ impl DataStore {
 }
 ----
 
-==== Key Files
+==== Performing Authorization Checks
+
+Once you have the authz type, you can check authorization using something like:
+
+[source,rust]
+----
+opctx.authorize(authz::Action::Delete, &authz_disk).await?;
+----
+
+Available actions include: `Read`, `Modify`, `Delete`, `ListChildren`, `CreateChild`.
+
+Authz checks can be done at any layer, but generally they should be done as close as possible to the code that takes the action. You'd expect to find the check above inside the Datastore layer, in `disk_delete`, _not_ at the app layer.  This ensures that authz checks cannot be accidentally separated from the action they protect (leaving some code paths unchecked).
+
+=== Key Files
 
 * `nexus/auth/src/authz/mod.rs` - Overview of authz subsystem
 * `nexus/auth/src/authz/api_resources.rs` - Authz type definitions
@@ -296,22 +294,22 @@ For dynamic resources, use `LookupPath` to look up the resource:
 use nexus_db_queries::db::lookup::LookupPath;
 
 // Top-level resource
-let (.., authz_ip_pool) = LookupPath::new(&opctx, &datastore)
-    .ip_pool_id(pool_id)
+let (authz_silo, _) = LookupPath::new(opctx, datastore)
+    .silo_name(&silo_name)
     .fetch()
     .await?;
 
-opctx.authorize(authz::Action::Read, &authz_ip_pool).await?;
+opctx.authorize(authz::Action::Read, &authz_silo).await?;
 
 // Multi-level nested resource
-let (.., authz_subnet) = LookupPath::new(&opctx, &datastore)
-    .project_id(project_id)
-    .vpc_id(vpc_id)
-    .vpc_subnet_id(subnet_id)
-    .fetch()
-    .await?;
+let (.., authz_project, authz_instance) =
+    LookupPath::new(opctx, datastore)
+        .project_name(project_name)
+        .instance_name(instance_name)
+        .lookup(authz::Action::Modify)
+        .await?;
 
-opctx.authorize(authz::Action::Modify, &authz_subnet).await?;
+opctx.authorize(authz::Action::Modify, &authz_instance).await?;
 ----
 
 See the docs on `LookupPath` for more.
@@ -577,14 +575,10 @@ For nested synthetic resources, construct the collection by hand after looking u
 ----
 use nexus_db_queries::db::lookup::LookupPath;
 
-let (.., authz_silo) = LookupPath::new(&opctx, &datastore)
-    .silo_id(silo_id)
-    .fetch()
-    .await?;
+let authz_silo = // ...
 
 // Construct the collection resource manually
 let authz_cert_list = authz::SiloCertificateList::new(authz_silo);
-
 opctx.authorize(authz::Action::CreateChild, &authz_cert_list).await?;
 ----
 
@@ -592,7 +586,7 @@ opctx.authorize(authz::Action::CreateChild, &authz_cert_list).await?;
 
 **Roles** are constructs within our policy.  We say that Fleet, Silo, and Project each have a handful of roles (like `viewer`, `collaborator`, and `admin`).  Permissions in our system flow from those roles.  Although the authz system supports dozens of different resources, authz checks ultimately boil down to checking whether a user has one of a few roles on these three resources.
 
-Most of the time when you're adding a new resource, you'll define the policy for that resource in terms of these existing roles and you can ignore this whole section.
+CAUTION: It is **very uncommon** for us to add a new role or add support for roles on a new resource.  This is a user-facing product decision not to be taken lightly.  If you're just adding a new resource, you don't need to be doing any of this.
 
 Taking Project as an example, here's how roles are implemented:
 
@@ -605,27 +599,56 @@ The roles enum is defined in `nexus/types/src/external_api/shared.rs`:
     Copy,
     Debug,
     Deserialize,
-    Display,
     EnumIter,
     Eq,
-    Ord,
     PartialEq,
-    PartialOrd,
     Serialize,
+    JsonSchema,
 )]
 #[serde(rename_all = "snake_case")]
 pub enum ProjectRole {
     Admin,
     Collaborator,
+    LimitedCollaborator,
     Viewer,
-}
-
-impl DatabaseString for ProjectRole {
-    type SqlType = ProjectRoleEnum;
 }
 ----
 
-There's a corresponding SQL enum type in `nexus/db-model/src/schema_versions.rs` that mirrors the Rust enum for database storage.
+The enum definition drives much of the rest of the system, including the set of roles that a user is allowed to set on an object.
+
+In `nexus/db-model/src/lib.rs`, there's an impl of `DatabaseString`:
+
+[source,rust]
+----
+impl DatabaseString for ProjectRole {
+    type Error = anyhow::Error;
+
+    fn to_database_string(&self) -> Cow<'_, str> {
+        match self {
+            ProjectRole::Admin => "admin",
+            ProjectRole::Collaborator => "collaborator",
+            ProjectRole::LimitedCollaborator => "limited-collaborator",
+            ProjectRole::Viewer => "viewer",
+        }
+        .into()
+    }
+
+    // WARNING: if you're considering changing this (including removing
+    // variants), be sure you've considered how Nexus will handle rows written
+    // previous to your change.
+    fn from_database_string(s: &str) -> Result<Self, Self::Error> {
+        match s {
+            "admin" => Ok(ProjectRole::Admin),
+            "collaborator" => Ok(ProjectRole::Collaborator),
+            "limited-collaborator" => Ok(ProjectRole::LimitedCollaborator),
+            "viewer" => Ok(ProjectRole::Viewer),
+            _ => {
+                Err(anyhow!("unsupported Project role from database: {:?}", s))
+            }
+        }
+    }
+}
+----
 
 The authz resource is configured with `roles_allowed = true`:
 
@@ -640,7 +663,44 @@ authz_resource! {
 }
 ----
 
-Resources with roles typically use `Custom` polar snippets since they need custom policy definitions.
+Resources with roles typically use `Custom` polar snippets since they need custom policy definitions.  For Project, this includes defining the role hierarchy (admin inherits collaborator, collaborator inherits viewer) and specifying which actions each role can perform.  These details may be very different for different resources or roles!
+
+```
+resource Project {
+	permissions = [
+	    "list_children",
+	    "modify",
+	    "read",
+	    "create_child",
+	];
+	roles = [ "admin", "collaborator", "limited-collaborator", "viewer" ];
+
+	# Roles implied by other roles on this resource
+	# Role hierarchy: admin > collaborator > limited-collaborator > viewer
+	#
+	# The "limited-collaborator" role can create/modify non-networking
+	# resources (instances, disks, etc.) but cannot create/modify networking
+	# infrastructure (VPCs, subnets, routers, internet gateways).
+	# See nexus/authz-macros for InProjectLimited vs InProjectFull.
+	"viewer" if "limited-collaborator";
+	"limited-collaborator" if "collaborator";
+	"collaborator" if "admin";
+
+	# Permissions granted directly by roles on this resource
+	"list_children" if "viewer";
+	"read" if "viewer";
+	"create_child" if "limited-collaborator";
+	"modify" if "admin";
+
+	# Roles implied by roles on this resource's parent (Silo)
+	relations = { parent_silo: Silo };
+	"admin" if "collaborator" on "parent_silo";
+	"limited-collaborator" if "limited-collaborator" on "parent_silo";
+	"viewer" if "viewer" on "parent_silo";
+}
+has_relation(silo: Silo, "parent_silo", project: Project)
+	if project.silo = silo;
+```
 
 The `ApiResourceWithRolesType` trait is implemented to link the resource to its roles enum:
 
@@ -651,10 +711,7 @@ impl ApiResourceWithRolesType for Project {
 }
 ----
 
-In `omicron.polar`, custom policy defines the roles and their permissions. For Project, this includes defining the role hierarchy (admin inherits collaborator, collaborator inherits viewer) and specifying which actions each role can perform.
 
-API endpoints exist to read and update role assignments on the resource (`PUT` and `GET` "policy"). The implementation uses common code that's generic over the resource type, so most of the logic is shared across all resources with roles.
+API endpoints exist to read and update role assignments on the resource: `project_policy_view` and `project_policy_update`. These are just a bit of boilerplate that call into common code that's generic over the resource type and roles.  You don't need to modify these to define a new role, but you will need to add analogous API endpoints if you're adding a new resource that supports roles.
 
-To define a new role, you'll need to add it to the shared enum type and to the database enum type.  You may also need a schema migration to add the new role name.
-
-The enum definition drives most of the rest of the system, including the set of roles that a user is allowed to set on an object.  You don't need to change any of the endpoints that modify policy if you're just adding a role.
+To define a new role, you'll need to add it to the shared enum type and to the `DatabaseString` impl.
