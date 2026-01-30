@@ -4,7 +4,7 @@
 
 == Overview
 
-This document explains how to work with the authorization (authz) subsystem in Nexus. Authorization is based on role-based access control (RBAC) using the Oso policy engine.  It's recommended to read the module comments in `nexus/auth/src/authz/mod.rs` and `nexus/auth/src/authz/api_resources.rs` to understand the basic concepts.
+This document explains how to work with the authorization (authz) subsystem in Nexus. Authorization is based on role-based access control (RBAC) using the Oso policy engine.  Read the module comments in `nexus/auth/src/authz/mod.rs` and `nexus/auth/src/authz/api_resources.rs` to understand the basic concepts.
 
 The most important thing to know is that every authz check we have today boils down to asking:
 
@@ -22,7 +22,7 @@ Here:
 
 - `opctx` identifies the actor.  This object is ubiquitous in Nexus and constructing it requires authenticating the user.
 - `authz::Action` is an enum with just a handful of standard actions.
-- `authz::INVENTORY` is the resource.  It's an **authz object** (an instance of an **authz object**).  It contains enough information about the type to figure out what authz information needed to be loaded (namely, what role information) in order to perform the check.  (This is generally just its id and the ids of its parents in the resource hierarchy.)
+- `authz::INVENTORY` is the resource.  It's an **authz object** (an instance of an **authz type**).  It contains enough information about the type to figure out what authz information needed to be loaded (namely, what role information) in order to perform the check.  (This is generally just its id and the ids of its parents in the resource hierarchy.)
 
 `opctx.authorize()` checks the system **policy**, which is the set of rules that produces a boolean answer to the question "can this actor perform this action on this resource?".  Our policy is defined in a language called Polar in a file called `omicron.polar`.
 
@@ -139,7 +139,7 @@ Authz checks can be done at any layer, but generally they should be done as clos
 * `nexus/auth/src/authz/oso_generic.rs` - Oso initialization
 * `nexus/authz-macros/src/lib.rs` - `authz_resource!` macro
 * `nexus/db-queries/src/policy_test/resources.rs` - Policy test setup
-* `nexus/db-queries/src/db/lookup.rs` - LookupPath implementation
+* `nexus/db-lookup/src/lookup_path.rs` - LookupPath implementation
 * `nexus/types/src/external_api/shared.rs` - Role enum definitions
 
 == Adding New Authz Resources
@@ -291,7 +291,7 @@ For dynamic resources, use `LookupPath` to look up the resource:
 
 [source,rust]
 ----
-use nexus_db_queries::db::lookup::LookupPath;
+use nexus_db_lookup::LookupPath;
 
 // Top-level resource
 let (authz_silo, _) = LookupPath::new(opctx, datastore)
@@ -573,7 +573,7 @@ For nested synthetic resources, construct the collection by hand after looking u
 
 [source,rust]
 ----
-use nexus_db_queries::db::lookup::LookupPath;
+use nexus_db_lookup::LookupPath;
 
 let authz_silo = // ...
 
