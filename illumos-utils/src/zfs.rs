@@ -1956,7 +1956,20 @@ impl Zfs {
         // Retry twice in the face of "dataset is busy", another part of
         // sled-agent may be accessing the list of datasets and volumes, or
         // properties of the volume.
-        for i in 0..3 {
+        let mut i = 0;
+
+        // This looks like some nonsense, but it ensures that the mutable ref is
+        // captured by the closure below, and not i by value, which would add 1
+        // to 0 every time the closure is called.
+        let j = &mut i;
+
+        let mut retryable = || {
+            let res = *j < 2;
+            *j += 1;
+            res
+        };
+
+        loop {
             match execute_async(cmd).await {
                 Ok(_) => {
                     return Ok(());
@@ -1969,7 +1982,8 @@ impl Zfs {
                 }
 
                 Err(crate::ExecutionError::CommandFailure(info))
-                    if info.stderr.contains("dataset is busy") && i < 2 =>
+                    if info.stderr.contains("dataset is busy")
+                        && retryable() =>
                 {
                     tokio::time::sleep(tokio::time::Duration::from_secs(1))
                         .await;
@@ -1984,9 +1998,6 @@ impl Zfs {
                 }
             }
         }
-
-        // Execution should never reach here?
-        Ok(())
     }
 }
 
