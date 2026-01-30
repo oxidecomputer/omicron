@@ -45,7 +45,7 @@ mod v2026011501;
 mod v2026011600;
 mod v2026012200;
 mod v2026012300;
-mod v2026012800;
+mod v2026013000;
 
 #[cfg(test)]
 mod test_utils;
@@ -78,7 +78,7 @@ api_versions!([
     // |  date-based version should be at the top of the list.
     // v
     // (next_yyyymmddnn, IDENT),
-    (2026013000, READ_ONLY_DISKS),
+    (2026013001, READ_ONLY_DISKS),
     (2026012800, REMOVE_SUBNET_POOL_POOL_TYPE),
     (2026012300, DUAL_STACK_EPHEMERAL_IP),
     (2026012201, EXTERNAL_SUBNET_ALLOCATOR_UPDATE),
@@ -2218,7 +2218,7 @@ pub trait NexusExternalApi {
         rqctx: RequestContext<Self::Context>,
         query_params: Query<PaginatedByNameOrId<params::ProjectSelector>>,
     ) -> Result<HttpResponseOk<ResultsPage<v2025112000::Disk>>, HttpError> {
-        Self::v2026012800_disk_list(rqctx, query_params).await.and_then(
+        Self::v2026013000_disk_list(rqctx, query_params).await.and_then(
             |HttpResponseOk(page)| {
                 let items: Result<Vec<_>, _> =
                     page.items.into_iter().map(TryInto::try_into).collect();
@@ -2240,10 +2240,10 @@ pub trait NexusExternalApi {
         tags = ["disks"],
         versions = VERSION_LOCAL_STORAGE..VERSION_READ_ONLY_DISKS,
     }]
-    async fn v2026012800_disk_list(
+    async fn v2026013000_disk_list(
         rqctx: RequestContext<Self::Context>,
         query_params: Query<PaginatedByNameOrId<params::ProjectSelector>>,
-    ) -> Result<HttpResponseOk<ResultsPage<v2026012800::Disk>>, HttpError> {
+    ) -> Result<HttpResponseOk<ResultsPage<v2026013000::Disk>>, HttpError> {
         Self::disk_list(rqctx, query_params).await.map(
             |HttpResponseOk(page)| {
                 let items: Vec<_> =
@@ -2292,11 +2292,11 @@ pub trait NexusExternalApi {
         tags = ["disks"],
         versions = VERSION_LOCAL_STORAGE..VERSION_READ_ONLY_DISKS,
     }]
-    async fn v2026012800_disk_create(
+    async fn v2026013000_disk_create(
         rqctx: RequestContext<Self::Context>,
         query_params: Query<params::ProjectSelector>,
-        new_disk: TypedBody<v2026012800::DiskCreate>,
-    ) -> Result<HttpResponseCreated<v2026012800::Disk>, HttpError> {
+        new_disk: TypedBody<v2026013000::DiskCreate>,
+    ) -> Result<HttpResponseCreated<v2026013000::Disk>, HttpError> {
         Self::disk_create(rqctx, query_params, new_disk.map(Into::into))
             .await
             .map(|resp| resp.map(Into::into))
@@ -2341,11 +2341,11 @@ pub trait NexusExternalApi {
         tags = ["disks"],
         versions = VERSION_LOCAL_STORAGE..VERSION_READ_ONLY_DISKS,
     }]
-    async fn v2026012800_disk_view(
+    async fn v2026013000_disk_view(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<params::DiskPath>,
         query_params: Query<params::OptionalProjectSelector>,
-    ) -> Result<HttpResponseOk<v2026012800::Disk>, HttpError> {
+    ) -> Result<HttpResponseOk<v2026013000::Disk>, HttpError> {
         Self::disk_view(rqctx, path_params, query_params)
             .await
             .map(|resp| resp.map(Into::into))
@@ -2545,10 +2545,10 @@ pub trait NexusExternalApi {
         tags = ["instances"],
         versions = VERSION_MULTICAST_IMPLICIT_LIFECYCLE_UPDATES..VERSION_READ_ONLY_DISKS,
     }]
-    async fn v2026012800_instance_create(
+    async fn v2026013000_instance_create(
         rqctx: RequestContext<Self::Context>,
         query_params: Query<params::ProjectSelector>,
-        new_instance: TypedBody<v2026012800::InstanceCreate>,
+        new_instance: TypedBody<v2026013000::InstanceCreate>,
     ) -> Result<HttpResponseCreated<Instance>, HttpError> {
         Self::instance_create(rqctx, query_params, new_instance.map(Into::into))
             .await
@@ -2742,13 +2742,13 @@ pub trait NexusExternalApi {
         tags = ["instances"],
         versions = VERSION_LOCAL_STORAGE..VERSION_READ_ONLY_DISKS,
     }]
-    async fn v2026012800_instance_disk_list(
+    async fn v2026013000_instance_disk_list(
         rqctx: RequestContext<Self::Context>,
         query_params: Query<
             PaginatedByNameOrId<params::OptionalProjectSelector>,
         >,
         path_params: Path<params::InstancePath>,
-    ) -> Result<HttpResponseOk<ResultsPage<v2026012800::Disk>>, HttpError> {
+    ) -> Result<HttpResponseOk<ResultsPage<v2026013000::Disk>>, HttpError> {
         Self::instance_disk_list(rqctx, query_params, path_params).await.map(
             |HttpResponseOk(page)| {
                 let items: Vec<_> =
@@ -2804,12 +2804,12 @@ pub trait NexusExternalApi {
         tags = ["instances"],
         versions = VERSION_LOCAL_STORAGE..VERSION_READ_ONLY_DISKS,
     }]
-    async fn v2026012800_instance_disk_attach(
+    async fn v2026013000_instance_disk_attach(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<params::InstancePath>,
         query_params: Query<params::OptionalProjectSelector>,
         disk_to_attach: TypedBody<params::DiskPath>,
-    ) -> Result<HttpResponseAccepted<v2026012800::Disk>, HttpError> {
+    ) -> Result<HttpResponseAccepted<v2026013000::Disk>, HttpError> {
         Self::instance_disk_attach(
             rqctx,
             path_params,
@@ -2865,12 +2865,12 @@ pub trait NexusExternalApi {
         tags = ["instances"],
         versions = VERSION_LOCAL_STORAGE..VERSION_READ_ONLY_DISKS,
     }]
-    async fn v2026012800_instance_disk_detach(
+    async fn v2026013000_instance_disk_detach(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<params::InstancePath>,
         query_params: Query<params::OptionalProjectSelector>,
         disk_to_detach: TypedBody<params::DiskPath>,
-    ) -> Result<HttpResponseAccepted<v2026012800::Disk>, HttpError> {
+    ) -> Result<HttpResponseAccepted<v2026013000::Disk>, HttpError> {
         Self::instance_disk_detach(
             rqctx,
             path_params,

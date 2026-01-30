@@ -95,7 +95,7 @@ impl From<external::Disk> for Disk {
             state,
             device_path,
             disk_type,
-            read_only: _, // read_only doth not exist in v2026012800
+            read_only: _, // read_only doth not exist in v2026013000
         } = new;
         Self {
             identity,

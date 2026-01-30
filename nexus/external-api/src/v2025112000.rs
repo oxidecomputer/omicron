@@ -6,7 +6,7 @@
 
 use crate::v2025121200;
 use crate::v2026010100;
-use crate::v2026012800;
+use crate::v2026013000;
 use nexus_types::external_api::params;
 use omicron_common::api::external;
 use schemars::JsonSchema;
@@ -93,9 +93,9 @@ impl TryFrom<external::Disk> for Disk {
     }
 }
 
-impl From<Disk> for v2026012800::Disk {
-    fn from(old: Disk) -> v2026012800::Disk {
-        v2026012800::Disk {
+impl From<Disk> for v2026013000::Disk {
+    fn from(old: Disk) -> v2026013000::Disk {
+        v2026013000::Disk {
             identity: old.identity,
             project_id: old.project_id,
             snapshot_id: old.snapshot_id,
@@ -109,10 +109,10 @@ impl From<Disk> for v2026012800::Disk {
     }
 }
 
-impl TryFrom<v2026012800::Disk> for Disk {
+impl TryFrom<v2026013000::Disk> for Disk {
     type Error = dropshot::HttpError;
 
-    fn try_from(new: v2026012800::Disk) -> Result<Disk, Self::Error> {
+    fn try_from(new: v2026013000::Disk) -> Result<Disk, Self::Error> {
         Ok(Disk {
             identity: new.identity,
             project_id: new.project_id,
@@ -219,11 +219,11 @@ impl From<DiskCreate> for params::DiskCreate {
     }
 }
 
-impl From<DiskCreate> for v2026012800::DiskCreate {
-    fn from(old: DiskCreate) -> v2026012800::DiskCreate {
-        v2026012800::DiskCreate {
+impl From<DiskCreate> for v2026013000::DiskCreate {
+    fn from(old: DiskCreate) -> v2026013000::DiskCreate {
+        v2026013000::DiskCreate {
             identity: old.identity,
-            disk_backend: v2026012800::DiskBackend::Distributed {
+            disk_backend: v2026013000::DiskBackend::Distributed {
                 disk_source: old.disk_source,
             },
             size: old.size,
@@ -256,17 +256,17 @@ impl From<InstanceDiskAttachment> for params::InstanceDiskAttachment {
     }
 }
 
-impl From<InstanceDiskAttachment> for v2026012800::InstanceDiskAttachment {
+impl From<InstanceDiskAttachment> for v2026013000::InstanceDiskAttachment {
     fn from(
         old: InstanceDiskAttachment,
-    ) -> v2026012800::InstanceDiskAttachment {
+    ) -> v2026013000::InstanceDiskAttachment {
         match old {
             InstanceDiskAttachment::Create(create) => {
-                v2026012800::InstanceDiskAttachment::Create(create.into())
+                v2026013000::InstanceDiskAttachment::Create(create.into())
             }
 
             InstanceDiskAttachment::Attach(attach) => {
-                v2026012800::InstanceDiskAttachment::Attach(attach)
+                v2026013000::InstanceDiskAttachment::Attach(attach)
             }
         }
     }
