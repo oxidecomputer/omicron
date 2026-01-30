@@ -54,6 +54,13 @@ pub const RACK_SUBNET: &str = "fd00:1122:3344:0100::/56";
 /// both transient deployments with no sensitive data.
 pub const TEST_SUITE_PASSWORD: &str = "oxide";
 
+/// Hash for [`TEST_SUITE_PASSWORD`]
+///
+/// This is hardcoded because it's used in many integration tests and
+/// recomputing it a ton of times wastes a lot of time.
+pub const TEST_SUITE_PASSWORD_HASH: &str = "$argon2id$v=19$m=98304,t=23,p=1$\
+     R/bEz3yhItskrgbhagyJvg$n3Df2hJDW29A66y//h4LBRrKXC2jfrn2wUsf0k6O10g";
+
 /// Returns whether the two identity metadata objects are identical.
 pub fn identity_eq(ident1: &IdentityMetadata, ident2: &IdentityMetadata) {
     assert_eq!(ident1.id, ident2.id);
