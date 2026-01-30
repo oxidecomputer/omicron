@@ -7,7 +7,7 @@ edition.workspace = true
 workspace = true
 
 [dependencies]
-bootstrap-agent-client.workspace = true
+bootstrap-agent-lockstep-client.workspace = true
 dropshot.workspace = true
 gateway-client.workspace = true
 omicron-common.workspace = true

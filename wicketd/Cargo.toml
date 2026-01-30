@@ -56,6 +56,7 @@ transceiver-controller.workspace = true
 uuid.workspace = true
 
 bootstrap-agent-client.workspace = true
+bootstrap-agent-lockstep-client.workspace = true
 omicron-ddm-admin-client.workspace = true
 gateway-client.workspace = true
 installinator-api.workspace = true

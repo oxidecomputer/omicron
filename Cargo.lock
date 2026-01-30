@@ -1001,6 +1001,7 @@ dependencies = [
  "schemars 0.8.22",
  "serde",
  "sled-agent-types",
+ "sled-agent-types-versions",
  "sled-hardware-types",
  "tufaceous-artifact",
 ]
@@ -1022,6 +1023,38 @@ dependencies = [
  "sled-hardware-types",
  "slog",
  "uuid",
+]
+
+[[package]]
+name = "bootstrap-agent-lockstep-api"
+version = "0.1.0"
+dependencies = [
+ "dropshot",
+ "omicron-common",
+ "omicron-passwords",
+ "omicron-uuid-kinds",
+ "omicron-workspace-hack",
+ "schemars 0.8.22",
+ "serde",
+ "sled-hardware-types",
+]
+
+[[package]]
+name = "bootstrap-agent-lockstep-client"
+version = "0.1.0"
+dependencies = [
+ "omicron-common",
+ "omicron-uuid-kinds",
+ "omicron-workspace-hack",
+ "oxnet",
+ "progenitor 0.10.0",
+ "regress",
+ "reqwest",
+ "schemars 0.8.22",
+ "serde",
+ "serde_json",
+ "sled-hardware-types",
+ "slog",
 ]
 
 [[package]]
@@ -2500,7 +2533,7 @@ dependencies = [
 [[package]]
 name = "ddm-admin-client"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/maghemite?rev=396bb3c570be65f4e8c73ea3243f4af6561a823a#396bb3c570be65f4e8c73ea3243f4af6561a823a"
+source = "git+https://github.com/oxidecomputer/maghemite?rev=508e2e74bd0bcf3ad6bc490e95667cfadafecb53#508e2e74bd0bcf3ad6bc490e95667cfadafecb53"
 dependencies = [
  "oxnet",
  "progenitor 0.11.2",
@@ -6426,7 +6459,7 @@ dependencies = [
 [[package]]
 name = "mg-admin-client"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/maghemite?rev=396bb3c570be65f4e8c73ea3243f4af6561a823a#396bb3c570be65f4e8c73ea3243f4af6561a823a"
+source = "git+https://github.com/oxidecomputer/maghemite?rev=508e2e74bd0bcf3ad6bc490e95667cfadafecb53#508e2e74bd0bcf3ad6bc490e95667cfadafecb53"
 dependencies = [
  "chrono",
  "colored 3.0.0",
@@ -8255,6 +8288,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "bootstrap-agent-api",
+ "bootstrap-agent-lockstep-api",
  "camino",
  "clap",
  "clickhouse-admin-api",
@@ -8891,6 +8925,7 @@ dependencies = [
  "bootstore",
  "bootstrap-agent-api",
  "bootstrap-agent-client",
+ "bootstrap-agent-lockstep-api",
  "bytes",
  "camino",
  "camino-tempfile",
@@ -11521,7 +11556,7 @@ dependencies = [
 [[package]]
 name = "rdb-types"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/maghemite?rev=396bb3c570be65f4e8c73ea3243f4af6561a823a#396bb3c570be65f4e8c73ea3243f4af6561a823a"
+source = "git+https://github.com/oxidecomputer/maghemite?rev=508e2e74bd0bcf3ad6bc490e95667cfadafecb53#508e2e74bd0bcf3ad6bc490e95667cfadafecb53"
 dependencies = [
  "oxnet",
  "schemars 0.8.22",
@@ -13281,6 +13316,7 @@ dependencies = [
 name = "sled-agent-types-versions"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "async-trait",
  "bootstore",
  "camino",
@@ -16422,6 +16458,7 @@ dependencies = [
  "async-trait",
  "base64 0.22.1",
  "bootstrap-agent-client",
+ "bootstrap-agent-lockstep-client",
  "buf-list",
  "bytes",
  "camino",
@@ -16506,7 +16543,7 @@ dependencies = [
 name = "wicketd-api"
 version = "0.1.0"
 dependencies = [
- "bootstrap-agent-client",
+ "bootstrap-agent-lockstep-client",
  "dropshot",
  "gateway-client",
  "omicron-common",

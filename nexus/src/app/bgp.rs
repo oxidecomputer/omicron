@@ -123,7 +123,7 @@ impl super::Nexus {
             for r in &router_info {
                 let asn = r.asn;
 
-                let peers = match client.get_neighbors_v2(asn).await {
+                let peers = match client.get_neighbors_v4(asn).await {
                     Ok(result) => result.into_inner(),
                     Err(e) => {
                         error!(
@@ -146,8 +146,11 @@ impl super::Nexus {
                         addr: host,
                         local_asn: r.asn,
                         remote_asn: info.asn.unwrap_or(0),
-                        state: info.state.into(),
-                        state_duration_millis: info.duration_millis,
+                        state: info.fsm_state.into(),
+                        state_duration_millis: u64::try_from(
+                            info.fsm_state_duration.as_millis(),
+                        )
+                        .unwrap_or(u64::MAX),
                     });
                 }
             }
@@ -176,13 +179,16 @@ impl super::Nexus {
                     continue;
                 }
             };
+
             for r in &router_info {
                 let asn = r.asn;
+                let selector = mg_admin_client::types::ExportedSelector {
+                    afi: Some(mg_admin_client::types::Afi::Ipv4),
+                    asn,
+                    peer: None,
+                };
 
-                let exported = match client
-                    .get_exported(&mg_admin_client::types::AsnSelector { asn })
-                    .await
-                {
+                let exported = match client.get_exported_v2(&selector).await {
                     Ok(result) => result.into_inner(),
                     Err(e) => {
                         error!(
@@ -237,7 +243,7 @@ impl super::Nexus {
             ))
         })? {
             let history = match client
-                .message_history_v2(&MessageHistoryRequest {
+                .message_history_v3(&MessageHistoryRequest {
                     asn: sel.asn,
                     direction: None,
                     peer: None,
@@ -280,7 +286,10 @@ impl super::Nexus {
         })? {
             let mut imported: Vec<BgpImportedRouteIpv4> = Vec::new();
             match client
-                .get_rib_imported(Some(&rdb_types::AddressFamily::Ipv4), None)
+                .get_rib_imported_v2(
+                    Some(&rdb_types::AddressFamily::Ipv4),
+                    None,
+                )
                 .await
             {
                 Ok(result) => {

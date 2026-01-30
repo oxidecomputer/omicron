@@ -226,11 +226,12 @@ table! {
 }
 
 table! {
-    switch_port_settings_bgp_peer_config (port_settings_id, interface_name, addr) {
+    switch_port_settings_bgp_peer_config (id) {
+        id -> Uuid,
         port_settings_id -> Uuid,
         bgp_config_id -> Uuid,
         interface_name -> Text,
-        addr -> Inet,
+        addr -> Nullable<Inet>,
         hold_time -> Int8,
         idle_hold_time -> Int8,
         delay_open -> Int8,
@@ -295,7 +296,7 @@ table! {
     bgp_peer_view (switch_location, port_name) {
         switch_location -> Text,
         port_name -> Text,
-        addr -> Inet,
+        addr -> Nullable<Inet>,
         asn -> Int8,
         connect_retry -> Int8,
         delay_open -> Int8,

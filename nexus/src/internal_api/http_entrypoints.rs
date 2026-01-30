@@ -16,6 +16,7 @@ use dropshot::Query;
 use dropshot::RequestContext;
 use dropshot::ResultsPage;
 use dropshot::TypedBody;
+use nexus_internal_api::ProbeInfo;
 use nexus_internal_api::*;
 use nexus_types::internal_api::params::SledAgentInfo;
 use nexus_types::internal_api::params::SwitchPutRequest;
@@ -408,8 +409,6 @@ impl NexusInternalApi for NexusInternalApiImpl {
             .instrument_dropshot_handler(&rqctx, handler)
             .await
     }
-
-    // NAT RPW internal APIs
 
     async fn ipv4_nat_changeset(
         rqctx: RequestContext<Self::Context>,

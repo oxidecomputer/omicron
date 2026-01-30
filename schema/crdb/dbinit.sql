@@ -3666,6 +3666,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.switch_port_settings_route_config (
 );
 
 CREATE TABLE IF NOT EXISTS omicron.public.switch_port_settings_bgp_peer_config (
+    id UUID NOT NULL DEFAULT gen_random_uuid(),
     port_settings_id UUID,
     bgp_config_id UUID NOT NULL,
     interface_name TEXT,
@@ -3685,13 +3686,28 @@ CREATE TABLE IF NOT EXISTS omicron.public.switch_port_settings_bgp_peer_config (
     allow_export_list_active BOOLEAN NOT NULL DEFAULT false,
     vlan_id INT4,
 
-    /* TODO https://github.com/oxidecomputer/omicron/issues/3013 */
-    PRIMARY KEY (port_settings_id, interface_name, addr)
+    PRIMARY KEY (id)
 );
+
+-- Unique constraint for numbered BGP peers (those with an address)
+CREATE UNIQUE INDEX IF NOT EXISTS switch_port_settings_bgp_peer_config_numbered_unique
+    ON omicron.public.switch_port_settings_bgp_peer_config (port_settings_id, interface_name, addr)
+    WHERE addr IS NOT NULL;
+
+-- Unique constraint for unnumbered BGP peers (one per interface)
+CREATE UNIQUE INDEX IF NOT EXISTS switch_port_settings_bgp_peer_config_unnumbered_unique
+    ON omicron.public.switch_port_settings_bgp_peer_config (port_settings_id, interface_name)
+    WHERE addr IS NULL;
 
 CREATE INDEX IF NOT EXISTS lookup_sps_bgp_peer_config_by_bgp_config_id on omicron.public.switch_port_settings_bgp_peer_config(
     bgp_config_id
 );
+
+-- Index for looking up BGP peers by port_settings_id.
+-- This is needed because the partial indexes (for numbered and unnumbered peers)
+-- don't cover all rows when filtering only by port_settings_id.
+CREATE INDEX IF NOT EXISTS lookup_sps_bgp_peer_config_by_port_settings_id
+    ON omicron.public.switch_port_settings_bgp_peer_config (port_settings_id);
 
 CREATE TABLE IF NOT EXISTS omicron.public.switch_port_settings_bgp_peer_config_communities (
     port_settings_id UUID NOT NULL,
@@ -8171,7 +8187,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '227.0.0', NULL)
+    (TRUE, NOW(), NOW(), '228.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

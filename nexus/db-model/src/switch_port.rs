@@ -650,10 +650,11 @@ impl Into<external::SwitchPortRouteConfig> for SwitchPortRouteConfig {
 )]
 #[diesel(table_name = switch_port_settings_bgp_peer_config)]
 pub struct SwitchPortBgpPeerConfig {
+    pub id: Uuid,
     pub port_settings_id: Uuid,
     pub bgp_config_id: Uuid,
     pub interface_name: Name,
-    pub addr: IpNetwork,
+    pub addr: Option<IpNetwork>,
     pub hold_time: SqlU32,
     pub idle_hold_time: SqlU32,
     pub delay_open: SqlU32,
@@ -740,10 +741,11 @@ impl SwitchPortBgpPeerConfig {
         p: &BgpPeer,
     ) -> Self {
         Self {
+            id: Uuid::new_v4(),
             port_settings_id,
             bgp_config_id,
             interface_name,
-            addr: p.addr.into(),
+            addr: p.addr.map(|a| a.into()),
             hold_time: p.hold_time.into(),
             idle_hold_time: p.idle_hold_time.into(),
             delay_open: p.delay_open.into(),

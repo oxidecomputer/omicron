@@ -62,12 +62,18 @@ impl super::Nexus {
         for x in &params.bgp_peers {
             for p in x.peers.iter() {
                 if let Some(ref key) = p.md5_auth_key {
+                    let peer_id = match p.addr {
+                        Some(addr) => format!("peer {}", addr),
+                        None => {
+                            format!("unnumbered peer on {}", p.interface_name)
+                        }
+                    };
                     if key.len() > 80 {
                         return Err(Error::invalid_value(
                             "md5_auth_key",
                             format!(
                                 "md5 auth key for {} is longer than 80 characters",
-                                p.addr
+                                peer_id
                             ),
                         ));
                     }
@@ -77,7 +83,7 @@ impl super::Nexus {
                                 "md5_auth_key",
                                 format!(
                                     "md5 auth key for {} must be printable ascii",
-                                    p.addr
+                                    peer_id
                                 ),
                             ));
                         }
