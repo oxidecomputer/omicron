@@ -510,9 +510,20 @@
         }
       }
     },
-    "/rot/attest": {
+    "/rot/{rot}/attest": {
       "post": {
         "operationId": "rot_attest",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "rot",
+            "description": "Which RoT to use",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Rot"
+            }
+          }
+        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -543,9 +554,20 @@
         }
       }
     },
-    "/rot/certificate-chain": {
+    "/rot/{rot}/certificate-chain": {
       "get": {
         "operationId": "rot_certificate_chain",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "rot",
+            "description": "Which RoT to use",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Rot"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "description": "successful operation",
@@ -566,9 +588,20 @@
         }
       }
     },
-    "/rot/measurement-log": {
+    "/rot/{rot}/measurement-log": {
       "get": {
         "operationId": "rot_measurement_log",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "rot",
+            "description": "Which RoT to use",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Rot"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "description": "successful operation",
@@ -10653,6 +10686,18 @@
         },
         "type": "string",
         "format": "uuid"
+      },
+      "Rot": {
+        "description": "A Root of Trust (RoT) which provides measurments and signed attestations.",
+        "oneOf": [
+          {
+            "description": "The per-sled RoT in an Oxide rack.",
+            "type": "string",
+            "enum": [
+              "oxide"
+            ]
+          }
+        ]
       },
       "PropolisUuid": {
         "x-rust-type": {

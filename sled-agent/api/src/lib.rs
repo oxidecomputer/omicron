@@ -1378,29 +1378,32 @@ pub trait SledAgentApi {
 
     #[endpoint {
         method = GET,
-        path = "/rot/measurement-log",
+        path = "/rot/{rot}/measurement-log",
         versions = VERSION_ADD_ROT_ATTESTATION..,
     }]
     async fn rot_measurement_log(
         request_context: RequestContext<Self::Context>,
+        path_params: Path<latest::rot::RotPathParams>,
     ) -> Result<HttpResponseOk<latest::rot::MeasurementLog>, HttpError>;
 
     #[endpoint {
         method = GET,
-        path = "/rot/certificate-chain",
+        path = "/rot/{rot}/certificate-chain",
         versions = VERSION_ADD_ROT_ATTESTATION..,
     }]
     async fn rot_certificate_chain(
         request_context: RequestContext<Self::Context>,
+        path_params: Path<latest::rot::RotPathParams>,
     ) -> Result<HttpResponseOk<latest::rot::CertificateChain>, HttpError>;
 
     #[endpoint {
         method = POST,
-        path = "/rot/attest",
+        path = "/rot/{rot}/attest",
         versions = VERSION_ADD_ROT_ATTESTATION..,
     }]
     async fn rot_attest(
         request_context: RequestContext<Self::Context>,
+        path_params: Path<latest::rot::RotPathParams>,
         body: TypedBody<latest::rot::Nonce>,
     ) -> Result<HttpResponseOk<latest::rot::Attestation>, HttpError>;
 }
