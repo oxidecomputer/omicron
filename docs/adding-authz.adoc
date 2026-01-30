@@ -26,7 +26,11 @@ This separation keeps policy decisions in the Polar file where they belong, maki
 
 == Static Resources
 
-Singleton resources representing system-wide concepts or synthetic collections. These are almost always synthetic resources that don't correspond to database entities. Examples: `Fleet`, `Inventory`, `DnsConfig`, `SiloCertificateList`, `VpcList`.
+Singleton resources representing system-wide concepts or synthetic collections. These are almost always synthetic resources that don't correspond to database entities.
+
+**Static top-level examples:** `Fleet`, `Inventory`, `DnsConfig`, `BlueprintConfig`, `QuiesceState`, `AuditLog`, `IpPoolList`, `DeviceAuthRequestList`
+
+**Static child examples:** `SiloCertificateList`, `SiloUserList`, `SiloGroupList`, `SiloIdentityProviderList`, `VpcList`
 
 === Example: Inventory (static top-level resource)
 
@@ -241,9 +245,17 @@ opctx.authorize(authz::Action::CreateChild, &authz_cert_list).await?;
 
 == Dynamic Resources
 
-Resources with multiple instances that correspond to database entities. This is the most common case. Examples: `Silo`, `IpPool`, `Disk`, `VpcSubnet`.
+Resources with multiple instances that correspond to database entities. This is the most common case.
 
 All dynamic resources use the `authz_resource!` macro. The key difference is which `polar_snippet` you choose based on where the resource lives in the hierarchy.
+
+**Examples by polar_snippet:**
+
+* `FleetChild`: `IpPool`, `Rack`, `Sled`, `Blueprint`, `AddressLot`, `SwitchPort`, `Service`
+* `InProjectLimited`: `Disk`, `Instance`, `Snapshot`, `ProjectImage`, `FloatingIp`, `AffinityGroup`
+* `InProjectFull`: `Vpc`, `VpcSubnet`, `VpcRouter`, `RouterRoute`, `InternetGateway`, `ExternalSubnet`
+* `InSilo`: `SiloImage`, `Image`
+* `Custom`: `Silo`, `Project`, `SshKey`, `Certificate`, `SiloUser`, `IdentityProvider`, `MulticastGroup`
 
 === Example: IpPool (fleet-level resource)
 
