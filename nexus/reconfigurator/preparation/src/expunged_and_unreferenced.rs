@@ -618,6 +618,7 @@ impl BlueprintExpungedZoneAccessReasonChecker {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use nexus_db_queries::db::datastore::CollectorReassignment;
     use nexus_reconfigurator_planning::blueprint_builder::BlueprintBuilder;
     use nexus_reconfigurator_planning::example::ExampleSystemBuilder;
     use nexus_reconfigurator_planning::planner::PlannerRng;
@@ -626,7 +627,11 @@ mod tests {
     use nexus_types::deployment::BlueprintZoneImageSource;
     use nexus_types::deployment::BlueprintZoneType;
     use nexus_types::deployment::SledFilter;
+    use nexus_types::internal_api::params::OximeterInfo;
+    use omicron_common::api::internal::nexus::ProducerEndpoint;
+    use omicron_common::api::internal::nexus::ProducerKind;
     use omicron_test_utils::dev;
+    use std::time::Duration;
 
     #[tokio::test]
     async fn test_pruneable_zones_reason_checker() {
@@ -750,6 +755,181 @@ mod tests {
             unchecked.is_empty(),
             "PruneableZones failed to consider some \
              `BlueprintExpungedZoneAccessReason`s: {unchecked:?}"
+        );
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_oximeter_pruneable_reasons() {
+        const TEST_NAME: &str = "test_oximeter_pruneable_reasons";
+
+        let logctx = dev::test_setup_log(TEST_NAME);
+        let log = &logctx.log;
+        let db = TestDatabase::new_with_datastore(log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        // Start with the base example system and build from there.
+        let (example, initial_blueprint) =
+            ExampleSystemBuilder::new(log, TEST_NAME).build();
+        let mut builder = BlueprintBuilder::new_based_on(
+            log,
+            &initial_blueprint,
+            TEST_NAME,
+            PlannerRng::from_seed(("builder", TEST_NAME)),
+        )
+        .expect("failed to create builder");
+
+        // Pick the first sled to add an Oximeter zone
+        let sled_id = example
+            .input
+            .all_sled_ids(SledFilter::Commissioned)
+            .next()
+            .expect("at least one sled");
+
+        // Add an Oximeter zone, then expunge it.
+        let image_source = BlueprintZoneImageSource::InstallDataset;
+        builder
+            .sled_add_zone_oximeter(sled_id, image_source)
+            .expect("added oximeter zone");
+        let oximeter_zone_id = builder
+            .current_in_service_zones()
+            .find_map(|(_, zone)| {
+                matches!(zone.zone_type, BlueprintZoneType::Oximeter(_))
+                    .then_some(zone.id)
+            })
+            .expect("found oximeter zone");
+        builder
+            .sled_expunge_zone(sled_id, oximeter_zone_id)
+            .expect("expunged zone");
+        builder
+            .sled_mark_expunged_zone_ready_for_cleanup(
+                sled_id,
+                oximeter_zone_id,
+            )
+            .expect("marked zone ready for cleanup");
+
+        let blueprint = builder.build(BlueprintSource::Test);
+
+        // Check that the zone is pruneable (no oximeter record, no producers)
+        let pruneable_zones =
+            PruneableZones::new(opctx, datastore, &blueprint, &[], &[])
+                .await
+                .expect("failed to find pruneable zones");
+        assert!(
+            pruneable_zones.pruneable_zones.contains(&oximeter_zone_id),
+            "oximeter zone should be pruneable when there's no \
+             oximeter record and no producers"
+        );
+
+        // Now insert an oximeter collector record for this zone
+        // This simulates the case where cleanup hasn't yet happened
+        datastore
+            .oximeter_create(
+                opctx,
+                &nexus_db_model::OximeterInfo::new(&OximeterInfo {
+                    collector_id: oximeter_zone_id.into_untyped_uuid(),
+                    address: "[::1]:12223".parse().unwrap(),
+                }),
+            )
+            .await
+            .expect("failed to insert oximeter record");
+
+        // Check that the zone is no longer pruneable
+        let pruneable_zones =
+            PruneableZones::new(opctx, datastore, &blueprint, &[], &[])
+                .await
+                .expect("failed to find pruneable zones");
+        assert!(
+            !pruneable_zones.pruneable_zones.contains(&oximeter_zone_id),
+            "oximeter zone should not be pruneable when there's an \
+             oximeter record"
+        );
+
+        // Now add producers assigned to this oximeter
+        use omicron_uuid_kinds::GenericUuid;
+        let producer1 = ProducerEndpoint {
+            id: OmicronZoneUuid::new_v4().into_untyped_uuid(),
+            kind: ProducerKind::Service,
+            address: "[::1]:12345".parse().unwrap(),
+            interval: Duration::from_secs(30),
+        };
+        let producer2 = ProducerEndpoint {
+            id: OmicronZoneUuid::new_v4().into_untyped_uuid(),
+            kind: ProducerKind::Service,
+            address: "[::1]:12346".parse().unwrap(),
+            interval: Duration::from_secs(30),
+        };
+
+        datastore
+            .producer_endpoint_upsert_and_assign(opctx, &producer1)
+            .await
+            .expect("failed to insert producer 1");
+        datastore
+            .producer_endpoint_upsert_and_assign(opctx, &producer2)
+            .await
+            .expect("failed to insert producer 2");
+
+        // Mark the oximeter as expunged in the datastore
+        datastore
+            .oximeter_expunge(opctx, oximeter_zone_id.into_untyped_uuid())
+            .await
+            .expect("failed to expunge oximeter");
+
+        // Check that the zone is still not pruneable (producers are assigned)
+        let pruneable_zones =
+            PruneableZones::new(opctx, datastore, &blueprint, &[], &[])
+                .await
+                .expect("failed to find pruneable zones");
+        assert!(
+            !pruneable_zones.pruneable_zones.contains(&oximeter_zone_id),
+            "oximeter zone should not be pruneable when it has \
+             producers assigned, even if expunged"
+        );
+
+        // Create a second dummy oximeter to reassign producers to
+        let dummy_oximeter_id = OmicronZoneUuid::new_v4().into_untyped_uuid();
+        datastore
+            .oximeter_create(
+                opctx,
+                &nexus_db_model::OximeterInfo::new(&OximeterInfo {
+                    collector_id: dummy_oximeter_id,
+                    address: "[::1]:12224".parse().unwrap(),
+                }),
+            )
+            .await
+            .expect("failed to insert dummy oximeter");
+
+        // Reassign the producers from the expunged oximeter to the new one
+        let reassignment = datastore
+            .oximeter_reassign_all_producers(
+                opctx,
+                oximeter_zone_id.into_untyped_uuid(),
+            )
+            .await
+            .expect("failed to reassign producers");
+        match reassignment {
+            CollectorReassignment::Complete(n) => {
+                assert_eq!(n, 2, "expected 2 producers to be reassigned");
+            }
+            CollectorReassignment::NoCollectorsAvailable => {
+                panic!(
+                    "expected producers to be reassigned, but no collectors \
+                     available"
+                );
+            }
+        }
+
+        // Check that the zone is now pruneable again (no producers assigned)
+        let pruneable_zones =
+            PruneableZones::new(opctx, datastore, &blueprint, &[], &[])
+                .await
+                .expect("failed to find pruneable zones");
+        assert!(
+            pruneable_zones.pruneable_zones.contains(&oximeter_zone_id),
+            "oximeter zone should be pruneable when expunged and \
+             all producers have been reassigned"
         );
 
         db.terminate().await;
