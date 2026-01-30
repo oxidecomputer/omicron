@@ -1050,7 +1050,35 @@ impl ServiceManager {
         &self,
         zone_args: &ZoneArgs<'_>,
     ) -> Result<Vec<(Port, PortTicket)>, Error> {
-        // Only some services currently need OPTE ports
+        // As a part of setting up OPTE ports, we notify dendrite on all
+        // switches that have an uplink about the new required NAT entries. This
+        // requires finding the switch zone IP addresses. We currently block
+        // until either:
+        //
+        // 1. We find all switch zone IPs.
+        // 2. We find at least one switch zone IP and this timeout elapses.
+        //
+        // If Nexus is up, we don't really need to do any of this work; it has a
+        // background task that will sync NAT entries periodically. However,
+        // it's critical that we set up NAT entries for boundary NTP in
+        // particular during cold boot; otherwise, we won't be able to timesync
+        // and bring the rack up.
+        //
+        // The choice of timeout here is a tension between wanting to wait for
+        // both switches and not wanting to block zone startup indefinitely if
+        // one of the scrimlets or switches is unavailable for an extended
+        // period of time. We should probably revist this entirely - maybe
+        // sled-agent should have its own NAT config reconciler for cold boot
+        // (although it's unclear how something like that wout interact with
+        // Nexus)?
+        //
+        // We'll pick 5 minutes, which has historically been the timeout here
+        // and should hopefully give enough time for a "just rebooted" scrimlet
+        // to bring its switch zone up, if we get unlucky in coincidental
+        // timings.
+        const WAIT_FOR_ALL_SWITCH_ZONES_TIMEOUT: Duration =
+            Duration::from_secs(5 * 60);
+
         if !matches!(
             zone_args.omicron_type(),
             Some(OmicronZoneType::ExternalDns { .. })
@@ -1084,11 +1112,12 @@ impl ServiceManager {
                 .lookup_uplinked_switch_zone_underlay_addrs(
                     resolver,
                     rack_network_config,
+                    WAIT_FOR_ALL_SWITCH_ZONES_TIMEOUT,
                 )
                 .await;
 
         let dpd_clients: Vec<DpdClient> = uplinked_switch_zone_addrs
-            .iter()
+            .values()
             .map(|addr| {
                 DpdClient::new(
                     &format!("http://[{}]:{}", addr, DENDRITE_PORT),

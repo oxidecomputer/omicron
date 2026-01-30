@@ -1382,7 +1382,17 @@ impl ServiceInner {
 
         // Ask MGS in each switch zone which switch it is.
         let switch_mgmt_addrs = EarlyNetworkSetup::new(&self.log)
-            .lookup_switch_zone_underlay_addrs(&resolver)
+            .lookup_uplinked_switch_zone_underlay_addrs(
+                &resolver,
+                &config.rack_network_config,
+                // We willing to wait forever to find all the switches that have
+                // configured uplinks; if we attempt to proceed without doing
+                // so, we'll fail handing off to Nexus later. (Ideally we could
+                // complete RSS with only one switch up and then configure the
+                // second later, but that currently doesn't work.)
+                // <https://github.com/oxidecomputer/omicron/issues/9678>
+                Duration::MAX,
+            )
             .await;
 
         rss_step.update(RssStep::InitNtp);

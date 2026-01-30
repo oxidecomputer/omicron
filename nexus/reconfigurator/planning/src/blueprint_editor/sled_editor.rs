@@ -383,8 +383,10 @@ impl SledEditor {
             PartialDatasetConfig::for_debug(zpool),
             // Transient Zone Root dataset
             PartialDatasetConfig::for_transient_zone_root(zpool),
-            // a LocalStorage dataset
-            PartialDatasetConfig::for_local_storage_root(zpool),
+            // an encrypted LocalStorage dataset
+            PartialDatasetConfig::for_local_storage(zpool),
+            // an unencrypted LocalStorage dataset
+            PartialDatasetConfig::for_local_storage_unencrypted(zpool),
         ];
 
         for dataset_config in dataset_configs {

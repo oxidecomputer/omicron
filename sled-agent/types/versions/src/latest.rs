@@ -20,8 +20,9 @@ pub mod bootstore {
 }
 
 pub mod dataset {
-    pub use crate::v9::dataset::LocalStorageDatasetEnsureRequest;
     pub use crate::v9::dataset::LocalStoragePathParam;
+    pub use crate::v17::dataset::LocalStorageDatasetDeleteRequest;
+    pub use crate::v17::dataset::LocalStorageDatasetEnsureRequest;
 }
 
 pub mod debug {
@@ -71,8 +72,8 @@ pub mod instance {
     pub use crate::v7::instance::InstanceMulticastBody;
     pub use crate::v7::instance::InstanceMulticastMembership;
 
-    pub use crate::v11::instance::InstanceEnsureBody;
-    pub use crate::v11::instance::InstanceSledLocalConfig;
+    pub use crate::v17::instance::InstanceEnsureBody;
+    pub use crate::v17::instance::InstanceSledLocalConfig;
 
     pub use omicron_common::api::internal::shared::ResolvedVpcFirewallRule;
 }
