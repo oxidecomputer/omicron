@@ -452,7 +452,9 @@ async fn test_audit_log_coverage(ctx: &ControlPlaneTestContext) {
                 | AllowedMethod::GetNonexistent
                 | AllowedMethod::GetUnimplemented
                 | AllowedMethod::GetVolatile
-                | AllowedMethod::GetWebsocket => false,
+                | AllowedMethod::GetWebsocket
+                | AllowedMethod::Head
+                | AllowedMethod::HeadNonexistent => false,
             };
 
             let before = fetch_log(client, t_start, None).await.items.len();

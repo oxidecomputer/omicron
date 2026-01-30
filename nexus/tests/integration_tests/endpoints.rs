@@ -95,6 +95,14 @@ pub const SUPPORT_BUNDLES_URL: &'static str =
     "/experimental/v1/system/support-bundles";
 pub static SUPPORT_BUNDLE_URL: LazyLock<String> =
     LazyLock::new(|| format!("{SUPPORT_BUNDLES_URL}/{{id}}"));
+pub static SUPPORT_BUNDLE_DOWNLOAD_URL: LazyLock<String> =
+    LazyLock::new(|| format!("{SUPPORT_BUNDLES_URL}/{{id}}/download"));
+pub static SUPPORT_BUNDLE_DOWNLOAD_FILE_URL: LazyLock<String> =
+    LazyLock::new(|| {
+        format!("{SUPPORT_BUNDLES_URL}/{{id}}/download/some-file.txt")
+    });
+pub static SUPPORT_BUNDLE_INDEX_URL: LazyLock<String> =
+    LazyLock::new(|| format!("{SUPPORT_BUNDLES_URL}/{{id}}/index"));
 
 // Global policy
 pub const SYSTEM_POLICY_URL: &'static str = "/v1/system/policy";
@@ -1584,6 +1592,13 @@ pub enum AllowedMethod {
     GetVolatile,
     /// HTTP "GET" method with websocket handshake headers.
     GetWebsocket,
+    /// HTTP "HEAD" method
+    #[allow(dead_code)]
+    Head,
+    /// HTTP "HEAD" method, but where we cannot statically define a URL that
+    /// will work (similar to GetNonexistent). The test runner should not expect
+    /// to get a 200 for privileged requests.
+    HeadNonexistent,
     /// HTTP "POST" method, with sample input (which should be valid input for
     /// this endpoint)
     Post(serde_json::Value),
@@ -1602,6 +1617,9 @@ impl AllowedMethod {
             | AllowedMethod::GetUnimplemented
             | AllowedMethod::GetVolatile
             | AllowedMethod::GetWebsocket => &Method::GET,
+            AllowedMethod::Head | AllowedMethod::HeadNonexistent => {
+                &Method::HEAD
+            }
             AllowedMethod::Post(_) => &Method::POST,
             AllowedMethod::Put(_) => &Method::PUT,
         }
@@ -1618,7 +1636,9 @@ impl AllowedMethod {
             | AllowedMethod::GetNonexistent
             | AllowedMethod::GetUnimplemented
             | AllowedMethod::GetVolatile
-            | AllowedMethod::GetWebsocket => None,
+            | AllowedMethod::GetWebsocket
+            | AllowedMethod::Head
+            | AllowedMethod::HeadNonexistent => None,
             AllowedMethod::Post(body) => Some(&body),
             AllowedMethod::Put(body) => Some(&body),
         }
@@ -2846,6 +2866,34 @@ pub static VERIFY_ENDPOINTS: LazyLock<Vec<VerifyEndpoint>> = LazyLock::new(
                         .unwrap(),
                     ),
                 ],
+            },
+            // Note: We use GetNonexistent/HeadNonexistent because the bundle is
+            // created but not in "Active" state (which requires background task
+            // processing). Privileged GET/HEAD will fail with 400, not 200, so
+            // we skip that check.
+            VerifyEndpoint {
+                url: &SUPPORT_BUNDLE_DOWNLOAD_URL,
+                visibility: Visibility::Protected,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![
+                    AllowedMethod::GetNonexistent,
+                    AllowedMethod::HeadNonexistent,
+                ],
+            },
+            VerifyEndpoint {
+                url: &SUPPORT_BUNDLE_DOWNLOAD_FILE_URL,
+                visibility: Visibility::Protected,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![
+                    AllowedMethod::GetNonexistent,
+                    AllowedMethod::HeadNonexistent,
+                ],
+            },
+            VerifyEndpoint {
+                url: &SUPPORT_BUNDLE_INDEX_URL,
+                visibility: Visibility::Protected,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![AllowedMethod::GetNonexistent],
             },
             /* Updates */
             VerifyEndpoint {
