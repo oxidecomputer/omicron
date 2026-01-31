@@ -359,6 +359,9 @@ impl ApiVersionHeader for reqwest::RequestBuilder {
 pub trait TestInterfaces {
     async fn vmm_single_step(&self, id: PropolisUuid);
     async fn vmm_finish_transition(&self, id: PropolisUuid);
+    /// Essentially like `vmm_finish_transition`, but returns an error instead
+    /// of panicking if the request fails. Useful when the VMM may have been
+    /// removed.
     async fn try_vmm_finish_transition(
         &self,
         id: PropolisUuid,
