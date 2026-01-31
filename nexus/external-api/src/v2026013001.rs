@@ -2,19 +2,20 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! Types from API version 2026013000 (`REMOVE_SUBNET_POOL_POOL_TYPE`) that changed
-//! in version 2026013001 (`READ_ONLY_DISKS`).
+//! Types from API version 2026013001 (`READ_ONLY_DISKS`) that changed
+//! in version 2026013100 (`READ_ONLY_DISKS_NULLABLE`).
+//!
+//! This is one of the silliest API versions so far (if not *the* silliest),
+//! since all the Rust structs are completely identical. However, making the API
+//! accept [`DiskSource::Snapshot`] and [`DiskSource::Image`] messages _without_
+//! a `read_only` field requires adding a `#[serde(default)]` attribute, which
+//! changes the generated OpenAPI document, and the easiest way to generate a
+//! new OpenAPI document is just to...copy and paste all the types again. Yay.
 
-use crate::v2025112000;
-use api_identity::ObjectIdentity;
 use nexus_types::external_api::params;
 use omicron_common::api::external;
 use omicron_common::api::external::ByteCount;
-use omicron_common::api::external::DiskState;
-use omicron_common::api::external::DiskType;
-use omicron_common::api::external::IdentityMetadata;
 use omicron_common::api::external::IdentityMetadataCreateParams;
-use omicron_common::api::external::ObjectIdentity;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
@@ -49,7 +50,7 @@ pub enum DiskBackend {
 
     Distributed {
         /// The initial source for this disk
-        disk_source: v2025112000::DiskSource,
+        disk_source: DiskSource,
     },
 }
 
@@ -66,47 +67,50 @@ impl From<DiskBackend> for params::DiskBackend {
     }
 }
 
-/// View of a Disk
-#[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
-pub struct Disk {
-    #[serde(flatten)]
-    pub identity: IdentityMetadata,
-    pub project_id: Uuid,
-    /// ID of snapshot from which disk was created, if any
-    pub snapshot_id: Option<Uuid>,
-    /// ID of image from which disk was created, if any
-    pub image_id: Option<Uuid>,
-    pub size: ByteCount,
-    pub block_size: ByteCount,
-    pub state: DiskState,
-    pub device_path: String,
-    pub disk_type: DiskType,
+/// Different sources for a Distributed Disk
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum DiskSource {
+    /// Create a blank disk
+    Blank {
+        /// size of blocks for this Disk. valid values are: 512, 2048, or 4096
+        block_size: params::BlockSize,
+    },
+
+    /// Create a disk from a disk snapshot
+    Snapshot {
+        snapshot_id: Uuid,
+        /// If `true`, the disk created from this snapshot will be read-only.
+        read_only: bool,
+    },
+
+    /// Create a disk from an image
+    Image {
+        image_id: Uuid,
+        /// If `true`, the disk created from this image will be read-only.
+        read_only: bool,
+    },
+
+    /// Create a blank disk that will accept bulk writes or pull blocks from an
+    /// external source.
+    ImportingBlocks { block_size: params::BlockSize },
 }
 
-impl From<external::Disk> for Disk {
-    fn from(new: external::Disk) -> Self {
-        let external::Disk {
-            identity,
-            project_id,
-            snapshot_id,
-            image_id,
-            size,
-            block_size,
-            state,
-            device_path,
-            disk_type,
-            read_only: _, // read_only doth not exist in v2026013000
-        } = new;
-        Self {
-            identity,
-            project_id,
-            snapshot_id,
-            image_id,
-            size,
-            block_size,
-            state,
-            device_path,
-            disk_type,
+impl From<DiskSource> for params::DiskSource {
+    fn from(old: DiskSource) -> Self {
+        // This is the funny part: you'll note that all these types are
+        // ~*EXACTLY THE SAME*~. I love API versioning!
+        match old {
+            DiskSource::Blank { block_size } => Self::Blank { block_size },
+            DiskSource::Snapshot { snapshot_id, read_only } => {
+                Self::Snapshot { snapshot_id, read_only }
+            }
+            DiskSource::Image { image_id, read_only } => {
+                Self::Image { image_id, read_only }
+            }
+            DiskSource::ImportingBlocks { block_size } => {
+                Self::ImportingBlocks { block_size }
+            }
         }
     }
 }

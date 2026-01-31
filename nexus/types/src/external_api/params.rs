@@ -2364,6 +2364,7 @@ pub enum DiskSource {
     Snapshot {
         snapshot_id: Uuid,
         /// If `true`, the disk created from this snapshot will be read-only.
+        #[serde(default)]
         read_only: bool,
     },
 
@@ -2371,6 +2372,7 @@ pub enum DiskSource {
     Image {
         image_id: Uuid,
         /// If `true`, the disk created from this image will be read-only.
+        #[serde(default)]
         read_only: bool,
     },
 
