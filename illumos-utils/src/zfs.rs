@@ -1810,7 +1810,10 @@ impl Zfs {
         Ok(())
     }
 
-    /// Returns Ok when a raw volume is ok to delete, and an error otherwise
+    /// Returns Ok when a raw volume is ok to delete, and an error otherwise.
+    ///
+    /// Note this function will wait the small amount of time it takes to stop
+    /// the zero init thread.
     pub async fn wait_for_raw_volume_ok_to_delete(
         params: &DatasetVolumeDeleteArgs<'_>,
     ) -> Result<(), DeleteDatasetVolumeError> {
