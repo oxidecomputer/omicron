@@ -740,8 +740,10 @@ impl super::Nexus {
             )
             .await?;
 
-        // Plumb the firewall rules for the built-in services
-        self.plumb_service_firewall_rules(opctx, &[]).await?;
+        // Note: Service firewall rules are plumbed in Server::start() via
+        // await_ip_allowlist_plumbing(), which runs before the external HTTP
+        // server starts. This ensures rules are in place for both fresh rack
+        // initialization and Nexus restart scenarios.
 
         // We've potentially updated the list of DNS servers and the DNS
         // configuration for both internal and external DNS, plus the Silo

@@ -363,20 +363,4 @@ impl super::Nexus {
         self.db_datastore.crucible_dataset_upsert(dataset).await?;
         Ok(())
     }
-
-    /// Ensure firewall rules for internal services get reflected on all the relevant sleds.
-    pub(crate) async fn plumb_service_firewall_rules(
-        &self,
-        opctx: &OpContext,
-        sleds_filter: &[SledUuid],
-    ) -> Result<(), Error> {
-        nexus_networking::plumb_service_firewall_rules(
-            &self.db_datastore,
-            opctx,
-            sleds_filter,
-            &self.opctx_alloc,
-            &self.log,
-        )
-        .await
-    }
 }
