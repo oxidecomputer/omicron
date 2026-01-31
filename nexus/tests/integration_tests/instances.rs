@@ -9006,6 +9006,9 @@ pub async fn instance_simulate(nexus: &Arc<Nexus>, id: &InstanceUuid) {
 ///
 /// Returns an error instead of panicking if the sled agent communication fails.
 /// This is useful during test cleanup where the sled agent may be unavailable.
+// This is currently only consumed by tests behind the multicast feature gate.
+// If/when it has another consumer, this cfg can be removed.
+#[cfg(feature = "multicast")]
 pub async fn try_instance_simulate(
     nexus: &Arc<Nexus>,
     id: &InstanceUuid,
