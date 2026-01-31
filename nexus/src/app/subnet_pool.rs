@@ -12,6 +12,7 @@
 //! - Replacing these stubs with real implementations
 
 use crate::app::Unimpl;
+use nexus_auth::authz;
 use nexus_db_queries::context::OpContext;
 use nexus_types::external_api::{params, views};
 use omicron_common::api::external::DataPageParams;
@@ -23,6 +24,7 @@ use omicron_common::api::external::NameOrId;
 use omicron_common::api::external::ResourceType;
 use omicron_common::api::external::UpdateResult;
 use omicron_common::api::external::http_pagination::PaginatedBy;
+use oxnet::IpNet;
 use uuid::Uuid;
 
 // TODO(#9453): Remove this helper once real lookup logic is implemented.
@@ -38,155 +40,232 @@ fn not_found_error(pool: &NameOrId, resource_type: ResourceType) -> Error {
 impl super::Nexus {
     // === Subnet Pool CRUD ===
 
-    // TODO(#9453): Implement using datastore subnet_pool_list method
     pub(crate) async fn subnet_pool_list(
         &self,
         opctx: &OpContext,
-        _pagparams: &PaginatedBy<'_>,
+        pagparams: &PaginatedBy<'_>,
     ) -> ListResultVec<views::SubnetPool> {
-        Err(self.unimplemented_todo(opctx, Unimpl::Public).await)
+        self.datastore()
+            .list_subnet_pools(opctx, pagparams)
+            .await
+            .map(|list| list.into_iter().map(Into::into).collect())
     }
 
-    // TODO(#9453): Implement using datastore subnet_pool_create method
     pub(crate) async fn subnet_pool_create(
         &self,
         opctx: &OpContext,
-        _pool_params: &params::SubnetPoolCreate,
+        pool_params: params::SubnetPoolCreate,
     ) -> Result<views::SubnetPool, Error> {
-        Err(self.unimplemented_todo(opctx, Unimpl::Public).await)
+        self.datastore()
+            .create_subnet_pool(opctx, pool_params)
+            .await
+            .map(Into::into)
     }
 
-    // TODO(#9453): Implement using subnet_pool_lookup and fetch
     pub(crate) async fn subnet_pool_view(
         &self,
         opctx: &OpContext,
         pool: &NameOrId,
     ) -> LookupResult<views::SubnetPool> {
-        let not_found = not_found_error(pool, ResourceType::SubnetPool);
-        Err(self
-            .unimplemented_todo(opctx, Unimpl::ProtectedLookup(not_found))
-            .await)
+        self.datastore()
+            .lookup_subnet_pool(opctx, pool)
+            .fetch()
+            .await
+            .map(|(_authz_pool, db_pool)| db_pool.into())
     }
 
-    // TODO(#9453): Implement using subnet_pool_lookup and datastore update
     pub(crate) async fn subnet_pool_update(
         &self,
         opctx: &OpContext,
         pool: &NameOrId,
-        _params: &params::SubnetPoolUpdate,
+        params: params::SubnetPoolUpdate,
     ) -> UpdateResult<views::SubnetPool> {
-        let not_found = not_found_error(pool, ResourceType::SubnetPool);
-        Err(self
-            .unimplemented_todo(opctx, Unimpl::ProtectedLookup(not_found))
-            .await)
+        let (authz_pool, _db_pool) = self
+            .datastore()
+            .lookup_subnet_pool(opctx, pool)
+            .fetch_for(authz::Action::Modify)
+            .await?;
+        self.datastore()
+            .update_subnet_pool(opctx, &authz_pool, params.into())
+            .await
+            .map(Into::into)
     }
 
-    // TODO(#9453): Implement using subnet_pool_lookup and datastore delete
     pub(crate) async fn subnet_pool_delete(
         &self,
         opctx: &OpContext,
         pool: &NameOrId,
     ) -> DeleteResult {
-        let not_found = not_found_error(pool, ResourceType::SubnetPool);
-        Err(self
-            .unimplemented_todo(opctx, Unimpl::ProtectedLookup(not_found))
-            .await)
+        let (authz_pool, db_pool) = self
+            .datastore()
+            .lookup_subnet_pool(opctx, pool)
+            .fetch_for(authz::Action::Delete)
+            .await?;
+        self.datastore().delete_subnet_pool(opctx, &authz_pool, &db_pool).await
     }
 
     // === Subnet Range Management ===
 
-    // TODO(#9453): Implement using subnet_pool_lookup and datastore list
     pub(crate) async fn subnet_pool_member_list(
         &self,
         opctx: &OpContext,
         pool: &NameOrId,
-        _pagparams: &PaginatedBy<'_>,
+        pagparams: &DataPageParams<'_, IpNet>,
     ) -> ListResultVec<views::SubnetPoolMember> {
-        let not_found = not_found_error(pool, ResourceType::SubnetPool);
-        Err(self
-            .unimplemented_todo(opctx, Unimpl::ProtectedLookup(not_found))
-            .await)
+        let (authz_pool, _db_pool) = self
+            .datastore()
+            .lookup_subnet_pool(opctx, pool)
+            .fetch_for(authz::Action::ListChildren)
+            .await?;
+        // This is a little awkward, but the database query is paginated by our
+        // model IpNet type, and the input here is an `oxnet::IpNet`. We can't
+        // use `DataPageParams::map_name()`, because that accepts a function
+        // that returns a _reference_, but we need to make an owned value here.
+        //
+        // Build a new set of pag params instead, since the actual IP CIDR is
+        // the same in either case.
+        let marker = pagparams.marker.map(|net| (*net).into());
+        let new_pagparams = DataPageParams {
+            marker: marker.as_ref(),
+            direction: pagparams.direction,
+            limit: pagparams.limit,
+        };
+        self.datastore()
+            .list_subnet_pool_members(opctx, &authz_pool, &new_pagparams)
+            .await
+            .map(|items| items.into_iter().map(Into::into).collect())
     }
 
-    // TODO(#9453): Implement using subnet_pool_lookup and datastore insert
     pub(crate) async fn subnet_pool_member_add(
         &self,
         opctx: &OpContext,
         pool: &NameOrId,
-        _params: &params::SubnetPoolMemberAdd,
+        params: &params::SubnetPoolMemberAdd,
     ) -> Result<views::SubnetPoolMember, Error> {
-        let not_found = not_found_error(pool, ResourceType::SubnetPool);
-        Err(self
-            .unimplemented_todo(opctx, Unimpl::ProtectedLookup(not_found))
-            .await)
+        let (authz_pool, db_pool) = self
+            .datastore()
+            .lookup_subnet_pool(opctx, pool)
+            .fetch_for(authz::Action::CreateChild)
+            .await?;
+        self.datastore()
+            .add_subnet_pool_member(opctx, &authz_pool, &db_pool, params)
+            .await
+            .map(Into::into)
     }
 
-    // TODO(#9453): Implement using subnet_pool_lookup and datastore delete
     pub(crate) async fn subnet_pool_member_remove(
         &self,
         opctx: &OpContext,
         pool: &NameOrId,
-        _params: &params::SubnetPoolMemberRemove,
+        params: &params::SubnetPoolMemberRemove,
     ) -> DeleteResult {
-        let not_found = not_found_error(pool, ResourceType::SubnetPool);
-        Err(self
-            .unimplemented_todo(opctx, Unimpl::ProtectedLookup(not_found))
-            .await)
+        let (authz_pool, _db_pool) = self
+            .datastore()
+            .lookup_subnet_pool(opctx, pool)
+            .fetch_for(authz::Action::Modify)
+            .await?;
+        self.datastore()
+            .delete_subnet_pool_member(opctx, &authz_pool, params.subnet.into())
+            .await
     }
 
     // === Silo Linkage ===
 
-    // TODO(#9453): Implement using subnet_pool_lookup and datastore list
     pub(crate) async fn subnet_pool_silo_list(
         &self,
         opctx: &OpContext,
         pool: &NameOrId,
-        _pagparams: &DataPageParams<'_, Uuid>,
+        pagparams: &DataPageParams<'_, Uuid>,
     ) -> ListResultVec<views::SubnetPoolSiloLink> {
-        let not_found = not_found_error(pool, ResourceType::SubnetPool);
-        Err(self
-            .unimplemented_todo(opctx, Unimpl::ProtectedLookup(not_found))
-            .await)
+        let (authz_pool, _db_pool) = self
+            .datastore()
+            .lookup_subnet_pool(opctx, pool)
+            .fetch_for(authz::Action::ListChildren)
+            .await?;
+        self.datastore()
+            .list_silos_linked_to_subnet_pool(opctx, &authz_pool, pagparams)
+            .await
+            .map(|items| items.into_iter().map(Into::into).collect())
     }
 
-    // TODO(#9453): Implement using subnet_pool_lookup and datastore insert
     pub(crate) async fn subnet_pool_silo_link(
         &self,
         opctx: &OpContext,
         pool: &NameOrId,
-        _params: &params::SubnetPoolLinkSilo,
+        params: params::SubnetPoolLinkSilo,
     ) -> Result<views::SubnetPoolSiloLink, Error> {
-        let not_found = not_found_error(pool, ResourceType::SubnetPool);
-        Err(self
-            .unimplemented_todo(opctx, Unimpl::ProtectedLookup(not_found))
-            .await)
+        let params::SubnetPoolLinkSilo { silo, is_default } = params;
+        let (authz_pool, _db_pool) = self
+            .datastore()
+            .lookup_subnet_pool(opctx, pool)
+            .fetch_for(authz::Action::Modify)
+            .await?;
+        let (authz_silo, _db_silo) = self
+            .silo_lookup(opctx, silo)?
+            .fetch_for(authz::Action::Modify)
+            .await?;
+        self.datastore()
+            .link_subnet_pool_to_silo(
+                opctx,
+                &authz_pool,
+                &authz_silo,
+                is_default,
+            )
+            .await
+            .map(Into::into)
     }
 
-    // TODO(#9453): Implement using subnet_pool_lookup, silo_lookup, and datastore
     pub(crate) async fn subnet_pool_silo_update(
         &self,
         opctx: &OpContext,
-        pool: &NameOrId,
-        _silo: &NameOrId,
-        _params: &params::SubnetPoolSiloUpdate,
+        pool: NameOrId,
+        silo: NameOrId,
+        params: params::SubnetPoolSiloUpdate,
     ) -> UpdateResult<views::SubnetPoolSiloLink> {
-        let not_found = not_found_error(pool, ResourceType::SubnetPool);
-        Err(self
-            .unimplemented_todo(opctx, Unimpl::ProtectedLookup(not_found))
-            .await)
+        let params::SubnetPoolSiloUpdate { is_default } = params;
+        let (authz_pool, _db_pool) = self
+            .datastore()
+            .lookup_subnet_pool(opctx, &pool)
+            .fetch_for(authz::Action::Modify)
+            .await?;
+        let (authz_silo, _db_silo) = self
+            .silo_lookup(opctx, silo)?
+            .fetch_for(authz::Action::Modify)
+            .await?;
+        self.datastore()
+            .update_subnet_pool_silo_link(
+                opctx,
+                &authz_pool,
+                &authz_silo,
+                is_default,
+            )
+            .await
+            .map(Into::into)
     }
 
-    // TODO(#9453): Implement using subnet_pool_lookup, silo_lookup, and datastore
     pub(crate) async fn subnet_pool_silo_unlink(
         &self,
         opctx: &OpContext,
-        pool: &NameOrId,
-        _silo: &NameOrId,
+        pool: NameOrId,
+        silo: NameOrId,
     ) -> DeleteResult {
-        let not_found = not_found_error(pool, ResourceType::SubnetPool);
-        Err(self
-            .unimplemented_todo(opctx, Unimpl::ProtectedLookup(not_found))
-            .await)
+        let (authz_pool, db_pool) = self
+            .datastore()
+            .lookup_subnet_pool(opctx, &pool)
+            .fetch_for(authz::Action::Modify)
+            .await?;
+        let (authz_silo, _db_silo) = self
+            .silo_lookup(opctx, silo)?
+            .fetch_for(authz::Action::Modify)
+            .await?;
+        self.datastore()
+            .unlink_subnet_pool_from_silo(
+                opctx,
+                &authz_pool,
+                &db_pool,
+                &authz_silo,
+            )
+            .await
     }
 
     // === Utilization ===

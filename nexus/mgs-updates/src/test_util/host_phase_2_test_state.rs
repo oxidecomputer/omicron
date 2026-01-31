@@ -215,8 +215,8 @@ mod api_impl {
     use sled_agent_types::artifact::ArtifactPutResponse;
     use sled_agent_types::artifact::ArtifactQueryParam;
     use sled_agent_types::bootstore::BootstoreStatus;
+    use sled_agent_types::dataset::LocalStorageDatasetDeleteRequest;
     use sled_agent_types::dataset::LocalStorageDatasetEnsureRequest;
-    use sled_agent_types::dataset::LocalStoragePathParam;
     use sled_agent_types::debug::ChickenSwitchDestroyOrphanedDatasets;
     use sled_agent_types::debug::OperatorSwitchZonePolicy;
     use sled_agent_types::diagnostics::SledDiagnosticsLogsDownloadPathParm;
@@ -368,7 +368,6 @@ mod api_impl {
                     datasets: BTreeMap::new(),
                     orphaned_datasets: IdOrdMap::new(),
                     zones: BTreeMap::new(),
-                    measurements: IdOrdMap::new(),
                     remove_mupdate_override: None,
                     boot_partitions,
                 }),
@@ -399,6 +398,7 @@ mod api_impl {
                     },
                 },
                 health_monitor: HealthMonitorInventory::new(),
+                reference_measurements: IdOrdMap::new(),
             }))
         }
 
@@ -936,7 +936,6 @@ mod api_impl {
 
         async fn local_storage_dataset_ensure(
             _request_context: RequestContext<Self::Context>,
-            _path_params: Path<LocalStoragePathParam>,
             _body: TypedBody<LocalStorageDatasetEnsureRequest>,
         ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
             unimplemented!()
@@ -944,7 +943,7 @@ mod api_impl {
 
         async fn local_storage_dataset_delete(
             _request_context: RequestContext<Self::Context>,
-            _path_params: Path<LocalStoragePathParam>,
+            _body: TypedBody<LocalStorageDatasetDeleteRequest>,
         ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
             unimplemented!()
         }

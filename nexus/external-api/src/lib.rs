@@ -44,6 +44,8 @@ mod v2026010500;
 mod v2026011501;
 mod v2026011600;
 mod v2026012200;
+mod v2026012300;
+mod v2026013000;
 
 #[cfg(test)]
 mod test_utils;
@@ -76,6 +78,10 @@ api_versions!([
     // |  date-based version should be at the top of the list.
     // v
     // (next_yyyymmddnn, IDENT),
+    (2026013001, READ_ONLY_DISKS),
+    (2026013000, INSTANCES_EXTERNAL_SUBNETS),
+    (2026012800, REMOVE_SUBNET_POOL_POOL_TYPE),
+    (2026012300, DUAL_STACK_EPHEMERAL_IP),
     (2026012201, EXTERNAL_SUBNET_ALLOCATOR_UPDATE),
     (2026012200, FLOATING_IP_ALLOCATOR_UPDATE),
     (2026012100, TRUST_QUORUM_ADD_SLEDS_AND_GET_LATEST_CONFIG),
@@ -1304,19 +1310,38 @@ pub trait NexusExternalApi {
         method = GET,
         path = "/v1/system/subnet-pools",
         tags = ["system/subnet-pools"],
-        versions = VERSION_EXTERNAL_SUBNET_ATTACHMENT..,
+        versions = VERSION_REMOVE_SUBNET_POOL_POOL_TYPE..,
     }]
     async fn subnet_pool_list(
         rqctx: RequestContext<Self::Context>,
         query_params: Query<PaginatedByNameOrId>,
     ) -> Result<HttpResponseOk<ResultsPage<views::SubnetPool>>, HttpError>;
 
+    /// List subnet pools
+    #[endpoint {
+        operation_id = "subnet_pool_list",
+        method = GET,
+        path = "/v1/system/subnet-pools",
+        tags = ["system/subnet-pools"],
+        versions = VERSION_EXTERNAL_SUBNET_ATTACHMENT..VERSION_REMOVE_SUBNET_POOL_POOL_TYPE,
+    }]
+    async fn v2026012300_subnet_pool_list(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<PaginatedByNameOrId>,
+    ) -> Result<HttpResponseOk<ResultsPage<v2026012300::SubnetPool>>, HttpError>
+    {
+        let HttpResponseOk(ResultsPage { items, next_page }) =
+            Self::subnet_pool_list(rqctx, query_params).await?;
+        let items = items.into_iter().map(Into::into).collect();
+        Ok(HttpResponseOk(ResultsPage { items, next_page }))
+    }
+
     /// Create a subnet pool
     #[endpoint {
         method = POST,
         path = "/v1/system/subnet-pools",
         tags = ["system/subnet-pools"],
-        versions = VERSION_EXTERNAL_SUBNET_ALLOCATOR_UPDATE..,
+        versions = VERSION_REMOVE_SUBNET_POOL_POOL_TYPE..,
     }]
     async fn subnet_pool_create(
         rqctx: RequestContext<Self::Context>,
@@ -1330,14 +1355,34 @@ pub trait NexusExternalApi {
         path = "/v1/system/subnet-pools",
         tags = ["system/subnet-pools"],
         versions =
+            VERSION_EXTERNAL_SUBNET_ALLOCATOR_UPDATE..VERSION_REMOVE_SUBNET_POOL_POOL_TYPE,
+    }]
+    async fn v2026012300_subnet_pool_create(
+        rqctx: RequestContext<Self::Context>,
+        pool_params: TypedBody<params::SubnetPoolCreate>,
+    ) -> Result<HttpResponseCreated<v2026012300::SubnetPool>, HttpError> {
+        let HttpResponseCreated(pool) =
+            Self::subnet_pool_create(rqctx, pool_params).await?;
+        Ok(HttpResponseCreated(pool.into()))
+    }
+
+    /// Create a subnet pool
+    #[endpoint {
+        operation_id = "subnet_pool_create",
+        method = POST,
+        path = "/v1/system/subnet-pools",
+        tags = ["system/subnet-pools"],
+        versions =
             VERSION_EXTERNAL_SUBNET_ATTACHMENT..VERSION_EXTERNAL_SUBNET_ALLOCATOR_UPDATE,
     }]
     async fn v2026012200_subnet_pool_create(
         rqctx: RequestContext<Self::Context>,
         pool_params: TypedBody<v2026012200::SubnetPoolCreate>,
-    ) -> Result<HttpResponseCreated<views::SubnetPool>, HttpError> {
+    ) -> Result<HttpResponseCreated<v2026012300::SubnetPool>, HttpError> {
         let pool_params = pool_params.try_map(TryInto::try_into)?;
-        Self::subnet_pool_create(rqctx, pool_params).await
+        let HttpResponseCreated(pool) =
+            Self::v2026012300_subnet_pool_create(rqctx, pool_params).await?;
+        Ok(HttpResponseCreated(pool))
     }
 
     /// Fetch a subnet pool
@@ -1345,25 +1390,62 @@ pub trait NexusExternalApi {
         method = GET,
         path = "/v1/system/subnet-pools/{pool}",
         tags = ["system/subnet-pools"],
-        versions = VERSION_EXTERNAL_SUBNET_ATTACHMENT..,
+        versions = VERSION_REMOVE_SUBNET_POOL_POOL_TYPE..,
     }]
     async fn subnet_pool_view(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<params::SubnetPoolPath>,
     ) -> Result<HttpResponseOk<views::SubnetPool>, HttpError>;
 
+    /// Fetch a subnet pool
+    #[endpoint {
+        operation_id = "subnet_pool_view",
+        method = GET,
+        path = "/v1/system/subnet-pools/{pool}",
+        tags = ["system/subnet-pools"],
+        versions =
+            VERSION_EXTERNAL_SUBNET_ATTACHMENT..VERSION_REMOVE_SUBNET_POOL_POOL_TYPE,
+    }]
+    async fn v2026012300_subnet_pool_view(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::SubnetPoolPath>,
+    ) -> Result<HttpResponseOk<v2026012300::SubnetPool>, HttpError> {
+        let HttpResponseOk(pool) =
+            Self::subnet_pool_view(rqctx, path_params).await?;
+        Ok(HttpResponseOk(pool.into()))
+    }
+
     /// Update a subnet pool
     #[endpoint {
         method = PUT,
         path = "/v1/system/subnet-pools/{pool}",
         tags = ["system/subnet-pools"],
-        versions = VERSION_EXTERNAL_SUBNET_ATTACHMENT..,
+        versions = VERSION_REMOVE_SUBNET_POOL_POOL_TYPE..,
     }]
     async fn subnet_pool_update(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<params::SubnetPoolPath>,
         updates: TypedBody<params::SubnetPoolUpdate>,
     ) -> Result<HttpResponseOk<views::SubnetPool>, HttpError>;
+
+    /// Update a subnet pool
+    #[endpoint {
+        operation_id = "subnet_pool_update",
+        method = PUT,
+        path = "/v1/system/subnet-pools/{pool}",
+        tags = ["system/subnet-pools"],
+        versions =
+            VERSION_EXTERNAL_SUBNET_ATTACHMENT..VERSION_REMOVE_SUBNET_POOL_POOL_TYPE,
+    }]
+    async fn v2026012300_subnet_pool_update(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::SubnetPoolPath>,
+        updates: TypedBody<params::SubnetPoolUpdate>,
+    ) -> Result<HttpResponseOk<v2026012300::SubnetPool>, HttpError> {
+        let HttpResponseOk(pool) =
+            Self::subnet_pool_update(rqctx, path_params, updates).await?;
+        Ok(HttpResponseOk(pool.into()))
+    }
 
     /// Delete a subnet pool
     #[endpoint {
@@ -1382,20 +1464,51 @@ pub trait NexusExternalApi {
         method = GET,
         path = "/v1/system/subnet-pools/{pool}/members",
         tags = ["system/subnet-pools"],
-        versions = VERSION_EXTERNAL_SUBNET_ATTACHMENT..,
+        versions = VERSION_REMOVE_SUBNET_POOL_POOL_TYPE..,
     }]
     async fn subnet_pool_member_list(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<params::SubnetPoolPath>,
-        query_params: Query<PaginatedByNameOrId>,
+        query_params: Query<SubnetPoolMemberPaginationParams>,
     ) -> Result<HttpResponseOk<ResultsPage<views::SubnetPoolMember>>, HttpError>;
+
+    /// List members in a subnet pool
+    //
+    // In this API version, we were paginating by name. Now, we want to paginate
+    // by the IP subnet. It's certainly possible to design a 1-1 encoding
+    // between those two so that we could correctly translate pagination
+    // querystrings between the versions.
+    //
+    // But that's really complicated, and the previous version of server always
+    // returned "unimplemented" for that endpoint anyway. We'll just keep on
+    // doing that in this version, rather than trying to translate.
+    #[endpoint {
+        operation_id = "subnet_pool_member_list",
+        method = GET,
+        path = "/v1/system/subnet-pools/{pool}/members",
+        tags = ["system/subnet-pools"],
+        versions =
+            VERSION_EXTERNAL_SUBNET_ATTACHMENT..VERSION_REMOVE_SUBNET_POOL_POOL_TYPE,
+    }]
+    async fn v2026012300_subnet_pool_member_list(
+        _rqctx: RequestContext<Self::Context>,
+        _path_params: Path<params::SubnetPoolPath>,
+        _query_params: Query<PaginatedByNameOrId>,
+    ) -> Result<
+        HttpResponseOk<ResultsPage<v2026012300::SubnetPoolMember>>,
+        HttpError,
+    > {
+        Err(HttpError::for_internal_error(
+            "endpoint is not implemented".to_string(),
+        ))
+    }
 
     /// Add a member to a subnet pool
     #[endpoint {
         method = POST,
         path = "/v1/system/subnet-pools/{pool}/members/add",
         tags = ["system/subnet-pools"],
-        versions = VERSION_EXTERNAL_SUBNET_ALLOCATOR_UPDATE..,
+        versions = VERSION_REMOVE_SUBNET_POOL_POOL_TYPE..,
     }]
     async fn subnet_pool_member_add(
         rqctx: RequestContext<Self::Context>,
@@ -1410,19 +1523,45 @@ pub trait NexusExternalApi {
         path = "/v1/system/subnet-pools/{pool}/members/add",
         tags = ["system/subnet-pools"],
         versions =
+            VERSION_EXTERNAL_SUBNET_ALLOCATOR_UPDATE..VERSION_REMOVE_SUBNET_POOL_POOL_TYPE,
+    }]
+    async fn v2026012300_subnet_pool_member_add(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::SubnetPoolPath>,
+        subnet_params: TypedBody<params::SubnetPoolMemberAdd>,
+    ) -> Result<HttpResponseCreated<v2026012300::SubnetPoolMember>, HttpError>
+    {
+        let HttpResponseCreated(pool) = Self::subnet_pool_member_add(
+            rqctx,
+            path_params,
+            subnet_params.map(Into::into),
+        )
+        .await?;
+        Ok(HttpResponseCreated(pool.into()))
+    }
+
+    /// Add a member to a subnet pool
+    #[endpoint {
+        operation_id = "subnet_pool_member_add",
+        method = POST,
+        path = "/v1/system/subnet-pools/{pool}/members/add",
+        tags = ["system/subnet-pools"],
+        versions =
             VERSION_EXTERNAL_SUBNET_ATTACHMENT..VERSION_EXTERNAL_SUBNET_ALLOCATOR_UPDATE,
     }]
     async fn v2026012200_subnet_pool_member_add(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<params::SubnetPoolPath>,
         subnet_params: TypedBody<v2026012200::SubnetPoolMemberAdd>,
-    ) -> Result<HttpResponseCreated<views::SubnetPoolMember>, HttpError> {
-        Self::subnet_pool_member_add(
+    ) -> Result<HttpResponseCreated<v2026012300::SubnetPoolMember>, HttpError>
+    {
+        let HttpResponseCreated(pool) = Self::subnet_pool_member_add(
             rqctx,
             path_params,
             subnet_params.map(Into::into),
         )
-        .await
+        .await?;
+        Ok(HttpResponseCreated(pool.into()))
     }
 
     /// Remove a member from a subnet pool
@@ -2080,7 +2219,7 @@ pub trait NexusExternalApi {
         rqctx: RequestContext<Self::Context>,
         query_params: Query<PaginatedByNameOrId<params::ProjectSelector>>,
     ) -> Result<HttpResponseOk<ResultsPage<v2025112000::Disk>>, HttpError> {
-        Self::disk_list(rqctx, query_params).await.and_then(
+        Self::v2026013000_disk_list(rqctx, query_params).await.and_then(
             |HttpResponseOk(page)| {
                 let items: Result<Vec<_>, _> =
                     page.items.into_iter().map(TryInto::try_into).collect();
@@ -2096,10 +2235,31 @@ pub trait NexusExternalApi {
 
     /// List disks
     #[endpoint {
+        operation_id = "disk_list",
         method = GET,
         path = "/v1/disks",
         tags = ["disks"],
-        versions = VERSION_LOCAL_STORAGE..,
+        versions = VERSION_LOCAL_STORAGE..VERSION_READ_ONLY_DISKS,
+    }]
+    async fn v2026013000_disk_list(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<PaginatedByNameOrId<params::ProjectSelector>>,
+    ) -> Result<HttpResponseOk<ResultsPage<v2026013000::Disk>>, HttpError> {
+        Self::disk_list(rqctx, query_params).await.map(
+            |HttpResponseOk(page)| {
+                let items: Vec<_> =
+                    page.items.into_iter().map(Into::into).collect();
+                HttpResponseOk(ResultsPage { next_page: page.next_page, items })
+            },
+        )
+    }
+
+    /// List disks
+    #[endpoint {
+        method = GET,
+        path = "/v1/disks",
+        tags = ["disks"],
+        versions = VERSION_READ_ONLY_DISKS..,
     }]
     async fn disk_list(
         rqctx: RequestContext<Self::Context>,
@@ -2131,7 +2291,25 @@ pub trait NexusExternalApi {
         method = POST,
         path = "/v1/disks",
         tags = ["disks"],
-        versions = VERSION_LOCAL_STORAGE..,
+        versions = VERSION_LOCAL_STORAGE..VERSION_READ_ONLY_DISKS,
+    }]
+    async fn v2026013000_disk_create(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<params::ProjectSelector>,
+        new_disk: TypedBody<v2026013000::DiskCreate>,
+    ) -> Result<HttpResponseCreated<v2026013000::Disk>, HttpError> {
+        Self::disk_create(rqctx, query_params, new_disk.map(Into::into))
+            .await
+            .map(|resp| resp.map(Into::into))
+    }
+
+    // TODO-correctness See note about instance create.  This should be async.
+    /// Create disk
+    #[endpoint {
+        method = POST,
+        path = "/v1/disks",
+        tags = ["disks"],
+        versions = VERSION_READ_ONLY_DISKS..,
     }]
     async fn disk_create(
         rqctx: RequestContext<Self::Context>,
@@ -2162,7 +2340,24 @@ pub trait NexusExternalApi {
         method = GET,
         path = "/v1/disks/{disk}",
         tags = ["disks"],
-        versions = VERSION_LOCAL_STORAGE..,
+        versions = VERSION_LOCAL_STORAGE..VERSION_READ_ONLY_DISKS,
+    }]
+    async fn v2026013000_disk_view(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::DiskPath>,
+        query_params: Query<params::OptionalProjectSelector>,
+    ) -> Result<HttpResponseOk<v2026013000::Disk>, HttpError> {
+        Self::disk_view(rqctx, path_params, query_params)
+            .await
+            .map(|resp| resp.map(Into::into))
+    }
+
+    /// Fetch disk
+    #[endpoint {
+        method = GET,
+        path = "/v1/disks/{disk}",
+        tags = ["disks"],
+        versions = VERSION_READ_ONLY_DISKS..,
     }]
     async fn disk_view(
         rqctx: RequestContext<Self::Context>,
@@ -2349,7 +2544,23 @@ pub trait NexusExternalApi {
         method = POST,
         path = "/v1/instances",
         tags = ["instances"],
-        versions = VERSION_MULTICAST_IMPLICIT_LIFECYCLE_UPDATES..,
+        versions = VERSION_MULTICAST_IMPLICIT_LIFECYCLE_UPDATES..VERSION_READ_ONLY_DISKS,
+    }]
+    async fn v2026013000_instance_create(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<params::ProjectSelector>,
+        new_instance: TypedBody<v2026013000::InstanceCreate>,
+    ) -> Result<HttpResponseCreated<Instance>, HttpError> {
+        Self::instance_create(rqctx, query_params, new_instance.map(Into::into))
+            .await
+    }
+
+    /// Create instance
+    #[endpoint {
+        method = POST,
+        path = "/v1/instances",
+        tags = ["instances"],
+        versions = VERSION_READ_ONLY_DISKS..,
     }]
     async fn instance_create(
         rqctx: RequestContext<Self::Context>,
@@ -2530,7 +2741,30 @@ pub trait NexusExternalApi {
         method = GET,
         path = "/v1/instances/{instance}/disks",
         tags = ["instances"],
-        versions = VERSION_LOCAL_STORAGE..,
+        versions = VERSION_LOCAL_STORAGE..VERSION_READ_ONLY_DISKS,
+    }]
+    async fn v2026013000_instance_disk_list(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<
+            PaginatedByNameOrId<params::OptionalProjectSelector>,
+        >,
+        path_params: Path<params::InstancePath>,
+    ) -> Result<HttpResponseOk<ResultsPage<v2026013000::Disk>>, HttpError> {
+        Self::instance_disk_list(rqctx, query_params, path_params).await.map(
+            |HttpResponseOk(page)| {
+                let items: Vec<_> =
+                    page.items.into_iter().map(Into::into).collect();
+                HttpResponseOk(ResultsPage { next_page: page.next_page, items })
+            },
+        )
+    }
+
+    /// List disks for instance
+    #[endpoint {
+        method = GET,
+        path = "/v1/instances/{instance}/disks",
+        tags = ["instances"],
+        versions = VERSION_READ_ONLY_DISKS..,
     }]
     async fn instance_disk_list(
         rqctx: RequestContext<Self::Context>,
@@ -2569,7 +2803,30 @@ pub trait NexusExternalApi {
         method = POST,
         path = "/v1/instances/{instance}/disks/attach",
         tags = ["instances"],
-        versions = VERSION_LOCAL_STORAGE..,
+        versions = VERSION_LOCAL_STORAGE..VERSION_READ_ONLY_DISKS,
+    }]
+    async fn v2026013000_instance_disk_attach(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::InstancePath>,
+        query_params: Query<params::OptionalProjectSelector>,
+        disk_to_attach: TypedBody<params::DiskPath>,
+    ) -> Result<HttpResponseAccepted<v2026013000::Disk>, HttpError> {
+        Self::instance_disk_attach(
+            rqctx,
+            path_params,
+            query_params,
+            disk_to_attach,
+        )
+        .await
+        .map(|resp| resp.map(Into::into))
+    }
+
+    /// Attach disk to instance
+    #[endpoint {
+        method = POST,
+        path = "/v1/instances/{instance}/disks/attach",
+        tags = ["instances"],
+        versions = VERSION_READ_ONLY_DISKS..,
     }]
     async fn instance_disk_attach(
         rqctx: RequestContext<Self::Context>,
@@ -2607,7 +2864,30 @@ pub trait NexusExternalApi {
         method = POST,
         path = "/v1/instances/{instance}/disks/detach",
         tags = ["instances"],
-        versions = VERSION_LOCAL_STORAGE..,
+        versions = VERSION_LOCAL_STORAGE..VERSION_READ_ONLY_DISKS,
+    }]
+    async fn v2026013000_instance_disk_detach(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::InstancePath>,
+        query_params: Query<params::OptionalProjectSelector>,
+        disk_to_detach: TypedBody<params::DiskPath>,
+    ) -> Result<HttpResponseAccepted<v2026013000::Disk>, HttpError> {
+        Self::instance_disk_detach(
+            rqctx,
+            path_params,
+            query_params,
+            disk_to_detach,
+        )
+        .await
+        .map(|resp| resp.map(Into::into))
+    }
+
+    /// Detach disk from instance
+    #[endpoint {
+        method = POST,
+        path = "/v1/instances/{instance}/disks/detach",
+        tags = ["instances"],
+        versions = VERSION_READ_ONLY_DISKS..,
     }]
     async fn instance_disk_detach(
         rqctx: RequestContext<Self::Context>,
@@ -3736,12 +4016,52 @@ pub trait NexusExternalApi {
         method = DELETE,
         path = "/v1/instances/{instance}/external-ips/ephemeral",
         tags = ["instances"],
+        versions = ..VERSION_DUAL_STACK_EPHEMERAL_IP,
+    }]
+    async fn v2026012200_instance_ephemeral_ip_detach(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::InstancePath>,
+        query_params: Query<params::OptionalProjectSelector>,
+    ) -> Result<HttpResponseDeleted, HttpError> {
+        let query_params =
+            query_params.map(|q| params::EphemeralIpDetachSelector {
+                project: q.project,
+                ip_version: None,
+            });
+        Self::instance_ephemeral_ip_detach(rqctx, path_params, query_params)
+            .await
+    }
+
+    /// Detach and deallocate ephemeral IP from instance
+    ///
+    /// When an instance has both IPv4 and IPv6 ephemeral IPs, the `ip_version`
+    /// query parameter must be specified to identify which IP to detach.
+    #[endpoint {
+        method = DELETE,
+        path = "/v1/instances/{instance}/external-ips/ephemeral",
+        tags = ["instances"],
+        versions = VERSION_DUAL_STACK_EPHEMERAL_IP..,
     }]
     async fn instance_ephemeral_ip_detach(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<params::InstancePath>,
-        query_params: Query<params::OptionalProjectSelector>,
+        query_params: Query<params::EphemeralIpDetachSelector>,
     ) -> Result<HttpResponseDeleted, HttpError>;
+
+    // Instance External Subnets
+
+    /// List external subnets attached to instance
+    #[endpoint {
+        method = GET,
+        path = "/v1/instances/{instance}/external-subnets",
+        tags = ["instances"],
+        versions = VERSION_INSTANCES_EXTERNAL_SUBNETS..,
+    }]
+    async fn instance_external_subnet_list(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<params::OptionalProjectSelector>,
+        path_params: Path<params::InstancePath>,
+    ) -> Result<HttpResponseOk<ResultsPage<views::ExternalSubnet>>, HttpError>;
 
     // Instance Multicast Groups
 
@@ -3755,12 +4075,22 @@ pub trait NexusExternalApi {
     }]
     async fn v2025121200_instance_multicast_group_list(
         rqctx: RequestContext<Self::Context>,
-        query_params: Query<PaginatedById<params::OptionalProjectSelector>>,
+        query_params: Query<params::OptionalProjectSelector>,
         path_params: Path<params::InstancePath>,
     ) -> Result<
         HttpResponseOk<ResultsPage<v2025121200::MulticastGroupMember>>,
         HttpError,
     > {
+        let query_params =
+            query_params.try_map(|params| {
+                // Easiest to deserialize and serialize the params, since some
+                // fields are private (they really should not be, having them
+                // accessible by serde makes them de-facto public).
+                serde_json::from_value(serde_json::to_value(params).map_err(
+                    |e| HttpError::for_bad_request(None, e.to_string()),
+                )?)
+                .map_err(|e| HttpError::for_bad_request(None, e.to_string()))
+            })?;
         Self::instance_multicast_group_list(rqctx, query_params, path_params)
             .await
             .map(|HttpResponseOk(page)| {
@@ -5853,6 +6183,9 @@ fn generate_tags_file(spec: &OpenAPI, cx: &mut ValidationContext<'_>) {
 
 pub type IpPoolRangePaginationParams =
     PaginationParams<EmptyScanParams, IpNetwork>;
+
+pub type SubnetPoolMemberPaginationParams =
+    PaginationParams<EmptyScanParams, oxnet::IpNet>;
 
 /// Type used to paginate request to list timeseries schema
 pub type TimeseriesSchemaPaginationParams =

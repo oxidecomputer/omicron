@@ -676,6 +676,7 @@ impl CollectionBuilder {
             last_reconciliation: inventory.last_reconciliation,
             file_source_resolver: inventory.file_source_resolver,
             health_monitor: inventory.health_monitor,
+            reference_measurements: inventory.reference_measurements,
         };
 
         self.sleds

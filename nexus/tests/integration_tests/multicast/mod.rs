@@ -237,6 +237,19 @@ pub(crate) async fn activate_multicast_reconciler(
     .await
 }
 
+/// Activates the inventory loader and waits for it to complete.
+///
+/// This ensures the watch channel has the latest inventory collection from the database.
+pub(crate) async fn activate_inventory_loader(
+    lockstep_client: &ClientTestContext,
+) -> nexus_lockstep_client::types::BackgroundTask {
+    nexus_test_utils::background::activate_background_task(
+        lockstep_client,
+        "inventory_loader",
+    )
+    .await
+}
+
 /// Wait for a condition to be true, activating the reconciler periodically.
 ///
 /// This is like `wait_for_condition` but activates the multicast reconciler
@@ -1292,12 +1305,19 @@ pub(crate) async fn cleanup_instances(
             let instance_id =
                 InstanceUuid::from_untyped_uuid(instance.identity.id);
 
-            // Simulate and wait for Running state
-            instance_helpers::instance_simulate(
+            // Use the fallible version during cleanup: if sled agent
+            // communication fails (e.g., because a test intentionally failed
+            // DPD or the sled), we log and continue rather than panic. Real
+            // issues are caught during test execution, not cleanup.
+            if let Err(e) = instance_helpers::try_instance_simulate(
                 &cptestctx.server.server_context().nexus,
                 &instance_id,
             )
-            .await;
+            .await
+            {
+                eprintln!("Warning: Failed to simulate instance {name}: {e:?}");
+                continue;
+            }
             instance_helpers::instance_wait_for_state_as(
                 client,
                 AuthnMode::PrivilegedUser,

@@ -53,6 +53,7 @@ use nexus_types::deployment::OximeterReadPolicy;
 use nexus_types::fm;
 use nexus_types::internal_api::background::AbandonedVmmReaperStatus;
 use nexus_types::internal_api::background::BlueprintPlannerStatus;
+use nexus_types::internal_api::background::BlueprintRendezvousStats;
 use nexus_types::internal_api::background::BlueprintRendezvousStatus;
 use nexus_types::internal_api::background::DatasetsRendezvousStats;
 use nexus_types::internal_api::background::EreporterStatus;
@@ -85,6 +86,7 @@ use omicron_uuid_kinds::DemoSagaUuid;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::ParseError;
 use omicron_uuid_kinds::PhysicalDiskUuid;
+use omicron_uuid_kinds::RackUuid;
 use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::SupportBundleUuid;
 use quiesce::QuiesceArgs;
@@ -97,6 +99,7 @@ use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::fs::OpenOptions;
+use std::num::ParseIntError;
 use std::os::unix::fs::PermissionsExt;
 use std::str::FromStr;
 use std::sync::Arc;
@@ -108,6 +111,7 @@ use tabled::settings::Padding;
 use tabled::settings::object::Columns;
 use tokio::io::AsyncWriteExt;
 use tokio::sync::OnceCell;
+use trust_quorum_types::types::Epoch;
 use update_engine::EventBuffer;
 use update_engine::ExecutionStatus;
 use update_engine::ExecutionTerminalInfo;
@@ -165,6 +169,8 @@ enum NexusCommands {
     /// interact with support bundles
     #[command(visible_alias = "sb")]
     SupportBundles(SupportBundleArgs),
+    /// interact with the trust quorum
+    TrustQuorum(TrustQuorumArgs),
     /// show running artifact versions
     UpdateStatus(UpdateStatusArgs),
 }
@@ -567,6 +573,43 @@ enum SupportBundleCommands {
 }
 
 #[derive(Debug, Args)]
+struct TrustQuorumArgs {
+    #[command(subcommand)]
+    command: TrustQuorumCommands,
+}
+
+#[derive(Debug, Subcommand)]
+enum TrustQuorumCommands {
+    GetConfig(TrustQuorumConfigArgs),
+    LrtqUpgrade,
+}
+
+#[derive(Debug, Clone, Copy, Args)]
+struct TrustQuorumConfigArgs {
+    rack_id: RackUuid,
+    epoch: TrustQuorumEpochOrLatest,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum TrustQuorumEpochOrLatest {
+    Latest,
+    Epoch(Epoch),
+}
+
+impl FromStr for TrustQuorumEpochOrLatest {
+    type Err = ParseIntError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        if matches!(s, "latest" | "current") {
+            Ok(Self::Latest)
+        } else {
+            let i: u64 = s.parse()?;
+            Ok(Self::Epoch(Epoch(i)))
+        }
+    }
+}
+
+#[derive(Debug, Args)]
 struct SupportBundleDeleteArgs {
     id: SupportBundleUuid,
 }
@@ -860,6 +903,15 @@ impl NexusArgs {
             NexusCommands::SupportBundles(SupportBundleArgs {
                 command: SupportBundleCommands::Inspect(args),
             }) => cmd_nexus_support_bundles_inspect(&client, args).await,
+            NexusCommands::TrustQuorum(TrustQuorumArgs {
+                command: TrustQuorumCommands::GetConfig(args),
+            }) => cmd_nexus_trust_quorum_get_config(&client, args).await,
+            NexusCommands::TrustQuorum(TrustQuorumArgs {
+                command: TrustQuorumCommands::LrtqUpgrade,
+            }) => {
+                let token = omdb.check_allow_destructive()?;
+                cmd_nexus_trust_quorum_lrtq_upgrade(&client, token).await
+            }
             NexusCommands::UpdateStatus(args) => {
                 cmd_nexus_update_status(&client, args).await
             }
@@ -1530,29 +1582,38 @@ fn print_task_blueprint_rendezvous(details: &serde_json::Value) {
                 status.inventory_collection_id
             );
 
-            print_datasets_rendezvous_stats(
-                &status.stats.debug_dataset,
-                "debug_dataset",
-            );
+            let BlueprintRendezvousStats {
+                debug_dataset,
+                crucible_dataset,
+                local_storage_dataset,
+                local_storage_unencrypted_dataset,
+            } = status.stats;
+
+            print_datasets_rendezvous_stats(&debug_dataset, "debug_dataset");
 
             // crucible datasets have a different number of rendezvous stats
             println!("    crucible_dataset rendezvous counts:");
             println!(
                 "        num_inserted:         {}",
-                status.stats.crucible_dataset.num_inserted
+                crucible_dataset.num_inserted
             );
             println!(
                 "        num_already_exist:    {}",
-                status.stats.crucible_dataset.num_already_exist
+                crucible_dataset.num_already_exist
             );
             println!(
                 "        num_not_in_inventory: {}",
-                status.stats.crucible_dataset.num_not_in_inventory
+                crucible_dataset.num_not_in_inventory
             );
 
             print_datasets_rendezvous_stats(
-                &status.stats.local_storage_dataset,
+                &local_storage_dataset,
                 "local_storage_dataset",
+            );
+
+            print_datasets_rendezvous_stats(
+                &local_storage_unencrypted_dataset,
+                "local_storage_unencrypted_dataset",
             );
         }
     }
@@ -4449,6 +4510,55 @@ async fn cmd_nexus_support_bundles_list(
         .with(tabled::settings::Padding::new(0, 1, 0, 0))
         .to_string();
     println!("{}", table);
+    Ok(())
+}
+
+async fn cmd_nexus_trust_quorum_get_config(
+    client: &nexus_lockstep_client::Client,
+    args: &TrustQuorumConfigArgs,
+) -> Result<(), anyhow::Error> {
+    let config = match args.epoch {
+        TrustQuorumEpochOrLatest::Latest => client
+            .trust_quorum_get_config(&args.rack_id.as_untyped_uuid(), None)
+            .await
+            .with_context(|| {
+                format!(
+                    "getting latest trust quorum config for rack {}",
+                    args.rack_id
+                )
+            })?,
+        TrustQuorumEpochOrLatest::Epoch(epoch) => client
+            .trust_quorum_get_config(
+                &args.rack_id.as_untyped_uuid(),
+                Some(epoch.0),
+            )
+            .await
+            .with_context(|| {
+                format!(
+                    "getting trust quorum config for rack {}, epoch {}",
+                    args.rack_id, epoch
+                )
+            })?,
+    }
+    .into_inner();
+
+    println!("{config:#?}");
+
+    Ok(())
+}
+
+async fn cmd_nexus_trust_quorum_lrtq_upgrade(
+    client: &nexus_lockstep_client::Client,
+    _destruction_token: DestructiveOperationToken,
+) -> Result<(), anyhow::Error> {
+    let epoch = client
+        .trust_quorum_lrtq_upgrade()
+        .await
+        .context("lrtq upgrade")?
+        .into_inner();
+
+    println!("Started LRTQ upgrade at epoch {epoch}");
+
     Ok(())
 }
 

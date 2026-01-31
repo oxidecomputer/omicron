@@ -25,6 +25,7 @@ use sled_agent_types::inventory::OrphanedDataset;
 use sled_agent_types::inventory::RemoveMupdateOverrideInventory;
 use sled_storage::config::MountConfig;
 use sled_storage::dataset::LOCAL_STORAGE_DATASET;
+use sled_storage::dataset::LOCAL_STORAGE_UNENCRYPTED_DATASET;
 use sled_storage::dataset::U2_DEBUG_DATASET;
 use sled_storage::dataset::ZONE_DATASET;
 use sled_storage::disk::Disk;
@@ -168,6 +169,12 @@ impl ReconcilerResult {
     ) -> impl Iterator<Item = PathInPool> + '_ {
         self.all_mounted_datasets_of_kind(DatasetKind::LocalStorage)
     }
+
+    pub(crate) fn all_mounted_local_storage_unencrypted_datasets(
+        &self,
+    ) -> impl Iterator<Item = PathInPool> + '_ {
+        self.all_mounted_datasets_of_kind(DatasetKind::LocalStorageUnencrypted)
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -236,7 +243,6 @@ impl LatestReconciliationResult {
             zones: self.zones_inventory.clone(),
             boot_partitions: self.boot_partitions.clone(),
             remove_mupdate_override: self.remove_mupdate_override.clone(),
-            measurements: IdOrdMap::new(),
         }
     }
 
@@ -250,6 +256,9 @@ impl LatestReconciliationResult {
         let mountpoint = match &kind {
             DatasetKind::Debug => U2_DEBUG_DATASET,
             DatasetKind::LocalStorage => LOCAL_STORAGE_DATASET,
+            DatasetKind::LocalStorageUnencrypted => {
+                LOCAL_STORAGE_UNENCRYPTED_DATASET
+            }
             DatasetKind::TransientZoneRoot => ZONE_DATASET,
 
             DatasetKind::Clickhouse

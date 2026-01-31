@@ -69,6 +69,7 @@ progenitor::generate_api!(
         Inventory = sled_agent_types_versions::latest::inventory::Inventory,
         InventoryDisk = sled_agent_types_versions::latest::inventory::InventoryDisk,
         InventoryZpool = sled_agent_types_versions::latest::inventory::InventoryZpool,
+        LrtqUpgradeMsg = trust_quorum_types::messages::LrtqUpgradeMsg,
         MacAddr = omicron_common::api::external::MacAddr,
         MupdateOverrideBootInventory = sled_agent_types_versions::latest::inventory::MupdateOverrideBootInventory,
         Name = omicron_common::api::external::Name,
@@ -388,13 +389,7 @@ impl TestInterfaces for Client {
     }
 
     async fn vmm_finish_transition(&self, id: PropolisUuid) {
-        let baseurl = self.baseurl();
-        let client = self.client();
-        let url = format!("{}/vmms/{}/poke", baseurl, id);
-        client
-            .post(url)
-            .api_version_header(self.api_version())
-            .send()
+        self.try_vmm_finish_transition(id)
             .await
             .expect("instance_finish_transition() failed unexpectedly");
     }
@@ -405,13 +400,9 @@ impl TestInterfaces for Client {
     ) -> Result<(), reqwest::Error> {
         let baseurl = self.baseurl();
         let client = self.client();
-        let url = format!("{baseurl}/vmms/{id}/poke");
-        client
-            .post(url)
-            .api_version_header(self.api_version())
-            .send()
-            .await
-            .map(|_| ())
+        let url = format!("{}/vmms/{}/poke", baseurl, id);
+        client.post(url).api_version_header(self.api_version()).send().await?;
+        Ok(())
     }
 
     async fn disk_finish_transition(&self, id: Uuid) {
