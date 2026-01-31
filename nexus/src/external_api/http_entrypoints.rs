@@ -1824,7 +1824,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
             let path = path_params.into_inner();
             let silo_link = silo_link.into_inner();
             let link = nexus
-                .subnet_pool_silo_link(&opctx, &path.pool, &silo_link)
+                .subnet_pool_silo_link(&opctx, &path.pool, silo_link)
                 .await?;
             Ok(HttpResponseCreated(link))
         })
@@ -1840,9 +1840,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
             let path = path_params.into_inner();
             let update = update.into_inner();
             let link = nexus
-                .subnet_pool_silo_update(
-                    &opctx, &path.pool, &path.silo, &update,
-                )
+                .subnet_pool_silo_update(&opctx, path.pool, path.silo, update)
                 .await?;
             Ok(HttpResponseOk(link))
         })
@@ -1855,9 +1853,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
         audit_and_time(&rqctx, |opctx, nexus| async move {
             let path = path_params.into_inner();
-            nexus
-                .subnet_pool_silo_unlink(&opctx, &path.pool, &path.silo)
-                .await?;
+            nexus.subnet_pool_silo_unlink(&opctx, path.pool, path.silo).await?;
             Ok(HttpResponseUpdatedNoContent())
         })
         .await
