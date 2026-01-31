@@ -618,8 +618,20 @@ impl BlueprintExpungedZoneAccessReasonChecker {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use chrono::Utc;
+    use nexus_db_model::ExternalIp;
+    use nexus_db_model::IpAttachState;
+    use nexus_db_model::IpKind;
+    use nexus_db_model::Ipv4Addr as DbIpv4Addr;
+    use nexus_db_model::MacAddr;
+    use nexus_db_model::Name;
+    use nexus_db_model::ServiceNetworkInterface;
+    use nexus_db_model::ServiceNetworkInterfaceIdentity;
+    use nexus_db_model::SqlU8;
+    use nexus_db_model::SqlU16;
     use nexus_db_queries::db::datastore::CollectorReassignment;
     use nexus_reconfigurator_planning::blueprint_builder::BlueprintBuilder;
+    use nexus_reconfigurator_planning::blueprint_editor::ExternalSnatNetworkingChoice;
     use nexus_reconfigurator_planning::example::ExampleSystemBuilder;
     use nexus_reconfigurator_planning::planner::PlannerRng;
     use nexus_test_utils::db::TestDatabase;
@@ -628,10 +640,68 @@ mod tests {
     use nexus_types::deployment::BlueprintZoneType;
     use nexus_types::deployment::SledFilter;
     use nexus_types::internal_api::params::OximeterInfo;
+    use omicron_common::api::external;
+    use omicron_common::api::external::MacAddr as ExternalMacAddr;
     use omicron_common::api::internal::nexus::ProducerEndpoint;
     use omicron_common::api::internal::nexus::ProducerKind;
+    use omicron_common::api::internal::shared::PrivateIpConfig;
     use omicron_test_utils::dev;
+    use omicron_uuid_kinds::GenericUuid;
+    use std::net::Ipv4Addr;
     use std::time::Duration;
+    use uuid::Uuid;
+
+    /// Helper to construct a test ExternalIp associated with a specific zone
+    fn make_external_ip_for_zone(
+        zone_id: OmicronZoneUuid,
+    ) -> nexus_db_model::ExternalIp {
+        ExternalIp {
+            id: OmicronZoneUuid::new_v4().into_untyped_uuid(),
+            name: None,
+            description: None,
+            time_created: Utc::now(),
+            time_modified: Utc::now(),
+            time_deleted: None,
+            ip_pool_id: Uuid::new_v4(),
+            ip_pool_range_id: Uuid::new_v4(),
+            is_service: true,
+            is_probe: false,
+            parent_id: Some(zone_id.into_untyped_uuid()),
+            kind: IpKind::SNat,
+            ip: "192.168.1.1/32".parse().unwrap(),
+            first_port: SqlU16::new(0),
+            last_port: SqlU16::new(65535),
+            project_id: None,
+            state: IpAttachState::Attached,
+        }
+    }
+
+    /// Helper to construct a test ServiceNetworkInterface associated with a
+    /// specific zone
+    fn make_service_nic_for_zone(
+        zone_id: OmicronZoneUuid,
+    ) -> nexus_db_model::ServiceNetworkInterface {
+        ServiceNetworkInterface {
+            identity: ServiceNetworkInterfaceIdentity {
+                id: Uuid::new_v4(),
+                name: Name(
+                    external::Name::try_from("test-nic".to_string()).unwrap(),
+                ),
+                description: "test NIC".to_string(),
+                time_created: Utc::now(),
+                time_modified: Utc::now(),
+                time_deleted: None,
+            },
+            service_id: zone_id.into_untyped_uuid(),
+            vpc_id: Uuid::new_v4(),
+            subnet_id: Uuid::new_v4(),
+            mac: MacAddr(external::MacAddr([0, 0, 0, 0, 0, 0].into())),
+            ipv4: Some(DbIpv4Addr::from("192.168.1.2".parse().unwrap())),
+            ipv6: None,
+            slot: SqlU8::new(0),
+            primary: true,
+        }
+    }
 
     #[tokio::test]
     async fn test_pruneable_zones_reason_checker() {
@@ -850,13 +920,13 @@ mod tests {
         // Now add producers assigned to this oximeter
         use omicron_uuid_kinds::GenericUuid;
         let producer1 = ProducerEndpoint {
-            id: OmicronZoneUuid::new_v4().into_untyped_uuid(),
+            id: Uuid::new_v4(),
             kind: ProducerKind::Service,
             address: "[::1]:12345".parse().unwrap(),
             interval: Duration::from_secs(30),
         };
         let producer2 = ProducerEndpoint {
-            id: OmicronZoneUuid::new_v4().into_untyped_uuid(),
+            id: Uuid::new_v4(),
             kind: ProducerKind::Service,
             address: "[::1]:12346".parse().unwrap(),
             interval: Duration::from_secs(30),
@@ -889,12 +959,11 @@ mod tests {
         );
 
         // Create a second dummy oximeter to reassign producers to
-        let dummy_oximeter_id = OmicronZoneUuid::new_v4().into_untyped_uuid();
         datastore
             .oximeter_create(
                 opctx,
                 &nexus_db_model::OximeterInfo::new(&OximeterInfo {
-                    collector_id: dummy_oximeter_id,
+                    collector_id: Uuid::new_v4(),
                     address: "[::1]:12224".parse().unwrap(),
                 }),
             )
@@ -930,6 +999,161 @@ mod tests {
             pruneable_zones.pruneable_zones.contains(&oximeter_zone_id),
             "oximeter zone should be pruneable when expunged and \
              all producers have been reassigned"
+        );
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_boundary_ntp_pruneable_reasons() {
+        const TEST_NAME: &str = "test_boundary_ntp_pruneable_reasons";
+
+        let logctx = dev::test_setup_log(TEST_NAME);
+        let log = &logctx.log;
+        let db = TestDatabase::new_with_datastore(log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        // Start with the base example system with one boundary NTP zone
+        let (example, initial_blueprint) =
+            ExampleSystemBuilder::new(log, TEST_NAME)
+                .set_boundary_ntp_count(1)
+                .expect("1 is a valid count of boundary NTP zones")
+                .build();
+        let mut builder = BlueprintBuilder::new_based_on(
+            log,
+            &initial_blueprint,
+            TEST_NAME,
+            PlannerRng::from_seed(("builder", TEST_NAME)),
+        )
+        .expect("failed to create builder");
+
+        // Find the boundary NTP zone and expunge it.
+        let (sled_id, boundary_ntp_zone_id, external_ip) = builder
+            .current_in_service_zones()
+            .find_map(|(sled_id, zone)| {
+                if let BlueprintZoneType::BoundaryNtp(config) = &zone.zone_type
+                {
+                    Some((sled_id, zone.id, config.external_ip))
+                } else {
+                    None
+                }
+            })
+            .expect("found boundary ntp zone");
+        builder
+            .sled_expunge_zone(sled_id, boundary_ntp_zone_id)
+            .expect("expunged zone");
+        builder
+            .sled_mark_expunged_zone_ready_for_cleanup(
+                sled_id,
+                boundary_ntp_zone_id,
+            )
+            .expect("marked zone ready for cleanup");
+
+        let blueprint = builder.build(BlueprintSource::Test);
+
+        // Confirm that it's NOT pruneable when there's no other boundary NTP
+        // zone with the same upstream config.
+        let pruneable_zones =
+            PruneableZones::new(opctx, datastore, &blueprint, &[], &[])
+                .await
+                .expect("failed to find pruneable zones");
+        assert!(
+            !pruneable_zones.pruneable_zones.contains(&boundary_ntp_zone_id),
+            "boundary NTP zone should not be pruneable when there's no \
+             other in-service zone with the same upstream config"
+        );
+
+        // Now add another boundary NTP zone with the same upstream config
+        let mut builder = BlueprintBuilder::new_based_on(
+            log,
+            &blueprint,
+            TEST_NAME,
+            PlannerRng::from_seed(("builder2", TEST_NAME)),
+        )
+        .expect("failed to create builder");
+
+        // Find a different sled to add the second boundary NTP zone
+        let other_sled_id = example
+            .input
+            .all_sled_ids(SledFilter::Commissioned)
+            .find(|id| *id != sled_id)
+            .expect("at least two sleds");
+
+        builder
+            .sled_promote_internal_ntp_to_boundary_ntp(
+                other_sled_id,
+                BlueprintZoneImageSource::InstallDataset,
+                {
+                    // Construct a ExternalSnatNetworkingChoice; steal the
+                    // existing zone's snat_cfg
+                    let nic_ip_config = PrivateIpConfig::new_ipv4(
+                        Ipv4Addr::new(10, 0, 0, 1),
+                        "10.0.0.0/24".parse().unwrap(),
+                    )
+                    .expect("valid private IP config");
+                    ExternalSnatNetworkingChoice {
+                        snat_cfg: external_ip.snat_cfg,
+                        nic_ip_config,
+                        nic_mac: ExternalMacAddr(
+                            omicron_common::api::external::MacAddr(
+                                [0, 0, 0, 0, 0, 1].into(),
+                            )
+                            .0,
+                        ),
+                    }
+                },
+            )
+            .expect("promoted boundary NTP zone");
+
+        let blueprint = builder.build(BlueprintSource::Test);
+
+        // Check that the zone IS now pruneable (another zone has the same
+        // config)
+        let pruneable_zones =
+            PruneableZones::new(opctx, datastore, &blueprint, &[], &[])
+                .await
+                .expect("failed to find pruneable zones");
+        assert!(
+            pruneable_zones.pruneable_zones.contains(&boundary_ntp_zone_id),
+            "boundary NTP zone should be pruneable when there's another \
+             in-service zone with the same upstream config"
+        );
+
+        // Check that it's NOT pruneable when there's an associated external IP
+        // db row
+        let external_ip = make_external_ip_for_zone(boundary_ntp_zone_id);
+        let pruneable_zones = PruneableZones::new(
+            opctx,
+            datastore,
+            &blueprint,
+            &[external_ip],
+            &[],
+        )
+        .await
+        .expect("failed to find pruneable zones");
+        assert!(
+            !pruneable_zones.pruneable_zones.contains(&boundary_ntp_zone_id),
+            "boundary NTP zone should not be pruneable when there's an \
+             associated external IP row"
+        );
+
+        // Check that it's NOT pruneable when there's an associated service NIC
+        // db row
+        let service_nic = make_service_nic_for_zone(boundary_ntp_zone_id);
+        let pruneable_zones = PruneableZones::new(
+            opctx,
+            datastore,
+            &blueprint,
+            &[],
+            &[service_nic],
+        )
+        .await
+        .expect("failed to find pruneable zones");
+        assert!(
+            !pruneable_zones.pruneable_zones.contains(&boundary_ntp_zone_id),
+            "boundary NTP zone should not be pruneable when there's an \
+             associated service NIC row"
         );
 
         db.terminate().await;

@@ -7403,6 +7403,7 @@ name = "nexus-reconfigurator-preparation"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "chrono",
  "futures",
  "nexus-db-model",
  "nexus-db-queries",
@@ -7421,6 +7422,7 @@ dependencies = [
  "slog-error-chain",
  "strum 0.27.2",
  "tokio",
+ "uuid",
 ]
 
 [[package]]

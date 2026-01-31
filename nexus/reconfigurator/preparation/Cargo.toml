@@ -28,7 +28,9 @@ strum.workspace = true
 omicron-workspace-hack.workspace = true
 
 [dev-dependencies]
+chrono.workspace = true
 nexus-reconfigurator-planning.workspace = true
 nexus-test-utils.workspace = true
 omicron-test-utils.workspace = true
 tokio.workspace = true
+uuid.workspace = true
