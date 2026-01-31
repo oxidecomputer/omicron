@@ -5217,6 +5217,7 @@ dependencies = [
  "oxlog",
  "oxnet",
  "regress",
+ "rustix 1.1.3",
  "schemars 0.8.22",
  "serde",
  "serde_json",
