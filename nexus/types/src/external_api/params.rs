@@ -2361,10 +2361,18 @@ pub enum DiskSource {
     },
 
     /// Create a disk from a disk snapshot
-    Snapshot { snapshot_id: Uuid },
+    Snapshot {
+        snapshot_id: Uuid,
+        /// If `true`, the disk created from this snapshot will be read-only.
+        read_only: bool,
+    },
 
     /// Create a disk from an image
-    Image { image_id: Uuid },
+    Image {
+        image_id: Uuid,
+        /// If `true`, the disk created from this image will be read-only.
+        read_only: bool,
+    },
 
     /// Create a blank disk that will accept bulk writes or pull blocks from an
     /// external source.

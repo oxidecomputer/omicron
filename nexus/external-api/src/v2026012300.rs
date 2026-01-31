@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! Types that changed from v2026012300 to v2026012800.
+//! Types that changed from v2026012300 to v2026013000.
 //!
 //! # Summary of changes
 //!
