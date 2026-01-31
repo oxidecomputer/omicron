@@ -619,6 +619,7 @@ impl BlueprintExpungedZoneAccessReasonChecker {
 mod tests {
     use super::*;
     use chrono::Utc;
+    use clickhouse_admin_types::keeper::KeeperId;
     use nexus_db_model::ExternalIp;
     use nexus_db_model::IpAttachState;
     use nexus_db_model::IpKind;
@@ -631,6 +632,7 @@ mod tests {
     use nexus_db_model::SqlU16;
     use nexus_db_queries::db::datastore::CollectorReassignment;
     use nexus_reconfigurator_planning::blueprint_builder::BlueprintBuilder;
+    use nexus_reconfigurator_planning::blueprint_editor::ExternalNetworkingChoice;
     use nexus_reconfigurator_planning::blueprint_editor::ExternalSnatNetworkingChoice;
     use nexus_reconfigurator_planning::example::ExampleSystemBuilder;
     use nexus_reconfigurator_planning::planner::PlannerRng;
@@ -638,6 +640,7 @@ mod tests {
     use nexus_types::deployment::BlueprintSource;
     use nexus_types::deployment::BlueprintZoneImageSource;
     use nexus_types::deployment::BlueprintZoneType;
+    use nexus_types::deployment::ClickhouseClusterConfig;
     use nexus_types::deployment::SledFilter;
     use nexus_types::internal_api::params::OximeterInfo;
     use omicron_common::api::external;
@@ -696,7 +699,9 @@ mod tests {
             vpc_id: Uuid::new_v4(),
             subnet_id: Uuid::new_v4(),
             mac: MacAddr(external::MacAddr([0, 0, 0, 0, 0, 0].into())),
-            ipv4: Some(DbIpv4Addr::from("192.168.1.2".parse().unwrap())),
+            ipv4: Some(DbIpv4Addr::from(
+                "192.168.1.2".parse::<Ipv4Addr>().unwrap(),
+            )),
             ipv6: None,
             slot: SqlU8::new(0),
             primary: true,
@@ -1154,6 +1159,475 @@ mod tests {
             !pruneable_zones.pruneable_zones.contains(&boundary_ntp_zone_id),
             "boundary NTP zone should not be pruneable when there's an \
              associated service NIC row"
+        );
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_nexus_pruneable_reasons() {
+        const TEST_NAME: &str = "test_nexus_pruneable_reasons";
+
+        let logctx = dev::test_setup_log(TEST_NAME);
+        let log = &logctx.log;
+        let db = TestDatabase::new_with_datastore(log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        // Start with the base example system (which includes Nexus zones)
+        let (_example, initial_blueprint) =
+            ExampleSystemBuilder::new(log, TEST_NAME).build();
+        let mut builder = BlueprintBuilder::new_based_on(
+            log,
+            &initial_blueprint,
+            TEST_NAME,
+            PlannerRng::from_seed(("builder", TEST_NAME)),
+        )
+        .expect("failed to create builder");
+
+        // Find a Nexus zone and expunge it
+        let (sled_id, nexus_zone_id) = builder
+            .current_in_service_zones()
+            .find_map(|(sled_id, zone)| {
+                matches!(zone.zone_type, BlueprintZoneType::Nexus(_))
+                    .then_some((sled_id, zone.id))
+            })
+            .expect("found nexus zone");
+        builder
+            .sled_expunge_zone(sled_id, nexus_zone_id)
+            .expect("expunged zone");
+        builder
+            .sled_mark_expunged_zone_ready_for_cleanup(sled_id, nexus_zone_id)
+            .expect("marked zone ready for cleanup");
+
+        let blueprint = builder.build(BlueprintSource::Test);
+
+        // Check that the zone IS pruneable when no database reasons exist
+        let pruneable_zones =
+            PruneableZones::new(opctx, datastore, &blueprint, &[], &[])
+                .await
+                .expect("failed to find pruneable zones");
+        assert!(
+            pruneable_zones.pruneable_zones.contains(&nexus_zone_id),
+            "nexus zone should be pruneable when no database reasons exist"
+        );
+
+        // Check that it's NOT pruneable when there's an associated external IP
+        // db row
+        let external_ip = make_external_ip_for_zone(nexus_zone_id);
+        let pruneable_zones = PruneableZones::new(
+            opctx,
+            datastore,
+            &blueprint,
+            &[external_ip],
+            &[],
+        )
+        .await
+        .expect("failed to find pruneable zones");
+        assert!(
+            !pruneable_zones.pruneable_zones.contains(&nexus_zone_id),
+            "nexus zone should not be pruneable when there's an \
+             associated external IP row"
+        );
+
+        // Check that it's NOT pruneable when there's an associated service NIC
+        // db row
+        let service_nic = make_service_nic_for_zone(nexus_zone_id);
+        let pruneable_zones = PruneableZones::new(
+            opctx,
+            datastore,
+            &blueprint,
+            &[],
+            &[service_nic],
+        )
+        .await
+        .expect("failed to find pruneable zones");
+        assert!(
+            !pruneable_zones.pruneable_zones.contains(&nexus_zone_id),
+            "nexus zone should not be pruneable when there's an \
+             associated service NIC row"
+        );
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_external_dns_pruneable_reasons() {
+        const TEST_NAME: &str = "test_external_dns_pruneable_reasons";
+
+        let logctx = dev::test_setup_log(TEST_NAME);
+        let log = &logctx.log;
+        let db = TestDatabase::new_with_datastore(log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        // Start with the base example system with one external DNS zone
+        let (example, initial_blueprint) =
+            ExampleSystemBuilder::new(log, TEST_NAME)
+                .external_dns_count(1)
+                .expect("1 is a valid count of external DNS zones")
+                .build();
+        let mut builder = BlueprintBuilder::new_based_on(
+            log,
+            &initial_blueprint,
+            TEST_NAME,
+            PlannerRng::from_seed(("builder", TEST_NAME)),
+        )
+        .expect("failed to create builder");
+
+        // Find the external DNS zone and expunge it
+        let (sled_id, external_dns_zone_id, dns_address) = builder
+            .current_in_service_zones()
+            .find_map(|(sled_id, zone)| {
+                if let BlueprintZoneType::ExternalDns(config) = &zone.zone_type
+                {
+                    Some((sled_id, zone.id, config.dns_address))
+                } else {
+                    None
+                }
+            })
+            .expect("found external dns zone");
+        builder
+            .sled_expunge_zone(sled_id, external_dns_zone_id)
+            .expect("expunged zone");
+        builder
+            .sled_mark_expunged_zone_ready_for_cleanup(
+                sled_id,
+                external_dns_zone_id,
+            )
+            .expect("marked zone ready for cleanup");
+
+        let blueprint = builder.build(BlueprintSource::Test);
+
+        // Confirm that it's NOT pruneable when there's no other external DNS
+        // zone with the same IP (meaning the IP hasn't been reassigned yet).
+        let pruneable_zones =
+            PruneableZones::new(opctx, datastore, &blueprint, &[], &[])
+                .await
+                .expect("failed to find pruneable zones");
+        assert!(
+            !pruneable_zones.pruneable_zones.contains(&external_dns_zone_id),
+            "external DNS zone should not be pruneable when its IP \
+             hasn't been reassigned to another in-service zone"
+        );
+
+        // Now add another external DNS zone with the same IP address
+        let mut builder = BlueprintBuilder::new_based_on(
+            log,
+            &blueprint,
+            TEST_NAME,
+            PlannerRng::from_seed(("builder2", TEST_NAME)),
+        )
+        .expect("failed to create builder");
+
+        // Find a different sled to add the second external DNS zone
+        let other_sled_id = example
+            .input
+            .all_sled_ids(SledFilter::Commissioned)
+            .find(|id| *id != sled_id)
+            .expect("at least two sleds");
+
+        // Construct an ExternalNetworkingChoice with the same external IP
+        let external_ip_choice = {
+            let nic_ip_config = PrivateIpConfig::new_ipv4(
+                Ipv4Addr::new(10, 0, 0, 2),
+                "10.0.0.0/24".parse().unwrap(),
+            )
+            .expect("valid private IP config");
+            ExternalNetworkingChoice {
+                external_ip: dns_address.addr.ip(),
+                nic_ip_config,
+                nic_mac: ExternalMacAddr(
+                    omicron_common::api::external::MacAddr(
+                        [0, 0, 0, 0, 0, 2].into(),
+                    )
+                    .0,
+                ),
+            }
+        };
+
+        builder
+            .sled_add_zone_external_dns(
+                other_sled_id,
+                BlueprintZoneImageSource::InstallDataset,
+                external_ip_choice,
+            )
+            .expect("added external DNS zone");
+
+        let blueprint = builder.build(BlueprintSource::Test);
+
+        // Check that the zone IS now pruneable (the IP has been reassigned to
+        // another in-service zone)
+        let pruneable_zones =
+            PruneableZones::new(opctx, datastore, &blueprint, &[], &[])
+                .await
+                .expect("failed to find pruneable zones");
+        assert!(
+            pruneable_zones.pruneable_zones.contains(&external_dns_zone_id),
+            "external DNS zone should be pruneable when its IP has been \
+             reassigned to another in-service zone"
+        );
+
+        // Check that it's NOT pruneable when there's an associated external IP
+        // db row
+        let external_ip = make_external_ip_for_zone(external_dns_zone_id);
+        let pruneable_zones = PruneableZones::new(
+            opctx,
+            datastore,
+            &blueprint,
+            &[external_ip],
+            &[],
+        )
+        .await
+        .expect("failed to find pruneable zones");
+        assert!(
+            !pruneable_zones.pruneable_zones.contains(&external_dns_zone_id),
+            "external DNS zone should not be pruneable when there's an \
+             associated external IP row"
+        );
+
+        // Check that it's NOT pruneable when there's an associated service NIC
+        // db row
+        let service_nic = make_service_nic_for_zone(external_dns_zone_id);
+        let pruneable_zones = PruneableZones::new(
+            opctx,
+            datastore,
+            &blueprint,
+            &[],
+            &[service_nic],
+        )
+        .await
+        .expect("failed to find pruneable zones");
+        assert!(
+            !pruneable_zones.pruneable_zones.contains(&external_dns_zone_id),
+            "external DNS zone should not be pruneable when there's an \
+             associated service NIC row"
+        );
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_clickhouse_keeper_pruneable_reasons() {
+        const TEST_NAME: &str = "test_clickhouse_keeper_pruneable_reasons";
+
+        let logctx = dev::test_setup_log(TEST_NAME);
+        let log = &logctx.log;
+        let db = TestDatabase::new_with_datastore(log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        // Start with the base example system and add a clickhouse keeper zone
+        let (_example, initial_blueprint) =
+            ExampleSystemBuilder::new(log, TEST_NAME).build();
+        let mut builder = BlueprintBuilder::new_based_on(
+            log,
+            &initial_blueprint,
+            TEST_NAME,
+            PlannerRng::from_seed(("builder", TEST_NAME)),
+        )
+        .expect("failed to create builder");
+
+        // Find a sled and add a clickhouse keeper zone
+        let sled_id = builder
+            .current_in_service_zones()
+            .map(|(sled_id, _)| sled_id)
+            .next()
+            .expect("at least one sled");
+
+        builder
+            .sled_add_zone_clickhouse_keeper(
+                sled_id,
+                BlueprintZoneImageSource::InstallDataset,
+            )
+            .expect("added clickhouse keeper zone");
+
+        // Find the keeper zone we just added
+        let keeper_zone_id = builder
+            .current_in_service_zones()
+            .find_map(|(_, zone)| {
+                matches!(zone.zone_type, BlueprintZoneType::ClickhouseKeeper(_))
+                    .then_some(zone.id)
+            })
+            .expect("found clickhouse keeper zone");
+
+        // Manually add the keeper to the clickhouse cluster config
+        // (normally the planner does this, but we need it for testing)
+        let config =
+            builder.clickhouse_cluster_config().cloned().unwrap_or_else(|| {
+                ClickhouseClusterConfig::new(
+                    "test_cluster".to_string(),
+                    "test_secret".to_string(),
+                )
+            });
+        let mut new_config = config.clone();
+        new_config.keepers.insert(keeper_zone_id, KeeperId(1));
+        builder.set_clickhouse_cluster_config(Some(new_config));
+
+        // Expunge the keeper zone
+        builder
+            .sled_expunge_zone(sled_id, keeper_zone_id)
+            .expect("expunged zone");
+        builder
+            .sled_mark_expunged_zone_ready_for_cleanup(sled_id, keeper_zone_id)
+            .expect("marked zone ready for cleanup");
+
+        let blueprint = builder.build(BlueprintSource::Test);
+
+        // Confirm that it's NOT pruneable when it's still in the clickhouse
+        // cluster config
+        let pruneable_zones =
+            PruneableZones::new(opctx, datastore, &blueprint, &[], &[])
+                .await
+                .expect("failed to find pruneable zones");
+        assert!(
+            !pruneable_zones.pruneable_zones.contains(&keeper_zone_id),
+            "clickhouse keeper zone should not be pruneable when it's \
+             still in the clickhouse cluster config"
+        );
+
+        // Now remove it from the clickhouse cluster config
+        let mut builder = BlueprintBuilder::new_based_on(
+            log,
+            &blueprint,
+            TEST_NAME,
+            PlannerRng::from_seed(("builder2", TEST_NAME)),
+        )
+        .expect("failed to create builder");
+
+        // Get the current config, remove the keeper, and set it back
+        let mut config = builder
+            .clickhouse_cluster_config()
+            .expect("clickhouse cluster config exists")
+            .clone();
+        config.keepers.remove(&keeper_zone_id);
+        builder.set_clickhouse_cluster_config(Some(config));
+
+        let blueprint = builder.build(BlueprintSource::Test);
+
+        // Check that the zone IS now pruneable (removed from cluster config)
+        let pruneable_zones =
+            PruneableZones::new(opctx, datastore, &blueprint, &[], &[])
+                .await
+                .expect("failed to find pruneable zones");
+        assert!(
+            pruneable_zones.pruneable_zones.contains(&keeper_zone_id),
+            "clickhouse keeper zone should be pruneable when it's been \
+             removed from the clickhouse cluster config"
+        );
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_clickhouse_server_pruneable_reasons() {
+        const TEST_NAME: &str = "test_clickhouse_server_pruneable_reasons";
+
+        let logctx = dev::test_setup_log(TEST_NAME);
+        let log = &logctx.log;
+        let db = TestDatabase::new_with_datastore(log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        // Start with the base example system and add a clickhouse server zone
+        let (_example, initial_blueprint) =
+            ExampleSystemBuilder::new(log, TEST_NAME).build();
+        let mut builder = BlueprintBuilder::new_based_on(
+            log,
+            &initial_blueprint,
+            TEST_NAME,
+            PlannerRng::from_seed(("builder", TEST_NAME)),
+        )
+        .expect("failed to create builder");
+
+        // Find a sled and add a clickhouse server zone
+        let sled_id = builder
+            .current_in_service_zones()
+            .map(|(sled_id, _)| sled_id)
+            .next()
+            .expect("at least one sled");
+
+        builder
+            .sled_add_zone_clickhouse_server(
+                sled_id,
+                BlueprintZoneImageSource::InstallDataset,
+            )
+            .expect("added clickhouse server zone");
+
+        // Find the server zone we just added
+        let server_zone_id = builder
+            .current_in_service_zones()
+            .find_map(|(_, zone)| {
+                matches!(zone.zone_type, BlueprintZoneType::ClickhouseServer(_))
+                    .then_some(zone.id)
+            })
+            .expect("found clickhouse server zone");
+
+        // Manually add the server to the clickhouse cluster config
+        // (normally the planner does this, but we need it for testing)
+        use clickhouse_admin_types::server::ServerId;
+        use nexus_types::deployment::ClickhouseClusterConfig;
+        let config =
+            builder.clickhouse_cluster_config().cloned().unwrap_or_else(|| {
+                ClickhouseClusterConfig::new(
+                    "test_cluster".to_string(),
+                    "test_secret".to_string(),
+                )
+            });
+        let mut new_config = config.clone();
+        new_config.servers.insert(server_zone_id, ServerId(1));
+        builder.set_clickhouse_cluster_config(Some(new_config));
+
+        // Expunge the server zone
+        builder
+            .sled_expunge_zone(sled_id, server_zone_id)
+            .expect("expunged zone");
+        builder
+            .sled_mark_expunged_zone_ready_for_cleanup(sled_id, server_zone_id)
+            .expect("marked zone ready for cleanup");
+
+        let blueprint = builder.build(BlueprintSource::Test);
+
+        // Confirm that it's NOT pruneable when it's still in the clickhouse
+        // cluster config
+        let pruneable_zones =
+            PruneableZones::new(opctx, datastore, &blueprint, &[], &[])
+                .await
+                .expect("failed to find pruneable zones");
+        assert!(
+            !pruneable_zones.pruneable_zones.contains(&server_zone_id),
+            "clickhouse server zone should not be pruneable when it's \
+             still in the clickhouse cluster config"
+        );
+
+        // Now remove it from the clickhouse cluster config
+        let mut builder = BlueprintBuilder::new_based_on(
+            log,
+            &blueprint,
+            TEST_NAME,
+            PlannerRng::from_seed(("builder2", TEST_NAME)),
+        )
+        .expect("failed to create builder");
+
+        // Get the current config, remove the server, and set it back
+        let mut config = builder
+            .clickhouse_cluster_config()
+            .expect("clickhouse cluster config exists")
+            .clone();
+        config.servers.remove(&server_zone_id);
+        builder.set_clickhouse_cluster_config(Some(config));
+
+        let blueprint = builder.build(BlueprintSource::Test);
+
+        // Check that the zone IS now pruneable (removed from cluster config)
+        let pruneable_zones =
+            PruneableZones::new(opctx, datastore, &blueprint, &[], &[])
+                .await
+                .expect("failed to find pruneable zones");
+        assert!(
+            pruneable_zones.pruneable_zones.contains(&server_zone_id),
+            "clickhouse server zone should be pruneable when it's been \
+             removed from the clickhouse cluster config"
         );
 
         db.terminate().await;
