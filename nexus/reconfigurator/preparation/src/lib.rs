@@ -63,6 +63,8 @@ use std::collections::BTreeSet;
 use std::net::IpAddr;
 use std::sync::Arc;
 
+mod expunged_and_unreferenced;
+
 /// Given various pieces of database state that go into the blueprint planning
 /// process, produce a `PlanningInput` object encapsulating what the planner
 /// needs to generate a blueprint
@@ -92,6 +94,7 @@ pub struct PlanningInputFromDb<'a> {
     pub planner_config: PlannerConfig,
     pub active_nexus_zones: BTreeSet<OmicronZoneUuid>,
     pub not_yet_nexus_zones: BTreeSet<OmicronZoneUuid>,
+    pub expunged_and_unreferenced_zones: BTreeSet<OmicronZoneUuid>,
     pub log: &'a Logger,
 }
 
@@ -269,6 +272,15 @@ impl PlanningInputFromDb<'_> {
             active_nexus_zones.into_iter().map(|n| n.nexus_id()).collect();
         let not_yet_nexus_zones =
             not_yet_nexus_zones.into_iter().map(|n| n.nexus_id()).collect();
+        let expunged_and_unreferenced_zones =
+            expunged_and_unreferenced::find_expunged_and_unreferenced_zones(
+                opctx,
+                datastore,
+                &parent_blueprint,
+                &external_ip_rows,
+                &service_nic_rows,
+            )
+            .await?;
 
         let planning_input = PlanningInputFromDb {
             parent_blueprint,
@@ -297,6 +309,7 @@ impl PlanningInputFromDb<'_> {
             planner_config,
             active_nexus_zones,
             not_yet_nexus_zones,
+            expunged_and_unreferenced_zones,
         }
         .build()
         .internal_context("assembling planning_input")?;
@@ -454,6 +467,18 @@ impl PlanningInputFromDb<'_> {
                      to planning input: {e}"
                 ))
             })?;
+        }
+
+        for &zone_id in &self.expunged_and_unreferenced_zones {
+            builder.insert_expunged_and_unreferenced_zone(zone_id).map_err(
+                |e| {
+                    Error::internal_error(&format!(
+                        "unexpectedly failed to add expunged and unreferenced \
+                         zone ID {zone_id} to planning input: {}",
+                        InlineErrorChain::new(&e),
+                    ))
+                },
+            )?;
         }
 
         Ok(builder.build())
