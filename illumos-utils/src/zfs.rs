@@ -1788,6 +1788,7 @@ impl Zfs {
                 }
 
                 // usr/src/uts/common/fs/zfs/sys/zio.h defines EFRAGS == EBADR
+                #[cfg(any(target_os = "linux", target_os = "illumos"))]
                 libc::EBADR => {
                     // EFRAGS means the zero init thread encountered an error
                     // allocating a record. This is fatal! The pool is too
