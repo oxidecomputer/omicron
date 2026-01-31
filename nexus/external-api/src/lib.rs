@@ -46,6 +46,7 @@ mod v2026011600;
 mod v2026012200;
 mod v2026012300;
 mod v2026013000;
+mod v2026013001;
 
 #[cfg(test)]
 mod test_utils;
@@ -78,6 +79,7 @@ api_versions!([
     // |  date-based version should be at the top of the list.
     // v
     // (next_yyyymmddnn, IDENT),
+    (2026013100, READ_ONLY_DISKS_NULLABLE),
     (2026013001, READ_ONLY_DISKS),
     (2026013000, INSTANCES_EXTERNAL_SUBNETS),
     (2026012800, REMOVE_SUBNET_POOL_POOL_TYPE),
@@ -2309,7 +2311,23 @@ pub trait NexusExternalApi {
         method = POST,
         path = "/v1/disks",
         tags = ["disks"],
-        versions = VERSION_READ_ONLY_DISKS..,
+        versions = VERSION_READ_ONLY_DISKS..VERSION_READ_ONLY_DISKS_NULLABLE,
+    }]
+    async fn v2026013001_disk_create(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<params::ProjectSelector>,
+        new_disk: TypedBody<v2026013001::DiskCreate>,
+    ) -> Result<HttpResponseCreated<Disk>, HttpError> {
+        Self::disk_create(rqctx, query_params, new_disk.map(Into::into)).await
+    }
+
+    // TODO-correctness See note about instance create.  This should be async.
+    /// Create disk
+    #[endpoint {
+        method = POST,
+        path = "/v1/disks",
+        tags = ["disks"],
+        versions = VERSION_READ_ONLY_DISKS_NULLABLE..,
     }]
     async fn disk_create(
         rqctx: RequestContext<Self::Context>,
@@ -2555,12 +2573,27 @@ pub trait NexusExternalApi {
             .await
     }
 
+    #[endpoint {
+        method = POST,
+        path = "/v1/instances",
+        tags = ["instances"],
+        versions = VERSION_READ_ONLY_DISKS..VERSION_READ_ONLY_DISKS_NULLABLE,
+    }]
+    async fn v2026013001_instance_create(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<params::ProjectSelector>,
+        new_instance: TypedBody<v2026013001::InstanceCreate>,
+    ) -> Result<HttpResponseCreated<Instance>, HttpError> {
+        Self::instance_create(rqctx, query_params, new_instance.map(Into::into))
+            .await
+    }
+
     /// Create instance
     #[endpoint {
         method = POST,
         path = "/v1/instances",
         tags = ["instances"],
-        versions = VERSION_READ_ONLY_DISKS..,
+        versions = VERSION_READ_ONLY_DISKS_NULLABLE..,
     }]
     async fn instance_create(
         rqctx: RequestContext<Self::Context>,
