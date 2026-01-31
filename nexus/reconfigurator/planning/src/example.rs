@@ -700,6 +700,54 @@ impl ExampleSystemBuilder {
                             )
                             .unwrap();
                     }
+                    // Add ClickhouseKeeper zones if a replicated policy is set.
+                    if let Some(policy) = &self.clickhouse_policy {
+                        let target_keepers = match &policy.mode {
+                            nexus_types::deployment::ClickhouseMode::Both {
+                                target_keepers,
+                                ..
+                            }
+                            | nexus_types::deployment::ClickhouseMode::ClusterOnly {
+                                target_keepers,
+                                ..
+                            } => *target_keepers,
+                            nexus_types::deployment::ClickhouseMode::SingleNodeOnly => 0,
+                        };
+                        if discretionary_ix < target_keepers.into() {
+                            builder
+                                .sled_add_zone_clickhouse_keeper(
+                                    sled_id,
+                                    self.target_release
+                                        .zone_image_source(ZoneKind::ClickhouseKeeper)
+                                        .expect("obtained ClickhouseKeeper image source"),
+                                )
+                                .unwrap();
+                        }
+                    }
+                    // Add ClickhouseServer zones if a replicated policy is set.
+                    if let Some(policy) = &self.clickhouse_policy {
+                        let target_servers = match &policy.mode {
+                            nexus_types::deployment::ClickhouseMode::Both {
+                                target_servers,
+                                ..
+                            }
+                            | nexus_types::deployment::ClickhouseMode::ClusterOnly {
+                                target_servers,
+                                ..
+                            } => *target_servers,
+                            nexus_types::deployment::ClickhouseMode::SingleNodeOnly => 0,
+                        };
+                        if discretionary_ix < target_servers.into() {
+                            builder
+                                .sled_add_zone_clickhouse_server(
+                                    sled_id,
+                                    self.target_release
+                                        .zone_image_source(ZoneKind::ClickhouseServer)
+                                        .expect("obtained ClickhouseServer image source"),
+                                )
+                                .unwrap();
+                        }
+                    }
                     let mut internal_dns_subnets =
                         builder.available_internal_dns_subnets().unwrap();
                     for _ in 0..self
@@ -1144,6 +1192,7 @@ pub fn extract_tuf_repo_description(
 #[cfg(test)]
 mod tests {
     use std::collections::BTreeMap;
+    use std::collections::BTreeSet;
     use std::time::Duration;
 
     use anyhow::anyhow;
@@ -1165,6 +1214,7 @@ mod tests {
     use omicron_test_utils::dev::test_setup_log;
     use sled_agent_types::inventory::{OmicronZoneConfig, ZoneKind};
     use slog_error_chain::InlineErrorChain;
+    use strum::IntoEnumIterator;
 
     use super::*;
 
@@ -1312,14 +1362,24 @@ mod tests {
         let logctx = test_setup_log(TEST_NAME);
 
         // Build an example system with all supported zone types.
-        // Explicitly enable the new zone types (Oximeter, CockroachDB,
-        // BoundaryNtp) which default to 0 for backward compatibility.
+        // Explicitly enable zone types that default to 0 or are not included
+        // by default for backward compatibility.
         let (example, blueprint) =
             ExampleSystemBuilder::new(&logctx.log, TEST_NAME)
-                .nsleds(3)
+                .nsleds(5)
                 .oximeter_count(OXIMETER_REDUNDANCY)
                 .cockroachdb_count(COCKROACHDB_REDUNDANCY)
                 .boundary_ntp_count(2)
+                .external_dns_count(1)
+                .unwrap()
+                .clickhouse_policy(nexus_types::deployment::ClickhousePolicy {
+                    version: 0,
+                    mode: nexus_types::deployment::ClickhouseMode::Both {
+                        target_servers: 2,
+                        target_keepers: 3,
+                    },
+                    time_created: chrono::Utc::now(),
+                })
                 .build();
 
         // Check that the system's target counts are set correctly.
@@ -1332,26 +1392,44 @@ mod tests {
             COCKROACHDB_REDUNDANCY
         );
 
-        // Check that the right number of zones are present in both the
-        // blueprint and in the collection.
+        // Verify that we can deploy every type of zone by iterating all
+        // ZoneKind variants and checking that each is represented in the
+        // blueprint.
+        let mut uncovered_zone_kinds: BTreeSet<ZoneKind> =
+            ZoneKind::iter().collect();
+
+        for (_, zone_config) in blueprint.in_service_zones() {
+            uncovered_zone_kinds.remove(&zone_config.zone_type.kind());
+        }
+
+        assert!(
+            uncovered_zone_kinds.is_empty(),
+            "the following zone kinds were not found in the blueprint: {:?}",
+            uncovered_zone_kinds
+        );
+
+        // Also verify the collection has all zone types.
+        let mut uncovered_zone_kinds: BTreeSet<ZoneKind> =
+            ZoneKind::iter().collect();
+
+        for zone in example.collection.all_ledgered_omicron_zones() {
+            uncovered_zone_kinds.remove(&zone.zone_type.kind());
+        }
+
+        assert!(
+            uncovered_zone_kinds.is_empty(),
+            "the following zone kinds were not found in the collection: \
+             {:?}",
+            uncovered_zone_kinds
+        );
+
+        // Specific checks for zones that have configurable counts.
         let oximeter_zones =
             blueprint_zones_of_kind(&blueprint, ZoneKind::Oximeter);
         assert_eq!(
             oximeter_zones.len(),
             OXIMETER_REDUNDANCY,
             "expected {} Oximeter zones in blueprint, got {}: {:#?}",
-            OXIMETER_REDUNDANCY,
-            oximeter_zones.len(),
-            oximeter_zones,
-        );
-        let oximeter_zones = collection_ledgered_zones_of_kind(
-            &example.collection,
-            ZoneKind::Oximeter,
-        );
-        assert_eq!(
-            oximeter_zones.len(),
-            OXIMETER_REDUNDANCY,
-            "expected {} Oximeter zones in collection, got {}: {:#?}",
             OXIMETER_REDUNDANCY,
             oximeter_zones.len(),
             oximeter_zones,
@@ -1367,22 +1445,10 @@ mod tests {
             cockroachdb_zones.len(),
             cockroachdb_zones,
         );
-        let cockroachdb_zones = collection_ledgered_zones_of_kind(
-            &example.collection,
-            ZoneKind::CockroachDb,
-        );
-        assert_eq!(
-            cockroachdb_zones.len(),
-            COCKROACHDB_REDUNDANCY,
-            "expected {} CockroachDB zones in collection, got {}: {:#?}",
-            COCKROACHDB_REDUNDANCY,
-            cockroachdb_zones.len(),
-            cockroachdb_zones,
-        );
 
-        // With 3 sleds and boundary_ntp_count set to 2, we expect:
+        // With 5 sleds and boundary_ntp_count set to 2, we expect:
         // - 2 BoundaryNtp zones on the first two discretionary sleds
-        // - 1 InternalNtp zone on the remaining sled
+        // - 3 InternalNtp zones on the remaining sleds
         let boundary_ntp_zones =
             blueprint_zones_of_kind(&blueprint, ZoneKind::BoundaryNtp);
         assert_eq!(
@@ -1392,35 +1458,13 @@ mod tests {
             boundary_ntp_zones.len(),
             boundary_ntp_zones,
         );
-        let boundary_ntp_zones = collection_ledgered_zones_of_kind(
-            &example.collection,
-            ZoneKind::BoundaryNtp,
-        );
-        assert_eq!(
-            boundary_ntp_zones.len(),
-            2,
-            "expected 2 BoundaryNtp zones in collection, got {}: {:#?}",
-            boundary_ntp_zones.len(),
-            boundary_ntp_zones,
-        );
 
         let internal_ntp_zones =
             blueprint_zones_of_kind(&blueprint, ZoneKind::InternalNtp);
         assert_eq!(
             internal_ntp_zones.len(),
-            1,
-            "expected 1 InternalNtp zone in blueprint, got {}: {:#?}",
-            internal_ntp_zones.len(),
-            internal_ntp_zones,
-        );
-        let internal_ntp_zones = collection_ledgered_zones_of_kind(
-            &example.collection,
-            ZoneKind::InternalNtp,
-        );
-        assert_eq!(
-            internal_ntp_zones.len(),
-            1,
-            "expected 1 InternalNtp zone in collection, got {}: {:#?}",
+            3,
+            "expected 3 InternalNtp zones in blueprint, got {}: {:#?}",
             internal_ntp_zones.len(),
             internal_ntp_zones,
         );
