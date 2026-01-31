@@ -115,6 +115,7 @@ reqwest = { version = "0.12.24", features = ["blocking", "cookies", "json", "rus
 rsa = { version = "0.9.8", features = ["serde", "sha2"] }
 rustc-hash = { version = "2.1.1" }
 rustls = { version = "0.23.19", features = ["ring"] }
+rustls-pki-types = { version = "1.10.0", features = ["std"] }
 rustls-webpki = { version = "0.102.8", default-features = false, features = ["aws_lc_rs", "ring", "std"] }
 schemars = { version = "0.8.22", features = ["bytes", "chrono", "semver", "url", "uuid1"] }
 scopeguard = { version = "1.2.0" }
@@ -257,6 +258,7 @@ reqwest = { version = "0.12.24", features = ["blocking", "cookies", "json", "rus
 rsa = { version = "0.9.8", features = ["serde", "sha2"] }
 rustc-hash = { version = "2.1.1" }
 rustls = { version = "0.23.19", features = ["ring"] }
+rustls-pki-types = { version = "1.10.0", features = ["std"] }
 rustls-webpki = { version = "0.102.8", default-features = false, features = ["aws_lc_rs", "ring", "std"] }
 schemars = { version = "0.8.22", features = ["bytes", "chrono", "semver", "url", "uuid1"] }
 scopeguard = { version = "1.2.0" }
@@ -386,6 +388,7 @@ dof-9fbad63c4bcf4a8f = { package = "dof", version = "0.4.0", default-features = 
 getrandom-468e82937335b1c9 = { package = "getrandom", version = "0.3.4", default-features = false, features = ["std"] }
 hyper-rustls = { version = "0.27.7", features = ["http2", "ring", "webpki-tokio"] }
 hyper-util = { version = "0.1.19", features = ["full"] }
+itertools-5ef9efb8ec2df382 = { package = "itertools", version = "0.12.1" }
 itertools-93f6ce9d446188ac = { package = "itertools", version = "0.10.5" }
 miniz_oxide = { version = "0.8.5", default-features = false, features = ["with-alloc"] }
 mio = { version = "1.0.2", features = ["net", "os-ext"] }
@@ -405,6 +408,7 @@ dof-9fbad63c4bcf4a8f = { package = "dof", version = "0.4.0", default-features = 
 getrandom-468e82937335b1c9 = { package = "getrandom", version = "0.3.4", default-features = false, features = ["std"] }
 hyper-rustls = { version = "0.27.7", features = ["http2", "ring", "webpki-tokio"] }
 hyper-util = { version = "0.1.19", features = ["full"] }
+itertools-5ef9efb8ec2df382 = { package = "itertools", version = "0.12.1" }
 itertools-93f6ce9d446188ac = { package = "itertools", version = "0.10.5" }
 miniz_oxide = { version = "0.8.5", default-features = false, features = ["with-alloc"] }
 mio = { version = "1.0.2", features = ["net", "os-ext"] }
