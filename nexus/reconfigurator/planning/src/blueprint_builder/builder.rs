@@ -1705,32 +1705,6 @@ impl<'a> BlueprintBuilder<'a> {
         self.sled_add_zone(sled_id, zone)
     }
 
-    pub fn sled_add_zone_internal_ntp(
-        &mut self,
-        sled_id: SledUuid,
-        image_source: BlueprintZoneImageSource,
-    ) -> Result<(), Error> {
-        let zone_id = self.rng.sled_rng(sled_id).next_zone();
-        let ip = self.sled_alloc_ip(sled_id)?;
-        let port = omicron_common::address::NTP_PORT;
-        let address = SocketAddrV6::new(ip, port, 0, 0);
-        let zone_type =
-            BlueprintZoneType::InternalNtp(blueprint_zone_type::InternalNtp {
-                address,
-            });
-        let filesystem_pool =
-            self.sled_select_zpool(sled_id, zone_type.kind())?;
-
-        let zone = BlueprintZoneConfig {
-            disposition: BlueprintZoneDisposition::InService,
-            id: zone_id,
-            filesystem_pool,
-            zone_type,
-            image_source,
-        };
-        self.sled_add_zone(sled_id, zone)
-    }
-
     pub fn sled_add_zone_crucible_pantry(
         &mut self,
         sled_id: SledUuid,
@@ -3390,6 +3364,10 @@ pub mod test {
                 }
             }
             assert!(!used_ip_ranges.is_empty());
+            // Deduplicate ranges (multiple zones may share the same IP
+            // ranges).
+            used_ip_ranges.sort();
+            used_ip_ranges.dedup();
             let input = {
                 let mut builder = input.into_builder();
                 builder.policy_mut().external_ips = {
@@ -3444,9 +3422,10 @@ pub mod test {
         let mut rng = SimRngState::from_seed(TEST_NAME);
 
         // Start with an example system (no CRDB zones).
-        let (example, parent) = ExampleSystemBuilder::new(&logctx.log, TEST_NAME)
-            .cockroachdb_count(0)
-            .build();
+        let (example, parent) =
+            ExampleSystemBuilder::new(&logctx.log, TEST_NAME)
+                .cockroachdb_count(0)
+                .build();
         let input = example.input;
 
         // Ensure no CRDB zones are present initially (they default to 0).

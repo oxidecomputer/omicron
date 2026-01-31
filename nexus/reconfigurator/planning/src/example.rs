@@ -39,9 +39,11 @@ use nexus_types::external_api::views::SledPolicy;
 use nexus_types::inventory::Collection;
 use omicron_common::address::Ipv4Range;
 use omicron_common::api::external::TufRepoDescription;
+#[cfg(test)]
 use omicron_common::policy::COCKROACHDB_REDUNDANCY;
 use omicron_common::policy::CRUCIBLE_PANTRY_REDUNDANCY;
 use omicron_common::policy::INTERNAL_DNS_REDUNDANCY;
+#[cfg(test)]
 use omicron_common::policy::OXIMETER_REDUNDANCY;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::SledKind;
@@ -216,7 +218,7 @@ pub struct ExampleSystemBuilder {
     crucible_pantry_count: ZoneCount,
     oximeter_count: ZoneCount,
     cockroachdb_count: ZoneCount,
-    internal_ntp_count: ZoneCount,
+    add_ntp_zones: bool,
     clickhouse_policy: Option<nexus_types::deployment::ClickhousePolicy>,
     create_zones: bool,
     create_disks_in_blueprint: bool,
@@ -256,7 +258,7 @@ impl ExampleSystemBuilder {
             crucible_pantry_count: ZoneCount(CRUCIBLE_PANTRY_REDUNDANCY),
             oximeter_count: ZoneCount(0),
             cockroachdb_count: ZoneCount(0),
-            internal_ntp_count: ZoneCount(0),
+            add_ntp_zones: false,
             clickhouse_policy: None,
             create_zones: true,
             create_disks_in_blueprint: true,
@@ -368,16 +370,16 @@ impl ExampleSystemBuilder {
         self
     }
 
-    /// Set the number of InternalNtp instances in the example system.
+    /// Set whether to add BoundaryNtp zones to the example system.
     ///
-    /// The default value is 1. A value of 0 is permitted.
-    ///
-    /// Note: InternalNtp zones can cause DNS packet fragmentation issues if
-    /// too many are deployed. See issue #9178.
+    /// The default value is `false`, which means InternalNtp zones will be
+    /// added to all sleds (the original behavior). If set to `true`, the
+    /// example system will add two BoundaryNtp zones on the first two
+    /// discretionary sleds, and InternalNtp zones on remaining sleds.
     ///
     /// If [`Self::create_zones`] is set to `false`, this is ignored.
-    pub fn internal_ntp_count(mut self, internal_ntp_count: usize) -> Self {
-        self.internal_ntp_count = ZoneCount(internal_ntp_count);
+    pub fn add_ntp_zones(mut self, add: bool) -> Self {
+        self.add_ntp_zones = add;
         self
     }
 
@@ -494,10 +496,6 @@ impl ExampleSystemBuilder {
         self.cockroachdb_count.0
     }
 
-    pub fn get_internal_ntp_zones(&self) -> usize {
-        self.internal_ntp_count.0
-    }
-
     /// Create a new example system with the given modifications.
     ///
     /// Return the system, and the initial blueprint that matches it.
@@ -515,7 +513,7 @@ impl ExampleSystemBuilder {
             "crucible_pantry_count" => self.crucible_pantry_count.0,
             "oximeter_count" => self.oximeter_count.0,
             "cockroachdb_count" => self.cockroachdb_count.0,
-            "internal_ntp_count" => self.internal_ntp_count.0,
+            "add_ntp_zones" => self.add_ntp_zones,
             "clickhouse_policy" => ?self.clickhouse_policy,
             "create_zones" => self.create_zones,
             "create_disks_in_blueprint" => self.create_disks_in_blueprint,
@@ -529,12 +527,9 @@ impl ExampleSystemBuilder {
         system
             .set_target_nexus_zone_count(nexus_count.0)
             .set_target_internal_dns_zone_count(self.internal_dns_count.0)
-            .set_target_crucible_pantry_zone_count(
-                self.crucible_pantry_count.0,
-            )
+            .set_target_crucible_pantry_zone_count(self.crucible_pantry_count.0)
             .set_target_oximeter_zone_count(self.oximeter_count.0)
-            .set_target_cockroachdb_zone_count(self.cockroachdb_count.0)
-            .set_target_internal_ntp_zone_count(self.internal_ntp_count.0);
+            .set_target_cockroachdb_zone_count(self.cockroachdb_count.0);
 
         // Set the clickhouse policy if one was specified
         if let Some(policy) = &self.clickhouse_policy {
@@ -656,11 +651,10 @@ impl ExampleSystemBuilder {
                     .unwrap();
             }
             if self.create_zones {
-                // If internal_ntp_count is 0, use sled_ensure_zone_ntp which
-                // adds an InternalNtp zone to every sled. Otherwise,
-                // InternalNtp zones will be added below based on
-                // internal_ntp_count distribution.
-                if self.internal_ntp_count.0 == 0 {
+                // Add InternalNtp zones on all sleds by default (original
+                // behavior). If add_ntp_zones is true, we'll add BoundaryNtp
+                // zones later instead.
+                if !self.add_ntp_zones {
                     let _ = builder
                         .sled_ensure_zone_ntp(
                             sled_id,
@@ -786,20 +780,49 @@ impl ExampleSystemBuilder {
                                 .expect("obtained CockroachDb image source"),
                         );
                     }
-                    for _ in 0..self
-                        .internal_ntp_count
-                        .on(discretionary_ix, discretionary_sled_count)
-                    {
+                    // Optionally add BoundaryNtp zones. On the first two
+                    // discretionary sleds, add BoundaryNtp zones if enabled. On
+                    // all sleds (below, outside the discretionary section), we'll
+                    // add InternalNtp zones (unless BoundaryNtp was already added).
+                    if self.add_ntp_zones && discretionary_ix < 2 {
+                        let ntp_servers = vec!["ntp.example.com".to_string()];
+                        let dns_servers = vec!["8.8.8.8".parse().unwrap()];
+                        let domain = Some("example.com".to_string());
+                        let external_ip = external_networking_alloc
+                            .for_new_boundary_ntp()
+                            .expect(
+                                "should have an external IP for BoundaryNtp",
+                            );
                         builder
-                            .sled_add_zone_internal_ntp(
+                            .sled_add_zone_boundary_ntp_with_config(
                                 sled_id,
+                                ntp_servers,
+                                dns_servers,
+                                domain,
                                 self.target_release
-                                    .zone_image_source(ZoneKind::InternalNtp)
-                                    .expect("obtained InternalNtp image source"),
+                                    .zone_image_source(ZoneKind::BoundaryNtp)
+                                    .expect(
+                                        "obtained BoundaryNtp image source",
+                                    ),
+                                external_ip,
                             )
                             .unwrap();
                     }
                     discretionary_ix += 1;
+                }
+
+                // If add_ntp_zones is true, add InternalNtp zones on sleds that
+                // don't have BoundaryNtp zones. sled_ensure_zone_ntp is a no-op
+                // if the sled already has an NTP zone.
+                if self.add_ntp_zones {
+                    let _ = builder
+                        .sled_ensure_zone_ntp(
+                            sled_id,
+                            self.target_release
+                                .zone_image_source(ZoneKind::InternalNtp)
+                                .expect("obtained InternalNtp image source"),
+                        )
+                        .unwrap();
                 }
 
                 for pool_name in sled_details.resources.zpools.keys() {
@@ -1303,13 +1326,13 @@ mod tests {
 
         // Build an example system with all supported zone types.
         // Explicitly enable the new zone types (Oximeter, CockroachDB,
-        // InternalNtp) which default to 0 for backward compatibility.
+        // BoundaryNtp) which default to 0 for backward compatibility.
         let (example, blueprint) =
             ExampleSystemBuilder::new(&logctx.log, TEST_NAME)
                 .nsleds(3)
                 .oximeter_count(OXIMETER_REDUNDANCY)
                 .cockroachdb_count(COCKROACHDB_REDUNDANCY)
-                .internal_ntp_count(1)
+                .add_ntp_zones(true)
                 .build();
 
         // Check that the system's target counts are set correctly.
@@ -1321,7 +1344,6 @@ mod tests {
             example.system.target_cockroachdb_zone_count(),
             COCKROACHDB_REDUNDANCY
         );
-        assert_eq!(example.system.target_internal_ntp_zone_count(), 1);
 
         // Check that the right number of zones are present in both the
         // blueprint and in the collection.
@@ -1369,6 +1391,30 @@ mod tests {
             COCKROACHDB_REDUNDANCY,
             cockroachdb_zones.len(),
             cockroachdb_zones,
+        );
+
+        // With 3 sleds and add_ntp_zones(true), we expect:
+        // - 2 BoundaryNtp zones on the first two discretionary sleds
+        // - 1 InternalNtp zone on the remaining sled
+        let boundary_ntp_zones =
+            blueprint_zones_of_kind(&blueprint, ZoneKind::BoundaryNtp);
+        assert_eq!(
+            boundary_ntp_zones.len(),
+            2,
+            "expected 2 BoundaryNtp zones in blueprint, got {}: {:#?}",
+            boundary_ntp_zones.len(),
+            boundary_ntp_zones,
+        );
+        let boundary_ntp_zones = collection_ledgered_zones_of_kind(
+            &example.collection,
+            ZoneKind::BoundaryNtp,
+        );
+        assert_eq!(
+            boundary_ntp_zones.len(),
+            2,
+            "expected 2 BoundaryNtp zones in collection, got {}: {:#?}",
+            boundary_ntp_zones.len(),
+            boundary_ntp_zones,
         );
 
         let internal_ntp_zones =
@@ -1642,6 +1688,9 @@ mod tests {
                 // Cockroach and Oximeter can be added via the
                 // cockroachdb_count() and oximeter_count() builder methods,
                 // but are not included by default.
+                //
+                // BoundaryNtp zones can be added via the add_ntp_zones()
+                // builder method, but are not included by default.
                 ServiceName::ClickhouseAdminKeeper
                 | ServiceName::ClickhouseAdminServer
                 | ServiceName::ClickhouseClusterNative

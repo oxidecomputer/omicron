@@ -116,7 +116,6 @@ pub struct SystemDescription {
     available_non_scrimlet_slots: BTreeSet<u16>,
     available_scrimlet_slots: BTreeSet<u16>,
     target_boundary_ntp_zone_count: usize,
-    target_internal_ntp_zone_count: usize,
     target_nexus_zone_count: usize,
     target_internal_dns_zone_count: usize,
     target_oximeter_zone_count: usize,
@@ -183,7 +182,6 @@ impl SystemDescription {
         // issues with the planner thinking our system is out of date from the
         // gate.
         let target_boundary_ntp_zone_count = 0;
-        let target_internal_ntp_zone_count = 0;
         let target_cockroachdb_zone_count = 0;
         let target_oximeter_zone_count = 0;
 
@@ -214,7 +212,6 @@ impl SystemDescription {
             available_non_scrimlet_slots,
             available_scrimlet_slots,
             target_boundary_ntp_zone_count,
-            target_internal_ntp_zone_count,
             target_nexus_zone_count,
             target_internal_dns_zone_count,
             target_oximeter_zone_count,
@@ -297,18 +294,6 @@ impl SystemDescription {
 
     pub fn target_boundary_ntp_zone_count(&self) -> usize {
         self.target_boundary_ntp_zone_count
-    }
-
-    pub fn set_target_internal_ntp_zone_count(
-        &mut self,
-        count: usize,
-    ) -> &mut Self {
-        self.target_internal_ntp_zone_count = count;
-        self
-    }
-
-    pub fn target_internal_ntp_zone_count(&self) -> usize {
-        self.target_internal_ntp_zone_count
     }
 
     pub fn set_target_crucible_pantry_zone_count(
