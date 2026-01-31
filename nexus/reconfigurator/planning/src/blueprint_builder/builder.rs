@@ -3364,10 +3364,6 @@ pub mod test {
                 }
             }
             assert!(!used_ip_ranges.is_empty());
-            // Deduplicate ranges (multiple zones may share the same IP
-            // ranges).
-            used_ip_ranges.sort();
-            used_ip_ranges.dedup();
             let input = {
                 let mut builder = input.into_builder();
                 builder.policy_mut().external_ips = {
@@ -3423,16 +3419,17 @@ pub mod test {
 
         // Start with an example system (no CRDB zones).
         let (example, parent) =
-            ExampleSystemBuilder::new(&logctx.log, TEST_NAME)
-                .cockroachdb_count(0)
-                .build();
+            ExampleSystemBuilder::new(&logctx.log, TEST_NAME).build();
         let input = example.input;
 
-        // Ensure no CRDB zones are present initially (they default to 0).
+        // Ensure no CRDB zones (currently `ExampleSystemBuilder` never
+        // provisions CRDB; this check makes sure we update our use of it if
+        // that changes).
         for (_, z) in parent.in_service_zones() {
             assert!(
                 !z.zone_type.is_cockroach(),
-                "unexpected cockroach zone: {z:?}"
+                "unexpected cockroach zone \
+                 (update use of ExampleSystemBuilder?): {z:?}"
             );
         }
 
