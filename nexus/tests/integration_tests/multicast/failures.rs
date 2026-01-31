@@ -106,6 +106,7 @@ async fn test_dpd_failure_during_creating_state(
 
     // Recovery: restart DPD and verify group/member recover
     cptestctx.restart_dendrite(SwitchLocation::Switch0).await;
+    activate_multicast_reconciler(&cptestctx.lockstep_client).await;
     wait_for_group_active(client, group_name).await;
     wait_for_member_state(
         cptestctx,
@@ -289,8 +290,9 @@ async fn test_dpd_failure_during_deleting_state(
         assert_eq!(group.identity.name.as_str(), group_name);
     }
 
-    // Restart DPD and cleanup
+    // Restart DPD and activate reconciler to complete deletion
     cptestctx.restart_dendrite(SwitchLocation::Switch0).await;
+    activate_multicast_reconciler(&cptestctx.lockstep_client).await;
     cleanup_instances(cptestctx, client, project_name, &[instance_name]).await;
     wait_for_group_deleted(cptestctx, group_name).await;
 }
@@ -458,6 +460,7 @@ async fn test_implicit_deletion_with_dpd_failure(
 
         // Restart DPD and verify cleanup completes
         cptestctx.restart_dendrite(SwitchLocation::Switch0).await;
+        activate_multicast_reconciler(&cptestctx.lockstep_client).await;
 
         // Both group and orphaned members should be cleaned up
         wait_for_group_deleted(cptestctx, group_name).await;
@@ -1140,7 +1143,7 @@ async fn test_multicast_group_underlay_collision_retry(
 
     // Restart DPD and run reconciler, triggering collision detection
     cptestctx.restart_dendrite(SwitchLocation::Switch0).await;
-    wait_for_multicast_reconciler(&cptestctx.lockstep_client).await;
+    activate_multicast_reconciler(&cptestctx.lockstep_client).await;
 
     // Fetch group B after reconciliation
     let group_b_after = datastore

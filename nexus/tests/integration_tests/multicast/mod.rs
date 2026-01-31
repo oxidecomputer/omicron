@@ -67,7 +67,7 @@ mod networking_integration;
 mod pool_selection;
 
 // Timeout constants for test operations
-const POLL_INTERVAL: Duration = Duration::from_millis(80);
+const POLL_INTERVAL: Duration = Duration::from_millis(50);
 const MULTICAST_OPERATION_TIMEOUT: Duration = Duration::from_secs(120);
 
 /// Generic helper for PUT upsert requests that return 201 Created.
