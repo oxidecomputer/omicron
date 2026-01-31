@@ -55,7 +55,7 @@ impl super::Nexus {
                 .map(|p| p.external_subnet_name_owned(name.into())),
             params::ExternalSubnetSelector {
                 external_subnet: NameOrId::Id(_),
-                ..
+                project: Some(_),
             } => Err(Error::invalid_request(
                 "when providing external subnet as an ID \
                      project should not be specified",
