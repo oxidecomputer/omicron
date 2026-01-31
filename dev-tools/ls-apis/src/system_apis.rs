@@ -16,6 +16,7 @@ use crate::api_metadata::ApiExpectedConsumer;
 use crate::api_metadata::ApiExpectedConsumers;
 use crate::api_metadata::ApiMetadata;
 use crate::api_metadata::Evaluation;
+use crate::api_metadata::RuleMatcher;
 use crate::api_metadata::VersionedHow;
 use crate::cargo::DepPath;
 use crate::parse_toml_file;
@@ -29,10 +30,12 @@ use iddqd::IdOrdMap;
 use iddqd::id_upcast;
 use parse_display::{Display, FromStr};
 use petgraph::dot::Dot;
+use petgraph::graph::Graph;
 use petgraph::graph::NodeIndex;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::fmt;
+use swrite::{SWrite, swriteln};
 
 /// Query information about the Dropshot/OpenAPI/Progenitor-based APIs within
 /// the Oxide system
@@ -60,6 +63,10 @@ pub struct SystemApis {
 
     /// maps an API name to the server component(s) that expose that API
     api_producers: BTreeMap<ClientPackageName, ApiProducerMap>,
+
+    /// index of (server, client) pairs configured as same-deployment-unit edges
+    same_deployment_unit_edges:
+        BTreeSet<(ServerComponentName, ClientPackageName)>,
 
     /// source of developer-maintained API metadata
     api_metadata: AllApiMetadata,
@@ -124,6 +131,22 @@ impl SystemApis {
         // Load the API manifest.
         let api_metadata: AllApiMetadata =
             parse_toml_file(&args.api_manifest_path)?;
+
+        // Build an index of configured same-deployment-unit edges. We use this
+        // index for validation and lookups.
+        let same_deployment_unit_edges: BTreeSet<_> = api_metadata
+            .same_deployment_unit_rules()
+            .filter_map(|rule| match &rule.matcher {
+                RuleMatcher::Server(server) => {
+                    Some((server.clone(), rule.client.clone()))
+                }
+                RuleMatcher::Ancestor(_) => {
+                    // This case is rejected at API construction time.
+                    None
+                }
+            })
+            .collect();
+
         // Load Cargo metadata and validate it against the manifest.
         let (workspaces, warnings) = Workspaces::load(&api_metadata)?;
         if !warnings.is_empty() {
@@ -293,6 +316,7 @@ impl SystemApis {
             api_consumers,
             missing_expected_consumers,
             api_producers,
+            same_deployment_unit_edges,
             api_metadata,
             workspaces,
         })
@@ -330,6 +354,17 @@ impl SystemApis {
         &self.api_metadata
     }
 
+    /// Returns true if this (server, client) edge is a same-deployment-unit
+    /// edge.
+    pub fn is_same_deployment_unit_edge(
+        &self,
+        server: &ServerComponentName,
+        client: &ClientPackageName,
+    ) -> bool {
+        self.same_deployment_unit_edges
+            .contains(&(server.clone(), client.clone()))
+    }
+
     /// Given a server component, return the APIs consumed by this component
     pub fn component_apis_consumed(
         &self,
@@ -350,6 +385,7 @@ impl SystemApis {
                 if filter.should_include(
                     &self.api_metadata,
                     &self.workspaces,
+                    server_component,
                     client_pkgname,
                     p,
                 )? {
@@ -398,7 +434,8 @@ impl SystemApis {
                 if filter.should_include(
                     &self.api_metadata,
                     &self.workspaces,
-                    &client,
+                    &api_consumer.server_pkgname,
+                    client,
                     p,
                 )? {
                     include.push(p);
@@ -474,7 +511,23 @@ impl SystemApis {
     /// Returns a string that can be passed to `dot(1)` to render a graph of
     /// API dependencies among deployment units
     pub fn dot_by_unit(&self, filter: ApiDependencyFilter) -> Result<String> {
-        let mut graph = petgraph::graph::Graph::new();
+        let (graph, _) =
+            self.make_deployment_unit_graph(filter, VersionedHowFilter::All)?;
+        Ok(Dot::new(&graph).to_string())
+    }
+
+    // The complex type below is only used in this one place: the return value
+    // of this internal helper function.  A type alias doesn't seem better.
+    #[expect(clippy::type_complexity)]
+    fn make_deployment_unit_graph(
+        &self,
+        dependency_filter: ApiDependencyFilter,
+        versioned_how_filter: VersionedHowFilter,
+    ) -> Result<(
+        Graph<&DeploymentUnitName, &ClientPackageName>,
+        BTreeMap<&DeploymentUnitName, NodeIndex>,
+    )> {
+        let mut graph = Graph::new();
         let nodes: BTreeMap<_, _> = self
             .deployment_units()
             .map(|name| (name, graph.add_node(name)))
@@ -489,8 +542,30 @@ impl SystemApis {
             let my_node = nodes.get(deployment_unit).unwrap();
             for server_pkg in server_components {
                 for (client_pkg, _) in
-                    self.component_apis_consumed(server_pkg, filter)?
+                    self.component_apis_consumed(server_pkg, dependency_filter)?
                 {
+                    // When building a server-side-versioned-only graph,
+                    // filter to only server-versioned APIs and skip edges
+                    // that represent same-deployment-unit communication.
+                    if let VersionedHowFilter::ServerSideOnly =
+                        versioned_how_filter
+                    {
+                        let api = self
+                            .api_metadata
+                            .client_pkgname_lookup(client_pkg)
+                            .unwrap();
+                        if api.versioned_how != VersionedHow::Server {
+                            continue;
+                        }
+
+                        if self
+                            .same_deployment_unit_edges
+                            .contains(&(server_pkg.clone(), client_pkg.clone()))
+                        {
+                            continue;
+                        }
+                    }
+
                     // Multiple server components may produce an API. However,
                     // if an API is produced by multiple server components
                     // within the same deployment unit, we would like to only
@@ -506,17 +581,13 @@ impl SystemApis {
                         .collect();
                     for other_unit in other_units {
                         let other_node = nodes.get(other_unit).unwrap();
-                        graph.update_edge(
-                            *my_node,
-                            *other_node,
-                            client_pkg.clone(),
-                        );
+                        graph.update_edge(*my_node, *other_node, client_pkg);
                     }
                 }
             }
         }
 
-        Ok(Dot::new(&graph).to_string())
+        Ok((graph, nodes))
     }
 
     /// Returns a string that can be passed to `dot(1)` to render a graph of
@@ -530,17 +601,17 @@ impl SystemApis {
     }
 
     // The complex type below is only used in this one place: the return value
-    // of an internal helper function.  A type alias doesn't seem better.
+    // of this internal helper function.  A type alias doesn't seem better.
     #[allow(clippy::type_complexity)]
     fn make_component_graph(
         &self,
         dependency_filter: ApiDependencyFilter,
         versioned_on_server_only: bool,
     ) -> Result<(
-        petgraph::graph::Graph<&ServerComponentName, &ClientPackageName>,
+        Graph<&ServerComponentName, &ClientPackageName>,
         BTreeMap<&ServerComponentName, NodeIndex>,
     )> {
-        let mut graph = petgraph::graph::Graph::new();
+        let mut graph = Graph::new();
         let nodes: BTreeMap<_, _> = self
             .server_component_units
             .keys()
@@ -575,6 +646,108 @@ impl SystemApis {
         }
 
         Ok((graph, nodes))
+    }
+
+    /// Computes the set of (server, client) edges that must be excluded from
+    /// the deployment unit dependency graph because they represent intra-unit
+    /// communication for server-side-versioned APIs.
+    ///
+    /// These are edges where all of the below are true:
+    ///
+    /// 1. The server consumes the client.
+    /// 2. The API is server-side-versioned.
+    /// 3. The server and API producer are in the same deployment unit.
+    ///
+    /// Returns a set of (server, client) pairs.
+    fn compute_required_same_deployment_unit_edges(
+        &self,
+    ) -> Result<BTreeSet<(ServerComponentName, ClientPackageName)>> {
+        // Use the IncludeNonDag filter to include SameDeploymentUnit edges. We
+        // need to see all real edges (excluding only the Bogus and NotDeployed
+        // ones) to determine which ones should be in the same-deployment-unit
+        // set.
+        let filter = ApiDependencyFilter::IncludeNonDag;
+        let mut required = BTreeSet::new();
+
+        for (server, server_unit) in &self.server_component_units {
+            for (client, _) in self.component_apis_consumed(server, filter)? {
+                // Only consider server-side-versioned APIs.
+                let Some(api) = self.api_metadata.client_pkgname_lookup(client)
+                else {
+                    continue;
+                };
+                if api.versioned_how != VersionedHow::Server {
+                    continue;
+                }
+
+                // Check if any producer is in the same deployment unit.
+                for producer in self.api_producers(client) {
+                    let Some(producer_unit) =
+                        self.server_component_units.get(producer)
+                    else {
+                        continue;
+                    };
+
+                    if server_unit == producer_unit {
+                        // This edge would create an intra-unit dependency for
+                        // a server-versioned API, so it must be in the
+                        // same-deployment-unit-only set.
+                        required.insert((server.clone(), client.clone()));
+                        break;
+                    }
+                }
+            }
+        }
+
+        Ok(required)
+    }
+
+    /// Validates that the configured same-deployment-unit rules exactly match
+    /// the required set of edges that must be excluded.
+    fn validate_same_deployment_unit_rules(&self) -> Result<()> {
+        let required = self.compute_required_same_deployment_unit_edges()?;
+        let configured = &self.same_deployment_unit_edges;
+
+        let missing: BTreeSet<_> = required.difference(configured).collect();
+        let extra: BTreeSet<_> = configured.difference(&required).collect();
+
+        if !missing.is_empty() || !extra.is_empty() {
+            let mut msg = String::from(
+                "same-deployment-unit rules do not match required edges:\n",
+            );
+
+            if !missing.is_empty() {
+                swriteln!(
+                    msg,
+                    "\nmissing entries (these edges exist and need \
+                     same-deployment-unit exclusion):"
+                );
+                for (server, client) in &missing {
+                    swriteln!(
+                        msg,
+                        "  - server = {server:?}, client = {client:?}"
+                    );
+                }
+            }
+
+            if !extra.is_empty() {
+                swriteln!(
+                    msg,
+                    "\nextra entries (these edges don't exist or don't need \
+                     exclusion):"
+                );
+                for (server, client) in &extra {
+                    swriteln!(
+                        msg,
+                        "  - server = {server:?}, client = {client:?}"
+                    );
+                }
+            }
+
+            bail!("{}", msg);
+        }
+
+        Ok(())
     }
 
     /// Verifies various important properties about the assignment of which APIs
@@ -631,6 +804,10 @@ impl SystemApis {
         // can't be part of a cycle.
         let filter = ApiDependencyFilter::Default;
 
+        // Validate that all configured same-deployment-unit rules are correct
+        // and match the required set exactly.
+        self.validate_same_deployment_unit_rules()?;
+
         // Construct a graph where:
         //
         // - nodes are all the API producer and consumer components
@@ -643,8 +820,23 @@ impl SystemApis {
             nodes.iter().map(|(s_c, node)| (node, s_c)).collect();
         if let Err(error) = petgraph::algo::toposort(&graph, None) {
             bail!(
-                "graph of server-managed components has a cycle (includes \
-                 node: {:?})",
+                "graph of server-managed API dependencies between components \
+                 has a cycle (includes node: {:?})",
+                reverse_nodes.get(&error.node_id()).unwrap()
+            );
+        }
+
+        // Do the same with a graph of deployment units.
+        let (graph, nodes) = self.make_deployment_unit_graph(
+            filter,
+            VersionedHowFilter::ServerSideOnly,
+        )?;
+        let reverse_nodes: BTreeMap<_, _> =
+            nodes.iter().map(|(d_u, node)| (node, d_u)).collect();
+        if let Err(error) = petgraph::algo::toposort(&graph, None) {
+            bail!(
+                "graph of server-managed API dependencies between deployment \
+                 units has a cycle (includes node: {:?})",
                 reverse_nodes.get(&error.node_id()).unwrap()
             );
         }
@@ -1243,6 +1435,17 @@ impl<'a> ClientDependenciesTracker<'a> {
     }
 }
 
+/// Specifies whether to filter to only server-versioned APIs when building
+/// dependency graphs.
+#[derive(Clone, Debug)]
+pub enum VersionedHowFilter {
+    /// Include all APIs regardless of versioning strategy.
+    All,
+    /// Include only APIs with server-side versioning, and skip edges that
+    /// represent same-deployment-unit communication.
+    ServerSideOnly,
+}
+
 /// Specifies which API dependencies to include vs. ignore when iterating
 /// dependencies
 #[derive(Clone, Copy, Debug, Default, Display, FromStr)]
@@ -1279,36 +1482,42 @@ pub enum ApiDependencyFilter {
 
 impl ApiDependencyFilter {
     /// Return whether this filter should include a dependency on
-    /// `client_pkgname` that goes through dependency path `dep_path`
+    /// `client_pkgname` that goes either through `server` or through
+    /// `dep_path`.
+    ///
+    /// Note: `Evaluation::SameDeploymentUnit` edges are included by all filters
+    /// here. These edges represent real dependencies and should appear in
+    /// component listings and graphs. They are only excluded when building the
+    /// deployment unit graph for cycle detection, which is handled separately
+    /// via `VersionedHowFilter::ServerSideOnly` in
+    /// `make_deployment_unit_graph`.
     fn should_include(
         &self,
         api_metadata: &AllApiMetadata,
         workspaces: &Workspaces,
+        server: &ServerComponentName,
         client_pkgname: &ClientPackageName,
         dep_path: &DepPath,
     ) -> Result<bool> {
-        let evaluation = api_metadata
-            .evaluate_dependency(workspaces, client_pkgname, dep_path)
+        let eval = api_metadata
+            .evaluate_dependency(workspaces, server, client_pkgname, dep_path)
             .with_context(|| format!("error applying filter {:?}", self))?;
 
         Ok(match self {
             ApiDependencyFilter::All => true,
-            ApiDependencyFilter::Bogus => {
-                matches!(evaluation, Evaluation::Bogus)
-            }
+            ApiDependencyFilter::Bogus => eval.any_matches(Evaluation::Bogus),
             ApiDependencyFilter::NonBogus => {
-                !matches!(evaluation, Evaluation::Bogus)
+                !eval.any_matches(Evaluation::Bogus)
             }
-            ApiDependencyFilter::IncludeNonDag => !matches!(
-                evaluation,
-                Evaluation::Bogus | Evaluation::NotDeployed
-            ),
-            ApiDependencyFilter::Default => !matches!(
-                evaluation,
-                Evaluation::NonDag
-                    | Evaluation::Bogus
-                    | Evaluation::NotDeployed
-            ),
+            ApiDependencyFilter::IncludeNonDag => {
+                !eval.any_matches(Evaluation::Bogus)
+                    && !eval.any_matches(Evaluation::NotDeployed)
+            }
+            ApiDependencyFilter::Default => {
+                !eval.any_matches(Evaluation::NonDag)
+                    && !eval.any_matches(Evaluation::Bogus)
+                    && !eval.any_matches(Evaluation::NotDeployed)
+            }
         })
     }
 }
