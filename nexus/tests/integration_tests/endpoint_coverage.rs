@@ -8,9 +8,20 @@
 //! endpoints, such as the unauthorized coverage test and audit log coverage
 //! test.
 
+use dropshot::ApiEndpointVersions;
 use nexus_external_api::nexus_external_api_mod;
 use regex::Regex;
 use std::collections::{BTreeMap, BTreeSet};
+
+/// Returns true for "current" endpoints, false for backwards-compat shims.
+fn is_current_endpoint(versions: &ApiEndpointVersions) -> bool {
+    match versions {
+        ApiEndpointVersions::All | ApiEndpointVersions::From(_) => true,
+        ApiEndpointVersions::Until(_) | ApiEndpointVersions::FromUntil(_) => {
+            false
+        }
+    }
+}
 
 /// An API operation (one HTTP method on one path).
 #[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
@@ -29,9 +40,9 @@ pub struct ApiOperations {
 impl ApiOperations {
     /// Create an ApiOperations containing all operations from the API description.
     ///
-    /// Filters out versioned endpoints (operation IDs starting with "v20")
-    /// and deduplicates by (method, path) since multiple API versions can
-    /// share the same path.
+    /// Filters to only "current" endpoints (not backwards-compat shims) and
+    /// deduplicates by (method, path) since multiple API versions can share
+    /// the same path.
     pub fn new() -> Self {
         let api = nexus_external_api_mod::stub_api_description().unwrap();
 
@@ -40,9 +51,7 @@ impl ApiOperations {
         let operations = api
             .into_router()
             .endpoints(None)
-            .filter(|(_, _, endpoint)| {
-                !endpoint.operation_id.starts_with("v20")
-            })
+            .filter(|(_, _, endpoint)| is_current_endpoint(&endpoint.versions))
             .filter(|(path, method, _)| {
                 seen_paths.insert((method.to_string(), path.clone()))
             })
