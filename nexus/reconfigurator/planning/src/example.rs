@@ -524,9 +524,11 @@ impl ExampleSystemBuilder {
         // Update the system's target counts with the counts configured by the
         // caller.  The target counts are essentially planner configuration
         // (part of system policy).  The idea here is to configure the resulting
-        // system so that the planner is happy with the system we've created and
-        // doesn't try to add/remove zones if what the caller configured
-        // differs from the defaults.
+        // system's policy to match what the user configured so that if you were
+        // to run the planner on it (with planning input generated from the
+        // SystemDescription, which is what we're configuring here), it would be
+        // happy with the system we've created and wouldn't try to add/remove
+        // zones if what the caller configured differs from the defaults.
         //
         // Note that external DNS does not get configured in this way because
         // the target count is determined from the number of distinct external
