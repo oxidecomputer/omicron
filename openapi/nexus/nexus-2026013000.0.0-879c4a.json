@@ -7,7 +7,7 @@
       "url": "https://oxide.computer",
       "email": "api@oxide.computer"
     },
-    "version": "2026013001.0.0"
+    "version": "2026013000.0.0"
   },
   "paths": {
     "/device/auth": {
@@ -3976,6 +3976,7 @@
         "tags": [
           "instances"
         ],
+        "summary": "Create instance",
         "operationId": "instance_create",
         "parameters": [
           {
@@ -19382,10 +19383,6 @@
             "type": "string",
             "format": "uuid"
           },
-          "read_only": {
-            "description": "Whether or not this disk is read-only.",
-            "type": "boolean"
-          },
           "size": {
             "$ref": "#/components/schemas/ByteCount"
           },
@@ -19417,7 +19414,6 @@
           "id",
           "name",
           "project_id",
-          "read_only",
           "size",
           "state",
           "time_created",
@@ -19568,10 +19564,6 @@
             "description": "Create a disk from a disk snapshot",
             "type": "object",
             "properties": {
-              "read_only": {
-                "description": "If `true`, the disk created from this snapshot will be read-only.",
-                "type": "boolean"
-              },
               "snapshot_id": {
                 "type": "string",
                 "format": "uuid"
@@ -19584,7 +19576,6 @@
               }
             },
             "required": [
-              "read_only",
               "snapshot_id",
               "type"
             ]
@@ -19597,10 +19588,6 @@
                 "type": "string",
                 "format": "uuid"
               },
-              "read_only": {
-                "description": "If `true`, the disk created from this image will be read-only.",
-                "type": "boolean"
-              },
               "type": {
                 "type": "string",
                 "enum": [
@@ -19610,7 +19597,6 @@
             },
             "required": [
               "image_id",
-              "read_only",
               "type"
             ]
           },

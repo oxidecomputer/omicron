@@ -7935,6 +7935,7 @@
           "experimental"
         ],
         "summary": "Abort the latest rack membership change",
+        "description": "This operation is synchronous. Upon returning from the API call, a success response indicates that the prior membership change was aborted. An error response indicates that there is no active membership change in progress (previous changes have completed) or that the current membership change could not be aborted.",
         "operationId": "rack_membership_abort",
         "parameters": [
           {
