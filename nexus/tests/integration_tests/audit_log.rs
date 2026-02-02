@@ -749,17 +749,20 @@ async fn test_audit_log_scim_token_auth(ctx: &ControlPlaneTestContext) {
 
     let t1 = Utc::now();
 
-    // Make an audited SCIM request using the token
-    RequestBuilder::new(client, Method::GET, "/scim/v2/Users")
+    // Make an audited SCIM request using the token (must be mutating for audit)
+    RequestBuilder::new(client, Method::POST, "/scim/v2/Users")
         .header(
             header::AUTHORIZATION,
             format!("Bearer {}", created_token.bearer_token),
         )
+        .body(Some(&serde_json::json!({
+            "userName": "test-user@example.com",
+        })))
         .allow_non_dropshot_errors()
-        .expect_status(Some(StatusCode::OK))
+        .expect_status(Some(StatusCode::CREATED))
         .execute()
         .await
-        .expect("failed to list SCIM users");
+        .expect("failed to create SCIM user");
 
     let t2 = Utc::now();
 
@@ -768,7 +771,7 @@ async fn test_audit_log_scim_token_auth(ctx: &ControlPlaneTestContext) {
     assert_eq!(audit_log.items.len(), 1);
 
     let entry = &audit_log.items[0];
-    assert_eq!(entry.operation_id, "scim_v2_list_users");
+    assert_eq!(entry.operation_id, "scim_v2_create_user");
     assert_eq!(entry.request_uri, "/scim/v2/Users");
     assert_eq!(entry.auth_method, Some(views::AuthMethod::ScimToken));
     assert_eq!(entry.credential_id, Some(created_token.id));
@@ -778,6 +781,6 @@ async fn test_audit_log_scim_token_auth(ctx: &ControlPlaneTestContext) {
     );
     assert_eq!(
         entry.result,
-        views::AuditLogEntryResult::Success { http_status_code: 200 }
+        views::AuditLogEntryResult::Success { http_status_code: 201 }
     );
 }
