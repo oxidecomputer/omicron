@@ -9,26 +9,19 @@ use super::instance_common::VmmAndSledIds;
 use super::instance_common::networking_resource_instance_state;
 use crate::app::authn;
 use crate::app::authz;
-use crate::app::db;
 use crate::app::sagas::declare_saga_actions;
 use crate::app::sagas::instance_common::delete_subnet_attachment_from_dpd;
 use crate::app::sagas::instance_common::delete_subnet_attachment_from_opte;
 use crate::app::sagas::instance_common::send_subnet_attachment_to_dpd;
 use crate::app::sagas::instance_common::send_subnet_attachment_to_opte;
 use anyhow::Context as _;
-use nexus_db_lookup::LookupPath;
 use nexus_db_model::IpAttachState;
 use nexus_db_queries::db::datastore::ExternalSubnetAttachResult;
 use nexus_db_queries::db::datastore::ExternalSubnetBeginAttachResult;
 use nexus_types::external_api::views;
-use omicron_common::api::external::NameOrId;
-use omicron_uuid_kinds::ExternalSubnetUuid;
-use omicron_uuid_kinds::GenericUuid;
-use ref_cast::RefCast;
 use serde::Deserialize;
 use serde::Serialize;
 use steno::ActionError;
-use uuid::Uuid;
 
 declare_saga_actions! {
     subnet_detach;
@@ -58,9 +51,8 @@ declare_saga_actions! {
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct Params {
-    pub project_id: Uuid,
     pub authz_instance: authz::Instance,
-    pub subnet: NameOrId,
+    pub authz_subnet: authz::ExternalSubnet,
     /// Authentication context to use to fetch the instance's current state from
     /// the database.
     pub serialized_authn: authn::saga::Serialized,
@@ -76,19 +68,12 @@ async fn ssd_begin_detach_subnet(
         &sagactx,
         &params.serialized_authn,
     );
-    let (.., authz_subnet) = match &params.subnet {
-        NameOrId::Name(name) => LookupPath::new(&opctx, datastore)
-            .project_id(params.project_id)
-            .external_subnet_name(db::model::Name::ref_cast(name)),
-        NameOrId::Id(id) => LookupPath::new(&opctx, datastore)
-            .external_subnet_id(ExternalSubnetUuid::from_untyped_uuid(*id)),
-    }
-    .lookup_for(authz::Action::Modify)
-    .await
-    .map_err(ActionError::action_failed)?;
-
     datastore
-        .begin_detach_subnet(&opctx, &params.authz_instance, &authz_subnet)
+        .begin_detach_subnet(
+            &opctx,
+            &params.authz_instance,
+            &params.authz_subnet,
+        )
         .await
         .map_err(ActionError::action_failed)
 }
@@ -288,6 +273,8 @@ pub(crate) mod test {
     use omicron_common::address::IpVersion;
     use omicron_common::api::external::LookupType;
     use omicron_common::api::external::SimpleIdentityOrName;
+    use omicron_uuid_kinds::ExternalSubnetUuid;
+    use omicron_uuid_kinds::GenericUuid;
     use omicron_uuid_kinds::InstanceUuid;
     use oxnet::IpNet;
 
@@ -365,7 +352,7 @@ pub(crate) mod test {
 
         // Actually attach the subnet.
         let attach_params = crate::app::sagas::subnet_attach::Params {
-            authz_subnet,
+            authz_subnet: authz_subnet.clone(),
             ip_version: IpVersion::V4.into(),
             authz_instance: authz_instance.clone(),
             serialized_authn: authn::saga::Serialized::for_opctx(&opctx),
@@ -379,7 +366,6 @@ pub(crate) mod test {
             .await
             .expect("subnet attach saga should succeed");
 
-        let project_id = project.identity.id;
         Context {
             _subnet_pool: subnet_pool,
             _member: member,
@@ -387,9 +373,8 @@ pub(crate) mod test {
             _project: project,
             authz_instance: authz_instance.clone(),
             detach_params: Params {
-                project_id,
                 authz_instance,
-                subnet: NameOrId::Name(EXTERNAL_SUBNET_NAME.parse().unwrap()),
+                authz_subnet,
                 serialized_authn: authn::saga::Serialized::for_opctx(&opctx),
             },
         }
