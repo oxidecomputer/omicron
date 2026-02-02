@@ -999,6 +999,7 @@ pub enum ResourceType {
     SupportBundle,
     SubnetPool,
     SubnetPoolMember,
+    SubnetPoolSiloLink,
     Switch,
     SwitchPort,
     SwitchPortSettings,
@@ -1456,6 +1457,8 @@ pub struct Disk {
     pub state: DiskState,
     pub device_path: String,
     pub disk_type: DiskType,
+    /// Whether or not this disk is read-only.
+    pub read_only: bool,
 }
 
 /// State of a Disk

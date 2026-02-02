@@ -516,7 +516,9 @@ pub struct SubnetPoolUtilization {
 // EXTERNAL SUBNETS
 
 /// An external subnet allocated from a subnet pool
-#[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[derive(
+    ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq,
+)]
 pub struct ExternalSubnet {
     #[serde(flatten)]
     pub identity: IdentityMetadata,

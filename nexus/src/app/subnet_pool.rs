@@ -171,57 +171,101 @@ impl super::Nexus {
 
     // === Silo Linkage ===
 
-    // TODO(#9453): Implement using subnet_pool_lookup and datastore list
     pub(crate) async fn subnet_pool_silo_list(
         &self,
         opctx: &OpContext,
         pool: &NameOrId,
-        _pagparams: &DataPageParams<'_, Uuid>,
+        pagparams: &DataPageParams<'_, Uuid>,
     ) -> ListResultVec<views::SubnetPoolSiloLink> {
-        let not_found = not_found_error(pool, ResourceType::SubnetPool);
-        Err(self
-            .unimplemented_todo(opctx, Unimpl::ProtectedLookup(not_found))
-            .await)
+        let (authz_pool, _db_pool) = self
+            .datastore()
+            .lookup_subnet_pool(opctx, pool)
+            .fetch_for(authz::Action::ListChildren)
+            .await?;
+        self.datastore()
+            .list_silos_linked_to_subnet_pool(opctx, &authz_pool, pagparams)
+            .await
+            .map(|items| items.into_iter().map(Into::into).collect())
     }
 
-    // TODO(#9453): Implement using subnet_pool_lookup and datastore insert
     pub(crate) async fn subnet_pool_silo_link(
         &self,
         opctx: &OpContext,
         pool: &NameOrId,
-        _params: &params::SubnetPoolLinkSilo,
+        params: params::SubnetPoolLinkSilo,
     ) -> Result<views::SubnetPoolSiloLink, Error> {
-        let not_found = not_found_error(pool, ResourceType::SubnetPool);
-        Err(self
-            .unimplemented_todo(opctx, Unimpl::ProtectedLookup(not_found))
-            .await)
+        let params::SubnetPoolLinkSilo { silo, is_default } = params;
+        let (authz_pool, _db_pool) = self
+            .datastore()
+            .lookup_subnet_pool(opctx, pool)
+            .fetch_for(authz::Action::Modify)
+            .await?;
+        let (authz_silo, _db_silo) = self
+            .silo_lookup(opctx, silo)?
+            .fetch_for(authz::Action::Modify)
+            .await?;
+        self.datastore()
+            .link_subnet_pool_to_silo(
+                opctx,
+                &authz_pool,
+                &authz_silo,
+                is_default,
+            )
+            .await
+            .map(Into::into)
     }
 
-    // TODO(#9453): Implement using subnet_pool_lookup, silo_lookup, and datastore
     pub(crate) async fn subnet_pool_silo_update(
         &self,
         opctx: &OpContext,
-        pool: &NameOrId,
-        _silo: &NameOrId,
-        _params: &params::SubnetPoolSiloUpdate,
+        pool: NameOrId,
+        silo: NameOrId,
+        params: params::SubnetPoolSiloUpdate,
     ) -> UpdateResult<views::SubnetPoolSiloLink> {
-        let not_found = not_found_error(pool, ResourceType::SubnetPool);
-        Err(self
-            .unimplemented_todo(opctx, Unimpl::ProtectedLookup(not_found))
-            .await)
+        let params::SubnetPoolSiloUpdate { is_default } = params;
+        let (authz_pool, _db_pool) = self
+            .datastore()
+            .lookup_subnet_pool(opctx, &pool)
+            .fetch_for(authz::Action::Modify)
+            .await?;
+        let (authz_silo, _db_silo) = self
+            .silo_lookup(opctx, silo)?
+            .fetch_for(authz::Action::Modify)
+            .await?;
+        self.datastore()
+            .update_subnet_pool_silo_link(
+                opctx,
+                &authz_pool,
+                &authz_silo,
+                is_default,
+            )
+            .await
+            .map(Into::into)
     }
 
-    // TODO(#9453): Implement using subnet_pool_lookup, silo_lookup, and datastore
     pub(crate) async fn subnet_pool_silo_unlink(
         &self,
         opctx: &OpContext,
-        pool: &NameOrId,
-        _silo: &NameOrId,
+        pool: NameOrId,
+        silo: NameOrId,
     ) -> DeleteResult {
-        let not_found = not_found_error(pool, ResourceType::SubnetPool);
-        Err(self
-            .unimplemented_todo(opctx, Unimpl::ProtectedLookup(not_found))
-            .await)
+        let (authz_pool, db_pool) = self
+            .datastore()
+            .lookup_subnet_pool(opctx, &pool)
+            .fetch_for(authz::Action::Modify)
+            .await?;
+        let (authz_silo, _db_silo) = self
+            .silo_lookup(opctx, silo)?
+            .fetch_for(authz::Action::Modify)
+            .await?;
+        self.datastore()
+            .unlink_subnet_pool_from_silo(
+                opctx,
+                &authz_pool,
+                &db_pool,
+                &authz_silo,
+            )
+            .await
     }
 
     // === Utilization ===

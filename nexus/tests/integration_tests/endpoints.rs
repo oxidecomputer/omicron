@@ -104,6 +104,60 @@ pub static SUPPORT_BUNDLE_DOWNLOAD_FILE_URL: LazyLock<String> =
 pub static SUPPORT_BUNDLE_INDEX_URL: LazyLock<String> =
     LazyLock::new(|| format!("{SUPPORT_BUNDLES_URL}/{{id}}/index"));
 
+// Probes
+pub static DEMO_PROBES_URL: LazyLock<String> = LazyLock::new(|| {
+    format!("/experimental/v1/probes?project={}", *DEMO_PROJECT_NAME)
+});
+pub static DEMO_PROBE_URL: LazyLock<String> = LazyLock::new(|| {
+    format!("/experimental/v1/probes/demo-probe?project={}", *DEMO_PROJECT_NAME)
+});
+
+// Switch port / LLDP
+pub static DEMO_SWITCH_PORT_STATUS_URL: LazyLock<String> = LazyLock::new(
+    || {
+        format!(
+            "/v1/system/hardware/switch-port/qsfp0/status?rack_id={}&switch_location=switch0",
+            RACK_UUID
+        )
+    },
+);
+pub static DEMO_SWITCH_PORT_LLDP_CONFIG_URL: LazyLock<String> = LazyLock::new(
+    || {
+        format!(
+            "/v1/system/hardware/switch-port/qsfp0/lldp/config?rack_id={}&switch_location=switch0",
+            RACK_UUID
+        )
+    },
+);
+pub static DEMO_LLDP_NEIGHBORS_URL: LazyLock<String> = LazyLock::new(|| {
+    format!(
+        "/v1/system/hardware/rack-switch-port/{}/switch0/qsfp0/lldp/neighbors",
+        RACK_UUID
+    )
+});
+
+// Rack membership
+pub static DEMO_RACK_MEMBERSHIP_STATUS_URL: LazyLock<String> =
+    LazyLock::new(|| {
+        format!("/v1/system/hardware/racks/{}/membership", RACK_UUID)
+    });
+pub static DEMO_RACK_MEMBERSHIP_ADD_URL: LazyLock<String> =
+    LazyLock::new(|| {
+        format!("/v1/system/hardware/racks/{}/membership/add", RACK_UUID)
+    });
+
+// Alert resend
+pub static DEMO_ALERT_RESEND_URL: LazyLock<String> = LazyLock::new(|| {
+    format!(
+        "/v1/alerts/00000000-0000-0000-0000-000000000000/resend?receiver={}",
+        *DEMO_WEBHOOK_RECEIVER_NAME
+    )
+});
+
+// Access token delete
+pub const DEMO_ACCESS_TOKEN_DELETE_URL: &str =
+    "/v1/me/access-tokens/00000000-0000-0000-0000-000000000000";
+
 // Global policy
 pub const SYSTEM_POLICY_URL: &'static str = "/v1/system/policy";
 
@@ -1134,13 +1188,12 @@ pub static DEMO_SUBNET_POOL_MEMBER_REMOVE: LazyLock<
 > = LazyLock::new(|| params::SubnetPoolMemberRemove {
     subnet: "10.0.0.0/16".parse().unwrap(),
 });
-// TODO(#9453): These are stub endpoints that return "not implemented" errors.
 pub static DEMO_SUBNET_POOL_SILOS_URL: LazyLock<String> =
     LazyLock::new(|| format!("{}/silos", *DEMO_SUBNET_POOL_URL));
 pub static DEMO_SUBNET_POOL_LINK_SILO: LazyLock<params::SubnetPoolLinkSilo> =
     LazyLock::new(|| params::SubnetPoolLinkSilo {
         silo: NameOrId::Id(DEFAULT_SILO.identity().id),
-        is_default: false,
+        is_default: true,
     });
 pub static DEMO_SUBNET_POOL_SILO_URL: LazyLock<String> = LazyLock::new(|| {
     format!("{}/silos/{}", *DEMO_SUBNET_POOL_URL, *DEMO_SILO_NAME)
@@ -1862,7 +1915,7 @@ pub static VERIFY_ENDPOINTS: LazyLock<Vec<VerifyEndpoint>> = LazyLock::new(
                 visibility: Visibility::Protected,
                 unprivileged_access: UnprivilegedAccess::None,
                 allowed_methods: vec![
-                    AllowedMethod::GetUnimplemented,
+                    AllowedMethod::Get,
                     AllowedMethod::Post(
                         serde_json::to_value(&*DEMO_SUBNET_POOL_LINK_SILO)
                             .unwrap(),
@@ -1888,14 +1941,12 @@ pub static VERIFY_ENDPOINTS: LazyLock<Vec<VerifyEndpoint>> = LazyLock::new(
                 allowed_methods: vec![AllowedMethod::GetUnimplemented],
             },
             /* External Subnets (project-scoped) */
-            // TODO(#9453): These are stub endpoints. Use GetUnimplemented
-            // since privileged GET requests will return 500 not 200.
             VerifyEndpoint {
                 url: &DEMO_EXTERNAL_SUBNETS_URL,
                 visibility: Visibility::Protected,
                 unprivileged_access: UnprivilegedAccess::None,
                 allowed_methods: vec![
-                    AllowedMethod::GetUnimplemented,
+                    AllowedMethod::Get,
                     AllowedMethod::Post(
                         serde_json::to_value(&*DEMO_EXTERNAL_SUBNET_CREATE)
                             .unwrap(),
@@ -1907,7 +1958,7 @@ pub static VERIFY_ENDPOINTS: LazyLock<Vec<VerifyEndpoint>> = LazyLock::new(
                 visibility: Visibility::Protected,
                 unprivileged_access: UnprivilegedAccess::None,
                 allowed_methods: vec![
-                    AllowedMethod::GetUnimplemented,
+                    AllowedMethod::Get,
                     AllowedMethod::Put(
                         serde_json::to_value(&*DEMO_EXTERNAL_SUBNET_UPDATE)
                             .unwrap(),
@@ -3498,6 +3549,89 @@ pub static VERIFY_ENDPOINTS: LazyLock<Vec<VerifyEndpoint>> = LazyLock::new(
                     AllowedMethod::Get,
                     AllowedMethod::Delete,
                 ],
+            },
+            // Probes
+            VerifyEndpoint {
+                url: &DEMO_PROBES_URL,
+                visibility: Visibility::Public,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![
+                    AllowedMethod::GetNonexistent,
+                    AllowedMethod::Post(serde_json::json!({
+                        "name": "test-probe",
+                        "description": "",
+                        "sled": SLED_AGENT_UUID,
+                    })),
+                ],
+            },
+            VerifyEndpoint {
+                url: &DEMO_PROBE_URL,
+                visibility: Visibility::Public,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![
+                    AllowedMethod::GetNonexistent,
+                    AllowedMethod::Delete,
+                ],
+            },
+            // Networking - Switch Port / LLDP
+            VerifyEndpoint {
+                url: &DEMO_SWITCH_PORT_STATUS_URL,
+                visibility: Visibility::Public,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![AllowedMethod::GetNonexistent],
+            },
+            VerifyEndpoint {
+                url: &DEMO_SWITCH_PORT_LLDP_CONFIG_URL,
+                visibility: Visibility::Public,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![
+                    AllowedMethod::GetNonexistent,
+                    AllowedMethod::Post(serde_json::json!({
+                        "id": "00000000-0000-0000-0000-000000000000",
+                        "enabled": false,
+                        "link_name": null,
+                        "link_description": null,
+                        "chassis_id": null,
+                        "system_name": null,
+                        "system_description": null,
+                        "management_ip": null,
+                    })),
+                ],
+            },
+            VerifyEndpoint {
+                url: &DEMO_LLDP_NEIGHBORS_URL,
+                visibility: Visibility::Public,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![AllowedMethod::GetNonexistent],
+            },
+            // Rack Membership
+            VerifyEndpoint {
+                url: &DEMO_RACK_MEMBERSHIP_STATUS_URL,
+                visibility: Visibility::Public,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![AllowedMethod::GetNonexistent],
+            },
+            VerifyEndpoint {
+                url: &DEMO_RACK_MEMBERSHIP_ADD_URL,
+                visibility: Visibility::Public,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![AllowedMethod::Post(serde_json::json!({
+                    "sled_ids": [],
+                }))],
+            },
+            // Alert Delivery Resend
+            VerifyEndpoint {
+                url: &DEMO_ALERT_RESEND_URL,
+                visibility: Visibility::Protected,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![AllowedMethod::Post(serde_json::json!({}))],
+            },
+            // Access Token Delete
+            VerifyEndpoint {
+                url: DEMO_ACCESS_TOKEN_DELETE_URL,
+                visibility: Visibility::Protected,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![AllowedMethod::Delete],
             },
         ]
     },

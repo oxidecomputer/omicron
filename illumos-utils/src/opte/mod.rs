@@ -148,6 +148,18 @@ fn router_target_opte(target: &shared::RouterTarget) -> RouterTarget {
     }
 }
 
+/// Configuration for a subnet attached to an instance's OPTE port.
+#[derive(Clone, Copy, Debug)]
+pub struct AttachedSubnet {
+    /// The IP subnet that's attached.
+    pub cidr: IpCidr,
+    /// True if this is an external subnet, and false if it's a VPC subnet.
+    ///
+    /// Traffic destined for external subnets do not undergo NAT in the same way
+    /// as VPC Subnets.
+    pub is_external: bool,
+}
+
 #[cfg(test)]
 mod tests {
     use super::Gateway;
