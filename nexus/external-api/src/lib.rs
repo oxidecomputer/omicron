@@ -47,7 +47,7 @@ mod v2026012200;
 mod v2026012300;
 mod v2026013000;
 mod v2026013001;
-mod v2026013002;
+mod v2026020200;
 
 #[cfg(test)]
 mod test_utils;
@@ -80,8 +80,8 @@ api_versions!([
     // |  date-based version should be at the top of the list.
     // v
     // (next_yyyymmddnn, IDENT),
+    (2026020200, BGP_UNNUMBERED_PEERS),
     (2026013100, READ_ONLY_DISKS_NULLABLE),
-    (2026013002, BGP_UNNUMBERED_PEERS),
     (2026013001, READ_ONLY_DISKS),
     (2026013000, INSTANCES_EXTERNAL_SUBNETS),
     (2026012800, REMOVE_SUBNET_POOL_POOL_TYPE),
@@ -3349,8 +3349,8 @@ pub trait NexusExternalApi {
     }]
     async fn v2026010300_networking_switch_port_settings_create(
         rqctx: RequestContext<Self::Context>,
-        new_settings: TypedBody<v2026013002::SwitchPortSettingsCreate>,
-    ) -> Result<HttpResponseCreated<v2026013002::SwitchPortSettings>, HttpError>
+        new_settings: TypedBody<v2026020200::SwitchPortSettingsCreate>,
+    ) -> Result<HttpResponseCreated<v2026020200::SwitchPortSettings>, HttpError>
     {
         match Self::networking_switch_port_settings_create(
             rqctx,
@@ -3414,7 +3414,7 @@ pub trait NexusExternalApi {
     async fn v2026010300_networking_switch_port_settings_view(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<params::SwitchPortSettingsInfoSelector>,
-    ) -> Result<HttpResponseOk<v2026013002::SwitchPortSettings>, HttpError>
+    ) -> Result<HttpResponseOk<v2026020200::SwitchPortSettings>, HttpError>
     {
         match Self::networking_switch_port_settings_view(rqctx, path_params)
             .await

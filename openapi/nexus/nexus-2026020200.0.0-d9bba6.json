@@ -7,7 +7,7 @@
       "url": "https://oxide.computer",
       "email": "api@oxide.computer"
     },
-    "version": "2026013000.0.0"
+    "version": "2026020200.0.0"
   },
   "paths": {
     "/device/auth": {
@@ -4634,6 +4634,52 @@
         "responses": {
           "204": {
             "description": "successful deletion"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/instances/{instance}/external-subnets": {
+      "get": {
+        "tags": [
+          "instances"
+        ],
+        "summary": "List external subnets attached to instance",
+        "operationId": "instance_external_subnet_list",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "project",
+            "description": "Name or ID of the project",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "path",
+            "name": "instance",
+            "description": "Name or ID of the instance",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExternalSubnetResultsPage"
+                }
+              }
+            }
           },
           "4XX": {
             "$ref": "#/components/responses/Error"
@@ -19337,6 +19383,10 @@
             "type": "string",
             "format": "uuid"
           },
+          "read_only": {
+            "description": "Whether or not this disk is read-only.",
+            "type": "boolean"
+          },
           "size": {
             "$ref": "#/components/schemas/ByteCount"
           },
@@ -19368,6 +19418,7 @@
           "id",
           "name",
           "project_id",
+          "read_only",
           "size",
           "state",
           "time_created",
@@ -19518,6 +19569,11 @@
             "description": "Create a disk from a disk snapshot",
             "type": "object",
             "properties": {
+              "read_only": {
+                "description": "If `true`, the disk created from this snapshot will be read-only.",
+                "default": false,
+                "type": "boolean"
+              },
               "snapshot_id": {
                 "type": "string",
                 "format": "uuid"
@@ -19541,6 +19597,11 @@
               "image_id": {
                 "type": "string",
                 "format": "uuid"
+              },
+              "read_only": {
+                "description": "If `true`, the disk created from this image will be read-only.",
+                "default": false,
+                "type": "boolean"
               },
               "type": {
                 "type": "string",
