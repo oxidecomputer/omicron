@@ -1115,6 +1115,14 @@ impl Default for BuilderSledSettings {
 struct ZoneCount(pub usize);
 
 impl ZoneCount {
+    /// Helper for determining how many instances of a particular zone should be
+    /// on a particular sled
+    ///
+    /// The assumption is that the caller is looping over `0..total_sleds` and
+    /// invoking this function for each sled with `sled_id` as the loop index.
+    /// This function returns how many instances of this zone should be on the
+    /// given sled, assuming the caller wants to distribute all of the instances
+    /// (`self.0`) as evenly as possible over all of the sleds (`total_sleds`).
     fn on(self, sled_id: usize, total_sleds: usize) -> usize {
         // Spread instances out as evenly as possible. If there are 5 sleds and 3
         // instances, we want to spread them out as 2, 2, 1.
