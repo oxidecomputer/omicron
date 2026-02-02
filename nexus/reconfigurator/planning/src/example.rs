@@ -702,46 +702,48 @@ impl ExampleSystemBuilder {
                             )
                             .unwrap();
                     }
-                    // XXX-dap the following two blocks could be combined to be
-                    // much more concise
-                    // Add ClickhouseKeeper zones if a replicated policy is set.
+                    // Add ClickhouseKeeper and ClickhouseServer zones if a
+                    // replicated policy is set.
                     if let Some(policy) = &self.clickhouse_policy {
-                        let target_keepers = match &policy.mode {
-                            ClickhouseMode::Both { target_keepers, .. }
-                            | ClickhouseMode::ClusterOnly {
-                                target_keepers,
-                                ..
-                            } => *target_keepers,
-                            ClickhouseMode::SingleNodeOnly => 0,
-                        };
+                        let (target_keepers, target_servers) =
+                            match &policy.mode {
+                                ClickhouseMode::Both {
+                                    target_keepers,
+                                    target_servers,
+                                }
+                                | ClickhouseMode::ClusterOnly {
+                                    target_keepers,
+                                    target_servers,
+                                } => (*target_keepers, *target_servers),
+                                ClickhouseMode::SingleNodeOnly => (0, 0),
+                            };
                         if discretionary_ix < target_keepers.into() {
                             builder
                                 .sled_add_zone_clickhouse_keeper(
                                     sled_id,
                                     self.target_release
-                                        .zone_image_source(ZoneKind::ClickhouseKeeper)
-                                        .expect("obtained ClickhouseKeeper image source"),
+                                        .zone_image_source(
+                                            ZoneKind::ClickhouseKeeper,
+                                        )
+                                        .expect(
+                                            "obtained ClickhouseKeeper image \
+                                             source",
+                                        ),
                                 )
                                 .unwrap();
                         }
-                    }
-                    // Add ClickhouseServer zones if a replicated policy is set.
-                    if let Some(policy) = &self.clickhouse_policy {
-                        let target_servers = match &policy.mode {
-                            ClickhouseMode::Both { target_servers, .. }
-                            | ClickhouseMode::ClusterOnly {
-                                target_servers,
-                                ..
-                            } => *target_servers,
-                            ClickhouseMode::SingleNodeOnly => 0,
-                        };
                         if discretionary_ix < target_servers.into() {
                             builder
                                 .sled_add_zone_clickhouse_server(
                                     sled_id,
                                     self.target_release
-                                        .zone_image_source(ZoneKind::ClickhouseServer)
-                                        .expect("obtained ClickhouseServer image source"),
+                                        .zone_image_source(
+                                            ZoneKind::ClickhouseServer,
+                                        )
+                                        .expect(
+                                            "obtained ClickhouseServer image \
+                                             source",
+                                        ),
                                 )
                                 .unwrap();
                         }
