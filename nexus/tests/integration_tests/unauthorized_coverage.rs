@@ -4,40 +4,51 @@
 
 use super::endpoints::VERIFY_ENDPOINTS;
 use expectorate::assert_contents;
-use openapiv3::OpenAPI;
+use nexus_external_api::nexus_external_api_mod;
 use std::collections::BTreeMap;
 
-/// Checks for uncovered public API endpoints
+/// Checks for uncovered API endpoints
 ///
 /// This test compares the endpoints covered by the "unauthorized" test with
-/// what's in the OpenAPI spec for the public API to make sure all endpoints are
-/// accounted-for.
+/// all endpoints from the API description (including unpublished ones) to make
+/// sure all endpoints are accounted-for.
 #[test]
 fn test_unauthorized_coverage() {
-    // Load the OpenAPI schema for Nexus's public API.
-    let schema_path = "../openapi/nexus/nexus-latest.json";
-    let schema_contents = std::fs::read_to_string(&schema_path)
-        .expect("failed to read Nexus OpenAPI spec");
-    let spec: OpenAPI = serde_json::from_str(&schema_contents)
-        .expect("Nexus OpenAPI spec was not valid OpenAPI");
+    // Get all endpoints from the API description, including unpublished ones.
+    // The OpenAPI spec only includes published endpoints, but we need to track
+    // coverage for unpublished endpoints (SCIM, login, console routes) as well.
+    let api = nexus_external_api_mod::stub_api_description().unwrap();
 
-    // Take each operation that we find in the OpenAPI spec, make a regular
+    // Take each operation that we find in the API description, make a regular
     // expression that we can use to match against it (more on this below), and
     // throw them into a BTreeMap.
-    let mut spec_operations: BTreeMap<Operation, regex::Regex> = spec
-        .operations()
-        .map(|(path, method, op)| {
+    //
+    // We filter out versioned endpoints (operation IDs starting with "v20")
+    // because those are older API versions that share coverage with their
+    // current counterparts. We also deduplicate by (method, path) since
+    // multiple API versions can share the same path with different operation
+    // IDs, and we only care about coverage per path/method combination.
+    let mut seen_paths: std::collections::BTreeSet<(String, String)> =
+        std::collections::BTreeSet::new();
+    let mut api_operations: BTreeMap<Operation, regex::Regex> = api
+        .into_router()
+        .endpoints(None)
+        .filter(|(_, _, endpoint)| !endpoint.operation_id.starts_with("v20"))
+        .filter(|(path, method, _)| {
+            seen_paths.insert((method.to_string(), path.clone()))
+        })
+        .map(|(path, method, endpoint)| {
             // We're going to take URLs from our test cases and match them
-            // against operations in the API spec.  The URLs from the API spec
+            // against operations in the API description.  The URLs from the API
             // contain variables (e.g., "/instances/{instance_name}").  Our test
             // cases have those variables filled in already (e.g.,
             // "/instances/my-instance").
             //
-            // To match a URL from the test case against one from the OpenAPI
-            // spec, we're going to:
+            // To match a URL from the test case against one from the API
+            // description, we're going to:
             //
-            // - use a regular expression to replace `{varname}` in the API
-            //   spec's URL with `[^/]+` (one or more non-slash characters)
+            // - use a regular expression to replace `{varname}` in the API's
+            //   URL with `[^/]+` (one or more non-slash characters)
             //
             // - use that string as the basis for a second regex that we'll
             //   store with the Operation.  We'll use this second regex to match
@@ -62,19 +73,23 @@ fn test_unauthorized_coverage() {
                 path
             );
             let re = regex::Regex::new("/\\{[^}]+\\}").unwrap();
-            let regex_path = re.replace_all(path, "/[^/]+");
+            let regex_path = re.replace_all(&path, "/[^/]+");
             let regex = regex::Regex::new(&format!("^{}$", regex_path))
                 .expect("modified URL string was not a valid regex");
-            let label = op
-                .operation_id
-                .clone()
-                .unwrap_or_else(|| String::from("unknown operation-id"));
-            (Operation { method, path, label }, regex)
+            let label = endpoint.operation_id.clone();
+            (
+                Operation {
+                    method: method.to_string(),
+                    path: path.clone(),
+                    label,
+                },
+                regex,
+            )
         })
         .collect();
 
     // Go through each of the authz test cases and match each one against an
-    // OpenAPI operation.
+    // API operation.
     let mut unexpected_endpoints = String::from(
         "API endpoints tested by unauthorized.rs but not found \
         in the OpenAPI spec:\n",
@@ -84,18 +99,18 @@ fn test_unauthorized_coverage() {
             // Remove the method and path from the list of operations if there's
             // a VerifyEndpoint for it.
             let method_string = m.http_method().to_string().to_uppercase();
-            let found = spec_operations.iter().find(|(op, regex)| {
+            let found = api_operations.iter().find(|(op, regex)| {
                 // Strip query parameters, if they exist.
                 let url = v.url.split('?').next().unwrap();
-                op.method.to_uppercase() == method_string && regex.is_match(url)
+                op.method == method_string && regex.is_match(url)
             });
             if let Some((op, _)) = found {
                 println!(
-                    "covered: {:40} ({:6?} {:?}) (by {:?})",
+                    "covered: {:40} ({:6} {:?}) (by {:?})",
                     op.label, op.method, op.path, v.url
                 );
                 let op = op.clone();
-                spec_operations.remove(&op);
+                api_operations.remove(&op);
             } else {
                 unexpected_endpoints
                     .push_str(&format!("{:6} {:?}\n", method_string, v.url));
@@ -115,14 +130,16 @@ fn test_unauthorized_coverage() {
         &unexpected_endpoints,
     );
 
-    // Check for uncovered endpoints (endpoints that are in the OpenAPI spec but
-    // not tested by the authz tests).
+    // Check for uncovered endpoints (endpoints that are in the API description
+    // but not tested by the authz tests).
     let mut uncovered_endpoints =
         "API endpoints with no coverage in authz tests:\n".to_string();
-    for op in spec_operations.keys() {
+    for op in api_operations.keys() {
         uncovered_endpoints.push_str(&format!(
             "{:40} ({:6} {:?})\n",
-            op.label, op.method, op.path
+            op.label,
+            op.method.to_lowercase(),
+            op.path
         ));
     }
 
@@ -159,8 +176,8 @@ fn test_unauthorized_coverage() {
 }
 
 #[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
-struct Operation<'a> {
-    method: &'a str,
-    path: &'a str,
+struct Operation {
+    method: String,
+    path: String,
     label: String,
 }

@@ -401,32 +401,30 @@ async fn test_audit_log_create_delete_ops(ctx: &ControlPlaneTestContext) {
 #[nexus_test]
 async fn test_audit_log_coverage(ctx: &ControlPlaneTestContext) {
     use super::endpoints::{AllowedMethod, VERIFY_ENDPOINTS};
+    use nexus_external_api::nexus_external_api_mod;
     use nexus_test_utils::http_testing::{AuthnMode, NexusRequest};
-    use openapiv3::OpenAPI;
     use std::collections::BTreeMap;
 
     let client = &ctx.external_client;
 
-    // Load the OpenAPI schema to get operation IDs
-    let schema_path = "../openapi/nexus/nexus-latest.json";
-    let schema_contents = std::fs::read_to_string(schema_path)
-        .expect("failed to read Nexus OpenAPI spec");
-    let spec: OpenAPI = serde_json::from_str(&schema_contents)
-        .expect("Nexus OpenAPI spec was not valid OpenAPI");
+    // Get all endpoints from the API description, including unpublished ones.
+    // The OpenAPI spec only includes published endpoints, but we need to test
+    // unpublished endpoints (SCIM, login, console routes) as well.
+    let api = nexus_external_api_mod::stub_api_description().unwrap();
 
     // Build a map from (method, url_regex) to (operation_id, path_template)
-    let spec_operations: BTreeMap<(String, String), (String, String)> = spec
-        .operations()
-        .map(|(path, method, op)| {
+    let all_operations: BTreeMap<(String, String), (String, String)> = api
+        .into_router()
+        .endpoints(None)
+        .map(|(path, method, endpoint)| {
             // Convert path template to regex pattern
             let re = regex::Regex::new("/\\{[^}]+\\}").unwrap();
-            let regex_path = re.replace_all(path, "/[^/]+");
+            let regex_path = re.replace_all(&path, "/[^/]+");
             let regex = format!("^{}$", regex_path);
-            let label = op
-                .operation_id
-                .clone()
-                .unwrap_or_else(|| String::from("unknown"));
-            ((method.to_uppercase(), regex), (label, path.to_string()))
+            (
+                (method.to_uppercase(), regex),
+                (endpoint.operation_id.clone(), path),
+            )
         })
         .collect();
 
@@ -489,11 +487,11 @@ async fn test_audit_log_coverage(ctx: &ControlPlaneTestContext) {
 
             let after = fetch_log(client, t_start, None).await.items.len();
 
-            // Find the operation info from the OpenAPI spec
+            // Find the operation info from the API description
             let method_str = http_method.to_string().to_uppercase();
             let url_path = endpoint.url.split('?').next().unwrap();
 
-            let (op_id, path_template) = spec_operations
+            let (op_id, path_template) = all_operations
                 .iter()
                 .find(|((m, regex), _)| {
                     *m == method_str
