@@ -699,21 +699,21 @@ mod test {
 
         // Now detach one of them, and the sled-agent should no longer have it.
         let removed = attached.into_iter().take(1).collect::<Vec<_>>();
-        let AttachedSubnetId::External(removed_id) = &removed[0].subnet_id else {
+        let AttachedSubnetId::External(removed_id) = &removed[0].subnet_id
+        else {
             panic!("All subnets are external right now");
         };
-        let n_rows =
-            diesel::update(dsl::external_subnet.find(removed_id.into_untyped_uuid()))
-                .set((
-                    dsl::attach_state.eq(IpAttachState::Detached),
-                    dsl::instance_id.eq(Option::<uuid::Uuid>::None),
-                    dsl::time_modified.eq(Utc::now()),
-                ))
-                .execute_async(
-                    &*datastore.pool_connection_for_tests().await.unwrap(),
-                )
-                .await
-                .unwrap();
+        let n_rows = diesel::update(
+            dsl::external_subnet.find(removed_id.into_untyped_uuid()),
+        )
+        .set((
+            dsl::attach_state.eq(IpAttachState::Detached),
+            dsl::instance_id.eq(Option::<uuid::Uuid>::None),
+            dsl::time_modified.eq(Utc::now()),
+        ))
+        .execute_async(&*datastore.pool_connection_for_tests().await.unwrap())
+        .await
+        .unwrap();
         assert_eq!(n_rows, 1);
         let attached =
             datastore.list_all_attached_subnets_batched(&opctx).await.unwrap();
@@ -739,8 +739,7 @@ mod test {
         // So we can simulate the subnet-detach operation above we just ran by
         // deleting the relevant attachment from the simulated sled agent.
         {
-            cptestctx
-                .sled_agents[0]
+            cptestctx.sled_agents[0]
                 .sled_agent()
                 .attached_subnets
                 .lock()
