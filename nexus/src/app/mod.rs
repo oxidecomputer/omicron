@@ -126,6 +126,7 @@ pub(crate) use nexus_db_queries::db::queries::disk::MAX_DISKS_PER_INSTANCE;
 use nexus_mgs_updates::DEFAULT_RETRY_TIMEOUT;
 use nexus_types::internal_api::views::MgsUpdateDriverStatus;
 use sagas::demo::CompletingDemoSagas;
+pub(crate) use self::deployment::SetTargetReleaseIntent;
 
 // XXX: Might want to recast as max *floating* IPs, we have at most one
 //      ephemeral (so bounded in saga by design).

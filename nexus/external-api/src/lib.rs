@@ -5901,6 +5901,23 @@ pub trait NexusExternalApi {
         params: TypedBody<params::SetTargetReleaseParams>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
 
+    /// Recover from an Oxide-support-driven system update
+    ///
+    /// Inform the control plane of the release of the rack's system software it
+    /// is now running due to a recovery operation ("mupdate") performed by
+    /// Oxide support.
+    ///
+    /// This endpoint should only be called at the direction of Oxide support.
+    #[endpoint {
+        method = PUT,
+        path = "/v1/system/update/target-release/recovery",
+        tags = ["system/update"],
+    }]
+    async fn target_release_update_recovery(
+        rqctx: RequestContext<Self::Context>,
+        params: TypedBody<params::SetTargetReleaseParams>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
+
     /// Fetch system update status
     ///
     /// Returns information about the current target release and the
