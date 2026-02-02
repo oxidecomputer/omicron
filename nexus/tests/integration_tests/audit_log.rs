@@ -400,46 +400,30 @@ async fn test_audit_log_create_delete_ops(ctx: &ControlPlaneTestContext) {
 /// As audit logging is added to endpoints, they should be removed from the file.
 #[nexus_test]
 async fn test_audit_log_coverage(ctx: &ControlPlaneTestContext) {
+    use super::endpoint_coverage::ApiOperations;
     use super::endpoints::{AllowedMethod, VERIFY_ENDPOINTS};
-    use nexus_external_api::nexus_external_api_mod;
     use nexus_test_utils::http_testing::{AuthnMode, NexusRequest};
     use std::collections::BTreeMap;
 
     let client = &ctx.external_client;
 
-    // Get all endpoints from the API description, including unpublished ones.
-    // The OpenAPI spec only includes published endpoints, but we need to test
-    // unpublished endpoints (SCIM, login, console routes) as well.
-    let api = nexus_external_api_mod::stub_api_description().unwrap();
-
-    // Build a map from (method, url_regex) to (operation_id, path_template)
-    let all_operations: BTreeMap<(String, String), (String, String)> = api
-        .into_router()
-        .endpoints(None)
-        .map(|(path, method, endpoint)| {
-            // Convert path template to regex pattern
-            let re = regex::Regex::new("/\\{[^}]+\\}").unwrap();
-            let regex_path = re.replace_all(&path, "/[^/]+");
-            let regex = format!("^{}$", regex_path);
-            (
-                (method.to_uppercase(), regex),
-                (endpoint.operation_id.clone(), path),
-            )
-        })
-        .collect();
+    let api_operations = ApiOperations::new();
 
     // Track mutating endpoints we haven't tested yet (not in VERIFY_ENDPOINTS).
-    // We filter out versioned endpoints (operation IDs starting with "v20")
-    // because those share coverage with their current counterparts.
     let mut untested_mutating: BTreeMap<String, (String, String)> =
-        all_operations
+        api_operations
             .iter()
-            .filter(|((method, _), (op_id, _))| {
-                matches!(method.as_str(), "POST" | "PUT" | "PATCH" | "DELETE")
-                    && !op_id.starts_with("v20")
+            .filter(|op| {
+                matches!(
+                    op.method.as_str(),
+                    "POST" | "PUT" | "PATCH" | "DELETE"
+                )
             })
-            .map(|((method, _), (op_id, path))| {
-                (op_id.clone(), (method.to_lowercase(), path.clone()))
+            .map(|op| {
+                (
+                    op.operation_id.clone(),
+                    (op.method.to_lowercase(), op.path.clone()),
+                )
             })
             .collect();
 
@@ -503,17 +487,13 @@ async fn test_audit_log_coverage(ctx: &ControlPlaneTestContext) {
             let after = fetch_log(client, t_start, None).await.items.len();
 
             // Find the operation info from the API description
-            let method_str = http_method.to_string().to_uppercase();
-            let url_path = endpoint.url.split('?').next().unwrap();
+            let method_str = http_method.to_string();
 
-            let (op_id, path_template) = all_operations
-                .iter()
-                .find(|((m, regex), _)| {
-                    *m == method_str
-                        && regex::Regex::new(regex).unwrap().is_match(url_path)
-                })
-                .map(|(_, (op_id, path))| (op_id.clone(), path.clone()))
+            let (op_id, path_template) = api_operations
+                .find(&method_str, endpoint.url)
+                .map(|op| (op.operation_id.clone(), op.path.clone()))
                 .unwrap_or_else(|| {
+                    let url_path = endpoint.url.split('?').next().unwrap();
                     (String::from("unknown"), url_path.to_string())
                 });
 
