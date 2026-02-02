@@ -158,16 +158,6 @@ pub static DEMO_LLDP_NEIGHBORS_URL: LazyLock<String> = LazyLock::new(|| {
     )
 });
 
-// Rack membership
-pub static DEMO_RACK_MEMBERSHIP_STATUS_URL: LazyLock<String> =
-    LazyLock::new(|| {
-        format!("/v1/system/hardware/racks/{}/membership", RACK_UUID)
-    });
-pub static DEMO_RACK_MEMBERSHIP_ADD_URL: LazyLock<String> =
-    LazyLock::new(|| {
-        format!("/v1/system/hardware/racks/{}/membership/add", RACK_UUID)
-    });
-
 // Alert resend
 pub static DEMO_ALERT_RESEND_URL: LazyLock<String> = LazyLock::new(|| {
     format!(
@@ -3646,21 +3636,6 @@ pub static VERIFY_ENDPOINTS: LazyLock<Vec<VerifyEndpoint>> = LazyLock::new(
                 visibility: Visibility::Public,
                 unprivileged_access: UnprivilegedAccess::None,
                 allowed_methods: vec![AllowedMethod::GetNonexistent],
-            },
-            // Rack Membership
-            VerifyEndpoint {
-                url: &DEMO_RACK_MEMBERSHIP_STATUS_URL,
-                visibility: Visibility::Public,
-                unprivileged_access: UnprivilegedAccess::None,
-                allowed_methods: vec![AllowedMethod::GetNonexistent],
-            },
-            VerifyEndpoint {
-                url: &DEMO_RACK_MEMBERSHIP_ADD_URL,
-                visibility: Visibility::Public,
-                unprivileged_access: UnprivilegedAccess::None,
-                allowed_methods: vec![AllowedMethod::Post(serde_json::json!({
-                    "sled_ids": [],
-                }))],
             },
             // Alert Delivery Resend
             VerifyEndpoint {
