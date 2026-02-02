@@ -547,7 +547,7 @@ impl ExampleSystemBuilder {
             .set_target_boundary_ntp_zone_count(self.boundary_ntp_count.0);
 
         // Set the clickhouse policy
-        system.clickhouse_policy(Some(self.clickhouse_policy.clone()));
+        system.clickhouse_policy(self.clickhouse_policy.clone());
 
         // Set the target release if one is available. We don't do this
         // unconditionally because we don't want the target release generation
