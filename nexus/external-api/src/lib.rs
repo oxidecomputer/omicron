@@ -4822,8 +4822,11 @@ pub trait NexusExternalApi {
 
     /// Abort the latest rack membership change
     ///
-    /// This operation is synchronous, and will succeed only if the prior
-    /// membership change is not yet past a point of no return
+    /// This operation is synchronous. Upon returning from the API call, a
+    /// success response indicates that the prior membership change was aborted.
+    /// An error response indicates that there is no active membership change
+    /// in progress (previous changes have completed) or that the current
+    /// membership change could not be aborted.
     #[endpoint {
         method = POST,
         path = "/v1/system/hardware/racks/{rack_id}/membership/abort",
