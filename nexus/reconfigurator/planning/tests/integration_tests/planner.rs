@@ -3158,7 +3158,7 @@ fn test_update_crucible_pantry_before_nexus() {
         artifacts,
     });
     sim.change_description("set new target release", |desc| {
-        desc.set_target_release_and_old_repo(description);
+        desc.set_target_release(description);
         Ok(())
     })
     .unwrap();
@@ -3530,7 +3530,7 @@ fn test_update_cockroach() {
         artifacts,
     });
     sim.change_description("set new target release", |desc| {
-        desc.set_target_release_and_old_repo(description);
+        desc.set_target_release(description);
         Ok(())
     })
     .unwrap();
@@ -3900,7 +3900,7 @@ fn test_update_boundary_ntp() {
         artifacts,
     });
     sim.change_description("set new target release", |desc| {
-        desc.set_target_release_and_old_repo(description);
+        desc.set_target_release(description);
         Ok(())
     })
     .unwrap();
@@ -4290,7 +4290,7 @@ fn test_update_internal_dns() {
         artifacts,
     });
     sim.change_description("set new target release", |desc| {
-        desc.set_target_release_and_old_repo(description);
+        desc.set_target_release(description);
         Ok(())
     })
     .unwrap();
@@ -4539,7 +4539,7 @@ fn test_update_all_zones() {
     });
 
     sim.change_description("set new target release", |desc| {
-        desc.set_target_release_and_old_repo(description);
+        desc.set_target_release(description);
         Ok(())
     })
     .unwrap();

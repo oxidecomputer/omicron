@@ -9,7 +9,6 @@ use omicron_common::api::internal::shared::NetworkInterfaceKind;
 use oxide_vpc::api::AddRouterEntryReq;
 use oxide_vpc::api::ClearVirt2PhysReq;
 use oxide_vpc::api::DelRouterEntryReq;
-use oxide_vpc::api::DhcpCfg;
 use oxide_vpc::api::Direction;
 use oxide_vpc::api::DumpVirt2PhysResp;
 use oxide_vpc::api::IpCfg;
@@ -192,7 +191,6 @@ impl Handle {
         &self,
         name: &str,
         cfg: VpcCfg,
-        _: DhcpCfg,
         _: bool,
     ) -> Result<NoResp, OpteError> {
         let name = name.to_string();

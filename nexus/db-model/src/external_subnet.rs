@@ -259,6 +259,16 @@ pub struct ExternalSubnetUpdate {
     pub time_modified: DateTime<Utc>,
 }
 
+impl From<params::ExternalSubnetUpdate> for ExternalSubnetUpdate {
+    fn from(value: params::ExternalSubnetUpdate) -> Self {
+        Self {
+            name: value.identity.name.map(Into::into),
+            description: value.identity.description,
+            time_modified: Utc::now(),
+        }
+    }
+}
+
 #[derive(
     Clone, Copy, Debug, Deserialize, PartialEq, Queryable, Selectable, Serialize,
 )]
@@ -268,4 +278,14 @@ pub struct SubnetPoolSiloLink {
     pub silo_id: Uuid,
     pub ip_version: IpVersion,
     pub is_default: bool,
+}
+
+impl From<SubnetPoolSiloLink> for views::SubnetPoolSiloLink {
+    fn from(value: SubnetPoolSiloLink) -> Self {
+        Self {
+            subnet_pool_id: value.subnet_pool_id.into_untyped_uuid(),
+            silo_id: value.silo_id.into_untyped_uuid(),
+            is_default: value.is_default,
+        }
+    }
 }
