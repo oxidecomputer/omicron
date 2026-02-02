@@ -141,3 +141,28 @@ pub fn dpd_client<N: NexusServer>(
     let addr = Ipv6Addr::LOCALHOST;
     dpd_client::Client::new(&format!("http://[{addr}]:{port}"), client_state)
 }
+
+#[cfg(test)]
+mod test {
+    use crate::TEST_SUITE_PASSWORD;
+    use crate::TEST_SUITE_PASSWORD_HASH;
+    use omicron_passwords::Password;
+    use omicron_passwords::PasswordHashString;
+
+    // Verify that the hardcoded test suite password hash matches the hardcoded
+    // test suite password.  Obviously it would be less brittle to just compute
+    // the hash each time we needed it, but that uses a lot of CPU time (by
+    // design) and has to be done for every single test.  That adds up.
+    #[test]
+    fn test_suite_password_matches_hash() {
+        let hasher = omicron_passwords::Hasher::default();
+        let password: Password = Password::new(TEST_SUITE_PASSWORD).unwrap();
+        let hash: PasswordHashString =
+            TEST_SUITE_PASSWORD_HASH.parse().unwrap();
+        let okay = hasher.verify_password(&password, &hash).unwrap();
+        assert!(
+            okay,
+            "TEST_SUITE_PASSWORD does not match TEST_SUITE_PASSWORD_HASH"
+        );
+    }
+}
