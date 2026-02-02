@@ -4821,6 +4821,9 @@ pub trait NexusExternalApi {
     ) -> Result<HttpResponseOk<RackMembershipStatus>, HttpError>;
 
     /// Abort the latest rack membership change
+    ///
+    /// This operation is synchronous, and will succeed only if the prior
+    /// membership change is not yet past a point of no return
     #[endpoint {
         method = POST,
         path = "/v1/system/hardware/racks/{rack_id}/membership/abort",
