@@ -620,16 +620,22 @@ mod tests {
     use super::*;
     use chrono::Utc;
     use clickhouse_admin_types::keeper::KeeperId;
+    use clickhouse_admin_types::server::ServerId;
+    use nexus_auth::authz;
     use nexus_db_model::ExternalIp;
     use nexus_db_model::IpAttachState;
     use nexus_db_model::IpKind;
     use nexus_db_model::Ipv4Addr as DbIpv4Addr;
     use nexus_db_model::MacAddr;
     use nexus_db_model::Name;
+    use nexus_db_model::RendezvousDebugDataset;
     use nexus_db_model::ServiceNetworkInterface;
     use nexus_db_model::ServiceNetworkInterfaceIdentity;
     use nexus_db_model::SqlU8;
     use nexus_db_model::SqlU16;
+    use nexus_db_model::SupportBundleState;
+    use nexus_db_model::saga_types::Saga;
+    use nexus_db_model::saga_types::SagaState;
     use nexus_db_queries::db::datastore::CollectorReassignment;
     use nexus_reconfigurator_planning::blueprint_builder::BlueprintBuilder;
     use nexus_reconfigurator_planning::blueprint_editor::ExternalNetworkingChoice;
@@ -644,12 +650,14 @@ mod tests {
     use nexus_types::deployment::SledFilter;
     use nexus_types::internal_api::params::OximeterInfo;
     use omicron_common::api::external;
+    use omicron_common::api::external::LookupType;
     use omicron_common::api::external::MacAddr as ExternalMacAddr;
     use omicron_common::api::internal::nexus::ProducerEndpoint;
     use omicron_common::api::internal::nexus::ProducerKind;
     use omicron_common::api::internal::shared::PrivateIpConfig;
     use omicron_test_utils::dev;
-    use omicron_uuid_kinds::GenericUuid;
+    use omicron_uuid_kinds::DatasetUuid;
+    use omicron_uuid_kinds::ZpoolUuid;
     use std::net::Ipv4Addr;
     use std::time::Duration;
     use uuid::Uuid;
@@ -923,7 +931,6 @@ mod tests {
         );
 
         // Now add producers assigned to this oximeter
-        use omicron_uuid_kinds::GenericUuid;
         let producer1 = ProducerEndpoint {
             id: Uuid::new_v4(),
             kind: ProducerKind::Service,
@@ -1177,6 +1184,7 @@ mod tests {
         // Start with the base example system (which includes Nexus zones)
         let (_example, initial_blueprint) =
             ExampleSystemBuilder::new(log, TEST_NAME).build();
+
         let mut builder = BlueprintBuilder::new_based_on(
             log,
             &initial_blueprint,
@@ -1202,7 +1210,8 @@ mod tests {
 
         let blueprint = builder.build(BlueprintSource::Test);
 
-        // Check that the zone IS pruneable when no database reasons exist
+        // Check that the zone IS pruneable (we haven't added anything to the db
+        // that would make it non-pruneable).
         let pruneable_zones =
             PruneableZones::new(opctx, datastore, &blueprint, &[], &[])
                 .await
@@ -1210,6 +1219,138 @@ mod tests {
         assert!(
             pruneable_zones.pruneable_zones.contains(&nexus_zone_id),
             "nexus zone should be pruneable when no database reasons exist"
+        );
+
+        // Check BlueprintExpungedZoneAccessReason::NexusDeleteMetadataRecord:
+        // Insert a database metadata record for this Nexus and verify the zone
+        // is non-pruneable.
+        let conn = datastore.pool_connection_for_tests().await.unwrap();
+        datastore
+            .initialize_nexus_access_from_blueprint_on_connection(
+                &conn,
+                vec![nexus_zone_id],
+            )
+            .await
+            .expect("failed to create database nexus access");
+        let pruneable_zones =
+            PruneableZones::new(opctx, datastore, &blueprint, &[], &[])
+                .await
+                .expect("failed to find pruneable zones");
+        assert!(
+            !pruneable_zones.pruneable_zones.contains(&nexus_zone_id),
+            "nexus zone should not be pruneable when there's a \
+             database metadata record"
+        );
+
+        // Remove the metadata record and verify the zone is pruneable again
+        datastore
+            .database_nexus_access_delete(opctx, nexus_zone_id)
+            .await
+            .expect("failed to delete nexus access");
+        let pruneable_zones =
+            PruneableZones::new(opctx, datastore, &blueprint, &[], &[])
+                .await
+                .expect("failed to find pruneable zones");
+        assert!(
+            pruneable_zones.pruneable_zones.contains(&nexus_zone_id),
+            "nexus zone should be pruneable after metadata record removed"
+        );
+
+        // Check BlueprintExpungedZoneAccessReason::NexusSagaReassignment
+        // Create a saga assigned to this Nexus and verify this makes the zone
+        // non-pruneable.
+        let saga_id = steno::SagaId(Uuid::new_v4());
+        let saga_params = steno::SagaCreateParams {
+            id: saga_id,
+            name: steno::SagaName::new("test_saga"),
+            dag: serde_json::json!({}),
+            state: steno::SagaCachedState::Running,
+        };
+        let saga =
+            Saga::new(nexus_zone_id.into_untyped_uuid().into(), saga_params);
+        datastore.saga_create(&saga).await.expect("failed to create saga");
+        let pruneable_zones =
+            PruneableZones::new(opctx, datastore, &blueprint, &[], &[])
+                .await
+                .expect("failed to find pruneable zones");
+        assert!(
+            !pruneable_zones.pruneable_zones.contains(&nexus_zone_id),
+            "nexus zone should not be pruneable when there's an \
+             unfinished saga assigned"
+        );
+
+        // Mark the saga as abandoned and verify the zone is pruneable again.
+        datastore
+            .saga_update_state(
+                saga_id,
+                SagaState::Abandoned,
+                nexus_zone_id.into_untyped_uuid().into(),
+            )
+            .await
+            .expect("failed to mark saga abandoned");
+        let pruneable_zones =
+            PruneableZones::new(opctx, datastore, &blueprint, &[], &[])
+                .await
+                .expect("failed to find pruneable zones");
+        assert!(
+            pruneable_zones.pruneable_zones.contains(&nexus_zone_id),
+            "nexus zone should be pruneable after saga is abandoned"
+        );
+
+        // Check BlueprintExpungedZoneAccessReason::NexusSupportBundleReassign
+        // Create a debug dataset so support_bundle_create can succeed, then
+        // create a support bundle, and verify that makes the zone
+        // non-pruneable.
+        let dataset = RendezvousDebugDataset::new(
+            DatasetUuid::new_v4(),
+            ZpoolUuid::new_v4(),
+            blueprint.id,
+        );
+        datastore
+            .debug_dataset_insert_if_not_exists(opctx, dataset)
+            .await
+            .expect("failed to create debug dataset");
+        let bundle = datastore
+            .support_bundle_create(
+                opctx,
+                "test support bundle",
+                nexus_zone_id,
+                None,
+            )
+            .await
+            .expect("failed to create support bundle");
+        let pruneable_zones =
+            PruneableZones::new(opctx, datastore, &blueprint, &[], &[])
+                .await
+                .expect("failed to find pruneable zones");
+        assert!(
+            !pruneable_zones.pruneable_zones.contains(&nexus_zone_id),
+            "nexus zone should not be pruneable when there's an \
+             assigned support bundle"
+        );
+
+        // Mark the support bundle as failed and verify the zone is pruneable
+        // again.
+        let authz_bundle = authz::SupportBundle::new(
+            authz::FLEET,
+            bundle.id(),
+            LookupType::by_id(bundle.id()),
+        );
+        datastore
+            .support_bundle_update(
+                opctx,
+                &authz_bundle,
+                SupportBundleState::Failed,
+            )
+            .await
+            .expect("failed to mark support bundle as failed");
+        let pruneable_zones =
+            PruneableZones::new(opctx, datastore, &blueprint, &[], &[])
+                .await
+                .expect("failed to find pruneable zones");
+        assert!(
+            pruneable_zones.pruneable_zones.contains(&nexus_zone_id),
+            "nexus zone should be pruneable after support bundle is failed"
         );
 
         // Check that it's NOT pruneable when there's an associated external IP
@@ -1565,8 +1706,6 @@ mod tests {
 
         // Manually add the server to the clickhouse cluster config
         // (normally the planner does this, but we need it for testing)
-        use clickhouse_admin_types::server::ServerId;
-        use nexus_types::deployment::ClickhouseClusterConfig;
         let config =
             builder.clickhouse_cluster_config().cloned().unwrap_or_else(|| {
                 ClickhouseClusterConfig::new(
