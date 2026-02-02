@@ -666,10 +666,10 @@ source.repo = "maghemite"
 # `tools/maghemite_openapi_version`. Failing to do so will cause a failure when
 # building `ddm-admin-client` (which will instruct you to update
 # `tools/maghemite_openapi_version`).
-source.commit = "508e2e74bd0bcf3ad6bc490e95667cfadafecb53"
+source.commit = "bbac08797b9ebbae5781f6d29756aa7882ae76bd"
 # The SHA256 digest is automatically posted to:
 # https://buildomat.eng.oxide.computer/public/file/oxidecomputer/maghemite/image/<commit>/mg-ddm-gz.sha256.txt
-source.sha256 = "ab539a20951368f4ba785e8b08f56fa00eef2e1913deb4d21025e1b5a08c4817"
+source.sha256 = "8c886b0fc2d156d1db7b78ca7e7b0c6aa147b7635b5d3355004745ea41da4320"
 output.type = "tarball"
 
 [package.mg-ddm]
@@ -682,10 +682,10 @@ source.repo = "maghemite"
 # `tools/maghemite_openapi_version`. Failing to do so will cause a failure when
 # building `ddm-admin-client` (which will instruct you to update
 # `tools/maghemite_openapi_version`).
-source.commit = "508e2e74bd0bcf3ad6bc490e95667cfadafecb53"
+source.commit = "bbac08797b9ebbae5781f6d29756aa7882ae76bd"
 # The SHA256 digest is automatically posted to:
 # https://buildomat.eng.oxide.computer/public/file/oxidecomputer/maghemite/image/<commit>/mg-ddm.sha256.txt
-source.sha256 = "1bb21d10fdf6f0d8fbddbdb5db75487fe84d86714ea49c37acbf7261abf7e67b"
+source.sha256 = "5def492d21c09cb0ca6dbfb3013109c0dd89d93fcef6350d5bf6c2f57c1b57bf"
 output.type = "zone"
 output.intermediate_only = true
 
@@ -697,7 +697,7 @@ source.repo = "maghemite"
 # `tools/maghemite_openapi_version`. Failing to do so will cause a failure when
 # building `ddm-admin-client` (which will instruct you to update
 # `tools/maghemite_openapi_version`).
-source.commit = "508e2e74bd0bcf3ad6bc490e95667cfadafecb53"
+source.commit = "bbac08797b9ebbae5781f6d29756aa7882ae76bd"
 # The SHA256 digest is automatically posted to:
 # https://buildomat.eng.oxide.computer/public/file/oxidecomputer/maghemite/image/<commit>/mgd.sha256.txt
 source.sha256 = "b29de25d151459a48cce296f8b6e883b60b13df511f32de2ac9addd87f723b97"
