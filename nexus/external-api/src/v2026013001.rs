@@ -2,145 +2,72 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! Nexus external types that changed from 2025112000 to 2025120300
+//! Types from API version 2026013001 (`READ_ONLY_DISKS`) that changed
+//! in version 2026013100 (`READ_ONLY_DISKS_NULLABLE`).
+//!
+//! This is one of the silliest API versions so far (if not *the* silliest),
+//! since all the Rust structs are completely identical. However, making the API
+//! accept [`DiskSource::Snapshot`] and [`DiskSource::Image`] messages _without_
+//! a `read_only` field requires adding a `#[serde(default)]` attribute, which
+//! changes the generated OpenAPI document, and the easiest way to generate a
+//! new OpenAPI document is just to...copy and paste all the types again. Yay.
 
-use crate::v2025121200;
-use crate::v2026010100;
-use crate::v2026013000;
 use nexus_types::external_api::params;
 use omicron_common::api::external;
+use omicron_common::api::external::ByteCount;
+use omicron_common::api::external::IdentityMetadataCreateParams;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
 use uuid::Uuid;
 
+/// Create-time parameters for a `Disk`
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-#[serde(rename_all = "snake_case")]
-pub enum DiskType {
-    Crucible,
-}
-
-impl From<DiskType> for external::DiskType {
-    fn from(old: DiskType) -> external::DiskType {
-        match old {
-            DiskType::Crucible => external::DiskType::Distributed,
-        }
-    }
-}
-
-/// View of a Disk
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-pub struct Disk {
+pub struct DiskCreate {
+    /// The common identifying metadata for the disk
     #[serde(flatten)]
-    pub identity: external::IdentityMetadata,
-    pub project_id: Uuid,
-    /// ID of snapshot from which disk was created, if any
-    pub snapshot_id: Option<Uuid>,
-    /// ID of image from which disk was created, if any
-    pub image_id: Option<Uuid>,
-    pub size: external::ByteCount,
-    pub block_size: external::ByteCount,
-    pub state: external::DiskState,
-    pub device_path: String,
-    pub disk_type: DiskType,
+    pub identity: IdentityMetadataCreateParams,
+
+    /// The source for this `Disk`'s blocks
+    pub disk_backend: DiskBackend,
+
+    /// The total size of the Disk (in bytes)
+    pub size: ByteCount,
 }
 
-impl From<Disk> for external::Disk {
-    fn from(old: Disk) -> external::Disk {
-        external::Disk {
-            identity: old.identity,
-            project_id: old.project_id,
-            snapshot_id: old.snapshot_id,
-            image_id: old.image_id,
-            size: old.size,
-            block_size: old.block_size,
-            state: old.state,
-            device_path: old.device_path,
-            disk_type: old.disk_type.into(),
-            read_only: false, // read_only defaults to false
+impl From<DiskCreate> for params::DiskCreate {
+    fn from(old: DiskCreate) -> Self {
+        let DiskCreate { identity, disk_backend, size } = old;
+        params::DiskCreate { identity, disk_backend: disk_backend.into(), size }
+    }
+}
+
+/// The source of a `Disk`'s blocks
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum DiskBackend {
+    Local {},
+
+    Distributed {
+        /// The initial source for this disk
+        disk_source: DiskSource,
+    },
+}
+
+impl From<DiskBackend> for params::DiskBackend {
+    fn from(old: DiskBackend) -> Self {
+        match old {
+            DiskBackend::Local {} => params::DiskBackend::Local {},
+            DiskBackend::Distributed { disk_source } => {
+                params::DiskBackend::Distributed {
+                    disk_source: disk_source.into(),
+                }
+            }
         }
     }
 }
 
-impl TryFrom<external::Disk> for Disk {
-    type Error = dropshot::HttpError;
-
-    fn try_from(new: external::Disk) -> Result<Disk, Self::Error> {
-        Ok(Disk {
-            identity: new.identity,
-            project_id: new.project_id,
-            snapshot_id: new.snapshot_id,
-            image_id: new.image_id,
-            size: new.size,
-            block_size: new.block_size,
-            state: new.state,
-            device_path: new.device_path,
-            disk_type: match new.disk_type {
-                external::DiskType::Distributed => DiskType::Crucible,
-
-                _ => {
-                    // Cannot display any other variant for this old client
-                    return Err(dropshot::HttpError::for_client_error(
-                        Some(String::from("Not Acceptable")),
-                        dropshot::ClientErrorStatusCode::NOT_ACCEPTABLE,
-                        String::from(
-                            "disk type variant not supported for client version",
-                        ),
-                    ));
-                }
-            },
-        })
-    }
-}
-
-impl From<Disk> for v2026013000::Disk {
-    fn from(old: Disk) -> v2026013000::Disk {
-        v2026013000::Disk {
-            identity: old.identity,
-            project_id: old.project_id,
-            snapshot_id: old.snapshot_id,
-            image_id: old.image_id,
-            size: old.size,
-            block_size: old.block_size,
-            state: old.state,
-            device_path: old.device_path,
-            disk_type: old.disk_type.into(),
-        }
-    }
-}
-
-impl TryFrom<v2026013000::Disk> for Disk {
-    type Error = dropshot::HttpError;
-
-    fn try_from(new: v2026013000::Disk) -> Result<Disk, Self::Error> {
-        Ok(Disk {
-            identity: new.identity,
-            project_id: new.project_id,
-            snapshot_id: new.snapshot_id,
-            image_id: new.image_id,
-            size: new.size,
-            block_size: new.block_size,
-            state: new.state,
-            device_path: new.device_path,
-            disk_type: match new.disk_type {
-                external::DiskType::Distributed => DiskType::Crucible,
-
-                _ => {
-                    // Cannot display any other variant for this old client
-                    return Err(dropshot::HttpError::for_client_error(
-                        Some(String::from("Not Acceptable")),
-                        dropshot::ClientErrorStatusCode::NOT_ACCEPTABLE,
-                        String::from(
-                            "disk type variant not supported for client version",
-                        ),
-                    ));
-                }
-            },
-        })
-    }
-}
-
-/// Different sources for a disk
+/// Different sources for a Distributed Disk
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum DiskSource {
@@ -151,10 +78,18 @@ pub enum DiskSource {
     },
 
     /// Create a disk from a disk snapshot
-    Snapshot { snapshot_id: Uuid },
+    Snapshot {
+        snapshot_id: Uuid,
+        /// If `true`, the disk created from this snapshot will be read-only.
+        read_only: bool,
+    },
 
     /// Create a disk from an image
-    Image { image_id: Uuid },
+    Image {
+        image_id: Uuid,
+        /// If `true`, the disk created from this image will be read-only.
+        read_only: bool,
+    },
 
     /// Create a blank disk that will accept bulk writes or pull blocks from an
     /// external source.
@@ -162,71 +97,20 @@ pub enum DiskSource {
 }
 
 impl From<DiskSource> for params::DiskSource {
-    fn from(old: DiskSource) -> params::DiskSource {
+    fn from(old: DiskSource) -> Self {
+        // This is the funny part: you'll note that all these types are
+        // ~*EXACTLY THE SAME*~. I love API versioning!
         match old {
-            DiskSource::Blank { block_size } => {
-                params::DiskSource::Blank { block_size }
+            DiskSource::Blank { block_size } => Self::Blank { block_size },
+            DiskSource::Snapshot { snapshot_id, read_only } => {
+                Self::Snapshot { snapshot_id, read_only }
             }
-
-            DiskSource::Snapshot { snapshot_id } => {
-                params::DiskSource::Snapshot {
-                    snapshot_id,
-                    // read only defaults to false if the client doesn't know
-                    // about it
-                    read_only: false,
-                }
+            DiskSource::Image { image_id, read_only } => {
+                Self::Image { image_id, read_only }
             }
-
-            DiskSource::Image { image_id } => {
-                params::DiskSource::Image {
-                    image_id,
-                    // read only defaults to false if the client doesn't know
-                    // about it
-                    read_only: false,
-                }
-            }
-
             DiskSource::ImportingBlocks { block_size } => {
-                params::DiskSource::ImportingBlocks { block_size }
+                Self::ImportingBlocks { block_size }
             }
-        }
-    }
-}
-
-/// Create-time parameters for a `Disk`
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-pub struct DiskCreate {
-    /// The common identifying metadata for the disk
-    #[serde(flatten)]
-    pub identity: external::IdentityMetadataCreateParams,
-
-    /// The initial source for this disk
-    pub disk_source: DiskSource,
-
-    /// The total size of the Disk (in bytes)
-    pub size: external::ByteCount,
-}
-
-impl From<DiskCreate> for params::DiskCreate {
-    fn from(old: DiskCreate) -> params::DiskCreate {
-        params::DiskCreate {
-            identity: old.identity,
-            disk_backend: params::DiskBackend::Distributed {
-                disk_source: old.disk_source.into(),
-            },
-            size: old.size,
-        }
-    }
-}
-
-impl From<DiskCreate> for v2026013000::DiskCreate {
-    fn from(old: DiskCreate) -> v2026013000::DiskCreate {
-        v2026013000::DiskCreate {
-            identity: old.identity,
-            disk_backend: v2026013000::DiskBackend::Distributed {
-                disk_source: old.disk_source,
-            },
-            size: old.size,
         }
     }
 }
@@ -251,22 +135,6 @@ impl From<InstanceDiskAttachment> for params::InstanceDiskAttachment {
 
             InstanceDiskAttachment::Attach(attach) => {
                 params::InstanceDiskAttachment::Attach(attach)
-            }
-        }
-    }
-}
-
-impl From<InstanceDiskAttachment> for v2026013000::InstanceDiskAttachment {
-    fn from(
-        old: InstanceDiskAttachment,
-    ) -> v2026013000::InstanceDiskAttachment {
-        match old {
-            InstanceDiskAttachment::Create(create) => {
-                v2026013000::InstanceDiskAttachment::Create(create.into())
-            }
-
-            InstanceDiskAttachment::Attach(attach) => {
-                v2026013000::InstanceDiskAttachment::Attach(attach)
             }
         }
     }
@@ -300,7 +168,7 @@ pub struct InstanceCreate {
 
     /// The network interfaces to be created for this instance.
     #[serde(default)]
-    pub network_interfaces: v2026010100::InstanceNetworkInterfaceAttachment,
+    pub network_interfaces: params::InstanceNetworkInterfaceAttachment,
 
     /// The external IP addresses provided to this instance.
     ///
@@ -309,15 +177,14 @@ pub struct InstanceCreate {
     /// known IP address for making inbound connections to the instance.
     // Delegates through v2025121200 → params::ExternalIpCreate
     #[serde(default)]
-    pub external_ips: Vec<v2025121200::ExternalIpCreate>,
+    pub external_ips: Vec<params::ExternalIpCreate>,
 
-    /// The multicast groups this instance should join.
+    /// Multicast groups this instance should join at creation.
     ///
-    /// The instance will be automatically added as a member of the specified
-    /// multicast groups during creation, enabling it to send and receive
-    /// multicast traffic for those groups.
+    /// Groups can be specified by name, UUID, or IP address. Non-existent
+    /// groups are created automatically.
     #[serde(default)]
-    pub multicast_groups: Vec<external::NameOrId>,
+    pub multicast_groups: Vec<params::MulticastGroupJoinSpec>,
 
     /// A list of disks to be attached to the instance.
     ///
@@ -389,9 +256,9 @@ pub struct InstanceCreate {
     pub cpu_platform: Option<external::InstanceCpuPlatform>,
 }
 
-impl From<InstanceCreate> for v2025121200::InstanceCreate {
-    fn from(old: InstanceCreate) -> v2025121200::InstanceCreate {
-        v2025121200::InstanceCreate {
+impl From<InstanceCreate> for params::InstanceCreate {
+    fn from(old: InstanceCreate) -> params::InstanceCreate {
+        params::InstanceCreate {
             identity: old.identity,
             ncpus: old.ncpus,
             memory: old.memory,

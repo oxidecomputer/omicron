@@ -302,7 +302,7 @@ pub fn link_subnet_pool_to_silo_query(
 ///
 /// This deletes the link between these objects, conditional on the generation
 /// of the Subnet Pool not having changed. We increment that whenever we create
-/// either a new pool member or a new External Subnet in the given Silo.
+/// either a new pool member or a new External Subnet in the given Pool.
 pub fn unlink_subnet_pool_from_silo_query(
     pool_id: SubnetPoolUuid,
     silo_id: Uuid,
@@ -313,8 +313,8 @@ pub fn unlink_subnet_pool_from_silo_query(
     builder
         .sql(
             "\
-    WITH subnet_pool AS (\
-        SELECT 1 \
+    WITH subnet_pool AS MATERIALIZED(\
+        SELECT CAST(IF(EXISTS(SELECT 1 \
         FROM subnet_pool \
         WHERE id = ",
         )
@@ -323,8 +323,10 @@ pub fn unlink_subnet_pool_from_silo_query(
         .sql(" AND time_deleted IS NULL AND rcgen = ")
         .param()
         .bind::<sql_types::BigInt, _>(rcgen)
+        .sql("), 'true', '")
+        .sql(SUBNET_POOL_CHANGED_SENTINEL)
         .sql(
-            ") \
+            "') AS BOOL)) \
     DELETE FROM \
     subnet_pool_silo_link \
     WHERE \
@@ -334,9 +336,49 @@ pub fn unlink_subnet_pool_from_silo_query(
         .bind::<sql_types::Uuid, _>(pool_id)
         .sql(" AND silo_id = ")
         .param()
-        .bind::<sql_types::Uuid, _>(silo_id)
-        .sql(" AND EXISTS(SELECT 1 FROM subnet_pool)");
+        .bind::<sql_types::Uuid, _>(silo_id);
     builder.query()
+}
+
+const SUBNET_POOL_CHANGED_SENTINEL: &str = "pool-modified";
+pub fn decode_unlink_subnet_pool_from_silo_result(
+    res: Result<usize, DieselError>,
+    authz_pool: &authz::SubnetPool,
+    authz_silo: &authz::Silo,
+) -> Result<(), Error> {
+    match res {
+        // Deleted exactly one row, happy case.
+        Ok(1) => Ok(()),
+        // Deleted 0 rows, which means the link didn't exist.
+        Ok(0) => Err(LookupType::ByCompositeId(format!(
+            "subnet_pool_id: {}, silo_id: {}",
+            authz_pool.id(),
+            authz_silo.id(),
+        ))
+        .into_not_found(ResourceType::SubnetPoolSiloLink)),
+        // We somehow deleted multiple rows?
+        Ok(n) => Err(Error::internal_error(&format!(
+            "Expected to DELETE 0 or 1 row when unlinking a subnet pool \
+            and silo, but deleted {}. silo_id={}, subnet_pool_id={}",
+            n,
+            authz_silo.id(),
+            authz_pool.id()
+        ))),
+        // We hit the cast error, which means the pool was modified.
+        Err(DieselError::DatabaseError(
+            DatabaseErrorKind::Unknown,
+            ref info,
+        )) if is_bool_parse_error(
+            info.message(),
+            SUBNET_POOL_CHANGED_SENTINEL,
+        ) =>
+        {
+            Err(Error::invalid_request(
+                "deletion failed due to concurrent modification",
+            ))
+        }
+        Err(e) => Err(public_error_from_diesel(e, ErrorHandler::Server)),
+    }
 }
 
 /// Query to insert an External Subnet.

@@ -1542,7 +1542,9 @@ CREATE TABLE IF NOT EXISTS omicron.public.disk_type_crucible (
     origin_snapshot UUID,
     origin_image UUID,
 
-    pantry_address TEXT
+    pantry_address TEXT,
+
+    read_only BOOL NOT NULL
 );
 
 /* Multiple disks cannot share volumes */
@@ -8187,7 +8189,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '228.0.0', NULL)
+    (TRUE, NOW(), NOW(), '229.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

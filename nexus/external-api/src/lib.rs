@@ -46,6 +46,8 @@ mod v2026011600;
 mod v2026012200;
 mod v2026012300;
 mod v2026013000;
+mod v2026013001;
+mod v2026013002;
 
 #[cfg(test)]
 mod test_utils;
@@ -78,7 +80,10 @@ api_versions!([
     // |  date-based version should be at the top of the list.
     // v
     // (next_yyyymmddnn, IDENT),
-    (2026013000, BGP_UNNUMBERED_PEERS),
+    (2026013100, READ_ONLY_DISKS_NULLABLE),
+    (2026013002, BGP_UNNUMBERED_PEERS),
+    (2026013001, READ_ONLY_DISKS),
+    (2026013000, INSTANCES_EXTERNAL_SUBNETS),
     (2026012800, REMOVE_SUBNET_POOL_POOL_TYPE),
     (2026012300, DUAL_STACK_EPHEMERAL_IP),
     (2026012201, EXTERNAL_SUBNET_ALLOCATOR_UPDATE),
@@ -1989,6 +1994,7 @@ pub trait NexusExternalApi {
     /// Deprecated: Groups are created implicitly when adding members in newer
     /// API versions.
     #[endpoint {
+        operation_id = "multicast_group_create",
         method = POST,
         path = "/v1/multicast-groups",
         tags = ["experimental"],
@@ -2048,6 +2054,7 @@ pub trait NexusExternalApi {
     ///
     /// Deprecated: groups are managed implicitly through member operations.
     #[endpoint {
+        operation_id = "multicast_group_update",
         method = PUT,
         path = "/v1/multicast-groups/{multicast_group}",
         tags = ["experimental"],
@@ -2071,6 +2078,7 @@ pub trait NexusExternalApi {
     ///
     /// Deprecated: groups are deleted automatically when the last member leaves.
     #[endpoint {
+        operation_id = "multicast_group_delete",
         method = DELETE,
         path = "/v1/multicast-groups/{multicast_group}",
         tags = ["experimental"],
@@ -2189,6 +2197,7 @@ pub trait NexusExternalApi {
     ///
     /// Deprecated: use the main view endpoint which accepts IP addresses directly.
     #[endpoint {
+        operation_id = "lookup_multicast_group_by_ip",
         method = GET,
         path = "/v1/system/multicast-groups/by-ip/{address}",
         tags = ["experimental"],
@@ -2218,7 +2227,7 @@ pub trait NexusExternalApi {
         rqctx: RequestContext<Self::Context>,
         query_params: Query<PaginatedByNameOrId<params::ProjectSelector>>,
     ) -> Result<HttpResponseOk<ResultsPage<v2025112000::Disk>>, HttpError> {
-        Self::disk_list(rqctx, query_params).await.and_then(
+        Self::v2026013000_disk_list(rqctx, query_params).await.and_then(
             |HttpResponseOk(page)| {
                 let items: Result<Vec<_>, _> =
                     page.items.into_iter().map(TryInto::try_into).collect();
@@ -2234,10 +2243,31 @@ pub trait NexusExternalApi {
 
     /// List disks
     #[endpoint {
+        operation_id = "disk_list",
         method = GET,
         path = "/v1/disks",
         tags = ["disks"],
-        versions = VERSION_LOCAL_STORAGE..,
+        versions = VERSION_LOCAL_STORAGE..VERSION_READ_ONLY_DISKS,
+    }]
+    async fn v2026013000_disk_list(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<PaginatedByNameOrId<params::ProjectSelector>>,
+    ) -> Result<HttpResponseOk<ResultsPage<v2026013000::Disk>>, HttpError> {
+        Self::disk_list(rqctx, query_params).await.map(
+            |HttpResponseOk(page)| {
+                let items: Vec<_> =
+                    page.items.into_iter().map(Into::into).collect();
+                HttpResponseOk(ResultsPage { next_page: page.next_page, items })
+            },
+        )
+    }
+
+    /// List disks
+    #[endpoint {
+        method = GET,
+        path = "/v1/disks",
+        tags = ["disks"],
+        versions = VERSION_READ_ONLY_DISKS..,
     }]
     async fn disk_list(
         rqctx: RequestContext<Self::Context>,
@@ -2266,10 +2296,46 @@ pub trait NexusExternalApi {
     // TODO-correctness See note about instance create.  This should be async.
     /// Create disk
     #[endpoint {
+        operation_id = "disk_create",
         method = POST,
         path = "/v1/disks",
         tags = ["disks"],
-        versions = VERSION_LOCAL_STORAGE..,
+        versions = VERSION_LOCAL_STORAGE..VERSION_READ_ONLY_DISKS,
+    }]
+    async fn v2026013000_disk_create(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<params::ProjectSelector>,
+        new_disk: TypedBody<v2026013000::DiskCreate>,
+    ) -> Result<HttpResponseCreated<v2026013000::Disk>, HttpError> {
+        Self::disk_create(rqctx, query_params, new_disk.map(Into::into))
+            .await
+            .map(|resp| resp.map(Into::into))
+    }
+
+    // TODO-correctness See note about instance create.  This should be async.
+    /// Create disk
+    #[endpoint {
+        operation_id = "disk_create",
+        method = POST,
+        path = "/v1/disks",
+        tags = ["disks"],
+        versions = VERSION_READ_ONLY_DISKS..VERSION_READ_ONLY_DISKS_NULLABLE,
+    }]
+    async fn v2026013001_disk_create(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<params::ProjectSelector>,
+        new_disk: TypedBody<v2026013001::DiskCreate>,
+    ) -> Result<HttpResponseCreated<Disk>, HttpError> {
+        Self::disk_create(rqctx, query_params, new_disk.map(Into::into)).await
+    }
+
+    // TODO-correctness See note about instance create.  This should be async.
+    /// Create disk
+    #[endpoint {
+        method = POST,
+        path = "/v1/disks",
+        tags = ["disks"],
+        versions = VERSION_READ_ONLY_DISKS_NULLABLE..,
     }]
     async fn disk_create(
         rqctx: RequestContext<Self::Context>,
@@ -2297,10 +2363,28 @@ pub trait NexusExternalApi {
 
     /// Fetch disk
     #[endpoint {
+        operation_id = "disk_view",
         method = GET,
         path = "/v1/disks/{disk}",
         tags = ["disks"],
-        versions = VERSION_LOCAL_STORAGE..,
+        versions = VERSION_LOCAL_STORAGE..VERSION_READ_ONLY_DISKS,
+    }]
+    async fn v2026013000_disk_view(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::DiskPath>,
+        query_params: Query<params::OptionalProjectSelector>,
+    ) -> Result<HttpResponseOk<v2026013000::Disk>, HttpError> {
+        Self::disk_view(rqctx, path_params, query_params)
+            .await
+            .map(|resp| resp.map(Into::into))
+    }
+
+    /// Fetch disk
+    #[endpoint {
+        method = GET,
+        path = "/v1/disks/{disk}",
+        tags = ["disks"],
+        versions = VERSION_READ_ONLY_DISKS..,
     }]
     async fn disk_view(
         rqctx: RequestContext<Self::Context>,
@@ -2484,10 +2568,43 @@ pub trait NexusExternalApi {
 
     /// Create instance
     #[endpoint {
+        operation_id = "instance_create",
         method = POST,
         path = "/v1/instances",
         tags = ["instances"],
-        versions = VERSION_MULTICAST_IMPLICIT_LIFECYCLE_UPDATES..,
+        versions = VERSION_MULTICAST_IMPLICIT_LIFECYCLE_UPDATES..VERSION_READ_ONLY_DISKS,
+    }]
+    async fn v2026013000_instance_create(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<params::ProjectSelector>,
+        new_instance: TypedBody<v2026013000::InstanceCreate>,
+    ) -> Result<HttpResponseCreated<Instance>, HttpError> {
+        Self::instance_create(rqctx, query_params, new_instance.map(Into::into))
+            .await
+    }
+
+    #[endpoint {
+        operation_id = "instance_create",
+        method = POST,
+        path = "/v1/instances",
+        tags = ["instances"],
+        versions = VERSION_READ_ONLY_DISKS..VERSION_READ_ONLY_DISKS_NULLABLE,
+    }]
+    async fn v2026013001_instance_create(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<params::ProjectSelector>,
+        new_instance: TypedBody<v2026013001::InstanceCreate>,
+    ) -> Result<HttpResponseCreated<Instance>, HttpError> {
+        Self::instance_create(rqctx, query_params, new_instance.map(Into::into))
+            .await
+    }
+
+    /// Create instance
+    #[endpoint {
+        method = POST,
+        path = "/v1/instances",
+        tags = ["instances"],
+        versions = VERSION_READ_ONLY_DISKS_NULLABLE..,
     }]
     async fn instance_create(
         rqctx: RequestContext<Self::Context>,
@@ -2521,6 +2638,7 @@ pub trait NexusExternalApi {
 
     /// Update instance
     #[endpoint {
+        operation_id = "instance_update",
         method = PUT,
         path = "/v1/instances/{instance}",
         tags = ["instances"],
@@ -2665,10 +2783,34 @@ pub trait NexusExternalApi {
 
     /// List disks for instance
     #[endpoint {
+        operation_id = "instance_disk_list",
         method = GET,
         path = "/v1/instances/{instance}/disks",
         tags = ["instances"],
-        versions = VERSION_LOCAL_STORAGE..,
+        versions = VERSION_LOCAL_STORAGE..VERSION_READ_ONLY_DISKS,
+    }]
+    async fn v2026013000_instance_disk_list(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<
+            PaginatedByNameOrId<params::OptionalProjectSelector>,
+        >,
+        path_params: Path<params::InstancePath>,
+    ) -> Result<HttpResponseOk<ResultsPage<v2026013000::Disk>>, HttpError> {
+        Self::instance_disk_list(rqctx, query_params, path_params).await.map(
+            |HttpResponseOk(page)| {
+                let items: Vec<_> =
+                    page.items.into_iter().map(Into::into).collect();
+                HttpResponseOk(ResultsPage { next_page: page.next_page, items })
+            },
+        )
+    }
+
+    /// List disks for instance
+    #[endpoint {
+        method = GET,
+        path = "/v1/instances/{instance}/disks",
+        tags = ["instances"],
+        versions = VERSION_READ_ONLY_DISKS..,
     }]
     async fn instance_disk_list(
         rqctx: RequestContext<Self::Context>,
@@ -2704,10 +2846,34 @@ pub trait NexusExternalApi {
 
     /// Attach disk to instance
     #[endpoint {
+        operation_id = "instance_disk_attach",
         method = POST,
         path = "/v1/instances/{instance}/disks/attach",
         tags = ["instances"],
-        versions = VERSION_LOCAL_STORAGE..,
+        versions = VERSION_LOCAL_STORAGE..VERSION_READ_ONLY_DISKS,
+    }]
+    async fn v2026013000_instance_disk_attach(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::InstancePath>,
+        query_params: Query<params::OptionalProjectSelector>,
+        disk_to_attach: TypedBody<params::DiskPath>,
+    ) -> Result<HttpResponseAccepted<v2026013000::Disk>, HttpError> {
+        Self::instance_disk_attach(
+            rqctx,
+            path_params,
+            query_params,
+            disk_to_attach,
+        )
+        .await
+        .map(|resp| resp.map(Into::into))
+    }
+
+    /// Attach disk to instance
+    #[endpoint {
+        method = POST,
+        path = "/v1/instances/{instance}/disks/attach",
+        tags = ["instances"],
+        versions = VERSION_READ_ONLY_DISKS..,
     }]
     async fn instance_disk_attach(
         rqctx: RequestContext<Self::Context>,
@@ -2742,10 +2908,34 @@ pub trait NexusExternalApi {
 
     /// Detach disk from instance
     #[endpoint {
+        operation_id = "instance_disk_detach",
         method = POST,
         path = "/v1/instances/{instance}/disks/detach",
         tags = ["instances"],
-        versions = VERSION_LOCAL_STORAGE..,
+        versions = VERSION_LOCAL_STORAGE..VERSION_READ_ONLY_DISKS,
+    }]
+    async fn v2026013000_instance_disk_detach(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::InstancePath>,
+        query_params: Query<params::OptionalProjectSelector>,
+        disk_to_detach: TypedBody<params::DiskPath>,
+    ) -> Result<HttpResponseAccepted<v2026013000::Disk>, HttpError> {
+        Self::instance_disk_detach(
+            rqctx,
+            path_params,
+            query_params,
+            disk_to_detach,
+        )
+        .await
+        .map(|resp| resp.map(Into::into))
+    }
+
+    /// Detach disk from instance
+    #[endpoint {
+        method = POST,
+        path = "/v1/instances/{instance}/disks/detach",
+        tags = ["instances"],
+        versions = VERSION_READ_ONLY_DISKS..,
     }]
     async fn instance_disk_detach(
         rqctx: RequestContext<Self::Context>,
@@ -3159,8 +3349,8 @@ pub trait NexusExternalApi {
     }]
     async fn v2026010300_networking_switch_port_settings_create(
         rqctx: RequestContext<Self::Context>,
-        new_settings: TypedBody<v2026013000::SwitchPortSettingsCreate>,
-    ) -> Result<HttpResponseCreated<v2026013000::SwitchPortSettings>, HttpError>
+        new_settings: TypedBody<v2026013002::SwitchPortSettingsCreate>,
+    ) -> Result<HttpResponseCreated<v2026013002::SwitchPortSettings>, HttpError>
     {
         match Self::networking_switch_port_settings_create(
             rqctx,
@@ -3224,7 +3414,7 @@ pub trait NexusExternalApi {
     async fn v2026010300_networking_switch_port_settings_view(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<params::SwitchPortSettingsInfoSelector>,
-    ) -> Result<HttpResponseOk<v2026013000::SwitchPortSettings>, HttpError>
+    ) -> Result<HttpResponseOk<v2026013002::SwitchPortSettings>, HttpError>
     {
         match Self::networking_switch_port_settings_view(rqctx, path_params)
             .await
@@ -3356,6 +3546,7 @@ pub trait NexusExternalApi {
     ) -> Result<HttpResponseOk<ResultsPage<BgpConfig>>, HttpError>;
 
     #[endpoint {
+        operation_id = "networking_bgp_status",
         method = GET,
         path = "/v1/system/networking/bgp-status",
         tags = ["system/networking"],
@@ -3920,6 +4111,7 @@ pub trait NexusExternalApi {
 
     /// Detach and deallocate ephemeral IP from instance
     #[endpoint {
+        operation_id = "instance_ephemeral_ip_detach",
         method = DELETE,
         path = "/v1/instances/{instance}/external-ips/ephemeral",
         tags = ["instances"],
@@ -3954,6 +4146,21 @@ pub trait NexusExternalApi {
         path_params: Path<params::InstancePath>,
         query_params: Query<params::EphemeralIpDetachSelector>,
     ) -> Result<HttpResponseDeleted, HttpError>;
+
+    // Instance External Subnets
+
+    /// List external subnets attached to instance
+    #[endpoint {
+        method = GET,
+        path = "/v1/instances/{instance}/external-subnets",
+        tags = ["instances"],
+        versions = VERSION_INSTANCES_EXTERNAL_SUBNETS..,
+    }]
+    async fn instance_external_subnet_list(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<params::OptionalProjectSelector>,
+        path_params: Path<params::InstancePath>,
+    ) -> Result<HttpResponseOk<ResultsPage<views::ExternalSubnet>>, HttpError>;
 
     // Instance Multicast Groups
 

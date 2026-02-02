@@ -930,7 +930,6 @@ mod tests {
                 description: "Creating test group".to_string(),
             },
             multicast_ip: Some("224.10.1.6".parse().unwrap()),
-            // Pool resolved via authz_pool argument to datastore call
             mvlan: None,
             has_sources: false,
             ip_version: None,
@@ -3049,9 +3048,10 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_member_attach_reactivation_from_left() {
-        let logctx =
-            dev::test_setup_log("test_member_attach_reactivation_from_left");
+    async fn test_member_attach_reactivation_source_handling() {
+        let logctx = dev::test_setup_log(
+            "test_member_attach_reactivation_source_handling",
+        );
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
 
@@ -3063,234 +3063,164 @@ mod tests {
         )
         .await;
 
-        // Create active group
         let group = multicast::create_test_group_with_state(
             &opctx,
             &datastore,
             "test-group",
             "224.10.1.9",
-            true, // make_active
+            true,
         )
         .await;
+        let group_id = MulticastGroupUuid::from_untyped_uuid(group.id());
 
-        // Create instance
-        let (instance, _vmm) = create_instance_with_vmm(
-            &opctx,
-            &datastore,
-            &setup.authz_project,
-            "test-instance",
-            setup.sled_id,
-        )
-        .await;
-        let instance_id = *instance.as_untyped_uuid();
-
-        // First attach with source IPs
-        let initial_sources: Vec<IpAddr> =
-            vec!["10.1.1.1".parse().unwrap(), "10.1.1.2".parse().unwrap()];
-        let member1 = datastore
-            .multicast_group_member_attach_to_instance(
+        // Preserve sources: None keeps existing source_ips
+        {
+            let instance = create_stopped_instance_record(
                 &opctx,
-                MulticastGroupUuid::from_untyped_uuid(group.id()),
-                InstanceUuid::from_untyped_uuid(instance_id),
-                Some(initial_sources.as_slice()),
+                &datastore,
+                &setup.authz_project,
+                "preserve-instance",
             )
-            .await
-            .expect("First attach should succeed");
+            .await;
 
-        // Verify `source_ips` were stored
-        // Database stores IpNetwork, so convert for comparison
-        let member_init = datastore
-            .multicast_group_member_get_by_id(&opctx, member1.id, false)
-            .await
-            .expect("Should get member")
-            .expect("Member should exist");
-        let stored_ips: Vec<IpAddr> =
-            member_init.source_ips.iter().map(|n| n.ip()).collect();
-        assert_eq!(
-            stored_ips, initial_sources,
-            "Initial source_ips should be stored"
-        );
+            let original_sources: Vec<IpAddr> =
+                vec!["10.1.1.1".parse().unwrap(), "10.1.1.2".parse().unwrap()];
+            let member = datastore
+                .multicast_group_member_attach_to_instance(
+                    &opctx,
+                    group_id,
+                    instance,
+                    Some(original_sources.as_slice()),
+                )
+                .await
+                .expect("Should attach");
 
-        // Transition member to "Left" state and clear sled_id (simulating
-        // instance stop)
-        //
-        // This does not set `time_deleted`, instead only stopped instances can
-        // be reactivated
-        datastore
-            .multicast_group_members_detach_by_instance(
+            datastore
+                .multicast_group_members_detach_by_instance(&opctx, instance)
+                .await
+                .expect("Should detach");
+
+            let reactivated = datastore
+                .multicast_group_member_attach_to_instance(
+                    &opctx, group_id, instance,
+                    None, // Preserve existing sources
+                )
+                .await
+                .expect("Reactivation should succeed");
+
+            assert_eq!(
+                member.id, reactivated.id,
+                "Should reactivate same member"
+            );
+            let stored_ips: Vec<IpAddr> =
+                reactivated.source_ips.iter().map(|n| n.ip()).collect();
+            assert_eq!(
+                stored_ips, original_sources,
+                "None should preserve existing source_ips"
+            );
+            assert_eq!(reactivated.state, MulticastGroupMemberState::Joining);
+        }
+
+        // Replace sources: Some([new]) replaces existing source_ips
+        {
+            let instance = create_stopped_instance_record(
                 &opctx,
-                InstanceUuid::from_untyped_uuid(instance_id),
+                &datastore,
+                &setup.authz_project,
+                "replace-instance",
             )
-            .await
-            .expect("Should transition member to 'Left' and clear sled_id");
+            .await;
 
-        // Verify member is now in Left state without time_deleted
-        let member_stopped = datastore
-            .multicast_group_member_get_by_id(&opctx, member1.id, false)
-            .await
-            .expect("Should get member")
-            .expect("Member should still exist (not soft-deleted)");
-        assert_eq!(member_stopped.state, MulticastGroupMemberState::Left);
-        assert!(
-            member_stopped.time_deleted.is_none(),
-            "'time_deleted' should not be set for stopped instances"
-        );
-        assert!(member_stopped.sled_id.is_none(), "sled_id should be cleared");
+            let original_sources: Vec<IpAddr> =
+                vec!["10.0.0.1".parse().unwrap(), "10.0.0.2".parse().unwrap()];
+            let member = datastore
+                .multicast_group_member_attach_to_instance(
+                    &opctx,
+                    group_id,
+                    instance,
+                    Some(original_sources.as_slice()),
+                )
+                .await
+                .expect("Should attach");
 
-        // Reactivate by attaching again (simulating instance restart)
-        // Use `None` to preserve the existing source IPs
-        let member2 = datastore
-            .multicast_group_member_attach_to_instance(
+            datastore
+                .multicast_group_members_detach_by_instance(&opctx, instance)
+                .await
+                .expect("Should detach");
+
+            let replacement_sources: Vec<IpAddr> =
+                vec!["10.0.0.3".parse().unwrap(), "10.0.0.4".parse().unwrap()];
+            let reactivated = datastore
+                .multicast_group_member_attach_to_instance(
+                    &opctx,
+                    group_id,
+                    instance,
+                    Some(replacement_sources.as_slice()),
+                )
+                .await
+                .expect("Reactivation should succeed");
+
+            assert_eq!(
+                member.id, reactivated.id,
+                "Should reactivate same member when replacing sources"
+            );
+            let stored_ips: Vec<IpAddr> =
+                reactivated.source_ips.iter().map(|n| n.ip()).collect();
+            assert_eq!(
+                stored_ips, replacement_sources,
+                "Some([new]) should replace existing sources"
+            );
+            assert_ne!(stored_ips, original_sources);
+        }
+
+        // Clear sources: Some([]) clears source_ips (switch to ASM)
+        {
+            let instance = create_stopped_instance_record(
                 &opctx,
-                MulticastGroupUuid::from_untyped_uuid(group.id()),
-                InstanceUuid::from_untyped_uuid(instance_id),
-                None, // Preserve existing sources
+                &datastore,
+                &setup.authz_project,
+                "clear-instance",
             )
-            .await
-            .expect("Reactivation should succeed");
+            .await;
 
-        // Should return same member ID (reactivated existing member)
-        assert_eq!(member1.id, member2.id, "Should reactivate same member");
+            let original_sources: Vec<IpAddr> =
+                vec!["10.5.5.1".parse().unwrap(), "10.5.5.2".parse().unwrap()];
+            let member = datastore
+                .multicast_group_member_attach_to_instance(
+                    &opctx,
+                    group_id,
+                    instance,
+                    Some(original_sources.as_slice()),
+                )
+                .await
+                .expect("Should attach");
 
-        // Verify member is back in "Joining" state with `time_deleted` still NULL
-        let member = datastore
-            .multicast_group_member_get_by_group_and_instance(
-                &opctx,
-                MulticastGroupUuid::from_untyped_uuid(group.id()),
-                InstanceUuid::from_untyped_uuid(instance_id),
-            )
-            .await
-            .expect("Should get member")
-            .expect("Member should exist");
+            datastore
+                .multicast_group_members_detach_by_instance(&opctx, instance)
+                .await
+                .expect("Should detach");
 
-        assert_eq!(member.state, MulticastGroupMemberState::Joining);
-        assert_eq!(member.id, member1.id);
-        assert!(
-            member.time_deleted.is_none(),
-            "time_deleted should remain NULL (never set by detach_by_instance)"
-        );
-        // Verify `source_ips` preserved on reactivation with empty sources
-        // Database stores IpNetwork, so convert for comparison
-        let stored_ips: Vec<IpAddr> =
-            member.source_ips.iter().map(|n| n.ip()).collect();
-        assert_eq!(
-            stored_ips, initial_sources,
-            "Reactivation with empty sources should preserve existing source_ips"
-        );
+            let reactivated = datastore
+                .multicast_group_member_attach_to_instance(
+                    &opctx,
+                    group_id,
+                    instance,
+                    Some(NO_SOURCE_IPS), // Clear sources
+                )
+                .await
+                .expect("Reactivation should succeed");
 
-        db.terminate().await;
-        logctx.cleanup_successful();
-    }
-
-    #[tokio::test]
-    async fn test_member_attach_reactivation_replaces_sources() {
-        let logctx = dev::test_setup_log(
-            "test_member_attach_reactivation_replaces_sources",
-        );
-        let db = TestDatabase::new_with_datastore(&logctx.log).await;
-        let (opctx, datastore) = (db.opctx(), db.datastore());
-
-        let setup = multicast::create_test_setup(
-            &opctx,
-            &datastore,
-            "replace-sources-pool",
-            "replace-sources-project",
-        )
-        .await;
-
-        // Create active group
-        let group = multicast::create_test_group_with_state(
-            &opctx,
-            &datastore,
-            "test-group",
-            "224.10.1.20",
-            true, // make_active
-        )
-        .await;
-
-        // Create instance
-        let (instance, _vmm) = create_instance_with_vmm(
-            &opctx,
-            &datastore,
-            &setup.authz_project,
-            "test-instance",
-            setup.sled_id,
-        )
-        .await;
-        let instance_id = *instance.as_untyped_uuid();
-
-        // Initial attach with source IPs [A, B]
-        let original_sources: Vec<IpAddr> =
-            vec!["10.0.0.1".parse().unwrap(), "10.0.0.2".parse().unwrap()];
-        datastore
-            .multicast_group_member_attach_to_instance(
-                &opctx,
-                MulticastGroupUuid::from_untyped_uuid(group.id()),
-                InstanceUuid::from_untyped_uuid(instance_id),
-                Some(original_sources.as_slice()),
-            )
-            .await
-            .expect("Should attach instance");
-
-        // Verify original sources stored
-        // Database stores IpNetwork, so convert for comparison
-        let member_initial = datastore
-            .multicast_group_member_get_by_group_and_instance(
-                &opctx,
-                MulticastGroupUuid::from_untyped_uuid(group.id()),
-                InstanceUuid::from_untyped_uuid(instance_id),
-            )
-            .await
-            .expect("Should get member")
-            .expect("Member should exist");
-        let stored_ips: Vec<IpAddr> =
-            member_initial.source_ips.iter().map(|n| n.ip()).collect();
-        assert_eq!(stored_ips, original_sources);
-
-        // Transition to "Left" (simulating instance stop)
-        datastore
-            .multicast_group_members_detach_by_instance(
-                &opctx,
-                InstanceUuid::from_untyped_uuid(instance_id),
-            )
-            .await
-            .expect("Should detach");
-
-        // Reactivate with a different set of non-empty sources [C, D]
-        let replacement_sources: Vec<IpAddr> =
-            vec!["10.0.0.3".parse().unwrap(), "10.0.0.4".parse().unwrap()];
-        datastore
-            .multicast_group_member_attach_to_instance(
-                &opctx,
-                MulticastGroupUuid::from_untyped_uuid(group.id()),
-                InstanceUuid::from_untyped_uuid(instance_id),
-                Some(replacement_sources.as_slice()),
-            )
-            .await
-            .expect("Reactivation should succeed");
-
-        // Verify `source_ips` were replaced (not preserved)
-        // Database stores IpNetwork, so convert for comparison
-        let member_reactivated = datastore
-            .multicast_group_member_get_by_group_and_instance(
-                &opctx,
-                MulticastGroupUuid::from_untyped_uuid(group.id()),
-                InstanceUuid::from_untyped_uuid(instance_id),
-            )
-            .await
-            .expect("Should get member")
-            .expect("Member should exist");
-        let stored_ips: Vec<IpAddr> =
-            member_reactivated.source_ips.iter().map(|n| n.ip()).collect();
-
-        assert_eq!(
-            stored_ips, replacement_sources,
-            "Reactivation with non-empty sources should REPLACE existing sources"
-        );
-        assert_ne!(
-            stored_ips, original_sources,
-            "Original sources should not be preserved when new sources provided"
-        );
+            assert_eq!(
+                member.id, reactivated.id,
+                "Should reactivate same member when clearing sources"
+            );
+            assert_eq!(
+                reactivated.source_ips.len(),
+                0,
+                "Some([]) should clear source_ips"
+            );
+            assert_eq!(reactivated.state, MulticastGroupMemberState::Joining);
+        }
 
         db.terminate().await;
         logctx.cleanup_successful();
@@ -3714,209 +3644,6 @@ mod tests {
             !state.has_any_source_member,
             "Group with no members should have has_any_source_member=false"
         );
-
-        db.terminate().await;
-        logctx.cleanup_successful();
-    }
-
-    /// Test that `None` preserves source_ips on reactivation.
-    ///
-    /// This verifies the distinction between:
-    /// - `None` → preserve existing source_ips
-    /// - `Some([])` → clear source_ips (switch to ASM)
-    #[tokio::test]
-    async fn test_member_attach_preserves_sources_on_reactivation() {
-        let logctx = dev::test_setup_log(
-            "test_member_attach_preserves_sources_on_reactivation",
-        );
-        let db = TestDatabase::new_with_datastore(&logctx.log).await;
-        let (opctx, datastore) = (db.opctx(), db.datastore());
-
-        let setup = multicast::create_test_setup(
-            &opctx,
-            &datastore,
-            "add-preserve-sources-pool",
-            "add-preserve-sources-project",
-        )
-        .await;
-
-        // Create active group
-        let group = multicast::create_test_group_with_state(
-            &opctx,
-            &datastore,
-            "test-group",
-            "224.10.1.1",
-            true, // make_active
-        )
-        .await;
-        let group_id = MulticastGroupUuid::from_untyped_uuid(group.id());
-
-        // Create stopped instance
-        let instance = create_stopped_instance_record(
-            &opctx,
-            &datastore,
-            &setup.authz_project,
-            "test-instance",
-        )
-        .await;
-
-        // Add member with `source_ips` via HTTP API path
-        let original_sources =
-            vec!["10.5.5.1".parse().unwrap(), "10.5.5.2".parse().unwrap()];
-        let member = datastore
-            .multicast_group_member_attach_to_instance(
-                &opctx,
-                group_id,
-                instance,
-                Some(original_sources.as_slice()),
-            )
-            .await
-            .expect("Should add member with sources");
-
-        assert_eq!(
-            member.source_ips.len(),
-            2,
-            "Member should have 2 source IPs"
-        );
-
-        // Transition to "Left" state
-        datastore
-            .multicast_group_members_detach_by_instance(&opctx, instance)
-            .await
-            .expect("Should detach");
-
-        // Verify member is in "Left" state
-        let left_member = datastore
-            .multicast_group_member_get_by_id(&opctx, member.id, false)
-            .await
-            .expect("Should get member")
-            .expect("Member should exist");
-        assert_eq!(left_member.state, MulticastGroupMemberState::Left);
-        // Source IPs should still be stored (just in "Left" state)
-        assert_eq!(left_member.source_ips.len(), 2);
-
-        // Reactivate via HTTP API path with `None` (preserve existing sources)
-        let reactivated = datastore
-            .multicast_group_member_attach_to_instance(
-                &opctx, group_id, instance,
-                None, // None = preserve existing source_ips
-            )
-            .await
-            .expect("Should reactivate member");
-
-        // Verify `source_ips` were preserved (not cleared)
-        assert_eq!(
-            reactivated.source_ips.len(),
-            2,
-            "Source IPs should be preserved on reactivation with None"
-        );
-        let reactivated_ips: Vec<IpAddr> =
-            reactivated.source_ips.iter().map(|n| n.ip()).collect();
-        assert!(reactivated_ips.contains(&"10.5.5.1".parse().unwrap()));
-        assert!(reactivated_ips.contains(&"10.5.5.2".parse().unwrap()));
-
-        // Verify state is back to Joining
-        assert_eq!(reactivated.state, MulticastGroupMemberState::Joining);
-
-        db.terminate().await;
-        logctx.cleanup_successful();
-    }
-
-    /// Test that `Some([])` clears `source_ips` on reactivation (switch to ASM).
-    ///
-    /// This verifies the distinction between:
-    /// - `None` → preserve existing `source_ips`
-    /// - `Some([])` → clear `source_ips` (switch to ASM)
-    #[tokio::test]
-    async fn test_member_attach_clears_sources_on_reactivation() {
-        let logctx = dev::test_setup_log(
-            "test_member_attach_clears_sources_on_reactivation",
-        );
-        let db = TestDatabase::new_with_datastore(&logctx.log).await;
-        let (opctx, datastore) = (db.opctx(), db.datastore());
-
-        let setup = multicast::create_test_setup(
-            &opctx,
-            &datastore,
-            "add-clear-sources-pool",
-            "add-clear-sources-project",
-        )
-        .await;
-
-        // Create active group
-        let group = multicast::create_test_group_with_state(
-            &opctx,
-            &datastore,
-            "test-group",
-            "224.10.1.1",
-            true, // make_active
-        )
-        .await;
-        let group_id = MulticastGroupUuid::from_untyped_uuid(group.id());
-
-        // Create stopped instance
-        let instance = create_stopped_instance_record(
-            &opctx,
-            &datastore,
-            &setup.authz_project,
-            "test-instance",
-        )
-        .await;
-
-        // Add member with `source_ips`
-        let original_sources =
-            vec!["10.5.5.1".parse().unwrap(), "10.5.5.2".parse().unwrap()];
-        let member = datastore
-            .multicast_group_member_attach_to_instance(
-                &opctx,
-                group_id,
-                instance,
-                Some(original_sources.as_slice()),
-            )
-            .await
-            .expect("Should add member with sources");
-
-        assert_eq!(
-            member.source_ips.len(),
-            2,
-            "Member should have 2 source IPs"
-        );
-
-        // Transition to "Left" state
-        datastore
-            .multicast_group_members_detach_by_instance(&opctx, instance)
-            .await
-            .expect("Should detach");
-
-        // Verify member is in "Left" state with sources still stored
-        let left_member = datastore
-            .multicast_group_member_get_by_id(&opctx, member.id, false)
-            .await
-            .expect("Should get member")
-            .expect("Member should exist");
-        assert_eq!(left_member.state, MulticastGroupMemberState::Left);
-        assert_eq!(left_member.source_ips.len(), 2);
-
-        // Reactivate to clear sources (switch to ASM)
-        let reactivated = datastore
-            .multicast_group_member_attach_to_instance(
-                &opctx,
-                group_id,
-                instance,
-                Some(NO_SOURCE_IPS), // Some([]) = clear source_ips
-            )
-            .await
-            .expect("Should reactivate member");
-
-        // Verify `source_ips` were cleared
-        assert_eq!(
-            reactivated.source_ips.len(),
-            0,
-            "Source IPs should be cleared on reactivation with Some([])"
-        );
-
-        // Verify state is back to "Joining"
-        assert_eq!(reactivated.state, MulticastGroupMemberState::Joining);
 
         db.terminate().await;
         logctx.cleanup_successful();

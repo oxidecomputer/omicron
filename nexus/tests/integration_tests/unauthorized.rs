@@ -390,6 +390,18 @@ static SETUP_REQUESTS: LazyLock<Vec<SetupReq>> = LazyLock::new(|| {
             body: serde_json::to_value(&*DEMO_STOPPED_INSTANCE_CREATE).unwrap(),
             id_routes: vec!["/v1/instances/{id}"],
         },
+        // Link the subnet pool to the current Silo
+        SetupReq::Post {
+            url: &DEMO_SUBNET_POOL_SILOS_URL,
+            body: serde_json::to_value(&*DEMO_SUBNET_POOL_LINK_SILO).unwrap(),
+            id_routes: vec![],
+        },
+        // Create a External Subnet in the Project
+        SetupReq::Post {
+            url: &DEMO_EXTERNAL_SUBNETS_URL,
+            body: serde_json::to_value(&*DEMO_EXTERNAL_SUBNET_CREATE).unwrap(),
+            id_routes: vec![],
+        },
         // Create a multicast IP pool
         SetupReq::Post {
             url: &DEMO_IP_POOLS_URL,
@@ -491,7 +503,12 @@ static SETUP_REQUESTS: LazyLock<Vec<SetupReq>> = LazyLock::new(|| {
                 },
             )
             .unwrap(),
-            id_routes: vec!["/experimental/v1/system/support-bundles/{id}"],
+            id_routes: vec![
+                "/experimental/v1/system/support-bundles/{id}",
+                "/experimental/v1/system/support-bundles/{id}/download",
+                "/experimental/v1/system/support-bundles/{id}/download/some-file.txt",
+                "/experimental/v1/system/support-bundles/{id}/index",
+            ],
         },
         // Create a trusted root for updates
         SetupReq::Post {
@@ -695,8 +712,14 @@ async fn verify_endpoint(
 
     // For each of the HTTP methods we use in the API as well as TRACE, we'll
     // make several requests to this URL and verify the results.
-    let methods =
-        [Method::GET, Method::PUT, Method::POST, Method::DELETE, Method::TRACE];
+    let methods = [
+        Method::GET,
+        Method::PUT,
+        Method::POST,
+        Method::DELETE,
+        Method::HEAD,
+        Method::TRACE,
+    ];
     for method in methods {
         let allowed = endpoint
             .allowed_methods
@@ -736,7 +759,7 @@ async fn verify_endpoint(
             let response = request.execute().await.unwrap_or_else(|e| {
                 panic!("Failed making {method} request to {uri}: {e}")
             });
-            verify_response(&response);
+            verify_response(&response, &method);
             record_operation(WhichTest::Unprivileged(&expected_status));
         } else {
             // "This door is opened elsewhere."
@@ -757,7 +780,7 @@ async fn verify_endpoint(
             request = request.expect_websocket_handshake();
         }
         let response = request.execute().await.unwrap();
-        verify_response(&response);
+        verify_response(&response, &method);
         record_operation(WhichTest::Unauthenticated(&expected_status));
 
         // Now try a few requests with bogus credentials.  We should get the
@@ -790,7 +813,7 @@ async fn verify_endpoint(
             request = request.expect_websocket_handshake();
         }
         let response = request.execute().await.unwrap();
-        verify_response(&response);
+        verify_response(&response, &method);
         record_operation(WhichTest::UnknownUser(&expected_status));
 
         // Now try a syntactically invalid authn header.
@@ -808,7 +831,7 @@ async fn verify_endpoint(
             request = request.expect_websocket_handshake();
         }
         let response = request.execute().await.unwrap();
-        verify_response(&response);
+        verify_response(&response, &method);
         record_operation(WhichTest::InvalidHeader(&expected_status));
 
         print!(" ");
@@ -851,9 +874,13 @@ async fn verify_endpoint(
 }
 
 /// Verifies the body of an HTTP response for status codes 401, 403, 404, or 405
-fn verify_response(response: &TestResponse) {
+fn verify_response(response: &TestResponse, method: &Method) {
     if response.status == StatusCode::SWITCHING_PROTOCOLS {
         // websocket handshake. avoid trying to parse absent body as json.
+        return;
+    }
+    if *method == Method::HEAD {
+        // HEAD requests have no body to parse.
         return;
     }
     let error: HttpErrorResponseBody = response.parsed_body().unwrap();

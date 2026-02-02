@@ -8,6 +8,7 @@ use crate::db::DataStore;
 use crate::db::pagination::paginated;
 use crate::db::queries::external_subnet::decode_delete_external_subnet_error;
 use crate::db::queries::external_subnet::decode_insert_external_subnet_error;
+use crate::db::queries::external_subnet::decode_unlink_subnet_pool_from_silo_result;
 use crate::db::queries::external_subnet::delete_external_subnet_query;
 use crate::db::queries::external_subnet::insert_external_subnet_query;
 use crate::db::queries::external_subnet::insert_subnet_pool_member_query;
@@ -31,6 +32,7 @@ use nexus_db_lookup::lookup;
 use nexus_db_model::ExternalSubnet;
 use nexus_db_model::ExternalSubnetIdentity;
 use nexus_db_model::ExternalSubnetUpdate;
+use nexus_db_model::IpAttachState;
 use nexus_db_model::IpNet;
 use nexus_db_model::IpVersion;
 use nexus_db_model::Name;
@@ -46,6 +48,7 @@ use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::DeleteResult;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::ListResultVec;
+use omicron_common::api::external::LookupType;
 use omicron_common::api::external::NameOrId;
 use omicron_common::api::external::ResourceType;
 use omicron_common::api::external::UpdateResult;
@@ -226,7 +229,7 @@ impl DataStore {
             ) if info.constraint_name()
                 == Some("subnet_pool_silo_link_pkey") =>
             {
-                Error::invalid_request("Subnet Pool is already linked to Silo")
+                Error::conflict("Subnet Pool is already linked to Silo")
             }
             DieselError::DatabaseError(
                 DatabaseErrorKind::NotNullViolation,
@@ -285,24 +288,75 @@ impl DataStore {
                 subnets first, and try again.",
             ));
         }
-        unlink_subnet_pool_from_silo_query(
+        let result = unlink_subnet_pool_from_silo_query(
             authz_pool.id(),
             authz_silo.id(),
             db_pool.rcgen,
         )
         .execute_async(&*self.pool_connection_authorized(opctx).await?)
-        .await
-        .and_then(
-            |count| {
-                if count == 0 { Err(DieselError::NotFound) } else { Ok(()) }
-            },
+        .await;
+        decode_unlink_subnet_pool_from_silo_result(
+            result, authz_pool, authz_silo,
         )
+    }
+
+    /// Update the link between a Subnet Pool and Silo.
+    pub async fn update_subnet_pool_silo_link(
+        &self,
+        opctx: &OpContext,
+        authz_pool: &authz::SubnetPool,
+        authz_silo: &authz::Silo,
+        is_default: bool,
+    ) -> UpdateResult<SubnetPoolSiloLink> {
+        opctx.authorize(authz::Action::Modify, authz_pool).await?;
+        opctx.authorize(authz::Action::Modify, authz_silo).await?;
+        use nexus_db_schema::schema::subnet_pool_silo_link::dsl;
+        diesel::update(
+            dsl::subnet_pool_silo_link
+                .filter(
+                    dsl::subnet_pool_id.eq(to_db_typed_uuid(authz_pool.id())),
+                )
+                .filter(dsl::silo_id.eq(authz_silo.id())),
+        )
+        .set(dsl::is_default.eq(is_default))
+        .returning(SubnetPoolSiloLink::as_returning())
+        .get_result_async(&*self.pool_connection_authorized(opctx).await?)
+        .await
         .map_err(|e| match e {
-            DieselError::NotFound => Error::invalid_request(
-                "deletion failed due to concurrent modification",
-            ),
-            _ => public_error_from_diesel(e, ErrorHandler::Server),
+            DieselError::NotFound => LookupType::ByCompositeId(format!(
+                "subnet_pool_id: {}, silo_id: {}",
+                authz_pool.id(),
+                authz_silo.id(),
+            ))
+            .into_not_found(ResourceType::SubnetPoolSiloLink),
+            DieselError::DatabaseError(
+                DatabaseErrorKind::UniqueViolation,
+                ref info,
+            ) if info.constraint_name() == Some("single_default_per_silo") => {
+                Error::invalid_request(
+                    "Can only have a single default Subnet Pool for a \
+                    Silo for each IP version.",
+                )
+            }
+            e => public_error_from_diesel(e, ErrorHandler::Server),
         })
+    }
+
+    /// List silos linked to a subnet pool.
+    pub async fn list_silos_linked_to_subnet_pool(
+        &self,
+        opctx: &OpContext,
+        authz_pool: &authz::SubnetPool,
+        pagparams: &DataPageParams<'_, Uuid>,
+    ) -> ListResultVec<SubnetPoolSiloLink> {
+        opctx.authorize(authz::Action::ListChildren, authz_pool).await?;
+        use nexus_db_schema::schema::subnet_pool_silo_link::dsl;
+        paginated(dsl::subnet_pool_silo_link, dsl::silo_id, &pagparams)
+            .filter(dsl::subnet_pool_id.eq(to_db_typed_uuid(authz_pool.id())))
+            .select(SubnetPoolSiloLink::as_select())
+            .get_results_async(&*self.pool_connection_authorized(opctx).await?)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 
     /// Add a new Subnet Pool Member.
@@ -468,7 +522,7 @@ impl DataStore {
         opctx: &OpContext,
         authz_subnet: &authz::ExternalSubnet,
         updates: ExternalSubnetUpdate,
-    ) -> UpdateResult<()> {
+    ) -> UpdateResult<ExternalSubnet> {
         use nexus_db_schema::schema::external_subnet::dsl;
         opctx.authorize(authz::Action::Modify, authz_subnet).await?;
         diesel::update(
@@ -477,10 +531,10 @@ impl DataStore {
                 .filter(dsl::time_deleted.is_null()),
         )
         .set(updates)
-        .execute_async(&*self.pool_connection_authorized(opctx).await?)
+        .returning(ExternalSubnet::as_returning())
+        .get_result_async(&*self.pool_connection_authorized(opctx).await?)
         .await
         .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
-        .map(|_| ())
     }
 
     /// Delete an External Subnet.
@@ -508,6 +562,52 @@ impl DataStore {
                     Ok(())
                 }
             })
+    }
+
+    /// Fetch all external subnets attached to the provided instance.
+    pub async fn instance_lookup_external_subnets(
+        &self,
+        opctx: &OpContext,
+        authz_instance: &authz::Instance,
+    ) -> ListResultVec<ExternalSubnet> {
+        opctx.authorize(authz::Action::Read, authz_instance).await?;
+        use nexus_db_schema::schema::external_subnet::dsl;
+        dsl::external_subnet
+            .filter(dsl::instance_id.eq(authz_instance.id()))
+            .filter(dsl::time_deleted.is_null())
+            .filter(dsl::attach_state.eq(IpAttachState::Attached))
+            .order_by(dsl::id)
+            .select(ExternalSubnet::as_select())
+            .get_results_async(&*self.pool_connection_authorized(opctx).await?)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+    }
+
+    /// List external subnets.
+    pub async fn list_external_subnets(
+        &self,
+        opctx: &OpContext,
+        authz_project: &authz::Project,
+        pagparams: &PaginatedBy<'_>,
+    ) -> ListResultVec<ExternalSubnet> {
+        opctx.authorize(authz::Action::ListChildren, authz_project).await?;
+        use nexus_db_schema::schema::external_subnet::dsl;
+        match pagparams {
+            PaginatedBy::Id(by_id) => {
+                paginated(dsl::external_subnet, dsl::id, by_id)
+            }
+            PaginatedBy::Name(by_name) => paginated(
+                dsl::external_subnet,
+                dsl::name,
+                &by_name.map_name(|n| Name::ref_cast(n)),
+            ),
+        }
+        .filter(dsl::project_id.eq(authz_project.id()))
+        .filter(dsl::time_deleted.is_null())
+        .select(ExternalSubnet::as_select())
+        .get_results_async(&*self.pool_connection_authorized(opctx).await?)
+        .await
+        .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 }
 
@@ -844,7 +944,7 @@ mod tests {
             .link_subnet_pool_to_silo(opctx, &authz_pool, &authz_silo, true)
             .await
             .expect_err("able to link pool to silo");
-        let Error::InvalidRequest { message } = &err else {
+        let Error::Conflict { message } = &err else {
             panic!("Expected invalid request, found: {err:#?}");
         };
         assert_eq!(
@@ -2879,6 +2979,160 @@ mod tests {
             "The IP subnet fd00::/48 overlaps with an existing Subnet Pool \
             member or IP Pool range",
         );
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn updating_nonexistent_pool_silo_link_fails() {
+        let logctx =
+            dev::test_setup_log("updating_nonexistent_pool_silo_link_fails");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        // Create a pool, don't link it.
+        let params = SubnetPoolCreate {
+            identity: IdentityMetadataCreateParams {
+                name: "my-pool".parse().unwrap(),
+                description: String::new(),
+            },
+            ip_version: IpVersion::V4,
+        };
+        let db_pool = datastore
+            .create_subnet_pool(opctx, params)
+            .await
+            .expect("able to create external subnet pool");
+        let authz_pool = authz::SubnetPool::new(
+            authz::FLEET,
+            db_pool.identity.id.into(),
+            LookupType::ById(db_pool.identity.id.into_untyped_uuid()),
+        );
+
+        let authz_silo = authz::Silo::new(
+            authz::FLEET,
+            DEFAULT_SILO_ID,
+            LookupType::ById(DEFAULT_SILO_ID),
+        );
+
+        // Try to update it.
+        let err = datastore
+            .update_subnet_pool_silo_link(opctx, &authz_pool, &authz_silo, true)
+            .await
+            .expect_err("should fail to update link that doesn't exist");
+        let Error::ObjectNotFound { type_name, lookup_type } = &err else {
+            panic!("Expected ObjectNotFound, found: {err:#?}");
+        };
+        assert!(matches!(type_name, ResourceType::SubnetPoolSiloLink));
+        let LookupType::ByCompositeId(id) = &lookup_type else {
+            panic!("Expected composite id lookup, found {lookup_type:#?}");
+        };
+        assert!(id.contains(&authz_silo.id().to_string()));
+        assert!(id.contains(&authz_pool.id().to_string()));
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn deleting_nonexistent_pool_silo_link_fails() {
+        let logctx =
+            dev::test_setup_log("deleting_nonexistent_pool_silo_link_fails");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        // Create a pool, don't link it.
+        let params = SubnetPoolCreate {
+            identity: IdentityMetadataCreateParams {
+                name: "my-pool".parse().unwrap(),
+                description: String::new(),
+            },
+            ip_version: IpVersion::V4,
+        };
+        let db_pool = datastore
+            .create_subnet_pool(opctx, params)
+            .await
+            .expect("able to create external subnet pool");
+        let authz_pool = authz::SubnetPool::new(
+            authz::FLEET,
+            db_pool.identity.id.into(),
+            LookupType::ById(db_pool.identity.id.into_untyped_uuid()),
+        );
+
+        let authz_silo = authz::Silo::new(
+            authz::FLEET,
+            DEFAULT_SILO_ID,
+            LookupType::ById(DEFAULT_SILO_ID),
+        );
+
+        // Try to unlink it.
+        let err = datastore
+            .unlink_subnet_pool_from_silo(
+                opctx,
+                &authz_pool,
+                &db_pool,
+                &authz_silo,
+            )
+            .await
+            .expect_err("should fail to delete link that doesn't exist");
+        let Error::ObjectNotFound { type_name, lookup_type } = &err else {
+            panic!("Expected ObjectNotFound, found: {err:#?}");
+        };
+        assert!(matches!(type_name, ResourceType::SubnetPoolSiloLink));
+        let LookupType::ByCompositeId(id) = &lookup_type else {
+            panic!("Expected composite id lookup, found {lookup_type:#?}");
+        };
+        assert!(id.contains(&authz_silo.id().to_string()));
+        assert!(id.contains(&authz_pool.id().to_string()));
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn linking_subnet_pool_and_silo_multiple_times_fails() {
+        let logctx = dev::test_setup_log(
+            "linking_subnet_pool_and_silo_multiple_times_fails",
+        );
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        // Create a pool, link it once.
+        let params = SubnetPoolCreate {
+            identity: IdentityMetadataCreateParams {
+                name: "my-pool".parse().unwrap(),
+                description: String::new(),
+            },
+            ip_version: IpVersion::V4,
+        };
+        let db_pool = datastore
+            .create_subnet_pool(opctx, params)
+            .await
+            .expect("able to create external subnet pool");
+        let authz_pool = authz::SubnetPool::new(
+            authz::FLEET,
+            db_pool.identity.id.into(),
+            LookupType::ById(db_pool.identity.id.into_untyped_uuid()),
+        );
+
+        let authz_silo = authz::Silo::new(
+            authz::FLEET,
+            DEFAULT_SILO_ID,
+            LookupType::ById(DEFAULT_SILO_ID),
+        );
+        let _link = datastore
+            .link_subnet_pool_to_silo(opctx, &authz_pool, &authz_silo, true)
+            .await
+            .expect("Should succeed linking the first time");
+
+        // Linking it again should fail.
+        let err = datastore
+            .link_subnet_pool_to_silo(opctx, &authz_pool, &authz_silo, true)
+            .await
+            .expect_err("Should fail linking the second time");
+        let Error::Conflict { .. } = &err else {
+            panic!("Expected Conflict, found {err:#?}");
+        };
 
         db.terminate().await;
         logctx.cleanup_successful();

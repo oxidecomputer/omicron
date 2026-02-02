@@ -1824,7 +1824,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
             let path = path_params.into_inner();
             let silo_link = silo_link.into_inner();
             let link = nexus
-                .subnet_pool_silo_link(&opctx, &path.pool, &silo_link)
+                .subnet_pool_silo_link(&opctx, &path.pool, silo_link)
                 .await?;
             Ok(HttpResponseCreated(link))
         })
@@ -1840,9 +1840,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
             let path = path_params.into_inner();
             let update = update.into_inner();
             let link = nexus
-                .subnet_pool_silo_update(
-                    &opctx, &path.pool, &path.silo, &update,
-                )
+                .subnet_pool_silo_update(&opctx, path.pool, path.silo, update)
                 .await?;
             Ok(HttpResponseOk(link))
         })
@@ -1855,9 +1853,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
         audit_and_time(&rqctx, |opctx, nexus| async move {
             let path = path_params.into_inner();
-            nexus
-                .subnet_pool_silo_unlink(&opctx, &path.pool, &path.silo)
-                .await?;
+            nexus.subnet_pool_silo_unlink(&opctx, path.pool, path.silo).await?;
             Ok(HttpResponseUpdatedNoContent())
         })
         .await
@@ -4094,14 +4090,10 @@ impl NexusExternalApi for NexusExternalApiImpl {
         query_params: Query<params::SwitchPortSelector>,
         config: TypedBody<LldpLinkConfig>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
-        let apictx = rqctx.context();
-        let query = query_params.into_inner();
-        let path = path_params.into_inner();
-        let handler = async {
-            let nexus = &apictx.context.nexus;
+        audit_and_time(&rqctx, |opctx, nexus| async move {
+            let query = query_params.into_inner();
+            let path = path_params.into_inner();
             let config = config.into_inner();
-            let opctx =
-                crate::context::op_context_for_external_api(&rqctx).await?;
             nexus
                 .lldp_config_update(
                     &opctx,
@@ -4112,12 +4104,8 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 )
                 .await?;
             Ok(HttpResponseUpdatedNoContent {})
-        };
-        apictx
-            .context
-            .external_latencies
-            .instrument_dropshot_handler(&rqctx, handler)
-            .await
+        })
+        .await
     }
 
     async fn networking_switch_port_lldp_neighbors(
@@ -4916,6 +4904,43 @@ impl NexusExternalApi for NexusExternalApiImpl {
             Ok(HttpResponseDeleted())
         })
         .await
+    }
+
+    // Instance External Subnets
+
+    async fn instance_external_subnet_list(
+        rqctx: RequestContext<ApiContext>,
+        query_params: Query<params::OptionalProjectSelector>,
+        path_params: Path<params::InstancePath>,
+    ) -> Result<HttpResponseOk<ResultsPage<views::ExternalSubnet>>, HttpError>
+    {
+        let apictx = rqctx.context();
+        let handler = async {
+            let nexus = &apictx.context.nexus;
+            let path = path_params.into_inner();
+            let query = query_params.into_inner();
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+            let instance_selector = params::InstanceSelector {
+                project: query.project,
+                instance: path.instance,
+            };
+            let instance_lookup =
+                nexus.instance_lookup(&opctx, instance_selector)?;
+            let subnets = nexus
+                .instance_list_external_subnets(&opctx, &instance_lookup)
+                .await?;
+            // The number of external subnets attached to an instance is expected
+            // to be small, so pagination is not implemented.
+            // TODO: Add MAX_EXTERNAL_SUBNETS_PER_INSTANCE constant (similar to
+            // MAX_EXTERNAL_IPS_PER_INSTANCE) and enforce it in attach operations.
+            Ok(HttpResponseOk(ResultsPage { items: subnets, next_page: None }))
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
     }
 
     // Instance Multicast Groups
@@ -6109,23 +6134,15 @@ impl NexusExternalApi for NexusExternalApiImpl {
         path_params: Path<params::RackPath>,
         req: TypedBody<params::RackMembershipAddSledsRequest>,
     ) -> Result<HttpResponseOk<RackMembershipStatus>, HttpError> {
-        let apictx = rqctx.context();
-        let nexus = &apictx.context.nexus;
-        let req = req.into_inner();
-        let rack_id =
-            RackUuid::from_untyped_uuid(path_params.into_inner().rack_id);
-        let handler = async {
-            let opctx =
-                crate::context::op_context_for_external_api(&rqctx).await?;
+        audit_and_time(&rqctx, |opctx, nexus| async move {
+            let req = req.into_inner();
+            let rack_id =
+                RackUuid::from_untyped_uuid(path_params.into_inner().rack_id);
             let status =
                 nexus.tq_add_sleds(&opctx, rack_id, req.sled_ids).await?;
             Ok(HttpResponseOk(status.into()))
-        };
-        apictx
-            .context
-            .external_latencies
-            .instrument_dropshot_handler(&rqctx, handler)
-            .await
+        })
+        .await
     }
 
     async fn rack_membership_status(
@@ -7484,20 +7501,12 @@ impl NexusExternalApi for NexusExternalApiImpl {
         rqctx: RequestContext<Self::Context>,
         path_params: Path<params::TokenPath>,
     ) -> Result<HttpResponseDeleted, HttpError> {
-        let apictx = rqctx.context();
-        let handler = async {
-            let opctx =
-                crate::context::op_context_for_external_api(&rqctx).await?;
-            let nexus = &apictx.context.nexus;
+        audit_and_time(&rqctx, |opctx, nexus| async move {
             let path = path_params.into_inner();
             nexus.current_user_token_delete(&opctx, path.token_id).await?;
             Ok(HttpResponseDeleted())
-        };
-        apictx
-            .context
-            .external_latencies
-            .instrument_dropshot_handler(&rqctx, handler)
-            .await
+        })
+        .await
     }
 
     async fn support_bundle_list(
@@ -7867,14 +7876,9 @@ impl NexusExternalApi for NexusExternalApiImpl {
         query_params: Query<params::ProjectSelector>,
         new_probe: TypedBody<params::ProbeCreate>,
     ) -> Result<HttpResponseCreated<Probe>, HttpError> {
-        let apictx = rqctx.context();
-        let handler = async {
-            let opctx =
-                crate::context::op_context_for_external_api(&rqctx).await?;
+        audit_and_time(&rqctx, |opctx, nexus| async move {
             opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
-
-            let nexus = &apictx.context.nexus;
-            let new_probe_params = &new_probe.into_inner();
+            let new_probe_params = new_probe.into_inner();
             let project_selector = query_params.into_inner();
             let project_lookup =
                 nexus.project_lookup(&opctx, project_selector)?;
@@ -7882,12 +7886,8 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 .probe_create(&opctx, &project_lookup, &new_probe_params)
                 .await?;
             Ok(HttpResponseCreated(probe.into()))
-        };
-        apictx
-            .context
-            .external_latencies
-            .instrument_dropshot_handler(&rqctx, handler)
-            .await
+        })
+        .await
     }
 
     async fn probe_delete(
@@ -7895,25 +7895,16 @@ impl NexusExternalApi for NexusExternalApiImpl {
         query_params: Query<params::ProjectSelector>,
         path_params: Path<params::ProbePath>,
     ) -> Result<HttpResponseDeleted, HttpError> {
-        let apictx = rqctx.context();
-        let handler = async {
-            let opctx =
-                crate::context::op_context_for_external_api(&rqctx).await?;
+        audit_and_time(&rqctx, |opctx, nexus| async move {
             opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
-
-            let nexus = &apictx.context.nexus;
             let path = path_params.into_inner();
             let project_selector = query_params.into_inner();
             let project_lookup =
                 nexus.project_lookup(&opctx, project_selector)?;
             nexus.probe_delete(&opctx, &project_lookup, path.probe).await?;
             Ok(HttpResponseDeleted())
-        };
-        apictx
-            .context
-            .external_latencies
-            .instrument_dropshot_handler(&rqctx, handler)
-            .await
+        })
+        .await
     }
 
     async fn audit_log_list(
@@ -8701,29 +8692,18 @@ impl NexusExternalApi for NexusExternalApiImpl {
         path_params: Path<params::AlertSelector>,
         receiver: Query<params::AlertReceiverSelector>,
     ) -> Result<HttpResponseCreated<views::AlertDeliveryId>, HttpError> {
-        let apictx = rqctx.context();
-        let handler = async {
-            let nexus = &apictx.context.nexus;
-
-            let opctx =
-                crate::context::op_context_for_external_api(&rqctx).await?;
-
+        audit_and_time(&rqctx, |opctx, nexus| async move {
             let event_selector = path_params.into_inner();
             let webhook_selector = receiver.into_inner();
             let event = nexus.alert_lookup(&opctx, event_selector)?;
             let rx = nexus.alert_receiver_lookup(&opctx, webhook_selector)?;
             let delivery_id =
                 nexus.alert_receiver_resend(&opctx, rx, event).await?;
-
             Ok(HttpResponseCreated(views::AlertDeliveryId {
                 delivery_id: delivery_id.into_untyped_uuid(),
             }))
-        };
-        apictx
-            .context
-            .external_latencies
-            .instrument_dropshot_handler(&rqctx, handler)
-            .await
+        })
+        .await
     }
 }
 

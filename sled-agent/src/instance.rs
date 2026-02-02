@@ -2161,6 +2161,9 @@ impl InstanceRunner {
                 external_ips: &self.external_ips,
                 firewall_rules: &self.firewall_rules,
                 dhcp_config: self.dhcp_config.clone(),
+                // TODO Accept these in the sled-agent API. See
+                // https://github.com/oxidecomputer/omicron/issues/9702.
+                attached_subnets: vec![],
             })?;
             opte_port_names.push(port.0.name().to_string());
             opte_ports.push(port);

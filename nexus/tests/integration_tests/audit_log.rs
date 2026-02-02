@@ -401,7 +401,6 @@ async fn test_audit_log_create_delete_ops(ctx: &ControlPlaneTestContext) {
 #[nexus_test]
 async fn test_audit_log_coverage(ctx: &ControlPlaneTestContext) {
     use super::endpoints::{AllowedMethod, VERIFY_ENDPOINTS};
-    use expectorate::assert_contents;
     use nexus_test_utils::http_testing::{AuthnMode, NexusRequest};
     use openapiv3::OpenAPI;
     use std::collections::BTreeMap;
@@ -452,7 +451,9 @@ async fn test_audit_log_coverage(ctx: &ControlPlaneTestContext) {
                 | AllowedMethod::GetNonexistent
                 | AllowedMethod::GetUnimplemented
                 | AllowedMethod::GetVolatile
-                | AllowedMethod::GetWebsocket => false,
+                | AllowedMethod::GetWebsocket
+                | AllowedMethod::Head
+                | AllowedMethod::HeadNonexistent => false,
             };
 
             let before = fetch_log(client, t_start, None).await.items.len();
@@ -562,16 +563,22 @@ async fn test_audit_log_coverage(ctx: &ControlPlaneTestContext) {
             "If the endpoint is read-only despite using POST (like the timeseries"
         );
         eprintln!(
-            "query endpoints), rerun the test with EXPECTORATE=overwrite to update"
+            "query endpoints), add it to uncovered-audit-log-endpoints.txt."
         );
-        eprintln!("the list of uncovered endpoints.");
         eprintln!(
             "======================================================================="
         );
         eprintln!();
     }
 
-    assert_contents(expected_path, &output);
+    // NOTE: We intentionally do NOT use expectorate's assert_contents here
+    // because we don't want EXPECTORATE=overwrite to allow people to
+    // accidentally add uncovered endpoints to the allowlist.
+    similar_asserts::assert_eq!(
+        expected,
+        output,
+        "left: uncovered-audit-log-endpoints.txt, right: actual"
+    );
 
     // Check for GET endpoints that unexpectedly have audit logging
     let mut get_output = String::from("GET endpoints with audit logging:\n");
@@ -608,16 +615,21 @@ async fn test_audit_log_coverage(ctx: &ControlPlaneTestContext) {
         eprintln!(
             "modify state. If this endpoint was intentionally audited (rare),"
         );
-        eprintln!(
-            "rerun the test with EXPECTORATE=overwrite to update the list."
-        );
+        eprintln!("add it to audited-get-endpoints.txt.");
         eprintln!(
             "======================================================================="
         );
         eprintln!();
     }
 
-    assert_contents(get_expected_path, &get_output);
+    // NOTE: We intentionally do NOT use expectorate's assert_contents here
+    // because we don't want EXPECTORATE=overwrite to allow people to
+    // accidentally add audited GET endpoints to the list.
+    similar_asserts::assert_eq!(
+        get_expected,
+        get_output,
+        "left: audited-get-endpoints.txt, right: actual"
+    );
 }
 
 fn verify_entry(
