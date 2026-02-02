@@ -524,6 +524,7 @@ async fn test_limited_collaborator_cannot_create_project(
                     name: "forbidden-project".parse().unwrap(),
                     description: "should not be created".to_string(),
                 },
+                skip_default_vpc: false,
             }))
             .expect_status(Some(StatusCode::FORBIDDEN)),
     )

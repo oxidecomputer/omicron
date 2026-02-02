@@ -343,6 +343,7 @@ async fn test_floating_ip_create_non_admin(
                 name: PROJECT_NAME.parse().unwrap(),
                 description: "floating ip project".to_string(),
             },
+            skip_default_vpc: false,
         },
     )
     .authn_as(AuthnMode::SiloUser(user.id))

@@ -51,20 +51,24 @@ impl NexusSaga for SagaProjectCreate {
     }
 
     fn make_saga_dag(
-        _params: &Self::Params,
+        params: &Self::Params,
         mut builder: steno::DagBuilder,
     ) -> Result<steno::Dag, super::SagaInitError> {
         builder.append(project_create_record_action());
-        builder.append(project_create_vpc_params_action());
 
-        let subsaga_builder = steno::DagBuilder::new(steno::SagaName::new(
-            sagas::vpc_create::SagaVpcCreate::NAME,
-        ));
-        builder.append(steno::Node::subsaga(
-            "vpc",
-            sagas::vpc_create::create_dag(subsaga_builder)?,
-            "vpc_create_params",
-        ));
+        if !params.project_create.skip_default_vpc {
+            builder.append(project_create_vpc_params_action());
+
+            let subsaga_builder = steno::DagBuilder::new(steno::SagaName::new(
+                sagas::vpc_create::SagaVpcCreate::NAME,
+            ));
+            builder.append(steno::Node::subsaga(
+                "vpc",
+                sagas::vpc_create::create_dag(subsaga_builder)?,
+                "vpc_create_params",
+            ));
+        }
+
         Ok(builder.build()?)
     }
 }
@@ -162,10 +166,11 @@ mod test {
         ExpressionMethods, OptionalExtension, QueryDsl, SelectableHelper,
     };
     use nexus_db_queries::{
-        authn::saga::Serialized, authz, context::OpContext,
+        authn::saga::Serialized, authz, context::OpContext, db,
         db::datastore::DataStore,
     };
     use nexus_test_utils_macros::nexus_test;
+    use nexus_types::identity::Resource;
     use omicron_common::api::external::IdentityMetadataCreateParams;
 
     type ControlPlaneTestContext =
@@ -173,6 +178,14 @@ mod test {
 
     // Helper for creating project create parameters
     fn new_test_params(opctx: &OpContext, authz_silo: authz::Silo) -> Params {
+        new_test_params_with_options(opctx, authz_silo, false)
+    }
+
+    fn new_test_params_with_options(
+        opctx: &OpContext,
+        authz_silo: authz::Silo,
+        skip_default_vpc: bool,
+    ) -> Params {
         Params {
             serialized_authn: Serialized::for_opctx(opctx),
             project_create: params::ProjectCreate {
@@ -180,6 +193,7 @@ mod test {
                     name: "my-project".parse().unwrap(),
                     description: "My Project".to_string(),
                 },
+                skip_default_vpc,
             },
             authz_silo,
         }
@@ -303,5 +317,58 @@ mod test {
             log,
         )
         .await;
+    }
+
+    #[nexus_test(server = crate::Server)]
+    async fn test_skip_default_vpc_creates_no_vpc(
+        cptestctx: &ControlPlaneTestContext,
+    ) {
+        let nexus = &cptestctx.server.server_context().nexus;
+        let datastore = nexus.datastore();
+
+        // Before running the test, confirm we have no records of any projects.
+        verify_clean_slate(datastore).await;
+
+        // Build the saga DAG with skip_default_vpc = true.
+        let opctx = test_opctx(&cptestctx);
+        let authz_silo = opctx.authn.silo_required().unwrap();
+        let params =
+            new_test_params_with_options(&opctx, authz_silo.clone(), true);
+        let saga_output = nexus
+            .sagas
+            .saga_execute::<SagaProjectCreate>(params)
+            .await
+            .unwrap();
+
+        // Verify that a project was created.
+        let (authz_project, db_project) = saga_output
+            .lookup_node_output::<(authz::Project, db::model::Project)>(
+                "project",
+            )
+            .unwrap();
+        assert_eq!(db_project.name().as_str(), "my-project");
+
+        // Verify that no VPCs were created for this project.
+        use async_bb8_diesel::AsyncRunQueryDsl;
+        use diesel::{ExpressionMethods, QueryDsl, SelectableHelper};
+        use nexus_db_queries::db::model::Vpc;
+        use nexus_db_schema::schema::vpc::dsl;
+
+        let vpcs = dsl::vpc
+            .filter(dsl::project_id.eq(authz_project.id()))
+            .filter(dsl::time_deleted.is_null())
+            .select(Vpc::as_select())
+            .load_async::<Vpc>(
+                &*datastore.pool_connection_for_tests().await.unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert!(
+            vpcs.is_empty(),
+            "expected no VPCs for project with skip_default_vpc=true, \
+             found: {:?}",
+            vpcs.iter().map(|v| v.name()).collect::<Vec<_>>()
+        );
     }
 }

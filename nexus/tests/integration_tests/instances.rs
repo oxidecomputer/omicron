@@ -8078,6 +8078,7 @@ async fn test_instance_create_in_silo(cptestctx: &ControlPlaneTestContext) {
                 name: PROJECT_NAME.parse().unwrap(),
                 description: String::new(),
             },
+            skip_default_vpc: false,
         },
     )
     .authn_as(AuthnMode::SiloUser(user_id))

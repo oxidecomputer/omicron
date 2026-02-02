@@ -77,6 +77,7 @@ async fn test_audit_log_list(ctx: &ControlPlaneTestContext) {
             name: "test-proj2".parse().unwrap(),
             description: "a pier".to_string(),
         },
+        skip_default_vpc: false,
     };
     let long_user_agent = "A".repeat(300);
     let long_query_value = "B".repeat(600);
@@ -677,6 +678,7 @@ async fn test_audit_log_access_token_auth(ctx: &ControlPlaneTestContext) {
             name: "token-project".parse().unwrap(),
             description: "created with access token".to_string(),
         },
+        skip_default_vpc: false,
     };
     RequestBuilder::new(client, Method::POST, "/v1/projects")
         .body(Some(&body))

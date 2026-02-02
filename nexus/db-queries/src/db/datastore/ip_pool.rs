@@ -2829,6 +2829,7 @@ mod test {
                     name: "my-project".parse().unwrap(),
                     description: "".to_string(),
                 },
+                skip_default_vpc: false,
             },
         );
         let (.., project) =
@@ -2946,6 +2947,7 @@ mod test {
                     name: "my-project".parse().unwrap(),
                     description: "".to_string(),
                 },
+                skip_default_vpc: false,
             },
         );
         let (.., project) =

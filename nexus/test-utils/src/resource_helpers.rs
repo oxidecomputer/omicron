@@ -616,6 +616,7 @@ pub async fn create_project(
                 name: project_name.parse().unwrap(),
                 description: "a pier".to_string(),
             },
+            skip_default_vpc: false,
         },
     )
     .await
