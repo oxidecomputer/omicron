@@ -8,6 +8,7 @@ use crate::PRODUCER_UUID;
 use crate::SLED_AGENT_UUID;
 use crate::SLED_AGENT2_UUID;
 use crate::TEST_SUITE_PASSWORD;
+use crate::TEST_SUITE_PASSWORD_HASH;
 use anyhow::Result;
 use camino::Utf8Path;
 use camino::Utf8PathBuf;
@@ -753,14 +754,7 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
         let silo_name: Name = "test-suite-silo".parse().unwrap();
         let user_name =
             UserId::try_from("test-privileged".to_string()).unwrap();
-        let user_password_hash = omicron_passwords::Hasher::default()
-            .create_password(
-                &omicron_passwords::Password::new(TEST_SUITE_PASSWORD).unwrap(),
-            )
-            .unwrap()
-            .as_str()
-            .parse()
-            .unwrap();
+        let user_password_hash = TEST_SUITE_PASSWORD_HASH.parse().unwrap();
         let recovery_silo = RecoverySiloConfig {
             silo_name: silo_name.clone(),
             user_name: user_name.clone(),

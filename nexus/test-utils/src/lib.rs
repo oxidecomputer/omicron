@@ -54,6 +54,16 @@ pub const RACK_SUBNET: &str = "fd00:1122:3344:0100::/56";
 /// both transient deployments with no sensitive data.
 pub const TEST_SUITE_PASSWORD: &str = "oxide";
 
+/// Hash for [`TEST_SUITE_PASSWORD`]
+///
+/// This is hardcoded because it's used in many integration tests and
+/// recomputing it a ton of times wastes a lot of time.
+// You can recompute this with: `cargo run --example=argon2 -- --input oxide`
+// (where `oxide` here is TEST_SUITE_PASSWORD (above)).  The tool will output
+// the password hash before proceeding to measure how long it takes to hash.
+pub const TEST_SUITE_PASSWORD_HASH: &str = "$argon2id$v=19$m=98304,t=23,p=1$\
+     R/bEz3yhItskrgbhagyJvg$n3Df2hJDW29A66y//h4LBRrKXC2jfrn2wUsf0k6O10g";
+
 /// Returns whether the two identity metadata objects are identical.
 pub fn identity_eq(ident1: &IdentityMetadata, ident2: &IdentityMetadata) {
     assert_eq!(ident1.id, ident2.id);
@@ -133,4 +143,29 @@ pub fn dpd_client<N: NexusServer>(
 
     let addr = Ipv6Addr::LOCALHOST;
     dpd_client::Client::new(&format!("http://[{addr}]:{port}"), client_state)
+}
+
+#[cfg(test)]
+mod test {
+    use crate::TEST_SUITE_PASSWORD;
+    use crate::TEST_SUITE_PASSWORD_HASH;
+    use omicron_passwords::Password;
+    use omicron_passwords::PasswordHashString;
+
+    // Verify that the hardcoded test suite password hash matches the hardcoded
+    // test suite password.  Obviously it would be less brittle to just compute
+    // the hash each time we needed it, but that uses a lot of CPU time (by
+    // design) and has to be done for every single test.  That adds up.
+    #[test]
+    fn test_suite_password_matches_hash() {
+        let hasher = omicron_passwords::Hasher::default();
+        let password: Password = Password::new(TEST_SUITE_PASSWORD).unwrap();
+        let hash: PasswordHashString =
+            TEST_SUITE_PASSWORD_HASH.parse().unwrap();
+        let okay = hasher.verify_password(&password, &hash).unwrap();
+        assert!(
+            okay,
+            "TEST_SUITE_PASSWORD does not match TEST_SUITE_PASSWORD_HASH"
+        );
+    }
 }
