@@ -1449,7 +1449,7 @@ impl SledAgentApi for SledAgentImpl {
         let sa = request_context.context();
         let rot = sa.rot_attestor(path_params.into_inner().rot);
         let log = rot.get_measurement_log().await?;
-        Ok(HttpResponseOk(log))
+        Ok(HttpResponseOk(log.into()))
     }
 
     async fn rot_certificate_chain(
@@ -1459,7 +1459,7 @@ impl SledAgentApi for SledAgentImpl {
         let sa = request_context.context();
         let rot = sa.rot_attestor(path_params.into_inner().rot);
         let chain = rot.get_certificate_chain().await?;
-        Ok(HttpResponseOk(chain))
+        Ok(HttpResponseOk(chain.into()))
     }
 
     async fn rot_attest(
@@ -1470,7 +1470,7 @@ impl SledAgentApi for SledAgentImpl {
         let sa = request_context.context();
         let rot = sa.rot_attestor(path_params.into_inner().rot);
         let nonce = body.into_inner();
-        let attestation = rot.attest(nonce).await?;
-        Ok(HttpResponseOk(attestation))
+        let attestation = rot.attest(nonce.into()).await?;
+        Ok(HttpResponseOk(attestation.into()))
     }
 }

@@ -6,10 +6,7 @@
 
 use dropshot::HttpError;
 use ipcc::AttestError;
-use sled_agent_types::rot::{
-    Attestation, CertificateChain, MeasurementLog, Nonce,
-};
-
+use sled_agent_types::rot as SaRotTypes;
 use slog::Logger;
 use slog_error_chain::InlineErrorChain;
 use thiserror::Error;
@@ -17,8 +14,85 @@ use tokio::sync::{
     mpsc::{self, error::TrySendError},
     oneshot,
 };
+use x509_cert::der::{EncodePem, pem::LineEnding};
 
 use crate::sled_agent::Error;
+
+pub struct MeasurementLog(attest_data::Log);
+
+impl From<attest_data::Log> for MeasurementLog {
+    fn from(log: attest_data::Log) -> Self {
+        MeasurementLog(log)
+    }
+}
+
+impl From<MeasurementLog> for SaRotTypes::MeasurementLog {
+    fn from(log: MeasurementLog) -> Self {
+        let measurements = log
+            .0
+            .iter()
+            .copied()
+            .map(|m| match m {
+                attest_data::Measurement::Sha3_256(d) => {
+                    SaRotTypes::Measurement::Sha3_256(
+                        SaRotTypes::Sha3_256Digest(d.0),
+                    )
+                }
+            })
+            .collect();
+        SaRotTypes::MeasurementLog(measurements)
+    }
+}
+
+pub struct CertificateChain(Vec<String>);
+
+impl TryFrom<x509_cert::PkiPath> for CertificateChain {
+    type Error = x509_cert::der::Error;
+
+    fn try_from(chain: x509_cert::PkiPath) -> Result<Self, Self::Error> {
+        let certs: Result<Vec<_>, _> =
+            chain.into_iter().map(|cert| cert.to_pem(LineEnding::LF)).collect();
+        Ok(CertificateChain(certs?))
+    }
+}
+
+impl From<CertificateChain> for SaRotTypes::CertificateChain {
+    fn from(chain: CertificateChain) -> Self {
+        SaRotTypes::CertificateChain(chain.0)
+    }
+}
+
+pub struct Nonce(attest_data::Nonce);
+
+impl From<SaRotTypes::Nonce> for Nonce {
+    fn from(nonce: SaRotTypes::Nonce) -> Self {
+        match nonce {
+            SaRotTypes::Nonce::N32(n32) => {
+                Nonce(attest_data::Nonce::N32(n32.into()))
+            }
+        }
+    }
+}
+
+pub struct Attestation(attest_data::Attestation);
+
+impl From<attest_data::Attestation> for Attestation {
+    fn from(att: attest_data::Attestation) -> Self {
+        Attestation(att)
+    }
+}
+
+impl From<Attestation> for SaRotTypes::Attestation {
+    fn from(att: Attestation) -> Self {
+        match att.0 {
+            attest_data::Attestation::Ed25519(sig) => {
+                SaRotTypes::Attestation::Ed25519(SaRotTypes::Ed25519Signature(
+                    sig.0,
+                ))
+            }
+        }
+    }
+}
 
 #[derive(Debug, Error)]
 pub enum RotError {
@@ -166,8 +240,8 @@ impl RotAttestationTask {
                     let _ = reply_tx.send(chain);
                 }
                 RotAttestationMessage::Attest(nonce, reply_tx) => {
-                    let Nonce::N32(nonce) = nonce;
-                    let attestation = ipcc.attest(nonce.into());
+                    let attest_data::Nonce::N32(nonce) = nonce.0;
+                    let attestation = ipcc.attest(nonce);
                     let _ = reply_tx.send(attestation.map(Into::into));
                 }
             }

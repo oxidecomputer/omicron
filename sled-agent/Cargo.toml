@@ -11,6 +11,7 @@ workspace = true
 [dependencies]
 anyhow.workspace = true
 async-trait.workspace = true
+attest-data.workspace = true
 atomicwrites.workspace = true
 base64.workspace = true
 bootstore.workspace = true
@@ -127,6 +128,7 @@ tufaceous-brand-metadata.workspace = true
 usdt.workspace = true
 uuid.workspace = true
 walkdir.workspace = true
+x509-cert.workspace = true
 zeroize.workspace = true
 zip.workspace = true
 zone.workspace = true

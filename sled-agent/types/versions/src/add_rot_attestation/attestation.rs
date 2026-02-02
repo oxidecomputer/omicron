@@ -8,7 +8,6 @@ use std::fmt;
 
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use x509_cert::der::EncodePem;
 
 /// A Root of Trust (RoT) which provides measurments and signed attestations.
 #[derive(Deserialize, Serialize, JsonSchema)]
@@ -33,7 +32,7 @@ pub struct RotPathParams {
     pub rot: Rot,
 }
 
-const SHA3_256_LEN: usize = attest_data::Sha3_256Digest::LENGTH;
+const SHA3_256_LEN: usize = 32;
 
 #[derive(Deserialize, Serialize, JsonSchema)]
 #[serde(transparent)]
@@ -58,43 +57,14 @@ pub enum Measurement {
     Sha3_256(Sha3_256Digest),
 }
 
-impl From<attest_data::Measurement> for Measurement {
-    fn from(m: attest_data::Measurement) -> Self {
-        match m {
-            attest_data::Measurement::Sha3_256(d) => {
-                Measurement::Sha3_256(Sha3_256Digest(d.0))
-            }
-        }
-    }
-}
-
 /// The set of measurments provided by the RoT.
 #[derive(Default, Deserialize, Serialize, JsonSchema)]
-pub struct MeasurementLog(
-    #[schemars(length(max = "attest_data::LOG_CAPACITY"))] pub Vec<Measurement>,
-);
-
-impl From<attest_data::Log> for MeasurementLog {
-    fn from(log: attest_data::Log) -> Self {
-        MeasurementLog(log.iter().copied().map(Into::into).collect())
-    }
-}
+pub struct MeasurementLog(pub Vec<Measurement>);
 
 /// A chain of PEM-encoded X.509 certificates (RFC5280) that link an
 /// attestation signing key to a trusted PKI root.
 #[derive(Deserialize, Serialize, JsonSchema)]
 pub struct CertificateChain(pub Vec<String>);
-
-impl TryFrom<x509_cert::PkiPath> for CertificateChain {
-    type Error = x509_cert::der::Error;
-
-    fn try_from(chain: x509_cert::PkiPath) -> Result<Self, Self::Error> {
-        use x509_cert::der::pem::LineEnding;
-        let certs: Result<Vec<_>, _> =
-            chain.into_iter().map(|cert| cert.to_pem(LineEnding::LF)).collect();
-        Ok(CertificateChain(certs?))
-    }
-}
 
 /// A random nonce provided as part of an attestation challenge to guarantee
 /// freshness thereby preventing replay attacks.
@@ -107,15 +77,7 @@ pub enum Nonce {
     N32([u8; 32]),
 }
 
-impl From<Nonce> for attest_data::Nonce {
-    fn from(n: Nonce) -> Self {
-        match n {
-            Nonce::N32(n32) => attest_data::Nonce::N32(n32.into()),
-        }
-    }
-}
-
-const ED25519_SIG_LEN: usize = attest_data::Ed25519Signature::LENGTH;
+const ED25519_SIG_LEN: usize = 64;
 
 #[derive(Deserialize, Serialize, JsonSchema)]
 #[serde(transparent)]
@@ -139,14 +101,4 @@ impl fmt::Debug for Ed25519Signature {
 pub enum Attestation {
     /// An Ed25519 signature.
     Ed25519(Ed25519Signature),
-}
-
-impl From<attest_data::Attestation> for Attestation {
-    fn from(att: attest_data::Attestation) -> Self {
-        match att {
-            attest_data::Attestation::Ed25519(sig) => {
-                Attestation::Ed25519(Ed25519Signature(sig.0))
-            }
-        }
-    }
 }

@@ -520,7 +520,7 @@ dependencies = [
 [[package]]
 name = "attest-data"
 version = "0.5.0"
-source = "git+https://github.com/oxidecomputer/dice-util?branch=generic-nonce#588030e6c545cd87f4402071714c2a112feea29b"
+source = "git+https://github.com/oxidecomputer/dice-util?branch=generic-nonce#8df4fc0aa4a48ff675a46b7f2cecf2e4d6c7290a"
 dependencies = [
  "const-oid",
  "der",
@@ -1752,7 +1752,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "117725a109d387c937a1533ce01b450cbde6b88abceea8473c4d7a85853cda3c"
 dependencies = [
  "lazy_static",
- "windows-sys 0.59.0",
+ "windows-sys 0.48.0",
 ]
 
 [[package]]
@@ -1761,7 +1761,7 @@ version = "3.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fde0e0ec90c9dfb3b4b1a0891a7dcd0e2bffde2f7efed5fe7c9bb00e5bfb915e"
 dependencies = [
- "windows-sys 0.59.0",
+ "windows-sys 0.48.0",
 ]
 
 [[package]]
@@ -6038,7 +6038,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4979f22fdb869068da03c9f7528f8297c6fd2606bc3a4affe42e6a823fdb8da4"
 dependencies = [
  "cfg-if",
- "windows-targets 0.52.6",
+ "windows-targets 0.48.5",
 ]
 
 [[package]]
@@ -8920,6 +8920,7 @@ dependencies = [
  "assert_matches",
  "async-trait",
  "atomicwrites",
+ "attest-data 0.5.0 (git+https://github.com/oxidecomputer/dice-util?branch=generic-nonce)",
  "base64 0.22.1",
  "bootstore",
  "bootstrap-agent-api",
@@ -9043,6 +9044,7 @@ dependencies = [
  "usdt 0.5.0",
  "uuid",
  "walkdir",
+ "x509-cert",
  "zeroize",
  "zfs-test-harness",
  "zip 4.2.0",
@@ -13320,7 +13322,6 @@ name = "sled-agent-types-versions"
 version = "0.1.0"
 dependencies = [
  "async-trait",
- "attest-data 0.5.0 (git+https://github.com/oxidecomputer/dice-util?branch=generic-nonce)",
  "bootstore",
  "camino",
  "chrono",
@@ -13351,7 +13352,6 @@ dependencies = [
  "trust-quorum-types-versions",
  "tufaceous-artifact",
  "uuid",
- "x509-cert",
 ]
 
 [[package]]
@@ -13686,7 +13686,7 @@ version = "0.8.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "03c3c6b7927ffe7ecaa769ee0e3994da3b8cafc8f444578982c83ecb161af917"
 dependencies = [
- "heck 0.5.0",
+ "heck 0.4.1",
  "proc-macro2",
  "quote",
  "syn 2.0.114",
@@ -16615,7 +16615,7 @@ version = "0.1.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cf221c93e13a30d793f7645a0e7762c55d169dbb0a49671918a2319d289b10bb"
 dependencies = [
- "windows-sys 0.59.0",
+ "windows-sys 0.48.0",
 ]
 
 [[package]]
