@@ -861,12 +861,11 @@ pub enum BlueprintExpungedZoneAccessReason {
     PlannerCheckReadyForCleanup,
 
     /// When constructing a [`PlanningInput`], it needs to loop over the
-    /// blueprint's expunged zones in order to know which zones it needs to
-    /// check for references, so that it can assemble the "expunged and
-    /// unreferenced" zone IDs.
+    /// blueprint's expunged zones in order to know which zones may be
+    /// pruneable.
     ///
     /// The planner does not need to account for this when pruning zones.
-    PlanningInputDetermineUnreferenced,
+    PlanningInputFindPruneable,
 
     /// When constructing a [`PlanningInput`], its builder has a guard that any
     /// "expunged and unreferenced" zone ID actually is expunged.

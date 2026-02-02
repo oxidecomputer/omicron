@@ -2,19 +2,20 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! Helpers for identifying when expunged zones are no longer referenced in the
-//! database.
+//! Helpers for identifying when expunged zones can be safely pruned from the
+//! blueprint (i.e., permanently dropped from being carried forward to
+//! subsequent blueprints).
 //!
 //! When a zone is first expunged, the expunged zone initially remains in the
 //! blueprint. Two high-level conditions must be satisfied before it's safe to
-//! prune an expunged zone from the blueprint (i.e., delete it entirely):
+//! prune an expunged zone from the blueprint:
 //!
 //! 1. We must know the zone is not running and will never run again. The
 //!    typical case of this confirmation is that the sled-agent responsible for
 //!    running the zone has confirmed the zone is no longer running and that
 //!    it's ledgered an `OmicronSledConfig` with a generation past the point in
-//!    which the zone was expunged. The uncommon case of this confirmation is
-//!    that the sled where this zone ran has been expunged.
+//!    which the zone was expunged. The atypical (but still valid) case of this
+//!    confirmation is that the sled where this zone ran has been expunged.
 //! 2. Any cleanup work that operates on expunged zones must be complete. This
 //!    is zone-type-specific. Some zone types have no cleanup work at all and
 //!    can be pruned as soon as the first condition is satisfied. Others have
@@ -28,10 +29,9 @@
 //! The [`BlueprintExpungedZoneAccessReason`] enum tracks a variant for every
 //! reason a caller wants to access the expunged zones of a blueprint, including
 //! all known cleanup actions. For each zone type, if the zone-type-specific
-//! cleanup work is complete, we included the zone ID in the "expunged and
-//! unreferenced" zone set in the `PlanningInput`. The planner can cheaply act
-//! on this set: for every zone ID present, it can safely prune it from the
-//! blueprint (i.e., do not include it in the child blueprint it emits).
+//! cleanup work is complete, we included the zone ID in the `pruneable_zones`
+//! zone set in the `PlanningInput`. The planner can cheaply act on this set:
+//! for every zone ID present, it can safely prune it from the blueprint.
 
 use nexus_db_model::SupportBundleState;
 use nexus_db_queries::context::OpContext;
@@ -98,15 +98,15 @@ impl PruneableZones {
 
         for (_, zone) in parent_blueprint.expunged_zones(
             ZoneRunningStatus::Shutdown,
-            Reason::PlanningInputDetermineUnreferenced,
+            Reason::PlanningInputFindPruneable,
         ) {
             // Check
             // BlueprintExpungedZoneAccessReason::DeallocateExternalNetworkingResources;
             // this reason applies to multiple zone types, so we check it for
             // them all. (Technically we only need to check it for zones that
             // _can_ have external networking, but it's fine to check ones that
-            // don't, and now we don't have to keep a list here of which zone
-            // types could have external networking rows present.)
+            // don't, and that way we don't have to keep a list here of which
+            // zone types could have external networking rows present.)
             reason_checker.add_reason_checked(
                 Reason::DeallocateExternalNetworkingResources,
             );
@@ -392,6 +392,10 @@ async fn is_oximeter_pruneable(
     Ok(assigned_producers.is_empty())
 }
 
+// Helper function to construct a `DataPageParams` that only asks for a single
+// item. In several checks above, we only care "does any item exist" - we can
+// get this via any paginated datastore function and limit the work to "just one
+// please".
 fn single_item_pagparams<T>() -> DataPageParams<'static, T> {
     DataPageParams {
         marker: None,
@@ -560,11 +564,7 @@ impl BlueprintExpungedZoneAccessReasonChecker {
                 // Checked by is_multinode_clickhouse_pruneable()
                 Reason::ClickhouseKeeperServerConfigIps => {}
 
-                // TODO-john FIXME
-                // NOT CHECKED: find_expunged_and_unreferenced_zones() will
-                // never consider a cockroach node "unreferenced", because we
-                // have currently disabled decommissioning (see
-                // https://github.com/oxidecomputer/omicron/issues/8447).
+                // Checked by is_cockroach_pruneable()
                 Reason::CockroachDecommission => {}
 
                 // Checked directly by the main loop in `PruneableZones::new()`.
@@ -591,7 +591,7 @@ impl BlueprintExpungedZoneAccessReasonChecker {
                 // Planner-related reasons that don't need to be checked (see
                 // `BlueprintExpungedZoneAccessReason` for specifics)
                 | Reason::PlannerCheckReadyForCleanup
-                | Reason::PlanningInputDetermineUnreferenced
+                | Reason::PlanningInputFindPruneable
                 | Reason::PlanningInputExpungedZoneGuard
 
                 // Test / development reasons that don't need to be checked
