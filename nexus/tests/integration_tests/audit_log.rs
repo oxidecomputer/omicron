@@ -428,6 +428,21 @@ async fn test_audit_log_coverage(ctx: &ControlPlaneTestContext) {
         })
         .collect();
 
+    // Track mutating endpoints we haven't tested yet (not in VERIFY_ENDPOINTS).
+    // We filter out versioned endpoints (operation IDs starting with "v20")
+    // because those share coverage with their current counterparts.
+    let mut untested_mutating: BTreeMap<String, (String, String)> =
+        all_operations
+            .iter()
+            .filter(|((method, _), (op_id, _))| {
+                matches!(method.as_str(), "POST" | "PUT" | "PATCH" | "DELETE")
+                    && !op_id.starts_with("v20")
+            })
+            .map(|((method, _), (op_id, path))| {
+                (op_id.clone(), (method.to_lowercase(), path.clone()))
+            })
+            .collect();
+
     // Set up resources needed by many endpoints
     DiskTest::new(&ctx).await;
     create_default_ip_pools(client).await;
@@ -502,6 +517,9 @@ async fn test_audit_log_coverage(ctx: &ControlPlaneTestContext) {
                     (String::from("unknown"), url_path.to_string())
                 });
 
+            // Mark this endpoint as tested
+            untested_mutating.remove(&op_id);
+
             if is_mutating {
                 // Mutating endpoints SHOULD have audit logging
                 if after <= before {
@@ -525,6 +543,13 @@ async fn test_audit_log_coverage(ctx: &ControlPlaneTestContext) {
     let mut output =
         String::from("Mutating endpoints without audit logging:\n");
     for (op_id, (method, path)) in &missing_audit {
+        output.push_str(&format!("{:44} ({:6} {:?})\n", op_id, method, path));
+    }
+
+    output.push_str(
+        "\nMutating endpoints not tested (not in VERIFY_ENDPOINTS):\n",
+    );
+    for (op_id, (method, path)) in &untested_mutating {
         output.push_str(&format!("{:44} ({:6} {:?})\n", op_id, method, path));
     }
 
