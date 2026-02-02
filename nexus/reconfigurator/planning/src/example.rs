@@ -821,18 +821,16 @@ impl ExampleSystemBuilder {
                         .cockroachdb_count
                         .on(discretionary_ix, discretionary_sled_count)
                     {
-                        // CockroachDB zones require zpools. If there are no
-                        // available zpools on this sled, skip creating this
-                        // zone.  This can happen in small test systems with
-                        // limited resources.
-                        // XXX-dap but we should notice if we didn't provision
-                        // enough -- I guess we should do that in general
-                        let _ = builder.sled_add_zone_cockroachdb(
-                            sled_id,
-                            self.target_release
-                                .zone_image_source(ZoneKind::CockroachDb)
-                                .expect("obtained CockroachDb image source"),
-                        );
+                        builder
+                            .sled_add_zone_cockroachdb(
+                                sled_id,
+                                self.target_release
+                                    .zone_image_source(ZoneKind::CockroachDb)
+                                    .expect(
+                                        "obtained CockroachDb image source",
+                                    ),
+                            )
+                            .unwrap();
                     }
                     // Add BoundaryNtp zones on the first N discretionary sleds.
                     if will_get_boundary_ntp {
