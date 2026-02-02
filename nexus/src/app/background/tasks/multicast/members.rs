@@ -982,27 +982,25 @@ impl MulticastGroupReconciler {
                     "error" => %e
                 );
 
-                // TODO: Cross-validate inventory sled→port mapping via DDM
-                // operational state.
+                // TODO: Use DDM as the primary source of truth for sled→port
+                // mapping, with inventory as cross-validation.
                 //
-                // We currently trust inventory (MGS/SP topology) for sled→port
-                // mapping.
+                // Currently we trust inventory (MGS/SP topology) for sled→port
+                // mapping. DDM (maghemite/ddmd) on switches has authoritative
+                // knowledge of which sleds are reachable on which ports.
                 //
-                // We could add validation using DDM on switches to confirm
-                // operational connectivity:
+                // Future approach:
+                //   1. Query DDM for operational sled→port mapping
+                //      // TODO: Add GET /peers endpoint to ddm-admin-client
+                //      // returning Map<peer_addr, PeerInfo> where PeerInfo
+                //      // includes port/interface field (requires maghemite change)
+                //   2. Use DDM mapping as primary source for multicast routing
+                //   3. Cross-validate against inventory to detect mismatches
+                //   4. On mismatch: invalidate cache, log warning, potentially
+                //      trigger inventory reconciliation
                 //
-                // Query DDM (underlay routing daemon on switches):
-                //   - GET /peers → Map<peer_addr, PeerInfo>
-                //   - **Needs API addition**: DDM's PeerInfo should include
-                //     port/interface or similar field showing which rear port
-                //     each underlay peer is reachable through
-                //   - Cross-reference: Does sled's underlay address appear as
-                //     an "Active" peer on the expected rear port?
-                //
-                // On mismatch: Could invalidate cache, transition member to
-                // "Left", or trigger inventory reconciliation. Prevents wasted
-                // retries on sleds with actual connectivity loss vs. inventory
-                // mismatch.
+                // This catches cases where inventory is stale or a sled moved
+                // but inventory hasn't updated yet.
 
                 let updated = self
                     .datastore

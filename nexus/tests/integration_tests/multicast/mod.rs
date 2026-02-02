@@ -50,6 +50,7 @@ use omicron_test_utils::dev::poll::{self, CondCheckError, wait_for_condition};
 use omicron_uuid_kinds::{GenericUuid, InstanceUuid, MulticastGroupUuid};
 
 use crate::integration_tests::instances as instance_helpers;
+use sled_agent_client::TestInterfaces as SledAgentTestInterfaces;
 
 // Shared type alias for all multicast integration tests
 pub(crate) type ControlPlaneTestContext =
@@ -66,7 +67,7 @@ mod networking_integration;
 mod pool_selection;
 
 // Timeout constants for test operations
-const POLL_INTERVAL: Duration = Duration::from_millis(80);
+const POLL_INTERVAL: Duration = Duration::from_millis(50);
 const MULTICAST_OPERATION_TIMEOUT: Duration = Duration::from_secs(120);
 
 /// Generic helper for PUT upsert requests that return 201 Created.
@@ -232,6 +233,19 @@ pub(crate) async fn activate_multicast_reconciler(
     nexus_test_utils::background::activate_background_task(
         lockstep_client,
         "multicast_reconciler",
+    )
+    .await
+}
+
+/// Activates the inventory loader and waits for it to complete.
+///
+/// This ensures the watch channel has the latest inventory collection from the database.
+pub(crate) async fn activate_inventory_loader(
+    lockstep_client: &ClientTestContext,
+) -> nexus_lockstep_client::types::BackgroundTask {
+    nexus_test_utils::background::activate_background_task(
+        lockstep_client,
+        "inventory_loader",
     )
     .await
 }
@@ -729,6 +743,147 @@ pub(crate) async fn wait_for_instance_sled_assignment(
     }
 }
 
+/// Wait for an instance to reach Running state, driving simulation on each poll.
+///
+/// More robust than passively waiting, as it actively drives instance
+/// simulation while polling for the Running state.
+///
+/// Only use for Running transitions. For Stopped state, use
+/// `wait_for_instance_stopped` which handles the VMM removal race condition.
+pub(crate) async fn instance_wait_for_running_with_simulation(
+    cptestctx: &ControlPlaneTestContext,
+    instance_id: InstanceUuid,
+) -> Instance {
+    let expected_state = InstanceState::Running;
+    let client = &cptestctx.external_client;
+    let nexus = &cptestctx.server.server_context().nexus;
+    let url = format!("/v1/instances/{instance_id}");
+
+    match wait_for_condition(
+        || async {
+            instance_helpers::instance_simulate(nexus, &instance_id).await;
+
+            let response = NexusRequest::object_get(client, &url)
+                .authn_as(AuthnMode::PrivilegedUser)
+                .execute()
+                .await
+                .map_err(|e| {
+                    CondCheckError::<String>::Failed(format!(
+                        "request failed: {e}"
+                    ))
+                })?;
+
+            let instance: Instance = response.parsed_body().map_err(|e| {
+                CondCheckError::<String>::Failed(format!("parse failed: {e}"))
+            })?;
+
+            if instance.runtime.run_state == expected_state {
+                Ok(instance)
+            } else {
+                Err(CondCheckError::<String>::NotYet)
+            }
+        },
+        &POLL_INTERVAL,
+        &MULTICAST_OPERATION_TIMEOUT,
+    )
+    .await
+    {
+        Ok(instance) => instance,
+        Err(poll::Error::TimedOut(elapsed)) => {
+            panic!(
+                "instance {instance_id} did not reach {expected_state:?} within {elapsed:?}"
+            );
+        }
+        Err(poll::Error::PermanentError(err)) => {
+            panic!(
+                "failed waiting for instance {instance_id} to reach {expected_state:?}: {err}"
+            );
+        }
+    }
+}
+/// Wait for an instance to reach the Stopped state, poking the simulated
+/// sled-agent on each poll iteration to advance the state machine.
+///
+/// This is more robust than calling `instance_simulate` once because
+/// concurrent operations may require multiple pokes to complete. Uses
+/// `try_vmm_finish_transition` to handle the race where the VMM can
+/// disappear between checking for it and poking.
+pub(crate) async fn wait_for_instance_stopped(
+    cptestctx: &ControlPlaneTestContext,
+    client: &ClientTestContext,
+    instance_id: InstanceUuid,
+    instance_name: &str,
+) {
+    let nexus = &cptestctx.server.server_context().nexus;
+    let log = &cptestctx.logctx.log;
+
+    info!(
+        log,
+        "waiting for instance to stop (with sled-agent pokes)";
+        "instance_id" => %instance_id,
+        "instance_name" => instance_name,
+    );
+
+    let url = format!("/v1/instances/{instance_id}");
+    match wait_for_condition(
+        || async {
+            let instance: Instance = NexusRequest::object_get(client, &url)
+                .authn_as(AuthnMode::PrivilegedUser)
+                .execute()
+                .await?
+                .parsed_body()?;
+
+            if instance.runtime.run_state == InstanceState::Stopped {
+                Ok(())
+            } else {
+                debug!(
+                    log,
+                    "instance not yet stopped, poking sled-agent";
+                    "instance_id" => %instance_id,
+                    "current_state" => ?instance.runtime.run_state,
+                );
+
+                // Try to poke the sled-agent. The VMM may not exist (if no
+                // active VMM) or may disappear between the check and the poke
+                // (race condition). Either case is fine since we're polling.
+                if let Ok(Some(sled_info)) =
+                    nexus.active_instance_info(&instance_id, None).await
+                {
+                    let _ = sled_info
+                        .sled_client
+                        .try_vmm_finish_transition(sled_info.propolis_id)
+                        .await;
+                }
+
+                Err(CondCheckError::<anyhow::Error>::NotYet)
+            }
+        },
+        &POLL_INTERVAL,
+        &MULTICAST_OPERATION_TIMEOUT,
+    )
+    .await
+    {
+        Ok(_) => {
+            info!(
+                log,
+                "instance stopped";
+                "instance_id" => %instance_id,
+            );
+        }
+        Err(poll::Error::TimedOut(elapsed)) => {
+            panic!(
+                "instance {instance_name} ({instance_id}) did not stop \
+                 within {elapsed:?}"
+            );
+        }
+        Err(poll::Error::PermanentError(err)) => {
+            panic!(
+                "failed waiting for instance {instance_name} to stop: {err}"
+            );
+        }
+    }
+}
+
 /// Verify that inventory-based sled-to-switch-port mapping is correct.
 ///
 /// This validates the entire flow:
@@ -943,38 +1098,6 @@ pub(crate) async fn wait_for_group_deleted(
     }
 }
 
-/// Verify a group is either deleted or in one of the expected states.
-///
-/// Useful when DPD is unavailable and groups can't complete state transitions.
-/// For example, when DPD is down during deletion, groups may be stuck in
-/// "Creating" or "Deleting" state rather than being fully deleted.
-pub(crate) async fn verify_group_deleted_or_in_states(
-    client: &ClientTestContext,
-    group_name: &str,
-    expected_states: &[&str],
-) {
-    let groups_result =
-        nexus_test_utils::resource_helpers::objects_list_page_authz::<
-            MulticastGroup,
-        >(client, "/v1/multicast-groups")
-        .await;
-
-    let matching_groups: Vec<_> = groups_result
-        .items
-        .into_iter()
-        .filter(|g| g.identity.name == group_name)
-        .collect();
-
-    if !matching_groups.is_empty() {
-        // Group still exists - should be in one of the expected states
-        let actual_state = &matching_groups[0].state;
-        assert!(
-            expected_states.contains(&actual_state.as_str()),
-            "Group {group_name} should be in one of {expected_states:?} states, found: {actual_state}"
-        );
-    }
-}
-
 /// Wait for a multicast group to be deleted from DPD (dataplane) with reconciler activation.
 ///
 /// This function waits for the DPD to report that the multicast group no longer exists
@@ -1182,12 +1305,19 @@ pub(crate) async fn cleanup_instances(
             let instance_id =
                 InstanceUuid::from_untyped_uuid(instance.identity.id);
 
-            // Simulate and wait for Running state
-            instance_helpers::instance_simulate(
+            // Use the fallible version during cleanup: if sled agent
+            // communication fails (e.g., because a test intentionally failed
+            // DPD or the sled), we log and continue rather than panic. Real
+            // issues are caught during test execution, not cleanup.
+            if let Err(e) = instance_helpers::try_instance_simulate(
                 &cptestctx.server.server_context().nexus,
                 &instance_id,
             )
-            .await;
+            .await
+            {
+                eprintln!("Warning: Failed to simulate instance {name}: {e:?}");
+                continue;
+            }
             instance_helpers::instance_wait_for_state_as(
                 client,
                 AuthnMode::PrivilegedUser,
@@ -1216,15 +1346,13 @@ pub(crate) async fn cleanup_instances(
     ops::join_all(delete_futures).await;
 }
 
-/// Stop multiple instances using the exact same pattern as groups.rs.
+/// Stop multiple instances, poking the simulated sled-agent while waiting.
 pub(crate) async fn stop_instances(
     cptestctx: &ControlPlaneTestContext,
     client: &ClientTestContext,
     project_name: &str,
     instance_names: &[&str],
 ) {
-    let nexus = &cptestctx.server.server_context().nexus;
-
     let fetch_futures = instance_names.iter().map(|name| {
         let url = format!("/v1/instances/{name}?project={project_name}");
         async move {
@@ -1280,15 +1408,11 @@ pub(crate) async fn stop_instances(
 
                     match stop_result {
                         Ok(_) => {
-                            instance_helpers::instance_simulate(
-                                nexus,
-                                instance_id,
-                            )
-                            .await;
-                            instance_helpers::instance_wait_for_state(
+                            wait_for_instance_stopped(
+                                cptestctx,
                                 client,
                                 *instance_id,
-                                InstanceState::Stopped,
+                                name,
                             )
                             .await;
                         }

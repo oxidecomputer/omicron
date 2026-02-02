@@ -2637,6 +2637,7 @@ async fn test_instance_using_image_from_other_project_fails(
                         disk_backend: params::DiskBackend::Distributed {
                             disk_source: params::DiskSource::Image {
                                 image_id: image.identity.id,
+                                read_only: false,
                             },
                         },
                         size: ByteCount::from_gibibytes_u32(4),
@@ -9000,6 +9001,35 @@ pub async fn instance_simulate(nexus: &Arc<Nexus>, id: &InstanceUuid) {
         .expect("instance must be on a sled to simulate a state change");
 
     sled_info.sled_client.vmm_finish_transition(sled_info.propolis_id).await;
+}
+
+/// Fallible version of instance_simulate for test cleanup.
+///
+/// Returns an error instead of panicking if the sled agent communication fails.
+/// This is useful during test cleanup where the sled agent may be unavailable.
+// This is currently only consumed by tests behind the multicast feature gate.
+// If/when it has another consumer, this cfg can be removed.
+#[cfg(feature = "multicast")]
+pub async fn try_instance_simulate(
+    nexus: &Arc<Nexus>,
+    id: &InstanceUuid,
+) -> Result<(), anyhow::Error> {
+    let sled_info = nexus
+        .active_instance_info(id, None)
+        .await?
+        .ok_or_else(|| anyhow::anyhow!("instance not on a sled"))?;
+
+    sled_info
+        .sled_client
+        .try_vmm_finish_transition(sled_info.propolis_id)
+        .await
+        .map_err(|e| {
+            anyhow::anyhow!(
+                "sled agent communication failed for VMM {}: {e}",
+                sled_info.propolis_id
+            )
+        })?;
+    Ok(())
 }
 
 /// Simulate one step of an ongoing instance state transition.  To do this, we

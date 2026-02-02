@@ -37,6 +37,7 @@ use nexus_types::external_api::params;
 use omicron_common::api::external;
 
 use crate::v2026011501;
+use crate::v2026013000;
 use omicron_common::api::external::{
     ByteCount, Hostname, IdentityMetadataCreateParams,
     InstanceAutoRestartPolicy, InstanceCpuCount, InstanceCpuPlatform,
@@ -235,10 +236,10 @@ pub struct InstanceCreate {
     pub multicast_groups: Vec<NameOrId>,
     /// A list of disks to be attached to the instance.
     #[serde(default)]
-    pub disks: Vec<params::InstanceDiskAttachment>,
+    pub disks: Vec<v2026013000::InstanceDiskAttachment>,
     /// The disk the instance is configured to boot from.
     #[serde(default)]
-    pub boot_disk: Option<params::InstanceDiskAttachment>,
+    pub boot_disk: Option<v2026013000::InstanceDiskAttachment>,
     /// An allowlist of SSH public keys to be transferred to the instance.
     pub ssh_public_keys: Option<Vec<NameOrId>>,
     /// Should this instance be started upon creation; true by default.
@@ -284,8 +285,8 @@ impl TryFrom<InstanceCreate> for params::InstanceCreate {
                     ip_version: None,
                 })
                 .collect(),
-            disks: old.disks,
-            boot_disk: old.boot_disk,
+            disks: old.disks.into_iter().map(Into::into).collect(),
+            boot_disk: old.boot_disk.map(Into::into),
             ssh_public_keys: old.ssh_public_keys,
             start: old.start,
             auto_restart_policy: old.auto_restart_policy,
