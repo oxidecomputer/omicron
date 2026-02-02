@@ -521,16 +521,23 @@ impl ExampleSystemBuilder {
         let mut rng = self.rng.clone();
 
         let mut system = SystemDescription::new();
-        // Update the system's target counts with the counts. (Note that
-        // there's no external DNS count.)
-        // XXX-dap what is this for and does it need to be updated for other
-        // zone types?
+        // Update the system's target counts with the counts configured by the
+        // caller.  The target counts are essentially planner configuration
+        // (part of system policy).  The idea here is to configure the resulting
+        // system so that the planner is happy with the system we've created and
+        // doesn't try to add/remove zones if what the caller configured
+        // differs from the defaults.
+        //
+        // Note that external DNS does not get configured in this way because
+        // the target count is determined from the number of distinct external
+        // IPs configured for the external DNS servers.
         system
             .set_target_nexus_zone_count(nexus_count.0)
             .set_target_internal_dns_zone_count(self.internal_dns_count.0)
             .set_target_crucible_pantry_zone_count(self.crucible_pantry_count.0)
             .set_target_oximeter_zone_count(self.oximeter_count.0)
-            .set_target_cockroachdb_zone_count(self.cockroachdb_count.0);
+            .set_target_cockroachdb_zone_count(self.cockroachdb_count.0)
+            .set_target_boundary_ntp_zone_count(self.boundary_ntp_count.0);
 
         // Set the clickhouse policy if one was specified
         if let Some(policy) = &self.clickhouse_policy {
@@ -664,7 +671,6 @@ impl ExampleSystemBuilder {
                         .sled_ensure_zone_ntp(
                             sled_id,
                             self.target_release
-                                // XXX-dap this is actually an internalNTP zone
                                 .zone_image_source(ZoneKind::BoundaryNtp)
                                 .expect("obtained BoundaryNtp image source"),
                         )
@@ -1776,9 +1782,6 @@ mod tests {
                     out.insert(service, Ok(()));
                 }
                 // Services that are not currently part of the example system.
-                //
-                // XXX-dap how can we get them to be?  Maybe mark two sleds as
-                // `sled_role` Scrimlet?
                 ServiceName::ManagementGatewayService
                 | ServiceName::Wicketd
                 | ServiceName::Dendrite
