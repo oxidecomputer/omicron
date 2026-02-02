@@ -725,7 +725,9 @@ impl ExampleSystemBuilder {
                                 } => (*target_keepers, *target_servers),
                                 ClickhouseMode::SingleNodeOnly => (0, 0),
                             };
-                        if discretionary_ix < target_keepers.into() {
+                        for _ in 0..ZoneCount(target_keepers.into())
+                            .on(discretionary_ix, discretionary_sled_count)
+                        {
                             builder
                                 .sled_add_zone_clickhouse_keeper(
                                     sled_id,
@@ -740,7 +742,9 @@ impl ExampleSystemBuilder {
                                 )
                                 .unwrap();
                         }
-                        if discretionary_ix < target_servers.into() {
+                        for _ in 0..ZoneCount(target_servers.into())
+                            .on(discretionary_ix, discretionary_sled_count)
+                        {
                             builder
                                 .sled_add_zone_clickhouse_server(
                                     sled_id,
