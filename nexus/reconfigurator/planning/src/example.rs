@@ -1246,7 +1246,6 @@ mod tests {
         static TEST_NAME: &str = "example_builder_zone_counts";
         let logctx = test_setup_log(TEST_NAME);
 
-        // XXX-dap update this test to account for the new things
         let (example, mut blueprint) =
             ExampleSystemBuilder::new(&logctx.log, TEST_NAME)
                 .nsleds(5)
@@ -1256,6 +1255,17 @@ mod tests {
                 .unwrap()
                 .external_dns_count(10)
                 .unwrap()
+                .oximeter_count(4)
+                .cockroachdb_count(3)
+                .boundary_ntp_count(2)
+                .clickhouse_policy(nexus_types::deployment::ClickhousePolicy {
+                    version: 0,
+                    mode: nexus_types::deployment::ClickhouseMode::Both {
+                        target_servers: 3,
+                        target_keepers: 4,
+                    },
+                    time_created: chrono::Utc::now(),
+                })
                 .build();
 
         // Define a time_created for consistent output across runs.
@@ -1354,6 +1364,111 @@ mod tests {
             "expected 5 Crucible pantry zones in collection, got {}: {:#?}",
             crucible_pantry_zones.len(),
             crucible_pantry_zones,
+        );
+
+        let clickhouse_keeper_zones =
+            blueprint_zones_of_kind(&blueprint, ZoneKind::ClickhouseKeeper);
+        assert_eq!(
+            clickhouse_keeper_zones.len(),
+            4,
+            "expected 4 ClickhouseKeeper zones in blueprint, got {}: {:#?}",
+            clickhouse_keeper_zones.len(),
+            clickhouse_keeper_zones,
+        );
+        let clickhouse_keeper_zones = collection_ledgered_zones_of_kind(
+            &example.collection,
+            ZoneKind::ClickhouseKeeper,
+        );
+        assert_eq!(
+            clickhouse_keeper_zones.len(),
+            4,
+            "expected 4 ClickhouseKeeper zones in collection, got {}: {:#?}",
+            clickhouse_keeper_zones.len(),
+            clickhouse_keeper_zones,
+        );
+
+        let clickhouse_server_zones =
+            blueprint_zones_of_kind(&blueprint, ZoneKind::ClickhouseServer);
+        assert_eq!(
+            clickhouse_server_zones.len(),
+            3,
+            "expected 3 ClickhouseServer zones in blueprint, got {}: {:#?}",
+            clickhouse_server_zones.len(),
+            clickhouse_server_zones,
+        );
+        let clickhouse_server_zones = collection_ledgered_zones_of_kind(
+            &example.collection,
+            ZoneKind::ClickhouseServer,
+        );
+        assert_eq!(
+            clickhouse_server_zones.len(),
+            3,
+            "expected 3 ClickhouseServer zones in collection, got {}: {:#?}",
+            clickhouse_server_zones.len(),
+            clickhouse_server_zones,
+        );
+
+        let oximeter_zones =
+            blueprint_zones_of_kind(&blueprint, ZoneKind::Oximeter);
+        assert_eq!(
+            oximeter_zones.len(),
+            4,
+            "expected 4 Oximeter zones in blueprint, got {}: {:#?}",
+            oximeter_zones.len(),
+            oximeter_zones,
+        );
+        let oximeter_zones = collection_ledgered_zones_of_kind(
+            &example.collection,
+            ZoneKind::Oximeter,
+        );
+        assert_eq!(
+            oximeter_zones.len(),
+            4,
+            "expected 4 Oximeter zones in collection, got {}: {:#?}",
+            oximeter_zones.len(),
+            oximeter_zones,
+        );
+
+        let cockroachdb_zones =
+            blueprint_zones_of_kind(&blueprint, ZoneKind::CockroachDb);
+        assert_eq!(
+            cockroachdb_zones.len(),
+            3,
+            "expected 3 CockroachDB zones in blueprint, got {}: {:#?}",
+            cockroachdb_zones.len(),
+            cockroachdb_zones,
+        );
+        let cockroachdb_zones = collection_ledgered_zones_of_kind(
+            &example.collection,
+            ZoneKind::CockroachDb,
+        );
+        assert_eq!(
+            cockroachdb_zones.len(),
+            3,
+            "expected 3 CockroachDB zones in collection, got {}: {:#?}",
+            cockroachdb_zones.len(),
+            cockroachdb_zones,
+        );
+
+        let boundary_ntp_zones =
+            blueprint_zones_of_kind(&blueprint, ZoneKind::BoundaryNtp);
+        assert_eq!(
+            boundary_ntp_zones.len(),
+            2,
+            "expected 2 BoundaryNtp zones in blueprint, got {}: {:#?}",
+            boundary_ntp_zones.len(),
+            boundary_ntp_zones,
+        );
+        let boundary_ntp_zones = collection_ledgered_zones_of_kind(
+            &example.collection,
+            ZoneKind::BoundaryNtp,
+        );
+        assert_eq!(
+            boundary_ntp_zones.len(),
+            2,
+            "expected 2 BoundaryNtp zones in collection, got {}: {:#?}",
+            boundary_ntp_zones.len(),
+            boundary_ntp_zones,
         );
 
         logctx.cleanup_successful();
