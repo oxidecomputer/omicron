@@ -23,6 +23,7 @@ use anyhow::Context;
 use anyhow::bail;
 use camino::Utf8Path;
 use camino_tempfile::Utf8TempDir;
+use chrono::Utc;
 use clap::Parser;
 use nexus_inventory::CollectionBuilderRng;
 use nexus_types::deployment::Blueprint;
@@ -216,7 +217,7 @@ pub struct ExampleSystemBuilder {
     oximeter_count: ZoneCount,
     cockroachdb_count: ZoneCount,
     boundary_ntp_count: ZoneCount,
-    clickhouse_policy: Option<nexus_types::deployment::ClickhousePolicy>,
+    clickhouse_policy: nexus_types::deployment::ClickhousePolicy,
     create_zones: bool,
     create_disks_in_blueprint: bool,
     target_release: TargetReleaseDescription,
@@ -256,7 +257,11 @@ impl ExampleSystemBuilder {
             oximeter_count: ZoneCount(0),
             cockroachdb_count: ZoneCount(0),
             boundary_ntp_count: ZoneCount(0),
-            clickhouse_policy: None,
+            clickhouse_policy: nexus_types::deployment::ClickhousePolicy {
+                version: 1,
+                mode: nexus_types::deployment::ClickhouseMode::SingleNodeOnly,
+                time_created: Utc::now(),
+            },
             create_zones: true,
             create_disks_in_blueprint: true,
             target_release: TargetReleaseDescription::Initial,
@@ -389,7 +394,7 @@ impl ExampleSystemBuilder {
         mut self,
         policy: nexus_types::deployment::ClickhousePolicy,
     ) -> Self {
-        self.clickhouse_policy = Some(policy);
+        self.clickhouse_policy = policy;
         self
     }
 
@@ -541,10 +546,8 @@ impl ExampleSystemBuilder {
             .set_target_cockroachdb_zone_count(self.cockroachdb_count.0)
             .set_target_boundary_ntp_zone_count(self.boundary_ntp_count.0);
 
-        // Set the clickhouse policy if one was specified
-        if let Some(policy) = &self.clickhouse_policy {
-            system.clickhouse_policy(policy.clone());
-        }
+        // Set the clickhouse policy
+        system.clickhouse_policy(Some(self.clickhouse_policy.clone()));
 
         // Set the target release if one is available. We don't do this
         // unconditionally because we don't want the target release generation
@@ -700,7 +703,10 @@ impl ExampleSystemBuilder {
                             )
                             .unwrap();
                     }
-                    if discretionary_ix == 0 {
+                    // Add single-node Clickhouse zone if the policy enables it.
+                    if discretionary_ix == 0
+                        && self.clickhouse_policy.mode.single_node_enabled()
+                    {
                         builder
                             .sled_add_zone_clickhouse(
                                 sled_id,
@@ -710,9 +716,10 @@ impl ExampleSystemBuilder {
                             )
                             .unwrap();
                     }
-                    // Add ClickhouseKeeper and ClickhouseServer zones if a
-                    // replicated policy is set.
-                    if let Some(policy) = &self.clickhouse_policy {
+                    // Add ClickhouseKeeper and ClickhouseServer zones if the
+                    // policy enables clustering.
+                    if self.clickhouse_policy.mode.cluster_enabled() {
+                        let policy = &self.clickhouse_policy;
                         let (target_keepers, target_servers) =
                             match &policy.mode {
                                 ClickhouseMode::Both {
