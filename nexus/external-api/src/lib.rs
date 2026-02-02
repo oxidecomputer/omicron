@@ -1992,6 +1992,7 @@ pub trait NexusExternalApi {
     /// Deprecated: Groups are created implicitly when adding members in newer
     /// API versions.
     #[endpoint {
+        operation_id = "multicast_group_create",
         method = POST,
         path = "/v1/multicast-groups",
         tags = ["experimental"],
@@ -2051,6 +2052,7 @@ pub trait NexusExternalApi {
     ///
     /// Deprecated: groups are managed implicitly through member operations.
     #[endpoint {
+        operation_id = "multicast_group_update",
         method = PUT,
         path = "/v1/multicast-groups/{multicast_group}",
         tags = ["experimental"],
@@ -2074,6 +2076,7 @@ pub trait NexusExternalApi {
     ///
     /// Deprecated: groups are deleted automatically when the last member leaves.
     #[endpoint {
+        operation_id = "multicast_group_delete",
         method = DELETE,
         path = "/v1/multicast-groups/{multicast_group}",
         tags = ["experimental"],
@@ -2192,6 +2195,7 @@ pub trait NexusExternalApi {
     ///
     /// Deprecated: use the main view endpoint which accepts IP addresses directly.
     #[endpoint {
+        operation_id = "lookup_multicast_group_by_ip",
         method = GET,
         path = "/v1/system/multicast-groups/by-ip/{address}",
         tags = ["experimental"],
@@ -2290,6 +2294,7 @@ pub trait NexusExternalApi {
     // TODO-correctness See note about instance create.  This should be async.
     /// Create disk
     #[endpoint {
+        operation_id = "disk_create",
         method = POST,
         path = "/v1/disks",
         tags = ["disks"],
@@ -2308,6 +2313,7 @@ pub trait NexusExternalApi {
     // TODO-correctness See note about instance create.  This should be async.
     /// Create disk
     #[endpoint {
+        operation_id = "disk_create",
         method = POST,
         path = "/v1/disks",
         tags = ["disks"],
@@ -2355,6 +2361,7 @@ pub trait NexusExternalApi {
 
     /// Fetch disk
     #[endpoint {
+        operation_id = "disk_view",
         method = GET,
         path = "/v1/disks/{disk}",
         tags = ["disks"],
@@ -2465,7 +2472,7 @@ pub trait NexusExternalApi {
 
     /// Create instance
     #[endpoint {
-        operation_id = "disk_create",
+        operation_id = "instance_create",
         method = POST,
         path = "/v1/instances",
         tags = ["instances"],
@@ -2559,6 +2566,7 @@ pub trait NexusExternalApi {
 
     /// Create instance
     #[endpoint {
+        operation_id = "instance_create",
         method = POST,
         path = "/v1/instances",
         tags = ["instances"],
@@ -2574,6 +2582,7 @@ pub trait NexusExternalApi {
     }
 
     #[endpoint {
+        operation_id = "instance_create",
         method = POST,
         path = "/v1/instances",
         tags = ["instances"],
@@ -2627,6 +2636,7 @@ pub trait NexusExternalApi {
 
     /// Update instance
     #[endpoint {
+        operation_id = "instance_update",
         method = PUT,
         path = "/v1/instances/{instance}",
         tags = ["instances"],
@@ -2771,6 +2781,7 @@ pub trait NexusExternalApi {
 
     /// List disks for instance
     #[endpoint {
+        operation_id = "instance_disk_list",
         method = GET,
         path = "/v1/instances/{instance}/disks",
         tags = ["instances"],
@@ -2833,6 +2844,7 @@ pub trait NexusExternalApi {
 
     /// Attach disk to instance
     #[endpoint {
+        operation_id = "instance_disk_attach",
         method = POST,
         path = "/v1/instances/{instance}/disks/attach",
         tags = ["instances"],
@@ -2894,6 +2906,7 @@ pub trait NexusExternalApi {
 
     /// Detach disk from instance
     #[endpoint {
+        operation_id = "instance_disk_detach",
         method = POST,
         path = "/v1/instances/{instance}/disks/detach",
         tags = ["instances"],
@@ -3482,6 +3495,7 @@ pub trait NexusExternalApi {
     ) -> Result<HttpResponseOk<ResultsPage<BgpConfig>>, HttpError>;
 
     #[endpoint {
+        operation_id = "networking_bgp_status",
         method = GET,
         path = "/v1/system/networking/bgp-status",
         tags = ["system/networking"],
@@ -4046,6 +4060,7 @@ pub trait NexusExternalApi {
 
     /// Detach and deallocate ephemeral IP from instance
     #[endpoint {
+        operation_id = "instance_ephemeral_ip_detach",
         method = DELETE,
         path = "/v1/instances/{instance}/external-ips/ephemeral",
         tags = ["instances"],
