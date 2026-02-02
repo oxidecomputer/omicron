@@ -705,8 +705,7 @@ async fn instance_send_attached_subnets_to_dendrite(
         );
         return Ok(());
     }
-    let subnets =
-        subnets.into_iter().map(|s| s.subnet).collect::<Vec<_>>();
+    let subnets = subnets.into_iter().map(|s| s.subnet).collect::<Vec<_>>();
     send_subnet_attachments_to_dendrite_inner(
         datastore,
         log,

@@ -2,6 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+use crate::IpVersion;
 use diesel::backend::Backend;
 use diesel::deserialize;
 use diesel::deserialize::FromSql;
@@ -12,7 +13,6 @@ use diesel::sql_types;
 use ipnetwork::IpNetwork;
 use serde::Deserialize;
 use serde::Serialize;
-use crate::IpVersion;
 
 #[derive(
     Clone,

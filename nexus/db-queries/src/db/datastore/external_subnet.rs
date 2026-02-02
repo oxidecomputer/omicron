@@ -4,14 +4,11 @@
 
 //! [`DataStore`] methods on Subnet Pools and External Subnets.
 
-use dropshot::PaginationOrder;
-use crate::db::collection_detach::DatastoreDetachTarget as _;
-use crate::db::collection_detach::DetachError;
 use crate::db::DataStore;
-use diesel::NullableExpressionMethods as _;
-use diesel::BoolExpressionMethods as _;
 use crate::db::collection_attach::AttachError;
 use crate::db::collection_attach::DatastoreAttachTarget as _;
+use crate::db::collection_detach::DatastoreDetachTarget as _;
+use crate::db::collection_detach::DetachError;
 use crate::db::datastore::SQL_BATCH_SIZE;
 use crate::db::pagination::Paginator;
 use crate::db::pagination::paginated;
@@ -29,12 +26,15 @@ use crate::db::update_and_check::UpdateAndCheck as _;
 use crate::db::update_and_check::UpdateStatus;
 use async_bb8_diesel::AsyncRunQueryDsl as _;
 use chrono::Utc;
+use diesel::BoolExpressionMethods as _;
 use diesel::ExpressionMethods as _;
 use diesel::JoinOnDsl as _;
+use diesel::NullableExpressionMethods as _;
 use diesel::QueryDsl as _;
 use diesel::SelectableHelper as _;
 use diesel::result::DatabaseErrorKind;
 use diesel::result::Error as DieselError;
+use dropshot::PaginationOrder;
 use nexus_auth::authz;
 use nexus_auth::authz::SUBNET_POOL_LIST;
 use nexus_auth::context::OpContext;
@@ -51,13 +51,13 @@ use nexus_db_model::IpNet;
 use nexus_db_model::IpVersion;
 use nexus_db_model::Ipv6Addr;
 use nexus_db_model::MacAddr;
-use nexus_db_model::Vni;
-use nexus_db_model::NetworkInterfaceKind;
 use nexus_db_model::Name;
+use nexus_db_model::NetworkInterfaceKind;
 use nexus_db_model::SubnetPool;
 use nexus_db_model::SubnetPoolMember;
 use nexus_db_model::SubnetPoolSiloLink;
 use nexus_db_model::SubnetPoolUpdate;
+use nexus_db_model::Vni;
 use nexus_db_model::to_db_typed_uuid;
 use nexus_types::external_api::params;
 use nexus_types::external_api::params::ExternalSubnetCreate;
@@ -71,8 +71,8 @@ use omicron_common::api::external::NameOrId;
 use omicron_common::api::external::ResourceType;
 use omicron_common::api::external::UpdateResult;
 use omicron_common::api::external::http_pagination::PaginatedBy;
-use omicron_common::api::internal::shared::AttachedSubnetId;
 use omicron_common::api::internal::shared::AttachedSubnet;
+use omicron_common::api::internal::shared::AttachedSubnetId;
 use omicron_uuid_kinds::ExternalSubnetUuid;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::InstanceUuid;
@@ -660,19 +660,20 @@ impl DataStore {
         instance_id: Uuid,
     ) -> Result<usize, Error> {
         use nexus_db_schema::schema::external_subnet::dsl;
-        diesel::update(dsl::external_subnet
+        diesel::update(
+            dsl::external_subnet
                 .filter(dsl::instance_id.eq(instance_id))
                 .filter(dsl::time_deleted.is_null())
-                .filter(dsl::attach_state.eq(IpAttachState::Attached))
-            )
-            .set((
-                dsl::time_deleted.eq(Utc::now()),
-                dsl::instance_id.eq(Option::<Uuid>::None),
-                dsl::attach_state.eq(IpAttachState::Detached),
-            ))
-            .execute_async(&*self.pool_connection_authorized(opctx).await?)
-            .await
-            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+                .filter(dsl::attach_state.eq(IpAttachState::Attached)),
+        )
+        .set((
+            dsl::time_deleted.eq(Utc::now()),
+            dsl::instance_id.eq(Option::<Uuid>::None),
+            dsl::attach_state.eq(IpAttachState::Detached),
+        ))
+        .execute_async(&*self.pool_connection_authorized(opctx).await?)
+        .await
+        .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 
     /// List external subnets.
@@ -1218,14 +1219,13 @@ impl DataStore {
             // - the subnet is suddenly detached, if there are concurrent sagas.
             (IpAttachState::Attaching, IpAttachState::Attached) => {
                 initial_update
-                    .set((
-                        dsl::time_modified.eq(now),
-                        dsl::attach_state.eq(to),
-                    ))
+                    .set((dsl::time_modified.eq(now), dsl::attach_state.eq(to)))
                     .check_if_exists::<ExternalSubnet>(id.into_untyped_uuid())
                     .execute_and_check(&conn)
                     .await
-                    .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+                    .map_err(|e| {
+                        public_error_from_diesel(e, ErrorHandler::Server)
+                    })
                     .and_then(|r| match r.status {
                         UpdateStatus::Updated => {
                             Ok(ExternalSubnetCompleteAttachResult::Modified(
@@ -1233,10 +1233,12 @@ impl DataStore {
                             ))
                         }
                         UpdateStatus::NotUpdatedButExists
-                            if r.found.attach_state == IpAttachState::Detached
-                                || r.found.identity.time_deleted.is_some() => {
+                            if r.found.attach_state
+                                == IpAttachState::Detached
+                                || r.found.identity.time_deleted.is_some() =>
+                        {
                             Err(Error::internal_error(
-                                "unwinding due to concurrent instance delete"
+                                "unwinding due to concurrent instance delete",
                             ))
                         }
                         UpdateStatus::NotUpdatedButExists => {
@@ -1265,10 +1267,12 @@ impl DataStore {
                     ))),
                 }
             }
-            (_, _) => return Err(Error::internal_error(&format!(
-                "Invalid set of states in external_subnet_complete_op: \
+            (_, _) => {
+                return Err(Error::internal_error(&format!(
+                    "Invalid set of states in external_subnet_complete_op: \
                 from={from:#?}, to={to:#?}"
-            ))),
+                )));
+            }
         }
     }
 }

@@ -11,6 +11,7 @@ use iddqd::IdOrdItem;
 use iddqd::IdOrdMap;
 use iddqd::id_upcast;
 use omicron_common::api::external::Generation;
+use omicron_common::api::external::SwitchLocation;
 use omicron_uuid_kinds::AlertReceiverUuid;
 use omicron_uuid_kinds::AlertUuid;
 use omicron_uuid_kinds::BlueprintUuid;
@@ -937,6 +938,39 @@ pub struct ProbeDistributorStatus {
 pub enum TrustQuorumManagerStatus {
     PerRackStatus { statuses: Vec<String>, errors: Vec<String> },
     Error(String),
+}
+
+#[derive(Default, Deserialize, Serialize)]
+pub struct AttachedSubnetManagerStatus {
+    /// Error reaching the database to fetch attached subnets.
+    pub db_error: Option<String>,
+    /// Details about attached subnets sent to Dendrite instances.
+    pub dendrite: HashMap<SwitchLocation, DendriteSubnetDetails>,
+    /// Details about attached subnets sent to sleds.
+    pub sled: HashMap<SledUuid, SledSubnetDetails>,
+}
+
+/// Details about attached subnets sent to a single Dendrite instance.
+#[derive(Default, Deserialize, Serialize)]
+pub struct DendriteSubnetDetails {
+    /// Number of new subnets added.
+    pub n_subnets_added: usize,
+    /// Number of existing subnets removed.
+    pub n_subnets_removed: usize,
+    /// Total number of subnets on the instance after the operation is
+    /// completed.
+    pub n_total_subnets: usize,
+    /// Errors encountered when sending attached subnets.
+    pub errors: Vec<String>,
+}
+
+/// Details about attached subnets sent to a single sled.
+#[derive(Default, Deserialize, Serialize)]
+pub struct SledSubnetDetails {
+    /// Total number of subnets, across all instances on the sled.
+    pub n_subnets: usize,
+    /// Errors encountered when sending attached subnets.
+    pub errors: Vec<String>,
 }
 
 #[cfg(test)]
