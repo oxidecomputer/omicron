@@ -152,11 +152,12 @@ pub struct PlanningInput {
     ///
     /// * Expunged
     /// * Confirmed shutdown and will never restart
-    /// * Not referenced elsewhere in Cockroach
+    /// * No longer needed by the rest of the system (any zone-type-specific
+    ///   cleanup work is complete, any information they contain is either
+    ///   useless or captured elsewhere, etc.)
     ///
-    /// and can therefore be pruned from the blueprint, because any potential
-    /// cleanup required from their expungement has completed.
-    expunged_and_unreferenced_zones: BTreeSet<OmicronZoneUuid>,
+    /// and can therefore be pruned from the blueprint.
+    pruneable_zones: BTreeSet<OmicronZoneUuid>,
 }
 
 impl PlanningInput {
@@ -353,10 +354,8 @@ impl PlanningInput {
         self.ignore_impossible_mgs_updates_since
     }
 
-    pub fn expunged_and_unreferenced_zones(
-        &self,
-    ) -> &BTreeSet<OmicronZoneUuid> {
-        &self.expunged_and_unreferenced_zones
+    pub fn pruneable_zones(&self) -> &BTreeSet<OmicronZoneUuid> {
+        &self.pruneable_zones
     }
 
     /// Convert this `PlanningInput` back into a [`PlanningInputBuilder`]
@@ -376,8 +375,7 @@ impl PlanningInput {
                 .ignore_impossible_mgs_updates_since,
             active_nexus_zones: self.active_nexus_zones,
             not_yet_nexus_zones: self.not_yet_nexus_zones,
-            expunged_and_unreferenced_zones: self
-                .expunged_and_unreferenced_zones,
+            pruneable_zones: self.pruneable_zones,
         }
     }
 }
@@ -1620,7 +1618,7 @@ pub struct PlanningInputBuilder {
     ignore_impossible_mgs_updates_since: DateTime<Utc>,
     active_nexus_zones: BTreeSet<OmicronZoneUuid>,
     not_yet_nexus_zones: BTreeSet<OmicronZoneUuid>,
-    expunged_and_unreferenced_zones: BTreeSet<OmicronZoneUuid>,
+    pruneable_zones: BTreeSet<OmicronZoneUuid>,
 }
 
 impl PlanningInputBuilder {
@@ -1643,7 +1641,7 @@ impl PlanningInputBuilder {
                 - MGS_UPDATE_SETTLE_TIMEOUT,
             active_nexus_zones: BTreeSet::new(),
             not_yet_nexus_zones: BTreeSet::new(),
-            expunged_and_unreferenced_zones: BTreeSet::new(),
+            pruneable_zones: BTreeSet::new(),
         }
     }
 
@@ -1753,24 +1751,22 @@ impl PlanningInputBuilder {
         self.not_yet_nexus_zones = not_yet_nexus_zones;
     }
 
-    /// Insert a zone that is expunged and unreferenced.
+    /// Insert a zone that is pruneable.
     ///
     /// # Errors
     ///
     /// Fails if this zone:
     ///
-    /// * Does not exist in the parent blueprint
-    /// * Exists in the parent blueprint but is not expunged and shutdown
-    pub fn insert_expunged_and_unreferenced_zone(
+    /// * Does not exist in the parent blueprint.
+    /// * Exists in the parent blueprint but is not expunged and shutdown (one
+    ///   of the two conditions for "pruneable"; we don't have enough
+    ///   information to check the other one here).
+    pub fn insert_pruneable_zone(
         &mut self,
         zone_id: OmicronZoneUuid,
     ) -> Result<(), PlanningInputBuildError> {
         use BlueprintExpungedZoneAccessReason::PlanningInputExpungedZoneGuard;
 
-        // We have no way to confirm that this zone is "unreferenced" - that's a
-        // property of the system at large, mostly CRDB state - but we can
-        // confirm that it's expunged and ready for cleanup by looking at the
-        // parent blueprint.
         if !self
             .parent_blueprint
             .expunged_zones(
@@ -1782,7 +1778,7 @@ impl PlanningInputBuilder {
             return Err(PlanningInputBuildError::ZoneNotExpunged(zone_id));
         }
 
-        self.expunged_and_unreferenced_zones.insert(zone_id);
+        self.pruneable_zones.insert(zone_id);
         Ok(())
     }
 
@@ -1799,8 +1795,7 @@ impl PlanningInputBuilder {
                 .ignore_impossible_mgs_updates_since,
             active_nexus_zones: self.active_nexus_zones,
             not_yet_nexus_zones: self.not_yet_nexus_zones,
-            expunged_and_unreferenced_zones: self
-                .expunged_and_unreferenced_zones,
+            pruneable_zones: self.pruneable_zones,
         }
     }
 }

@@ -96,7 +96,7 @@ pub struct PlanningInputFromDb<'a> {
     pub planner_config: PlannerConfig,
     pub active_nexus_zones: BTreeSet<OmicronZoneUuid>,
     pub not_yet_nexus_zones: BTreeSet<OmicronZoneUuid>,
-    pub expunged_and_unreferenced_zones: BTreeSet<OmicronZoneUuid>,
+    pub pruneable_zones: BTreeSet<OmicronZoneUuid>,
     pub log: &'a Logger,
 }
 
@@ -274,7 +274,7 @@ impl PlanningInputFromDb<'_> {
             active_nexus_zones.into_iter().map(|n| n.nexus_id()).collect();
         let not_yet_nexus_zones =
             not_yet_nexus_zones.into_iter().map(|n| n.nexus_id()).collect();
-        let expunged_and_unreferenced_zones = PruneableZones::new(
+        let pruneable_zones = PruneableZones::new(
             opctx,
             datastore,
             &parent_blueprint,
@@ -311,7 +311,7 @@ impl PlanningInputFromDb<'_> {
             planner_config,
             active_nexus_zones,
             not_yet_nexus_zones,
-            expunged_and_unreferenced_zones,
+            pruneable_zones,
         }
         .build()
         .internal_context("assembling planning_input")?;
@@ -471,16 +471,14 @@ impl PlanningInputFromDb<'_> {
             })?;
         }
 
-        for &zone_id in &self.expunged_and_unreferenced_zones {
-            builder.insert_expunged_and_unreferenced_zone(zone_id).map_err(
-                |e| {
-                    Error::internal_error(&format!(
-                        "unexpectedly failed to add expunged and unreferenced \
-                         zone ID {zone_id} to planning input: {}",
-                        InlineErrorChain::new(&e),
-                    ))
-                },
-            )?;
+        for &zone_id in &self.pruneable_zones {
+            builder.insert_pruneable_zone(zone_id).map_err(|e| {
+                Error::internal_error(&format!(
+                    "unexpectedly failed to pruneable zone ID {zone_id} \
+                     to planning input: {}",
+                    InlineErrorChain::new(&e),
+                ))
+            })?;
         }
 
         Ok(builder.build())

@@ -868,7 +868,7 @@ pub enum BlueprintExpungedZoneAccessReason {
     PlanningInputFindPruneable,
 
     /// When constructing a [`PlanningInput`], its builder has a guard that any
-    /// "expunged and unreferenced" zone ID actually is expunged.
+    /// supposedly-pruneable zone ID actually is expunged.
     ///
     /// This guard is implemented by asking the parent blueprint for its list of
     /// expunged zones. The planner does not need to account for this when
