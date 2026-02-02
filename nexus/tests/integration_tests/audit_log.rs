@@ -443,6 +443,7 @@ async fn test_audit_log_coverage(ctx: &ControlPlaneTestContext) {
             let is_mutating = match method {
                 AllowedMethod::Post(_)
                 | AllowedMethod::Put(_)
+                | AllowedMethod::Patch(_)
                 | AllowedMethod::Delete => true,
                 AllowedMethod::Get
                 | AllowedMethod::GetNonexistent
