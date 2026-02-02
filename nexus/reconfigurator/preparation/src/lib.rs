@@ -63,9 +63,9 @@ use std::collections::BTreeSet;
 use std::net::IpAddr;
 use std::sync::Arc;
 
-mod expunged_and_unreferenced;
+mod pruneable_zones;
 
-use expunged_and_unreferenced::PruneableZones;
+use pruneable_zones::PruneableZones;
 
 /// Given various pieces of database state that go into the blueprint planning
 /// process, produce a `PlanningInput` object encapsulating what the planner
