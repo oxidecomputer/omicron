@@ -7,6 +7,8 @@
 pub mod v1;
 pub mod v2;
 
+mod impls;
+
 // Re-export latest version types for convenience.
 // Note: New versions of these types will be added to the top-level module.
 pub use v1::BfdPeerConfig;
