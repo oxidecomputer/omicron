@@ -59,6 +59,7 @@ use nexus_types::external_api::{params, views};
 use nexus_types::identity::Resource;
 use nexus_types::internal_api::params::InstanceMigrateRequest;
 use nexus_types::silo::DEFAULT_SILO_ID;
+use omicron_common::address::IpVersion;
 use omicron_common::api::external::AffinityPolicy;
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::Disk;
@@ -9265,4 +9266,80 @@ async fn test_instance_with_max_disks(cptestctx: &ControlPlaneTestContext) {
     // Ensure that each disk attached ok
     let disks = get_instance_disks(&client, name).await;
     assert_eq!(disks.len(), MAX_DISKS_PER_INSTANCE as usize);
+}
+
+// Regression for https://github.com/oxidecomputer/omicron/issues/9775.
+#[nexus_test]
+async fn can_create_instance_with_multiple_nics_and_ephemeral_ip(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+    create_project_and_pool(&client).await;
+    let second_vpc_subnet_name = "second";
+    create_vpc_subnet(
+        &client,
+        PROJECT_NAME,
+        "default",
+        second_vpc_subnet_name,
+        "10.2.0.0/24".parse().unwrap(),
+        None,
+        None,
+    )
+    .await;
+    let nics = params::InstanceNetworkInterfaceAttachment::Create(vec![
+        params::InstanceNetworkInterfaceCreate {
+            identity: IdentityMetadataCreateParams {
+                name: "net0".parse().unwrap(),
+                description: String::new(),
+            },
+            vpc_name: "default".parse().unwrap(),
+            subnet_name: "default".parse().unwrap(),
+            ip_config: params::PrivateIpStackCreate::DualStack {
+                v4: params::PrivateIpv4StackCreate {
+                    ip: params::Ipv4Assignment::Auto,
+                    transit_ips: vec![],
+                },
+                v6: params::PrivateIpv6StackCreate {
+                    ip: params::Ipv6Assignment::Auto,
+                    transit_ips: vec![],
+                },
+            },
+        },
+        params::InstanceNetworkInterfaceCreate {
+            identity: IdentityMetadataCreateParams {
+                name: "net1".parse().unwrap(),
+                description: String::new(),
+            },
+            vpc_name: "default".parse().unwrap(),
+            subnet_name: second_vpc_subnet_name.parse().unwrap(),
+            ip_config: params::PrivateIpStackCreate::DualStack {
+                v4: params::PrivateIpv4StackCreate {
+                    ip: params::Ipv4Assignment::Auto,
+                    transit_ips: vec![],
+                },
+                v6: params::PrivateIpv6StackCreate {
+                    ip: params::Ipv6Assignment::Auto,
+                    transit_ips: vec![],
+                },
+            },
+        },
+    ]);
+    let external_ips = vec![params::ExternalIpCreate::Ephemeral {
+        pool_selector: params::PoolSelector::Auto {
+            ip_version: Some(IpVersion::V4),
+        },
+    }];
+    let _ = create_instance_with(
+        client,
+        PROJECT_NAME,
+        "multi-niccy",
+        &nics,
+        vec![],
+        external_ips,
+        false,
+        None,
+        None,
+        vec![],
+    )
+    .await;
 }
