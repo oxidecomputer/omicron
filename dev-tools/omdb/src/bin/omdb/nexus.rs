@@ -4635,15 +4635,18 @@ async fn cmd_nexus_trust_quorum_remove_sled_with_datastore(
         remove a sled from the trust quorum and reboot it, it will not be able \
         to unlock its storage and participate in the control plane. However, \
         the Reconfigurator will not yet know the sled is expunged and may \
-        still try to use it.
+        still try to use it."
+    );
 
-        Therefore, you must treat this action in conjunction with a reboot as \
+    println!(
+        "Therefore, you must treat this action in conjunction with a reboot as \
         the software equivalent of physically removing the sled from the rack \
-        before expungement.
+        before expungement."
+    );
 
-        After this sled is removed from the trust quorum, you must reboot it \
-        and expunge it to complete the process.
-        "
+    println!(
+        "After this sled is removed from the trust quorum, you must reboot it \
+        and expunge it to complete the process."
     );
 
     println!(
@@ -4657,18 +4660,17 @@ async fn cmd_nexus_trust_quorum_remove_sled_with_datastore(
     prompt.read_and_validate("sled serial number", sled.serial_number())?;
 
     println!(
-        "About to start the trust quorum reconfiguration to remove the sled.
-
-        If this operation with a timeout, please check the latest trust quorum \
-        configuration to see whether or not to proceed with rack reboot and \
-        expungement.
-
-        You can poll the trust quorum reconfiguration with \
-        `omdb nexus trust-quorum get-config <RACK_ID> <EPOCH | latest>`\n"
+        "About to start the trust quorum reconfiguration to remove the sled."
     );
 
     println!(
-        "Please poll the trust quorum reconfiguration for commmit with: \
+        "If this operation fails with a timeout, please check the latest trust \
+        quorum configuration to see whether or not to proceed with rack reboot \
+        and expungement."
+    );
+
+    println!(
+        "You can poll the trust quorum reconfiguration with \
         `omdb nexus trust-quorum get-config <RACK_ID> <EPOCH | latest>`\n"
     );
 

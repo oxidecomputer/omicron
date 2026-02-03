@@ -116,7 +116,7 @@ impl super::Nexus {
         else {
             return Err(Error::internal_error(&format!(
                 "Cannot retrieve newly inserted trust quorum \
-                    configuration for rack {rack_id}, epoch {new_epoch}."
+                 configuration for rack {rack_id}, epoch {new_epoch}."
             )));
         };
 
