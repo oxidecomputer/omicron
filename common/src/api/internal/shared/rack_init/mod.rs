@@ -9,22 +9,23 @@ pub mod v2;
 
 // Re-export latest version types for convenience.
 // Note: New versions of these types will be added to the top-level module.
-pub use v2::BfdPeerConfig;
-pub use v2::BgpConfig;
+pub use v1::BfdPeerConfig;
+pub use v1::BgpConfig;
+pub use v1::ExternalPortDiscovery;
+pub use v1::HostPortConfig;
+pub use v1::LldpAdminStatus;
+pub use v1::LldpPortConfig;
+pub use v1::ParseLldpAdminStatusError;
+pub use v1::ParseSwitchLocationError;
+pub use v1::PortFec;
+pub use v1::PortSpeed;
+pub use v1::RouteConfig;
+pub use v1::SwitchLocation;
+pub use v1::SwitchPorts;
+pub use v1::TxEqConfig;
+pub use v1::UplinkAddressConfig;
+pub use v1::UplinkAddressConfigError;
+
 pub use v2::BgpPeerConfig;
-pub use v2::ExternalPortDiscovery;
-pub use v2::HostPortConfig;
-pub use v2::LldpAdminStatus;
-pub use v2::LldpPortConfig;
-pub use v2::ParseLldpAdminStatusError;
-pub use v2::ParseSwitchLocationError;
 pub use v2::PortConfig;
-pub use v2::PortFec;
-pub use v2::PortSpeed;
 pub use v2::RackNetworkConfig;
-pub use v2::RouteConfig;
-pub use v2::SwitchLocation;
-pub use v2::SwitchPorts;
-pub use v2::TxEqConfig;
-pub use v2::UplinkAddressConfig;
-pub use v2::UplinkAddressConfigError;
