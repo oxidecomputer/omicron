@@ -5,6 +5,13 @@ to:   blueprint 1481141d-a5cf-4103-8344-738967e0f110
 
   sled 216f8913-f977-46da-8803-e6b98db7f437 (active, config generation 2 -> 3):
 
+    measurements:
+    ------------------------------
+    hash              version     
+    ------------------------------
+    install dataset   (no version)
+
+
     host phase 2 contents:
     ------------------------
     slot   boot image source

@@ -25,6 +25,13 @@ parent:    1b013011-2062-4b48-b544-a32b23bce83a
     B      current contents 
 
 
+    measurements:
+    ---------------------------
+    hash      version          
+    ---------------------------
+    unknown   (unknown version)
+
+
     physical disks:
     ------------------------------------------------------------------------------------
     vendor        model        serial                                        disposition
@@ -154,6 +161,13 @@ parent:    9766ca20-38d4-4380-b005-e7c43c797e7c
     B      current contents 
 
 
+    measurements:
+    ---------------------------
+    hash      version          
+    ---------------------------
+    unknown   (unknown version)
+
+
     physical disks:
     ------------------------------------------------------------------------------------
     vendor        model        serial                                        disposition
@@ -261,6 +275,13 @@ to:   blueprint f714e6ea-e85a-4d7d-93c2-a018744fe176
  MODIFIED SLEDS:
 
   sled 868d5b02-7792-4fc0-b6a9-654afcae9ea0 (active, config generation 2 -> 4):
+
+    measurements:
+    ----------------------
+    hash      version     
+    ----------------------
+    unknown   (no version)
+
 
     host phase 2 contents:
     ------------------------
@@ -402,6 +423,13 @@ parent:    bb128f06-a2e1-44c1-8874-4f789d0ff896
     B      current contents 
 
 
+    measurements:
+    ---------------------------
+    hash      version          
+    ---------------------------
+    unknown   (unknown version)
+
+
     physical disks:
     ------------------------------------------------------------------------------------
     vendor        model        serial                                        disposition
@@ -509,6 +537,13 @@ to:   blueprint d9c572a1-a68c-4945-b1ec-5389bd588fe9
  MODIFIED SLEDS:
 
   sled 868d5b02-7792-4fc0-b6a9-654afcae9ea0 (active, config generation 4 -> 6):
+
+    measurements:
+    ----------------------
+    hash      version     
+    ----------------------
+    unknown   (no version)
+
 
     host phase 2 contents:
     ------------------------

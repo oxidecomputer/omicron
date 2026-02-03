@@ -15,6 +15,13 @@ parent:    516e80a3-b362-4fac-bd3c-4559717120dd
     B      current contents 
 
 
+    measurements:
+    ------------------------------
+    hash              version     
+    ------------------------------
+    install dataset   (no version)
+
+
     physical disks:
     -------------------------------------------------------------------------------------
     vendor        model        serial                                        disposition 
@@ -138,6 +145,13 @@ parent:    516e80a3-b362-4fac-bd3c-4559717120dd
     ------------------------
     A      current contents 
     B      current contents 
+
+
+    measurements:
+    ------------------------------
+    hash              version     
+    ------------------------------
+    install dataset   (no version)
 
 
     physical disks:
@@ -264,6 +278,13 @@ parent:    516e80a3-b362-4fac-bd3c-4559717120dd
     ------------------------
     A      current contents 
     B      current contents 
+
+
+    measurements:
+    ------------------------------
+    hash              version     
+    ------------------------------
+    install dataset   (no version)
 
 
     physical disks:

@@ -37,6 +37,7 @@ use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::BlueprintDatasetConfig;
 use nexus_types::deployment::BlueprintDatasetDisposition;
 use nexus_types::deployment::BlueprintHostPhase2DesiredSlots;
+use nexus_types::deployment::BlueprintMeasurements;
 use nexus_types::deployment::BlueprintPhysicalDiskConfig;
 use nexus_types::deployment::BlueprintPhysicalDiskDisposition;
 use nexus_types::deployment::BlueprintSledConfig;
@@ -1396,6 +1397,7 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
                     remove_mupdate_override: None,
                     host_phase_2:
                         BlueprintHostPhase2DesiredSlots::current_contents(),
+                    measurements: BlueprintMeasurements::install_dataset(),
                 },
             );
         }

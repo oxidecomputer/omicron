@@ -58,9 +58,11 @@ use nexus_db_model::BpPendingMgsUpdateHostPhase1;
 use nexus_db_model::BpPendingMgsUpdateRot;
 use nexus_db_model::BpPendingMgsUpdateRotBootloader;
 use nexus_db_model::BpPendingMgsUpdateSp;
+use nexus_db_model::BpSingleMeasurement;
 use nexus_db_model::BpSledMetadata;
 use nexus_db_model::BpTarget;
 use nexus_db_model::DbArtifactVersion;
+use nexus_db_model::DbBpSledMeasurements;
 use nexus_db_model::DbTypedUuid;
 use nexus_db_model::DebugLogBlueprintPlanning;
 use nexus_db_model::HwBaseboardId;
@@ -77,7 +79,9 @@ use nexus_db_schema::enums::HwRotSlotEnum;
 use nexus_db_schema::enums::SpTypeEnum;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::BlueprintExpungedZoneAccessReason;
+use nexus_types::deployment::BlueprintMeasurements;
 use nexus_types::deployment::BlueprintMetadata;
+use nexus_types::deployment::BlueprintSingleMeasurement;
 use nexus_types::deployment::BlueprintSledConfig;
 use nexus_types::deployment::BlueprintSource;
 use nexus_types::deployment::BlueprintTarget;
@@ -267,6 +271,22 @@ impl DataStore {
                     .last_allocated_ip_subnet_offset
                     .into_u16()
                     .into(),
+
+                measurements: (&sled.measurements).into(),
+            })
+            .collect::<Vec<_>>();
+
+        let measurements = blueprint
+            .sleds
+            .iter()
+            .flat_map(|(sled_id, sled)| {
+                sled.measurements.iter().map(move |measurement| {
+                    BpSingleMeasurement::new(
+                        blueprint_id,
+                        *sled_id,
+                        measurement,
+                    )
+                })
             })
             .collect::<Vec<_>>();
 
@@ -398,6 +418,21 @@ impl DataStore {
                             .execute_async(&conn)
                             .await?;
                 }
+
+                // Insert all measurements for this blueprint.
+                {
+                    // Skip formatting this line to prevent rustfmt bailing out.
+                    #[rustfmt::skip]
+                    use nexus_db_schema::schema::bp_single_measurements::dsl
+                        as single_measurement;
+                    let _ = diesel::insert_into(
+                        single_measurement::bp_single_measurements,
+                    )
+                    .values(measurements)
+                    .execute_async(&conn)
+                    .await?;
+                }
+
 
                 // Insert all physical disks for this blueprint.
                 {
@@ -1159,6 +1194,49 @@ impl DataStore {
             bbs
         };
 
+        let raw_measurements: Vec<(BpSingleMeasurement, Option<TufArtifact>)> = {
+            use nexus_db_schema::schema::bp_single_measurements::dsl;
+            use nexus_db_schema::schema::tuf_artifact::dsl as tuf_artifact_dsl;
+
+            let mut rows = Vec::new();
+            let mut paginator = Paginator::new(
+                SQL_BATCH_SIZE,
+                dropshot::PaginationOrder::Ascending,
+            );
+            while let Some(p) = paginator.next() {
+                let batch = paginated(
+                    dsl::bp_single_measurements,
+                    dsl::id,
+                    &p.current_pagparams(),
+                )
+                .filter(dsl::blueprint_id.eq(to_db_typed_uuid(blueprint_id)))
+                // Left join in case the artifact is missing from the
+                // tuf_artifact table, which is non-fatal.
+                .left_join(
+                    tuf_artifact_dsl::tuf_artifact.on(tuf_artifact_dsl::kind
+                        .eq(ArtifactKind::MEASUREMENT_CORPUS.to_string())
+                        .and(
+                            tuf_artifact_dsl::sha256
+                                .eq(dsl::image_artifact_sha256),
+                        )),
+                )
+                .select((
+                    BpSingleMeasurement::as_select(),
+                    Option::<TufArtifact>::as_select(),
+                ))
+                .load_async::<(BpSingleMeasurement, Option<TufArtifact>)>(
+                    &*conn,
+                )
+                .await
+                .map_err(|e| {
+                    public_error_from_diesel(e, ErrorHandler::Server)
+                })?;
+                paginator = p.found_batch(&batch, &|(z, _)| z.id);
+                rows.extend(batch);
+            }
+            rows
+        };
+
         // ================================================================
         // STAGE 2: Check if blueprint exists
         //
@@ -1197,6 +1275,17 @@ impl DataStore {
         // corruption, not a torn read from concurrent deletion.
         // ================================================================
 
+        let mut omicron_measurements: BTreeMap<
+            SledUuid,
+            BTreeSet<BlueprintSingleMeasurement>,
+        > = BTreeMap::new();
+        for (m, artifact) in raw_measurements {
+            omicron_measurements
+                .entry(m.sled_id.into())
+                .or_default()
+                .insert(m.to_measurement(artifact));
+        }
+
         // Parse sled metadata into BlueprintSledConfig map
         let mut sled_configs: BTreeMap<SledUuid, BlueprintSledConfig> =
             BTreeMap::new();
@@ -1208,6 +1297,41 @@ impl DataStore {
                 LastAllocatedSubnetIpOffset::new(
                     *s.last_allocated_ip_subnet_offset,
                 );
+            let measurements = match (
+                omicron_measurements.remove(&s.sled_id.into()),
+                s.measurements,
+            ) {
+                // There were measurements in the database and we expect this
+                (Some(m), DbBpSledMeasurements::Artifacts) => {
+                    BlueprintMeasurements::artifacts(m).ok_or(
+                        Error::internal_error(&format!(
+                            "sled {} has an empty measurement set",
+                            s.sled_id
+                        )),
+                    )?
+                }
+                // There were no measurements, we expect this for both these cases
+                (None, DbBpSledMeasurements::InstallDataset) => {
+                    BlueprintMeasurements::install_dataset()
+                }
+                (None, DbBpSledMeasurements::Unknown) => {
+                    BlueprintMeasurements::unknown()
+                }
+                // The rest of these are inconsistent and we have a bug somewhere
+                (Some(_), DbBpSledMeasurements::InstallDataset)
+                | (Some(_), DbBpSledMeasurements::Unknown) => {
+                    return Err(Error::internal_error(&format!(
+                        "Found entries for sled {} when there should be none",
+                        s.sled_id
+                    )));
+                }
+                (None, DbBpSledMeasurements::Artifacts) => {
+                    return Err(Error::internal_error(&format!(
+                        "Missing measurements for sled {}",
+                        s.sled_id
+                    )));
+                }
+            };
             let config = BlueprintSledConfig {
                 state: s.sled_state.into(),
                 subnet,
@@ -1220,6 +1344,7 @@ impl DataStore {
                     .remove_mupdate_override
                     .map(|id| id.into()),
                 host_phase_2: s.host_phase_2(slot_a_version, slot_b_version),
+                measurements,
             };
             let old = sled_configs.insert(s.sled_id.into(), config);
             bail_unless!(
@@ -4616,6 +4741,7 @@ mod tests {
                     blueprint_id
                 ),
                 query_count!(bp_pending_mgs_update_host_phase_1, blueprint_id),
+                query_count!(bp_single_measurements, blueprint_id),
                 query_count!(debug_log_blueprint_planning, blueprint_id),
             ] {
                 let count: i64 = result.unwrap();
@@ -4735,6 +4861,7 @@ mod tests {
             "bp_clickhouse_keeper_zone_id_to_node_id",
             "bp_clickhouse_server_zone_id_to_node_id",
             "debug_log_blueprint_planning",
+            "bp_single_measurements",
         ];
 
         // Check that all non-exception tables have at least one row

@@ -18,13 +18,13 @@ use internal_dns_types::names::ServiceName;
 use nexus_types::deployment::LastAllocatedSubnetIpOffset;
 use nexus_types::deployment::{
     Blueprint, BlueprintDatasetConfig, BlueprintDatasetDisposition,
-    BlueprintHostPhase2DesiredSlots, BlueprintPhysicalDiskConfig,
-    BlueprintPhysicalDiskDisposition, BlueprintSledConfig, BlueprintSource,
-    BlueprintZoneConfig, BlueprintZoneDisposition, BlueprintZoneImageSource,
-    BlueprintZoneType, CockroachDbPreserveDowngrade,
-    OmicronZoneExternalFloatingAddr, OmicronZoneExternalFloatingIp,
-    OmicronZoneExternalSnatIp, OximeterReadMode, PendingMgsUpdates,
-    blueprint_zone_type,
+    BlueprintHostPhase2DesiredSlots, BlueprintMeasurements,
+    BlueprintPhysicalDiskConfig, BlueprintPhysicalDiskDisposition,
+    BlueprintSledConfig, BlueprintSource, BlueprintZoneConfig,
+    BlueprintZoneDisposition, BlueprintZoneImageSource, BlueprintZoneType,
+    CockroachDbPreserveDowngrade, OmicronZoneExternalFloatingAddr,
+    OmicronZoneExternalFloatingIp, OmicronZoneExternalSnatIp, OximeterReadMode,
+    PendingMgsUpdates, blueprint_zone_type,
 };
 use nexus_types::external_api::sled::SledState;
 use omicron_common::address::{
@@ -946,6 +946,7 @@ impl Plan {
                     host_phase_2:
                         BlueprintHostPhase2DesiredSlots::current_contents(),
                     remove_mupdate_override: None,
+                    measurements: BlueprintMeasurements::install_dataset(),
                 },
             );
         }

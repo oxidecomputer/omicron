@@ -85,6 +85,7 @@ mod tests {
     use nexus_types::deployment::BlueprintDatasetConfig;
     use nexus_types::deployment::BlueprintDatasetDisposition;
     use nexus_types::deployment::BlueprintHostPhase2DesiredSlots;
+    use nexus_types::deployment::BlueprintMeasurements;
     use nexus_types::deployment::BlueprintPhysicalDiskConfig;
     use nexus_types::deployment::BlueprintPhysicalDiskDisposition;
     use nexus_types::deployment::BlueprintZoneConfig;
@@ -271,6 +272,7 @@ mod tests {
             zones,
             remove_mupdate_override: None,
             host_phase_2: BlueprintHostPhase2DesiredSlots::current_contents(),
+            measurements: BlueprintMeasurements::install_dataset(),
         };
         let sled_configs =
             [(sim_sled_agent.id, sled_config.clone())].into_iter().collect();

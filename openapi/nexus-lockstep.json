@@ -2263,6 +2263,71 @@
           "slot_b"
         ]
       },
+      "BlueprintMeasurements": {
+        "type": "object",
+        "properties": {
+          "inner": {
+            "$ref": "#/components/schemas/BlueprintMeasurementsInternal"
+          }
+        },
+        "required": [
+          "inner"
+        ]
+      },
+      "BlueprintMeasurementsInternal": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "unknown"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "install_dataset"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "artifacts": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/BlueprintSingleMeasurement"
+                },
+                "uniqueItems": true
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "artifacts"
+                ]
+              }
+            },
+            "required": [
+              "artifacts",
+              "type"
+            ]
+          }
+        ]
+      },
       "BlueprintMetadata": {
         "description": "Describe high-level metadata about a blueprint",
         "type": "object",
@@ -2458,6 +2523,22 @@
           }
         ]
       },
+      "BlueprintSingleMeasurement": {
+        "type": "object",
+        "properties": {
+          "hash": {
+            "type": "string",
+            "format": "hex string (32 bytes)"
+          },
+          "version": {
+            "$ref": "#/components/schemas/BlueprintArtifactVersion"
+          }
+        },
+        "required": [
+          "hash",
+          "version"
+        ]
+      },
       "BlueprintSledConfig": {
         "description": "Information about the configuration of a sled as recorded in a blueprint.\n\nPart of [`Blueprint`].",
         "type": "object",
@@ -2507,6 +2588,9 @@
             "format": "uint16",
             "minimum": 0
           },
+          "measurements": {
+            "$ref": "#/components/schemas/BlueprintMeasurements"
+          },
           "remove_mupdate_override": {
             "nullable": true,
             "allOf": [
@@ -2553,6 +2637,7 @@
           "disks",
           "host_phase_2",
           "last_allocated_ip_subnet_offset",
+          "measurements",
           "sled_agent_generation",
           "state",
           "subnet",
