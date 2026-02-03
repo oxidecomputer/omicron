@@ -34,6 +34,9 @@ use illumos_utils::opte::PortManager;
 use illumos_utils::running_zone::RunningZone;
 use illumos_utils::zfs::CanMount;
 use illumos_utils::zfs::DatasetEnsureArgs;
+use illumos_utils::zfs::DatasetVolumeDeleteArgs;
+use illumos_utils::zfs::DatasetVolumeEnsureArgs;
+use illumos_utils::zfs::DestroyDatasetErrorVariant;
 use illumos_utils::zfs::Mountpoint;
 use illumos_utils::zfs::SizeDetails;
 use illumos_utils::zfs::Zfs;
@@ -1315,13 +1318,22 @@ impl SledAgent {
         .await
         .map_err(|e| HttpError::for_internal_error(e.to_string()))?;
 
-        Zfs::ensure_dataset_volume(
-            delegated_zvol.volume_name(),
-            volume_size,
-            delegated_zvol.volblocksize(),
-        )
+        Zfs::ensure_dataset_volume(DatasetVolumeEnsureArgs {
+            name: &delegated_zvol.volume_name(),
+            size: volume_size,
+            raw: true,
+            // Set the volblocksize (read: the allocation size for the zvol,
+            // _not_ the actual block size!) to 128k
+            volblocksize: Some(131072),
+        })
         .await
-        .map_err(|e| HttpError::for_internal_error(e.to_string()))?;
+        .map_err(|e| {
+            if e.is_not_ready() {
+                HttpError::for_unavail(None, e.to_string())
+            } else {
+                HttpError::for_internal_error(e.to_string())
+            }
+        })?;
 
         Ok(())
     }
@@ -1391,11 +1403,26 @@ impl SledAgent {
             DelegatedZvol::LocalStorageUnencrypted { zpool_id, dataset_id }
         };
 
-        Zfs::destroy_dataset(&delegated_zvol.parent_dataset_name())
-            .await
-            .map_err(|e| HttpError::for_internal_error(e.to_string()))?;
+        Zfs::delete_dataset_volume(DatasetVolumeDeleteArgs {
+            name: &delegated_zvol.volume_name(),
+            raw: true,
+        })
+        .await
+        .map_err(|e| HttpError::for_internal_error(e.to_string()))?;
 
-        Ok(())
+        match Zfs::destroy_dataset(&delegated_zvol.parent_dataset_name()).await
+        {
+            Ok(()) => Ok(()),
+
+            Err(e) => match e.err {
+                // This is called from a saga, so it has to be idempotent
+                DestroyDatasetErrorVariant::NotFound => Ok(()),
+
+                DestroyDatasetErrorVariant::Other(e) => {
+                    Err(HttpError::for_internal_error(e.to_string()))
+                }
+            },
+        }
     }
 }
 

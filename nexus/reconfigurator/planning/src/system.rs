@@ -881,33 +881,6 @@ impl SystemDescription {
         &mut self,
         description: TargetReleaseDescription,
     ) -> &mut Self {
-        // Create a new TufRepoPolicy by bumping the generation.
-        let new_repo = TufRepoPolicy {
-            target_release_generation: self
-                .tuf_repo
-                .target_release_generation
-                .next(),
-            description,
-        };
-
-        let _old_repo = self.set_tuf_repo_inner(new_repo);
-
-        // It's tempting to consider setting old_repo to the current tuf_repo,
-        // but that requires the invariant that old_repo is always the current
-        // target release and that an update isn't currently in progress. See
-        // https://github.com/oxidecomputer/omicron/issues/8056 for some
-        // discussion.
-        //
-        // We provide a method to set the old repo explicitly with these
-        // assumptions in mind: `set_target_release_and_old_repo`.
-
-        self
-    }
-
-    pub fn set_target_release_and_old_repo(
-        &mut self,
-        description: TargetReleaseDescription,
-    ) -> &mut Self {
         let new_repo = TufRepoPolicy {
             target_release_generation: self
                 .tuf_repo

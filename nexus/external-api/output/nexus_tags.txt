@@ -59,6 +59,7 @@ probe_create                             POST     /experimental/v1/probes
 probe_delete                             DELETE   /experimental/v1/probes/{probe}
 probe_list                               GET      /experimental/v1/probes
 probe_view                               GET      /experimental/v1/probes/{probe}
+rack_membership_abort                    POST     /v1/system/hardware/racks/{rack_id}/membership/abort
 rack_membership_add_sleds                POST     /v1/system/hardware/racks/{rack_id}/membership/add
 rack_membership_status                   GET      /v1/system/hardware/racks/{rack_id}/membership
 support_bundle_create                    POST     /experimental/v1/system/support-bundles
