@@ -674,8 +674,8 @@ impl ExampleSystemBuilder {
                         .sled_ensure_zone_ntp(
                             sled_id,
                             self.target_release
-                                .zone_image_source(ZoneKind::BoundaryNtp)
-                                .expect("obtained BoundaryNtp image source"),
+                                .zone_image_source(ZoneKind::InternalNtp)
+                                .expect("obtained InternalNtp image source"),
                         )
                         .unwrap();
                 }

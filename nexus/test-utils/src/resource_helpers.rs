@@ -651,7 +651,8 @@ pub async fn create_disk_from_snapshot(
     client: &ClientTestContext,
     project_name: &str,
     disk_name: &str,
-    snapshot_id: Uuid,
+    snapshot: &views::Snapshot,
+    read_only: bool,
 ) -> Disk {
     let url = format!("/v1/disks?project={}", project_name);
     object_create(
@@ -663,9 +664,40 @@ pub async fn create_disk_from_snapshot(
                 description: String::from("sells rainsticks"),
             },
             disk_backend: params::DiskBackend::Distributed {
-                disk_source: params::DiskSource::Snapshot { snapshot_id },
+                disk_source: params::DiskSource::Snapshot {
+                    snapshot_id: snapshot.identity.id,
+                    read_only,
+                },
             },
-            size: ByteCount::from_gibibytes_u32(1),
+            size: snapshot.size,
+        },
+    )
+    .await
+}
+
+pub async fn create_disk_from_image(
+    client: &ClientTestContext,
+    project_name: &str,
+    disk_name: &str,
+    image: &views::Image,
+    read_only: bool,
+) -> Disk {
+    let url = format!("/v1/disks?project={}", project_name);
+    object_create(
+        client,
+        &url,
+        &params::DiskCreate {
+            identity: IdentityMetadataCreateParams {
+                name: disk_name.parse().unwrap(),
+                description: String::from("sells rainsticks"),
+            },
+            disk_backend: params::DiskBackend::Distributed {
+                disk_source: params::DiskSource::Image {
+                    image_id: image.identity.id,
+                    read_only,
+                },
+            },
+            size: image.size,
         },
     )
     .await
