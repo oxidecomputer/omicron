@@ -579,6 +579,7 @@ struct TrustQuorumArgs {
 }
 
 #[derive(Debug, Subcommand)]
+#[allow(clippy::large_enum_variant)]
 enum TrustQuorumCommands {
     GetConfig(TrustQuorumConfigArgs),
     LrtqUpgrade,
