@@ -385,9 +385,7 @@ impl ExampleSystemBuilder {
 
     /// Set the Clickhouse policy for the example system.
     ///
-    /// The default is `None`, which means single-node Clickhouse is deployed.
-    /// Use this to enable replicated Clickhouse with ClickhouseServer and
-    /// ClickhouseKeeper zones.
+    /// The default is that only single-node Clickhouse is deployed.
     ///
     /// If [`Self::create_zones`] is set to `false`, this is ignored.
     pub fn clickhouse_policy(
