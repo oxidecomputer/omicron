@@ -1819,13 +1819,6 @@ mod tests {
                 | ServiceName::Mgd => {
                     out.insert(service, Ok(()));
                 }
-                // DNS records for Wicketd, Tfportd, and Maghemite don't
-                // currently exist, even on real deployed systems.
-                ServiceName::Wicketd
-                | ServiceName::Tfport
-                | ServiceName::Maghemite => {
-                    out.insert(service, Err(QueryError::NoRecordsFound));
-                }
                 // InternalNtp is too large to fit in a single DNS packet and
                 // therefore times out, but DNS lookups for it aren't used
                 // anywhere. See #9178.
