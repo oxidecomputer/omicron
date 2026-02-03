@@ -21,7 +21,7 @@
 //! - Source IP validation: ASM can have sources; SSM requires them
 //! - Pool validation: IP must be in a linked multicast pool
 
-use std::net::IpAddr;
+use std::net::{IpAddr, Ipv4Addr};
 
 use http::{Method, StatusCode};
 
@@ -30,6 +30,7 @@ use nexus_test_utils::http_testing::{
 };
 use nexus_test_utils::resource_helpers::{
     create_default_ip_pools, create_instance, create_project, object_create,
+    object_create_error,
 };
 use nexus_test_utils_macros::nexus_test;
 use nexus_types::external_api::params::{
@@ -299,6 +300,48 @@ async fn test_multicast_api_behavior(cptestctx: &ControlPlaneTestContext) {
     .execute()
     .await
     .expect("Invalid UUID should return 400 Bad Request");
+
+    // Attempt create an instance with more than 32 group memberships.
+    // We expect this to fail.
+    let instance4_params = InstanceCreate {
+        identity: IdentityMetadataCreateParams {
+            name: "too-many-multis".parse().unwrap(),
+            description: "This instance is just too popular!".to_string(),
+        },
+        ncpus: InstanceCpuCount::try_from(1).unwrap(),
+        memory: ByteCount::from_gibibytes_u32(1),
+        hostname: "too-many-multis".parse().unwrap(),
+        user_data: vec![],
+        ssh_public_keys: None,
+        network_interfaces: InstanceNetworkInterfaceAttachment::DefaultIpv4,
+        external_ips: vec![],
+        multicast_groups: (0..33)
+            .map(|i| MulticastGroupJoinSpec {
+                group: MulticastGroupIdentifier::Ip(
+                    Ipv4Addr::from_octets([224, 2, 10, 1 + i]).into(),
+                ),
+                source_ips: None,
+                ip_version: None,
+            })
+            .collect(),
+        disks: vec![],
+        boot_disk: None,
+        start: false, // Create stopped to test UUID operations on non-running instances
+        cpu_platform: None,
+        auto_restart_policy: Default::default(),
+        anti_affinity_groups: Vec::new(),
+    };
+    let err = object_create_error(
+        client,
+        &instance_url,
+        &instance4_params,
+        StatusCode::BAD_REQUEST,
+    )
+    .await;
+    assert_eq!(
+        err.message,
+        "An instance may not join more than 32 multicast groups",
+    );
 
     cleanup_instances(
         cptestctx,
