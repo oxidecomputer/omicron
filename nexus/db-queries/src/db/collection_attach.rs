@@ -216,22 +216,28 @@ pub trait DatastoreAttachTarget<ResourceType>:
     /// having some property.
     ///
     /// Users can supply any executable SQL query that returns a boolean. It
-    /// _should_ return a single value, but there aren't great ways to express
+    /// _must_ return a single value, but there aren't great ways to express
     /// that in Diesel's trait system. The query will be used in a CTE like:
     ///
     /// ```text
     /// WITH user_supplied_update_condition AS (
-    ///     SELECT COALESCE(EVERY(<your conditional query>), FALSE)
+    ///     SELECT COALESCE(BOOL_AND(q.condition), FALSE) AS result
+    ///     FROM (
+    ///         SELECT *
+    ///         FROM (<your input query>)
+    ///         AS input_query
+    ///     ) AS q(condition)
     /// )
     /// ```
     ///
-    /// That means:
+    /// That means;
     ///
     /// - If the condition query returns no rows, the result is `FALSE`.
     /// - If the condition query returns one row, the result is the result of
     ///   that row.
-    /// - If the query returns multiple rows, they will be joined with `AND`, so
-    ///   any false row will cause the update not to be applied.
+    /// - If the query returns multiple rows, a SQL runtime error will be
+    ///   emitted complaining about "more than one row returned by a subquery
+    ///   used as an expression",
     ///
     /// # Notes
     ///
@@ -628,16 +634,17 @@ where
 /// //          FOR UPDATE
 /// //      ),
 /// //      /* Check any user-supplied update conditions. */
-/// //      satisfies_update_conditions AS (SELECT COALESCE(EVERY((
-/// //          <user-supplied update condition query>
-/// //      )), FALSE)),
+/// //      satisfies_update_conditions AS COALESCE(
+/// //          <evaluate user supplied condition>,
+/// //          FALSE
+/// //      ),
 /// //      /* Make a decision on whether or not to apply ANY updates */
 /// //      do_update AS (
 /// //          SELECT IF(
 /// //              EXISTS(SELECT id FROM collection_info) AND
 /// //              EXISTS(SELECT id FROM resource_info) AND
 /// //              (SELECT * FROM resource_count) < <CAPACITY> AND
-/// //              EVERY((SELECT * FROM satisfies_update_conditions)),
+/// //              (SELECT result FROM satisfies_update_conditions)),
 /// //          TRUE, FALSE),
 /// //      ),
 /// //      /* Update the resource */
@@ -688,10 +695,13 @@ where
         out.push_sql(" FOR UPDATE), ");
 
         out.push_sql(
-            "user_supplied_update_condition AS (SELECT COALESCE(EVERY((",
+            "user_supplied_update_condition AS (SELECT \
+                COALESCE(BOOL_AND(q.condition), FALSE) AS result \
+                FROM (\
+                    SELECT * FROM (",
         );
         self.update_condition.walk_ast(out.reborrow())?;
-        out.push_sql(")), FALSE)), ");
+        out.push_sql(") AS user_query) AS q(condition)), ");
 
         out.push_sql("do_update AS (SELECT IF(EXISTS(SELECT ");
         out.push_identifier(CollectionIdColumn::<ResourceType, C>::NAME)?;
@@ -702,7 +712,7 @@ where
         );
         out.push_bind_param::<BigInt, _>(&self.max_attached_resources)?;
         out.push_sql(
-            " AND EVERY((SELECT * FROM user_supplied_update_condition)), TRUE, FALSE)), "
+            " AND (SELECT result FROM user_supplied_update_condition), TRUE, FALSE)), "
         );
 
         out.push_sql("updated_resource AS (");
@@ -1004,14 +1014,15 @@ mod test {
                 ) FOR UPDATE\
             ), \
             user_supplied_update_condition AS (\
-                SELECT COALESCE(EVERY((SELECT $6)), FALSE)\
+                SELECT COALESCE(BOOL_AND(q.condition), FALSE) AS result \
+                FROM (SELECT * FROM (SELECT $6) AS user_query) AS q(condition)\
             ), \
             do_update AS (\
                 SELECT IF(\
                     EXISTS(SELECT \"id\" FROM collection_info) AND \
                     EXISTS(SELECT \"id\" FROM resource_info) AND \
                     (SELECT * FROM resource_count) < $7 AND \
-                    EVERY((SELECT * FROM user_supplied_update_condition)), \
+                    (SELECT result FROM user_supplied_update_condition), \
                 TRUE, \
                 FALSE)\
             ), \
