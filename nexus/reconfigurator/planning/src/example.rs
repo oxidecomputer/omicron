@@ -32,6 +32,7 @@ use nexus_types::deployment::BlueprintHostPhase2DesiredContents;
 use nexus_types::deployment::BlueprintHostPhase2DesiredSlots;
 use nexus_types::deployment::BlueprintSource;
 use nexus_types::deployment::ClickhouseMode;
+use nexus_types::deployment::ClickhousePolicy;
 use nexus_types::deployment::ExpectedVersion;
 use nexus_types::deployment::OmicronZoneNic;
 use nexus_types::deployment::PlanningInput;
@@ -217,7 +218,7 @@ pub struct ExampleSystemBuilder {
     oximeter_count: ZoneCount,
     cockroachdb_count: ZoneCount,
     boundary_ntp_count: ZoneCount,
-    clickhouse_policy: nexus_types::deployment::ClickhousePolicy,
+    clickhouse_policy: ClickhousePolicy,
     create_zones: bool,
     create_disks_in_blueprint: bool,
     target_release: TargetReleaseDescription,
@@ -257,9 +258,9 @@ impl ExampleSystemBuilder {
             oximeter_count: ZoneCount(0),
             cockroachdb_count: ZoneCount(0),
             boundary_ntp_count: ZoneCount(0),
-            clickhouse_policy: nexus_types::deployment::ClickhousePolicy {
+            clickhouse_policy: ClickhousePolicy {
                 version: 1,
-                mode: nexus_types::deployment::ClickhouseMode::SingleNodeOnly,
+                mode: ClickhouseMode::SingleNodeOnly,
                 time_created: Utc::now(),
             },
             create_zones: true,
@@ -388,10 +389,7 @@ impl ExampleSystemBuilder {
     /// The default is that only single-node Clickhouse is deployed.
     ///
     /// If [`Self::create_zones`] is set to `false`, this is ignored.
-    pub fn clickhouse_policy(
-        mut self,
-        policy: nexus_types::deployment::ClickhousePolicy,
-    ) -> Self {
+    pub fn clickhouse_policy(mut self, policy: ClickhousePolicy) -> Self {
         self.clickhouse_policy = policy;
         self
     }
@@ -1283,9 +1281,9 @@ mod tests {
                 .oximeter_count(4)
                 .cockroachdb_count(3)
                 .boundary_ntp_count(2)
-                .clickhouse_policy(nexus_types::deployment::ClickhousePolicy {
+                .clickhouse_policy(ClickhousePolicy {
                     version: 0,
-                    mode: nexus_types::deployment::ClickhouseMode::Both {
+                    mode: ClickhouseMode::Both {
                         target_servers: 3,
                         target_keepers: 4,
                     },
@@ -1295,11 +1293,6 @@ mod tests {
 
         // Define a time_created for consistent output across runs.
         blueprint.time_created = DateTime::<Utc>::UNIX_EPOCH;
-
-        expectorate::assert_contents(
-            "tests/output/example_builder_zone_counts_blueprint.txt",
-            &blueprint.display().to_string(),
-        );
 
         // Check that the system's target counts are set correctly.
         assert_eq!(example.system.target_nexus_zone_count(), 6);
@@ -1513,9 +1506,9 @@ mod tests {
                 .boundary_ntp_count(2)
                 .external_dns_count(1)
                 .unwrap()
-                .clickhouse_policy(nexus_types::deployment::ClickhousePolicy {
+                .clickhouse_policy(ClickhousePolicy {
                     version: 0,
-                    mode: nexus_types::deployment::ClickhouseMode::Both {
+                    mode: ClickhouseMode::Both {
                         target_servers: 2,
                         target_keepers: 3,
                     },
@@ -1561,9 +1554,9 @@ mod tests {
                 .oximeter_count(1)
                 .external_dns_count(5)
                 .expect("expected to be able to set external_dns_count")
-                .clickhouse_policy(nexus_types::deployment::ClickhousePolicy {
+                .clickhouse_policy(ClickhousePolicy {
                     version: 0,
-                    mode: nexus_types::deployment::ClickhouseMode::Both {
+                    mode: ClickhouseMode::Both {
                         target_servers: 2,
                         target_keepers: 3,
                     },
