@@ -7,7 +7,7 @@
       "url": "https://oxide.computer",
       "email": "api@oxide.computer"
     },
-    "version": "2026012900.0.0"
+    "version": "2026013100.0.0"
   },
   "paths": {
     "/device/auth": {
@@ -4644,6 +4644,52 @@
         }
       }
     },
+    "/v1/instances/{instance}/external-subnets": {
+      "get": {
+        "tags": [
+          "instances"
+        ],
+        "summary": "List external subnets attached to instance",
+        "operationId": "instance_external_subnet_list",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "project",
+            "description": "Name or ID of the project",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "path",
+            "name": "instance",
+            "description": "Name or ID of the instance",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExternalSubnetResultsPage"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/v1/instances/{instance}/multicast-groups": {
       "get": {
         "tags": [
@@ -7860,45 +7906,6 @@
             "name": "version",
             "schema": {
               "$ref": "#/components/schemas/RackMembershipVersion"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/RackMembershipStatus"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      }
-    },
-    "/v1/system/hardware/racks/{rack_id}/membership/abort": {
-      "post": {
-        "tags": [
-          "experimental"
-        ],
-        "summary": "Abort the latest rack membership change",
-        "operationId": "rack_membership_abort",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "rack_id",
-            "description": "ID of the rack",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid"
             }
           }
         ],
@@ -12078,13 +12085,6 @@
             "schema": {
               "nullable": true,
               "type": "string"
-            }
-          },
-          {
-            "in": "query",
-            "name": "sort_by",
-            "schema": {
-              "$ref": "#/components/schemas/NameOrIdSortMode"
             }
           }
         ],
@@ -19383,6 +19383,10 @@
             "type": "string",
             "format": "uuid"
           },
+          "read_only": {
+            "description": "Whether or not this disk is read-only.",
+            "type": "boolean"
+          },
           "size": {
             "$ref": "#/components/schemas/ByteCount"
           },
@@ -19414,6 +19418,7 @@
           "id",
           "name",
           "project_id",
+          "read_only",
           "size",
           "state",
           "time_created",
@@ -19564,6 +19569,11 @@
             "description": "Create a disk from a disk snapshot",
             "type": "object",
             "properties": {
+              "read_only": {
+                "description": "If `true`, the disk created from this snapshot will be read-only.",
+                "default": false,
+                "type": "boolean"
+              },
               "snapshot_id": {
                 "type": "string",
                 "format": "uuid"
@@ -19587,6 +19597,11 @@
               "image_id": {
                 "type": "string",
                 "format": "uuid"
+              },
+              "read_only": {
+                "description": "If `true`, the disk created from this image will be read-only.",
+                "default": false,
+                "type": "boolean"
               },
               "type": {
                 "type": "string",
@@ -27711,14 +27726,6 @@
               }
             ]
           },
-          "pool_type": {
-            "description": "Type of subnet pool (unicast or multicast)",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/IpPoolType"
-              }
-            ]
-          },
           "time_created": {
             "description": "timestamp when this resource was created",
             "type": "string",
@@ -27735,7 +27742,6 @@
           "id",
           "ip_version",
           "name",
-          "pool_type",
           "time_created",
           "time_modified"
         ]
@@ -27791,12 +27797,8 @@
         "description": "A member (subnet) within a subnet pool",
         "type": "object",
         "properties": {
-          "description": {
-            "description": "human-readable free-form text about a resource",
-            "type": "string"
-          },
           "id": {
-            "description": "unique, immutable, system-controlled identifier for each resource",
+            "description": "ID of the pool member",
             "type": "string",
             "format": "uuid"
           },
@@ -27812,14 +27814,6 @@
             "format": "uint8",
             "minimum": 0
           },
-          "name": {
-            "description": "unique, mutable, user-controlled identifier for each resource",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/Name"
-              }
-            ]
-          },
           "subnet": {
             "description": "The subnet CIDR",
             "allOf": [
@@ -27834,26 +27828,18 @@
             "format": "uuid"
           },
           "time_created": {
-            "description": "timestamp when this resource was created",
-            "type": "string",
-            "format": "date-time"
-          },
-          "time_modified": {
-            "description": "timestamp when this resource was last modified",
+            "description": "Time the pool member was created.",
             "type": "string",
             "format": "date-time"
           }
         },
         "required": [
-          "description",
           "id",
           "max_prefix_length",
           "min_prefix_length",
-          "name",
           "subnet",
           "subnet_pool_id",
-          "time_created",
-          "time_modified"
+          "time_created"
         ]
       },
       "SubnetPoolMemberAdd": {

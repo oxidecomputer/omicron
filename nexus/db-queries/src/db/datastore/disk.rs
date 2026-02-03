@@ -46,6 +46,8 @@ use nexus_db_errors::ErrorHandler;
 use nexus_db_errors::OptionalError;
 use nexus_db_errors::public_error_from_diesel;
 use nexus_db_lookup::LookupPath;
+use nexus_types::external_api::params;
+use nexus_types::identity::Asset;
 use omicron_common::api;
 use omicron_common::api::external;
 use omicron_common::api::external::CreateResult;
@@ -119,6 +121,14 @@ impl Disk {
     pub fn block_size(&self) -> model::BlockSize {
         self.model().block_size
     }
+
+    pub fn is_read_only(&self) -> bool {
+        match self {
+            Self::Crucible(disk) => disk.is_read_only(),
+            // local disks cannot currently be read-only
+            Self::LocalStorage(_) => false,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -170,6 +180,10 @@ impl CrucibleDisk {
 
     pub fn pantry_address(&self) -> Option<SocketAddrV6> {
         self.disk_type_crucible.pantry_address()
+    }
+
+    pub fn is_read_only(&self) -> bool {
+        self.disk_type_crucible.read_only
     }
 }
 
@@ -357,6 +371,7 @@ impl Into<api::external::Disk> for Disk {
                     state: disk.state().into(),
                     device_path,
                     disk_type: api::external::DiskType::Distributed,
+                    read_only: disk_type_crucible.read_only,
                 }
             }
 
@@ -377,10 +392,17 @@ impl Into<api::external::Disk> for Disk {
                     state: disk.state().into(),
                     device_path,
                     disk_type: api::external::DiskType::Local,
+                    // Local disks are (currently) never read-only
+                    read_only: false,
                 }
             }
         }
     }
+}
+
+enum ReadOnlyDiskSource {
+    Image(authz::Image),
+    Snapshot(authz::Snapshot),
 }
 
 impl DataStore {
@@ -708,6 +730,29 @@ impl DataStore {
     ) -> Result<Disk, diesel::result::Error> {
         use nexus_db_schema::schema::disk::dsl;
 
+        // In what state do we expect the disk record to be created? This will
+        // generally be `Creating`, save for read-only disks being created from
+        // existing images or snapshots, which pop into existence already
+        // `Detached` (as the read-only volume snapshot backing them already
+        // exists). Thus, when we check for insert conflicts, we must compare
+        // the inserted state with the requested initial state, rather than
+        // assuming it will always be `Creating`.
+        let expected_state = match disk {
+            Disk::Crucible(CrucibleDisk {
+                disk_type_crucible:
+                    DiskTypeCrucible {
+                        read_only: true,
+                        create_snapshot_id,
+                        create_image_id,
+                        ..
+                    },
+                ..
+            }) if create_snapshot_id.is_some() || create_image_id.is_some() => {
+                external::DiskState::Detached
+            }
+            _ => external::DiskState::Creating,
+        };
+
         let generation = disk.runtime().generation;
         let name = disk.name().clone();
         let project_id = disk.project_id();
@@ -780,9 +825,10 @@ impl DataStore {
         // ensure that the newly created Disk is valid (even if there was an
         // insertion conflict).
 
-        if disk_model.state().state() != &api::external::DiskState::Creating {
+        if disk_model.state().state() != &expected_state {
             return Err(err.bail(Error::internal_error(&format!(
-                "newly-created Disk has unexpected state: {:?}",
+                "newly-created Disk has unexpected state: {:?} (expected \
+                 {expected_state:?})",
                 disk_model.state(),
             ))));
         }
@@ -1744,6 +1790,278 @@ impl DataStore {
             disk,
             disk_type_crucible,
         }))
+    }
+
+    /// Create a read-only disk from an existing snapshot or image.
+    pub async fn project_create_read_only_disk(
+        &self,
+        opctx: &OpContext,
+        authz_project: &authz::Project,
+        disk_id: &Uuid,
+        params: &params::DiskCreate,
+    ) -> CreateResult<db::datastore::Disk> {
+        opctx.authorize(authz::Action::CreateChild, authz_project).await?;
+
+        let params::DiskBackend::Distributed { ref disk_source } =
+            params.disk_backend
+        else {
+            // This is an internal error rather than an invalid argument or
+            // similar, because Nexus should not have called this function with
+            // a local storage backend.
+            return Err(Error::internal_error(
+                "invalid disk_backend for `project_create_readonly_disk` \
+                 (must be `Distributed`)",
+            ));
+        };
+        // Check that `params` refers either to an image or snapshot as the
+        // source, and look it up now to perform authz checks. We must pass the
+        // authz resource into the transaction so that it can refresh the lookup
+        // to insure the transaction still exists once the transaction executes.
+        let src = match disk_source {
+            &params::DiskSource::Image { image_id, read_only: true } => {
+                let (_, authz_image, _) = LookupPath::new(opctx, self)
+                    .image_id(image_id)
+                    .fetch()
+                    .await?;
+                ReadOnlyDiskSource::Image(authz_image)
+            }
+            &params::DiskSource::Snapshot { snapshot_id, read_only: true } => {
+                let (_, _, authz_snapshot, _) = LookupPath::new(opctx, self)
+                    .snapshot_id(snapshot_id)
+                    .fetch()
+                    .await?;
+                ReadOnlyDiskSource::Snapshot(authz_snapshot)
+            }
+            src => {
+                // This is an internal error rather than an invalid argument or
+                // similar, because Nexus should not have called this function with
+                // a non-readonly disk source
+                return Err(Error::InternalError {
+                    internal_message: format!(
+                        "invalid `DiskSource` for \
+                         `project_create_readonly_disk`: {src:?}"
+                    ),
+                });
+            }
+        };
+
+        let err = OptionalError::new();
+        let conn = self.pool_connection_authorized(opctx).await?;
+
+        let disk = self
+            .transaction_retry_wrapper("project_create_read_only_disk")
+            .transaction(&conn, |conn| {
+                let err = err.clone();
+                let params = &params;
+                let src = &src;
+                async move {
+                    Self::project_create_read_only_disk_in_txn(
+                        &conn,
+                        err,
+                        authz_project,
+                        disk_id,
+                        params,
+                        src,
+                    )
+                    .await
+                }
+            })
+            .await
+            .map_err(|e| {
+                if let Some(err) = err.take() {
+                    err
+                } else {
+                    public_error_from_diesel(e, ErrorHandler::Server)
+                }
+            })?;
+
+        Ok(disk)
+    }
+
+    async fn project_create_read_only_disk_in_txn(
+        conn: &async_bb8_diesel::Connection<DbConnection>,
+        err: OptionalError<Error>,
+        authz_project: &authz::Project,
+        disk_id: &Uuid,
+        params: &params::DiskCreate,
+        src: &ReadOnlyDiskSource,
+    ) -> Result<db::datastore::Disk, diesel::result::Error> {
+        use crate::db::datastore::CrucibleTargets;
+        use crate::db::datastore::VolumeCheckoutReason;
+        use crate::db::datastore::read_only_resources_associated_with_volume;
+        use sled_agent_client::VolumeConstructionRequest;
+
+        // For idempotency, first check if the disk already exists, and if it
+        // does, just return that.
+        let maybe_disk = {
+            use nexus_db_schema::schema::disk::dsl;
+            dsl::disk
+                .filter(dsl::id.eq(*disk_id))
+                .select(db::model::Disk::as_select())
+                .get_result_async(conn)
+                .await
+                .optional()?
+        };
+        if let Some(disk) = maybe_disk {
+            if disk.disk_type != db::model::DiskType::Crucible {
+                // this is *probably* a UUID collision. Seems bad.
+                return Err(err.bail(Error::InternalError {
+                    internal_message: format!(
+                        "weird! disk {disk_id} already exists, \
+                         but its type was {:?} (not Crucible)",
+                        disk.disk_type,
+                    ),
+                }));
+            }
+            use nexus_db_schema::schema::disk_type_crucible::dsl;
+            let disk_type_crucible = dsl::disk_type_crucible
+                .filter(dsl::disk_id.eq(*disk_id))
+                .select(db::model::DiskTypeCrucible::as_select())
+                .get_result_async(conn)
+                .await?;
+            return Ok(db::datastore::Disk::Crucible(CrucibleDisk {
+                disk,
+                disk_type_crucible,
+            }));
+        }
+
+        // Re-fetch the source image or snapshot again within the transaction to
+        // ensure that it still exists (it could have been deleted since the
+        // lookup in `project_create_read_only_disk`...)
+        let (volume_id, block_size) = match src {
+            ReadOnlyDiskSource::Snapshot(authz_snapshot) => {
+                let maybe_snapshot: Option<db::model::Snapshot> = {
+                    use nexus_db_schema::schema::snapshot::dsl;
+                    dsl::snapshot
+                        .filter(dsl::time_deleted.is_null())
+                        .filter(dsl::id.eq(authz_snapshot.id()))
+                        .select(db::model::Snapshot::as_select())
+                        .get_result_async(conn)
+                        .await
+                        .optional()?
+                };
+
+                let Some(snapshot) = maybe_snapshot else {
+                    return Err(err.bail(authz_snapshot.not_found()));
+                };
+
+                (snapshot.volume_id(), snapshot.block_size)
+            }
+            ReadOnlyDiskSource::Image(authz_image) => {
+                let maybe_image: Option<db::model::Image> = {
+                    use nexus_db_schema::schema::image::dsl;
+                    dsl::image
+                        .filter(dsl::time_deleted.is_null())
+                        .filter(dsl::id.eq(authz_image.id()))
+                        .select(db::model::Image::as_select())
+                        .get_result_async(conn)
+                        .await
+                        .optional()?
+                };
+
+                let Some(image) = maybe_image else {
+                    return Err(err.bail(authz_image.not_found()));
+                };
+                (image.volume_id(), image.block_size)
+            }
+        };
+
+        let sub_err = OptionalError::new();
+        let copy_of_volume = Self::volume_checkout_in_txn(
+            conn,
+            sub_err.clone(),
+            volume_id,
+            VolumeCheckoutReason::ReadOnlyCopy,
+        )
+        .await
+        .map_err(|e| {
+            if let Some(sub_err) = sub_err.take() {
+                err.bail(Error::from(sub_err).internal_context(
+                    "failed to checkout base volume for readonly disk",
+                ))
+            } else {
+                e
+            }
+        })?;
+
+        let copy_of_vcr: VolumeConstructionRequest =
+            serde_json::from_str(copy_of_volume.data()).map_err(|e| {
+                err.bail(Error::InternalError {
+                    internal_message: format!(
+                        "failed to deserialize base volume VCR: {e}"
+                    ),
+                })
+            })?;
+
+        let crucible_targets = {
+            let mut crucible_targets = CrucibleTargets::default();
+            read_only_resources_associated_with_volume(
+                &copy_of_vcr,
+                &mut crucible_targets,
+            );
+            crucible_targets
+        };
+
+        let sub_err = OptionalError::new();
+        let read_only_disk_volume =
+            Self::volume_create_in_txn(
+                conn,
+                sub_err.clone(),
+                VolumeUuid::new_v4(),
+                copy_of_vcr,
+                crucible_targets,
+            )
+            .await
+            .map_err(|e| {
+                if let Some(sub_err) = sub_err.take() {
+                    err.bail(Error::from(sub_err).internal_context(
+                        "failed to create read-only disk volume",
+                    ))
+                } else {
+                    e
+                }
+            })?;
+
+        // No additional work is required to create a read-only disk from a
+        // snapshot or image, as the snapshot or image's volume already exists.
+        // Thus, the new disk begins its life in the `Detached` state, rather
+        // than `Creating`. As soon as the database records are created, the
+        // disk is ready for use.
+        let runtime_initial = db::model::DiskRuntimeState::new().detach();
+        let disk = db::model::Disk::new(
+            *disk_id,
+            authz_project.id(),
+            &params,
+            block_size,
+            runtime_initial,
+            db::model::DiskType::Crucible,
+        );
+        let params::DiskBackend::Distributed { ref disk_source } =
+            params.disk_backend
+        else {
+            return Err(err.bail(Error::internal_error(
+                "`project_create_read_only_disk` called with \
+                 non-Distributed backend",
+            )));
+        };
+        let disk_type_crucible = db::model::DiskTypeCrucible::new(
+            *disk_id,
+            read_only_disk_volume.id(),
+            disk_source,
+        );
+
+        let crucible_disk =
+            db::datastore::CrucibleDisk { disk, disk_type_crucible };
+
+        let disk = Self::project_create_disk_in_txn(
+            conn,
+            err,
+            authz_project,
+            db::datastore::Disk::Crucible(crucible_disk),
+        )
+        .await?;
+
+        Ok(disk)
     }
 }
 

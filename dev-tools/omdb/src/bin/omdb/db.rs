@@ -2210,6 +2210,7 @@ async fn crucible_disk_info(
         volume_id: String,
         disk_state: String,
         import_address: String,
+        readonly: bool,
     }
 
     // The rows describing the downstairs regions for this disk/volume
@@ -2229,6 +2230,8 @@ async fn crucible_disk_info(
     let volume_id = disk.volume_id().to_string();
 
     let disk_state = disk.runtime().disk_state.to_string();
+
+    let readonly = disk.is_read_only();
 
     let import_address = match disk.pantry_address() {
         Some(ref pa) => pa.clone().to_string(),
@@ -2286,6 +2289,7 @@ async fn crucible_disk_info(
                 volume_id,
                 disk_state,
                 import_address,
+                readonly,
             }
         } else {
             UpstairsRow {
@@ -2296,6 +2300,7 @@ async fn crucible_disk_info(
                 volume_id,
                 disk_state,
                 import_address,
+                readonly,
             }
         }
     } else {
@@ -2308,6 +2313,7 @@ async fn crucible_disk_info(
             volume_id,
             disk_state,
             import_address,
+            readonly,
         }
     };
     rows.push(usr);

@@ -465,21 +465,23 @@ pub struct IpPoolRange {
 // SUBNET POOLS
 
 /// A pool of subnets for external subnet allocation
-#[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[derive(
+    ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq,
+)]
 pub struct SubnetPool {
     #[serde(flatten)]
     pub identity: IdentityMetadata,
     /// The IP version for this pool
     pub ip_version: IpVersion,
-    /// Type of subnet pool (unicast or multicast)
-    pub pool_type: shared::IpPoolType,
 }
 
 /// A member (subnet) within a subnet pool
-#[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
 pub struct SubnetPoolMember {
-    #[serde(flatten)]
-    pub identity: IdentityMetadata,
+    /// ID of the pool member
+    pub id: Uuid,
+    /// Time the pool member was created.
+    pub time_created: DateTime<Utc>,
     /// ID of the parent subnet pool
     pub subnet_pool_id: Uuid,
     /// The subnet CIDR
@@ -514,7 +516,9 @@ pub struct SubnetPoolUtilization {
 // EXTERNAL SUBNETS
 
 /// An external subnet allocated from a subnet pool
-#[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[derive(
+    ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq,
+)]
 pub struct ExternalSubnet {
     #[serde(flatten)]
     pub identity: IdentityMetadata,

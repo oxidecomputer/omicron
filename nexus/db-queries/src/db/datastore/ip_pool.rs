@@ -5974,6 +5974,7 @@ mod test {
             .add_subnet_pool_member(
                 opctx,
                 &authz_pool,
+                &db_pool,
                 &SubnetPoolMemberAdd {
                     subnet: "fd00::/48".parse().unwrap(),
                     min_prefix_length: None,
