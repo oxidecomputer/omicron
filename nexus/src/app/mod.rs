@@ -120,13 +120,13 @@ pub(crate) mod sagas;
 // TODO: When referring to API types, we should try to include
 // the prefix unless it is unambiguous.
 
+pub(crate) use self::deployment::SetTargetReleaseIntent;
 use crate::app::quiesce::NexusQuiesceHandle;
 pub(crate) use nexus_db_model::MAX_NICS_PER_INSTANCE;
 pub(crate) use nexus_db_queries::db::queries::disk::MAX_DISKS_PER_INSTANCE;
 use nexus_mgs_updates::DEFAULT_RETRY_TIMEOUT;
 use nexus_types::internal_api::views::MgsUpdateDriverStatus;
 use sagas::demo::CompletingDemoSagas;
-pub(crate) use self::deployment::SetTargetReleaseIntent;
 
 // XXX: Might want to recast as max *floating* IPs, we have at most one
 //      ephemeral (so bounded in saga by design).

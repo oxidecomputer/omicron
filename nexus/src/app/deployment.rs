@@ -274,7 +274,7 @@ impl super::Nexus {
         params: params::SetTargetReleaseParams,
         intent: SetTargetReleaseIntent,
     ) -> Result<(), Error> {
-        let system_version = params.system_version;
+        let new_system_version = params.system_version;
 
         // We don't need a transaction for the following queries because
         // (1) the generation numbers provide optimistic concurrency control:
@@ -296,36 +296,72 @@ impl super::Nexus {
                 // set the first one.
             }
             TargetReleaseSource::SystemVersion(tuf_repo_id) => {
-                // Disallow downgrades.
-                let current_version = self
+                let (_, current_blueprint) = self
                     .datastore()
-                    .tuf_repo_get_version(&opctx, &tuf_repo_id)
+                    .blueprint_target_get_current_full(opctx)
                     .await?;
-                if !is_new_target_release_version_allowed(
-                    &current_version,
-                    &system_version,
-                ) {
-                    return Err(Error::invalid_request(format!(
-                        "Requested target release ({system_version}) \
-                         must not be older than current target release \
-                         ({current_version})."
-                    ))
-                    .into());
-                }
 
-                // Ensure we don't change the target release mid-update.
-                self.validate_target_release_change_allowed(
-                    &opctx,
-                    &current_version,
-                )
-                .await?;
+                // We already have a target release, and an operator is
+                // attempting to change it. We have very different rules to
+                // enforce depending on _why_ they're trying to change it.
+                //
+                // If they're attempting to start a new system update, we have
+                // several system-level requirements we must enforce (e.g.,
+                // there must not be any sleds waiting for mupdate recovery, and
+                // the version cannot be downgraded). These are enforced by
+                // `validate_can_set_target_release_for_update()`.
+                //
+                // If they're attempting to recover from a mupdate, the only
+                // requirement we enforce is that there is at least one sled
+                // that is waiting for mupdate recovery. If there isn't, there's
+                // no reason to attempt to recover from a mupdate. If there is,
+                // we don't do any further version checking, because a mupdate
+                // is by design going outside the bounds of the update system.
+                // It's possible support has intentionally mupdated the system
+                // to a version that wouldn't normally be allowed by the update
+                // system, and we have to provide a way to notify the system of
+                // that change. (A more benign example that has come up in
+                // practice is: system is mupdated to version N. Operator
+                // sets the target release with `RecoverFromMupdate` intent, but
+                // accidentally sets it to version N+1. The sleds remain in the
+                // "waiting for mupdate recovery" state, because N+1 doesn't
+                // match the software deployed, but the thing the operator needs
+                // to do now is set the target release with `RecoverFromMupdate`
+                // intent to version N, which looks like a version _downgrade_
+                // but isn't, in practice.)
+                let validation_result = match intent {
+                    SetTargetReleaseIntent::Update => {
+                        let current_version = self
+                            .datastore()
+                            .tuf_repo_get_version(&opctx, &tuf_repo_id)
+                            .await?;
+                        validate_can_set_target_release_for_update(
+                            &current_blueprint,
+                            &current_version,
+                            &new_system_version,
+                        )
+                    }
+                    SetTargetReleaseIntent::RecoverFromMupdate => {
+                        validate_can_set_target_release_for_mupdate_recovery(
+                            &current_blueprint,
+                        )
+                    }
+                };
+
+                // Unpack the result and convert the error, if any.
+                let () = validation_result.map_err(|err| {
+                    Error::invalid_request(format!(
+                        "Target release cannot be changed: {}",
+                        InlineErrorChain::new(&err),
+                    ))
+                })?;
             }
         }
 
         // Fetch the TUF repo metadata and update the target release.
         let tuf_repo_id = self
             .datastore()
-            .tuf_repo_get_by_version(&opctx, system_version.into())
+            .tuf_repo_get_by_version(&opctx, new_system_version.into())
             .await?
             .id;
         let next_target_release =
@@ -338,105 +374,200 @@ impl super::Nexus {
             .await?;
         Ok(())
     }
-
-    pub(crate) async fn validate_target_release_change_allowed(
-        &self,
-        opctx: &OpContext,
-        current_target_version: &semver::Version,
-    ) -> Result<(), Error> {
-        let (_, current_blueprint) =
-            self.datastore().blueprint_target_get_current_full(opctx).await?;
-
-        if is_target_release_change_allowed(
-            &current_blueprint,
-            current_target_version,
-        ) {
-            Ok(())
-        } else {
-            Err(Error::invalid_request(
-                "Target release cannot be changed: \
-                 a previous update is still in progress.",
-            ))
-        }
-    }
 }
 
-fn is_new_target_release_version_allowed(
-    current_version: &semver::Version,
-    proposed_new_version: &semver::Version,
-) -> bool {
-    let mut current_version = current_version.clone();
-    let mut proposed_new_version = proposed_new_version.clone();
-
-    // Strip out the build metadata; this allows upgrading from one commit on
-    // the same major/minor/release/patch to another. This isn't always right -
-    // we shouldn't allow downgrading to an earlier commit - but we don't have
-    // enough information in the version strings today to determine that. See
-    // <https://github.com/oxidecomputer/omicron/issues/9071>.
-    current_version.build = semver::BuildMetadata::EMPTY;
-    proposed_new_version.build = semver::BuildMetadata::EMPTY;
-
-    proposed_new_version >= current_version
+#[derive(Debug, thiserror::Error, PartialEq, Eq)]
+enum TargetReleaseChangeError {
+    #[error("no evidence a mupdate has occurred - recovery not needed")]
+    NoMupdateRecoveryNeeded,
+    #[error(
+        "a support-driven recovery (mupdate) has occurred and \
+         must be cleared first"
+    )]
+    WaitingForMupdateToBeCleared,
+    #[error("a previous update is still in progress")]
+    PreviousUpdateInProgress,
+    #[error(
+        "cannot update to target release {0} (already targeting that version)"
+    )]
+    UpdateToIdenticalVersion(semver::Version),
+    #[error(
+        "cannot skip from major version {current} to major version {proposed}"
+    )]
+    CannotSkipMajorVersion { current: u64, proposed: u64 },
+    #[error(
+        "cannot downgrade: requested target release version {proposed} \
+         is older than current target release version {current}"
+    )]
+    CannotDowngrade { current: semver::Version, proposed: semver::Version },
 }
 
 // Check whether we should allow an operator to change the current target
-// release. This does not check whether changing to a _particular_ version is
-// ok; rather, it checks whether changing it _all all_ is allowed.
+// release to recover from a mupdate.
 //
-// We must allow target release changes if there's any evidence a mupdate has
-// occurred; setting a new target release is how the operator gives control back
-// to Nexus after that's happened.
+// We must be very generous here, as discussed at our call site in
+// `target_release_update()` above. We only reject this request if there are no
+// sleds waiting for recovery from a mupdate.
 //
-// If there's not evidence a mupdate has occurred, we must _reject_ target
-// release changes if another update is still in progress; we don't allow
-// upgrading to version N+1 if we're still in the process of upgrading from N-1
-// to N.
+// Note that unlick `validate_can_set_target_release_for_update()`, this
+// function does not take any arguments about the current or proposed system
+// version. Mupdate can bypass all our typical version ordering requirements, so
+// we have to allow recovery to the _actual_ version it installed, regardless of
+// what we currently have on the system.
+fn validate_can_set_target_release_for_mupdate_recovery(
+    current_blueprint: &Blueprint,
+) -> Result<(), TargetReleaseChangeError> {
+    // Check sled configs first: if any sled still has a mupdate override in
+    // place, we're waiting for mupdate recovery.
+    for (_, sled_config) in current_blueprint.active_sled_configs() {
+        if sled_config.remove_mupdate_override.is_some() {
+            return Ok(());
+        }
+
+        // Be paranoid: also check the host OS slots for `CurrentContents`. This
+        // check isn't as precise as it should be; see the discussion about
+        // checking both slots in
+        // `validate_can_set_target_release_for_update()`.
+        if sled_config.host_phase_2.slot_a
+            == BlueprintHostPhase2DesiredContents::CurrentContents
+            || sled_config.host_phase_2.slot_b
+                == BlueprintHostPhase2DesiredContents::CurrentContents
+        {
+            return Ok(());
+        }
+    }
+
+    // Confirm all zones have converted to running out of known artifacts. If
+    // any are still running from the install dataset, we haven't recovered from
+    // the mupdate.
+    // Now check zone configs.
+    for (_, zone_config) in current_blueprint.in_service_zones() {
+        match &zone_config.image_source {
+            BlueprintZoneImageSource::InstallDataset => {
+                return Ok(());
+            }
+            BlueprintZoneImageSource::Artifact { .. } => continue,
+        }
+    }
+
+    // No sleds have a mupdate override and all zones are configured to use
+    // artifact sources - there hasn't been a mupdate.
+    //
+    // This check is inherently racy: a sled could have just been mupdated but
+    // we haven't yet noticed. There isn't much we can do about that?
+    Err(TargetReleaseChangeError::NoMupdateRecoveryNeeded)
+}
+
+// Helper for `validate_target_release_change_allowed_for_update()` below that
+// only performs the checks to enforce our update version ordering.
+fn validate_update_version_number_ordering(
+    current_version: &semver::Version,
+    proposed_new_version: &semver::Version,
+) -> Result<(), TargetReleaseChangeError> {
+    // We cannot update to the _identical_ version we're already at.
+    if proposed_new_version == current_version {
+        return Err(TargetReleaseChangeError::UpdateToIdenticalVersion(
+            current_version.clone(),
+        ));
+    }
+
+    // We cannot skip major versions.
+    if proposed_new_version.major > current_version.major + 1 {
+        return Err(TargetReleaseChangeError::CannotSkipMajorVersion {
+            current: current_version.major,
+            proposed: proposed_new_version.major,
+        });
+    }
+
+    // We cannot downgrade; however, we do need to be able to allow updates to
+    // "same version, different build info" to allow for dev/test systems that
+    // want to update from one commit inside a release to a subsequent commit in
+    // the same release (dogfood, racklettes). We implement this check by
+    // stripping out the build info and then comparing the versions.
+    //
+    // This is not entirely correct - it allows updating to _any_ commit with
+    // the same release, even older ones - but we don't have enough information
+    // in the version strings today to determine commit ordering. See
+    // <https://github.com/oxidecomputer/omicron/issues/9071>.
+    let is_downgrade = {
+        let mut current_version = current_version.clone();
+        let mut proposed_new_version = proposed_new_version.clone();
+
+        current_version.build = semver::BuildMetadata::EMPTY;
+        proposed_new_version.build = semver::BuildMetadata::EMPTY;
+
+        proposed_new_version < current_version
+    };
+    if is_downgrade {
+        return Err(TargetReleaseChangeError::CannotDowngrade {
+            current: current_version.clone(),
+            proposed: proposed_new_version.clone(),
+        });
+    }
+
+    Ok(())
+}
+
+// Check whether we should allow an operator to change the current target
+// release to start a new system update.
+//
+// We must reject target release changes if:
+//
+// * A mupdate has occurred (they must use the "set target releaes for recovery"
+//   endpoint instead)
+// * Another update is in progress
+// * The new version doesn't satisfy our requirements for upgrade ordering (no
+//   downgrades; cannot skip major releases)
 //
 // The latter restriction is due to the implementation of the blueprint planner,
 // which means it's sufficient to look at the current target blueprint; we don't
 // have to look at inventory. As long as we've been able to decide how to finish
 // a previous update, we can allow starting the next one, even if we haven't
 // finished executing the previous one.
-fn is_target_release_change_allowed(
+fn validate_can_set_target_release_for_update(
     current_blueprint: &Blueprint,
     current_target_version: &semver::Version,
-) -> bool {
+    proposed_new_version: &semver::Version,
+) -> Result<(), TargetReleaseChangeError> {
+    validate_update_version_number_ordering(
+        current_target_version,
+        proposed_new_version,
+    )?;
+
     // Convert this to a string; comparing "system version as a string" to
     // "artifact version as a string" below feels bad, but is maybe fine? The
     // artifact versions are loaded from the DB by joining against a table that
     // populates them as the system version that contained them.
     let current_target_version = current_target_version.to_string();
 
-    // As we look over the blueprint, did we find any component not on the
-    // current target release? We can't immediately return `Ok(false)` if we do,
-    // because we have to keep checking them all for evidence of a mupdate.
-    // Instead, we'll set this boolean to `false` and return it at the end.
-    let mut all_components_on_current_target_release = true;
-
     // Check sled configs first.
     for (_, sled_config) in current_blueprint.active_sled_configs() {
         if sled_config.remove_mupdate_override.is_some() {
-            // A mupdate has occurred; we must allow a new target release.
-            return true;
+            // A mupdate has occurred; we must not allow an update.
+            return Err(TargetReleaseChangeError::WaitingForMupdateToBeCleared);
         }
 
-        // This check is a little funky and I'm not sure it's right, so
-        // we'll err on the side of being permissive. The blueprint doesn't
-        // track which slot is supposed to be the boot disk (maybe it
-        // should?), so we'll consider a mupdate in progress if either slot
-        // shows evidence of a mupdate, and we'll consider an update done if
-        // either slot matches the current target release.
+        // Blueprints don't check which slot is supposed to be the boot disk
+        // (maybe they should?), so checking the host OS is a little funky. We
+        // consider the system to be updateable (as far as this check is
+        // concerned) if _either_ slot is set to an artifact with a version that
+        // matches the current system target version, with the expectation that
+        // seeing that means we updated this sled to that version.
+        //
+        // If neither slot contains the current version, we'll fall back to
+        // checking whether either slot contains `CurrentContents` - that
+        // indicates the sled has been MUPdated, which influences the error we
+        // return.
+        //
+        // We really ought to only be checking the intended slot, not both.
         let mut found_current_version_in_either_slot = false;
+        let mut found_current_contents_in_either_slot = false;
         for phase2 in
             [&sled_config.host_phase_2.slot_a, &sled_config.host_phase_2.slot_b]
         {
             match phase2 {
                 BlueprintHostPhase2DesiredContents::CurrentContents => {
-                    // Weak evidence of a mupdate; err on the side of "allow".
-                    // This is weak evidence because we could have already
-                    // completed one update and it's the other slot that's still
-                    // set to `CurrentContents`.
-                    return true;
+                    found_current_contents_in_either_slot = true;
                 }
                 BlueprintHostPhase2DesiredContents::Artifact {
                     version,
@@ -463,7 +594,13 @@ fn is_target_release_change_allowed(
         // If neither slot contains the current version, we're not done
         // upgrading to it.
         if !found_current_version_in_either_slot {
-            all_components_on_current_target_release = false;
+            if found_current_contents_in_either_slot {
+                return Err(
+                    TargetReleaseChangeError::WaitingForMupdateToBeCleared,
+                );
+            } else {
+                return Err(TargetReleaseChangeError::PreviousUpdateInProgress);
+            }
         }
     }
 
@@ -471,8 +608,10 @@ fn is_target_release_change_allowed(
     for (_, zone_config) in current_blueprint.in_service_zones() {
         match &zone_config.image_source {
             BlueprintZoneImageSource::InstallDataset => {
-                // A mupdate has occurred; we must allow a new target release.
-                return true;
+                // A mupdate has occurred; we must not allow an update.
+                return Err(
+                    TargetReleaseChangeError::WaitingForMupdateToBeCleared,
+                );
             }
             BlueprintZoneImageSource::Artifact { version, .. } => {
                 match version {
@@ -481,7 +620,7 @@ fn is_target_release_change_allowed(
                             // We found a zone not yet on the current target
                             // version; the previous upgrade is not yet
                             // complete.
-                            all_components_on_current_target_release = false;
+                            return Err(TargetReleaseChangeError::PreviousUpdateInProgress);
                         }
                     }
                     BlueprintArtifactVersion::Unknown => {
@@ -492,24 +631,23 @@ fn is_target_release_change_allowed(
                         // hashes?
                         //
                         // For now, treat this as "not the current version".
-                        all_components_on_current_target_release = false;
+                        return Err(
+                            TargetReleaseChangeError::PreviousUpdateInProgress,
+                        );
                     }
                 }
             }
         }
     }
 
-    // We don't attempt to check Hubris components:
+    // All the sled and zone configs match the current target version; it's okay
+    // to proceed with an update. We don't attempt to check Hubris components:
     //
     // * They don't have the same API versioning restrictions that require
     //   strict single-stepped upgrades.
     // * We don't keep the desired state of all Hubris components in the
     //   blueprint anyway.
-
-    // If we made it here, we found no evidence of a mupdate; only allow a new
-    // target release if all components have been upgraded to the current target
-    // release.
-    all_components_on_current_target_release
+    Ok(())
 }
 
 #[cfg(test)]
@@ -517,12 +655,9 @@ mod tests {
     use super::*;
     use nexus_reconfigurator_planning::example::example;
     use nexus_types::deployment::BlueprintHostPhase2DesiredSlots;
-    use nexus_types::deployment::BlueprintZoneDisposition;
-    use nexus_types::external_api::views::SledState;
-    use omicron_common::api::external::Generation;
     use omicron_test_utils::dev::test_setup_log;
     use omicron_uuid_kinds::MupdateOverrideUuid;
-    use std::mem;
+    use slog::Logger;
     use tufaceous_artifact::ArtifactHash;
     use tufaceous_artifact::ArtifactVersion;
 
@@ -550,211 +685,394 @@ mod tests {
         }
     }
 
-    #[test]
-    fn test_is_new_target_release_version_allowed() {
-        // Updating between versions that differ only in build metadata should
-        // be allowed in both directions.
-        let v1: semver::Version = "16.0.0-0.ci+git544f608e05a".parse().unwrap();
-        let v2: semver::Version = "16.0.0-0.ci+git8571be38c0b".parse().unwrap();
-        assert!(is_new_target_release_version_allowed(&v1, &v2));
-        assert!(is_new_target_release_version_allowed(&v2, &v1));
-
-        // Updating from a version to itself is always allowed. (This is
-        // important for clearing mupdate overrides.)
-        assert!(is_new_target_release_version_allowed(&v1, &v1));
-        assert!(is_new_target_release_version_allowed(&v2, &v2));
-
-        // We should be able to upgrade but not downgrade if the versions differ
-        // in major/minor/patch/prerelease.
-        for (v1, v2) in [
-            ("15.0.0-0.ci+git12345", "16.0.0-0.ci+git12345"),
-            ("16.0.0-0.ci+git12345", "16.1.0-0.ci+git12345"),
-            ("16.1.0-0.ci+git12345", "16.1.1-0.ci+git12345"),
-            ("16.1.1-0.ci+git12345", "16.1.1-1.ci+git12345"),
-        ] {
-            let v1: semver::Version = v1.parse().unwrap();
-            let v2: semver::Version = v2.parse().unwrap();
-            assert!(
-                is_new_target_release_version_allowed(&v1, &v2),
-                "should be allowed to upgrade from {v1} to {v2}"
-            );
-            assert!(
-                !is_new_target_release_version_allowed(&v2, &v1),
-                "should not be allowed to upgrade from {v1} to {v2}"
-            );
+    fn make_blueprint_matching_system_version(
+        log: &Logger,
+        test_name: &str,
+        version: &semver::Version,
+    ) -> Blueprint {
+        let (_, _, mut bp) = example(log, test_name);
+        for sled_config in bp.sleds.values_mut() {
+            sled_config.remove_mupdate_override = None;
+            sled_config.host_phase_2 = BlueprintHostPhase2DesiredSlots {
+                slot_a: make_os_artifact(&version),
+                slot_b: make_os_artifact(&version),
+            };
+            for mut zone_config in sled_config.zones.iter_mut() {
+                zone_config.image_source = make_zone_artifact(&version);
+            }
         }
+        bp
     }
 
     #[test]
-    fn test_is_target_release_change_allowed() {
-        static TEST_NAME: &str = "is_target_release_change_allowed";
+    fn test_version_number_ordering_requirements_for_update() {
+        static TEST_NAME: &str =
+            "test_version_number_ordering_requirements_for_update";
         let logctx = test_setup_log(TEST_NAME);
         let log = &logctx.log;
 
-        // Fake versions for current target release and previous target release.
-        let previous_target_version: semver::Version = "1.0.0".parse().unwrap();
-        let current_target_version: semver::Version = "2.0.0".parse().unwrap();
+        // Setup: start with an arbitrary system version and a blueprint where
+        // all components are on that version.
+        let current_version: semver::Version =
+            "16.2.0-0.ci+git544f608e05a".parse().unwrap();
+        let blueprint = make_blueprint_matching_system_version(
+            log,
+            TEST_NAME,
+            &current_version,
+        );
 
-        // Build a base blueprint where all the zone image sources and OS images
-        // reference artifacts from the current target version.
-        let base_blueprint = {
-            let (_, _, mut bp) = example(log, TEST_NAME);
-            for sled_config in bp.sleds.values_mut() {
-                sled_config.remove_mupdate_override = None;
-                sled_config.host_phase_2 = BlueprintHostPhase2DesiredSlots {
-                    slot_a: make_os_artifact(&current_target_version),
-                    slot_b: make_os_artifact(&current_target_version),
-                };
-                for mut zone_config in sled_config.zones.iter_mut() {
-                    zone_config.image_source =
-                        make_zone_artifact(&current_target_version);
-                }
+        // Versions we should allow as new targets for an update: different
+        // commit in the same release, and any version from the next major
+        // version (but not above "major + 1").
+        for valid_update_version in [
+            "16.2.0-0.ci+git11111111111",
+            "16.2.0-0.ci+git22222222222",
+            "16.2.0-0.ci+gitfffffffffff",
+            "16.2.1-0.ci+git11111111111",
+            "16.3.0-0.ci+git22222222222",
+            "17.0.0-0.ci+git11111111111",
+            "17.0.1-0.ci+git22222222222",
+            "17.1.0-0.ci+gitfffffffffff",
+            "17.100.99-0.ci+git123456789ab",
+        ] {
+            let v: semver::Version = valid_update_version.parse().unwrap();
+            assert_eq!(
+                validate_can_set_target_release_for_update(
+                    &blueprint,
+                    &current_version,
+                    &v
+                ),
+                Ok(()),
+                "should be able to update from {current_version} to {v}"
+            );
+        }
+
+        // Versions we should not allow as new update targets.
+        let same_version = current_version.clone();
+        let older_minor: semver::Version =
+            "16.1.0-0.ci+git123456789ab".parse().unwrap();
+        let older_major: semver::Version =
+            "15.3.0-0.ci+git123456789ab".parse().unwrap();
+        let skip_major: semver::Version =
+            "18.0.0-0.ci+git123456789ab".parse().unwrap();
+        for (v, expected_err) in [
+            (
+                &same_version,
+                TargetReleaseChangeError::UpdateToIdenticalVersion(
+                    same_version.clone(),
+                ),
+            ),
+            (
+                &older_minor,
+                TargetReleaseChangeError::CannotDowngrade {
+                    current: current_version.clone(),
+                    proposed: older_minor.clone(),
+                },
+            ),
+            (
+                &older_major,
+                TargetReleaseChangeError::CannotDowngrade {
+                    current: current_version.clone(),
+                    proposed: older_major.clone(),
+                },
+            ),
+            (
+                &skip_major,
+                TargetReleaseChangeError::CannotSkipMajorVersion {
+                    current: 16,
+                    proposed: 18,
+                },
+            ),
+        ] {
+            match validate_can_set_target_release_for_update(
+                &blueprint,
+                &current_version,
+                v,
+            ) {
+                Ok(()) => panic!(
+                    "unexpected success updating from {current_version} to {v}"
+                ),
+                Err(err) => assert_eq!(err, expected_err),
             }
+        }
+
+        logctx.cleanup_successful();
+    }
+
+    #[test]
+    fn test_reject_update_requests_if_system_is_not_updateable() {
+        static TEST_NAME: &str =
+            "test_reject_update_requests_if_system_is_not_updateable";
+        let logctx = test_setup_log(TEST_NAME);
+        let log = &logctx.log;
+
+        // Setup: start with an arbitrary system version and a blueprint where
+        // all components are on that version.
+        let current_version: semver::Version =
+            "16.2.0-0.ci+git544f608e05a".parse().unwrap();
+        let blueprint = make_blueprint_matching_system_version(
+            log,
+            TEST_NAME,
+            &current_version,
+        );
+
+        // Pick a next version that's legal in terms of ordering. (Version
+        // number ordering checks are covered by
+        // `test_version_number_ordering_requirements_for_update()` above.)
+        let next_version: semver::Version =
+            "17.0.0-0.ci+git123456789ab".parse().unwrap();
+
+        // From our base blueprint, we should be allowed to start an update.
+        assert_eq!(
+            validate_can_set_target_release_for_update(
+                &blueprint,
+                &current_version,
+                &next_version
+            ),
+            Ok(()),
+            "should be able to update from {current_version} to {next_version}"
+        );
+
+        // Also pick an old version; one of our tests below is that some
+        // component is still on this older version (i.e., we're still trying to
+        // update to `current_version`).
+        let prev_version: semver::Version =
+            "15.0.0-0.ci+git123456789ab".parse().unwrap();
+
+        // Create some blueprints that are modified in various ways to put the
+        // system in a non-updateable state.
+
+        // 1. Can't update if any sled has a mupdate override in place (evidence
+        //    of a mupdate).
+        let bp_sled_mupdate_override = {
+            let mut bp = blueprint.clone();
+            bp.sleds.values_mut().next().unwrap().remove_mupdate_override =
+                Some(MupdateOverrideUuid::new_v4());
             bp
         };
 
-        // All components in this blueprint reference current_target_release, so
-        // we should be able to set a new target release.
-        assert!(is_target_release_change_allowed(
-            &base_blueprint,
-            &current_target_version
-        ));
+        // 2. Can't update if any sled has both OS slots set to "current
+        //    contents" (evidence of a mupdate).
+        let bp_os_mupdate = {
+            let mut bp = blueprint.clone();
+            let sled = bp.sleds.values_mut().next().unwrap();
+            sled.host_phase_2.slot_a =
+                BlueprintHostPhase2DesiredContents::CurrentContents;
+            sled.host_phase_2.slot_b =
+                BlueprintHostPhase2DesiredContents::CurrentContents;
+            bp
+        };
 
-        {
-            // Build a blueprint for which target release changes are rejected
-            // due to a sled with no current OS.
-            let bp_old_os = {
-                let mut bp = base_blueprint.clone();
-                let sled_config = bp.sleds.values_mut().next().unwrap();
-                sled_config.host_phase_2 = BlueprintHostPhase2DesiredSlots {
-                    slot_a: make_os_artifact(&previous_target_version),
-                    slot_b: make_os_artifact(&previous_target_version),
-                };
-                assert!(!is_target_release_change_allowed(
-                    &bp,
-                    &current_target_version
-                ));
-                bp
+        // 3. Can't update if any zone has an image source of InstallDataset
+        //    (evidence of a mupdate).
+        let bp_zone_mupdate = {
+            let mut bp = blueprint.clone();
+            bp.sleds
+                .values_mut()
+                .next()
+                .unwrap()
+                .zones
+                .iter_mut()
+                .next()
+                .unwrap()
+                .image_source = BlueprintZoneImageSource::InstallDataset;
+            bp
+        };
+
+        // 4. Can't update if any zone is still running from an old version
+        //    (evidence that an update is still in progress).
+        let bp_zone_old_version = {
+            let mut bp = blueprint.clone();
+            bp.sleds
+                .values_mut()
+                .next()
+                .unwrap()
+                .zones
+                .iter_mut()
+                .next()
+                .unwrap()
+                .image_source = BlueprintZoneImageSource::Artifact {
+                version: BlueprintArtifactVersion::Available {
+                    version: ArtifactVersion::new(prev_version.to_string())
+                        .unwrap(),
+                },
+                hash: ArtifactHash([0; 32]),
             };
+            bp
+        };
 
-            // Change the sled to be decommissioned; we should ignore it now and
-            // allow changing the target release.
-            let mut bp = bp_old_os.clone();
-            let sled_config = bp.sleds.values_mut().next().unwrap();
-            sled_config.state = SledState::Decommissioned;
-            assert!(is_target_release_change_allowed(
-                &bp,
-                &current_target_version
-            ));
-
-            // Change one of the OS slots to `CurrentContents`; now changing the
-            // target release should be allowed, because this sled might have
-            // been mupdated.
-            let mut bp = bp_old_os.clone();
-            let sled_config = bp.sleds.values_mut().next().unwrap();
-            sled_config.host_phase_2 = BlueprintHostPhase2DesiredSlots {
-                slot_a: make_os_artifact(&previous_target_version),
-                slot_b: BlueprintHostPhase2DesiredContents::CurrentContents,
+        // 5. Can't update if any zone is running from an unknown version
+        //    (evidence that an update is still in progress, although today this
+        //    shouldn't be possible since we require strictly stepping from one
+        //    version to the next).
+        let bp_zone_unknown_version = {
+            let mut bp = blueprint.clone();
+            bp.sleds
+                .values_mut()
+                .next()
+                .unwrap()
+                .zones
+                .iter_mut()
+                .next()
+                .unwrap()
+                .image_source = BlueprintZoneImageSource::Artifact {
+                version: BlueprintArtifactVersion::Unknown,
+                hash: ArtifactHash([0; 32]),
             };
-            assert!(is_target_release_change_allowed(
-                &bp,
-                &current_target_version
-            ));
+            bp
+        };
 
-            // Change a different sled - set a mupdate override.
-            let mut bp = bp_old_os.clone();
-            let next_sled_config = bp.sleds.values_mut().nth(1).unwrap();
-            next_sled_config.remove_mupdate_override =
-                Some(MupdateOverrideUuid::new_v4());
-            assert!(is_target_release_change_allowed(
-                &bp,
-                &current_target_version
-            ));
+        // 6. Can't update if neither host OS slot is on the current version.
+        //    (This check should be more precise: we really only care about the
+        //    current active slot, but that isn't tracked by the config.)
+        let bp_os_old_version = {
+            let mut bp = blueprint.clone();
+            let sled = bp.sleds.values_mut().next().unwrap();
+            let prev_artifact = BlueprintHostPhase2DesiredContents::Artifact {
+                version: BlueprintArtifactVersion::Available {
+                    version: ArtifactVersion::new(prev_version.to_string())
+                        .unwrap(),
+                },
+                hash: ArtifactHash([0; 32]),
+            };
+            sled.host_phase_2.slot_a = prev_artifact.clone();
+            sled.host_phase_2.slot_b = prev_artifact;
+            bp
+        };
 
-            // Change a zone on a different sled to be sourced from the
-            // install dataset.
-            let mut bp = bp_old_os.clone();
-            let next_sled_config = bp.sleds.values_mut().nth(1).unwrap();
-            let mut zone_config =
-                next_sled_config.zones.iter_mut().next().unwrap();
-            zone_config.image_source = BlueprintZoneImageSource::InstallDataset;
-            mem::drop(zone_config);
-            assert!(is_target_release_change_allowed(
-                &bp,
-                &current_target_version
-            ));
+        for (description, blueprint, expected_err) in [
+            (
+                "sled mupdate override",
+                bp_sled_mupdate_override,
+                TargetReleaseChangeError::WaitingForMupdateToBeCleared,
+            ),
+            (
+                "OS mupdate",
+                bp_os_mupdate,
+                TargetReleaseChangeError::WaitingForMupdateToBeCleared,
+            ),
+            (
+                "zone mupdate",
+                bp_zone_mupdate,
+                TargetReleaseChangeError::WaitingForMupdateToBeCleared,
+            ),
+            (
+                "zone old version",
+                bp_zone_old_version,
+                TargetReleaseChangeError::PreviousUpdateInProgress,
+            ),
+            (
+                "zone unknown version",
+                bp_zone_unknown_version,
+                TargetReleaseChangeError::PreviousUpdateInProgress,
+            ),
+            (
+                "OS old version",
+                bp_os_old_version,
+                TargetReleaseChangeError::PreviousUpdateInProgress,
+            ),
+        ] {
+            match validate_can_set_target_release_for_update(
+                &blueprint,
+                &current_version,
+                &next_version,
+            ) {
+                Ok(()) => {
+                    panic!("unexpected success with blueprint: {description}")
+                }
+                Err(err) => assert_eq!(
+                    err, expected_err,
+                    "unexpected error attempting to update from \
+                     blueprint: {description}"
+                ),
+            }
         }
 
-        {
-            // Repeat similar tests to the above section, but start by building
-            // a blueprint for which target release changes are rejected due to
-            // a sled with a zone running an artifact from the previous release.
-            let bp_old_zone = {
-                let mut bp = base_blueprint.clone();
-                let sled_config = bp.sleds.values_mut().next().unwrap();
-                let mut zone_config =
-                    sled_config.zones.iter_mut().next().unwrap();
-                zone_config.image_source =
-                    make_zone_artifact(&previous_target_version);
-                mem::drop(zone_config);
-                assert!(!is_target_release_change_allowed(
-                    &bp,
-                    &current_target_version
-                ));
-                bp
-            };
+        logctx.cleanup_successful();
+    }
 
-            // Expunge the zone; we should ignore it now and allow changing the
-            // target release.
-            let mut bp = bp_old_zone.clone();
-            let sled_config = bp.sleds.values_mut().next().unwrap();
-            let mut zone_config = sled_config.zones.iter_mut().next().unwrap();
-            zone_config.disposition = BlueprintZoneDisposition::Expunged {
-                as_of_generation: Generation::new(),
-                ready_for_cleanup: false,
-            };
-            mem::drop(zone_config);
-            assert!(is_target_release_change_allowed(
-                &bp,
-                &current_target_version
-            ));
+    #[test]
+    fn test_validate_can_set_target_release_for_mupdate_recovery() {
+        static TEST_NAME: &str =
+            "test_validate_can_set_target_release_for_mupdate_recovery";
+        let logctx = test_setup_log(TEST_NAME);
+        let log = &logctx.log;
 
-            // Change one of the OS slots to `CurrentContents`; now changing the
-            // target release should be allowed, because this sled might have
-            // been mupdated.
-            let mut bp = bp_old_zone.clone();
-            let sled_config = bp.sleds.values_mut().next().unwrap();
-            sled_config.host_phase_2 = BlueprintHostPhase2DesiredSlots {
-                slot_a: make_os_artifact(&previous_target_version),
-                slot_b: BlueprintHostPhase2DesiredContents::CurrentContents,
-            };
-            assert!(is_target_release_change_allowed(
-                &bp,
-                &current_target_version
-            ));
+        // Setup: start with an arbitrary system version and a blueprint where
+        // all components are on that version.
+        let current_version: semver::Version =
+            "16.2.0-0.ci+git544f608e05a".parse().unwrap();
+        let blueprint = make_blueprint_matching_system_version(
+            log,
+            TEST_NAME,
+            &current_version,
+        );
 
-            // Change a different sled - set a mupdate override.
-            let mut bp = bp_old_zone.clone();
-            let next_sled_config = bp.sleds.values_mut().nth(1).unwrap();
-            next_sled_config.remove_mupdate_override =
+        // The blueprint described a system on a known version; i.e., no
+        // evidence of a mupdate. We should not be able to set the target
+        // release for mupdate recovery.
+        assert_eq!(
+            validate_can_set_target_release_for_mupdate_recovery(&blueprint),
+            Err(TargetReleaseChangeError::NoMupdateRecoveryNeeded)
+        );
+
+        // Confirm that blueprints with different kinds of evidence a mupdate
+        // has occurred allow setting a new target release for mupdate recovery.
+
+        // sled with a mupdate override in place
+        let bp_sled_mupdate_override = {
+            let mut bp = blueprint.clone();
+            bp.sleds.values_mut().next().unwrap().remove_mupdate_override =
                 Some(MupdateOverrideUuid::new_v4());
-            assert!(is_target_release_change_allowed(
-                &bp,
-                &current_target_version
-            ));
+            bp
+        };
 
-            // Change a zone on a different sled to be sourced from the
-            // install dataset.
-            let mut bp = bp_old_zone.clone();
-            let next_sled_config = bp.sleds.values_mut().nth(1).unwrap();
-            let mut zone_config =
-                next_sled_config.zones.iter_mut().next().unwrap();
-            zone_config.image_source = BlueprintZoneImageSource::InstallDataset;
-            mem::drop(zone_config);
-            assert!(is_target_release_change_allowed(
-                &bp,
-                &current_target_version
-            ));
+        // sled with a mupdate'd host OS slot A
+        let bp_os_mupdate_a = {
+            let mut bp = blueprint.clone();
+            let sled = bp.sleds.values_mut().next().unwrap();
+            sled.host_phase_2.slot_a =
+                BlueprintHostPhase2DesiredContents::CurrentContents;
+            bp
+        };
+
+        // sled with a mupdate'd host OS slot B
+        let bp_os_mupdate_b = {
+            let mut bp = blueprint.clone();
+            let sled = bp.sleds.values_mut().next().unwrap();
+            sled.host_phase_2.slot_b =
+                BlueprintHostPhase2DesiredContents::CurrentContents;
+            bp
+        };
+
+        // zone with an artifact source set to the install dataset
+        let bp_zone_mupdate = {
+            let mut bp = blueprint.clone();
+            bp.sleds
+                .values_mut()
+                .next()
+                .unwrap()
+                .zones
+                .iter_mut()
+                .next()
+                .unwrap()
+                .image_source = BlueprintZoneImageSource::InstallDataset;
+            bp
+        };
+
+        for (description, blueprint) in [
+            ("sled with mupdate override", bp_sled_mupdate_override),
+            ("sled with OS mupdate slot A", bp_os_mupdate_a),
+            ("sled with OS mupdate slot B", bp_os_mupdate_b),
+            ("zone set to install dataset", bp_zone_mupdate),
+        ] {
+            assert_eq!(
+                validate_can_set_target_release_for_mupdate_recovery(
+                    &blueprint
+                ),
+                Ok(()),
+                "should find evidence of mupdate in blueprint: {description}"
+            );
         }
 
         logctx.cleanup_successful();
