@@ -1819,9 +1819,8 @@ mod tests {
                 | ServiceName::Mgd => {
                     out.insert(service, Ok(()));
                 }
-                // DNS records for Wicketd, Tfportd, and Maghemite don't currently
-                // exist, even on real deployed systems.
-                // XXX-dap verify this
+                // DNS records for Wicketd, Tfportd, and Maghemite don't
+                // currently exist, even on real deployed systems.
                 ServiceName::Wicketd
                 | ServiceName::Tfport
                 | ServiceName::Maghemite => {
