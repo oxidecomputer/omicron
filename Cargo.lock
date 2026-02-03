@@ -1036,6 +1036,7 @@ dependencies = [
  "omicron-workspace-hack",
  "schemars 0.8.22",
  "serde",
+ "sled-agent-types",
  "sled-hardware-types",
 ]
 
