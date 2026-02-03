@@ -1,3 +1,8 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
+use iddqd::IdOrdMap;
 use illumos_utils::svcs::SvcsInMaintenanceResult;
 use illumos_utils::zpool::UnhealthyZpoolsResult;
 use omicron_common::api::external::ByteCount;
@@ -14,11 +19,12 @@ use crate::v1::inventory::InventoryDisk;
 use crate::v1::inventory::InventoryZpool;
 use crate::v1::inventory::SledRole;
 use crate::v12;
-use crate::v14;
-pub use crate::v14::inventory::ConfigReconcilerInventory;
 pub use crate::v14::inventory::ConfigReconcilerInventoryStatus;
 pub use crate::v14::inventory::OmicronFileSourceResolverInventory;
 pub use crate::v14::inventory::OmicronSledConfig;
+use crate::v16;
+pub use crate::v16::inventory::ConfigReconcilerInventory;
+pub use crate::v16::inventory::SingleMeasurementInventory;
 
 /// Identity and basic status information about this sled agent
 #[derive(Clone, Debug, Deserialize, JsonSchema, Serialize)]
@@ -39,9 +45,10 @@ pub struct Inventory {
     pub last_reconciliation: Option<ConfigReconcilerInventory>,
     pub file_source_resolver: OmicronFileSourceResolverInventory,
     pub health_monitor: HealthMonitorInventory,
+    pub reference_measurements: IdOrdMap<SingleMeasurementInventory>,
 }
 
-impl From<Inventory> for v14::inventory::Inventory {
+impl From<Inventory> for v16::inventory::Inventory {
     fn from(value: Inventory) -> Self {
         let Inventory {
             sled_id,
@@ -60,6 +67,7 @@ impl From<Inventory> for v14::inventory::Inventory {
             last_reconciliation,
             file_source_resolver,
             health_monitor,
+            reference_measurements,
         } = value;
         Self {
             sled_id,
@@ -78,6 +86,7 @@ impl From<Inventory> for v14::inventory::Inventory {
             last_reconciliation,
             file_source_resolver,
             health_monitor: health_monitor.into(),
+            reference_measurements,
         }
     }
 }
