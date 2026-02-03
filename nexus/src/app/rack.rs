@@ -65,6 +65,7 @@ use oxnet::IpNet;
 use sled_agent_client::types::AddSledRequest;
 use sled_agent_client::types::StartSledAgentRequest;
 use sled_agent_client::types::StartSledAgentRequestBody;
+use sled_hardware_types::BaseboardId;
 
 use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
@@ -739,8 +740,10 @@ impl super::Nexus {
             )
             .await?;
 
-        // Plumb the firewall rules for the built-in services
-        self.plumb_service_firewall_rules(opctx, &[]).await?;
+        // Note: Service firewall rules are plumbed in Server::start() via
+        // await_ip_allowlist_plumbing(), which runs before the external HTTP
+        // server starts. This ensures rules are in place for both fresh rack
+        // initialization and Nexus restart scenarios.
 
         // We've potentially updated the list of DNS servers and the DNS
         // configuration for both internal and external DNS, plus the Silo
@@ -890,7 +893,7 @@ impl super::Nexus {
         };
 
         // Convert `UninitializedSledId` to the sled-agent type
-        let baseboard_id = sled_agent_client::types::BaseboardId {
+        let baseboard_id = BaseboardId {
             serial_number: sled.serial.clone(),
             part_number: sled.part.clone(),
         };

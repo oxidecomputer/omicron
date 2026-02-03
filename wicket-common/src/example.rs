@@ -196,13 +196,17 @@ impl ExampleRackSetupData {
             management_addrs: Some(vec!["172.32.0.4".parse().unwrap()]),
         });
 
+        let rack_subnet_address =
+            Some(Ipv6Addr::new(0xfd00, 0x1122, 0x3344, 0x0100, 0, 0, 0, 0));
+
         let rack_network_config = UserSpecifiedRackNetworkConfig {
+            rack_subnet_address,
             infra_ip_first: "172.30.0.1".parse().unwrap(),
             infra_ip_last: "172.30.0.10".parse().unwrap(),
             #[rustfmt::skip]
             switch0: btreemap! {
-		"port0".to_owned() => UserSpecifiedPortConfig {
-		    addresses: vec!["172.30.0.1/24".parse().unwrap()],
+                "port0".to_owned() => UserSpecifiedPortConfig {
+                    addresses: vec!["172.30.0.1/24".parse().unwrap()],
                     routes: vec![RouteConfig {
                         destination: "0.0.0.0/0".parse().unwrap(),
                         nexthop: "172.30.0.10".parse().unwrap(),
@@ -212,11 +216,11 @@ impl ExampleRackSetupData {
                     bgp_peers: switch0_port0_bgp_peers,
                     uplink_port_speed: PortSpeed::Speed400G,
                     uplink_port_fec: Some(PortFec::Firecode),
-		    lldp: switch0_port0_lldp,
-		    tx_eq,
-		    autoneg: true,
-		},
-	    },
+                    lldp: switch0_port0_lldp,
+                    tx_eq,
+                    autoneg: true,
+                },
+            },
             #[rustfmt::skip]
             switch1: btreemap! {
                 // Use the same port name as in switch0 to test that it doesn't
@@ -233,7 +237,7 @@ impl ExampleRackSetupData {
                     uplink_port_speed: PortSpeed::Speed400G,
                     uplink_port_fec: None,
                     lldp: switch1_port0_lldp,
-		    tx_eq,
+                    tx_eq,
                     autoneg: true,
                 },
             },

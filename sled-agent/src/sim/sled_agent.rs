@@ -40,8 +40,8 @@ use omicron_common::disk::{
     DisksManagementResult, OmicronPhysicalDisksConfig,
 };
 use omicron_uuid_kinds::{
-    DatasetUuid, ExternalZpoolUuid, GenericUuid, PhysicalDiskUuid,
-    PropolisUuid, SledUuid, SupportBundleUuid, ZpoolUuid,
+    DatasetUuid, GenericUuid, PhysicalDiskUuid, PropolisUuid, SledUuid,
+    SupportBundleUuid, ZpoolUuid,
 };
 use oxnet::Ipv6Net;
 use propolis_client::instance_spec::FileStorageBackend;
@@ -61,10 +61,11 @@ use sled_agent_types::instance::{
     VmmPutStateResponse, VmmStateRequested, VmmUnregisterResponse,
 };
 use sled_agent_types::inventory::{
-    ConfigReconcilerInventory, ConfigReconcilerInventoryStatus,
-    HostPhase2DesiredSlots, Inventory, InventoryDataset, InventoryDisk,
-    InventoryZpool, OmicronFileSourceResolverInventory, OmicronSledConfig,
-    OmicronZonesConfig, SledRole,
+    ConfigReconcilerInventory, ConfigReconcilerInventoryResult,
+    ConfigReconcilerInventoryStatus, HostPhase2DesiredSlots, Inventory,
+    InventoryDataset, InventoryDisk, InventoryZpool,
+    OmicronFileSourceResolverInventory, OmicronSledConfig, OmicronZonesConfig,
+    SingleMeasurementInventory, SledRole,
 };
 use sled_agent_types::support_bundle::SupportBundleMetadata;
 
@@ -239,13 +240,15 @@ impl SledAgent {
             // pool name.
             let dataset = path.strip_prefix("/dev/zvol/rdsk/oxp_").unwrap();
 
-            // what remains is: UUID/crypt/local_storage/UUID/vol
+            // what remains is: UUID/local_storage_unencrypted/UUID/vol
             let parts: Vec<&str> = dataset.split("/").collect();
             let zpool_id: ZpoolUuid = parts[0].parse().unwrap();
-            let dataset_id: DatasetUuid = parts[3].parse().unwrap();
+            let dataset_id: DatasetUuid = parts[2].parse().unwrap();
 
             // This panics if this dataset was not already created
-            self.storage.lock().get_local_storage_dataset(zpool_id, dataset_id);
+            self.storage
+                .lock()
+                .get_local_storage_unencrypted_dataset(zpool_id, dataset_id);
         }
 
         for (id, _disk) in vmm_spec.crucible_backends() {
@@ -829,6 +832,21 @@ impl SledAgent {
             measurements: Default::default(),
         };
 
+        let reference_measurements = vec![
+            SingleMeasurementInventory {
+                path: "this/is/fake1".into(),
+                result: ConfigReconcilerInventoryResult::Ok,
+            },
+            SingleMeasurementInventory {
+                path: "this/is/fake2".into(),
+                result: ConfigReconcilerInventoryResult::Err {
+                    message: "this is an error".to_string(),
+                },
+            },
+        ]
+        .into_iter()
+        .collect();
+
         Ok(Inventory {
             sled_id: self.id,
             sled_agent_address,
@@ -903,6 +921,7 @@ impl SledAgent {
             file_source_resolver: OmicronFileSourceResolverInventory::new_fake(
             ),
             health_monitor,
+            reference_measurements,
         })
     }
 
@@ -1110,13 +1129,15 @@ impl SledAgent {
 
     pub fn ensure_local_storage_dataset(
         &self,
-        zpool_id: ExternalZpoolUuid,
-        dataset_id: DatasetUuid,
         request: LocalStorageDatasetEnsureRequest,
     ) {
-        self.storage
-            .lock()
-            .ensure_local_storage_dataset(zpool_id, dataset_id, request);
+        assert!(!request.encrypted_at_rest);
+
+        self.storage.lock().ensure_local_storage_unencrypted_dataset(
+            request.zpool_id,
+            request.dataset_id,
+            request,
+        );
     }
 }
 

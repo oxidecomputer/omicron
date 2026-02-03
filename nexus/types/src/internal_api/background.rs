@@ -300,6 +300,7 @@ impl SupportBundleCollectionStep {
     ///
     /// These are used both when creating steps and when validating in tests.
     pub const STEP_BUNDLE_ID: &'static str = "bundle id";
+    pub const STEP_USER_COMMENT: &'static str = "user comment";
     pub const STEP_RECONFIGURATOR_STATE: &'static str = "reconfigurator state";
     pub const STEP_EREPORTS: &'static str = "ereports";
     pub const STEP_SLED_CUBBY_INFO: &'static str = "sled cubby info";
@@ -614,6 +615,7 @@ pub struct BlueprintRendezvousStats {
     pub debug_dataset: DatasetsRendezvousStats,
     pub crucible_dataset: CrucibleDatasetsRendezvousStats,
     pub local_storage_dataset: DatasetsRendezvousStats,
+    pub local_storage_unencrypted_dataset: DatasetsRendezvousStats,
 }
 
 /// Stats for the rendezvous table that stores Crucible datasets
@@ -929,6 +931,12 @@ pub struct ProbeDistributorStatus {
     pub probes_by_sled: HashMap<SledUuid, usize>,
     /// Errors when sending a probe.
     pub errors: Vec<ProbeError>,
+}
+
+#[derive(Serialize, Deserialize)]
+pub enum TrustQuorumManagerStatus {
+    PerRackStatus { statuses: Vec<String>, errors: Vec<String> },
+    Error(String),
 }
 
 #[cfg(test)]

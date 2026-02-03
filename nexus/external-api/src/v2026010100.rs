@@ -50,6 +50,7 @@ use std::net::IpAddr;
 use uuid::Uuid;
 
 use crate::v2026010300;
+use crate::v2026013000;
 
 /// Describes an attachment of an `InstanceNetworkInterface` to an `Instance`,
 /// at the time the instance is created.
@@ -365,7 +366,7 @@ pub struct InstanceCreate {
     /// Use the boot_disk attribute to specify a boot disk. When boot_disk is
     /// specified it will count against the disk attachment limit.
     #[serde(default)]
-    pub disks: Vec<params::InstanceDiskAttachment>,
+    pub disks: Vec<v2026013000::InstanceDiskAttachment>,
 
     /// The disk the instance is configured to boot from.
     ///
@@ -383,7 +384,7 @@ pub struct InstanceCreate {
     /// can change as disks are attached and detached, which may result in an
     /// instance that only boots to the EFI shell until a boot disk is set.
     #[serde(default)]
-    pub boot_disk: Option<params::InstanceDiskAttachment>,
+    pub boot_disk: Option<v2026013000::InstanceDiskAttachment>,
 
     /// An allowlist of SSH public keys to be transferred to the instance via
     /// cloud-init during instance creation.
@@ -452,8 +453,8 @@ impl TryFrom<InstanceCreate> for params::InstanceCreate {
                     ip_version: None,
                 })
                 .collect(),
-            disks: value.disks,
-            boot_disk: value.boot_disk,
+            disks: value.disks.into_iter().map(Into::into).collect(),
+            boot_disk: value.boot_disk.map(Into::into),
             ssh_public_keys: value.ssh_public_keys,
             start: value.start,
             auto_restart_policy: value.auto_restart_policy,

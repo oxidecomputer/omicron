@@ -95,6 +95,21 @@ impl From<UninitializedSledId> for BaseboardId {
     }
 }
 
+#[derive(
+    Clone,
+    Debug,
+    Serialize,
+    Deserialize,
+    JsonSchema,
+    PartialOrd,
+    Ord,
+    PartialEq,
+    Eq,
+)]
+pub struct RackMembershipAddSledsRequest {
+    pub sled_ids: BTreeSet<BaseboardId>,
+}
+
 path_param!(AffinityGroupPath, affinity_group, "affinity group");
 path_param!(AntiAffinityGroupPath, anti_affinity_group, "anti affinity group");
 path_param!(
@@ -247,6 +262,18 @@ pub struct ProjectSelector {
 pub struct OptionalProjectSelector {
     /// Name or ID of the project
     pub project: Option<NameOrId>,
+}
+
+/// Query parameters for ephemeral IP detach endpoint
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
+pub struct EphemeralIpDetachSelector {
+    /// Name or ID of the project
+    pub project: Option<NameOrId>,
+    /// The IP version of the ephemeral IP to detach.
+    ///
+    /// Required when the instance has both IPv4 and IPv6 ephemeral IPs.
+    /// If only one ephemeral IP is attached, this field may be omitted.
+    pub ip_version: Option<IpVersion>,
 }
 
 #[derive(Deserialize, JsonSchema, Clone)]
@@ -1472,22 +1499,107 @@ pub struct IpPoolSiloUpdate {
     pub is_default: bool,
 }
 
-// Floating IPs
+// Subnet Pools
 
-/// Specify how to allocate a floating IP address.
+path_param!(SubnetPoolPath, pool, "subnet pool");
+
+/// Path parameters for subnet pool silo operations
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct SubnetPoolSiloPath {
+    /// Name or ID of the subnet pool
+    pub pool: NameOrId,
+    /// Name or ID of the silo
+    pub silo: NameOrId,
+}
+
+/// Create a subnet pool
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct SubnetPoolCreate {
+    #[serde(flatten)]
+    pub identity: IdentityMetadataCreateParams,
+    /// The IP version for this pool (IPv4 or IPv6). All subnets in the pool
+    /// must match this version.
+    pub ip_version: IpVersion,
+}
+
+/// Update a subnet pool
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct SubnetPoolUpdate {
+    #[serde(flatten)]
+    pub identity: IdentityMetadataUpdateParams,
+}
+
+/// Add a member (subnet) to a subnet pool
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct SubnetPoolMemberAdd {
+    /// The subnet to add to the pool
+    pub subnet: IpNet,
+    /// Minimum prefix length for allocations from this subnet; a smaller prefix
+    /// means larger allocations are allowed (e.g. a /16 prefix yields larger
+    /// subnet allocations than a /24 prefix).
+    ///
+    /// Valid values: 0-32 for IPv4, 0-128 for IPv6.
+    /// Default if not specified is equal to the subnet's prefix length.
+    pub min_prefix_length: Option<u8>,
+    /// Maximum prefix length for allocations from this subnet; a larger prefix
+    /// means smaller allocations are allowed (e.g. a /24 prefix yields smaller
+    /// subnet allocations than a /16 prefix).
+    ///
+    /// Valid values: 0-32 for IPv4, 0-128 for IPv6.
+    /// Default if not specified is 32 for IPv4 and 128 for IPv6.
+    pub max_prefix_length: Option<u8>,
+}
+
+/// Remove a subnet from a pool
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct SubnetPoolMemberRemove {
+    /// The subnet to remove from the pool. Must match an existing entry exactly.
+    pub subnet: IpNet,
+}
+
+/// Link a subnet pool to a silo
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct SubnetPoolLinkSilo {
+    /// The silo to link
+    pub silo: NameOrId,
+    /// Whether this is the default subnet pool for the silo. When true,
+    /// external subnet allocations that don't specify a pool use this one.
+    pub is_default: bool,
+}
+
+/// Update a subnet pool's silo link
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct SubnetPoolSiloUpdate {
+    /// Whether this is the default subnet pool for the silo
+    pub is_default: bool,
+}
+
+// External Subnets
+
+path_param!(ExternalSubnetPath, external_subnet, "external subnet");
+
+/// Selector for looking up an external subnet
+#[derive(Deserialize, JsonSchema, Clone)]
+pub struct ExternalSubnetSelector {
+    /// Name or ID of the project (required if `external_subnet` is a Name)
+    pub project: Option<NameOrId>,
+    /// Name or ID of the external subnet
+    pub external_subnet: NameOrId,
+}
+
+/// Specify how to allocate an external subnet.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(tag = "type", rename_all = "snake_case")]
-pub enum AddressSelector {
-    /// Reserve a specific IP address.
+pub enum ExternalSubnetAllocator {
+    /// Reserve a specific subnet.
     Explicit {
-        /// The IP address to reserve. Must be available in the pool.
-        ip: IpAddr,
-        /// The pool containing this address. If not specified, the default
-        /// pool for the address's IP version is used.
-        pool: Option<NameOrId>,
+        /// The subnet CIDR to reserve. Must be available in the pool.
+        subnet: IpNet,
     },
-    /// Automatically allocate an IP address from a specified pool.
+    /// Automatically allocate a subnet with the specified prefix length.
     Auto {
+        /// The prefix length for the allocated subnet (e.g., 24 for a /24).
+        prefix_len: u8,
         /// Pool selection.
         ///
         /// If omitted, this field uses the silo's default pool. If the
@@ -1498,9 +1610,57 @@ pub enum AddressSelector {
     },
 }
 
-impl Default for AddressSelector {
+/// Create an external subnet
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct ExternalSubnetCreate {
+    #[serde(flatten)]
+    pub identity: IdentityMetadataCreateParams,
+
+    /// Subnet allocation method.
+    pub allocator: ExternalSubnetAllocator,
+}
+
+/// Update an external subnet
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct ExternalSubnetUpdate {
+    #[serde(flatten)]
+    pub identity: IdentityMetadataUpdateParams,
+}
+
+/// Attach an external subnet to an instance
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct ExternalSubnetAttach {
+    /// Name or ID of the instance to attach to
+    pub instance: NameOrId,
+}
+
+// Floating IPs
+
+/// Specify how to allocate a floating IP address.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum AddressAllocator {
+    /// Reserve a specific IP address. The pool is inferred from the address
+    /// since IP pools cannot have overlapping ranges.
+    Explicit {
+        /// The IP address to reserve.
+        ip: IpAddr,
+    },
+    /// Automatically allocate an IP address from a pool.
+    Auto {
+        /// Pool selection.
+        ///
+        /// If omitted, the silo's default pool is used. If the silo has
+        /// default pools for both IPv4 and IPv6, the request will fail
+        /// unless `ip_version` is specified.
+        #[serde(default)]
+        pool_selector: PoolSelector,
+    },
+}
+
+impl Default for AddressAllocator {
     fn default() -> Self {
-        AddressSelector::Auto { pool_selector: PoolSelector::default() }
+        AddressAllocator::Auto { pool_selector: PoolSelector::default() }
     }
 }
 
@@ -1512,7 +1672,7 @@ pub struct FloatingIpCreate {
 
     /// IP address allocation method.
     #[serde(default)]
-    pub address_selector: AddressSelector,
+    pub address_allocator: AddressAllocator,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
@@ -1616,8 +1776,8 @@ pub struct InstanceDiskAttach {
     pub name: Name,
 }
 
-/// Specify which IP pool to allocate from.
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+/// Specify which IP or external subnet pool to allocate from.
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize, JsonSchema)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum PoolSelector {
     /// Use the specified pool by name or ID.
@@ -1670,8 +1830,17 @@ pub struct EphemeralIpCreate {
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ExternalIpDetach {
-    Ephemeral,
-    Floating { floating_ip: NameOrId },
+    Ephemeral {
+        /// The IP version of the ephemeral IP to detach.
+        ///
+        /// Required when the instance has both IPv4 and IPv6 ephemeral IPs.
+        /// If only one ephemeral IP is attached, this field may be omitted.
+        #[serde(default)]
+        ip_version: Option<IpVersion>,
+    },
+    Floating {
+        floating_ip: NameOrId,
+    },
 }
 
 /// Create-time parameters for an `Instance`
@@ -2192,10 +2361,20 @@ pub enum DiskSource {
     },
 
     /// Create a disk from a disk snapshot
-    Snapshot { snapshot_id: Uuid },
+    Snapshot {
+        snapshot_id: Uuid,
+        /// If `true`, the disk created from this snapshot will be read-only.
+        #[serde(default)]
+        read_only: bool,
+    },
 
     /// Create a disk from an image
-    Image { image_id: Uuid },
+    Image {
+        image_id: Uuid,
+        /// If `true`, the disk created from this image will be read-only.
+        #[serde(default)]
+        read_only: bool,
+    },
 
     /// Create a blank disk that will accept bulk writes or pull blocks from an
     /// external source.
@@ -3017,6 +3196,11 @@ pub struct LoginPath {
     pub silo_name: Name,
 }
 
+#[derive(Deserialize, JsonSchema)]
+pub struct RackMembershipConfigPathParams {
+    pub rack_id: Uuid,
+}
+
 /// This is meant as a security feature. We want to ensure we never redirect to
 /// a URI on a different host.
 #[derive(Serialize, Deserialize, Debug, JsonSchema, Clone, Display)]
@@ -3614,6 +3798,11 @@ pub struct ScimV2GroupPathParam {
     pub group_id: String,
 }
 
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct RackMembershipVersionParam {
+    pub version: Option<shared::RackMembershipVersion>,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -4086,5 +4275,69 @@ mod tests {
         let result: Result<MulticastGroupUpdate, _> =
             serde_json::from_str(json);
         assert!(result.is_err(), "Should reject reserved VLAN ID 1");
+    }
+
+    #[test]
+    fn test_address_allocator_explicit_requires_ip() {
+        // Explicit requires an IP address - pool-only is not valid
+        let json = r#"{"type": "explicit", "pool": "my-pool"}"#;
+        let result: Result<AddressAllocator, _> = serde_json::from_str(json);
+        assert!(result.is_err(), "explicit without ip should fail");
+    }
+
+    #[test]
+    fn test_address_allocator_explicit_with_ip() {
+        let json = r#"{"type": "explicit", "ip": "10.0.0.1"}"#;
+        let result: Result<AddressAllocator, _> = serde_json::from_str(json);
+        assert!(result.is_ok(), "explicit with ip should be valid");
+        match result.unwrap() {
+            AddressAllocator::Explicit { ip } => {
+                assert_eq!(ip, "10.0.0.1".parse::<std::net::IpAddr>().unwrap());
+            }
+            _ => panic!("Expected Explicit variant"),
+        }
+    }
+
+    #[test]
+    fn test_address_allocator_explicit_missing_ip() {
+        let json = r#"{"type": "explicit"}"#;
+        let result: Result<AddressAllocator, _> = serde_json::from_str(json);
+        assert!(result.is_err(), "explicit without ip should fail");
+    }
+
+    #[test]
+    fn test_address_allocator_auto_with_explicit_pool() {
+        // To allocate from a specific pool, use Auto with explicit pool_selector
+        let json = r#"{"type": "auto", "pool_selector": {"type": "explicit", "pool": "my-pool"}}"#;
+        let result: Result<AddressAllocator, _> = serde_json::from_str(json);
+        assert!(
+            result.is_ok(),
+            "auto with explicit pool_selector should be valid"
+        );
+        match result.unwrap() {
+            AddressAllocator::Auto { pool_selector } => {
+                assert!(matches!(pool_selector, PoolSelector::Explicit { .. }));
+            }
+            _ => panic!("Expected Auto variant"),
+        }
+    }
+
+    #[test]
+    fn test_address_allocator_auto_with_auto_pool() {
+        // Auto-allocate from default pool
+        let json = r#"{"type": "auto", "pool_selector": {"type": "auto"}}"#;
+        let result: Result<AddressAllocator, _> = serde_json::from_str(json);
+        assert!(result.is_ok(), "auto with auto pool_selector should be valid");
+    }
+
+    #[test]
+    fn test_address_allocator_auto_default() {
+        // Default pool_selector when omitted
+        let json = r#"{"type": "auto"}"#;
+        let result: Result<AddressAllocator, _> = serde_json::from_str(json);
+        assert!(
+            result.is_ok(),
+            "auto without pool_selector should use default"
+        );
     }
 }

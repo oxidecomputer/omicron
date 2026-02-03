@@ -1352,7 +1352,6 @@ impl<'a> TestBoardCollectionBuilder<'a> {
                                     datasets: BTreeMap::new(),
                                     orphaned_datasets: IdOrdMap::new(),
                                     zones: BTreeMap::new(),
-                                    measurements: IdOrdMap::new(),
                                     boot_partitions,
                                     remove_mupdate_override: None,
                                 },
@@ -1373,6 +1372,7 @@ impl<'a> TestBoardCollectionBuilder<'a> {
                             file_source_resolver:
                                 OmicronFileSourceResolverInventory::new_fake(),
                             health_monitor: HealthMonitorInventory::new(),
+                            reference_measurements: IdOrdMap::new(),
                         },
                     )
                     .unwrap();

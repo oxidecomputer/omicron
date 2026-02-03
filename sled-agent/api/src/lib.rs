@@ -36,7 +36,9 @@ api_versions!([
     // |  example for the next person.
     // v
     // (next_int, IDENT),
-    (16, ADD_ZPOOLS_HEALTH_CHECK),
+    (18, ADD_ZPOOLS_HEALTH_CHECK),
+    (17, TWO_TYPES_OF_DELEGATED_ZVOL),
+    (16, MEASUREMENT_PROPER_INVENTORY),
     (15, ADD_TRUST_QUORUM_STATUS),
     (14, MEASUREMENTS),
     (13, ADD_TRUST_QUORUM),
@@ -418,13 +420,27 @@ pub trait SledAgentApi {
         operation_id = "vmm_register",
         method = PUT,
         path = "/vmms/{propolis_id}",
-        versions = VERSION_ADD_DUAL_STACK_EXTERNAL_IP_CONFIG..
+        versions = VERSION_TWO_TYPES_OF_DELEGATED_ZVOL..
     }]
     async fn vmm_register(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<latest::instance::VmmPathParam>,
         body: TypedBody<latest::instance::InstanceEnsureBody>,
     ) -> Result<HttpResponseOk<SledVmmState>, HttpError>;
+
+    #[endpoint {
+        operation_id = "vmm_register",
+        method = PUT,
+        path = "/vmms/{propolis_id}",
+        versions = VERSION_ADD_DUAL_STACK_EXTERNAL_IP_CONFIG..VERSION_TWO_TYPES_OF_DELEGATED_ZVOL
+    }]
+    async fn vmm_register_v11(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::instance::VmmPathParam>,
+        body: TypedBody<v11::instance::InstanceEnsureBody>,
+    ) -> Result<HttpResponseOk<SledVmmState>, HttpError> {
+        Self::vmm_register(rqctx, path_params, body.map(Into::into)).await
+    }
 
     #[endpoint {
         operation_id = "vmm_register",
@@ -438,9 +454,8 @@ pub trait SledAgentApi {
         path_params: Path<v1::instance::VmmPathParam>,
         body: TypedBody<v10::instance::InstanceEnsureBody>,
     ) -> Result<HttpResponseOk<SledVmmState>, HttpError> {
-        let body =
-            body.try_map(latest::instance::InstanceEnsureBody::try_from)?;
-        Self::vmm_register(rqctx, path_params, body).await
+        let body = body.try_map(v11::instance::InstanceEnsureBody::try_from)?;
+        Self::vmm_register(rqctx, path_params, body.map(Into::into)).await
     }
 
     #[endpoint {
@@ -756,14 +771,13 @@ pub trait SledAgentApi {
         operation_id = "inventory",
         method = GET,
         path = "/inventory",
-        versions = VERSION_MEASUREMENTS..VERSION_ADD_ZPOOLS_HEALTH_CHECK,
+        versions = VERSION_MEASUREMENTS..VERSION_MEASUREMENT_PROPER_INVENTORY,
     }]
     async fn inventory_v14(
         rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<v14::inventory::Inventory>, HttpError> {
-        Self::inventory(rqctx).await.map(|HttpResponseOk(inv)| {
-            HttpResponseOk(v14::inventory::Inventory::from(inv))
-        })
+        let HttpResponseOk(inventory) = Self::inventory(rqctx).await?;
+        inventory.try_into().map_err(HttpError::from).map(HttpResponseOk)
     }
 
     /// Fetch basic information about this sled
@@ -1094,26 +1108,81 @@ pub trait SledAgentApi {
 
     /// Create a local storage dataset
     #[endpoint {
+        operation_id = "local_storage_dataset_ensure",
         method = POST,
-        path = "/local-storage/{zpool_id}/{dataset_id}",
-        versions = VERSION_DELEGATE_ZVOL_TO_PROPOLIS..,
+        path = "/local-storage",
+        versions = VERSION_TWO_TYPES_OF_DELEGATED_ZVOL..,
     }]
     async fn local_storage_dataset_ensure(
         request_context: RequestContext<Self::Context>,
-        path_params: Path<latest::dataset::LocalStoragePathParam>,
         body: TypedBody<latest::dataset::LocalStorageDatasetEnsureRequest>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
+
+    /// Create a local storage dataset
+    #[endpoint {
+        operation_id = "local_storage_dataset_ensure",
+        method = POST,
+        path = "/local-storage/{zpool_id}/{dataset_id}",
+        versions = VERSION_DELEGATE_ZVOL_TO_PROPOLIS..VERSION_TWO_TYPES_OF_DELEGATED_ZVOL,
+    }]
+    async fn local_storage_dataset_ensure_v9(
+        request_context: RequestContext<Self::Context>,
+        path_params: Path<v9::dataset::LocalStoragePathParam>,
+        body: TypedBody<v9::dataset::LocalStorageDatasetEnsureRequest>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        let path_params = path_params.into_inner();
+        let body = body.into_inner();
+
+        Self::local_storage_dataset_ensure(
+            request_context,
+            latest::dataset::LocalStorageDatasetEnsureRequest::from(
+                path_params.zpool_id,
+                path_params.dataset_id,
+                body,
+            )
+            .into(),
+        )
+        .await
+    }
+
+    /// Delete a local storage dataset
+    #[endpoint {
+        operation_id = "local_storage_dataset_delete",
+        method = DELETE,
+        path = "/local-storage",
+        versions = VERSION_TWO_TYPES_OF_DELEGATED_ZVOL..,
+    }]
+    async fn local_storage_dataset_delete(
+        request_context: RequestContext<Self::Context>,
+        body: TypedBody<latest::dataset::LocalStorageDatasetDeleteRequest>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
 
     /// Delete a local storage dataset
     #[endpoint {
+        operation_id = "local_storage_dataset_delete",
         method = DELETE,
         path = "/local-storage/{zpool_id}/{dataset_id}",
-        versions = VERSION_DELEGATE_ZVOL_TO_PROPOLIS..,
+        versions = VERSION_DELEGATE_ZVOL_TO_PROPOLIS..VERSION_TWO_TYPES_OF_DELEGATED_ZVOL,
     }]
-    async fn local_storage_dataset_delete(
+    async fn local_storage_dataset_delete_v9(
         request_context: RequestContext<Self::Context>,
-        path_params: Path<latest::dataset::LocalStoragePathParam>,
-    ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
+        path_params: Path<v9::dataset::LocalStoragePathParam>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        let path_params = path_params.into_inner();
+
+        Self::local_storage_dataset_delete(
+            request_context,
+            latest::dataset::LocalStorageDatasetDeleteRequest {
+                zpool_id: path_params.zpool_id,
+                dataset_id: path_params.dataset_id,
+                // This version of the API assumed it would be using the
+                // encrypted dataset.
+                encrypted_at_rest: true,
+            }
+            .into(),
+        )
+        .await
+    }
 
     /// Initiate a trust quorum reconfiguration
     #[endpoint {

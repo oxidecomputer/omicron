@@ -345,6 +345,7 @@ pub(crate) mod test {
         create_project,
     };
     use nexus_test_utils_macros::nexus_test;
+    use nexus_types::external_api::params;
     use omicron_common::api::external::SimpleIdentityOrName;
     use sled_agent_types::instance::InstanceExternalIpBody;
 
@@ -362,8 +363,11 @@ pub(crate) mod test {
             client,
             FIP_NAME,
             &project.identity.id.to_string(),
-            None,
-            Some(v4_pool.identity.name.as_str()),
+            params::AddressAllocator::Auto {
+                pool_selector: params::PoolSelector::Explicit {
+                    pool: v4_pool.identity.name.clone().into(),
+                },
+            },
         )
         .await;
 
