@@ -47,6 +47,7 @@ use omicron_common::policy::INTERNAL_DNS_REDUNDANCY;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::SledKind;
 use omicron_uuid_kinds::VnicUuid;
+use sled_agent_types::inventory::SledRole;
 use sled_agent_types::inventory::ZoneKind;
 use tufaceous_artifact::ArtifactHash;
 use tufaceous_artifact::ArtifactKind;
@@ -219,6 +220,7 @@ pub struct ExampleSystemBuilder {
     cockroachdb_count: ZoneCount,
     boundary_ntp_count: ZoneCount,
     clickhouse_policy: ClickhousePolicy,
+    scrimlet_count: u8,
     create_zones: bool,
     create_disks_in_blueprint: bool,
     target_release: TargetReleaseDescription,
@@ -263,6 +265,7 @@ impl ExampleSystemBuilder {
                 mode: ClickhouseMode::SingleNodeOnly,
                 time_created: Utc::now(),
             },
+            scrimlet_count: 0,
             create_zones: true,
             create_disks_in_blueprint: true,
             target_release: TargetReleaseDescription::Initial,
@@ -286,6 +289,15 @@ impl ExampleSystemBuilder {
     /// If [`Self::create_zones`] is set to `false`, this is ignored.
     pub fn ndisks_per_sled(mut self, ndisks_per_sled: u8) -> Self {
         self.ndisks_per_sled = ndisks_per_sled;
+        self
+    }
+
+    /// Set the number of sleds that identify as Scrimlets in the example
+    /// system.
+    ///
+    /// The default value is 0.
+    pub fn scrimlet_count(mut self, scrimlet_count: u8) -> Self {
+        self.scrimlet_count = scrimlet_count;
         self
     }
 
@@ -556,7 +568,16 @@ impl ExampleSystemBuilder {
         let sled_ids_with_settings: Vec<_> = self
             .sled_settings
             .iter()
-            .map(|settings| (rng.sled_rng.next(), settings))
+            .enumerate()
+            .map(|(i, settings)| {
+                let role = if i < usize::from(self.scrimlet_count) {
+                    SledRole::Scrimlet
+                } else {
+                    SledRole::Gimlet
+                };
+
+                (rng.sled_rng.next(), settings, role)
+            })
             .collect();
 
         let artifacts_by_kind = if let TargetReleaseDescription::TufRepo(repo) =
@@ -578,11 +599,12 @@ impl ExampleSystemBuilder {
             None
         };
 
-        for (sled_id, settings) in &sled_ids_with_settings {
+        for (sled_id, settings, role) in &sled_ids_with_settings {
             let _ = system
                 .sled(
                     SledBuilder::new()
                         .id(*sled_id)
+                        .sled_role(*role)
                         .npools(self.ndisks_per_sled)
                         .policy(settings.policy),
                 )
@@ -1554,6 +1576,7 @@ mod tests {
                 .oximeter_count(1)
                 .external_dns_count(5)
                 .expect("expected to be able to set external_dns_count")
+                .scrimlet_count(2)
                 .clickhouse_policy(ClickhousePolicy {
                     version: 0,
                     mode: ClickhouseMode::Both {
@@ -1790,16 +1813,17 @@ mod tests {
                 | ServiceName::NexusLockstep
                 | ServiceName::Oximeter
                 | ServiceName::OximeterReader
-                | ServiceName::RepoDepot => {
+                | ServiceName::RepoDepot
+                | ServiceName::ManagementGatewayService
+                | ServiceName::Dendrite
+                | ServiceName::Mgd => {
                     out.insert(service, Ok(()));
                 }
-                // Services that are not currently part of the example system.
-                ServiceName::ManagementGatewayService
-                | ServiceName::Wicketd
-                | ServiceName::Dendrite
+                // DNS records for Wicketd, Tfportd, and Maghemite don't
+                // currently exist, even on real deployed systems.
+                ServiceName::Wicketd
                 | ServiceName::Tfport
-                | ServiceName::Maghemite
-                | ServiceName::Mgd => {
+                | ServiceName::Maghemite => {
                     out.insert(service, Err(QueryError::NoRecordsFound));
                 }
                 // InternalNtp is too large to fit in a single DNS packet and
