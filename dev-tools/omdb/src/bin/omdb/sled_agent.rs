@@ -43,6 +43,10 @@ enum SledAgentCommands {
     /// print information about the local bootstore node
     #[clap(subcommand)]
     Bootstore(BootstoreCommands),
+
+    /// print information about the local trust quorum node
+    #[clap(subcommand)]
+    TrustQuorum(TrustQuorumCommands),
 }
 
 #[derive(Debug, Subcommand)]
@@ -69,6 +73,12 @@ enum SwitchZonePolicyCommands {
 #[derive(Debug, Subcommand)]
 enum BootstoreCommands {
     /// show the internal state of the local bootstore node
+    Status,
+}
+
+#[derive(Debug, Subcommand)]
+enum TrustQuorumCommands {
+    /// show the status of the local trust quorum node
     Status,
 }
 
@@ -121,6 +131,9 @@ impl SledAgentArgs {
             }
             SledAgentCommands::Bootstore(BootstoreCommands::Status) => {
                 cmd_bootstore_status(&client).await
+            }
+            SledAgentCommands::TrustQuorum(TrustQuorumCommands::Status) => {
+                cmd_trust_quorum_status(&client).await
             }
         }
     }
@@ -222,6 +235,44 @@ async fn cmd_bootstore_status(
     for addr in status.negotiating_connections.iter() {
         println!("    {addr}");
     }
+
+    Ok(())
+}
+
+/// Runs `omdb sled-agent trust-quorum status`
+async fn cmd_trust_quorum_status(
+    client: &sled_agent_client::Client,
+) -> Result<(), anyhow::Error> {
+    let status = client
+        .trust_quorum_status()
+        .await
+        .context("trust quorum status")?
+        .into_inner();
+
+    println!("connected peers:");
+    if status.connected_peers.is_empty() {
+        println!("    <none>");
+    }
+    for peer in status.connected_peers.iter() {
+        println!("    {peer}");
+    }
+
+    println!("alarms:");
+    if status.alarms.is_empty() {
+        println!("    <none>");
+    }
+    for alarm in status.alarms.iter() {
+        println!("    {:?}", alarm);
+    }
+
+    println!("persistent state:");
+    println!("    has lrtq share: {}", status.persistent_state.has_lrtq_share);
+    println!("    configs: {:?}", status.persistent_state.configs);
+    println!("    shares: {:?}", status.persistent_state.shares);
+    println!("    commits: {:?}", status.persistent_state.commits);
+    println!("    expunged: {:?}", status.persistent_state.expunged);
+
+    println!("proxied requests: {}", status.proxied_requests);
 
     Ok(())
 }
