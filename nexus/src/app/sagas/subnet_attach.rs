@@ -20,8 +20,8 @@ use anyhow::Context as _;
 use nexus_db_model::IpAttachState;
 use nexus_db_model::IpNet;
 use nexus_db_model::IpVersion;
-use nexus_db_queries::db::datastore::ExternalSubnetAttachResult;
 use nexus_db_queries::db::datastore::ExternalSubnetBeginAttachResult;
+use nexus_db_queries::db::datastore::ExternalSubnetCompleteAttachResult;
 use nexus_types::external_api::views;
 use nexus_types::identity::Resource;
 use serde::Deserialize;
@@ -115,8 +115,8 @@ async fn ssa_begin_attach_subnet_undo(
         .await
         .map_err(ActionError::action_failed)
     {
-        Ok(ExternalSubnetAttachResult::Modified) => Ok(()),
-        Ok(ExternalSubnetAttachResult::NoChanges) => {
+        Ok(ExternalSubnetCompleteAttachResult::Modified(_)) => Ok(()),
+        Ok(ExternalSubnetCompleteAttachResult::NoChanges) => {
             warn!(log, "subnet is deleted, could not fully detach");
             Ok(())
         }
@@ -215,8 +215,10 @@ async fn ssa_complete_attach(
         )
         .await
     {
-        Ok(ExternalSubnetAttachResult::Modified) => Ok(subnet.into()),
-        Ok(ExternalSubnetAttachResult::NoChanges) => {
+        Ok(ExternalSubnetCompleteAttachResult::Modified(subnet)) => {
+            Ok(subnet.into())
+        }
+        Ok(ExternalSubnetCompleteAttachResult::NoChanges) => {
             warn!(log, "ssa_complete_attach ran more than once");
             Ok(subnet.into())
         }

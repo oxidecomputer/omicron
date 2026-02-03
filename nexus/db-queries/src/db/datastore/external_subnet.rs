@@ -1158,7 +1158,7 @@ impl DataStore {
         id: ExternalSubnetUuid,
         from: IpAttachState,
         to: IpAttachState,
-    ) -> Result<ExternalSubnetAttachResult, Error> {
+    ) -> Result<ExternalSubnetCompleteAttachResult, Error> {
         use nexus_db_schema::schema::external_subnet::dsl;
         if !matches!(from, IpAttachState::Attaching | IpAttachState::Detaching)
         {
@@ -1186,18 +1186,23 @@ impl DataStore {
             //
             // In either case, we can just set the values we need.
             (_, IpAttachState::Detached) => {
-                let n_rows = initial_update
+                let mut rows = initial_update
                     .set((
                         dsl::instance_id.eq(Option::<Uuid>::None),
                         dsl::time_modified.eq(now),
                         dsl::attach_state.eq(to),
                     ))
-                    .execute_async(&*conn)
+                    .returning(ExternalSubnet::as_returning())
+                    .get_results_async(&*conn)
                     .await
-                    .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
-                match n_rows {
-                    0 => Ok(ExternalSubnetAttachResult::NoChanges),
-                    1 => Ok(ExternalSubnetAttachResult::Modified),
+                    .map_err(|e| {
+                        public_error_from_diesel(e, ErrorHandler::Server)
+                    })?;
+                match rows.len() {
+                    0 => Ok(ExternalSubnetCompleteAttachResult::NoChanges),
+                    1 => Ok(ExternalSubnetCompleteAttachResult::Modified(
+                        rows.pop().expect("just checked it has 1 element"),
+                    )),
                     n => Err(Error::internal_error(&format!(
                         "In `external_subnet_complete_op` expected 0 or 1 \
                         rows to be modified, found {n}",
@@ -1222,7 +1227,11 @@ impl DataStore {
                     .await
                     .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
                     .and_then(|r| match r.status {
-                        UpdateStatus::Updated => Ok(ExternalSubnetAttachResult::Modified),
+                        UpdateStatus::Updated => {
+                            Ok(ExternalSubnetCompleteAttachResult::Modified(
+                                r.found,
+                            ))
+                        }
                         UpdateStatus::NotUpdatedButExists
                             if r.found.attach_state == IpAttachState::Detached
                                 || r.found.identity.time_deleted.is_some() => {
@@ -1230,21 +1239,26 @@ impl DataStore {
                                 "unwinding due to concurrent instance delete"
                             ))
                         }
-                        UpdateStatus::NotUpdatedButExists => Ok(ExternalSubnetAttachResult::NoChanges),
+                        UpdateStatus::NotUpdatedButExists => {
+                            Ok(ExternalSubnetCompleteAttachResult::NoChanges)
+                        }
                     })
             }
             // Undoing a failed detach saga.
             (IpAttachState::Detaching, IpAttachState::Attached) => {
-                let n_rows = initial_update.set((
-                    dsl::time_modified.eq(now),
-                    dsl::attach_state.eq(to),
-                ))
-                    .execute_async(&*conn)
+                let mut rows = initial_update
+                    .set((dsl::time_modified.eq(now), dsl::attach_state.eq(to)))
+                    .returning(ExternalSubnet::as_returning())
+                    .get_results_async(&*conn)
                     .await
-                    .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
-                match n_rows {
-                    0 => Ok(ExternalSubnetAttachResult::NoChanges),
-                    1 => Ok(ExternalSubnetAttachResult::Modified),
+                    .map_err(|e| {
+                        public_error_from_diesel(e, ErrorHandler::Server)
+                    })?;
+                match rows.len() {
+                    0 => Ok(ExternalSubnetCompleteAttachResult::NoChanges),
+                    1 => Ok(ExternalSubnetCompleteAttachResult::Modified(
+                        rows.pop().expect("just checked it has 1 element"),
+                    )),
                     n => Err(Error::internal_error(&format!(
                         "In `external_subnet_complete_op` expected 0 or 1 \
                         rows to be modified, found {n}",
@@ -1266,8 +1280,8 @@ pub struct ExternalSubnetBeginAttachResult {
 }
 
 #[derive(Debug, serde::Deserialize, serde::Serialize)]
-pub enum ExternalSubnetAttachResult {
-    Modified,
+pub enum ExternalSubnetCompleteAttachResult {
+    Modified(ExternalSubnet),
     NoChanges,
 }
 

@@ -16,8 +16,8 @@ use crate::app::sagas::instance_common::send_subnet_attachment_to_dpd;
 use crate::app::sagas::instance_common::send_subnet_attachment_to_opte;
 use anyhow::Context as _;
 use nexus_db_model::IpAttachState;
-use nexus_db_queries::db::datastore::ExternalSubnetAttachResult;
 use nexus_db_queries::db::datastore::ExternalSubnetBeginAttachResult;
+use nexus_db_queries::db::datastore::ExternalSubnetCompleteAttachResult;
 use nexus_types::external_api::views;
 use serde::Deserialize;
 use serde::Serialize;
@@ -102,8 +102,8 @@ async fn ssd_begin_detach_subnet_undo(
         )
         .await
     {
-        Ok(ExternalSubnetAttachResult::Modified) => Ok(()),
-        Ok(ExternalSubnetAttachResult::NoChanges) => {
+        Ok(ExternalSubnetCompleteAttachResult::Modified(_)) => Ok(()),
+        Ok(ExternalSubnetCompleteAttachResult::NoChanges) => {
             warn!(log, "subnet is deleted, could not reattach");
             Ok(())
         }
@@ -220,8 +220,10 @@ async fn ssd_complete_detach(
         )
         .await
     {
-        Ok(ExternalSubnetAttachResult::Modified) => Ok(subnet.into()),
-        Ok(ExternalSubnetAttachResult::NoChanges) => {
+        Ok(ExternalSubnetCompleteAttachResult::Modified(subnet)) => {
+            Ok(subnet.into())
+        }
+        Ok(ExternalSubnetCompleteAttachResult::NoChanges) => {
             warn!(log, "ssd_complete_detach ran more than once");
             Ok(subnet.into())
         }
