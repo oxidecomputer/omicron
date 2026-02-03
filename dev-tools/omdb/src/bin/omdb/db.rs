@@ -161,6 +161,7 @@ use omicron_uuid_kinds::InstanceUuid;
 use omicron_uuid_kinds::ParseError;
 use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::PropolisUuid;
+use omicron_uuid_kinds::RackUuid;
 use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::VolumeUuid;
 use omicron_uuid_kinds::ZpoolUuid;
@@ -435,6 +436,8 @@ enum DbCommands {
     /// More precisely, `omdb db whatis` reports tables containing a unique UUID
     /// column with the specified value.
     Whatis(whatis::WhatisArgs),
+    /// Print information about trust quorum configurations
+    TrustQuorum(TrustQuorumArgs),
 }
 
 #[derive(Debug, Args, Clone)]
@@ -1162,6 +1165,25 @@ struct SetStorageBufferArgs {
     storage_buffer: i64,
 }
 
+#[derive(Debug, Args, Clone)]
+struct TrustQuorumArgs {
+    #[command(subcommand)]
+    command: TrustQuorumCommands,
+}
+
+#[derive(Debug, Subcommand, Clone)]
+enum TrustQuorumCommands {
+    /// List trust quorum configurations for a rack
+    ListConfigs(TrustQuorumListConfigsArgs),
+}
+
+#[derive(Debug, Args, Clone)]
+struct TrustQuorumListConfigsArgs {
+    /// Rack ID to list configurations for
+    #[arg(long)]
+    rack_id: RackUuid,
+}
+
 impl DbArgs {
     /// Run a `omdb db` subcommand.
     ///
@@ -1531,6 +1553,11 @@ impl DbArgs {
                     }
                     DbCommands::Whatis(args) => {
                         whatis::cmd_db_whatis(&datastore, args).await
+                    }
+                    DbCommands::TrustQuorum(TrustQuorumArgs {
+                        command: TrustQuorumCommands::ListConfigs(args),
+                    }) => {
+                        cmd_db_trust_quorum_list_configs(&opctx, &datastore, &fetch_opts, &args).await
                     }
                 }
             }
@@ -8105,6 +8132,72 @@ async fn cmd_db_zpool_set_storage_buffer(
         "set pool {} control plane storage buffer bytes to {}",
         args.id, args.storage_buffer,
     );
+
+    Ok(())
+}
+
+/// Run `omdb db trust-quorum list-configs`.
+async fn cmd_db_trust_quorum_list_configs(
+    opctx: &OpContext,
+    datastore: &DataStore,
+    fetch_opts: &DbFetchOptions,
+    args: &TrustQuorumListConfigsArgs,
+) -> Result<(), anyhow::Error> {
+    #[derive(Tabled)]
+    #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
+    struct TqConfigRow {
+        epoch: i64,
+        #[tabled(display_with = "option_impl_display")]
+        last_committed_epoch: Option<i64>,
+        state: String,
+        threshold: u8,
+        commit_crash_tolerance: u8,
+        coordinator: Uuid,
+        #[tabled(display_with = "datetime_rfc3339_concise")]
+        time_created: DateTime<Utc>,
+        #[tabled(display_with = "option_datetime_rfc3339_concise")]
+        time_committing: Option<DateTime<Utc>>,
+        #[tabled(display_with = "option_datetime_rfc3339_concise")]
+        time_committed: Option<DateTime<Utc>>,
+        #[tabled(display_with = "option_datetime_rfc3339_concise")]
+        time_aborted: Option<DateTime<Utc>>,
+        #[tabled(display_with = "display_option_blank")]
+        abort_reason: Option<String>,
+    }
+
+    let limit = fetch_opts.fetch_limit;
+    let configs = datastore
+        .tq_list_config(opctx, args.rack_id, &first_page::<i64>(limit))
+        .await
+        .context("listing trust quorum configurations")?;
+
+    check_limit(&configs, limit, || {
+        String::from("listing trust quorum configurations")
+    });
+
+    let rows: Vec<TqConfigRow> = configs
+        .into_iter()
+        .map(|config| TqConfigRow {
+            epoch: config.epoch,
+            last_committed_epoch: config.last_committed_epoch,
+            state: format!("{:?}", config.state),
+            threshold: config.threshold.into(),
+            commit_crash_tolerance: config.commit_crash_tolerance.into(),
+            coordinator: config.coordinator,
+            time_created: config.time_created,
+            time_committing: config.time_committing,
+            time_committed: config.time_committed,
+            time_aborted: config.time_aborted,
+            abort_reason: config.abort_reason,
+        })
+        .collect();
+
+    let table = tabled::Table::new(rows)
+        .with(tabled::settings::Style::empty())
+        .with(tabled::settings::Padding::new(0, 1, 0, 0))
+        .to_string();
+
+    println!("{}", table);
 
     Ok(())
 }
