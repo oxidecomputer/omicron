@@ -8009,6 +8009,24 @@ async fn create_instance_with_pool(
     .await
 }
 
+pub async fn fetch_instance_network_interfaces(
+    client: &ClientTestContext,
+    instance_name: &str,
+    project_name: &str,
+) -> Vec<InstanceNetworkInterface> {
+    let url = format!(
+        "/v1/network-interfaces?project={project_name}&instance={instance_name}"
+    );
+    let nics = NexusRequest::object_get(client, &url)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .expect("Failed to fetch instance NICs")
+        .parsed_body::<ResultsPage<InstanceNetworkInterface>>()
+        .expect("Failed to parse NICs");
+    nics.items
+}
+
 pub async fn fetch_instance_external_ips(
     client: &ClientTestContext,
     instance_name: &str,

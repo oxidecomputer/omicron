@@ -256,6 +256,11 @@ impl NexusSaga for SagaInstanceCreate {
         //
         // All of these together are a pretty big chunk of work, and should be
         // tackled on their own. So we're deferring that for now.
+        //
+        // Also note that we're intentionally not adding automatic SNAT
+        // addresses for IPv6. That's a short-term fix for
+        // https://github.com/oxidecomputer/omicron/issues/9683, but as noted
+        // above, fixing #4317 is the right long-term solution.
         match &params.create_params.network_interfaces {
             params::InstanceNetworkInterfaceAttachment::Create(nics) => {
                 if let Some(primary) = nics.first() {
@@ -267,14 +272,6 @@ impl NexusSaga for SagaInstanceCreate {
                         ));
                         builder.append(create_snat_ipv4_action());
                     }
-                    if primary.ip_config.has_ipv6_stack() {
-                        builder.append(Node::action(
-                            "snat_ipv6_id",
-                            "CreateSnatIpv6Id",
-                            ACTION_GENERATE_ID.as_ref(),
-                        ));
-                        builder.append(create_snat_ipv6_action());
-                    }
                 }
             }
             params::InstanceNetworkInterfaceAttachment::DefaultIpv4 => {
@@ -285,14 +282,7 @@ impl NexusSaga for SagaInstanceCreate {
                 ));
                 builder.append(create_snat_ipv4_action());
             }
-            params::InstanceNetworkInterfaceAttachment::DefaultIpv6 => {
-                builder.append(Node::action(
-                    "snat_ipv6_id",
-                    "CreateSnatIpv6Id",
-                    ACTION_GENERATE_ID.as_ref(),
-                ));
-                builder.append(create_snat_ipv6_action());
-            }
+            params::InstanceNetworkInterfaceAttachment::DefaultIpv6 => {}
             params::InstanceNetworkInterfaceAttachment::DefaultDualStack => {
                 builder.append(Node::action(
                     "snat_ipv4_id",
@@ -300,12 +290,6 @@ impl NexusSaga for SagaInstanceCreate {
                     ACTION_GENERATE_ID.as_ref(),
                 ));
                 builder.append(create_snat_ipv4_action());
-                builder.append(Node::action(
-                    "snat_ipv6_id",
-                    "CreateSnatIpv6Id",
-                    ACTION_GENERATE_ID.as_ref(),
-                ));
-                builder.append(create_snat_ipv6_action());
             }
             params::InstanceNetworkInterfaceAttachment::None => {}
         }
