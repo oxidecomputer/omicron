@@ -11,8 +11,8 @@
 
 use dropshot::{HttpError, HttpResponseOk, RequestContext, TypedBody};
 use omicron_uuid_kinds::{RackInitUuid, RackResetUuid};
-use sled_agent_types::rack_ops::RackOperationStatus;
 use sled_agent_types::rack_init::RackInitializeRequest;
+use sled_agent_types::rack_ops::RackOperationStatus;
 
 #[dropshot::api_description]
 pub trait BootstrapAgentLockstepApi {
