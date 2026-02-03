@@ -19488,7 +19488,7 @@
         ]
       },
       "DiskSource": {
-        "description": "Different sources for a disk",
+        "description": "Different sources for a Distributed Disk",
         "oneOf": [
           {
             "description": "Create a blank disk",
