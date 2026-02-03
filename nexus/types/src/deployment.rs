@@ -20,6 +20,7 @@ pub use crate::inventory::ZpoolName;
 use blueprint_diff::ClickhouseClusterConfigDiffTablesForSingleBlueprint;
 use blueprint_display::BpDatasetsTableSchema;
 use blueprint_display::BpHostPhase2TableSchema;
+use blueprint_display::BpMeasurementsTableSchema;
 use blueprint_display::BpTableColumn;
 use daft::Diffable;
 use gateway_types::component::SpType;
@@ -55,6 +56,7 @@ use serde::Deserialize;
 use serde::Serialize;
 use sled_agent_types_versions::latest::inventory::HostPhase2DesiredContents;
 use sled_agent_types_versions::latest::inventory::HostPhase2DesiredSlots;
+use sled_agent_types_versions::latest::inventory::OmicronSingleMeasurement;
 use sled_agent_types_versions::latest::inventory::OmicronSledConfig;
 use sled_agent_types_versions::latest::inventory::OmicronZoneConfig;
 use sled_agent_types_versions::latest::inventory::OmicronZoneImageSource;
@@ -967,6 +969,68 @@ impl BpTableData for BlueprintHostPhase2TableData<'_> {
     }
 }
 
+/// Wrapper to display a table of a `BlueprintSledConfig`'s measurements.
+#[derive(Clone, Debug)]
+struct BlueprintMeasurementsTableData<'a> {
+    measurements: &'a BlueprintMeasurements,
+}
+
+impl<'a> BlueprintMeasurementsTableData<'a> {
+    fn new(measurements: &'a BlueprintMeasurements) -> Self {
+        Self { measurements }
+    }
+
+    fn all_rows(
+        measurement: &BlueprintMeasurements,
+        state: BpDiffState,
+    ) -> impl Iterator<Item = BpTableRow> {
+        match measurement {
+            BlueprintMeasurements::Artifacts { artifacts } => artifacts
+                .iter()
+                .map(move |d| {
+                    BpTableRow::from_strings(
+                        state,
+                        vec![d.hash.to_string(), d.version.to_string()],
+                    )
+                })
+                .collect::<Vec<BpTableRow>>()
+                .into_iter(),
+            BlueprintMeasurements::InstallDataset => {
+                vec![BpTableRow::from_strings(
+                    state,
+                    vec![
+                        "install dataset".to_string(),
+                        "(no version)".to_string(),
+                    ],
+                )]
+                .into_iter()
+                .collect::<Vec<BpTableRow>>()
+                .into_iter()
+            }
+        }
+    }
+
+    fn diff_leaf<'b>(
+        diffs: &daft::Leaf<&'b BlueprintMeasurements>,
+    ) -> impl Iterator<Item = BpTableRow> + 'b {
+        if diffs.is_unchanged() {
+            Self::all_rows(diffs.before, BpDiffState::Unchanged)
+                .collect::<Vec<BpTableRow>>()
+                .into_iter()
+        } else {
+            let a = Self::all_rows(diffs.before, BpDiffState::Removed);
+            let b = Self::all_rows(diffs.after, BpDiffState::Added);
+            a.chain(b).collect::<Vec<BpTableRow>>().into_iter()
+        }
+    }
+}
+
+impl BpTableData for BlueprintMeasurementsTableData<'_> {
+    fn rows(&self, state: BpDiffState) -> impl Iterator<Item = BpTableRow> {
+        Self::all_rows(self.measurements, state)
+    }
+}
+
 /// Wrapper to display a table of a `BlueprintSledConfig`'s disks.
 #[derive(Clone, Debug)]
 struct BlueprintPhysicalDisksTableData<'a> {
@@ -1224,6 +1288,7 @@ impl fmt::Display for BlueprintDisplay<'_> {
                 zones,
                 remove_mupdate_override,
                 host_phase_2,
+                measurements,
             } = config;
 
             // Report toplevel sled info
@@ -1250,6 +1315,16 @@ impl fmt::Display for BlueprintDisplay<'_> {
                     .collect(),
             );
             writeln!(f, "{host_phase_2_table}\n")?;
+
+            // Construct the desired host phase 2 contents table
+            let measurements_table = BpTable::new(
+                BpMeasurementsTableSchema {},
+                None,
+                BlueprintMeasurementsTableData::new(measurements)
+                    .rows(BpDiffState::Unchanged)
+                    .collect(),
+            );
+            writeln!(f, "{measurements_table}\n")?;
 
             // Construct the disks subtable
             let disks_table = BpTable::new(
@@ -1364,6 +1439,8 @@ pub struct BlueprintSledConfig {
     pub zones: IdOrdMap<BlueprintZoneConfig>,
     pub remove_mupdate_override: Option<MupdateOverrideUuid>,
     pub host_phase_2: BlueprintHostPhase2DesiredSlots,
+    #[serde(default = "BlueprintMeasurements::default")]
+    pub measurements: BlueprintMeasurements,
 }
 
 impl BlueprintSledConfig {
@@ -1414,7 +1491,7 @@ impl BlueprintSledConfig {
                 .collect(),
             remove_mupdate_override: self.remove_mupdate_override,
             host_phase_2: self.host_phase_2.into(),
-            measurements: BTreeSet::new(),
+            measurements: self.measurements.into(),
         }
     }
 
@@ -1816,6 +1893,94 @@ impl fmt::Display for BlueprintArtifactVersion {
             BlueprintArtifactVersion::Unknown => {
                 write!(f, "(unknown version)")
             }
+        }
+    }
+}
+
+#[derive(
+    Clone,
+    Debug,
+    PartialEq,
+    Eq,
+    Hash,
+    PartialOrd,
+    Ord,
+    JsonSchema,
+    Deserialize,
+    Serialize,
+    Diffable,
+)]
+pub struct BlueprintSingleMeasurement {
+    pub version: BlueprintArtifactVersion,
+    pub hash: ArtifactHash,
+}
+
+impl Display for BlueprintSingleMeasurement {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{} {}", self.hash, self.version)
+    }
+}
+
+#[derive(
+    Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq, Diffable,
+)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum BlueprintMeasurements {
+    InstallDataset,
+    Artifacts { artifacts: BTreeSet<BlueprintSingleMeasurement> },
+}
+
+impl BlueprintMeasurements {
+    fn default() -> Self {
+        Self::InstallDataset
+    }
+
+    fn len(&self) -> usize {
+        match self {
+            BlueprintMeasurements::InstallDataset => 0,
+            BlueprintMeasurements::Artifacts { artifacts } => artifacts.len(),
+        }
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = &BlueprintSingleMeasurement> {
+        match self {
+            BlueprintMeasurements::InstallDataset => {
+                std::iter::empty::<&BlueprintSingleMeasurement>()
+                    .collect::<Vec<&BlueprintSingleMeasurement>>()
+                    .into_iter()
+            }
+            BlueprintMeasurements::Artifacts { artifacts } => artifacts
+                .iter()
+                .collect::<Vec<&BlueprintSingleMeasurement>>()
+                .into_iter(),
+        }
+    }
+}
+
+impl Display for BlueprintMeasurements {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            BlueprintMeasurements::InstallDataset => {
+                writeln!(f, "(install dataset)")?;
+            }
+            BlueprintMeasurements::Artifacts { artifacts } => {
+                for m in artifacts {
+                    writeln!(f, "{m}")?;
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
+impl From<BlueprintMeasurements> for BTreeSet<OmicronSingleMeasurement> {
+    fn from(value: BlueprintMeasurements) -> Self {
+        match value {
+            BlueprintMeasurements::InstallDataset => BTreeSet::new(),
+            BlueprintMeasurements::Artifacts { artifacts } => artifacts
+                .into_iter()
+                .map(|x| OmicronSingleMeasurement { hash: x.hash })
+                .collect(),
         }
     }
 }

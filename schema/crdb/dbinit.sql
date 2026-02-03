@@ -5213,6 +5213,18 @@ CREATE TABLE IF NOT EXISTS omicron.public.bp_sled_metadata (
     PRIMARY KEY (blueprint_id, sled_id)
 );
 
+-- description of measurements specified in a blueprint
+CREATE TABLE IF NOT EXISTS omicron.public.bp_single_measurements (
+    -- foreign key into the `blueprint` table
+    blueprint_id UUID NOT NULL,
+    sled_id UUID NOT NULL,
+    -- id solely for database purposes
+    id UUID NOT NULL,
+
+     image_artifact_sha256 STRING(64) NOT NULL,
+     PRIMARY KEY (blueprint_id, id)
+);
+
 -- description of omicron physical disks specified in a blueprint.
 CREATE TABLE IF NOT EXISTS omicron.public.bp_omicron_physical_disk  (
     -- foreign key into the `blueprint` table
@@ -8192,7 +8204,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '231.0.0', NULL)
+    (TRUE, NOW(), NOW(), '232.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;
