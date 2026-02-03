@@ -11,6 +11,7 @@ use anyhow::Context;
 use anyhow::bail;
 use clap::Args;
 use clap::Subcommand;
+use sled_agent_client::types::NodeStatus;
 use sled_agent_client::types::OperatorSwitchZonePolicy;
 
 /// Arguments to the "omdb sled-agent" subcommand
@@ -43,6 +44,10 @@ enum SledAgentCommands {
     /// print information about the local bootstore node
     #[clap(subcommand)]
     Bootstore(BootstoreCommands),
+
+    /// print information about the local trust quorum node
+    #[clap(subcommand)]
+    TrustQuorum(TrustQuorumCommands),
 }
 
 #[derive(Debug, Subcommand)]
@@ -70,6 +75,24 @@ enum SwitchZonePolicyCommands {
 enum BootstoreCommands {
     /// show the internal state of the local bootstore node
     Status,
+}
+
+#[derive(Debug, Subcommand)]
+enum TrustQuorumCommands {
+    /// show the status of the local trust quorum node
+    Status,
+    /// show the status of a trust quorum node via proxy
+    ProxyStatus(TrustQuorumProxyStatusArgs),
+}
+
+#[derive(Debug, Args)]
+struct TrustQuorumProxyStatusArgs {
+    /// Oxide part number of the target sled
+    #[clap(long)]
+    part_number: String,
+    /// Serial number of the target sled
+    #[clap(long)]
+    serial_number: String,
 }
 
 impl SledAgentArgs {
@@ -122,6 +145,12 @@ impl SledAgentArgs {
             SledAgentCommands::Bootstore(BootstoreCommands::Status) => {
                 cmd_bootstore_status(&client).await
             }
+            SledAgentCommands::TrustQuorum(TrustQuorumCommands::Status) => {
+                cmd_trust_quorum_status(&client).await
+            }
+            SledAgentCommands::TrustQuorum(
+                TrustQuorumCommands::ProxyStatus(args),
+            ) => cmd_trust_quorum_proxy_status(&client, args).await,
         }
     }
 }
@@ -224,4 +253,62 @@ async fn cmd_bootstore_status(
     }
 
     Ok(())
+}
+
+/// Runs `omdb sled-agent trust-quorum status`
+async fn cmd_trust_quorum_status(
+    client: &sled_agent_client::Client,
+) -> Result<(), anyhow::Error> {
+    let status = client
+        .trust_quorum_status()
+        .await
+        .context("trust quorum status")?
+        .into_inner();
+
+    print_trust_quorum_status(status);
+
+    Ok(())
+}
+
+/// Runs `omdb sled-agent trust-quorum proxy-status`
+async fn cmd_trust_quorum_proxy_status(
+    client: &sled_agent_client::Client,
+    args: &TrustQuorumProxyStatusArgs,
+) -> Result<(), anyhow::Error> {
+    let status = client
+        .trust_quorum_proxy_status(&args.part_number, &args.serial_number)
+        .await
+        .context("trust quorum proxy status")?
+        .into_inner();
+
+    print_trust_quorum_status(status);
+
+    Ok(())
+}
+
+fn print_trust_quorum_status(status: NodeStatus) {
+    println!("connected peers:");
+    if status.connected_peers.is_empty() {
+        println!("    <none>");
+    }
+    for peer in status.connected_peers.iter() {
+        println!("    {peer}");
+    }
+
+    println!("alarms:");
+    if status.alarms.is_empty() {
+        println!("    <none>");
+    }
+    for alarm in status.alarms.iter() {
+        println!("    {:?}", alarm);
+    }
+
+    println!("persistent state:");
+    println!("    has lrtq share: {}", status.persistent_state.has_lrtq_share);
+    println!("    configs: {:?}", status.persistent_state.configs);
+    println!("    shares: {:?}", status.persistent_state.shares);
+    println!("    commits: {:?}", status.persistent_state.commits);
+    println!("    expunged: {:?}", status.persistent_state.expunged);
+
+    println!("proxied requests: {}", status.proxied_requests);
 }
