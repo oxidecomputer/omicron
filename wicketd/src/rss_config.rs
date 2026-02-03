@@ -241,23 +241,22 @@ impl CurrentRssConfig {
         // a small rack cluster that does not support trust quorum.
         // https://github.com/oxidecomputer/omicron/issues/3690
         const TRUST_QUORUM_MIN_SIZE: usize = 3;
-        let trust_quorum_peers: Option<
-            Vec<bootstrap_agent_lockstep_client::types::Baseboard>,
-        > = if self.bootstrap_sleds.len() >= TRUST_QUORUM_MIN_SIZE {
-            Some(
-                self.bootstrap_sleds
-                    .iter()
-                    .map(|sled| sled.baseboard.clone().into())
-                    .collect(),
-            )
-        } else {
-            warn!(
-                log,
-                "Trust quorum disabled: requires at least {} sleds",
-                TRUST_QUORUM_MIN_SIZE
-            );
-            None
-        };
+        let trust_quorum_peers: Option<Vec<Baseboard>> =
+            if self.bootstrap_sleds.len() >= TRUST_QUORUM_MIN_SIZE {
+                Some(
+                    self.bootstrap_sleds
+                        .iter()
+                        .map(|sled| sled.baseboard.clone())
+                        .collect(),
+                )
+            } else {
+                warn!(
+                    log,
+                    "Trust quorum disabled: requires at least {} sleds",
+                    TRUST_QUORUM_MIN_SIZE
+                );
+                None
+            };
 
         // Convert between internal and progenitor types.
         let user_password_hash =
