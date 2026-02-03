@@ -11,6 +11,7 @@ use anyhow::Context;
 use anyhow::bail;
 use clap::Args;
 use clap::Subcommand;
+use sled_agent_client::types::NodeStatus;
 use sled_agent_client::types::OperatorSwitchZonePolicy;
 
 /// Arguments to the "omdb sled-agent" subcommand
@@ -80,6 +81,18 @@ enum BootstoreCommands {
 enum TrustQuorumCommands {
     /// show the status of the local trust quorum node
     Status,
+    /// show the status of a trust quorum node via proxy
+    ProxyStatus(TrustQuorumProxyStatusArgs),
+}
+
+#[derive(Debug, Args)]
+struct TrustQuorumProxyStatusArgs {
+    /// Oxide part number of the target sled
+    #[clap(long)]
+    part_number: String,
+    /// Serial number of the target sled
+    #[clap(long)]
+    serial_number: String,
 }
 
 impl SledAgentArgs {
@@ -135,6 +148,9 @@ impl SledAgentArgs {
             SledAgentCommands::TrustQuorum(TrustQuorumCommands::Status) => {
                 cmd_trust_quorum_status(&client).await
             }
+            SledAgentCommands::TrustQuorum(
+                TrustQuorumCommands::ProxyStatus(args),
+            ) => cmd_trust_quorum_proxy_status(&client, args).await,
         }
     }
 }
@@ -249,6 +265,28 @@ async fn cmd_trust_quorum_status(
         .context("trust quorum status")?
         .into_inner();
 
+    print_trust_quorum_status(status);
+
+    Ok(())
+}
+
+/// Runs `omdb sled-agent trust-quorum proxy-status`
+async fn cmd_trust_quorum_proxy_status(
+    client: &sled_agent_client::Client,
+    args: &TrustQuorumProxyStatusArgs,
+) -> Result<(), anyhow::Error> {
+    let status = client
+        .trust_quorum_proxy_status(&args.part_number, &args.serial_number)
+        .await
+        .context("trust quorum proxy status")?
+        .into_inner();
+
+    print_trust_quorum_status(status);
+
+    Ok(())
+}
+
+fn print_trust_quorum_status(status: NodeStatus) {
     println!("connected peers:");
     if status.connected_peers.is_empty() {
         println!("    <none>");
@@ -273,6 +311,4 @@ async fn cmd_trust_quorum_status(
     println!("    expunged: {:?}", status.persistent_state.expunged);
 
     println!("proxied requests: {}", status.proxied_requests);
-
-    Ok(())
 }
