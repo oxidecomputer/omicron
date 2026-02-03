@@ -8,7 +8,6 @@ license = "MPL-2.0"
 workspace = true
 
 [dependencies]
-attest-data.workspace = true
 camino.workspace = true
 chrono.workspace = true
 dropshot.workspace = true

@@ -520,7 +520,7 @@ dependencies = [
 [[package]]
 name = "attest-data"
 version = "0.5.0"
-source = "git+https://github.com/oxidecomputer/dice-util?branch=generic-nonce#8df4fc0aa4a48ff675a46b7f2cecf2e4d6c7290a"
+source = "git+https://github.com/oxidecomputer/dice-util?branch=generic-nonce#7e03d358bfbc988d1bcf5116b2777ea1f75e57ac"
 dependencies = [
  "const-oid",
  "der",
@@ -2756,6 +2756,27 @@ version = "0.1.0"
 source = "git+https://github.com/oxidecomputer/dice-util?rev=6e0ef48f72ff85ba50fc8286c8e89dc5f9c822dd#6e0ef48f72ff85ba50fc8286c8e89dc5f9c822dd"
 dependencies = [
  "thiserror 2.0.18",
+]
+
+[[package]]
+name = "dice-verifier"
+version = "0.3.0-pre0"
+source = "git+https://github.com/oxidecomputer/dice-util?branch=generic-nonce#7e03d358bfbc988d1bcf5116b2777ea1f75e57ac"
+dependencies = [
+ "attest-data 0.5.0 (git+https://github.com/oxidecomputer/dice-util?branch=generic-nonce)",
+ "const-oid",
+ "ed25519-dalek",
+ "env_logger",
+ "hex",
+ "hubpack",
+ "libipcc 0.1.0 (git+https://github.com/oxidecomputer/ipcc-rs?rev=7cdf2ab9c8d9e9267a8b366aa780c6c26f9a5ecf)",
+ "log",
+ "p384",
+ "rats-corim 0.1.0 (git+https://github.com/oxidecomputer/rats-corim)",
+ "sha3",
+ "tempfile",
+ "thiserror 2.0.18",
+ "x509-cert",
 ]
 
 [[package]]
@@ -5613,10 +5634,8 @@ checksum = "fc6d6206008e25125b1f97fbe5d309eb7b85141cf9199d52dbd3729a1584dd16"
 name = "ipcc"
 version = "0.1.0"
 dependencies = [
- "attest-data 0.5.0 (git+https://github.com/oxidecomputer/dice-util?branch=generic-nonce)",
  "ciborium",
- "hubpack",
- "libipcc 0.1.0 (git+https://github.com/oxidecomputer/ipcc-rs?rev=7cdf2ab9c8d9e9267a8b366aa780c6c26f9a5ecf)",
+ "libipcc 0.1.0 (git+https://github.com/oxidecomputer/ipcc-rs?rev=524eb8f125003dff50b9703900c6b323f00f9e1b)",
  "omicron-common",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
@@ -5625,7 +5644,6 @@ dependencies = [
  "test-strategy",
  "thiserror 2.0.18",
  "tufaceous-artifact",
- "x509-cert",
 ]
 
 [[package]]
@@ -8920,7 +8938,6 @@ dependencies = [
  "assert_matches",
  "async-trait",
  "atomicwrites",
- "attest-data 0.5.0 (git+https://github.com/oxidecomputer/dice-util?branch=generic-nonce)",
  "base64 0.22.1",
  "bootstore",
  "bootstrap-agent-api",
@@ -8936,6 +8953,7 @@ dependencies = [
  "cockroach-admin-client",
  "crucible-agent-client",
  "derive_more 0.99.20",
+ "dice-verifier 0.3.0-pre0 (git+https://github.com/oxidecomputer/dice-util?branch=generic-nonce)",
  "display-error-chain",
  "dns-server",
  "dns-service-client",
@@ -8960,7 +8978,6 @@ dependencies = [
  "installinator-common",
  "internal-dns-resolver",
  "internal-dns-types",
- "ipcc",
  "ipnetwork",
  "itertools 0.14.0",
  "key-manager",
@@ -12156,7 +12173,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys 0.11.0",
- "windows-sys 0.61.1",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -13090,7 +13107,6 @@ dependencies = [
 name = "sled-agent-api"
 version = "0.1.0"
 dependencies = [
- "attest-data 0.5.0 (git+https://github.com/oxidecomputer/dice-util?branch=generic-nonce)",
  "camino",
  "chrono",
  "dropshot",
@@ -13774,7 +13790,7 @@ dependencies = [
  "cfg-if",
  "clap",
  "dice-mfg-msgs",
- "dice-verifier",
+ "dice-verifier 0.3.0-pre0 (git+https://github.com/oxidecomputer/dice-util?rev=6e0ef48f72ff85ba50fc8286c8e89dc5f9c822dd)",
  "ed25519-dalek",
  "hubpack",
  "libipcc 0.1.0 (git+https://github.com/oxidecomputer/ipcc-rs?rev=524eb8f125003dff50b9703900c6b323f00f9e1b)",
@@ -14331,7 +14347,7 @@ dependencies = [
  "getrandom 0.3.4",
  "once_cell",
  "rustix 1.1.3",
- "windows-sys 0.61.1",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]

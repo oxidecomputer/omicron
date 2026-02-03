@@ -11,7 +11,6 @@ workspace = true
 [dependencies]
 anyhow.workspace = true
 async-trait.workspace = true
-attest-data.workspace = true
 atomicwrites.workspace = true
 base64.workspace = true
 bootstore.workspace = true
@@ -29,6 +28,7 @@ cockroach-admin-client.workspace = true
 # Only used by the simulated sled agent.
 crucible-agent-client.workspace = true
 derive_more.workspace = true
+dice-verifier = { workspace = true, features = ["ipcc", "mock"] }
 display-error-chain.workspace = true
 dns-server.workspace = true
 dns-service-client.workspace = true
@@ -53,7 +53,6 @@ illumos-utils.workspace = true
 installinator-common.workspace = true
 internal-dns-resolver.workspace = true
 internal-dns-types.workspace = true
-ipcc.workspace = true
 ipnetwork.workspace = true
 itertools.workspace = true
 key-manager.workspace = true

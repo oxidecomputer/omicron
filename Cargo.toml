@@ -396,7 +396,6 @@ assert_cmd = "2.0.17"
 async-bb8-diesel = "0.2"
 async-recursion = "1.1.1"
 async-trait = "0.1.89"
-attest-data = { git = "https://github.com/oxidecomputer/dice-util", branch = "generic-nonce" }
 attest-mock = { git = "https://github.com/oxidecomputer/dice-util", rev = "10952e8d9599b735b85d480af3560a11700e5b64" }
 atomicwrites = "0.4.4"
 authz-macros = { path = "nexus/authz-macros" }
@@ -459,6 +458,7 @@ debug-ignore = "1.0.5"
 derive_more = "0.99.20"
 derive-where = "1.5.0"
 dev-tools-common = { path = "dev-tools/common" }
+dice-verifier = { git = "https://github.com/oxidecomputer/dice-util", branch = "generic-nonce", default-features = false }
 # Having the i-implement-... feature here makes diesel go away from the workspace-hack
 diesel = { version = "2.2.12", features = ["i-implement-a-third-party-backend-and-opt-into-breaking-changes", "postgres", "r2d2", "chrono", "serde_json", "network-address", "uuid"] }
 diesel-dtrace = "0.4.2"
@@ -525,7 +525,6 @@ http-body-util = "0.1.3"
 http-range = "0.1.5"
 httpmock = "0.8.0-alpha.1"
 httptest = "0.16.3"
-hubpack = "0.1"
 hubtools = { git = "https://github.com/oxidecomputer/hubtools.git", rev = "2b1ef9b38d75563ea800baa3b17327eec17b1b7a" }
 humantime = "2.2.0"
 hyper = "1.6.0"
@@ -557,7 +556,7 @@ jiff = "0.2.15"
 key-manager = { path = "key-manager" }
 kstat-rs = "0.2.4"
 libc = "0.2.174"
-libipcc = { git = "https://github.com/oxidecomputer/ipcc-rs", rev = "7cdf2ab9c8d9e9267a8b366aa780c6c26f9a5ecf" }
+libipcc = { git = "https://github.com/oxidecomputer/ipcc-rs", rev = "524eb8f125003dff50b9703900c6b323f00f9e1b" }
 libfalcon = { git = "https://github.com/oxidecomputer/falcon", branch = "main" }
 libnvme = { git = "https://github.com/oxidecomputer/libnvme", rev = "dd5bb221d327a1bc9287961718c3c10d6bd37da0" }
 linear-map = "1.2.0"

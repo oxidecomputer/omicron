@@ -4,11 +4,12 @@
 
 //! Mechanisms for interacting with the sled's RoT.
 
+use dice_verifier::{Attest, AttestError, ipcc, mock};
 use dropshot::HttpError;
-use ipcc::AttestError;
 use sled_agent_types::rot as SaRotTypes;
 use slog::Logger;
 use slog_error_chain::InlineErrorChain;
+use sprockets_tls::keys::AttestConfig;
 use thiserror::Error;
 use tokio::sync::{
     mpsc::{self, error::TrySendError},
@@ -16,12 +17,10 @@ use tokio::sync::{
 };
 use x509_cert::der::{EncodePem, pem::LineEnding};
 
-use crate::sled_agent::Error;
+pub struct MeasurementLog(dice_verifier::Log);
 
-pub struct MeasurementLog(attest_data::Log);
-
-impl From<attest_data::Log> for MeasurementLog {
-    fn from(log: attest_data::Log) -> Self {
+impl From<dice_verifier::Log> for MeasurementLog {
+    fn from(log: dice_verifier::Log) -> Self {
         MeasurementLog(log)
     }
 }
@@ -33,7 +32,7 @@ impl From<MeasurementLog> for SaRotTypes::MeasurementLog {
             .iter()
             .copied()
             .map(|m| match m {
-                attest_data::Measurement::Sha3_256(d) => {
+                dice_verifier::Measurement::Sha3_256(d) => {
                     SaRotTypes::Measurement::Sha3_256(
                         SaRotTypes::Sha3_256Digest(d.0),
                     )
@@ -62,22 +61,22 @@ impl From<CertificateChain> for SaRotTypes::CertificateChain {
     }
 }
 
-pub struct Nonce(attest_data::Nonce);
+pub struct Nonce(dice_verifier::Nonce);
 
 impl From<SaRotTypes::Nonce> for Nonce {
     fn from(nonce: SaRotTypes::Nonce) -> Self {
         match nonce {
             SaRotTypes::Nonce::N32(n32) => {
-                Nonce(attest_data::Nonce::N32(n32.into()))
+                Nonce(dice_verifier::Nonce::N32(n32.into()))
             }
         }
     }
 }
 
-pub struct Attestation(attest_data::Attestation);
+pub struct Attestation(dice_verifier::Attestation);
 
-impl From<attest_data::Attestation> for Attestation {
-    fn from(att: attest_data::Attestation) -> Self {
+impl From<dice_verifier::Attestation> for Attestation {
+    fn from(att: dice_verifier::Attestation) -> Self {
         Attestation(att)
     }
 }
@@ -85,7 +84,7 @@ impl From<attest_data::Attestation> for Attestation {
 impl From<Attestation> for SaRotTypes::Attestation {
     fn from(att: Attestation) -> Self {
         match att.0 {
-            attest_data::Attestation::Ed25519(sig) => {
+            dice_verifier::Attestation::Ed25519(sig) => {
                 SaRotTypes::Attestation::Ed25519(SaRotTypes::Ed25519Signature(
                     sig.0,
                 ))
@@ -96,10 +95,13 @@ impl From<Attestation> for SaRotTypes::Attestation {
 
 #[derive(Debug, Error)]
 pub enum RotError {
-    #[error(transparent)]
-    Ipcc(#[from] ipcc::IpccError),
+    #[error("Failed to create IPCC attestor: {0}")]
+    AttestIpcc(#[from] dice_verifier::ipcc::IpccError),
 
-    #[error(transparent)]
+    #[error("Failed to create mock attestor: {0}")]
+    AttestMock(#[from] mock::AttestMockError),
+
+    #[error("Attestation request failed: {0}")]
     Attest(#[from] AttestError),
 
     #[error("RoT attestation queue full")]
@@ -178,37 +180,39 @@ impl RotAttestationHandle {
 pub struct RotAttestationTask {
     log: Logger,
     rx: mpsc::Receiver<RotAttestationMessage>,
-    ipcc: Option<ipcc::Ipcc>,
+    attest: Box<dyn Attest + Send>,
 }
 
 type RotAttestation = (RotAttestationTask, RotAttestationHandle);
 
 impl RotAttestationTask {
-    pub fn new(log: &Logger) -> Result<RotAttestation, Error> {
-        let log = log.new(o!("component" => "RotAttestationTask"));
-
-        let ipcc = match ipcc::Ipcc::new() {
-            Ok(ipcc) => Some(ipcc),
-            Err(e) => {
-                // Only fail here if we're on an Oxide sled where we expect to
-                // have IPCC available. Otherwise, we just log the error and
-                // continue. Any subsequent attestation requests will fail as
-                // `RotAttestationTask::run` will bail without an Ipcc handle.
-                error!(log, "failed to get ipcc handle: {e}");
-                let is_oxide = sled_hardware::is_oxide_sled().map_err(|e| {
-                    Error::Underlay(
-                        sled_hardware::underlay::Error::SystemDetection(e),
-                    )
-                })?;
-                if is_oxide {
-                    return Err(RotError::Ipcc(e).into());
-                }
-                None
+    pub fn new(
+        log: &Logger,
+        attest_config: &AttestConfig,
+    ) -> Result<RotAttestation, RotError> {
+        let log = log.new(o!(
+            "component" => "RotAttestationTask",
+            "interface" => match attest_config {
+                AttestConfig::Ipcc => "ipcc",
+                AttestConfig::Local { .. } => "mock",
             }
+        ));
+
+        let attest: Box<dyn Attest + Send> = match attest_config {
+            AttestConfig::Ipcc => Box::new(ipcc::AttestIpcc::new()?),
+            AttestConfig::Local {
+                priv_key,
+                cert_chain,
+                log,
+                test_corpus: _,
+            } => Box::new(mock::AttestMock::load(cert_chain, log, priv_key)?),
         };
 
         let (tx, rx) = mpsc::channel(QUEUE_SIZE);
-        Ok((RotAttestationTask { log, rx, ipcc }, RotAttestationHandle { tx }))
+        Ok((
+            RotAttestationTask { log, rx, attest },
+            RotAttestationHandle { tx },
+        ))
     }
 
     /// Run the main request handler loop that processes incoming RoT
@@ -217,10 +221,7 @@ impl RotAttestationTask {
     /// This should be run via `spawn_blocking` as we perform ipcc operations
     /// via an ioctl and don't want to block any other tasks.
     pub fn run(mut self) {
-        let Some(ipcc) = self.ipcc.take() else {
-            warn!(self.log, "No ipcc handle. Exiting.");
-            return;
-        };
+        info!(self.log, "request loop started.");
         loop {
             let Some(req) = self.rx.blocking_recv() else {
                 warn!(self.log, "All senders dropped. Exiting.");
@@ -229,19 +230,19 @@ impl RotAttestationTask {
 
             match req {
                 RotAttestationMessage::GetMeasurementLog(reply_tx) => {
-                    let log = ipcc.get_measurement_log();
+                    let log = self.attest.get_measurement_log();
                     let _ = reply_tx.send(log.map(Into::into));
                 }
                 RotAttestationMessage::GetCertificateChain(reply_tx) => {
-                    let chain = ipcc.get_certificates().and_then(|chain| {
-                        CertificateChain::try_from(chain)
-                            .map_err(AttestError::from)
-                    });
+                    let chain =
+                        self.attest.get_certificates().and_then(|chain| {
+                            CertificateChain::try_from(chain)
+                                .map_err(AttestError::from)
+                        });
                     let _ = reply_tx.send(chain);
                 }
                 RotAttestationMessage::Attest(nonce, reply_tx) => {
-                    let attest_data::Nonce::N32(nonce) = nonce.0;
-                    let attestation = ipcc.attest(nonce);
+                    let attestation = self.attest.attest(&nonce.0);
                     let _ = reply_tx.send(attestation.map(Into::into));
                 }
             }
