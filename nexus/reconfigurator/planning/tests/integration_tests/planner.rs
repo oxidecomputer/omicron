@@ -315,8 +315,10 @@ fn test_add_multiple_nexus_to_one_sled() {
     // Use our example system with one sled and one Nexus instance as a
     // starting point.
     let mut sim = ReconfiguratorCliTestState::new(TEST_NAME, &logctx.log);
-    sim.load_example_customized(|builder| Ok(builder.nsleds(1).nexus_count(1)))
-        .expect("loaded example system");
+    sim.load_example_customized(|builder| {
+        Ok(builder.set_nsleds(1).set_nexus_count(1))
+    })
+    .expect("loaded example system");
 
     let blueprint1 = sim.assert_latest_blueprint_is_blippy_clean();
 
@@ -852,7 +854,7 @@ fn test_crucible_allocation_skips_nonprovisionable_disks() {
     // internal DNS to avoid churn unrelated to this test.
     let mut sim = ReconfiguratorCliTestState::new(TEST_NAME, &logctx.log);
     sim.load_example_customized(|builder| {
-        builder.nsleds(1).nexus_count(1).internal_dns_count(1)
+        builder.set_nsleds(1).set_nexus_count(1).set_internal_dns_count(1)
     })
     .expect("loaded example system");
     let blueprint1 = sim.assert_latest_blueprint_is_blippy_clean();
@@ -943,8 +945,10 @@ fn test_dataset_settings_modified_in_place() {
 
     // Create an example system with a single sled and a single Nexus.
     let mut sim = ReconfiguratorCliTestState::new(TEST_NAME, &logctx.log);
-    sim.load_example_customized(|builder| Ok(builder.nsleds(1).nexus_count(1)))
-        .expect("loaded example system");
+    sim.load_example_customized(|builder| {
+        Ok(builder.set_nsleds(1).set_nexus_count(1))
+    })
+    .expect("loaded example system");
     let blueprint1 = sim.assert_latest_blueprint_is_blippy_clean();
     let sled_id = blueprint1.sleds().next().expect("1 sled");
 
@@ -1006,7 +1010,7 @@ fn test_disk_add_expunge_decommission() {
     // of these sleds.
     let mut sim = ReconfiguratorCliTestState::new(TEST_NAME, &logctx.log);
     sim.load_example_customized(|builder| {
-        builder.nsleds(2).internal_dns_count(1)
+        builder.set_nsleds(2).set_internal_dns_count(1)
     })
     .expect("loaded example system");
     let blueprint1 = sim.assert_latest_blueprint_is_blippy_clean();
@@ -1161,7 +1165,7 @@ fn test_disk_expungement_removes_zones_durable_zpool() {
     // Create an example system with a single sled
     let mut sim = ReconfiguratorCliTestState::new(TEST_NAME, &logctx.log);
     sim.load_example_customized(|builder| {
-        builder.nsleds(1).nexus_count(1).internal_dns_count(1)
+        builder.set_nsleds(1).set_nexus_count(1).set_internal_dns_count(1)
     })
     .expect("loaded example system");
     let blueprint1 = sim.assert_latest_blueprint_is_blippy_clean();
@@ -1336,8 +1340,10 @@ fn test_disk_expungement_removes_zones_transient_filesystem() {
 
     // Create an example system with a single sled
     let mut sim = ReconfiguratorCliTestState::new(TEST_NAME, &logctx.log);
-    sim.load_example_customized(|builder| Ok(builder.nsleds(1).nexus_count(2)))
-        .expect("loaded example system");
+    sim.load_example_customized(|builder| {
+        Ok(builder.set_nsleds(1).set_nexus_count(2))
+    })
+    .expect("loaded example system");
     let blueprint1 = sim.assert_latest_blueprint_is_blippy_clean();
     let sled_id = blueprint1.sleds().next().expect("1 sled");
 
@@ -1456,8 +1462,10 @@ fn test_nexus_allocation_skips_nonprovisionable_sleds() {
     // non-provisionable states in the future, we'll have to add more
     // sleds.)
     let mut sim = ReconfiguratorCliTestState::new(TEST_NAME, &logctx.log);
-    sim.load_example_customized(|builder| Ok(builder.nsleds(5).nexus_count(5)))
-        .expect("loaded example system");
+    sim.load_example_customized(|builder| {
+        Ok(builder.set_nsleds(5).set_nexus_count(5))
+    })
+    .expect("loaded example system");
     let blueprint1 = sim.assert_latest_blueprint_is_blippy_clean();
 
     // This blueprint should only have 5 Nexus zones: one on each sled.
@@ -2660,7 +2668,7 @@ fn test_zones_marked_ready_for_cleanup_based_on_inventory() {
     //
     // Don't start internal DNS zones (not part of this test, and causes noise).
     let mut sim = ReconfiguratorCliTestState::new(TEST_NAME, &logctx.log);
-    sim.load_example_customized(|builder| builder.internal_dns_count(0))
+    sim.load_example_customized(|builder| builder.set_internal_dns_count(0))
         .expect("loaded example system");
     let blueprint1 = sim.assert_latest_blueprint_is_blippy_clean();
 

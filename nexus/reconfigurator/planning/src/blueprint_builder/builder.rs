@@ -2936,8 +2936,8 @@ pub mod test {
         // the disks around so that `sled_add_disks` can add them.
         let (example, parent) =
             ExampleSystemBuilder::new(&logctx.log, TEST_NAME)
-                .create_zones(false)
-                .create_disks_in_blueprint(false)
+                .set_create_zones(false)
+                .set_create_disks_in_blueprint(false)
                 .build();
         let input = example.input;
 
@@ -3170,7 +3170,7 @@ pub mod test {
         // Start with an empty system (sleds with no zones).
         let (example, parent) =
             ExampleSystemBuilder::new(&logctx.log, TEST_NAME)
-                .create_zones(false)
+                .set_create_zones(false)
                 .build();
         let collection = example.collection;
         let input = example.input;
@@ -3521,7 +3521,7 @@ pub mod test {
 
         // Use our example system.
         let (system, blueprint1) =
-            ExampleSystemBuilder::new(&log, TEST_NAME).nsleds(1).build();
+            ExampleSystemBuilder::new(&log, TEST_NAME).set_nsleds(1).build();
 
         // Find a zone and change its image source.
         let mut blueprint_builder = BlueprintBuilder::new_based_on(

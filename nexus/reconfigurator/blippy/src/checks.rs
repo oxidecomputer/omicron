@@ -1273,7 +1273,7 @@ mod tests {
         let logctx = test_setup_log(TEST_NAME);
         let (_, mut blueprint) =
             ExampleSystemBuilder::new(&logctx.log, TEST_NAME)
-                .external_dns_count(2)
+                .set_external_dns_count(2)
                 .unwrap()
                 .build();
 
@@ -1356,7 +1356,7 @@ mod tests {
         let logctx = test_setup_log(TEST_NAME);
         let (_, mut blueprint) =
             ExampleSystemBuilder::new(&logctx.log, TEST_NAME)
-                .external_dns_count(2)
+                .set_external_dns_count(2)
                 .unwrap()
                 .build();
 
@@ -2050,8 +2050,8 @@ mod tests {
         static TEST_NAME: &str = "test_nexus_generation_no_nexus";
         let logctx = test_setup_log(TEST_NAME);
         let (_, blueprint) = ExampleSystemBuilder::new(&logctx.log, TEST_NAME)
-            .nsleds(1)
-            .nexus_count(0)
+            .set_nsleds(1)
+            .set_nexus_count(0)
             .build();
 
         // Run blippy checks
@@ -2078,8 +2078,8 @@ mod tests {
         let logctx = test_setup_log(TEST_NAME);
         let (_, mut blueprint) =
             ExampleSystemBuilder::new(&logctx.log, TEST_NAME)
-                .nsleds(3)
-                .nexus_count(3)
+                .set_nsleds(3)
+                .set_nexus_count(3)
                 .build();
 
         // Find the Nexus zones
