@@ -21,7 +21,8 @@ use iddqd::id_ord_map::Entry;
 use illumos_utils::dladm::Etherstub;
 use illumos_utils::link::VnicAllocator;
 use illumos_utils::opte::{
-    DhcpCfg, PortCreateParams, PortManager, net_to_cidr,
+    DhcpCfg, EnsureAttachedSubnetResult, PortCreateParams, PortManager,
+    cidr_to_net, net_to_cidr,
 };
 use illumos_utils::running_zone::{RunningZone, ZoneBuilderFactory};
 use illumos_utils::zone::PROPOLIS_ZONE_PREFIX;
@@ -47,7 +48,9 @@ use rand::SeedableRng;
 use rand::prelude::IteratorRandom;
 use sled_agent_config_reconciler::AvailableDatasetsReceiver;
 use sled_agent_resolvable_files::ramdisk_file_source;
-use sled_agent_types::attached_subnet::{AttachedSubnet, AttachedSubnets};
+use sled_agent_types::attached_subnet::{
+    AttachedSubnet, AttachedSubnetKind, AttachedSubnets,
+};
 use sled_agent_types::instance::*;
 use sled_agent_types::zone_bundle::ZoneBundleCause;
 use slog::Logger;
@@ -1649,6 +1652,20 @@ impl InstanceRunner {
             return Err(Error::Opte(illumos_utils::opte::Error::NoPrimaryNic));
         };
 
+        // NOTE: There are a lot of really annoying conversions here at the API
+        // boundary between Omicron, illumos-utils, and OPTE. We want to work
+        // with the sled-agent API type, because it uses `oxnet` and we can
+        // stuff those types into the `iddqd` map types.
+        //
+        // But that means we need to convert both on the way in and the way out,
+        // since the calls into the OPTE code return the chagnes it actually
+        // applied, in _that module's_ native types.
+        //
+        // https://github.com/oxidecomputer/opte/issues/933 tracks moving OPTE
+        // to the `oxnet` types. That will be a bit of a lift, since the kernel
+        // context requires some more care, but it's definitely worth it to not
+        // have at least 3-4 different "IP network" types floating around here.
+
         // OPTE itself either inserts a new subnet, or updates the mapping it
         // currently has, so we can "add" the full set here.
         //
@@ -1658,25 +1675,22 @@ impl InstanceRunner {
         let to_remove = self
             .attached_subnets
             .iter()
-            .filter_map(|s| match requested.get(&s.subnet) {
-                Some(_) => None,
-                None => Some(net_to_cidr(s.subnet)),
+            .filter_map(|s| {
+                if requested.contains_key(&s.subnet) {
+                    None
+                } else {
+                    Some(net_to_cidr(s.subnet))
+                }
             })
             .collect::<Vec<_>>();
-        let to_ensure = requested
-            .iter()
-            .map(|s| illumos_utils::opte::AttachedSubnet {
-                cidr: net_to_cidr(s.subnet),
-                is_external: s.is_external,
-            })
-            .collect::<Vec<_>>();
+        let to_ensure =
+            requested.iter().copied().map(Into::into).collect::<Vec<_>>();
         let nic_id = primary_nic.id;
         let nic_kind = primary_nic.kind;
-        self.port_manager
-            .attached_subnets_ensure(nic_id, nic_kind, to_remove, to_ensure)
-            .map_err(Error::from)?;
-        self.attached_subnets = requested;
-        Ok(())
+        let result = self
+            .port_manager
+            .attached_subnets_ensure(nic_id, nic_kind, to_remove, to_ensure);
+        self.update_with_subnet_ensure_result(result)
     }
 
     /// Delete all attached subnets.
@@ -1691,11 +1705,47 @@ impl InstanceRunner {
             .iter()
             .map(|s| net_to_cidr(s.subnet))
             .collect();
-        self.port_manager
-            .attached_subnets_ensure(nic_id, nic_kind, to_remove, vec![])
-            .map_err(Error::from)?;
-        self.attached_subnets.clear();
-        Ok(())
+        let result = self.port_manager.attached_subnets_ensure(
+            nic_id,
+            nic_kind,
+            to_remove,
+            vec![],
+        );
+        self.update_with_subnet_ensure_result(result)
+    }
+
+    fn update_with_subnet_ensure_result(
+        &mut self,
+        result: EnsureAttachedSubnetResult,
+    ) -> Result<(), Error> {
+        let EnsureAttachedSubnetResult { diff, error } = result;
+        // Update our own set with the result that we _did_ actually apply,
+        // since we could have failed partway through.
+        for removed in diff.detached.iter().copied().map(cidr_to_net) {
+            if self.attached_subnets.remove(&removed).is_none() {
+                error!(
+                    self.log,
+                    "we computed an attached subnet to detach, successfully \
+                    removed it from OPTE, but now it appears not to be in \
+                    our set!";
+                    "removed" => %removed,
+                );
+            }
+        }
+        for attached in diff.attached.into_iter().map(Into::into) {
+            if let Err(e) = self.attached_subnets.insert_unique(attached) {
+                error!(
+                    self.log,
+                    "we computed a new attached subnet to attach, successfully \
+                    added it to OPTE, but now it appears we already had it!";
+                    "duplicate" => ?e,
+                );
+            }
+        }
+        match error {
+            Some(e) => Err(e.into()),
+            None => Ok(()),
+        }
     }
 
     /// Attach a single subnet.
@@ -1716,7 +1766,14 @@ impl InstanceRunner {
         };
         let subnet_ = illumos_utils::opte::AttachedSubnet {
             cidr: net_to_cidr(subnet.subnet),
-            is_external: subnet.is_external,
+            kind: match subnet.kind {
+                AttachedSubnetKind::Vpc => {
+                    illumos_utils::opte::AttachedSubnetKind::Vpc
+                }
+                AttachedSubnetKind::External => {
+                    illumos_utils::opte::AttachedSubnetKind::External
+                }
+            },
         };
         self.port_manager
             .attach_subnet(nic_id, nic_kind, subnet_)
@@ -2372,7 +2429,10 @@ impl InstanceRunner {
                     .iter()
                     .map(|att| illumos_utils::opte::AttachedSubnet {
                         cidr: net_to_cidr(att.subnet),
-                        is_external: att.is_external,
+                        kind: match att.kind {
+                            AttachedSubnetKind::Vpc => illumos_utils::opte::AttachedSubnetKind::Vpc,
+                            AttachedSubnetKind::External => illumos_utils::opte::AttachedSubnetKind::External,
+                        },
                     })
                     .collect(),
             })?;

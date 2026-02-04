@@ -421,7 +421,7 @@ pub(super) async fn send_subnet_attachment_to_opte(
     let request = sled_agent_client::types::AttachedSubnet {
         // TODO-completeness: Expand this code to handle VPC subnets too. See
         // https://github.com/oxidecomputer/omicron/issues/9580.
-        is_external: true,
+        kind: sled_agent_client::types::AttachedSubnetKind::External,
         subnet: subnet.subnet.into(),
     };
     let result = osagactx

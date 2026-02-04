@@ -75,6 +75,41 @@ impl super::Nexus {
         Ok(new_config)
     }
 
+    /// Abort the latest trust quorum configuration if it is still in the
+    /// preparing state.
+    pub(crate) async fn tq_abort_latest_config(
+        &self,
+        opctx: &OpContext,
+        rack_id: RackUuid,
+    ) -> Result<TrustQuorumConfig, Error> {
+        let Some(latest_config) =
+            self.db_datastore.tq_get_latest_config(opctx, rack_id).await?
+        else {
+            return Err(Error::non_resourcetype_not_found(
+                "No trust quorum configuration exists for this rack",
+            ));
+        };
+
+        self.db_datastore
+            .tq_abort_config(
+                opctx,
+                rack_id,
+                latest_config.epoch,
+                "Aborted via API request".to_string(),
+            )
+            .await?;
+
+        // Return the updated configuration
+        self.db_datastore
+            .tq_get_config(opctx, rack_id, latest_config.epoch)
+            .await?
+            .ok_or_else(|| {
+                Error::internal_error(
+                    "Configuration was just aborted but cannot be retrieved",
+                )
+            })
+    }
+
     /// Read the set of all commissioned sleds from an existing deployment and
     /// issue an upgrade request to trust quorum.
     ///

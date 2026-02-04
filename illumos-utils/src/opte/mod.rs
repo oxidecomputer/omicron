@@ -30,6 +30,8 @@ use oxide_vpc::api::Ipv6PrefixLen;
 use oxide_vpc::api::RouterTarget;
 pub use oxide_vpc::api::Vni;
 use oxnet::IpNet;
+use oxnet::Ipv4Net;
+use oxnet::Ipv6Net;
 pub use port::Port;
 pub use port_manager::MulticastGroupCfg;
 pub use port_manager::PortCreateParams;
@@ -125,6 +127,18 @@ pub fn net_to_cidr(net: IpNet) -> IpCidr {
     }
 }
 
+/// Convert an OPTE [IpCidr] into a Nexus [IpNet].
+pub fn cidr_to_net(cidr: IpCidr) -> IpNet {
+    match cidr {
+        IpCidr::Ip4(ipv4) => IpNet::V4(
+            Ipv4Net::new(ipv4.ip().into(), ipv4.prefix_len()).unwrap(),
+        ),
+        IpCidr::Ip6(ipv6) => IpNet::V6(
+            Ipv6Net::new(ipv6.ip().into(), ipv6.prefix_len()).unwrap(),
+        ),
+    }
+}
+
 /// Convert a nexus [shared::RouterTarget] to an OPTE [RouterTarget].
 ///
 /// This is effectively a [`From`] impl, but defined for two
@@ -153,11 +167,46 @@ fn router_target_opte(target: &shared::RouterTarget) -> RouterTarget {
 pub struct AttachedSubnet {
     /// The IP subnet that's attached.
     pub cidr: IpCidr,
-    /// True if this is an external subnet, and false if it's a VPC subnet.
-    ///
-    /// Traffic destined for external subnets do not undergo NAT in the same way
-    /// as VPC Subnets.
-    pub is_external: bool,
+    /// The kind of subnet.
+    pub kind: AttachedSubnetKind,
+}
+
+/// The kind of subnet that is attached.
+#[derive(Clone, Copy, Debug)]
+pub enum AttachedSubnetKind {
+    /// This is a VPC subnet.
+    Vpc,
+    /// This is an external subnet.
+    External,
+}
+
+/// A set of removed / added attached subnets in an OPTE API call.
+///
+/// This is used to ensure we keep our in-memory state in sync with whatever we
+/// actually apply at the OPTE driver level.
+#[derive(Clone, Debug, Default)]
+pub struct AttachedSubnetDiff {
+    pub detached: Vec<IpCidr>,
+    pub attached: Vec<AttachedSubnet>,
+}
+
+/// A result of attempting to ensure the set of attached subnets is exactly what
+/// we want.
+///
+/// OPTE exposes a single-subnet attach / detach API. The sled-agent exposes
+/// that and also an operation to PUT the entire set, which we build out of the
+/// per-subnet operations.
+///
+/// That risks the in-memory state getting out of sync with the state in OPTE.
+/// If we put a whole set, but fail partway through, we need to ensure we have
+/// the same thing that OPTE does.
+///
+/// This type is the result of that whole-set operation. It includes the diff
+/// that we actually applied and any error that occurred while talking to OPTE.
+#[derive(Debug, Default)]
+pub struct EnsureAttachedSubnetResult {
+    pub diff: AttachedSubnetDiff,
+    pub error: Option<Error>,
 }
 
 #[cfg(test)]

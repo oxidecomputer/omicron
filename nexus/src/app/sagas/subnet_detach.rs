@@ -289,6 +289,7 @@ pub(crate) mod test {
     use omicron_uuid_kinds::GenericUuid;
     use omicron_uuid_kinds::InstanceUuid;
     use oxnet::IpNet;
+    use sled_agent_types::attached_subnet::AttachedSubnetKind;
 
     type ControlPlaneTestContext =
         nexus_test_utils::ControlPlaneTestContext<crate::Server>;
@@ -431,7 +432,7 @@ pub(crate) mod test {
                 )
             });
         assert!(
-            on_sled_agent.is_external,
+            matches!(on_sled_agent.kind, AttachedSubnetKind::External),
             "All attached subnets should be external at this point"
         );
     }
