@@ -6,15 +6,13 @@
 
 use super::nexus::HostIdentifier;
 use crate::{
-    api::external::{self, BfdMode, ImportExportPolicy, MacAddr, Name, Vni},
+    api::external::{self, BfdMode, ImportExportPolicy, Name, Vni},
     disk::DatasetName,
     zpool_name::ZpoolName,
 };
 use daft::Diffable;
 use omicron_uuid_kinds::ExternalZpoolUuid;
-use omicron_uuid_kinds::{
-    DatasetUuid, ExternalSubnetUuid, InstanceUuid, RackUuid, SledUuid,
-};
+use omicron_uuid_kinds::DatasetUuid;
 use oxnet::{IpNet, Ipv4Net, Ipv6Net};
 use schemars::JsonSchema;
 use serde::{Deserialize, Deserializer, Serialize, Serializer, de};
