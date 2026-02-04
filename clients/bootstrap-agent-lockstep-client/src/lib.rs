@@ -25,6 +25,7 @@ progenitor::generate_api!(
     },
     replace = {
         AllowedSourceIps = omicron_common::api::external::AllowedSourceIps,
+        Baseboard = sled_hardware_types::Baseboard,
         ImportExportPolicy = omicron_common::api::external::ImportExportPolicy,
     },
 );
@@ -32,41 +33,5 @@ progenitor::generate_api!(
 impl omicron_common::api::external::ClientError for types::Error {
     fn message(&self) -> String {
         self.message.clone()
-    }
-}
-
-impl From<types::Baseboard> for sled_hardware_types::Baseboard {
-    fn from(value: types::Baseboard) -> Self {
-        match value {
-            types::Baseboard::Gimlet { identifier, model, revision } => {
-                sled_hardware_types::Baseboard::new_gimlet(
-                    identifier, model, revision,
-                )
-            }
-            types::Baseboard::Unknown => {
-                sled_hardware_types::Baseboard::unknown()
-            }
-            types::Baseboard::Pc { identifier, model } => {
-                sled_hardware_types::Baseboard::new_pc(identifier, model)
-            }
-        }
-    }
-}
-
-impl From<sled_hardware_types::Baseboard> for types::Baseboard {
-    fn from(value: sled_hardware_types::Baseboard) -> Self {
-        match value {
-            sled_hardware_types::Baseboard::Gimlet {
-                identifier,
-                model,
-                revision,
-            } => types::Baseboard::Gimlet { identifier, model, revision },
-            sled_hardware_types::Baseboard::Unknown => {
-                types::Baseboard::Unknown
-            }
-            sled_hardware_types::Baseboard::Pc { identifier, model } => {
-                types::Baseboard::Pc { identifier, model }
-            }
-        }
     }
 }

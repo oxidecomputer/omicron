@@ -10,9 +10,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::{
     collections::HashMap,
-    fmt,
     net::{IpAddr, Ipv4Addr, Ipv6Addr},
-    str::FromStr,
 };
 
 /// Initial network configuration
@@ -102,43 +100,6 @@ pub struct BgpPeerConfig {
     pub vlan_id: Option<u16>,
 }
 
-impl BgpPeerConfig {
-    /// The default hold time for a BGP peer in seconds.
-    pub const DEFAULT_HOLD_TIME: u64 = 6;
-
-    /// The default idle hold time for a BGP peer in seconds.
-    pub const DEFAULT_IDLE_HOLD_TIME: u64 = 3;
-
-    /// The default delay open time for a BGP peer in seconds.
-    pub const DEFAULT_DELAY_OPEN: u64 = 0;
-
-    /// The default connect retry time for a BGP peer in seconds.
-    pub const DEFAULT_CONNECT_RETRY: u64 = 3;
-
-    /// The default keepalive time for a BGP peer in seconds.
-    pub const DEFAULT_KEEPALIVE: u64 = 2;
-
-    pub fn hold_time(&self) -> u64 {
-        self.hold_time.unwrap_or(Self::DEFAULT_HOLD_TIME)
-    }
-
-    pub fn idle_hold_time(&self) -> u64 {
-        self.idle_hold_time.unwrap_or(Self::DEFAULT_IDLE_HOLD_TIME)
-    }
-
-    pub fn delay_open(&self) -> u64 {
-        self.delay_open.unwrap_or(Self::DEFAULT_DELAY_OPEN)
-    }
-
-    pub fn connect_retry(&self) -> u64 {
-        self.connect_retry.unwrap_or(Self::DEFAULT_CONNECT_RETRY)
-    }
-
-    pub fn keepalive(&self) -> u64 {
-        self.keepalive.unwrap_or(Self::DEFAULT_KEEPALIVE)
-    }
-}
-
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq, JsonSchema)]
 pub struct BfdPeerConfig {
     pub local: Option<IpAddr>,
@@ -173,64 +134,8 @@ pub struct UplinkAddressConfig {
     pub vlan_id: Option<u16>,
 }
 
-impl UplinkAddressConfig {
-    pub fn addr(&self) -> IpAddr {
-        self.address.addr()
-    }
-}
-
-impl std::fmt::Display for UplinkAddressConfig {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self.vlan_id {
-            None => write!(f, "{}", self.address),
-            Some(v) => write!(f, "{};{}", self.address, v),
-        }
-    }
-}
-
 #[derive(Debug, PartialEq, Eq, Deserialize, Serialize)]
-pub struct UplinkAddressConfigError(String);
-
-impl std::fmt::Display for UplinkAddressConfigError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "parse switch location error: {}", self.0)
-    }
-}
-
-/// Convert a string into an UplinkAddressConfig.
-/// 192.168.1.1/24 => UplinkAddressConfig { 192.168.1.1/24, None }
-/// 192.168.1.1/24;200 => UplinkAddressConfig { 192.168.1.1/24, Some(200) }
-impl FromStr for UplinkAddressConfig {
-    type Err = UplinkAddressConfigError;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let fields: Vec<&str> = s.split(';').collect();
-        let (address, vlan_id) = match fields.len() {
-            1 => Ok((fields[0], None)),
-            2 => Ok((fields[0], Some(fields[1]))),
-            _ => Err(UplinkAddressConfigError(format!(
-                "not a valid uplink address: {s}"
-            ))),
-        }?;
-        let address = address.parse().map_err(|_| {
-            UplinkAddressConfigError(format!(
-                "not a valid ip address: {address}"
-            ))
-        })?;
-        let vlan_id = match vlan_id {
-            None => Ok(None),
-            Some(v) => match v.parse() {
-                Err(_) => Err(format!("invalid vlan id: {v}")),
-                Ok(vlan_id) if vlan_id > 1 && vlan_id < 4096 => {
-                    Ok(Some(vlan_id))
-                }
-                Ok(vlan_id) => Err(format!("vlan id out of range: {vlan_id}")),
-            },
-        }
-        .map_err(|e| UplinkAddressConfigError(e))?;
-        Ok(UplinkAddressConfig { address, vlan_id })
-    }
-}
+pub struct UplinkAddressConfigError(pub(super) String);
 
 #[derive(
     Clone, Debug, Default, Deserialize, Serialize, PartialEq, Eq, JsonSchema,
@@ -245,41 +150,8 @@ pub enum LldpAdminStatus {
     TxOnly,
 }
 
-impl fmt::Display for LldpAdminStatus {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            LldpAdminStatus::Enabled => write!(f, "enabled"),
-            LldpAdminStatus::Disabled => write!(f, "disabled"),
-            LldpAdminStatus::RxOnly => write!(f, "rx_only"),
-            LldpAdminStatus::TxOnly => write!(f, "tx_only"),
-        }
-    }
-}
-
 #[derive(Debug, PartialEq, Eq, Deserialize, Serialize)]
-pub struct ParseLldpAdminStatusError(String);
-
-impl std::fmt::Display for ParseLldpAdminStatusError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "LLDP admin status error: {}", self.0)
-    }
-}
-
-impl FromStr for LldpAdminStatus {
-    type Err = ParseLldpAdminStatusError;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s.to_lowercase().as_str() {
-            "enabled" => Ok(Self::Enabled),
-            "disabled" => Ok(Self::Disabled),
-            "rxonly" | "rx_only" => Ok(Self::RxOnly),
-            "txonly" | "tx_only" => Ok(Self::TxOnly),
-            _ => Err(ParseLldpAdminStatusError(format!(
-                "not a valid admin status: {s}"
-            ))),
-        }
-    }
-}
+pub struct ParseLldpAdminStatusError(pub(super) String);
 
 /// Per-port LLDP configuration settings.  Only the "status" setting is
 /// mandatory.  All other fields have natural defaults or may be inherited from
@@ -372,17 +244,6 @@ pub struct HostPortConfig {
     pub tx_eq: Option<TxEqConfig>,
 }
 
-impl From<PortConfig> for HostPortConfig {
-    fn from(x: PortConfig) -> Self {
-        Self {
-            port: x.port,
-            addrs: x.addresses,
-            lldp: x.lldp.clone(),
-            tx_eq: x.tx_eq,
-        }
-    }
-}
-
 /// Identifies switch physical location
 #[derive(
     Clone,
@@ -405,47 +266,8 @@ pub enum SwitchLocation {
     Switch1,
 }
 
-impl SwitchLocation {
-    /// Return the location of the other switch, not ourself.
-    pub const fn other(&self) -> Self {
-        match self {
-            SwitchLocation::Switch0 => SwitchLocation::Switch1,
-            SwitchLocation::Switch1 => SwitchLocation::Switch0,
-        }
-    }
-}
-
-impl fmt::Display for SwitchLocation {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            SwitchLocation::Switch0 => write!(f, "switch0"),
-            SwitchLocation::Switch1 => write!(f, "switch1"),
-        }
-    }
-}
-
 #[derive(Debug, PartialEq, Eq, Deserialize, Serialize)]
-pub struct ParseSwitchLocationError(String);
-
-impl std::fmt::Display for ParseSwitchLocationError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "parse switch location error: {}", self.0)
-    }
-}
-
-impl FromStr for SwitchLocation {
-    type Err = ParseSwitchLocationError;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s {
-            "switch0" => Ok(Self::Switch0),
-            "switch1" => Ok(Self::Switch1),
-            _ => Err(ParseSwitchLocationError(format!(
-                "not a valid location: {s}"
-            ))),
-        }
-    }
-}
+pub struct ParseSwitchLocationError(pub(super) String);
 
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
@@ -482,22 +304,6 @@ pub enum PortSpeed {
     Speed400G,
 }
 
-impl fmt::Display for PortSpeed {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            PortSpeed::Speed0G => write!(f, "0G"),
-            PortSpeed::Speed1G => write!(f, "1G"),
-            PortSpeed::Speed10G => write!(f, "10G"),
-            PortSpeed::Speed25G => write!(f, "25G"),
-            PortSpeed::Speed40G => write!(f, "40G"),
-            PortSpeed::Speed50G => write!(f, "50G"),
-            PortSpeed::Speed100G => write!(f, "100G"),
-            PortSpeed::Speed200G => write!(f, "200G"),
-            PortSpeed::Speed400G => write!(f, "400G"),
-        }
-    }
-}
-
 /// Switchport FEC options
 #[derive(
     Copy, Clone, Debug, Deserialize, Serialize, PartialEq, Eq, JsonSchema, Hash,
@@ -507,14 +313,4 @@ pub enum PortFec {
     Firecode,
     None,
     Rs,
-}
-
-impl fmt::Display for PortFec {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            PortFec::Firecode => write!(f, "Firecode R-FEC"),
-            PortFec::None => write!(f, "None"),
-            PortFec::Rs => write!(f, "RS-FEC"),
-        }
-    }
 }

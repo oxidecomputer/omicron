@@ -75,7 +75,6 @@ impl TryFrom<crate::v19::early_networking::EarlyNetworkConfig>
         value: crate::v19::early_networking::EarlyNetworkConfig,
     ) -> Result<Self, Self::Error> {
         use omicron_common::api::internal::shared::rack_init::v1;
-        use omicron_common::api::internal::shared::rack_init::v2;
         use std::net::IpAddr;
 
         let rack_network_config = value
@@ -139,84 +138,14 @@ impl TryFrom<crate::v19::early_networking::EarlyNetworkConfig>
                                     vlan_id: a.vlan_id,
                                 })
                                 .collect(),
-                            switch: match p.switch {
-                                v2::SwitchLocation::Switch0 => {
-                                    v1::SwitchLocation::Switch0
-                                }
-                                v2::SwitchLocation::Switch1 => {
-                                    v1::SwitchLocation::Switch1
-                                }
-                            },
+                            switch: p.switch,
                             port: p.port,
-                            uplink_port_speed: match p.uplink_port_speed {
-                                v2::PortSpeed::Speed0G => {
-                                    v1::PortSpeed::Speed0G
-                                }
-                                v2::PortSpeed::Speed1G => {
-                                    v1::PortSpeed::Speed1G
-                                }
-                                v2::PortSpeed::Speed10G => {
-                                    v1::PortSpeed::Speed10G
-                                }
-                                v2::PortSpeed::Speed25G => {
-                                    v1::PortSpeed::Speed25G
-                                }
-                                v2::PortSpeed::Speed40G => {
-                                    v1::PortSpeed::Speed40G
-                                }
-                                v2::PortSpeed::Speed50G => {
-                                    v1::PortSpeed::Speed50G
-                                }
-                                v2::PortSpeed::Speed100G => {
-                                    v1::PortSpeed::Speed100G
-                                }
-                                v2::PortSpeed::Speed200G => {
-                                    v1::PortSpeed::Speed200G
-                                }
-                                v2::PortSpeed::Speed400G => {
-                                    v1::PortSpeed::Speed400G
-                                }
-                            },
-                            uplink_port_fec: p.uplink_port_fec.map(
-                                |f| match f {
-                                    v2::PortFec::Firecode => {
-                                        v1::PortFec::Firecode
-                                    }
-                                    v2::PortFec::None => v1::PortFec::None,
-                                    v2::PortFec::Rs => v1::PortFec::Rs,
-                                },
-                            ),
+                            uplink_port_speed: p.uplink_port_speed,
+                            uplink_port_fec: p.uplink_port_fec,
                             bgp_peers,
                             autoneg: p.autoneg,
-                            lldp: p.lldp.map(|l| v1::LldpPortConfig {
-                                status: match l.status {
-                                    v2::LldpAdminStatus::Enabled => {
-                                        v1::LldpAdminStatus::Enabled
-                                    }
-                                    v2::LldpAdminStatus::Disabled => {
-                                        v1::LldpAdminStatus::Disabled
-                                    }
-                                    v2::LldpAdminStatus::RxOnly => {
-                                        v1::LldpAdminStatus::RxOnly
-                                    }
-                                    v2::LldpAdminStatus::TxOnly => {
-                                        v1::LldpAdminStatus::TxOnly
-                                    }
-                                },
-                                chassis_id: l.chassis_id,
-                                port_id: l.port_id,
-                                port_description: l.port_description,
-                                system_name: l.system_name,
-                                system_description: l.system_description,
-                                management_addrs: l.management_addrs,
-                            }),
-                            tx_eq: p.tx_eq.map(|t| v1::TxEqConfig {
-                                pre1: t.pre1,
-                                pre2: t.pre2,
-                                main: t.main,
-                                post2: t.post2,
-                                post1: t.post1,
-                            }),
+                            lldp: p.lldp,
+                            tx_eq: p.tx_eq,
                         })
                     })
                     .collect::<Result<Vec<_>, _>>()?;
@@ -245,14 +174,7 @@ impl TryFrom<crate::v19::early_networking::EarlyNetworkConfig>
                             detection_threshold: b.detection_threshold,
                             required_rx: b.required_rx,
                             mode: b.mode,
-                            switch: match b.switch {
-                                v2::SwitchLocation::Switch0 => {
-                                    v1::SwitchLocation::Switch0
-                                }
-                                v2::SwitchLocation::Switch1 => {
-                                    v1::SwitchLocation::Switch1
-                                }
-                            },
+                            switch: b.switch,
                         })
                         .collect(),
                 })
