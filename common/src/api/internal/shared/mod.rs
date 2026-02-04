@@ -11,8 +11,8 @@ use crate::{
     zpool_name::ZpoolName,
 };
 use daft::Diffable;
-use omicron_uuid_kinds::ExternalZpoolUuid;
 use omicron_uuid_kinds::DatasetUuid;
+use omicron_uuid_kinds::ExternalZpoolUuid;
 use oxnet::{IpNet, Ipv4Net, Ipv6Net};
 use schemars::JsonSchema;
 use serde::{Deserialize, Deserializer, Serialize, Serializer, de};
