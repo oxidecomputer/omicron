@@ -425,7 +425,6 @@
         ]
       },
       "BootstrapAddressDiscovery": {
-        "description": "Describes how bootstrap addresses should be collected during RSS.",
         "oneOf": [
           {
             "description": "Ignore all bootstrap addresses except our own.",
@@ -842,11 +841,11 @@
         "format": "uuid"
       },
       "RackInitializeRequest": {
-        "description": "Rack initialization request.",
+        "description": "Configuration for the \"rack setup service\".\n\nThe Rack Setup Service should be responsible for one-time setup actions, such as CockroachDB placement and initialization.  Without operator intervention, however, these actions need a way to be automated in our deployment.",
         "type": "object",
         "properties": {
           "allowed_source_ips": {
-            "description": "IPs or subnets allowed to make requests to user-facing services.",
+            "description": "IPs or subnets allowed to make requests to user-facing services",
             "default": {
               "allow": "any"
             },
@@ -873,7 +872,7 @@
             }
           },
           "external_certificates": {
-            "description": "Initial TLS certificates for the external API.",
+            "description": "initial TLS certificates for the external API",
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/Certificate"
@@ -888,7 +887,7 @@
             }
           },
           "external_dns_zone_name": {
-            "description": "DNS name for the DNS zone delegated to the rack for external DNS.",
+            "description": "DNS name for the DNS zone delegated to the rack for external DNS",
             "type": "string"
           },
           "internal_services_ip_pool_ranges": {
@@ -906,7 +905,7 @@
             }
           },
           "rack_network_config": {
-            "description": "Initial rack network configuration.",
+            "description": "Initial rack network configuration",
             "allOf": [
               {
                 "$ref": "#/components/schemas/RackNetworkConfig"
@@ -914,7 +913,7 @@
             ]
           },
           "recovery_silo": {
-            "description": "Configuration of the Recovery Silo (the initial Silo).",
+            "description": "Configuration of the Recovery Silo (the initial Silo)",
             "allOf": [
               {
                 "$ref": "#/components/schemas/RecoverySiloConfig"
@@ -923,7 +922,7 @@
           },
           "trust_quorum_peers": {
             "nullable": true,
-            "description": "The set of peer_ids required to initialize trust quorum.\n\nThe value is `None` if we are not using trust quorum.",
+            "description": "The set of peer_ids required to initialize trust quorum\n\nThe value is `None` if we are not using trust quorum",
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/Baseboard"
@@ -1229,7 +1228,7 @@
         ]
       },
       "RssStep": {
-        "description": "Steps we go through during initial rack setup.",
+        "description": "Steps we go through during initial rack setup. Keep this list in order that they happen.",
         "oneOf": [
           {
             "type": "object",
