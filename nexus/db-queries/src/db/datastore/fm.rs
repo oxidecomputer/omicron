@@ -1552,26 +1552,48 @@ mod tests {
                 de,
                 ereports,
                 alerts_requested,
-            } = dbg!(case);
-            let Some(expected) = this.cases.get(&case.id) else {
-                panic!("expected case {id} to exist in the original sitrep")
+            } = case;
+            let case_id = id;
+            let Some(expected) = this.cases.get(&case_id) else {
+                panic!(
+                    "assertion failed: left == right\n  \
+                    right sitrep contained case {case_id}\n  \
+                    left sitrep contains only cases {:?}\n",
+                    this.cases.iter().map(|case| case.id).collect::<Vec<_>>(),
+                )
             };
             // N.B.: we must assert each bit of the case manually, as ereports
             // contain `time_collected` timestamps which will lose a bit of
             // precision when roundtripped through the database.
             // :(
-            assert_eq!(id, &expected.id);
-            assert_eq!(created_sitrep_id, &expected.created_sitrep_id);
-            assert_eq!(closed_sitrep_id, &expected.closed_sitrep_id);
-            assert_eq!(comment, &expected.comment);
-            assert_eq!(de, &expected.de);
+            assert_eq!(&expected.id, id, "while checking case {case_id}");
+            assert_eq!(
+                &expected.created_sitrep_id, created_sitrep_id,
+                "while checking case {case_id}"
+            );
+            assert_eq!(
+                &expected.closed_sitrep_id, closed_sitrep_id,
+                "while checking case {case_id}"
+            );
+            assert_eq!(
+                &expected.comment, comment,
+                "while checking case {case_id}"
+            );
+            assert_eq!(&expected.de, de, "while checking case {case_id}");
 
             // Now, check that all the ereports are present in both cases.
             assert_eq!(ereports.len(), expected.ereports.len());
             for expected in &expected.ereports {
-                let Some(ereport) = ereports.get(&expected.ereport.id()) else {
+                let ereport_id = expected.ereport.id();
+                let Some(ereport) = ereports.get(&ereport_id) else {
                     panic!(
-                        "expected ereport {id} to exist in the original case"
+                        "assertion failed: left == right (while checking case {case_id})\n  \
+                        case in right sitrep did not contain ereport {ereport_id}\n  \
+                        it contains only these ereports: {:?}\n",
+                        ereports
+                            .iter()
+                            .map(|e| e.ereport.id().to_string())
+                            .collect::<Vec<_>>(),
                     )
                 };
                 let fm::case::CaseEreport {
@@ -1579,20 +1601,35 @@ mod tests {
                     ereport,
                     assigned_sitrep_id,
                     comment,
-                } = dbg!(ereport);
-                assert_eq!(id, &expected.id);
+                } = ereport;
+                assert_eq!(
+                    &expected.id, id,
+                    "ereport assignment IDs should be equal \
+                     (while checking ereport {ereport_id} in case {case_id})",
+                );
                 // This is where we go out of our way to avoid the timestamp,
                 // btw.
-                assert_eq!(ereport.id(), expected.ereport.id());
-                assert_eq!(assigned_sitrep_id, &expected.assigned_sitrep_id);
-                assert_eq!(comment, &expected.comment);
+                assert_eq!(
+                    expected.ereport.id(),
+                    ereport.id(),
+                    "while checking ereport {ereport_id} in case {case_id}",
+                );
+                assert_eq!(
+                    &expected.assigned_sitrep_id, assigned_sitrep_id,
+                    "while checking ereport {ereport_id} in case {case_id}",
+                );
+                assert_eq!(
+                    &expected.comment, comment,
+                    "while checking ereport {ereport_id} in case {case_id}",
+                );
             }
 
             // Since these don't have any timestamps in them, we can just assert
             // the whole map is the same.
-            assert_eq!(alerts_requested, &expected.alerts_requested);
-
-            eprintln!();
+            assert_eq!(
+                alerts_requested, &expected.alerts_requested,
+                "while checking case {case_id}"
+            );
         }
     }
 
