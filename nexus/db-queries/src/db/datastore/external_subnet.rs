@@ -110,7 +110,7 @@ struct AttachedSubnetDetails {
 impl From<AttachedSubnetDetails> for AttachedSubnet {
     fn from(value: AttachedSubnetDetails) -> Self {
         Self {
-            _rack_id: RackUuid::from_untyped_uuid(value.rack_id),
+            rack_id: RackUuid::from_untyped_uuid(value.rack_id),
             sled_id: SledUuid::from_untyped_uuid(value.sled_id),
             sled_ip: value.sled_ip.into(),
             vmm_id: PropolisUuid::from_untyped_uuid(value.vmm_id),

@@ -86,9 +86,16 @@ async fn ssd_begin_detach_subnet_undo(
     let datastore = osagactx.datastore();
     warn!(log, "ssd_begin_detach_subnet_undo: Reverting attached->detaching");
     let params = sagactx.saga_params::<Params>()?;
-    let ExternalSubnetBeginAttachResult { subnet, do_saga: _ } =
+    let ExternalSubnetBeginAttachResult { subnet, do_saga } =
         sagactx
             .lookup::<ExternalSubnetBeginAttachResult>("begin_detach_result")?;
+
+    // NOTE: This is really an optimization, since
+    // `external_subnet_complete_op()` is idempotent. Still, avoid the work if
+    // we can.
+    if !do_saga {
+        return Ok(());
+    }
     let opctx = crate::context::op_context_for_saga_action(
         &sagactx,
         &params.serialized_authn,

@@ -247,10 +247,8 @@ impl Nexus {
         subnet: IpNet,
     ) -> Result<(), Error> {
         delete_attached_subnets_from_dendrite_inner(
-            &self.db_datastore,
             &self.log,
             self.resolver(),
-            &self.opctx_alloc,
             &[subnet],
         )
         .await
@@ -658,7 +656,6 @@ pub(crate) async fn instance_delete_dpd_config(
         log,
         resolver,
         opctx,
-        opctx_alloc,
         instance_id,
     )
     .await;
@@ -792,7 +789,6 @@ async fn instance_delete_attached_subnets_from_dendrite(
     log: &slog::Logger,
     resolver: &internal_dns_resolver::Resolver,
     opctx: &OpContext,
-    opctx_alloc: &OpContext,
     instance_id: InstanceUuid,
 ) -> Result<(), Error> {
     let subnets = datastore
@@ -804,28 +800,28 @@ async fn instance_delete_attached_subnets_from_dendrite(
     if subnets.is_empty() {
         return Ok(());
     }
-    delete_attached_subnets_from_dendrite_inner(
-        datastore,
-        log,
-        resolver,
-        opctx_alloc,
-        &subnets,
-    )
-    .await
+    delete_attached_subnets_from_dendrite_inner(log, resolver, &subnets).await
 }
 
 async fn delete_attached_subnets_from_dendrite_inner(
-    datastore: &DataStore,
     log: &slog::Logger,
     resolver: &internal_dns_resolver::Resolver,
-    opctx_alloc: &OpContext,
     subnets: &[IpNet],
 ) -> Result<(), Error> {
-    let boundary_switches = boundary_switches(datastore, opctx_alloc).await?;
+    // NOTE: We really want to delete this specific mapping from IP subnet to
+    // instance target, at a specific generation. Dendrite's API isn't really
+    // expressive enough to say that today, but see
+    // https://github.com/oxidecomputer/dendrite/issues/209. In the meantime, we
+    // intentionally delete this mapping from _all_ switches. That's the same
+    // thing as "both" switches, since (1) we have only a single rack and (2) we
+    // don't list the switches (per-rack or otherwise) in the database. See
+    // https://github.com/oxidecomputer/omicron/issues/6394 for that one.
+    let switches =
+        HashSet::from([SwitchLocation::Switch0, SwitchLocation::Switch1]);
     let clients = super::dpd_clients(resolver, log).await.map_err(|e| {
         Error::internal_error(&format!("failed to get dpd clients: {e}"))
     })?;
-    for switch in boundary_switches.iter() {
+    for switch in switches.iter() {
         let Some(client) = clients.get(switch) else {
             error!(
                 log,

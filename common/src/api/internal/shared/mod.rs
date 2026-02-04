@@ -1109,12 +1109,7 @@ pub enum AttachedSubnetId {
 #[derive(Debug)]
 pub struct AttachedSubnet {
     /// ID of the rack hosting this instance.
-    //
-    // NOTE: We do not use this today. It's here for the future when we've
-    // resolved https://github.com/oxidecomputer/omicron/issues/5201, and so
-    // we can map this entry to the Dendrite instances only on the rack this
-    // instance lives on.
-    pub _rack_id: RackUuid,
+    pub rack_id: RackUuid,
     /// ID of the sled hosting the instance.
     pub sled_id: SledUuid,
     /// Underlay IP address of the sled hosting the instance.
