@@ -1012,11 +1012,13 @@ async fn cmd_db_alert_info(
         class,
         payload,
         num_dispatched,
+        case_id,
     } = alert;
 
     const CLASS: &str = "class";
     const TIME_DISPATCHED: &str = "fully dispatched at";
     const NUM_DISPATCHED: &str = "deliveries dispatched";
+    const CASE_ID: &str = "requested by FM case";
 
     const WIDTH: usize = const_max_len(&[
         ID,
@@ -1025,6 +1027,7 @@ async fn cmd_db_alert_info(
         TIME_DISPATCHED,
         NUM_DISPATCHED,
         CLASS,
+        CASE_ID,
     ]);
 
     println!("\n{:=<80}", "== ALERT ");
@@ -1036,6 +1039,9 @@ async fn cmd_db_alert_info(
     println!("    {NUM_DISPATCHED:>WIDTH$}: {num_dispatched}");
     if let Some(t) = time_dispatched {
         println!("    {TIME_DISPATCHED:>WIDTH$}: {t}")
+    }
+    if let Some(case_id) = case_id {
+        println!("    {CASE_ID:>WIDTH$}: {case_id:?}");
     }
 
     println!("\n{:=<80}", "== ALERT PAYLOAD ");
