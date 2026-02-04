@@ -434,7 +434,7 @@ impl ExampleSystemBuilder {
     ///
     /// The default is `true`.
     ///
-    /// If [`Self::ndisks_per_sled`] is set to 0, then this is implied: if no
+    /// If `Self::ndisks_per_sled` is set to 0, then this is implied: if no
     /// disks are created, then the blueprint won't have any disks.
     pub fn with_create_disks_in_blueprint(mut self, create: bool) -> Self {
         self.create_disks_in_blueprint = create;
