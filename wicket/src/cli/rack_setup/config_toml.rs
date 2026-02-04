@@ -362,7 +362,9 @@ fn populate_uplink_table(cfg: &UserSpecifiedPortConfig) -> Table {
     for a in addresses {
         let UplinkAddressConfig { address, vlan_id } = a;
         let mut x = InlineTable::new();
-        x.insert("address", string_value(address));
+        if let Some(address) = address {
+            x.insert("address", string_value(address));
+        }
         if let Some(vlan_id) = vlan_id {
             x.insert("vlan_id", i64_value(i64::from(*vlan_id)));
         }

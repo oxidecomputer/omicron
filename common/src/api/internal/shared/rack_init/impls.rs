@@ -14,7 +14,7 @@ use super::SwitchLocation;
 use super::UplinkAddressConfig;
 use super::UplinkAddressConfigError;
 use std::fmt;
-use std::net::IpAddr;
+use std::net::{IpAddr, Ipv6Addr};
 use std::str::FromStr;
 
 impl BgpPeerConfig {
@@ -56,15 +56,22 @@ impl BgpPeerConfig {
 
 impl UplinkAddressConfig {
     pub fn addr(&self) -> IpAddr {
-        self.address.addr()
+        match self.address {
+            Some(ipaddr) => ipaddr.addr(),
+            None => {
+                IpAddr::V6(Ipv6Addr::UNSPECIFIED)
+            }
+        }
     }
 }
 
 impl std::fmt::Display for UplinkAddressConfig {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self.vlan_id {
-            None => write!(f, "{}", self.address),
-            Some(v) => write!(f, "{};{}", self.address, v),
+        match (&self.address, self.vlan_id) {
+            (Some(addr), None) => write!(f, "{}", addr),
+            (Some(addr), Some(v)) => write!(f, "{};{}", addr, v),
+            (None, None) => write!(f, "link-local"),
+            (None, Some(v)) => write!(f, "link-local;{}", v),
         }
     }
 }
@@ -76,25 +83,31 @@ impl std::fmt::Display for UplinkAddressConfigError {
 }
 
 /// Convert a string into an UplinkAddressConfig.
-/// 192.168.1.1/24 => UplinkAddressConfig { 192.168.1.1/24, None }
-/// 192.168.1.1/24;200 => UplinkAddressConfig { 192.168.1.1/24, Some(200) }
+/// 192.168.1.1/24 => UplinkAddressConfig { Some(192.168.1.1/24), None }
+/// 192.168.1.1/24;200 => UplinkAddressConfig { Some(192.168.1.1/24), Some(200) }
+/// link-local => UplinkAddressConfig { None, None }
+/// link-local;200 => UplinkAddressConfig { None, Some(200) }
 impl FromStr for UplinkAddressConfig {
     type Err = UplinkAddressConfigError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         let fields: Vec<&str> = s.split(';').collect();
-        let (address, vlan_id) = match fields.len() {
+        let (address_str, vlan_id) = match fields.len() {
             1 => Ok((fields[0], None)),
             2 => Ok((fields[0], Some(fields[1]))),
             _ => Err(UplinkAddressConfigError(format!(
                 "not a valid uplink address: {s}"
             ))),
         }?;
-        let address = address.parse().map_err(|_| {
-            UplinkAddressConfigError(format!(
-                "not a valid ip address: {address}"
-            ))
-        })?;
+        let address = if address_str == "link-local" {
+            None
+        } else {
+            Some(address_str.parse().map_err(|_| {
+                UplinkAddressConfigError(format!(
+                    "not a valid ip address: {address_str}"
+                ))
+            })?)
+        };
         let vlan_id = match vlan_id {
             None => Ok(None),
             Some(v) => match v.parse() {

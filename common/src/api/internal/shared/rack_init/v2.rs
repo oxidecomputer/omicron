@@ -7,19 +7,17 @@
 //! they now may be modified freely.
 
 use super::v1::BfdPeerConfig;
-use super::v1::BgpConfig;
 use super::v1::LldpPortConfig;
 use super::v1::PortFec;
 use super::v1::PortSpeed;
 use super::v1::RouteConfig;
 use super::v1::SwitchLocation;
 use super::v1::TxEqConfig;
-use super::v1::UplinkAddressConfig;
 use crate::api::external::ImportExportPolicy;
-use oxnet::Ipv6Net;
+use oxnet::{Ipv6Net, IpNet};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use std::net::{IpAddr, Ipv4Addr};
+use std::net::IpAddr;
 
 /// Initial network configuration
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, JsonSchema)]
@@ -27,9 +25,9 @@ pub struct RackNetworkConfig {
     pub rack_subnet: Ipv6Net,
     // TODO: #3591 Consider making infra-ip ranges implicit for uplinks
     /// First ip address to be used for configuring network infrastructure
-    pub infra_ip_first: Ipv4Addr,
+    pub infra_ip_first: IpAddr,
     /// Last ip address to be used for configuring network infrastructure
-    pub infra_ip_last: Ipv4Addr,
+    pub infra_ip_last: IpAddr,
     /// Uplinks for connecting the rack to external networks
     pub ports: Vec<PortConfig>,
     /// BGP configurations for connecting the rack to external networks
@@ -113,5 +111,58 @@ pub struct PortConfig {
     /// LLDP configuration for this port
     pub lldp: Option<LldpPortConfig>,
     /// TX-EQ configuration for this port
+    pub tx_eq: Option<TxEqConfig>,
+}
+
+#[derive(
+    Clone, Debug, Deserialize, Serialize, PartialEq, Eq, JsonSchema, Hash,
+)]
+pub struct UplinkAddressConfig {
+    /// The address to be used on the uplink.
+    /// Set to `None` for an Ipv6 Link Local address.
+    pub address: Option<IpNet>,
+
+    /// The VLAN id (if any) associated with this address.
+    #[serde(default)]
+    pub vlan_id: Option<u16>,
+}
+
+#[derive(Debug, PartialEq, Eq, Deserialize, Serialize)]
+pub struct UplinkAddressConfigError(pub(super) String);
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq, JsonSchema)]
+pub struct BgpConfig {
+    /// The autonomous system number for the BGP configuration.
+    pub asn: u32,
+
+    /// The set of prefixes for the BGP router to originate.
+    pub originate: Vec<IpNet>,
+
+    /// Shaper to apply to outgoing messages.
+    #[serde(default)]
+    pub shaper: Option<String>,
+
+    /// Checker to apply to incoming messages.
+    #[serde(default)]
+    pub checker: Option<String>,
+}
+
+/// A set of switch uplinks.
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
+pub struct SwitchPorts {
+    pub uplinks: Vec<HostPortConfig>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, JsonSchema)]
+pub struct HostPortConfig {
+    /// Switchport to use for external connectivity
+    pub port: String,
+
+    /// IP Address and prefix (e.g., `192.168.0.1/16`) to apply to switchport
+    /// (must be in infra_ip pool).  May also include an optional VLAN ID.
+    pub addrs: Vec<UplinkAddressConfig>,
+
+    pub lldp: Option<LldpPortConfig>,
+
     pub tx_eq: Option<TxEqConfig>,
 }
