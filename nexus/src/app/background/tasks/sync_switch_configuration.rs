@@ -878,7 +878,7 @@ impl BackgroundTask for SwitchPortSettingsManager {
                             // communities/import/export tables are keyed by address
                             let peer_config = UnnumberedBgpPeerConfig {
                                 name: format!("unnumbered-{}", peer.interface_name),
-                                interface: peer.interface_name.to_string(),
+                                interface: format!("tfport{}_0", peer.interface_name),
                                 hold_time: peer.hold_time.0.into(),
                                 idle_hold_time: peer.idle_hold_time.0.into(),
                                 delay_open: peer.delay_open.0.into(),

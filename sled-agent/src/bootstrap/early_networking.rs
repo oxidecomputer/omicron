@@ -607,7 +607,7 @@ impl<'a> EarlyNetworkSetup<'a> {
                     // Unnumbered peer - identified by interface
                     let bpc = MgUnnumberedBgpPeerConfig {
                         name: format!("unnumbered-{}", port.port),
-                        interface: port.port.clone(),
+                        interface: format!("tfport{}_0", port.port),
                         hold_time: peer.hold_time.unwrap_or(6),
                         idle_hold_time: peer.idle_hold_time.unwrap_or(3),
                         delay_open: peer.delay_open.unwrap_or(0),
