@@ -10,6 +10,7 @@ use crate::app::background::tasks::fm_sitrep_load::CurrentSitrep;
 use futures::future::BoxFuture;
 use nexus_background_task_interface::Activator;
 use nexus_db_queries::context::OpContext;
+use nexus_db_queries::db;
 use nexus_db_queries::db::DataStore;
 use nexus_types::fm::Sitrep;
 use nexus_types::fm::SitrepVersion;
@@ -83,21 +84,16 @@ impl FmRendezvous {
         // and do a single `INSERT INTO` query, or iterate over them one by one
         // (not allocating) but insert one at a time?
         for (case_id, req) in sitrep.alerts_requested() {
-            let &AlertRequest { id, requested_sitrep_id, class, ref payload } =
-                req;
+            let &AlertRequest { id, class, requested_sitrep_id, .. } = req;
             status.total_alerts_requested += 1;
             if requested_sitrep_id == sitrep.id() {
                 status.current_sitrep_alerts_requested += 1;
             }
-            let class = class.into();
             match self
                 .datastore
                 .alert_create(
                     &opctx,
-                    id,
-                    class,
-                    payload.clone(),
-                    Some(case_id.into()),
+                    db::model::Alert::for_fm_alert_request(req, case_id),
                 )
                 .await
             {

@@ -7,7 +7,10 @@ use crate::DbTypedUuid;
 use chrono::{DateTime, Utc};
 use db_macros::Asset;
 use nexus_db_schema::schema::alert;
+use nexus_types::fm::case;
+use omicron_uuid_kinds::AlertUuid;
 use omicron_uuid_kinds::CaseKind;
+use omicron_uuid_kinds::CaseUuid;
 use serde::{Deserialize, Serialize};
 
 /// A webhook event.
@@ -51,4 +54,40 @@ impl Alert {
     /// UUID of the singleton event entry for alert receiver liveness probes.
     pub const PROBE_ALERT_ID: uuid::Uuid =
         uuid::Uuid::from_u128(0x001de000_7768_4000_8000_000000000001);
+
+    /// Returns an `Alert` model representing a newly-created alert, with the
+    /// provided ID, alert class, and JSON payload.
+    pub fn new(
+        id: impl Into<AlertUuid>,
+        class: impl Into<AlertClass>,
+        payload: impl Into<serde_json::Value>,
+    ) -> Self {
+        Self {
+            identity: AlertIdentity::new(id.into()),
+            time_dispatched: None,
+            class: class.into(),
+            payload: payload.into(),
+            num_dispatched: 0,
+            case_id: None,
+        }
+    }
+
+    pub fn for_fm_alert_request(
+        req: &case::AlertRequest,
+        case_id: CaseUuid,
+    ) -> Self {
+        let &case::AlertRequest {
+            id,
+            class,
+            ref payload,
+            // Ignore the sitrep ID fields, as they are not included in the
+            // alert model.
+            requested_sitrep_id: _,
+        } = req;
+
+        Self {
+            case_id: Some(case_id.into()),
+            ..Self::new(id, class, payload.clone())
+        }
+    }
 }

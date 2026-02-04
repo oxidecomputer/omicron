@@ -188,20 +188,13 @@ impl Nexus {
         &self,
         opctx: &OpContext,
         id: AlertUuid,
-        class: AlertClass,
+        class: impl Into<AlertClass>,
         event: serde_json::Value,
     ) -> Result<Alert, Error> {
         let alert = self
             .datastore()
-            .alert_create(opctx, id, class, event, None)
+            .alert_create(opctx, Alert::new(id, class, event))
             .await?;
-        slog::debug!(
-            &opctx.log,
-            "published alert";
-            "alert_id" => ?id,
-            "alert_class" => %alert.class,
-            "time_created" => ?alert.identity.time_created,
-        );
 
         // Once the alert has been inserted, activate the dispatcher task to
         // ensure its propagated to receivers.

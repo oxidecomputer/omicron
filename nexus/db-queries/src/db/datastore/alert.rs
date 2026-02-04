@@ -7,8 +7,6 @@
 use super::DataStore;
 use crate::context::OpContext;
 use crate::db::model::Alert;
-use crate::db::model::AlertClass;
-use crate::db::model::AlertIdentity;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use diesel::prelude::*;
 use diesel::result::DatabaseErrorKind;
@@ -16,32 +14,22 @@ use diesel::result::Error as DieselError;
 use diesel::result::OptionalExtension;
 use nexus_db_errors::ErrorHandler;
 use nexus_db_errors::public_error_from_diesel;
-use nexus_db_model::DbTypedUuid;
 use nexus_db_schema::schema::alert::dsl as alert_dsl;
+use nexus_types::identity::Asset;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::UpdateResult;
-use omicron_uuid_kinds::{AlertUuid, CaseKind, GenericUuid};
+use omicron_uuid_kinds::{AlertUuid, GenericUuid};
 
 impl DataStore {
     pub async fn alert_create(
         &self,
         opctx: &OpContext,
-        id: AlertUuid,
-        class: AlertClass,
-        payload: serde_json::Value,
-        case_id: Option<DbTypedUuid<CaseKind>>,
+        alert: Alert,
     ) -> CreateResult<Alert> {
         let conn = self.pool_connection_authorized(&opctx).await?;
         let alert = diesel::insert_into(alert_dsl::alert)
-            .values(Alert {
-                identity: AlertIdentity::new(id),
-                time_dispatched: None,
-                class,
-                payload,
-                num_dispatched: 0,
-                case_id,
-            })
+            .values(alert)
             .returning(Alert::as_returning())
             .get_result_async(&*conn)
             .await
@@ -49,15 +37,16 @@ impl DataStore {
                 DieselError::DatabaseError(
                     DatabaseErrorKind::UniqueViolation,
                     _,
-                ) => Error::conflict(format!("alert ID {id} already exists")),
+                ) => Error::conflict("alert already exists"),
                 e => public_error_from_diesel(e, ErrorHandler::Server),
             })?;
 
         slog::debug!(
             &opctx.log,
             "published alert";
-            "alert_id" => ?id,
-            "alert_class" => %class,
+            "alert_id" => ?alert.id(),
+            "alert_class" => %alert.class,
+            "alert_case_id" => ?alert.case_id,
             "time_created" => ?alert.identity.time_created,
         );
 
