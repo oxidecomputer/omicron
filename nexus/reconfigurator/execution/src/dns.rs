@@ -1061,7 +1061,7 @@ mod test {
             .set_nsleds(5)
             .set_external_dns_count(3)
             .expect("can set external dns count");
-        let external_dns_count = system_builder.get_external_dns_zones();
+        let external_dns_count = system_builder.external_dns_zones();
         let (_, mut blueprint) = system_builder.build();
         blueprint.internal_dns_version = Generation::new();
         blueprint.external_dns_version = Generation::new();

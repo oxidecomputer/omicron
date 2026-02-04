@@ -500,27 +500,27 @@ impl ExampleSystemBuilder {
         Ok(self)
     }
 
-    fn get_nexus_zones(&self) -> ZoneCount {
+    fn nexus_zones(&self) -> ZoneCount {
         self.nexus_count.unwrap_or(ZoneCount(self.sled_settings.len()))
     }
 
-    pub fn get_internal_dns_zones(&self) -> usize {
+    pub fn internal_dns_zones(&self) -> usize {
         self.internal_dns_count.0
     }
 
-    pub fn get_external_dns_zones(&self) -> usize {
+    pub fn external_dns_zones(&self) -> usize {
         self.external_dns_count.0
     }
 
-    pub fn get_oximeter_zones(&self) -> usize {
+    pub fn oximeter_zones(&self) -> usize {
         self.oximeter_count.0
     }
 
-    pub fn get_cockroachdb_zones(&self) -> usize {
+    pub fn cockroachdb_zones(&self) -> usize {
         self.cockroachdb_count.0
     }
 
-    pub fn get_boundary_ntp_count(&self) -> usize {
+    pub fn boundary_ntp_count(&self) -> usize {
         self.boundary_ntp_count.0
     }
 
@@ -528,7 +528,7 @@ impl ExampleSystemBuilder {
     ///
     /// Return the system, and the initial blueprint that matches it.
     pub fn build(&self) -> (ExampleSystem, Blueprint) {
-        let nexus_count = self.get_nexus_zones();
+        let nexus_count = self.nexus_zones();
 
         slog::debug!(
             &self.log,
