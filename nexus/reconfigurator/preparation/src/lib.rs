@@ -274,7 +274,7 @@ impl PlanningInputFromDb<'_> {
             active_nexus_zones.into_iter().map(|n| n.nexus_id()).collect();
         let not_yet_nexus_zones =
             not_yet_nexus_zones.into_iter().map(|n| n.nexus_id()).collect();
-        let pruneable_zones = PruneableZones::new(
+        let pruneable_zones = PruneableZones::assemble(
             opctx,
             datastore,
             &parent_blueprint,

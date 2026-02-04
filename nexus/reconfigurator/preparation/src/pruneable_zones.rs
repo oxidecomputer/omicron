@@ -70,7 +70,7 @@ impl PruneableZones {
     ///    completed.
     ///
     /// See this module's documentation for more details.
-    pub async fn new(
+    pub async fn assemble(
         opctx: &OpContext,
         datastore: &DataStore,
         parent_blueprint: &Blueprint,
@@ -191,8 +191,11 @@ fn is_boundary_ntp_pruneable(
     boundary_ntp_configs: &InServiceBoundaryNtpUpstreamConfigs<'_>,
     reason_checker: &mut BlueprintExpungedZoneAccessReasonChecker,
 ) -> bool {
-    // If this zone's upstream config is also the config of an in-service zone,
-    // then it's pruneable. Note the reason we're checking here.
+    // The only reason we might need to hang onto the blueprint information for
+    // a boundary NTP zone is if it's the only zone that contains the boundary
+    // NTP configuration.  As long as the set of boundary NTP configs from
+    // in-service zones includes the same configuration, then this zone is
+    // pruneable. Note the reason we're checking here.
     reason_checker.add_reason_checked(
         BlueprintExpungedZoneAccessReason::BoundaryNtpUpstreamConfig,
     );
@@ -209,7 +212,7 @@ fn is_cockroach_pruneable(
     // decommissioned the node that was present in that zone; however, we don't
     // currently decommission cockroach nodes (tracked by
     // <https://github.com/oxidecomputer/omicron/issues/8447>). We therefore
-    // never consider cockroach nodes pruneable
+    // never consider cockroach nodes pruneable.
     //
     // This shouldn't be a huge deal in practice; Cockroach zones are updated in
     // place, not by an expunge/add pair, so a typical update does not produce
@@ -236,7 +239,7 @@ fn is_multinode_clickhouse_pruneable(
 ) -> bool {
     // If this zone is still present in the clickhouse cluster config, it's
     // not pruneable. If there is no config at all or there is but it doesn't
-    // contain this zone, it is prunable.
+    // contain this zone, it is pruneable.
     //
     // Note the reason we've checked here.
     reason_checker.add_reason_checked(
@@ -528,6 +531,11 @@ impl<'a> ZonesWithServiceNicRows<'a> {
 /// Helper type to ensure we've covered every
 /// [`BlueprintExpungedZoneAccessReason`] in our checks above.
 ///
+/// It's critical that the system never prune a zone whose information might
+/// be needed in the future.  So we're pretty careful here.  We require all
+/// uses of expunged zones to provide a `reason` and we check that there's
+/// associated code for each of these reasons using this struct.
+///
 /// This type has both compile-time (the `match` in `new()`) and runtime (the
 /// `assert_all_reasons_checked()` function) guards that confirm we cover any
 /// new variants added to [`BlueprintExpungedZoneAccessReason`] in the future.
@@ -567,7 +575,8 @@ impl BlueprintExpungedZoneAccessReasonChecker {
                 // Checked by is_cockroach_pruneable()
                 Reason::CockroachDecommission => {}
 
-                // Checked directly by the main loop in `PruneableZones::new()`.
+                // Checked directly by the main loop in
+                // `PruneableZones::assemble()`.
                 Reason::DeallocateExternalNetworkingResources => {}
 
                 // Checked by is_external_dns_pruneable()
@@ -716,6 +725,9 @@ mod tests {
         }
     }
 
+    // Checks that when given an example system with all components on it, the
+    // implementation above handles all the possible reasons that an expunged
+    // zone might be used.
     #[tokio::test]
     async fn test_pruneable_zones_reason_checker() {
         const TEST_NAME: &str = "test_pruneable_zones_reason_checker";
@@ -821,7 +833,7 @@ mod tests {
         // interrogate the internal `reason_checker` and assert that it contains
         // all known reasons.
         let pruneable_zones =
-            PruneableZones::new(opctx, datastore, &blueprint, &[], &[])
+            PruneableZones::assemble(opctx, datastore, &blueprint, &[], &[])
                 .await
                 .expect("failed to find pruneable zones");
 
@@ -897,7 +909,7 @@ mod tests {
 
         // Check that the zone is pruneable (no oximeter record, no producers)
         let pruneable_zones =
-            PruneableZones::new(opctx, datastore, &blueprint, &[], &[])
+            PruneableZones::assemble(opctx, datastore, &blueprint, &[], &[])
                 .await
                 .expect("failed to find pruneable zones");
         assert!(
@@ -921,7 +933,7 @@ mod tests {
 
         // Check that the zone is no longer pruneable
         let pruneable_zones =
-            PruneableZones::new(opctx, datastore, &blueprint, &[], &[])
+            PruneableZones::assemble(opctx, datastore, &blueprint, &[], &[])
                 .await
                 .expect("failed to find pruneable zones");
         assert!(
@@ -961,7 +973,7 @@ mod tests {
 
         // Check that the zone is still not pruneable (producers are assigned)
         let pruneable_zones =
-            PruneableZones::new(opctx, datastore, &blueprint, &[], &[])
+            PruneableZones::assemble(opctx, datastore, &blueprint, &[], &[])
                 .await
                 .expect("failed to find pruneable zones");
         assert!(
@@ -1004,7 +1016,7 @@ mod tests {
 
         // Check that the zone is now pruneable again (no producers assigned)
         let pruneable_zones =
-            PruneableZones::new(opctx, datastore, &blueprint, &[], &[])
+            PruneableZones::assemble(opctx, datastore, &blueprint, &[], &[])
                 .await
                 .expect("failed to find pruneable zones");
         assert!(
@@ -1067,7 +1079,7 @@ mod tests {
         // Confirm that it's NOT pruneable when there's no other boundary NTP
         // zone with the same upstream config.
         let pruneable_zones =
-            PruneableZones::new(opctx, datastore, &blueprint, &[], &[])
+            PruneableZones::assemble(opctx, datastore, &blueprint, &[], &[])
                 .await
                 .expect("failed to find pruneable zones");
         assert!(
@@ -1123,7 +1135,7 @@ mod tests {
         // Check that the zone IS now pruneable (another zone has the same
         // config)
         let pruneable_zones =
-            PruneableZones::new(opctx, datastore, &blueprint, &[], &[])
+            PruneableZones::assemble(opctx, datastore, &blueprint, &[], &[])
                 .await
                 .expect("failed to find pruneable zones");
         assert!(
@@ -1135,7 +1147,7 @@ mod tests {
         // Check that it's NOT pruneable when there's an associated external IP
         // db row
         let external_ip = make_external_ip_for_zone(boundary_ntp_zone_id);
-        let pruneable_zones = PruneableZones::new(
+        let pruneable_zones = PruneableZones::assemble(
             opctx,
             datastore,
             &blueprint,
@@ -1153,7 +1165,7 @@ mod tests {
         // Check that it's NOT pruneable when there's an associated service NIC
         // db row
         let service_nic = make_service_nic_for_zone(boundary_ntp_zone_id);
-        let pruneable_zones = PruneableZones::new(
+        let pruneable_zones = PruneableZones::assemble(
             opctx,
             datastore,
             &blueprint,
@@ -1213,7 +1225,7 @@ mod tests {
         // Check that the zone IS pruneable (we haven't added anything to the db
         // that would make it non-pruneable).
         let pruneable_zones =
-            PruneableZones::new(opctx, datastore, &blueprint, &[], &[])
+            PruneableZones::assemble(opctx, datastore, &blueprint, &[], &[])
                 .await
                 .expect("failed to find pruneable zones");
         assert!(
@@ -1233,7 +1245,7 @@ mod tests {
             .await
             .expect("failed to create database nexus access");
         let pruneable_zones =
-            PruneableZones::new(opctx, datastore, &blueprint, &[], &[])
+            PruneableZones::assemble(opctx, datastore, &blueprint, &[], &[])
                 .await
                 .expect("failed to find pruneable zones");
         assert!(
@@ -1248,7 +1260,7 @@ mod tests {
             .await
             .expect("failed to delete nexus access");
         let pruneable_zones =
-            PruneableZones::new(opctx, datastore, &blueprint, &[], &[])
+            PruneableZones::assemble(opctx, datastore, &blueprint, &[], &[])
                 .await
                 .expect("failed to find pruneable zones");
         assert!(
@@ -1270,7 +1282,7 @@ mod tests {
             Saga::new(nexus_zone_id.into_untyped_uuid().into(), saga_params);
         datastore.saga_create(&saga).await.expect("failed to create saga");
         let pruneable_zones =
-            PruneableZones::new(opctx, datastore, &blueprint, &[], &[])
+            PruneableZones::assemble(opctx, datastore, &blueprint, &[], &[])
                 .await
                 .expect("failed to find pruneable zones");
         assert!(
@@ -1289,7 +1301,7 @@ mod tests {
             .await
             .expect("failed to mark saga abandoned");
         let pruneable_zones =
-            PruneableZones::new(opctx, datastore, &blueprint, &[], &[])
+            PruneableZones::assemble(opctx, datastore, &blueprint, &[], &[])
                 .await
                 .expect("failed to find pruneable zones");
         assert!(
@@ -1320,7 +1332,7 @@ mod tests {
             .await
             .expect("failed to create support bundle");
         let pruneable_zones =
-            PruneableZones::new(opctx, datastore, &blueprint, &[], &[])
+            PruneableZones::assemble(opctx, datastore, &blueprint, &[], &[])
                 .await
                 .expect("failed to find pruneable zones");
         assert!(
@@ -1345,7 +1357,7 @@ mod tests {
             .await
             .expect("failed to mark support bundle as failed");
         let pruneable_zones =
-            PruneableZones::new(opctx, datastore, &blueprint, &[], &[])
+            PruneableZones::assemble(opctx, datastore, &blueprint, &[], &[])
                 .await
                 .expect("failed to find pruneable zones");
         assert!(
@@ -1356,7 +1368,7 @@ mod tests {
         // Check that it's NOT pruneable when there's an associated external IP
         // db row
         let external_ip = make_external_ip_for_zone(nexus_zone_id);
-        let pruneable_zones = PruneableZones::new(
+        let pruneable_zones = PruneableZones::assemble(
             opctx,
             datastore,
             &blueprint,
@@ -1374,7 +1386,7 @@ mod tests {
         // Check that it's NOT pruneable when there's an associated service NIC
         // db row
         let service_nic = make_service_nic_for_zone(nexus_zone_id);
-        let pruneable_zones = PruneableZones::new(
+        let pruneable_zones = PruneableZones::assemble(
             opctx,
             datastore,
             &blueprint,
@@ -1443,7 +1455,7 @@ mod tests {
         // Confirm that it's NOT pruneable when there's no other external DNS
         // zone with the same IP (meaning the IP hasn't been reassigned yet).
         let pruneable_zones =
-            PruneableZones::new(opctx, datastore, &blueprint, &[], &[])
+            PruneableZones::assemble(opctx, datastore, &blueprint, &[], &[])
                 .await
                 .expect("failed to find pruneable zones");
         assert!(
@@ -1500,7 +1512,7 @@ mod tests {
         // Check that the zone IS now pruneable (the IP has been reassigned to
         // another in-service zone)
         let pruneable_zones =
-            PruneableZones::new(opctx, datastore, &blueprint, &[], &[])
+            PruneableZones::assemble(opctx, datastore, &blueprint, &[], &[])
                 .await
                 .expect("failed to find pruneable zones");
         assert!(
@@ -1512,7 +1524,7 @@ mod tests {
         // Check that it's NOT pruneable when there's an associated external IP
         // db row
         let external_ip = make_external_ip_for_zone(external_dns_zone_id);
-        let pruneable_zones = PruneableZones::new(
+        let pruneable_zones = PruneableZones::assemble(
             opctx,
             datastore,
             &blueprint,
@@ -1530,7 +1542,7 @@ mod tests {
         // Check that it's NOT pruneable when there's an associated service NIC
         // db row
         let service_nic = make_service_nic_for_zone(external_dns_zone_id);
-        let pruneable_zones = PruneableZones::new(
+        let pruneable_zones = PruneableZones::assemble(
             opctx,
             datastore,
             &blueprint,
@@ -1618,7 +1630,7 @@ mod tests {
         // Confirm that it's NOT pruneable when it's still in the clickhouse
         // cluster config
         let pruneable_zones =
-            PruneableZones::new(opctx, datastore, &blueprint, &[], &[])
+            PruneableZones::assemble(opctx, datastore, &blueprint, &[], &[])
                 .await
                 .expect("failed to find pruneable zones");
         assert!(
@@ -1648,7 +1660,7 @@ mod tests {
 
         // Check that the zone IS now pruneable (removed from cluster config)
         let pruneable_zones =
-            PruneableZones::new(opctx, datastore, &blueprint, &[], &[])
+            PruneableZones::assemble(opctx, datastore, &blueprint, &[], &[])
                 .await
                 .expect("failed to find pruneable zones");
         assert!(
@@ -1730,7 +1742,7 @@ mod tests {
         // Confirm that it's NOT pruneable when it's still in the clickhouse
         // cluster config
         let pruneable_zones =
-            PruneableZones::new(opctx, datastore, &blueprint, &[], &[])
+            PruneableZones::assemble(opctx, datastore, &blueprint, &[], &[])
                 .await
                 .expect("failed to find pruneable zones");
         assert!(
@@ -1760,7 +1772,7 @@ mod tests {
 
         // Check that the zone IS now pruneable (removed from cluster config)
         let pruneable_zones =
-            PruneableZones::new(opctx, datastore, &blueprint, &[], &[])
+            PruneableZones::assemble(opctx, datastore, &blueprint, &[], &[])
                 .await
                 .expect("failed to find pruneable zones");
         assert!(

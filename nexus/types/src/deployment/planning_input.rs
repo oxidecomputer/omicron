@@ -1601,7 +1601,10 @@ pub enum PlanningInputBuildError {
     },
     #[error("sled not found: {0}")]
     SledNotFound(SledUuid),
-    #[error("attempted to mark non-expunged zone as expunged: {0}")]
+    #[error(
+        "attempted to mark zone as pruneable that is not expunged \
+         or may still be running: {0}"
+    )]
     ZoneNotExpunged(OmicronZoneUuid),
 }
 
