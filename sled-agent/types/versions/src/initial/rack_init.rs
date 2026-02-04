@@ -23,6 +23,8 @@ use serde::{Deserialize, Serialize};
 use sled_hardware_types::Baseboard;
 use std::{collections::BTreeSet, net::IpAddr, net::Ipv6Addr};
 
+pub use omicron_common::api::internal::shared::rack_init::v1::SwitchPorts;
+
 /// Configuration for the "rack setup service".
 ///
 /// The Rack Setup Service should be responsible for one-time setup actions,

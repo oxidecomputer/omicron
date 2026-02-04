@@ -717,11 +717,24 @@ pub trait SledAgentApi {
     #[endpoint {
         method = POST,
         path = "/switch-ports",
+        versions = VERSION_BGP_V6..,
     }]
     async fn uplink_ensure(
         rqctx: RequestContext<Self::Context>,
         body: TypedBody<SwitchPorts>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
+
+    #[endpoint {
+        method = POST,
+        path = "/switch-ports",
+        versions = ..VERSION_BGP_V6,
+    }]
+    async fn uplink_ensure_v1(
+        rqctx: RequestContext<Self::Context>,
+        body: TypedBody<v1::rack_init::SwitchPorts>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        Self::uplink_ensure(rqctx, body.map(From::from)).await
+    }
 
     /// This API endpoint is only reading the local sled agent's view of the
     /// bootstore. The boostore is a distributed data store that is eventually

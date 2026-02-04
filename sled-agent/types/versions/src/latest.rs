@@ -144,6 +144,8 @@ pub mod rack_init {
     pub use crate::v18::rack_init::RackInitializeRequest;
     pub use crate::v18::rack_init::RackInitializeRequestParams;
     pub use crate::v18::rack_init::RackInitializeRequestParseError;
+
+    pub use omicron_common::api::internal::shared::SwitchPorts;
 }
 
 pub mod sled {
