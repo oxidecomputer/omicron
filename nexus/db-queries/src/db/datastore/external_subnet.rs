@@ -13,7 +13,7 @@ use crate::db::datastore::SQL_BATCH_SIZE;
 use crate::db::pagination::Paginator;
 use crate::db::pagination::paginated;
 use crate::db::queries::external_ip::SAFE_TO_ATTACH_INSTANCE_STATES;
-use crate::db::queries::external_subnet::MAX_ATTACHED_SUBNETS;
+use crate::db::queries::external_subnet::MAX_ATTACHED_SUBNETS_PER_INSTANCE;
 use crate::db::queries::external_subnet::decode_delete_external_subnet_error;
 use crate::db::queries::external_subnet::decode_insert_external_subnet_error;
 use crate::db::queries::external_subnet::decode_unlink_subnet_pool_from_silo_result;
@@ -667,7 +667,6 @@ impl DataStore {
                 .filter(dsl::attach_state.eq(IpAttachState::Attached)),
         )
         .set((
-            dsl::time_deleted.eq(Utc::now()),
             dsl::instance_id.eq(Option::<Uuid>::None),
             dsl::attach_state.eq(IpAttachState::Detached),
         ))
@@ -704,7 +703,7 @@ impl DataStore {
     }
 
     /// Fetch the attached subnets, internal or external, to an instance.
-    pub async fn instance_lookup_attached_external_subnets(
+    pub async fn instance_lookup_attached_subnets(
         &self,
         opctx: &OpContext,
         instance_id: InstanceUuid,
@@ -888,7 +887,7 @@ impl DataStore {
         authz_instance: &authz::Instance,
         authz_subnet: &authz::ExternalSubnet,
         ip_version: IpVersion,
-    ) -> Result<ExternalSubnetBeginAttachResult, Error> {
+    ) -> Result<ExternalSubnetBeginOpResult, Error> {
         use nexus_db_schema::schema::external_subnet::dsl;
         use nexus_db_schema::schema::instance::dsl as instance_dsl;
         use nexus_db_schema::schema::network_interface::dsl as nic_dsl;
@@ -909,6 +908,11 @@ impl DataStore {
             IpVersion::V6 => base_nic_query.select(nic_dsl::ipv6.is_not_null()),
         };
 
+        // NOTE: We only allow attaching to instances that are fully stopped or
+        // running. This is in contrast to Floating IPs, which can be attached
+        // to a `starting` instance, because FIPs can be created at the time the
+        // instance is created. We don't allow that today, but we should expand
+        // this set of allowed states in the future if we add support.
         let query = Instance::attach_resource_with_update_condition(
             authz_instance.id(),
             authz_subnet.id().into_untyped_uuid(),
@@ -922,7 +926,7 @@ impl DataStore {
                 .into_boxed()
                 .filter(dsl::attach_state.eq(IpAttachState::Detached))
                 .filter(dsl::instance_id.is_null()),
-            MAX_ATTACHED_SUBNETS,
+            MAX_ATTACHED_SUBNETS_PER_INSTANCE,
             diesel::update(dsl::external_subnet).set((
                 dsl::time_modified.eq(Utc::now()),
                 dsl::instance_id.eq(Some(authz_instance.id())),
@@ -933,7 +937,7 @@ impl DataStore {
         query
             .attach_and_get_result_async(&*self.pool_connection_authorized(opctx).await?)
             .await
-            .map(|(_instance, subnet)| ExternalSubnetBeginAttachResult { subnet, do_saga: true })
+            .map(|(_instance, subnet)| ExternalSubnetBeginOpResult { subnet, do_saga: true })
             .or_else(|e| match e {
                 AttachError::CollectionNotFound => {
                     Err(Error::not_found_by_id(
@@ -965,7 +969,7 @@ impl DataStore {
                                 // We're already attached to this instance.
                                 // Return the record, but we are already done
                                 // with the attach saga here.
-                                return Ok(ExternalSubnetBeginAttachResult {
+                                return Ok(ExternalSubnetBeginOpResult {
                                     subnet: resource,
                                     do_saga: false,
                                 });
@@ -980,7 +984,7 @@ impl DataStore {
                             // The subnet is still being attached, e.g., the
                             // saga node for doing the attachment is running
                             // again. We need to continue the saga.
-                            return Ok(ExternalSubnetBeginAttachResult {
+                            return Ok(ExternalSubnetBeginOpResult {
                                 subnet: resource,
                                 do_saga: true,
                             });
@@ -1014,10 +1018,10 @@ impl DataStore {
                     }
 
                     // Too many subnets attached.
-                    if attached_count >= i64::from(MAX_ATTACHED_SUBNETS) {
+                    if attached_count >= i64::from(MAX_ATTACHED_SUBNETS_PER_INSTANCE) {
                         return Err(Error::invalid_request(&format!(
                             "An instance may not have more than \
-                            {MAX_ATTACHED_SUBNETS} attached subnets"
+                            {MAX_ATTACHED_SUBNETS_PER_INSTANCE} attached subnets"
                         )));
                     }
 
@@ -1043,13 +1047,18 @@ impl DataStore {
         opctx: &OpContext,
         authz_instance: &authz::Instance,
         authz_subnet: &authz::ExternalSubnet,
-    ) -> Result<ExternalSubnetBeginAttachResult, Error> {
+    ) -> Result<ExternalSubnetBeginOpResult, Error> {
         use nexus_db_schema::schema::external_subnet::dsl;
         use nexus_db_schema::schema::instance::dsl as instance_dsl;
 
         opctx.authorize(authz::Action::Modify, authz_instance).await?;
         opctx.authorize(authz::Action::Modify, authz_subnet).await?;
 
+        // NOTE: We only allow attaching to instances that are fully stopped or
+        // running. This is in contrast to Floating IPs, which can be attached
+        // to a `starting` instance, because FIPs can be created at the time the
+        // instance is created. We don't allow that today, but we should expand
+        // this set of allowed states in the future if we add support.
         let query = Instance::detach_resource(
             authz_instance.id(),
             authz_subnet.id().into_untyped_uuid(),
@@ -1071,7 +1080,7 @@ impl DataStore {
         query
             .detach_and_get_result_async(&*self.pool_connection_authorized(opctx).await?)
             .await
-            .map(|subnet| ExternalSubnetBeginAttachResult { subnet, do_saga: true })
+            .map(|subnet| ExternalSubnetBeginOpResult { subnet, do_saga: true })
             .or_else(|e| match e {
                 DetachError::CollectionNotFound => {
                     Err(Error::not_found_by_id(
@@ -1095,14 +1104,14 @@ impl DataStore {
                         IpAttachState::Detached => {
                             // Subnet was already detached. Return success, but
                             // we don't need to run the saga.
-                            return Ok(ExternalSubnetBeginAttachResult {
+                            return Ok(ExternalSubnetBeginOpResult {
                                 subnet: resource,
                                 do_saga: false,
                             });
                         }
                         IpAttachState::Detaching if resource_instance_id == instance_id => {
                             // Re-running the detach saga node again.
-                            return Ok(ExternalSubnetBeginAttachResult {
+                            return Ok(ExternalSubnetBeginOpResult {
                                 subnet: resource,
                                 do_saga: true,
                             });
@@ -1146,7 +1155,7 @@ impl DataStore {
                         )));
                     }
 
-                    Err(Error::internal_error("failed to attach subnet"))
+                    Err(Error::internal_error("failed to detach subnet"))
                 }
                 DetachError::DatabaseError(e) => Err(public_error_from_diesel(e, ErrorHandler::Server))
             })
@@ -1159,7 +1168,7 @@ impl DataStore {
         id: ExternalSubnetUuid,
         from: IpAttachState,
         to: IpAttachState,
-    ) -> Result<ExternalSubnetCompleteAttachResult, Error> {
+    ) -> Result<ExternalSubnetCompleteOpResult, Error> {
         use nexus_db_schema::schema::external_subnet::dsl;
         if !matches!(from, IpAttachState::Attaching | IpAttachState::Detaching)
         {
@@ -1169,7 +1178,7 @@ impl DataStore {
         }
         if !matches!(to, IpAttachState::Attached | IpAttachState::Detached) {
             return Err(Error::internal_error(&format!(
-                "external subnet must move to a final state, not {from}"
+                "external subnet must move to a final state, not {to}"
             )));
         }
         let initial_update = diesel::update(dsl::external_subnet)
@@ -1200,8 +1209,8 @@ impl DataStore {
                         public_error_from_diesel(e, ErrorHandler::Server)
                     })?;
                 match rows.len() {
-                    0 => Ok(ExternalSubnetCompleteAttachResult::NoChanges),
-                    1 => Ok(ExternalSubnetCompleteAttachResult::Modified(
+                    0 => Ok(ExternalSubnetCompleteOpResult::NoChanges),
+                    1 => Ok(ExternalSubnetCompleteOpResult::Modified(
                         rows.pop().expect("just checked it has 1 element"),
                     )),
                     n => Err(Error::internal_error(&format!(
@@ -1212,11 +1221,10 @@ impl DataStore {
             }
             // Finalizing the attachment.
             //
-            // Similar to the Floating IP case, we need special handling here
-            // for two cases:
-            //
-            // - the subnet is deleted, which can happen during instance delete
-            // - the subnet is suddenly detached, if there are concurrent sagas.
+            // Subnets can't be deleted while they're still attached or
+            // partially-attached to an instance. But the _instance_ can be
+            // deleted in any state. Catch that edge case here, and fail with a
+            // 500.
             (IpAttachState::Attaching, IpAttachState::Attached) => {
                 initial_update
                     .set((dsl::time_modified.eq(now), dsl::attach_state.eq(to)))
@@ -1227,22 +1235,20 @@ impl DataStore {
                         public_error_from_diesel(e, ErrorHandler::Server)
                     })
                     .and_then(|r| match r.status {
-                        UpdateStatus::Updated => {
-                            Ok(ExternalSubnetCompleteAttachResult::Modified(
-                                r.found,
-                            ))
-                        }
+                        UpdateStatus::Updated => Ok(
+                            ExternalSubnetCompleteOpResult::Modified(r.found),
+                        ),
                         UpdateStatus::NotUpdatedButExists
                             if r.found.attach_state
                                 == IpAttachState::Detached
-                                || r.found.identity.time_deleted.is_some() =>
+                                || r.found.instance_id.is_none() =>
                         {
                             Err(Error::internal_error(
                                 "unwinding due to concurrent instance delete",
                             ))
                         }
                         UpdateStatus::NotUpdatedButExists => {
-                            Ok(ExternalSubnetCompleteAttachResult::NoChanges)
+                            Ok(ExternalSubnetCompleteOpResult::NoChanges)
                         }
                     })
             }
@@ -1257,8 +1263,8 @@ impl DataStore {
                         public_error_from_diesel(e, ErrorHandler::Server)
                     })?;
                 match rows.len() {
-                    0 => Ok(ExternalSubnetCompleteAttachResult::NoChanges),
-                    1 => Ok(ExternalSubnetCompleteAttachResult::Modified(
+                    0 => Ok(ExternalSubnetCompleteOpResult::NoChanges),
+                    1 => Ok(ExternalSubnetCompleteOpResult::Modified(
                         rows.pop().expect("just checked it has 1 element"),
                     )),
                     n => Err(Error::internal_error(&format!(
@@ -1278,13 +1284,13 @@ impl DataStore {
 }
 
 #[derive(Debug, serde::Deserialize, serde::Serialize)]
-pub struct ExternalSubnetBeginAttachResult {
+pub struct ExternalSubnetBeginOpResult {
     pub subnet: ExternalSubnet,
     pub do_saga: bool,
 }
 
 #[derive(Debug, serde::Deserialize, serde::Serialize)]
-pub enum ExternalSubnetCompleteAttachResult {
+pub enum ExternalSubnetCompleteOpResult {
     Modified(ExternalSubnet),
     NoChanges,
 }

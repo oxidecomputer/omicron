@@ -16,13 +16,19 @@ use crate::app::sagas::instance_common::send_subnet_attachment_to_dpd;
 use crate::app::sagas::instance_common::send_subnet_attachment_to_opte;
 use anyhow::Context as _;
 use nexus_db_model::IpAttachState;
-use nexus_db_queries::db::datastore::ExternalSubnetBeginAttachResult;
-use nexus_db_queries::db::datastore::ExternalSubnetCompleteAttachResult;
+use nexus_db_queries::db::datastore::ExternalSubnetBeginOpResult;
+use nexus_db_queries::db::datastore::ExternalSubnetCompleteOpResult;
 use nexus_types::external_api::views;
 use serde::Deserialize;
 use serde::Serialize;
 use steno::ActionError;
 
+// We are doing resource-locking here using the attach state of the external
+// subnets. We atomically move from attached to detaching to start the saga,
+// continue with the rest of the actions, and finalize it by moving from
+// detaching to detached.
+//
+// See the block comment at the top of `instance_ip_attach.rs` for more details.
 declare_saga_actions! {
     subnet_detach;
     DETACH_SUBNET -> "begin_detach_result" {
@@ -60,7 +66,7 @@ pub struct Params {
 
 async fn ssd_begin_detach_subnet(
     sagactx: NexusActionContext,
-) -> Result<ExternalSubnetBeginAttachResult, ActionError> {
+) -> Result<ExternalSubnetBeginOpResult, ActionError> {
     let osagactx = sagactx.user_data();
     let datastore = osagactx.datastore();
     let params = sagactx.saga_params::<Params>()?;
@@ -86,9 +92,8 @@ async fn ssd_begin_detach_subnet_undo(
     let datastore = osagactx.datastore();
     warn!(log, "ssd_begin_detach_subnet_undo: Reverting attached->detaching");
     let params = sagactx.saga_params::<Params>()?;
-    let ExternalSubnetBeginAttachResult { subnet, do_saga } =
-        sagactx
-            .lookup::<ExternalSubnetBeginAttachResult>("begin_detach_result")?;
+    let ExternalSubnetBeginOpResult { subnet, do_saga } =
+        sagactx.lookup::<ExternalSubnetBeginOpResult>("begin_detach_result")?;
 
     // NOTE: This is really an optimization, since
     // `external_subnet_complete_op()` is idempotent. Still, avoid the work if
@@ -109,8 +114,8 @@ async fn ssd_begin_detach_subnet_undo(
         )
         .await
     {
-        Ok(ExternalSubnetCompleteAttachResult::Modified(_)) => Ok(()),
-        Ok(ExternalSubnetCompleteAttachResult::NoChanges) => {
+        Ok(ExternalSubnetCompleteOpResult::Modified(_)) => Ok(()),
+        Ok(ExternalSubnetCompleteOpResult::NoChanges) => {
             warn!(log, "subnet is deleted, could not reattach");
             Ok(())
         }
@@ -134,9 +139,8 @@ async fn ssd_get_instance_state(
 async fn ssd_notify_dpd(
     sagactx: NexusActionContext,
 ) -> Result<(), ActionError> {
-    let ExternalSubnetBeginAttachResult { subnet, do_saga } =
-        sagactx
-            .lookup::<ExternalSubnetBeginAttachResult>("begin_detach_result")?;
+    let ExternalSubnetBeginOpResult { subnet, do_saga } =
+        sagactx.lookup::<ExternalSubnetBeginOpResult>("begin_detach_result")?;
     if !do_saga {
         return Ok(());
     }
@@ -152,8 +156,8 @@ async fn ssd_notify_dpd_undo(
     let sled_id = sagactx
         .lookup::<Option<VmmAndSledIds>>("instance_state")?
         .map(|ids| ids.sled_id);
-    let subnet = sagactx
-        .lookup::<ExternalSubnetBeginAttachResult>("begin_detach_result")?;
+    let subnet =
+        sagactx.lookup::<ExternalSubnetBeginOpResult>("begin_detach_result")?;
     let ip_subnet = subnet.subnet.subnet;
     send_subnet_attachment_to_dpd(
         &sagactx,
@@ -177,8 +181,8 @@ async fn ssd_notify_opte(
     sagactx: NexusActionContext,
 ) -> Result<(), ActionError> {
     let ids = sagactx.lookup::<Option<VmmAndSledIds>>("instance_state")?;
-    let subnet = sagactx
-        .lookup::<ExternalSubnetBeginAttachResult>("begin_detach_result")?;
+    let subnet =
+        sagactx.lookup::<ExternalSubnetBeginOpResult>("begin_detach_result")?;
     delete_subnet_attachment_from_opte(&sagactx, ids, subnet)
         .await
         .map_err(ActionError::action_failed)
@@ -188,8 +192,8 @@ async fn ssd_notify_opte_undo(
     sagactx: NexusActionContext,
 ) -> Result<(), anyhow::Error> {
     let ids = sagactx.lookup::<Option<VmmAndSledIds>>("instance_state")?;
-    let subnet = sagactx
-        .lookup::<ExternalSubnetBeginAttachResult>("begin_detach_result")?;
+    let subnet =
+        sagactx.lookup::<ExternalSubnetBeginOpResult>("begin_detach_result")?;
     let ip_subnet = subnet.subnet.subnet;
     send_subnet_attachment_to_opte(&sagactx, ids, subnet).await.with_context(
         || {
@@ -208,9 +212,8 @@ async fn ssd_complete_detach(
     let log = sagactx.user_data().log();
     let datastore = sagactx.user_data().datastore();
     let params = sagactx.saga_params::<Params>()?;
-    let ExternalSubnetBeginAttachResult { subnet, do_saga } =
-        sagactx
-            .lookup::<ExternalSubnetBeginAttachResult>("begin_detach_result")?;
+    let ExternalSubnetBeginOpResult { subnet, do_saga } =
+        sagactx.lookup::<ExternalSubnetBeginOpResult>("begin_detach_result")?;
     if !do_saga {
         return Ok(subnet.into());
     }
@@ -227,10 +230,10 @@ async fn ssd_complete_detach(
         )
         .await
     {
-        Ok(ExternalSubnetCompleteAttachResult::Modified(subnet)) => {
+        Ok(ExternalSubnetCompleteOpResult::Modified(subnet)) => {
             Ok(subnet.into())
         }
-        Ok(ExternalSubnetCompleteAttachResult::NoChanges) => {
+        Ok(ExternalSubnetCompleteOpResult::NoChanges) => {
             warn!(log, "ssd_complete_detach ran more than once");
             Ok(subnet.into())
         }
@@ -474,7 +477,7 @@ pub(crate) mod test {
 
         // The database records should also indicate it's now detached.
         let subnets = datastore
-            .instance_lookup_attached_external_subnets(&opctx, instance_id)
+            .instance_lookup_attached_subnets(&opctx, instance_id)
             .await
             .unwrap();
         assert!(subnets.is_empty());

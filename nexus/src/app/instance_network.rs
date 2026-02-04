@@ -679,7 +679,7 @@ async fn instance_send_attached_subnets_to_dendrite(
     instance_target: dpd_client::types::InstanceTarget,
 ) -> Result<(), Error> {
     let subnets = match datastore
-        .instance_lookup_attached_external_subnets(opctx, instance_id)
+        .instance_lookup_attached_subnets(opctx, instance_id)
         .await
     {
         Ok(s) => s,
@@ -769,13 +769,15 @@ async fn send_subnet_attachments_to_dendrite_inner(
             {
                 Ok(_) => debug!(
                     log,
-                    "deleted instance attached subnet from Dendrite";
+                    "created instance attached subnet on switch";
                     "subnet" => %subnet,
+                    "switch" => %switch,
                 ),
                 Err(e) => error!(
                     log,
-                    "failed to delete instance attached subnet from Dendrite";
+                    "failed to create instance attached subnet on switch";
                     "subnet" => %subnet,
+                    "switch" => %switch,
                     "error" => InlineErrorChain::new(&e),
                 ),
             }
@@ -792,7 +794,7 @@ async fn instance_delete_attached_subnets_from_dendrite(
     instance_id: InstanceUuid,
 ) -> Result<(), Error> {
     let subnets = datastore
-        .instance_lookup_attached_external_subnets(opctx, instance_id)
+        .instance_lookup_attached_subnets(opctx, instance_id)
         .await?
         .into_iter()
         .map(|s| s.subnet)
@@ -835,13 +837,15 @@ async fn delete_attached_subnets_from_dendrite_inner(
             match client.attached_subnet_delete(subnet).await {
                 Ok(_) => debug!(
                     log,
-                    "deleted attached subnet from Dendrite";
+                    "deleted attached subnet from switch";
                     "subnet" => %subnet,
+                    "switch" => %switch,
                 ),
                 Err(e) => error!(
                     log,
-                    "failed to delete attached subnet from Dendrite";
+                    "failed to delete attached subnet from switch";
                     "subnet" => %subnet,
+                    "switch" => %switch,
                     "error" => InlineErrorChain::new(&e),
                 ),
             }

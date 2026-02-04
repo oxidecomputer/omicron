@@ -36,7 +36,7 @@ use omicron_uuid_kinds::GenericUuid as _;
 
 impl super::Nexus {
     /// Look up an external subnet by selector.
-    fn external_subnet_lookup<'a>(
+    pub(crate) fn external_subnet_lookup<'a>(
         &'a self,
         opctx: &'a OpContext,
         selector: params::ExternalSubnetSelector,
