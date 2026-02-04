@@ -15,6 +15,7 @@ use super::MIN_MEMORY_BYTES_PER_INSTANCE;
 use crate::app::sagas;
 use crate::app::sagas::NexusSaga;
 use crate::db::datastore::Disk;
+use crate::db::datastore::LocalStorageAllocation;
 use crate::external_api::params;
 use cancel_safe_futures::prelude::*;
 use futures::future::Fuse;
@@ -40,6 +41,7 @@ use nexus_db_queries::db::datastore::InstanceAndActiveVmm;
 use nexus_db_queries::db::datastore::InstanceStateComputer;
 use nexus_db_queries::db::identity::Resource;
 use nexus_types::external_api::views;
+use omicron_common::address::ConcreteIp;
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DataPageParams;
@@ -49,6 +51,7 @@ use omicron_common::api::external::Hostname;
 use omicron_common::api::external::InstanceCpuCount;
 use omicron_common::api::external::InstanceState;
 use omicron_common::api::external::InternalContext;
+use omicron_common::api::external::IpVersion;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::NameOrId;
@@ -58,7 +61,6 @@ use omicron_common::api::internal::nexus;
 use omicron_common::api::internal::shared::ExternalIpConfig;
 use omicron_common::api::internal::shared::ExternalIpConfigBuilder;
 use omicron_common::api::internal::shared::ExternalIps;
-use omicron_common::api::internal::shared::external_ip::ConcreteIp;
 use omicron_common::api::internal::shared::external_ip::SourceNatConfig;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::InstanceUuid;
@@ -77,7 +79,7 @@ use sagas::instance_update;
 use sled_agent_client::types::DelegatedZvol;
 use sled_agent_client::types::InstanceMigrationTargetParams;
 use sled_agent_client::types::VmmPutStateBody;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::matches;
 use std::net::IpAddr;
 use std::net::SocketAddr;
@@ -373,11 +375,11 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
         authz_instance: &authz::Instance,
-        multicast_groups: &[NameOrId],
+        multicast_groups: &[params::MulticastGroupJoinSpec],
     ) -> Result<(), Error> {
         let instance_id = authz_instance.id();
 
-        // Check if multicast is enabled - if not, skip all multicast operations
+        // Check if multicast is enabled -> if not, skip all multicast operations
         if !self.multicast_enabled() {
             debug!(opctx.log,
                    "multicast not enabled, skipping multicast group changes";
@@ -400,7 +402,7 @@ impl super::Nexus {
             .multicast_group_members_list_by_instance(
                 opctx,
                 InstanceUuid::from_untyped_uuid(instance_id),
-                false,
+                &DataPageParams::max_page(),
             )
             .await?;
         let current_group_ids: HashSet<_> =
@@ -414,18 +416,61 @@ impl super::Nexus {
             "current_group_ids" => ?current_group_ids
         );
 
-        // Resolve new multicast group names/IDs to group records
+        // Resolve multicast group identifiers to group IDs.
+        //
+        // For existing memberships (group already in current_group_ids), we just
+        // need the ID - no validation needed since source_ips: None means
+        // "preserve existing sources".
+        //
+        // For new memberships, we resolve (which creates groups if needed) and
+        // validation (address family + SSM) happens inside resolve.
         let mut new_group_ids = HashSet::new();
-        for group_name_or_id in multicast_groups {
-            let multicast_group_selector = params::MulticastGroupSelector {
-                multicast_group: group_name_or_id.clone(),
+        let mut group_source_ips: HashMap<Uuid, Option<Vec<std::net::IpAddr>>> =
+            HashMap::new();
+        for spec in multicast_groups {
+            // Check if this is an existing membership by looking up the group ID first
+            let group_uuid = match self
+                .resolve_multicast_group_identifier(opctx, &spec.group)
+                .await
+            {
+                Ok(id) => {
+                    let uuid = id.into_untyped_uuid();
+                    // If already a member, skip validation (None = preserve)
+                    if !current_group_ids.contains(&uuid) {
+                        // New membership - validate (address family + SSM)
+                        self.resolve_multicast_group_identifier_with_sources(
+                            opctx,
+                            &spec.group,
+                            spec.source_ips.as_deref(),
+                            spec.ip_version,
+                        )
+                        .await?;
+                    }
+                    uuid
+                }
+                Err(Error::ObjectNotFound { .. }) => {
+                    // Group doesn't exist: resolve will create it (and validate accordingly)
+                    let id = self
+                        .resolve_multicast_group_identifier_with_sources(
+                            opctx,
+                            &spec.group,
+                            spec.source_ips.as_deref(),
+                            spec.ip_version,
+                        )
+                        .await?;
+                    id.into_untyped_uuid()
+                }
+                Err(e) => return Err(e),
             };
-            let multicast_group_lookup =
-                self.multicast_group_lookup(opctx, &multicast_group_selector)?;
-            let (.., db_group) =
-                multicast_group_lookup.fetch_for(authz::Action::Read).await?;
-            let id = db_group.id();
-            new_group_ids.insert(id);
+            new_group_ids.insert(group_uuid);
+            group_source_ips.insert(group_uuid, spec.source_ips.clone());
+        }
+
+        // Validate no duplicate groups were specified
+        if new_group_ids.len() != multicast_groups.len() {
+            return Err(Error::invalid_request(
+                "Duplicate multicast group specified in request",
+            ));
         }
 
         // Determine which groups to leave and join
@@ -459,19 +504,27 @@ impl super::Nexus {
                 .await?;
         }
 
-        // Add members to new groups
+        // Add members to new groups with their source_ips.
+        // Validation (address family + SSM) already happened in resolve.
         for group_id in groups_to_join {
+            let source_ips = group_source_ips
+                .get(&group_id)
+                .cloned()
+                .expect("group_id must be in group_source_ips");
+
             debug!(
                 opctx.log,
                 "adding member to group (reconciler will handle dataplane updates)";
                 "instance_id" => %instance_id,
-                "group_id" => %group_id
+                "group_id" => %group_id,
+                "source_ips" => ?source_ips
             );
             self.datastore()
                 .multicast_group_member_attach_to_instance(
                     opctx,
                     MulticastGroupUuid::from_untyped_uuid(group_id),
                     InstanceUuid::from_untyped_uuid(instance_id),
+                    source_ips.as_deref(),
                 )
                 .await?;
         }
@@ -594,17 +647,33 @@ impl super::Nexus {
             )));
         }
 
-        if params
+        // Collect ephemeral IP selectors for validation
+        let ephemeral_selectors: Vec<_> = params
             .external_ips
             .iter()
-            .filter(|v| matches!(v, params::ExternalIpCreate::Ephemeral { .. }))
-            .count()
-            > MAX_EPHEMERAL_IPS_PER_INSTANCE
-        {
+            .filter_map(|v| match v {
+                params::ExternalIpCreate::Ephemeral { pool_selector } => {
+                    Some(pool_selector)
+                }
+                _ => None,
+            })
+            .collect();
+
+        if ephemeral_selectors.len() > MAX_EPHEMERAL_IPS_PER_INSTANCE {
             return Err(Error::invalid_request(&format!(
-                "An instance may not have more than {} ephemeral IP address",
+                "An instance may not have more than {} ephemeral IP addresses",
                 MAX_EPHEMERAL_IPS_PER_INSTANCE,
             )));
+        }
+
+        // If requesting two ephemeral IPs, validate they specify different versions
+        if ephemeral_selectors.len() == 2 {
+            self.validate_ephemeral_ip_pair(
+                opctx,
+                ephemeral_selectors[0],
+                ephemeral_selectors[1],
+            )
+            .await?;
         }
 
         if let params::InstanceNetworkInterfaceAttachment::Create(ref ifaces) =
@@ -1394,10 +1463,22 @@ impl super::Nexus {
                 .into());
             };
 
-            delegated_zvols.push(DelegatedZvol::LocalStorage {
-                zpool_id: local_storage_dataset_allocation.pool_id(),
-                dataset_id: local_storage_dataset_allocation.id(),
-            });
+            match local_storage_dataset_allocation {
+                LocalStorageAllocation::Unencrypted(allocation) => {
+                    delegated_zvols.push(
+                        DelegatedZvol::LocalStorageUnencrypted {
+                            zpool_id: allocation.pool_id(),
+                            dataset_id: allocation.id(),
+                        },
+                    );
+                }
+
+                LocalStorageAllocation::Encrypted(_) => {
+                    let msg = "disks backed by encrypted local storage are \
+                        currently not supported";
+                    return Err(Error::invalid_request(msg).into());
+                }
+            }
         }
 
         let nics = self
@@ -1480,7 +1561,7 @@ impl super::Nexus {
                 .multicast_group_members_list_by_instance(
                     opctx,
                     InstanceUuid::from_untyped_uuid(authz_instance.id()),
-                    false, // include_removed
+                    &DataPageParams::max_page(),
                 )
                 .await
                 .map_err(|e| {
@@ -1501,10 +1582,11 @@ impl super::Nexus {
                     )
                     .await
                 {
+                    // Source IPs are per-member, not per-group
                     multicast_groups.push(
                         sled_agent_client::types::InstanceMulticastMembership {
                             group_ip: group.multicast_ip.ip(),
-                            sources: group
+                            sources: member
                                 .source_ips
                                 .into_iter()
                                 .map(|src_ip| src_ip.ip())
@@ -2190,7 +2272,29 @@ impl super::Nexus {
         opctx: &OpContext,
         instance_lookup: &lookup::Instance<'_>,
         pool: Option<NameOrId>,
+        ip_version: Option<IpVersion>,
     ) -> UpdateResult<views::ExternalIp> {
+        // Validate pool/ip_version compatibility upfront for clear error
+        // communication.
+        //
+        // The saga will look up the pool again, but this ensures the user gets
+        // a direct error before any saga machinery starts, and without changing
+        // the `Ephemeral` type fields.
+        if let (Some(pool_id), Some(requested_version)) = (&pool, ip_version) {
+            let (_, db_pool) = self
+                .ip_pool_lookup(opctx, pool_id)?
+                .fetch_for(authz::Action::CreateChild)
+                .await?;
+            let db_version: IpVersion = db_pool.ip_version.into();
+            if db_version != requested_version {
+                return Err(Error::invalid_request(format!(
+                    "requested IP version ({requested_version}) does not match \
+                     pool '{}' version ({db_version})",
+                    db_pool.name().as_str(),
+                )));
+            }
+        }
+
         let (.., authz_project, authz_instance) =
             instance_lookup.lookup_for(authz::Action::Modify).await?;
 
@@ -2198,17 +2302,119 @@ impl super::Nexus {
             opctx,
             authz_instance,
             authz_project.id(),
-            ExternalIpAttach::Ephemeral { pool },
+            ExternalIpAttach::Ephemeral { pool, ip_version },
         )
         .await
     }
 
-    /// Attach an ephemeral IP to an instance.
+    /// Validate that two ephemeral IP pool selectors specify different IP versions.
+    ///
+    /// This is used during instance creation to ensure dual-stack configurations
+    /// are valid (one IPv4 + one IPv6 ephemeral IP).
+    async fn validate_ephemeral_ip_pair(
+        &self,
+        opctx: &OpContext,
+        first: &params::PoolSelector,
+        second: &params::PoolSelector,
+    ) -> Result<(), Error> {
+        use params::PoolSelector;
+
+        match (first, second) {
+            // Reject any case where ip_version is not specified. This keeps
+            // the API predictable: if you want two ephemeral IPs, you must be
+            // explicit about what you want for both. No relying on defaults.
+            (PoolSelector::Auto { ip_version: None }, _)
+            | (_, PoolSelector::Auto { ip_version: None }) => {
+                return Err(Error::invalid_request(
+                    "when requesting two ephemeral IPs, IP version or explicit \
+                     pool name must be specified on each",
+                ));
+            }
+
+            // Two Auto with same version
+            (
+                PoolSelector::Auto { ip_version: Some(v1) },
+                PoolSelector::Auto { ip_version: Some(v2) },
+            ) if v1 == v2 => {
+                return Err(Error::invalid_request(format!(
+                    "cannot request two ephemeral IPs of the same version ({v1})"
+                )));
+            }
+
+            // Two Auto with different versions - valid
+            (
+                PoolSelector::Auto { ip_version: Some(_) },
+                PoolSelector::Auto { ip_version: Some(_) },
+            ) => {}
+
+            // Two Explicit with same pool
+            (
+                PoolSelector::Explicit { pool: p1 },
+                PoolSelector::Explicit { pool: p2 },
+            ) if p1 == p2 => {
+                return Err(Error::invalid_request(
+                    "cannot request two ephemeral IPs from the same pool",
+                ));
+            }
+
+            // Two Explicit with different pools - verify different versions
+            (
+                PoolSelector::Explicit { pool: p1 },
+                PoolSelector::Explicit { pool: p2 },
+            ) => {
+                let v1 = self.get_pool_ip_version(opctx, p1).await?;
+                let v2 = self.get_pool_ip_version(opctx, p2).await?;
+                if v1 == v2 {
+                    return Err(Error::invalid_request(format!(
+                        "cannot request two ephemeral IPs of the same version \
+                         ({v1}): both pools are {v1}"
+                    )));
+                }
+            }
+
+            // Explicit + Auto(Some) - verify different versions
+            (
+                PoolSelector::Explicit { pool },
+                PoolSelector::Auto { ip_version: Some(v) },
+            )
+            | (
+                PoolSelector::Auto { ip_version: Some(v) },
+                PoolSelector::Explicit { pool },
+            ) => {
+                let pool_version =
+                    self.get_pool_ip_version(opctx, pool).await?;
+                if pool_version == *v {
+                    return Err(Error::invalid_request(format!(
+                        "cannot request two ephemeral IPs of the same version \
+                         ({v}): explicit pool and auto selection both specify {v}"
+                    )));
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Get the IP version of a pool by name or ID.
+    async fn get_pool_ip_version(
+        &self,
+        opctx: &OpContext,
+        pool: &NameOrId,
+    ) -> Result<IpVersion, Error> {
+        let (_, db_pool) = self
+            .ip_pool_lookup(opctx, pool)?
+            .fetch_for(authz::Action::CreateChild)
+            .await?;
+        Ok(db_pool.ip_version.into())
+    }
+
+    /// Attach a Floating IP to an instance.
     pub(crate) async fn instance_attach_floating_ip(
         self: &Arc<Self>,
         opctx: &OpContext,
         instance_lookup: &lookup::Instance<'_>,
         authz_fip: authz::FloatingIp,
+        ip_version: IpVersion,
         authz_fip_project: authz::Project,
     ) -> UpdateResult<views::ExternalIp> {
         let (.., authz_project, authz_instance) =
@@ -2224,7 +2430,7 @@ impl super::Nexus {
             opctx,
             authz_instance,
             authz_project.id(),
-            ExternalIpAttach::Floating { floating_ip: authz_fip },
+            ExternalIpAttach::Floating { floating_ip: authz_fip, ip_version },
         )
         .await
     }

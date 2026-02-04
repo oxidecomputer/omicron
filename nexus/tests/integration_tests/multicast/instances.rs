@@ -6,38 +6,50 @@
 
 //! Tests multicast group + instance integration.
 //!
-//! Tests that verify multicast group functionality when integrated with
-//! instance creation, modification, and deletion.
+//! Instance lifecycle tests:
+//!
+//! - Full lifecycle: Create, attach, start, stop, delete flows
+//! - Attach conflicts: Cannot attach same instance twice to same group
+//! - Attach limits: Validates per-instance multicast group limits
+//! - State transitions: Member states change with instance state
+//! - Persistence: Memberships survive instance stop/start cycles
+//! - Concurrent operations: Parallel attach/detach operations
+//! - Never-started instances: Cleanup of members for instances never started
+//! - Migration: Memberships update correctly when instance migrates
+//! - SSM validation via instance operations:
+//!   - Instance create with SSM: Must specify sources in multicast_groups
+//!   - Instance reconfigure adding SSM: Must specify sources for new SSM groups
+//!   - SSM sources are per-member (S,G subscription model)
 
-use std::net::{IpAddr, Ipv4Addr};
+use std::net::IpAddr;
 
 use http::{Method, StatusCode};
+
 use nexus_db_queries::context::OpContext;
 use nexus_test_utils::http_testing::{AuthnMode, NexusRequest, RequestBuilder};
 use nexus_test_utils::resource_helpers::{
-    create_default_ip_pool, create_instance, create_project, object_create,
+    create_default_ip_pools, create_instance, create_project, object_create,
     object_delete, object_get,
 };
 use nexus_test_utils_macros::nexus_test;
 use nexus_types::external_api::params::{
-    InstanceCreate, InstanceNetworkInterfaceAttachment, MulticastGroupCreate,
-    MulticastGroupMemberAdd,
+    InstanceCreate, InstanceMulticastGroupJoin,
+    InstanceNetworkInterfaceAttachment, InstanceUpdate, MulticastGroupJoinSpec,
 };
+
 use nexus_types::external_api::views::{MulticastGroup, MulticastGroupMember};
 use nexus_types::internal_api::params::InstanceMigrateRequest;
 
 use omicron_common::api::external::{
     ByteCount, IdentityMetadataCreateParams, Instance, InstanceCpuCount,
-    InstanceState, NameOrId,
+    InstanceState,
 };
-use omicron_common::vlan::VlanID;
 use omicron_nexus::TestInterfaces;
 use omicron_uuid_kinds::{GenericUuid, InstanceUuid};
-use sled_agent_client::TestInterfaces as _;
 
 use super::*;
 use crate::integration_tests::instances::{
-    instance_simulate, instance_wait_for_state,
+    instance_simulate, instance_wait_for_state, vmm_simulate_on_sled,
 };
 
 const PROJECT_NAME: &str = "test-project";
@@ -47,57 +59,36 @@ const PROJECT_NAME: &str = "test-project";
 async fn test_multicast_lifecycle(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
 
-    // Setup - create IP pool and project (shared across all operations)
-    create_default_ip_pool(&client).await;
-    create_project(client, PROJECT_NAME).await;
-    let mcast_pool = create_multicast_ip_pool_with_range(
-        &client,
-        "mcast-pool-comprehensive",
-        (224, 30, 0, 1),   // Large range: 224.30.0.1
-        (224, 30, 0, 255), // to 224.30.0.255 (255 IPs)
+    // Create project and pools in parallel
+    ops::join3(
+        create_default_ip_pools(&client),
+        create_project(client, PROJECT_NAME),
+        create_multicast_ip_pool_with_range(
+            &client,
+            "mcast-pool-comprehensive",
+            (224, 30, 0, 1),   // Large range: 224.30.0.1
+            (224, 30, 0, 255), // to 224.30.0.255 (255 IPs)
+        ),
     )
     .await;
 
-    // Create multiple multicast groups in parallel
-    let group_specs = &[
-        MulticastGroupForTest {
-            name: "group-lifecycle-1",
-            multicast_ip: IpAddr::V4(Ipv4Addr::new(224, 30, 0, 101)),
-            description: Some("Group for lifecycle testing 1".to_string()),
-        },
-        MulticastGroupForTest {
-            name: "group-lifecycle-2",
-            multicast_ip: IpAddr::V4(Ipv4Addr::new(224, 30, 0, 102)),
-            description: Some("Group for lifecycle testing 2".to_string()),
-        },
-        MulticastGroupForTest {
-            name: "group-lifecycle-3",
-            multicast_ip: IpAddr::V4(Ipv4Addr::new(224, 30, 0, 103)),
-            description: Some("Group for lifecycle testing 3".to_string()),
-        },
-        MulticastGroupForTest {
-            name: "group-lifecycle-4",
-            multicast_ip: IpAddr::V4(Ipv4Addr::new(224, 30, 0, 104)),
-            description: Some("Group for lifecycle testing 4".to_string()),
-        },
+    // Group names for implicit groups (implicitly created when first member joins)
+    let group_names = [
+        "group-lifecycle-1",
+        "group-lifecycle-2",
+        "group-lifecycle-3",
+        "group-lifecycle-4",
     ];
 
-    let groups =
-        create_multicast_groups(client, &mcast_pool, group_specs).await;
-
-    // Wait for all groups to become active in parallel
-    let group_names: Vec<&str> = group_specs.iter().map(|g| g.name).collect();
-    wait_for_groups_active(client, &group_names).await;
-
-    // Create multiple instances in parallel - test various attachment scenarios
+    // Create instances first (groups will be implicitly created when members attach)
     let instances = [
-        // Instance with group attached at creation
+        // Instance for group-lifecycle-1 (will implicitly create the group)
         instance_for_multicast_groups(
             cptestctx,
             PROJECT_NAME,
             "instance-create-attach",
             false,
-            &["group-lifecycle-1"],
+            &[],
         )
         .await,
         // Instances for live attach/detach testing
@@ -128,7 +119,17 @@ async fn test_multicast_lifecycle(cptestctx: &ControlPlaneTestContext) {
         .await,
     ];
 
-    // Verify create-time attachment worked
+    // Implicitly create group-lifecycle-1 by adding a member
+    multicast_group_attach(
+        cptestctx,
+        PROJECT_NAME,
+        "instance-create-attach",
+        group_names[0],
+    )
+    .await;
+
+    // Wait for group-lifecycle-1 to become active and verify membership
+    wait_for_group_active(client, group_names[0]).await;
     wait_for_member_state(
         cptestctx,
         "group-lifecycle-1",
@@ -139,7 +140,7 @@ async fn test_multicast_lifecycle(cptestctx: &ControlPlaneTestContext) {
     .await;
 
     // Live attach/detach operations
-    // Attach instance-live-1 to group-lifecycle-2
+    // Attach instance-live-1 to group-lifecycle-2 (implicitly creates the group)
     multicast_group_attach(
         cptestctx,
         PROJECT_NAME,
@@ -147,6 +148,9 @@ async fn test_multicast_lifecycle(cptestctx: &ControlPlaneTestContext) {
         "group-lifecycle-2",
     )
     .await;
+
+    // Wait for group-lifecycle-2 to become active
+    wait_for_group_active(client, group_names[1]).await;
 
     // Attach instance-live-2 to group-lifecycle-2 (test multiple instances per group)
     multicast_group_attach(
@@ -169,7 +173,7 @@ async fn test_multicast_lifecycle(cptestctx: &ControlPlaneTestContext) {
     }
 
     // Multi-group attachment (instance to multiple groups)
-    // Attach instance-multi-groups to multiple groups
+    // Attach instance-multi-groups to group-lifecycle-3 (implicitly creates the group)
     multicast_group_attach(
         cptestctx,
         PROJECT_NAME,
@@ -178,6 +182,10 @@ async fn test_multicast_lifecycle(cptestctx: &ControlPlaneTestContext) {
     )
     .await;
 
+    // Wait for group-lifecycle-3 to become active
+    wait_for_group_active(client, group_names[2]).await;
+
+    // Attach instance-multi-groups to group-lifecycle-4 (implicitly creates the group)
     multicast_group_attach(
         cptestctx,
         PROJECT_NAME,
@@ -185,6 +193,9 @@ async fn test_multicast_lifecycle(cptestctx: &ControlPlaneTestContext) {
         "group-lifecycle-4",
     )
     .await;
+
+    // Wait for group-lifecycle-4 to become active
+    wait_for_group_active(client, group_names[3]).await;
 
     // Verify multi-group membership
     for group_name in ["group-lifecycle-3", "group-lifecycle-4"] {
@@ -207,7 +218,7 @@ async fn test_multicast_lifecycle(cptestctx: &ControlPlaneTestContext) {
     )
     .await;
 
-    // Test idempotency - detach again (should not error)
+    // Test idempotency
     multicast_group_detach(
         client,
         PROJECT_NAME,
@@ -239,7 +250,7 @@ async fn test_multicast_lifecycle(cptestctx: &ControlPlaneTestContext) {
     assert_eq!(members[0].instance_id, instances[2].identity.id);
 
     // Verify groups are still active and functional
-    for (i, group_name) in group_names.iter().enumerate() {
+    for group_name in group_names.iter() {
         let group_url = mcast_group_url(group_name);
         let current_group: MulticastGroup =
             object_get(client, &group_url).await;
@@ -247,10 +258,8 @@ async fn test_multicast_lifecycle(cptestctx: &ControlPlaneTestContext) {
             current_group.state, "Active",
             "Group {group_name} should remain Active throughout lifecycle"
         );
-        assert_eq!(current_group.identity.id, groups[i].identity.id);
     }
 
-    // Cleanup - use our parallel cleanup functions
     cleanup_instances(
         cptestctx,
         client,
@@ -264,7 +273,14 @@ async fn test_multicast_lifecycle(cptestctx: &ControlPlaneTestContext) {
     )
     .await;
 
-    cleanup_multicast_groups(client, &group_names).await;
+    // Implicit model: groups are implicitly deleted when last member (instance) is removed
+    ops::join4(
+        wait_for_group_deleted(cptestctx, group_names[0]),
+        wait_for_group_deleted(cptestctx, group_names[1]),
+        wait_for_group_deleted(cptestctx, group_names[2]),
+        wait_for_group_deleted(cptestctx, group_names[3]),
+    )
+    .await;
 }
 
 #[nexus_test]
@@ -273,52 +289,56 @@ async fn test_multicast_group_attach_conflicts(
 ) {
     let client = &cptestctx.external_client;
 
-    create_default_ip_pool(&client).await;
-    create_project(client, PROJECT_NAME).await;
-    let mcast_pool = create_multicast_ip_pool_with_range(
-        &client,
-        "mcast-pool-conflicts",
-        (224, 23, 0, 1),   // Unique range: 224.23.0.1
-        (224, 23, 0, 255), // to 224.23.0.255
+    // Create project and pools in parallel
+    ops::join3(
+        create_default_ip_pools(&client),
+        create_project(client, PROJECT_NAME),
+        create_multicast_ip_pool_with_range(
+            &client,
+            "mcast-pool-conflicts",
+            (224, 23, 0, 1),   // Unique range: 224.23.0.1
+            (224, 23, 0, 255), // to 224.23.0.255
+        ),
     )
     .await;
 
-    // Create a multicast group
-    let multicast_ip = IpAddr::V4(Ipv4Addr::new(224, 23, 0, 103));
-    let group_url = "/v1/multicast-groups".to_string();
-    let params = MulticastGroupCreate {
-        identity: IdentityMetadataCreateParams {
-            name: "mcast-group-1".parse().unwrap(),
-            description: "Group for conflict testing".to_string(),
-        },
-        multicast_ip: Some(multicast_ip),
-        source_ips: None,
-        pool: Some(NameOrId::Name(mcast_pool.identity.name.clone())),
-        mvlan: None,
-    };
-    object_create::<_, MulticastGroup>(client, &group_url, &params).await;
-
-    // Wait for group to become Active before proceeding
-    wait_for_group_active(client, "mcast-group-1").await;
-
-    // Create first instance with the multicast group
+    // Create first instance (implicit model: first instance creates the group)
     instance_for_multicast_groups(
         cptestctx,
         PROJECT_NAME,
         "mcast-instance-1",
         false,
-        &["mcast-group-1"],
+        &[],
     )
     .await;
 
-    // Create second instance with the same multicast group
+    // Add instance1 to group (group implicitly creates if it doesn't exist)
+    multicast_group_attach(
+        cptestctx,
+        PROJECT_NAME,
+        "mcast-instance-1",
+        "mcast-group-1",
+    )
+    .await;
+
+    // Wait for group to become Active before proceeding
+    wait_for_group_active(client, "mcast-group-1").await;
+
+    // Create second instance and add to same multicast group
     // This should succeed (multicast groups can have multiple members, unlike floating IPs)
     instance_for_multicast_groups(
         cptestctx,
         PROJECT_NAME,
         "mcast-instance-2",
         false,
-        &["mcast-group-1"],
+        &[],
+    )
+    .await;
+    multicast_group_attach(
+        cptestctx,
+        PROJECT_NAME,
+        "mcast-instance-2",
+        "mcast-group-1",
     )
     .await;
 
@@ -345,7 +365,6 @@ async fn test_multicast_group_attach_conflicts(
         "Multicast group should support multiple members (unlike floating IPs)"
     );
 
-    // Clean up - use cleanup functions
     cleanup_instances(
         cptestctx,
         client,
@@ -353,7 +372,7 @@ async fn test_multicast_group_attach_conflicts(
         &["mcast-instance-1", "mcast-instance-2"],
     )
     .await;
-    cleanup_multicast_groups(client, &["mcast-group-1"]).await;
+    wait_for_group_deleted(cptestctx, "mcast-group-1").await;
 }
 
 #[nexus_test]
@@ -362,61 +381,51 @@ async fn test_multicast_group_attach_limits(
 ) {
     let client = &cptestctx.external_client;
 
-    create_default_ip_pool(&client).await;
-    create_project(client, PROJECT_NAME).await;
-    let mcast_pool = create_multicast_ip_pool(&client, "mcast-pool").await;
+    // Create project and pools in parallel
+    ops::join3(
+        create_default_ip_pools(&client),
+        create_project(client, PROJECT_NAME),
+        create_multicast_ip_pool(&client, "mcast-pool"),
+    )
+    .await;
 
-    // Create multiple multicast groups in parallel to test per-instance limits
-    let group_specs = &[
-        MulticastGroupForTest {
-            name: "limit-test-group-0",
-            multicast_ip: IpAddr::V4(Ipv4Addr::new(224, 0, 1, 104)),
-            description: Some("Group 0 for limit testing".to_string()),
-        },
-        MulticastGroupForTest {
-            name: "limit-test-group-1",
-            multicast_ip: IpAddr::V4(Ipv4Addr::new(224, 0, 1, 105)),
-            description: Some("Group 1 for limit testing".to_string()),
-        },
-        MulticastGroupForTest {
-            name: "limit-test-group-2",
-            multicast_ip: IpAddr::V4(Ipv4Addr::new(224, 0, 1, 106)),
-            description: Some("Group 2 for limit testing".to_string()),
-        },
-        MulticastGroupForTest {
-            name: "limit-test-group-3",
-            multicast_ip: IpAddr::V4(Ipv4Addr::new(224, 0, 1, 107)),
-            description: Some("Group 3 for limit testing".to_string()),
-        },
-        MulticastGroupForTest {
-            name: "limit-test-group-4",
-            multicast_ip: IpAddr::V4(Ipv4Addr::new(224, 0, 1, 108)),
-            description: Some("Group 4 for limit testing".to_string()),
-        },
+    // Group names for implicit groups (implicitly created when first member joins)
+    let group_names = [
+        "limit-test-group-0",
+        "limit-test-group-1",
+        "limit-test-group-2",
+        "limit-test-group-3",
+        "limit-test-group-4",
     ];
 
-    create_multicast_groups(client, &mcast_pool, group_specs).await;
-    let group_names: Vec<&str> = group_specs.iter().map(|g| g.name).collect();
-
-    // Wait for all groups to become Active in parallel
-    wait_for_groups_active(client, &group_names).await;
-
-    // Try to create an instance with many multicast groups
-    // (Check if there's a reasonable limit per instance)
-    let multicast_group_names: Vec<&str> = group_names[0..3].to_vec();
-
+    // Create instance first (groups will be implicitly created when attached)
     let instance = instance_for_multicast_groups(
         cptestctx,
         PROJECT_NAME,
         "mcast-instance-1",
         false,
-        &multicast_group_names, // Test with 3 groups (reasonable limit)
+        &[], // No groups at creation
     )
     .await;
 
+    // Attach instance to 3 groups (implicitly creates each group)
+    let multicast_group_names = &group_names[0..3];
+    for group_name in multicast_group_names {
+        multicast_group_attach(
+            cptestctx,
+            PROJECT_NAME,
+            "mcast-instance-1",
+            group_name,
+        )
+        .await;
+    }
+
+    // Wait for all groups to become active in parallel
+    wait_for_groups_active(client, multicast_group_names).await;
+
     // Wait for members to reach "Left" state for each group
-    // (instance is stopped, so member starts in "Left" state with no `sled_id`)
-    for group_name in &multicast_group_names {
+    // (instance is stopped, so member starts in "Left" state with no sled_id)
+    for group_name in multicast_group_names {
         wait_for_member_state(
             cptestctx,
             group_name,
@@ -427,7 +436,7 @@ async fn test_multicast_group_attach_limits(
     }
 
     // Verify instance is member of multiple groups
-    for group_name in &multicast_group_names {
+    for group_name in multicast_group_names {
         let members_url = mcast_group_members_url(group_name);
         let members = nexus_test_utils::http_testing::NexusRequest::iter_collection_authn::<MulticastGroupMember>(
              client,
@@ -447,10 +456,16 @@ async fn test_multicast_group_attach_limits(
         assert_eq!(members[0].instance_id, instance.identity.id);
     }
 
-    // Clean up - use cleanup functions
     cleanup_instances(cptestctx, client, PROJECT_NAME, &["mcast-instance-1"])
         .await;
-    cleanup_multicast_groups(client, &group_names).await;
+    // Groups are implicitly deleted when last member (instance) is removed
+    // Only 3 groups were created (group_names[0..3])
+    ops::join3(
+        wait_for_group_deleted(cptestctx, group_names[0]),
+        wait_for_group_deleted(cptestctx, group_names[1]),
+        wait_for_group_deleted(cptestctx, group_names[2]),
+    )
+    .await;
 }
 
 #[nexus_test]
@@ -459,38 +474,35 @@ async fn test_multicast_group_instance_state_transitions(
 ) {
     let client = &cptestctx.external_client;
 
-    create_default_ip_pool(&client).await;
-    create_project(client, PROJECT_NAME).await;
-    let mcast_pool = create_multicast_ip_pool(&client, "mcast-pool").await;
+    // Create project and pools in parallel
+    ops::join3(
+        create_default_ip_pools(&client),
+        create_project(client, PROJECT_NAME),
+        create_multicast_ip_pool(&client, "mcast-pool"),
+    )
+    .await;
 
-    // Create a multicast group with explicit IP for easy DPD validation
-    let multicast_ip = IpAddr::V4(Ipv4Addr::new(224, 0, 1, 200));
-    let group_url = "/v1/multicast-groups".to_string();
-    let params = MulticastGroupCreate {
-        identity: IdentityMetadataCreateParams {
-            name: "state-test-group".parse().unwrap(),
-            description: "Group for testing instance state transitions"
-                .to_string(),
-        },
-        multicast_ip: Some(multicast_ip),
-        source_ips: None,
-        pool: Some(NameOrId::Name(mcast_pool.identity.name.clone())),
-        mvlan: None,
-    };
-    object_create::<_, MulticastGroup>(client, &group_url, &params).await;
-
-    // Wait for group to become Active before proceeding
-    wait_for_group_active(client, "state-test-group").await;
-
-    // Create stopped instance and add to multicast group
+    // Create stopped instance (no multicast groups at creation)
     let stopped_instance = instance_for_multicast_groups(
         cptestctx,
         PROJECT_NAME,
         "state-test-instance",
-        false, // Create stopped
-        &["state-test-group"],
+        false,
+        &[],
     )
     .await;
+
+    // Add instance to group (group implicitly creates if it doesn't exist)
+    multicast_group_attach(
+        cptestctx,
+        PROJECT_NAME,
+        "state-test-instance",
+        "state-test-group",
+    )
+    .await;
+
+    // Wait for group to become Active before proceeding
+    wait_for_group_active(client, "state-test-group").await;
 
     // Verify instance is stopped and in multicast group
     assert_eq!(stopped_instance.runtime.run_state, InstanceState::Stopped);
@@ -566,13 +578,13 @@ async fn test_multicast_group_instance_state_transitions(
     );
     assert_eq!(final_members[0].instance_id, stopped_instance.identity.id);
 
-    // Clean up
     object_delete(
         client,
         &format!("/v1/instances/state-test-instance?project={PROJECT_NAME}"),
     )
     .await;
-    object_delete(client, &mcast_group_url("state-test-group")).await;
+
+    wait_for_group_deleted(cptestctx, "state-test-group").await;
 }
 
 /// Test that multicast group membership persists through instance stop/start cycles
@@ -581,45 +593,47 @@ async fn test_multicast_group_instance_state_transitions(
 async fn test_multicast_group_persistence_through_stop_start(
     cptestctx: &ControlPlaneTestContext,
 ) {
+    // Ensure inventory and DPD are ready before creating instances with multicast groups
+    ensure_multicast_test_ready(cptestctx).await;
+
     let client = &cptestctx.external_client;
 
-    create_default_ip_pool(&client).await;
-    create_project(client, PROJECT_NAME).await;
-    let mcast_pool = create_multicast_ip_pool(&client, "mcast-pool").await;
+    // Create project and pools in parallel
+    ops::join3(
+        create_default_ip_pools(&client),
+        create_project(client, PROJECT_NAME),
+        create_multicast_ip_pool(&client, "mcast-pool"),
+    )
+    .await;
 
-    // Create a multicast group
-    let multicast_ip = IpAddr::V4(Ipv4Addr::new(224, 0, 1, 200));
-    let group_url = "/v1/multicast-groups".to_string();
-    let params = MulticastGroupCreate {
-        identity: IdentityMetadataCreateParams {
-            name: "persist-test-group".parse().unwrap(),
-            description: "Group for stop/start persistence testing".to_string(),
-        },
-        multicast_ip: Some(multicast_ip),
-        source_ips: None,
-        pool: Some(NameOrId::Name(mcast_pool.identity.name.clone())),
-        mvlan: None,
-    };
-    object_create::<_, MulticastGroup>(client, &group_url, &params).await;
-
-    // Wait for group to become Active
-    wait_for_group_active(client, "persist-test-group").await;
-
-    // Create instance with the multicast group and start it
+    // Create instance and start it (no multicast groups at creation)
     let instance = instance_for_multicast_groups(
         cptestctx,
         PROJECT_NAME,
         "persist-test-instance",
-        true, // start the instance
-        &["persist-test-group"],
+        true,
+        &[],
     )
     .await;
+
+    // Add instance to group (group implicitly creates if it doesn't exist)
+    multicast_group_attach(
+        cptestctx,
+        PROJECT_NAME,
+        "persist-test-instance",
+        "persist-test-group",
+    )
+    .await;
+
+    // Wait for group to become Active
+    wait_for_group_active(client, "persist-test-group").await;
 
     let instance_id = InstanceUuid::from_untyped_uuid(instance.identity.id);
 
     // Simulate the instance transitioning to Running state
     let nexus = &cptestctx.server.server_context().nexus;
     instance_simulate(nexus, &instance_id).await;
+    instance_wait_for_state(client, instance_id, InstanceState::Running).await;
 
     // Wait for member to be joined (reconciler will process the sled_id set by instance start)
     wait_for_member_state(
@@ -748,7 +762,6 @@ async fn test_multicast_group_persistence_through_stop_start(
     )
     .await;
 
-    // Clean up - use cleanup helper which handles stop/delete
     cleanup_instances(
         cptestctx,
         client,
@@ -756,7 +769,8 @@ async fn test_multicast_group_persistence_through_stop_start(
         &["persist-test-instance"],
     )
     .await;
-    cleanup_multicast_groups(client, &["persist-test-group"]).await;
+    // Group is implicitly deleted when last member (instance) is removed
+    wait_for_group_deleted(cptestctx, "persist-test-group").await;
 }
 
 /// Verify concurrent multicast operations maintain correct member states.
@@ -769,32 +783,23 @@ async fn test_multicast_group_persistence_through_stop_start(
 async fn test_multicast_concurrent_operations(
     cptestctx: &ControlPlaneTestContext,
 ) {
+    // Ensure inventory and DPD are ready before creating instances with multicast groups
+    ensure_multicast_test_ready(cptestctx).await;
+
     let client = &cptestctx.external_client;
 
-    create_default_ip_pool(&client).await;
-    create_project(client, PROJECT_NAME).await;
-    let mcast_pool = create_multicast_ip_pool_with_range(
-        &client,
-        "concurrent-pool",
-        (224, 40, 0, 1),
-        (224, 40, 0, 255),
+    // Create project and pools in parallel
+    ops::join3(
+        create_default_ip_pools(&client),
+        create_project(client, PROJECT_NAME),
+        create_multicast_ip_pool_with_range(
+            &client,
+            "concurrent-pool",
+            (224, 40, 0, 1),
+            (224, 40, 0, 255),
+        ),
     )
     .await;
-
-    let multicast_ip = IpAddr::V4(Ipv4Addr::new(224, 40, 0, 100));
-    let group_url = "/v1/multicast-groups".to_string();
-    let group_params = MulticastGroupCreate {
-        identity: IdentityMetadataCreateParams {
-            name: "concurrent-test-group".parse().unwrap(),
-            description: "Group for concurrent operations testing".to_string(),
-        },
-        multicast_ip: Some(multicast_ip),
-        source_ips: None,
-        pool: Some(NameOrId::Name(mcast_pool.identity.name.clone())),
-        mvlan: None,
-    };
-    object_create::<_, MulticastGroup>(client, &group_url, &group_params).await;
-    wait_for_group_active(client, "concurrent-test-group").await;
 
     // Create multiple instances for concurrent testing
     let instance_names = [
@@ -804,17 +809,27 @@ async fn test_multicast_concurrent_operations(
         "concurrent-instance-4",
     ];
 
-    // Create all instances in parallel (now that we fixed the cleanup double-delete bug)
+    // Create all instances in parallel
     let create_futures = instance_names
         .iter()
         .map(|name| create_instance(client, PROJECT_NAME, name));
     let instances = ops::join_all(create_futures).await;
 
-    // Attach all instances to the multicast group in parallel (this is the optimization)
+    // First instance attach (implicitly creates the group)
+    multicast_group_attach(
+        cptestctx,
+        PROJECT_NAME,
+        instance_names[0],
+        "concurrent-test-group",
+    )
+    .await;
+    wait_for_group_active(client, "concurrent-test-group").await;
+
+    // Attach remaining instances to the existing group in parallel
     multicast_group_attach_bulk(
         cptestctx,
         PROJECT_NAME,
-        &instance_names,
+        &instance_names[1..],
         "concurrent-test-group",
     )
     .await;
@@ -886,7 +901,7 @@ async fn test_multicast_concurrent_operations(
             "concurrent-test-group",
         )
         .await;
-        // Don't wait for reconciler - immediately do another operation
+        // Don't wait for reconciler; immediately do another operation
         multicast_group_detach(
             client,
             PROJECT_NAME,
@@ -916,9 +931,9 @@ async fn test_multicast_concurrent_operations(
         .await;
     }
 
-    // Cleanup
+    // Cleanup and delete instances (group is implicitly deleted when last member removed)
     cleanup_instances(cptestctx, client, PROJECT_NAME, &instance_names).await;
-    cleanup_multicast_groups(client, &["concurrent-test-group"]).await;
+    wait_for_group_deleted(cptestctx, "concurrent-test-group").await;
 }
 
 /// Verify that multicast members are properly cleaned up when an instance
@@ -937,35 +952,20 @@ async fn test_multicast_member_cleanup_instance_never_started(
     let group_name = "never-started-group";
     let instance_name = "never-started-instance";
 
-    // Setup: project, pools, group
-    create_project(client, project_name).await;
-    create_default_ip_pool(client).await;
-    let mcast_pool = create_multicast_ip_pool_with_range(
-        client,
-        "never-started-pool",
-        (224, 50, 0, 1),
-        (224, 50, 0, 255),
+    // Create project and pools in parallel
+    ops::join3(
+        create_project(client, project_name),
+        create_default_ip_pools(client),
+        create_multicast_ip_pool_with_range(
+            client,
+            "never-started-pool",
+            (224, 50, 0, 1),
+            (224, 50, 0, 255),
+        ),
     )
     .await;
 
-    // Create multicast group
-    let multicast_ip = IpAddr::V4(Ipv4Addr::new(224, 50, 0, 100));
-    let group_url = "/v1/multicast-groups".to_string();
-    let group_params = MulticastGroupCreate {
-        identity: IdentityMetadataCreateParams {
-            name: group_name.parse().unwrap(),
-            description: "Group for never-started instance test".to_string(),
-        },
-        multicast_ip: Some(multicast_ip),
-        source_ips: None,
-        pool: Some(NameOrId::Name(mcast_pool.identity.name.clone())),
-        mvlan: None,
-    };
-
-    object_create::<_, MulticastGroup>(client, &group_url, &group_params).await;
-    wait_for_group_active(client, group_name).await;
-
-    // Create instance but don't start it - use start: false
+    // Create instance but don't start it
     let instance_params = InstanceCreate {
         identity: IdentityMetadataCreateParams {
             name: instance_name.parse().unwrap(),
@@ -976,13 +976,13 @@ async fn test_multicast_member_cleanup_instance_never_started(
         hostname: instance_name.parse().unwrap(),
         user_data: vec![],
         ssh_public_keys: None,
-        network_interfaces: InstanceNetworkInterfaceAttachment::Default,
+        network_interfaces: InstanceNetworkInterfaceAttachment::DefaultIpv4,
         external_ips: vec![],
         multicast_groups: vec![],
         disks: vec![],
         boot_disk: None,
         cpu_platform: None,
-        start: false, // Critical: don't start the instance
+        start: false, // Don't start the instance
         auto_restart_policy: Default::default(),
         anti_affinity_groups: Vec::new(),
     };
@@ -991,22 +991,11 @@ async fn test_multicast_member_cleanup_instance_never_started(
     let instance: Instance =
         object_create(client, &instance_url, &instance_params).await;
 
-    // Add instance as multicast member (will be in "Left" state since instance
-    // is stopped with no sled_id)
-    let member_add_url = format!(
-        "{}?project={project_name}",
-        mcast_group_members_url(group_name)
-    );
-    let member_params = MulticastGroupMemberAdd {
-        instance: NameOrId::Name(instance_name.parse().unwrap()),
-    };
-
-    object_create::<_, MulticastGroupMember>(
-        client,
-        &member_add_url,
-        &member_params,
-    )
-    .await;
+    // Add instance as multicast member (implicitly creates group)
+    // Member will be in "Left" state since instance is stopped with no sled_id
+    multicast_group_attach(cptestctx, project_name, instance_name, group_name)
+        .await;
+    wait_for_group_active(client, group_name).await;
 
     // Wait for member to reach "Left" state (stopped instance with no sled_id)
     wait_for_member_state(
@@ -1021,38 +1010,18 @@ async fn test_multicast_member_cleanup_instance_never_started(
     let members = list_multicast_group_members(client, group_name).await;
     assert_eq!(members.len(), 1, "Should have one member");
 
-    // Delete the instance directly without starting it
-    // This simulates the case where an instance is created, added to multicast group,
-    // but then deleted before ever starting (never gets a sled assignment)
-    let instance_url =
-        format!("/v1/instances/{instance_name}?project={project_name}");
-    object_delete(client, &instance_url).await;
-
-    // Wait for reconciler to process the deletion
-    wait_for_multicast_reconciler(&cptestctx.lockstep_client).await;
-
-    // Critical test: Verify the orphaned member was cleaned up
-    // The RPW reconciler should detect that the member's instance was deleted
-    // and remove the member from the group
-    let final_members = list_multicast_group_members(client, group_name).await;
-    assert_eq!(
-        final_members.len(),
-        0,
-        "Orphaned member should be cleaned up when instance is deleted without starting"
-    );
-
-    // Verify that stale ports were removed from DPD
-    // Since the instance never started (never had a `sled_id`), there should be
-    // no rear/underlay ports in DPD for this group. This verifies the reconciler
-    // only removes ports when it has complete information about all "Joined" members.
-
-    // Get the underlay group IP from the database
+    // Save underlay group info BEFORE deleting the instance
+    // (After deletion, the group will be deleted too since it was implicitly created)
     let nexus = &cptestctx.server.server_context().nexus;
     let datastore = nexus.datastore();
     let opctx =
         OpContext::for_tests(cptestctx.logctx.log.clone(), datastore.clone());
 
-    // Fetch the external group to get its underlay_group_id
+    // Fetch the external group from the view to get its multicast_ip
+    let external_group_view = get_multicast_group(client, group_name).await;
+    let multicast_ip = external_group_view.multicast_ip;
+
+    // Fetch the external group from datastore to get its underlay_group_id
     let external_group = datastore
         .multicast_group_lookup_by_ip(&opctx, multicast_ip)
         .await
@@ -1070,55 +1039,40 @@ async fn test_multicast_member_cleanup_instance_never_started(
 
     let underlay_multicast_ip = underlay_group.multicast_ip.ip();
 
-    // Query DPD for the underlay group (where instance members are stored)
-    let dpd_client = nexus_test_utils::dpd_client(cptestctx);
-    let dpd_group_response = dpd_client
-        .multicast_group_get(&underlay_multicast_ip)
-        .await
-        .expect("Should be able to query DPD for underlay multicast group");
+    // Delete the instance directly without starting it
+    // This simulates the case where an instance is created, added to multicast group,
+    // but then deleted before ever starting (never gets a sled assignment)
+    let instance_url =
+        format!("/v1/instances/{instance_name}?project={project_name}");
+    object_delete(client, &instance_url).await;
 
-    // Extract underlay members from the response
-    let underlay_members = match dpd_group_response.into_inner() {
-        dpd_client::types::MulticastGroupResponse::Underlay {
-            members, ..
-        } => members,
-        dpd_client::types::MulticastGroupResponse::External { .. } => {
-            panic!(
-                "Expected underlay group when querying underlay IP, got external"
-            );
-        }
-    };
+    // Verify the orphaned member was cleaned up
+    // The RPW reconciler should detect that the member's instance was deleted
+    // and remove the member from the group. Since this was an implicitly created
+    // group and the last member was removed, the group itself should be deleted.
+    wait_for_group_deleted(cptestctx, group_name).await;
 
-    // Filter to only rear/underlay members (instance members on backplane)
-    let rear_underlay_members: Vec<_> = underlay_members
-        .iter()
-        .filter(|m| {
-            matches!(m.port_id, dpd_client::types::PortId::Rear(_))
-                && m.direction == dpd_client::types::Direction::Underlay
-        })
-        .collect();
-
-    assert_eq!(
-        rear_underlay_members.len(),
-        0,
-        "DPD should have no rear/underlay ports after instance deletion and reconciler run"
-    );
-
-    // Cleanup
-    cleanup_multicast_groups(client, &[group_name]).await;
+    // Verify that stale ports were removed from DPD
+    // Since the instance never started (never had a `sled_id`), there should be
+    // no rear/underlay ports in DPD for this group.
+    // Note: We use the underlay IP we saved before deleting the instance.
+    wait_for_group_deleted_from_dpd(cptestctx, underlay_multicast_ip).await;
 }
 
 /// Verify multicast group membership persists through instance migration.
 ///
 /// The RPW reconciler detects sled_id changes and updates DPD configuration on
 /// both source and target switches to maintain uninterrupted multicast traffic.
-/// Member state follows the expected lifecycle: Joined on source sled → sled_id
-/// updated during migration → Joined again on target sled after reconciler
+/// Member state follows the expected lifecycle: Joined on source `sled` → `sled_id`
+/// updated during migration → "Joined" again on target sled after reconciler
 /// processes the change.
 #[nexus_test(extra_sled_agents = 1)]
 async fn test_multicast_group_membership_during_migration(
     cptestctx: &ControlPlaneTestContext,
 ) {
+    // Ensure inventory and DPD are ready before creating instances with multicast groups
+    ensure_multicast_test_ready(cptestctx).await;
+
     let client = &cptestctx.external_client;
     let lockstep_client = &cptestctx.lockstep_client;
     let nexus = &cptestctx.server.server_context().nexus;
@@ -1126,51 +1080,37 @@ async fn test_multicast_group_membership_during_migration(
     let group_name = "migration-test-group";
     let instance_name = "migration-test-instance";
 
-    // Setup: project, pools, and multicast group
-    create_project(client, project_name).await;
-    create_default_ip_pool(client).await;
-    let mcast_pool = create_multicast_ip_pool_with_range(
-        client,
-        "migration-pool",
-        (224, 60, 0, 1),
-        (224, 60, 0, 255),
+    // Create project and pools in parallel
+    ops::join3(
+        create_project(client, project_name),
+        create_default_ip_pools(client),
+        create_multicast_ip_pool_with_range(
+            client,
+            "migration-pool",
+            (224, 60, 0, 1),
+            (224, 60, 0, 255),
+        ),
     )
     .await;
 
-    // Create multicast group with mvlan
-    let multicast_ip = IpAddr::V4(Ipv4Addr::new(224, 60, 0, 100));
-    let group_url = "/v1/multicast-groups".to_string();
-    let group_params = MulticastGroupCreate {
-        identity: IdentityMetadataCreateParams {
-            name: group_name.parse().unwrap(),
-            description: "Group for migration testing with mvlan".to_string(),
-        },
-        multicast_ip: Some(multicast_ip),
-        source_ips: None,
-        pool: Some(NameOrId::Name(mcast_pool.identity.name.clone())),
-        mvlan: Some(VlanID::new(3000).unwrap()), // Test mvlan persistence through migration
-    };
-
-    let created_group: MulticastGroup =
-        object_create(client, &group_url, &group_params).await;
-    wait_for_group_active(client, group_name).await;
-
-    // Verify mvlan is set
-    assert_eq!(
-        created_group.mvlan,
-        Some(VlanID::new(3000).unwrap()),
-        "MVLAN should be set on group creation"
-    );
-
-    // Create and start instance with multicast group membership
+    // Create and start instance first (no multicast groups at creation)
     let instance = instance_for_multicast_groups(
         cptestctx,
         project_name,
         instance_name,
-        true, // start the instance
-        &[group_name],
+        true,
+        &[],
     )
     .await;
+
+    // Add instance to group (group implicitly creates if it doesn't exist)
+    multicast_group_attach(cptestctx, project_name, instance_name, group_name)
+        .await;
+    wait_for_group_active(client, group_name).await;
+
+    // Get the group's multicast IP for DPD verification later
+    let created_group = get_multicast_group(client, group_name).await;
+    let multicast_ip = created_group.multicast_ip;
 
     let instance_id = InstanceUuid::from_untyped_uuid(instance.identity.id);
 
@@ -1193,28 +1133,12 @@ async fn test_multicast_group_membership_during_migration(
     assert_eq!(pre_migration_members[0].instance_id, instance.identity.id);
     assert_eq!(pre_migration_members[0].state, "Joined");
 
-    // Verify mvlan is in DPD before migration
+    // Verify group exists in DPD before migration
     let dpd_client = nexus_test_utils::dpd_client(cptestctx);
-    let pre_migration_dpd_group = dpd_client
+    dpd_client
         .multicast_group_get(&multicast_ip)
         .await
         .expect("Multicast group should exist in DPD before migration");
-
-    match pre_migration_dpd_group.into_inner() {
-        dpd_client::types::MulticastGroupResponse::External {
-            external_forwarding,
-            ..
-        } => {
-            assert_eq!(
-                external_forwarding.vlan_id,
-                Some(3000),
-                "DPD should show vlan_id=3000 before migration"
-            );
-        }
-        dpd_client::types::MulticastGroupResponse::Underlay { .. } => {
-            panic!("Expected external group, got underlay");
-        }
-    }
 
     // Get source and target sleds for migration
     let source_sled_id = nexus
@@ -1246,7 +1170,7 @@ async fn test_multicast_group_membership_during_migration(
     .await
     .expect("Should initiate instance migration");
 
-    // Get propolis IDs for source and target - follow the pattern from existing tests
+    // Get propolis IDs for source and target
     let info = nexus
         .active_instance_info(&instance_id, None)
         .await
@@ -1255,17 +1179,6 @@ async fn test_multicast_group_membership_during_migration(
     let src_propolis_id = info.propolis_id;
     let dst_propolis_id =
         info.dst_propolis_id.expect("Instance should have a migration target");
-
-    // Helper function from instances.rs
-    async fn vmm_simulate_on_sled(
-        _cptestctx: &ControlPlaneTestContext,
-        nexus: &std::sync::Arc<omicron_nexus::Nexus>,
-        sled_id: omicron_uuid_kinds::SledUuid,
-        propolis_id: omicron_uuid_kinds::PropolisUuid,
-    ) {
-        let sa = nexus.sled_client(&sled_id).await.unwrap();
-        sa.vmm_finish_transition(propolis_id).await;
-    }
 
     // Complete migration on source sled and wait for instance to enter "Migrating"
     vmm_simulate_on_sled(cptestctx, nexus, source_sled_id, src_propolis_id)
@@ -1342,31 +1255,15 @@ async fn test_multicast_group_membership_during_migration(
     // This confirms the RPW reconciler correctly mapped the new sled to its rear port
     verify_inventory_based_port_mapping(cptestctx, &instance_id)
         .await
-        .expect("port mapping should be updated after migration");
+        .expect("Port mapping should be updated after migration");
 
-    // Verify mvlan persisted in DPD after migration
-    let post_migration_dpd_group = dpd_client
+    // Verify group still exists in DPD after migration
+    dpd_client
         .multicast_group_get(&multicast_ip)
         .await
         .expect("Multicast group should exist in DPD after migration");
 
-    match post_migration_dpd_group.into_inner() {
-        dpd_client::types::MulticastGroupResponse::External {
-            external_forwarding,
-            ..
-        } => {
-            assert_eq!(
-                external_forwarding.vlan_id,
-                Some(3000),
-                "DPD should still show vlan_id=3000 after migration - mvlan must persist"
-            );
-        }
-        dpd_client::types::MulticastGroupResponse::Underlay { .. } => {
-            panic!("Expected external group, got underlay");
-        }
-    }
-
-    // Cleanup: Stop and delete instance, then cleanup group
+    // Cleanup: Stop and delete instance
     let stop_url =
         format!("/v1/instances/{instance_name}/stop?project={project_name}");
     nexus_test_utils::http_testing::NexusRequest::new(
@@ -1387,14 +1284,15 @@ async fn test_multicast_group_membership_during_migration(
     instance_simulate(nexus, &instance_id).await;
     instance_wait_for_state(client, instance_id, InstanceState::Stopped).await;
 
-    // Delete instance and cleanup
+    // Delete instance; group is implicitly deleted when last member removed
     object_delete(
         client,
         &format!("/v1/instances/{instance_name}?project={project_name}"),
     )
     .await;
 
-    cleanup_multicast_groups(client, &[group_name]).await;
+    // Implicit model: group is implicitly deleted when last member (instance) is removed
+    wait_for_group_deleted(cptestctx, group_name).await;
 }
 
 /// Verify the RPW reconciler handles concurrent instance migrations within the same multicast group.
@@ -1413,48 +1311,45 @@ async fn test_multicast_group_concurrent_member_migrations(
     let project_name = "concurrent-migration-project";
     let group_name = "concurrent-migration-group";
 
-    // Setup: project, pools, and multicast group
-    create_project(client, project_name).await;
-    create_default_ip_pool(client).await;
-    let mcast_pool = create_multicast_ip_pool_with_range(
-        client,
-        "concurrent-migration-pool",
-        (224, 62, 0, 1),
-        (224, 62, 0, 255),
+    // Create project and pools in parallel
+    ops::join3(
+        create_project(client, project_name),
+        create_default_ip_pools(client),
+        create_multicast_ip_pool_with_range(
+            client,
+            "concurrent-migration-pool",
+            (224, 62, 0, 1),
+            (224, 62, 0, 255),
+        ),
     )
     .await;
 
-    // Create multicast group
-    let multicast_ip = IpAddr::V4(Ipv4Addr::new(224, 62, 0, 100));
-    let group_url = "/v1/multicast-groups".to_string();
-    let group_params = MulticastGroupCreate {
-        identity: IdentityMetadataCreateParams {
-            name: group_name.parse().unwrap(),
-            description: "Group for concurrent migration testing".to_string(),
-        },
-        multicast_ip: Some(multicast_ip),
-        source_ips: None,
-        pool: Some(NameOrId::Name(mcast_pool.identity.name.clone())),
-        mvlan: None,
-    };
-
-    object_create::<_, MulticastGroup>(client, &group_url, &group_params).await;
-    wait_for_group_active(client, group_name).await;
-
-    // Ensure inventory and DPD are ready before creating instances with multicast groups
+    // Ensure inventory and DPD are ready before creating instances
     ensure_multicast_test_ready(cptestctx).await;
 
-    // Create multiple instances all in the same multicast group
-    let instance_specs = [
-        ("concurrent-instance-1", &[group_name][..]),
-        ("concurrent-instance-2", &[group_name][..]),
-    ];
+    // Create multiple instances
+    let instance_names = ["concurrent-instance-1", "concurrent-instance-2"];
+    let create_futures = instance_names
+        .iter()
+        .map(|name| create_instance(client, project_name, name));
+    let instances = ops::join_all(create_futures).await;
 
-    let instances = create_instances_with_multicast_groups(
-        client,
+    // First instance attach (implicitly creates the group)
+    multicast_group_attach(
+        cptestctx,
         project_name,
-        &instance_specs,
-        true, // start instances
+        instance_names[0],
+        group_name,
+    )
+    .await;
+    wait_for_group_active(client, group_name).await;
+
+    // Second instance attach (group already exists)
+    multicast_group_attach(
+        cptestctx,
+        project_name,
+        instance_names[1],
+        group_name,
     )
     .await;
 
@@ -1553,17 +1448,6 @@ async fn test_multicast_group_concurrent_member_migrations(
             .dst_propolis_id
             .expect("Instance should have a migration target");
 
-        // Helper function from instances.rs
-        async fn vmm_simulate_on_sled(
-            _cptestctx: &ControlPlaneTestContext,
-            nexus: &std::sync::Arc<omicron_nexus::Nexus>,
-            sled_id: omicron_uuid_kinds::SledUuid,
-            propolis_id: omicron_uuid_kinds::PropolisUuid,
-        ) {
-            let sa = nexus.sled_client(&sled_id).await.unwrap();
-            sa.vmm_finish_transition(propolis_id).await;
-        }
-
         // Complete migration on source and target
         vmm_simulate_on_sled(
             cptestctx,
@@ -1625,8 +1509,1140 @@ async fn test_multicast_group_concurrent_member_migrations(
         .await;
     }
 
-    // Cleanup
-    let instance_names = ["concurrent-instance-1", "concurrent-instance-2"];
+    // Cleanup and delete instances (group is automatically deleted when last member removed)
     cleanup_instances(cptestctx, client, project_name, &instance_names).await;
-    cleanup_multicast_groups(client, &[group_name]).await;
+    wait_for_group_deleted(cptestctx, group_name).await;
+}
+
+/// Test that source_ips are preserved across instance stop/start.
+///
+/// This verifies that when an instance is stopped and started:
+/// a) Member goes to "Left" state on stop
+/// b) Member is reactivated on start
+/// c) The `source_ips` configured via explicit API are not wiped
+#[nexus_test]
+async fn test_source_ips_preserved_on_instance_restart(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+    let project_name = "source-preserve-project";
+    let instance_name = "source-preserve-inst";
+
+    // Setup: project and SSM pool
+    ops::join3(
+        create_project(client, project_name),
+        create_default_ip_pools(client),
+        create_multicast_ip_pool_with_range(
+            client,
+            "source-preserve-ssm-pool",
+            (232, 50, 0, 1),
+            (232, 50, 0, 255),
+        ),
+    )
+    .await;
+
+    // Create and start instance
+    let instance = create_instance(client, project_name, instance_name).await;
+    let instance_id = InstanceUuid::from_untyped_uuid(instance.identity.id);
+
+    // Start the instance
+    let instance_start_url =
+        format!("/v1/instances/{instance_name}/start?project={project_name}");
+    NexusRequest::new(
+        RequestBuilder::new(client, Method::POST, &instance_start_url)
+            .body(None as Option<&serde_json::Value>)
+            .expect_status(Some(StatusCode::ACCEPTED)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .expect("Should start instance");
+
+    // Simulate and wait for running
+    let nexus = &cptestctx.server.server_context().nexus;
+    instance_simulate(nexus, &instance_id).await;
+    instance_wait_for_state(client, instance_id, InstanceState::Running).await;
+
+    // Join SSM multicast group with source_ips
+    let ssm_ip = "232.50.0.100";
+    let source_ip: IpAddr = "10.99.99.1".parse().unwrap();
+    let join_url = format!(
+        "/v1/instances/{instance_name}/multicast-groups/{ssm_ip}?project={project_name}"
+    );
+    let join_body = InstanceMulticastGroupJoin {
+        source_ips: Some(vec![source_ip]),
+        ip_version: None,
+    };
+
+    let member_before: MulticastGroupMember =
+        put_upsert(client, &join_url, &join_body).await;
+
+    // Verify source_ips are set
+    assert_eq!(
+        member_before.source_ips.len(),
+        1,
+        "Member should have 1 source IP after join"
+    );
+    assert_eq!(
+        member_before.source_ips[0], source_ip,
+        "Member should have the specified source IP"
+    );
+
+    // Stop the instance
+    let instance_stop_url =
+        format!("/v1/instances/{instance_name}/stop?project={project_name}");
+    NexusRequest::new(
+        RequestBuilder::new(client, Method::POST, &instance_stop_url)
+            .body(None as Option<&serde_json::Value>)
+            .expect_status(Some(StatusCode::ACCEPTED)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .expect("Should stop instance");
+
+    // Simulate and wait for stopped
+    instance_simulate(nexus, &instance_id).await;
+    instance_wait_for_state(client, instance_id, InstanceState::Stopped).await;
+
+    // Start the instance again
+    NexusRequest::new(
+        RequestBuilder::new(client, Method::POST, &instance_start_url)
+            .body(None as Option<&serde_json::Value>)
+            .expect_status(Some(StatusCode::ACCEPTED)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .expect("Should restart instance");
+
+    // Simulate and wait for running
+    instance_simulate(nexus, &instance_id).await;
+    instance_wait_for_state(client, instance_id, InstanceState::Running).await;
+
+    // Verify source_ips are PRESERVED after restart
+    // Get the member via the group members list
+    let expected_group_name = format!("mcast-{}", ssm_ip.replace('.', "-"));
+    let members_url =
+        format!("/v1/multicast-groups/{expected_group_name}/members");
+    let members_after: Vec<MulticastGroupMember> =
+        NexusRequest::iter_collection_authn(client, &members_url, "", None)
+            .await
+            .expect("Should list members after restart")
+            .all_items;
+
+    assert_eq!(members_after.len(), 1, "Should have 1 member after restart");
+    let member_after = &members_after[0];
+
+    assert_eq!(
+        member_after.source_ips.len(),
+        1,
+        "Member should still have 1 source IP after restart"
+    );
+    assert_eq!(
+        member_after.source_ips[0], source_ip,
+        "Member source_ips should be PRESERVED after instance restart"
+    );
+
+    cleanup_instances(cptestctx, client, project_name, &[instance_name]).await;
+    wait_for_group_deleted(cptestctx, &expected_group_name).await;
+}
+
+/// Test that source_ips are preserved when instance is reconfigured with multicast_groups.
+///
+/// This verifies that when an instance already has a membership with source_ips
+/// and the instance is reconfigured with multicast_groups that includes that group:
+/// 1. The existing membership (with source_ips) is not replaced
+/// 2. New groups are added with empty source_ips
+/// 3. Groups not in the new list are removed
+#[nexus_test]
+async fn test_source_ips_preserved_on_instance_reconfigure(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+    let project_name = "reconfig-preserve-project";
+    let instance_name = "reconfig-preserve-inst";
+
+    // Setup: create project and pools
+    ops::join3(
+        create_default_ip_pools(&client),
+        create_project(client, project_name),
+        // SSM pool for source-filtered groups
+        create_multicast_ip_pool_with_range(
+            client,
+            "reconfig-ssm-pool",
+            (232, 60, 0, 1),
+            (232, 60, 0, 255),
+        ),
+    )
+    .await;
+
+    // Also create an ASM pool for the second group
+    create_multicast_ip_pool_with_range(
+        client,
+        "reconfig-asm-pool",
+        (224, 60, 0, 1),
+        (224, 60, 0, 255),
+    )
+    .await;
+
+    // Create instance with specified resources (need to match InstanceUpdate)
+    let instance: Instance = object_create(
+        client,
+        &format!("/v1/instances?project={project_name}"),
+        &InstanceCreate {
+            identity: IdentityMetadataCreateParams {
+                name: instance_name.parse().unwrap(),
+                description:
+                    "test instance for reconfigure source_ips preservation"
+                        .into(),
+            },
+            ncpus: InstanceCpuCount(2),
+            memory: ByteCount::from_gibibytes_u32(4),
+            hostname: instance_name.parse().unwrap(),
+            user_data: Vec::new(),
+            ssh_public_keys: None,
+            network_interfaces: InstanceNetworkInterfaceAttachment::DefaultIpv4,
+            external_ips: Vec::new(),
+            disks: Vec::new(),
+            boot_disk: None,
+            start: false,
+            auto_restart_policy: None,
+            anti_affinity_groups: Vec::new(),
+            cpu_platform: None,
+            multicast_groups: Vec::new(),
+        },
+    )
+    .await;
+    let instance_id = InstanceUuid::from_untyped_uuid(instance.identity.id);
+
+    // Start instance so we can join groups
+    let instance_start_url =
+        format!("/v1/instances/{instance_name}/start?project={project_name}");
+    NexusRequest::new(
+        RequestBuilder::new(client, Method::POST, &instance_start_url)
+            .expect_status(Some(StatusCode::ACCEPTED)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .expect("Should start instance");
+
+    // Simulate and wait for running
+    let nexus = &cptestctx.server.server_context().nexus;
+    instance_simulate(nexus, &instance_id).await;
+    instance_wait_for_state(client, instance_id, InstanceState::Running).await;
+
+    // Join SSM multicast group with source_ips via explicit API
+    let ssm_ip = "232.60.0.100";
+    let source_ip: IpAddr = "10.60.60.1".parse().unwrap();
+    let join_url = format!(
+        "/v1/instances/{instance_name}/multicast-groups/{ssm_ip}?project={project_name}"
+    );
+    let join_body = InstanceMulticastGroupJoin {
+        source_ips: Some(vec![source_ip]),
+        ip_version: None,
+    };
+
+    let member_before: MulticastGroupMember =
+        put_upsert(client, &join_url, &join_body).await;
+
+    // Verify source_ips are set
+    let ssm_group_name = format!("mcast-{}", ssm_ip.replace('.', "-"));
+    assert_eq!(
+        member_before.source_ips.len(),
+        1,
+        "Member should have 1 source IP after join"
+    );
+    assert_eq!(
+        member_before.source_ips[0], source_ip,
+        "Member should have the specified source IP"
+    );
+
+    // Now reconfigure instance with multicast_groups that includes the
+    // SSM group and adds a new ASM group
+    let asm_ip = "224.60.0.50";
+    let asm_group_name = format!("mcast-{}", asm_ip.replace('.', "-"));
+
+    let update_url =
+        format!("/v1/instances/{instance_name}?project={project_name}");
+    let update_body = serde_json::json!({
+        "ncpus": 2,
+        "memory": 4294967296_u64,  // 4 GiB in bytes
+        "boot_disk": null,
+        "auto_restart_policy": null,
+        "cpu_platform": null,
+        "multicast_groups": [
+            // Existing group: source_ips=null to preserve existing sources
+            { "group": ssm_ip, "source_ips": null },
+            // New group: source_ips=null (will have empty sources since no prior)
+            { "group": asm_ip, "source_ips": null },
+        ]
+    });
+
+    NexusRequest::new(
+        RequestBuilder::new(client, Method::PUT, &update_url)
+            .body(Some(&update_body))
+            .expect_status(Some(StatusCode::OK)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .expect("Should reconfigure instance with multicast_groups");
+
+    // Wait for ASM group to be created
+    wait_for_group_active(client, &asm_group_name).await;
+
+    // Verify SSM group source_ips are PRESERVED
+    let ssm_members_url =
+        format!("/v1/multicast-groups/{ssm_group_name}/members");
+    let ssm_members: Vec<MulticastGroupMember> =
+        NexusRequest::iter_collection_authn(
+            client,
+            &ssm_members_url,
+            "",
+            Some(10),
+        )
+        .await
+        .expect("Should list SSM group members")
+        .all_items;
+
+    assert_eq!(ssm_members.len(), 1, "SSM group should have 1 member");
+    let ssm_member = &ssm_members[0];
+    assert_eq!(
+        ssm_member.source_ips.len(),
+        1,
+        "SSM member should still have 1 source IP after reconfigure"
+    );
+    assert_eq!(
+        ssm_member.source_ips[0], source_ip,
+        "SSM member source_ips should be PRESERVED after instance reconfigure"
+    );
+
+    // Verify ASM group was created with empty source_ips
+    let asm_members_url =
+        format!("/v1/multicast-groups/{asm_group_name}/members");
+    let asm_members: Vec<MulticastGroupMember> =
+        NexusRequest::iter_collection_authn(
+            client,
+            &asm_members_url,
+            "",
+            Some(10),
+        )
+        .await
+        .expect("Should list ASM group members")
+        .all_items;
+
+    assert_eq!(asm_members.len(), 1, "ASM group should have 1 member");
+    let asm_member = &asm_members[0];
+    assert!(
+        asm_member.source_ips.is_empty(),
+        "ASM member added via reconfigure should have empty source_ips"
+    );
+
+    cleanup_instances(cptestctx, client, project_name, &[instance_name]).await;
+    wait_for_group_deleted(cptestctx, &ssm_group_name).await;
+    wait_for_group_deleted(cptestctx, &asm_group_name).await;
+}
+
+/// Test creating an instance with SSM multicast groups via MulticastGroupJoinSpec.
+///
+/// This tests the new implicit flow that allows specifying source_ips
+/// when creating an instance with multicast_groups.
+#[nexus_test]
+async fn test_instance_create_with_ssm_multicast_groups(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    use nexus_types::external_api::params::MulticastGroupJoinSpec;
+
+    let client = &cptestctx.external_client;
+    let project_name = "ssm-create-project";
+    let instance_name = "ssm-create-instance";
+
+    // Setup: create pools and project
+    ops::join3(
+        create_default_ip_pools(&client),
+        create_project(client, project_name),
+        create_multicast_ip_pool_with_range(
+            client,
+            "ssm-create-pool",
+            (232, 70, 0, 1),
+            (232, 70, 0, 100),
+        ),
+    )
+    .await;
+
+    // Create instance with SSM multicast group + source_ips via implicit flow
+    let ssm_ip: IpAddr = "232.70.0.10".parse().unwrap();
+    let source_ip: IpAddr = "10.70.70.1".parse().unwrap();
+
+    let instance_params = InstanceCreate {
+        identity: IdentityMetadataCreateParams {
+            name: instance_name.parse().unwrap(),
+            description: "Instance created with SSM multicast groups".into(),
+        },
+        ncpus: InstanceCpuCount(2),
+        memory: ByteCount::from_gibibytes_u32(4),
+        hostname: instance_name.parse().unwrap(),
+        user_data: Vec::new(),
+        ssh_public_keys: None,
+        network_interfaces: InstanceNetworkInterfaceAttachment::DefaultIpv4,
+        external_ips: Vec::new(),
+        disks: Vec::new(),
+        boot_disk: None,
+        start: true, // Start the instance
+        auto_restart_policy: None,
+        anti_affinity_groups: Vec::new(),
+        cpu_platform: None,
+        // Key part: SSM group with source_ips via MulticastGroupJoinSpec
+        multicast_groups: vec![MulticastGroupJoinSpec {
+            group: ssm_ip.to_string().parse().unwrap(),
+            source_ips: Some(vec![source_ip]),
+            ip_version: None,
+        }],
+    };
+
+    let instance_url = format!("/v1/instances?project={project_name}");
+    let instance: Instance =
+        object_create(client, &instance_url, &instance_params).await;
+    let instance_id = InstanceUuid::from_untyped_uuid(instance.identity.id);
+
+    // Simulate instance to running state
+    let nexus = &cptestctx.server.server_context().nexus;
+    instance_simulate(nexus, &instance_id).await;
+    instance_wait_for_state(client, instance_id, InstanceState::Running).await;
+
+    // Verify the SSM group was created
+    let ssm_group_name =
+        format!("mcast-{}", ssm_ip.to_string().replace('.', "-"));
+    wait_for_group_active(client, &ssm_group_name).await;
+
+    // Verify the member was created with source_ips
+    let members = list_multicast_group_members(client, &ssm_group_name).await;
+    assert_eq!(members.len(), 1, "Should have one member");
+
+    let member = &members[0];
+    assert_eq!(member.instance_id, instance.identity.id);
+    assert_eq!(member.source_ips.len(), 1, "Member should have 1 source IP");
+    assert_eq!(
+        member.source_ips[0], source_ip,
+        "Member should have the specified source IP"
+    );
+
+    // Verify the group-level source_ips shows the union (just the one source)
+    let group = get_multicast_group(client, &ssm_group_name).await;
+    assert_eq!(
+        group.source_ips.len(),
+        1,
+        "Group should show 1 source IP (union of members)"
+    );
+    assert_eq!(group.source_ips[0], source_ip);
+
+    // Cleanup
+    cleanup_instances(cptestctx, client, project_name, &[instance_name]).await;
+    wait_for_group_deleted(cptestctx, &ssm_group_name).await;
+}
+
+/// Test that creating an instance with SSM multicast group (by IP) without
+/// sources fails validation.
+///
+/// SSM addresses (232/8 for IPv4) require source IPs to be specified. This
+/// test verifies the validation happens during instance creation and prevents
+/// creating the instance without proper SSM sources.
+#[nexus_test]
+async fn test_instance_create_with_ssm_without_sources_fails(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    use nexus_types::external_api::params::MulticastGroupJoinSpec;
+
+    let client = &cptestctx.external_client;
+    let project_name = "ssm-nosrc-create-project";
+    let instance_name = "ssm-nosrc-create-instance";
+
+    // Setup: create pools and project
+    ops::join3(
+        create_default_ip_pools(&client),
+        create_project(client, project_name),
+        create_multicast_ip_pool_with_range(
+            client,
+            "ssm-nosrc-create-pool",
+            (232, 80, 0, 1),
+            (232, 80, 0, 100),
+        ),
+    )
+    .await;
+
+    // Try to create instance with SSM multicast group WITHOUT source_ips
+    // This should fail validation
+    let ssm_ip: IpAddr = "232.80.0.10".parse().unwrap();
+
+    let instance_params = InstanceCreate {
+        identity: IdentityMetadataCreateParams {
+            name: instance_name.parse().unwrap(),
+            description: "Instance should fail with SSM without sources".into(),
+        },
+        ncpus: InstanceCpuCount(2),
+        memory: ByteCount::from_gibibytes_u32(4),
+        hostname: instance_name.parse().unwrap(),
+        user_data: Vec::new(),
+        ssh_public_keys: None,
+        network_interfaces: InstanceNetworkInterfaceAttachment::DefaultIpv4,
+        external_ips: Vec::new(),
+        disks: Vec::new(),
+        boot_disk: None,
+        start: true,
+        auto_restart_policy: None,
+        anti_affinity_groups: Vec::new(),
+        cpu_platform: None,
+        // SSM group by IP with NO source_ips - should fail
+        multicast_groups: vec![MulticastGroupJoinSpec {
+            group: ssm_ip.to_string().parse().unwrap(),
+            source_ips: None, // Missing sources for SSM!
+            ip_version: None,
+        }],
+    };
+
+    let instance_url = format!("/v1/instances?project={project_name}");
+    let error = NexusRequest::new(
+        RequestBuilder::new(client, Method::POST, &instance_url)
+            .body(Some(&instance_params))
+            .expect_status(Some(StatusCode::BAD_REQUEST)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .expect("Creating instance with SSM without sources should fail");
+
+    // Verify the error message mentions SSM/source requirements
+    let error_body: serde_json::Value =
+        serde_json::from_slice(&error.body).unwrap();
+    let error_message = error_body["message"].as_str().unwrap_or("");
+    assert!(
+        error_message.contains("SSM") || error_message.contains("source"),
+        "Error should mention SSM or source IPs: {error_message}"
+    );
+}
+
+/// Test that instance reconfigure adding a new SSM group without sources fails.
+///
+/// When reconfiguring an instance to add new multicast groups:
+/// - For existing memberships: `source_ips = None` means "preserve existing"
+/// - For new memberships: `source_ips = None` means "no sources" which is
+///   invalid for SSM
+#[nexus_test]
+async fn test_instance_reconfigure_add_new_ssm_without_sources_fails(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    use omicron_common::api::external::Nullable;
+
+    let client = &cptestctx.external_client;
+    let project_name = "ssm-nosrc-reconfig-project";
+    let instance_name = "ssm-nosrc-reconfig-instance";
+
+    // Setup: create pools and project
+    ops::join3(
+        create_default_ip_pools(&client),
+        create_project(client, project_name),
+        create_multicast_ip_pool_with_range(
+            client,
+            "ssm-nosrc-reconfig-pool",
+            (232, 81, 0, 1),
+            (232, 81, 0, 100),
+        ),
+    )
+    .await;
+
+    // First: create an instance WITHOUT any multicast groups
+    let instance_params = InstanceCreate {
+        identity: IdentityMetadataCreateParams {
+            name: instance_name.parse().unwrap(),
+            description: "Instance for SSM reconfigure test".into(),
+        },
+        ncpus: InstanceCpuCount(2),
+        memory: ByteCount::from_gibibytes_u32(4),
+        hostname: instance_name.parse().unwrap(),
+        user_data: Vec::new(),
+        ssh_public_keys: None,
+        network_interfaces: InstanceNetworkInterfaceAttachment::DefaultIpv4,
+        external_ips: Vec::new(),
+        disks: Vec::new(),
+        boot_disk: None,
+        start: true,
+        auto_restart_policy: None,
+        anti_affinity_groups: Vec::new(),
+        cpu_platform: None,
+        multicast_groups: vec![], // No multicast groups initially
+    };
+
+    let instance_url = format!("/v1/instances?project={project_name}");
+    let instance: Instance =
+        object_create(client, &instance_url, &instance_params).await;
+    let instance_id = InstanceUuid::from_untyped_uuid(instance.identity.id);
+
+    // Simulate instance to running state
+    let nexus = &cptestctx.server.server_context().nexus;
+    instance_simulate(nexus, &instance_id).await;
+    instance_wait_for_state(client, instance_id, InstanceState::Running).await;
+
+    // Now try to reconfigure to add a new SSM group without sources
+    let ssm_ip: IpAddr = "232.81.0.10".parse().unwrap();
+
+    let update_params = InstanceUpdate {
+        ncpus: InstanceCpuCount(2),
+        memory: ByteCount::from_gibibytes_u32(4),
+        boot_disk: Nullable(None),
+        auto_restart_policy: Nullable(None),
+        cpu_platform: Nullable(None),
+        // Try to add new SSM group without sources - should fail
+        multicast_groups: Some(vec![MulticastGroupJoinSpec {
+            group: ssm_ip.to_string().parse().unwrap(),
+            source_ips: None, // Missing sources for new SSM group!
+            ip_version: None,
+        }]),
+    };
+
+    let update_url =
+        format!("/v1/instances/{instance_name}?project={project_name}");
+    let error = NexusRequest::new(
+        RequestBuilder::new(client, Method::PUT, &update_url)
+            .body(Some(&update_params))
+            .expect_status(Some(StatusCode::BAD_REQUEST)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .expect("Reconfigure adding new SSM group without sources should fail");
+
+    // Verify the error message mentions SSM/source requirements
+    let error_body: serde_json::Value =
+        serde_json::from_slice(&error.body).unwrap();
+    let error_message = error_body["message"].as_str().unwrap_or("");
+    assert!(
+        error_message.contains("SSM") || error_message.contains("source"),
+        "Error should mention SSM or source IPs: {error_message}"
+    );
+
+    // Cleanup
+    cleanup_instances(cptestctx, client, project_name, &[instance_name]).await;
+}
+
+/// Test explicit member state transitions during reactivation (Left → Joining → Joined).
+///
+/// Verifies the 3-state lifecycle:
+/// - Create instance with multicast group → member in "Left" state (stopped)
+/// - Start instance → RPW transitions to "Joined"
+/// - Stop instance → RPW transitions to "Left"
+/// - Start instance again → RPW transitions Left → Joining → Joined (reactivation)
+#[nexus_test]
+async fn test_member_state_transitions_on_reactivation(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+    let project_name = "state-transition-project";
+    let instance_name = "state-transition-inst";
+
+    // Setup
+    ops::join2(
+        create_project(client, project_name),
+        create_default_ip_pools(client),
+    )
+    .await;
+    create_multicast_ip_pool(client, "state-pool").await;
+
+    // Create instance (stopped)
+    let instance: Instance = object_create(
+        client,
+        &format!("/v1/instances?project={project_name}"),
+        &InstanceCreate {
+            identity: IdentityMetadataCreateParams {
+                name: instance_name.parse().unwrap(),
+                description: "test state transitions".into(),
+            },
+            ncpus: InstanceCpuCount(2),
+            memory: ByteCount::from_gibibytes_u32(4),
+            hostname: instance_name.parse().unwrap(),
+            user_data: Vec::new(),
+            ssh_public_keys: None,
+            network_interfaces: InstanceNetworkInterfaceAttachment::DefaultIpv4,
+            external_ips: Vec::new(),
+            disks: Vec::new(),
+            boot_disk: None,
+            start: false,
+            auto_restart_policy: None,
+            anti_affinity_groups: Vec::new(),
+            cpu_platform: None,
+            multicast_groups: Vec::new(),
+        },
+    )
+    .await;
+    let instance_id = InstanceUuid::from_untyped_uuid(instance.identity.id);
+    let nexus = &cptestctx.server.server_context().nexus;
+
+    // Join multicast group while stopped
+    // Use IP within the default pool's range (224.2.0.0 - 224.2.255.255)
+    let multicast_ip: IpAddr = "224.2.90.1".parse().unwrap();
+    let expected_group_name =
+        format!("mcast-{}", multicast_ip.to_string().replace('.', "-"));
+    let join_url = format!(
+        "/v1/instances/{instance_name}/multicast-groups/{multicast_ip}?project={project_name}"
+    );
+    let member: MulticastGroupMember =
+        put_upsert(client, &join_url, &InstanceMulticastGroupJoin::default())
+            .await;
+
+    // Case: Stopped instance -> member in "Left" state
+    wait_for_member_state(
+        cptestctx,
+        &expected_group_name,
+        member.instance_id,
+        nexus_db_model::MulticastGroupMemberState::Left,
+    )
+    .await;
+
+    // Start instance
+    let start_url =
+        format!("/v1/instances/{instance_name}/start?project={project_name}");
+    NexusRequest::new(
+        RequestBuilder::new(client, Method::POST, &start_url)
+            .expect_status(Some(StatusCode::ACCEPTED)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .expect("Start should succeed");
+
+    instance_simulate(nexus, &instance_id).await;
+    instance_wait_for_state(client, instance_id, InstanceState::Running).await;
+
+    // Case: Running instance -> member now in "Joined" state
+    wait_for_member_state(
+        cptestctx,
+        &expected_group_name,
+        member.instance_id,
+        nexus_db_model::MulticastGroupMemberState::Joined,
+    )
+    .await;
+
+    // Stop instance
+    let stop_url =
+        format!("/v1/instances/{instance_name}/stop?project={project_name}");
+    NexusRequest::new(
+        RequestBuilder::new(client, Method::POST, &stop_url)
+            .expect_status(Some(StatusCode::ACCEPTED)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .expect("Stop should succeed");
+
+    instance_simulate(nexus, &instance_id).await;
+    instance_wait_for_state(client, instance_id, InstanceState::Stopped).await;
+
+    // Case: Stopped after running -> member goes back to "Left" state
+    wait_for_member_state(
+        cptestctx,
+        &expected_group_name,
+        member.instance_id,
+        nexus_db_model::MulticastGroupMemberState::Left,
+    )
+    .await;
+
+    // Start instance again (reactivation)
+    NexusRequest::new(
+        RequestBuilder::new(client, Method::POST, &start_url)
+            .expect_status(Some(StatusCode::ACCEPTED)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .expect("Restart should succeed");
+
+    instance_simulate(nexus, &instance_id).await;
+    instance_wait_for_state(client, instance_id, InstanceState::Running).await;
+
+    // Case: Reactivation complete -> member goes back to "Joined" state
+    wait_for_member_state(
+        cptestctx,
+        &expected_group_name,
+        member.instance_id,
+        nexus_db_model::MulticastGroupMemberState::Joined,
+    )
+    .await;
+
+    // Cleanup
+    cleanup_instances(cptestctx, client, project_name, &[instance_name]).await;
+    wait_for_group_deleted(cptestctx, &expected_group_name).await;
+}
+
+/// Test that instance deletion only removes that instance's membership,
+/// preserving other instances' memberships in the same group.
+///
+/// This tests the invariant that `multicast_group_member_delete_by_group_and_instance`
+/// filters by both `group_id` and `instance_id`, not just `group_id`. This is
+/// important for saga undo correctness: if Instance B's create saga fails after
+/// joining a group, the undo must not affect Instance A's existing membership
+/// in the same group.
+#[nexus_test]
+async fn test_instance_delete_preserves_other_memberships(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+    let project_name = "delete-preserve-project";
+    let group_name = "delete-preserve-group";
+
+    // Setup: create project and multicast pool
+    ops::join3(
+        create_default_ip_pools(client),
+        create_project(client, project_name),
+        create_multicast_ip_pool_with_range(
+            client,
+            "delete-preserve-pool",
+            (224, 90, 0, 1),
+            (224, 90, 0, 255),
+        ),
+    )
+    .await;
+
+    // Create Instance A and join it to the multicast group
+    create_instance(client, project_name, "instance-a").await;
+    multicast_group_attach(cptestctx, project_name, "instance-a", group_name)
+        .await;
+    wait_for_group_active(client, group_name).await;
+
+    // Verify Instance A is a member
+    let members_before = list_multicast_group_members(client, group_name).await;
+    assert_eq!(members_before.len(), 1, "Instance A should be a member");
+    let instance_a_id = members_before[0].instance_id;
+
+    // Create Instance B and join it to the same group
+    create_instance(client, project_name, "instance-b").await;
+    multicast_group_attach(cptestctx, project_name, "instance-b", group_name)
+        .await;
+
+    // Verify both instances are now members
+    let members_with_b = list_multicast_group_members(client, group_name).await;
+    assert_eq!(members_with_b.len(), 2, "Both instances should be members");
+
+    // Delete Instance B, only removing B's membership, not A's
+    cleanup_instances(cptestctx, client, project_name, &["instance-b"]).await;
+
+    // Verify that Instance A's membership must still exist
+    let members_after_b_delete =
+        list_multicast_group_members(client, group_name).await;
+
+    assert_eq!(
+        members_after_b_delete.len(),
+        1,
+        "Instance A's membership should survive Instance B's deletion"
+    );
+    assert_eq!(
+        members_after_b_delete[0].instance_id, instance_a_id,
+        "The remaining member should be Instance A"
+    );
+
+    // Verify the group is still active (not deleted due to last member leaving)
+    let group = get_multicast_group(client, group_name).await;
+    assert_eq!(
+        group.state, "Active",
+        "Group should still be active since Instance A is still a member"
+    );
+
+    // Cleanup: delete Instance A, which should trigger group deletion
+    cleanup_instances(cptestctx, client, project_name, &["instance-a"]).await;
+    wait_for_group_deleted(cptestctx, group_name).await;
+}
+
+/// Test IPv6 multicast group lifecycle: create, start, stop, delete.
+///
+/// This mirrors the IPv4 lifecycle tests but uses IPv6 multicast addresses
+/// from a global-scope (ff0e::/16) pool to verify IPv6 support end-to-end.
+#[nexus_test]
+async fn test_multicast_ipv6_lifecycle(cptestctx: &ControlPlaneTestContext) {
+    let client = &cptestctx.external_client;
+    let project_name = "ipv6-lifecycle-project";
+    let group_name = "ipv6-lifecycle-group";
+
+    // Setup: create project and IPv6 multicast pool
+    ops::join3(
+        create_default_ip_pools(client),
+        create_project(client, project_name),
+        create_multicast_ip_pool_v6(client, "ipv6-lifecycle-pool"),
+    )
+    .await;
+    ensure_multicast_test_ready(cptestctx).await;
+
+    // Create an instance (not started yet)
+    let instance = instance_for_multicast_groups(
+        cptestctx,
+        project_name,
+        "ipv6-instance",
+        false,
+        &[],
+    )
+    .await;
+
+    // Join the IPv6 multicast group (implicitly creates the group)
+    let join_url = format!(
+        "/v1/instances/{}/multicast-groups/{group_name}?project={project_name}",
+        instance.identity.id
+    );
+    let member: MulticastGroupMember = put_upsert(
+        client,
+        &join_url,
+        &nexus_types::external_api::params::InstanceMulticastGroupJoin {
+            source_ips: None,
+            ip_version: None, // Only one pool, no ambiguity
+        },
+    )
+    .await;
+
+    assert_eq!(member.instance_id, instance.identity.id);
+
+    // Activate reconciler and wait for group to become Active
+    wait_for_multicast_reconciler(&cptestctx.lockstep_client).await;
+    let group = wait_for_group_active(client, group_name).await;
+
+    // Verify the group got an IPv6 address from the pool
+    match group.multicast_ip {
+        std::net::IpAddr::V4(_) => {
+            panic!(
+                "Expected IPv6 multicast address, got IPv4: {}",
+                group.multicast_ip
+            );
+        }
+        std::net::IpAddr::V6(v6) => {
+            assert!(
+                v6.segments()[0] == 0xff0e,
+                "Expected global-scope IPv6 multicast (ff0e::), got {}",
+                group.multicast_ip
+            );
+        }
+    }
+
+    // Start the instance - member should transition to "Joined"
+    let instance_id = InstanceUuid::from_untyped_uuid(instance.identity.id);
+    let nexus = &cptestctx.server.server_context().nexus;
+    let start_url =
+        format!("/v1/instances/ipv6-instance/start?project={project_name}");
+    NexusRequest::new(
+        RequestBuilder::new(client, Method::POST, &start_url)
+            .expect_status(Some(StatusCode::ACCEPTED)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .expect("Start should succeed");
+    instance_simulate(nexus, &instance_id).await;
+    instance_wait_for_state(client, instance_id, InstanceState::Running).await;
+    wait_for_multicast_reconciler(&cptestctx.lockstep_client).await;
+
+    let member_joined = wait_for_member_state(
+        cptestctx,
+        group_name,
+        instance.identity.id,
+        nexus_db_model::MulticastGroupMemberState::Joined,
+    )
+    .await;
+    assert_eq!(member_joined.state, "Joined");
+
+    // Stop the instance - member should transition to "Left"
+    let stop_url =
+        format!("/v1/instances/ipv6-instance/stop?project={project_name}");
+    NexusRequest::new(
+        RequestBuilder::new(client, Method::POST, &stop_url)
+            .body(None as Option<&serde_json::Value>)
+            .expect_status(Some(StatusCode::ACCEPTED)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .expect("Should stop instance");
+
+    instance_simulate(nexus, &instance_id).await;
+    instance_wait_for_state(client, instance_id, InstanceState::Stopped).await;
+    wait_for_multicast_reconciler(&cptestctx.lockstep_client).await;
+
+    let member_left = wait_for_member_state(
+        cptestctx,
+        group_name,
+        instance.identity.id,
+        nexus_db_model::MulticastGroupMemberState::Left,
+    )
+    .await;
+    assert_eq!(member_left.state, "Left");
+
+    // Delete the instance - this should delete the group since it's the only member
+    cleanup_instances(cptestctx, client, project_name, &["ipv6-instance"])
+        .await;
+    wait_for_group_deleted(cptestctx, group_name).await;
+}
+
+/// Test that a group with all members in "Left" state remains "Active".
+///
+/// When all instances in a multicast group are stopped (members go to "Left"),
+/// the group should remain "Active". We only delete when members are removed
+/// (instance delete), not when they're stopped.
+#[nexus_test]
+async fn test_group_with_all_members_left(cptestctx: &ControlPlaneTestContext) {
+    // Ensure inventory and DPD are ready before creating instances with multicast groups
+    ensure_multicast_test_ready(cptestctx).await;
+
+    let client = &cptestctx.external_client;
+    let project_name = "all-left-project";
+    let group_name = "all-left-group";
+
+    // Setup
+    ops::join3(
+        create_default_ip_pools(client),
+        create_project(client, project_name),
+        create_multicast_ip_pool(client, "all-left-pool"),
+    )
+    .await;
+
+    // Create instance and start it (no multicast groups at creation)
+    let instance1 = instance_for_multicast_groups(
+        cptestctx,
+        project_name,
+        "left-instance-1",
+        true,
+        &[],
+    )
+    .await;
+
+    // Add instance to group (group implicitly creates if it doesn't exist)
+    multicast_group_attach(
+        cptestctx,
+        project_name,
+        "left-instance-1",
+        group_name,
+    )
+    .await;
+
+    // Wait for group to become Active
+    wait_for_group_active(client, group_name).await;
+
+    let id1 = InstanceUuid::from_untyped_uuid(instance1.identity.id);
+
+    // Simulate the instance transitioning to Running state
+    let nexus = &cptestctx.server.server_context().nexus;
+    instance_simulate(nexus, &id1).await;
+    instance_wait_for_state(client, id1, InstanceState::Running).await;
+
+    // Wait for member to be joined
+    wait_for_member_state(
+        cptestctx,
+        group_name,
+        instance1.identity.id,
+        nexus_db_model::MulticastGroupMemberState::Joined,
+    )
+    .await;
+
+    // Now add a second instance to the SAME group
+    let instance2 = instance_for_multicast_groups(
+        cptestctx,
+        project_name,
+        "left-instance-2",
+        true,
+        &[],
+    )
+    .await;
+
+    multicast_group_attach(
+        cptestctx,
+        project_name,
+        "left-instance-2",
+        group_name,
+    )
+    .await;
+
+    let id2 = InstanceUuid::from_untyped_uuid(instance2.identity.id);
+    instance_simulate(nexus, &id2).await;
+    instance_wait_for_state(client, id2, InstanceState::Running).await;
+
+    // Wait for member2 to be joined (member1 already verified above)
+    wait_for_member_state(
+        cptestctx,
+        group_name,
+        instance2.identity.id,
+        nexus_db_model::MulticastGroupMemberState::Joined,
+    )
+    .await;
+
+    // Stop both instances -> members should go to "Left"
+    for (name, id) in [("left-instance-1", id1), ("left-instance-2", id2)] {
+        let stop_url =
+            format!("/v1/instances/{name}/stop?project={project_name}");
+        NexusRequest::new(
+            RequestBuilder::new(client, Method::POST, &stop_url)
+                .body(None as Option<&serde_json::Value>)
+                .expect_status(Some(StatusCode::ACCEPTED)),
+        )
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .expect("Should stop instance");
+
+        instance_simulate(nexus, &id).await;
+        instance_wait_for_state(client, id, InstanceState::Stopped).await;
+    }
+
+    wait_for_multicast_reconciler(&cptestctx.lockstep_client).await;
+
+    // Verify both members are "Left"
+    wait_for_member_state(
+        cptestctx,
+        group_name,
+        instance1.identity.id,
+        nexus_db_model::MulticastGroupMemberState::Left,
+    )
+    .await;
+    wait_for_member_state(
+        cptestctx,
+        group_name,
+        instance2.identity.id,
+        nexus_db_model::MulticastGroupMemberState::Left,
+    )
+    .await;
+
+    // Group should still be "Active" (not deleted)
+    let group = get_multicast_group(client, group_name).await;
+    assert_eq!(
+        group.state, "Active",
+        "Group should remain Active when all members are Left"
+    );
+
+    // Start one instance again - member should go back to "Joined"
+    let start_url =
+        format!("/v1/instances/left-instance-1/start?project={project_name}");
+    NexusRequest::new(
+        RequestBuilder::new(client, Method::POST, &start_url)
+            .body(None as Option<&serde_json::Value>)
+            .expect_status(Some(StatusCode::ACCEPTED)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .expect("Should start instance");
+
+    instance_simulate(nexus, &id1).await;
+    instance_wait_for_state(client, id1, InstanceState::Running).await;
+    wait_for_multicast_reconciler(&cptestctx.lockstep_client).await;
+
+    wait_for_member_state(
+        cptestctx,
+        group_name,
+        instance1.identity.id,
+        nexus_db_model::MulticastGroupMemberState::Joined,
+    )
+    .await;
+
+    // Cleanup
+    cleanup_instances(
+        cptestctx,
+        client,
+        project_name,
+        &["left-instance-1", "left-instance-2"],
+    )
+    .await;
+    wait_for_group_deleted(cptestctx, group_name).await;
 }

@@ -6,7 +6,8 @@
 
 use crate::established_conn::EstablishedConn;
 use crate::proxy;
-use trust_quorum_protocol::{BaseboardId, Envelope, PeerMsg};
+use sled_hardware_types::BaseboardId;
+use trust_quorum_protocol::{Envelope, PeerMsg};
 
 // TODO: Move to this crate
 // https://github.com/oxidecomputer/omicron/issues/9311
@@ -502,7 +503,14 @@ impl ConnMgr {
                         Some(self.on_task_exit(task_id))
                     }
                     Err(err) => {
-                        warn!(self.log, "Connection task panic: {err}");
+                        if err.is_panic() {
+                            warn!(self.log, "Connection task panic: {err}");
+                        } else {
+                            debug!(
+                                self.log,
+                                "Connection task {} cancelled", err.id(),
+                            );
+                        }
                         Some(self.on_task_exit(err.id()))
                     }
                 }
@@ -538,7 +546,7 @@ impl ConnMgr {
                     return;
                 }
             };
-            let platform_id = stream.peer_platform_id().as_str().unwrap();
+            let platform_id = stream.peer_platform_id().as_str();
             let baseboard_id = platform_id_to_baseboard_id(platform_id);
 
             // TODO: Conversion between `PlatformId` and `BaseboardId` should
@@ -806,7 +814,7 @@ impl ConnMgr {
                     return ();
                 }
             };
-            let platform_id = stream.peer_platform_id().as_str().unwrap();
+            let platform_id = stream.peer_platform_id().as_str();
             let baseboard_id = platform_id_to_baseboard_id(platform_id);
 
             // TODO: Conversion between `PlatformId` and `BaseboardId` should

@@ -113,6 +113,7 @@ fm.sitrep_gc_period_secs = 600
 fm.rendezvous_period_secs = 300
 probe_distributor.period_secs = 60
 multicast_reconciler.period_secs = 60
+trust_quorum.period_secs = 60
 # TTL for sled-to-backplane-port mapping cache
 # Default: 3600 seconds (1 hour) - detects new sleds and inventory changes
 # multicast_reconciler.sled_cache_ttl_secs = 3600

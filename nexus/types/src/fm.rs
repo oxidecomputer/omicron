@@ -41,6 +41,18 @@ pub struct Sitrep {
     /// ID, and which Nexus produced it.
     pub metadata: SitrepMetadata,
     pub cases: IdOrdMap<Case>,
+    //
+    // NOTE FOR FUTURE GENERATIONS: If you add more database tables whose
+    // records are top-level children of a sitrep (i.e., like cases), please
+    // make sure to update the tests in `nexus_db_queries::db::datastore::fm` to
+    // also include those records. In particular, make sure to update the
+    // `assert_sitreps_eq` function to also assert that your new records are
+    // contained in both sitreps. Also, the tests for sitrep deletion and for
+    // roundtripping sitreps through the database should also
+    // create/delete/assert any new records added.
+    //
+    // Thank you for your cooperation!
+    //
 }
 
 impl Sitrep {

@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::{self, Write};
 use std::net::{IpAddr, Ipv6Addr};
 
@@ -12,7 +12,6 @@ use indent_write::fmt::IndentWriter;
 use omicron_common::api::external::Generation;
 use omicron_common::api::internal::shared::NetworkInterface;
 use omicron_common::disk::{DatasetKind, DatasetName, M2Slot};
-use omicron_common::ledger::Ledgerable;
 use omicron_common::update::{ArtifactId, OmicronInstallManifestSource};
 use omicron_uuid_kinds::MupdateUuid;
 use tufaceous_artifact::{ArtifactHash, KnownArtifactKind};
@@ -23,10 +22,10 @@ use crate::latest::inventory::{
     HostPhase2DesiredContents, HostPhase2DesiredSlots, ManifestBootInventory,
     ManifestInventory, ManifestNonBootInventory, MupdateOverrideBootInventory,
     MupdateOverrideInventory, MupdateOverrideNonBootInventory,
-    OmicronSledConfig, OmicronZoneConfig, OmicronZoneImageSource,
-    OmicronZoneType, OmicronZonesConfig,
+    OmicronFileSourceResolverInventory, OmicronSledConfig, OmicronZoneConfig,
+    OmicronZoneImageSource, OmicronZoneType, OmicronZonesConfig,
     RemoveMupdateOverrideBootSuccessInventory, RemoveMupdateOverrideInventory,
-    ZoneArtifactInventory, ZoneImageResolverInventory, ZoneKind,
+    SingleMeasurementInventory, ZoneArtifactInventory, ZoneKind,
 };
 
 impl ZoneKind {
@@ -532,11 +531,12 @@ impl BootPartitionContents {
     }
 }
 
-impl ZoneImageResolverInventory {
+impl OmicronFileSourceResolverInventory {
     /// Returns a new, fake inventory for tests.
-    pub fn new_fake() -> ZoneImageResolverInventory {
-        ZoneImageResolverInventory {
+    pub fn new_fake() -> OmicronFileSourceResolverInventory {
+        OmicronFileSourceResolverInventory {
             zone_manifest: ManifestInventory::new_fake(),
+            measurement_manifest: ManifestInventory::new_fake(),
             mupdate_override: MupdateOverrideInventory::new_fake(),
         }
     }
@@ -581,18 +581,25 @@ impl MupdateOverrideInventory {
     }
 }
 
-/// Display helper for [`ZoneImageResolverInventory`].
-pub struct ZoneImageResolverInventoryDisplay<'a> {
-    inner: &'a ZoneImageResolverInventory,
+/// Display helper for [`OmicronFileSourceResolverInventory`].
+pub struct OmicronFileSourceResolverInventoryDisplay<'a> {
+    inner: &'a OmicronFileSourceResolverInventory,
 }
 
-impl fmt::Display for ZoneImageResolverInventoryDisplay<'_> {
+impl fmt::Display for OmicronFileSourceResolverInventoryDisplay<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let ZoneImageResolverInventory { zone_manifest, mupdate_override } =
-            self.inner;
+        let OmicronFileSourceResolverInventory {
+            zone_manifest,
+            measurement_manifest,
+            mupdate_override,
+        } = self.inner;
         writeln!(f, "zone manifest:")?;
         let mut indented = IndentWriter::new("    ", f);
         write!(indented, "{}", zone_manifest.display())?;
+        let f = indented.into_inner();
+        writeln!(f, "measurement manifest:")?;
+        let mut indented = IndentWriter::new("    ", f);
+        write!(indented, "{}", measurement_manifest.display())?;
         let f = indented.into_inner();
         writeln!(f, "mupdate override:")?;
         let mut indented = IndentWriter::new("    ", f);
@@ -601,10 +608,10 @@ impl fmt::Display for ZoneImageResolverInventoryDisplay<'_> {
     }
 }
 
-impl ZoneImageResolverInventory {
+impl OmicronFileSourceResolverInventory {
     /// Returns a displayer for this inventory.
-    pub fn display(&self) -> ZoneImageResolverInventoryDisplay<'_> {
-        ZoneImageResolverInventoryDisplay { inner: self }
+    pub fn display(&self) -> OmicronFileSourceResolverInventoryDisplay<'_> {
+        OmicronFileSourceResolverInventoryDisplay { inner: self }
     }
 }
 
@@ -865,19 +872,34 @@ impl Default for OmicronSledConfig {
             zones: IdOrdMap::default(),
             remove_mupdate_override: None,
             host_phase_2: HostPhase2DesiredSlots::current_contents(),
+            measurements: BTreeSet::new(),
         }
     }
 }
 
-impl Ledgerable for OmicronSledConfig {
-    fn is_newer_than(&self, other: &Self) -> bool {
-        self.generation > other.generation
+impl SingleMeasurementInventory {
+    pub fn display(&self) -> SingleMeasurementInventoryDisplay<'_> {
+        SingleMeasurementInventoryDisplay { inner: self }
     }
+}
 
-    fn generation_bump(&mut self) {
-        // DO NOTHING!
-        //
-        // Generation bumps must only ever come from nexus and will be encoded
-        // in the struct itself
+/// a displayer for [`SingleMeasurementInventory`]
+pub struct SingleMeasurementInventoryDisplay<'a> {
+    inner: &'a SingleMeasurementInventory,
+}
+
+impl fmt::Display for SingleMeasurementInventoryDisplay<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let SingleMeasurementInventory { path, result } = self.inner;
+
+        match result {
+            ConfigReconcilerInventoryResult::Ok => {
+                writeln!(f, "entry {path} ok")?
+            }
+            ConfigReconcilerInventoryResult::Err { message } => {
+                writeln!(f, "entry error : {message}")?
+            }
+        }
+        Ok(())
     }
 }

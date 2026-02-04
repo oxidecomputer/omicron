@@ -6,13 +6,10 @@
 //! at deployment time.
 
 use crate::PostgresConfigWithUrl;
-use anyhow::anyhow;
 use camino::{Utf8Path, Utf8PathBuf};
 use dropshot::ConfigDropshot;
 use dropshot::ConfigLogging;
-use ipnet::Ipv6Net;
 use nexus_types::deployment::ReconfiguratorConfig;
-use omicron_common::address::IPV6_ADMIN_SCOPED_MULTICAST_PREFIX;
 use omicron_common::address::Ipv6Subnet;
 pub use omicron_common::address::MAX_VPC_IPV4_SUBNET_PREFIX;
 pub use omicron_common::address::MIN_VPC_IPV4_SUBNET_PREFIX;
@@ -23,15 +20,12 @@ use omicron_common::api::internal::shared::SwitchLocation;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use serde_with::DeserializeFromStr;
 use serde_with::DisplayFromStr;
 use serde_with::DurationSeconds;
-use serde_with::SerializeDisplay;
 use serde_with::serde_as;
 use std::collections::HashMap;
 use std::fmt;
 use std::net::IpAddr;
-use std::net::Ipv6Addr;
 use std::net::SocketAddr;
 use std::time::Duration;
 use uuid::Uuid;
@@ -437,6 +431,8 @@ pub struct BackgroundTaskConfig {
     pub probe_distributor: ProbeDistributorConfig,
     /// configuration for multicast reconciler (group+members) task
     pub multicast_reconciler: MulticastGroupReconcilerConfig,
+    /// configuration for trust quorum manager task
+    pub trust_quorum: TrustQuorumConfig,
 }
 
 #[serde_as]
@@ -952,15 +948,6 @@ impl Default for FmTasksConfig {
     }
 }
 
-/// Fixed underlay admin-scoped IPv6 multicast network (ff04::/64) used for
-/// internal multicast group allocation and external→underlay mapping.
-/// This /64 subnet within the admin-scoped space provides 2^64 host addresses
-/// (ample for collision resistance) and is not configurable.
-pub const DEFAULT_UNDERLAY_MULTICAST_NET: Ipv6Net = Ipv6Net::new_assert(
-    Ipv6Addr::new(IPV6_ADMIN_SCOPED_MULTICAST_PREFIX, 0, 0, 0, 0, 0, 0, 0),
-    64,
-);
-
 /// Configuration for multicast options.
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 pub struct MulticastConfig {
@@ -981,6 +968,15 @@ pub struct MulticastConfig {
 pub struct ProbeDistributorConfig {
     /// period (in seconds) for periodic activations of the background task that
     /// distributes networking probe zones to sled-agents.
+    #[serde_as(as = "DurationSeconds<u64>")]
+    pub period_secs: Duration,
+}
+
+#[serde_as]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct TrustQuorumConfig {
+    /// period (in seconds) for periodic activations of the background task that
+    /// completes trust quorum reconfigurations.
     #[serde_as(as = "DurationSeconds<u64>")]
     pub period_secs: Duration,
 }
@@ -1028,45 +1024,8 @@ pub struct PackageConfig {
     pub default_region_allocation_strategy: RegionAllocationStrategy,
 }
 
-/// List of supported external authn schemes
-///
-/// Note that the authn subsystem doesn't know about this type.  It allows
-/// schemes to be called whatever they want.  This is just to provide a set of
-/// allowed values for configuration.
-#[derive(
-    Clone, Copy, Debug, DeserializeFromStr, Eq, PartialEq, SerializeDisplay,
-)]
-pub enum SchemeName {
-    Spoof,
-    SessionCookie,
-    AccessToken,
-    ScimToken,
-}
-
-impl std::str::FromStr for SchemeName {
-    type Err = anyhow::Error;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s {
-            "spoof" => Ok(SchemeName::Spoof),
-            "session_cookie" => Ok(SchemeName::SessionCookie),
-            "access_token" => Ok(SchemeName::AccessToken),
-            "scim_token" => Ok(SchemeName::ScimToken),
-            _ => Err(anyhow!("unsupported authn scheme: {:?}", s)),
-        }
-    }
-}
-
-impl std::fmt::Display for SchemeName {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(match self {
-            SchemeName::Spoof => "spoof",
-            SchemeName::SessionCookie => "session_cookie",
-            SchemeName::AccessToken => "access_token",
-            SchemeName::ScimToken => "scim",
-        })
-    }
-}
+// Re-export SchemeName from nexus-types for use in config parsing.
+pub use nexus_types::authn::SchemeName;
 
 impl WebhookDeliveratorConfig {
     const fn default_lease_timeout_secs() -> u64 {
@@ -1290,6 +1249,7 @@ mod test {
             probe_distributor.period_secs = 50
             multicast_reconciler.period_secs = 60
             fm.rendezvous_period_secs = 51
+            trust_quorum.period_secs = 60
             [default_region_allocation_strategy]
             type = "random"
             seed = 0
@@ -1548,6 +1508,9 @@ mod test {
                             sled_cache_ttl_secs: MulticastGroupReconcilerConfig::default_sled_cache_ttl_secs(),
                             backplane_cache_ttl_secs: MulticastGroupReconcilerConfig::default_backplane_cache_ttl_secs(),
                         },
+                        trust_quorum: TrustQuorumConfig {
+                            period_secs: Duration::from_secs(60),
+                        },
                     },
                     multicast: MulticastConfig { enabled: false },
                     default_region_allocation_strategy:
@@ -1652,6 +1615,7 @@ mod test {
             probe_distributor.period_secs = 47
             fm.rendezvous_period_secs = 48
             multicast_reconciler.period_secs = 60
+            trust_quorum.period_secs = 60
 
             [default_region_allocation_strategy]
             type = "random"

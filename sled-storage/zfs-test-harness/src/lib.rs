@@ -417,7 +417,7 @@ struct HardcodedSecretRetriever;
 #[async_trait::async_trait]
 impl key_manager::SecretRetriever for HardcodedSecretRetriever {
     async fn get_latest(
-        &self,
+        &mut self,
     ) -> Result<key_manager::VersionedIkm, key_manager::SecretRetrieverError>
     {
         let epoch = 0;
@@ -429,7 +429,7 @@ impl key_manager::SecretRetriever for HardcodedSecretRetriever {
 
     /// We don't plan to do any key rotation before trust quorum is ready
     async fn get(
-        &self,
+        &mut self,
         epoch: u64,
     ) -> Result<key_manager::SecretState, key_manager::SecretRetrieverError>
     {

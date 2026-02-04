@@ -19,88 +19,193 @@ use std::{
     sync::LazyLock,
 };
 
+pub const BOOTSTRAP_SUBNET_PREFIX: u8 = 40;
 pub const AZ_PREFIX: u8 = 48;
 pub const RACK_PREFIX: u8 = 56;
 pub const SLED_PREFIX: u8 = 64;
 
 // Multicast constants
 
-/// IPv4 Source-Specific Multicast (SSM) subnet as defined in RFC 4607:
-/// <https://tools.ietf.org/html/rfc4607>.
+/// IPv4 Source-Specific Multicast (SSM) subnet.
 ///
-/// RFC 4607 Section 3 allocates 232.0.0.0/8 as the IPv4 SSM address range.
+/// See [RFC 4607 §3] for the IPv4 SSM address range allocation (232.0.0.0/8).
 /// This is a single contiguous block, unlike IPv6 which has per-scope ranges.
-pub const IPV4_SSM_SUBNET: oxnet::Ipv4Net =
-    oxnet::Ipv4Net::new_unchecked(Ipv4Addr::new(232, 0, 0, 0), 8);
-
-/// IPv6 Source-Specific Multicast (SSM) subnet as defined in RFC 4607:
-/// <https://tools.ietf.org/html/rfc4607>.
 ///
-/// RFC 4607 Section 3 specifies "FF3x::/32 for each scope x" - meaning one
-/// /32 block per scope (FF30::/32, FF31::/32, ..., FF3F::/32).
+/// [RFC 4607 §3]: https://www.rfc-editor.org/rfc/rfc4607#section-3
+pub const IPV4_SSM_SUBNET: Ipv4Net =
+    Ipv4Net::new_unchecked(Ipv4Addr::new(232, 0, 0, 0), 8);
+
+/// IPv6 Source-Specific Multicast (SSM) subnet.
+///
+/// See [RFC 4607 §3] for SSM scope allocation. The RFC specifies "ff3x::/32
+/// for each scope x" - meaning one /32 block per scope (ff30::/32, ff31::/32,
+/// ..., ff3f::/32).
 ///
 /// We use /12 as an implementation convenience to match all these blocks with
 /// a single subnet. This works because all SSM addresses share the same first
 /// 12 bits:
-/// - Bits 0-7:  11111111 (0xFF, multicast prefix)
+/// - Bits 0-7:  11111111 (0xff, multicast prefix)
 /// - Bits 8-11: 0011 (flag field = 3, indicating SSM)
-/// - Bits 12-15: xxxx (scope field, any value 0-F)
+/// - Bits 12-15: xxxx (scope field, any value 0-f)
 ///
-/// Thus FF30::/12 efficiently matches FF30:: through FF3F:FFFF:...:FFFF,
+/// Thus ff30::/12 efficiently matches ff30:: through ff3f:ffff:...:ffff,
 /// covering all SSM scopes.
-pub const IPV6_SSM_SUBNET: oxnet::Ipv6Net = oxnet::Ipv6Net::new_unchecked(
-    Ipv6Addr::new(0xff30, 0, 0, 0, 0, 0, 0, 0),
-    12,
-);
+///
+/// This superset is used only for contains-based classification and validation
+/// (e.g., `contains()` checks). It is not an allocation boundary.
+///
+/// [RFC 4607 §3]: https://www.rfc-editor.org/rfc/rfc4607#section-3
+pub const IPV6_SSM_SUBNET: Ipv6Net =
+    Ipv6Net::new_unchecked(Ipv6Addr::new(0xff30, 0, 0, 0, 0, 0, 0, 0), 12);
+
+/// Maximum source IPs per SSM group member (per [RFC 3376] IGMPv3).
+///
+/// [RFC 3376]: https://www.rfc-editor.org/rfc/rfc3376
+pub const MAX_SSM_SOURCE_IPS: usize = 64;
+
+/// Check if an IP is in the SSM (Source-Specific Multicast) range.
+///
+/// SSM ranges per [RFC 4607 §3]:
+/// - IPv4: 232.0.0.0/8
+/// - IPv6: ff3x::/32 (all SSM scopes)
+///
+/// [RFC 4607 §3]: https://www.rfc-editor.org/rfc/rfc4607#section-3
+pub fn is_ssm_address(ip: std::net::IpAddr) -> bool {
+    match ip {
+        IpAddr::V4(addr) => IPV4_SSM_SUBNET.contains(addr),
+        IpAddr::V6(addr) => IPV6_SSM_SUBNET.contains(addr),
+    }
+}
 
 /// IPv4 multicast address range (224.0.0.0/4).
-/// See RFC 5771 (IPv4 Multicast Address Assignments):
-/// <https://www.rfc-editor.org/rfc/rfc5771>
+///
+/// See [RFC 5771] for IPv4 multicast address assignments.
+///
+/// [RFC 5771]: https://www.rfc-editor.org/rfc/rfc5771
 pub const IPV4_MULTICAST_RANGE: Ipv4Net =
     Ipv4Net::new_unchecked(Ipv4Addr::new(224, 0, 0, 0), 4);
 
 /// IPv4 link-local multicast subnet (224.0.0.0/24).
+///
 /// This range is reserved for local network control protocols and should not
 /// be routed beyond the local link. Includes addresses for protocols like
 /// OSPF (224.0.0.5), RIPv2 (224.0.0.9), and other local routing protocols.
-/// See RFC 5771 Section 4:
-/// <https://www.rfc-editor.org/rfc/rfc5771#section-4>
+///
+/// See [RFC 5771 §4] for link-local multicast address assignments. The IANA
+/// IPv4 Multicast Address Space registry is the canonical source for
+/// assignments.
+///
+/// [RFC 5771 §4]: https://www.rfc-editor.org/rfc/rfc5771#section-4
 pub const IPV4_LINK_LOCAL_MULTICAST_SUBNET: Ipv4Net =
     Ipv4Net::new_unchecked(Ipv4Addr::new(224, 0, 0, 0), 24);
 
 /// IPv6 multicast address range (ff00::/8).
-/// See RFC 4291 (IPv6 Addressing Architecture):
-/// <https://www.rfc-editor.org/rfc/rfc4291>
+///
+/// See [RFC 4291] for IPv6 addressing architecture.
+///
+/// [RFC 4291]: https://www.rfc-editor.org/rfc/rfc4291
 pub const IPV6_MULTICAST_RANGE: Ipv6Net =
     Ipv6Net::new_unchecked(Ipv6Addr::new(0xff00, 0, 0, 0, 0, 0, 0, 0), 8);
 
 /// IPv6 multicast prefix (ff00::/8) mask/value for scope checking.
+///
+/// See [RFC 4291 §2.7] for multicast address format.
+///
+/// [RFC 4291 §2.7]: https://www.rfc-editor.org/rfc/rfc4291#section-2.7
 pub const IPV6_MULTICAST_PREFIX: u16 = 0xff00;
 
-/// Admin-scoped IPv6 multicast prefix (ff04::/16) as u16 for address
+/// Admin-local IPv6 multicast prefix (ff04::/16) as u16 for address
 /// construction and normalization of underlay multicast addresses.
+///
+/// See [RFC 4291 §2.7] and [RFC 7346] for IPv6 multicast address format
+/// and scope definitions.
+///
+/// [RFC 4291 §2.7]: https://www.rfc-editor.org/rfc/rfc4291#section-2.7
+/// [RFC 7346]: https://www.rfc-editor.org/rfc/rfc7346
 pub const IPV6_ADMIN_SCOPED_MULTICAST_PREFIX: u16 = 0xff04;
 
+/// Fixed underlay admin-local IPv6 multicast subnet (ff04::/64) used for
+/// internal multicast group allocation and external→underlay mapping.
+///
+/// Admin-local scope (4) is defined in [RFC 7346] as "the smallest scope that
+/// must be administratively configured."
+///
+/// Static for consistency across racks. The XOR-fold algorithm maps external
+/// multicast IPs into this /64 with an 8-bit salt, guaranteeing 256 unique
+/// addresses per external IP for collision retries. IP pool validation rejects
+/// ranges overlapping this prefix.
+///
+/// External pools may use other admin-local prefixes (e.g., `ff04:0:0:1::/64`)
+/// outside this range or other administratively configured scopes
+/// (e.g., site-local `ff05::/16`).
+///
+/// [RFC 7346]: https://www.rfc-editor.org/rfc/rfc7346
+// TODO: Expose this subnet via rack API (e.g., in `Rack` view or a dedicated
+// networking info endpoint) so operators can see reserved address ranges.
+pub const UNDERLAY_MULTICAST_SUBNET: Ipv6Net = Ipv6Net::new_unchecked(
+    Ipv6Addr::new(IPV6_ADMIN_SCOPED_MULTICAST_PREFIX, 0, 0, 0, 0, 0, 0, 0),
+    64,
+);
+
+/// Last address in the underlay multicast subnet (ff04::ffff:ffff:ffff:ffff).
+pub const UNDERLAY_MULTICAST_SUBNET_LAST: Ipv6Addr = Ipv6Addr::new(
+    IPV6_ADMIN_SCOPED_MULTICAST_PREFIX,
+    0,
+    0,
+    0,
+    0xffff,
+    0xffff,
+    0xffff,
+    0xffff,
+);
+
 /// IPv6 interface-local multicast subnet (ff01::/16).
+///
 /// These addresses are not routable and should not be added to IP pools.
-/// See RFC 4291 Section 2.7 (multicast scope field):
-/// <https://www.rfc-editor.org/rfc/rfc4291#section-2.7>
-pub const IPV6_INTERFACE_LOCAL_MULTICAST_SUBNET: oxnet::Ipv6Net =
-    oxnet::Ipv6Net::new_unchecked(
-        Ipv6Addr::new(0xff01, 0, 0, 0, 0, 0, 0, 0),
-        16,
-    );
+///
+/// See [RFC 4291 §2.7] for multicast scope field definitions.
+///
+/// [RFC 4291 §2.7]: https://www.rfc-editor.org/rfc/rfc4291#section-2.7
+pub const IPV6_INTERFACE_LOCAL_MULTICAST_SUBNET: Ipv6Net =
+    Ipv6Net::new_unchecked(Ipv6Addr::new(0xff01, 0, 0, 0, 0, 0, 0, 0), 16);
+
+/// Last address in the IPv6 interface-local multicast subnet.
+pub const IPV6_INTERFACE_LOCAL_MULTICAST_LAST: Ipv6Addr = Ipv6Addr::new(
+    0xff01, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff,
+);
 
 /// IPv6 link-local multicast subnet (ff02::/16).
+///
 /// These addresses are not routable beyond the local link and should not be
 /// added to IP pools.
-/// See RFC 4291 Section 2.7 (multicast scope field):
-/// <https://www.rfc-editor.org/rfc/rfc4291#section-2.7>
-pub const IPV6_LINK_LOCAL_MULTICAST_SUBNET: oxnet::Ipv6Net =
-    oxnet::Ipv6Net::new_unchecked(
-        Ipv6Addr::new(0xff02, 0, 0, 0, 0, 0, 0, 0),
-        16,
-    );
+///
+/// See [RFC 4291 §2.7] for multicast scope field definitions.
+///
+/// [RFC 4291 §2.7]: https://www.rfc-editor.org/rfc/rfc4291#section-2.7
+pub const IPV6_LINK_LOCAL_MULTICAST_SUBNET: Ipv6Net =
+    Ipv6Net::new_unchecked(Ipv6Addr::new(0xff02, 0, 0, 0, 0, 0, 0, 0), 16);
+
+/// Last address in the IPv6 link-local multicast subnet.
+pub const IPV6_LINK_LOCAL_MULTICAST_LAST: Ipv6Addr = Ipv6Addr::new(
+    0xff02, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff,
+);
+
+/// IPv6 reserved-scope multicast subnet (ff00::/16).
+///
+/// Scope 0 is reserved - packets with this scope must not be originated and
+/// must be silently dropped if received. These addresses should not be added
+/// to IP pools.
+///
+/// See [RFC 4291 §2.7] for multicast scope field definitions.
+///
+/// [RFC 4291 §2.7]: https://www.rfc-editor.org/rfc/rfc4291#section-2.7
+pub const IPV6_RESERVED_SCOPE_MULTICAST_SUBNET: Ipv6Net =
+    Ipv6Net::new_unchecked(Ipv6Addr::new(0xff00, 0, 0, 0, 0, 0, 0, 0), 16);
+
+/// Last address in the IPv6 reserved-scope multicast subnet.
+pub const IPV6_RESERVED_SCOPE_MULTICAST_LAST: Ipv6Addr = Ipv6Addr::new(
+    0xff00, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff,
+);
 
 /// maximum possible value for a tcp or udp port
 pub const MAX_PORT: u16 = u16::MAX;
@@ -254,8 +359,9 @@ pub static NTP_OPTE_IPV6_SUBNET: LazyLock<Ipv6Net> = LazyLock::new(|| {
 // Anycast is a mechanism in which a single IP address is shared by multiple
 // devices, and the destination is located based on routing distance.
 //
-// This is covered by RFC 4291 in much more detail:
-// <https://datatracker.ietf.org/doc/html/rfc4291#section-2.6>
+// See [RFC 4291 §2.6] for anycast address allocation.
+//
+// [RFC 4291 §2.6]: https://www.rfc-editor.org/rfc/rfc4291#section-2.6
 //
 // Anycast addresses are always the "zeroeth" address within a subnet.  We
 // always explicitly skip these addresses within our network.
@@ -875,6 +981,51 @@ impl Iterator for IpRangeIter {
             Self::V4(iter) => iter.next().map(IpAddr::V4),
             Self::V6(iter) => iter.next().map(IpAddr::V6),
         }
+    }
+}
+
+/// Trait for any IP address type.
+pub trait Ip:
+    Clone
+    + Copy
+    + std::fmt::Debug
+    + Diffable
+    + Eq
+    + JsonSchema
+    + std::hash::Hash
+    + PartialOrd
+    + PartialEq
+    + Ord
+    + Serialize
+{
+}
+impl Ip for Ipv4Addr {}
+impl Ip for Ipv6Addr {}
+impl Ip for IpAddr {}
+
+/// An IP address of a specific version, IPv4 or IPv6.
+pub trait ConcreteIp: Ip {
+    fn into_ipaddr(self) -> IpAddr;
+    fn into_ipnet(self) -> ipnetwork::IpNetwork;
+}
+
+impl ConcreteIp for Ipv4Addr {
+    fn into_ipaddr(self) -> IpAddr {
+        IpAddr::V4(self)
+    }
+
+    fn into_ipnet(self) -> ipnetwork::IpNetwork {
+        ipnetwork::IpNetwork::V4(ipnetwork::Ipv4Network::from(self))
+    }
+}
+
+impl ConcreteIp for Ipv6Addr {
+    fn into_ipaddr(self) -> IpAddr {
+        IpAddr::V6(self)
+    }
+
+    fn into_ipnet(self) -> ipnetwork::IpNetwork {
+        ipnetwork::IpNetwork::V6(ipnetwork::Ipv6Network::from(self))
     }
 }
 

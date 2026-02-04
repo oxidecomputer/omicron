@@ -31,7 +31,7 @@ use sled_agent_types::artifact::{
 };
 use sled_agent_types::bootstore::BootstoreStatus;
 use sled_agent_types::dataset::{
-    LocalStorageDatasetEnsureRequest, LocalStoragePathParam,
+    LocalStorageDatasetDeleteRequest, LocalStorageDatasetEnsureRequest,
 };
 use sled_agent_types::debug::OperatorSwitchZonePolicy;
 use sled_agent_types::diagnostics::{
@@ -55,11 +55,21 @@ use sled_agent_types::support_bundle::{
     SupportBundleMetadata, SupportBundlePathParam,
     SupportBundleTransferQueryParams,
 };
+use sled_agent_types::trust_quorum::{
+    ProxyCommitRequest, ProxyPrepareAndCommitRequest, TrustQuorumNetworkConfig,
+};
 use sled_agent_types::zone_bundle::{
     BundleUtilization, CleanupContext, CleanupContextUpdate, CleanupCount,
     CleanupPeriod, StorageLimit, ZoneBundleFilter, ZoneBundleId,
     ZoneBundleMetadata, ZonePathParam,
 };
+use sled_hardware_types::BaseboardId;
+use slog_error_chain::InlineErrorChain;
+use trust_quorum_types::messages::{
+    CommitRequest, LrtqUpgradeMsg, PrepareAndCommitRequest, ReconfigureMsg,
+};
+use trust_quorum_types::status::{CommitStatus, CoordinatorStatus, NodeStatus};
+
 // Fixed identifiers for prior versions only
 use sled_agent_types_versions::v1;
 use sled_diagnostics::{
@@ -834,6 +844,7 @@ impl SledAgentApi for SledAgentImpl {
         crate::sled_agent::sled_add(
             sa.logger().clone(),
             sa.sprockets().clone(),
+            sa.measurements().clone(),
             request.sled_id,
             request.start_request,
         )
@@ -1146,35 +1157,229 @@ impl SledAgentApi for SledAgentImpl {
 
     async fn local_storage_dataset_ensure(
         request_context: RequestContext<Self::Context>,
-        path_params: Path<LocalStoragePathParam>,
         body: TypedBody<LocalStorageDatasetEnsureRequest>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
         let sa = request_context.context();
-        let path_params = path_params.into_inner();
         let request = body.into_inner();
 
-        sa.create_local_storage_dataset(
-            path_params.zpool_id,
-            path_params.dataset_id,
-            request,
-        )
-        .await?;
+        sa.create_local_storage_dataset(request).await?;
 
         Ok(HttpResponseUpdatedNoContent())
     }
 
     async fn local_storage_dataset_delete(
         request_context: RequestContext<Self::Context>,
-        path_params: Path<LocalStoragePathParam>,
+        body: TypedBody<LocalStorageDatasetDeleteRequest>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
         let sa = request_context.context();
-        let path_params = path_params.into_inner();
+        let request = body.into_inner();
 
-        sa.delete_local_storage_dataset(
-            path_params.zpool_id,
-            path_params.dataset_id,
-        )
-        .await?;
+        sa.delete_local_storage_dataset(request).await?;
+
+        Ok(HttpResponseUpdatedNoContent())
+    }
+
+    async fn trust_quorum_reconfigure(
+        request_context: RequestContext<Self::Context>,
+        body: TypedBody<ReconfigureMsg>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        let sa = request_context.context();
+        let msg = body.into_inner();
+
+        sa.trust_quorum().reconfigure(msg).await.map_err(|e| {
+            HttpError::for_internal_error(InlineErrorChain::new(&e).to_string())
+        })?;
+
+        Ok(HttpResponseUpdatedNoContent())
+    }
+
+    async fn trust_quorum_upgrade_from_lrtq(
+        request_context: RequestContext<Self::Context>,
+        body: TypedBody<LrtqUpgradeMsg>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        let sa = request_context.context();
+        let msg = body.into_inner();
+
+        sa.trust_quorum().upgrade_from_lrtq(msg).await.map_err(|e| {
+            HttpError::for_internal_error(InlineErrorChain::new(&e).to_string())
+        })?;
+
+        Ok(HttpResponseUpdatedNoContent())
+    }
+
+    async fn trust_quorum_commit(
+        request_context: RequestContext<Self::Context>,
+        body: TypedBody<CommitRequest>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        let sa = request_context.context();
+        let request = body.into_inner();
+
+        let status = sa
+            .trust_quorum()
+            .commit(request.rack_id, request.epoch)
+            .await
+            .map_err(|e| {
+                HttpError::for_internal_error(
+                    InlineErrorChain::new(&e).to_string(),
+                )
+            })?;
+
+        // Pending is not expected for commit operations - it indicates an error
+        if status == CommitStatus::Pending {
+            return Err(HttpError::for_internal_error(
+                "commit returned Pending, which is unexpected".to_string(),
+            ));
+        }
+
+        Ok(HttpResponseUpdatedNoContent())
+    }
+
+    async fn trust_quorum_coordinator_status(
+        request_context: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<Option<CoordinatorStatus>>, HttpError> {
+        let sa = request_context.context();
+
+        let status =
+            sa.trust_quorum().coordinator_status().await.map_err(|e| {
+                HttpError::for_internal_error(
+                    InlineErrorChain::new(&e).to_string(),
+                )
+            })?;
+
+        Ok(HttpResponseOk(status))
+    }
+
+    async fn trust_quorum_prepare_and_commit(
+        request_context: RequestContext<Self::Context>,
+        body: TypedBody<PrepareAndCommitRequest>,
+    ) -> Result<HttpResponseOk<CommitStatus>, HttpError> {
+        let sa = request_context.context();
+        let request = body.into_inner();
+
+        let status = sa
+            .trust_quorum()
+            .prepare_and_commit(request.config)
+            .await
+            .map_err(|e| {
+                HttpError::for_internal_error(
+                    InlineErrorChain::new(&e).to_string(),
+                )
+            })?;
+
+        Ok(HttpResponseOk(status))
+    }
+
+    async fn trust_quorum_proxy_commit(
+        request_context: RequestContext<Self::Context>,
+        body: TypedBody<ProxyCommitRequest>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        let sa = request_context.context();
+        let request = body.into_inner();
+
+        let status = sa
+            .trust_quorum()
+            .proxy()
+            .commit(
+                request.destination,
+                request.request.rack_id,
+                request.request.epoch,
+            )
+            .await
+            .map_err(|e| {
+                HttpError::for_internal_error(
+                    InlineErrorChain::new(&e).to_string(),
+                )
+            })?;
+
+        // Pending is not expected for commit operations - it indicates an error
+        if status == CommitStatus::Pending {
+            return Err(HttpError::for_internal_error(
+                "commit returned Pending, which is unexpected".to_string(),
+            ));
+        }
+
+        Ok(HttpResponseUpdatedNoContent())
+    }
+
+    async fn trust_quorum_proxy_prepare_and_commit(
+        request_context: RequestContext<Self::Context>,
+        body: TypedBody<ProxyPrepareAndCommitRequest>,
+    ) -> Result<HttpResponseOk<CommitStatus>, HttpError> {
+        let sa = request_context.context();
+        let request = body.into_inner();
+
+        let status = sa
+            .trust_quorum()
+            .proxy()
+            .prepare_and_commit(request.destination, request.request.config)
+            .await
+            .map_err(|e| {
+                HttpError::for_internal_error(
+                    InlineErrorChain::new(&e).to_string(),
+                )
+            })?;
+
+        Ok(HttpResponseOk(status))
+    }
+
+    async fn trust_quorum_proxy_status(
+        request_context: RequestContext<Self::Context>,
+        query_params: Query<BaseboardId>,
+    ) -> Result<HttpResponseOk<NodeStatus>, HttpError> {
+        let sa = request_context.context();
+        let destination = query_params.into_inner();
+
+        let status =
+            sa.trust_quorum().proxy().status(destination).await.map_err(
+                |e| {
+                    HttpError::for_internal_error(
+                        InlineErrorChain::new(&e).to_string(),
+                    )
+                },
+            )?;
+
+        Ok(HttpResponseOk(status))
+    }
+
+    async fn trust_quorum_status(
+        request_context: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<NodeStatus>, HttpError> {
+        let sa = request_context.context();
+
+        let status = sa.trust_quorum().status().await.map_err(|e| {
+            HttpError::for_internal_error(InlineErrorChain::new(&e).to_string())
+        })?;
+
+        Ok(HttpResponseOk(status))
+    }
+
+    async fn trust_quorum_network_config_get(
+        request_context: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<Option<TrustQuorumNetworkConfig>>, HttpError>
+    {
+        let sa = request_context.context();
+
+        let config = sa.trust_quorum().network_config().await.map_err(|e| {
+            HttpError::for_internal_error(InlineErrorChain::new(&e).to_string())
+        })?;
+
+        Ok(HttpResponseOk(config.map(TrustQuorumNetworkConfig::from)))
+    }
+
+    async fn trust_quorum_network_config_put(
+        request_context: RequestContext<Self::Context>,
+        body: TypedBody<TrustQuorumNetworkConfig>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        let sa = request_context.context();
+        let config = body.into_inner();
+
+        sa.trust_quorum().update_network_config(config.into()).await.map_err(
+            |e| {
+                HttpError::for_internal_error(
+                    InlineErrorChain::new(&e).to_string(),
+                )
+            },
+        )?;
 
         Ok(HttpResponseUpdatedNoContent())
     }
