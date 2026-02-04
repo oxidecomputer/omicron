@@ -24,6 +24,7 @@ use chrono::Utc;
 use dropshot::Body;
 use dropshot::HttpError;
 use futures::Stream;
+use iddqd::IdOrdMap;
 use omicron_common::api::external::{
     ByteCount, DiskState, Error, Generation, ResourceType,
 };
@@ -43,7 +44,7 @@ use omicron_uuid_kinds::{
     DatasetUuid, GenericUuid, PhysicalDiskUuid, PropolisUuid, SledUuid,
     SupportBundleUuid, ZpoolUuid,
 };
-use oxnet::Ipv6Net;
+use oxnet::{IpNet, Ipv6Net};
 use propolis_client::instance_spec::FileStorageBackend;
 use propolis_client::instance_spec::SpecKey;
 use propolis_client::{
@@ -51,6 +52,7 @@ use propolis_client::{
 };
 use range_requests::PotentialRange;
 use sled_agent_health_monitor::HealthMonitorHandle;
+use sled_agent_types::attached_subnet::{AttachedSubnet, AttachedSubnets};
 use sled_agent_types::dataset::LocalStorageDatasetEnsureRequest;
 use sled_agent_types::disk::DiskStateRequested;
 use sled_agent_types::early_networking::{
@@ -104,6 +106,9 @@ pub struct SledAgent {
     /// lists of external IPs assigned to instances
     pub external_ips:
         Mutex<HashMap<PropolisUuid, HashSet<InstanceExternalIpBody>>>,
+    /// subnets attached to instances.
+    pub attached_subnets:
+        Mutex<HashMap<PropolisUuid, IdOrdMap<AttachedSubnet>>>,
     /// multicast group memberships for instances
     pub multicast_groups:
         Mutex<HashMap<PropolisUuid, HashSet<InstanceMulticastMembership>>>,
@@ -191,6 +196,7 @@ impl SledAgent {
             simulated_upstairs,
             v2p_mappings: Mutex::new(HashSet::new()),
             external_ips: Mutex::new(HashMap::new()),
+            attached_subnets: Mutex::new(HashMap::new()),
             multicast_groups: Mutex::new(HashMap::new()),
             vpc_routes: Mutex::new(HashMap::new()),
             mock_propolis: futures::lock::Mutex::new(None),
@@ -726,6 +732,75 @@ impl SledAgent {
 
         my_eips.remove(&body_args);
 
+        Ok(())
+    }
+
+    pub async fn instance_put_attached_subnets(
+        &self,
+        propolis_id: PropolisUuid,
+        subnets: AttachedSubnets,
+    ) -> Result<(), Error> {
+        if !self.vmms.contains_key(&propolis_id.into_untyped_uuid()).await {
+            return Err(Error::internal_error(
+                "can't alter subnet state for VMM that's not registered",
+            ));
+        }
+        self.attached_subnets
+            .lock()
+            .unwrap()
+            .insert(propolis_id, subnets.subnets);
+        Ok(())
+    }
+
+    pub async fn instance_delete_attached_subnets(
+        &self,
+        propolis_id: PropolisUuid,
+    ) -> Result<(), Error> {
+        if !self.vmms.contains_key(&propolis_id.into_untyped_uuid()).await {
+            return Err(Error::internal_error(
+                "can't alter subnet state for VMM that's not registered",
+            ));
+        }
+        self.attached_subnets
+            .lock()
+            .unwrap()
+            .entry(propolis_id)
+            .or_default()
+            .clear();
+        Ok(())
+    }
+
+    pub async fn instance_post_attached_subnet(
+        &self,
+        propolis_id: PropolisUuid,
+        subnet: AttachedSubnet,
+    ) -> Result<(), Error> {
+        if !self.vmms.contains_key(&propolis_id.into_untyped_uuid()).await {
+            return Err(Error::internal_error(
+                "can't alter subnet state for VMM that's not registered",
+            ));
+        }
+        let mut subnets = self.attached_subnets.lock().unwrap();
+        let instance_subnets = subnets.entry(propolis_id).or_default();
+        instance_subnets
+            .insert_unique(subnet)
+            .map_err(|_| Error::conflict("Subnet already attached"))
+    }
+
+    pub async fn instance_delete_attached_subnet(
+        &self,
+        propolis_id: PropolisUuid,
+        subnet: IpNet,
+    ) -> Result<(), Error> {
+        if !self.vmms.contains_key(&propolis_id.into_untyped_uuid()).await {
+            return Err(Error::internal_error(
+                "can't alter subnet state for VMM that's not registered",
+            ));
+        }
+        let mut subnets = self.attached_subnets.lock().unwrap();
+        if let Some(instance_subnets) = subnets.get_mut(&propolis_id) {
+            instance_subnets.remove(&subnet);
+        }
         Ok(())
     }
 

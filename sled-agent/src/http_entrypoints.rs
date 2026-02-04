@@ -29,6 +29,9 @@ use sled_agent_types::artifact::{
     ArtifactListResponse, ArtifactPathParam, ArtifactPutResponse,
     ArtifactQueryParam,
 };
+use sled_agent_types::attached_subnet::{
+    AttachedSubnet, AttachedSubnets, VmmSubnetPathParam,
+};
 use sled_agent_types::bootstore::BootstoreStatus;
 use sled_agent_types::dataset::{
     LocalStorageDatasetDeleteRequest, LocalStorageDatasetEnsureRequest,
@@ -1382,5 +1385,57 @@ impl SledAgentApi for SledAgentImpl {
         )?;
 
         Ok(HttpResponseUpdatedNoContent())
+    }
+
+    async fn vmm_put_attached_subnets(
+        request_context: RequestContext<Self::Context>,
+        path_params: Path<VmmPathParam>,
+        body: TypedBody<AttachedSubnets>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        let sa = request_context.context();
+        let propolis_id = path_params.into_inner().propolis_id;
+        sa.instance_put_attached_subnets(propolis_id, body.into_inner())
+            .await
+            .map(|_| HttpResponseUpdatedNoContent())
+            .map_err(HttpError::from)
+    }
+
+    async fn vmm_delete_attached_subnets(
+        request_context: RequestContext<Self::Context>,
+        path_params: Path<VmmPathParam>,
+    ) -> Result<HttpResponseDeleted, HttpError> {
+        let sa = request_context.context();
+        let propolis_id = path_params.into_inner().propolis_id;
+        sa.instance_delete_attached_subnets(propolis_id)
+            .await
+            .map(|_| HttpResponseDeleted())
+            .map_err(HttpError::from)
+    }
+
+    async fn vmm_post_attached_subnet(
+        request_context: RequestContext<Self::Context>,
+        path_params: Path<VmmPathParam>,
+        body: TypedBody<AttachedSubnet>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        let sa = request_context.context();
+        let propolis_id = path_params.into_inner().propolis_id;
+        let subnet = body.into_inner();
+        sa.instance_attach_subnet(propolis_id, subnet)
+            .await
+            .map(|_| HttpResponseUpdatedNoContent())
+            .map_err(HttpError::from)
+    }
+
+    async fn vmm_delete_attached_subnet(
+        request_context: RequestContext<Self::Context>,
+        path_params: Path<VmmSubnetPathParam>,
+    ) -> Result<HttpResponseDeleted, HttpError> {
+        let sa = request_context.context();
+        let VmmSubnetPathParam { propolis_id, subnet } =
+            path_params.into_inner();
+        sa.instance_detach_subnet(propolis_id, subnet)
+            .await
+            .map(|_| HttpResponseDeleted())
+            .map_err(HttpError::from)
     }
 }
