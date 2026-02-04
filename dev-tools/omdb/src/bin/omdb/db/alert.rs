@@ -85,6 +85,16 @@ struct AlertListArgs {
     #[clap(long)]
     dispatched_after: Option<DateTime<Utc>>,
 
+    /// Include only alerts requested by the fault management case(s) with the
+    /// specified UUIDs.
+    ///
+    /// If multiple case IDs are provided, alerts requested by any of those
+    /// cases will be included in the output.
+    ///
+    /// Note that not all alerts are requested by fault management cases.
+    #[clap(long = "case")]
+    cases: Vec<Uuid>,
+
     /// If `true`, include only alerts that have been fully dispatched.
     /// If `false`, include only alerts that have not been fully dispatched.
     ///
@@ -871,6 +881,7 @@ async fn cmd_db_alert_list(
         payload,
         before,
         after,
+        cases,
         dispatched_before,
         dispatched_after,
         dispatched,
@@ -924,6 +935,10 @@ async fn cmd_db_alert_list(
         }
     }
 
+    if !cases.is_empty() {
+        query = query.filter(alert_dsl::case_id.eq_any(cases.clone()));
+    }
+
     let ctx = || "loading alerts";
     let alerts = query.load_async(&*conn).await.with_context(ctx)?;
 
@@ -939,6 +954,8 @@ async fn cmd_db_alert_list(
         #[tabled(display_with = "datetime_opt_rfc3339_concise")]
         time_dispatched: Option<DateTime<Utc>>,
         dispatched: i64,
+        #[tabled(display_with = "display_option_blank")]
+        fm_case_id: Option<Uuid>,
     }
 
     impl From<&'_ Alert> for AlertRow {
@@ -949,6 +966,7 @@ async fn cmd_db_alert_list(
                 time_created: alert.identity.time_created,
                 time_dispatched: alert.time_dispatched,
                 dispatched: alert.num_dispatched,
+                fm_case_id: alert.case_id.map(GenericUuid::into_untyped_uuid),
             }
         }
     }
