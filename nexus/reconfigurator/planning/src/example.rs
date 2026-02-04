@@ -286,7 +286,7 @@ impl ExampleSystemBuilder {
     /// The default value is [`SledBuilder::DEFAULT_NPOOLS`]. A value of 0 is
     /// permitted.
     ///
-    /// If [`Self::create_zones`] is set to `false`, this is ignored.
+    /// If `Self::create_zones` is set to `false`, this is ignored.
     pub fn with_ndisks_per_sled(mut self, ndisks_per_sled: u8) -> Self {
         self.ndisks_per_sled = ndisks_per_sled;
         self
@@ -306,7 +306,7 @@ impl ExampleSystemBuilder {
     /// The default value is the same as the number of sleds (i.e. one Nexus
     /// instance per sled). A value of 0 is permitted.
     ///
-    /// If [`Self::create_zones`] is set to `false`, this is ignored.
+    /// If `Self::create_zones` is set to `false`, this is ignored.
     pub fn with_nexus_count(mut self, nexus_count: usize) -> Self {
         self.nexus_count = Some(ZoneCount(nexus_count));
         self
@@ -317,7 +317,7 @@ impl ExampleSystemBuilder {
     /// The default value is [`INTERNAL_DNS_REDUNDANCY`]. A value anywhere
     /// between 0 and [`INTERNAL_DNS_REDUNDANCY`], inclusive, is permitted.
     ///
-    /// If [`Self::create_zones`] is set to `false`, this is ignored.
+    /// If `Self::create_zones` is set to `false`, this is ignored.
     pub fn with_internal_dns_count(
         mut self,
         internal_dns_count: usize,
@@ -356,7 +356,7 @@ impl ExampleSystemBuilder {
 
     /// Set the number of Crucible pantry instances in the example system.
     ///
-    /// If [`Self::create_zones`] is set to `false`, this is ignored.
+    /// If `Self::create_zones` is set to `false`, this is ignored.
     pub fn with_crucible_pantry_count(
         mut self,
         crucible_pantry_count: usize,
@@ -369,7 +369,7 @@ impl ExampleSystemBuilder {
     ///
     /// The default value is 0. A value of 0 is permitted.
     ///
-    /// If [`Self::create_zones`] is set to `false`, this is ignored.
+    /// If `Self::create_zones` is set to `false`, this is ignored.
     pub fn with_oximeter_count(mut self, oximeter_count: usize) -> Self {
         self.oximeter_count = ZoneCount(oximeter_count);
         self
@@ -379,7 +379,7 @@ impl ExampleSystemBuilder {
     ///
     /// The default value is 0. A value of 0 is permitted.
     ///
-    /// If [`Self::create_zones`] is set to `false`, this is ignored.
+    /// If `Self::create_zones` is set to `false`, this is ignored.
     pub fn with_cockroachdb_count(mut self, cockroachdb_count: usize) -> Self {
         self.cockroachdb_count = ZoneCount(cockroachdb_count);
         self
@@ -397,7 +397,7 @@ impl ExampleSystemBuilder {
     /// This implicitly controls the number of internal NTP zones in the system.
     /// Each sled with no boundary NTP zone gets an internal NTP zone.
     ///
-    /// If [`Self::create_zones`] is set to `false`, this is ignored.
+    /// If `Self::create_zones` is set to `false`, this is ignored.
     pub fn with_boundary_ntp_count(
         mut self,
         boundary_ntp_count: usize,
@@ -416,7 +416,7 @@ impl ExampleSystemBuilder {
     ///
     /// The default is that only single-node Clickhouse is deployed.
     ///
-    /// If [`Self::create_zones`] is set to `false`, this is ignored.
+    /// If `Self::create_zones` is set to `false`, this is ignored.
     pub fn with_clickhouse_policy(mut self, policy: ClickhousePolicy) -> Self {
         self.clickhouse_policy = policy;
         self
