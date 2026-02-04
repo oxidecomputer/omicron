@@ -1606,7 +1606,7 @@ impl super::Nexus {
             .into_iter()
             .map(|ext| sled_agent_client::types::AttachedSubnet {
                 subnet: ext.subnet.into(),
-                is_external: true,
+                kind: sled_agent_client::types::AttachedSubnetKind::External,
             })
             .collect();
 
