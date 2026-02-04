@@ -24,6 +24,7 @@ futures.workspace = true
 http.workspace = true
 ipnetwork.workspace = true
 itertools.workspace = true
+key-manager.workspace = true
 libc.workspace = true
 macaddr.workspace = true
 nix.workspace = true
@@ -44,6 +45,7 @@ tokio.workspace = true
 uuid.workspace = true
 whoami.workspace = true
 zone.workspace = true
+zfs-atomic-change-key.workspace = true
 tofino.workspace = true
 rustix.workspace = true
 

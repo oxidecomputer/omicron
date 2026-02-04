@@ -24,25 +24,32 @@ use sled_agent_types::inventory::OmicronSledConfig;
 use sled_agent_types::inventory::OrphanedDataset;
 use sled_agent_types::inventory::RemoveMupdateOverrideInventory;
 use sled_storage::config::MountConfig;
+use sled_storage::dataset::CRYPT_DATASET;
 use sled_storage::dataset::LOCAL_STORAGE_DATASET;
 use sled_storage::dataset::LOCAL_STORAGE_UNENCRYPTED_DATASET;
 use sled_storage::dataset::U2_DEBUG_DATASET;
 use sled_storage::dataset::ZONE_DATASET;
 use sled_storage::disk::Disk;
 use slog::Logger;
+use slog::debug;
+use slog::error;
 use slog::info;
 use slog::warn;
 use std::collections::BTreeMap;
+use std::collections::BTreeSet;
 use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::Duration;
 use std::time::Instant;
 use tokio::sync::watch;
+use trust_quorum_types::types::Epoch;
 
 use crate::InternalDisksReceiver;
 use crate::SledAgentArtifactStore;
 use crate::TimeSyncConfig;
+use crate::dataset_serialization_task::DatasetRekeyInfo;
 use crate::dataset_serialization_task::DatasetTaskHandle;
+use crate::dataset_serialization_task::RekeyRequest;
 use crate::debug_collector::FormerZoneRootArchiver;
 use crate::host_phase_2::BootPartitionReconciler;
 use crate::ledger::CurrentSledConfig;
@@ -75,6 +82,7 @@ pub(crate) fn spawn<T: SledAgentFacilities, U: SledAgentArtifactStore>(
     external_disks_tx: watch::Sender<HashSet<Disk>>,
     former_zone_root_archiver: FormerZoneRootArchiver,
     raw_disks_rx: RawDisksReceiver,
+    committed_epoch_rx: watch::Receiver<Option<Epoch>>,
     sled_agent_facilities: T,
     sled_agent_artifact_store: U,
     log: Logger,
@@ -101,6 +109,7 @@ pub(crate) fn spawn<T: SledAgentFacilities, U: SledAgentArtifactStore>(
             datasets,
             zones,
             boot_partitions,
+            committed_epoch_rx,
             log,
         }
         .run(sled_agent_facilities, sled_agent_artifact_store),
@@ -305,6 +314,9 @@ struct ReconcilerTask {
     datasets: OmicronDatasets,
     zones: OmicronZones,
     boot_partitions: BootPartitionReconciler,
+    /// Receiver for committed epoch notifications from trust quorum.
+    /// When a new epoch is committed, we need to rotate ZFS encryption keys.
+    committed_epoch_rx: watch::Receiver<Option<Epoch>>,
     log: Logger,
 }
 
@@ -326,6 +338,11 @@ impl ReconcilerTask {
         // particular kind of failure we're retrying"). For now we'll just take
         // this pretty aggressive policy.
         const SLEEP_BETWEEN_RETRIES: Duration = Duration::from_secs(5);
+
+        // Ensure we process the initial epoch on startup. Using mark_unchanged()
+        // means that changed() will fire on the first value, allowing us to
+        // catch any missed rekeys from crashes.
+        self.committed_epoch_rx.mark_unchanged();
 
         loop {
             let result = self
@@ -407,6 +424,30 @@ impl ReconcilerTask {
                         "starting reconciliation due to retryable error"
                     );
                     continue;
+                }
+
+                // Cancel-safe per docs on `changed()`
+                //
+                // Handle committed epoch changes from trust quorum. When a new
+                // epoch is committed, we need to rotate ZFS encryption keys for
+                // all managed U.2 crypt datasets. The rekey operation is
+                // performed as part of normal reconciliation in do_reconciliation.
+                result = self.committed_epoch_rx.changed() => {
+                    match result {
+                        Ok(()) => {
+                            info!(
+                                self.log,
+                                "starting reconciliation due to epoch change"
+                            );
+                            continue;
+                        }
+                        Err(_closed) => {
+                            warn!(
+                                self.log,
+                                "committed_epoch watch channel closed"
+                            );
+                        }
+                    }
                 }
             }
         }
@@ -547,6 +588,17 @@ impl ReconcilerTask {
             )
             .await;
 
+        // Check if any disks need rekeying to the current committed epoch.
+        // We use borrow_and_update() to mark the epoch as seen, so we don't
+        // trigger another reconciliation for the same epoch change.
+        // Note: We must copy the epoch out of the Ref before any await points.
+        let current_epoch = *self.committed_epoch_rx.borrow_and_update();
+        let has_rekey_error = if let Some(epoch) = current_epoch {
+            self.rekey_for_epoch(epoch).await
+        } else {
+            false
+        };
+
         // Ensure all the datasets we want exist.
         self.datasets
             .ensure_datasets_if_needed(
@@ -600,12 +652,13 @@ impl ReconcilerTask {
         }
 
         // We'll retry even if there have been no config changes if (a) time
-        // isn't sync'd yet or (b) any of our disk/dataset/zone attempts failed
-        // with a retryable error.
+        // isn't sync'd yet, (b) any of our disk/dataset/zone attempts failed
+        // with a retryable error, or (c) any rekey operations failed.
         let result = if !timesync_status.is_synchronized()
             || self.external_disks.has_retryable_error()
             || self.zones.has_retryable_error()
             || self.datasets.has_retryable_error()
+            || has_rekey_error
         {
             ReconciliationResult::ShouldRetry
         } else {
@@ -632,6 +685,110 @@ impl ReconcilerTask {
         });
 
         result
+    }
+
+    /// Rotate encryption keys for managed U.2 crypt datasets that need rekeying.
+    ///
+    /// This is called during reconciliation when the committed epoch has changed.
+    /// Disks whose cached epoch is less than the target epoch OR whose epoch
+    /// is unknown (None) are candidates for rekeying. The actual rekey operation
+    /// has an idempotency check that skips disks already at the target epoch.
+    /// On success, updates the cached epoch in `external_disks`.
+    ///
+    /// Returns true if any rekey operations failed.
+    async fn rekey_for_epoch(&mut self, target_epoch: Epoch) -> bool {
+        // Filter to disks that need rekeying:
+        // - Known epoch < target: definitely needs rekey
+        // - Unknown epoch (None): attempt rekey to be safe; idempotency check
+        //   in datasets_rekey will skip if already at target
+        let disks_needing_rekey: Vec<_> = self
+            .external_disks
+            .disk_rekey_info()
+            .filter(|i| match i.cached_epoch {
+                Some(e) => e < target_epoch,
+                None => true,
+            })
+            .collect();
+
+        if disks_needing_rekey.is_empty() {
+            debug!(self.log, "No datasets need rekeying"; "epoch" => %target_epoch);
+            return false;
+        }
+
+        // Build request, tracking key derivation failures separately
+        let mut failed = BTreeSet::new();
+        let mut request = RekeyRequest::default();
+
+        for info in disks_needing_rekey {
+            let dataset_name =
+                format!("{}/{}", info.disk.zpool_name(), CRYPT_DATASET);
+            match self
+                .key_requester
+                .get_key(target_epoch.0, info.disk.identity().clone())
+                .await
+            {
+                Ok(key) => {
+                    request.disks.insert(
+                        info.disk_id,
+                        DatasetRekeyInfo { dataset_name, key },
+                    );
+                }
+                Err(e) => {
+                    error!(
+                        self.log,
+                        "Failed to derive key";
+                        "disk_id" => %info.disk_id,
+                        "error" => %e,
+                    );
+                    failed.insert(info.disk_id);
+                }
+            }
+        }
+
+        if request.disks.is_empty() {
+            info!(
+                self.log,
+                "No rekey requests (all key derivations failed)";
+                "epoch" => %target_epoch
+            );
+            return true; // has failures
+        }
+
+        let disk_count = request.disks.len();
+        info!(
+            self.log,
+            "Rotating encryption keys";
+            "count" => disk_count,
+            "epoch" => %target_epoch,
+        );
+
+        // Send request to dataset task
+        let result = match self.datasets.rekey_datasets(request).await {
+            Ok(r) => r,
+            Err(e) => {
+                error!(
+                    self.log,
+                    "Failed to send rekey request to dataset task";
+                    "disk_count" => disk_count,
+                    "error" => %e,
+                );
+                return true; // has failures
+            }
+        };
+
+        // Update cached epochs for successful rekeys
+        self.external_disks.apply_rekey_result(&result, target_epoch);
+
+        let has_failures = !failed.is_empty() || result.has_failures();
+
+        info!(
+            self.log,
+            "Key rotation complete";
+            "succeeded" => result.succeeded.len(),
+            "failed" => failed.len() + result.failed.len(),
+        );
+
+        has_failures
     }
 }
 

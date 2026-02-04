@@ -626,6 +626,7 @@ impl SledAgent {
             SledAgentArtifactStoreWrapper(Arc::clone(
                 &long_running_task_handles.artifact_store,
             )),
+            long_running_task_handles.trust_quorum.committed_epoch_rx(),
             config_reconciler_spawn_token,
         );
 

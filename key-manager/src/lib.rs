@@ -53,11 +53,12 @@ pub enum Error {
 }
 
 /// Derived Disk Encryption key
-#[derive(Default)]
+#[derive(Debug, Default)]
 struct Aes256GcmDiskEncryptionKey(SecretBox<[u8; 32]>);
 
 /// A Disk encryption key for a given epoch to be used with ZFS datasets for
 /// U.2 devices
+#[derive(Debug)]
 pub struct VersionedAes256GcmDiskEncryptionKey {
     epoch: u64,
     key: Aes256GcmDiskEncryptionKey,

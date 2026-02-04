@@ -26,12 +26,14 @@ use illumos_utils::zfs::DestroyDatasetError;
 use illumos_utils::zfs::Mountpoint;
 use illumos_utils::zfs::WhichDatasets;
 use illumos_utils::zfs::Zfs;
+use key_manager::VersionedAes256GcmDiskEncryptionKey;
 use omicron_common::disk::DatasetConfig;
 use omicron_common::disk::DatasetKind;
 use omicron_common::disk::DatasetName;
 use omicron_common::disk::SharedDatasetConfig;
 use omicron_common::zpool_name::ZpoolName;
 use omicron_uuid_kinds::DatasetUuid;
+use omicron_uuid_kinds::PhysicalDiskUuid;
 use sled_agent_types::inventory::InventoryDataset;
 use sled_agent_types::inventory::OrphanedDataset;
 use sled_storage::config::MountConfig;
@@ -158,6 +160,49 @@ pub enum NestedDatasetListError {
         #[source]
         err: anyhow::Error,
     },
+}
+
+/// Error returned when ZFS encryption key rotation fails.
+#[derive(Debug, thiserror::Error)]
+pub enum KeyRotationError {
+    #[error("failed to rotate encryption key for dataset {dataset}")]
+    ChangeKeyFailed {
+        dataset: String,
+        #[source]
+        err: anyhow::Error,
+    },
+}
+
+/// Information for rekeying a single dataset.
+#[derive(Debug)]
+pub struct DatasetRekeyInfo {
+    /// Full ZFS dataset name (e.g., `oxp_<uuid>/crypt`)
+    pub dataset_name: String,
+    /// The new encryption key with its epoch.
+    pub key: VersionedAes256GcmDiskEncryptionKey,
+}
+
+/// Request to rekey a batch of datasets.
+#[derive(Debug, Default)]
+pub struct RekeyRequest {
+    /// Datasets to rekey, keyed by physical disk UUID.
+    pub disks: BTreeMap<PhysicalDiskUuid, DatasetRekeyInfo>,
+}
+
+/// Result of a batch rekey operation.
+#[derive(Debug, Default)]
+pub struct RekeyResult {
+    /// Disks that were successfully rekeyed.
+    pub succeeded: BTreeSet<PhysicalDiskUuid>,
+    /// Disks that failed to rekey.
+    pub failed: BTreeSet<PhysicalDiskUuid>,
+}
+
+impl RekeyResult {
+    /// Returns true if any rekey operations failed.
+    pub fn has_failures(&self) -> bool {
+        !self.failed.is_empty()
+    }
 }
 
 #[derive(Debug)]
@@ -330,6 +375,18 @@ impl DatasetTaskHandle {
         .await
     }
 
+    /// Rotate encryption keys for multiple datasets.
+    pub async fn rekey_datasets(
+        &self,
+        request: RekeyRequest,
+    ) -> Result<RekeyResult, DatasetTaskError> {
+        self.try_send_request(|tx| DatasetTaskRequest::DatasetsRekey {
+            request,
+            tx,
+        })
+        .await
+    }
+
     async fn try_send_request<T, F>(
         &self,
         make_request: F,
@@ -420,6 +477,9 @@ impl DatasetTask {
                 _ = tx.0.send(
                     self.nested_dataset_list(dataset, options, zfs).await,
                 );
+            }
+            DatasetTaskRequest::DatasetsRekey { request, tx } => {
+                _ = tx.0.send(self.datasets_rekey(request, zfs).await);
             }
         }
     }
@@ -1117,6 +1177,89 @@ impl DatasetTask {
             })
             .collect())
     }
+
+    /// Rotate encryption keys for multiple datasets.
+    ///
+    /// For each request, checks if the dataset is already at the target epoch
+    /// (idempotent), and if not, rotates the key and sets the epoch property
+    /// (atomically with the key rotation).
+    ///
+    /// This is a batch operation so that the caller can ensure that all
+    /// datasets are updated together with no intervening operations. It does
+    /// not guarantee that the operation will succeed atomically across all
+    /// datasets.
+    async fn datasets_rekey<T: ZfsImpl>(
+        &mut self,
+        request: RekeyRequest,
+        zfs: &T,
+    ) -> RekeyResult {
+        let log = self.log.new(slog::o!("request" => "datasets_rekey"));
+        let mut succeeded = BTreeSet::new();
+        let mut failed = BTreeSet::new();
+
+        // Batch fetch current epochs for all datasets to check for idempotency
+        let dataset_names: Vec<String> =
+            request.disks.values().map(|r| r.dataset_name.clone()).collect();
+        let current_epochs: BTreeMap<String, Option<u64>> = match zfs
+            .get_dataset_properties(&dataset_names, WhichDatasets::SelfOnly)
+            .await
+        {
+            Ok(props) => props.into_iter().map(|p| (p.name, p.epoch)).collect(),
+            Err(e) => {
+                // If we can't read properties, log and proceed with all rekeys
+                warn!(
+                    log,
+                    "Could not read dataset properties, proceeding with rekeys";
+                    "error" => %e,
+                );
+                BTreeMap::new()
+            }
+        };
+
+        for (disk_id, req) in request.disks {
+            let new_epoch = req.key.epoch();
+
+            // Check current epoch - skip if already at target
+            if let Some(Some(current_epoch)) =
+                current_epochs.get(&req.dataset_name)
+            {
+                if *current_epoch == new_epoch {
+                    info!(
+                        log,
+                        "Dataset already at target epoch, skipping";
+                        "dataset" => &req.dataset_name,
+                        "epoch" => new_epoch,
+                    );
+                    succeeded.insert(disk_id);
+                    continue;
+                }
+            }
+
+            info!(
+                log,
+                "Rotating encryption key";
+                "dataset" => &req.dataset_name,
+                "new_epoch" => new_epoch,
+            );
+
+            match zfs.change_key(&req.dataset_name, &req.key).await {
+                Ok(()) => {
+                    succeeded.insert(disk_id);
+                }
+                Err(e) => {
+                    warn!(
+                        log,
+                        "Failed to rotate encryption key";
+                        "dataset" => &req.dataset_name,
+                        "error" => %e,
+                    );
+                    failed.insert(disk_id);
+                }
+            }
+        }
+
+        RekeyResult { succeeded, failed }
+    }
 }
 
 #[derive(Debug)]
@@ -1161,6 +1304,10 @@ enum DatasetTaskRequest {
                 Result<Vec<NestedDatasetConfig>, NestedDatasetListError>,
             >,
         >,
+    },
+    DatasetsRekey {
+        request: RekeyRequest,
+        tx: DebugIgnore<oneshot::Sender<RekeyResult>>,
     },
 }
 
@@ -1239,6 +1386,16 @@ trait ZfsImpl: Send + Sync + 'static {
         datasets: &[String],
         which: WhichDatasets,
     ) -> impl Future<Output = anyhow::Result<Vec<DatasetProperties>>> + Send;
+
+    /// Atomically change the encryption key and set the oxide:epoch property.
+    ///
+    /// This is used for ZFS key rotation when a new Trust Quorum epoch is
+    /// committed.
+    fn change_key(
+        &self,
+        dataset: &str,
+        key: &VersionedAes256GcmDiskEncryptionKey,
+    ) -> impl Future<Output = Result<(), KeyRotationError>> + Send;
 }
 
 struct RealZfs;
@@ -1284,12 +1441,26 @@ impl ZfsImpl for RealZfs {
     ) -> anyhow::Result<Vec<DatasetProperties>> {
         Zfs::get_dataset_properties(datasets, which).await
     }
+
+    async fn change_key(
+        &self,
+        dataset: &str,
+        key: &VersionedAes256GcmDiskEncryptionKey,
+    ) -> Result<(), KeyRotationError> {
+        Zfs::change_key(dataset, key).await.map_err(|err| {
+            KeyRotationError::ChangeKeyFailed {
+                dataset: dataset.to_string(),
+                err: err.into(),
+            }
+        })
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::CurrentlyManagedZpoolsReceiver;
+    use anyhow::anyhow;
     use assert_matches::assert_matches;
     use illumos_utils::zfs::DestroyDatasetErrorVariant;
     use omicron_common::api::external::ByteCount;
@@ -1371,6 +1542,7 @@ mod tests {
                     .as_ref()
                     .map(|sd| sd.compression.to_string())
                     .unwrap_or_else(|| "on".to_string()),
+                epoch: args.encryption_details.as_ref().map(|ed| ed.epoch),
             };
             state.datasets.insert(props.name.clone(), props);
             Ok(())
@@ -1470,6 +1642,24 @@ mod tests {
                 .filter(|(name, _)| filter_fn(name))
                 .map(|(_, props)| props.clone())
                 .collect())
+        }
+
+        async fn change_key(
+            &self,
+            dataset: &str,
+            key: &VersionedAes256GcmDiskEncryptionKey,
+        ) -> Result<(), KeyRotationError> {
+            let mut state = self.inner.lock().unwrap();
+
+            // Verify dataset exists and update its epoch
+            let props = state.datasets.get_mut(dataset).ok_or(
+                KeyRotationError::ChangeKeyFailed {
+                    dataset: dataset.to_string(),
+                    err: anyhow!("dataset does not exist"),
+                },
+            )?;
+            props.epoch = Some(key.epoch());
+            Ok(())
         }
     }
 
@@ -2051,6 +2241,7 @@ mod tests {
                         quota: None,
                         reservation: None,
                         compression: CompressionAlgorithm::On.to_string(),
+                        epoch: None,
                     },
                 );
             }

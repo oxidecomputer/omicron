@@ -206,6 +206,42 @@ pub struct GetValueError {
 #[error("Failed to list snapshots: {0}")]
 pub struct ListSnapshotsError(#[from] crate::ExecutionError);
 
+/// Error returned by [`Zfs::change_key`].
+#[derive(thiserror::Error, Debug)]
+#[error("Failed to change encryption key for dataset '{name}'")]
+pub struct ChangeKeyError {
+    pub name: String,
+    #[source]
+    pub err: anyhow::Error,
+}
+
+/// Error returned by [`Zfs::load_key`].
+#[derive(thiserror::Error, Debug)]
+#[error("Failed to load encryption key for dataset '{name}'")]
+pub struct LoadKeyError {
+    pub name: String,
+    #[source]
+    pub err: crate::ExecutionError,
+}
+
+/// Error returned by [`Zfs::dataset_exists`].
+#[derive(thiserror::Error, Debug)]
+#[error("Failed to check if dataset '{name}' exists")]
+pub struct DatasetExistsError {
+    pub name: String,
+    #[source]
+    pub err: crate::ExecutionError,
+}
+
+/// Error returned by [`Zfs::unload_key`].
+#[derive(thiserror::Error, Debug)]
+#[error("Failed to unload encryption key for dataset '{name}'")]
+pub struct UnloadKeyError {
+    pub name: String,
+    #[source]
+    pub err: crate::ExecutionError,
+}
+
 #[derive(Debug, thiserror::Error)]
 #[error(
     "Failed to create snapshot '{snap_name}' from filesystem '{filesystem}': {err}"
@@ -523,11 +559,14 @@ pub struct DatasetProperties {
     /// string so that unexpected compression formats don't prevent inventory
     /// from being collected.
     pub compression: String,
+    /// The encryption key epoch for this dataset.
+    ///
+    /// Only present on encrypted datasets (e.g., crypt datasets on U.2s).
+    pub epoch: Option<u64>,
 }
 
 impl DatasetProperties {
-    const ZFS_GET_PROPS: &'static str =
-        "oxide:uuid,name,mounted,avail,used,quota,reservation,compression";
+    const ZFS_GET_PROPS: &'static str = "oxide:uuid,oxide:epoch,name,mounted,avail,used,quota,reservation,compression";
 }
 
 impl TryFrom<&DatasetProperties> for SharedDatasetConfig {
@@ -648,6 +687,18 @@ impl DatasetProperties {
                     .get("compression")
                     .map(|(prop, _source)| prop.to_string())
                     .ok_or_else(|| anyhow!("Missing 'compression'"))?;
+                // The epoch property is only present on encrypted datasets.
+                // Like oxide:uuid, we ignore inherited values.
+                let epoch = props
+                    .get("oxide:epoch")
+                    .filter(|(prop, source)| {
+                        !source.starts_with("inherited") && *prop != "-"
+                    })
+                    .map(|(prop, _source)| {
+                        prop.parse::<u64>()
+                            .context("Failed to parse 'oxide:epoch'")
+                    })
+                    .transpose()?;
 
                 Ok(DatasetProperties {
                     id,
@@ -658,6 +709,7 @@ impl DatasetProperties {
                     quota,
                     reservation,
                     compression,
+                    epoch,
                 })
             })
             .collect::<Result<Vec<_>, _>>()
@@ -1197,7 +1249,7 @@ impl Zfs {
         name: &str,
         mountpoint: &Mountpoint,
     ) -> Result<(), EnsureDatasetErrorRaw> {
-        let mount_info = Self::dataset_exists(name, mountpoint).await?;
+        let mount_info = Self::dataset_mount_info(name, mountpoint).await?;
         if !mount_info.exists {
             return Err(EnsureDatasetErrorRaw::DoesNotExist);
         }
@@ -1246,7 +1298,7 @@ impl Zfs {
             additional_options,
         }: DatasetEnsureArgs<'_>,
     ) -> Result<(), EnsureDatasetErrorRaw> {
-        let dataset_info = Self::dataset_exists(name, &mountpoint).await?;
+        let dataset_info = Self::dataset_mount_info(name, &mountpoint).await?;
 
         // Non-zoned datasets with an explicit mountpoint and the
         // "canmount=on" property should be mounted within the global zone.
@@ -1365,9 +1417,29 @@ impl Zfs {
         Ok(())
     }
 
-    // Return (true, mounted) if the dataset exists, (false, false) otherwise,
-    // where mounted is if the dataset is mounted.
-    async fn dataset_exists(
+    /// Check if a ZFS dataset exists.
+    pub async fn dataset_exists(
+        name: &str,
+    ) -> Result<bool, DatasetExistsError> {
+        let mut cmd = Command::new(ZFS);
+        cmd.args(&["list", "-H", name]);
+        match execute_async(&mut cmd).await {
+            Ok(_) => Ok(true),
+            Err(crate::ExecutionError::CommandFailure(ref info))
+                if info.stderr.contains("does not exist") =>
+            {
+                Ok(false)
+            }
+            Err(err) => Err(DatasetExistsError { name: name.to_string(), err }),
+        }
+    }
+
+    /// Get mount info for a dataset, validating its mountpoint.
+    ///
+    /// Returns (exists=true, mounted) if the dataset exists with the expected
+    /// mountpoint, (exists=false, mounted=false) if it doesn't exist.
+    /// Returns an error if the dataset exists but has an unexpected mountpoint.
+    async fn dataset_mount_info(
         name: &str,
         mountpoint: &Mountpoint,
     ) -> Result<DatasetMountInfo, EnsureDatasetErrorRaw> {
@@ -1521,6 +1593,62 @@ impl Zfs {
                 err,
             }
         })
+    }
+
+    /// Atomically change the encryption key and set the oxide:epoch property.
+    ///
+    /// This operation is used for ZFS key rotation when a new Trust Quorum
+    /// epoch is committed.
+    pub async fn change_key(
+        dataset: &str,
+        key: &key_manager::VersionedAes256GcmDiskEncryptionKey,
+    ) -> Result<(), ChangeKeyError> {
+        // FIXME: Replace the use of `zfs_atomic_change_key` with a native
+        // invocation of `zfs change-key` using the `-o oxide:epoch` option to
+        // set the epoch. At time of writing, the `zfs change-key` command does
+        // not support setting user properties inline, but a patch is pending to
+        // add this feature.
+
+        let ds = zfs_atomic_change_key::Dataset::new(dataset).map_err(|e| {
+            ChangeKeyError {
+                name: dataset.to_string(),
+                err: anyhow::anyhow!("invalid dataset name: {e}"),
+            }
+        })?;
+
+        ds.change_key(zfs_atomic_change_key::Key::hex(*key.expose_secret()))
+            .property("oxide:epoch", key.epoch().to_string())
+            .await
+            .map_err(|e| ChangeKeyError {
+                name: dataset.to_string(),
+                err: anyhow::anyhow!("{e}"),
+            })
+    }
+
+    /// Load the encryption key for an encrypted ZFS dataset.
+    ///
+    /// This makes the dataset accessible for mounting. The key must have
+    /// previously been written to the dataset's keylocation.
+    pub async fn load_key(name: &str) -> Result<(), LoadKeyError> {
+        let mut cmd = Command::new(PFEXEC);
+        cmd.args(&[ZFS, "load-key", name]);
+        execute_async(&mut cmd)
+            .await
+            .map(|_| ())
+            .map_err(|err| LoadKeyError { name: name.to_string(), err })
+    }
+
+    /// Unload the encryption key for an encrypted ZFS dataset.
+    ///
+    /// This is used for cleanup after failed key operations or during
+    /// trial decryption recovery. The dataset must not be mounted.
+    pub async fn unload_key(name: &str) -> Result<(), UnloadKeyError> {
+        let mut cmd = Command::new(PFEXEC);
+        cmd.args(&[ZFS, "unload-key", name]);
+        execute_async(&mut cmd)
+            .await
+            .map(|_| ())
+            .map_err(|err| UnloadKeyError { name: name.to_string(), err })
     }
 
     /// Calls "zfs get" to acquire multiple values

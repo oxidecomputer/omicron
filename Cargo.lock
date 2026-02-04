@@ -5205,6 +5205,7 @@ dependencies = [
  "http",
  "ipnetwork",
  "itertools 0.14.0",
+ "key-manager",
  "libc",
  "macaddr",
  "nix 0.30.1",
@@ -5232,6 +5233,7 @@ dependencies = [
  "toml 0.8.23",
  "uuid",
  "whoami",
+ "zfs-atomic-change-key",
  "zone 0.3.1",
 ]
 
@@ -13134,6 +13136,7 @@ dependencies = [
  "regex",
  "schemars 0.8.22",
  "scopeguard",
+ "secrecy 0.10.3",
  "serde",
  "serde_json",
  "sha2",
@@ -13149,6 +13152,7 @@ dependencies = [
  "test-strategy",
  "thiserror 2.0.18",
  "tokio",
+ "trust-quorum-types",
  "tufaceous-artifact",
  "xshell",
  "zone 0.3.1",
@@ -17234,6 +17238,19 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.114",
+]
+
+[[package]]
+name = "zfs-atomic-change-key"
+version = "0.1.0"
+source = "git+https://github.com/oxidecomputer/zfs-atomic-change-key#0324c273eb8acc837eff4ffaea17cd773a76fd93"
+dependencies = [
+ "hex",
+ "serde",
+ "serde_json",
+ "thiserror 1.0.69",
+ "tokio",
+ "zeroize",
 ]
 
 [[package]]
