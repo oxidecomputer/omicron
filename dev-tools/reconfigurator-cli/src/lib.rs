@@ -288,7 +288,7 @@ impl ReconfiguratorSim {
         let rng = state.rng_mut().next_example_rng();
 
         let builder = f(ExampleSystemBuilder::new_with_rng(&self.log, rng)
-            .nexus_count(
+            .with_nexus_count(
                 state
                     .config_mut()
                     .num_nexus()
@@ -3623,11 +3623,11 @@ fn cmd_load_example(
 ) -> anyhow::Result<Option<String>> {
     sim.load_example(args.seed, |builder| {
         let mut builder = builder
-            .nsleds(args.nsleds)
-            .ndisks_per_sled(args.ndisks_per_sled)
-            .external_dns_count(3)
+            .with_nsleds(args.nsleds)
+            .with_ndisks_per_sled(args.ndisks_per_sled)
+            .with_external_dns_count(3)
             .context("invalid external DNS zone count")?
-            .create_disks_in_blueprint(!args.no_disks_in_blueprint);
+            .with_create_disks_in_blueprint(!args.no_disks_in_blueprint);
         for sled_policy in args.sled_policy {
             builder = builder
                 .with_sled_policy(sled_policy.index, sled_policy.policy)

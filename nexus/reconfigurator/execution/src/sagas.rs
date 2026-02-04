@@ -124,8 +124,9 @@ mod test {
 
         // First, create a basic blueprint with several Nexus zones in
         // generation 1.
-        let (example, blueprint1) =
-            ExampleSystemBuilder::new(log, TEST_NAME).nexus_count(4).build();
+        let (example, blueprint1) = ExampleSystemBuilder::new(log, TEST_NAME)
+            .with_nexus_count(4)
+            .build();
         let g1 = Generation::new();
         let g1_nexus_ids: Vec<_> = blueprint1
             .in_service_nexus_zones()

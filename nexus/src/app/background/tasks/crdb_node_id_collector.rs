@@ -261,7 +261,7 @@ mod tests {
 
         // Build an example system with one sled.
         let (_, bp0) =
-            ExampleSystemBuilder::new(log, TEST_NAME).nsleds(1).build();
+            ExampleSystemBuilder::new(log, TEST_NAME).with_nsleds(1).build();
 
         // `ExampleSystemBuilder` doesn't place any cockroach nodes; assert so
         // we bail out early if that changes.

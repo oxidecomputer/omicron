@@ -4312,13 +4312,13 @@ mod tests {
         // Nexus zone).
         let (example_system, blueprint1) =
             ExampleSystemBuilder::new(&opctx.log, test_name)
-                .nsleds(1)
-                .nexus_count(1)
-                .internal_dns_count(0)
+                .with_nsleds(1)
+                .with_nexus_count(1)
+                .with_internal_dns_count(0)
                 .expect("internal DNS count can be 0")
-                .external_dns_count(0)
+                .with_external_dns_count(0)
                 .expect("external DNS count can be 0")
-                .crucible_pantry_count(0)
+                .with_crucible_pantry_count(0)
                 .build();
         let blueprint2 = BlueprintBuilder::new_based_on(
             &logctx.log,

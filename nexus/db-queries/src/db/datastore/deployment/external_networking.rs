@@ -1397,7 +1397,7 @@ mod tests {
         // Create a blueprint with no external DNS zones.
         let (example_system, bp1) =
             ExampleSystemBuilder::new(&opctx.log, TEST_NAME)
-                .external_dns_count(0)
+                .with_external_dns_count(0)
                 .expect("external DNS count can be 0")
                 .build();
 

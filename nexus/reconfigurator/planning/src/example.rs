@@ -276,7 +276,7 @@ impl ExampleSystemBuilder {
     ///
     /// Currently, this value can be anywhere between 0 and 5. (More can be
     /// added in the future if necessary.)
-    pub fn nsleds(mut self, nsleds: usize) -> Self {
+    pub fn with_nsleds(mut self, nsleds: usize) -> Self {
         self.sled_settings.resize(nsleds, BuilderSledSettings::default());
         self
     }
@@ -286,8 +286,8 @@ impl ExampleSystemBuilder {
     /// The default value is [`SledBuilder::DEFAULT_NPOOLS`]. A value of 0 is
     /// permitted.
     ///
-    /// If [`Self::create_zones`] is set to `false`, this is ignored.
-    pub fn ndisks_per_sled(mut self, ndisks_per_sled: u8) -> Self {
+    /// If `Self::create_zones` is set to `false`, this is ignored.
+    pub fn with_ndisks_per_sled(mut self, ndisks_per_sled: u8) -> Self {
         self.ndisks_per_sled = ndisks_per_sled;
         self
     }
@@ -296,7 +296,7 @@ impl ExampleSystemBuilder {
     /// system.
     ///
     /// The default value is 0.
-    pub fn scrimlet_count(mut self, scrimlet_count: u8) -> Self {
+    pub fn with_scrimlet_count(mut self, scrimlet_count: u8) -> Self {
         self.scrimlet_count = scrimlet_count;
         self
     }
@@ -306,8 +306,8 @@ impl ExampleSystemBuilder {
     /// The default value is the same as the number of sleds (i.e. one Nexus
     /// instance per sled). A value of 0 is permitted.
     ///
-    /// If [`Self::create_zones`] is set to `false`, this is ignored.
-    pub fn nexus_count(mut self, nexus_count: usize) -> Self {
+    /// If `Self::create_zones` is set to `false`, this is ignored.
+    pub fn with_nexus_count(mut self, nexus_count: usize) -> Self {
         self.nexus_count = Some(ZoneCount(nexus_count));
         self
     }
@@ -317,8 +317,8 @@ impl ExampleSystemBuilder {
     /// The default value is [`INTERNAL_DNS_REDUNDANCY`]. A value anywhere
     /// between 0 and [`INTERNAL_DNS_REDUNDANCY`], inclusive, is permitted.
     ///
-    /// If [`Self::create_zones`] is set to `false`, this is ignored.
-    pub fn internal_dns_count(
+    /// If `Self::create_zones` is set to `false`, this is ignored.
+    pub fn with_internal_dns_count(
         mut self,
         internal_dns_count: usize,
     ) -> anyhow::Result<Self> {
@@ -340,7 +340,7 @@ impl ExampleSystemBuilder {
     /// primarily to simplify the implementation.)
     ///
     /// Each DNS server is assigned an address in the 198.51.100.x range.
-    pub fn external_dns_count(
+    pub fn with_external_dns_count(
         mut self,
         external_dns_count: usize,
     ) -> anyhow::Result<Self> {
@@ -356,8 +356,8 @@ impl ExampleSystemBuilder {
 
     /// Set the number of Crucible pantry instances in the example system.
     ///
-    /// If [`Self::create_zones`] is set to `false`, this is ignored.
-    pub fn crucible_pantry_count(
+    /// If `Self::create_zones` is set to `false`, this is ignored.
+    pub fn with_crucible_pantry_count(
         mut self,
         crucible_pantry_count: usize,
     ) -> Self {
@@ -369,8 +369,8 @@ impl ExampleSystemBuilder {
     ///
     /// The default value is 0. A value of 0 is permitted.
     ///
-    /// If [`Self::create_zones`] is set to `false`, this is ignored.
-    pub fn oximeter_count(mut self, oximeter_count: usize) -> Self {
+    /// If `Self::create_zones` is set to `false`, this is ignored.
+    pub fn with_oximeter_count(mut self, oximeter_count: usize) -> Self {
         self.oximeter_count = ZoneCount(oximeter_count);
         self
     }
@@ -379,8 +379,8 @@ impl ExampleSystemBuilder {
     ///
     /// The default value is 0. A value of 0 is permitted.
     ///
-    /// If [`Self::create_zones`] is set to `false`, this is ignored.
-    pub fn cockroachdb_count(mut self, cockroachdb_count: usize) -> Self {
+    /// If `Self::create_zones` is set to `false`, this is ignored.
+    pub fn with_cockroachdb_count(mut self, cockroachdb_count: usize) -> Self {
         self.cockroachdb_count = ZoneCount(cockroachdb_count);
         self
     }
@@ -397,8 +397,8 @@ impl ExampleSystemBuilder {
     /// This implicitly controls the number of internal NTP zones in the system.
     /// Each sled with no boundary NTP zone gets an internal NTP zone.
     ///
-    /// If [`Self::create_zones`] is set to `false`, this is ignored.
-    pub fn set_boundary_ntp_count(
+    /// If `Self::create_zones` is set to `false`, this is ignored.
+    pub fn with_boundary_ntp_count(
         mut self,
         boundary_ntp_count: usize,
     ) -> anyhow::Result<Self> {
@@ -416,8 +416,8 @@ impl ExampleSystemBuilder {
     ///
     /// The default is that only single-node Clickhouse is deployed.
     ///
-    /// If [`Self::create_zones`] is set to `false`, this is ignored.
-    pub fn clickhouse_policy(mut self, policy: ClickhousePolicy) -> Self {
+    /// If `Self::create_zones` is set to `false`, this is ignored.
+    pub fn with_clickhouse_policy(mut self, policy: ClickhousePolicy) -> Self {
         self.clickhouse_policy = policy;
         self
     }
@@ -425,7 +425,7 @@ impl ExampleSystemBuilder {
     /// Create zones in the example system.
     ///
     /// The default is `true`.
-    pub fn create_zones(mut self, create_zones: bool) -> Self {
+    pub fn with_create_zones(mut self, create_zones: bool) -> Self {
         self.create_zones = create_zones;
         self
     }
@@ -434,9 +434,9 @@ impl ExampleSystemBuilder {
     ///
     /// The default is `true`.
     ///
-    /// If [`Self::ndisks_per_sled`] is set to 0, then this is implied: if no
+    /// If `Self::ndisks_per_sled` is set to 0, then this is implied: if no
     /// disks are created, then the blueprint won't have any disks.
-    pub fn create_disks_in_blueprint(mut self, create: bool) -> Self {
+    pub fn with_create_disks_in_blueprint(mut self, create: bool) -> Self {
         self.create_disks_in_blueprint = create;
         self
     }
@@ -460,8 +460,8 @@ impl ExampleSystemBuilder {
         Ok(self)
     }
 
-    /// Set the target release to an initial `0.0.1` version, and image sources to
-    /// Artifact corresponding to the release.
+    /// Set the target release to an initial `0.0.1` version, and image sources
+    /// to `Artifact`s corresponding to the release.
     pub fn with_target_release_0_0_1(self) -> anyhow::Result<Self> {
         // Find the 0.0.1 release relative to this crate's root directory.
         let root_dir = Utf8Path::new(env!("CARGO_MANIFEST_DIR"));
@@ -500,27 +500,27 @@ impl ExampleSystemBuilder {
         Ok(self)
     }
 
-    fn get_nexus_zones(&self) -> ZoneCount {
+    fn nexus_zones(&self) -> ZoneCount {
         self.nexus_count.unwrap_or(ZoneCount(self.sled_settings.len()))
     }
 
-    pub fn get_internal_dns_zones(&self) -> usize {
+    pub fn internal_dns_zones(&self) -> usize {
         self.internal_dns_count.0
     }
 
-    pub fn get_external_dns_zones(&self) -> usize {
+    pub fn external_dns_zones(&self) -> usize {
         self.external_dns_count.0
     }
 
-    pub fn get_oximeter_zones(&self) -> usize {
+    pub fn oximeter_zones(&self) -> usize {
         self.oximeter_count.0
     }
 
-    pub fn get_cockroachdb_zones(&self) -> usize {
+    pub fn cockroachdb_zones(&self) -> usize {
         self.cockroachdb_count.0
     }
 
-    pub fn get_boundary_ntp_count(&self) -> usize {
+    pub fn boundary_ntp_count(&self) -> usize {
         self.boundary_ntp_count.0
     }
 
@@ -528,7 +528,7 @@ impl ExampleSystemBuilder {
     ///
     /// Return the system, and the initial blueprint that matches it.
     pub fn build(&self) -> (ExampleSystem, Blueprint) {
-        let nexus_count = self.get_nexus_zones();
+        let nexus_count = self.nexus_zones();
 
         slog::debug!(
             &self.log,
@@ -1324,18 +1324,18 @@ mod tests {
 
         let (example, mut blueprint) =
             ExampleSystemBuilder::new(&logctx.log, TEST_NAME)
-                .nsleds(5)
-                .nexus_count(6)
-                .crucible_pantry_count(5)
-                .internal_dns_count(2)
+                .with_nsleds(5)
+                .with_nexus_count(6)
+                .with_crucible_pantry_count(5)
+                .with_internal_dns_count(2)
                 .unwrap()
-                .external_dns_count(10)
+                .with_external_dns_count(10)
                 .unwrap()
-                .oximeter_count(4)
-                .cockroachdb_count(3)
-                .set_boundary_ntp_count(2)
+                .with_oximeter_count(4)
+                .with_cockroachdb_count(3)
+                .with_boundary_ntp_count(2)
                 .unwrap()
-                .clickhouse_policy(ClickhousePolicy {
+                .with_clickhouse_policy(ClickhousePolicy {
                     version: 0,
                     mode: ClickhouseMode::Both {
                         target_servers: 3,
@@ -1554,14 +1554,14 @@ mod tests {
         // Build an example system with all supported zone types.
         let (_example, blueprint) =
             ExampleSystemBuilder::new(&logctx.log, TEST_NAME)
-                .nsleds(5)
-                .oximeter_count(OXIMETER_REDUNDANCY)
-                .cockroachdb_count(COCKROACHDB_REDUNDANCY)
-                .set_boundary_ntp_count(2)
+                .with_nsleds(5)
+                .with_oximeter_count(OXIMETER_REDUNDANCY)
+                .with_cockroachdb_count(COCKROACHDB_REDUNDANCY)
+                .with_boundary_ntp_count(2)
                 .unwrap()
-                .external_dns_count(1)
+                .with_external_dns_count(1)
                 .unwrap()
-                .clickhouse_policy(ClickhousePolicy {
+                .with_clickhouse_policy(ClickhousePolicy {
                     version: 0,
                     mode: ClickhouseMode::Both {
                         target_servers: 2,
@@ -1602,16 +1602,16 @@ mod tests {
         // number of Nexuses as a system in typical use.
         let (example, blueprint) =
             ExampleSystemBuilder::new(&logctx.log, TEST_NAME)
-                .nsleds(32)
-                .nexus_count(6)
-                .cockroachdb_count(5)
-                .set_boundary_ntp_count(2)
+                .with_nsleds(32)
+                .with_nexus_count(6)
+                .with_cockroachdb_count(5)
+                .with_boundary_ntp_count(2)
                 .unwrap()
-                .oximeter_count(1)
-                .external_dns_count(5)
+                .with_oximeter_count(1)
+                .with_external_dns_count(5)
                 .expect("expected to be able to set external_dns_count")
-                .scrimlet_count(2)
-                .clickhouse_policy(ClickhousePolicy {
+                .with_scrimlet_count(2)
+                .with_clickhouse_policy(ClickhousePolicy {
                     version: 0,
                     mode: ClickhouseMode::Both {
                         target_servers: 2,

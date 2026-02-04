@@ -740,9 +740,9 @@ mod tests {
         // Start with the base example system and build from there.
         let (example, initial_blueprint) =
             ExampleSystemBuilder::new(log, TEST_NAME)
-                .external_dns_count(1)
+                .with_external_dns_count(1)
                 .expect("1 is a valid count of external DNS zones")
-                .set_boundary_ntp_count(1)
+                .with_boundary_ntp_count(1)
                 .expect("1 is a valid count of boundary NTP zones")
                 .build();
         let mut builder = BlueprintBuilder::new_based_on(
@@ -1041,7 +1041,7 @@ mod tests {
         // Start with the base example system with one boundary NTP zone
         let (example, initial_blueprint) =
             ExampleSystemBuilder::new(log, TEST_NAME)
-                .set_boundary_ntp_count(1)
+                .with_boundary_ntp_count(1)
                 .expect("1 is a valid count of boundary NTP zones")
                 .build();
         let mut builder = BlueprintBuilder::new_based_on(
@@ -1417,7 +1417,7 @@ mod tests {
         // Start with the base example system with one external DNS zone
         let (example, initial_blueprint) =
             ExampleSystemBuilder::new(log, TEST_NAME)
-                .external_dns_count(1)
+                .with_external_dns_count(1)
                 .expect("1 is a valid count of external DNS zones")
                 .build();
         let mut builder = BlueprintBuilder::new_based_on(
