@@ -1551,6 +1551,7 @@ mod tests {
                 comment,
                 de,
                 ereports,
+                alerts_requested,
             } = dbg!(case);
             let Some(expected) = this.cases.get(&case.id) else {
                 panic!("expected case {id} to exist in the original sitrep")
@@ -1586,6 +1587,11 @@ mod tests {
                 assert_eq!(assigned_sitrep_id, &expected.assigned_sitrep_id);
                 assert_eq!(comment, &expected.comment);
             }
+
+            // Since these don't have any timestamps in them, we can just assert
+            // the whole map is the same.
+            assert_eq!(alerts_requested, &expected.alerts_requested);
+
             eprintln!();
         }
     }
@@ -1800,70 +1806,7 @@ mod tests {
             .await
             .expect("failed to read sitrep");
 
-<<<<<<< HEAD
-        // Verify the sitrep metadata matches --- ignore the timestamp.
-        assert_eq!(read_sitrep.id(), sitrep.id());
-        assert_eq!(read_sitrep.metadata.creator_id, sitrep.metadata.creator_id);
-        assert_eq!(read_sitrep.metadata.comment, sitrep.metadata.comment);
-        assert_eq!(read_sitrep.metadata.parent_sitrep_id, None);
-
-        // Verify all the expected cases were read back
-        for case in &read_sitrep.cases {
-            let fm::Case {
-                id,
-                created_sitrep_id,
-                closed_sitrep_id,
-                comment,
-                de,
-                ereports,
-                alerts_requested,
-            } = dbg!(case);
-            let Some(expected) = sitrep.cases.get(&case.id) else {
-                panic!("expected case {id} to exist in the original sitrep")
-            };
-            // N.B.: we must assert each bit of the case manually, as ereports
-            // contain `time_collected` timestamps which will lose a bit of
-            // precision when roundtripped through the database.
-            // :(
-            assert_eq!(id, &expected.id);
-            assert_eq!(created_sitrep_id, &expected.created_sitrep_id);
-            assert_eq!(closed_sitrep_id, &expected.closed_sitrep_id);
-            assert_eq!(comment, &expected.comment);
-            assert_eq!(de, &expected.de);
-
-            // Check that all the expected ereports exist in the case we read
-            // back. We must iterate over the map and make assertions for each
-            // entry in order to skip comparing timestamps that may have lost
-            // some precision whilst roundtripped through CRDB.
-            for expected in &expected.ereports {
-                let Some(ereport) = ereports.get(&expected.ereport.id()) else {
-                    panic!(
-                        "expected ereport {id} to exist in the original case"
-                    )
-                };
-                let fm::case::CaseEreport {
-                    id,
-                    ereport,
-                    assigned_sitrep_id,
-                    comment,
-                } = dbg!(ereport);
-                assert_eq!(id, &expected.id);
-                // This is where we go out of our way to avoid the timestamp,
-                // btw.
-                assert_eq!(ereport.id(), expected.ereport.id());
-                assert_eq!(assigned_sitrep_id, &expected.assigned_sitrep_id);
-                assert_eq!(comment, &expected.comment);
-            }
-
-            // Since these don't have any timestamps in them, we can just assert
-            // the whole map is the same.
-            assert_eq!(alerts_requested, &expected.alerts_requested);
-
-            eprintln!();
-        }
-=======
         assert_sitreps_eq(&sitrep, &read_sitrep);
->>>>>>> main
 
         // Clean up
         db.terminate().await;

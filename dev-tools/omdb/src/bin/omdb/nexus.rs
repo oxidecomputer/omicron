@@ -3371,8 +3371,6 @@ fn display_fm_alert_stats(stats: &FmAlertStats) {
     }
 }
 
-};
-
 fn print_task_trust_quorum_manager(details: &serde_json::Value) {
     let status = match serde_json::from_value::<TrustQuorumManagerStatus>(
         details.clone(),
