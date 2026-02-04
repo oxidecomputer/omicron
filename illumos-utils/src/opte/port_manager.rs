@@ -66,7 +66,6 @@ use slog::debug;
 use slog::error;
 use slog::info;
 use slog::warn;
-#[cfg(all(target_os = "illumos", not(test)))]
 use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
 use std::collections::HashMap;
@@ -1104,23 +1103,13 @@ impl PortManager {
                 Ok(())
             }
             Err(e) => {
-                #[cfg(all(target_os = "illumos", not(test)))]
                 error!(
                     self.inner.log,
                     "failed to attach subnet";
                     "port_name" => %port.name(),
                     "subnet" => %cidr,
                     "kind" => ?kind,
-                    "error" => InlineErrorChain::new(&e),
-                );
-                #[cfg(not(all(target_os = "illumos", not(test))))]
-                error!(
-                    self.inner.log,
-                    "failed to attach subnet";
-                    "port_name" => %port.name(),
-                    "subnet" => %cidr,
-                    "kind" => ?kind,
-                    "error" => ?e,
+                    InlineErrorChain::new(&e),
                 );
                 Err(Error::from(e))
             }
@@ -1170,21 +1159,12 @@ impl PortManager {
                 Ok(())
             }
             Err(e) => {
-                #[cfg(all(target_os = "illumos", not(test)))]
                 error!(
                     self.inner.log,
                     "failed to detach subnet";
                     "port_name" => %port.name(),
                     "subnet" => %subnet,
-                    "error" => InlineErrorChain::new(&e),
-                );
-                #[cfg(not(all(target_os = "illumos", not(test))))]
-                error!(
-                    self.inner.log,
-                    "failed to detach subnet";
-                    "port_name" => %port.name(),
-                    "subnet" => %subnet,
-                    "error" => ?e,
+                    InlineErrorChain::new(&e),
                 );
                 Err(Error::from(e))
             }
