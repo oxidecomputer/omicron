@@ -30,8 +30,8 @@ slog-term.workspace = true
 tar.workspace = true
 tokio = { workspace = true, features = ["full"] }
 toml.workspace = true
+tufaceous.workspace = true
 tufaceous-artifact.workspace = true
-tufaceous-lib.workspace = true
 update-common.workspace = true
 
 [lints]

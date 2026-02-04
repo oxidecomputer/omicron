@@ -86,7 +86,6 @@ use std::sync::Arc;
 use std::time::Duration;
 use tufaceous_artifact::ArtifactHash;
 use tufaceous_artifact::ArtifactVersion;
-use tufaceous_artifact::KnownArtifactKind;
 
 /// Describes an actual or synthetic Oxide rack for planning and testing
 ///
@@ -2013,8 +2012,7 @@ impl Sled {
             git_commit: String::from("unknown"),
             name: board.clone(),
             version: version.to_string(),
-            sign: KnownArtifactKind::GimletRotBootloader
-                .fake_artifact_hubris_sign(),
+            sign: Some("sign-gimlet".into()),
         }
     }
 
@@ -2036,7 +2034,7 @@ impl Sled {
             git_commit: String::from("unknown"),
             name: board.clone(),
             version: version.to_string(),
-            sign: KnownArtifactKind::GimletRot.fake_artifact_hubris_sign(),
+            sign: Some("sign-gimlet".into()),
         }
     }
 

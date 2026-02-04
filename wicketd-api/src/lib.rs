@@ -11,7 +11,6 @@ use dropshot::RequestContext;
 use dropshot::StreamingBody;
 use dropshot::TypedBody;
 use gateway_client::types::IgnitionCommand;
-use omicron_common::update::ArtifactId;
 use omicron_uuid_kinds::RackInitUuid;
 use omicron_uuid_kinds::RackResetUuid;
 use schemars::JsonSchema;
@@ -22,7 +21,7 @@ use sled_hardware_types::Baseboard;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::net::Ipv6Addr;
-use tufaceous_artifact::ArtifactHashId;
+use tufaceous_artifact::ArtifactId;
 use wicket_common::inventory::RackV1Inventory;
 use wicket_common::inventory::SpIdentifier;
 use wicket_common::inventory::SpType;
@@ -459,14 +458,6 @@ pub enum GetInventoryResponse {
     Unavailable,
 }
 
-#[derive(Clone, Debug, JsonSchema, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub struct InstallableArtifacts {
-    pub artifact_id: ArtifactId,
-    pub installable: Vec<ArtifactHashId>,
-    pub sign: Option<Vec<u8>>,
-}
-
 /// The response to a `get_artifacts` call: the system version, and the list of
 /// all artifacts currently held by wicketd.
 #[derive(Clone, Debug, JsonSchema, Serialize)]
@@ -485,7 +476,7 @@ pub struct GetArtifactsAndEventReportsResponse {
     /// Conceptually, this is a `BTreeMap<ArtifactId, Vec<ArtifactHashId>>`, but
     /// JSON requires string keys for maps, so we give back a vec of pairs
     /// instead.
-    pub artifacts: Vec<InstallableArtifacts>,
+    pub artifacts: Vec<ArtifactId>,
 
     pub event_reports: BTreeMap<SpType, BTreeMap<u16, EventReport>>,
 }

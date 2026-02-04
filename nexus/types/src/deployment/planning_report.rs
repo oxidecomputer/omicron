@@ -563,6 +563,10 @@ pub enum FailedRotBootloaderUpdateReason {
     /// No artifact with the required conditions for the component was found
     #[error("no matching artifact was found")]
     NoMatchingArtifactFound,
+    /// Too many artifacts with the required conditions for the component were
+    /// found
+    #[error("too many matching artifacts were found")]
+    TooManyMatchingArtifacts,
     /// The component's corresponding SP was not found in the inventory
     #[error("corresponding SP is not in inventory")]
     SpNotInInventory,
@@ -598,6 +602,10 @@ pub enum FailedRotUpdateReason {
     /// No artifact with the required conditions for the component was found
     #[error("no matching artifact was found")]
     NoMatchingArtifactFound,
+    /// Too many artifacts with the required conditions for the component were
+    /// found
+    #[error("too many matching artifacts were found")]
+    TooManyMatchingArtifacts,
     /// RoT state was not found in inventory
     #[error("rot state is not in inventory")]
     RotStateNotInInventory,
@@ -633,6 +641,10 @@ pub enum FailedSpUpdateReason {
     /// No artifact with the required conditions for the component was found
     #[error("no matching artifact was found")]
     NoMatchingArtifactFound,
+    /// Too many artifacts with the required conditions for the component were
+    /// found
+    #[error("too many matching artifacts were found")]
+    TooManyMatchingArtifacts,
     /// The component's corresponding SP was not found in the inventory
     #[error("corresponding SP is not in inventory")]
     SpNotInInventory,

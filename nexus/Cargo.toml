@@ -122,7 +122,6 @@ thiserror.workspace = true
 tokio = { workspace = true, features = ["full"] }
 tokio-postgres = { workspace = true, features = ["with-serde_json-1"] }
 tokio-util = { workspace = true, features = ["codec", "rt"] }
-tough.workspace = true
 trust-quorum-types.workspace = true
 tufaceous-artifact.workspace = true
 usdt.workspace = true
@@ -196,7 +195,6 @@ subprocess.workspace = true
 term.workspace = true
 tufaceous.workspace = true
 tufaceous-artifact.workspace = true
-tufaceous-lib.workspace = true
 
 [[bench]]
 name = "setup_benchmark"

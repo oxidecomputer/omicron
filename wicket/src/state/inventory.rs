@@ -11,7 +11,6 @@ use std::collections::BTreeMap;
 use std::fmt::Display;
 use std::iter::Iterator;
 use std::sync::LazyLock;
-use tufaceous_artifact::KnownArtifactKind;
 use wicket_common::inventory::{
     RackV1Inventory, RotInventory, RotSlot, SpComponentCaboose,
     SpComponentInfo, SpIgnition, SpState, SpType, Transceiver,
@@ -293,30 +292,6 @@ impl ComponentId {
 
     pub fn name(&self) -> String {
         self.to_string()
-    }
-
-    pub fn sp_known_artifact_kind(&self) -> KnownArtifactKind {
-        match self {
-            ComponentId::Sled(_) => KnownArtifactKind::GimletSp,
-            ComponentId::Switch(_) => KnownArtifactKind::SwitchSp,
-            ComponentId::Psc(_) => KnownArtifactKind::PscSp,
-        }
-    }
-
-    pub fn rot_known_artifact_kind(&self) -> KnownArtifactKind {
-        match self {
-            ComponentId::Sled(_) => KnownArtifactKind::GimletRot,
-            ComponentId::Switch(_) => KnownArtifactKind::SwitchRot,
-            ComponentId::Psc(_) => KnownArtifactKind::PscRot,
-        }
-    }
-
-    pub fn rot_bootloader_known_artifact_kind(&self) -> KnownArtifactKind {
-        match self {
-            ComponentId::Sled(_) => KnownArtifactKind::GimletRotBootloader,
-            ComponentId::Switch(_) => KnownArtifactKind::SwitchRotBootloader,
-            ComponentId::Psc(_) => KnownArtifactKind::PscRotBootloader,
-        }
     }
 
     pub fn to_string_uppercase(&self) -> String {

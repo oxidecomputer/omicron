@@ -18,7 +18,7 @@ use dropshot_api_manager_types::api_versions;
 use hyper::header;
 use installinator_common_versions::latest;
 use omicron_uuid_kinds::MupdateUuid;
-use tufaceous_artifact::ArtifactHashId;
+use tufaceous_artifact::InstallinatorArtifactId;
 use update_engine::{NestedSpec, events::EventReport};
 
 api_versions!([
@@ -40,7 +40,7 @@ pub trait InstallinatorApi {
     }]
     async fn get_artifact_by_hash(
         rqctx: RequestContext<Self::Context>,
-        path: Path<ArtifactHashId>,
+        path: Path<InstallinatorArtifactId>,
     ) -> Result<HttpResponseHeaders<HttpResponseOk<FreeformBody>>, HttpError>;
 
     /// Report progress and completion to the server.

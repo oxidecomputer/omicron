@@ -1510,11 +1510,9 @@ table! {
     tuf_repo (id) {
         id -> Uuid,
         time_created -> Timestamptz,
-        sha256 -> Text,
-        targets_role_version -> Int8,
-        valid_until -> Timestamptz,
+        sha256 -> Nullable<Text>,
         system_version -> Text,
-        file_name -> Text,
+        file_name -> Nullable<Text>,
         time_pruned -> Nullable<Timestamptz>,
     }
 }
@@ -1522,15 +1520,19 @@ table! {
 table! {
     tuf_artifact (id) {
         id -> Uuid,
-        name -> Text,
         version -> Text,
-        kind -> Text,
         time_created -> Timestamptz,
         sha256 -> Text,
         artifact_size -> Int8,
         generation_added -> Int8,
-        sign -> Nullable<Binary>,
-        board -> Nullable<Text>,
+    }
+}
+
+table! {
+    tuf_artifact_tag (artifact_id, key) {
+        artifact_id -> Uuid,
+        key -> Text,
+        value -> Text,
     }
 }
 
@@ -1544,7 +1546,8 @@ table! {
 allow_tables_to_appear_in_same_query!(
     tuf_repo,
     tuf_repo_artifact,
-    tuf_artifact
+    tuf_artifact,
+    tuf_artifact_tag
 );
 joinable!(tuf_repo_artifact -> tuf_repo (tuf_repo_id));
 joinable!(tuf_repo_artifact -> tuf_artifact (tuf_artifact_id));

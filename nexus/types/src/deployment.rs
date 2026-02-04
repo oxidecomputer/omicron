@@ -34,7 +34,6 @@ use omicron_common::address::SLED_PREFIX;
 use omicron_common::address::SLED_RESERVED_ADDRESSES;
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::Generation;
-use omicron_common::api::external::TufArtifactMeta;
 use omicron_common::api::internal::shared::DatasetKind;
 use omicron_common::disk::CompressionAlgorithm;
 use omicron_common::disk::DatasetConfig;
@@ -69,6 +68,7 @@ use std::net::Ipv6Addr;
 use std::net::SocketAddrV6;
 use std::sync::Arc;
 use strum::EnumIter;
+use tufaceous_artifact::Artifact;
 use tufaceous_artifact::ArtifactHash;
 use tufaceous_artifact::ArtifactVersion;
 use tufaceous_artifact::ArtifactVersionError;
@@ -1745,10 +1745,10 @@ pub enum BlueprintZoneImageSource {
 }
 
 impl BlueprintZoneImageSource {
-    pub fn from_available_artifact(artifact: &TufArtifactMeta) -> Self {
+    pub fn from_available_artifact(artifact: &Artifact) -> Self {
         BlueprintZoneImageSource::Artifact {
             version: BlueprintArtifactVersion::Available {
-                version: artifact.id.version.clone(),
+                version: artifact.version.clone(),
             },
             hash: artifact.hash,
         }

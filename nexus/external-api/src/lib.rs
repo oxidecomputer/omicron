@@ -47,6 +47,7 @@ mod v2026012200;
 mod v2026012300;
 mod v2026013000;
 mod v2026013001;
+mod v2026029999; // FIXME date
 
 #[cfg(test)]
 mod test_utils;
@@ -79,6 +80,7 @@ api_versions!([
     // |  date-based version should be at the top of the list.
     // v
     // (next_yyyymmddnn, IDENT),
+    (2026029999, TUF_REPO_OPTIONAL_METADATA), // FIXME date
     (2026020200, TRUST_QUORUM_ABORT_CONFIG),
     (2026013100, READ_ONLY_DISKS_NULLABLE),
     (2026013001, READ_ONLY_DISKS),
@@ -5063,6 +5065,7 @@ pub trait NexusExternalApi {
         path = "/v1/system/update/repositories",
         tags = ["system/update"],
         request_body_max_bytes = PUT_UPDATE_REPOSITORY_MAX_BYTES,
+        versions = VERSION_TUF_REPO_OPTIONAL_METADATA..,
     }]
     async fn system_update_repository_upload(
         rqctx: RequestContext<Self::Context>,
@@ -5070,16 +5073,57 @@ pub trait NexusExternalApi {
         body: StreamingBody,
     ) -> Result<HttpResponseOk<views::TufRepoUpload>, HttpError>;
 
+    /// Upload system release repository
+    ///
+    /// System release repositories are verified by the updates trust store.
+    #[endpoint {
+        operation_id = "system_update_repository_upload",
+        method = PUT,
+        path = "/v1/system/update/repositories",
+        tags = ["system/update"],
+        request_body_max_bytes = PUT_UPDATE_REPOSITORY_MAX_BYTES,
+        versions = ..VERSION_TUF_REPO_OPTIONAL_METADATA,
+    }]
+    // FIXME date
+    async fn v2026029999_system_update_repository_upload(
+        rqctx: RequestContext<Self::Context>,
+        query: Query<params::UpdatesPutRepositoryParams>,
+        body: StreamingBody,
+    ) -> Result<HttpResponseOk<v2026029999::TufRepoUpload>, HttpError> {
+        let HttpResponseOk(response) =
+            Self::system_update_repository_upload(rqctx, query, body).await?;
+        Ok(HttpResponseOk(response.into()))
+    }
+
     /// Fetch system release repository by version
     #[endpoint {
         method = GET,
         path = "/v1/system/update/repositories/{system_version}",
         tags = ["system/update"],
+        versions = VERSION_TUF_REPO_OPTIONAL_METADATA..,
     }]
     async fn system_update_repository_view(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<params::UpdatesGetRepositoryParams>,
     ) -> Result<HttpResponseOk<views::TufRepo>, HttpError>;
+
+    /// Fetch system release repository by version
+    #[endpoint {
+        operation_id = "system_update_repository_view",
+        method = GET,
+        path = "/v1/system/update/repositories/{system_version}",
+        tags = ["system/update"],
+        versions = ..VERSION_TUF_REPO_OPTIONAL_METADATA,
+    }]
+    // FIXME date
+    async fn v2026029999_system_update_repository_view(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::UpdatesGetRepositoryParams>,
+    ) -> Result<HttpResponseOk<v2026029999::TufRepo>, HttpError> {
+        let HttpResponseOk(response) =
+            Self::system_update_repository_view(rqctx, path_params).await?;
+        Ok(HttpResponseOk(response.into()))
+    }
 
     /// List all TUF repositories
     ///
@@ -5089,11 +5133,37 @@ pub trait NexusExternalApi {
         method = GET,
         path = "/v1/system/update/repositories",
         tags = ["system/update"],
+        versions = VERSION_TUF_REPO_OPTIONAL_METADATA..,
     }]
     async fn system_update_repository_list(
         rqctx: RequestContext<Self::Context>,
         query_params: Query<PaginatedByVersion>,
     ) -> Result<HttpResponseOk<ResultsPage<views::TufRepo>>, HttpError>;
+
+    /// List all TUF repositories
+    ///
+    /// Returns a paginated list of all TUF repositories ordered by system
+    /// version (newest first by default).
+    #[endpoint {
+        operation_id = "system_update_repository_list",
+        method = GET,
+        path = "/v1/system/update/repositories",
+        tags = ["system/update"],
+        versions = ..VERSION_TUF_REPO_OPTIONAL_METADATA,
+    }]
+    // FIXME date
+    async fn v2026029999_system_update_repository_list(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<PaginatedByVersion>,
+    ) -> Result<HttpResponseOk<ResultsPage<v2026029999::TufRepo>>, HttpError>
+    {
+        let page =
+            Self::system_update_repository_list(rqctx, query_params).await?.0;
+        Ok(HttpResponseOk(ResultsPage {
+            items: page.items.into_iter().map(Into::into).collect(),
+            next_page: page.next_page,
+        }))
+    }
 
     /// List root roles in the updates trust store
     ///

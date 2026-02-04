@@ -1814,7 +1814,7 @@ pub struct TufRepo {
     // This is a slight abuse of `ArtifactHash`, since that's the hash of
     // individual artifacts within the repository. However, we use it here for
     // convenience.
-    pub hash: ArtifactHash,
+    pub hash: Option<ArtifactHash>,
 
     /// The system version for this repository
     ///
@@ -1830,7 +1830,7 @@ pub struct TufRepo {
     /// it's just what the client reported.
     // (e.g., with wicket, we read the file contents from stdin so we don't know
     // the correct file name).
-    pub file_name: String,
+    pub file_name: Option<String>,
 
     /// Time the repository was uploaded
     pub time_created: DateTime<Utc>,
