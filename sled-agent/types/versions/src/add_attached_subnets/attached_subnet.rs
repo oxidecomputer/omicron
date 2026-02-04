@@ -50,6 +50,7 @@ impl From<illumos_utils::opte::AttachedSubnet> for AttachedSubnet {
 
 /// The kind of attached subnet.
 #[derive(Clone, Copy, Debug, Deserialize, JsonSchema, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
 pub enum AttachedSubnetKind {
     /// This is a VPC subnet.
     Vpc,
