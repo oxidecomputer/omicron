@@ -22,6 +22,7 @@ debug-ignore.workspace = true
 dropshot.workspace = true
 futures.workspace = true
 http.workspace = true
+iddqd.workspace = true
 ipnetwork.workspace = true
 itertools.workspace = true
 libc.workspace = true
@@ -45,6 +46,7 @@ uuid.workspace = true
 whoami.workspace = true
 zone.workspace = true
 tofino.workspace = true
+rustix.workspace = true
 
 omicron-workspace-hack.workspace = true
 
