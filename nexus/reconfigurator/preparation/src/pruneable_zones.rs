@@ -308,43 +308,43 @@ async fn is_nexus_pruneable(
         return Ok(false);
     }
 
-    // This is a no-op match that exists solely to ensure we update our logic if
-    // the possible support bundle states change. We need to query for any
-    // support bundle assigned to the `zone_id` Nexus in any state that might
-    // require cleanup work; currently, that means "any state other than
-    // `Failed`".
-    //
-    // If updating this match, you must also ensure you update the query below!
-    match SupportBundleState::Active {
-        SupportBundleState::Collecting
-        | SupportBundleState::Active
-        | SupportBundleState::Destroying
-        | SupportBundleState::Failing => {
-            // We need to query for these states.
-        }
-        SupportBundleState::Failed => {
-            // The sole state we don't care about.
-        }
-    }
-
     // Does this Nexus zone still have support bundles assigned to it in any
-    // state that requires cleanup work? This requires explicitly listing the
-    // states we care about; the no-op match statement above will hopefully keep
-    // this in sync with any changes to the enum.
+    // state that requires cleanup work? This requires building up a list of the
+    // support bundle states we care about and then querying for any bundle in
+    // one of those states assigned to the `zone_id` Nexus.
+    //
+    // Currently, any state other than `Failed` means cleanup work is still
+    // required. We construct the vec of all non-`Failed` states by iterating
+    // over all possible variants to ensure if any changes are made to the enum
+    // in the future, we're forced to manually update the construction of this
+    // set to account for those changes.
     reason_checker.add_reason_checked(
         BlueprintExpungedZoneAccessReason::NexusSupportBundleReassign,
     );
+    let support_bundle_states_needing_cleanup = {
+        let mut states = Vec::new();
+        for state in SupportBundleState::iter() {
+            match state {
+                SupportBundleState::Collecting
+                | SupportBundleState::Active
+                | SupportBundleState::Destroying
+                | SupportBundleState::Failing => {
+                    // We need to query for bundles in these states.
+                    states.push(state);
+                }
+                SupportBundleState::Failed => {
+                    // The sole state we don't care about.
+                }
+            }
+        }
+        states
+    };
     if !datastore
         .support_bundle_list_assigned_to_nexus(
             opctx,
             &single_item_pagparams(),
             zone_id,
-            vec![
-                SupportBundleState::Collecting,
-                SupportBundleState::Active,
-                SupportBundleState::Destroying,
-                SupportBundleState::Failing,
-            ],
+            support_bundle_states_needing_cleanup,
         )
         .await?
         .is_empty()
