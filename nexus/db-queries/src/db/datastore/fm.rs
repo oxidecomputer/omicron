@@ -899,6 +899,7 @@ impl DataStore {
         struct SitrepDeleteResult {
             sitreps_deleted: usize,
             case_ereports_deleted: usize,
+            alert_requests_deleted: usize,
             cases_deleted: usize,
         }
 
@@ -906,7 +907,7 @@ impl DataStore {
         let SitrepDeleteResult {
             sitreps_deleted,
             case_ereports_deleted,
-            case_alert_requests_deleted,
+            alert_requests_deleted,
             cases_deleted,
         } = self
             // Sitrep deletion is transactional to prevent a sitrep from being
@@ -938,6 +939,13 @@ impl DataStore {
                     .execute_async(&conn)
                     .await?;
 
+                    // Delete case alert requests.
+                    let alert_requests_deleted = diesel::delete(
+                        alert_req_dsl::fm_alert_request.filter(alert_req_dsl::sitrep_id.eq_any(ids.clone()))
+                    )
+                    .execute_async(&conn)
+                    .await?;
+
                     // Delete case metadata records.
                     let cases_deleted = diesel::delete(
                         case_dsl::fm_case
@@ -957,6 +965,7 @@ impl DataStore {
                     Ok(SitrepDeleteResult {
                         sitreps_deleted,
                         cases_deleted,
+                        alert_requests_deleted,
                         case_ereports_deleted,
                     })
                 }
