@@ -1601,7 +1601,7 @@ impl Zfs {
     /// epoch is committed.
     pub async fn change_key(
         dataset: &str,
-        key: &key_manager::VersionedAes256GcmDiskEncryptionKey,
+        key: &key_manager_types::VersionedAes256GcmDiskEncryptionKey,
     ) -> Result<(), ChangeKeyError> {
         // FIXME: Replace the use of `zfs_atomic_change_key` with a native
         // invocation of `zfs change-key` using the `-o oxide:epoch` option to

@@ -25,6 +25,7 @@ iddqd.workspace = true
 illumos-utils.workspace = true
 installinator-common.workspace = true
 key-manager.workspace = true
+key-manager-types.workspace = true
 sled-agent-types-versions.workspace = true
 ntp-admin-client.workspace = true
 omicron-common.workspace = true

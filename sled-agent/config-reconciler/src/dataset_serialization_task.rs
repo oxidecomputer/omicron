@@ -26,7 +26,7 @@ use illumos_utils::zfs::DestroyDatasetError;
 use illumos_utils::zfs::Mountpoint;
 use illumos_utils::zfs::WhichDatasets;
 use illumos_utils::zfs::Zfs;
-use key_manager::VersionedAes256GcmDiskEncryptionKey;
+use key_manager_types::VersionedAes256GcmDiskEncryptionKey;
 use omicron_common::disk::DatasetConfig;
 use omicron_common::disk::DatasetKind;
 use omicron_common::disk::DatasetName;
