@@ -15,7 +15,6 @@ use crate::api_metadata::ApiConsumerStatus;
 use crate::api_metadata::ApiExpectedConsumer;
 use crate::api_metadata::ApiExpectedConsumers;
 use crate::api_metadata::ApiMetadata;
-use crate::api_metadata::ClientMatcher;
 use crate::api_metadata::Evaluation;
 use crate::api_metadata::VersionedHow;
 use crate::cargo::DepPath;
@@ -693,8 +692,7 @@ impl SystemApis {
         // Build the configured set from the manifest.
         let mut configured = BTreeSet::new();
         for edge in self.api_metadata.intra_deployment_unit_only_edges() {
-            let ClientMatcher::Specific(client) = &edge.client;
-            configured.insert((edge.server.clone(), client.clone()));
+            configured.insert((edge.server.clone(), edge.client.clone()));
         }
 
         // Compare the two sets.

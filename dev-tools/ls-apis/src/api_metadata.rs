@@ -214,7 +214,7 @@ impl TryFrom<RawApiMetadata> for AllApiMetadata {
                     edge.server
                 );
             }
-            let client_name = edge.client.as_specific();
+            let client_name = &edge.client;
             if !apis.contains_key(client_name) {
                 bail!(
                     "intra_deployment_unit_only_edges:
@@ -449,39 +449,6 @@ pub enum Evaluation {
     Dag,
 }
 
-/// Specifies which client to match in an IDU-only edge rule.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub enum ClientMatcher {
-    /// Match a specific client package.
-    Specific(ClientPackageName),
-}
-
-impl<'de> Deserialize<'de> for ClientMatcher {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        let s = String::deserialize(deserializer)?;
-        Ok(ClientMatcher::Specific(ClientPackageName::from(s)))
-    }
-}
-
-impl ClientMatcher {
-    /// Returns true if this matcher matches the given client package.
-    pub fn matches(&self, client: &ClientPackageName) -> bool {
-        match self {
-            ClientMatcher::Specific(name) => name == client,
-        }
-    }
-
-    /// Returns the specific client name.
-    pub fn as_specific(&self) -> &ClientPackageName {
-        match self {
-            ClientMatcher::Specific(name) => name,
-        }
-    }
-}
-
 /// An edge that should be excluded from the deployment unit dependency graph
 /// because it represents communication that only happens locally within a
 /// single instance of a single deployment unit.
@@ -491,7 +458,7 @@ pub struct IntraDeploymentUnitOnlyEdge {
     /// The server component that consumes the API.
     pub server: ServerComponentName,
     /// The client package consumed.
-    pub client: ClientMatcher,
+    pub client: ClientPackageName,
     /// Explanation of why this edge is intra-deployment-unit-only.
     pub note: String,
 }
@@ -503,6 +470,6 @@ impl IntraDeploymentUnitOnlyEdge {
         server: &ServerComponentName,
         client: &ClientPackageName,
     ) -> bool {
-        self.server == *server && self.client.matches(client)
+        self.server == *server && self.client == *client
     }
 }
