@@ -290,6 +290,9 @@ pub enum SecretRetrieverError {
 
     #[error("Trust quorum error: {0}")]
     TrustQuorum(String),
+
+    #[error("Timeout retrieving secret")]
+    Timeout,
 }
 
 /// A mechanism for retrieving a secrets to use as input key material to HKDF-
