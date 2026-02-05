@@ -860,13 +860,13 @@ fn rss_config_text<'a>(
                 });
 
             let addresses = addresses.iter().map(|a| {
-                let mut items = vec![
-                    Span::styled("  • Address       : ", label_style),
-                ];
+                let mut items =
+                    vec![Span::styled("  • Address       : ", label_style)];
                 if let Some(address) = a.address {
                     items.push(Span::styled(address.to_string(), ok_style));
                 } else {
-                    items.push(Span::styled("link-local".to_string(), ok_style));
+                    items
+                        .push(Span::styled("link-local".to_string(), ok_style));
                 }
                 if let Some(vlan_id) = a.vlan_id {
                     items.extend([

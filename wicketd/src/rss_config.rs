@@ -658,8 +658,8 @@ fn validate_rack_network_config(
 
     Ok(bootstrap_agent_lockstep_client::types::RackNetworkConfig {
         rack_subnet,
-        infra_ip_first: config.infra_ip_first,
-        infra_ip_last: config.infra_ip_last,
+        infra_ip_first: std::net::IpAddr::V4(config.infra_ip_first),
+        infra_ip_last: std::net::IpAddr::V4(config.infra_ip_last),
         ports: config
             .iter_uplinks()
             .map(|(switch, port, config)| {

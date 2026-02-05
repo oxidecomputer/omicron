@@ -62,6 +62,7 @@ use omicron_common::api::internal::shared::ExternalPortDiscovery;
 use omicron_common::api::internal::shared::LldpAdminStatus;
 use omicron_uuid_kinds::SledUuid;
 use oxnet::IpNet;
+use oxnet::Ipv6Net;
 use sled_agent_client::types::AddSledRequest;
 use sled_agent_client::types::StartSledAgentRequest;
 use sled_agent_client::types::StartSledAgentRequestBody;
@@ -71,7 +72,7 @@ use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::collections::HashMap;
-use std::net::IpAddr;
+use std::net::Ipv6Addr;
 use std::num::NonZeroU32;
 use std::str::FromStr;
 use uuid::Uuid;
@@ -402,8 +403,8 @@ impl super::Nexus {
 
         let kind = AddressLotKind::Infra;
 
-        let first_address = IpAddr::V4(rack_network_config.infra_ip_first);
-        let last_address = IpAddr::V4(rack_network_config.infra_ip_last);
+        let first_address = rack_network_config.infra_ip_first;
+        let last_address = rack_network_config.infra_ip_last;
         let ipv4_block = AddressLotBlockCreate { first_address, last_address };
 
         let blocks = vec![ipv4_block];
@@ -454,10 +455,7 @@ impl super::Nexus {
                         blocks: bgp_config
                             .originate
                             .iter()
-                            .map(|o| AddressLotBlockCreate {
-                                first_address: o.first_addr().into(),
-                                last_address: o.last_addr().into(),
-                            })
+                            .map(|ipnet| (*ipnet).into())
                             .collect(),
                     },
                 )
@@ -488,13 +486,13 @@ impl super::Nexus {
                         announcement: bgp_config
                             .originate
                             .iter()
-                            .map(|ipv4_net| BgpAnnouncementCreate {
+                            .map(|ipnet| BgpAnnouncementCreate {
                                 address_lot_block: NameOrId::Name(
                                     format!("as{}", bgp_config.asn)
                                         .parse()
                                         .unwrap(),
                                 ),
-                                network: (*ipv4_net).into(),
+                                network: *ipnet,
                             })
                             .collect(),
                     },
@@ -580,7 +578,9 @@ impl super::Nexus {
                 .iter()
                 .map(|a| Address {
                     address_lot: NameOrId::Name(address_lot_name.clone()),
-                    address: a.address,
+                    address: a.address.unwrap_or_else(|| {
+                        IpNet::V6(Ipv6Net::host_net(Ipv6Addr::UNSPECIFIED))
+                    }),
                     vlan_id: a.vlan_id,
                 })
                 .collect();

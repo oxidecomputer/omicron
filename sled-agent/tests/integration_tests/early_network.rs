@@ -7,9 +7,7 @@
 use std::str::FromStr;
 
 use bootstore::schemes::v0 as bootstore;
-use omicron_common::api::internal::shared::{
-    LldpAdminStatus, LldpPortConfig, UplinkAddressConfig,
-};
+use omicron_common::api::internal::shared::{LldpAdminStatus, LldpPortConfig};
 use omicron_common::api::{
     external::{ImportExportPolicy, SwitchLocation},
     internal::shared::{
@@ -158,10 +156,7 @@ fn current_config_example() -> (&'static str, EarlyNetworkConfig) {
                     },
                     PortConfig {
                         routes: vec![],
-                        addresses: vec![UplinkAddressConfig {
-                            address: "172.20.15.53/29".parse().unwrap(),
-                            vlan_id: None,
-                        }],
+                        addresses: vec!["172.20.15.53/29".parse().unwrap()],
                         switch: SwitchLocation::Switch1,
                         port: "qsfp18".to_owned(),
                         uplink_port_speed: PortSpeed::Speed100G,
@@ -203,10 +198,7 @@ fn current_config_example() -> (&'static str, EarlyNetworkConfig) {
                     },
                     PortConfig {
                         routes: vec![],
-                        addresses: vec![UplinkAddressConfig {
-                            address: "172.20.15.45/29".parse().unwrap(),
-                            vlan_id: None,
-                        }],
+                        addresses: vec!["172.20.15.45/29".parse().unwrap()],
                         switch: SwitchLocation::Switch0,
                         port: "qsfp18".to_owned(),
                         uplink_port_speed: PortSpeed::Speed100G,

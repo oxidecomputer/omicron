@@ -637,8 +637,8 @@ pub async fn run_standalone_server(
         external_port_count: ExternalPortDiscovery::Static(HashMap::new()),
         rack_network_config: RackNetworkConfig {
             rack_subnet: Ipv6Net::host_net(Ipv6Addr::LOCALHOST),
-            infra_ip_first: Ipv4Addr::LOCALHOST,
-            infra_ip_last: Ipv4Addr::LOCALHOST,
+            infra_ip_first: IpAddr::V4(Ipv4Addr::LOCALHOST),
+            infra_ip_last: IpAddr::V4(Ipv4Addr::LOCALHOST),
             ports: Vec::new(),
             bgp: Vec::new(),
             bfd: Vec::new(),

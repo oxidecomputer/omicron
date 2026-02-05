@@ -11,7 +11,7 @@ use crate::app::{
     },
     dpd_clients, switch_zone_address_mappings,
 };
-use oxnet::Ipv4Net;
+use oxnet::{IpNet, Ipv4Net, Ipv6Net};
 use slog::{Logger, o};
 
 use internal_dns_resolver::Resolver;
@@ -49,7 +49,7 @@ use omicron_common::{
         internal::shared::ParseSwitchLocationError,
     },
 };
-use rdb_types::{Prefix4, Prefix6};
+use rdb_types::{Prefix, Prefix4, Prefix6};
 use serde_json::json;
 use sled_agent_client::types::{
     BgpConfig as SledBgpConfig, BgpPeerConfig as SledBgpPeerConfig,
@@ -549,7 +549,7 @@ impl BackgroundTask for SwitchPortSettingsManager {
                 let mut switch_bgp_config: HashMap<SwitchLocation, (Uuid, BgpConfig)> = HashMap::new();
 
                 // Prefixes are associated to BgpConfig via the config id
-                let mut bgp_announce_prefixes: HashMap<Uuid, Vec<Prefix4>> = HashMap::new();
+                let mut bgp_announce_prefixes: HashMap<Uuid, Vec<Prefix>> = HashMap::new();
 
                 for (location, port, change) in &changes {
                     let PortSettingsChange::Apply(settings) = change else {
@@ -639,17 +639,19 @@ impl BackgroundTask for SwitchPortSettingsManager {
                                 },
                             };
 
-                            let mut prefixes: Vec<Prefix4> = vec![];
+                            let mut prefixes: Vec<Prefix> = vec![];
 
                             for announcement in &announcements {
-                                let value = match announcement.network.ip() {
-                                    IpAddr::V4(value) => value,
-                                    IpAddr::V6(a) => {
-                                        error!(log, "bad request, only ipv4 supported at this time"; "requested_address" => ?a);
-                                        continue;
+                                match announcement.network.ip() {
+                                    IpAddr::V4(value) => {
+                                        let prefix = Prefix4 { value, length: announcement.network.prefix() };
+                                        prefixes.push(Prefix::V4(prefix));
+                                    },
+                                    IpAddr::V6(value) => {
+                                        let prefix = Prefix6 { value, length: announcement.network.prefix() };
+                                        prefixes.push(Prefix::V6(prefix));
                                     },
                                 };
-                                prefixes.push(Prefix4 { value, length: announcement.network.prefix() });
                             }
                             bgp_announce_prefixes.insert(bgp_config.bgp_announce_set_id, prefixes);
                         }
@@ -1058,8 +1060,18 @@ impl BackgroundTask for SwitchPortSettingsManager {
                         .expect("bgp config is present but announce set is not populated")
                         .iter()
                         .map(|prefix| {
-                            Ipv4Net::new(prefix.value, prefix.length)
-                                .expect("Prefix4 and Ipv4Net's value types have diverged")
+                            match prefix {
+                                Prefix::V4(prefix4) => {
+                                    let net = Ipv4Net::new(prefix4.value, prefix4.length)
+                                        .expect("Prefix4 and Ipv4Net's value types have diverged");
+                                    IpNet::V4(net)
+                                },
+                                Prefix::V6(prefix6) => {
+                                    let net = Ipv6Net::new(prefix6.value, prefix6.length)
+                                        .expect("Prefix6 and Ipv6Net's value types have diverged");
+                                    IpNet::V6(net)
+                                },
+                            }
                         }).collect();
 
                     SledBgpConfig {
@@ -1109,7 +1121,7 @@ impl BackgroundTask for SwitchPortSettingsManager {
                     let mut port_config = PortConfig {
                         addresses: info.addresses.iter().map(|a|
 			    UplinkAddressConfig {
-				    address: a.address,
+				    address: Some(a.address),
 				    vlan_id: a.vlan_id
 			    }).collect(),
                         autoneg: info
@@ -1313,8 +1325,8 @@ impl BackgroundTask for SwitchPortSettingsManager {
                         ntp_servers,
                         rack_network_config: Some(RackNetworkConfig {
                             rack_subnet: subnet,
-                            infra_ip_first,
-                            infra_ip_last,
+                            infra_ip_first: std::net::IpAddr::V4(infra_ip_first),
+                            infra_ip_last: std::net::IpAddr::V4(infra_ip_last),
                             ports,
                             bgp,
                             bfd,
@@ -1744,7 +1756,7 @@ fn uplinks(
                 .addresses
                 .iter()
                 .map(|a| UplinkAddressConfig {
-                    address: a.address,
+                    address: Some(a.address),
                     vlan_id: a.vlan_id,
                 })
                 .collect(),

@@ -9,6 +9,7 @@ use crate::impls::rack_init::default_allowed_source_ips;
 use crate::impls::rack_init::validate_external_dns;
 use anyhow::Result;
 use camino::Utf8PathBuf;
+pub use omicron_common::api::internal::shared::rack_init::v1::SwitchPorts;
 use omicron_common::{
     address::IpRange,
     api::{

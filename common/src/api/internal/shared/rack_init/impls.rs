@@ -58,9 +58,7 @@ impl UplinkAddressConfig {
     pub fn addr(&self) -> IpAddr {
         match self.address {
             Some(ipaddr) => ipaddr.addr(),
-            None => {
-                IpAddr::V6(Ipv6Addr::UNSPECIFIED)
-            }
+            None => IpAddr::V6(Ipv6Addr::UNSPECIFIED),
         }
     }
 }

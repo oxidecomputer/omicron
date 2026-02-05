@@ -41,7 +41,7 @@ use omicron_common::backoff::{
 };
 use omicron_ddm_admin_client::DdmError;
 use oxnet::IpNet;
-use rdb_types::{Prefix4, Prefix6};
+use rdb_types::{Prefix, Prefix4, Prefix6};
 use slog::Logger;
 use slog_error_chain::InlineErrorChain;
 use std::collections::{HashMap, HashSet};
@@ -665,7 +665,16 @@ impl<'a> EarlyNetworkSetup<'a> {
                     originate: config
                         .originate
                         .iter()
-                        .map(|x| Prefix4 { length: x.width(), value: x.addr() })
+                        .map(|x| match x {
+                            IpNet::V4(ipv4_net) => Prefix::V4(Prefix4 {
+                                length: ipv4_net.width(),
+                                value: ipv4_net.addr(),
+                            }),
+                            IpNet::V6(ipv6_net) => Prefix::V6(Prefix6 {
+                                length: ipv6_net.width(),
+                                value: ipv6_net.addr(),
+                            }),
+                        })
                         .collect(),
                 };
 

@@ -309,7 +309,10 @@ fn add_steps_for_single_local_uplink_preflight_check<'a>(
 
                 for addr in &uplink.addresses {
                     // This includes the CIDR only
-                    let uplink_cidr = addr.address.expect("TODO: conversion unimplemented!").to_string();
+                    let uplink_cidr = addr
+                        .address
+                        .expect("TODO: conversion unimplemented!")
+                        .to_string();
                     // This includes the VLAN ID, if any
                     let uplink_cfg = addr.to_string();
                     if let Err(err) = execute_command(&[

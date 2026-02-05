@@ -14,7 +14,7 @@ use super::v1::RouteConfig;
 use super::v1::SwitchLocation;
 use super::v1::TxEqConfig;
 use crate::api::external::ImportExportPolicy;
-use oxnet::{Ipv6Net, IpNet};
+use oxnet::{IpNet, Ipv6Net};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::net::IpAddr;
@@ -127,6 +127,12 @@ pub struct UplinkAddressConfig {
     pub vlan_id: Option<u16>,
 }
 
+impl From<super::v1::UplinkAddressConfig> for UplinkAddressConfig {
+    fn from(value: super::v1::UplinkAddressConfig) -> Self {
+        Self { address: Some(value.address), vlan_id: value.vlan_id }
+    }
+}
+
 #[derive(Debug, PartialEq, Eq, Deserialize, Serialize)]
 pub struct UplinkAddressConfigError(pub(super) String);
 
@@ -153,6 +159,12 @@ pub struct SwitchPorts {
     pub uplinks: Vec<HostPortConfig>,
 }
 
+impl From<super::v1::SwitchPorts> for SwitchPorts {
+    fn from(value: super::v1::SwitchPorts) -> Self {
+        Self { uplinks: value.uplinks.into_iter().map(From::from).collect() }
+    }
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, JsonSchema)]
 pub struct HostPortConfig {
     /// Switchport to use for external connectivity
@@ -165,4 +177,15 @@ pub struct HostPortConfig {
     pub lldp: Option<LldpPortConfig>,
 
     pub tx_eq: Option<TxEqConfig>,
+}
+
+impl From<super::v1::HostPortConfig> for HostPortConfig {
+    fn from(value: super::v1::HostPortConfig) -> Self {
+        Self {
+            port: value.port,
+            addrs: value.addrs.into_iter().map(From::from).collect(),
+            lldp: value.lldp,
+            tx_eq: value.tx_eq,
+        }
+    }
 }

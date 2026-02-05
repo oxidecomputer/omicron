@@ -3036,7 +3036,7 @@
             "description": "The set of prefixes for the BGP router to originate.",
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/Ipv4Net"
+              "$ref": "#/components/schemas/IpNet"
             }
           },
           "shaper": {
@@ -8520,12 +8520,12 @@
           "infra_ip_first": {
             "description": "First ip address to be used for configuring network infrastructure",
             "type": "string",
-            "format": "ipv4"
+            "format": "ip"
           },
           "infra_ip_last": {
             "description": "Last ip address to be used for configuring network infrastructure",
             "type": "string",
-            "format": "ipv4"
+            "format": "ip"
           },
           "ports": {
             "description": "Uplinks for connecting the rack to external networks",
@@ -9645,7 +9645,13 @@
         "type": "object",
         "properties": {
           "address": {
-            "$ref": "#/components/schemas/IpNet"
+            "nullable": true,
+            "description": "The address to be used on the uplink. Set to `None` for an Ipv6 Link Local address.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/IpNet"
+              }
+            ]
           },
           "vlan_id": {
             "nullable": true,
@@ -9655,10 +9661,7 @@
             "format": "uint16",
             "minimum": 0
           }
-        },
-        "required": [
-          "address"
-        ]
+        }
       },
       "VirtioDisk": {
         "description": "A disk that presents a virtio-block interface to the guest.",

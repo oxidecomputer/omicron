@@ -6,9 +6,9 @@
 
 use bootstore::schemes::v0 as bootstore;
 use omicron_common::api::internal::shared::RackNetworkConfig;
+use oxnet::IpNet;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use oxnet::IpNet;
 
 /// Network configuration required to bring up the control plane
 ///
@@ -46,8 +46,12 @@ impl From<crate::v1::early_networking::EarlyNetworkConfig>
             value.body.rack_network_config.map(|v1_config| {
                 RackNetworkConfig {
                     rack_subnet: v1_config.rack_subnet,
-                    infra_ip_first: std::net::IpAddr::V4(v1_config.infra_ip_first),
-                    infra_ip_last: std::net::IpAddr::V4(v1_config.infra_ip_last),
+                    infra_ip_first: std::net::IpAddr::V4(
+                        v1_config.infra_ip_first,
+                    ),
+                    infra_ip_last: std::net::IpAddr::V4(
+                        v1_config.infra_ip_last,
+                    ),
                     ports: v1_config
                         .ports
                         .into_iter()
@@ -163,10 +167,13 @@ impl From<crate::v1::early_networking::EarlyNetworkConfig>
                     bgp: v1_config
                         .bgp
                         .into_iter()
-                        .map(|b| BgpConfig
-{
+                        .map(|b| BgpConfig {
                             asn: b.asn,
-                            originate: b.originate.iter().map(|i| IpNet::V4(*i)).collect(),
+                            originate: b
+                                .originate
+                                .iter()
+                                .map(|i| IpNet::V4(*i))
+                                .collect(),
                             shaper: b.shaper,
                             checker: b.checker,
                         })
