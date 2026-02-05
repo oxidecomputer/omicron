@@ -727,12 +727,21 @@ impl ReconcilerTask {
         let mut request = RekeyRequest::default();
 
         for info in disks_needing_rekey {
-            match self
-                .key_requester
-                .get_key(target_epoch.0, info.disk.identity().clone())
-                .await
+            match tokio::time::timeout(
+                // Because `get_key` could take an indefinite amount of time in
+                // the case where the rack secret is not yet assembled, we set a
+                // timeout and mark disks that could not be given a derived key
+                // as failed, so that we will immediately retry to reconcile.
+                //
+                // This timeout is supposed to be long enough to be annoying and
+                // noticeable, but not too long to be devastating.
+                Duration::from_mins(2),
+                self.key_requester
+                    .get_key(target_epoch.0, info.disk.identity().clone()),
+            )
+            .await
             {
-                Ok(key) => {
+                Ok(Ok(key)) => {
                     let dataset_name =
                         format!("{}/{}", info.disk.zpool_name(), CRYPT_DATASET);
                     request.disks.insert(
@@ -740,10 +749,19 @@ impl ReconcilerTask {
                         DatasetRekeyInfo { dataset_name, key },
                     );
                 }
-                Err(e) => {
+                Ok(Err(e)) => {
                     error!(
                         self.log,
                         "Failed to derive key";
+                        "disk_id" => %info.disk_id,
+                        "error" => %e,
+                    );
+                    failed.insert(info.disk_id);
+                }
+                Err(e) => {
+                    error!(
+                        self.log,
+                        "Key derivation timed out";
                         "disk_id" => %info.disk_id,
                         "error" => %e,
                     );
