@@ -278,6 +278,37 @@ async fn crdb_list_enums(crdb: &CockroachInstance) -> Vec<Row> {
     process_rows(&rows)
 }
 
+/// Returns a map from table name to an ordered list of column names.
+///
+/// The column names are ordered by their ordinal position in the table,
+/// which allows us to verify that the relative order of columns is the
+/// same between dbinit.sql and migrations.
+async fn crdb_column_ordering(
+    crdb: &CockroachInstance,
+) -> BTreeMap<String, Vec<String>> {
+    let client = crdb.connect().await.expect("failed to connect");
+
+    let rows = client
+        .query(
+            "SELECT table_name, column_name \
+             FROM information_schema.columns \
+             WHERE table_schema = 'public' \
+             ORDER BY table_name, ordinal_position",
+            &[],
+        )
+        .await
+        .expect("failed to query column ordering");
+    client.cleanup().await.expect("cleaning up after query");
+
+    let mut result: BTreeMap<String, Vec<String>> = BTreeMap::new();
+    for row in rows {
+        let table_name: String = row.get(0);
+        let column_name: String = row.get(1);
+        result.entry(table_name).or_default().push(column_name);
+    }
+    result
+}
+
 fn read_all_schema_versions() -> AllSchemaVersions {
     AllSchemaVersions::load(camino::Utf8Path::new(SCHEMA_DIR)).unwrap()
 }
@@ -521,6 +552,8 @@ const TABLES: [&'static str; 4] =
 #[derive(PartialEq, Debug)]
 struct InformationSchema {
     columns: Vec<Row>,
+    // "Table Name" -> "Columns"
+    column_ordering: BTreeMap<String, Vec<String>>,
     constraint_column_usage: Vec<Row>,
     enums: Vec<Row>,
     key_column_usage: Vec<Row>,
@@ -539,6 +572,40 @@ impl InformationSchema {
         // the columns diff especially needs this: it can be 20k lines otherwise
         similar_asserts::assert_eq!(self.tables, other.tables);
         similar_asserts::assert_eq!(self.columns, other.columns);
+
+        // These tables have known column ordering mismatches between dbinit.sql
+        // and migrations. The "token-and-session-ids" migration added an `id`
+        // column to these tables via `ALTER TABLE ... ADD COLUMN`, which places
+        // the column at the end. However, dbinit.sql defines `id` as the first
+        // column. Since deployed racks may have been initialized either way
+        // (fresh from dbinit.sql or upgraded via migrations), we cannot change
+        // the column order without a more complex migration. We explicitly
+        // exclude these tables from the column ordering check.
+        //
+        // See: https://github.com/oxidecomputer/omicron/issues/9809
+        const TABLES_WITH_KNOWN_COLUMN_ORDERING_ISSUES: &[&str] =
+            &["console_session", "device_access_token"];
+
+        let filter_known_issues =
+            |ordering: &BTreeMap<String, Vec<String>>| -> BTreeMap<_, _> {
+                ordering
+                    .iter()
+                    .filter(|(table, _)| {
+                        !TABLES_WITH_KNOWN_COLUMN_ORDERING_ISSUES
+                            .contains(&table.as_str())
+                    })
+                    .map(|(k, v)| (k.clone(), v.clone()))
+                    .collect()
+            };
+
+        similar_asserts::assert_eq!(
+            filter_known_issues(&self.column_ordering),
+            filter_known_issues(&other.column_ordering),
+            "Column ordering did not match. The relative order of columns within \
+            each table must be the same in dbinit.sql and migrations. Since \
+            migrations can only add columns at the end of a table, new columns \
+            in dbinit.sql should also be added at the end of the table definition."
+        );
         similar_asserts::assert_eq!(
             self.enums,
             other.enums,
@@ -566,10 +633,6 @@ impl InformationSchema {
         similar_asserts::assert_eq!(
             self.statistics,
             other.statistics,
-            "Statistics did not match. This often means that in dbinit.sql, a new \
-            column was added into the middle of a table rather than to the end. \
-            If that is the case, change dbinit.sql to add the column to the \
-            end of the table.\n"
         );
         similar_asserts::assert_eq!(self.sequences, other.sequences);
         similar_asserts::assert_eq!(self.pg_indexes, other.pg_indexes);
@@ -587,6 +650,8 @@ impl InformationSchema {
             Some("table_schema = 'public'"),
         )
         .await;
+
+        let column_ordering = crdb_column_ordering(crdb).await;
 
         let enums = crdb_list_enums(crdb).await;
 
@@ -659,6 +724,7 @@ impl InformationSchema {
 
         Self {
             columns,
+            column_ordering,
             constraint_column_usage,
             enums,
             key_column_usage,
