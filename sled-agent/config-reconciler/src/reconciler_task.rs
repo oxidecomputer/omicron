@@ -339,11 +339,6 @@ impl ReconcilerTask {
         // this pretty aggressive policy.
         const SLEEP_BETWEEN_RETRIES: Duration = Duration::from_secs(5);
 
-        // Ensure we process the initial epoch on startup. Using mark_unchanged()
-        // means that changed() will fire on the first value, allowing us to
-        // catch any missed rekeys from crashes.
-        self.committed_epoch_rx.mark_unchanged();
-
         loop {
             let result = self
                 .do_reconcilation(
@@ -591,7 +586,6 @@ impl ReconcilerTask {
         // Check if any disks need rekeying to the current committed epoch.
         // We use borrow_and_update() to mark the epoch as seen, so we don't
         // trigger another reconciliation for the same epoch change.
-        // Note: We must copy the epoch out of the Ref before any await points.
         let current_epoch = *self.committed_epoch_rx.borrow_and_update();
         let rekey_result = if let Some(epoch) = current_epoch {
             self.rekey_for_epoch(epoch).await
