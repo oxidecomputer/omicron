@@ -8,6 +8,7 @@ use super::MAX_DISKS_PER_INSTANCE;
 use super::MAX_EPHEMERAL_IPS_PER_INSTANCE;
 use super::MAX_EXTERNAL_IPS_PER_INSTANCE;
 use super::MAX_MEMORY_BYTES_PER_INSTANCE;
+use super::MAX_MULTICAST_GROUPS_PER_INSTANCE;
 use super::MAX_NICS_PER_INSTANCE;
 use super::MAX_SSH_KEYS_PER_INSTANCE;
 use super::MAX_VCPU_PER_INSTANCE;
@@ -644,6 +645,13 @@ impl super::Nexus {
             return Err(Error::invalid_request(&format!(
                 "An instance may not have more than {} external IP addresses",
                 MAX_EXTERNAL_IPS_PER_INSTANCE,
+            )));
+        }
+
+        if params.multicast_groups.len() > MAX_MULTICAST_GROUPS_PER_INSTANCE {
+            return Err(Error::invalid_request(&format!(
+                "An instance may not join more than {} multicast groups",
+                MAX_MULTICAST_GROUPS_PER_INSTANCE,
             )));
         }
 
@@ -1606,7 +1614,7 @@ impl super::Nexus {
             .into_iter()
             .map(|ext| sled_agent_client::types::AttachedSubnet {
                 subnet: ext.subnet.into(),
-                is_external: true,
+                kind: sled_agent_client::types::AttachedSubnetKind::External,
             })
             .collect();
 

@@ -1,3 +1,11 @@
 Mutating endpoints without audit logging:
 system_timeseries_query                      (post   "/v1/system/timeseries/query")
 timeseries_query                             (post   "/v1/timeseries/query")
+
+Mutating endpoints not tested (not in VERIFY_ENDPOINTS):
+device_access_token                          (post   "/device/token")
+device_auth_confirm                          (post   "/device/confirm")
+device_auth_request                          (post   "/device/auth")
+login_local                                  (post   "/v1/login/{silo_name}/local")
+login_saml                                   (post   "/login/{silo_name}/saml/{provider_name}")
+logout                                       (post   "/v1/logout")

@@ -3021,9 +3021,13 @@
         "description": "A subnet attached to a single instance.",
         "type": "object",
         "properties": {
-          "is_external": {
-            "description": "Is this is a subnet in the external customer network.\n\nIf false, this is a VPC Subnet attached to the instance.",
-            "type": "boolean"
+          "kind": {
+            "description": "The kind of subnet that is attached.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/AttachedSubnetKind"
+              }
+            ]
           },
           "subnet": {
             "description": "The IP subnet.",
@@ -3035,8 +3039,27 @@
           }
         },
         "required": [
-          "is_external",
+          "kind",
           "subnet"
+        ]
+      },
+      "AttachedSubnetKind": {
+        "description": "The kind of attached subnet.",
+        "oneOf": [
+          {
+            "description": "This is a VPC subnet.",
+            "type": "string",
+            "enum": [
+              "vpc"
+            ]
+          },
+          {
+            "description": "This is an external subnet.",
+            "type": "string",
+            "enum": [
+              "external"
+            ]
+          }
         ]
       },
       "AttachedSubnets": {

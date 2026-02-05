@@ -20,14 +20,20 @@ use anyhow::Context as _;
 use nexus_db_model::IpAttachState;
 use nexus_db_model::IpNet;
 use nexus_db_model::IpVersion;
-use nexus_db_queries::db::datastore::ExternalSubnetBeginAttachResult;
-use nexus_db_queries::db::datastore::ExternalSubnetCompleteAttachResult;
+use nexus_db_queries::db::datastore::ExternalSubnetBeginOpResult;
+use nexus_db_queries::db::datastore::ExternalSubnetCompleteOpResult;
 use nexus_types::external_api::views;
 use nexus_types::identity::Resource;
 use serde::Deserialize;
 use serde::Serialize;
 use steno::ActionError;
 
+// We are doing resource-locking here using the attach state of the external
+// subnets. We atomically move from detached to attaching to start the saga,
+// continue with the rest of the actions, and finalize it by moving from
+// attaching to attched.
+//
+// See the block comment at the top of `instance_ip_attach.rs` for more details.
 declare_saga_actions! {
     subnet_attach;
     BEGIN_ATTACH -> "begin_attach_result" {
@@ -67,7 +73,7 @@ pub struct Params {
 // Mark the external subnet record as "attaching" to the provided instance.
 async fn ssa_begin_attach_subnet(
     sagactx: NexusActionContext,
-) -> Result<ExternalSubnetBeginAttachResult, ActionError> {
+) -> Result<ExternalSubnetBeginOpResult, ActionError> {
     let osagactx = sagactx.user_data();
     let datastore = osagactx.datastore();
     let params = sagactx.saga_params::<Params>()?;
@@ -95,9 +101,8 @@ async fn ssa_begin_attach_subnet_undo(
 
     debug!(log, "ensuring subnet is detached");
     let params = sagactx.saga_params::<Params>()?;
-    let ExternalSubnetBeginAttachResult { subnet, do_saga } =
-        sagactx
-            .lookup::<ExternalSubnetBeginAttachResult>("begin_attach_result")?;
+    let ExternalSubnetBeginOpResult { subnet, do_saga } =
+        sagactx.lookup::<ExternalSubnetBeginOpResult>("begin_attach_result")?;
     if !do_saga {
         return Ok(());
     }
@@ -115,8 +120,8 @@ async fn ssa_begin_attach_subnet_undo(
         .await
         .map_err(ActionError::action_failed)
     {
-        Ok(ExternalSubnetCompleteAttachResult::Modified(_)) => Ok(()),
-        Ok(ExternalSubnetCompleteAttachResult::NoChanges) => {
+        Ok(ExternalSubnetCompleteOpResult::Modified(_)) => Ok(()),
+        Ok(ExternalSubnetCompleteOpResult::NoChanges) => {
             warn!(log, "subnet is deleted, could not fully detach");
             Ok(())
         }
@@ -144,8 +149,8 @@ async fn ssa_notify_dpd(
     let sled_id = sagactx
         .lookup::<Option<VmmAndSledIds>>("instance_state")?
         .map(|ids| ids.sled_id);
-    let subnet = sagactx
-        .lookup::<ExternalSubnetBeginAttachResult>("begin_attach_result")?;
+    let subnet =
+        sagactx.lookup::<ExternalSubnetBeginOpResult>("begin_attach_result")?;
     send_subnet_attachment_to_dpd(
         &sagactx,
         &params.serialized_authn,
@@ -172,8 +177,8 @@ async fn ssa_update_opte(
     sagactx: NexusActionContext,
 ) -> Result<(), ActionError> {
     let ids = sagactx.lookup::<Option<VmmAndSledIds>>("instance_state")?;
-    let subnet = sagactx
-        .lookup::<ExternalSubnetBeginAttachResult>("begin_attach_result")?;
+    let subnet =
+        sagactx.lookup::<ExternalSubnetBeginOpResult>("begin_attach_result")?;
     send_subnet_attachment_to_opte(&sagactx, ids, subnet).await
 }
 
@@ -181,8 +186,8 @@ async fn ssa_update_opte_undo(
     sagactx: NexusActionContext,
 ) -> Result<(), anyhow::Error> {
     let ids = sagactx.lookup::<Option<VmmAndSledIds>>("instance_state")?;
-    let subnet = sagactx
-        .lookup::<ExternalSubnetBeginAttachResult>("begin_attach_result")?;
+    let subnet =
+        sagactx.lookup::<ExternalSubnetBeginOpResult>("begin_attach_result")?;
     delete_subnet_attachment_from_opte(&sagactx, ids, subnet)
         .await
         .context("deleting attached subnet from OPTE")
@@ -196,9 +201,8 @@ async fn ssa_complete_attach(
     let datastore = osagactx.datastore();
     debug!(log, "finalizing subnet attachment");
     let params = sagactx.saga_params::<Params>()?;
-    let ExternalSubnetBeginAttachResult { subnet, do_saga } =
-        sagactx
-            .lookup::<ExternalSubnetBeginAttachResult>("begin_attach_result")?;
+    let ExternalSubnetBeginOpResult { subnet, do_saga } =
+        sagactx.lookup::<ExternalSubnetBeginOpResult>("begin_attach_result")?;
     if !do_saga {
         return Ok(subnet.into());
     }
@@ -215,10 +219,10 @@ async fn ssa_complete_attach(
         )
         .await
     {
-        Ok(ExternalSubnetCompleteAttachResult::Modified(subnet)) => {
+        Ok(ExternalSubnetCompleteOpResult::Modified(subnet)) => {
             Ok(subnet.into())
         }
-        Ok(ExternalSubnetCompleteAttachResult::NoChanges) => {
+        Ok(ExternalSubnetCompleteOpResult::NoChanges) => {
             warn!(log, "ssa_complete_attach ran more than once");
             Ok(subnet.into())
         }
@@ -265,14 +269,18 @@ pub(crate) mod test {
     use nexus_test_utils::resource_helpers::create_subnet_pool;
     use nexus_test_utils::resource_helpers::create_subnet_pool_member;
     use nexus_test_utils_macros::nexus_test;
+    use nexus_types::external_api::params;
     use nexus_types::external_api::views::ExternalSubnet;
     use nexus_types::external_api::views::Project;
     use nexus_types::external_api::views::SubnetPool;
     use nexus_types::external_api::views::SubnetPoolMember;
     use omicron_common::address::IpVersion;
+    use omicron_common::api::external::NameOrId;
     use omicron_common::api::external::SimpleIdentityOrName;
+    use omicron_common::api::internal::shared::AttachedSubnetId;
     use omicron_uuid_kinds::GenericUuid as _;
     use omicron_uuid_kinds::InstanceUuid;
+    use sled_agent_types::attached_subnet::AttachedSubnetKind;
 
     type ControlPlaneTestContext =
         nexus_test_utils::ControlPlaneTestContext<crate::Server>;
@@ -427,13 +435,13 @@ pub(crate) mod test {
                 )
             });
         assert!(
-            on_sled_agent.is_external,
+            matches!(on_sled_agent.kind, AttachedSubnetKind::External),
             "All attached subnets should be external at this point"
         );
 
         // The database records should also indicate it's now attached.
         let subnets = datastore
-            .instance_lookup_attached_external_subnets(&opctx, instance_id)
+            .instance_lookup_attached_subnets(&opctx, instance_id)
             .await
             .unwrap();
         assert_eq!(subnets.len(), 1);
@@ -524,5 +532,74 @@ pub(crate) mod test {
         let params = new_test_params(&opctx, &datastore).await;
         let dag = create_saga_dag::<SagaSubnetAttach>(params).unwrap();
         test_helpers::actions_succeed_idempotently(nexus, dag).await;
+    }
+
+    // NOTE: This is really a test for `instance_detach_external_subnets()`.
+    // It's much easier to write here until we finish wiring up the subnet
+    // attachment API in Nexus.
+    #[nexus_test(server = crate::Server)]
+    async fn detaching_all_instance_subnets_does_not_delete_subnets(
+        cptestctx: &ControlPlaneTestContext,
+    ) {
+        let client = &cptestctx.external_client;
+        let apictx = &cptestctx.server.server_context();
+        let nexus = &apictx.nexus;
+        let opctx = test_helpers::test_opctx(cptestctx);
+        let datastore = &nexus.db_datastore;
+        let _context = setup_test(&client).await;
+        let instance =
+            create_instance(client, PROJECT_NAME, INSTANCE_NAME).await;
+        let instance_id = InstanceUuid::from_untyped_uuid(instance.id());
+        crate::app::sagas::test_helpers::instance_simulate(
+            cptestctx,
+            &instance_id,
+        )
+        .await;
+
+        // Attach the subnet.
+        let params = new_test_params(&opctx, datastore).await;
+        nexus
+            .sagas
+            .saga_execute::<SagaSubnetAttach>(params)
+            .await
+            .expect("subnet attach saga should succeed");
+
+        // The database records should indicate it's now attached.
+        let subnets = datastore
+            .instance_lookup_attached_subnets(&opctx, instance_id)
+            .await
+            .unwrap();
+        assert_eq!(subnets.len(), 1);
+        assert_eq!(subnets[0].instance_id, instance_id);
+        let subnet_id = match subnets[0].subnet_id {
+            AttachedSubnetId::External(eid) => eid.into_untyped_uuid(),
+            AttachedSubnetId::Vpc(_) => todo!("handle attached VPC subnets"),
+        };
+
+        // Detach all (1) subnets from the instance.
+        let n_detached = datastore
+            .instance_detach_external_subnets(
+                &opctx,
+                instance_id.into_untyped_uuid(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(n_detached, 1);
+
+        // We should still be able to lookup the subnet directly.
+        let (.., db_subnet) = nexus
+            .external_subnet_lookup(
+                &opctx,
+                params::ExternalSubnetSelector {
+                    project: None,
+                    external_subnet: NameOrId::Id(subnet_id),
+                },
+            )
+            .unwrap()
+            .fetch()
+            .await
+            .expect("Should still be able to look up subnet after detaching");
+        assert_eq!(db_subnet.id().into_untyped_uuid(), subnet_id);
+        assert!(db_subnet.instance_id.is_none());
     }
 }

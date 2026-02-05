@@ -303,7 +303,7 @@ impl DataStore {
                 LocalStorageAllocation::Unencrypted(allocation) => {
                     Self::delete_local_storage_unencrypted_dataset_allocation_in_txn(
                         &conn,
-                        allocation.local_storage_unencrypted_dataset_id(),
+                        allocation.id(),
                     )
                     .await
                 }
@@ -311,7 +311,7 @@ impl DataStore {
                 LocalStorageAllocation::Encrypted(allocation) => {
                     Self::delete_local_storage_dataset_allocation_in_txn(
                         &conn,
-                        allocation.local_storage_dataset_id(),
+                        allocation.id(),
                     )
                     .await
                 }

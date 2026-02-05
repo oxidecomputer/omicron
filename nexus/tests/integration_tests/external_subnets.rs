@@ -10,7 +10,7 @@ use dropshot::ResultsPage;
 use dropshot::test_util::ClientTestContext;
 use http::Method;
 use http::StatusCode;
-use nexus_db_queries::db::queries::external_subnet::MAX_ATTACHED_SUBNETS;
+use nexus_db_queries::db::queries::external_subnet::MAX_ATTACHED_SUBNETS_PER_INSTANCE;
 use nexus_test_utils::http_testing::AuthnMode;
 use nexus_test_utils::http_testing::NexusRequest;
 use nexus_test_utils::http_testing::RequestBuilder;
@@ -624,9 +624,10 @@ async fn cannot_attach_too_many_subnets(cptestctx: &ControlPlaneTestContext) {
     instance_wait_for_state(client, instance_id, InstanceState::Running).await;
 
     // Create and attach a bunch of subnets.
-    let mut subnets =
-        Vec::with_capacity(usize::try_from(MAX_ATTACHED_SUBNETS).unwrap());
-    for i in 0..MAX_ATTACHED_SUBNETS {
+    let mut subnets = Vec::with_capacity(
+        usize::try_from(MAX_ATTACHED_SUBNETS_PER_INSTANCE).unwrap(),
+    );
+    for i in 0..MAX_ATTACHED_SUBNETS_PER_INSTANCE {
         let name = format!("{EXTERNAL_SUBNET_NAME}-{i}");
         let create_params = params::ExternalSubnetCreate {
             identity: IdentityMetadataCreateParams {
