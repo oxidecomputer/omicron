@@ -7022,6 +7022,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "nexus-fm"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "ereport-types",
+ "iddqd",
+ "nexus-reconfigurator-planning",
+ "nexus-types",
+ "omicron-test-utils",
+ "omicron-uuid-kinds",
+ "omicron-workspace-hack",
+ "rand 0.9.2",
+ "serde",
+ "serde_json",
+ "slog",
+ "slog-error-chain",
+ "typed-rng",
+]
+
+[[package]]
 name = "nexus-internal-api"
 version = "0.1.0"
 dependencies = [
@@ -8462,6 +8483,7 @@ dependencies = [
  "nexus-db-schema",
  "nexus-defaults",
  "nexus-external-api",
+ "nexus-fm",
  "nexus-internal-api",
  "nexus-inventory",
  "nexus-lockstep-api",
