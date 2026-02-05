@@ -3668,7 +3668,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.switch_port_settings_route_config (
 );
 
 CREATE TABLE IF NOT EXISTS omicron.public.switch_port_settings_bgp_peer_config (
-    id UUID NOT NULL DEFAULT gen_random_uuid(),
+    id UUID NOT NULL,
     port_settings_id UUID,
     bgp_config_id UUID NOT NULL,
     interface_name TEXT,
