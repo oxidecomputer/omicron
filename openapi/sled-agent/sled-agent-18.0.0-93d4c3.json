@@ -411,7 +411,7 @@
       "get": {
         "summary": "This API endpoint is only reading the local sled agent's view of the",
         "description": "bootstore. The boostore is a distributed data store that is eventually consistent. Reads from individual nodes may not represent the latest state.",
-        "operationId": "read_network_bootstore_config_cache_v1",
+        "operationId": "read_network_bootstore_config_cache",
         "responses": {
           "200": {
             "description": "successful operation",
@@ -432,7 +432,7 @@
         }
       },
       "put": {
-        "operationId": "write_network_bootstore_config_v1",
+        "operationId": "write_network_bootstore_config",
         "requestBody": {
           "content": {
             "application/json": {
@@ -1497,7 +1497,7 @@
     },
     "/switch-ports": {
       "post": {
-        "operationId": "uplink_ensure_v1",
+        "operationId": "uplink_ensure",
         "requestBody": {
           "content": {
             "application/json": {
@@ -3259,7 +3259,7 @@
         "type": "object",
         "properties": {
           "addr": {
-            "description": "Address of the peer. Use `Ipv4Addr::UNSPECIFIED` to indicate an unnumbered BGP session established over the interface specified by `port`.",
+            "description": "Address of the peer.",
             "type": "string",
             "format": "ipv4"
           },
@@ -5355,7 +5355,7 @@
             "nullable": true,
             "allOf": [
               {
-                "$ref": "#/components/schemas/RackNetworkConfig"
+                "$ref": "#/components/schemas/RackNetworkConfigV2"
               }
             ]
           }
@@ -8277,7 +8277,7 @@
         "type": "string",
         "format": "uuid"
       },
-      "PortConfig": {
+      "PortConfigV2": {
         "type": "object",
         "properties": {
           "addresses": {
@@ -8709,7 +8709,7 @@
         ],
         "additionalProperties": false
       },
-      "RackNetworkConfig": {
+      "RackNetworkConfigV2": {
         "description": "Initial network configuration",
         "type": "object",
         "properties": {
@@ -8742,7 +8742,7 @@
             "description": "Uplinks for connecting the rack to external networks",
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/PortConfig"
+              "$ref": "#/components/schemas/PortConfigV2"
             }
           },
           "rack_subnet": {
