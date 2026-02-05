@@ -512,6 +512,7 @@
     },
     "/rot/{rot}/attest": {
       "post": {
+        "summary": "Return attestation over recorded measurments and nonce from the RoT.",
         "operationId": "rot_attest",
         "parameters": [
           {
@@ -556,6 +557,7 @@
     },
     "/rot/{rot}/certificate-chain": {
       "get": {
+        "summary": "Return the certificate chain for the attestation signer from the RoT.",
         "operationId": "rot_certificate_chain",
         "parameters": [
           {
@@ -590,6 +592,7 @@
     },
     "/rot/{rot}/measurement-log": {
       "get": {
+        "summary": "Return the set of measurments recorded by the RoT.",
         "operationId": "rot_measurement_log",
         "parameters": [
           {

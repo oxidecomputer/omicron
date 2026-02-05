@@ -1376,6 +1376,7 @@ pub trait SledAgentApi {
         path_params: Path<latest::attached_subnet::VmmSubnetPathParam>,
     ) -> Result<HttpResponseDeleted, HttpError>;
 
+    /// Return the set of measurments recorded by the RoT.
     #[endpoint {
         method = GET,
         path = "/rot/{rot}/measurement-log",
@@ -1386,6 +1387,7 @@ pub trait SledAgentApi {
         path_params: Path<latest::rot::RotPathParams>,
     ) -> Result<HttpResponseOk<latest::rot::MeasurementLog>, HttpError>;
 
+    /// Return the certificate chain for the attestation signer from the RoT.
     #[endpoint {
         method = GET,
         path = "/rot/{rot}/certificate-chain",
@@ -1396,6 +1398,7 @@ pub trait SledAgentApi {
         path_params: Path<latest::rot::RotPathParams>,
     ) -> Result<HttpResponseOk<latest::rot::CertificateChain>, HttpError>;
 
+    /// Return attestation over recorded measurments and nonce from the RoT.
     #[endpoint {
         method = POST,
         path = "/rot/{rot}/attest",
