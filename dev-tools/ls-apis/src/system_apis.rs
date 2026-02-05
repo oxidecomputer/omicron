@@ -331,14 +331,14 @@ impl SystemApis {
         &self.api_metadata
     }
 
-    /// Returns the note for a localhost-only edge, if one matches.
-    pub fn localhost_only_edge_note(
+    /// Returns the note for a intra-deployment-unit-only edge, if one matches.
+    pub fn idu_only_edge_note(
         &self,
         server: &ServerComponentName,
         client: &ClientPackageName,
     ) -> Option<&str> {
         self.api_metadata
-            .localhost_only_edges()
+            .intra_deployment_unit_only_edges()
             .iter()
             .find(|edge| edge.matches(server, client))
             .map(|edge| edge.note.as_str())
@@ -498,7 +498,7 @@ impl SystemApis {
     fn make_deployment_unit_graph(
         &self,
         dependency_filter: ApiDependencyFilter,
-        localhost_only_edges: Option<
+        idu_only_edges: Option<
             &BTreeSet<(ServerComponentName, ClientPackageName)>,
         >,
     ) -> Result<(
@@ -522,9 +522,9 @@ impl SystemApis {
                 for (client_pkg, _) in
                     self.component_apis_consumed(server_pkg, dependency_filter)?
                 {
-                    // When localhost_only_edges is provided, we're building a
+                    // When idu_only_edges is provided, we're building a
                     // graph of server-side-versioned API dependencies only.
-                    if let Some(localhost_edges) = localhost_only_edges {
+                    if let Some(idu_edges) = idu_only_edges {
                         let api = self
                             .api_metadata
                             .client_pkgname_lookup(client_pkg)
@@ -533,10 +533,10 @@ impl SystemApis {
                             continue;
                         }
 
-                        // Skip edges that represent localhost-only communication
-                        // (communication within a deployment unit that doesn't
-                        // cross deployment unit boundaries).
-                        if localhost_edges
+                        // Skip edges that represent intra-deployment-unit-only
+                        // communication (communication within one instance of
+                        // one deployment unit).
+                        if idu_edges
                             .contains(&(server_pkg.clone(), client_pkg.clone()))
                         {
                             continue;
@@ -636,7 +636,7 @@ impl SystemApis {
     /// 3. The server and API producer are in the same deployment unit.
     ///
     /// Returns a set of (server, client) pairs.
-    fn compute_required_localhost_edges(
+    fn compute_required_idu_edges(
         &self,
     ) -> Result<BTreeSet<(ServerComponentName, ClientPackageName)>> {
         let filter = ApiDependencyFilter::Default;
@@ -669,7 +669,7 @@ impl SystemApis {
                     if server_unit == producer_unit {
                         // This edge would create an intra-unit dependency for
                         // a server-versioned API, so it must be in the
-                        // localhost-only list.
+                        // intra-deployment-unit-only list.
                         required.insert((server.clone(), client.clone()));
                         break;
                     }
@@ -680,18 +680,19 @@ impl SystemApis {
         Ok(required)
     }
 
-    /// Validates that the configured localhost_only_edges exactly match the
-    /// required set of edges that must be excluded.
+    /// Validates that the configured idu_only_edges exactly match the required
+    /// set of edges that must be excluded.
     ///
-    /// Returns the validated set of edges for use by make_deployment_unit_graph.
-    fn validate_localhost_only_edges(
+    /// Returns the validated set of edges for use by
+    /// make_deployment_unit_graph.
+    fn validate_idu_only_edges(
         &self,
     ) -> Result<BTreeSet<(ServerComponentName, ClientPackageName)>> {
-        let required = self.compute_required_localhost_edges()?;
+        let required = self.compute_required_idu_edges()?;
 
         // Build the configured set from the manifest.
         let mut configured = BTreeSet::new();
-        for edge in self.api_metadata.localhost_only_edges() {
+        for edge in self.api_metadata.intra_deployment_unit_only_edges() {
             let ClientMatcher::Specific(client) = &edge.client;
             configured.insert((edge.server.clone(), client.clone()));
         }
@@ -702,11 +703,15 @@ impl SystemApis {
 
         if !missing.is_empty() || !extra.is_empty() {
             let mut msg = String::from(
-                "localhost_only_edges configuration does not match required edges:\n",
+                "intra_deployment_unit_only_edges configuration does not \
+                 match required edges:\n",
             );
 
             if !missing.is_empty() {
-                msg.push_str("\nMissing entries (these edges exist and need localhost-only exclusion):\n");
+                msg.push_str(
+                    "\nMissing entries (these edges exist and need \
+                       intra_deployment_unit_only exclusion):\n",
+                );
                 for (server, client) in &missing {
                     msg.push_str(&format!(
                         "  - server = {:?}, client = {:?}\n",
@@ -716,7 +721,10 @@ impl SystemApis {
             }
 
             if !extra.is_empty() {
-                msg.push_str("\nExtra entries (these edges don't exist or don't need exclusion):\n");
+                msg.push_str(
+                    "\nExtra entries (these edges don't exist or don't need \
+                     exclusion):\n",
+                );
                 for (server, client) in &extra {
                     msg.push_str(&format!(
                         "  - server = {:?}, client = {:?}\n",
@@ -785,9 +793,9 @@ impl SystemApis {
         // can't be part of a cycle.
         let filter = ApiDependencyFilter::Default;
 
-        // Validate that all configured localhost_only_edges are correct and
-        // match the required set exactly.
-        let localhost_only_edges = self.validate_localhost_only_edges()?;
+        // Validate that all configured intra_deployment_unit_only_edges are
+        // correct and match the required set exactly.
+        let idu_only_edges = self.validate_idu_only_edges()?;
 
         // Construct a graph where:
         //
@@ -808,8 +816,8 @@ impl SystemApis {
         }
 
         // Do the same with a graph of deployment units.
-        let (graph, nodes) = self
-            .make_deployment_unit_graph(filter, Some(&localhost_only_edges))?;
+        let (graph, nodes) =
+            self.make_deployment_unit_graph(filter, Some(&idu_only_edges))?;
         let reverse_nodes: BTreeMap<_, _> =
             nodes.iter().map(|(d_u, node)| (node, d_u)).collect();
         if let Err(error) = petgraph::algo::toposort(&graph, None) {

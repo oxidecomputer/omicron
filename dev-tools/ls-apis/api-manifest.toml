@@ -595,41 +595,47 @@ sled agent.
 """
 
 ################################################################################
-# Localhost-only edges
+# Intra-deployment-unit-only edges
 #
 # These edges are excluded from the deployment unit dependency graph because
-# they represent communication that only happens locally within a deployment
-# unit, not across deployment unit boundaries. A single deployment unit is
-# updated atomically, so there's no risk of version skew with localhost-only
-# edges.
+# they represent communication that only happens locally within a *single
+# instance* of a single deployment unit, not across deployment unit boundaries.
+# A single deployment unit is updated atomically, so there's no risk of version
+# skew with intra_deployment_unit-only edges.
+#
+# Note that things do not belong here when they cross different instances of the
+# same deployment unit.  For example, Sled Agent and MGS are in the same
+# deployment unit (the host OS), but Sled Agent's use of MGS crosses different
+# instances of the deployment unit (i.e., different sleds).  Those don't belong
+# in this category.
 ################################################################################
 
-[[localhost_only_edges]]
+[[intra_deployment_unit_only_edges]]
 server = "ddmd"
 client = "dpd-client"
 note = "verified: sled-agent configures ddmd with dpd_host=[::1] (services.rs:3127)"
 
-[[localhost_only_edges]]
+[[intra_deployment_unit_only_edges]]
 server = "dpd"
 client = "gateway-client"
 note = "verified: dpd defaults to [::1]:MGS_PORT (dendrite switch_identifiers.rs:60)"
 
-[[localhost_only_edges]]
+[[intra_deployment_unit_only_edges]]
 server = "lldpd"
 client = "dpd-client"
 note = "verified: lldpd defaults to localhost for dpd (lldp dendrite.rs:194)"
 
-[[localhost_only_edges]]
+[[intra_deployment_unit_only_edges]]
 server = "mgd"
 client = "ddm-admin-client"
 note = "verified: mg-lower hardcodes localhost:8000 (mg-lower ddm.rs:110)"
 
-[[localhost_only_edges]]
+[[intra_deployment_unit_only_edges]]
 server = "mgd"
 client = "dpd-client"
 note = "verified: mg-lower hardcodes localhost (mg-lower dendrite.rs:491)"
 
-[[localhost_only_edges]]
+[[intra_deployment_unit_only_edges]]
 server = "mgd"
 client = "gateway-client"
 note = "verified: mgd defaults to [::1]:12225 (mgd main.rs:93)"
@@ -638,52 +644,52 @@ note = "verified: mgd defaults to [::1]:12225 (mgd main.rs:93)"
 # localhost. They are kept here to avoid breaking the build, but need to be
 # fixed, either through client-side versioning or by some other means.
 
-[[localhost_only_edges]]
+[[intra_deployment_unit_only_edges]]
 server = "omicron-sled-agent"
 client = "gateway-client"
 note = "BUG: uses underlay IP, not localhost (early_networking.rs:376)"
 
-[[localhost_only_edges]]
+[[intra_deployment_unit_only_edges]]
 server = "omicron-sled-agent"
 client = "ddm-admin-client"
 note = "verified: uses Client::localhost() (ddm_reconciler.rs:56)"
 
-[[localhost_only_edges]]
+[[intra_deployment_unit_only_edges]]
 server = "omicron-sled-agent"
 client = "dpd-client"
 note = "BUG: uses underlay IP, not localhost (services.rs:1090)"
 
-[[localhost_only_edges]]
+[[intra_deployment_unit_only_edges]]
 server = "omicron-sled-agent"
 client = "mg-admin-client"
 note = "BUG: uses underlay IP, not localhost (early_networking.rs:483)"
 
-[[localhost_only_edges]]
+[[intra_deployment_unit_only_edges]]
 server = "omicron-sled-agent"
 client = "propolis-client"
 note = "BUG: uses zone IP, not localhost (instance.rs:2283)"
 
-[[localhost_only_edges]]
+[[intra_deployment_unit_only_edges]]
 server = "tfportd"
 client = "dpd-client"
 note = "verified: configured with dpd_host=[::1] (services.rs:2852)"
 
-[[localhost_only_edges]]
+[[intra_deployment_unit_only_edges]]
 server = "tfportd"
 client = "lldpd-client"
 note = "verified: hardcodes localhost (tfportd tfport.rs:88)"
 
-[[localhost_only_edges]]
+[[intra_deployment_unit_only_edges]]
 server = "wicketd"
 client = "ddm-admin-client"
 note = "verified: uses DdmAdminClient::localhost() (bootstrap_addrs.rs:162)"
 
-[[localhost_only_edges]]
+[[intra_deployment_unit_only_edges]]
 server = "wicketd"
 client = "dpd-client"
 note = "verified: hardcodes [::1]:DENDRITE_PORT (preflight_check/uplink.rs:83)"
 
-[[localhost_only_edges]]
+[[intra_deployment_unit_only_edges]]
 server = "wicketd"
 client = "gateway-client"
 note = "verified: --mgs-address CLI expects localhost (bin/wicketd.rs:35)"
