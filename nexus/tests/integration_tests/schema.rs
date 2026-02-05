@@ -630,10 +630,7 @@ impl InformationSchema {
             self.referential_constraints,
             other.referential_constraints
         );
-        similar_asserts::assert_eq!(
-            self.statistics,
-            other.statistics,
-        );
+        similar_asserts::assert_eq!(self.statistics, other.statistics,);
         similar_asserts::assert_eq!(self.sequences, other.sequences);
         similar_asserts::assert_eq!(self.pg_indexes, other.pg_indexes);
     }
