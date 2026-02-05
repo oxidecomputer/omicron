@@ -2,9 +2,13 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! Version 2 of rack init types. The rack initialization API is now
-//! lockstep, so this should be the last version of these types and
-//! they now may be modified freely.
+//! Version 2 of rack init types.
+
+// These types are used in the rack initialization lockstep API, which allows
+// changes freely, and also kept serialized in the bootstore, which requires
+// changes to be made very carefully to maintain backwards compatibility. We
+// need a better setup for managing bootstore changes; this is tracked by
+// <https://github.com/oxidecomputer/omicron/issues/9801>.
 
 use super::v1::BfdPeerConfig;
 use super::v1::LldpPortConfig;

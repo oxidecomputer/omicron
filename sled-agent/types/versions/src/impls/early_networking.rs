@@ -7,7 +7,7 @@
 use std::str::FromStr;
 
 use bootstore::schemes::v0 as bootstore;
-use slog::{Logger, warn};
+use slog::Logger;
 
 use crate::latest::early_networking::{
     EarlyNetworkConfig, EarlyNetworkConfigBody,
@@ -40,27 +40,19 @@ impl EarlyNetworkConfig {
         2
     }
 
-    // Note: This currently only converts between v0 and v1 or deserializes v1 of
-    // `EarlyNetworkConfig`.
+    /// Attempt to read the contents of the bootstore, converting from old
+    /// versions if necessary.
     pub fn deserialize_bootstore_config(
-        log: &Logger,
+        _log: &Logger,
         config: &bootstore::NetworkConfig,
     ) -> Result<Self, serde_json::Error> {
-        // Try to deserialize the latest version of the data structure (v2). If
-        // that succeeds we are done.
-        match serde_json::from_slice::<EarlyNetworkConfig>(&config.blob) {
-            Ok(val) => Ok(val),
-            Err(error) => {
-                // Log this error and continue trying to deserialize older
-                // versions.
-                warn!(
-                    log,
-                    "Failed to deserialize EarlyNetworkConfig \
-                     as v2, trying next as v1: {}",
-                    error,
-                );
-                Err(error)
-            }
-        }
+        // Try to serialize the latest version. We don't currently try to read
+        // any old versions - the last time we changed it in a wire-incompatible
+        // way was many releases ago.
+        //
+        // If a wire-incompatible change to `EarlyNetworkConfig` is made, this
+        // function will need to change to account for that (at least during the
+        // one major release where the change is rolled out).
+        serde_json::from_slice::<EarlyNetworkConfig>(&config.blob)
     }
 }
