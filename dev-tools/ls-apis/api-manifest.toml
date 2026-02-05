@@ -608,6 +608,7 @@ sled agent.
 # deployment unit (the host OS), but Sled Agent's use of MGS crosses different
 # instances of the deployment unit (i.e., different sleds).  Those don't belong
 # in this category.
+# XXX-dap need to update and then validate these
 ################################################################################
 
 [[intra_deployment_unit_only_edges]]

@@ -628,46 +628,34 @@ impl SystemApis {
         Ok((graph, nodes))
     }
 
-    /// Computes the set of (server, client) edges that must be excluded from
-    /// the deployment unit dependency graph because they represent intra-unit
-    /// communication for server-side-versioned APIs.
+    /// Computes the set of (server, client) edges for server-side-only-
+    /// versioned APIs where the server and client are in the same deployment
+    /// unit.
     ///
-    /// These are edges where all of the below are true:
-    ///
-    /// 1. The server consumes the client.
-    /// 2. The API is server-side-versioned.
-    /// 3. The server and API producer are in the same deployment unit.
-    ///
-    /// Returns a set of (server, client) pairs.
+    /// See the caller for more on this.
     fn compute_required_idu_edges(
         &self,
     ) -> Result<BTreeSet<(ServerComponentName, ClientPackageName)>> {
         let filter = ApiDependencyFilter::Default;
         let mut required = BTreeSet::new();
 
-        for server in self.server_component_units.keys() {
-            let Some(server_unit) = self.server_component_units.get(server)
-            else {
-                continue;
-            };
-
+        for (server, server_unit) in &self.server_component_units {
             for (client, _) in self.component_apis_consumed(server, filter)? {
                 // Only consider server-side-versioned APIs.
-                let Some(api) = self.api_metadata.client_pkgname_lookup(client)
-                else {
-                    continue;
-                };
+                let api = self
+                    .api_metadata
+                    .client_pkgname_lookup(client)
+                    .expect("consumed API must have metadata");
                 if api.versioned_how != VersionedHow::Server {
                     continue;
                 }
 
                 // Check if any producer is in the same deployment unit.
                 for producer in self.api_producers(client) {
-                    let Some(producer_unit) =
-                        self.server_component_units.get(producer)
-                    else {
-                        continue;
-                    };
+                    let producer_unit = self
+                        .server_component_units
+                        .get(producer)
+                        .expect("API producer must be in some deployment unit");
 
                     if server_unit == producer_unit {
                         // This edge would create an intra-unit dependency for
@@ -683,8 +671,28 @@ impl SystemApis {
         Ok(required)
     }
 
-    /// Validates that the configured idu_only_edges exactly match the required
-    /// set of edges that must be excluded.
+    /// Validates that these two sets of (server, client) edges match:
+    ///
+    /// - API dependencies found by this tool *within* a deployment unit for a
+    ///   server-side-versioned API
+    /// - API dependencies annotated in the metadata as being
+    ///   intra-deployment-unit
+    ///
+    /// Why?  Recall that a server-side-only-versioned API means that the server
+    /// is always updated before its clients.  Further, the update system does
+    /// not (and cannot) guarantee anything about the ordering of updates for a
+    /// particular kind of deployment unit.  (Example: for host OS, the update
+    /// system does not say that any particular sleds are updated before any
+    /// others.)  Thus, if you have a server-side-only-versioned API with a
+    /// client in the same deployment unit, that's only allowable if the client
+    /// is always talking to an instance of the server in the same *instance* of
+    /// the same deployment unit.  A dependency from Sled Agent to Propolis in
+    /// the *same* host OS is okay.  A dependency from Sled Agent to a Propolis
+    /// on a different sled is not.
+    ///
+    /// If we found a same-deployment-unit edge that's not labeled in the
+    /// manifest as intra-deployment-unit, that means we've identified either a
+    /// manifest bug or an update bug waiting to happen.
     ///
     /// Returns the validated set of edges for use by
     /// make_deployment_unit_graph.
@@ -704,35 +712,31 @@ impl SystemApis {
         let extra: BTreeSet<_> = configured.difference(&required).collect();
 
         if !missing.is_empty() || !extra.is_empty() {
-            let mut msg = String::from(
-                "intra_deployment_unit_only_edges configuration does not \
-                 match required edges:\n",
-            );
-
-            if !missing.is_empty() {
-                msg.push_str(
-                    "\nMissing entries (these edges exist and need \
-                       intra_deployment_unit_only exclusion):\n",
-                );
-                for (server, client) in &missing {
-                    msg.push_str(&format!(
-                        "  - server = {:?}, client = {:?}\n",
-                        server, client
-                    ));
-                }
+            let mut msg = String::new();
+            for (server, client) in missing {
+                msg.push_str(&format!(
+                    "The following API dependendency exists between two \
+                     components in the same deployment unit, but is not \
+                     present in `intra_deployment_unit_only_edges`: \
+                     server {:?} client {:?}\n\
+                     If this client only ever uses this API with a server \
+                     in the same *instance* of the same deployment unit, \
+                     then add it to `intra_deployment_unit_only_edges`. \
+                     Otherwise, this relationship is incompatible with \
+                     automated upgrade.\n",
+                    server, client,
+                ));
             }
 
-            if !extra.is_empty() {
-                msg.push_str(
-                    "\nExtra entries (these edges don't exist or don't need \
-                     exclusion):\n",
-                );
-                for (server, client) in &extra {
-                    msg.push_str(&format!(
-                        "  - server = {:?}, client = {:?}\n",
-                        server, client
-                    ));
-                }
+            for (server, client) in extra {
+                msg.push_str(&format!(
+                    "`intra_deployment_unit_only_edges` contains an edge \
+                     between server {:?} and client {:?}, but either \
+                     this API dependency was not found, or the API is not \
+                     server-side-only-versioned, or this client and server \
+                     are not in the same deployment unit.\n",
+                    server, client,
+                ));
             }
 
             bail!("{}", msg);
