@@ -16,7 +16,6 @@ illumos-utils.workspace = true
 indent_write.workspace = true
 async-trait.workspace = true
 bootstore.workspace = true
-hex.workspace = true
 omicron-common.workspace = true
 omicron-passwords.workspace = true
 omicron-uuid-kinds.workspace = true

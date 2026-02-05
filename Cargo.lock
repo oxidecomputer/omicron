@@ -13342,7 +13342,6 @@ dependencies = [
  "camino",
  "chrono",
  "daft",
- "hex",
  "iddqd",
  "illumos-utils",
  "indent_write",
