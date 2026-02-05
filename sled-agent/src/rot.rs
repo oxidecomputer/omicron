@@ -95,13 +95,13 @@ impl From<Attestation> for SaRotTypes::Attestation {
 
 #[derive(Debug, Error)]
 pub enum RotError {
-    #[error("Failed to create IPCC attestor: {0}")]
+    #[error("failed to create IPCC attestor: {0}")]
     AttestIpcc(#[from] dice_verifier::ipcc::IpccError),
 
-    #[error("Failed to create mock attestor: {0}")]
+    #[error("failed to create mock attestor: {0}")]
     AttestMock(#[from] mock::AttestMockError),
 
-    #[error("Attestation request failed: {0}")]
+    #[error("attestation request failed: {0}")]
     Attest(#[from] AttestError),
 
     #[error("RoT attestation queue full")]
@@ -177,19 +177,40 @@ impl RotAttestationHandle {
     }
 }
 
+/// Mediates access to the Oxide RoT on the current sled.
+///
+/// The semantics are:
+///  1. Attestation requests (on a real sled) are proxied through a few layers:
+///     Sled Agent ([`RotAttestationTask`]) <--(via IPCC)--> SP <-> RoT.
+///     Those IPCC calls are made via an IOCTL (via [`ipcc::AttestIpcc`]) and
+///     thus should be treated as "blocking I/O".
+///  2. There is only a single outstanding attestation request at any point.
+///  3. (1) + (2) leads us to service requests (via [`RotAttestationHandle`])
+///     from a single queue which is drained by a task started via
+///     `spawn_blocking()` -- [`RotAttestationTask::run`].
 pub struct RotAttestationTask {
     log: Logger,
     rx: mpsc::Receiver<RotAttestationMessage>,
     attest: Box<dyn Attest + Send>,
 }
 
-type RotAttestation = (RotAttestationTask, RotAttestationHandle);
-
 impl RotAttestationTask {
-    pub fn new(
+    /// Creates and launches the RoT Attestation task with the given config.
+    /// On success, a handle is returned to use for submitting attestation
+    /// requests.
+    pub fn launch(
         log: &Logger,
         attest_config: &AttestConfig,
-    ) -> Result<RotAttestation, RotError> {
+    ) -> Result<RotAttestationHandle, RotError> {
+        let (task, handle) = Self::new(log, attest_config)?;
+        tokio::task::spawn_blocking(move || task.run());
+        Ok(handle)
+    }
+
+    fn new(
+        log: &Logger,
+        attest_config: &AttestConfig,
+    ) -> Result<(RotAttestationTask, RotAttestationHandle), RotError> {
         let log = log.new(o!(
             "component" => "RotAttestationTask",
             "interface" => match attest_config {
@@ -220,7 +241,7 @@ impl RotAttestationTask {
     ///
     /// This should be run via `spawn_blocking` as we perform ipcc operations
     /// via an ioctl and don't want to block any other tasks.
-    pub fn run(mut self) {
+    fn run(mut self) {
         info!(self.log, "request loop started.");
         loop {
             let Some(req) = self.rx.blocking_recv() else {

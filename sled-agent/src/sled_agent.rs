@@ -682,10 +682,8 @@ impl SledAgent {
         });
 
         // Spawn a background task for handling RoT attestation operations
-        let (rot_attest_task, rot_attest_handle) =
-            RotAttestationTask::new(&log, &config.sprockets.attest)?;
-
-        tokio::task::spawn_blocking(move || rot_attest_task.run());
+        let rot_attest_handle =
+            RotAttestationTask::launch(&log, &config.sprockets.attest)?;
 
         let currently_managed_zpools_rx =
             config_reconciler.currently_managed_zpools_rx().clone();
