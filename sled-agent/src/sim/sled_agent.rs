@@ -7,7 +7,6 @@
 use super::artifact_store::SimArtifactStorage;
 use super::collection::{PokeMode, SimCollection};
 use super::config::Config;
-use super::disk::SimDisk;
 use super::instance::{self, SimInstance};
 use super::storage::CrucibleData;
 use super::storage::Storage;
@@ -26,7 +25,7 @@ use dropshot::HttpError;
 use futures::Stream;
 use iddqd::IdOrdMap;
 use omicron_common::api::external::{
-    ByteCount, DiskState, Error, Generation, ResourceType,
+    ByteCount, Error, Generation, ResourceType,
 };
 use omicron_common::api::internal::nexus::{
     DiskRuntimeState, MigrationRuntimeState, MigrationState, SledVmmState,
@@ -92,11 +91,8 @@ pub struct SledAgent {
     pub ip: IpAddr,
     /// collection of simulated VMMs, indexed by Propolis uuid
     vmms: Arc<SimCollection<SimInstance>>,
-    /// collection of simulated disks, indexed by disk uuid
-    disks: Arc<SimCollection<SimDisk>>,
     storage: Storage,
     updates: UpdateManager,
-    nexus_address: SocketAddr,
     pub nexus_client: Arc<NexusClient>,
     pub simulated_upstairs: Arc<SimulatedUpstairs>,
     pub v2p_mappings: Mutex<HashSet<VirtualNetworkInterfaceHost>>,
@@ -130,7 +126,6 @@ impl SledAgent {
     pub async fn new_simulated_with_id(
         config: &Config,
         log: Logger,
-        nexus_address: SocketAddr,
         nexus_client: Arc<NexusClient>,
         simulated_upstairs: Arc<SimulatedUpstairs>,
         sled_index: u16,
@@ -140,7 +135,6 @@ impl SledAgent {
         info!(&log, "created simulated sled agent"; "sim_mode" => ?sim_mode);
 
         let instance_log = log.new(o!("kind" => "instances"));
-        let disk_log = log.new(o!("kind" => "disks"));
         let storage_log = log.new(o!("kind" => "storage"));
 
         let bootstore_network_config = Mutex::new(EarlyNetworkConfig {
@@ -184,14 +178,8 @@ impl SledAgent {
                 instance_log,
                 sim_mode,
             )),
-            disks: Arc::new(SimCollection::new(
-                Arc::clone(&nexus_client),
-                disk_log,
-                sim_mode,
-            )),
             storage,
             updates: UpdateManager::new(config.updates.clone()),
-            nexus_address,
             nexus_client,
             simulated_upstairs,
             v2p_mappings: Mutex::new(HashSet::new()),
@@ -257,37 +245,12 @@ impl SledAgent {
                 .get_local_storage_unencrypted_dataset(zpool_id, dataset_id);
         }
 
-        for (id, _disk) in vmm_spec.crucible_backends() {
-            let SpecKey::Uuid(id) = id else {
-                return Err(Error::invalid_value(
-                    id.to_string(),
-                    "Crucible disks in a Propolis spec must have UUID keys",
-                ));
-            };
-
-            let initial_state = DiskRuntimeState {
-                disk_state: DiskState::Attached(
-                    instance_id.into_untyped_uuid(),
-                ),
-                generation: omicron_common::api::external::Generation::new(),
-                time_updated: chrono::Utc::now(),
-            };
-
-            // Ensure that any disks that are in this request are attached to
-            // this instance.
-            self.disks
-                .sim_ensure(
-                    &id,
-                    initial_state,
-                    Some(DiskStateRequested::Attached(
-                        instance_id.into_untyped_uuid(),
-                    )),
-                )
-                .await?;
-            self.disks
-                .sim_ensure_producer(id, (self.nexus_address, *id))
-                .await?;
-        }
+        // There's no way to verify that the downstairs targetted in a volume
+        // construction request are valid from a single simulated sled agent
+        // unless those simulated sled agents share the simulated storage state,
+        // which they don't. In tests where there are many simulated sled agents
+        // it may even be true that none of the downstairs referenced in the
+        // construction request are hosted on this one.
 
         // If the user of this simulated agent previously requested a mock
         // Propolis server, start that server.
@@ -562,16 +525,8 @@ impl SledAgent {
         self.vmms.size().await
     }
 
-    pub async fn disk_count(&self) -> usize {
-        self.disks.size().await
-    }
-
     pub async fn vmm_poke(&self, id: PropolisUuid, mode: PokeMode) {
         self.vmms.sim_poke(id.into_untyped_uuid(), mode).await;
-    }
-
-    pub async fn disk_poke(&self, id: Uuid) {
-        self.disks.sim_poke(id, PokeMode::SingleStep).await;
     }
 
     /// Adds a Physical Disk to the simulated sled agent.
