@@ -3,11 +3,11 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use crate::AlertClass;
-use crate::AlertClassParseError;
 use crate::SemverVersion;
 use crate::typed_uuid::DbTypedUuid;
 use chrono::{DateTime, Utc};
 use nexus_db_schema::schema::{alert_glob, alert_subscription};
+use nexus_types::alert::AlertClassParseError;
 use nexus_types::external_api::shared;
 use omicron_common::api::external::Error;
 use omicron_uuid_kinds::{AlertReceiverKind, AlertReceiverUuid};
@@ -81,9 +81,12 @@ impl AlertSubscriptionKind {
             return Ok(Self::Glob(AlertGlob { regex, glob: value }));
         }
 
-        let class = value.parse().map_err(|e: AlertClassParseError| {
-            Error::invalid_value("alert_class", e.to_string())
-        })?;
+        let class: AlertClass = value
+            .parse::<nexus_types::alert::AlertClass>()
+            .map_err(|e: AlertClassParseError| {
+                Error::invalid_value("alert_class", e.to_string())
+            })?
+            .into();
 
         if class == AlertClass::Probe {
             return Err(Error::invalid_value(

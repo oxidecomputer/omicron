@@ -2,10 +2,11 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+use crate::alert::AlertClass;
 use crate::fm::DiagnosisEngineKind;
 use crate::fm::Ereport;
 use iddqd::{IdOrdItem, IdOrdMap};
-use omicron_uuid_kinds::{CaseEreportUuid, CaseUuid, SitrepUuid};
+use omicron_uuid_kinds::{AlertUuid, CaseEreportUuid, CaseUuid, SitrepUuid};
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::sync::Arc;
@@ -19,6 +20,7 @@ pub struct Case {
     pub de: DiagnosisEngineKind,
 
     pub ereports: IdOrdMap<CaseEreport>,
+    pub alerts_requested: IdOrdMap<AlertRequest>,
 
     pub comment: String,
 }
@@ -69,6 +71,23 @@ impl IdOrdItem for CaseEreport {
     iddqd::id_upcast!();
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct AlertRequest {
+    pub id: AlertUuid,
+    pub class: AlertClass,
+    pub payload: serde_json::Value,
+    pub requested_sitrep_id: SitrepUuid,
+}
+
+impl iddqd::IdOrdItem for AlertRequest {
+    type Key<'a> = &'a AlertUuid;
+    fn key(&self) -> Self::Key<'_> {
+        &self.id
+    }
+
+    iddqd::id_upcast!();
+}
+
 struct DisplayCase<'a> {
     case: &'a Case,
     indent: usize,
@@ -100,6 +119,7 @@ impl fmt::Display for DisplayCase<'_> {
                     de,
                     ereports,
                     comment,
+                    alerts_requested,
                 },
             indent,
             sitrep_id,
@@ -190,6 +210,30 @@ impl fmt::Display for DisplayCase<'_> {
             }
         }
 
+        if !alerts_requested.is_empty() {
+            writeln!(f, "\n{:>indent$}alerts requested:", "")?;
+            writeln!(f, "{:>indent$}-----------------", "")?;
+
+            let indent = indent + 2;
+            for AlertRequest { id, class, payload: _, requested_sitrep_id } in
+                alerts_requested.iter()
+            {
+                const CLASS: &str = "class:";
+                const REQUESTED_IN: &str = "requested in:";
+
+                const WIDTH: usize = const_max_len(&[CLASS, REQUESTED_IN]);
+
+                writeln!(f, "{BULLET:>indent$}alert {id}",)?;
+                writeln!(f, "{:>indent$}{CLASS:<WIDTH$} {class}", "",)?;
+                writeln!(
+                    f,
+                    "{:>indent$}{REQUESTED_IN:<WIDTH$} {requested_sitrep_id}{}\n",
+                    "",
+                    this_sitrep(*requested_sitrep_id)
+                )?;
+            }
+        }
+
         writeln!(f)?;
 
         Ok(())
@@ -203,7 +247,7 @@ mod tests {
     use crate::inventory::SpType;
     use ereport_types::{Ena, EreportId};
     use omicron_uuid_kinds::{
-        CaseUuid, EreporterRestartUuid, OmicronZoneUuid, SitrepUuid,
+        AlertUuid, CaseUuid, EreporterRestartUuid, OmicronZoneUuid, SitrepUuid,
     };
     use std::str::FromStr;
     use std::sync::Arc;
@@ -225,6 +269,12 @@ mod tests {
         .unwrap();
         let collector_id =
             OmicronZoneUuid::from_str("34f3b79e-168a-46f8-be49-4fe8eaff539a")
+                .unwrap();
+        let alert1_id =
+            AlertUuid::from_str("7fe8c664-5b91-490f-b71b-b19e6e07ff3a")
+                .unwrap();
+        let alert2_id =
+            AlertUuid::from_str("8a6f88ef-c436-44a9-b4cb-cae91d7306c9")
                 .unwrap();
 
         // Create some ereports
@@ -281,6 +331,24 @@ mod tests {
         };
         ereports.insert_unique(ereport2).unwrap();
 
+        let mut alerts_requested = IdOrdMap::new();
+        alerts_requested
+            .insert_unique(AlertRequest {
+                id: alert1_id,
+                class: AlertClass::TestFoo,
+                payload: serde_json::json!({}),
+                requested_sitrep_id: created_sitrep_id,
+            })
+            .unwrap();
+        alerts_requested
+            .insert_unique(AlertRequest {
+                id: alert2_id,
+                class: AlertClass::TestFooBar,
+                payload: serde_json::json!({}),
+                requested_sitrep_id: closed_sitrep_id,
+            })
+            .unwrap();
+
         // Create the case
         let case = Case {
             id: case_id,
@@ -288,6 +356,7 @@ mod tests {
             closed_sitrep_id: Some(closed_sitrep_id),
             de: DiagnosisEngineKind::PowerShelf,
             ereports,
+            alerts_requested,
             comment: "Power shelf rectifier added and removed here :-)"
                 .to_string(),
         };

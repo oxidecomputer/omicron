@@ -338,6 +338,11 @@ task: "external_endpoints"
     on each one
 
 
+task: "fm_rendezvous"
+    updates externally visible database tables to match the current fault
+    management sitrep
+
+
 task: "fm_sitrep_gc"
     garbage collects fault management situation reports
 
@@ -652,6 +657,12 @@ task: "external_endpoints"
         warning: silo ..........<REDACTED_UUID>........... with DNS name "test-suite-silo.sys.oxide-dev.test" has no usable certificates
 
     TLS certificates: 0
+
+task: "fm_rendezvous"
+  configured period: every <REDACTED_DURATION>m
+  last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    no FM situation report loaded
 
 task: "fm_sitrep_gc"
   configured period: every <REDACTED_DURATION>s
@@ -1239,6 +1250,12 @@ task: "external_endpoints"
         warning: silo ..........<REDACTED_UUID>........... with DNS name "test-suite-silo.sys.oxide-dev.test" has no usable certificates
 
     TLS certificates: 0
+
+task: "fm_rendezvous"
+  configured period: every <REDACTED_DURATION>m
+  last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    no FM situation report loaded
 
 task: "fm_sitrep_gc"
   configured period: every <REDACTED_DURATION>s

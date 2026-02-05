@@ -7,14 +7,15 @@
 use super::DataStore;
 use crate::context::OpContext;
 use crate::db::model::Alert;
-use crate::db::model::AlertClass;
-use crate::db::model::AlertIdentity;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use diesel::prelude::*;
+use diesel::result::DatabaseErrorKind;
+use diesel::result::Error as DieselError;
 use diesel::result::OptionalExtension;
 use nexus_db_errors::ErrorHandler;
 use nexus_db_errors::public_error_from_diesel;
 use nexus_db_schema::schema::alert::dsl as alert_dsl;
+use nexus_types::identity::Asset;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::UpdateResult;
@@ -24,23 +25,32 @@ impl DataStore {
     pub async fn alert_create(
         &self,
         opctx: &OpContext,
-        id: AlertUuid,
-        class: AlertClass,
-        payload: serde_json::Value,
+        alert: Alert,
     ) -> CreateResult<Alert> {
         let conn = self.pool_connection_authorized(&opctx).await?;
-        diesel::insert_into(alert_dsl::alert)
-            .values(Alert {
-                identity: AlertIdentity::new(id),
-                time_dispatched: None,
-                class,
-                payload,
-                num_dispatched: 0,
-            })
+        let alert = diesel::insert_into(alert_dsl::alert)
+            .values(alert)
             .returning(Alert::as_returning())
             .get_result_async(&*conn)
             .await
-            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+            .map_err(|e| match e {
+                DieselError::DatabaseError(
+                    DatabaseErrorKind::UniqueViolation,
+                    _,
+                ) => Error::conflict("alert already exists"),
+                e => public_error_from_diesel(e, ErrorHandler::Server),
+            })?;
+
+        slog::debug!(
+            &opctx.log,
+            "published alert";
+            "alert_id" => ?alert.id(),
+            "alert_class" => %alert.class,
+            "alert_case_id" => ?alert.case_id,
+            "time_created" => ?alert.identity.time_created,
+        );
+
+        Ok(alert)
     }
 
     pub async fn alert_select_next_for_dispatch(
