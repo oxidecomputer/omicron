@@ -17,12 +17,10 @@ pub fn rack_initialize_request_from_file<P: AsRef<Utf8Path>>(
     let contents = std::fs::read_to_string(&path).map_err(|err| {
         RackInitializeRequestParseError::Io { path: path.into(), err }
     })?;
-    let mut raw_config =
-        rack_initialize_request_from_toml(&contents).map_err(|err| {
-            RackInitializeRequestParseError::Deserialize {
-                path: path.into(),
-                err: err.into(),
-            }
+    let mut raw_config = toml::from_str::<RackInitializeRequest>(&contents)
+        .map_err(|err| RackInitializeRequestParseError::Deserialize {
+            path: path.into(),
+            err: err.into(),
         })?;
 
     // In the same way that sled-agent itself (our caller) discovers the
@@ -71,13 +69,6 @@ pub fn rack_initialize_request_from_file<P: AsRef<Utf8Path>>(
     }
 
     Ok(raw_config)
-}
-
-/// Parse a RackInitializeRequest from TOML.
-pub fn rack_initialize_request_from_toml(
-    data: &str,
-) -> Result<RackInitializeRequest, toml::de::Error> {
-    toml::from_str::<RackInitializeRequest>(data)
 }
 
 /// Return a RackInitializeRequest configuration suitable for testing.
