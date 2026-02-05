@@ -732,11 +732,18 @@ async fn recover_epoch_by_trial_decryption(
         // successful load-key but before setting the epoch property, the
         // correct key would still be loaded and our load-key would fail.
         if let Err(e) = Zfs::unload_key(dataset_name).await {
-            warn!(
+            debug!(
                 log,
-                "Failed to unload key (best-effort)";
+                "Failed to unload key as expected during trial decryption";
                 "dataset" => dataset_name,
                 "error" => %e,
+            );
+        } else {
+            warn!(
+                log,
+                "Successfully unloaded key during trial decryption,\\
+                likely due to prior crash before setting oxide:epoch";
+                "dataset" => dataset_name,
             );
         }
 
