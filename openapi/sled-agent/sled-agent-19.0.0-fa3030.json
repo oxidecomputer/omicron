@@ -7,7 +7,7 @@
       "url": "https://oxide.computer",
       "email": "api@oxide.computer"
     },
-    "version": "18.0.0"
+    "version": "19.0.0"
   },
   "paths": {
     "/artifacts": {
@@ -1990,6 +1990,138 @@
         }
       }
     },
+    "/vmms/{propolis_id}/attached-subnets": {
+      "put": {
+        "summary": "Update the subnets attached to an instance.",
+        "operationId": "vmm_put_attached_subnets",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "propolis_id",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/PropolisUuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AttachedSubnets"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "post": {
+        "summary": "Attach a subnet to an instance.",
+        "operationId": "vmm_post_attached_subnet",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "propolis_id",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/PropolisUuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AttachedSubnet"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "delete": {
+        "summary": "Delete all subnets attached to an instance.",
+        "operationId": "vmm_delete_attached_subnets",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "propolis_id",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/PropolisUuid"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "successful deletion"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/vmms/{propolis_id}/attached-subnets/{subnet}": {
+      "delete": {
+        "summary": "Detach a subnet from an instance.",
+        "operationId": "vmm_delete_attached_subnet",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "propolis_id",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/PropolisUuid"
+            }
+          },
+          {
+            "in": "path",
+            "name": "subnet",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/IpNet"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "successful deletion"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/vmms/{propolis_id}/disks/{disk_id}/snapshot": {
       "post": {
         "summary": "Take a snapshot of a disk that is attached to an instance",
@@ -2883,6 +3015,78 @@
         "required": [
           "datasets",
           "successful_writes"
+        ]
+      },
+      "AttachedSubnet": {
+        "description": "A subnet attached to a single instance.",
+        "type": "object",
+        "properties": {
+          "kind": {
+            "description": "The kind of subnet that is attached.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/AttachedSubnetKind"
+              }
+            ]
+          },
+          "subnet": {
+            "description": "The IP subnet.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/IpNet"
+              }
+            ]
+          }
+        },
+        "required": [
+          "kind",
+          "subnet"
+        ]
+      },
+      "AttachedSubnetKind": {
+        "description": "The kind of attached subnet.",
+        "oneOf": [
+          {
+            "description": "This is a VPC subnet.",
+            "type": "string",
+            "enum": [
+              "vpc"
+            ]
+          },
+          {
+            "description": "This is an external subnet.",
+            "type": "string",
+            "enum": [
+              "external"
+            ]
+          }
+        ]
+      },
+      "AttachedSubnets": {
+        "description": "Subnets attached to a single instance.",
+        "type": "object",
+        "properties": {
+          "subnets": {
+            "title": "IdOrdMap",
+            "x-rust-type": {
+              "crate": "iddqd",
+              "parameters": [
+                {
+                  "$ref": "#/components/schemas/AttachedSubnet"
+                }
+              ],
+              "path": "iddqd::IdOrdMap",
+              "version": "*"
+            },
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AttachedSubnet"
+            },
+            "uniqueItems": true
+          }
+        },
+        "required": [
+          "subnets"
         ]
       },
       "Baseboard": {
@@ -5996,6 +6200,12 @@
         "description": "Describes sled-local configuration that a sled-agent must establish to make the instance's virtual hardware fully functional.",
         "type": "object",
         "properties": {
+          "attached_subnets": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AttachedSubnet"
+            }
+          },
           "delegated_zvols": {
             "type": "array",
             "items": {
@@ -6036,6 +6246,7 @@
           }
         },
         "required": [
+          "attached_subnets",
           "delegated_zvols",
           "dhcp_config",
           "firewall_rules",

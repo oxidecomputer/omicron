@@ -7929,6 +7929,46 @@
         }
       }
     },
+    "/v1/system/hardware/racks/{rack_id}/membership/abort": {
+      "post": {
+        "tags": [
+          "experimental"
+        ],
+        "summary": "Abort the latest rack membership change",
+        "description": "This operation is synchronous. Upon returning from the API call, a success response indicates that the prior membership change was aborted. An error response indicates that there is no active membership change in progress (previous changes have completed) or that the current membership change could not be aborted.",
+        "operationId": "rack_membership_abort",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "rack_id",
+            "description": "ID of the rack",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RackMembershipStatus"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/v1/system/hardware/racks/{rack_id}/membership/add": {
       "post": {
         "tags": [
@@ -11055,8 +11095,8 @@
         "tags": [
           "system/networking"
         ],
-        "summary": "Create switch port settings",
-        "operationId": "networking_switch_port_settings_create",
+        "summary": "Create switch port settings (old version with required BgpPeer.addr)",
+        "operationId": "v2026010300_networking_switch_port_settings_create",
         "requestBody": {
           "content": {
             "application/json": {
@@ -11120,8 +11160,8 @@
         "tags": [
           "system/networking"
         ],
-        "summary": "Get information about switch port",
-        "operationId": "networking_switch_port_settings_view",
+        "summary": "Get information about switch port (old version with required BgpPeer.addr)",
+        "operationId": "v2026010300_networking_switch_port_settings_view",
         "parameters": [
           {
             "in": "path",
@@ -17133,8 +17173,7 @@
         "type": "object",
         "properties": {
           "addr": {
-            "nullable": true,
-            "description": "The address of the host to peer with. If not provided, this is an unnumbered BGP session that will be established over the interface specified by `interface_name`.",
+            "description": "The address of the host to peer with.",
             "type": "string",
             "format": "ip"
           },
@@ -17255,6 +17294,7 @@
           }
         },
         "required": [
+          "addr",
           "allowed_export",
           "allowed_import",
           "bgp_config",
@@ -17269,6 +17309,7 @@
         ]
       },
       "BgpPeerConfig": {
+        "description": "BGP peer configuration for a link (old version with required addr).",
         "type": "object",
         "properties": {
           "link_name": {
@@ -28724,7 +28765,7 @@
         ]
       },
       "SwitchPortSettings": {
-        "description": "This structure contains all port settings information in one place. It's a convenience data structure for getting a complete view of a particular port's settings.",
+        "description": "Switch port settings (old version with required BgpPeer.addr).",
         "type": "object",
         "properties": {
           "addresses": {
@@ -28829,7 +28870,7 @@
         ]
       },
       "SwitchPortSettingsCreate": {
-        "description": "Parameters for creating switch port settings. Switch port settings are the central data structure for setting up external networking. Switch port settings include link, interface, route, address and dynamic network protocol configuration.",
+        "description": "Parameters for creating switch port settings (old version with required BgpPeer.addr).",
         "type": "object",
         "properties": {
           "addresses": {

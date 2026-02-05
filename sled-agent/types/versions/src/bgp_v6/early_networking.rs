@@ -9,6 +9,7 @@ use omicron_common::api::internal::shared::RackNetworkConfig;
 use oxnet::IpNet;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use std::net::Ipv6Addr;
 
 /// Network configuration required to bring up the control plane
 ///
@@ -208,6 +209,180 @@ impl From<crate::v1::early_networking::EarlyNetworkConfig>
                 rack_network_config,
             },
         }
+    }
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum ConversionError {
+    #[error("{field} should be Ipv4Addr, but is {addr}")]
+    NotIpv4 { field: String, addr: std::net::IpAddr },
+    #[error("{field} should be Ipv4Net, but is {net}")]
+    NotIpv4Net { field: String, net: oxnet::IpNet },
+}
+
+impl TryFrom<EarlyNetworkConfig>
+    for crate::v1::early_networking::EarlyNetworkConfig
+{
+    type Error = ConversionError;
+
+    fn try_from(value: EarlyNetworkConfig) -> Result<Self, Self::Error> {
+        use omicron_common::api::internal::shared::rack_init::v1;
+        use std::net::IpAddr;
+
+        let rack_network_config = value
+            .body
+            .rack_network_config
+            .map(|v2_config| {
+                let ports = v2_config
+                    .ports
+                    .into_iter()
+                    .map(|p| {
+                        let bgp_peers = p
+                            .bgp_peers
+                            .into_iter()
+                            .map(|peer| {
+                                let addr = match peer.addr {
+                                    IpAddr::V4(v4) => Ok(v4),
+                                    other => {
+                                        let err = ConversionError::NotIpv4 {
+                                            field: "BgpPeerConfig.addr".into(),
+                                            addr: other,
+                                        };
+                                        Err(err)
+                                    }
+                                }?;
+                                Ok(v1::BgpPeerConfig {
+                                    asn: peer.asn,
+                                    port: peer.port,
+                                    addr,
+                                    hold_time: peer.hold_time,
+                                    idle_hold_time: peer.idle_hold_time,
+                                    delay_open: peer.delay_open,
+                                    connect_retry: peer.connect_retry,
+                                    keepalive: peer.keepalive,
+                                    remote_asn: peer.remote_asn,
+                                    min_ttl: peer.min_ttl,
+                                    md5_auth_key: peer.md5_auth_key,
+                                    multi_exit_discriminator: peer
+                                        .multi_exit_discriminator,
+                                    communities: peer.communities,
+                                    local_pref: peer.local_pref,
+                                    enforce_first_as: peer.enforce_first_as,
+                                    allowed_import: peer.allowed_import,
+                                    allowed_export: peer.allowed_export,
+                                    vlan_id: peer.vlan_id,
+                                })
+                            })
+                            .collect::<Result<Vec<_>, _>>()?;
+
+                        Ok(v1::PortConfig {
+                            routes: p
+                                .routes
+                                .into_iter()
+                                .map(|r| v1::RouteConfig {
+                                    destination: r.destination,
+                                    nexthop: r.nexthop,
+                                    vlan_id: r.vlan_id,
+                                    rib_priority: r.rib_priority,
+                                })
+                                .collect(),
+                            addresses: p
+                                .addresses
+                                .into_iter()
+                                .map(|a| v1::UplinkAddressConfig {
+                                    address: a.address.unwrap_or_else(|| {
+                                        IpNet::host_net(IpAddr::V6(
+                                            Ipv6Addr::UNSPECIFIED,
+                                        ))
+                                    }),
+                                    vlan_id: a.vlan_id,
+                                })
+                                .collect(),
+                            switch: p.switch,
+                            port: p.port,
+                            uplink_port_speed: p.uplink_port_speed,
+                            uplink_port_fec: p.uplink_port_fec,
+                            bgp_peers,
+                            autoneg: p.autoneg,
+                            lldp: p.lldp,
+                            tx_eq: p.tx_eq,
+                        })
+                    })
+                    .collect::<Result<Vec<_>, _>>()?;
+
+                let infra_ip_first = match v2_config.infra_ip_first {
+                    IpAddr::V4(ipv4_addr) => Ok(ipv4_addr),
+                    _ => Err(ConversionError::NotIpv4 {
+                        field: "RackNetworkConfig.infra_ip_first".into(),
+                        addr: v2_config.infra_ip_first,
+                    }),
+                }?;
+
+                let infra_ip_last = match v2_config.infra_ip_last {
+                    IpAddr::V4(ipv4_addr) => Ok(ipv4_addr),
+                    _ => Err(ConversionError::NotIpv4 {
+                        field: "RackNetworkConfig.infra_ip_last".into(),
+                        addr: v2_config.infra_ip_last,
+                    }),
+                }?;
+
+                let mut bgp = vec![];
+
+                for bgp_config in v2_config.bgp {
+                    let mut originate = vec![];
+
+                    for prefix in bgp_config.originate {
+                        match prefix {
+                            IpNet::V4(ipv4_net) => {
+                                originate.push(ipv4_net);
+                                Ok(())
+                            }
+                            _ => Err(ConversionError::NotIpv4Net {
+                                field: "BgpConfig.originate".into(),
+                                net: prefix,
+                            }),
+                        }?
+                    }
+                    let converted_config = v1::BgpConfig {
+                        asn: bgp_config.asn,
+                        originate,
+                        shaper: bgp_config.shaper,
+                        checker: bgp_config.checker,
+                    };
+
+                    bgp.push(converted_config);
+                }
+
+                Ok(v1::RackNetworkConfig {
+                    rack_subnet: v2_config.rack_subnet,
+                    infra_ip_first,
+                    infra_ip_last,
+                    ports,
+                    bgp,
+                    bfd: v2_config
+                        .bfd
+                        .into_iter()
+                        .map(|b| v1::BfdPeerConfig {
+                            local: b.local,
+                            remote: b.remote,
+                            detection_threshold: b.detection_threshold,
+                            required_rx: b.required_rx,
+                            mode: b.mode,
+                            switch: b.switch,
+                        })
+                        .collect(),
+                })
+            })
+            .transpose()?;
+
+        Ok(Self {
+            generation: value.generation,
+            schema_version: value.schema_version,
+            body: crate::v1::early_networking::EarlyNetworkConfigBody {
+                ntp_servers: value.body.ntp_servers,
+                rack_network_config,
+            },
+        })
     }
 }
 

@@ -983,13 +983,13 @@ impl DataStore {
                                     let msg = "failed to check if bgp peer exists in switch port settings";
                                     match e {
                                         diesel::result::Error::NotFound => {
-					    debug!(opctx.log, "{msg}"; "error" => ?e);
+                                            debug!(opctx.log, "{msg}"; "error" => ?e);
                                             Ok(None)
                                         },
                                         _ => {
-					    error!(opctx.log, "{msg}"; "error" => ?e);
-					    Err(err.bail(Error::internal_error(msg)))
-					}
+                                            error!(opctx.log, "{msg}"; "error" => ?e);
+                                            Err(err.bail(Error::internal_error(msg)))
+                                        }
                                     }
                                 }
                             }?;

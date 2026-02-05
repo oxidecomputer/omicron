@@ -80,7 +80,8 @@ api_versions!([
     // |  date-based version should be at the top of the list.
     // v
     // (next_yyyymmddnn, IDENT),
-    (2026020200, BGP_UNNUMBERED_PEERS),
+    (2026020500, BGP_UNNUMBERED_PEERS),
+    (2026020200, TRUST_QUORUM_ABORT_CONFIG),
     (2026013100, READ_ONLY_DISKS_NULLABLE),
     (2026013001, READ_ONLY_DISKS),
     (2026013000, INSTANCES_EXTERNAL_SUBNETS),
@@ -4868,6 +4869,24 @@ pub trait NexusExternalApi {
         rqctx: RequestContext<Self::Context>,
         path_params: Path<params::RackPath>,
         req: TypedBody<params::RackMembershipAddSledsRequest>,
+    ) -> Result<HttpResponseOk<RackMembershipStatus>, HttpError>;
+
+    /// Abort the latest rack membership change
+    ///
+    /// This operation is synchronous. Upon returning from the API call, a
+    /// success response indicates that the prior membership change was aborted.
+    /// An error response indicates that there is no active membership change
+    /// in progress (previous changes have completed) or that the current
+    /// membership change could not be aborted.
+    #[endpoint {
+        method = POST,
+        path = "/v1/system/hardware/racks/{rack_id}/membership/abort",
+        tags = ["experimental"],
+        versions = VERSION_TRUST_QUORUM_ABORT_CONFIG..
+    }]
+    async fn rack_membership_abort(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::RackPath>,
     ) -> Result<HttpResponseOk<RackMembershipStatus>, HttpError>;
 
     /// Retrieve the rack cluster membership status

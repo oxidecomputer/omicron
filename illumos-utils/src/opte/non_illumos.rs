@@ -9,6 +9,7 @@ use omicron_common::api::internal::shared::NetworkInterfaceKind;
 use oxide_vpc::api::AddRouterEntryReq;
 use oxide_vpc::api::ClearVirt2PhysReq;
 use oxide_vpc::api::DelRouterEntryReq;
+use oxide_vpc::api::DetachSubnetResp;
 use oxide_vpc::api::Direction;
 use oxide_vpc::api::DumpVirt2PhysResp;
 use oxide_vpc::api::IpCfg;
@@ -58,6 +59,11 @@ pub enum Error {
 
     #[error("No matching NIC found for port {0} at slot {1}.")]
     NoNicforPort(String, u32),
+
+    #[error(
+        "Tried to update attached subnets on non-existent port ({0}, {1:?})"
+    )]
+    AttachedSubnetUpdateMissingPort(uuid::Uuid, NetworkInterfaceKind),
 }
 
 pub fn initialize_xde_driver(
@@ -346,5 +352,24 @@ impl Handle {
         );
         state.underlay_initialized = true;
         Ok(NO_RESPONSE)
+    }
+
+    /// Attach a subnet.
+    pub(crate) fn attach_subnet(
+        &self,
+        _name: &str,
+        _subnet: IpCidr,
+        _is_external: bool,
+    ) -> Result<NoResp, OpteError> {
+        unimplemented!("Not yet used in tests");
+    }
+
+    /// Detach a subnet.
+    pub(crate) fn detach_subnet(
+        &self,
+        _name: &str,
+        _subnet: IpCidr,
+    ) -> Result<DetachSubnetResp, OpteError> {
+        unimplemented!("Not yet used in tests");
     }
 }

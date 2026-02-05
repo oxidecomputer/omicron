@@ -8,7 +8,9 @@ use std::net::IpAddr;
 use std::net::Ipv4Addr;
 use std::net::Ipv6Addr;
 
+use crate::integration_tests::instances::create_project_and_pool;
 use crate::integration_tests::instances::fetch_instance_external_ips;
+use crate::integration_tests::instances::fetch_instance_network_interfaces;
 use crate::integration_tests::instances::instance_simulate;
 use crate::integration_tests::instances::instance_wait_for_state;
 use dropshot::HttpErrorResponseBody;
@@ -61,6 +63,7 @@ use omicron_common::api::external::InstanceCpuCount;
 use omicron_common::api::external::InstanceState;
 use omicron_common::api::external::Name;
 use omicron_common::api::external::NameOrId;
+use omicron_common::api::external::PrivateIpStack;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::InstanceUuid;
 use oxide_client::types::ExternalIpResultsPage;
@@ -1968,16 +1971,20 @@ async fn can_list_instance_snat_ip(cptestctx: &ControlPlaneTestContext) {
     .unwrap_or_else(|e| panic!("failed to parse IP pool range: {e}"));
     assert_eq!(range.items.len(), 1, "Should have 1 range in the pool");
     let oxide_client::types::IpRange::V6(oxide_client::types::Ipv6Range {
-        first,
         ..
     }) = &range.items[0].range
     else {
         panic!("Expected IPv6 range, found {:?}", &range.items[0]);
     };
-    let expected_v6_ip = IpAddr::V6(*first);
 
     // Create a running instance with only an SNAT IP address, for each IP
     // stack.
+    //
+    // See https://github.com/oxidecomputer/omicron/issues/9683. We used to
+    // check the automatic and implicit IPv6 SNAT address here, but we're not
+    // creating those as short term fix for #9683. In the long run, we'll only
+    // do that when needed in any case, as part of fixing #4317. But we can
+    // still validate the IPv4 address, which is implicit and automatic.
     let instance_name = INSTANCE_NAMES[0];
     let instance = instance_for_external_ips(
         client,
@@ -2003,8 +2010,8 @@ async fn can_list_instance_snat_ip(cptestctx: &ControlPlaneTestContext) {
     let ips = page.items;
     assert_eq!(
         ips.len(),
-        2,
-        "Instance should have been created with exactly 2 IPs"
+        1,
+        "Instance should have been created with exactly 1 IP"
     );
 
     // Find the IPv4 IP and check it.
@@ -2030,34 +2037,6 @@ async fn can_list_instance_snat_ip(cptestctx: &ControlPlaneTestContext) {
     };
     assert_eq!(ip_pool_id, &v4_pool.identity.id);
     assert_eq!(ip, &expected_v4_ip);
-
-    // Port ranges are half-open on the right, e.g., [0, 16384).
-    assert_eq!(*first_port, 0);
-    assert_eq!(*last_port, NUM_SOURCE_NAT_PORTS - 1);
-
-    // Find the IPv6 IP and check it.
-    let res = ips
-        .iter()
-        .find(|ip| match ip {
-            oxide_client::types::ExternalIp::Snat { ip, .. }
-                if ip.is_ipv6() =>
-            {
-                true
-            }
-            _ => false,
-        })
-        .expect("Expected to find IPv6 SNAT IP");
-    let oxide_client::types::ExternalIp::Snat {
-        ip,
-        ip_pool_id,
-        first_port,
-        last_port,
-    } = res
-    else {
-        panic!("Expected an SNAT external IP, found {:?}", res);
-    };
-    assert_eq!(ip_pool_id, &v6_pool.identity.id);
-    assert_eq!(ip, &expected_v6_ip);
 
     // Port ranges are half-open on the right, e.g., [0, 16384).
     assert_eq!(*first_port, 0);
@@ -2094,7 +2073,6 @@ async fn can_create_instance_with_ephemeral_ipv6_address(
     else {
         panic!("Expected IPv6 range, found {:?}", &range.items[0]);
     };
-    let expected_ip = IpAddr::V6(*first);
 
     // Create a running instance with an Ephemeral IPv6 address.
     let instance_name = INSTANCE_NAMES[0];
@@ -2116,9 +2094,12 @@ async fn can_create_instance_with_ephemeral_ipv6_address(
     )
     .await;
 
-    // First, sanity check the SNAT IPv6 address. These are currently created
-    // unconditionally, but see
-    // https://github.com/oxidecomputer/omicron/issues/4317 for more details.
+    // Validate the ephemeral IPv6 address only.
+    //
+    // See https://github.com/oxidecomputer/omicron/issues/9683. We used to
+    // check the automatic and implicit IPv6 SNAT address here, but we're not
+    // creating those as short term fix for #9683. In the long run, we'll only
+    // do that when needed in any case, as part of fixing #4317.
     let url = format!("/v1/instances/{}/external-ips", instance.identity.id);
     let page = NexusRequest::object_get(client, &url)
         .authn_as(AuthnMode::PrivilegedUser)
@@ -2134,30 +2115,9 @@ async fn can_create_instance_with_ephemeral_ipv6_address(
     let ips = page.items;
     assert_eq!(
         ips.len(),
-        2,
-        "Instance should have been created with exactly 2 external IPs"
+        1,
+        "Instance should have been created with exactly 1 external IP"
     );
-    let res = ips
-        .iter()
-        .find(|ip| matches!(ip, oxide_client::types::ExternalIp::Snat { .. }))
-        .expect("An SNAT IP");
-    let oxide_client::types::ExternalIp::Snat {
-        ip,
-        ip_pool_id,
-        first_port,
-        last_port,
-    } = res
-    else {
-        panic!("Expected an SNAT external IP, found {:?}", res);
-    };
-    assert_eq!(ip_pool_id, &v6_pool.identity.id);
-    assert_eq!(ip, &expected_ip);
-
-    // Port ranges are half-open on the right, e.g., [0, 16384).
-    assert_eq!(*first_port, 0);
-    assert_eq!(*last_port, NUM_SOURCE_NAT_PORTS - 1);
-
-    // Now check the Ephemeral IPv6 address.
     let res = ips
         .iter()
         .find(|ip| {
@@ -2169,7 +2129,7 @@ async fn can_create_instance_with_ephemeral_ipv6_address(
         panic!("Expected an Ephemeral external IP, found {:?}", res);
     };
     assert_eq!(ip_pool_id, &v6_pool.identity.id);
-    let expected_ip = IpAddr::V6(Ipv6Addr::from_bits(first.to_bits() + 1));
+    let expected_ip = IpAddr::V6(Ipv6Addr::from_bits(first.to_bits()));
     assert_eq!(ip, &expected_ip);
 }
 
@@ -2205,10 +2165,6 @@ async fn can_create_instance_with_floating_ipv6_address(
     };
     let expected_ip = IpAddr::V6(*first);
 
-    // We're creating the FIP first, explicity. The SNAT is allocated
-    // automatically during instance creation, and so takes the next address.
-    let expected_snat_ip = IpAddr::V6(Ipv6Addr::from(u128::from(*first) + 1));
-
     // Create a floating IP, from the IPv6 Pool.
     let fip_name = FIP_NAMES[0];
     let fip = create_floating_ip(
@@ -2241,9 +2197,12 @@ async fn can_create_instance_with_floating_ipv6_address(
     )
     .await;
 
-    // First, sanity check the SNAT IPv6 address. These are currently created
-    // unconditionally, but see
-    // https://github.com/oxidecomputer/omicron/issues/4317 for more details.
+    // Validate the floating IPv6 address only.
+    //
+    // See https://github.com/oxidecomputer/omicron/issues/9683. We used to
+    // check the automatic and implicit IPv6 SNAT address here, but we're not
+    // creating those as short term fix for #9683. In the long run, we'll only
+    // do that when needed in any case, as part of fixing #4317.
     let url = format!("/v1/instances/{}/external-ips", instance.identity.id);
     let page = NexusRequest::object_get(client, &url)
         .authn_as(AuthnMode::PrivilegedUser)
@@ -2259,31 +2218,9 @@ async fn can_create_instance_with_floating_ipv6_address(
     let ips = page.items;
     assert_eq!(
         ips.len(),
-        2,
-        "Instance should have been created with exactly 2 external IPs"
+        1,
+        "Instance should have been created with exactly 1 external IP"
     );
-
-    let ip = ips
-        .iter()
-        .find(|ip| matches!(ip, oxide_client::types::ExternalIp::Snat { .. }))
-        .expect("Should contain an SNAT IP");
-    let oxide_client::types::ExternalIp::Snat {
-        ip,
-        ip_pool_id,
-        first_port,
-        last_port,
-    } = ip
-    else {
-        panic!("Expected an SNAT external IP, found {:?}", &ips[0]);
-    };
-    assert_eq!(ip_pool_id, &v6_pool.identity.id);
-    assert_eq!(ip, &expected_snat_ip);
-
-    // Port ranges are half-open on the right, e.g., [0, 16384).
-    assert_eq!(*first_port, 0);
-    assert_eq!(*last_port, NUM_SOURCE_NAT_PORTS - 1);
-
-    // Then check the Floating IPv6 address.
     let ip = ips
         .iter()
         .find(|ip| {
@@ -2516,4 +2453,46 @@ async fn test_ephemeral_ip_idempotent_attach_with_exhausted_explicit_pool(
         eph_v4_again.ip(),
         "Idempotent attach should return the same IP"
     );
+}
+
+// Test that we do not automatically try to create SNAT addresses for IPv6. This
+// is a short-term fix for https://github.com/oxidecomputer/omicron/issues/9683,
+// which we'd like to resolve more completely by addressing
+// https://github.com/oxidecomputer/omicron/issues/4317, which is a larger
+// refactor of the IP allocations done in the instance sagas.
+#[nexus_test]
+async fn no_automatic_snat_for_ipv6(cptestctx: &ControlPlaneTestContext) {
+    let client = &cptestctx.external_client;
+    let project = create_project_and_pool(client).await;
+    let project_name = project.identity.name.as_str();
+    let _ = create_instance_with(
+        client,
+        project_name,
+        "niccy",
+        &params::InstanceNetworkInterfaceAttachment::DefaultDualStack,
+        vec![],
+        vec![],
+        false,
+        None,
+        None,
+        vec![],
+    )
+    .await;
+
+    // The instance should have a NIC with a VPC-private IPv6 address.
+    let nics =
+        fetch_instance_network_interfaces(client, "niccy", project_name).await;
+    assert_eq!(nics.len(), 1);
+    let nic = &nics[0];
+    assert!(matches!(nic.ip_stack, PrivateIpStack::DualStack { .. }));
+
+    // List external IPs, which should have no SNAT for the IPv6 VPC address.
+    let eips = fetch_instance_external_ips(client, "niccy", project_name).await;
+    assert_eq!(eips.len(), 1, "Expected exactly 1 SNAT external IP");
+    assert_eq!(
+        eips[0].kind(),
+        shared::IpKind::SNat,
+        "Expected exactly 1 SNAT external IP"
+    );
+    assert!(matches!(eips[0].ip(), IpAddr::V4(_)));
 }
