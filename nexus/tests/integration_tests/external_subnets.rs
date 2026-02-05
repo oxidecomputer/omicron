@@ -10,11 +10,13 @@ use dropshot::ResultsPage;
 use dropshot::test_util::ClientTestContext;
 use http::Method;
 use http::StatusCode;
+use nexus_db_queries::db::queries::external_subnet::MAX_ATTACHED_SUBNETS;
 use nexus_test_utils::http_testing::AuthnMode;
 use nexus_test_utils::http_testing::NexusRequest;
 use nexus_test_utils::http_testing::RequestBuilder;
 use nexus_test_utils::resource_helpers::create_default_ip_pools;
 use nexus_test_utils::resource_helpers::create_instance;
+use nexus_test_utils::resource_helpers::create_instance_with;
 use nexus_test_utils::resource_helpers::create_project;
 use nexus_test_utils::resource_helpers::create_subnet_pool;
 use nexus_test_utils::resource_helpers::create_subnet_pool_member;
@@ -261,6 +263,20 @@ async fn external_subnet_pagination(cptestctx: &ControlPlaneTestContext) {
 
 #[nexus_test]
 async fn test_external_subnet_attach(cptestctx: &ControlPlaneTestContext) {
+    attach_test_impl(cptestctx, InstanceState::Running).await
+}
+
+#[nexus_test]
+async fn test_can_attach_external_subnet_to_stopped_instance(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    attach_test_impl(cptestctx, InstanceState::Stopped).await
+}
+
+async fn attach_test_impl(
+    cptestctx: &ControlPlaneTestContext,
+    instance_state: InstanceState,
+) {
     let client = &cptestctx.external_client;
 
     // Create a pool, member, IP Pool, range, and project first
@@ -296,12 +312,40 @@ async fn test_external_subnet_attach(cptestctx: &ControlPlaneTestContext) {
     .await;
     assert!(member_subnet.is_supernet_of(&external_subnet.subnet));
 
-    // Create an instance and wait for it to go to the running state.
-    let instance = create_instance(client, PROJECT_NAME, INSTANCE_NAME).await;
-    let instance_id = InstanceUuid::from_untyped_uuid(instance.identity.id);
+    // Create an instance and wait for it to go to the desired state.
     let nexus = &cptestctx.server.server_context().nexus;
-    instance_simulate(nexus, &instance_id).await;
-    instance_wait_for_state(client, instance_id, InstanceState::Running).await;
+    let instance = match instance_state {
+        InstanceState::Running => {
+            let instance =
+                create_instance(client, PROJECT_NAME, INSTANCE_NAME).await;
+            let instance_id =
+                InstanceUuid::from_untyped_uuid(instance.identity.id);
+            instance_simulate(nexus, &instance_id).await;
+            instance_wait_for_state(
+                client,
+                instance_id,
+                InstanceState::Running,
+            )
+            .await;
+            instance
+        }
+        InstanceState::Stopped => {
+            create_instance_with(
+                client,
+                PROJECT_NAME,
+                INSTANCE_NAME,
+                &Default::default(),
+                vec![],
+                vec![],
+                /* start = */ false,
+                None,
+                None,
+                vec![],
+            )
+            .await
+        }
+        _ => panic!("this test should only use a stopped or running instance"),
+    };
 
     // Now attach the subnet to it.
     let updated =
@@ -335,7 +379,6 @@ async fn test_external_subnet_attach(cptestctx: &ControlPlaneTestContext) {
 
     // Now let's delete it and make sure we don't see it anymore.
     let detached = detach_external_subnet(client, EXTERNAL_SUBNET_NAME).await;
-    println!("{detached:#?}");
     assert!(detached.instance_id.is_none());
     assert!(
         objects_list_page_authz::<ExternalSubnet>(
@@ -581,9 +624,9 @@ async fn cannot_attach_too_many_subnets(cptestctx: &ControlPlaneTestContext) {
     instance_wait_for_state(client, instance_id, InstanceState::Running).await;
 
     // Create and attach a bunch of subnets.
-    let max_subnets = 32;
-    let mut subnets = Vec::with_capacity(max_subnets);
-    for i in 0..max_subnets {
+    let mut subnets =
+        Vec::with_capacity(usize::try_from(MAX_ATTACHED_SUBNETS).unwrap());
+    for i in 0..MAX_ATTACHED_SUBNETS {
         let name = format!("{EXTERNAL_SUBNET_NAME}-{i}");
         let create_params = params::ExternalSubnetCreate {
             identity: IdentityMetadataCreateParams {
@@ -642,6 +685,75 @@ async fn cannot_attach_too_many_subnets(cptestctx: &ControlPlaneTestContext) {
         &params::ExternalSubnetAttach {
             instance: INSTANCE_NAME.parse::<Name>().unwrap().into(),
         },
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap();
+}
+
+#[nexus_test]
+async fn cannot_delete_attached_external_subnet(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+
+    // Create a pool, member, IP Pool, range, and project first
+    let _pool =
+        create_subnet_pool(client, SUBNET_POOL_NAME, IpVersion::V4).await;
+    let member_subnet = "8.8.8.0/24".parse().unwrap();
+    let _member =
+        create_subnet_pool_member(client, SUBNET_POOL_NAME, member_subnet)
+            .await;
+    let (_v4_pool, _v6_pool) = create_default_ip_pools(client).await;
+    let _ = create_project(client, PROJECT_NAME).await;
+
+    // Then create a subnet in the pool.
+    let create_params = params::ExternalSubnetCreate {
+        identity: IdentityMetadataCreateParams {
+            name: EXTERNAL_SUBNET_NAME.parse().unwrap(),
+            description: String::from("A test external subnet"),
+        },
+        allocator: params::ExternalSubnetAllocator::Auto {
+            prefix_len: 28,
+            pool_selector: params::PoolSelector::Explicit {
+                pool: NameOrId::Name(SUBNET_POOL_NAME.parse().unwrap()),
+            },
+        },
+    };
+    let external_subnet = NexusRequest::objects_post(
+        client,
+        &external_subnets_url(PROJECT_NAME),
+        &create_params,
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute_and_parse_unwrap::<ExternalSubnet>()
+    .await;
+    assert!(member_subnet.is_supernet_of(&external_subnet.subnet));
+
+    // Create a stopped instance, and attach the subnet.
+    let _ = create_instance_with(
+        client,
+        PROJECT_NAME,
+        INSTANCE_NAME,
+        &Default::default(),
+        vec![],
+        vec![],
+        /* start = */ false,
+        None,
+        None,
+        vec![],
+    )
+    .await;
+    let _ = attach_external_subnet(client, INSTANCE_NAME, EXTERNAL_SUBNET_NAME)
+        .await;
+
+    // We shouldn't be able to delete the subnet yet.
+    NexusRequest::expect_failure(
+        client,
+        StatusCode::BAD_REQUEST,
+        Method::DELETE,
+        &external_subnet_url(EXTERNAL_SUBNET_NAME, PROJECT_NAME),
     )
     .authn_as(AuthnMode::PrivilegedUser)
     .execute()
