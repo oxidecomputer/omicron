@@ -32,6 +32,11 @@
 #: from_output = "/work/crate-build-timings.json"
 #:
 #: [[publish]]
+#: series = "build-info-helios"
+#: name = "cargo-timing.html"
+#: from_output = "/work/cargo-timing.html"
+#:
+#: [[publish]]
 #: series = "live-tests"
 #: name = "live-tests-archive.tgz"
 #: from_output = "/work/oxidecomputer/omicron/target/live-tests-archive.tgz"

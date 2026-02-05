@@ -113,17 +113,22 @@ export RUSTC_BOOTSTRAP=1
 
 # Build all the packages and tests, and keep track of how long each took to build.
 # We report build progress to stderr, and the "--timings=json" output goes to stdout.
+# We also generate an HTML timing report for visual inspection of build parallelism.
 #
 # The build graph ends up building several bin/test targets that depend on
 # omicron-nexus at the same time, which uses significant memory to compile on
 # illumos. To mitigate this we build everything except omicron-nexus's bin/test
 # targets first, then finish the build after.
-ptime -m cargo build -Z unstable-options --timings=json \
+ptime -m cargo build -Z unstable-options --timings=json,html \
     --workspace --exclude=omicron-nexus --tests --locked --verbose \
     1>> "$OUTPUT_DIR/crate-build-timings.json"
-ptime -m cargo build -Z unstable-options --timings=json \
+ptime -m cargo build -Z unstable-options --timings=json,html \
     --workspace --tests --locked --verbose \
     1>> "$OUTPUT_DIR/crate-build-timings.json"
+
+# Copy the HTML timing report to the output directory.
+# Cargo writes to target/cargo-timings/cargo-timing.html (a symlink to the latest).
+cp target/cargo-timings/cargo-timing.html "$OUTPUT_DIR/cargo-timing.html"
 
 #
 # We apply our own timeout to ensure that we get a normal failure on timeout

@@ -29,6 +29,11 @@
 #: series = "build-info-linux"
 #: name = "crate-build-timings.json"
 #: from_output = "/work/crate-build-timings.json"
+#:
+#: [[publish]]
+#: series = "build-info-linux"
+#: name = "cargo-timing.html"
+#: from_output = "/work/cargo-timing.html"
 
 
 sudo apt-get install -y jq
