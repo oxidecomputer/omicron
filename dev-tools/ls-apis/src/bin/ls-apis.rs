@@ -252,10 +252,10 @@ fn print_server_components<'a>(
             );
         }
         for (c, path) in apis.component_apis_consumed(s, filter)? {
-            if let Some(note) = apis.idu_only_edge_note(s, c) {
+            if apis.idu_only_edge_note(s, c).is_some() {
                 println!(
-                    "{}    consumes: {} (intra-deployment-unit-only: {})",
-                    prefix, c, note
+                    "{}    consumes: {} (intra-deployment-unit-only)",
+                    prefix, c
                 );
             } else {
                 println!("{}    consumes: {}", prefix, c);
