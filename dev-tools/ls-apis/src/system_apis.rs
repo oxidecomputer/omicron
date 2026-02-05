@@ -487,7 +487,8 @@ impl SystemApis {
     /// Returns a string that can be passed to `dot(1)` to render a graph of
     /// API dependencies among deployment units
     pub fn dot_by_unit(&self, filter: ApiDependencyFilter) -> Result<String> {
-        let (graph, _) = self.make_deployment_unit_graph(filter, None)?;
+        let (graph, _) =
+            self.make_deployment_unit_graph(filter, EdgeFilter::All)?;
         Ok(Dot::new(&graph).to_string())
     }
 
@@ -497,9 +498,7 @@ impl SystemApis {
     fn make_deployment_unit_graph(
         &self,
         dependency_filter: ApiDependencyFilter,
-        idu_only_edges: Option<
-            &BTreeSet<(ServerComponentName, ClientPackageName)>,
-        >,
+        edge_filter: EdgeFilter<'_>,
     ) -> Result<(
         petgraph::graph::Graph<&DeploymentUnitName, &ClientPackageName>,
         BTreeMap<&DeploymentUnitName, NodeIndex>,
@@ -521,20 +520,25 @@ impl SystemApis {
                 for (client_pkg, _) in
                     self.component_apis_consumed(server_pkg, dependency_filter)?
                 {
-                    // When idu_only_edges is provided, we're building a
-                    // graph of server-side-versioned API dependencies only.
-                    if let Some(idu_edges) = idu_only_edges {
+                    if let EdgeFilter::DagOnly(idu_edges) = edge_filter {
                         let api = self
                             .api_metadata
                             .client_pkgname_lookup(client_pkg)
                             .unwrap();
+                        // Filtering DAG-only edges means ignoring everything
+                        // that's not server-side-versioned.
                         if api.versioned_how != VersionedHow::Server {
                             continue;
                         }
 
-                        // Skip edges that represent intra-deployment-unit-only
-                        // communication (communication within one instance of
-                        // one deployment unit).
+                        // When filtering DAG-only edges, also skip edges that
+                        // represent intra-deployment-unit-only communication
+                        // (communication within one instance of one deployment
+                        // unit).  That's because intra-deployment-unit edges
+                        // would look like a cycle in the dependency graph, but
+                        // aren't one that we care about since they're always
+                        // referring to the same *instance* of the same
+                        // deployment unit.
                         if idu_edges
                             .contains(&(server_pkg.clone(), client_pkg.clone()))
                         {
@@ -814,8 +818,10 @@ impl SystemApis {
         }
 
         // Do the same with a graph of deployment units.
-        let (graph, nodes) =
-            self.make_deployment_unit_graph(filter, Some(&idu_only_edges))?;
+        let (graph, nodes) = self.make_deployment_unit_graph(
+            filter,
+            EdgeFilter::DagOnly(&idu_only_edges),
+        )?;
         let reverse_nodes: BTreeMap<_, _> =
             nodes.iter().map(|(d_u, node)| (node, d_u)).collect();
         if let Err(error) = petgraph::algo::toposort(&graph, None) {
@@ -989,6 +995,11 @@ impl SystemApis {
 
         Ok(dag_check)
     }
+}
+
+enum EdgeFilter<'a> {
+    All,
+    DagOnly(&'a BTreeSet<(ServerComponentName, ClientPackageName)>),
 }
 
 /// Describes proposals for assigning how APIs should be versioned, based on
