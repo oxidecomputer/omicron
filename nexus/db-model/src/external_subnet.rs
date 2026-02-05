@@ -24,7 +24,7 @@ use nexus_db_schema::schema::subnet_pool_member;
 use nexus_db_schema::schema::subnet_pool_silo_link;
 use nexus_types::external_api::params;
 use nexus_types::external_api::views;
-use nexus_types::identity::Resource;
+use nexus_types::identity::Resource as _;
 use omicron_common::api::external;
 use omicron_common::api::external::Error;
 use omicron_uuid_kinds::GenericUuid as _;

@@ -48,9 +48,7 @@ use rand::SeedableRng;
 use rand::prelude::IteratorRandom;
 use sled_agent_config_reconciler::AvailableDatasetsReceiver;
 use sled_agent_resolvable_files::ramdisk_file_source;
-use sled_agent_types::attached_subnet::{
-    AttachedSubnet, AttachedSubnetKind, AttachedSubnets,
-};
+use sled_agent_types::attached_subnet::{AttachedSubnet, AttachedSubnets};
 use sled_agent_types::instance::*;
 use sled_agent_types::zone_bundle::ZoneBundleCause;
 use slog::Logger;
@@ -1764,19 +1762,8 @@ impl InstanceRunner {
                 return Err(Error::SubnetAlreadyAttached(subnet.subnet));
             }
         };
-        let subnet_ = illumos_utils::opte::AttachedSubnet {
-            cidr: net_to_cidr(subnet.subnet),
-            kind: match subnet.kind {
-                AttachedSubnetKind::Vpc => {
-                    illumos_utils::opte::AttachedSubnetKind::Vpc
-                }
-                AttachedSubnetKind::External => {
-                    illumos_utils::opte::AttachedSubnetKind::External
-                }
-            },
-        };
         self.port_manager
-            .attach_subnet(nic_id, nic_kind, subnet_)
+            .attach_subnet(nic_id, nic_kind, subnet.into())
             .map_err(Error::from)?;
         entry.insert(subnet);
         Ok(())
@@ -2427,13 +2414,8 @@ impl InstanceRunner {
                 attached_subnets: self
                     .attached_subnets
                     .iter()
-                    .map(|att| illumos_utils::opte::AttachedSubnet {
-                        cidr: net_to_cidr(att.subnet),
-                        kind: match att.kind {
-                            AttachedSubnetKind::Vpc => illumos_utils::opte::AttachedSubnetKind::Vpc,
-                            AttachedSubnetKind::External => illumos_utils::opte::AttachedSubnetKind::External,
-                        },
-                    })
+                    .copied()
+                    .map(Into::into)
                     .collect(),
             })?;
             opte_port_names.push(port.0.name().to_string());

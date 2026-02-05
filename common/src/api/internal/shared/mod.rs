@@ -11,10 +11,13 @@ use crate::{
     zpool_name::ZpoolName,
 };
 use daft::Diffable;
-use omicron_uuid_kinds::{
-    DatasetUuid, ExternalSubnetUuid, InstanceUuid, RackUuid, SledUuid,
-};
-use omicron_uuid_kinds::{ExternalZpoolUuid, PropolisUuid};
+use omicron_uuid_kinds::DatasetUuid;
+use omicron_uuid_kinds::ExternalSubnetUuid;
+use omicron_uuid_kinds::ExternalZpoolUuid;
+use omicron_uuid_kinds::InstanceUuid;
+use omicron_uuid_kinds::PropolisUuid;
+use omicron_uuid_kinds::RackUuid;
+use omicron_uuid_kinds::SledUuid;
 use oxnet::{IpNet, Ipv4Net, Ipv6Net};
 use schemars::JsonSchema;
 use serde::{Deserialize, Deserializer, Serialize, Serializer, de};
@@ -1106,7 +1109,7 @@ pub enum AttachedSubnetId {
 }
 
 /// All details about an attached subnet and the Instance it's attached to.
-#[derive(Debug)]
+#[derive(Clone, Copy, Debug)]
 pub struct AttachedSubnet {
     /// ID of the rack hosting this instance.
     pub rack_id: RackUuid,
@@ -1118,7 +1121,7 @@ pub struct AttachedSubnet {
     pub vmm_id: PropolisUuid,
     /// ID of the instance
     pub instance_id: InstanceUuid,
-    /// ID of the subnet itself.
+    /// ID of the attached subnet itself.
     pub subnet_id: AttachedSubnetId,
     /// The IP subnet that's attached.
     pub subnet: IpNet,
