@@ -561,12 +561,17 @@ pub struct DatasetProperties {
     pub compression: String,
     /// The encryption key epoch for this dataset.
     ///
-    /// Only present on encrypted datasets (e.g., crypt datasets on U.2s).
+    /// Only present on encrypted datasets that directly hold a key (e.g.,
+    /// crypt datasets on U.2s). Not present on datasets that inherit
+    /// encryption from a parent.
     pub epoch: Option<u64>,
 }
 
 impl DatasetProperties {
-    const ZFS_GET_PROPS: &'static str = "oxide:uuid,oxide:epoch,name,mounted,avail,used,quota,reservation,compression";
+    const ZFS_GET_PROPS: &'static str = concat!(
+        "oxide:uuid,oxide:epoch,",
+        "name,mounted,avail,used,quota,reservation,compression",
+    );
 }
 
 impl TryFrom<&DatasetProperties> for SharedDatasetConfig {
@@ -1621,7 +1626,7 @@ impl Zfs {
             .await
             .map_err(|e| ChangeKeyError {
                 name: dataset.to_string(),
-                err: anyhow::anyhow!("{e}"),
+                err: anyhow::Error::from(e),
             })
     }
 

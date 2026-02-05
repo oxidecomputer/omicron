@@ -487,8 +487,8 @@ async fn ensure_zpool_dataset_is_encrypted(
     let encrypted_dataset = encrypted_dataset.full_name();
 
     let (unencrypted_dataset_exists, encrypted_dataset_exists) = (
-        dataset_exists(&unencrypted_dataset).await?,
-        dataset_exists(&encrypted_dataset).await?,
+        Zfs::dataset_exists(&unencrypted_dataset).await?,
+        Zfs::dataset_exists(&encrypted_dataset).await?,
     );
 
     match (unencrypted_dataset_exists, encrypted_dataset_exists) {
@@ -573,13 +573,6 @@ async fn ensure_zpool_dataset_is_encrypted(
         &unencrypted_dataset,
     )
     .await;
-}
-
-// Returns true if the dataset exists.
-async fn dataset_exists(
-    dataset: &str,
-) -> Result<bool, DatasetEncryptionMigrationError> {
-    Ok(Zfs::dataset_exists(dataset).await?)
 }
 
 // Destroys the dataset and all children, recursively.
@@ -738,7 +731,14 @@ async fn recover_epoch_by_trial_decryption(
         // loaded keys across process restarts, so if we crashed after a
         // successful load-key but before setting the epoch property, the
         // correct key would still be loaded and our load-key would fail.
-        let _ = Zfs::unload_key(dataset_name).await;
+        if let Err(e) = Zfs::unload_key(dataset_name).await {
+            warn!(
+                log,
+                "Failed to unload key (best-effort)";
+                "dataset" => dataset_name,
+                "error" => %e,
+            );
+        }
 
         // Get the key for this epoch
         let key =

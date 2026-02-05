@@ -593,10 +593,10 @@ impl ReconcilerTask {
         // trigger another reconciliation for the same epoch change.
         // Note: We must copy the epoch out of the Ref before any await points.
         let current_epoch = *self.committed_epoch_rx.borrow_and_update();
-        let has_rekey_error = if let Some(epoch) = current_epoch {
+        let rekey_result = if let Some(epoch) = current_epoch {
             self.rekey_for_epoch(epoch).await
         } else {
-            false
+            ReconciliationResult::NoRetryNeeded
         };
 
         // Ensure all the datasets we want exist.
@@ -658,7 +658,7 @@ impl ReconcilerTask {
             || self.external_disks.has_retryable_error()
             || self.zones.has_retryable_error()
             || self.datasets.has_retryable_error()
-            || has_rekey_error
+            || matches!(rekey_result, ReconciliationResult::ShouldRetry)
         {
             ReconciliationResult::ShouldRetry
         } else {
@@ -694,25 +694,38 @@ impl ReconcilerTask {
     /// is unknown (None) are candidates for rekeying. The actual rekey operation
     /// has an idempotency check that skips disks already at the target epoch.
     /// On success, updates the cached epoch in `external_disks`.
-    ///
-    /// Returns true if any rekey operations failed.
-    async fn rekey_for_epoch(&mut self, target_epoch: Epoch) -> bool {
-        // Filter to disks that need rekeying:
-        // - Known epoch < target: definitely needs rekey
-        // - Unknown epoch (None): attempt rekey to be safe; idempotency check
-        //   in datasets_rekey will skip if already at target
+    async fn rekey_for_epoch(
+        &mut self,
+        target_epoch: Epoch,
+    ) -> ReconciliationResult {
+        // Log an error if any disk has an epoch ahead of target (should
+        // not happen, but guard against it).
+        for info in self.external_disks.disk_rekey_info() {
+            if let Some(e) = info.cached_epoch {
+                if e > target_epoch {
+                    error!(
+                        self.log,
+                        "Disk has epoch ahead of target";
+                        "disk_id" => %info.disk_id,
+                        "cached_epoch" => %e,
+                        "target_epoch" => %target_epoch,
+                    );
+                }
+            }
+        }
+
+        // Filter to disks that need rekeying. `None < Some(_)` so disks
+        // with unknown epoch are included (idempotency check in
+        // datasets_rekey will skip if already at target).
         let disks_needing_rekey: Vec<_> = self
             .external_disks
             .disk_rekey_info()
-            .filter(|i| match i.cached_epoch {
-                Some(e) => e < target_epoch,
-                None => true,
-            })
+            .filter(|i| i.cached_epoch < Some(target_epoch))
             .collect();
 
         if disks_needing_rekey.is_empty() {
             debug!(self.log, "No datasets need rekeying"; "epoch" => %target_epoch);
-            return false;
+            return ReconciliationResult::NoRetryNeeded;
         }
 
         // Build request, tracking key derivation failures separately
@@ -720,14 +733,14 @@ impl ReconcilerTask {
         let mut request = RekeyRequest::default();
 
         for info in disks_needing_rekey {
-            let dataset_name =
-                format!("{}/{}", info.disk.zpool_name(), CRYPT_DATASET);
             match self
                 .key_requester
                 .get_key(target_epoch.0, info.disk.identity().clone())
                 .await
             {
                 Ok(key) => {
+                    let dataset_name =
+                        format!("{}/{}", info.disk.zpool_name(), CRYPT_DATASET);
                     request.disks.insert(
                         info.disk_id,
                         DatasetRekeyInfo { dataset_name, key },
@@ -746,12 +759,12 @@ impl ReconcilerTask {
         }
 
         if request.disks.is_empty() {
-            info!(
+            warn!(
                 self.log,
                 "No rekey requests (all key derivations failed)";
                 "epoch" => %target_epoch
             );
-            return true; // has failures
+            return ReconciliationResult::ShouldRetry;
         }
 
         let disk_count = request.disks.len();
@@ -772,7 +785,7 @@ impl ReconcilerTask {
                     "disk_count" => disk_count,
                     "error" => %e,
                 );
-                return true; // has failures
+                return ReconciliationResult::ShouldRetry;
             }
         };
 
@@ -788,7 +801,11 @@ impl ReconcilerTask {
             "failed" => failed.len() + result.failed.len(),
         );
 
-        has_failures
+        if has_failures {
+            ReconciliationResult::ShouldRetry
+        } else {
+            ReconciliationResult::NoRetryNeeded
+        }
     }
 }
 

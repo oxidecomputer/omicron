@@ -164,13 +164,11 @@ pub enum NestedDatasetListError {
 
 /// Error returned when ZFS encryption key rotation fails.
 #[derive(Debug, thiserror::Error)]
-pub enum KeyRotationError {
-    #[error("failed to rotate encryption key for dataset {dataset}")]
-    ChangeKeyFailed {
-        dataset: String,
-        #[source]
-        err: anyhow::Error,
-    },
+#[error("failed to rotate encryption key for dataset {dataset}")]
+pub struct KeyRotationError {
+    dataset: String,
+    #[source]
+    err: anyhow::Error,
 }
 
 /// Information for rekeying a single dataset.
@@ -1218,27 +1216,26 @@ impl DatasetTask {
 
         for (disk_id, req) in request.disks {
             let new_epoch = req.key.epoch();
+            let current_epoch =
+                current_epochs.get(&req.dataset_name).copied().flatten();
 
             // Check current epoch - skip if already at target
-            if let Some(Some(current_epoch)) =
-                current_epochs.get(&req.dataset_name)
-            {
-                if *current_epoch == new_epoch {
-                    info!(
-                        log,
-                        "Dataset already at target epoch, skipping";
-                        "dataset" => &req.dataset_name,
-                        "epoch" => new_epoch,
-                    );
-                    succeeded.insert(disk_id);
-                    continue;
-                }
+            if current_epoch == Some(new_epoch) {
+                info!(
+                    log,
+                    "Dataset already at target epoch, skipping";
+                    "dataset" => &req.dataset_name,
+                    "epoch" => new_epoch,
+                );
+                succeeded.insert(disk_id);
+                continue;
             }
 
             info!(
                 log,
                 "Rotating encryption key";
                 "dataset" => &req.dataset_name,
+                "current_epoch" => ?current_epoch,
                 "new_epoch" => new_epoch,
             );
 
@@ -1251,6 +1248,8 @@ impl DatasetTask {
                         log,
                         "Failed to rotate encryption key";
                         "dataset" => &req.dataset_name,
+                        "current_epoch" => ?current_epoch,
+                        "new_epoch" => new_epoch,
                         "error" => %e,
                     );
                     failed.insert(disk_id);
@@ -1447,11 +1446,9 @@ impl ZfsImpl for RealZfs {
         dataset: &str,
         key: &VersionedAes256GcmDiskEncryptionKey,
     ) -> Result<(), KeyRotationError> {
-        Zfs::change_key(dataset, key).await.map_err(|err| {
-            KeyRotationError::ChangeKeyFailed {
-                dataset: dataset.to_string(),
-                err: err.into(),
-            }
+        Zfs::change_key(dataset, key).await.map_err(|err| KeyRotationError {
+            dataset: dataset.to_string(),
+            err: err.into(),
         })
     }
 }
@@ -1652,12 +1649,11 @@ mod tests {
             let mut state = self.inner.lock().unwrap();
 
             // Verify dataset exists and update its epoch
-            let props = state.datasets.get_mut(dataset).ok_or(
-                KeyRotationError::ChangeKeyFailed {
+            let props =
+                state.datasets.get_mut(dataset).ok_or(KeyRotationError {
                     dataset: dataset.to_string(),
                     err: anyhow!("dataset does not exist"),
-                },
-            )?;
+                })?;
             props.epoch = Some(key.epoch());
             Ok(())
         }
