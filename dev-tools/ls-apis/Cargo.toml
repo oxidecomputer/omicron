@@ -18,7 +18,6 @@ newtype_derive.workspace = true
 parse-display.workspace = true
 petgraph.workspace = true
 serde.workspace = true
-swrite.workspace = true
 toml.workspace = true
 omicron-workspace-hack.workspace = true
 
