@@ -116,7 +116,7 @@ pub enum ApiError {
     #[error("rack init timeout: unacked_peers: {unacked_peers:?}")]
     RackInitTimeout { unacked_peers: BTreeSet<Baseboard> },
 
-    #[error("rack init falied: trust quorum error")]
+    #[error("rack init failed: trust quorum error")]
     RackInitFailed(#[source] TrustQuorumError),
 
     #[error("rack secret load timeout")]
