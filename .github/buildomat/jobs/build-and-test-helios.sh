@@ -32,9 +32,14 @@
 #: from_output = "/work/crate-build-timings.json"
 #:
 #: [[publish]]
-#: series = "build-info-helios"
-#: name = "cargo-timing.html"
-#: from_output = "/work/cargo-timing.html"
+#: series = "build-info-without-nexus-helios"
+#: name = "cargo-timing-without-nexus.html"
+#: from_output = "/work/cargo-timing-without-nexus.html"
+#:
+#: [[publish]]
+#: series = "build-info-with-nexus-helios"
+#: name = "cargo-timing-with-nexus.html"
+#: from_output = "/work/cargo-timing-with-nexus.html"
 #:
 #: [[publish]]
 #: series = "live-tests"

@@ -122,13 +122,12 @@ export RUSTC_BOOTSTRAP=1
 ptime -m cargo build -Z unstable-options --timings=json,html \
     --workspace --exclude=omicron-nexus --tests --locked --verbose \
     1>> "$OUTPUT_DIR/crate-build-timings.json"
+cp target/cargo-timings/cargo-timing.html "$OUTPUT_DIR/cargo-timing-without-nexus.html"
+
 ptime -m cargo build -Z unstable-options --timings=json,html \
     --workspace --tests --locked --verbose \
     1>> "$OUTPUT_DIR/crate-build-timings.json"
-
-# Copy the HTML timing report to the output directory.
-# Cargo writes to target/cargo-timings/cargo-timing.html (a symlink to the latest).
-cp target/cargo-timings/cargo-timing.html "$OUTPUT_DIR/cargo-timing.html"
+cp target/cargo-timings/cargo-timing.html "$OUTPUT_DIR/cargo-timing-with-nexus.html"
 
 #
 # We apply our own timeout to ensure that we get a normal failure on timeout
