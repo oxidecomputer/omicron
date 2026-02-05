@@ -409,7 +409,7 @@ impl<'a> EarlyNetworkSetup<'a> {
                     error!(
                         self.log,
                         "unable to apply uplink port configuration";
-                        "error" => ?e,
+                        InlineErrorChain::new(&e),
                         "port_id" => ?port_id,
                         "configuration" => ?dpd_port_settings
                     );
@@ -702,7 +702,7 @@ impl<'a> EarlyNetworkSetup<'a> {
                     error!(
                         self.log,
                         "BGP peer configuration failed";
-                        "error" => ?e,
+                        InlineErrorChain::new(&e),
                         "configuration" => ?request,
                     );
                 }
@@ -767,7 +767,7 @@ impl<'a> EarlyNetworkSetup<'a> {
             error!(
                 self.log,
                 "static route configuration failed";
-                "error" => ?e,
+                InlineErrorChain::new(&e),
                 "configuration" => ?rq,
             );
         };
@@ -806,7 +806,7 @@ impl<'a> EarlyNetworkSetup<'a> {
                 error!(
                     self.log,
                     "BFD peer configuration failed";
-                    "error" => ?e,
+                    InlineErrorChain::new(&e),
                     "configuration" => ?cfg,
                 );
             };

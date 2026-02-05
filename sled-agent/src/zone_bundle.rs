@@ -31,6 +31,7 @@ use sled_agent_config_reconciler::AvailableDatasetsReceiver;
 use sled_agent_config_reconciler::InternalDisksReceiver;
 use sled_agent_types::zone_bundle::*;
 use slog::Logger;
+use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::io::Cursor;
@@ -727,7 +728,7 @@ async fn create_zfs_snapshots(
                                     log,
                                     "failed to list datasets, will \
                                     unwind any previously created snapshots";
-                                    "error" => ?e,
+                                    InlineErrorChain::new(&e),
                                 );
                                 assert!(
                                     maybe_err
@@ -756,7 +757,7 @@ async fn create_zfs_snapshots(
                                 log,
                                 "failed to create snapshot, will \
                                 unwind any previously created";
-                                "error" => ?e,
+                                InlineErrorChain::new(&e),
                             );
                             assert!(maybe_err.replace(e).is_none());
                             break;
@@ -776,7 +777,7 @@ async fn create_zfs_snapshots(
                     log,
                     "failed to get metadata for potential zone directory";
                     "zone_dir" => %zone_dir,
-                    "error" => ?e,
+                    InlineErrorChain::new(&e),
                 );
             }
         }
@@ -803,7 +804,7 @@ async fn cleanup_zfs_snapshots(log: &Logger, snapshots: &[Snapshot]) {
                 log,
                 "failed to destroy zone bundle ZFS snapshot";
                 "snapshot" => %snapshot,
-                "error" => ?e,
+                InlineErrorChain::new(&e),
             ),
         }
     }
@@ -943,7 +944,7 @@ async fn create(
                 "failed to create bundle file";
                 "zone" => zone.name(),
                 "file" => %full_path,
-                "error" => ?e,
+                InlineErrorChain::new(&e),
             );
             return Err(BundleError::OpenBundleFile {
                 path: full_path.to_owned(),
@@ -992,7 +993,7 @@ async fn create(
                 "failed to save zone bundle command output";
                 "zone" => zone.name(),
                 "command" => ?cmd,
-                "error" => ?e,
+                InlineErrorChain::new(&e),
             );
         }
     }
@@ -1017,7 +1018,7 @@ async fn create(
                 log,
                 "failed to enumerate zone service processes";
                 "zone" => zone.name(),
-                "error" => ?e,
+                InlineErrorChain::new(&*e),
             );
             return Err(BundleError::from(e));
         }
@@ -1050,7 +1051,7 @@ async fn create(
                     log,
                     "failed to create ZFS snapshots";
                     "zone_name" => zone.name(),
-                    "error" => ?e,
+                    InlineErrorChain::new(&e),
                 );
                 return Err(e);
             }
@@ -1091,7 +1092,7 @@ async fn create(
                     "failed to save zone bundle command output";
                     "zone" => zone.name(),
                     "command" => ?args,
-                    "error" => ?e,
+                    InlineErrorChain::new(&e),
                 );
             }
         }
@@ -1115,7 +1116,7 @@ async fn create(
                     log,
                     "failed to find service log files";
                     "zone" => zone.name(),
-                    "error" => ?e,
+                    InlineErrorChain::new(&e),
                 );
                 cleanup_zfs_snapshots(&log, &snapshots).await;
                 return Err(e);
@@ -1139,7 +1140,7 @@ async fn create(
                         "failed to append log file to zone bundle";
                         "zone" => zone.name(),
                         "log_file" => %svc.log_file,
-                        "error" => ?e,
+                        InlineErrorChain::new(&e),
                     );
                 }
             }

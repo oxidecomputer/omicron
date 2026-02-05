@@ -71,6 +71,7 @@ use sled_agent_types::inventory::{
 use sled_agent_types::support_bundle::SupportBundleMetadata;
 
 use slog::Logger;
+use slog_error_chain::InlineErrorChain;
 use std::collections::{HashMap, HashSet};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::sync::Arc;
@@ -435,7 +436,7 @@ impl SledAgent {
                                 info!(log, "sim_ensure success"; "vmm_state" => #?vmm_state);
                             }
                             Err(instance_put_error) => {
-                                error!(log, "sim_ensure failure"; "error" => #?instance_put_error);
+                                error!(log, "sim_ensure failure"; InlineErrorChain::new(&instance_put_error));
                             }
                         }
                     });

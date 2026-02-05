@@ -60,6 +60,7 @@ use rand::seq::IndexedRandom;
 use sled_agent_types::inventory::OmicronZoneDataset;
 use sled_agent_types::rack_init::RecoverySiloConfig;
 use slog::{Drain, Logger, info};
+use slog_error_chain::InlineErrorChain;
 use std::collections::HashMap;
 use std::net::IpAddr;
 use std::net::Ipv4Addr;
@@ -191,7 +192,7 @@ impl Server {
             };
             let log_notification_failure = |error, delay| {
                 warn!(log, "failed to contact nexus, will retry in {:?}", delay;
-                    "error" => ?error);
+                    InlineErrorChain::new(&error));
             };
             retry_notify(
                 retry_policy_internal_service_aggressive(),

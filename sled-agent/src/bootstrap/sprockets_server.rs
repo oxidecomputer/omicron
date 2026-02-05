@@ -13,6 +13,7 @@ use crate::bootstrap::views::SledAgentResponse;
 use sled_agent_measurements::MeasurementsHandle;
 use sled_agent_types::sled::StartSledAgentRequest;
 use slog::Logger;
+use slog_error_chain::InlineErrorChain;
 use sprockets_tls::Stream;
 use sprockets_tls::keys::SprocketsConfig;
 use sprockets_tls::server::Server;
@@ -72,14 +73,14 @@ impl SprocketsServer {
                 Err(e) => {
                     // Not much we can do here besides log the error and use
                     // an empty corpus
-                    error!(self.log, "measurement error; using empty corpus"; &e);
+                    error!(self.log, "measurement error; using empty corpus"; InlineErrorChain::new(&e));
                     vec![]
                 }
             };
             let acceptor = match self.listener.accept(corpus).await {
                 Ok(acceptor) => acceptor,
                 Err(err) => {
-                    error!(self.log, "accept() failed"; &err);
+                    error!(self.log, "accept() failed"; InlineErrorChain::new(&err));
                     continue;
                 }
             };
@@ -91,7 +92,7 @@ impl SprocketsServer {
                 let stream = match acceptor.handshake().await {
                     Ok((stream, _)) => stream,
                     Err(err) => {
-                        error!(log, "Sprockets handshake failed"; &err);
+                        error!(log, "Sprockets handshake failed"; InlineErrorChain::new(&err));
                         return;
                     }
                 };
@@ -101,7 +102,9 @@ impl SprocketsServer {
                     .await
                 {
                     Ok(()) => info!(log, "Connection closed"),
-                    Err(err) => warn!(log, "Connection failed"; "err" => err),
+                    // The error type here is `String`, so we don't need
+                    // InlineErrorChain.
+                    Err(err) => warn!(log, "Connection failed"; "err" => %err),
                 }
             });
         }

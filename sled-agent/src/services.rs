@@ -1253,7 +1253,7 @@ impl ServiceManager {
             let log_failure = |error, _| {
                 warn!(
                     self.inner.log, "failed to create NAT entry for service";
-                    "error" => ?error,
+                    InlineErrorChain::new(&error),
                     "zone_type" => zone_kind.report_str(),
                 );
             };
@@ -3241,7 +3241,7 @@ impl ServiceManager {
         let mut command = std::process::Command::new(PFEXEC);
         let cmd = command.args(&["/usr/platform/oxide/bin/tmpx", "-Z"]);
         if let Err(e) = execute(cmd) {
-            warn!(self.inner.log, "Updating [wu]tmpx databases failed: {}", e);
+            warn!(self.inner.log, "Updating [wu]tmpx databases failed"; InlineErrorChain::new(&e));
         }
     }
 

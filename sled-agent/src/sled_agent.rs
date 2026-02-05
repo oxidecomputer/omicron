@@ -621,11 +621,13 @@ impl SledAgent {
             retry_notify::<_, String, _, _, _, _>(
                 retry_policy_internal_service_aggressive(),
                 get_network_config,
+                // The error type here is `String`, so we don't need
+                // InlineErrorChain.
                 |error, delay| {
                     warn!(
                         log,
                         "failed to get network config from bootstore";
-                        "error" => ?error,
+                        "error" => %error,
                         "retry_after" => ?delay,
                     );
                 },
