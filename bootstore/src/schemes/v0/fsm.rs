@@ -116,8 +116,8 @@ pub enum ApiError {
     #[error("rack init timeout: unacked_peers: {unacked_peers:?}")]
     RackInitTimeout { unacked_peers: BTreeSet<Baseboard> },
 
-    #[error("rack init falied: trust quorum error: {0:?}")]
-    RackInitFailed(TrustQuorumError),
+    #[error("rack init falied: trust quorum error")]
+    RackInitFailed(#[source] TrustQuorumError),
 
     #[error("rack secret load timeout")]
     RackSecretLoadTimeout,
@@ -142,12 +142,13 @@ pub enum ApiError {
     },
 
     #[error(
-        "error response received from ({from}) in state ({state}) with request_id ({request_id}): {error:?}"
+        "error response received from ({from}) in state ({state}) with request_id ({request_id})"
     )]
     ErrorResponseReceived {
         from: Baseboard,
         state: &'static str,
         request_id: Uuid,
+        #[source]
         error: MsgError,
     },
 }
