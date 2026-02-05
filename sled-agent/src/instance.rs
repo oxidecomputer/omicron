@@ -53,6 +53,7 @@ use sled_agent_types::attached_subnet::{AttachedSubnet, AttachedSubnets};
 use sled_agent_types::instance::*;
 use sled_agent_types::zone_bundle::ZoneBundleCause;
 use slog::Logger;
+use slog_error_chain::InlineErrorChain;
 use std::net::IpAddr;
 use std::net::SocketAddr;
 use std::ops::ControlFlow;
@@ -170,8 +171,8 @@ async fn wait_for_http_server(
     let log_notification_failure = |error, delay| {
         warn!(
             log,
-            "failed to await http server ({}), will retry in {:?}", error, delay;
-            "error" => ?error
+            "failed to await http server, will retry in {:?}", delay;
+            InlineErrorChain::new(&error),
         );
     };
 
@@ -407,7 +408,7 @@ impl InstanceMonitorRunner {
                     warn!(
                         self.log,
                         "Failed to poll Propolis state";
-                        "error" => %error,
+                        InlineErrorChain::new(&error),
                         "retry_in" => ?delay,
                         "generation" => generation,
                     );
@@ -477,7 +478,7 @@ impl InstanceMonitorRunner {
                             self.log,
                             "communication error checking up on Propolis, but \
                              the zone is still running...";
-                            "error" => %e,
+                            InlineErrorChain::new(&e),
                             "zone" => %self.zone_name,
                         );
                         Err(BackoffError::transient(e))
@@ -486,7 +487,7 @@ impl InstanceMonitorRunner {
                         info!(
                             self.log,
                             "Propolis zone is no longer running!";
-                            "error" => %e,
+                            InlineErrorChain::new(&e),
                             "zone" => %self.zone_name,
                             "zone_state" => ?zone.state(),
                         );
@@ -499,7 +500,7 @@ impl InstanceMonitorRunner {
                             self.log,
                             "error checking if Propolis zone still exists after \
                              commuication error";
-                            "error" => %zoneadm_error,
+                            InlineErrorChain::new(&zoneadm_error),
                             "zone" => %self.zone_name,
                         );
                         Err(BackoffError::transient(e))
@@ -828,7 +829,7 @@ impl InstanceRunner {
                                     self.log,
                                     "Error handling request";
                                     "request" => request_variant,
-                                    "err" => ?err,
+                                    InlineErrorChain::new(&err),
                                 );
                             }
                         }
@@ -1143,7 +1144,8 @@ impl InstanceRunner {
             .await;
 
         if let Err(e) = &res {
-            error!(self.log, "Error from Propolis client: {:?}", e;
+            error!(self.log, "Error from Propolis client";
+               InlineErrorChain::new(e),
                "status" => ?e.status());
         }
 
@@ -1318,7 +1320,7 @@ impl InstanceRunner {
         let log = self.log.clone();
         let monitor_handle = tokio::task::spawn(async move {
             match runner.run().await {
-                Err(e) => warn!(log, "State monitoring task failed: {}", e),
+                Err(e) => warn!(log, "State monitoring task failed"; InlineErrorChain::new(&*e)),
                 Ok(()) => info!(log, "State monitoring task complete"),
             }
         });
@@ -1896,11 +1898,13 @@ fn propolis_error_code(
     let code = rv.error_code.as_deref()?;
     match code.parse::<PropolisErrorCode>() {
         Err(parse_error) => {
+            // The parse_error is a strum::ParseError which is just a string
+            // error, so we log it directly without InlineErrorChain.
             warn!(log, "Propolis returned an unknown error code: {code:?}";
                 "status" => ?error.status(),
-                "error" => %error,
+                InlineErrorChain::new(error),
                 "code" => ?code,
-                "parse_error" => ?parse_error);
+                "parse_error" => %parse_error);
             None
         }
         Ok(code) => Some(code),
@@ -2353,7 +2357,7 @@ impl InstanceRunner {
         let setup = match self.setup_propolis_zone().await {
             Ok(setup) => setup,
             Err(e) => {
-                error!(&self.log, "failed to set up Propolis zone"; "error" => ?e);
+                error!(&self.log, "failed to set up Propolis zone"; InlineErrorChain::new(&e));
                 return Err(e);
             }
         };
@@ -2366,7 +2370,7 @@ impl InstanceRunner {
             )
             .await
         {
-            error!(&self.log, "failed to create Propolis VM"; "error" => ?e);
+            error!(&self.log, "failed to create Propolis VM"; InlineErrorChain::new(&e));
             return Err(e);
         }
 
@@ -2675,7 +2679,7 @@ impl InstanceRunner {
                     warn!(
                         self.log,
                         "Error handling request to terminate instance";
-                        "err" => ?err,
+                        InlineErrorChain::new(&err),
                     );
                 }
 

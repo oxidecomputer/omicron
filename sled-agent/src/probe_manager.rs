@@ -36,6 +36,7 @@ use sled_agent_resolvable_files::ramdisk_file_source;
 use sled_agent_types::probes::ExternalIp;
 use sled_agent_types::probes::ProbeCreate;
 use slog::{Logger, error, warn};
+use slog_error_chain::InlineErrorChain;
 use std::collections::{HashMap, HashSet};
 use std::hash::{Hash, Hasher};
 use std::net::IpAddr;
@@ -450,7 +451,7 @@ impl ProbeManagerInner {
                 // this intended to delete the control VNIC?
                 for l in running_zone.links_mut() {
                     if let Err(e) = l.delete().await {
-                        error!(self.log, "delete probe link {}: {e}", l.name());
+                        error!(self.log, "delete probe link {}",  l.name(); InlineErrorChain::new(&e));
                     }
                 }
 

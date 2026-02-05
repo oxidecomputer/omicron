@@ -20,6 +20,7 @@ use sled_agent_types::rack_init::RackInitializeRequestParams;
 use sled_agent_types::rack_ops::RssStep;
 use sled_agent_types::sled::StartSledAgentRequest;
 use slog::Logger;
+use slog_error_chain::InlineErrorChain;
 use sprockets_tls::keys::SprocketsConfig;
 use std::net::Ipv6Addr;
 use std::net::SocketAddrV6;
@@ -121,7 +122,7 @@ async fn initialize_sled_agent(
     };
 
     let log_failure = |error, _| {
-        warn!(log, "failed to start sled agent"; "error" => ?error);
+        warn!(log, "failed to start sled agent"; InlineErrorChain::new(&error));
     };
     retry_notify(retry_policy_local(), sled_agent_initialize, log_failure)
         .await?;

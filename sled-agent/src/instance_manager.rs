@@ -28,6 +28,7 @@ use sled_agent_types::attached_subnet::AttachedSubnets;
 use sled_agent_types::instance::*;
 use sled_agent_types::instance::{InstanceEnsureBody, InstanceMulticastBody};
 use slog::Logger;
+use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 use tokio::sync::{mpsc, oneshot};
@@ -668,7 +669,7 @@ impl InstanceManagerRunner {
                             self.log,
                             "Error handling request";
                             "request" => request_variant.unwrap(),
-                            "err" => ?err
+                            InlineErrorChain::new(&err),
                         );
                     }
                 }
@@ -987,12 +988,12 @@ impl InstanceManagerRunner {
             if let Some(instance) = self.jobs.remove(&id) {
                 let (tx, rx) = oneshot::channel();
                 if let Err(e) = instance.terminate(tx, VmmStateOwner::Runner) {
-                    warn!(self.log, "use_only_these_disks: Failed to request instance removal"; "err" => ?e);
+                    warn!(self.log, "use_only_these_disks: Failed to request instance removal"; InlineErrorChain::new(&e));
                     continue;
                 }
 
                 if let Err(e) = rx.await {
-                    warn!(self.log, "use_only_these_disks: Failed while removing instance"; "err" => ?e);
+                    warn!(self.log, "use_only_these_disks: Failed while removing instance"; InlineErrorChain::new(&e));
                 }
             }
         }

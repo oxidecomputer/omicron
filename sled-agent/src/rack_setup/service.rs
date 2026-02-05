@@ -308,7 +308,7 @@ impl RackSetupService {
         let handle = tokio::task::spawn(async move {
             let svc = ServiceInner::new(log.clone());
             if let Err(e) = svc.reset(local_bootstrap_agent).await {
-                warn!(log, "RSS rack reset failed: {}", e);
+                warn!(log, "RSS rack reset failed"; InlineErrorChain::new(&e));
                 Err(e)
             } else {
                 Ok(())
@@ -748,8 +748,10 @@ impl ServiceInner {
                 )))
             }
         };
+        // The error type here is `String`, so we don't need
+        // InlineErrorChain.
         let log_failure = |error, _| {
-            warn!(self.log, "Time is not yet synchronized"; "error" => ?error);
+            warn!(self.log, "Time is not yet synchronized"; "error" => %error);
         };
 
         retry_notify(

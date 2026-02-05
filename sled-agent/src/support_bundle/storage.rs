@@ -757,11 +757,11 @@ impl<'a> SupportBundleManager<'a> {
         tmp_file.seek(tokio::io::SeekFrom::Start(offset)).await?;
 
         if let Err(err) = Self::stream_bundle(tmp_file, stream).await {
-            warn!(log, "Failed to write bundle to storage"; "error" => ?err);
+            warn!(log, "Failed to write bundle to storage"; InlineErrorChain::new(&err));
             if let Err(unlink_err) =
                 tokio::fs::remove_file(support_bundle_path_tmp).await
             {
-                warn!(log, "Failed to unlink bundle after previous error"; "error" => ?unlink_err);
+                warn!(log, "Failed to unlink bundle after previous error"; InlineErrorChain::new(&unlink_err));
             }
             return Err(err);
         }

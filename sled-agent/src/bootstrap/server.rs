@@ -48,6 +48,7 @@ use sled_agent_types::sled::StartSledAgentRequest;
 use sled_hardware::underlay;
 use sled_storage::dataset::CONFIG_DATASET;
 use slog::Logger;
+use slog_error_chain::InlineErrorChain;
 use std::io;
 use std::net::SocketAddr;
 use std::net::SocketAddrV6;
@@ -610,7 +611,7 @@ impl Inner {
                     Err(err) => {
                         // This error is unrecoverable, and if returned we'd
                         // end up in maintenance mode anyway.
-                        error!(log, "Failed to start sled agent: {err:#}");
+                        error!(log, "Failed to start sled agent"; InlineErrorChain::new(&err));
                         panic!("Failed to start sled agent: {err:#}");
                     }
                 };

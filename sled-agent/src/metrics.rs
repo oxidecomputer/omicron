@@ -17,6 +17,7 @@ use oximeter_instruments::kstat::link::SledDataLinkTarget;
 use oximeter_producer::LogConfig;
 use oximeter_producer::Server as ProducerServer;
 use slog::Logger;
+use slog_error_chain::InlineErrorChain;
 use std::collections::HashMap;
 use std::collections::hash_map::Entry;
 use std::net::Ipv6Addr;
@@ -240,7 +241,7 @@ async fn remove_datalink(
                     "failed to remove VNIC from kstat sampler, \
                      metrics may still be produced for it";
                     "link_name" => name,
-                    "error" => ?err,
+                    InlineErrorChain::new(&err),
                 );
             }
         },
@@ -285,7 +286,7 @@ async fn add_datalink(
                         "link_name" => entry.key(),
                         "link_kind" => %link.kind(),
                         "zone_name" => %link.zone_name(),
-                        "error" => ?err,
+                        InlineErrorChain::new(&err),
                     );
                 }
             }
@@ -326,7 +327,7 @@ async fn sync_sled_datalinks(
                     log,
                     "failed to update link already tracked by kstat sampler";
                     "link_name" => link_name,
-                    "error" => ?err,
+                    InlineErrorChain::new(&err),
                 );
             }
         }
