@@ -320,6 +320,18 @@ impl SystemDescription {
         self.target_internal_dns_zone_count
     }
 
+    pub fn set_target_oximeter_zone_count(
+        &mut self,
+        count: usize,
+    ) -> &mut Self {
+        self.target_oximeter_zone_count = count;
+        self
+    }
+
+    pub fn target_oximeter_zone_count(&self) -> usize {
+        self.target_oximeter_zone_count
+    }
+
     pub fn external_ip_policy(&self) -> &ExternalIpPolicy {
         &self.external_ip_policy
     }

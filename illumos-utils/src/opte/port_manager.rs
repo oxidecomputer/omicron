@@ -6,6 +6,7 @@
 
 use crate::dladm::OPTE_LINK_PREFIX;
 use crate::opte::AttachedSubnet;
+use crate::opte::EnsureAttachedSubnetResult;
 use crate::opte::Error;
 use crate::opte::Gateway;
 use crate::opte::Handle;
@@ -65,6 +66,8 @@ use slog::debug;
 use slog::error;
 use slog::info;
 use slog::warn;
+#[cfg(all(target_os = "illumos", not(test)))]
+use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::collections::HashSet;
@@ -76,6 +79,8 @@ use std::sync::Mutex;
 use std::sync::atomic::AtomicU64;
 use std::sync::atomic::Ordering;
 use uuid::Uuid;
+
+use super::AttachedSubnetKind;
 
 /// Stored routes (and usage count) for a given VPC/subnet.
 #[derive(Debug, Default, Clone)]
@@ -283,10 +288,13 @@ fn build_opte_ipv4_config(
     let attached_subnets = attached_subnets
         .iter()
         .filter_map(|subnet| match subnet.cidr {
-            IpCidr::Ip4(ipv4) => Some((
-                ipv4,
-                AttachedSubnetConfig { is_external: subnet.is_external },
-            )),
+            IpCidr::Ip4(ipv4) => {
+                let is_external = match subnet.kind {
+                    AttachedSubnetKind::Vpc => false,
+                    AttachedSubnetKind::External => true,
+                };
+                Some((ipv4, AttachedSubnetConfig { is_external }))
+            }
             IpCidr::Ip6(_) => None,
         })
         .collect();
@@ -323,10 +331,13 @@ fn build_opte_ipv6_config(
         .iter()
         .filter_map(|subnet| match subnet.cidr {
             IpCidr::Ip4(_) => None,
-            IpCidr::Ip6(ipv6) => Some((
-                ipv6,
-                AttachedSubnetConfig { is_external: subnet.is_external },
-            )),
+            IpCidr::Ip6(ipv6) => {
+                let is_external = match subnet.kind {
+                    AttachedSubnetKind::Vpc => false,
+                    AttachedSubnetKind::External => true,
+                };
+                Some((ipv6, AttachedSubnetConfig { is_external }))
+            }
         })
         .collect();
     Ipv6Cfg {
@@ -1002,11 +1013,16 @@ impl PortManager {
         nic_kind: NetworkInterfaceKind,
         ensure_removed: Vec<IpCidr>,
         ensure_added: Vec<AttachedSubnet>,
-    ) -> Result<(), Error> {
+    ) -> EnsureAttachedSubnetResult {
         let ports = self.inner.ports.lock().unwrap();
-        let port = ports.get(&(nic_id, nic_kind)).ok_or_else(|| {
-            Error::AttachedSubnetUpdateMissingPort(nic_id, nic_kind)
-        })?;
+        let Some(port) = ports.get(&(nic_id, nic_kind)) else {
+            return EnsureAttachedSubnetResult {
+                diff: Default::default(),
+                error: Some(Error::AttachedSubnetUpdateMissingPort(
+                    nic_id, nic_kind,
+                )),
+            };
+        };
         self.attached_subnets_ensure_port(port, ensure_removed, ensure_added)
     }
 
@@ -1015,20 +1031,41 @@ impl PortManager {
         port: &Port,
         ensure_removed: Vec<IpCidr>,
         ensure_added: Vec<AttachedSubnet>,
-    ) -> Result<(), Error> {
+    ) -> EnsureAttachedSubnetResult {
         debug!(
             self.inner.log,
             "ensuring attached subnets for port";
             "port_name" => %port.name(),
         );
-        let hdl = Handle::new()?;
+        let hdl = match Handle::new() {
+            Ok(h) => h,
+            Err(e) => {
+                return EnsureAttachedSubnetResult {
+                    diff: Default::default(),
+                    error: Some(e.into()),
+                };
+            }
+        };
+        let mut result = EnsureAttachedSubnetResult::default();
         for cidr in ensure_removed.into_iter() {
-            hdl.detach_subnet(port.name(), cidr)?;
+            match hdl.detach_subnet(port.name(), cidr) {
+                Ok(_) => result.diff.detached.push(cidr),
+                Err(e) => {
+                    assert!(result.error.replace(e.into()).is_none());
+                    return result;
+                }
+            }
         }
         for subnet in ensure_added.into_iter() {
-            self.attach_subnet_port(port, subnet)?
+            match self.attach_subnet_port(port, subnet) {
+                Ok(_) => result.diff.attached.push(subnet),
+                Err(e) => {
+                    assert!(result.error.replace(e).is_none());
+                    return result;
+                }
+            }
         }
-        Ok(())
+        result
     }
 
     pub fn attach_subnet(
@@ -1050,7 +1087,11 @@ impl PortManager {
         subnet: AttachedSubnet,
     ) -> Result<(), Error> {
         let hdl = Handle::new()?;
-        let AttachedSubnet { cidr, is_external } = subnet;
+        let AttachedSubnet { cidr, kind } = subnet;
+        let is_external = match kind {
+            AttachedSubnetKind::Vpc => false,
+            AttachedSubnetKind::External => true,
+        };
         match hdl.attach_subnet(port.name(), cidr, is_external) {
             Ok(_) => {
                 debug!(
@@ -1058,17 +1099,27 @@ impl PortManager {
                     "attached subnet";
                     "port_name" => %port.name(),
                     "subnet" => %cidr,
-                    "is_external" => is_external,
+                    "kind" => ?kind,
                 );
                 Ok(())
             }
             Err(e) => {
+                #[cfg(all(target_os = "illumos", not(test)))]
                 error!(
                     self.inner.log,
                     "failed to attach subnet";
                     "port_name" => %port.name(),
                     "subnet" => %cidr,
-                    "is_external" => is_external,
+                    "kind" => ?kind,
+                    "error" => InlineErrorChain::new(&e),
+                );
+                #[cfg(not(all(target_os = "illumos", not(test))))]
+                error!(
+                    self.inner.log,
+                    "failed to attach subnet";
+                    "port_name" => %port.name(),
+                    "subnet" => %cidr,
+                    "kind" => ?kind,
                     "error" => ?e,
                 );
                 Err(Error::from(e))
@@ -1119,6 +1170,15 @@ impl PortManager {
                 Ok(())
             }
             Err(e) => {
+                #[cfg(all(target_os = "illumos", not(test)))]
+                error!(
+                    self.inner.log,
+                    "failed to detach subnet";
+                    "port_name" => %port.name(),
+                    "subnet" => %subnet,
+                    "error" => InlineErrorChain::new(&e),
+                );
+                #[cfg(not(all(target_os = "illumos", not(test))))]
                 error!(
                     self.inner.log,
                     "failed to detach subnet";

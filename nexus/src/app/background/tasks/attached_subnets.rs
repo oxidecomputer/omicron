@@ -28,6 +28,7 @@ use oxnet::IpNet;
 use serde_json::Value;
 use serde_json::json;
 use sled_agent_client::types::AttachedSubnet;
+use sled_agent_client::types::AttachedSubnetKind;
 use sled_agent_client::types::AttachedSubnets;
 use slog::Logger;
 use slog::debug;
@@ -310,10 +311,12 @@ fn group_attached_subnets_by_sled_and_vmm(
             .subnets
             .push(AttachedSubnet {
                 subnet: attachment.subnet,
-                is_external: matches!(
-                    attachment.subnet_id,
-                    AttachedSubnetId::External(_)
-                ),
+                kind: match attachment.subnet_id {
+                    AttachedSubnetId::External(_) => {
+                        AttachedSubnetKind::External
+                    }
+                    AttachedSubnetId::Vpc(_) => AttachedSubnetKind::Vpc,
+                },
             });
     }
     attachments_by_sled
@@ -451,6 +454,7 @@ mod test {
     use omicron_common::address::IpVersion;
     use omicron_common::api::internal::shared;
     use omicron_uuid_kinds::GenericUuid;
+    use sled_agent_types::attached_subnet::AttachedSubnetKind;
     use std::collections::BTreeSet;
 
     #[test]
@@ -692,7 +696,10 @@ mod test {
                 let on_sled = sa_subnets.get(&att.vmm_id).unwrap();
                 assert_eq!(on_sled.len(), 1);
                 let attached_on_sled = on_sled.iter().next().unwrap();
-                assert!(attached_on_sled.is_external);
+                assert!(matches!(
+                    attached_on_sled.kind,
+                    AttachedSubnetKind::External
+                ));
                 assert_eq!(attached_on_sled.subnet, att.subnet);
             }
         }
@@ -779,7 +786,10 @@ mod test {
                 let on_sled = sa_subnets.get(&att.vmm_id).unwrap();
                 assert_eq!(on_sled.len(), 1);
                 let attached_on_sled = on_sled.iter().next().unwrap();
-                assert!(attached_on_sled.is_external);
+                assert!(matches!(
+                    attached_on_sled.kind,
+                    AttachedSubnetKind::External
+                ));
                 assert_eq!(attached_on_sled.subnet, att.subnet);
             }
         }

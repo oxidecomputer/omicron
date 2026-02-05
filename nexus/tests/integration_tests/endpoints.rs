@@ -44,6 +44,7 @@ use omicron_common::api::external::UserId;
 use omicron_common::api::external::VpcFirewallRuleUpdateParams;
 use omicron_test_utils::certificates::CertificateChain;
 use semver::Version;
+use std::collections::BTreeSet;
 use std::net::IpAddr;
 use std::net::Ipv4Addr;
 use std::num::NonZeroU32;
@@ -66,6 +67,27 @@ pub static HARDWARE_SLED_PROVISION_POLICY_URL: LazyLock<String> =
             SLED_AGENT_UUID
         )
     });
+pub static HARDWARE_RACK_MEMBERSHIP_URL: LazyLock<String> =
+    LazyLock::new(|| {
+        format!("/v1/system/hardware/racks/{}/membership", RACK_UUID)
+    });
+pub static HARDWARE_RACK_MEMBERSHIP_ADD_URL: LazyLock<String> =
+    LazyLock::new(|| {
+        format!("/v1/system/hardware/racks/{}/membership/add", RACK_UUID)
+    });
+pub static HARDWARE_RACK_MEMBERSHIP_ABORT_URL: LazyLock<String> =
+    LazyLock::new(|| {
+        format!("/v1/system/hardware/racks/{}/membership/abort", RACK_UUID)
+    });
+pub static DEMO_RACK_ADD_SLEDS_REQUEST: LazyLock<
+    params::RackMembershipAddSledsRequest,
+> = LazyLock::new(|| params::RackMembershipAddSledsRequest {
+    sled_ids: BTreeSet::from([sled_hardware_types::BaseboardId {
+        serial_number: "demo-serial".to_string(),
+        part_number: "demo-part".to_string(),
+    }]),
+});
+
 pub static DEMO_SLED_PROVISION_POLICY: LazyLock<
     params::SledProvisionPolicyParams,
 > = LazyLock::new(|| params::SledProvisionPolicyParams {
@@ -135,16 +157,6 @@ pub static DEMO_LLDP_NEIGHBORS_URL: LazyLock<String> = LazyLock::new(|| {
         RACK_UUID
     )
 });
-
-// Rack membership
-pub static DEMO_RACK_MEMBERSHIP_STATUS_URL: LazyLock<String> =
-    LazyLock::new(|| {
-        format!("/v1/system/hardware/racks/{}/membership", RACK_UUID)
-    });
-pub static DEMO_RACK_MEMBERSHIP_ADD_URL: LazyLock<String> =
-    LazyLock::new(|| {
-        format!("/v1/system/hardware/racks/{}/membership/add", RACK_UUID)
-    });
 
 // Alert resend
 pub static DEMO_ALERT_RESEND_URL: LazyLock<String> = LazyLock::new(|| {
@@ -1550,6 +1562,14 @@ pub static SCIM_TOKEN_URL: LazyLock<String> = LazyLock::new(|| {
     )
 });
 
+// SCIM v2 endpoints (bearer token auth, not session auth)
+pub const SCIM_V2_USERS_URL: &str = "/scim/v2/Users";
+pub const SCIM_V2_USER_URL: &str =
+    "/scim/v2/Users/00000000-0000-0000-0000-000000000000";
+pub const SCIM_V2_GROUPS_URL: &str = "/scim/v2/Groups";
+pub const SCIM_V2_GROUP_URL: &str =
+    "/scim/v2/Groups/00000000-0000-0000-0000-000000000000";
+
 /// Describes an API endpoint to be verified by the "unauthorized" test
 ///
 /// These structs are also used to check whether we're covering all endpoints in
@@ -1666,6 +1686,9 @@ pub enum AllowedMethod {
     /// HTTP "PUT" method, with sample input (which should be valid input for
     /// this endpoint)
     Put(serde_json::Value),
+    /// HTTP "PATCH" method, with sample input (which should be valid input for
+    /// this endpoint)
+    Patch(serde_json::Value),
 }
 
 impl AllowedMethod {
@@ -1683,6 +1706,7 @@ impl AllowedMethod {
             }
             AllowedMethod::Post(_) => &Method::POST,
             AllowedMethod::Put(_) => &Method::PUT,
+            AllowedMethod::Patch(_) => &Method::PATCH,
         }
     }
 
@@ -1702,6 +1726,7 @@ impl AllowedMethod {
             | AllowedMethod::HeadNonexistent => None,
             AllowedMethod::Post(body) => Some(&body),
             AllowedMethod::Put(body) => Some(&body),
+            AllowedMethod::Patch(body) => Some(&body),
         }
     }
 }
@@ -2840,6 +2865,27 @@ pub static VERIFY_ENDPOINTS: LazyLock<Vec<VerifyEndpoint>> = LazyLock::new(
                 allowed_methods: vec![AllowedMethod::Get],
             },
             VerifyEndpoint {
+                url: &HARDWARE_RACK_MEMBERSHIP_URL,
+                visibility: Visibility::Protected,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![AllowedMethod::GetNonexistent],
+            },
+            VerifyEndpoint {
+                url: &HARDWARE_RACK_MEMBERSHIP_ADD_URL,
+                visibility: Visibility::Protected,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![AllowedMethod::Post(
+                    serde_json::to_value(&*DEMO_RACK_ADD_SLEDS_REQUEST)
+                        .unwrap()
+                )],
+            },
+            VerifyEndpoint {
+                url: &HARDWARE_RACK_MEMBERSHIP_ABORT_URL,
+                visibility: Visibility::Protected,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![AllowedMethod::Post(serde_json::Value::Null)],
+            },
+            VerifyEndpoint {
                 url: &HARDWARE_UNINITIALIZED_SLEDS,
                 visibility: Visibility::Public,
                 unprivileged_access: UnprivilegedAccess::None,
@@ -3550,6 +3596,63 @@ pub static VERIFY_ENDPOINTS: LazyLock<Vec<VerifyEndpoint>> = LazyLock::new(
                     AllowedMethod::Delete,
                 ],
             },
+            // SCIM v2 endpoints (bearer token auth). These use GetNonexistent
+            // because the default silo is LocalOnly, not SamlScim, so we can't
+            // actually authenticate with a SCIM token in this test.
+            VerifyEndpoint {
+                url: SCIM_V2_USERS_URL,
+                visibility: Visibility::Public,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![
+                    AllowedMethod::GetNonexistent,
+                    AllowedMethod::Post(serde_json::json!({
+                        "userName": "test@example.com",
+                    })),
+                ],
+            },
+            VerifyEndpoint {
+                url: SCIM_V2_USER_URL,
+                visibility: Visibility::Protected,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![
+                    AllowedMethod::GetNonexistent,
+                    AllowedMethod::Put(serde_json::json!({
+                        "userName": "test@example.com",
+                    })),
+                    AllowedMethod::Patch(serde_json::json!({
+                        "schemas": ["urn:ietf:params:scim:api:messages:2.0:PatchOp"],
+                        "Operations": [],
+                    })),
+                    AllowedMethod::Delete,
+                ],
+            },
+            VerifyEndpoint {
+                url: SCIM_V2_GROUPS_URL,
+                visibility: Visibility::Public,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![
+                    AllowedMethod::GetNonexistent,
+                    AllowedMethod::Post(serde_json::json!({
+                        "displayName": "test-group",
+                    })),
+                ],
+            },
+            VerifyEndpoint {
+                url: SCIM_V2_GROUP_URL,
+                visibility: Visibility::Protected,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![
+                    AllowedMethod::GetNonexistent,
+                    AllowedMethod::Put(serde_json::json!({
+                        "displayName": "test-group",
+                    })),
+                    AllowedMethod::Patch(serde_json::json!({
+                        "schemas": ["urn:ietf:params:scim:api:messages:2.0:PatchOp"],
+                        "Operations": [],
+                    })),
+                    AllowedMethod::Delete,
+                ],
+            },
             // Probes
             VerifyEndpoint {
                 url: &DEMO_PROBES_URL,
@@ -3603,21 +3706,6 @@ pub static VERIFY_ENDPOINTS: LazyLock<Vec<VerifyEndpoint>> = LazyLock::new(
                 visibility: Visibility::Public,
                 unprivileged_access: UnprivilegedAccess::None,
                 allowed_methods: vec![AllowedMethod::GetNonexistent],
-            },
-            // Rack Membership
-            VerifyEndpoint {
-                url: &DEMO_RACK_MEMBERSHIP_STATUS_URL,
-                visibility: Visibility::Public,
-                unprivileged_access: UnprivilegedAccess::None,
-                allowed_methods: vec![AllowedMethod::GetNonexistent],
-            },
-            VerifyEndpoint {
-                url: &DEMO_RACK_MEMBERSHIP_ADD_URL,
-                visibility: Visibility::Public,
-                unprivileged_access: UnprivilegedAccess::None,
-                allowed_methods: vec![AllowedMethod::Post(serde_json::json!({
-                    "sled_ids": [],
-                }))],
             },
             // Alert Delivery Resend
             VerifyEndpoint {

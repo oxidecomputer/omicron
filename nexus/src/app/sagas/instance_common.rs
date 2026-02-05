@@ -16,7 +16,7 @@ use nexus_db_model::{
     SledReservationConstraints, SledResourceVmm, VmmCpuPlatform, VmmState,
 };
 use nexus_db_queries::authz;
-use nexus_db_queries::db::datastore::ExternalSubnetBeginAttachResult;
+use nexus_db_queries::db::datastore::ExternalSubnetBeginOpResult;
 use nexus_db_queries::{authn, context::OpContext, db, db::DataStore};
 use omicron_common::api::external::{Error, IpVersion, NameOrId};
 use omicron_uuid_kinds::{GenericUuid, InstanceUuid, PropolisUuid, SledUuid};
@@ -335,7 +335,7 @@ pub(super) async fn send_subnet_attachment_to_dpd(
     serialized_authn: &authn::saga::Serialized,
     authz_instance: &authz::Instance,
     sled_uuid: Option<SledUuid>,
-    subnet: ExternalSubnetBeginAttachResult,
+    subnet: ExternalSubnetBeginOpResult,
 ) -> Result<Option<IpNet>, ActionError> {
     let osagactx = sagactx.user_data();
     let datastore = osagactx.datastore();
@@ -346,7 +346,7 @@ pub(super) async fn send_subnet_attachment_to_dpd(
     let Some(sled_uuid) = sled_uuid else {
         return Ok(None);
     };
-    let ExternalSubnetBeginAttachResult { subnet, do_saga } = subnet;
+    let ExternalSubnetBeginOpResult { subnet, do_saga } = subnet;
     if !do_saga {
         return Ok(None);
     }
@@ -407,21 +407,21 @@ pub(super) async fn delete_subnet_attachment_from_dpd(
 pub(super) async fn send_subnet_attachment_to_opte(
     sagactx: &NexusActionContext,
     vmm_and_sled: Option<VmmAndSledIds>,
-    subnet: ExternalSubnetBeginAttachResult,
+    subnet: ExternalSubnetBeginOpResult,
 ) -> Result<(), ActionError> {
     let osagactx = sagactx.user_data();
     let Some(VmmAndSledIds { vmm_id: propolis_id, sled_id }) = vmm_and_sled
     else {
         return Ok(());
     };
-    let ExternalSubnetBeginAttachResult { subnet, do_saga } = subnet;
+    let ExternalSubnetBeginOpResult { subnet, do_saga } = subnet;
     if !do_saga {
         return Ok(());
     }
     let request = sled_agent_client::types::AttachedSubnet {
         // TODO-completeness: Expand this code to handle VPC subnets too. See
         // https://github.com/oxidecomputer/omicron/issues/9580.
-        is_external: true,
+        kind: sled_agent_client::types::AttachedSubnetKind::External,
         subnet: subnet.subnet.into(),
     };
     let result = osagactx
@@ -454,14 +454,14 @@ pub(super) async fn send_subnet_attachment_to_opte(
 pub(super) async fn delete_subnet_attachment_from_opte(
     sagactx: &NexusActionContext,
     vmm_and_sled: Option<VmmAndSledIds>,
-    subnet: ExternalSubnetBeginAttachResult,
+    subnet: ExternalSubnetBeginOpResult,
 ) -> Result<(), ActionError> {
     let osagactx = sagactx.user_data();
     let Some(VmmAndSledIds { vmm_id: propolis_id, sled_id }) = vmm_and_sled
     else {
         return Ok(());
     };
-    let ExternalSubnetBeginAttachResult { subnet, do_saga } = subnet;
+    let ExternalSubnetBeginOpResult { subnet, do_saga } = subnet;
     if !do_saga {
         return Ok(());
     }
