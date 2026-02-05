@@ -27,7 +27,7 @@ use nexus_types::external_api::views;
 use nexus_types::identity::Resource;
 use omicron_common::api::external;
 use omicron_common::api::external::Error;
-use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::GenericUuid as _;
 use omicron_uuid_kinds::InstanceKind;
 use omicron_uuid_kinds::SubnetPoolKind;
 use omicron_uuid_kinds::SubnetPoolMemberKind;

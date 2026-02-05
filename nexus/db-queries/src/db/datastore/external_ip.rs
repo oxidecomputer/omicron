@@ -570,6 +570,7 @@ impl DataStore {
             .into_boxed()
             .filter(nic_dsl::parent_id.eq(instance_id.into_untyped_uuid()))
             .filter(nic_dsl::time_deleted.is_null())
+            .filter(nic_dsl::is_primary.eq(true))
             .filter(nic_dsl::kind.eq(NetworkInterfaceKind::Instance));
         let has_matching_ip_stack = match ip_version {
             IpVersion::V4 => base_nic_query.select(nic_dsl::ip.is_not_null()),

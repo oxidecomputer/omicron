@@ -6,13 +6,15 @@
 
 use super::nexus::HostIdentifier;
 use crate::{
-    api::external::{self, BfdMode, ImportExportPolicy, Name, Vni},
+    api::external::{self, BfdMode, ImportExportPolicy, MacAddr, Name, Vni},
     disk::DatasetName,
     zpool_name::ZpoolName,
 };
 use daft::Diffable;
-use omicron_uuid_kinds::DatasetUuid;
-use omicron_uuid_kinds::ExternalZpoolUuid;
+use omicron_uuid_kinds::{
+    DatasetUuid, ExternalSubnetUuid, InstanceUuid, RackUuid, SledUuid,
+};
+use omicron_uuid_kinds::{ExternalZpoolUuid, PropolisUuid};
 use oxnet::{IpNet, Ipv4Net, Ipv6Net};
 use schemars::JsonSchema;
 use serde::{Deserialize, Deserializer, Serialize, Serializer, de};
@@ -1095,6 +1097,35 @@ impl DelegatedZvol {
             }
         }
     }
+}
+
+#[derive(Clone, Copy, Debug)]
+pub enum AttachedSubnetId {
+    External(ExternalSubnetUuid),
+    Vpc(Uuid),
+}
+
+/// All details about an attached subnet and the Instance it's attached to.
+#[derive(Debug)]
+pub struct AttachedSubnet {
+    /// ID of the rack hosting this instance.
+    pub rack_id: RackUuid,
+    /// ID of the sled hosting the instance.
+    pub sled_id: SledUuid,
+    /// Underlay IP address of the sled hosting the instance.
+    pub sled_ip: Ipv6Addr,
+    /// ID of the Propolis hypervisor managing this instance.
+    pub vmm_id: PropolisUuid,
+    /// ID of the instance
+    pub instance_id: InstanceUuid,
+    /// ID of the subnet itself.
+    pub subnet_id: AttachedSubnetId,
+    /// The IP subnet that's attached.
+    pub subnet: IpNet,
+    /// The MAC address of the primary network interface.
+    pub mac: MacAddr,
+    /// The VNI of the VPC the instance is in.
+    pub vni: Vni,
 }
 
 #[cfg(test)]
