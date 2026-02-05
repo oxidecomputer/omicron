@@ -8152,7 +8152,7 @@ async fn cmd_db_trust_quorum_list_configs(
         state: String,
         threshold: u8,
         commit_crash_tolerance: u8,
-        coordinator: Uuid,
+        coordinator_hardware_baseboard_id: Uuid,
         #[tabled(display_with = "datetime_rfc3339_concise")]
         time_created: DateTime<Utc>,
         #[tabled(display_with = "option_datetime_rfc3339_concise")]
@@ -8183,7 +8183,7 @@ async fn cmd_db_trust_quorum_list_configs(
             state: format!("{:?}", config.state),
             threshold: config.threshold.into(),
             commit_crash_tolerance: config.commit_crash_tolerance.into(),
-            coordinator: config.coordinator,
+            coordinator_hardware_baseboard_id: config.coordinator,
             time_created: config.time_created,
             time_committing: config.time_committing,
             time_committed: config.time_committed,
