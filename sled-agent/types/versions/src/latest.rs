@@ -14,6 +14,13 @@ pub mod artifact {
     pub use crate::v1::artifact::ArtifactQueryParam;
 }
 
+pub mod attached_subnet {
+    pub use crate::v18::attached_subnet::AttachedSubnet;
+    pub use crate::v18::attached_subnet::AttachedSubnetKind;
+    pub use crate::v18::attached_subnet::AttachedSubnets;
+    pub use crate::v18::attached_subnet::VmmSubnetPathParam;
+}
+
 pub mod bootstore {
     pub use crate::v1::bootstore::BootstoreStatus;
     pub use crate::v1::bootstore::EstablishedConnection;
@@ -72,8 +79,8 @@ pub mod instance {
     pub use crate::v7::instance::InstanceMulticastBody;
     pub use crate::v7::instance::InstanceMulticastMembership;
 
-    pub use crate::v17::instance::InstanceEnsureBody;
-    pub use crate::v17::instance::InstanceSledLocalConfig;
+    pub use crate::v18::instance::InstanceEnsureBody;
+    pub use crate::v18::instance::InstanceSledLocalConfig;
 
     pub use omicron_common::api::internal::shared::ResolvedVpcFirewallRule;
 }

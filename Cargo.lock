@@ -981,6 +981,7 @@ dependencies = [
  "sled-hardware-types",
  "slog",
  "slog-async",
+ "slog-error-chain",
  "slog-term",
  "thiserror 2.0.18",
  "tokio",
@@ -1065,9 +1066,9 @@ checksum = "1fd0f2584146f6f2ef48085050886acf353beff7305ebd1ae69500e27c67f64b"
 
 [[package]]
 name = "bytes"
-version = "1.10.1"
+version = "1.11.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d71b6127be86fdcfddb610f7182ac57211d4b18a3e9c82eb2d17662f2227ad6a"
+checksum = "1e748733b7cbc798e1434b6ac524f0c1ff2ab456fe201501e6497c8417a4fc33"
 dependencies = [
  "serde",
 ]
@@ -5203,6 +5204,7 @@ dependencies = [
  "dropshot",
  "futures",
  "http",
+ "iddqd",
  "ipnetwork",
  "itertools 0.14.0",
  "libc",
@@ -9708,6 +9710,7 @@ dependencies = [
  "serde",
  "slog",
  "slog-async",
+ "slog-error-chain",
  "slog-term",
  "thiserror 2.0.18",
  "tokio",
@@ -9743,6 +9746,7 @@ dependencies = [
  "chrono",
  "clap",
  "dropshot",
+ "either",
  "internal-dns-resolver",
  "internal-dns-types",
  "nexus-client",
@@ -9755,6 +9759,7 @@ dependencies = [
  "serde_json",
  "slog",
  "slog-dtrace",
+ "slog-error-chain",
  "slog-term",
  "thiserror 2.0.18",
  "tokio",
