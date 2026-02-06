@@ -7558,6 +7558,7 @@
         "type": "object",
         "properties": {
           "addr": {
+            "nullable": true,
             "description": "Address of the peer.",
             "type": "string",
             "format": "ip"
@@ -7692,7 +7693,6 @@
           }
         },
         "required": [
-          "addr",
           "asn",
           "port"
         ],
@@ -7781,11 +7781,11 @@
           },
           "infra_ip_first": {
             "type": "string",
-            "format": "ipv4"
+            "format": "ip"
           },
           "infra_ip_last": {
             "type": "string",
-            "format": "ipv4"
+            "format": "ip"
           },
           "rack_subnet_address": {
             "nullable": true,
