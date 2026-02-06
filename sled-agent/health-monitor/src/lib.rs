@@ -4,10 +4,9 @@
 
 //! Machinery for sled-agent to run periodic health checks.
 //!
-//! The initial entry point to this system is [`HealthMonitorHandle::stub()`].
-//! This should be called early in sled-agent startup. Later during the
-//! sled-agent start process, sled-agent should spawn each of the polling tasks
-//! found in the health_checks module.
+//! The initial entry point to this system is [`HealthMonitorHandle::spawn()`].
+//! During the sled-agent start process, sled-agent will spawn each of the
+//! polling tasks found in the health_checks module.
 //!
 //! The health checks we run are:
 //!
