@@ -164,6 +164,7 @@ certificate_create                       POST     /v1/certificates
 certificate_delete                       DELETE   /v1/certificates/{certificate}
 certificate_list                         GET      /v1/certificates
 certificate_view                         GET      /v1/certificates/{certificate}
+current_silo_subnet_pool_list            GET      /v1/subnet-pools
 group_list                               GET      /v1/groups
 group_view                               GET      /v1/groups/{group_id}
 policy_update                            PUT      /v1/policy
@@ -320,6 +321,7 @@ ping                                     GET      /v1/ping
 
 API operations found with tag "system/subnet-pools"
 OPERATION ID                             METHOD   URL PATH
+silo_subnet_pool_list                    GET      /v1/system/silos/{silo}/subnet-pools
 subnet_pool_create                       POST     /v1/system/subnet-pools
 subnet_pool_delete                       DELETE   /v1/system/subnet-pools/{pool}
 subnet_pool_list                         GET      /v1/system/subnet-pools

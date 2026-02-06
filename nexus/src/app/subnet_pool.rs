@@ -13,6 +13,7 @@
 
 use crate::app::Unimpl;
 use nexus_auth::authz;
+use nexus_db_lookup::lookup;
 use nexus_db_queries::context::OpContext;
 use nexus_types::external_api::{params, views};
 use omicron_common::api::external::DataPageParams;
@@ -184,6 +185,36 @@ impl super::Nexus {
             .await?;
         self.datastore()
             .list_silos_linked_to_subnet_pool(opctx, &authz_pool, pagparams)
+            .await
+            .map(|items| items.into_iter().map(Into::into).collect())
+    }
+
+    pub(crate) async fn silo_subnet_pool_list(
+        &self,
+        opctx: &OpContext,
+        silo: NameOrId,
+        pagparams: &DataPageParams<'_, Uuid>,
+    ) -> ListResultVec<views::SubnetPoolSiloLink> {
+        let (authz_silo, _db_silo) = self
+            .silo_lookup(opctx, silo)?
+            .fetch_for(authz::Action::ListChildren)
+            .await?;
+        self.datastore()
+            .list_subnet_pools_linked_to_silo(opctx, &authz_silo, pagparams)
+            .await
+            .map(|items| items.into_iter().map(Into::into).collect())
+    }
+
+    pub(crate) async fn current_silo_subnet_pool_list(
+        &self,
+        opctx: &OpContext,
+        current_silo: lookup::Silo<'_>,
+        pagparams: &DataPageParams<'_, Uuid>,
+    ) -> ListResultVec<views::SubnetPoolSiloLink> {
+        let (authz_silo, _db_silo) =
+            current_silo.fetch_for(authz::Action::ListChildren).await?;
+        self.datastore()
+            .list_subnet_pools_linked_to_silo(opctx, &authz_silo, pagparams)
             .await
             .map(|items| items.into_iter().map(Into::into).collect())
     }

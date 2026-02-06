@@ -425,6 +425,23 @@ impl DataStore {
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 
+    /// List subnet pools linked to a silo.
+    pub async fn list_subnet_pools_linked_to_silo(
+        &self,
+        opctx: &OpContext,
+        authz_silo: &authz::Silo,
+        pagparams: &DataPageParams<'_, Uuid>,
+    ) -> ListResultVec<SubnetPoolSiloLink> {
+        opctx.authorize(authz::Action::ListChildren, authz_silo).await?;
+        use nexus_db_schema::schema::subnet_pool_silo_link::dsl;
+        paginated(dsl::subnet_pool_silo_link, dsl::subnet_pool_id, &pagparams)
+            .filter(dsl::silo_id.eq(authz_silo.id()))
+            .select(SubnetPoolSiloLink::as_select())
+            .get_results_async(&*self.pool_connection_authorized(opctx).await?)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+    }
+
     /// Add a new Subnet Pool Member.
     ///
     /// IP subnets must be unique across all Subnet Pool Members, in all pools.

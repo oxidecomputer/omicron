@@ -79,6 +79,7 @@ api_versions!([
     // |  date-based version should be at the top of the list.
     // v
     // (next_yyyymmddnn, IDENT),
+    (2026020600, ADD_SILO_SUBNET_POOLS),
     (2026020200, TRUST_QUORUM_ABORT_CONFIG),
     (2026013100, READ_ONLY_DISKS_NULLABLE),
     (2026013001, READ_ONLY_DISKS),
@@ -1590,6 +1591,31 @@ pub trait NexusExternalApi {
     async fn subnet_pool_silo_list(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<params::SubnetPoolPath>,
+        query_params: Query<PaginatedById>,
+    ) -> Result<HttpResponseOk<ResultsPage<views::SubnetPoolSiloLink>>, HttpError>;
+
+    /// List subnet pools linked to a silo
+    #[endpoint {
+        method = GET,
+        path = "/v1/system/silos/{silo}/subnet-pools",
+        tags = ["system/subnet-pools"],
+        versions = VERSION_ADD_SILO_SUBNET_POOLS..,
+    }]
+    async fn silo_subnet_pool_list(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::SiloPath>,
+        query_params: Query<PaginatedById>,
+    ) -> Result<HttpResponseOk<ResultsPage<views::SubnetPoolSiloLink>>, HttpError>;
+
+    /// List subnet pools linked to the user's current silo
+    #[endpoint {
+        method = GET,
+        path = "/v1/subnet-pools/",
+        tags = ["silos"],
+        versions = VERSION_ADD_SILO_SUBNET_POOLS..,
+    }]
+    async fn current_silo_subnet_pool_list(
+        rqctx: RequestContext<Self::Context>,
         query_params: Query<PaginatedById>,
     ) -> Result<HttpResponseOk<ResultsPage<views::SubnetPoolSiloLink>>, HttpError>;
 

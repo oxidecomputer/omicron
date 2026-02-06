@@ -1847,6 +1847,68 @@ impl NexusExternalApi for NexusExternalApiImpl {
             .await
     }
 
+    async fn silo_subnet_pool_list(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::SiloPath>,
+        query_params: Query<PaginatedById>,
+    ) -> Result<HttpResponseOk<ResultsPage<views::SubnetPoolSiloLink>>, HttpError>
+    {
+        let apictx = rqctx.context();
+        let handler = async {
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+            let nexus = &apictx.context.nexus;
+            let query = query_params.into_inner();
+            let pag_params = data_page_params_for(&rqctx, &query)?;
+            let silo = path_params.into_inner().silo;
+            let links =
+                nexus.silo_subnet_pool_list(&opctx, silo, &pag_params).await?;
+            Ok(HttpResponseOk(ScanById::results_page(
+                &query,
+                links,
+                &|_, x: &views::SubnetPoolSiloLink| x.silo_id,
+            )?))
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    async fn current_silo_subnet_pool_list(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<PaginatedById>,
+    ) -> Result<HttpResponseOk<ResultsPage<views::SubnetPoolSiloLink>>, HttpError>
+    {
+        let apictx = rqctx.context();
+        let handler = async {
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+            let nexus = &apictx.context.nexus;
+            let query = query_params.into_inner();
+            let pag_params = data_page_params_for(&rqctx, &query)?;
+            let current_silo = nexus.current_silo_lookup(&opctx)?;
+            let links = nexus
+                .current_silo_subnet_pool_list(
+                    &opctx,
+                    current_silo,
+                    &pag_params,
+                )
+                .await?;
+            Ok(HttpResponseOk(ScanById::results_page(
+                &query,
+                links,
+                &|_, x: &views::SubnetPoolSiloLink| x.silo_id,
+            )?))
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
     async fn subnet_pool_silo_link(
         rqctx: RequestContext<ApiContext>,
         path_params: Path<params::SubnetPoolPath>,
