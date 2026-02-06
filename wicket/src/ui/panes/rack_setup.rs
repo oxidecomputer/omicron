@@ -860,10 +860,14 @@ fn rss_config_text<'a>(
                 });
 
             let addresses = addresses.iter().map(|a| {
-                let mut items = vec![
-                    Span::styled("  • Address       : ", label_style),
-                    Span::styled(a.address.to_string(), ok_style),
-                ];
+                let mut items =
+                    vec![Span::styled("  • Address       : ", label_style)];
+                if let Some(address) = a.address {
+                    items.push(Span::styled(address.to_string(), ok_style));
+                } else {
+                    items
+                        .push(Span::styled("link-local".to_string(), ok_style));
+                }
                 if let Some(vlan_id) = a.vlan_id {
                     items.extend([
                         Span::styled(" (vlan_id=", label_style),
@@ -901,10 +905,15 @@ fn rss_config_text<'a>(
                     vlan_id,
                 } = p;
 
+                let addr_string = match addr {
+                    Some(a) => a.to_string(),
+                    None => "unnumbered".to_string(),
+                };
+
                 let mut lines = vec![
                     vec![
                         Span::styled("  • BGP peer      : ", label_style),
-                        Span::styled(addr.to_string(), ok_style),
+                        Span::styled(addr_string, ok_style),
                         Span::styled(" asn=", label_style),
                         Span::styled(asn.to_string(), ok_style),
                         Span::styled(" port=", label_style),

@@ -2460,6 +2460,21 @@ pub struct AddressLotBlockCreate {
     pub last_address: IpAddr,
 }
 
+impl From<IpNet> for AddressLotBlockCreate {
+    fn from(ipnet: IpNet) -> AddressLotBlockCreate {
+        match ipnet {
+            IpNet::V4(ipv4_net) => AddressLotBlockCreate {
+                first_address: ipv4_net.first_addr().into(),
+                last_address: ipv4_net.last_addr().into(),
+            },
+            IpNet::V6(ipv6_net) => AddressLotBlockCreate {
+                first_address: ipv6_net.first_addr().into(),
+                last_address: ipv6_net.last_addr().into(),
+            },
+        }
+    }
+}
+
 /// Parameters for creating a loopback address on a particular rack switch.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct LoopbackAddressCreate {

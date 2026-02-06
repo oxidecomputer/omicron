@@ -1422,8 +1422,8 @@ mod tests {
             },
             rack_network_config: RackNetworkConfig {
                 rack_subnet: Ipv6Net::host_net(Ipv6Addr::LOCALHOST),
-                infra_ip_first: Ipv4Addr::LOCALHOST,
-                infra_ip_last: Ipv4Addr::LOCALHOST,
+                infra_ip_first: std::net::IpAddr::V4(Ipv4Addr::LOCALHOST),
+                infra_ip_last: std::net::IpAddr::V4(Ipv4Addr::LOCALHOST),
                 ports: Vec::new(),
                 bgp: Vec::new(),
                 bfd: Vec::new(),

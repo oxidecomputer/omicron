@@ -128,7 +128,7 @@ impl Into<external::BgpAnnouncement> for BgpAnnouncement {
 pub struct BgpPeerView {
     pub switch_location: String,
     pub port_name: String,
-    pub addr: IpNetwork,
+    pub addr: Option<IpNetwork>,
     pub asn: SqlU32,
     pub connect_retry: SqlU32,
     pub delay_open: SqlU32,

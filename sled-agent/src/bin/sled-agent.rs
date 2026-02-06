@@ -13,7 +13,7 @@ use omicron_sled_agent::bootstrap::RssAccessError;
 use omicron_sled_agent::bootstrap::server as bootstrap_server;
 use omicron_sled_agent::config::Config as SledConfig;
 use sled_agent_types::rack_init::{
-    RackInitializeRequest, RackInitializeRequestParams,
+    RackInitializeRequestParams, rack_initialize_request_from_file,
 };
 
 #[derive(Debug, Parser)]
@@ -64,7 +64,7 @@ async fn do_run() -> Result<(), CmdError> {
             };
             let rss_config = if rss_config_path.exists() {
                 let rss_config =
-                    RackInitializeRequest::from_file(rss_config_path)
+                    rack_initialize_request_from_file(rss_config_path)
                         .map_err(|e| CmdError::Failure(anyhow!(e)))?;
                 let skip_timesync = config.skip_timesync.unwrap_or(false);
                 Some(RackInitializeRequestParams::new(

@@ -28,7 +28,7 @@ use nexus_config::NUM_INITIAL_RESERVED_IP_ADDRESSES;
 use nexus_lockstep_client::types::{
     AllowedSourceIps, CrucibleDatasetCreateRequest, ExternalPortDiscovery,
     IpRange, Ipv4Range, Ipv6Range, RackInitializationRequest,
-    RackNetworkConfigV2,
+    RackNetworkConfig,
 };
 use nexus_types::deployment::{
     BlueprintPhysicalDiskConfig, BlueprintPhysicalDiskDisposition,
@@ -635,10 +635,10 @@ pub async fn run_standalone_server(
         external_dns_zone_name: DNS_ZONE_EXTERNAL_TESTING.to_owned(),
         recovery_silo,
         external_port_count: ExternalPortDiscovery::Static(HashMap::new()),
-        rack_network_config: RackNetworkConfigV2 {
+        rack_network_config: RackNetworkConfig {
             rack_subnet: Ipv6Net::host_net(Ipv6Addr::LOCALHOST),
-            infra_ip_first: Ipv4Addr::LOCALHOST,
-            infra_ip_last: Ipv4Addr::LOCALHOST,
+            infra_ip_first: IpAddr::V4(Ipv4Addr::LOCALHOST),
+            infra_ip_last: IpAddr::V4(Ipv4Addr::LOCALHOST),
             ports: Vec::new(),
             bgp: Vec::new(),
             bfd: Vec::new(),

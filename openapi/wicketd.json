@@ -1253,7 +1253,7 @@
             "description": "The set of prefixes for the BGP router to originate.",
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/Ipv4Net"
+              "$ref": "#/components/schemas/IpNet"
             }
           },
           "shaper": {
@@ -7405,7 +7405,13 @@
         "type": "object",
         "properties": {
           "address": {
-            "$ref": "#/components/schemas/IpNet"
+            "nullable": true,
+            "description": "The address to be used on the uplink. Set to `None` for an Ipv6 Link Local address.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/IpNet"
+              }
+            ]
           },
           "vlan_id": {
             "nullable": true,
@@ -7415,10 +7421,7 @@
             "format": "uint16",
             "minimum": 0
           }
-        },
-        "required": [
-          "address"
-        ]
+        }
       },
       "UplinkPreflightStepId": {
         "oneOf": [
@@ -7555,9 +7558,10 @@
         "type": "object",
         "properties": {
           "addr": {
+            "nullable": true,
             "description": "Address of the peer.",
             "type": "string",
-            "format": "ipv4"
+            "format": "ip"
           },
           "allowed_export": {
             "description": "Apply export policy to this peer with an allow list.",
@@ -7689,7 +7693,6 @@
           }
         },
         "required": [
-          "addr",
           "asn",
           "port"
         ],
@@ -7703,7 +7706,7 @@
         }
       },
       "UserSpecifiedPortConfig": {
-        "description": "User-specified version of [`PortConfigV2`].\n\nAll of [`PortConfigV2`] is user-specified. But we expect the port name to be a key, rather than a field as in [`PortConfigV2`]. So this has all of the fields other than the port name.\n\n[`PortConfigV2`]: omicron_common::api::internal::shared::PortConfigV2",
+        "description": "User-specified version of [`PortConfig`].\n\nAll of [`PortConfig`] is user-specified. But we expect the port name to be a key, rather than a field as in [`PortConfig`]. So this has all of the fields other than the port name.\n\n[`PortConfig`]: omicron_common::api::internal::shared::PortConfig",
         "type": "object",
         "properties": {
           "addresses": {
@@ -7778,11 +7781,11 @@
           },
           "infra_ip_first": {
             "type": "string",
-            "format": "ipv4"
+            "format": "ip"
           },
           "infra_ip_last": {
             "type": "string",
-            "format": "ipv4"
+            "format": "ip"
           },
           "rack_subnet_address": {
             "nullable": true,

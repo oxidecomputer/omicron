@@ -406,8 +406,12 @@ impl nexus_test_interface::NexusServer for Server {
                         rack_subnet: "fd00:1122:3344:0100::/56"
                             .parse()
                             .unwrap(),
-                        infra_ip_first: Ipv4Addr::UNSPECIFIED,
-                        infra_ip_last: Ipv4Addr::UNSPECIFIED,
+                        infra_ip_first: std::net::IpAddr::V4(
+                            Ipv4Addr::UNSPECIFIED,
+                        ),
+                        infra_ip_last: std::net::IpAddr::V4(
+                            Ipv4Addr::UNSPECIFIED,
+                        ),
                         ports: Vec::new(),
                         bgp: Vec::new(),
                         bfd: Vec::new(),
