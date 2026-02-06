@@ -801,7 +801,9 @@ fn build_port_config(
                 });
 
                 BaBgpPeerConfig {
-                    addr: p.addr,
+                    addr: p
+                        .addr
+                        .unwrap_or_else(|| IpAddr::V6(Ipv6Addr::UNSPECIFIED)),
                     asn: p.asn,
                     port: p.port.clone(),
                     hold_time: p.hold_time,

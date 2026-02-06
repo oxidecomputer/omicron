@@ -100,7 +100,7 @@ impl ExampleRackSetupData {
         let switch0_port0_bgp_peers = vec![
             UserSpecifiedBgpPeerConfig {
                 asn: 47,
-                addr: "10.2.3.4".parse().unwrap(),
+                addr: Some("10.2.3.4".parse().unwrap()),
                 port: "port0".into(),
                 hold_time: Some(BgpPeerConfig::DEFAULT_HOLD_TIME),
                 idle_hold_time: Some(BgpPeerConfig::DEFAULT_IDLE_HOLD_TIME),
@@ -122,7 +122,7 @@ impl ExampleRackSetupData {
             },
             UserSpecifiedBgpPeerConfig {
                 asn: 28,
-                addr: "10.2.3.5".parse().unwrap(),
+                addr: Some("10.2.3.5".parse().unwrap()),
                 port: "port0".into(),
                 remote_asn: Some(200),
                 hold_time: Some(10),
@@ -147,7 +147,7 @@ impl ExampleRackSetupData {
 
         let switch1_port0_bgp_peers = vec![UserSpecifiedBgpPeerConfig {
             asn: 47,
-            addr: "10.2.3.4".parse().unwrap(),
+            addr: Some("10.2.3.4".parse().unwrap()),
             port: "port0".into(),
             hold_time: Some(BgpPeerConfig::DEFAULT_HOLD_TIME),
             idle_hold_time: Some(BgpPeerConfig::DEFAULT_IDLE_HOLD_TIME),

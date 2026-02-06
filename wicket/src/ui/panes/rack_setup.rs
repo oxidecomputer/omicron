@@ -905,10 +905,15 @@ fn rss_config_text<'a>(
                     vlan_id,
                 } = p;
 
+                let addr_string = match addr {
+                    Some(a) => a.to_string(),
+                    None => "unnumbered".to_string(),
+                };
+
                 let mut lines = vec![
                     vec![
                         Span::styled("  • BGP peer      : ", label_style),
-                        Span::styled(addr.to_string(), ok_style),
+                        Span::styled(addr_string, ok_style),
                         Span::styled(" asn=", label_style),
                         Span::styled(asn.to_string(), ok_style),
                         Span::styled(" port=", label_style),

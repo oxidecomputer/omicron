@@ -420,7 +420,9 @@ fn populate_uplink_table(cfg: &UserSpecifiedPortConfig) -> Table {
         peer.insert("port", string_item(port));
 
         // addr = ""
-        peer.insert("addr", string_item(addr));
+        if let Some(x) = addr {
+            peer.insert("addr", string_item(x));
+        }
 
         // hold_time
         if let Some(x) = hold_time {
