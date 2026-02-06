@@ -1,3 +1,4 @@
--- Index for cleaning up old tokens
-CREATE INDEX IF NOT EXISTS lookup_console_by_creation
-    ON omicron.public.console_session (time_created);
+-- Rename the primary key constraint to match dbinit.sql
+-- IF EXISTS makes this a no-op if the constraint was already renamed
+ALTER INDEX IF EXISTS omicron.public.console_session_new_pkey
+    RENAME TO console_session_pkey;
