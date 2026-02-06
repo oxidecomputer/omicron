@@ -462,6 +462,8 @@ pub struct IntraDeploymentUnitOnlyEdge {
     pub client: ClientPackageName,
     /// Explanation of why this edge is intra-deployment-unit-only.
     pub note: String,
+    /// Permalinks to source code referenced by `note`
+    pub permalinks: Vec<String>,
 }
 
 impl IntraDeploymentUnitOnlyEdge {

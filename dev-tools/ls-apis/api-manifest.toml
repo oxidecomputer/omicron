@@ -608,89 +608,186 @@ sled agent.
 # deployment unit (the host OS), but Sled Agent's use of MGS crosses different
 # instances of the deployment unit (i.e., different sleds).  Those don't belong
 # in this category.
-# XXX-dap need to update and then validate these
 ################################################################################
 
 [[intra_deployment_unit_only_edges]]
 server = "ddmd"
 client = "dpd-client"
-note = "verified: sled-agent configures ddmd with dpd_host=[::1] (services.rs:3127)"
+note = """
+ddmd runs in both the global zone and the switch zone. The switch zone is
+configured with dpd_host=[::1] (services.rs:3127). The global zone configures
+"dendrite" to false, meaning it does not expose a dendrite server
+(ddm/manifest.xml:25).
+"""
+permalinks = [
+    "https://github.com/oxidecomputer/omicron/blob/6cef874/sled-agent/src/services.rs#L3127",
+    "https://github.com/oxidecomputer/maghemite/blob/396bb3c/smf/ddm/manifest.xml#L25",
+]
 
 [[intra_deployment_unit_only_edges]]
 server = "dpd"
 client = "gateway-client"
-note = "verified: dpd defaults to [::1]:MGS_PORT (dendrite switch_identifiers.rs:60)"
+note = """
+dpd defaults to [::1]:MGS_PORT (switch_identifiers.rs:60), and the SMF start
+script doesn't pass in --mgs-address.
+"""
+permalinks = [
+    "https://github.com/oxidecomputer/dendrite/blob/606c0be/dpd/src/switch_identifiers.rs#L60",
+    "https://github.com/oxidecomputer/dendrite/blob/606c0be/dpd/misc/dpd.xml",
+    "https://github.com/oxidecomputer/dendrite/blob/606c0be/tools/svc-dpd",
+]
 
 [[intra_deployment_unit_only_edges]]
 server = "lldpd"
 client = "dpd-client"
-note = "verified: lldpd defaults to localhost for dpd (lldp dendrite.rs:194)"
+note = """
+lldpd defaults to localhost for dpd (dendrite.rs:194), and the SMF start
+script doesn't pass in --host.
+"""
+permalinks = [
+    "https://github.com/oxidecomputer/lldp/blob/61479b6/lldpd/src/dendrite.rs#L194",
+    "https://github.com/oxidecomputer/lldp/blob/61479b6/lldpd/misc/lldpd.xml",
+    "https://github.com/oxidecomputer/lldp/blob/61479b6/lldpd/misc/svc-lldpd",
+]
 
 [[intra_deployment_unit_only_edges]]
 server = "mgd"
 client = "ddm-admin-client"
-note = "verified: mg-lower hardcodes localhost:8000 (mg-lower ddm.rs:110)"
+note = "mg-lower hardcodes localhost:8000."
+permalinks = [
+    "https://github.com/oxidecomputer/maghemite/blob/396bb3c/mg-lower/src/ddm.rs#L110",
+]
 
 [[intra_deployment_unit_only_edges]]
 server = "mgd"
 client = "dpd-client"
-note = "verified: mg-lower hardcodes localhost (mg-lower dendrite.rs:491)"
+note = "mg-lower hardcodes localhost."
+permalinks = [
+    "https://github.com/oxidecomputer/maghemite/blob/396bb3c/mg-lower/src/dendrite.rs#L491",
+]
 
 [[intra_deployment_unit_only_edges]]
 server = "mgd"
 client = "gateway-client"
-note = "verified: mgd defaults to [::1]:12225 (mgd main.rs:93)"
-
-# NOTE: The following sled-agent edges are BUGS - they use underlay IPs, not
-# localhost. They are kept here to avoid breaking the build, but need to be
-# fixed, either through client-side versioning or by some other means.
-
-[[intra_deployment_unit_only_edges]]
-server = "omicron-sled-agent"
-client = "gateway-client"
-note = "BUG: uses underlay IP, not localhost (early_networking.rs:376)"
+note = """
+mgd defaults to [::1]:12225 (mgd main.rs:93), and the SMF start script
+doesn't set --mgs-addr.
+"""
+permalinks = [
+    "https://github.com/oxidecomputer/maghemite/blob/396bb3c/mgd/src/main.rs#L93",
+    "https://github.com/oxidecomputer/maghemite/blob/396bb3c/smf/mgd/manifest.xml",
+    "https://github.com/oxidecomputer/maghemite/blob/396bb3c/smf/mgd_method_script.sh",
+]
 
 [[intra_deployment_unit_only_edges]]
 server = "omicron-sled-agent"
 client = "ddm-admin-client"
-note = "verified: uses Client::localhost() (ddm_reconciler.rs:56)"
-
-[[intra_deployment_unit_only_edges]]
-server = "omicron-sled-agent"
-client = "dpd-client"
-note = "BUG: uses underlay IP, not localhost (services.rs:1090)"
+note = "Sled Agent uses Client::localhost() to connect to ddm."
+permalinks = [
+    "https://github.com/oxidecomputer/omicron/blob/6cef874/sled-agent/src/ddm_reconciler.rs#L56",
+]
 
 [[intra_deployment_unit_only_edges]]
 server = "omicron-sled-agent"
 client = "mg-admin-client"
-note = "BUG: uses underlay IP, not localhost (early_networking.rs:483)"
+note = """
+Sled Agent only queries the switch zone on the same sled,
+which is within the same deployment unit as the global
+zone.
+"""
+permalinks = [
+    "https://github.com/oxidecomputer/omicron/blob/6cef874/sled-agent/src/bootstrap/early_networking.rs#L483",
+]
 
 [[intra_deployment_unit_only_edges]]
 server = "omicron-sled-agent"
 client = "propolis-client"
-note = "BUG: uses zone IP, not localhost (instance.rs:2283)"
+note = "Unsure: it looks like this only queries the Propolis server out of the same deployment unit?"
+permalinks = [
+    "https://github.com/oxidecomputer/omicron/blob/6cef874/sled-agent/src/instance.rs#L2283",
+]
+
+# NOTE: The following sled-agent edges are bugs: they cross deployment units.
+# They are kept here to avoid breaking the build, but need to be fixed, either
+# through client-side versioning or by some other means.
+
+[[intra_deployment_unit_only_edges]]
+server = "omicron-sled-agent"
+client = "gateway-client"
+note = """
+BUG: Sled Agent creates two MGS clients. One of them
+(early_networking.rs:376) queries the switch zone on
+the same sled, which is within the same deployment unit
+as the global zone, so this is okay.
+
+The other one (early_networking.rs:277) queries both
+switch zones, so it crosses deployment units. This needs
+to be fixed.
+"""
+permalinks = [
+    "https://github.com/oxidecomputer/omicron/blob/6cef874/sled-agent/src/bootstrap/early_networking.rs#L376",
+    "https://github.com/oxidecomputer/omicron/blob/6cef874/sled-agent/src/bootstrap/early_networking.rs#L277-L280",
+]
+
+[[intra_deployment_unit_only_edges]]
+server = "omicron-sled-agent"
+client = "dpd-client"
+note = """
+BUG: Sled Agent reaches out to both switch zones, which crosses deployment units.
+"""
+permalinks = [
+    "https://github.com/oxidecomputer/omicron/blob/6cef874/sled-agent/src/services.rs#L1090",
+]
 
 [[intra_deployment_unit_only_edges]]
 server = "tfportd"
 client = "dpd-client"
-note = "verified: configured with dpd_host=[::1] (services.rs:2852)"
+note = """
+The tfportd service has the dpd_host SMF property (tfport.xml:52) set to [::1]
+(services.rs:2852). tfportd has a --dpd-host option (main.rs:81) but the SMF
+start script (svc-tfportd:12) does not use it.
+"""
+permalinks = [
+    "https://github.com/oxidecomputer/omicron/blob/6cef874/sled-agent/src/services.rs#L2852",
+    "https://github.com/oxidecomputer/dendrite/blob/606c0be/tfportd/misc/tfport.xml#L52-L53",
+    "https://github.com/oxidecomputer/dendrite/blob/cf31be9/tfportd/src/main.rs#L81-L83",
+    "https://github.com/oxidecomputer/dendrite/blob/606c0be/tools/svc-tfportd#L12",
+]
 
 [[intra_deployment_unit_only_edges]]
 server = "tfportd"
 client = "lldpd-client"
-note = "verified: hardcodes localhost (tfportd tfport.rs:88)"
+note = "tfportd hardcodes localhost for its lldpd-client (tfport.rs:88)."
+permalinks = [
+    "https://github.com/oxidecomputer/dendrite/blob/606c0be/tfportd/src/tfport.rs#L88",
+]
 
 [[intra_deployment_unit_only_edges]]
 server = "wicketd"
 client = "ddm-admin-client"
-note = "verified: uses DdmAdminClient::localhost() (bootstrap_addrs.rs:162)"
+note = "wicketd uses DdmAdminClient::localhost() (bootstrap_addrs.rs:162)."
+permalinks = [
+    "https://github.com/oxidecomputer/omicron/blob/6cef874/wicketd/src/bootstrap_addrs.rs#L162",
+]
 
 [[intra_deployment_unit_only_edges]]
 server = "wicketd"
 client = "dpd-client"
-note = "verified: hardcodes [::1]:DENDRITE_PORT (preflight_check/uplink.rs:83)"
+note = "wicketd hardcodes [::1] (uplink.rs:83)."
+permalinks = [
+    "https://github.com/oxidecomputer/omicron/blob/6cef874/wicketd/src/preflight_check/uplink.rs#L83",
+]
 
 [[intra_deployment_unit_only_edges]]
 server = "wicketd"
 client = "gateway-client"
-note = "verified: --mgs-address CLI expects localhost (bin/wicketd.rs:35)"
+note = """
+wicketd's mgs-address config (wicketd.rs:35) is always set to [::1]
+(services.rs:2586). This config is passed into wicketd at startup
+(manifest.xml:20).
+"""
+permalinks = [
+    "https://github.com/oxidecomputer/omicron/blob/6cef874/sled-agent/src/services.rs#L2685-L2689",
+    "https://github.com/oxidecomputer/omicron/blob/6cef874/wicketd/src/bin/wicketd.rs#L35",
+    "https://github.com/oxidecomputer/omicron/blob/6cef874/smf/wicketd/manifest.xml#L20",
+]
