@@ -4,6 +4,7 @@
 -- these columns are now nullable (port_settings_id and interface_name) or
 -- intentionally nullable for unnumbered peers (addr).
 ALTER TABLE omicron.public.switch_port_settings_bgp_peer_config
+    ALTER COLUMN id DROP DEFAULT,
     ALTER COLUMN port_settings_id DROP NOT NULL,
     ALTER COLUMN interface_name DROP NOT NULL,
     ALTER COLUMN addr DROP NOT NULL;
