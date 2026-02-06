@@ -573,34 +573,9 @@ impl InformationSchema {
         similar_asserts::assert_eq!(self.tables, other.tables);
         similar_asserts::assert_eq!(self.columns, other.columns);
 
-        // These tables have known column ordering mismatches between dbinit.sql
-        // and migrations. The "token-and-session-ids" migration added an `id`
-        // column to these tables via `ALTER TABLE ... ADD COLUMN`, which places
-        // the column at the end. However, dbinit.sql defines `id` as the first
-        // column. Since deployed racks may have been initialized either way
-        // (fresh from dbinit.sql or upgraded via migrations), we cannot change
-        // the column order without a more complex migration. We explicitly
-        // exclude these tables from the column ordering check.
-        //
-        // See: https://github.com/oxidecomputer/omicron/issues/9809
-        const TABLES_WITH_KNOWN_COLUMN_ORDERING_ISSUES: &[&str] =
-            &["console_session", "device_access_token"];
-
-        let filter_known_issues =
-            |ordering: &BTreeMap<String, Vec<String>>| -> BTreeMap<_, _> {
-                ordering
-                    .iter()
-                    .filter(|(table, _)| {
-                        !TABLES_WITH_KNOWN_COLUMN_ORDERING_ISSUES
-                            .contains(&table.as_str())
-                    })
-                    .map(|(k, v)| (k.clone(), v.clone()))
-                    .collect()
-            };
-
         similar_asserts::assert_eq!(
-            filter_known_issues(&self.column_ordering),
-            filter_known_issues(&other.column_ordering),
+            self.column_ordering,
+            other.column_ordering,
             "Column ordering did not match. The relative order of columns within \
             each table must be the same in dbinit.sql and migrations. Since \
             migrations can only add columns at the end of a table, new columns \
@@ -4151,6 +4126,112 @@ fn after_222_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
     })
 }
 
+// Migration 229 fixes column ordering in console_session and device_access_token.
+// The "id" column was added via ALTER TABLE in migration 145, placing it at the
+// end. This migration recreates the tables with "id" as the first column.
+const SESSION_229_ID: Uuid =
+    Uuid::from_u128(0x22900001_0000_0000_0000_000000000001);
+const SESSION_229_TOKEN: &str = "tok-console-229-migration-test";
+const SESSION_229_SILO_USER: Uuid =
+    Uuid::from_u128(0x22900001_0000_0000_0000_000000000002);
+
+const DEVICE_229_ID: Uuid =
+    Uuid::from_u128(0x22900002_0000_0000_0000_000000000001);
+const DEVICE_229_TOKEN: &str = "tok-device-229-migration-test";
+const DEVICE_229_CLIENT_ID: Uuid =
+    Uuid::from_u128(0x22900002_0000_0000_0000_000000000002);
+const DEVICE_229_DEVICE_CODE: &str = "code-229-migration-test";
+const DEVICE_229_SILO_USER: Uuid =
+    Uuid::from_u128(0x22900002_0000_0000_0000_000000000003);
+
+fn before_229_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
+    Box::pin(async move {
+        // Insert test data into console_session and device_access_token.
+        // These tables currently have "id" as the last column (from migration 145).
+        ctx.client
+            .batch_execute(&format!(
+                "
+                INSERT INTO omicron.public.console_session
+                    (id, token, time_created, time_last_used, silo_user_id)
+                VALUES
+                    ('{SESSION_229_ID}', '{SESSION_229_TOKEN}', now(), now(), '{SESSION_229_SILO_USER}');
+
+                INSERT INTO omicron.public.device_access_token
+                    (id, token, client_id, device_code, silo_user_id, time_requested, time_created)
+                VALUES
+                    ('{DEVICE_229_ID}', '{DEVICE_229_TOKEN}', '{DEVICE_229_CLIENT_ID}',
+                     '{DEVICE_229_DEVICE_CODE}', '{DEVICE_229_SILO_USER}', now(), now());
+                "
+            ))
+            .await
+            .expect("failed to insert pre-migration rows for 229");
+    })
+}
+
+fn after_229_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
+    Box::pin(async move {
+        // Verify data was preserved after the column reordering migration.
+
+        // Check console_session
+        let rows = ctx
+            .client
+            .query(
+                &format!(
+                    "SELECT id, token, silo_user_id FROM omicron.public.console_session
+                     WHERE id = '{SESSION_229_ID}'"
+                ),
+                &[],
+            )
+            .await
+            .expect("failed to query post-migration console_session");
+        assert_eq!(rows.len(), 1, "console_session row should still exist");
+
+        let id: Uuid = rows[0].get("id");
+        assert_eq!(id, SESSION_229_ID);
+        let token: &str = rows[0].get("token");
+        assert_eq!(token, SESSION_229_TOKEN);
+        let silo_user_id: Uuid = rows[0].get("silo_user_id");
+        assert_eq!(silo_user_id, SESSION_229_SILO_USER);
+
+        // Check device_access_token
+        let rows = ctx
+            .client
+            .query(
+                &format!(
+                    "SELECT id, token, client_id, device_code, silo_user_id
+                     FROM omicron.public.device_access_token
+                     WHERE id = '{DEVICE_229_ID}'"
+                ),
+                &[],
+            )
+            .await
+            .expect("failed to query post-migration device_access_token");
+        assert_eq!(rows.len(), 1, "device_access_token row should still exist");
+
+        let id: Uuid = rows[0].get("id");
+        assert_eq!(id, DEVICE_229_ID);
+        let token: &str = rows[0].get("token");
+        assert_eq!(token, DEVICE_229_TOKEN);
+        let client_id: Uuid = rows[0].get("client_id");
+        assert_eq!(client_id, DEVICE_229_CLIENT_ID);
+        let device_code: &str = rows[0].get("device_code");
+        assert_eq!(device_code, DEVICE_229_DEVICE_CODE);
+        let silo_user_id: Uuid = rows[0].get("silo_user_id");
+        assert_eq!(silo_user_id, DEVICE_229_SILO_USER);
+
+        // Clean up test data
+        ctx.client
+            .batch_execute(&format!(
+                "
+                DELETE FROM omicron.public.console_session WHERE id = '{SESSION_229_ID}';
+                DELETE FROM omicron.public.device_access_token WHERE id = '{DEVICE_229_ID}';
+                "
+            ))
+            .await
+            .expect("failed to clean up migration 229 test data");
+    })
+}
+
 // Lazily initializes all migration checks. The combination of Rust function
 // pointers and async makes defining a static table fairly painful, so we're
 // using lazy initialization instead.
@@ -4280,6 +4361,10 @@ fn get_migration_checks() -> BTreeMap<Version, DataMigrationFns> {
     map.insert(
         Version::new(222, 0, 0),
         DataMigrationFns::new().before(before_222_0_0).after(after_222_0_0),
+    );
+    map.insert(
+        Version::new(229, 0, 0),
+        DataMigrationFns::new().before(before_229_0_0).after(after_229_0_0),
     );
     map
 }
