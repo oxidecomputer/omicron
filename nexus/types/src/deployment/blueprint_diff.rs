@@ -32,8 +32,9 @@ use std::fmt::{self, Write as _};
 
 use crate::deployment::blueprint_display::BpClickhouseKeepersTableSchema;
 use crate::deployment::{
-    Blueprint, BlueprintDatasetConfig, BlueprintZoneConfig,
-    BlueprintZoneDisposition, CollectionDatasetIdentifier, ZoneSortKey,
+    Blueprint, BlueprintDatasetConfig, BlueprintSingleMeasurement,
+    BlueprintZoneConfig, BlueprintZoneDisposition, CollectionDatasetIdentifier,
+    ZoneSortKey,
 };
 
 // A wrapper type around a `daft` generated `BlueprintDiff that provides summary
@@ -232,7 +233,7 @@ impl<'a> BlueprintDiffSummary<'a> {
                 .diff
                 .sleds
                 .modified_values_diff()
-                .fold(0, |acc, c| acc + c.measurements.after.len())
+                .fold(0, |acc, c| acc + c.measurements.added.len())
     }
 
     pub fn total_measurements_removed(&self) -> usize {
@@ -245,7 +246,7 @@ impl<'a> BlueprintDiffSummary<'a> {
                 .diff
                 .sleds
                 .modified_values_diff()
-                .fold(0, |acc, c| acc + c.measurements.before.len())
+                .fold(0, |acc, c| acc + c.measurements.removed.len())
     }
 
     /// Iterate over all added zones on a sled
@@ -1615,7 +1616,8 @@ impl ClickhouseClusterConfigDiffTables {
 #[derive(Debug)]
 pub struct BpDiffMeasurements<'a> {
     pub added: BTreeMap<SledUuid, &'a BlueprintMeasurements>,
-    pub common: BTreeMap<SledUuid, Leaf<&'a BlueprintMeasurements>>,
+    pub common:
+        BTreeMap<SledUuid, daft::BTreeSetDiff<'a, BlueprintSingleMeasurement>>,
     pub removed: BTreeMap<SledUuid, &'a BlueprintMeasurements>,
 }
 
@@ -1647,15 +1649,16 @@ impl<'a> BpDiffMeasurements<'a> {
     /// Return a [`BpTable`] for the given `sled_id`
     pub fn to_bp_sled_subtable(&self, sled_id: &SledUuid) -> Option<BpTable> {
         let mut rows = vec![];
-        if let Some(diff) = self.common.get(sled_id) {
-            rows.extend(BlueprintMeasurementsTableData::diff_leaf(diff));
-        }
         if let Some(desired) = self.removed.get(sled_id) {
             rows.extend(
                 BlueprintMeasurementsTableData::new(desired)
                     .rows(BpDiffState::Removed),
             );
         }
+        if let Some(desired) = self.common.get(sled_id) {
+            rows.extend(BlueprintMeasurementsTableData::diff_rows(desired));
+        }
+
         if let Some(desired) = self.added.get(sled_id) {
             rows.extend(
                 BlueprintMeasurementsTableData::new(desired)

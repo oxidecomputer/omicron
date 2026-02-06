@@ -1191,6 +1191,49 @@ impl DataStore {
             bbs
         };
 
+        let raw_measurements: Vec<(BpSingleMeasurement, Option<TufArtifact>)> = {
+            use nexus_db_schema::schema::bp_single_measurements::dsl;
+            use nexus_db_schema::schema::tuf_artifact::dsl as tuf_artifact_dsl;
+
+            let mut rows = Vec::new();
+            let mut paginator = Paginator::new(
+                SQL_BATCH_SIZE,
+                dropshot::PaginationOrder::Ascending,
+            );
+            while let Some(p) = paginator.next() {
+                let batch = paginated(
+                    dsl::bp_single_measurements,
+                    dsl::id,
+                    &p.current_pagparams(),
+                )
+                .filter(dsl::blueprint_id.eq(to_db_typed_uuid(blueprint_id)))
+                // Left join in case the artifact is missing from the
+                // tuf_artifact table, which is non-fatal.
+                .left_join(
+                    tuf_artifact_dsl::tuf_artifact.on(tuf_artifact_dsl::kind
+                        .eq(ArtifactKind::MEASUREMENT_CORPUS.to_string())
+                        .and(
+                            tuf_artifact_dsl::sha256
+                                .eq(dsl::image_artifact_sha256),
+                        )),
+                )
+                .select((
+                    BpSingleMeasurement::as_select(),
+                    Option::<TufArtifact>::as_select(),
+                ))
+                .load_async::<(BpSingleMeasurement, Option<TufArtifact>)>(
+                    &*conn,
+                )
+                .await
+                .map_err(|e| {
+                    public_error_from_diesel(e, ErrorHandler::Server)
+                })?;
+                paginator = p.found_batch(&batch, &|(z, _)| z.id);
+                rows.extend(batch);
+            }
+            rows
+        };
+
         // ================================================================
         // STAGE 2: Check if blueprint exists
         //
@@ -1263,49 +1306,6 @@ impl DataStore {
                 s.sled_id
             );
         }
-
-        let raw_measurements: Vec<(BpSingleMeasurement, Option<TufArtifact>)> = {
-            use nexus_db_schema::schema::bp_single_measurements::dsl;
-            use nexus_db_schema::schema::tuf_artifact::dsl as tuf_artifact_dsl;
-
-            let mut rows = Vec::new();
-            let mut paginator = Paginator::new(
-                SQL_BATCH_SIZE,
-                dropshot::PaginationOrder::Ascending,
-            );
-            while let Some(p) = paginator.next() {
-                let batch = paginated(
-                    dsl::bp_single_measurements,
-                    dsl::id,
-                    &p.current_pagparams(),
-                )
-                .filter(dsl::blueprint_id.eq(to_db_typed_uuid(blueprint_id)))
-                // Left join in case the artifact is missing from the
-                // tuf_artifact table, which is non-fatal.
-                .left_join(
-                    tuf_artifact_dsl::tuf_artifact.on(tuf_artifact_dsl::kind
-                        .eq(ArtifactKind::MEASUREMENT_CORPUS.to_string())
-                        .and(
-                            tuf_artifact_dsl::sha256
-                                .eq(dsl::image_artifact_sha256),
-                        )),
-                )
-                .select((
-                    BpSingleMeasurement::as_select(),
-                    Option::<TufArtifact>::as_select(),
-                ))
-                .load_async::<(BpSingleMeasurement, Option<TufArtifact>)>(
-                    &*conn,
-                )
-                .await
-                .map_err(|e| {
-                    public_error_from_diesel(e, ErrorHandler::Server)
-                })?;
-                paginator = p.found_batch(&batch, &|(z, _)| z.id);
-                rows.extend(batch);
-            }
-            rows
-        };
 
         let mut omicron_measurements: BTreeMap<
             SledUuid,

@@ -2524,14 +2524,7 @@
             "minimum": 0
           },
           "measurements": {
-            "default": {
-              "type": "install_dataset"
-            },
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/BlueprintMeasurements"
-              }
-            ]
+            "$ref": "#/components/schemas/BlueprintMeasurements"
           },
           "remove_mupdate_override": {
             "nullable": true,
@@ -2579,6 +2572,7 @@
           "disks",
           "host_phase_2",
           "last_allocated_ip_subnet_offset",
+          "measurements",
           "sled_agent_generation",
           "state",
           "subnet",

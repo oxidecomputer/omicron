@@ -976,26 +976,65 @@ struct BlueprintMeasurementsTableData<'a> {
 }
 
 impl<'a> BlueprintMeasurementsTableData<'a> {
+    fn diff_rows<'b>(
+        diffs: &'b daft::BTreeSetDiff<BlueprintSingleMeasurement>,
+    ) -> impl Iterator<Item = BpTableRow> + 'b + use<'b> {
+        if diffs.removed.is_empty()
+            && diffs.common.is_empty()
+            && diffs.added.is_empty()
+        {
+            return either::Either::Left(
+                vec![BpTableRow::from_strings(
+                    BpDiffState::Unchanged,
+                    vec![
+                        "install dataset".to_string(),
+                        "(no version)".to_string(),
+                    ],
+                )]
+                .into_iter(),
+            );
+        }
+        let removed = diffs.removed.iter().map(move |d| {
+            BpTableRow::from_strings(
+                BpDiffState::Removed,
+                vec![d.hash.to_string(), d.version.to_string()],
+            )
+        });
+
+        let common = diffs.common.iter().map(move |d| {
+            BpTableRow::from_strings(
+                BpDiffState::Unchanged,
+                vec![d.hash.to_string(), d.version.to_string()],
+            )
+        });
+
+        let added = diffs.added.iter().map(move |d| {
+            BpTableRow::from_strings(
+                BpDiffState::Added,
+                vec![d.hash.to_string(), d.version.to_string()],
+            )
+        });
+
+        either::Either::Right(removed.chain(common.chain(added)))
+    }
+
     fn new(measurements: &'a BlueprintMeasurements) -> Self {
         Self { measurements }
     }
+}
 
-    fn all_rows(
-        measurement: &BlueprintMeasurements,
-        state: BpDiffState,
-    ) -> impl Iterator<Item = BpTableRow> {
-        match measurement {
-            BlueprintMeasurements::Artifacts { artifacts } => artifacts
-                .iter()
-                .map(move |d| {
+impl BpTableData for BlueprintMeasurementsTableData<'_> {
+    fn rows(&self, state: BpDiffState) -> impl Iterator<Item = BpTableRow> {
+        match self.measurements {
+            BlueprintMeasurements::Artifacts { artifacts } => {
+                either::Either::Left(artifacts.iter().map(move |d| {
                     BpTableRow::from_strings(
                         state,
                         vec![d.hash.to_string(), d.version.to_string()],
                     )
-                })
-                .collect::<Vec<BpTableRow>>()
-                .into_iter(),
-            BlueprintMeasurements::InstallDataset => {
+                }))
+            }
+            BlueprintMeasurements::InstallDataset => either::Either::Right(
                 vec![BpTableRow::from_strings(
                     state,
                     vec![
@@ -1003,31 +1042,9 @@ impl<'a> BlueprintMeasurementsTableData<'a> {
                         "(no version)".to_string(),
                     ],
                 )]
-                .into_iter()
-                .collect::<Vec<BpTableRow>>()
-                .into_iter()
-            }
+                .into_iter(),
+            ),
         }
-    }
-
-    fn diff_leaf<'b>(
-        diffs: &daft::Leaf<&'b BlueprintMeasurements>,
-    ) -> impl Iterator<Item = BpTableRow> + 'b {
-        if diffs.is_unchanged() {
-            Self::all_rows(diffs.before, BpDiffState::Unchanged)
-                .collect::<Vec<BpTableRow>>()
-                .into_iter()
-        } else {
-            let a = Self::all_rows(diffs.before, BpDiffState::Removed);
-            let b = Self::all_rows(diffs.after, BpDiffState::Added);
-            a.chain(b).collect::<Vec<BpTableRow>>().into_iter()
-        }
-    }
-}
-
-impl BpTableData for BlueprintMeasurementsTableData<'_> {
-    fn rows(&self, state: BpDiffState) -> impl Iterator<Item = BpTableRow> {
-        Self::all_rows(self.measurements, state)
     }
 }
 
@@ -1439,7 +1456,6 @@ pub struct BlueprintSledConfig {
     pub zones: IdOrdMap<BlueprintZoneConfig>,
     pub remove_mupdate_override: Option<MupdateOverrideUuid>,
     pub host_phase_2: BlueprintHostPhase2DesiredSlots,
-    #[serde(default = "BlueprintMeasurements::default")]
     pub measurements: BlueprintMeasurements,
 }
 
@@ -1921,20 +1937,46 @@ impl Display for BlueprintSingleMeasurement {
     }
 }
 
-#[derive(
-    Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq, Diffable,
-)]
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum BlueprintMeasurements {
     InstallDataset,
     Artifacts { artifacts: BTreeSet<BlueprintSingleMeasurement> },
 }
 
-impl BlueprintMeasurements {
-    fn default() -> Self {
-        Self::InstallDataset
-    }
+// Enums will get treated as a `Leaf` which doesn't product correct
+// results for what we want
+impl Diffable for BlueprintMeasurements {
+    type Diff<'daft> = daft::BTreeSetDiff<'daft, BlueprintSingleMeasurement>;
 
+    fn diff<'daft>(&'daft self, other: &'daft Self) -> Self::Diff<'daft> {
+        match (self, other) {
+            (Self::InstallDataset, Self::InstallDataset) => {
+                daft::BTreeSetDiff::new()
+            }
+            (Self::InstallDataset, Self::Artifacts { artifacts }) => {
+                daft::BTreeSetDiff {
+                    common: BTreeSet::new(),
+                    added: artifacts.iter().collect(),
+                    removed: BTreeSet::new(),
+                }
+            }
+            (Self::Artifacts { artifacts }, Self::InstallDataset) => {
+                daft::BTreeSetDiff {
+                    common: BTreeSet::new(),
+                    added: BTreeSet::new(),
+                    removed: artifacts.iter().collect(),
+                }
+            }
+            (
+                Self::Artifacts { artifacts: first },
+                Self::Artifacts { artifacts: second },
+            ) => first.diff(second),
+        }
+    }
+}
+
+impl BlueprintMeasurements {
     fn len(&self) -> usize {
         match self {
             BlueprintMeasurements::InstallDataset => 0,

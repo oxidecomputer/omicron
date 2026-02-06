@@ -5221,8 +5221,8 @@ CREATE TABLE IF NOT EXISTS omicron.public.bp_single_measurements (
     -- id solely for database purposes
     id UUID NOT NULL,
 
-     image_artifact_sha256 STRING(64) NOT NULL,
-     PRIMARY KEY (blueprint_id, id)
+    image_artifact_sha256 STRING(64) NOT NULL,
+    PRIMARY KEY (blueprint_id, id)
 );
 
 -- description of omicron physical disks specified in a blueprint.
