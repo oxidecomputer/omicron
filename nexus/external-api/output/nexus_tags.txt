@@ -146,6 +146,7 @@ system_policy_view                       GET      /v1/system/policy
 
 API operations found with tag "projects"
 OPERATION ID                             METHOD   URL PATH
+current_silo_subnet_pool_list            GET      /v1/subnet-pools
 project_create                           POST     /v1/projects
 project_delete                           DELETE   /v1/projects/{project}
 project_ip_pool_list                     GET      /v1/ip-pools
@@ -164,7 +165,6 @@ certificate_create                       POST     /v1/certificates
 certificate_delete                       DELETE   /v1/certificates/{certificate}
 certificate_list                         GET      /v1/certificates
 certificate_view                         GET      /v1/certificates/{certificate}
-current_silo_subnet_pool_list            GET      /v1/subnet-pools
 group_list                               GET      /v1/groups
 group_view                               GET      /v1/groups/{group_id}
 policy_update                            PUT      /v1/policy
@@ -306,6 +306,7 @@ silo_policy_update                       PUT      /v1/system/silos/{silo}/policy
 silo_policy_view                         GET      /v1/system/silos/{silo}/policy
 silo_quotas_update                       PUT      /v1/system/silos/{silo}/quotas
 silo_quotas_view                         GET      /v1/system/silos/{silo}/quotas
+silo_subnet_pool_list                    GET      /v1/system/silos/{silo}/subnet-pools
 silo_user_list                           GET      /v1/system/users
 silo_user_view                           GET      /v1/system/users/{user_id}
 silo_utilization_list                    GET      /v1/system/utilization/silos
@@ -321,7 +322,6 @@ ping                                     GET      /v1/ping
 
 API operations found with tag "system/subnet-pools"
 OPERATION ID                             METHOD   URL PATH
-silo_subnet_pool_list                    GET      /v1/system/silos/{silo}/subnet-pools
 subnet_pool_create                       POST     /v1/system/subnet-pools
 subnet_pool_delete                       DELETE   /v1/system/subnet-pools/{pool}
 subnet_pool_list                         GET      /v1/system/subnet-pools

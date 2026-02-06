@@ -425,21 +425,36 @@ impl DataStore {
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 
-    /// List subnet pools linked to a silo.
-    pub async fn list_subnet_pools_linked_to_silo(
+    /// List Subnet Pools linked to the given Silo.
+    ///
+    /// Returns (SubnetPool, SubnetPoolSiloLink) so we can know in the calling
+    /// code whether the pool is default for the silo.
+    pub async fn silo_subnet_pool_list(
         &self,
         opctx: &OpContext,
         authz_silo: &authz::Silo,
-        pagparams: &DataPageParams<'_, Uuid>,
-    ) -> ListResultVec<SubnetPoolSiloLink> {
-        opctx.authorize(authz::Action::ListChildren, authz_silo).await?;
-        use nexus_db_schema::schema::subnet_pool_silo_link::dsl;
-        paginated(dsl::subnet_pool_silo_link, dsl::subnet_pool_id, &pagparams)
-            .filter(dsl::silo_id.eq(authz_silo.id()))
-            .select(SubnetPoolSiloLink::as_select())
-            .get_results_async(&*self.pool_connection_authorized(opctx).await?)
-            .await
-            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+        pagparams: &PaginatedBy<'_>,
+    ) -> ListResultVec<(SubnetPool, SubnetPoolSiloLink)> {
+        use nexus_db_schema::schema::subnet_pool;
+        use nexus_db_schema::schema::subnet_pool_silo_link;
+
+        match pagparams {
+            PaginatedBy::Id(pagparams) => {
+                paginated(subnet_pool::table, subnet_pool::id, pagparams)
+            }
+            PaginatedBy::Name(pagparams) => paginated(
+                subnet_pool::table,
+                subnet_pool::name,
+                &pagparams.map_name(|n| Name::ref_cast(n)),
+            ),
+        }
+        .inner_join(subnet_pool_silo_link::table)
+        .filter(subnet_pool_silo_link::silo_id.eq(authz_silo.id()))
+        .filter(subnet_pool::time_deleted.is_null())
+        .select(<(SubnetPool, SubnetPoolSiloLink)>::as_select())
+        .load_async(&*self.pool_connection_authorized(opctx).await?)
+        .await
+        .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 
     /// Add a new Subnet Pool Member.

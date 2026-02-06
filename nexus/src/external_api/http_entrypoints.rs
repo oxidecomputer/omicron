@@ -1848,10 +1848,10 @@ impl NexusExternalApi for NexusExternalApiImpl {
     }
 
     async fn silo_subnet_pool_list(
-        rqctx: RequestContext<Self::Context>,
+        rqctx: RequestContext<ApiContext>,
         path_params: Path<params::SiloPath>,
-        query_params: Query<PaginatedById>,
-    ) -> Result<HttpResponseOk<ResultsPage<views::SubnetPoolSiloLink>>, HttpError>
+        query_params: Query<PaginatedByNameOrId>,
+    ) -> Result<HttpResponseOk<ResultsPage<views::SiloSubnetPool>>, HttpError>
     {
         let apictx = rqctx.context();
         let handler = async {
@@ -1860,13 +1860,26 @@ impl NexusExternalApi for NexusExternalApiImpl {
             let nexus = &apictx.context.nexus;
             let query = query_params.into_inner();
             let pag_params = data_page_params_for(&rqctx, &query)?;
-            let silo = path_params.into_inner().silo;
-            let links =
-                nexus.silo_subnet_pool_list(&opctx, silo, &pag_params).await?;
-            Ok(HttpResponseOk(ScanById::results_page(
+            let scan_params = ScanByNameOrId::from_query(&query)?;
+            let paginated_by = name_or_id_pagination(&pag_params, scan_params)?;
+            let path = path_params.into_inner();
+
+            let silo_lookup = nexus.silo_lookup(&opctx, path.silo)?;
+            let pools = nexus
+                .silo_subnet_pool_list(&opctx, &silo_lookup, &paginated_by)
+                .await?
+                .into_iter()
+                .map(|(pool, silo_link)| views::SiloSubnetPool {
+                    identity: pool.identity(),
+                    is_default: silo_link.is_default,
+                    ip_version: pool.ip_version.into(),
+                })
+                .collect();
+
+            Ok(HttpResponseOk(ScanByNameOrId::results_page(
                 &query,
-                links,
-                &|_, x: &views::SubnetPoolSiloLink| x.silo_id,
+                pools,
+                &marker_for_name_or_id,
             )?))
         };
         apictx
@@ -1877,9 +1890,9 @@ impl NexusExternalApi for NexusExternalApiImpl {
     }
 
     async fn current_silo_subnet_pool_list(
-        rqctx: RequestContext<Self::Context>,
-        query_params: Query<PaginatedById>,
-    ) -> Result<HttpResponseOk<ResultsPage<views::SubnetPoolSiloLink>>, HttpError>
+        rqctx: RequestContext<ApiContext>,
+        query_params: Query<PaginatedByNameOrId>,
+    ) -> Result<HttpResponseOk<ResultsPage<views::SiloSubnetPool>>, HttpError>
     {
         let apictx = rqctx.context();
         let handler = async {
@@ -1888,18 +1901,22 @@ impl NexusExternalApi for NexusExternalApiImpl {
             let nexus = &apictx.context.nexus;
             let query = query_params.into_inner();
             let pag_params = data_page_params_for(&rqctx, &query)?;
-            let current_silo = nexus.current_silo_lookup(&opctx)?;
-            let links = nexus
-                .current_silo_subnet_pool_list(
-                    &opctx,
-                    current_silo,
-                    &pag_params,
-                )
-                .await?;
-            Ok(HttpResponseOk(ScanById::results_page(
+            let scan_params = ScanByNameOrId::from_query(&query)?;
+            let paginated_by = name_or_id_pagination(&pag_params, scan_params)?;
+            let pools = nexus
+                .current_silo_subnet_pool_list(&opctx, &paginated_by)
+                .await?
+                .into_iter()
+                .map(|(pool, silo_link)| views::SiloSubnetPool {
+                    identity: pool.identity(),
+                    is_default: silo_link.is_default,
+                    ip_version: pool.ip_version.into(),
+                })
+                .collect();
+            Ok(HttpResponseOk(ScanByNameOrId::results_page(
                 &query,
-                links,
-                &|_, x: &views::SubnetPoolSiloLink| x.silo_id,
+                pools,
+                &marker_for_name_or_id,
             )?))
         };
         apictx

@@ -1598,26 +1598,26 @@ pub trait NexusExternalApi {
     #[endpoint {
         method = GET,
         path = "/v1/system/silos/{silo}/subnet-pools",
-        tags = ["system/subnet-pools"],
+        tags = ["system/silos"],
         versions = VERSION_ADD_SILO_SUBNET_POOLS..,
     }]
     async fn silo_subnet_pool_list(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<params::SiloPath>,
-        query_params: Query<PaginatedById>,
-    ) -> Result<HttpResponseOk<ResultsPage<views::SubnetPoolSiloLink>>, HttpError>;
+        query_params: Query<PaginatedByNameOrId>,
+    ) -> Result<HttpResponseOk<ResultsPage<views::SiloSubnetPool>>, HttpError>;
 
     /// List subnet pools linked to the user's current silo
     #[endpoint {
         method = GET,
-        path = "/v1/subnet-pools/",
-        tags = ["silos"],
+        path = "/v1/subnet-pools",
+        tags = ["projects"],
         versions = VERSION_ADD_SILO_SUBNET_POOLS..,
     }]
     async fn current_silo_subnet_pool_list(
         rqctx: RequestContext<Self::Context>,
-        query_params: Query<PaginatedById>,
-    ) -> Result<HttpResponseOk<ResultsPage<views::SubnetPoolSiloLink>>, HttpError>;
+        query_params: Query<PaginatedByNameOrId>,
+    ) -> Result<HttpResponseOk<ResultsPage<views::SiloSubnetPool>>, HttpError>;
 
     /// Link a subnet pool to a silo
     #[endpoint {
