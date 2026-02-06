@@ -30,6 +30,11 @@
 #: series = "build-info-linux"
 #: name = "crate-build-timings.json"
 #: from_output = "/work/crate-build-timings.json"
+#:
+#: [[publish]]
+#: series = "nextest-recording-linux"
+#: name = "nextest-run-archive.zip"
+#: from_output = "/tmp/nextest-run-archive.zip"
 
 
 sudo apt-get install -y jq

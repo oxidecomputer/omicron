@@ -36,5 +36,10 @@
 #: series = "live-tests"
 #: name = "live-tests-archive.tgz"
 #: from_output = "/work/oxidecomputer/omicron/target/live-tests-archive.tgz"
+#:
+#: [[publish]]
+#: series = "nextest-recording-helios"
+#: name = "nextest-run-archive.zip"
+#: from_output = "/tmp/nextest-run-archive.zip"
 
 exec .github/buildomat/build-and-test.sh illumos
