@@ -1202,6 +1202,8 @@ pub static DEMO_SUBNET_POOL_MEMBER_REMOVE: LazyLock<
 });
 pub static DEMO_SUBNET_POOL_SILOS_URL: LazyLock<String> =
     LazyLock::new(|| format!("{}/silos", *DEMO_SUBNET_POOL_URL));
+pub static DEMO_SILO_SUBNET_POOLS_URL: LazyLock<String> =
+    LazyLock::new(|| format!("{}/subnet-pools", *DEMO_SILO_URL));
 pub static DEMO_SUBNET_POOL_LINK_SILO: LazyLock<params::SubnetPoolLinkSilo> =
     LazyLock::new(|| params::SubnetPoolLinkSilo {
         silo: NameOrId::Id(DEFAULT_SILO.identity().id),
@@ -1215,6 +1217,7 @@ pub static DEMO_SUBNET_POOL_SILO_UPDATE: LazyLock<
 > = LazyLock::new(|| params::SubnetPoolSiloUpdate { is_default: true });
 pub static DEMO_SUBNET_POOL_UTILIZATION_URL: LazyLock<String> =
     LazyLock::new(|| format!("{}/utilization", *DEMO_SUBNET_POOL_URL));
+pub static DEMO_CURRENT_SILO_SUBNET_POOLS_URL: &str = "/v1/subnet-pools";
 
 // External Subnets (project-scoped)
 pub static DEMO_EXTERNAL_SUBNETS_URL: LazyLock<String> = LazyLock::new(|| {
@@ -1948,6 +1951,14 @@ pub static VERIFY_ENDPOINTS: LazyLock<Vec<VerifyEndpoint>> = LazyLock::new(
                 ],
             },
             VerifyEndpoint {
+                url: &DEMO_SILO_SUBNET_POOLS_URL,
+                visibility: Visibility::Protected,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![
+                    AllowedMethod::Get,
+                ],
+            },
+            VerifyEndpoint {
                 url: &DEMO_SUBNET_POOL_SILO_URL,
                 visibility: Visibility::Protected,
                 unprivileged_access: UnprivilegedAccess::None,
@@ -1964,6 +1975,14 @@ pub static VERIFY_ENDPOINTS: LazyLock<Vec<VerifyEndpoint>> = LazyLock::new(
                 visibility: Visibility::Protected,
                 unprivileged_access: UnprivilegedAccess::None,
                 allowed_methods: vec![AllowedMethod::GetUnimplemented],
+            },
+            VerifyEndpoint {
+                url: &DEMO_CURRENT_SILO_SUBNET_POOLS_URL,
+                visibility: Visibility::Protected,
+                unprivileged_access: UnprivilegedAccess::ReadOnly,
+                allowed_methods: vec![
+                    AllowedMethod::Get,
+                ],
             },
             /* External Subnets (project-scoped) */
             VerifyEndpoint {

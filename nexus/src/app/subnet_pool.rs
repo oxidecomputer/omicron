@@ -13,11 +13,15 @@
 
 use crate::app::Unimpl;
 use nexus_auth::authz;
+use nexus_db_lookup::lookup;
+use nexus_db_model::SubnetPool;
+use nexus_db_model::SubnetPoolSiloLink;
 use nexus_db_queries::context::OpContext;
 use nexus_types::external_api::{params, views};
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::DeleteResult;
 use omicron_common::api::external::Error;
+use omicron_common::api::external::InternalContext;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::NameOrId;
@@ -186,6 +190,46 @@ impl super::Nexus {
             .list_silos_linked_to_subnet_pool(opctx, &authz_pool, pagparams)
             .await
             .map(|items| items.into_iter().map(Into::into).collect())
+    }
+
+    pub(crate) async fn silo_subnet_pool_list(
+        &self,
+        opctx: &OpContext,
+        silo_lookup: &lookup::Silo<'_>,
+        pagparams: &PaginatedBy<'_>,
+    ) -> ListResultVec<(SubnetPool, SubnetPoolSiloLink)> {
+        let (.., authz_silo) =
+            silo_lookup.lookup_for(authz::Action::Read).await?;
+
+        // check ability to list pools in general
+        opctx
+            .authorize(authz::Action::ListChildren, &authz::SUBNET_POOL_LIST)
+            .await?;
+
+        self.datastore()
+            .silo_subnet_pool_list(opctx, &authz_silo, pagparams)
+            .await
+    }
+
+    /// List Subnet Pools linked to the user's current silo.
+    pub(crate) async fn current_silo_subnet_pool_list(
+        &self,
+        opctx: &OpContext,
+        pagparams: &PaginatedBy<'_>,
+    ) -> ListResultVec<(SubnetPool, SubnetPoolSiloLink)> {
+        let authz_silo = opctx
+            .authn
+            .silo_required()
+            .internal_context("listing subnet pools")?;
+
+        // From the developer user's point of view, we treat Subnet Pools linked
+        // to their silo as silo resources, so they can list them if they can
+        // list silo children.
+        opctx.authorize(authz::Action::ListChildren, &authz_silo).await?;
+
+        self.datastore()
+            .silo_subnet_pool_list(opctx, &authz_silo, pagparams)
+            .await
     }
 
     pub(crate) async fn subnet_pool_silo_link(

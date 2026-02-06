@@ -146,6 +146,7 @@ system_policy_view                       GET      /v1/system/policy
 
 API operations found with tag "projects"
 OPERATION ID                             METHOD   URL PATH
+current_silo_subnet_pool_list            GET      /v1/subnet-pools
 project_create                           POST     /v1/projects
 project_delete                           DELETE   /v1/projects/{project}
 project_ip_pool_list                     GET      /v1/ip-pools
@@ -305,6 +306,7 @@ silo_policy_update                       PUT      /v1/system/silos/{silo}/policy
 silo_policy_view                         GET      /v1/system/silos/{silo}/policy
 silo_quotas_update                       PUT      /v1/system/silos/{silo}/quotas
 silo_quotas_view                         GET      /v1/system/silos/{silo}/quotas
+silo_subnet_pool_list                    GET      /v1/system/silos/{silo}/subnet-pools
 silo_user_list                           GET      /v1/system/users
 silo_user_view                           GET      /v1/system/users/{user_id}
 silo_utilization_list                    GET      /v1/system/utilization/silos
