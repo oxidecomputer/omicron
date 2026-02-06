@@ -16,6 +16,7 @@ use crate::nexus::{
     NexusClient, NexusNotifierHandle, NexusNotifierInput, NexusNotifierTask,
 };
 use crate::probe_manager::ProbeManager;
+use crate::rot::{RotAttestationHandle, RotAttestationTask};
 use crate::services::{self, ServiceManager, UnderlayInfo};
 use crate::support_bundle::logs::SupportBundleLogs;
 use crate::support_bundle::storage::SupportBundleManager;
@@ -85,6 +86,7 @@ use sled_agent_types::probes::ProbeCreate;
 use sled_agent_types::resolvable_files::{
     PreparedOmicronZone, RemoveMupdateOverrideResult, ResolverStatus,
 };
+use sled_agent_types::rot::Rot;
 use sled_agent_types::sled::StartSledAgentRequest;
 use sled_agent_types::zone_bundle::{
     BundleUtilization, CleanupContext, CleanupCount, CleanupPeriod,
@@ -187,6 +189,9 @@ pub enum Error {
 
     #[error("Time not yet synchronized")]
     TimeNotSynchronized,
+
+    #[error(transparent)]
+    Rot(#[from] crate::rot::RotError),
 }
 
 impl From<Error> for omicron_common::api::external::Error {
@@ -375,6 +380,9 @@ struct SledAgentInner {
 
     // A mechanism for notifiying nexus about sled-agent updates
     nexus_notifier: NexusNotifierHandle,
+
+    // A handle to the RoT for attestation requests.
+    rot_attestor: RotAttestationHandle,
 
     // The rack network config provided at RSS time.
     rack_network_config: Option<RackNetworkConfig>,
@@ -673,6 +681,10 @@ impl SledAgent {
             nexus_notifier_task.run().await;
         });
 
+        // Spawn a background task for handling RoT attestation operations
+        let rot_attest_handle =
+            RotAttestationTask::launch(&log, &config.sprockets.attest)?;
+
         let currently_managed_zpools_rx =
             config_reconciler.currently_managed_zpools_rx().clone();
         let probes = ProbeManager::new(
@@ -696,6 +708,7 @@ impl SledAgent {
                 port_manager,
                 services,
                 nexus_notifier: nexus_notifier_handle,
+                rot_attestor: rot_attest_handle,
                 rack_network_config,
                 zone_bundler: long_running_task_handles.zone_bundler.clone(),
                 bootstore: long_running_task_handles.bootstore.clone(),
@@ -761,6 +774,12 @@ impl SledAgent {
 
     pub(crate) fn hardware_monitor(&self) -> &HardwareMonitorHandle {
         &self.inner.hardware_monitor
+    }
+
+    pub(crate) fn rot_attestor(&self, rot: Rot) -> &RotAttestationHandle {
+        // We currently only support the LPC55 RoT
+        let Rot::Oxide = rot;
+        &self.inner.rot_attestor
     }
 
     /// Trigger a request to Nexus informing it that the current sled exists,

@@ -28,6 +28,7 @@ cockroach-admin-client.workspace = true
 # Only used by the simulated sled agent.
 crucible-agent-client.workspace = true
 derive_more.workspace = true
+dice-verifier = { workspace = true, features = ["ipcc", "mock"] }
 display-error-chain.workspace = true
 dns-server.workspace = true
 dns-service-client.workspace = true
@@ -126,6 +127,7 @@ tufaceous-brand-metadata.workspace = true
 usdt.workspace = true
 uuid.workspace = true
 walkdir.workspace = true
+x509-cert.workspace = true
 zeroize.workspace = true
 zip.workspace = true
 zone.workspace = true

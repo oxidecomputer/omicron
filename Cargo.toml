@@ -458,6 +458,7 @@ debug-ignore = "1.0.5"
 derive_more = "0.99.20"
 derive-where = "1.5.0"
 dev-tools-common = { path = "dev-tools/common" }
+dice-verifier = { git = "https://github.com/oxidecomputer/dice-util", branch = "main", default-features = false }
 # Having the i-implement-... feature here makes diesel go away from the workspace-hack
 diesel = { version = "2.2.12", features = ["i-implement-a-third-party-backend-and-opt-into-breaking-changes", "postgres", "r2d2", "chrono", "serde_json", "network-address", "uuid"] }
 diesel-dtrace = "0.4.2"
@@ -826,6 +827,7 @@ wicket = { path = "wicket" }
 wicket-common = { path = "wicket-common" }
 wicketd-api = { path = "wicketd-api" }
 wicketd-client = { path = "clients/wicketd-client" }
+x509-cert = { version = "0.2.5", default-features = false }
 xshell = "0.2.7"
 zerocopy = "0.8.26"
 zeroize = { version = "1.8.1", features = ["zeroize_derive", "std"] }

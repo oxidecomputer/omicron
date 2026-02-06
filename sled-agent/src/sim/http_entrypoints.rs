@@ -63,6 +63,9 @@ use sled_agent_types::instance::{
 };
 use sled_agent_types::inventory::{Inventory, OmicronSledConfig};
 use sled_agent_types::probes::ProbeSet;
+use sled_agent_types::rot::{
+    Attestation, CertificateChain, MeasurementLog, Nonce, RotPathParams,
+};
 use sled_agent_types::sled::AddSledRequest;
 use sled_agent_types::support_bundle::{
     RangeRequestHeaders, SupportBundleFilePathParam,
@@ -1059,6 +1062,28 @@ impl SledAgentApi for SledAgentSimImpl {
             .await
             .map(|_| HttpResponseDeleted())
             .map_err(HttpError::from)
+    }
+
+    async fn rot_measurement_log(
+        _request_context: RequestContext<Self::Context>,
+        _path_params: Path<RotPathParams>,
+    ) -> Result<HttpResponseOk<MeasurementLog>, HttpError> {
+        method_unimplemented()
+    }
+
+    async fn rot_certificate_chain(
+        _request_context: RequestContext<Self::Context>,
+        _path_params: Path<RotPathParams>,
+    ) -> Result<HttpResponseOk<CertificateChain>, HttpError> {
+        method_unimplemented()
+    }
+
+    async fn rot_attest(
+        _request_context: RequestContext<Self::Context>,
+        _path_params: Path<RotPathParams>,
+        _body: TypedBody<Nonce>,
+    ) -> Result<HttpResponseOk<Attestation>, HttpError> {
+        method_unimplemented()
     }
 }
 
