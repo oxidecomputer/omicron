@@ -228,7 +228,6 @@ table! {
 
 table! {
     switch_port_settings_bgp_peer_config (id) {
-        id -> Uuid,
         port_settings_id -> Uuid,
         bgp_config_id -> Uuid,
         interface_name -> Text,
@@ -246,7 +245,8 @@ table! {
         enforce_first_as -> Bool,
         allow_import_list_active -> Bool,
         allow_export_list_active -> Bool,
-        vlan_id -> Nullable<Int4>
+        vlan_id -> Nullable<Int4>,
+        id -> Uuid,
     }
 }
 

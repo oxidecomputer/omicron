@@ -650,7 +650,6 @@ impl Into<external::SwitchPortRouteConfig> for SwitchPortRouteConfig {
 )]
 #[diesel(table_name = switch_port_settings_bgp_peer_config)]
 pub struct SwitchPortBgpPeerConfig {
-    pub id: Uuid,
     pub port_settings_id: Uuid,
     pub bgp_config_id: Uuid,
     pub interface_name: Name,
@@ -669,6 +668,7 @@ pub struct SwitchPortBgpPeerConfig {
     pub allow_import_list_active: bool,
     pub allow_export_list_active: bool,
     pub vlan_id: Option<SqlU16>,
+    pub id: Uuid,
 }
 
 #[derive(

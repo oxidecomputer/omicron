@@ -3668,7 +3668,6 @@ CREATE TABLE IF NOT EXISTS omicron.public.switch_port_settings_route_config (
 );
 
 CREATE TABLE IF NOT EXISTS omicron.public.switch_port_settings_bgp_peer_config (
-    id UUID NOT NULL,
     port_settings_id UUID,
     bgp_config_id UUID NOT NULL,
     interface_name TEXT,
@@ -3687,6 +3686,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.switch_port_settings_bgp_peer_config (
     allow_import_list_active BOOLEAN NOT NULL DEFAULT false,
     allow_export_list_active BOOLEAN NOT NULL DEFAULT false,
     vlan_id INT4,
+    id UUID NOT NULL,
 
     PRIMARY KEY (id)
 );
