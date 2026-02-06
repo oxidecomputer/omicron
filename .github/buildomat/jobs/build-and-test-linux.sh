@@ -7,6 +7,7 @@
 #: output_rules = [
 #:	"%/work/*",
 #:	"%/work/oxidecomputer/omicron/target/nextest/ci/junit.xml",
+#:	"=/tmp/nextest-run-archive.zip",
 #:	"%/var/tmp/omicron_tmp/**/*",
 #:	"!/var/tmp/omicron_tmp/crdb-base*",
 #:	"!/var/tmp/omicron_tmp/rustc*",

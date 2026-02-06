@@ -8,6 +8,7 @@
 #:	"%/work/*",
 #:	"%/work/oxidecomputer/omicron/target/nextest/ci/junit.xml",
 #:	"%/work/oxidecomputer/omicron/target/live-tests-archive.tgz",
+#:	"=/tmp/nextest-run-archive.zip",
 #:	"%/var/tmp/omicron_tmp/**/*",
 #:	"!/var/tmp/omicron_tmp/crdb-base*",
 #:	"!/var/tmp/omicron_tmp/rustc*",
