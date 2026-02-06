@@ -22,7 +22,7 @@ use serde::{Deserialize, Serialize};
 impl_enum_type!(
     SupportBundleStateEnum:
 
-    #[derive(Copy, Clone, Debug, AsExpression, FromSqlRow, Serialize, Deserialize, PartialEq)]
+    #[derive(Copy, Clone, Debug, AsExpression, FromSqlRow, Serialize, Deserialize, PartialEq, strum::EnumIter)]
     pub enum SupportBundleState;
 
     // Enum values
