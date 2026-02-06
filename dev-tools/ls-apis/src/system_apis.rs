@@ -30,6 +30,7 @@ use iddqd::id_upcast;
 use itertools::Itertools;
 use parse_display::{Display, FromStr};
 use petgraph::dot::Dot;
+use petgraph::graph::Graph;
 use petgraph::graph::NodeIndex;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
@@ -546,10 +547,10 @@ impl SystemApis {
         dependency_filter: ApiDependencyFilter,
         edge_filter: EdgeFilter<'_>,
     ) -> Result<(
-        petgraph::graph::Graph<&DeploymentUnitName, &ClientPackageName>,
+        Graph<&DeploymentUnitName, &ClientPackageName>,
         BTreeMap<&DeploymentUnitName, NodeIndex>,
     )> {
-        let mut graph = petgraph::graph::Graph::new();
+        let mut graph = Graph::new();
         let nodes: BTreeMap<_, _> = self
             .deployment_units()
             .map(|name| (name, graph.add_node(name)))
@@ -634,10 +635,10 @@ impl SystemApis {
         dependency_filter: ApiDependencyFilter,
         versioned_on_server_only: bool,
     ) -> Result<(
-        petgraph::graph::Graph<&ServerComponentName, &ClientPackageName>,
+        Graph<&ServerComponentName, &ClientPackageName>,
         BTreeMap<&ServerComponentName, NodeIndex>,
     )> {
-        let mut graph = petgraph::graph::Graph::new();
+        let mut graph = Graph::new();
         let nodes: BTreeMap<_, _> = self
             .server_component_units
             .keys()
