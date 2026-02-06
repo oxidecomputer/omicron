@@ -33,8 +33,8 @@ use omicron_common::address::DENDRITE_PORT;
 use omicron_common::address::{MGD_PORT, MGS_PORT};
 use omicron_common::api::external::{BfdMode, ImportExportPolicy};
 use omicron_common::api::internal::shared::{
-    BgpConfig, PortConfig, PortFec, PortSpeed, RackNetworkConfig,
-    SwitchLocation,
+    BgpConfig, BgpPeerConfig, PortConfig, PortFec, PortSpeed,
+    RackNetworkConfig, SwitchLocation,
 };
 use omicron_common::backoff::{
     BackoffError, ExponentialBackoff, ExponentialBackoffBuilder, retry_notify,
@@ -570,11 +570,21 @@ impl<'a> EarlyNetworkSetup<'a> {
                     let bpc = MgBgpPeerConfig {
                         name: format!("{}", addr),
                         host: format!("{}:179", addr),
-                        hold_time: peer.hold_time.unwrap_or(6),
-                        idle_hold_time: peer.idle_hold_time.unwrap_or(3),
-                        delay_open: peer.delay_open.unwrap_or(0),
-                        connect_retry: peer.connect_retry.unwrap_or(3),
-                        keepalive: peer.keepalive.unwrap_or(2),
+                        hold_time: peer
+                            .hold_time
+                            .unwrap_or(BgpPeerConfig::DEFAULT_HOLD_TIME),
+                        idle_hold_time: peer
+                            .idle_hold_time
+                            .unwrap_or(BgpPeerConfig::DEFAULT_IDLE_HOLD_TIME),
+                        delay_open: peer
+                            .delay_open
+                            .unwrap_or(BgpPeerConfig::DEFAULT_DELAY_OPEN),
+                        connect_retry: peer
+                            .connect_retry
+                            .unwrap_or(BgpPeerConfig::DEFAULT_CONNECT_RETRY),
+                        keepalive: peer
+                            .keepalive
+                            .unwrap_or(BgpPeerConfig::DEFAULT_KEEPALIVE),
                         resolution: BGP_SESSION_RESOLUTION,
                         passive: false,
                         remote_asn: peer.remote_asn,
@@ -608,11 +618,21 @@ impl<'a> EarlyNetworkSetup<'a> {
                     let bpc = MgUnnumberedBgpPeerConfig {
                         name: format!("unnumbered-{}", port.port),
                         interface: format!("tfport{}_0", port.port),
-                        hold_time: peer.hold_time.unwrap_or(6),
-                        idle_hold_time: peer.idle_hold_time.unwrap_or(3),
-                        delay_open: peer.delay_open.unwrap_or(0),
-                        connect_retry: peer.connect_retry.unwrap_or(3),
-                        keepalive: peer.keepalive.unwrap_or(2),
+                        hold_time: peer
+                            .hold_time
+                            .unwrap_or(BgpPeerConfig::DEFAULT_HOLD_TIME),
+                        idle_hold_time: peer
+                            .idle_hold_time
+                            .unwrap_or(BgpPeerConfig::DEFAULT_IDLE_HOLD_TIME),
+                        delay_open: peer
+                            .delay_open
+                            .unwrap_or(BgpPeerConfig::DEFAULT_DELAY_OPEN),
+                        connect_retry: peer
+                            .connect_retry
+                            .unwrap_or(BgpPeerConfig::DEFAULT_CONNECT_RETRY),
+                        keepalive: peer
+                            .keepalive
+                            .unwrap_or(BgpPeerConfig::DEFAULT_KEEPALIVE),
                         resolution: BGP_SESSION_RESOLUTION,
                         passive: false,
                         remote_asn: peer.remote_asn,
