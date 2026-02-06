@@ -911,6 +911,15 @@ async fn rsrss_new_region_volume_create_undo(
 
     let new_region_volume_id =
         sagactx.lookup::<VolumeUuid>("new_region_volume_id")?;
+
+    if osagactx.datastore().volume_get(new_region_volume_id).await?.is_some() {
+        // All the knowledge to unwind the resources created by this saga is in
+        // this saga, but use soft delete in order to keep volume resource usage
+        // records consistent (they would have been added in the volume create).
+        // Make sure to only call this if the volume still exists.
+        osagactx.datastore().soft_delete_volume(new_region_volume_id).await?;
+    }
+
     osagactx.datastore().volume_hard_delete(new_region_volume_id).await?;
 
     Ok(())
@@ -1008,6 +1017,15 @@ async fn rsrss_create_fake_volume_undo(
     // Delete the fake volume.
 
     let new_volume_id = sagactx.lookup::<VolumeUuid>("new_volume_id")?;
+
+    if osagactx.datastore().volume_get(new_volume_id).await?.is_some() {
+        // All the knowledge to unwind the resources created by this saga is in
+        // this saga, but use soft delete in order to keep volume resource usage
+        // records consistent (they would have been added in the volume create).
+        // Make sure to only call this if the volume still exists.
+        osagactx.datastore().soft_delete_volume(new_volume_id).await?;
+    }
+
     osagactx.datastore().volume_hard_delete(new_volume_id).await?;
 
     Ok(())
