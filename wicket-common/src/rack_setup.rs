@@ -31,7 +31,6 @@ use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::fmt;
 use std::net::IpAddr;
-use std::net::Ipv4Addr;
 use std::net::Ipv6Addr;
 use std::str::FromStr;
 use tufaceous_artifact::ArtifactHash;
@@ -100,8 +99,8 @@ pub struct BootstrapSledDescription {
 #[serde(deny_unknown_fields)]
 pub struct UserSpecifiedRackNetworkConfig {
     pub rack_subnet_address: Option<Ipv6Addr>,
-    pub infra_ip_first: Ipv4Addr,
-    pub infra_ip_last: Ipv4Addr,
+    pub infra_ip_first: IpAddr,
+    pub infra_ip_last: IpAddr,
     // Map of switch -> port -> configuration, under the assumption that
     // (switch, port) is unique.
     pub switch0: BTreeMap<String, UserSpecifiedPortConfig>,

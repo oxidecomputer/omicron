@@ -19,7 +19,9 @@ use bootstrap_agent_lockstep_client::types::UserId;
 use display_error_chain::DisplayErrorChain;
 use omicron_certificates::CertificateError;
 use omicron_common::address;
+use omicron_common::address::IpRange;
 use omicron_common::address::Ipv4Range;
+use omicron_common::address::Ipv6Range;
 use omicron_common::api::external::AllowedSourceIps;
 use omicron_common::api::external::SwitchLocation;
 use oxnet::Ipv6Net;
@@ -618,12 +620,21 @@ fn validate_rack_network_config(
     }
 
     // Make sure `infra_ip_first`..`infra_ip_last` is a well-defined range...
-    let infra_ip_range =
-        Ipv4Range::new(config.infra_ip_first, config.infra_ip_last).map_err(
-            |s: String| {
+    let infra_ip_range = match (config.infra_ip_first, config.infra_ip_last) {
+        (IpAddr::V4(first), IpAddr::V4(last)) => Ipv4Range::new(first, last)
+            .map_err(|s: String| {
                 anyhow!("invalid `infra_ip_first`, `infra_ip_last` range: {s}")
-            },
-        )?;
+            })
+            .map(|v| IpRange::V4(v)),
+        (IpAddr::V6(first), IpAddr::V6(last)) => Ipv6Range::new(first, last)
+            .map_err(|s: String| {
+                anyhow!("invalid `infra_ip_first`, `infra_ip_last` range: {s}")
+            })
+            .map(|v| IpRange::V6(v)),
+        _ => Err(anyhow!(
+            "`infra_ip_first` and `infra_ip_last` must be of the same type"
+        )),
+    }?;
 
     // TODO this implies a single contiguous range for port IPs which is over
     // constraining
@@ -631,8 +642,8 @@ fn validate_rack_network_config(
     for (_, _, port_config) in config.iter_uplinks() {
         for addr in &port_config.addresses {
             // ... and check that it contains `uplink_ip`.
-            if addr.addr() < infra_ip_range.first
-                || addr.addr() > infra_ip_range.last
+            if addr.addr() < infra_ip_range.first_address()
+                || addr.addr() > infra_ip_range.last_address()
             {
                 bail!(
                     "`uplink_cidr`'s IP address must be in the range defined by \
@@ -658,8 +669,8 @@ fn validate_rack_network_config(
 
     Ok(bootstrap_agent_lockstep_client::types::RackNetworkConfig {
         rack_subnet,
-        infra_ip_first: std::net::IpAddr::V4(config.infra_ip_first),
-        infra_ip_last: std::net::IpAddr::V4(config.infra_ip_last),
+        infra_ip_first: config.infra_ip_first,
+        infra_ip_last: config.infra_ip_last,
         ports: config
             .iter_uplinks()
             .map(|(switch, port, config)| {
