@@ -204,8 +204,6 @@ impl TryFrom<RawApiMetadata> for AllApiMetadata {
         }
 
         // Validate IDU-only edges reference known server components and APIs.
-        // XXX-dap validate that the client and server are in the same
-        // deployment unit
         let known_components: BTreeSet<_> =
             deployment_units.values().flat_map(|u| u.packages.iter()).collect();
         for edge in &raw.intra_deployment_unit_only_edges {
@@ -216,12 +214,12 @@ impl TryFrom<RawApiMetadata> for AllApiMetadata {
                     edge.server
                 );
             }
-            let client_name = &edge.client;
-            if !apis.contains_key(client_name) {
+
+            if !apis.contains_key(&edge.client) {
                 bail!(
-                    "intra_deployment_unit_only_edges:
+                    "intra_deployment_unit_only_edges: \
                      unknown client {:?}",
-                    client_name
+                    edge.client,
                 );
             }
         }

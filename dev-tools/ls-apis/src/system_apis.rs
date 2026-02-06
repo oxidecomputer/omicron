@@ -27,6 +27,7 @@ use cargo_metadata::Package;
 use iddqd::IdOrdItem;
 use iddqd::IdOrdMap;
 use iddqd::id_upcast;
+use itertools::Itertools;
 use parse_display::{Display, FromStr};
 use petgraph::dot::Dot;
 use petgraph::graph::NodeIndex;
@@ -283,6 +284,51 @@ impl SystemApis {
                         );
                     }
                 }
+            }
+        }
+
+        // Validate that the IDU-only edges' components belong to the same
+        // deployment unit.
+        for edge in api_metadata.intra_deployment_unit_only_edges() {
+            let server = &edge.server;
+            let Some(server_unit) = server_component_units.get(server) else {
+                // This was validated earlier, but there's not an easy way to
+                // express this in the type system, so we just handle it
+                // gracefully.
+                bail!(
+                    "internal error: intra_deployment_unit_only specifies \
+                    server {:?} that does not exist in server components",
+                    server,
+                );
+            };
+
+            let client = &edge.client;
+            let Some(producers) = api_producers.get(client) else {
+                // This was validated earlier, but there's not an easy way to
+                // express this in the type system, so we just handle it
+                // gracefully.
+                bail!(
+                    "internal error: intra_deployment_unit_only specifies \
+                     client {:?} that does not correspond to a known API",
+                    client,
+                );
+            };
+
+            if !producers.iter().any(|(p, _)| {
+                server_component_units
+                    .get(p)
+                    .map(|producer_unit| producer_unit == server_unit)
+                    .unwrap_or(false)
+            }) {
+                bail!(
+                    "error: intra_deployment_unit_only specifies server \
+                     {:?} in deployment unit {:?}, but none of the producers \
+                     of client {:?} are in that deployment_unit: {}",
+                    server,
+                    server_unit,
+                    client,
+                    producers.iter().map(|(p, _)| p.as_str()).join(", "),
+                );
             }
         }
 

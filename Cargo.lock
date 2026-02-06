@@ -8335,6 +8335,7 @@ dependencies = [
  "expectorate",
  "iddqd",
  "indent_write",
+ "itertools 0.14.0",
  "newtype_derive",
  "omicron-test-utils",
  "omicron-workspace-hack",
