@@ -629,7 +629,8 @@ server = "dpd"
 client = "gateway-client"
 note = """
 dpd defaults to [::1]:MGS_PORT (switch_identifiers.rs:60), and the SMF start
-script doesn't pass in --mgs-address.
+script doesn't pass in --mgs-address.  The comment also explains that it
+explicitly wants the local MGS and this can only be overridden for testing.
 """
 permalinks = [
     "https://github.com/oxidecomputer/dendrite/blob/606c0be/dpd/src/switch_identifiers.rs#L60",
@@ -685,6 +686,9 @@ client = "ddm-admin-client"
 note = "Sled Agent uses Client::localhost() to connect to ddm."
 permalinks = [
     "https://github.com/oxidecomputer/omicron/blob/6cef874/sled-agent/src/ddm_reconciler.rs#L56",
+    "https://github.com/oxidecomputer/omicron/blob/6cef874/sled-agent/src/bootstrap/bootstore_setup.rs#L92",
+    "https://github.com/oxidecomputer/omicron/blob/6cef874/sled-agent/src/rack_setup/service.rs#L1086",
+    "https://github.com/oxidecomputer/omicron/blob/6cef874/sled-agent/src/sled_agent.rs#L1378",
 ]
 
 [[intra_deployment_unit_only_edges]]
@@ -702,7 +706,10 @@ permalinks = [
 [[intra_deployment_unit_only_edges]]
 server = "omicron-sled-agent"
 client = "propolis-client"
-note = "Unsure: it looks like this only queries the Propolis server out of the same deployment unit?"
+note = """
+Only queries the Propolis server on the same sled, so Propolis is in the
+same deployment unit.
+"""
 permalinks = [
     "https://github.com/oxidecomputer/omicron/blob/6cef874/sled-agent/src/instance.rs#L2283",
 ]
@@ -733,9 +740,15 @@ permalinks = [
 server = "omicron-sled-agent"
 client = "dpd-client"
 note = """
-BUG: Sled Agent reaches out to both switch zones, which crosses deployment units.
+BUG: Sled Agent creates two DPD clients.  One of them (early_networking.rs:419)
+is always to the switch zone on the same sled, which is in the same deployment
+unit.
+
+The other one (services.rs:1090) queries both switch zones, so it crosses
+deployment units.  This needs to be fixed.
 """
 permalinks = [
+    "https://github.com/oxidecomputer/omicron/blob/6cef874/sled-agent/src/bootstrap/early_networking.rs#L419",
     "https://github.com/oxidecomputer/omicron/blob/6cef874/sled-agent/src/services.rs#L1090",
 ]
 
