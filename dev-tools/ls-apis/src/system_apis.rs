@@ -328,7 +328,7 @@ impl SystemApis {
                     server,
                     server_unit,
                     client,
-                    producers.iter().map(|(p, _)| p.as_str()).join(", "),
+                    producers.keys().map(|p| p.as_str()).join(", "),
                 );
             }
         }

@@ -730,6 +730,8 @@ as the global zone, so this is okay.
 The other one (early_networking.rs:277) queries both
 switch zones, so it crosses deployment units. This needs
 to be fixed.
+
+Reference: https://github.com/oxidecomputer/omicron/issues/9708
 """
 permalinks = [
     "https://github.com/oxidecomputer/omicron/blob/6cef874/sled-agent/src/bootstrap/early_networking.rs#L376",
@@ -746,6 +748,8 @@ unit.
 
 The other one (services.rs:1090) queries both switch zones, so it crosses
 deployment units.  This needs to be fixed.
+
+Reference: https://github.com/oxidecomputer/omicron/issues/9708
 """
 permalinks = [
     "https://github.com/oxidecomputer/omicron/blob/6cef874/sled-agent/src/bootstrap/early_networking.rs#L419",
