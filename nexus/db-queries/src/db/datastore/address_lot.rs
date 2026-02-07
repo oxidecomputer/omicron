@@ -2,6 +2,8 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+use std::net::IpAddr;
+
 use super::DataStore;
 use crate::authz;
 use crate::context::OpContext;
@@ -353,31 +355,38 @@ pub(crate) async fn try_reserve_block(
 
     // Ensure the address is not already taken.
 
-    let results: Vec<Uuid> = if anycast {
-        // Ensure that a non-anycast reservation has not already been made
-        rsvd_block_dsl::address_lot_rsvd_block
-            .filter(address_lot_rsvd_block::address_lot_id.eq(lot_id))
-            .filter(address_lot_rsvd_block::first_address.le(inet))
-            .filter(address_lot_rsvd_block::last_address.ge(inet))
-            .filter(address_lot_rsvd_block::anycast.eq(false))
-            .select(address_lot_rsvd_block::id)
-            .get_results_async(conn)
-            .await?
-    } else {
-        // Ensure that a reservation of any kind has not already been made
-        rsvd_block_dsl::address_lot_rsvd_block
-            .filter(address_lot_rsvd_block::address_lot_id.eq(lot_id))
-            .filter(address_lot_rsvd_block::first_address.le(inet))
-            .filter(address_lot_rsvd_block::last_address.ge(inet))
-            .select(address_lot_rsvd_block::id)
-            .get_results_async(conn)
-            .await?
+    let no_reserve = match inet.ip() {
+        IpAddr::V4(a) => a.is_unspecified(),
+        IpAddr::V6(a) => a.is_unspecified() || a.is_unicast_link_local(),
     };
 
-    if !results.is_empty() {
-        return Err(ReserveBlockTxnError::CustomError(
-            ReserveBlockError::AddressUnavailable,
-        ));
+    if !no_reserve {
+        let results: Vec<Uuid> = if anycast {
+            // Ensure that a non-anycast reservation has not already been made
+            rsvd_block_dsl::address_lot_rsvd_block
+                .filter(address_lot_rsvd_block::address_lot_id.eq(lot_id))
+                .filter(address_lot_rsvd_block::first_address.le(inet))
+                .filter(address_lot_rsvd_block::last_address.ge(inet))
+                .filter(address_lot_rsvd_block::anycast.eq(false))
+                .select(address_lot_rsvd_block::id)
+                .get_results_async(conn)
+                .await?
+        } else {
+            // Ensure that a reservation of any kind has not already been made
+            rsvd_block_dsl::address_lot_rsvd_block
+                .filter(address_lot_rsvd_block::address_lot_id.eq(lot_id))
+                .filter(address_lot_rsvd_block::first_address.le(inet))
+                .filter(address_lot_rsvd_block::last_address.ge(inet))
+                .select(address_lot_rsvd_block::id)
+                .get_results_async(conn)
+                .await?
+        };
+
+        if !results.is_empty() {
+            return Err(ReserveBlockTxnError::CustomError(
+                ReserveBlockError::AddressUnavailable,
+            ));
+        }
     }
 
     // 3. Mark the address as in use.

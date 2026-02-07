@@ -33,8 +33,8 @@ use mg_admin_client::types::{
     DeleteStaticRoute4Request, DeleteStaticRoute6Request,
     ImportExportPolicy4 as MgImportExportPolicy4,
     ImportExportPolicy6 as MgImportExportPolicy6, Ipv4UnicastConfig,
-    JitterRange, ShaperSource, StaticRoute4, StaticRoute4List, StaticRoute6,
-    StaticRoute6List, UnnumberedBgpPeerConfig,
+    Ipv6UnicastConfig, JitterRange, ShaperSource, StaticRoute4,
+    StaticRoute4List, StaticRoute6, StaticRoute6List, UnnumberedBgpPeerConfig,
 };
 use nexus_db_queries::{
     context::OpContext,
@@ -879,8 +879,8 @@ impl BackgroundTask for SwitchPortSettingsManager {
                             // For unnumbered peers, we use NoFiltering policies as the
                             // communities/import/export tables are keyed by address
                             let peer_config = UnnumberedBgpPeerConfig {
-                                name: format!("unnumbered-{}", peer.interface_name),
-                                interface: format!("tfport{}_0", peer.interface_name),
+                                name: format!("unnumbered-{}", port.port_name),
+                                interface: format!("tfport{}_0", port.port_name),
                                 hold_time: peer.hold_time.0.into(),
                                 idle_hold_time: peer.idle_hold_time.0.into(),
                                 delay_open: peer.delay_open.0.into(),
@@ -900,11 +900,11 @@ impl BackgroundTask for SwitchPortSettingsManager {
                                     import_policy: MgImportExportPolicy4::NoFiltering,
                                     export_policy: MgImportExportPolicy4::NoFiltering,
                                 }),
-                                ipv6_unicast: None, /*TODO Some(Ipv6UnicastConfig{
+                                ipv6_unicast: Some(Ipv6UnicastConfig{
                                     nexthop: None,
                                     import_policy: MgImportExportPolicy6::NoFiltering,
                                     export_policy: MgImportExportPolicy6::NoFiltering,
-                                }),*/
+                                }),
                                 vlan_id: peer.vlan_id.map(|x| x.0),
                                 connect_retry_jitter: Some(JitterRange {
                                     max: 1.0,
