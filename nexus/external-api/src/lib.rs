@@ -47,7 +47,7 @@ mod v2026012200;
 mod v2026012300;
 mod v2026013000;
 mod v2026013001;
-pub mod v2026020200;
+pub mod v2026020600;
 
 #[cfg(test)]
 mod test_utils;
@@ -80,7 +80,8 @@ api_versions!([
     // |  date-based version should be at the top of the list.
     // v
     // (next_yyyymmddnn, IDENT),
-    (2026020500, BGP_UNNUMBERED_PEERS),
+    (2026020700, BGP_UNNUMBERED_PEERS),
+    (2026020600, ADD_SILO_SUBNET_POOLS),
     (2026020200, TRUST_QUORUM_ABORT_CONFIG),
     (2026013100, READ_ONLY_DISKS_NULLABLE),
     (2026013001, READ_ONLY_DISKS),
@@ -1594,6 +1595,31 @@ pub trait NexusExternalApi {
         path_params: Path<params::SubnetPoolPath>,
         query_params: Query<PaginatedById>,
     ) -> Result<HttpResponseOk<ResultsPage<views::SubnetPoolSiloLink>>, HttpError>;
+
+    /// List subnet pools linked to a silo
+    #[endpoint {
+        method = GET,
+        path = "/v1/system/silos/{silo}/subnet-pools",
+        tags = ["system/silos"],
+        versions = VERSION_ADD_SILO_SUBNET_POOLS..,
+    }]
+    async fn silo_subnet_pool_list(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::SiloPath>,
+        query_params: Query<PaginatedByNameOrId>,
+    ) -> Result<HttpResponseOk<ResultsPage<views::SiloSubnetPool>>, HttpError>;
+
+    /// List subnet pools linked to the user's current silo
+    #[endpoint {
+        method = GET,
+        path = "/v1/subnet-pools",
+        tags = ["projects"],
+        versions = VERSION_ADD_SILO_SUBNET_POOLS..,
+    }]
+    async fn current_silo_subnet_pool_list(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<PaginatedByNameOrId>,
+    ) -> Result<HttpResponseOk<ResultsPage<views::SiloSubnetPool>>, HttpError>;
 
     /// Link a subnet pool to a silo
     #[endpoint {
@@ -3350,8 +3376,8 @@ pub trait NexusExternalApi {
     }]
     async fn v2026010300_networking_switch_port_settings_create(
         rqctx: RequestContext<Self::Context>,
-        new_settings: TypedBody<v2026020200::SwitchPortSettingsCreate>,
-    ) -> Result<HttpResponseCreated<v2026020200::SwitchPortSettings>, HttpError>
+        new_settings: TypedBody<v2026020600::SwitchPortSettingsCreate>,
+    ) -> Result<HttpResponseCreated<v2026020600::SwitchPortSettings>, HttpError>
     {
         match Self::networking_switch_port_settings_create(
             rqctx,
@@ -3415,7 +3441,7 @@ pub trait NexusExternalApi {
     async fn v2026010300_networking_switch_port_settings_view(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<params::SwitchPortSettingsInfoSelector>,
-    ) -> Result<HttpResponseOk<v2026020200::SwitchPortSettings>, HttpError>
+    ) -> Result<HttpResponseOk<v2026020600::SwitchPortSettings>, HttpError>
     {
         match Self::networking_switch_port_settings_view(rqctx, path_params)
             .await
@@ -3533,8 +3559,8 @@ pub trait NexusExternalApi {
     }]
     async fn v2026010300_networking_bgp_config_create(
         rqctx: RequestContext<Self::Context>,
-        config: TypedBody<v2026020200::BgpConfigCreate>,
-    ) -> Result<HttpResponseCreated<v2026020200::BgpConfig>, HttpError>;
+        config: TypedBody<v2026020600::BgpConfigCreate>,
+    ) -> Result<HttpResponseCreated<v2026020600::BgpConfig>, HttpError>;
 
     /// Create new BGP configuration
     #[endpoint {
@@ -3558,7 +3584,7 @@ pub trait NexusExternalApi {
     async fn v2026010300_networking_bgp_config_list(
         rqctx: RequestContext<Self::Context>,
         query_params: Query<PaginatedByNameOrId>,
-    ) -> Result<HttpResponseOk<ResultsPage<v2026020200::BgpConfig>>, HttpError>;
+    ) -> Result<HttpResponseOk<ResultsPage<v2026020600::BgpConfig>>, HttpError>;
 
     /// List BGP configurations
     #[endpoint {

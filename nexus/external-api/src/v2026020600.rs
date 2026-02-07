@@ -2,16 +2,28 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! Nexus external types that changed from 2026013001 to 2026013002.
+//! Nexus external types that changed from 2026020600 to 2026020700.
 //!
-//! Version 2026013001 types (before BGP unnumbered peers support was added).
+//! Version 2026020600 types (before BGP unnumbered peers support was added).
 //!
 //! Key differences from newer API versions:
 //! - [`BgpPeer`] has a required `addr` field. Newer versions make `addr`
 //!   optional to support BGP unnumbered sessions where the peer address
 //!   is discovered dynamically via the interface rather than being specified.
+//! - [`BgpPeerConfig`] contains the old [`BgpPeer`] type with required `addr`.
+//! - [`SwitchPortSettingsCreate`] uses the old [`BgpPeerConfig`] type.
+//! - [`SwitchPortSettings`] contains the old [`BgpPeer`] type with required `addr`.
+//! - [`BgpConfigCreate`] lacks the `max_paths` field. Newer versions include
+//!   `max_paths` to configure BGP multipath support.
+//! - [`BgpConfig`] lacks the `max_paths` field. Newer versions include
+//!   `max_paths` to configure BGP multipath support.
 //!
 //! [`BgpPeer`]: self::BgpPeer
+//! [`BgpPeerConfig`]: self::BgpPeerConfig
+//! [`SwitchPortSettingsCreate`]: self::SwitchPortSettingsCreate
+//! [`SwitchPortSettings`]: self::SwitchPortSettings
+//! [`BgpConfigCreate`]: self::BgpConfigCreate
+//! [`BgpConfig`]: self::BgpConfig
 
 use api_identity::ObjectIdentity;
 use omicron_common::api::external::ObjectIdentity;
