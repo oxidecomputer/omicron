@@ -177,6 +177,7 @@ impl DataStore {
             .authorize(authz::Action::CreateChild, &authz::SUBNET_POOL_LIST)
             .await?;
         use nexus_db_schema::schema::subnet_pool::dsl;
+        let name = params.identity.name.to_string();
         let pool = SubnetPool::new(params.identity, params.ip_version.into());
         diesel::insert_into(dsl::subnet_pool)
             .values(pool)
@@ -186,7 +187,12 @@ impl DataStore {
             .returning(SubnetPool::as_returning())
             .get_result_async(&*self.pool_connection_authorized(opctx).await?)
             .await
-            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+            .map_err(|e| {
+                public_error_from_diesel(
+                    e,
+                    ErrorHandler::Conflict(ResourceType::SubnetPool, &name),
+                )
+            })
     }
 
     /// Delete a Subnet Pool.
@@ -1423,6 +1429,29 @@ mod tests {
         assert_eq!(pool.identity.time_created, pool.identity.time_modified);
         assert!(pool.identity.time_deleted.is_none());
         assert_eq!(pool.ip_version, IpVersion::V4.into());
+
+        // Creating a duplicate pool should fail with ObjectAlreadyExists.
+        let duplicate_params = SubnetPoolCreate {
+            identity: IdentityMetadataCreateParams {
+                name: "my-pool".parse().unwrap(),
+                description: String::new(),
+            },
+            ip_version: IpVersion::V4,
+        };
+        let err = datastore
+            .create_subnet_pool(opctx, duplicate_params)
+            .await
+            .expect_err("creating a duplicate subnet pool should fail");
+        assert!(
+            matches!(
+                &err,
+                Error::ObjectAlreadyExists {
+                    type_name: ResourceType::SubnetPool,
+                    ..
+                }
+            ),
+            "expected ObjectAlreadyExists, got: {err:?}"
+        );
 
         let by_id = NameOrId::Id(pool.identity.id.into_untyped_uuid());
         let (authz_pool, db_pool) = datastore
