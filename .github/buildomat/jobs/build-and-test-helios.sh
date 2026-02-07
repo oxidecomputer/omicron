@@ -32,6 +32,16 @@
 #: from_output = "/work/crate-build-timings.json"
 #:
 #: [[publish]]
+#: series = "build-info-without-nexus-helios"
+#: name = "cargo-timing-without-nexus.html"
+#: from_output = "/work/cargo-timing-without-nexus.html"
+#:
+#: [[publish]]
+#: series = "build-info-with-nexus-helios"
+#: name = "cargo-timing-with-nexus.html"
+#: from_output = "/work/cargo-timing-with-nexus.html"
+#:
+#: [[publish]]
 #: series = "live-tests"
 #: name = "live-tests-archive.tgz"
 #: from_output = "/work/oxidecomputer/omicron/target/live-tests-archive.tgz"
