@@ -94,6 +94,7 @@ async fn test_port_settings_basic_crud(ctx: &ControlPlaneTestContext) {
         vrf: None,
         checker: None,
         shaper: None,
+        max_paths: Default::default(),
     };
 
     NexusRequest::objects_post(

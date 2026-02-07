@@ -29,8 +29,9 @@ use futures::FutureExt;
 use futures::future::BoxFuture;
 use mg_admin_client::types::{
     AddStaticRoute4Request, AddStaticRoute6Request, ApplyRequest,
-    BgpPeerConfig, CheckerSource, DeleteStaticRoute4Request,
-    DeleteStaticRoute6Request, ImportExportPolicy4 as MgImportExportPolicy4,
+    BestpathFanoutRequest, BgpPeerConfig, CheckerSource,
+    DeleteStaticRoute4Request, DeleteStaticRoute6Request,
+    ImportExportPolicy4 as MgImportExportPolicy4,
     ImportExportPolicy6 as MgImportExportPolicy6, Ipv4UnicastConfig,
     JitterRange, ShaperSource, StaticRoute4, StaticRoute4List, StaticRoute6,
     StaticRoute6List, UnnumberedBgpPeerConfig,
@@ -541,9 +542,8 @@ impl BackgroundTask for SwitchPortSettingsManager {
 
                 // build a list of desired settings for each switch
                 let mut desired_bgp_configs: HashMap<
-                    SwitchLocation,
-                    ApplyRequest,
-                > = HashMap::new();
+                        SwitchLocation, (ApplyRequest, BestpathFanoutRequest)
+                        > = HashMap::new();
 
                 // we currently only support one bgp config per switch
                 let mut switch_bgp_config: HashMap<SwitchLocation, (Uuid, BgpConfig)> = HashMap::new();
@@ -951,14 +951,13 @@ impl BackgroundTask for SwitchPortSettingsManager {
 
                     match desired_bgp_configs.entry(*location) {
                         Entry::Occupied(mut occupied_entry) => {
-                            let config = occupied_entry.get_mut();
+                            let (config, _) = occupied_entry.get_mut();
                             // peers are the only per-port part of the config.
                             config.peers.extend(peers);
                             config.unnumbered_peers.extend(unnumbered_peers);
                         }
                         Entry::Vacant(vacant_entry) => {
-                            vacant_entry.insert(
-                                ApplyRequest {
+                            let apply_request = ApplyRequest {
                                     asn: *request_bgp_config.asn,
                                     peers,
                                     unnumbered_peers,
@@ -971,12 +970,29 @@ impl BackgroundTask for SwitchPortSettingsManager {
                                         asn: *request_bgp_config.asn,
                                         code: code.clone(),
                                     }),
-                                });
+                                };
+
+                            let fanout = match std::num::NonZeroU8::new(*request_bgp_config.max_paths) {
+                                Some(v) => v,
+                                None => {
+                                    error!(
+                                        log,
+                                        "Bgp config max_paths was set to zero! Configuring with default value of 1!";
+                                        "switch" => ?location,
+                                        "bgp_config_id" => ?config_id,
+                                    );
+                                    std::num::NonZeroU8::MIN
+                                },
+                            };
+
+                            let fanout_request = BestpathFanoutRequest { fanout };
+
+                            vacant_entry.insert((apply_request, fanout_request));
                         }
                     }
                 }
 
-                for (location, config) in &desired_bgp_configs {
+                for (location, (config, fanout)) in &desired_bgp_configs {
                     let client = match mgd_clients.get(location) {
                         Some(client) => client,
                         None => {
@@ -992,6 +1008,10 @@ impl BackgroundTask for SwitchPortSettingsManager {
                     );
                     if let Err(e) = client.bgp_apply_v2(config).await {
                         error!(log, "error while applying bgp configuration"; "error" => ?e);
+                    }
+
+                    if let Err(e) = client.update_rib_bestpath_fanout(fanout).await {
+                        error!(log, "error while updating bestpath fanout"; "error" => ?e);
                     }
                 }
 

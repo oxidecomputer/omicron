@@ -1097,6 +1097,7 @@ mod tests {
                     vrf: None,
                     shaper: None,
                     checker: None,
+                    max_paths: Default::default(),
                 },
             )
             .await

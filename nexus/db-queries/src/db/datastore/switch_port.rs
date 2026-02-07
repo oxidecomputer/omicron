@@ -1914,6 +1914,7 @@ mod test {
             vrf: None,
             checker: None,
             shaper: None,
+            max_paths: Default::default(),
         };
 
         datastore.bgp_config_create(&opctx, &bgp_config).await.unwrap();

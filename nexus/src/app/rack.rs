@@ -526,6 +526,7 @@ impl super::Nexus {
                         vrf: None,
                         shaper: bgp_config.shaper.clone(),
                         checker: bgp_config.checker.clone(),
+                        max_paths: bgp_config.max_paths.into(),
                     },
                 )
                 .await

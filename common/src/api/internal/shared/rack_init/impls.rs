@@ -5,6 +5,8 @@
 use super::BgpPeerConfig;
 use super::HostPortConfig;
 use super::LldpAdminStatus;
+use super::MaxPathConfig;
+use super::MaxPathConfigError;
 use super::ParseLldpAdminStatusError;
 use super::ParseSwitchLocationError;
 use super::PortConfig;
@@ -54,6 +56,26 @@ impl BgpPeerConfig {
     }
 }
 
+impl FromStr for MaxPathConfig {
+    type Err = MaxPathConfigError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let v: u8 = s.parse().map_err(|e| {
+            MaxPathConfigError(format!(
+                "failed to parse value for max path config: {e}"
+            ))
+        })?;
+
+        Self::new(v)
+    }
+}
+
+impl std::fmt::Display for MaxPathConfig {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.as_u8())
+    }
+}
+
 impl UplinkAddressConfig {
     pub fn addr(&self) -> IpAddr {
         match self.address {
@@ -66,10 +88,10 @@ impl UplinkAddressConfig {
 impl std::fmt::Display for UplinkAddressConfig {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match (&self.address, self.vlan_id) {
-            (Some(addr), None) => write!(f, "{}", addr),
-            (Some(addr), Some(v)) => write!(f, "{};{}", addr, v),
+            (Some(addr), None) => write!(f, "{addr}"),
+            (Some(addr), Some(v)) => write!(f, "{addr};{v}"),
             (None, None) => write!(f, "link-local"),
-            (None, Some(v)) => write!(f, "link-local;{}", v),
+            (None, Some(v)) => write!(f, "link-local;{v}"),
         }
     }
 }

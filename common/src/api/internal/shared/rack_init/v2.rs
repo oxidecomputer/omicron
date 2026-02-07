@@ -155,7 +155,50 @@ pub struct BgpConfig {
     /// Checker to apply to incoming messages.
     #[serde(default)]
     pub checker: Option<String>,
+
+    /// Maximum number of paths to use when multiple "best paths" exist
+    #[serde(default)]
+    pub max_paths: MaxPathConfig,
 }
+
+#[derive(
+    Debug, Copy, Clone, Deserialize, Serialize, PartialEq, Eq, JsonSchema,
+)]
+pub struct MaxPathConfig(u8);
+
+impl MaxPathConfig {
+    pub fn new(v: u8) -> Result<Self, MaxPathConfigError> {
+        if v == 0 {
+            let msg = "Max path value cannot be zero".into();
+            return Err(MaxPathConfigError(msg));
+        }
+
+        if v > 32 {
+            let msg =
+                "System does not support more than 32 paths for ECMP".into();
+            return Err(MaxPathConfigError(msg));
+        }
+
+        Ok(Self(v))
+    }
+
+    pub fn new_unchecked(v: u8) -> Self {
+        Self(v)
+    }
+
+    pub fn as_u8(&self) -> u8 {
+        self.0
+    }
+}
+
+impl Default for MaxPathConfig {
+    fn default() -> Self {
+        Self(1)
+    }
+}
+
+#[derive(Debug, PartialEq, Eq, Deserialize, Serialize)]
+pub struct MaxPathConfigError(pub(super) String);
 
 /// A set of switch uplinks.
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]

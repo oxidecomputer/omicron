@@ -12,6 +12,7 @@ pub mod http_pagination;
 pub use crate::address::IpVersion;
 pub use crate::api::internal::shared::AllowedSourceIps;
 pub use crate::api::internal::shared::SwitchLocation;
+use crate::api::internal::shared::rack_init::MaxPathConfig;
 use crate::update::ArtifactId;
 use anyhow::Context;
 use api_identity::ObjectIdentity;
@@ -3318,6 +3319,9 @@ pub struct BgpConfig {
     /// Optional virtual routing and forwarding identifier for this BGP
     /// configuration.
     pub vrf: Option<String>,
+
+    /// Maximum number of paths to use when multiple "best paths" exist
+    pub max_paths: MaxPathConfig,
 }
 
 /// Represents a BGP announce set by id. The id can be used with other API calls

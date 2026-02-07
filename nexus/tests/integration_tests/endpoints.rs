@@ -964,6 +964,7 @@ pub static DEMO_BGP_CONFIG: LazyLock<params::BgpConfigCreate> =
         vrf: None,
         checker: None,
         shaper: None,
+        max_paths: Default::default(),
     });
 pub const DEMO_BGP_ANNOUNCE_SET_URL: &'static str =
     "/v1/system/networking/bgp-announce-set";

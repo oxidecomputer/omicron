@@ -7,6 +7,7 @@
 use std::str::FromStr;
 
 use bootstore::schemes::v0 as bootstore;
+use omicron_common::api::internal::shared::rack_init::MaxPathConfig;
 use omicron_common::api::internal::shared::{LldpAdminStatus, LldpPortConfig};
 use omicron_common::api::{
     external::{ImportExportPolicy, SwitchLocation},
@@ -279,6 +280,7 @@ fn current_config_example() -> (&'static str, EarlyNetworkConfig) {
                     ],
                     shaper: None,
                     checker: None,
+                    max_paths: MaxPathConfig::default(),
                 }],
                 bfd: vec![],
             }),

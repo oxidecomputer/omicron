@@ -26,6 +26,8 @@ pub use v1::TxEqConfig;
 pub use v2::BgpConfig;
 pub use v2::BgpPeerConfig;
 pub use v2::HostPortConfig;
+pub use v2::MaxPathConfig;
+pub use v2::MaxPathConfigError;
 pub use v2::PortConfig;
 pub use v2::RackNetworkConfig;
 pub use v2::SwitchPorts;

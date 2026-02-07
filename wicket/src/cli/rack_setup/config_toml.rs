@@ -304,8 +304,13 @@ fn populate_network_table(
                     // This style ensures that if a new field is added, this
                     // fails at compile time.
                     // XXX: shaper and checker are going to go away
-                    let BgpConfig { asn, originate, shaper: _, checker: _ } =
-                        cfg;
+                    let BgpConfig {
+                        asn,
+                        originate,
+                        shaper: _,
+                        checker: _,
+                        max_paths,
+                    } = cfg;
 
                     let mut bgp = Table::new();
                     bgp.insert("asn", i64_item(i64::from(*asn)));
@@ -318,6 +323,12 @@ fn populate_network_table(
                         "originate",
                         Item::Value(Value::Array(originate_out)),
                     );
+
+                    bgp.insert(
+                        "max_paths",
+                        i64_item(i64::from(max_paths.as_u8())),
+                    );
+
                     bgp
                 })
                 .collect();

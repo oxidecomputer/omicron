@@ -290,6 +290,7 @@ table! {
         vrf -> Nullable<Text>,
         shaper -> Nullable<Text>,
         checker -> Nullable<Text>,
+        max_paths -> Int2,
     }
 }
 

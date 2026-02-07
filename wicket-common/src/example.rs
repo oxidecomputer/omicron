@@ -14,7 +14,7 @@ use omicron_common::{
         external::AllowedSourceIps,
         internal::shared::{
             BgpConfig, BgpPeerConfig, LldpAdminStatus, LldpPortConfig, PortFec,
-            PortSpeed, RouteConfig, TxEqConfig,
+            PortSpeed, RouteConfig, TxEqConfig, rack_init::MaxPathConfig,
         },
     },
 };
@@ -246,6 +246,7 @@ impl ExampleRackSetupData {
                 originate: vec!["10.0.0.0/16".parse().unwrap()],
                 shaper: None,
                 checker: None,
+                max_paths: MaxPathConfig::default(),
             }],
         };
 

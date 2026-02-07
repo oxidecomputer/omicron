@@ -1220,11 +1220,14 @@ fn rss_config_text<'a>(
                 // The shaper and checker are not currently used.
                 shaper: _,
                 checker: _,
+                max_paths,
             } = cfg;
             let mut items = vec![
                 Span::styled("  • BGP config    :", label_style),
                 Span::styled(" asn=", label_style),
                 Span::styled(asn.to_string(), ok_style),
+                Span::styled(" max_paths=", label_style),
+                Span::styled(max_paths.to_string(), ok_style),
                 Span::styled(" originate=", label_style),
             ];
             if originate.is_empty() {

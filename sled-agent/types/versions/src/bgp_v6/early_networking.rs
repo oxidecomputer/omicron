@@ -5,7 +5,9 @@
 //! Types for network setup required to bring up the control plane.
 
 use bootstore::schemes::v0 as bootstore;
-use omicron_common::api::internal::shared::RackNetworkConfig;
+use omicron_common::api::internal::shared::{
+    RackNetworkConfig, rack_init::MaxPathConfig,
+};
 use oxnet::IpNet;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -177,6 +179,7 @@ impl From<crate::v1::early_networking::EarlyNetworkConfig>
                                 .collect(),
                             shaper: b.shaper,
                             checker: b.checker,
+                            max_paths: MaxPathConfig::default(),
                         })
                         .collect(),
                     bfd: v1_config
