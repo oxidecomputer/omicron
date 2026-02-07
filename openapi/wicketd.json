@@ -1249,6 +1249,15 @@
             "default": null,
             "type": "string"
           },
+          "max_paths": {
+            "description": "Maximum number of paths to use when multiple \"best paths\" exist",
+            "default": 1,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/MaxPathConfig"
+              }
+            ]
+          },
           "originate": {
             "description": "The set of prefixes for the BGP router to originate.",
             "type": "array",
@@ -2250,6 +2259,11 @@
         "required": [
           "status"
         ]
+      },
+      "MaxPathConfig": {
+        "type": "integer",
+        "format": "uint8",
+        "minimum": 0
       },
       "MediaInterfaceId": {
         "oneOf": [

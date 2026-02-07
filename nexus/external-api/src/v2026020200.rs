@@ -13,7 +13,12 @@
 //!
 //! [`BgpPeer`]: self::BgpPeer
 
-use omicron_common::api::external::{self, ImportExportPolicy, Name, NameOrId};
+use api_identity::ObjectIdentity;
+use omicron_common::api::external::ObjectIdentity;
+use omicron_common::api::external::{
+    self, IdentityMetadata, IdentityMetadataCreateParams, ImportExportPolicy,
+    Name, NameOrId,
+};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::net::IpAddr;
@@ -283,5 +288,71 @@ impl TryFrom<external::SwitchPortSettings> for SwitchPortSettings {
                 .collect::<Result<Vec<_>, _>>()?,
             addresses: new.addresses,
         })
+    }
+}
+
+/// Parameters for creating a BGP configuration. This includes and autonomous
+/// system number (ASN) and a virtual routing and forwarding (VRF) identifier.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct BgpConfigCreate {
+    #[serde(flatten)]
+    pub identity: IdentityMetadataCreateParams,
+
+    /// The autonomous system number of this BGP configuration.
+    pub asn: u32,
+
+    pub bgp_announce_set_id: NameOrId,
+
+    /// Optional virtual routing and forwarding identifier for this BGP
+    /// configuration.
+    pub vrf: Option<Name>,
+
+    // Dynamic BGP policy is not yet available so we skip adding it to the API
+    /// A shaper program to apply to outgoing open and update messages.
+    #[serde(skip)]
+    pub shaper: Option<String>,
+    /// A checker program to apply to incoming open and update messages.
+    #[serde(skip)]
+    pub checker: Option<String>,
+}
+
+impl From<BgpConfigCreate> for params::BgpConfigCreate {
+    fn from(old: BgpConfigCreate) -> params::BgpConfigCreate {
+        params::BgpConfigCreate {
+            identity: old.identity,
+            asn: old.asn,
+            bgp_announce_set_id: old.bgp_announce_set_id,
+            vrf: old.vrf,
+            shaper: old.shaper,
+            checker: old.checker,
+            max_paths: Default::default(),
+        }
+    }
+}
+
+/// A base BGP configuration.
+#[derive(
+    ObjectIdentity, Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq,
+)]
+pub struct BgpConfig {
+    #[serde(flatten)]
+    pub identity: IdentityMetadata,
+
+    /// The autonomous system number of this BGP configuration.
+    pub asn: u32,
+
+    /// Optional virtual routing and forwarding identifier for this BGP
+    /// configuration.
+    pub vrf: Option<String>,
+}
+
+impl From<BgpConfig> for external::BgpConfig {
+    fn from(old: BgpConfig) -> external::BgpConfig {
+        external::BgpConfig {
+            identity: old.identity,
+            asn: old.asn,
+            vrf: old.vrf,
+            max_paths: Default::default(),
+        }
     }
 }

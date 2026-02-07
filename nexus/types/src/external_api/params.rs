@@ -2875,7 +2875,17 @@ pub struct BgpConfigCreate {
     pub max_paths: MaxPathConfig,
 }
 
-#[derive(Debug, Display, Copy, Clone, Deserialize, Serialize, JsonSchema)]
+#[derive(
+    Debug,
+    Display,
+    Copy,
+    Clone,
+    Eq,
+    PartialEq,
+    Deserialize,
+    Serialize,
+    JsonSchema,
+)]
 #[display("{0}")]
 #[serde(transparent)]
 pub struct MaxPathConfig(pub u8);

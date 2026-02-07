@@ -17019,6 +17019,14 @@
             "type": "string",
             "format": "uuid"
           },
+          "max_paths": {
+            "description": "Maximum number of paths to use when multiple \"best paths\" exist",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/MaxPathConfig"
+              }
+            ]
+          },
           "name": {
             "description": "unique, mutable, user-controlled identifier for each resource",
             "allOf": [
@@ -17047,6 +17055,7 @@
           "asn",
           "description",
           "id",
+          "max_paths",
           "name",
           "time_created",
           "time_modified"
@@ -17067,6 +17076,13 @@
           },
           "description": {
             "type": "string"
+          },
+          "max_paths": {
+            "description": "Maximum number of paths to use when multiple \"best paths\" exist",
+            "default": 1,
+            "type": "integer",
+            "format": "uint8",
+            "minimum": 0
           },
           "name": {
             "$ref": "#/components/schemas/Name"
@@ -24355,6 +24371,11 @@
           "addr",
           "interface_num"
         ]
+      },
+      "MaxPathConfig": {
+        "type": "integer",
+        "format": "uint8",
+        "minimum": 0
       },
       "Measurement": {
         "description": "A `Measurement` is a timestamped datum from a single metric",

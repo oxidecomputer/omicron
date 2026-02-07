@@ -1099,6 +1099,7 @@ impl BackgroundTask for SwitchPortSettingsManager {
                         originate: announcements,
                         checker: config.checker.clone(),
                         shaper: config.shaper.clone(),
+                        max_paths: sled_agent_client::types::MaxPathConfig(*config.max_paths),
                     }
                 }).collect();
 

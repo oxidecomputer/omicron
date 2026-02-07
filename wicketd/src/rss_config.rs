@@ -613,6 +613,7 @@ fn validate_rack_network_config(
     bgp_auth_keys: &BTreeMap<BgpAuthKeyId, Option<BgpAuthKey>>,
 ) -> Result<bootstrap_agent_lockstep_client::types::RackNetworkConfig> {
     use bootstrap_agent_lockstep_client::types::BgpConfig as BaBgpConfig;
+    use bootstrap_agent_lockstep_client::types::MaxPathConfig as BaMaxPathConfig;
 
     // Ensure that there is at least one uplink
     if !config.has_any_uplinks() {
@@ -685,6 +686,7 @@ fn validate_rack_network_config(
                 originate: config.originate.clone(),
                 checker: config.checker.clone(),
                 shaper: config.shaper.clone(),
+                max_paths: BaMaxPathConfig(config.max_paths.as_u8()),
             })
             .collect(),
         //TODO bfd config in wicket

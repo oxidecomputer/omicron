@@ -3236,6 +3236,15 @@
             "default": null,
             "type": "string"
           },
+          "max_paths": {
+            "description": "Maximum number of paths to use when multiple \"best paths\" exist",
+            "default": 1,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/MaxPathConfig"
+              }
+            ]
+          },
           "originate": {
             "description": "The set of prefixes for the BGP router to originate.",
             "type": "array",
@@ -6982,6 +6991,11 @@
           "path",
           "zpool_id"
         ]
+      },
+      "MaxPathConfig": {
+        "type": "integer",
+        "format": "uint8",
+        "minimum": 0
       },
       "MigrationFailureInjector": {
         "description": "Describes a synthetic device that registers for VM lifecycle notifications and returns errors during attempts to migrate.\n\nThis is only supported by Propolis servers compiled with the `failure-injection` feature.",

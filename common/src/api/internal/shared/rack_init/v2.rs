@@ -162,7 +162,7 @@ pub struct BgpConfig {
 }
 
 #[derive(
-    Debug, Copy, Clone, Deserialize, Serialize, PartialEq, Eq, JsonSchema,
+    Debug, Copy, Clone, Eq, PartialEq, Deserialize, Serialize, JsonSchema,
 )]
 pub struct MaxPathConfig(u8);
 

@@ -973,6 +973,9 @@ impl ServiceInner {
                         originate: config.originate.to_vec(),
                         shaper: config.shaper.clone(),
                         checker: config.checker.clone(),
+                        max_paths: NexusTypes::MaxPathConfig(
+                            config.max_paths.as_u8(),
+                        ),
                     })
                     .collect(),
                 bfd: config

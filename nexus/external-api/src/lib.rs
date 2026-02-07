@@ -47,7 +47,7 @@ mod v2026012200;
 mod v2026012300;
 mod v2026013000;
 mod v2026013001;
-mod v2026020200;
+pub mod v2026020200;
 
 #[cfg(test)]
 mod test_utils;
@@ -3529,6 +3529,19 @@ pub trait NexusExternalApi {
         method = POST,
         path = "/v1/system/networking/bgp",
         tags = ["system/networking"],
+        versions = ..VERSION_BGP_UNNUMBERED_PEERS,
+    }]
+    async fn v2026010300_networking_bgp_config_create(
+        rqctx: RequestContext<Self::Context>,
+        config: TypedBody<v2026020200::BgpConfigCreate>,
+    ) -> Result<HttpResponseCreated<v2026020200::BgpConfig>, HttpError>;
+
+    /// Create new BGP configuration
+    #[endpoint {
+        method = POST,
+        path = "/v1/system/networking/bgp",
+        tags = ["system/networking"],
+        versions = VERSION_BGP_UNNUMBERED_PEERS..,
     }]
     async fn networking_bgp_config_create(
         rqctx: RequestContext<Self::Context>,
@@ -3540,6 +3553,19 @@ pub trait NexusExternalApi {
         method = GET,
         path = "/v1/system/networking/bgp",
         tags = ["system/networking"],
+        versions = ..VERSION_BGP_UNNUMBERED_PEERS,
+    }]
+    async fn v2026010300_networking_bgp_config_list(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<PaginatedByNameOrId>,
+    ) -> Result<HttpResponseOk<ResultsPage<v2026020200::BgpConfig>>, HttpError>;
+
+    /// List BGP configurations
+    #[endpoint {
+        method = GET,
+        path = "/v1/system/networking/bgp",
+        tags = ["system/networking"],
+        versions = VERSION_BGP_UNNUMBERED_PEERS..,
     }]
     async fn networking_bgp_config_list(
         rqctx: RequestContext<Self::Context>,
