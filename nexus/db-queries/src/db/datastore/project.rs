@@ -17,6 +17,7 @@ use crate::db::model::Name;
 use crate::db::model::Project;
 use crate::db::model::ProjectUpdate;
 use crate::db::model::Silo;
+use crate::db::model::PhysicalProvisioningCollection;
 use crate::db::model::VirtualProvisioningCollection;
 use crate::db::pagination::paginated;
 use async_bb8_diesel::AsyncRunQueryDsl;
@@ -198,6 +199,14 @@ impl DataStore {
                         ),
                     )
                     .await?;
+                    self.physical_provisioning_collection_create_on_connection(
+                        &conn,
+                        PhysicalProvisioningCollection::new(
+                            project.id(),
+                            CollectionTypeProvisioned::Project,
+                        ),
+                    )
+                    .await?;
                     Ok(project)
                 }
             })
@@ -284,6 +293,12 @@ impl DataStore {
                     }
 
                     self.virtual_provisioning_collection_delete_on_connection(
+                        &opctx.log,
+                        &conn,
+                        db_project.id(),
+                    )
+                    .await?;
+                    self.physical_provisioning_collection_delete_on_connection(
                         &opctx.log,
                         &conn,
                         db_project.id(),

@@ -16,6 +16,7 @@ use crate::db::model::CollectionTypeProvisioned;
 use crate::db::model::IpPoolResourceType;
 use crate::db::model::Name;
 use crate::db::model::Silo;
+use crate::db::model::PhysicalProvisioningCollection;
 use crate::db::model::VirtualProvisioningCollection;
 use crate::db::pagination::Paginator;
 use crate::db::pagination::paginated;
@@ -104,6 +105,15 @@ impl DataStore {
         self.virtual_provisioning_collection_create(
             opctx,
             VirtualProvisioningCollection::new(
+                DEFAULT_SILO.id(),
+                CollectionTypeProvisioned::Silo,
+            ),
+        )
+        .await?;
+
+        self.physical_provisioning_collection_create(
+            opctx,
+            PhysicalProvisioningCollection::new(
                 DEFAULT_SILO.id(),
                 CollectionTypeProvisioned::Silo,
             ),
@@ -289,6 +299,14 @@ impl DataStore {
                     ),
                 )
                 .await?;
+                self.physical_provisioning_collection_create_on_connection(
+                    &conn,
+                    PhysicalProvisioningCollection::new(
+                        silo.id(),
+                        CollectionTypeProvisioned::Silo,
+                    ),
+                )
+                .await?;
 
                 if let Some(query) = silo_admin_group_ensure_query {
                     query.execute_async(&conn).await?;
@@ -334,6 +352,7 @@ impl DataStore {
                         new_silo_params.quotas.cpus,
                         new_silo_params.quotas.memory.into(),
                         new_silo_params.quotas.storage.into(),
+                        new_silo_params.quotas.physical_storage,
                     ),
                 )
                 .await?;
@@ -501,6 +520,10 @@ impl DataStore {
                     .await?;
 
                 self.virtual_provisioning_collection_delete_on_connection(
+                    &opctx.log, &conn, id,
+                )
+                .await?;
+                self.physical_provisioning_collection_delete_on_connection(
                     &opctx.log, &conn, id,
                 )
                 .await?;

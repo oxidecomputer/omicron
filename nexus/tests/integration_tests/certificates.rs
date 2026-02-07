@@ -397,6 +397,7 @@ async fn test_silo_certificates() {
                     cpus: 0,
                     memory: oxide_client::types::ByteCount(0),
                     storage: oxide_client::types::ByteCount(0),
+                    physical_storage: None,
                 })
                 .identity_mode(oxide_client::types::SiloIdentityMode::LocalOnly)
                 .tls_certificates(vec![silo2_cert.try_into().unwrap()]),
@@ -466,6 +467,7 @@ async fn test_silo_certificates() {
                     cpus: 0,
                     memory: oxide_client::types::ByteCount(0),
                     storage: oxide_client::types::ByteCount(0),
+                    physical_storage: None,
                 })
                 .identity_mode(oxide_client::types::SiloIdentityMode::LocalOnly)
                 .tls_certificates(vec![silo3_cert.try_into().unwrap()]),

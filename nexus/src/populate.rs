@@ -294,6 +294,9 @@ impl Populator for PopulateFleet {
         async {
             datastore
                 .load_builtin_fleet_virtual_provisioning_collection(opctx)
+                .await?;
+            datastore
+                .load_builtin_fleet_physical_provisioning_collection(opctx)
                 .await
         }
         .boxed()

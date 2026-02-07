@@ -47,6 +47,7 @@ mod v2026012200;
 mod v2026012300;
 mod v2026013000;
 mod v2026013001;
+mod v2026020200;
 
 #[cfg(test)]
 mod test_utils;
@@ -79,6 +80,7 @@ api_versions!([
     // |  date-based version should be at the top of the list.
     // v
     // (next_yyyymmddnn, IDENT),
+    (2026021100, PHYSICAL_STORAGE_QUOTAS),
     (2026020901, UPDATE_EXTERNAL_SUBNET_DOCS),
     (2026020900, RENAME_POOL_ENDPOINTS),
     (2026020600, ADD_SILO_SUBNET_POOLS),
@@ -448,9 +450,26 @@ pub trait NexusExternalApi {
 
     /// Fetch resource utilization for user's current silo
     #[endpoint {
+        operation_id = "utilization_view",
         method = GET,
         path = "/v1/utilization",
         tags = ["silos"],
+        versions = ..VERSION_PHYSICAL_STORAGE_QUOTAS,
+    }]
+    async fn v2026020200_utilization_view(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<v2026020200::Utilization>, HttpError> {
+        Self::utilization_view(rqctx)
+            .await
+            .map(|HttpResponseOk(u)| HttpResponseOk(u.into()))
+    }
+
+    /// Fetch resource utilization for user's current silo
+    #[endpoint {
+        method = GET,
+        path = "/v1/utilization",
+        tags = ["silos"],
+        versions = VERSION_PHYSICAL_STORAGE_QUOTAS..,
     }]
     async fn utilization_view(
         rqctx: RequestContext<Self::Context>,
@@ -458,9 +477,27 @@ pub trait NexusExternalApi {
 
     /// Fetch current utilization for given silo
     #[endpoint {
+        operation_id = "silo_utilization_view",
         method = GET,
         path = "/v1/system/utilization/silos/{silo}",
         tags = ["system/silos"],
+        versions = ..VERSION_PHYSICAL_STORAGE_QUOTAS,
+    }]
+    async fn v2026020200_silo_utilization_view(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::SiloPath>,
+    ) -> Result<HttpResponseOk<v2026020200::SiloUtilization>, HttpError> {
+        Self::silo_utilization_view(rqctx, path_params)
+            .await
+            .map(|HttpResponseOk(u)| HttpResponseOk(u.into()))
+    }
+
+    /// Fetch current utilization for given silo
+    #[endpoint {
+        method = GET,
+        path = "/v1/system/utilization/silos/{silo}",
+        tags = ["system/silos"],
+        versions = VERSION_PHYSICAL_STORAGE_QUOTAS..,
     }]
     async fn silo_utilization_view(
         rqctx: RequestContext<Self::Context>,
@@ -469,9 +506,31 @@ pub trait NexusExternalApi {
 
     /// List current utilization state for all silos
     #[endpoint {
+        operation_id = "silo_utilization_list",
         method = GET,
         path = "/v1/system/utilization/silos",
         tags = ["system/silos"],
+        versions = ..VERSION_PHYSICAL_STORAGE_QUOTAS,
+    }]
+    async fn v2026020200_silo_utilization_list(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<PaginatedByNameOrId>,
+    ) -> Result<HttpResponseOk<ResultsPage<v2026020200::SiloUtilization>>, HttpError> {
+        Self::silo_utilization_list(rqctx, query_params).await.map(
+            |HttpResponseOk(page)| {
+                let items: Vec<_> =
+                    page.items.into_iter().map(Into::into).collect();
+                HttpResponseOk(ResultsPage { next_page: page.next_page, items })
+            },
+        )
+    }
+
+    /// List current utilization state for all silos
+    #[endpoint {
+        method = GET,
+        path = "/v1/system/utilization/silos",
+        tags = ["system/silos"],
+        versions = VERSION_PHYSICAL_STORAGE_QUOTAS..,
     }]
     async fn silo_utilization_list(
         rqctx: RequestContext<Self::Context>,
@@ -480,9 +539,31 @@ pub trait NexusExternalApi {
 
     /// Lists resource quotas for all silos
     #[endpoint {
+        operation_id = "system_quotas_list",
         method = GET,
         path = "/v1/system/silo-quotas",
         tags = ["system/silos"],
+        versions = ..VERSION_PHYSICAL_STORAGE_QUOTAS,
+    }]
+    async fn v2026020200_system_quotas_list(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<PaginatedById>,
+    ) -> Result<HttpResponseOk<ResultsPage<v2026020200::SiloQuotas>>, HttpError> {
+        Self::system_quotas_list(rqctx, query_params).await.map(
+            |HttpResponseOk(page)| {
+                let items: Vec<_> =
+                    page.items.into_iter().map(Into::into).collect();
+                HttpResponseOk(ResultsPage { next_page: page.next_page, items })
+            },
+        )
+    }
+
+    /// Lists resource quotas for all silos
+    #[endpoint {
+        method = GET,
+        path = "/v1/system/silo-quotas",
+        tags = ["system/silos"],
+        versions = VERSION_PHYSICAL_STORAGE_QUOTAS..,
     }]
     async fn system_quotas_list(
         rqctx: RequestContext<Self::Context>,
@@ -491,9 +572,27 @@ pub trait NexusExternalApi {
 
     /// Fetch resource quotas for silo
     #[endpoint {
+        operation_id = "silo_quotas_view",
         method = GET,
         path = "/v1/system/silos/{silo}/quotas",
         tags = ["system/silos"],
+        versions = ..VERSION_PHYSICAL_STORAGE_QUOTAS,
+    }]
+    async fn v2026020200_silo_quotas_view(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::SiloPath>,
+    ) -> Result<HttpResponseOk<v2026020200::SiloQuotas>, HttpError> {
+        Self::silo_quotas_view(rqctx, path_params)
+            .await
+            .map(|HttpResponseOk(q)| HttpResponseOk(q.into()))
+    }
+
+    /// Fetch resource quotas for silo
+    #[endpoint {
+        method = GET,
+        path = "/v1/system/silos/{silo}/quotas",
+        tags = ["system/silos"],
+        versions = VERSION_PHYSICAL_STORAGE_QUOTAS..,
     }]
     async fn silo_quotas_view(
         rqctx: RequestContext<Self::Context>,
@@ -504,9 +603,30 @@ pub trait NexusExternalApi {
     ///
     /// If a quota value is not specified, it will remain unchanged.
     #[endpoint {
+        operation_id = "silo_quotas_update",
         method = PUT,
         path = "/v1/system/silos/{silo}/quotas",
         tags = ["system/silos"],
+        versions = ..VERSION_PHYSICAL_STORAGE_QUOTAS,
+    }]
+    async fn v2026020200_silo_quotas_update(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::SiloPath>,
+        new_quota: TypedBody<v2026020200::SiloQuotasUpdate>,
+    ) -> Result<HttpResponseOk<v2026020200::SiloQuotas>, HttpError> {
+        Self::silo_quotas_update(rqctx, path_params, new_quota.map(Into::into))
+            .await
+            .map(|HttpResponseOk(q)| HttpResponseOk(q.into()))
+    }
+
+    /// Update resource quotas for silo
+    ///
+    /// If a quota value is not specified, it will remain unchanged.
+    #[endpoint {
+        method = PUT,
+        path = "/v1/system/silos/{silo}/quotas",
+        tags = ["system/silos"],
+        versions = VERSION_PHYSICAL_STORAGE_QUOTAS..,
     }]
     async fn silo_quotas_update(
         rqctx: RequestContext<Self::Context>,
@@ -529,9 +649,25 @@ pub trait NexusExternalApi {
 
     /// Create silo
     #[endpoint {
+        operation_id = "silo_create",
         method = POST,
         path = "/v1/system/silos",
         tags = ["system/silos"],
+        versions = ..VERSION_PHYSICAL_STORAGE_QUOTAS,
+    }]
+    async fn v2026020200_silo_create(
+        rqctx: RequestContext<Self::Context>,
+        new_silo_params: TypedBody<v2026020200::SiloCreate>,
+    ) -> Result<HttpResponseCreated<views::Silo>, HttpError> {
+        Self::silo_create(rqctx, new_silo_params.map(Into::into)).await
+    }
+
+    /// Create silo
+    #[endpoint {
+        method = POST,
+        path = "/v1/system/silos",
+        tags = ["system/silos"],
+        versions = VERSION_PHYSICAL_STORAGE_QUOTAS..,
     }]
     async fn silo_create(
         rqctx: RequestContext<Self::Context>,

@@ -85,6 +85,9 @@ pub struct SiloQuotas {
     pub silo_id: Uuid,
     #[serde(flatten)]
     pub limits: VirtualResourceCounts,
+    /// The amount of physical storage (in bytes) allocated for this silo.
+    /// `None` means no limit is set.
+    pub physical_storage: Option<i64>,
 }
 
 // For the eyes of end users
@@ -98,6 +101,10 @@ pub struct Utilization {
     /// The total amount of resources that can be provisioned in this silo
     /// Actions that would exceed this limit will fail
     pub capacity: VirtualResourceCounts,
+    /// Total physical disk bytes provisioned (including replication overhead)
+    pub physical_disk_bytes_provisioned: i64,
+    /// Physical storage capacity allocated via quota. `None` means no limit.
+    pub physical_storage_allocated: Option<i64>,
 }
 
 // For the eyes of an operator
@@ -111,6 +118,10 @@ pub struct SiloUtilization {
     pub provisioned: VirtualResourceCounts,
     /// Accounts for the total amount of resources reserved for silos via their quotas
     pub allocated: VirtualResourceCounts,
+    /// Total physical disk bytes provisioned (including replication overhead)
+    pub physical_disk_bytes_provisioned: i64,
+    /// Physical storage capacity allocated via quota. `None` means no limit.
+    pub physical_storage_allocated: Option<i64>,
 }
 
 // We want to be able to paginate SiloUtilization by NameOrId

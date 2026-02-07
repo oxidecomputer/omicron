@@ -19,6 +19,9 @@ pub struct SiloUtilization {
     pub cpus_provisioned: i64,
     pub memory_provisioned: ByteCount,
     pub storage_provisioned: ByteCount,
+
+    pub physical_disk_bytes_provisioned: i64,
+    pub physical_storage_allocated: Option<i64>,
 }
 
 impl From<SiloUtilization> for views::SiloUtilization {
@@ -36,6 +39,10 @@ impl From<SiloUtilization> for views::SiloUtilization {
                 memory: silo_utilization.memory_allocated.into(),
                 storage: silo_utilization.storage_allocated.into(),
             },
+            physical_disk_bytes_provisioned: silo_utilization
+                .physical_disk_bytes_provisioned,
+            physical_storage_allocated: silo_utilization
+                .physical_storage_allocated,
         }
     }
 }
@@ -53,6 +60,10 @@ impl From<SiloUtilization> for views::Utilization {
                 memory: silo_utilization.memory_allocated.into(),
                 storage: silo_utilization.storage_allocated.into(),
             },
+            physical_disk_bytes_provisioned: silo_utilization
+                .physical_disk_bytes_provisioned,
+            physical_storage_allocated: silo_utilization
+                .physical_storage_allocated,
         }
     }
 }

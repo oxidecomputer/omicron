@@ -751,6 +751,29 @@ async fn ssc_account_space(
         )
         .await
         .map_err(ActionError::action_failed)?;
+
+    let physical = nexus_db_model::distributed_disk_physical_bytes(
+        nexus_db_model::VirtualDiskBytes(*snapshot_created.size),
+    );
+    let phys_bytes = nexus_db_model::ByteCount::from(physical.into_byte_count());
+    let zero = nexus_db_model::ByteCount::from(
+        omicron_common::api::external::ByteCount::from(0u32),
+    );
+    // Snapshot charges both zfs_snapshot AND read_only (2x pre-accounting).
+    // This ensures quotas are never exceeded during future scrubbing, which
+    // will subtract zfs_snapshot bytes (reducing from 2x to 1x).
+    osagactx
+        .datastore()
+        .physical_provisioning_collection_insert_snapshot(
+            &opctx,
+            snapshot_created.id(),
+            params.project_id,
+            zero, phys_bytes, phys_bytes,
+            zero, phys_bytes, phys_bytes,
+        )
+        .await
+        .map_err(ActionError::action_failed)?;
+
     Ok(())
 }
 
@@ -775,6 +798,25 @@ async fn ssc_account_space_undo(
             snapshot_created.size,
         )
         .await?;
+
+    let physical = nexus_db_model::distributed_disk_physical_bytes(
+        nexus_db_model::VirtualDiskBytes(*snapshot_created.size),
+    );
+    let phys_bytes = nexus_db_model::ByteCount::from(physical.into_byte_count());
+    let zero = nexus_db_model::ByteCount::from(
+        omicron_common::api::external::ByteCount::from(0u32),
+    );
+    osagactx
+        .datastore()
+        .physical_provisioning_collection_delete_snapshot(
+            &opctx,
+            snapshot_created.id(),
+            params.project_id,
+            zero, phys_bytes, phys_bytes,
+            zero, phys_bytes, phys_bytes,
+        )
+        .await?;
+
     Ok(())
 }
 

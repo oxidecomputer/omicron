@@ -53,10 +53,6 @@ declare_saga_actions! {
         + sdc_alloc_regions
         - sdc_alloc_regions_undo
     }
-    SPACE_ACCOUNT -> "no_result" {
-        + sdc_account_space
-        - sdc_account_space_undo
-    }
     REGIONS_ENSURE_UNDO -> "regions_ensure_undo" {
         + sdc_noop
         - sdc_regions_ensure_undo
@@ -111,7 +107,10 @@ impl NexusSaga for SagaDiskCreate {
             ACTION_GENERATE_ID.as_ref(),
         ));
 
-        builder.append(space_account_action());
+        // NOTE: Provisioning (virtual + physical) is performed atomically
+        // inside each CREATE_*_DISK_RECORD action, in the same transaction
+        // as the disk record creation. This eliminates race windows where
+        // the dedup query sees inconsistent state.
 
         match &params.create_params.disk_backend {
             params::DiskBackend::Distributed {
@@ -175,6 +174,10 @@ impl NexusSaga for SagaDiskCreate {
 const NOT_NEEDED_FOR_READONLY: &str = "this action should not have been added \
     to a saga creating a read-only disk from an image or snapshot";
 
+/// Combined action: atomically creates the disk record AND inserts
+/// virtual + physical provisioning in a single database transaction.
+/// This eliminates the race window where the dedup query sees
+/// inconsistent state between disk records and provisioning.
 async fn sdc_create_crucible_disk_record(
     sagactx: NexusActionContext,
 ) -> Result<db::datastore::CrucibleDisk, ActionError> {
@@ -277,12 +280,14 @@ async fn sdc_create_crucible_disk_record(
         .await
         .map_err(ActionError::action_failed)?;
 
+    // Atomically create disk record + virtual + physical provisioning.
     osagactx
         .datastore()
-        .project_create_disk(
+        .project_create_disk_and_provision(
             &opctx,
             &authz_project,
             db::datastore::Disk::Crucible(crucible_disk.clone()),
+            &params.create_params,
         )
         .await
         .map_err(ActionError::action_failed)?;
@@ -290,12 +295,42 @@ async fn sdc_create_crucible_disk_record(
     Ok(crucible_disk)
 }
 
+/// Undo for disk creation: deletes the disk record AND removes
+/// the virtual + physical provisioning that was created atomically.
 async fn sdc_create_disk_record_undo(
     sagactx: NexusActionContext,
 ) -> Result<(), anyhow::Error> {
     let osagactx = sagactx.user_data();
+    let params = sagactx.saga_params::<Params>()?;
+
+    let opctx = crate::context::op_context_for_saga_action(
+        &sagactx,
+        &params.serialized_authn,
+    );
 
     let disk_id = sagactx.lookup::<Uuid>("disk_id")?;
+
+    // Remove provisioning first, then delete the disk record.
+    // These are separate calls since the undo path doesn't need
+    // atomicity guarantees (we're already unwinding).
+    osagactx
+        .datastore()
+        .virtual_provisioning_collection_delete_disk(
+            &opctx,
+            disk_id,
+            params.project_id,
+            params.create_params.size.into(),
+        )
+        .await
+        .map_err(ActionError::action_failed)?;
+
+    sdc_undo_physical_provisioning(
+        osagactx,
+        &opctx,
+        &params,
+        disk_id,
+    )
+    .await?;
 
     osagactx
         .datastore()
@@ -308,6 +343,8 @@ async fn sdc_create_disk_record_undo(
     Ok(())
 }
 
+/// Combined action: atomically creates the local storage disk record AND
+/// inserts virtual + physical provisioning in a single database transaction.
 async fn sdc_create_local_storage_disk_record(
     sagactx: NexusActionContext,
 ) -> Result<db::datastore::LocalStorageDisk, ActionError> {
@@ -360,12 +397,14 @@ async fn sdc_create_local_storage_disk_record(
         .await
         .map_err(ActionError::action_failed)?;
 
+    // Atomically create disk record + virtual + physical provisioning.
     osagactx
         .datastore()
-        .project_create_disk(
+        .project_create_disk_and_provision(
             &opctx,
             &authz_project,
             db::datastore::Disk::LocalStorage(local_storage_disk.clone()),
+            &params.create_params,
         )
         .await
         .map_err(ActionError::action_failed)?;
@@ -442,51 +481,112 @@ async fn sdc_alloc_regions_undo(
     Ok(())
 }
 
-async fn sdc_account_space(
-    sagactx: NexusActionContext,
-) -> Result<(), ActionError> {
-    let osagactx = sagactx.user_data();
-    let params = sagactx.saga_params::<Params>()?;
-
-    let opctx = crate::context::op_context_for_saga_action(
-        &sagactx,
-        &params.serialized_authn,
-    );
-    let disk_id = sagactx.lookup::<Uuid>("disk_id")?;
-    osagactx
-        .datastore()
-        .virtual_provisioning_collection_insert_disk(
-            &opctx,
-            disk_id,
-            params.project_id,
-            params.create_params.size.into(),
-        )
-        .await
-        .map_err(ActionError::action_failed)?;
-    Ok(())
-}
-
-async fn sdc_account_space_undo(
-    sagactx: NexusActionContext,
+/// Helper: undo physical provisioning for a disk.
+/// Used by `sdc_create_disk_record_undo` and can be reused elsewhere.
+async fn sdc_undo_physical_provisioning(
+    osagactx: &std::sync::Arc<super::SagaContext>,
+    opctx: &nexus_db_queries::context::OpContext,
+    params: &Params,
+    disk_id: Uuid,
 ) -> Result<(), anyhow::Error> {
-    let osagactx = sagactx.user_data();
-    let params = sagactx.saga_params::<Params>()?;
-
-    let opctx = crate::context::op_context_for_saga_action(
-        &sagactx,
-        &params.serialized_authn,
+    let virtual_bytes =
+        nexus_db_model::VirtualDiskBytes(params.create_params.size);
+    let zero = nexus_db_model::ByteCount::from(
+        omicron_common::api::external::ByteCount::from(0u32),
     );
-    let disk_id = sagactx.lookup::<Uuid>("disk_id")?;
-    osagactx
-        .datastore()
-        .virtual_provisioning_collection_delete_disk(
-            &opctx,
-            disk_id,
-            params.project_id,
-            params.create_params.size.into(),
-        )
-        .await
-        .map_err(ActionError::action_failed)?;
+
+    use crate::external_api::params::{DiskBackend, DiskSource};
+    use nexus_db_queries::db::queries::physical_provisioning_collection_update::{
+        DedupInfo, DedupOriginColumn,
+    };
+
+    match &params.create_params.disk_backend {
+        DiskBackend::Distributed {
+            disk_source: DiskSource::Image { image_id, read_only },
+        } => {
+            let physical =
+                nexus_db_model::distributed_disk_physical_bytes(virtual_bytes);
+            let phys_bytes =
+                nexus_db_model::ByteCount::from(physical.into_byte_count());
+            let writable = if *read_only { zero } else { phys_bytes };
+            osagactx
+                .datastore()
+                .physical_provisioning_collection_delete_disk_deduped(
+                    opctx,
+                    disk_id,
+                    params.project_id,
+                    writable,
+                    phys_bytes,
+                    DedupInfo::Disk {
+                        origin_column: DedupOriginColumn::Image,
+                        origin_id: *image_id,
+                        disk_id,
+                    },
+                )
+                .await
+                .map_err(ActionError::action_failed)?;
+        }
+        DiskBackend::Distributed {
+            disk_source: DiskSource::Snapshot { snapshot_id, read_only },
+        } => {
+            let physical =
+                nexus_db_model::distributed_disk_physical_bytes(virtual_bytes);
+            let phys_bytes =
+                nexus_db_model::ByteCount::from(physical.into_byte_count());
+            let writable = if *read_only { zero } else { phys_bytes };
+            osagactx
+                .datastore()
+                .physical_provisioning_collection_delete_disk_deduped(
+                    opctx,
+                    disk_id,
+                    params.project_id,
+                    writable,
+                    phys_bytes,
+                    DedupInfo::Disk {
+                        origin_column: DedupOriginColumn::Snapshot,
+                        origin_id: *snapshot_id,
+                        disk_id,
+                    },
+                )
+                .await
+                .map_err(ActionError::action_failed)?;
+        }
+        DiskBackend::Distributed { .. } => {
+            let physical =
+                nexus_db_model::distributed_disk_physical_bytes(virtual_bytes);
+            let phys_bytes =
+                nexus_db_model::ByteCount::from(physical.into_byte_count());
+            osagactx
+                .datastore()
+                .physical_provisioning_collection_delete_disk(
+                    opctx,
+                    disk_id,
+                    params.project_id,
+                    phys_bytes, zero, zero,
+                    phys_bytes, zero, zero,
+                )
+                .await
+                .map_err(ActionError::action_failed)?;
+        }
+        DiskBackend::Local {} => {
+            let physical =
+                nexus_db_model::local_disk_physical_bytes(virtual_bytes);
+            let phys_bytes =
+                nexus_db_model::ByteCount::from(physical.into_byte_count());
+            osagactx
+                .datastore()
+                .physical_provisioning_collection_delete_disk(
+                    opctx,
+                    disk_id,
+                    params.project_id,
+                    phys_bytes, zero, zero,
+                    phys_bytes, zero, zero,
+                )
+                .await
+                .map_err(ActionError::action_failed)?;
+        }
+    }
+
     Ok(())
 }
 
@@ -974,6 +1074,8 @@ async fn sdc_call_pantry_attach_for_disk_undo(
     Ok(())
 }
 
+/// Combined action: atomically creates the read-only disk record AND
+/// inserts virtual + physical provisioning in a single database transaction.
 async fn sdc_create_readonly_disk_records(
     sagactx: NexusActionContext,
 ) -> Result<db::datastore::Disk, ActionError> {
@@ -1010,9 +1112,10 @@ async fn sdc_create_readonly_disk_records(
         "project_id" => %authz_project.id(),
     );
 
+    // Atomically create disk record + virtual + physical provisioning.
     osagactx
         .datastore()
-        .project_create_read_only_disk(
+        .project_create_read_only_disk_and_provision(
             &opctx,
             &authz_project,
             &disk_id,

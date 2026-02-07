@@ -17,6 +17,7 @@ pub mod oximeter;
 pub mod region_allocation;
 pub mod regions_hard_delete;
 pub mod sled_reservation;
+pub mod physical_provisioning_collection_update;
 pub mod virtual_provisioning_collection_update;
 pub mod vpc;
 pub mod vpc_subnet;

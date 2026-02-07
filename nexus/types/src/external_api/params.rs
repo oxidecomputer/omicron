@@ -628,6 +628,10 @@ pub struct SiloQuotasCreate {
     pub memory: ByteCount,
     /// The amount of storage (in bytes) available for disks or snapshots
     pub storage: ByteCount,
+    /// The amount of physical storage (in bytes) available for the Silo.
+    /// `None` means no limit is enforced.
+    #[serde(default)]
+    pub physical_storage: Option<i64>,
 }
 
 impl SiloQuotasCreate {
@@ -637,6 +641,7 @@ impl SiloQuotasCreate {
             cpus: 0,
             memory: ByteCount::from(0),
             storage: ByteCount::from(0),
+            physical_storage: None,
         }
     }
 
@@ -651,6 +656,7 @@ impl SiloQuotasCreate {
             cpus: 9999999999,
             memory: ByteCount::try_from(999999999999999999_u64).unwrap(),
             storage: ByteCount::try_from(999999999999999999_u64).unwrap(),
+            physical_storage: None,
         }
     }
 }
@@ -673,6 +679,10 @@ pub struct SiloQuotasUpdate {
     pub memory: Option<ByteCount>,
     /// The amount of storage (in bytes) available for disks or snapshots
     pub storage: Option<ByteCount>,
+    /// The amount of physical storage (in bytes) available for the Silo.
+    /// Set to `null` to remove the limit.
+    #[serde(default)]
+    pub physical_storage: Option<Option<i64>>,
 }
 
 // TODO: Unlike quota values, silo settings are nullable, so we need passing
