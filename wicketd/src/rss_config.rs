@@ -642,6 +642,9 @@ fn validate_rack_network_config(
     // iterate through each port config
     for (_, _, port_config) in config.iter_uplinks() {
         for addr in &port_config.addresses {
+            if addr.addr().is_unspecified() {
+                continue;
+            }
             // ... and check that it contains `uplink_ip`.
             if addr.addr() < infra_ip_range.first_address()
                 || addr.addr() > infra_ip_range.last_address()
