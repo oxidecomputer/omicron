@@ -791,6 +791,9 @@ impl<'a> EarlyNetworkSetup<'a> {
 
         let mut addrs = Vec::new();
         for a in &port_config.addresses {
+            if a.addr().is_unspecified() {
+                continue;
+            }
             // TODO We're discarding the `uplink_cidr.prefix()` here and only using
             // the IP address; at some point we probably need to give the full CIDR
             // to dendrite?

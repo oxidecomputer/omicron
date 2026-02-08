@@ -1141,10 +1141,11 @@ impl BackgroundTask for SwitchPortSettingsManager {
 
                     let mut port_config = PortConfig {
                         addresses: info.addresses.iter().map(|a|
-			    UplinkAddressConfig {
-				    address: Some(a.address),
-				    vlan_id: a.vlan_id
-			    }).collect(),
+            			    UplinkAddressConfig {
+            				    address: Some(a.address),
+            				    vlan_id: a.vlan_id
+            			    }
+            			).collect(),
                         autoneg: info
                             .links
                             .get(0) //TODO breakout support
@@ -2092,7 +2093,7 @@ async fn apply_switch_port_changes(
             }
         };
 
-        let config_on_switch =
+        let mut config_on_switch =
             match client.port_settings_get(&dpd_port_id, DPD_TAG).await {
                 Ok(v) => v,
                 Err(e) => {
@@ -2106,6 +2107,14 @@ async fn apply_switch_port_changes(
                     continue;
                 }
             };
+
+        // dont consider link local addresses in change computation
+        for lnk in config_on_switch.links.values_mut() {
+            lnk.addrs.retain(|x| match x {
+                IpAddr::V6(addr) => !addr.is_unicast_link_local(),
+                _ => true,
+            })
+        }
 
         info!(
             log,
