@@ -486,7 +486,7 @@ impl<'a> EarlyNetworkSetup<'a> {
             };
 
         // Helper function to build IPv6 unicast import/export policies
-        let _build_ipv6_unicast =
+        let build_ipv6_unicast =
             |peer: &omicron_common::api::internal::shared::BgpPeerConfig| {
                 Ipv6UnicastConfig {
                     nexthop: None,
@@ -595,7 +595,7 @@ impl<'a> EarlyNetworkSetup<'a> {
                         local_pref: peer.local_pref,
                         enforce_first_as: peer.enforce_first_as,
                         ipv4_unicast: Some(build_ipv4_unicast(peer)),
-                        ipv6_unicast: None, // TODO Some(build_ipv6_unicast(peer)),
+                        ipv6_unicast: Some(build_ipv6_unicast(peer)),
                         vlan_id: peer.vlan_id,
                         connect_retry_jitter: Some(JitterRange {
                             max: 1.0,
@@ -643,7 +643,7 @@ impl<'a> EarlyNetworkSetup<'a> {
                         local_pref: peer.local_pref,
                         enforce_first_as: peer.enforce_first_as,
                         ipv4_unicast: Some(build_ipv4_unicast(peer)),
-                        ipv6_unicast: None, // TODO Some(build_ipv6_unicast(peer)),
+                        ipv6_unicast: Some(build_ipv6_unicast(peer)),
                         vlan_id: peer.vlan_id,
                         connect_retry_jitter: Some(JitterRange {
                             max: 1.0,
