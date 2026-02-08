@@ -255,6 +255,9 @@ pub struct UserSpecifiedBgpPeerConfig {
     /// Associate a VLAN ID with a BGP peer session.
     #[serde(default)]
     pub vlan_id: Option<u16>,
+    /// Router lifetime in seconds for unnumbered BGP peers.
+    #[serde(default)]
+    pub router_lifetime: u16,
 }
 
 impl UserSpecifiedBgpPeerConfig {

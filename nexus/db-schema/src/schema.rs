@@ -247,6 +247,7 @@ table! {
         allow_export_list_active -> Bool,
         vlan_id -> Nullable<Int4>,
         id -> Uuid,
+        router_lifetime -> Int4,
     }
 }
 
@@ -312,6 +313,7 @@ table! {
         local_pref -> Nullable<Int8>,
         enforce_first_as -> Bool,
         vlan_id -> Nullable<Int4>,
+        router_lifetime -> Int4,
     }
 }
 

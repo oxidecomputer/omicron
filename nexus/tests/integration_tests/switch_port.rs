@@ -330,6 +330,7 @@ async fn test_port_settings_basic_crud(ctx: &ControlPlaneTestContext) {
                 allowed_export: ImportExportPolicy::NoFiltering,
                 allowed_import: ImportExportPolicy::NoFiltering,
                 vlan_id: None,
+                router_lifetime: 0,
             },
             // Unnumbered peer - identified by interface only (addr is None)
             BgpPeer {
@@ -355,6 +356,7 @@ async fn test_port_settings_basic_crud(ctx: &ControlPlaneTestContext) {
                     "192.168.0.0/16".parse().unwrap(),
                 ]),
                 vlan_id: None,
+                router_lifetime: 0,
             },
         ],
     });

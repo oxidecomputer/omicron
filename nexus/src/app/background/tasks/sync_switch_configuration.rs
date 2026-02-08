@@ -912,7 +912,7 @@ impl BackgroundTask for SwitchPortSettingsManager {
                                 }),
                                 deterministic_collision_resolution: false,
                                 idle_hold_jitter: None,
-                                router_lifetime: 1800,  // Default to 30 minutes
+                                router_lifetime: peer.router_lifetime.0,
                             };
 
                             // update the stored vec if it exists, create a new on if it doesn't exist
@@ -1177,6 +1177,7 @@ impl BackgroundTask for SwitchPortSettingsManager {
                                     allowed_export: ImportExportPolicy::NoFiltering,
                                     allowed_import: ImportExportPolicy::NoFiltering,
                                     vlan_id: c.vlan_id.map(|x| x.0),
+                                    router_lifetime: c.router_lifetime.0,
                                 }
                         }).collect(),
                         port: port.port_name.to_string(),

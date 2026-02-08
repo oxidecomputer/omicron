@@ -12,6 +12,8 @@ use super::ParseSwitchLocationError;
 use super::PortConfig;
 use super::PortFec;
 use super::PortSpeed;
+use super::RouterLifetimeConfig;
+use super::RouterLifetimeConfigError;
 use super::SwitchLocation;
 use super::UplinkAddressConfig;
 use super::UplinkAddressConfigError;
@@ -73,6 +75,26 @@ impl FromStr for MaxPathConfig {
 impl std::fmt::Display for MaxPathConfig {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.as_u8())
+    }
+}
+
+impl FromStr for RouterLifetimeConfig {
+    type Err = RouterLifetimeConfigError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let v: u16 = s.parse().map_err(|e| {
+            RouterLifetimeConfigError(format!(
+                "failed to parse value for router lifetime config: {e}"
+            ))
+        })?;
+
+        Self::new(v)
+    }
+}
+
+impl std::fmt::Display for RouterLifetimeConfig {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.as_u16())
     }
 }
 

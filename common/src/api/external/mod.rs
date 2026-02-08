@@ -3303,6 +3303,9 @@ pub struct BgpPeer {
 
     /// Associate a VLAN ID with a peer.
     pub vlan_id: Option<u16>,
+
+    /// Router lifetime in seconds for unnumbered BGP peers.
+    pub router_lifetime: u16,
 }
 
 /// A base BGP configuration.

@@ -123,6 +123,7 @@ impl From<BgpPeer> for external::BgpPeer {
             allowed_import: old.allowed_import,
             allowed_export: old.allowed_export,
             vlan_id: old.vlan_id,
+            router_lifetime: 0,
         }
     }
 }

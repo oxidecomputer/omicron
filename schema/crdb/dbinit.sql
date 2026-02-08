@@ -3687,6 +3687,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.switch_port_settings_bgp_peer_config (
     allow_export_list_active BOOLEAN NOT NULL DEFAULT false,
     vlan_id INT4,
     id UUID NOT NULL,
+    router_lifetime INT4 NOT NULL DEFAULT 0,
 
     PRIMARY KEY (id)
 );
@@ -6133,6 +6134,7 @@ SELECT
  bpc.local_pref,
  bpc.enforce_first_as,
  bpc.vlan_id,
+ bpc.router_lifetime,
  bc.asn
 FROM omicron.public.switch_port sp
 JOIN omicron.public.switch_port_settings_bgp_peer_config bpc

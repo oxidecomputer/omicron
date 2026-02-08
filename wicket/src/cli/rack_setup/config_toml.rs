@@ -420,6 +420,7 @@ fn populate_uplink_table(cfg: &UserSpecifiedPortConfig) -> Table {
             allowed_import,
             allowed_export,
             vlan_id,
+            router_lifetime,
         } = p;
 
         let mut peer = Table::new();
@@ -510,6 +511,14 @@ fn populate_uplink_table(cfg: &UserSpecifiedPortConfig) -> Table {
         //vlan
         if let Some(x) = vlan_id {
             peer.insert("vlan_id", i64_item(i64::from(*x)));
+        }
+
+        // router_lifetime
+        if *router_lifetime != 0 {
+            peer.insert(
+                "router_lifetime",
+                i64_item(i64::from(*router_lifetime)),
+            );
         }
 
         // local_pref

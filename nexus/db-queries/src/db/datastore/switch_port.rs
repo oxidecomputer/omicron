@@ -67,6 +67,7 @@ pub struct BgpPeerConfig {
     pub allowed_export: ImportExportPolicy,
     pub communities: Vec<u32>,
     pub vlan_id: Option<SqlU16>,
+    pub router_lifetime: SqlU16,
 }
 
 impl Into<external::BgpPeer> for BgpPeerConfig {
@@ -92,6 +93,7 @@ impl Into<external::BgpPeer> for BgpPeerConfig {
             allowed_import: self.allowed_import,
             allowed_export: self.allowed_export,
             vlan_id: self.vlan_id.map(Into::into),
+            router_lifetime: self.router_lifetime.into(),
         }
     }
 }
@@ -676,6 +678,7 @@ impl DataStore {
                         local_pref: p.local_pref,
                         enforce_first_as: p.enforce_first_as,
                         vlan_id: p.vlan_id,
+                        router_lifetime: p.router_lifetime,
                         communities: communities.into_iter().map(|c| c.community.0).collect(),
                         allowed_import,
                         allowed_export,
@@ -1555,6 +1558,7 @@ async fn do_switch_port_settings_create(
             local_pref: p.local_pref,
             enforce_first_as: p.enforce_first_as,
             vlan_id: p.vlan_id,
+            router_lifetime: p.router_lifetime,
             allowed_import,
             allowed_export,
             communities,
@@ -1957,6 +1961,7 @@ mod test {
                     allowed_export: ImportExportPolicy::NoFiltering,
                     allowed_import: ImportExportPolicy::NoFiltering,
                     vlan_id: None,
+                    router_lifetime: 0,
                 }],
             }],
             addresses: vec![],

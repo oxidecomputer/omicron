@@ -903,6 +903,7 @@ fn rss_config_text<'a>(
                     allowed_import,
                     allowed_export,
                     vlan_id,
+                    router_lifetime,
                 } = p;
 
                 let addr_string = match addr {
@@ -992,6 +993,15 @@ fn rss_config_text<'a>(
                         settings.extend([
                             Span::styled(" vlan_id=", label_style),
                             Span::styled(vlan_id.to_string(), ok_style),
+                        ]);
+                    }
+                    if *router_lifetime != 0 {
+                        settings.extend([
+                            Span::styled(" router_lifetime=", label_style),
+                            Span::styled(
+                                format!("{}s", router_lifetime),
+                                ok_style,
+                            ),
                         ]);
                     }
 

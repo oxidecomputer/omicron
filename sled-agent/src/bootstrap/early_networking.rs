@@ -651,7 +651,7 @@ impl<'a> EarlyNetworkSetup<'a> {
                         }),
                         deterministic_collision_resolution: false,
                         idle_hold_jitter: None,
-                        router_lifetime: 1800, // Default to 30 minutes
+                        router_lifetime: peer.router_lifetime,
                     };
                     match bgp_unnumbered_peer_configs.get_mut(&port.port) {
                         Some(peers) => {

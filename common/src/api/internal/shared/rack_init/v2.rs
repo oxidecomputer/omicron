@@ -91,6 +91,9 @@ pub struct BgpPeerConfig {
     /// Associate a VLAN ID with a BGP peer session.
     #[serde(default)]
     pub vlan_id: Option<u16>,
+    /// Router lifetime in seconds for unnumbered BGP peers.
+    #[serde(default)]
+    pub router_lifetime: u16,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq, JsonSchema)]
@@ -199,6 +202,47 @@ impl Default for MaxPathConfig {
 
 #[derive(Debug, PartialEq, Eq, Deserialize, Serialize)]
 pub struct MaxPathConfigError(pub(super) String);
+
+/// Router lifetime in seconds for unnumbered BGP peers.
+///
+/// This value is used in IPv6 Router Advertisements to indicate how long
+/// the router should be considered valid by neighbors.
+#[derive(
+    Debug, Copy, Clone, Eq, PartialEq, Deserialize, Serialize, JsonSchema,
+)]
+pub struct RouterLifetimeConfig(u16);
+
+impl RouterLifetimeConfig {
+    /// Default router lifetime: 0 seconds (disabled)
+    pub const DEFAULT: u16 = 0;
+
+    pub fn new(v: u16) -> Result<Self, RouterLifetimeConfigError> {
+        // Maximum valid router lifetime is 9000 seconds (2.5 hours) per RFC 4861
+        if v > 9000 {
+            let msg = "Router lifetime cannot exceed 9000 seconds".into();
+            return Err(RouterLifetimeConfigError(msg));
+        }
+
+        Ok(Self(v))
+    }
+
+    pub fn new_unchecked(v: u16) -> Self {
+        Self(v)
+    }
+
+    pub fn as_u16(&self) -> u16 {
+        self.0
+    }
+}
+
+impl Default for RouterLifetimeConfig {
+    fn default() -> Self {
+        Self(Self::DEFAULT)
+    }
+}
+
+#[derive(Debug, PartialEq, Eq, Deserialize, Serialize)]
+pub struct RouterLifetimeConfigError(pub(super) String);
 
 /// A set of switch uplinks.
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]

@@ -7697,6 +7697,13 @@
             "format": "uint32",
             "minimum": 0
           },
+          "router_lifetime": {
+            "description": "Router lifetime in seconds for unnumbered BGP peers.",
+            "default": 0,
+            "type": "integer",
+            "format": "uint16",
+            "minimum": 0
+          },
           "vlan_id": {
             "nullable": true,
             "description": "Associate a VLAN ID with a BGP peer session.",

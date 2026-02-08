@@ -148,4 +148,5 @@ pub struct BgpPeerView {
     pub local_pref: Option<SqlU32>,
     pub enforce_first_as: bool,
     pub vlan_id: Option<SqlU16>,
+    pub router_lifetime: SqlU16,
 }

@@ -133,6 +133,7 @@ impl From<crate::v1::early_networking::EarlyNetworkConfig>
                                     allowed_import: peer.allowed_import,
                                     allowed_export: peer.allowed_export,
                                     vlan_id: peer.vlan_id,
+                                    router_lifetime: 0,
                                 })
                                 .collect(),
                             autoneg: p.autoneg,

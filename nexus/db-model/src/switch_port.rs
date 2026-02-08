@@ -669,6 +669,7 @@ pub struct SwitchPortBgpPeerConfig {
     pub allow_export_list_active: bool,
     pub vlan_id: Option<SqlU16>,
     pub id: Uuid,
+    pub router_lifetime: SqlU16,
 }
 
 #[derive(
@@ -768,6 +769,7 @@ impl SwitchPortBgpPeerConfig {
                 _ => true,
             },
             vlan_id: p.vlan_id.map(|x| x.into()),
+            router_lifetime: p.router_lifetime.into(),
         }
     }
 }

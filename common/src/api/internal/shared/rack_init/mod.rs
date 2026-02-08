@@ -30,6 +30,8 @@ pub use v2::MaxPathConfig;
 pub use v2::MaxPathConfigError;
 pub use v2::PortConfig;
 pub use v2::RackNetworkConfig;
+pub use v2::RouterLifetimeConfig;
+pub use v2::RouterLifetimeConfigError;
 pub use v2::SwitchPorts;
 pub use v2::UplinkAddressConfig;
 pub use v2::UplinkAddressConfigError;
