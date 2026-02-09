@@ -898,7 +898,7 @@ impl BackgroundTask for SwitchPortSettingsManager {
                                 multi_exit_discriminator: peer.multi_exit_discriminator.as_ref().map(|x| x.0),
                                 local_pref: peer.local_pref.as_ref().map(|x| x.0),
                                 enforce_first_as: peer.enforce_first_as,
-                                communities: Vec::new(),
+                                communities: communities.into_iter().map(|c| c.community.0).collect(),
                                 ipv4_unicast: Some(Ipv4UnicastConfig{
                                     nexthop: None,
                                     import_policy: import_policy4,

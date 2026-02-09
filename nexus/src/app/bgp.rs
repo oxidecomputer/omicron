@@ -122,7 +122,6 @@ impl super::Nexus {
 
             for r in &router_info {
                 let asn = r.asn;
-
                 let peers = match client.get_neighbors_v4(asn).await {
                     Ok(result) => result.into_inner(),
                     Err(e) => {
@@ -133,17 +132,10 @@ impl super::Nexus {
                         continue;
                     }
                 };
-                for (host, info) in peers {
-                    let Ok(host) = host.parse() else {
-                        error!(
-                            self.log,
-                            "failed to parse peer host address {host}",
-                        );
-                        continue;
-                    };
+                for (_host, info) in peers {
                     result.push(BgpPeerStatus {
                         switch: *switch,
-                        addr: host,
+                        addr: info.remote_ip,
                         local_asn: r.asn,
                         remote_asn: info.asn.unwrap_or(0),
                         state: info.fsm_state.into(),
