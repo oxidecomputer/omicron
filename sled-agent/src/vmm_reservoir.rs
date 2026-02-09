@@ -188,7 +188,10 @@ impl VmmReservoirManager {
             }
             Some(mode) => {
                 if let Err(e) = self.set_reservoir_size(mode) {
-                    error!(self.log, "Failed to setup VMM reservoir"; InlineErrorChain::new(&e));
+                    error!(
+                        self.log, "Failed to setup VMM reservoir";
+                        InlineErrorChain::new(&e),
+                    );
                 }
             }
         }
@@ -200,7 +203,10 @@ impl VmmReservoirManager {
                     let _ = reply_tx.send(Ok(()));
                 }
                 Err(e) => {
-                    error!(self.log, "Failed to setup VMM reservoir"; InlineErrorChain::new(&e));
+                    error!(
+                        self.log, "Failed to setup VMM reservoir";
+                        InlineErrorChain::new(&e),
+                    );
                     let _ = reply_tx.send(Err(e));
                 }
             }
