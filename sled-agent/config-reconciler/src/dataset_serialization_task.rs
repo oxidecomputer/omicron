@@ -20,6 +20,7 @@ use iddqd::IdOrdMap;
 use iddqd::id_upcast;
 use illumos_utils::zfs;
 use illumos_utils::zfs::CanMount;
+use illumos_utils::zfs::Keypath;
 use illumos_utils::zfs::DatasetEnsureArgs;
 use illumos_utils::zfs::DatasetProperties;
 use illumos_utils::zfs::DestroyDatasetError;
@@ -28,6 +29,7 @@ use illumos_utils::zfs::WhichDatasets;
 use illumos_utils::zfs::Zfs;
 use key_manager_types::VersionedAes256GcmDiskEncryptionKey;
 use omicron_common::disk::DatasetConfig;
+use omicron_common::disk::DiskIdentity;
 use omicron_common::disk::DatasetKind;
 use omicron_common::disk::DatasetName;
 use omicron_common::disk::SharedDatasetConfig;
@@ -37,6 +39,7 @@ use omicron_uuid_kinds::PhysicalDiskUuid;
 use sled_agent_types::inventory::InventoryDataset;
 use sled_agent_types::inventory::OrphanedDataset;
 use sled_storage::config::MountConfig;
+use sled_storage::keyfile::KeyFile;
 use sled_storage::dataset::CRYPT_DATASET;
 use sled_storage::dataset::ZONE_DATASET;
 use sled_storage::nested_dataset::NestedDatasetConfig;
@@ -178,6 +181,8 @@ pub struct DatasetRekeyInfo {
     pub dataset_name: String,
     /// The new encryption key with its epoch.
     pub key: VersionedAes256GcmDiskEncryptionKey,
+    /// Identity of the physical disk (used to construct keyfile path).
+    pub disk_identity: DiskIdentity,
 }
 
 /// Request to rekey a batch of datasets.
@@ -1239,7 +1244,33 @@ impl DatasetTask {
                 "new_epoch" => new_epoch,
             );
 
-            match zfs.change_key(&req.dataset_name, &req.key).await {
+            // Write the new key to the keylocation file, invoke
+            // `zfs change-key`, then zero and unlink the keyfile.
+            let keypath = Keypath::new(
+                &req.disk_identity,
+                &self.mount_config.root,
+            );
+            let mut keyfile = match KeyFile::create(
+                keypath.clone(),
+                req.key.expose_secret(),
+                &log,
+            )
+            .await
+            {
+                Ok(kf) => kf,
+                Err(e) => {
+                    warn!(
+                        log,
+                        "Failed to create keyfile for rekey";
+                        "dataset" => &req.dataset_name,
+                        "error" => %e,
+                    );
+                    failed.insert(disk_id);
+                    continue;
+                }
+            };
+
+            match zfs.change_key(&req.dataset_name, new_epoch).await {
                 Ok(()) => {
                     succeeded.insert(disk_id);
                 }
@@ -1254,6 +1285,15 @@ impl DatasetTask {
                     );
                     failed.insert(disk_id);
                 }
+            }
+
+            if let Err(e) = keyfile.zero_and_unlink().await {
+                warn!(
+                    log,
+                    "Failed to zero keyfile after rekey";
+                    "path" => %keypath,
+                    "error" => %e,
+                );
             }
         }
 
@@ -1386,14 +1426,16 @@ trait ZfsImpl: Send + Sync + 'static {
         which: WhichDatasets,
     ) -> impl Future<Output = anyhow::Result<Vec<DatasetProperties>>> + Send;
 
-    /// Atomically change the encryption key and set the oxide:epoch property.
+    /// Change the encryption key and set the oxide:epoch property.
     ///
     /// This is used for ZFS key rotation when a new Trust Quorum epoch is
-    /// committed.
+    /// committed. The caller is responsible for writing the new key to the
+    /// dataset's keylocation before calling this, and zeroing the keyfile
+    /// afterward.
     fn change_key(
         &self,
         dataset: &str,
-        key: &VersionedAes256GcmDiskEncryptionKey,
+        epoch: u64,
     ) -> impl Future<Output = Result<(), KeyRotationError>> + Send;
 }
 
@@ -1444,9 +1486,9 @@ impl ZfsImpl for RealZfs {
     async fn change_key(
         &self,
         dataset: &str,
-        key: &VersionedAes256GcmDiskEncryptionKey,
+        epoch: u64,
     ) -> Result<(), KeyRotationError> {
-        Zfs::change_key(dataset, key).await.map_err(|err| KeyRotationError {
+        Zfs::change_key(dataset, epoch).await.map_err(|err| KeyRotationError {
             dataset: dataset.to_string(),
             err: err.into(),
         })
@@ -1644,7 +1686,7 @@ mod tests {
         async fn change_key(
             &self,
             dataset: &str,
-            key: &VersionedAes256GcmDiskEncryptionKey,
+            epoch: u64,
         ) -> Result<(), KeyRotationError> {
             let mut state = self.inner.lock().unwrap();
 
@@ -1654,7 +1696,7 @@ mod tests {
                     dataset: dataset.to_string(),
                     err: anyhow!("dataset does not exist"),
                 })?;
-            props.epoch = Some(key.epoch());
+            props.epoch = Some(epoch);
             Ok(())
         }
     }

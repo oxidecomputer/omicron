@@ -737,7 +737,11 @@ impl ReconcilerTask {
                         format!("{}/{}", info.disk.zpool_name(), CRYPT_DATASET);
                     request.disks.insert(
                         info.disk_id,
-                        DatasetRekeyInfo { dataset_name, key },
+                        DatasetRekeyInfo {
+                            dataset_name,
+                            key,
+                            disk_identity: info.disk.identity().clone(),
+                        },
                     );
                 }
                 Err(e) => {

@@ -45,7 +45,6 @@ tokio.workspace = true
 uuid.workspace = true
 whoami.workspace = true
 zone.workspace = true
-zfs-atomic-change-key.workspace = true
 tofino.workspace = true
 rustix.workspace = true
 
