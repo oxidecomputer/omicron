@@ -26,7 +26,6 @@ use dropshot::TypedBody;
 use dropshot::endpoint;
 use omicron_common::api::internal::nexus::DiskRuntimeState;
 use omicron_common::api::internal::nexus::SledVmmState;
-use slog_error_chain::InlineErrorChain;
 use omicron_common::api::internal::shared::ExternalIpGatewayMap;
 use omicron_common::api::internal::shared::SledIdentifiers;
 use omicron_common::api::internal::shared::VirtualNetworkInterfaceHost;
@@ -83,6 +82,7 @@ use sled_agent_types::zone_bundle::{
     ZoneBundleFilter, ZoneBundleId, ZoneBundleMetadata, ZonePathParam,
 };
 use sled_hardware_types::BaseboardId;
+use slog_error_chain::InlineErrorChain;
 // Fixed identifiers for prior versions only
 use sled_agent_types_versions::v1;
 use sled_diagnostics::SledDiagnosticsQueryOutput;
@@ -329,7 +329,9 @@ impl SledAgentApi for SledAgentSimImpl {
             path_params.disk_id,
             body.snapshot_id,
         )
-        .map_err(|e| HttpError::for_internal_error(InlineErrorChain::new(&e).to_string()))?;
+        .map_err(|e| {
+            HttpError::for_internal_error(InlineErrorChain::new(&e).to_string())
+        })?;
 
         Ok(HttpResponseOk(VmmIssueDiskSnapshotRequestResponse {
             snapshot_id: body.snapshot_id,
@@ -355,8 +357,9 @@ impl SledAgentApi for SledAgentSimImpl {
         let sa = rqctx.context();
         let body_args = body.into_inner();
 
-        sa.set_virtual_nic_host(&body_args)
-            .map_err(|e| HttpError::for_internal_error(InlineErrorChain::new(&e).to_string()))?;
+        sa.set_virtual_nic_host(&body_args).map_err(|e| {
+            HttpError::for_internal_error(InlineErrorChain::new(&e).to_string())
+        })?;
 
         Ok(HttpResponseUpdatedNoContent())
     }
@@ -368,8 +371,9 @@ impl SledAgentApi for SledAgentSimImpl {
         let sa = rqctx.context();
         let body_args = body.into_inner();
 
-        sa.unset_virtual_nic_host(&body_args)
-            .map_err(|e| HttpError::for_internal_error(InlineErrorChain::new(&e).to_string()))?;
+        sa.unset_virtual_nic_host(&body_args).map_err(|e| {
+            HttpError::for_internal_error(InlineErrorChain::new(&e).to_string())
+        })?;
 
         Ok(HttpResponseUpdatedNoContent())
     }
@@ -415,11 +419,13 @@ impl SledAgentApi for SledAgentSimImpl {
         rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<Inventory>, HttpError> {
         let sa = rqctx.context();
-        Ok(HttpResponseOk(
-            sa.inventory(rqctx.server.local_addr).map_err(|e| {
-                HttpError::for_internal_error(InlineErrorChain::new(&*e).to_string())
-            })?,
-        ))
+        Ok(HttpResponseOk(sa.inventory(rqctx.server.local_addr).map_err(
+            |e| {
+                HttpError::for_internal_error(
+                    InlineErrorChain::new(&*e).to_string(),
+                )
+            },
+        )?))
     }
 
     async fn omicron_config_put(

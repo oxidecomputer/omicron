@@ -201,7 +201,9 @@ impl TryFrom<Zone> for ProbeState {
                 .strip_prefix(&format!("{PROBE_ZONE_PREFIX}_"))
                 .ok_or(String::from("not a probe prefix"))?
                 .parse()
-                .map_err(|e| format!("invalid uuid: {}", InlineErrorChain::new(&e)))?,
+                .map_err(|e| {
+                    format!("invalid uuid: {}", InlineErrorChain::new(&e))
+                })?,
             status: value.state(),
             external_ips: Vec::new(),
             interface: None,

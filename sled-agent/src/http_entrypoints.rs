@@ -847,7 +847,10 @@ impl SledAgentApi for SledAgentImpl {
         )
         .await
         .map_err(|e| {
-            let message = format!("Failed to add sled to rack cluster: {}", InlineErrorChain::new(&e));
+            let message = format!(
+                "Failed to add sled to rack cluster: {}",
+                InlineErrorChain::new(&e)
+            );
             HttpError {
                 status_code: ErrorStatusCode::INTERNAL_SERVER_ERROR,
                 error_code: None,

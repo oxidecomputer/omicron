@@ -316,9 +316,10 @@ impl Server {
     pub async fn wait_for_finish(self) -> Result<(), String> {
         match self.inner_task.await {
             Ok(()) => Ok(()),
-            Err(err) => {
-                Err(format!("bootstrap agent inner task panicked: {}", InlineErrorChain::new(&err)))
-            }
+            Err(err) => Err(format!(
+                "bootstrap agent inner task panicked: {}",
+                InlineErrorChain::new(&err)
+            )),
         }
     }
 }

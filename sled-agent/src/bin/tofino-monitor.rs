@@ -77,7 +77,9 @@ mod illumos {
             // tree.
             if let Ok(true) = std::fs::exists(TOFINO_DEVICE) {
                 match tofino::get_tofino() {
-                    Err(e) => error!(log, "failed devinfo lookup"; InlineErrorChain::new(&e)),
+                    Err(e) => {
+                        error!(log, "failed devinfo lookup"; InlineErrorChain::new(&e))
+                    }
                     Ok(Some(x)) => return x,
                     _ => {}
                 }

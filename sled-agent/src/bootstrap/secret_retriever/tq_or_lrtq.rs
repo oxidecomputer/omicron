@@ -72,7 +72,11 @@ impl TqOrLrtqSecretRetriever {
                 .handle
                 .status()
                 .await
-                .map_err(|e| SecretRetrieverError::TrustQuorum(InlineErrorChain::new(&e).to_string()))?
+                .map_err(|e| {
+                    SecretRetrieverError::TrustQuorum(
+                        InlineErrorChain::new(&e).to_string(),
+                    )
+                })?
                 .persistent_state
                 .commits;
 

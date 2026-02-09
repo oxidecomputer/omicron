@@ -14,7 +14,6 @@ use crate::sim::http_entrypoints_pantry::PantryStatus;
 use crate::sim::http_entrypoints_pantry::VolumeStatus;
 use crate::support_bundle::storage::SupportBundleManager;
 use anyhow::{self, Result, bail};
-use slog_error_chain::InlineErrorChain;
 use camino::Utf8Path;
 use camino_tempfile::Utf8TempDir;
 use chrono::prelude::*;
@@ -49,6 +48,7 @@ use sled_storage::nested_dataset::NestedDatasetConfig;
 use sled_storage::nested_dataset::NestedDatasetListOptions;
 use sled_storage::nested_dataset::NestedDatasetLocation;
 use slog::Logger;
+use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::collections::HashSet;
@@ -2197,7 +2197,11 @@ impl Pantry {
 
         self.simulated_upstairs
             .snapshot(volume_id.parse().unwrap(), snapshot_id.parse().unwrap())
-            .map_err(|e| HttpError::for_internal_error(InlineErrorChain::new(&e).to_string()))
+            .map_err(|e| {
+                HttpError::for_internal_error(
+                    InlineErrorChain::new(&e).to_string(),
+                )
+            })
     }
 
     pub fn bulk_write(

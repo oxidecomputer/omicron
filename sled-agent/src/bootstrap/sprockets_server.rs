@@ -183,10 +183,9 @@ async fn read_request(
     const MAX_REQUEST_LEN: u32 = 128 << 20;
 
     // Read request, length prefix first.
-    let request_length = stream
-        .read_u32()
-        .await
-        .map_err(|err| format!("Failed to read length prefix: {}", InlineErrorChain::new(&err)))?;
+    let request_length = stream.read_u32().await.map_err(|err| {
+        format!("Failed to read length prefix: {}", InlineErrorChain::new(&err))
+    })?;
 
     // Sanity check / guard against malformed lengths
     if request_length > MAX_REQUEST_LEN {
@@ -197,13 +196,19 @@ async fn read_request(
 
     let mut buf = vec![0; request_length as usize];
     stream.read_exact(&mut buf).await.map_err(|err| {
-        format!("Failed to read message of length {request_length}: {}", InlineErrorChain::new(&err))
+        format!(
+            "Failed to read message of length {request_length}: {}",
+            InlineErrorChain::new(&err)
+        )
     })?;
 
     // Deserialize request.
     let envelope: RequestEnvelope<'static> = serde_json::from_slice(&buf)
         .map_err(|err| {
-            format!("Failed to deserialize request envelope: {}", InlineErrorChain::new(&err))
+            format!(
+                "Failed to deserialize request envelope: {}",
+                InlineErrorChain::new(&err)
+            )
         })?;
 
     // Currently we only have one version, so there's nothing to do in this
@@ -222,24 +227,32 @@ async fn write_response(
 ) -> Result<(), String> {
     // Build and serialize response.
     let envelope = ResponseEnvelope { version: version::V1, response };
-    let buf = serde_json::to_vec(&envelope)
-        .map_err(|err| format!("Failed to serialize response: {}", InlineErrorChain::new(&err)))?;
+    let buf = serde_json::to_vec(&envelope).map_err(|err| {
+        format!("Failed to serialize response: {}", InlineErrorChain::new(&err))
+    })?;
 
     // Write response, length prefix first.
     let response_length = u32::try_from(buf.len())
         .expect("serialized bootstrap-agent response length overflowed u32");
 
     stream.write_u32(response_length).await.map_err(|err| {
-        format!("Failed to write response length prefix: {}", InlineErrorChain::new(&err))
+        format!(
+            "Failed to write response length prefix: {}",
+            InlineErrorChain::new(&err)
+        )
     })?;
-    stream
-        .write_all(&buf)
-        .await
-        .map_err(|err| format!("Failed to write response body: {}", InlineErrorChain::new(&err)))?;
-    stream
-        .flush()
-        .await
-        .map_err(|err| format!("Failed to flush response body: {}", InlineErrorChain::new(&err)))?;
+    stream.write_all(&buf).await.map_err(|err| {
+        format!(
+            "Failed to write response body: {}",
+            InlineErrorChain::new(&err)
+        )
+    })?;
+    stream.flush().await.map_err(|err| {
+        format!(
+            "Failed to flush response body: {}",
+            InlineErrorChain::new(&err)
+        )
+    })?;
 
     Ok(())
 }

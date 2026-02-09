@@ -7,9 +7,9 @@
 use super::storage::Storage;
 use omicron_common::api::external::Error;
 use omicron_uuid_kinds::SledUuid;
-use slog_error_chain::InlineErrorChain;
 use propolis_client::VolumeConstructionRequest;
 use slog::Logger;
+use slog_error_chain::InlineErrorChain;
 use std::collections::HashMap;
 use std::collections::VecDeque;
 use std::net::SocketAddr;
@@ -79,7 +79,10 @@ impl SimulatedUpstairs {
             &volume_construction_request,
         )
         .map_err(|e| {
-            Error::invalid_request(&format!("bad socketaddr: {}", InlineErrorChain::new(&e)))
+            Error::invalid_request(&format!(
+                "bad socketaddr: {}",
+                InlineErrorChain::new(&e)
+            ))
         })?;
 
         for target in targets {
@@ -107,9 +110,13 @@ impl SimulatedUpstairs {
                     "sled_id" => %sled_id,
                 );
 
-                crucible_data
-                    .create_snapshot(region_id, snapshot_id)
-                    .map_err(|e| Error::internal_error(&InlineErrorChain::new(&*e).to_string()))?;
+                crucible_data.create_snapshot(region_id, snapshot_id).map_err(
+                    |e| {
+                        Error::internal_error(
+                            &InlineErrorChain::new(&*e).to_string(),
+                        )
+                    },
+                )?;
 
                 break;
             }

@@ -32,11 +32,12 @@ impl SecretRetriever for LrtqSecretRetriever {
         &mut self,
     ) -> Result<VersionedIkm, SecretRetrieverError> {
         let epoch = 1;
-        let rack_secret = self
-            .bootstore
-            .load_rack_secret()
-            .await
-            .map_err(|e| SecretRetrieverError::Bootstore(InlineErrorChain::new(&e).to_string()))?;
+        let rack_secret =
+            self.bootstore.load_rack_secret().await.map_err(|e| {
+                SecretRetrieverError::Bootstore(
+                    InlineErrorChain::new(&e).to_string(),
+                )
+            })?;
         let secret = rack_secret.expose_secret().as_bytes();
         Ok(VersionedIkm::new(epoch, self.salt, secret))
     }

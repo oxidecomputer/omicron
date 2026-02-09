@@ -15,8 +15,8 @@ use async_trait::async_trait;
 use key_manager::{
     SecretRetriever, SecretRetrieverError, SecretState, VersionedIkm,
 };
-use slog_error_chain::InlineErrorChain;
 use secrecy::ExposeSecret;
+use slog_error_chain::InlineErrorChain;
 use std::time::Duration;
 use tokio::time::{sleep, timeout};
 use trust_quorum::NodeTaskHandle;

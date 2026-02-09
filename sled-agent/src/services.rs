@@ -306,7 +306,9 @@ impl From<Error> for omicron_common::api::external::Error {
                 )
             }
             Error::RequestedZoneConfigOutdated { .. } => {
-                omicron_common::api::external::Error::conflict(&InlineErrorChain::new(&err).to_string())
+                omicron_common::api::external::Error::conflict(
+                    &InlineErrorChain::new(&err).to_string(),
+                )
             }
             _ => omicron_common::api::external::Error::InternalError {
                 internal_message: InlineErrorChain::new(&err).to_string(),

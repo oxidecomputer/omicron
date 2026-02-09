@@ -863,12 +863,14 @@ impl From<Error> for HttpError {
             Error::HashMismatch { .. }
             | Error::InvalidPerSledConfig { .. }
             | Error::NoConfig
-            | Error::NotInConfig { .. } => {
-                HttpError::for_bad_request(None, InlineErrorChain::new(&err).to_string())
-            }
-            Error::NotFound { .. } => {
-                HttpError::for_not_found(None, InlineErrorChain::new(&err).to_string())
-            }
+            | Error::NotInConfig { .. } => HttpError::for_bad_request(
+                None,
+                InlineErrorChain::new(&err).to_string(),
+            ),
+            Error::NotFound { .. } => HttpError::for_not_found(
+                None,
+                InlineErrorChain::new(&err).to_string(),
+            ),
             Error::GenerationConfig { .. } => HttpError::for_client_error(
                 Some("CONFIG_GENERATION".to_string()),
                 dropshot::ClientErrorStatusCode::CONFLICT,
