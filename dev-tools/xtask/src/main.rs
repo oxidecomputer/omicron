@@ -13,6 +13,7 @@ use std::env;
 use std::os::unix::process::CommandExt;
 use std::process::Command;
 
+mod api_check;
 mod check_features;
 mod check_workspace_deps;
 mod clippy;
@@ -40,6 +41,9 @@ struct Args {
 
 #[derive(Subcommand)]
 enum Cmds {
+    /// Unified API change validation workflow
+    ApiCheck(api_check::ApiCheckArgs),
+
     /// Run Argon2 hash with specific parameters (quick performance check)
     Argon2(external::External),
 
@@ -113,6 +117,7 @@ enum Cmds {
 fn main() -> Result<()> {
     let args = Args::parse();
     match args.cmd {
+        Cmds::ApiCheck(args) => api_check::run_cmd(args),
         Cmds::Argon2(external) => {
             external.cargo_args(["--release"]).exec_example("argon2")
         }
