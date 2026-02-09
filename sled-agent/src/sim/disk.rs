@@ -18,6 +18,7 @@ use omicron_common::api::internal::nexus::ProducerEndpoint;
 use omicron_common::api::internal::nexus::ProducerKind;
 use oximeter_producer::LogConfig;
 use oximeter_producer::Server as ProducerServer;
+use slog_error_chain::InlineErrorChain;
 use sled_agent_types::disk::DiskStateRequested;
 use std::net::{Ipv6Addr, SocketAddr};
 use std::sync::Arc;
@@ -180,12 +181,12 @@ impl SimDisk {
             }),
         };
         let server =
-            ProducerServer::start(&config).map_err(|e| e.to_string())?;
+            ProducerServer::start(&config).map_err(|e| InlineErrorChain::new(&e).to_string())?;
         let producer = producers::DiskProducer::new(id);
         server
             .registry()
             .register_producer(producer)
-            .map_err(|e| e.to_string())?;
+            .map_err(|e| InlineErrorChain::new(&e).to_string())?;
         self.producer.replace(server);
         Ok(())
     }
@@ -206,6 +207,8 @@ impl Simulatable for SimDisk {
         &mut self,
         args: Self::ProducerArgs,
     ) -> Result<(), Error> {
+        // The error type here is `String`, so we don't need
+        // InlineErrorChain.
         self.start_producer_server(args.0, args.1).await.map_err(|e| {
             Error::internal_error(&format!("Setting producer server: {e}"))
         })?;

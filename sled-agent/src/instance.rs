@@ -1011,8 +1011,8 @@ impl InstanceRunner {
             },
             |err: Error, delay| {
                 warn!(self.log,
-                      "Failed to publish instance state to Nexus: {}",
-                      err.to_string();
+                      "Failed to publish instance state to Nexus";
+                      InlineErrorChain::new(&err),
                       "instance_id" => %self.instance_id(),
                       "propolis_id" => %self.propolis_id,
                       "retry_after" => ?delay);
@@ -1023,7 +1023,8 @@ impl InstanceRunner {
         if let Err(e) = result {
             error!(
                 self.log,
-                "Failed to publish state to Nexus, will not retry: {:?}", e;
+                "Failed to publish state to Nexus, will not retry";
+                InlineErrorChain::new(&e),
                 "instance_id" => %self.instance_id(),
                 "propolis_id" => %self.propolis_id,
             );
@@ -1386,7 +1387,7 @@ impl InstanceRunner {
                 self.log,
                 "Failed to take zone bundle for terminated instance";
                 "zone_name" => &zname,
-                "reason" => ?e,
+                InlineErrorChain::new(&e),
             );
         }
 
@@ -1418,7 +1419,7 @@ impl InstanceRunner {
         .await;
         match result {
             Ok(Ok(_)) => {}
-            Ok(Err(e)) => panic!("{e}"),
+            Ok(Err(e)) => panic!("{}", InlineErrorChain::new(&e)),
             Err(_) => {
                 panic!("Zone {zname:?} could not be halted within 5 minutes")
             }

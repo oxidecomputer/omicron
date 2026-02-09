@@ -864,20 +864,20 @@ impl From<Error> for HttpError {
             | Error::InvalidPerSledConfig { .. }
             | Error::NoConfig
             | Error::NotInConfig { .. } => {
-                HttpError::for_bad_request(None, err.to_string())
+                HttpError::for_bad_request(None, InlineErrorChain::new(&err).to_string())
             }
             Error::NotFound { .. } => {
-                HttpError::for_not_found(None, err.to_string())
+                HttpError::for_not_found(None, InlineErrorChain::new(&err).to_string())
             }
             Error::GenerationConfig { .. } => HttpError::for_client_error(
                 Some("CONFIG_GENERATION".to_string()),
                 dropshot::ClientErrorStatusCode::CONFLICT,
-                err.to_string(),
+                InlineErrorChain::new(&err).to_string(),
             ),
             Error::GenerationPut { .. } => HttpError::for_client_error(
                 None,
                 dropshot::ClientErrorStatusCode::CONFLICT,
-                err.to_string(),
+                InlineErrorChain::new(&err).to_string(),
             ),
 
             // 5xx errors: ensure the error chain is logged

@@ -201,7 +201,7 @@ impl TryFrom<Zone> for ProbeState {
                 .strip_prefix(&format!("{PROBE_ZONE_PREFIX}_"))
                 .ok_or(String::from("not a probe prefix"))?
                 .parse()
-                .map_err(|e| format!("invalid uuid: {e}"))?,
+                .map_err(|e| format!("invalid uuid: {}", InlineErrorChain::new(&e)))?,
             status: value.state(),
             external_ips: Vec::new(),
             interface: None,
@@ -269,7 +269,7 @@ impl ProbeManagerInner {
         let current = match self.current_state().await {
             Ok(state) => state,
             Err(e) => {
-                error!(self.log, "get current probe state: {e}");
+                error!(self.log, "get current probe state"; InlineErrorChain::new(&*e));
                 return;
             }
         };
@@ -316,7 +316,7 @@ impl ProbeManagerInner {
         for probe in probes {
             info!(self.log, "adding probe {}", probe.id);
             if let Err(e) = self.add_probe(probe).await {
-                error!(self.log, "add probe: {e}");
+                error!(self.log, "add probe"; InlineErrorChain::new(&*e));
             }
         }
     }
@@ -477,6 +477,8 @@ impl ProbeManagerInner {
                 running_zone.release_opte_ports();
 
                 if let Err(e) = running_zone.stop().await {
+                    // The error type here is `String`, so we don't
+                    // need InlineErrorChain.
                     error!(self.log, "stop probe: {e}")
                 }
                 // TODO are there storage resources that need to be cleared

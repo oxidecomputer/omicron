@@ -9,6 +9,7 @@ use slog::debug;
 use slog::error;
 use slog::info;
 use slog::o;
+use slog_error_chain::InlineErrorChain;
 use std::sync::Arc;
 
 #[cfg(target_os = "illumos")]
@@ -21,6 +22,7 @@ mod illumos {
     use slog::Logger;
     use slog::error;
     use slog::info;
+    use slog_error_chain::InlineErrorChain;
     use std::sync::Arc;
 
     const TOFINO_DEVICE: &str = "/dev/tofino/1";
@@ -50,7 +52,7 @@ mod illumos {
                 }
             }
             Err(e) => {
-                error!(log, "failed to get list of zones: {e:?}");
+                error!(log, "failed to get list of zones"; InlineErrorChain::new(&e));
                 return;
             }
         }
@@ -63,7 +65,7 @@ mod illumos {
             .arg("halt")
             .output()
         {
-            error!(log, "failed to halt switch zone: {e:?}");
+            error!(log, "failed to halt switch zone"; InlineErrorChain::new(&e));
         }
     }
 
@@ -75,7 +77,7 @@ mod illumos {
             // tree.
             if let Ok(true) = std::fs::exists(TOFINO_DEVICE) {
                 match tofino::get_tofino() {
-                    Err(e) => error!(log, "failed devinfo lookup: {e:?}"),
+                    Err(e) => error!(log, "failed devinfo lookup"; InlineErrorChain::new(&e)),
                     Ok(Some(x)) => return x,
                     _ => {}
                 }
@@ -101,14 +103,15 @@ mod illumos {
                 Ok(template) => match template.create() {
                     Ok(c) => c,
                     Err(e) => {
-                        error!(&log, "unable to create tofino contract: {e:?}");
+                        error!(&log, "unable to create tofino contract"; InlineErrorChain::new(&e));
                         continue;
                     }
                 },
                 Err(e) => {
                     error!(
                         &log,
-                        "unable to open tofino contract template: {e:?}"
+                        "unable to open tofino contract template";
+                        InlineErrorChain::new(&e),
                     );
                     continue;
                 }
@@ -116,7 +119,7 @@ mod illumos {
             let ctl = match Control::new(ContractType::Device, ctid) {
                 Ok(c) => c,
                 Err(e) => {
-                    error!(&log, "unable to create tofino contract: {e:?}");
+                    error!(&log, "unable to create tofino contract"; InlineErrorChain::new(&e));
                     continue;
                 }
             };
@@ -144,14 +147,14 @@ mod illumos {
                         halt_switch_zone(&log);
                         info!(&log, "acknowledging the remove event");
                         if let Err(e) = ctl.ack(ev.event_id) {
-                            error!(&log, "{e:?}");
+                            error!(&log, "failed to ack event"; InlineErrorChain::new(&e));
                         }
                         std::thread::sleep(std::time::Duration::from_secs(2));
                     }
                     contract::CT_EV_NEGEND => {
                         info!(&log, "closing out the device contract");
                         if let Err(e) = ctl.abandon() {
-                            error!(&log, "{e:?}");
+                            error!(&log, "failed to abandon contract"; InlineErrorChain::new(&e));
                         }
 
                         info!(&log, "tofino monitor exiting");
@@ -171,7 +174,10 @@ fn wait_for_signal(log: Arc<Logger>) {
     let mut signals = match Signals::new(&[SIGHUP, SIGINT, SIGQUIT, SIGTERM]) {
         Ok(s) => s,
         Err(e) => {
-            panic!("failed to set up signal handler: {e:?}");
+            panic!(
+                "failed to set up signal handler: {}",
+                InlineErrorChain::new(&e),
+            );
         }
     };
 

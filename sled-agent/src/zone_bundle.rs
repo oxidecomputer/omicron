@@ -984,7 +984,7 @@ async fn create(
         );
         let output = match zone.run_cmd(cmd) {
             Ok(s) => s,
-            Err(e) => format!("{}", e),
+            Err(e) => InlineErrorChain::new(&e).to_string(),
         };
         let contents = format!("Command: {:?}\n{}", cmd, output).into_bytes();
         if let Err(e) = insert_data(&mut builder, cmd[0], &contents) {
@@ -1077,7 +1077,7 @@ async fn create(
             );
             let output = match zone.run_cmd(args) {
                 Ok(s) => s,
-                Err(e) => format!("{}", e),
+                Err(e) => InlineErrorChain::new(&e).to_string(),
             };
             let contents =
                 format!("Command: {:?}\n{}", args, output).into_bytes();
@@ -1208,7 +1208,7 @@ async fn find_archived_log_files<'a, T: Iterator<Item = &'a Utf8PathBuf>>(
                         log,
                         "failed to read zone debug directory";
                         "directory" => ?dir,
-                        "reason" => ?e,
+                        InlineErrorChain::new(&e),
                     );
                     continue;
                 }
@@ -1257,7 +1257,7 @@ async fn find_archived_log_files<'a, T: Iterator<Item = &'a Utf8PathBuf>>(
                             log,
                             "failed to fetch zone debug directory entry";
                             "directory" => ?dir,
-                            "reason" => ?e,
+                            InlineErrorChain::new(&e),
                         );
                     }
                 }
@@ -1374,7 +1374,7 @@ async fn filter_zone_bundles(
                     log,
                     "failed to extract zone bundle metadata, skipping";
                     "path" => %path,
-                    "reason" => ?e,
+                    InlineErrorChain::new(&e),
                 );
             }
         }

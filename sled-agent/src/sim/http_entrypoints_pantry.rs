@@ -12,6 +12,7 @@ use dropshot::{
 use propolis_client::VolumeConstructionRequest;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use slog_error_chain::InlineErrorChain;
 use std::sync::Arc;
 
 use super::storage::Pantry;
@@ -134,7 +135,7 @@ async fn attach(
 
     pantry
         .attach(path.id.clone(), body.volume_construction_request)
-        .map_err(|e| HttpError::for_internal_error(e.to_string()))?;
+        .map_err(|e| HttpError::for_internal_error(InlineErrorChain::new(&*e).to_string()))?;
 
     Ok(HttpResponseOk(AttachResult { id: path.id }))
 }
@@ -220,7 +221,7 @@ async fn job_result_ok(
         Ok(job_result_ok) => {
             Ok(HttpResponseOk(JobResultOkResponse { job_result_ok }))
         }
-        Err(e) => Err(HttpError::for_internal_error(e.to_string())),
+        Err(e) => Err(HttpError::for_internal_error(InlineErrorChain::new(&*e).to_string())),
     }
 }
 
@@ -257,7 +258,7 @@ async fn import_from_url(
 
     let job_id = pantry
         .import_from_url(path.id.clone(), body.url, body.expected_digest)
-        .map_err(|e| HttpError::for_internal_error(e.to_string()))?;
+        .map_err(|e| HttpError::for_internal_error(InlineErrorChain::new(&e).to_string()))?;
 
     Ok(HttpResponseOk(ImportFromUrlResponse { job_id }))
 }
@@ -283,7 +284,7 @@ async fn snapshot(
 
     pantry
         .snapshot(path.id.clone(), body.snapshot_id)
-        .map_err(|e| HttpError::for_internal_error(e.to_string()))?;
+        .map_err(|e| HttpError::for_internal_error(InlineErrorChain::new(&e).to_string()))?;
 
     Ok(HttpResponseUpdatedNoContent())
 }
@@ -313,7 +314,7 @@ async fn bulk_write(
         &base64::engine::general_purpose::STANDARD,
         body.base64_encoded_data,
     )
-    .map_err(|e| HttpError::for_bad_request(None, e.to_string()))?;
+    .map_err(|e| HttpError::for_bad_request(None, InlineErrorChain::new(&e).to_string()))?;
 
     pantry.bulk_write(path.id.clone(), body.offset, data)?;
 
@@ -339,7 +340,7 @@ async fn scrub(
 
     let job_id = pantry
         .scrub(path.id.clone())
-        .map_err(|e| HttpError::for_internal_error(e.to_string()))?;
+        .map_err(|e| HttpError::for_internal_error(InlineErrorChain::new(&e).to_string()))?;
 
     Ok(HttpResponseOk(ScrubResponse { job_id }))
 }
@@ -358,7 +359,7 @@ async fn detach(
 
     pantry
         .detach(path.id)
-        .map_err(|e| HttpError::for_internal_error(e.to_string()))?;
+        .map_err(|e| HttpError::for_internal_error(InlineErrorChain::new(&*e).to_string()))?;
 
     Ok(HttpResponseDeleted())
 }

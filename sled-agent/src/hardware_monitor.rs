@@ -14,6 +14,7 @@ use sled_hardware::{HardwareManager, HardwareUpdate};
 use sled_hardware_types::Baseboard;
 use sled_storage::disk::RawDisk;
 use slog::Logger;
+use slog_error_chain::InlineErrorChain;
 use tokio::sync::broadcast::error::RecvError;
 use tokio::sync::{broadcast, oneshot, watch};
 
@@ -297,7 +298,7 @@ impl HardwareMonitor {
             }
         } else {
             if let Err(e) = service_manager.deactivate_switch().await {
-                warn!(self.log, "Failed to deactivate switch: {e}");
+                warn!(self.log, "Failed to deactivate switch"; InlineErrorChain::new(&e));
             }
         }
     }
