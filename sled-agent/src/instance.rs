@@ -1903,8 +1903,8 @@ fn propolis_error_code(
     let code = rv.error_code.as_deref()?;
     match code.parse::<PropolisErrorCode>() {
         Err(parse_error) => {
-            // The parse_error is a strum::ParseError which is just a string
-            // error, so we log it directly without InlineErrorChain.
+            // The parse_error is a &str, so we log it directly without
+            // InlineErrorChain.
             warn!(
                 log, "Propolis returned an unknown error code: {code:?}";
                 "status" => ?error.status(),
