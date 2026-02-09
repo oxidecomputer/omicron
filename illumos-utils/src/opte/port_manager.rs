@@ -261,7 +261,11 @@ fn omicron_to_opte_ip_config(
         | (
             PrivateIpConfig::V6(_) | PrivateIpConfig::V4(_),
             Some(ExternalIpConfig::DualStack { .. }),
-        ) => return Err(Error::InvalidPortIpConfig),
+        ) => {
+            return Err(Error::InvalidPortIpConfig(String::from(
+                "No private IP stack for external IP config",
+            )));
+        }
     };
     Ok(cfg)
 }
@@ -859,7 +863,9 @@ impl PortManager {
                     "group_ip" => %group.group_ip,
                     "port_name" => port.name(),
                 );
-                return Err(Error::InvalidPortIpConfig);
+                return Err(Error::InvalidPortIpConfig(String::from(
+                    "invalid multicast IP address",
+                )));
             }
         }
 
