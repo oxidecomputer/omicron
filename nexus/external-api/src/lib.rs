@@ -3652,7 +3652,24 @@ pub trait NexusExternalApi {
         method = GET,
         path = "/v1/system/networking/bgp-status",
         tags = ["system/networking"],
-        versions = VERSION_BGP_PEER_COLLISION_STATE..,
+        versions = VERSION_BGP_PEER_COLLISION_STATE..VERSION_BGP_UNNUMBERED_PEERS,
+    }]
+    async fn networking_bgp_status_v2026020600(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<Vec<v2026020600::BgpPeerStatus>>, HttpError>
+    {
+        let result = Self::networking_bgp_status(rqctx).await?.0;
+        let shit: Vec<_> =
+            result.into_iter().map(v2026020600::BgpPeerStatus::from).collect();
+        Ok(HttpResponseOk(shit))
+    }
+
+    /// Get BGP peer status
+    #[endpoint {
+        method = GET,
+        path = "/v1/system/networking/bgp-status",
+        tags = ["system/networking"],
+        versions = VERSION_BGP_UNNUMBERED_PEERS..,
     }]
     async fn networking_bgp_status(
         rqctx: RequestContext<Self::Context>,

@@ -132,9 +132,10 @@ impl super::Nexus {
                         continue;
                     }
                 };
-                for (_host, info) in peers {
+                for (peer_id, info) in peers {
                     result.push(BgpPeerStatus {
                         switch: *switch,
+                        peer_id: peer_id.clone(),
                         addr: info.remote_ip,
                         local_asn: r.asn,
                         remote_asn: info.asn.unwrap_or(0),

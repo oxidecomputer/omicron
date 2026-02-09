@@ -17557,6 +17557,10 @@
             "format": "uint32",
             "minimum": 0
           },
+          "peer_id": {
+            "description": "Interface name",
+            "type": "string"
+          },
           "remote_asn": {
             "description": "Remote autonomous system number.",
             "type": "integer",
@@ -17589,6 +17593,7 @@
         "required": [
           "addr",
           "local_asn",
+          "peer_id",
           "remote_asn",
           "state",
           "state_duration_millis",

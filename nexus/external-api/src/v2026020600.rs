@@ -369,3 +369,52 @@ impl From<BgpConfig> for external::BgpConfig {
         }
     }
 }
+
+/// The current status of a BGP peer.
+#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq)]
+pub struct BgpPeerStatus {
+    /// IP address of the peer.
+    pub addr: IpAddr,
+
+    /// Local autonomous system number.
+    pub local_asn: u32,
+
+    /// Remote autonomous system number.
+    pub remote_asn: u32,
+
+    /// State of the peer.
+    pub state: external::BgpPeerState,
+
+    /// Time of last state change.
+    pub state_duration_millis: u64,
+
+    /// Switch with the peer session.
+    pub switch: external::SwitchLocation,
+}
+
+impl From<BgpPeerStatus> for external::BgpPeerStatus {
+    fn from(value: BgpPeerStatus) -> Self {
+        Self {
+            addr: value.addr,
+            peer_id: String::default(),
+            local_asn: value.local_asn,
+            remote_asn: value.remote_asn,
+            state: value.state.clone(),
+            state_duration_millis: value.state_duration_millis,
+            switch: value.switch.clone(),
+        }
+    }
+}
+
+impl From<external::BgpPeerStatus> for BgpPeerStatus {
+    fn from(value: external::BgpPeerStatus) -> Self {
+        Self {
+            addr: value.addr,
+            local_asn: value.local_asn,
+            remote_asn: value.remote_asn,
+            state: value.state.clone(),
+            state_duration_millis: value.state_duration_millis,
+            switch: value.switch.clone(),
+        }
+    }
+}

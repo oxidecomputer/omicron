@@ -3449,6 +3449,9 @@ pub struct BgpPeerStatus {
     /// IP address of the peer.
     pub addr: IpAddr,
 
+    /// Interface name
+    pub peer_id: String,
+
     /// Local autonomous system number.
     pub local_asn: u32,
 
