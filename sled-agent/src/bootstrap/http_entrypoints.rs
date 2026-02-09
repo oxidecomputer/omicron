@@ -121,9 +121,12 @@ impl BootstrapAgentApi for BootstrapAgentImpl {
         let ctx = rqctx.context();
         let request =
             RackInitializeRequestParams::new(body.into_inner(), SKIP_TIMESYNC);
-        let id = ctx
-            .start_rack_initialize(request)
-            .map_err(|err| HttpError::for_bad_request(None, InlineErrorChain::new(&err).to_string()))?;
+        let id = ctx.start_rack_initialize(request).map_err(|err| {
+            HttpError::for_bad_request(
+                None,
+                InlineErrorChain::new(&err).to_string(),
+            )
+        })?;
         Ok(HttpResponseOk(id))
     }
 
@@ -139,7 +142,12 @@ impl BootstrapAgentApi for BootstrapAgentImpl {
                 ctx.global_zone_bootstrap_ip,
                 ctx.measurements.clone(),
             )
-            .map_err(|err| HttpError::for_bad_request(None, InlineErrorChain::new(&err).to_string()))?;
+            .map_err(|err| {
+                HttpError::for_bad_request(
+                    None,
+                    InlineErrorChain::new(&err).to_string(),
+                )
+            })?;
         Ok(HttpResponseOk(id))
     }
 

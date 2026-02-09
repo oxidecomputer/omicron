@@ -18,8 +18,8 @@ use omicron_common::api::internal::nexus::ProducerEndpoint;
 use omicron_common::api::internal::nexus::ProducerKind;
 use oximeter_producer::LogConfig;
 use oximeter_producer::Server as ProducerServer;
-use slog_error_chain::InlineErrorChain;
 use sled_agent_types::disk::DiskStateRequested;
+use slog_error_chain::InlineErrorChain;
 use std::net::{Ipv6Addr, SocketAddr};
 use std::sync::Arc;
 use std::time::Duration;
@@ -180,8 +180,8 @@ impl SimDisk {
                 level: ConfigLoggingLevel::Error,
             }),
         };
-        let server =
-            ProducerServer::start(&config).map_err(|e| InlineErrorChain::new(&e).to_string())?;
+        let server = ProducerServer::start(&config)
+            .map_err(|e| InlineErrorChain::new(&e).to_string())?;
         let producer = producers::DiskProducer::new(id);
         server
             .registry()

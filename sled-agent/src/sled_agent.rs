@@ -249,7 +249,8 @@ impl From<Error> for dropshot::HttpError {
                             {
                                 return HttpError::for_unavail(
                                     None,
-                                    InlineErrorChain::new(&propolis_error).to_string(),
+                                    InlineErrorChain::new(&propolis_error)
+                                        .to_string(),
                                 );
                             }
                         }
@@ -277,7 +278,9 @@ impl From<Error> for dropshot::HttpError {
                             InlineErrorChain::new(&err).to_string(),
                         )
                     }
-                    e => HttpError::for_internal_error(InlineErrorChain::new(&e).to_string()),
+                    e => HttpError::for_internal_error(
+                        InlineErrorChain::new(&e).to_string(),
+                    ),
                 }
             }
             Error::Instance(
@@ -288,15 +291,22 @@ impl From<Error> for dropshot::HttpError {
             ),
             Error::ZoneBundle(ref inner) => match inner {
                 BundleError::NoStorage | BundleError::Unavailable { .. } => {
-                    HttpError::for_unavail(None, InlineErrorChain::new(inner).to_string())
+                    HttpError::for_unavail(
+                        None,
+                        InlineErrorChain::new(inner).to_string(),
+                    )
                 }
-                BundleError::NoSuchZone { .. } => {
-                    HttpError::for_not_found(None, InlineErrorChain::new(inner).to_string())
-                }
+                BundleError::NoSuchZone { .. } => HttpError::for_not_found(
+                    None,
+                    InlineErrorChain::new(inner).to_string(),
+                ),
                 BundleError::StorageLimitCreate(_)
                 | BundleError::CleanupPeriodCreate(_)
                 | BundleError::PriorityOrderCreate(_) => {
-                    HttpError::for_bad_request(None, InlineErrorChain::new(inner).to_string())
+                    HttpError::for_bad_request(
+                        None,
+                        InlineErrorChain::new(inner).to_string(),
+                    )
                 }
                 BundleError::InstanceTerminating => {
                     HttpError::for_client_error(
@@ -305,13 +315,17 @@ impl From<Error> for dropshot::HttpError {
                         InlineErrorChain::new(inner).to_string(),
                     )
                 }
-                _ => HttpError::for_internal_error(InlineErrorChain::new(&err).to_string()),
+                _ => HttpError::for_internal_error(
+                    InlineErrorChain::new(&err).to_string(),
+                ),
             },
             Error::Services(err) => {
                 let err = omicron_common::api::external::Error::from(err);
                 err.into()
             }
-            e => HttpError::for_internal_error(InlineErrorChain::new(&e).to_string()),
+            e => HttpError::for_internal_error(
+                InlineErrorChain::new(&e).to_string(),
+            ),
         }
     }
 }
@@ -1357,7 +1371,9 @@ impl SledAgent {
             additional_options: None,
         })
         .await
-        .map_err(|e| HttpError::for_internal_error(InlineErrorChain::new(&e).to_string()))?;
+        .map_err(|e| {
+            HttpError::for_internal_error(InlineErrorChain::new(&e).to_string())
+        })?;
 
         Zfs::ensure_dataset_volume(DatasetVolumeEnsureArgs {
             name: &delegated_zvol.volume_name(),
@@ -1370,9 +1386,14 @@ impl SledAgent {
         .await
         .map_err(|e| {
             if e.is_not_ready() {
-                HttpError::for_unavail(None, InlineErrorChain::new(&e).to_string())
+                HttpError::for_unavail(
+                    None,
+                    InlineErrorChain::new(&e).to_string(),
+                )
             } else {
-                HttpError::for_internal_error(InlineErrorChain::new(&e).to_string())
+                HttpError::for_internal_error(
+                    InlineErrorChain::new(&e).to_string(),
+                )
             }
         })?;
 
@@ -1449,7 +1470,9 @@ impl SledAgent {
             raw: true,
         })
         .await
-        .map_err(|e| HttpError::for_internal_error(InlineErrorChain::new(&e).to_string()))?;
+        .map_err(|e| {
+            HttpError::for_internal_error(InlineErrorChain::new(&e).to_string())
+        })?;
 
         match Zfs::destroy_dataset(&delegated_zvol.parent_dataset_name()).await
         {
@@ -1460,7 +1483,9 @@ impl SledAgent {
                 DestroyDatasetErrorVariant::NotFound => Ok(()),
 
                 DestroyDatasetErrorVariant::Other(e) => {
-                    Err(HttpError::for_internal_error(InlineErrorChain::new(&e).to_string()))
+                    Err(HttpError::for_internal_error(
+                        InlineErrorChain::new(&e).to_string(),
+                    ))
                 }
             },
         }

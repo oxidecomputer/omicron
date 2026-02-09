@@ -85,7 +85,12 @@ impl Server {
                     ),
                 )))
                 .start()
-                .map_err(|error| format!("initializing server: {}", InlineErrorChain::new(&error)))?;
+                .map_err(|error| {
+                    format!(
+                        "initializing server: {}",
+                        InlineErrorChain::new(&error)
+                    )
+                })?;
         Ok(Server { http_server })
     }
 

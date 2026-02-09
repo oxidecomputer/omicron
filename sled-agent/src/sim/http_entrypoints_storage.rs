@@ -114,9 +114,9 @@ async fn region_delete(
     let id = path.into_inner().id;
     let crucible = rc.context();
 
-    crucible
-        .delete(id)
-        .map_err(|e| HttpError::for_bad_request(None, InlineErrorChain::new(&*e).to_string()))?;
+    crucible.delete(id).map_err(|e| {
+        HttpError::for_bad_request(None, InlineErrorChain::new(&*e).to_string())
+    })?;
 
     Ok(HttpResponseDeleted())
 }
@@ -207,9 +207,9 @@ async fn region_delete_snapshot(
         ));
     }
 
-    crucible
-        .delete_snapshot(&p.id, &p.name)
-        .map_err(|e| HttpError::for_bad_request(None, InlineErrorChain::new(&*e).to_string()))?;
+    crucible.delete_snapshot(&p.id, &p.name).map_err(|e| {
+        HttpError::for_bad_request(None, InlineErrorChain::new(&*e).to_string())
+    })?;
 
     Ok(HttpResponseDeleted())
 }

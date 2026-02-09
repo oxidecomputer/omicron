@@ -428,8 +428,11 @@ mod swapctl {
         // Unwrap safety: We know this isn't null because we just created it
         let ptr = std::ptr::NonNull::new(&mut list_req).unwrap();
         let n_devices = unsafe {
-            swapctl_cmd(SC_LIST, Some(ptr))
-                .map_err(|e| SwapDeviceError::ListDevices(InlineErrorChain::new(&e).to_string()))?
+            swapctl_cmd(SC_LIST, Some(ptr)).map_err(|e| {
+                SwapDeviceError::ListDevices(
+                    InlineErrorChain::new(&e).to_string(),
+                )
+            })?
         };
 
         let mut devices = Vec::with_capacity(n_devices as usize);
