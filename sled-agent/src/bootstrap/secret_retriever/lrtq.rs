@@ -14,7 +14,7 @@ use key_manager::{
 ///
 /// The LRTQ retriever only returns keys for epoch 1
 #[derive(Debug)]
-pub(super) struct LrtqSecretRetriever {
+pub struct LrtqSecretRetriever {
     pub(super) salt: [u8; 32],
     bootstore: NodeHandle,
 }

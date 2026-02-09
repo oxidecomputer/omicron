@@ -77,7 +77,8 @@ pub struct LongRunningTaskHandles {
     pub health_monitor: HealthMonitorHandle,
 
     /// A handle for interacting with the trust quorum
-    pub trust_quorum: trust_quorum::NodeTaskHandle,
+    /// Re-enable after R18
+    /*pub trust_quorum: trust_quorum::NodeTaskHandle, */
 
     /// Handle to configure the secret retriever used by the KeyManager.
     pub secret_retriever: ConfigurableSecretRetrieverHandle,
@@ -176,7 +177,9 @@ pub async fn spawn_all_longrunning_tasks(
         .await,
     );
 
-    let trust_quorum = spawn_trust_quorum_task(
+    // TODO: Re-enable post R18
+    // This is disabled because it exacerbates a pre-existing IPCC bug.
+    /*let trust_quorum = spawn_trust_quorum_task(
         log,
         &config_reconciler,
         &hardware_manager,
@@ -185,13 +188,14 @@ pub async fn spawn_all_longrunning_tasks(
         measurements.clone(),
     )
     .await;
+    */
 
     let bootstore = spawn_bootstore_tasks(
         log,
         &config_reconciler,
         &hardware_manager,
         global_zone_bootstrap_ip,
-        trust_quorum.clone(),
+        /*trust_quorum.clone() */
     )
     .await;
 
@@ -206,7 +210,7 @@ pub async fn spawn_all_longrunning_tasks(
             zone_bundler,
             zone_image_resolver,
             health_monitor,
-            trust_quorum,
+            /*trust_quorum, */
             secret_retriever: secret_retriever_config,
             artifact_store,
             measurements,
@@ -306,7 +310,7 @@ async fn spawn_bootstore_tasks(
     config_reconciler: &ConfigReconcilerHandle,
     hardware_manager: &HardwareManager,
     global_zone_bootstrap_ip: Ipv6Addr,
-    tq_handle: trust_quorum::NodeTaskHandle,
+    /* tq_handle: trust_quorum::NodeTaskHandle, */
 ) -> bootstore::NodeHandle {
     let config = new_bootstore_config(
         &config_reconciler
@@ -329,8 +333,11 @@ async fn spawn_bootstore_tasks(
     let log = log.new(o!("component" => "bootstore_ddmd_poller"));
     let node_handle2 = node_handle.clone();
     tokio::spawn(async move {
-        poll_ddmd_for_bootstore_and_tq_peer_update(log, node_handle2, tq_handle)
-            .await
+        poll_ddmd_for_bootstore_and_tq_peer_update(
+            log,
+            node_handle2, /*tq_handle */
+        )
+        .await
     });
 
     node_handle

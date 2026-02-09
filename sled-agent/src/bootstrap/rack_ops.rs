@@ -152,7 +152,7 @@ impl RssAccess {
         internal_disks_rx: &InternalDisksReceiver,
         measurements: Arc<MeasurementsHandle>,
         bootstore_node_handle: &bootstore::NodeHandle,
-        trust_quorum_handle: &trust_quorum::NodeTaskHandle,
+        /*        trust_quorum_handle: &trust_quorum::NodeTaskHandle, */
         request: RackInitializeRequestParams,
     ) -> Result<RackInitUuid, RssAccessError> {
         let mut status = self.status.lock().unwrap();
@@ -192,7 +192,7 @@ impl RssAccess {
                 let internal_disks_rx = internal_disks_rx.clone();
                 let bootstore_node_handle = bootstore_node_handle.clone();
                 let status = Arc::clone(&self.status);
-                let trust_quorum_handle = trust_quorum_handle.clone();
+                /* let trust_quorum_handle = trust_quorum_handle.clone(); */
                 tokio::spawn(async move {
                     let result = rack_initialize(
                         &parent_log,
@@ -201,7 +201,7 @@ impl RssAccess {
                         internal_disks_rx,
                         measurements,
                         bootstore_node_handle,
-                        trust_quorum_handle,
+                        /*trust_quorum_handle, */
                         request,
                         step_tx,
                     )
@@ -346,7 +346,7 @@ async fn rack_initialize(
     internal_disks_rx: InternalDisksReceiver,
     measurements: Arc<MeasurementsHandle>,
     bootstore_node_handle: bootstore::NodeHandle,
-    trust_quorum_handle: trust_quorum::NodeTaskHandle,
+    /*    trust_quorum_handle: trust_quorum::NodeTaskHandle, */
     request: RackInitializeRequestParams,
     step_tx: watch::Sender<RssStep>,
 ) -> Result<(), SetupServiceError> {
@@ -358,7 +358,7 @@ async fn rack_initialize(
         internal_disks_rx,
         measurements,
         bootstore_node_handle,
-        trust_quorum_handle,
+        /* trust_quorum_handle, */
         step_tx,
     )
     .await
