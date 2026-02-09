@@ -79,6 +79,7 @@ api_versions!([
     // |  date-based version should be at the top of the list.
     // v
     // (next_yyyymmddnn, IDENT),
+    (2026020901, UPDATE_EXTERNAL_SUBNET_DOCS),
     (2026020900, RENAME_POOL_ENDPOINTS),
     (2026020600, ADD_SILO_SUBNET_POOLS),
     (2026020200, TRUST_QUORUM_ABORT_CONFIG),
@@ -2355,10 +2356,6 @@ pub trait NexusExternalApi {
     ) -> Result<HttpResponseDeleted, HttpError>;
 
     /// Attach an external subnet to an instance
-    ///
-    /// Begins an asynchronous attach operation. Returns the subnet with
-    /// `instance_id` set to the target instance. The attach completes
-    /// asynchronously; poll the subnet to check completion.
     #[endpoint {
         method = POST,
         path = "/v1/external-subnets/{external_subnet}/attach",
@@ -2373,9 +2370,6 @@ pub trait NexusExternalApi {
     ) -> Result<HttpResponseAccepted<views::ExternalSubnet>, HttpError>;
 
     /// Detach an external subnet from an instance
-    ///
-    /// Begins an asynchronous detach operation. Returns the subnet with
-    /// `instance_id` cleared. The detach completes asynchronously.
     #[endpoint {
         method = POST,
         path = "/v1/external-subnets/{external_subnet}/detach",
