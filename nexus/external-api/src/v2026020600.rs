@@ -401,7 +401,7 @@ impl From<BgpPeerStatus> for external::BgpPeerStatus {
             remote_asn: value.remote_asn,
             state: value.state.clone(),
             state_duration_millis: value.state_duration_millis,
-            switch: value.switch.clone(),
+            switch: value.switch,
         }
     }
 }
@@ -414,7 +414,7 @@ impl From<external::BgpPeerStatus> for BgpPeerStatus {
             remote_asn: value.remote_asn,
             state: value.state.clone(),
             state_duration_millis: value.state_duration_millis,
-            switch: value.switch.clone(),
+            switch: value.switch,
         }
     }
 }
