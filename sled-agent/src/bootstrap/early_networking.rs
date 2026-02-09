@@ -203,7 +203,7 @@ impl<'a> EarlyNetworkSetup<'a> {
                     "Failed to look up switch zone locations";
                     // The error type here is String, so we
                     // don't need InlineErrorChain.
-                    "error" => #%error,
+                    "error" => %error,
                     "retry_after" => ?delay,
                     "requested_wait_time" => ?wait_for_at_least_one,
                     "total_elapsed" => ?elapsed,
@@ -284,7 +284,11 @@ impl<'a> EarlyNetworkSetup<'a> {
                     switch_location_map.insert(location, addr);
                 }
                 Err(err) => {
-                    warn!(self.log, "Failed to determine switch location from MGS"; InlineErrorChain::new(&*err));
+                    warn!(
+                        self.log,
+                        "Failed to determine switch location from MGS";
+                        InlineErrorChain::new(&*err),
+                    );
                 }
             }
         }

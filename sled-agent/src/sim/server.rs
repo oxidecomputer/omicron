@@ -131,9 +131,7 @@ impl Server {
             ),
         )))
         .start()
-        .map_err(|error| {
-            anyhow!("initializing server: {}", InlineErrorChain::new(&error),)
-        })?;
+        .context("initializing server")?;
 
         // Notify the control plane that we're up, and continue trying this
         // until it succeeds. We retry with an randomized, capped exponential
@@ -341,10 +339,9 @@ pub async fn run_standalone_server(
     logging: &dropshot::ConfigLogging,
     rss_args: &RssArgs,
 ) -> Result<(), anyhow::Error> {
-    let (drain, registration) =
-        slog_dtrace::with_drain(logging.to_logger("sled-agent").map_err(
-            |e| anyhow!("initializing logger: {}", InlineErrorChain::new(&e)),
-        )?);
+    let (drain, registration) = slog_dtrace::with_drain(
+        logging.to_logger("sled-agent").context("initializing logger")?,
+    );
     let log = slog::Logger::root(drain.fuse(), slog::o!(FileKv));
     if let slog_dtrace::ProbeRegistration::Failed(e) = registration {
         let msg = format!("failed to register DTrace probes: {}", e);

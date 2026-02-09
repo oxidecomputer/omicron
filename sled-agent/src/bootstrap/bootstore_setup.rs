@@ -113,7 +113,7 @@ pub async fn poll_ddmd_for_bootstore_and_tq_peer_update(
                     {
                         error!(
                             log,
-                            "Bootstore comms error, \
+                            "Bootstore comms error; \
                              bootstore::Node task must have panicked";
                             InlineErrorChain::new(&e),
                         );

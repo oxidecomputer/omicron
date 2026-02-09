@@ -52,7 +52,10 @@ mod illumos {
                 }
             }
             Err(e) => {
-                error!(log, "failed to get list of zones"; InlineErrorChain::new(&e));
+                error!(
+                    log, "failed to get list of zones";
+                    InlineErrorChain::new(&e),
+                );
                 return;
             }
         }
@@ -65,7 +68,10 @@ mod illumos {
             .arg("halt")
             .output()
         {
-            error!(log, "failed to halt switch zone"; InlineErrorChain::new(&e));
+            error!(
+                log, "failed to halt switch zone";
+                InlineErrorChain::new(&e),
+            );
         }
     }
 
@@ -78,7 +84,10 @@ mod illumos {
             if let Ok(true) = std::fs::exists(TOFINO_DEVICE) {
                 match tofino::get_tofino() {
                     Err(e) => {
-                        error!(log, "failed devinfo lookup"; InlineErrorChain::new(&e))
+                        error!(
+                            log, "failed devinfo lookup";
+                            InlineErrorChain::new(&e),
+                        );
                     }
                     Ok(Some(x)) => return x,
                     _ => {}
@@ -105,7 +114,10 @@ mod illumos {
                 Ok(template) => match template.create() {
                     Ok(c) => c,
                     Err(e) => {
-                        error!(&log, "unable to create tofino contract"; InlineErrorChain::new(&e));
+                        error!(
+                            &log, "unable to create tofino contract";
+                            InlineErrorChain::new(&e),
+                        );
                         continue;
                     }
                 },
@@ -121,7 +133,10 @@ mod illumos {
             let ctl = match Control::new(ContractType::Device, ctid) {
                 Ok(c) => c,
                 Err(e) => {
-                    error!(&log, "unable to create tofino contract"; InlineErrorChain::new(&e));
+                    error!(
+                        &log, "unable to create tofino contract";
+                        InlineErrorChain::new(&e),
+                    );
                     continue;
                 }
             };
@@ -149,14 +164,20 @@ mod illumos {
                         halt_switch_zone(&log);
                         info!(&log, "acknowledging the remove event");
                         if let Err(e) = ctl.ack(ev.event_id) {
-                            error!(&log, "failed to ack event"; InlineErrorChain::new(&e));
+                            error!(
+                                &log, "failed to ack event";
+                                InlineErrorChain::new(&e),
+                            );
                         }
                         std::thread::sleep(std::time::Duration::from_secs(2));
                     }
                     contract::CT_EV_NEGEND => {
                         info!(&log, "closing out the device contract");
                         if let Err(e) = ctl.abandon() {
-                            error!(&log, "failed to abandon contract"; InlineErrorChain::new(&e));
+                            error!(
+                                &log, "failed to abandon contract";
+                                InlineErrorChain::new(&e),
+                            );
                         }
 
                         info!(&log, "tofino monitor exiting");

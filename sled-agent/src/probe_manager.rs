@@ -271,7 +271,10 @@ impl ProbeManagerInner {
         let current = match self.current_state().await {
             Ok(state) => state,
             Err(e) => {
-                error!(self.log, "get current probe state"; InlineErrorChain::new(&*e));
+                error!(
+                    self.log, "get current probe state";
+                    InlineErrorChain::new(&*e),
+                );
                 return;
             }
         };

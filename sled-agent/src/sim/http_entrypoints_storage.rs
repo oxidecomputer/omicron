@@ -15,9 +15,8 @@ use dropshot::{
 };
 use schemars::JsonSchema;
 use serde::Deserialize;
-use std::sync::Arc;
-
 use slog_error_chain::InlineErrorChain;
+use std::sync::Arc;
 
 use super::storage::CrucibleData;
 

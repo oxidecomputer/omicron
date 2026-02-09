@@ -505,7 +505,10 @@ impl NexusNotifierTask {
         {
             Ok(res) => res,
             Err(e) => {
-                error!(self.log, "Nexus request task exited prematurely"; InlineErrorChain::new(&e));
+                error!(
+                    self.log, "Nexus request task exited prematurely";
+                    InlineErrorChain::new(&e),
+                );
                 return;
             }
         };
