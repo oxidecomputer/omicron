@@ -66,6 +66,7 @@ use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::DeleteResult;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::ListResultVec;
+use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::LookupType;
 use omicron_common::api::external::NameOrId;
 use omicron_common::api::external::ResourceType;
@@ -461,6 +462,53 @@ impl DataStore {
         .load_async(&*self.pool_connection_authorized(opctx).await?)
         .await
         .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+    }
+
+    /// Fetch a single Subnet Pool linked to the given Silo by name or ID.
+    ///
+    /// Returns 404 if the pool doesn't exist or isn't linked to the silo.
+    pub async fn silo_subnet_pool_fetch(
+        &self,
+        opctx: &OpContext,
+        authz_silo: &authz::Silo,
+        pool: &NameOrId,
+    ) -> LookupResult<(SubnetPool, SubnetPoolSiloLink)> {
+        use nexus_db_schema::schema::subnet_pool;
+        use nexus_db_schema::schema::subnet_pool_silo_link;
+
+        let mut query = subnet_pool::table
+            .inner_join(subnet_pool_silo_link::table)
+            .filter(subnet_pool_silo_link::silo_id.eq(authz_silo.id()))
+            .filter(subnet_pool::time_deleted.is_null())
+            .select(<(SubnetPool, SubnetPoolSiloLink)>::as_select())
+            .into_boxed();
+
+        match pool {
+            NameOrId::Name(name) => {
+                query = query.filter(subnet_pool::name.eq(name.to_string()));
+            }
+            NameOrId::Id(id) => {
+                query = query.filter(subnet_pool::id.eq(*id));
+            }
+        }
+
+        let lookup_type = match pool {
+            NameOrId::Name(name) => LookupType::ByName(name.to_string()),
+            NameOrId::Id(id) => LookupType::ById(*id),
+        };
+
+        query
+            .first_async(&*self.pool_connection_authorized(opctx).await?)
+            .await
+            .map_err(|e| {
+                public_error_from_diesel(
+                    e,
+                    ErrorHandler::NotFoundByLookup(
+                        ResourceType::SubnetPool,
+                        lookup_type,
+                    ),
+                )
+            })
     }
 
     /// Add a new Subnet Pool Member.

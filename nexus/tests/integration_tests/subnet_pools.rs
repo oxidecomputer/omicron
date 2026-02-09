@@ -21,6 +21,7 @@ use nexus_test_utils::resource_helpers::create_silo;
 use nexus_test_utils::resource_helpers::create_subnet_pool;
 use nexus_test_utils::resource_helpers::create_subnet_pool_member;
 use nexus_test_utils::resource_helpers::grant_iam;
+use nexus_test_utils::resource_helpers::link_subnet_pool;
 use nexus_test_utils::resource_helpers::test_params;
 use nexus_test_utils_macros::nexus_test;
 use nexus_types::external_api::params;
@@ -593,6 +594,79 @@ async fn test_current_silo_subnet_pool_list(
     assert_eq!(list[1].identity.name.to_string(), other_name);
     assert!(!list[1].is_default);
     assert_eq!(list[1].ip_version, IpVersion::V6);
+}
+
+#[nexus_test]
+async fn test_current_silo_subnet_pool_view(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+
+    let silo =
+        create_silo(client, SILO_NAME, false, SiloIdentityMode::LocalOnly)
+            .await;
+    let silo_url = format!("{}/{}", SILO_URL, SILO_NAME);
+
+    let default_name = "default-subnet-pool";
+    let other_name = "other-subnet-pool";
+    let unlinked_name = "unlinked-subnet-pool";
+
+    create_subnet_pool(client, default_name, IpVersion::V6).await;
+    create_subnet_pool(client, other_name, IpVersion::V4).await;
+    create_subnet_pool(client, unlinked_name, IpVersion::V6).await;
+
+    link_subnet_pool(client, default_name, &silo.identity.id, true).await;
+    link_subnet_pool(client, other_name, &silo.identity.id, false).await;
+
+    // Create a silo user and make them a collaborator.
+    let user = create_local_user(
+        client,
+        &silo,
+        &"user".parse().unwrap(),
+        test_params::UserPassword::LoginDisallowed,
+    )
+    .await;
+    grant_iam(
+        client,
+        &silo_url,
+        SiloRole::Collaborator,
+        user.id,
+        AuthnMode::PrivilegedUser,
+    )
+    .await;
+
+    // Fetch a linked default pool by name.
+    let url = format!("/v1/subnet-pools/{}", default_name);
+    let pool = NexusRequest::object_get(client, &url)
+        .authn_as(AuthnMode::SiloUser(user.id))
+        .execute_and_parse_unwrap::<SiloSubnetPool>()
+        .await;
+    assert_eq!(pool.identity.name.as_str(), default_name);
+    assert!(pool.is_default);
+    assert_eq!(pool.ip_version, IpVersion::V6);
+
+    // Fetch a linked non-default pool by name.
+    let url = format!("/v1/subnet-pools/{}", other_name);
+    let pool = NexusRequest::object_get(client, &url)
+        .authn_as(AuthnMode::SiloUser(user.id))
+        .execute_and_parse_unwrap::<SiloSubnetPool>()
+        .await;
+    assert_eq!(pool.identity.name.as_str(), other_name);
+    assert!(!pool.is_default);
+    assert_eq!(pool.ip_version, IpVersion::V4);
+
+    // Fetching an unlinked pool returns 404.
+    let url = format!("/v1/subnet-pools/{}", unlinked_name);
+    NexusRequest::expect_failure(
+        client,
+        StatusCode::NOT_FOUND,
+        Method::GET,
+        &url,
+    )
+    .authn_as(AuthnMode::SiloUser(user.id))
+    .execute()
+    .await
+    .unwrap();
 }
 
 #[nexus_test]
