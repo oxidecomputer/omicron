@@ -201,7 +201,7 @@ impl From<Error> for omicron_common::api::external::Error {
             // Some errors can convert themselves into the external error
             Error::Services(err) => err.into(),
             _ => omicron_common::api::external::Error::InternalError {
-                internal_message: err.to_string(),
+                internal_message: InlineErrorChain::new(&err).to_string(),
             },
         }
     }
@@ -227,7 +227,7 @@ impl From<Error> for dropshot::HttpError {
                     err @ crate::instance::Error::FailedSendChannelFull => {
                         HttpError::for_unavail(
                             Some(INSTANCE_CHANNEL_FULL.to_string()),
-                            err.to_string(),
+                            InlineErrorChain::new(&err).to_string(),
                         )
                     }
                     crate::instance::Error::Propolis(propolis_error) => {
@@ -250,12 +250,12 @@ impl From<Error> for dropshot::HttpError {
                             {
                                 return HttpError::for_unavail(
                                     None,
-                                    propolis_error.to_string(),
+                                    InlineErrorChain::new(&propolis_error).to_string(),
                                 );
                             }
                         }
                         HttpError::for_internal_error(
-                            propolis_error.to_string(),
+                            InlineErrorChain::new(&propolis_error).to_string(),
                         )
                     }
                     crate::instance::Error::Transition(omicron_error) => {
@@ -268,51 +268,51 @@ impl From<Error> for dropshot::HttpError {
                         HttpError::for_client_error(
                             Some(NO_SUCH_INSTANCE.to_string()),
                             ClientErrorStatusCode::GONE,
-                            instance_error.to_string(),
+                            InlineErrorChain::new(&instance_error).to_string(),
                         )
                     }
                     err @ crate::instance::Error::SubnetAlreadyAttached(_) => {
                         HttpError::for_client_error(
                             Some(SUBNET_ALREADY_ATTACHED.to_string()),
                             ClientErrorStatusCode::CONFLICT,
-                            err.to_string(),
+                            InlineErrorChain::new(&err).to_string(),
                         )
                     }
-                    e => HttpError::for_internal_error(e.to_string()),
+                    e => HttpError::for_internal_error(InlineErrorChain::new(&e).to_string()),
                 }
             }
             Error::Instance(
                 e @ crate::instance_manager::Error::NoSuchVmm(_),
             ) => HttpError::for_not_found(
                 Some(NO_SUCH_INSTANCE.to_string()),
-                e.to_string(),
+                InlineErrorChain::new(&e).to_string(),
             ),
             Error::ZoneBundle(ref inner) => match inner {
                 BundleError::NoStorage | BundleError::Unavailable { .. } => {
-                    HttpError::for_unavail(None, inner.to_string())
+                    HttpError::for_unavail(None, InlineErrorChain::new(inner).to_string())
                 }
                 BundleError::NoSuchZone { .. } => {
-                    HttpError::for_not_found(None, inner.to_string())
+                    HttpError::for_not_found(None, InlineErrorChain::new(inner).to_string())
                 }
                 BundleError::StorageLimitCreate(_)
                 | BundleError::CleanupPeriodCreate(_)
                 | BundleError::PriorityOrderCreate(_) => {
-                    HttpError::for_bad_request(None, inner.to_string())
+                    HttpError::for_bad_request(None, InlineErrorChain::new(inner).to_string())
                 }
                 BundleError::InstanceTerminating => {
                     HttpError::for_client_error(
                         Some(NO_SUCH_INSTANCE.to_string()),
                         ClientErrorStatusCode::GONE,
-                        inner.to_string(),
+                        InlineErrorChain::new(inner).to_string(),
                     )
                 }
-                _ => HttpError::for_internal_error(err.to_string()),
+                _ => HttpError::for_internal_error(InlineErrorChain::new(&err).to_string()),
             },
             Error::Services(err) => {
                 let err = omicron_common::api::external::Error::from(err);
                 err.into()
             }
-            e => HttpError::for_internal_error(e.to_string()),
+            e => HttpError::for_internal_error(InlineErrorChain::new(&e).to_string()),
         }
     }
 }
@@ -1362,7 +1362,7 @@ impl SledAgent {
             additional_options: None,
         })
         .await
-        .map_err(|e| HttpError::for_internal_error(e.to_string()))?;
+        .map_err(|e| HttpError::for_internal_error(InlineErrorChain::new(&e).to_string()))?;
 
         Zfs::ensure_dataset_volume(DatasetVolumeEnsureArgs {
             name: &delegated_zvol.volume_name(),
@@ -1375,9 +1375,9 @@ impl SledAgent {
         .await
         .map_err(|e| {
             if e.is_not_ready() {
-                HttpError::for_unavail(None, e.to_string())
+                HttpError::for_unavail(None, InlineErrorChain::new(&e).to_string())
             } else {
-                HttpError::for_internal_error(e.to_string())
+                HttpError::for_internal_error(InlineErrorChain::new(&e).to_string())
             }
         })?;
 
@@ -1454,7 +1454,7 @@ impl SledAgent {
             raw: true,
         })
         .await
-        .map_err(|e| HttpError::for_internal_error(e.to_string()))?;
+        .map_err(|e| HttpError::for_internal_error(InlineErrorChain::new(&e).to_string()))?;
 
         match Zfs::destroy_dataset(&delegated_zvol.parent_dataset_name()).await
         {
@@ -1465,7 +1465,7 @@ impl SledAgent {
                 DestroyDatasetErrorVariant::NotFound => Ok(()),
 
                 DestroyDatasetErrorVariant::Other(e) => {
-                    Err(HttpError::for_internal_error(e.to_string()))
+                    Err(HttpError::for_internal_error(InlineErrorChain::new(&e).to_string()))
                 }
             },
         }
@@ -1535,7 +1535,7 @@ pub enum AddSledError {
     DdmAdminClient(#[source] omicron_ddm_admin_client::DdmError),
     #[error("Failed to learn bootstrap ip for {0:?}")]
     NotFound(BaseboardId),
-    #[error("Failed to initialize {sled_id}: {err}")]
+    #[error("Failed to initialize {sled_id}")]
     BootstrapTcpClient {
         sled_id: Baseboard,
         #[source]
@@ -1594,7 +1594,7 @@ pub async fn sled_add(
             Err(err) => {
                 warn!(
                     log, "Failed to get baseboard for {ip}";
-                    "err" => #%err,
+                    InlineErrorChain::new(&err),
                 );
             }
         }

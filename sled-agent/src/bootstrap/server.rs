@@ -317,7 +317,7 @@ impl Server {
         match self.inner_task.await {
             Ok(()) => Ok(()),
             Err(err) => {
-                Err(format!("bootstrap agent inner task panicked: {err}"))
+                Err(format!("bootstrap agent inner task panicked: {}", InlineErrorChain::new(&err)))
             }
         }
     }
@@ -485,7 +485,9 @@ fn start_dropshot_server(
     )))
     .start()
     .map_err(|error| {
-        StartError::InitBootstrapDropshotServer(error.to_string())
+        StartError::InitBootstrapDropshotServer(
+            InlineErrorChain::new(&error).to_string(),
+        )
     })?;
 
     Ok(http_server)
@@ -648,7 +650,10 @@ impl Inner {
                             log, "Failed to start sled agent";
                             InlineErrorChain::new(&err),
                         );
-                        panic!("Failed to start sled agent: {err:#}");
+                        panic!(
+                            "Failed to start sled agent: {}",
+                            InlineErrorChain::new(&err),
+                        );
                     }
                 };
                 _ = response_tx.send(response);

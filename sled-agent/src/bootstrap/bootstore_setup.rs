@@ -18,6 +18,7 @@ use sled_hardware_types::Baseboard;
 use sled_hardware_types::underlay::BootstrapInterface;
 use sled_storage::dataset::CLUSTER_DATASET;
 use slog::Logger;
+use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeSet;
 use std::net::Ipv6Addr;
 use std::net::SocketAddrV6;
@@ -112,11 +113,9 @@ pub async fn poll_ddmd_for_bootstore_and_tq_peer_update(
                     {
                         error!(
                             log,
-                            concat!(
-                                "Bootstore comms error: {}. ",
-                                "bootstore::Node task must have panicked",
-                            ),
-                            e
+                            "Bootstore comms error, \
+                             bootstore::Node task must have panicked";
+                            InlineErrorChain::new(&e),
                         );
                         return;
                     }
@@ -144,7 +143,7 @@ pub async fn poll_ddmd_for_bootstore_and_tq_peer_update(
             Err(err) => {
                 warn!(
                     log, "Failed to get prefixes from ddmd";
-                    "err" => #%err,
+                    InlineErrorChain::new(&err),
                 );
                 break;
             }

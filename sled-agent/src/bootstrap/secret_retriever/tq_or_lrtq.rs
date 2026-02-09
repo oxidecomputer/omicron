@@ -12,6 +12,7 @@ use bootstore::schemes::v0::NodeHandle;
 use key_manager::{
     SecretRetriever, SecretRetrieverError, SecretState, VersionedIkm,
 };
+use slog_error_chain::InlineErrorChain;
 use trust_quorum::NodeTaskHandle;
 
 use super::lrtq::LrtqSecretRetriever;
@@ -71,7 +72,7 @@ impl TqOrLrtqSecretRetriever {
                 .handle
                 .status()
                 .await
-                .map_err(|e| SecretRetrieverError::TrustQuorum(e.to_string()))?
+                .map_err(|e| SecretRetrieverError::TrustQuorum(InlineErrorChain::new(&e).to_string()))?
                 .persistent_state
                 .commits;
 

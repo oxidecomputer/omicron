@@ -302,14 +302,14 @@ impl From<Error> for omicron_common::api::external::Error {
             | Error::InvalidFilesystemPoolZoneConfig { .. }
             | Error::ZoneIsRunningOnRamdisk { .. } => {
                 omicron_common::api::external::Error::invalid_request(
-                    &err.to_string(),
+                    &InlineErrorChain::new(&err).to_string(),
                 )
             }
             Error::RequestedZoneConfigOutdated { .. } => {
-                omicron_common::api::external::Error::conflict(&err.to_string())
+                omicron_common::api::external::Error::conflict(&InlineErrorChain::new(&err).to_string())
             }
             _ => omicron_common::api::external::Error::InternalError {
-                internal_message: err.to_string(),
+                internal_message: InlineErrorChain::new(&err).to_string(),
             },
         }
     }

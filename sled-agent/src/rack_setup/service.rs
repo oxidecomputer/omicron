@@ -678,7 +678,7 @@ impl ServiceInner {
                     log,
                     "failed to write DNS configuration (will retry in {:?})",
                     duration;
-                    "error_message" => #%error
+                    InlineErrorChain::new(&error),
                 );
             };
 
@@ -1071,7 +1071,7 @@ impl ServiceInner {
                 .map_err(BackoffError::transient)
         };
         let log_failure = |err, _| {
-            info!(self.log, "Failed to handoff to nexus: {err}");
+            info!(self.log, "Failed to handoff to nexus"; InlineErrorChain::new(&err));
         };
 
         retry_notify(

@@ -308,13 +308,13 @@ impl BootstrapAgentHandleReceiver {
                             .connect_timeout(dur)
                             .timeout(dur)
                             .build()
-                            .map_err(|e| e.to_string())?;
+                            .map_err(|e| InlineErrorChain::new(&e).to_string())?;
                         let client = BootstrapAgentClient::new_with_client(
                             &format!("http://{}", bootstrap_addr),
                             client,
                             log.new(o!("BootstrapAgentClient" => bootstrap_addr.to_string())),
                         );
-                        client.sled_reset().await.map_err(|e| e.to_string())?;
+                        client.sled_reset().await.map_err(|e| InlineErrorChain::new(&e).to_string())?;
 
                         info!(
                             log, "Reset sled";

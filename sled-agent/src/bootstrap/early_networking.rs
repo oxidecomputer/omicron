@@ -201,6 +201,8 @@ impl<'a> EarlyNetworkSetup<'a> {
                 warn!(
                     self.log,
                     "Failed to look up switch zone locations";
+                    // The error type here is String, so we
+                    // don't need InlineErrorChain.
                     "error" => #%error,
                     "retry_after" => ?delay,
                     "requested_wait_time" => ?wait_for_at_least_one,
@@ -241,7 +243,8 @@ impl<'a> EarlyNetworkSetup<'a> {
             .await
             .map_err(|err| {
                 BackoffError::transient(format!(
-                    "Error resolving dendrite services in internal DNS: {err}",
+                    "Error resolving dendrite services in internal DNS: {}",
+                    InlineErrorChain::new(&err),
                 ))
             })?;
 
@@ -281,7 +284,7 @@ impl<'a> EarlyNetworkSetup<'a> {
                     switch_location_map.insert(location, addr);
                 }
                 Err(err) => {
-                    warn!(self.log, "{err:#}");
+                    warn!(self.log, "Failed to determine switch location from MGS"; InlineErrorChain::new(&*err));
                 }
             }
         }

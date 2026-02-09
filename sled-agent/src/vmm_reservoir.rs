@@ -7,6 +7,7 @@
 use illumos_utils::vmm_reservoir;
 use omicron_common::api::external::ByteCount;
 use slog::Logger;
+use slog_error_chain::InlineErrorChain;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::thread;
@@ -16,7 +17,7 @@ use sled_hardware::MemoryReservations;
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
-    #[error("Failed to create reservoir: {0}")]
+    #[error("Failed to create reservoir")]
     Reservoir(#[from] vmm_reservoir::Error),
 
     #[error("Invalid reservoir configuration: {0}")]
@@ -187,7 +188,7 @@ impl VmmReservoirManager {
             }
             Some(mode) => {
                 if let Err(e) = self.set_reservoir_size(mode) {
-                    error!(self.log, "Failed to setup VMM reservoir: {e}");
+                    error!(self.log, "Failed to setup VMM reservoir"; InlineErrorChain::new(&e));
                 }
             }
         }
@@ -199,7 +200,7 @@ impl VmmReservoirManager {
                     let _ = reply_tx.send(Ok(()));
                 }
                 Err(e) => {
-                    error!(self.log, "Failed to setup VMM reservoir: {e}");
+                    error!(self.log, "Failed to setup VMM reservoir"; InlineErrorChain::new(&e));
                     let _ = reply_tx.send(Err(e));
                 }
             }

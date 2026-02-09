@@ -131,7 +131,12 @@ impl Server {
             ),
         )))
         .start()
-        .map_err(|error| anyhow!("initializing server: {}", error))?;
+        .map_err(|error| {
+            anyhow!(
+                "initializing server: {}",
+                InlineErrorChain::new(&error),
+            )
+        })?;
 
         // Notify the control plane that we're up, and continue trying this
         // until it succeeds. We retry with an randomized, capped exponential
@@ -296,7 +301,7 @@ async fn handoff_to_nexus(
             .map_err(BackoffError::transient)
     };
     let log_failure = |err, _| {
-        info!(log, "Failed to handoff to nexus: {err}");
+        info!(log, "Failed to handoff to nexus"; InlineErrorChain::new(&err));
     };
     retry_notify(
         retry_policy_internal_service_aggressive(),
@@ -342,7 +347,9 @@ pub async fn run_standalone_server(
     let (drain, registration) = slog_dtrace::with_drain(
         logging
             .to_logger("sled-agent")
-            .map_err(|message| anyhow!("initializing logger: {}", message))?,
+            .map_err(|e| {
+                anyhow!("initializing logger: {}", InlineErrorChain::new(&e))
+            })?,
     );
     let log = slog::Logger::root(drain.fuse(), slog::o!(FileKv));
     if let slog_dtrace::ProbeRegistration::Failed(e) = registration {

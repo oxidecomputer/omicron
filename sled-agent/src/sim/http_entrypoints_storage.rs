@@ -17,6 +17,8 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 use std::sync::Arc;
 
+use slog_error_chain::InlineErrorChain;
+
 use super::storage::CrucibleData;
 
 type CrucibleAgentApiDescription = ApiDescription<Arc<CrucibleData>>;
@@ -114,7 +116,7 @@ async fn region_delete(
 
     crucible
         .delete(id)
-        .map_err(|e| HttpError::for_bad_request(None, e.to_string()))?;
+        .map_err(|e| HttpError::for_bad_request(None, InlineErrorChain::new(&*e).to_string()))?;
 
     Ok(HttpResponseDeleted())
 }
@@ -207,7 +209,7 @@ async fn region_delete_snapshot(
 
     crucible
         .delete_snapshot(&p.id, &p.name)
-        .map_err(|e| HttpError::for_bad_request(None, e.to_string()))?;
+        .map_err(|e| HttpError::for_bad_request(None, InlineErrorChain::new(&*e).to_string()))?;
 
     Ok(HttpResponseDeleted())
 }
@@ -248,8 +250,8 @@ async fn region_run_snapshot(
     let running_snapshot =
         crucible.create_running_snapshot(&p.id, &p.name).map_err(|e| {
             HttpError::for_internal_error(format!(
-                "running snapshot create failure: {:?}",
-                e,
+                "running snapshot create failure: {}",
+                InlineErrorChain::new(&*e),
             ))
         })?;
 
@@ -276,8 +278,8 @@ async fn region_delete_running_snapshot(
 
     crucible.delete_running_snapshot(&p.id, &p.name).map_err(|e| {
         HttpError::for_internal_error(format!(
-            "running snapshot create failure: {:?}",
-            e,
+            "running snapshot create failure: {}",
+            InlineErrorChain::new(&*e),
         ))
     })?;
 

@@ -15,6 +15,7 @@ use async_trait::async_trait;
 use key_manager::{
     SecretRetriever, SecretRetrieverError, SecretState, VersionedIkm,
 };
+use slog_error_chain::InlineErrorChain;
 use secrecy::ExposeSecret;
 use std::time::Duration;
 use tokio::time::{sleep, timeout};
@@ -66,7 +67,7 @@ impl TqSecretRetriever {
                     }
                     Err(e) => {
                         return Err(SecretRetrieverError::TrustQuorum(
-                            e.to_string(),
+                            InlineErrorChain::new(&e).to_string(),
                         ));
                     }
                 }
@@ -93,7 +94,7 @@ impl TqSecretRetriever {
                     }
                     Err(e) => {
                         return Err(SecretRetrieverError::TrustQuorum(
-                            e.to_string(),
+                            InlineErrorChain::new(&e).to_string(),
                         ));
                     }
                 }

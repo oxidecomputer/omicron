@@ -15,6 +15,7 @@ use omicron_uuid_kinds::SledUuid;
 use sled_agent_config_reconciler::ConfigReconcilerSpawnToken;
 use sled_agent_types::sled::StartSledAgentRequest;
 use slog::Logger;
+use slog_error_chain::InlineErrorChain;
 use std::net::SocketAddr;
 use std::sync::Arc;
 
@@ -51,7 +52,7 @@ impl Server {
                 log.new(o!("component" => "DnsResolver")),
                 *sled_address.ip(),
             )
-            .map_err(|e| e.to_string())?,
+            .map_err(|e| InlineErrorChain::new(&e).to_string())?,
         );
 
         let nexus_client = make_nexus_client(&log, resolver);
@@ -66,7 +67,7 @@ impl Server {
             config_reconciler_spawn_token,
         )
         .await
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| InlineErrorChain::new(&e).to_string())?;
 
         let dropshot_config = dropshot::ConfigDropshot {
             bind_address: SocketAddr::V6(sled_address),
@@ -84,7 +85,7 @@ impl Server {
                     ),
                 )))
                 .start()
-                .map_err(|error| format!("initializing server: {}", error))?;
+                .map_err(|error| format!("initializing server: {}", InlineErrorChain::new(&error)))?;
         Ok(Server { http_server })
     }
 

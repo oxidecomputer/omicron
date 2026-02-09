@@ -148,8 +148,8 @@ impl SledAgentApi for SledAgentImpl {
         };
         let f = tokio::fs::File::open(&path).await.map_err(|e| {
             HttpError::for_internal_error(format!(
-                "failed to open zone bundle file at {}: {:?}",
-                path, e,
+                "failed to open zone bundle file at {path}: {}",
+                InlineErrorChain::new(&e),
             ))
         })?;
         let file_access = hyper_staticfile::vfs::TokioFileAccess::new(f);
@@ -190,7 +190,8 @@ impl SledAgentApi for SledAgentImpl {
         for path in paths.into_iter() {
             tokio::fs::remove_file(&path).await.map_err(|e| {
                 HttpError::for_internal_error(format!(
-                    "Failed to delete zone bundle: {e}"
+                    "Failed to delete zone bundle: {}",
+                    InlineErrorChain::new(&e),
                 ))
             })?;
         }
@@ -846,7 +847,7 @@ impl SledAgentApi for SledAgentImpl {
         )
         .await
         .map_err(|e| {
-            let message = format!("Failed to add sled to rack cluster: {e}");
+            let message = format!("Failed to add sled to rack cluster: {}", InlineErrorChain::new(&e));
             HttpError {
                 status_code: ErrorStatusCode::INTERNAL_SERVER_ERROR,
                 error_code: None,

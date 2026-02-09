@@ -24,6 +24,7 @@ mod views;
 
 pub(crate) use pre_server::BootstrapNetworking;
 pub use rack_ops::RssAccessError;
+use slog_error_chain::InlineErrorChain;
 
 /// Describes errors which may occur while operating the bootstrap service.
 #[derive(thiserror::Error, Debug)]
@@ -53,6 +54,6 @@ pub enum BootstrapError {
 
 impl From<BootstrapError> for omicron_common::api::external::Error {
     fn from(err: BootstrapError) -> Self {
-        Self::internal_error(&format!("{err:#}"))
+        Self::internal_error(&InlineErrorChain::new(&err).to_string())
     }
 }
