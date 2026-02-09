@@ -433,10 +433,16 @@ impl SledAgent {
                         {
                             Ok(state) => {
                                 let vmm_state: nexus_client::types::SledVmmState = state.into();
-                                info!(log, "sim_ensure success"; "vmm_state" => #?vmm_state);
+                                info!(
+                                    log, "sim_ensure success";
+                                    "vmm_state" => #?vmm_state,
+                                );
                             }
                             Err(instance_put_error) => {
-                                error!(log, "sim_ensure failure"; InlineErrorChain::new(&instance_put_error));
+                                error!(
+                                    log, "sim_ensure failure";
+                                    InlineErrorChain::new(&instance_put_error),
+                                );
                             }
                         }
                     });

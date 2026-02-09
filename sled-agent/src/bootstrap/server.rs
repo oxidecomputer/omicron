@@ -644,7 +644,10 @@ impl Inner {
                     Err(err) => {
                         // This error is unrecoverable, and if returned we'd
                         // end up in maintenance mode anyway.
-                        error!(log, "Failed to start sled agent"; InlineErrorChain::new(&err));
+                        error!(
+                            log, "Failed to start sled agent";
+                            InlineErrorChain::new(&err),
+                        );
                         panic!("Failed to start sled agent: {err:#}");
                     }
                 };

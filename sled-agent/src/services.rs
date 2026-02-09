@@ -3241,7 +3241,10 @@ impl ServiceManager {
         let mut command = std::process::Command::new(PFEXEC);
         let cmd = command.args(&["/usr/platform/oxide/bin/tmpx", "-Z"]);
         if let Err(e) = execute(cmd) {
-            warn!(self.inner.log, "Updating [wu]tmpx databases failed"; InlineErrorChain::new(&e));
+            warn!(
+                self.inner.log, "Updating [wu]tmpx databases failed";
+                InlineErrorChain::new(&e),
+            );
         }
     }
 

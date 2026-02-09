@@ -73,14 +73,20 @@ impl SprocketsServer {
                 Err(e) => {
                     // Not much we can do here besides log the error and use
                     // an empty corpus
-                    error!(self.log, "measurement error; using empty corpus"; InlineErrorChain::new(&e));
+                    error!(
+                        self.log, "measurement error; using empty corpus";
+                        InlineErrorChain::new(&e),
+                    );
                     vec![]
                 }
             };
             let acceptor = match self.listener.accept(corpus).await {
                 Ok(acceptor) => acceptor,
                 Err(err) => {
-                    error!(self.log, "accept() failed"; InlineErrorChain::new(&err));
+                    error!(
+                        self.log, "accept() failed";
+                        InlineErrorChain::new(&err),
+                    );
                     continue;
                 }
             };
@@ -92,7 +98,10 @@ impl SprocketsServer {
                 let stream = match acceptor.handshake().await {
                     Ok((stream, _)) => stream,
                     Err(err) => {
-                        error!(log, "Sprockets handshake failed"; InlineErrorChain::new(&err));
+                        error!(
+                            log, "Sprockets handshake failed";
+                            InlineErrorChain::new(&err),
+                        );
                         return;
                     }
                 };
