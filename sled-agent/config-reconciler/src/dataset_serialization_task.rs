@@ -20,18 +20,18 @@ use iddqd::IdOrdMap;
 use iddqd::id_upcast;
 use illumos_utils::zfs;
 use illumos_utils::zfs::CanMount;
-use illumos_utils::zfs::Keypath;
 use illumos_utils::zfs::DatasetEnsureArgs;
 use illumos_utils::zfs::DatasetProperties;
 use illumos_utils::zfs::DestroyDatasetError;
+use illumos_utils::zfs::Keypath;
 use illumos_utils::zfs::Mountpoint;
 use illumos_utils::zfs::WhichDatasets;
 use illumos_utils::zfs::Zfs;
 use key_manager_types::VersionedAes256GcmDiskEncryptionKey;
 use omicron_common::disk::DatasetConfig;
-use omicron_common::disk::DiskIdentity;
 use omicron_common::disk::DatasetKind;
 use omicron_common::disk::DatasetName;
+use omicron_common::disk::DiskIdentity;
 use omicron_common::disk::SharedDatasetConfig;
 use omicron_common::zpool_name::ZpoolName;
 use omicron_uuid_kinds::DatasetUuid;
@@ -39,9 +39,9 @@ use omicron_uuid_kinds::PhysicalDiskUuid;
 use sled_agent_types::inventory::InventoryDataset;
 use sled_agent_types::inventory::OrphanedDataset;
 use sled_storage::config::MountConfig;
-use sled_storage::keyfile::KeyFile;
 use sled_storage::dataset::CRYPT_DATASET;
 use sled_storage::dataset::ZONE_DATASET;
+use sled_storage::keyfile::KeyFile;
 use sled_storage::nested_dataset::NestedDatasetConfig;
 use sled_storage::nested_dataset::NestedDatasetListOptions;
 use sled_storage::nested_dataset::NestedDatasetLocation;
@@ -1246,10 +1246,8 @@ impl DatasetTask {
 
             // Write the new key to the keylocation file, invoke
             // `zfs change-key`, then zero and unlink the keyfile.
-            let keypath = Keypath::new(
-                &req.disk_identity,
-                &self.mount_config.root,
-            );
+            let keypath =
+                Keypath::new(&req.disk_identity, &self.mount_config.root);
             let mut keyfile = match KeyFile::create(
                 keypath.clone(),
                 req.key.expose_secret(),
