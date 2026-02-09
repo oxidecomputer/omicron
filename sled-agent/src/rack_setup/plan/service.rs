@@ -281,9 +281,16 @@ impl Plan {
 
         let log_failure = |error: PlanError, call_count, total_duration| {
             if call_count == 0 {
-                info!(log, "failed to get inventory from {address}"; InlineErrorChain::new(&error));
+                info!(
+                    log, "failed to get inventory from {address}";
+                    InlineErrorChain::new(&error),
+                );
             } else if total_duration > std::time::Duration::from_secs(20) {
-                warn!(log, "failed to get inventory from {address}"; InlineErrorChain::new(&error), "total duration" => ?total_duration);
+                warn!(
+                    log, "failed to get inventory from {address}";
+                    InlineErrorChain::new(&error),
+                    "total duration" => ?total_duration,
+                );
             }
         };
         let inventory = retry_notify_ext(

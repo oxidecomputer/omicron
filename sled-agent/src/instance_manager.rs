@@ -988,12 +988,22 @@ impl InstanceManagerRunner {
             if let Some(instance) = self.jobs.remove(&id) {
                 let (tx, rx) = oneshot::channel();
                 if let Err(e) = instance.terminate(tx, VmmStateOwner::Runner) {
-                    warn!(self.log, "use_only_these_disks: Failed to request instance removal"; InlineErrorChain::new(&e));
+                    warn!(
+                        self.log,
+                        "use_only_these_disks: \
+                         Failed to request instance removal";
+                        InlineErrorChain::new(&e),
+                    );
                     continue;
                 }
 
                 if let Err(e) = rx.await {
-                    warn!(self.log, "use_only_these_disks: Failed while removing instance"; InlineErrorChain::new(&e));
+                    warn!(
+                        self.log,
+                        "use_only_these_disks: \
+                         Failed while removing instance";
+                        InlineErrorChain::new(&e),
+                    );
                 }
             }
         }

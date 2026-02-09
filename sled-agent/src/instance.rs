@@ -1144,9 +1144,11 @@ impl InstanceRunner {
             .await;
 
         if let Err(e) = &res {
-            error!(self.log, "Error from Propolis client";
-               InlineErrorChain::new(e),
-               "status" => ?e.status());
+            error!(
+                self.log, "Error from Propolis client";
+                InlineErrorChain::new(e),
+                "status" => ?e.status(),
+            );
         }
 
         res.map(|_| ())
@@ -1320,7 +1322,10 @@ impl InstanceRunner {
         let log = self.log.clone();
         let monitor_handle = tokio::task::spawn(async move {
             match runner.run().await {
-                Err(e) => warn!(log, "State monitoring task failed"; InlineErrorChain::new(&*e)),
+                Err(e) => warn!(
+                    log, "State monitoring task failed";
+                    InlineErrorChain::new(&*e),
+                ),
                 Ok(()) => info!(log, "State monitoring task complete"),
             }
         });
@@ -1900,11 +1905,13 @@ fn propolis_error_code(
         Err(parse_error) => {
             // The parse_error is a strum::ParseError which is just a string
             // error, so we log it directly without InlineErrorChain.
-            warn!(log, "Propolis returned an unknown error code: {code:?}";
+            warn!(
+                log, "Propolis returned an unknown error code: {code:?}";
                 "status" => ?error.status(),
                 InlineErrorChain::new(error),
                 "code" => ?code,
-                "parse_error" => %parse_error);
+                "parse_error" => %parse_error,
+            );
             None
         }
         Ok(code) => Some(code),
@@ -2357,7 +2364,10 @@ impl InstanceRunner {
         let setup = match self.setup_propolis_zone().await {
             Ok(setup) => setup,
             Err(e) => {
-                error!(&self.log, "failed to set up Propolis zone"; InlineErrorChain::new(&e));
+                error!(
+                    &self.log, "failed to set up Propolis zone";
+                    InlineErrorChain::new(&e),
+                );
                 return Err(e);
             }
         };
@@ -2370,7 +2380,10 @@ impl InstanceRunner {
             )
             .await
         {
-            error!(&self.log, "failed to create Propolis VM"; InlineErrorChain::new(&e));
+            error!(
+                &self.log, "failed to create Propolis VM";
+                InlineErrorChain::new(&e),
+            );
             return Err(e);
         }
 
