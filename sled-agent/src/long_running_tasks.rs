@@ -19,7 +19,7 @@ use crate::bootstrap::bootstore_setup::{
 use crate::bootstrap::secret_retriever::{
     ConfigurableSecretRetriever, ConfigurableSecretRetrieverHandle,
 };
-use crate::bootstrap::trust_quorum_setup::new_trust_quorum_config;
+//use crate::bootstrap::trust_quorum_setup::new_trust_quorum_config;
 use crate::config::Config;
 use crate::hardware_monitor::{HardwareMonitor, HardwareMonitorHandle};
 use crate::services::ServiceManager;
@@ -39,11 +39,11 @@ use sled_hardware::{HardwareManager, SledMode, UnparsedDisk};
 use sled_storage::config::MountConfig;
 use sled_storage::disk::RawSyntheticDisk;
 use slog::{Logger, info};
-use sprockets_tls::keys::SprocketsConfig;
+//use sprockets_tls::keys::SprocketsConfig;
 use std::net::Ipv6Addr;
 use std::sync::Arc;
 use tokio::sync::oneshot;
-use trust_quorum;
+//use trust_quorum;
 
 /// A mechanism for interacting with all long running tasks that can be shared
 /// between the bootstrap-agent and sled-agent code.
@@ -269,7 +269,7 @@ fn spawn_hardware_monitor(
     (monitor, sled_agent_started_tx, service_manager_ready_tx)
 }
 
-async fn spawn_trust_quorum_task(
+/*async fn spawn_trust_quorum_task(
     log: &Logger,
     config_reconciler: &ConfigReconcilerHandle,
     hardware_manager: &HardwareManager,
@@ -304,6 +304,7 @@ async fn spawn_trust_quorum_task(
     tokio::spawn(async move { node.run().await });
     handle
 }
+*/
 
 async fn spawn_bootstore_tasks(
     log: &Logger,
