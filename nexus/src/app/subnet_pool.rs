@@ -232,6 +232,26 @@ impl super::Nexus {
             .await
     }
 
+    /// Look up a subnet pool linked to the current silo. Returns 404 if the
+    /// pool exists but isn't linked to the current silo.
+    ///
+    /// Authorization comes from the silo link: if the pool is linked to the
+    /// caller's silo, they can view it; otherwise they get a 404. This is
+    /// the same pattern used by `silo_ip_pool_fetch` for IP pools.
+    pub(crate) async fn silo_subnet_pool_fetch(
+        &self,
+        opctx: &OpContext,
+        pool: &NameOrId,
+    ) -> LookupResult<(SubnetPool, SubnetPoolSiloLink)> {
+        let authz_silo = opctx
+            .authn
+            .silo_required()
+            .internal_context("fetching subnet pool")?;
+        opctx.authorize(authz::Action::ListChildren, &authz_silo).await?;
+
+        self.datastore().silo_subnet_pool_fetch(opctx, &authz_silo, pool).await
+    }
+
     pub(crate) async fn subnet_pool_silo_link(
         &self,
         opctx: &OpContext,

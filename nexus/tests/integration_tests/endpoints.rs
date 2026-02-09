@@ -1218,6 +1218,8 @@ pub static DEMO_SUBNET_POOL_SILO_UPDATE: LazyLock<
 pub static DEMO_SUBNET_POOL_UTILIZATION_URL: LazyLock<String> =
     LazyLock::new(|| format!("{}/utilization", *DEMO_SUBNET_POOL_URL));
 pub static DEMO_CURRENT_SILO_SUBNET_POOLS_URL: &str = "/v1/subnet-pools";
+pub static DEMO_CURRENT_SILO_SUBNET_POOL_URL: LazyLock<String> =
+    LazyLock::new(|| format!("/v1/subnet-pools/{}", *DEMO_SUBNET_POOL_NAME));
 
 // External Subnets (project-scoped)
 pub static DEMO_EXTERNAL_SUBNETS_URL: LazyLock<String> = LazyLock::new(|| {
@@ -1983,6 +1985,12 @@ pub static VERIFY_ENDPOINTS: LazyLock<Vec<VerifyEndpoint>> = LazyLock::new(
                 allowed_methods: vec![
                     AllowedMethod::Get,
                 ],
+            },
+            VerifyEndpoint {
+                url: &DEMO_CURRENT_SILO_SUBNET_POOL_URL,
+                visibility: Visibility::Protected,
+                unprivileged_access: UnprivilegedAccess::ReadOnly,
+                allowed_methods: vec![AllowedMethod::Get],
             },
             /* External Subnets (project-scoped) */
             VerifyEndpoint {

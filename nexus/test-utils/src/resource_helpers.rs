@@ -464,6 +464,21 @@ pub async fn create_subnet_pool_member_with_prefix_lengths(
     .await
 }
 
+pub async fn link_subnet_pool(
+    client: &ClientTestContext,
+    pool_name: &str,
+    silo_id: &Uuid,
+    is_default: bool,
+) {
+    let link =
+        params::SubnetPoolLinkSilo { silo: NameOrId::Id(*silo_id), is_default };
+    let url = format!("/v1/system/subnet-pools/{pool_name}/silos");
+    object_create::<params::SubnetPoolLinkSilo, views::SubnetPoolSiloLink>(
+        client, &url, &link,
+    )
+    .await;
+}
+
 pub async fn create_external_subnet_in_pool(
     client: &ClientTestContext,
     pool_name: &str,
