@@ -223,7 +223,8 @@ const PUT_UPDATE_REPOSITORY_MAX_BYTES: usize = 4 * GIB;
                 }
             },
             "ip-pools" = {
-                description = "IP pools are collections of external IPs that can be assigned to silos. These are the IP pools available to the current silo.",
+                description = "IP pools are collections of external IPs \
+                    that can be allocated and attached to instances.",
                 external_docs = {
                     url = "http://docs.oxide.computer/api/ip-pools"
                 }
@@ -271,7 +272,9 @@ const PUT_UPDATE_REPOSITORY_MAX_BYTES: usize = 4 * GIB;
                 }
             },
             "subnet-pools" = {
-                description = "Subnet pools are collections of IP subnets that can be assigned to silos. These are the subnet pools available to the current silo.",
+                description = "Subnet pools are collections of external \
+                    subnets that can be allocated and attached \
+                    to instances.",
                 external_docs = {
                     url = "http://docs.oxide.computer/api/subnet-pools"
                 }
@@ -325,16 +328,18 @@ const PUT_UPDATE_REPOSITORY_MAX_BYTES: usize = 4 * GIB;
                 }
             },
             "system/ip-pools" = {
-                description = "IP pools are collections of external IPs that can be assigned to silos. When a pool is linked to a silo, users in that silo can allocate IPs from the pool for their instances.",
+                description = "IP pools are collections of external IPs. \
+                    Linking a pool to a silo makes it available \
+                    for allocation by users in that silo.",
                 external_docs = {
                     url = "http://docs.oxide.computer/api/system-ip-pools"
                 }
             },
             "system/subnet-pools" = {
-                description = "Subnet pools are collections of IP subnets \
-                    that can be assigned to silos. When a pool is linked to \
-                    a silo, users in that silo can allocate external subnets \
-                    from the pool.",
+                description = "Subnet pools are collections of external \
+                    subnets. Linking a pool to a silo makes it \
+                    available for allocation by users in that \
+                    silo.",
                 external_docs = {
                     url = "http://docs.oxide.computer/api/system-subnet-pools"
                 }
@@ -1134,8 +1139,6 @@ pub trait NexusExternalApi {
     }
 
     /// List IP pools
-    ///
-    /// List all IP pools regardless of silo links.
     #[endpoint {
         method = GET,
         path = "/v1/system/ip-pools",
@@ -1194,8 +1197,6 @@ pub trait NexusExternalApi {
     }
 
     /// Fetch IP pool
-    ///
-    /// Fetch an IP pool regardless of silo links.
     #[endpoint {
         method = GET,
         path = "/v1/system/ip-pools/{pool}",
@@ -1498,7 +1499,7 @@ pub trait NexusExternalApi {
         query_params: Query<IpPoolRangePaginationParams>,
     ) -> Result<HttpResponseOk<ResultsPage<views::IpPoolRange>>, HttpError>;
 
-    /// Add range to an IP pool
+    /// Add range to IP pool
     ///
     /// IPv6 ranges are not allowed yet for unicast pools.
     ///
@@ -1523,7 +1524,7 @@ pub trait NexusExternalApi {
         Self::system_ip_pool_range_add(rqctx, path_params, range_params).await
     }
 
-    /// Add range to an IP pool
+    /// Add range to IP pool
     ///
     /// IPv6 ranges are not allowed yet for unicast pools.
     ///
@@ -1668,8 +1669,6 @@ pub trait NexusExternalApi {
     // Subnet Pools
 
     /// List subnet pools
-    ///
-    /// List all subnet pools regardless of silo links.
     #[endpoint {
         method = GET,
         path = "/v1/system/subnet-pools",
@@ -1715,7 +1714,7 @@ pub trait NexusExternalApi {
         Ok(HttpResponseOk(ResultsPage { items, next_page }))
     }
 
-    /// Create a subnet pool
+    /// Create subnet pool
     #[endpoint {
         method = POST,
         path = "/v1/system/subnet-pools",
@@ -1727,7 +1726,7 @@ pub trait NexusExternalApi {
         pool_params: TypedBody<params::SubnetPoolCreate>,
     ) -> Result<HttpResponseCreated<views::SubnetPool>, HttpError>;
 
-    /// Create a subnet pool
+    /// Create subnet pool
     #[endpoint {
         operation_id = "subnet_pool_create",
         method = POST,
@@ -1742,7 +1741,7 @@ pub trait NexusExternalApi {
         Self::system_subnet_pool_create(rqctx, pool_params).await
     }
 
-    /// Create a subnet pool
+    /// Create subnet pool
     #[endpoint {
         operation_id = "subnet_pool_create",
         method = POST,
@@ -1760,7 +1759,7 @@ pub trait NexusExternalApi {
         Ok(HttpResponseCreated(pool.into()))
     }
 
-    /// Create a subnet pool
+    /// Create subnet pool
     #[endpoint {
         operation_id = "subnet_pool_create",
         method = POST,
@@ -1779,9 +1778,7 @@ pub trait NexusExternalApi {
         Ok(HttpResponseCreated(pool))
     }
 
-    /// Fetch a subnet pool
-    ///
-    /// Fetch a subnet pool regardless of silo links.
+    /// Fetch subnet pool
     #[endpoint {
         method = GET,
         path = "/v1/system/subnet-pools/{pool}",
@@ -1793,7 +1790,7 @@ pub trait NexusExternalApi {
         path_params: Path<params::SubnetPoolPath>,
     ) -> Result<HttpResponseOk<views::SubnetPool>, HttpError>;
 
-    /// Fetch a subnet pool
+    /// Fetch subnet pool
     #[endpoint {
         operation_id = "subnet_pool_view",
         method = GET,
@@ -1808,7 +1805,7 @@ pub trait NexusExternalApi {
         Self::system_subnet_pool_view(rqctx, path_params).await
     }
 
-    /// Fetch a subnet pool
+    /// Fetch subnet pool
     #[endpoint {
         operation_id = "subnet_pool_view",
         method = GET,
@@ -1826,7 +1823,7 @@ pub trait NexusExternalApi {
         Ok(HttpResponseOk(pool.into()))
     }
 
-    /// Update a subnet pool
+    /// Update subnet pool
     #[endpoint {
         method = PUT,
         path = "/v1/system/subnet-pools/{pool}",
@@ -1839,7 +1836,7 @@ pub trait NexusExternalApi {
         updates: TypedBody<params::SubnetPoolUpdate>,
     ) -> Result<HttpResponseOk<views::SubnetPool>, HttpError>;
 
-    /// Update a subnet pool
+    /// Update subnet pool
     #[endpoint {
         operation_id = "subnet_pool_update",
         method = PUT,
@@ -1855,7 +1852,7 @@ pub trait NexusExternalApi {
         Self::system_subnet_pool_update(rqctx, path_params, updates).await
     }
 
-    /// Update a subnet pool
+    /// Update subnet pool
     #[endpoint {
         operation_id = "subnet_pool_update",
         method = PUT,
@@ -1875,7 +1872,7 @@ pub trait NexusExternalApi {
         Ok(HttpResponseOk(pool.into()))
     }
 
-    /// Delete a subnet pool
+    /// Delete subnet pool
     #[endpoint {
         operation_id = "subnet_pool_delete",
         method = DELETE,
@@ -1890,7 +1887,7 @@ pub trait NexusExternalApi {
         Self::system_subnet_pool_delete(rqctx, path_params).await
     }
 
-    /// Delete a subnet pool
+    /// Delete subnet pool
     #[endpoint {
         method = DELETE,
         path = "/v1/system/subnet-pools/{pool}",
@@ -1902,7 +1899,7 @@ pub trait NexusExternalApi {
         path_params: Path<params::SubnetPoolPath>,
     ) -> Result<HttpResponseDeleted, HttpError>;
 
-    /// List members in a subnet pool
+    /// List members in subnet pool
     #[endpoint {
         method = GET,
         path = "/v1/system/subnet-pools/{pool}/members",
@@ -1915,7 +1912,7 @@ pub trait NexusExternalApi {
         query_params: Query<SubnetPoolMemberPaginationParams>,
     ) -> Result<HttpResponseOk<ResultsPage<views::SubnetPoolMember>>, HttpError>;
 
-    /// List members in a subnet pool
+    /// List members in subnet pool
     #[endpoint {
         operation_id = "subnet_pool_member_list",
         method = GET,
@@ -1933,7 +1930,7 @@ pub trait NexusExternalApi {
             .await
     }
 
-    /// List members in a subnet pool
+    /// List members in subnet pool
     //
     // In this API version, we were paginating by name. Now, we want to paginate
     // by the IP subnet. It's certainly possible to design a 1-1 encoding
@@ -1964,7 +1961,7 @@ pub trait NexusExternalApi {
         ))
     }
 
-    /// Add a member to a subnet pool
+    /// Add member to subnet pool
     #[endpoint {
         method = POST,
         path = "/v1/system/subnet-pools/{pool}/members/add",
@@ -1977,7 +1974,7 @@ pub trait NexusExternalApi {
         subnet_params: TypedBody<params::SubnetPoolMemberAdd>,
     ) -> Result<HttpResponseCreated<views::SubnetPoolMember>, HttpError>;
 
-    /// Add a member to a subnet pool
+    /// Add member to subnet pool
     #[endpoint {
         operation_id = "subnet_pool_member_add",
         method = POST,
@@ -1994,7 +1991,7 @@ pub trait NexusExternalApi {
             .await
     }
 
-    /// Add a member to a subnet pool
+    /// Add member to subnet pool
     #[endpoint {
         operation_id = "subnet_pool_member_add",
         method = POST,
@@ -2018,7 +2015,7 @@ pub trait NexusExternalApi {
         Ok(HttpResponseCreated(pool.into()))
     }
 
-    /// Add a member to a subnet pool
+    /// Add member to subnet pool
     #[endpoint {
         operation_id = "subnet_pool_member_add",
         method = POST,
@@ -2042,7 +2039,7 @@ pub trait NexusExternalApi {
         Ok(HttpResponseCreated(pool.into()))
     }
 
-    /// Remove a member from a subnet pool
+    /// Remove member from subnet pool
     #[endpoint {
         operation_id = "subnet_pool_member_remove",
         method = POST,
@@ -2063,7 +2060,7 @@ pub trait NexusExternalApi {
         .await
     }
 
-    /// Remove a member from a subnet pool
+    /// Remove member from subnet pool
     #[endpoint {
         method = POST,
         path = "/v1/system/subnet-pools/{pool}/members/remove",
@@ -2076,7 +2073,7 @@ pub trait NexusExternalApi {
         subnet_params: TypedBody<params::SubnetPoolMemberRemove>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
 
-    /// List silos linked to a subnet pool
+    /// List silos linked to subnet pool
     #[endpoint {
         operation_id = "subnet_pool_silo_list",
         method = GET,
@@ -2094,7 +2091,7 @@ pub trait NexusExternalApi {
             .await
     }
 
-    /// List silos linked to a subnet pool
+    /// List silos linked to subnet pool
     #[endpoint {
         method = GET,
         path = "/v1/system/subnet-pools/{pool}/silos",
@@ -2160,7 +2157,7 @@ pub trait NexusExternalApi {
         path_params: Path<params::SubnetPoolPath>,
     ) -> Result<HttpResponseOk<views::SiloSubnetPool>, HttpError>;
 
-    /// Link a subnet pool to a silo
+    /// Link subnet pool to silo
     #[endpoint {
         operation_id = "subnet_pool_silo_link",
         method = POST,
@@ -2176,7 +2173,7 @@ pub trait NexusExternalApi {
         Self::system_subnet_pool_silo_link(rqctx, path_params, silo_link).await
     }
 
-    /// Link a subnet pool to a silo
+    /// Link subnet pool to silo
     #[endpoint {
         method = POST,
         path = "/v1/system/subnet-pools/{pool}/silos",
@@ -2189,7 +2186,7 @@ pub trait NexusExternalApi {
         silo_link: TypedBody<params::SubnetPoolLinkSilo>,
     ) -> Result<HttpResponseCreated<views::SubnetPoolSiloLink>, HttpError>;
 
-    /// Update a subnet pool's link to a silo
+    /// Update subnet pool's link to silo
     #[endpoint {
         operation_id = "subnet_pool_silo_update",
         method = PUT,
@@ -2205,7 +2202,7 @@ pub trait NexusExternalApi {
         Self::system_subnet_pool_silo_update(rqctx, path_params, update).await
     }
 
-    /// Update a subnet pool's link to a silo
+    /// Update subnet pool's link to silo
     #[endpoint {
         method = PUT,
         path = "/v1/system/subnet-pools/{pool}/silos/{silo}",
@@ -2218,7 +2215,7 @@ pub trait NexusExternalApi {
         update: TypedBody<params::SubnetPoolSiloUpdate>,
     ) -> Result<HttpResponseOk<views::SubnetPoolSiloLink>, HttpError>;
 
-    /// Unlink a subnet pool from a silo
+    /// Unlink subnet pool from silo
     #[endpoint {
         operation_id = "subnet_pool_silo_unlink",
         method = DELETE,
@@ -2233,7 +2230,7 @@ pub trait NexusExternalApi {
         Self::system_subnet_pool_silo_unlink(rqctx, path_params).await
     }
 
-    /// Unlink a subnet pool from a silo
+    /// Unlink subnet pool from silo
     #[endpoint {
         method = DELETE,
         path = "/v1/system/subnet-pools/{pool}/silos/{silo}",

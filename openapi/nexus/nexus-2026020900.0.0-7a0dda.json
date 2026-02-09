@@ -9246,7 +9246,6 @@
           "system/ip-pools"
         ],
         "summary": "List IP pools",
-        "description": "List all IP pools regardless of silo links.",
         "operationId": "system_ip_pool_list",
         "parameters": [
           {
@@ -9342,7 +9341,6 @@
           "system/ip-pools"
         ],
         "summary": "Fetch IP pool",
-        "description": "Fetch an IP pool regardless of silo links.",
         "operationId": "system_ip_pool_view",
         "parameters": [
           {
@@ -9517,7 +9515,7 @@
         "tags": [
           "system/ip-pools"
         ],
-        "summary": "Add range to an IP pool",
+        "summary": "Add range to IP pool",
         "description": "IPv6 ranges are not allowed yet for unicast pools.\n\nFor multicast pools, all ranges must be either Any-Source Multicast (ASM) or Source-Specific Multicast (SSM), but not both. Mixing ASM and SSM ranges in the same pool is not allowed.\n\nASM: IPv4 addresses outside 232.0.0.0/8, IPv6 addresses with flag field != 3 SSM: IPv4 addresses in 232.0.0.0/8, IPv6 addresses with flag field = 3",
         "operationId": "system_ip_pool_range_add",
         "parameters": [
@@ -12056,7 +12054,6 @@
           "system/subnet-pools"
         ],
         "summary": "List subnet pools",
-        "description": "List all subnet pools regardless of silo links.",
         "operationId": "system_subnet_pool_list",
         "parameters": [
           {
@@ -12113,7 +12110,7 @@
         "tags": [
           "system/subnet-pools"
         ],
-        "summary": "Create a subnet pool",
+        "summary": "Create subnet pool",
         "operationId": "system_subnet_pool_create",
         "requestBody": {
           "content": {
@@ -12150,8 +12147,7 @@
         "tags": [
           "system/subnet-pools"
         ],
-        "summary": "Fetch a subnet pool",
-        "description": "Fetch a subnet pool regardless of silo links.",
+        "summary": "Fetch subnet pool",
         "operationId": "system_subnet_pool_view",
         "parameters": [
           {
@@ -12187,7 +12183,7 @@
         "tags": [
           "system/subnet-pools"
         ],
-        "summary": "Update a subnet pool",
+        "summary": "Update subnet pool",
         "operationId": "system_subnet_pool_update",
         "parameters": [
           {
@@ -12233,7 +12229,7 @@
         "tags": [
           "system/subnet-pools"
         ],
-        "summary": "Delete a subnet pool",
+        "summary": "Delete subnet pool",
         "operationId": "system_subnet_pool_delete",
         "parameters": [
           {
@@ -12264,7 +12260,7 @@
         "tags": [
           "system/subnet-pools"
         ],
-        "summary": "List members in a subnet pool",
+        "summary": "List members in subnet pool",
         "operationId": "system_subnet_pool_member_list",
         "parameters": [
           {
@@ -12325,7 +12321,7 @@
         "tags": [
           "system/subnet-pools"
         ],
-        "summary": "Add a member to a subnet pool",
+        "summary": "Add member to subnet pool",
         "operationId": "system_subnet_pool_member_add",
         "parameters": [
           {
@@ -12373,7 +12369,7 @@
         "tags": [
           "system/subnet-pools"
         ],
-        "summary": "Remove a member from a subnet pool",
+        "summary": "Remove member from subnet pool",
         "operationId": "system_subnet_pool_member_remove",
         "parameters": [
           {
@@ -12414,7 +12410,7 @@
         "tags": [
           "system/subnet-pools"
         ],
-        "summary": "List silos linked to a subnet pool",
+        "summary": "List silos linked to subnet pool",
         "operationId": "system_subnet_pool_silo_list",
         "parameters": [
           {
@@ -12480,7 +12476,7 @@
         "tags": [
           "system/subnet-pools"
         ],
-        "summary": "Link a subnet pool to a silo",
+        "summary": "Link subnet pool to silo",
         "operationId": "system_subnet_pool_silo_link",
         "parameters": [
           {
@@ -12528,7 +12524,7 @@
         "tags": [
           "system/subnet-pools"
         ],
-        "summary": "Update a subnet pool's link to a silo",
+        "summary": "Update subnet pool's link to silo",
         "operationId": "system_subnet_pool_silo_update",
         "parameters": [
           {
@@ -12583,7 +12579,7 @@
         "tags": [
           "system/subnet-pools"
         ],
-        "summary": "Unlink a subnet pool from a silo",
+        "summary": "Unlink subnet pool from silo",
         "operationId": "system_subnet_pool_silo_unlink",
         "parameters": [
           {
@@ -31607,7 +31603,7 @@
     },
     {
       "name": "ip-pools",
-      "description": "IP pools are collections of external IPs that can be assigned to silos. These are the IP pools available to the current silo.",
+      "description": "IP pools are collections of external IPs that can be allocated and attached to instances.",
       "externalDocs": {
         "url": "http://docs.oxide.computer/api/ip-pools"
       }
@@ -31663,7 +31659,7 @@
     },
     {
       "name": "subnet-pools",
-      "description": "Subnet pools are collections of IP subnets that can be assigned to silos. These are the subnet pools available to the current silo.",
+      "description": "Subnet pools are collections of external subnets that can be allocated and attached to instances.",
       "externalDocs": {
         "url": "http://docs.oxide.computer/api/subnet-pools"
       }
@@ -31691,7 +31687,7 @@
     },
     {
       "name": "system/ip-pools",
-      "description": "IP pools are collections of external IPs that can be assigned to silos. When a pool is linked to a silo, users in that silo can allocate IPs from the pool for their instances.",
+      "description": "IP pools are collections of external IPs. Linking a pool to a silo makes it available for allocation by users in that silo.",
       "externalDocs": {
         "url": "http://docs.oxide.computer/api/system-ip-pools"
       }
@@ -31733,7 +31729,7 @@
     },
     {
       "name": "system/subnet-pools",
-      "description": "Subnet pools are collections of IP subnets that can be assigned to silos. When a pool is linked to a silo, users in that silo can allocate external subnets from the pool.",
+      "description": "Subnet pools are collections of external subnets. Linking a pool to a silo makes it available for allocation by users in that silo.",
       "externalDocs": {
         "url": "http://docs.oxide.computer/api/system-subnet-pools"
       }
