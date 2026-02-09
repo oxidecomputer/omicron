@@ -53,6 +53,7 @@ use std::sync::Arc;
 use ref_cast::RefCast;
 use slog::{debug, error};
 
+use super::MAX_MULTICAST_GROUPS_PER_INSTANCE;
 use nexus_db_lookup::{LookupPath, lookup};
 use nexus_db_model::Name;
 use nexus_db_queries::context::OpContext;
@@ -311,6 +312,27 @@ impl super::Nexus {
         // Authorize instance modification upfront
         let (.., authz_instance) =
             instance_lookup.lookup_for(authz::Action::Modify).await?;
+        let instance_id = InstanceUuid::from_untyped_uuid(authz_instance.id());
+
+        // Multicast joins during instance create are limited to at most
+        // MAX_MULTICAST_GROUPS_PER_INSTANCE entries, primarily to bound saga
+        // length. We impose the same limit here for consistency, but may want
+        // to revisit doing so depending on customer need.
+        let current_members = self
+            .db_datastore
+            .multicast_group_members_list_by_instance(
+                opctx,
+                instance_id,
+                &DataPageParams::max_page(),
+            )
+            .await?;
+
+        if current_members.len() >= MAX_MULTICAST_GROUPS_PER_INSTANCE {
+            return Err(external::Error::invalid_request(&format!(
+                "An instance may not join more than {} multicast groups",
+                MAX_MULTICAST_GROUPS_PER_INSTANCE,
+            )));
+        }
 
         // Find or create the group based on identifier type.
         // SSM validation happens inside resolve functions.
@@ -339,7 +361,7 @@ impl super::Nexus {
             .multicast_group_member_attach_to_instance(
                 opctx,
                 group_id,
-                InstanceUuid::from_untyped_uuid(authz_instance.id()),
+                instance_id,
                 source_ips,
             )
             .await?;

@@ -20,7 +20,7 @@ use omicron_common::api::internal::{
     },
 };
 use sled_agent_types_versions::{
-    latest, v1, v4, v6, v7, v9, v10, v11, v12, v14, v16,
+    latest, v1, v4, v6, v7, v9, v10, v11, v12, v14, v16, v17,
 };
 use sled_diagnostics::SledDiagnosticsQueryOutput;
 
@@ -36,7 +36,8 @@ api_versions!([
     // |  example for the next person.
     // v
     // (next_int, IDENT),
-    (18, ADD_ZPOOLS_HEALTH_CHECK),
+    (19, ADD_ZPOOLS_HEALTH_CHECK),
+    (18, ADD_ATTACHED_SUBNETS),
     (17, TWO_TYPES_OF_DELEGATED_ZVOL),
     (16, MEASUREMENT_PROPER_INVENTORY),
     (15, ADD_TRUST_QUORUM_STATUS),
@@ -420,13 +421,28 @@ pub trait SledAgentApi {
         operation_id = "vmm_register",
         method = PUT,
         path = "/vmms/{propolis_id}",
-        versions = VERSION_TWO_TYPES_OF_DELEGATED_ZVOL..
+        versions = VERSION_ADD_ATTACHED_SUBNETS..
     }]
     async fn vmm_register(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<latest::instance::VmmPathParam>,
         body: TypedBody<latest::instance::InstanceEnsureBody>,
     ) -> Result<HttpResponseOk<SledVmmState>, HttpError>;
+
+    #[endpoint {
+        operation_id = "vmm_register",
+        method = PUT,
+        path = "/vmms/{propolis_id}",
+        versions =
+            VERSION_TWO_TYPES_OF_DELEGATED_ZVOL..VERSION_ADD_ATTACHED_SUBNETS
+    }]
+    async fn vmm_register_v17(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::instance::VmmPathParam>,
+        body: TypedBody<v17::instance::InstanceEnsureBody>,
+    ) -> Result<HttpResponseOk<SledVmmState>, HttpError> {
+        Self::vmm_register(rqctx, path_params, body.map(Into::into)).await
+    }
 
     #[endpoint {
         operation_id = "vmm_register",
@@ -439,7 +455,7 @@ pub trait SledAgentApi {
         path_params: Path<latest::instance::VmmPathParam>,
         body: TypedBody<v11::instance::InstanceEnsureBody>,
     ) -> Result<HttpResponseOk<SledVmmState>, HttpError> {
-        Self::vmm_register(rqctx, path_params, body.map(Into::into)).await
+        Self::vmm_register_v17(rqctx, path_params, body.map(Into::into)).await
     }
 
     #[endpoint {
@@ -455,7 +471,7 @@ pub trait SledAgentApi {
         body: TypedBody<v10::instance::InstanceEnsureBody>,
     ) -> Result<HttpResponseOk<SledVmmState>, HttpError> {
         let body = body.try_map(v11::instance::InstanceEnsureBody::try_from)?;
-        Self::vmm_register(rqctx, path_params, body.map(Into::into)).await
+        Self::vmm_register_v11(rqctx, path_params, body).await
     }
 
     #[endpoint {
@@ -1328,4 +1344,50 @@ pub trait SledAgentApi {
         request_context: RequestContext<Self::Context>,
         body: TypedBody<latest::trust_quorum::TrustQuorumNetworkConfig>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
+
+    /// Update the subnets attached to an instance.
+    #[endpoint {
+        method = PUT,
+        path = "/vmms/{propolis_id}/attached-subnets",
+        versions = VERSION_ADD_ATTACHED_SUBNETS..,
+    }]
+    async fn vmm_put_attached_subnets(
+        request_context: RequestContext<Self::Context>,
+        path_params: Path<latest::instance::VmmPathParam>,
+        body: TypedBody<latest::attached_subnet::AttachedSubnets>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
+
+    /// Delete all subnets attached to an instance.
+    #[endpoint {
+        method = DELETE,
+        path = "/vmms/{propolis_id}/attached-subnets",
+        versions = VERSION_ADD_ATTACHED_SUBNETS..,
+    }]
+    async fn vmm_delete_attached_subnets(
+        request_context: RequestContext<Self::Context>,
+        path_params: Path<latest::instance::VmmPathParam>,
+    ) -> Result<HttpResponseDeleted, HttpError>;
+
+    /// Attach a subnet to an instance.
+    #[endpoint {
+        method = POST,
+        path = "/vmms/{propolis_id}/attached-subnets",
+        versions = VERSION_ADD_ATTACHED_SUBNETS..,
+    }]
+    async fn vmm_post_attached_subnet(
+        request_context: RequestContext<Self::Context>,
+        path_params: Path<latest::instance::VmmPathParam>,
+        body: TypedBody<latest::attached_subnet::AttachedSubnet>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
+
+    /// Detach a subnet from an instance.
+    #[endpoint {
+        method = DELETE,
+        path = "/vmms/{propolis_id}/attached-subnets/{subnet}",
+        versions = VERSION_ADD_ATTACHED_SUBNETS..,
+    }]
+    async fn vmm_delete_attached_subnet(
+        request_context: RequestContext<Self::Context>,
+        path_params: Path<latest::attached_subnet::VmmSubnetPathParam>,
+    ) -> Result<HttpResponseDeleted, HttpError>;
 }

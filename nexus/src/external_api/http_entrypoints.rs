@@ -883,11 +883,19 @@ impl NexusExternalApi for NexusExternalApiImpl {
         rqctx: RequestContext<Self::Context>,
         query_params: Query<scim2_rs::QueryParams>,
     ) -> Result<Response<Body>, HttpError> {
-        audit_and_time(&rqctx, |opctx, nexus| async move {
+        let apictx = rqctx.context();
+        let handler = async {
+            let nexus = &apictx.context.nexus;
             let query = query_params.into_inner();
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
             nexus.scim_v2_list_users(&opctx, query).await
-        })
-        .await
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
     }
 
     async fn scim_v2_get_user(
@@ -895,12 +903,20 @@ impl NexusExternalApi for NexusExternalApiImpl {
         path_params: Path<params::ScimV2UserPathParam>,
         query_params: Query<scim2_rs::QueryParams>,
     ) -> Result<Response<Body>, HttpError> {
-        audit_and_time(&rqctx, |opctx, nexus| async move {
+        let apictx = rqctx.context();
+        let handler = async {
+            let nexus = &apictx.context.nexus;
             let query = query_params.into_inner();
             let path = path_params.into_inner();
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
             nexus.scim_v2_get_user_by_id(&opctx, query, path.user_id).await
-        })
-        .await
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
     }
 
     async fn scim_v2_create_user(
@@ -955,11 +971,19 @@ impl NexusExternalApi for NexusExternalApiImpl {
         rqctx: RequestContext<Self::Context>,
         query_params: Query<scim2_rs::QueryParams>,
     ) -> Result<Response<Body>, HttpError> {
-        audit_and_time(&rqctx, |opctx, nexus| async move {
+        let apictx = rqctx.context();
+        let handler = async {
+            let nexus = &apictx.context.nexus;
             let query = query_params.into_inner();
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
             nexus.scim_v2_list_groups(&opctx, query).await
-        })
-        .await
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
     }
 
     async fn scim_v2_get_group(
@@ -967,12 +991,20 @@ impl NexusExternalApi for NexusExternalApiImpl {
         path_params: Path<params::ScimV2GroupPathParam>,
         query_params: Query<scim2_rs::QueryParams>,
     ) -> Result<Response<Body>, HttpError> {
-        audit_and_time(&rqctx, |opctx, nexus| async move {
+        let apictx = rqctx.context();
+        let handler = async {
+            let nexus = &apictx.context.nexus;
             let query = query_params.into_inner();
             let path = path_params.into_inner();
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
             nexus.scim_v2_get_group_by_id(&opctx, query, path.group_id).await
-        })
-        .await
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
     }
 
     async fn scim_v2_create_group(
@@ -1806,6 +1838,85 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 &query,
                 links,
                 &|_, x: &views::SubnetPoolSiloLink| x.silo_id,
+            )?))
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    async fn silo_subnet_pool_list(
+        rqctx: RequestContext<ApiContext>,
+        path_params: Path<params::SiloPath>,
+        query_params: Query<PaginatedByNameOrId>,
+    ) -> Result<HttpResponseOk<ResultsPage<views::SiloSubnetPool>>, HttpError>
+    {
+        let apictx = rqctx.context();
+        let handler = async {
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+            let nexus = &apictx.context.nexus;
+            let query = query_params.into_inner();
+            let pag_params = data_page_params_for(&rqctx, &query)?;
+            let scan_params = ScanByNameOrId::from_query(&query)?;
+            let paginated_by = name_or_id_pagination(&pag_params, scan_params)?;
+            let path = path_params.into_inner();
+
+            let silo_lookup = nexus.silo_lookup(&opctx, path.silo)?;
+            let pools = nexus
+                .silo_subnet_pool_list(&opctx, &silo_lookup, &paginated_by)
+                .await?
+                .into_iter()
+                .map(|(pool, silo_link)| views::SiloSubnetPool {
+                    identity: pool.identity(),
+                    is_default: silo_link.is_default,
+                    ip_version: pool.ip_version.into(),
+                })
+                .collect();
+
+            Ok(HttpResponseOk(ScanByNameOrId::results_page(
+                &query,
+                pools,
+                &marker_for_name_or_id,
+            )?))
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    async fn current_silo_subnet_pool_list(
+        rqctx: RequestContext<ApiContext>,
+        query_params: Query<PaginatedByNameOrId>,
+    ) -> Result<HttpResponseOk<ResultsPage<views::SiloSubnetPool>>, HttpError>
+    {
+        let apictx = rqctx.context();
+        let handler = async {
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+            let nexus = &apictx.context.nexus;
+            let query = query_params.into_inner();
+            let pag_params = data_page_params_for(&rqctx, &query)?;
+            let scan_params = ScanByNameOrId::from_query(&query)?;
+            let paginated_by = name_or_id_pagination(&pag_params, scan_params)?;
+            let pools = nexus
+                .current_silo_subnet_pool_list(&opctx, &paginated_by)
+                .await?
+                .into_iter()
+                .map(|(pool, silo_link)| views::SiloSubnetPool {
+                    identity: pool.identity(),
+                    is_default: silo_link.is_default,
+                    ip_version: pool.ip_version.into(),
+                })
+                .collect();
+            Ok(HttpResponseOk(ScanByNameOrId::results_page(
+                &query,
+                pools,
+                &marker_for_name_or_id,
             )?))
         };
         apictx
@@ -4930,10 +5041,9 @@ impl NexusExternalApi for NexusExternalApiImpl {
             let subnets = nexus
                 .instance_list_external_subnets(&opctx, &instance_lookup)
                 .await?;
-            // The number of external subnets attached to an instance is expected
-            // to be small, so pagination is not implemented.
-            // TODO: Add MAX_EXTERNAL_SUBNETS_PER_INSTANCE constant (similar to
-            // MAX_EXTERNAL_IPS_PER_INSTANCE) and enforce it in attach operations.
+            // The number of external subnets attached to an instance is capped
+            // by MAX_ATTACHED_SUBNETS_PER_INSTANCE, so pagination is not
+            // implemented.
             Ok(HttpResponseOk(ResultsPage { items: subnets, next_page: None }))
         };
         apictx

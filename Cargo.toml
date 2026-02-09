@@ -680,10 +680,10 @@ progenitor-client = "0.10.0"
 # NOTE: if you change the pinned revision of the `bhyve_api` and propolis
 # dependencies, you must also update the references in package-manifest.toml to
 # match the new revision.
-bhyve_api = { git = "https://github.com/oxidecomputer/propolis", rev = "2aa7f9d0ee84a1c45e821d6444b1d2f0e69b743e" }
-propolis_api_types = { git = "https://github.com/oxidecomputer/propolis", rev = "2aa7f9d0ee84a1c45e821d6444b1d2f0e69b743e" }
-propolis-client = { git = "https://github.com/oxidecomputer/propolis", rev = "2aa7f9d0ee84a1c45e821d6444b1d2f0e69b743e" }
-propolis-mock-server = { git = "https://github.com/oxidecomputer/propolis", rev = "2aa7f9d0ee84a1c45e821d6444b1d2f0e69b743e" }
+bhyve_api = { git = "https://github.com/oxidecomputer/propolis", rev = "1df49a42dbb50ed7938b3e6927ad99ce68d15700" }
+propolis_api_types = { git = "https://github.com/oxidecomputer/propolis", rev = "1df49a42dbb50ed7938b3e6927ad99ce68d15700" }
+propolis-client = { git = "https://github.com/oxidecomputer/propolis", rev = "1df49a42dbb50ed7938b3e6927ad99ce68d15700" }
+propolis-mock-server = { git = "https://github.com/oxidecomputer/propolis", rev = "1df49a42dbb50ed7938b3e6927ad99ce68d15700" }
 # NOTE: see above!
 proptest = "1.7.0"
 qorb = "0.4.1"
@@ -716,6 +716,7 @@ rustfmt-wrapper = "0.2"
 rustls = "0.22.2"
 rustls-pemfile = "2.2.0"
 rustyline = "14.0.0"
+rustix = "1.1.2"
 samael = { version = "0.0.19", features = ["xmlsec"] }
 schemars = "0.8.22"
 scopeguard = "1.2.0"

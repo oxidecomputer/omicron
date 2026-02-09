@@ -16,22 +16,28 @@ use http::StatusCode;
 use nexus_test_utils::http_testing::AuthnMode;
 use nexus_test_utils::http_testing::NexusRequest;
 use nexus_test_utils::http_testing::RequestBuilder;
+use nexus_test_utils::resource_helpers::create_local_user;
 use nexus_test_utils::resource_helpers::create_silo;
 use nexus_test_utils::resource_helpers::create_subnet_pool;
 use nexus_test_utils::resource_helpers::create_subnet_pool_member;
+use nexus_test_utils::resource_helpers::grant_iam;
+use nexus_test_utils::resource_helpers::test_params;
 use nexus_test_utils_macros::nexus_test;
 use nexus_types::external_api::params;
 use nexus_types::external_api::params::SubnetPoolMemberAdd;
 use nexus_types::external_api::params::SubnetPoolMemberRemove;
 use nexus_types::external_api::params::SubnetPoolUpdate;
 use nexus_types::external_api::shared::SiloIdentityMode;
+use nexus_types::external_api::shared::SiloRole;
 use nexus_types::external_api::views::IpVersion;
+use nexus_types::external_api::views::SiloSubnetPool;
 use nexus_types::external_api::views::SubnetPool;
 use nexus_types::external_api::views::SubnetPoolMember;
 use nexus_types::external_api::views::SubnetPoolSiloLink;
 use nexus_types::silo::DEFAULT_SILO_ID;
 use omicron_common::api::external::IdentityMetadataUpdateParams;
 use omicron_common::api::external::Name;
+use omicron_common::api::external::SimpleIdentityOrName as _;
 use std::collections::BTreeSet;
 
 type ControlPlaneTestContext =
@@ -39,10 +45,8 @@ type ControlPlaneTestContext =
 
 const SUBNET_POOLS_URL: &str = "/v1/system/subnet-pools";
 const SUBNET_POOL_NAME: &str = "schist";
-
-// Note: These tests verify that stub endpoints return 500 Internal Server Error.
-// The detailed "endpoint is not implemented" message is intentionally not exposed
-// to clients for security reasons (internal messages are logged server-side only).
+const SILO_URL: &str = "/v1/system/silos";
+const SILO_NAME: &str = "marble";
 
 #[nexus_test]
 async fn basic_subnet_pool_crud(cptestctx: &ControlPlaneTestContext) {
@@ -389,6 +393,206 @@ async fn test_subnet_pool_silo_list(cptestctx: &ControlPlaneTestContext) {
         .items;
     assert_eq!(new_linked.len(), linked.len() - 1);
     assert!(!new_linked.iter().any(|new| new.silo_id == linked[0].silo_id))
+}
+
+#[nexus_test]
+async fn test_silo_subnet_pool_list(cptestctx: &ControlPlaneTestContext) {
+    let client = &cptestctx.external_client;
+    let url = format!("{}/{}/subnet-pools", SILO_URL, SILO_NAME);
+
+    // Create a silo and a bunch of pools.
+    let silo =
+        create_silo(client, SILO_NAME, false, SiloIdentityMode::LocalOnly)
+            .await;
+    let n_pools = 100;
+    let mut pools = Vec::with_capacity(n_pools);
+    for i in 0..n_pools {
+        let pool = create_subnet_pool(
+            client,
+            &format!("test-pool-{i}"),
+            IpVersion::V6,
+        )
+        .await;
+        pools.push(pool)
+    }
+
+    // There should be none linked to the silo at first.
+    let linked = NexusRequest::object_get(client, &url)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute_and_parse_unwrap::<ResultsPage<SiloSubnetPool>>()
+        .await
+        .items;
+    assert!(linked.is_empty());
+
+    // Link the first few pools.
+    let n_to_link = 10;
+    let mut linked_pools = Vec::with_capacity(n_to_link);
+    let link_params = params::SubnetPoolLinkSilo {
+        silo: omicron_common::api::external::NameOrId::Id(silo.identity.id),
+        is_default: false,
+    };
+    for pool in pools.iter().take(n_to_link) {
+        let pool_url = format!("{}/{}/silos", SUBNET_POOLS_URL, pool.name());
+        let link = NexusRequest::objects_post(client, &pool_url, &link_params)
+            .authn_as(AuthnMode::PrivilegedUser)
+            .execute_and_parse_unwrap::<SubnetPoolSiloLink>()
+            .await;
+        linked_pools.push(link);
+    }
+
+    // Now we should list all and only those in the list.
+    let linked = NexusRequest::object_get(client, &url)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute_and_parse_unwrap::<ResultsPage<SiloSubnetPool>>()
+        .await
+        .items;
+    assert_eq!(linked.len(), linked_pools.len());
+    assert_eq!(
+        linked.iter().map(|pool| pool.identity.id).collect::<BTreeSet<_>>(),
+        linked_pools
+            .iter()
+            .map(|link| link.subnet_pool_id)
+            .collect::<BTreeSet<_>>(),
+    );
+    assert!(linked.iter().all(|pool| pool.ip_version == IpVersion::V6));
+    assert!(linked.iter().all(|pool| !pool.is_default));
+
+    // And fetching the list in two pages works too.
+    let mut as_pages = Vec::with_capacity(n_to_link);
+    let n_pages = 2;
+    let page_size = n_to_link / n_pages;
+    let mut page_token = None;
+    for _ in 0..n_pages {
+        let page_url = if let Some(token) = page_token {
+            format!("{url}?limit={page_size}&page_token={token}")
+        } else {
+            format!("{url}?limit={page_size}")
+        };
+        let ResultsPage { mut items, next_page } =
+            NexusRequest::object_get(client, &page_url)
+                .authn_as(AuthnMode::PrivilegedUser)
+                .execute_and_parse_unwrap::<ResultsPage<SiloSubnetPool>>()
+                .await;
+        assert_eq!(items.len(), page_size);
+        as_pages.append(&mut items);
+        page_token = next_page;
+    }
+
+    // After fetching all pages, we should have the same set in the same order
+    // as fetching the full set in one page.
+    assert_eq!(as_pages, linked);
+
+    // And we should not fetch any more.
+    let page_url =
+        format!("{url}?limit={page_size}&page_token={}", page_token.unwrap());
+    let should_be_empty = NexusRequest::object_get(client, &page_url)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute_and_parse_unwrap::<ResultsPage<SiloSubnetPool>>()
+        .await
+        .items;
+    assert!(should_be_empty.is_empty());
+
+    // And if we unlink one, it no longer shows up.
+    let to_unlink = pools[0].identity.id;
+    NexusRequest::object_delete(
+        client,
+        &format!(
+            "{}/{}/silos/{}",
+            SUBNET_POOLS_URL,
+            pools[0].name(),
+            silo.id()
+        ),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .expect("failed to make request");
+
+    let new_linked = NexusRequest::object_get(client, &url)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute_and_parse_unwrap::<ResultsPage<SiloSubnetPool>>()
+        .await
+        .items;
+    assert_eq!(new_linked.len(), linked.len() - 1);
+    assert!(!new_linked.iter().any(|pool| pool.identity.id == to_unlink))
+}
+
+#[nexus_test]
+async fn test_current_silo_subnet_pool_list(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+
+    let silo =
+        create_silo(client, SILO_NAME, false, SiloIdentityMode::LocalOnly)
+            .await;
+    let silo_url = format!("{}/{}", SILO_URL, SILO_NAME);
+
+    let default_name = "default-subnet-pool";
+    let other_name = "other-subnet-pool";
+    let unlinked_name = "unlinked-subnet-pool";
+
+    create_subnet_pool(client, default_name, IpVersion::V6).await;
+    create_subnet_pool(client, other_name, IpVersion::V6).await;
+    create_subnet_pool(client, unlinked_name, IpVersion::V6).await;
+
+    // Link two of the pools to the silo.
+    let link_params = params::SubnetPoolLinkSilo {
+        silo: omicron_common::api::external::NameOrId::Id(silo.identity.id),
+        is_default: true,
+    };
+    let _default_link = NexusRequest::objects_post(
+        client,
+        &format!("{}/{}/silos", SUBNET_POOLS_URL, default_name),
+        &link_params,
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute_and_parse_unwrap::<SubnetPoolSiloLink>()
+    .await;
+
+    let link_params = params::SubnetPoolLinkSilo {
+        silo: omicron_common::api::external::NameOrId::Id(silo.identity.id),
+        is_default: false,
+    };
+    let _other_link = NexusRequest::objects_post(
+        client,
+        &format!("{}/{}/silos", SUBNET_POOLS_URL, other_name),
+        &link_params,
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute_and_parse_unwrap::<SubnetPoolSiloLink>()
+    .await;
+
+    // Create a silo user and make them a collaborator.
+    let user = create_local_user(
+        client,
+        &silo,
+        &"user".parse().unwrap(),
+        test_params::UserPassword::LoginDisallowed,
+    )
+    .await;
+    grant_iam(
+        client,
+        &silo_url,
+        SiloRole::Collaborator,
+        user.id,
+        AuthnMode::PrivilegedUser,
+    )
+    .await;
+
+    let list = NexusRequest::object_get(client, "/v1/subnet-pools")
+        .authn_as(AuthnMode::SiloUser(user.id))
+        .execute_and_parse_unwrap::<ResultsPage<SiloSubnetPool>>()
+        .await
+        .items;
+
+    assert_eq!(list.len(), 2);
+    assert_eq!(list[0].identity.name.to_string(), default_name);
+    assert!(list[0].is_default);
+    assert_eq!(list[0].ip_version, IpVersion::V6);
+    assert_eq!(list[1].identity.name.to_string(), other_name);
+    assert!(!list[1].is_default);
+    assert_eq!(list[1].ip_version, IpVersion::V6);
 }
 
 #[nexus_test]

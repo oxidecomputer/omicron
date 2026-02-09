@@ -51,8 +51,10 @@ pub mod v15;
 pub mod v16;
 #[path = "two_types_of_delegated_zvol/mod.rs"]
 pub mod v17;
-#[path = "add_health_monitor_zpools/mod.rs"]
+#[path = "add_attached_subnets/mod.rs"]
 pub mod v18;
+#[path = "add_health_monitor_zpools/mod.rs"]
+pub mod v19;
 #[path = "add_switch_zone_operator_policy/mod.rs"]
 pub mod v3;
 #[path = "add_nexus_lockstep_port_to_inventory/mod.rs"]

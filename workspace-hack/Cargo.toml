@@ -26,11 +26,11 @@ base16ct = { version = "0.2.0", default-features = false, features = ["alloc"] }
 base64 = { version = "0.22.1" }
 base64ct = { version = "1.6.0", default-features = false, features = ["std"] }
 bitflags-dff4ba8e3ae991db = { package = "bitflags", version = "1.3.2" }
-bitflags-f595c2ba2a3f28df = { package = "bitflags", version = "2.9.4", default-features = false, features = ["serde"] }
+bitflags-f595c2ba2a3f28df = { package = "bitflags", version = "2.9.4", default-features = false, features = ["serde", "std"] }
 bstr = { version = "1.10.0" }
 buf-list = { version = "1.0.3", default-features = false, features = ["tokio1"] }
 byteorder = { version = "1.5.0" }
-bytes = { version = "1.10.1", features = ["serde"] }
+bytes = { version = "1.11.1", features = ["serde"] }
 chrono = { version = "0.4.43", features = ["serde"] }
 cipher = { version = "0.4.4", default-features = false, features = ["block-padding", "zeroize"] }
 clap = { version = "4.5.48", features = ["cargo", "derive", "env", "wrap_help"] }
@@ -166,11 +166,11 @@ base16ct = { version = "0.2.0", default-features = false, features = ["alloc"] }
 base64 = { version = "0.22.1" }
 base64ct = { version = "1.6.0", default-features = false, features = ["std"] }
 bitflags-dff4ba8e3ae991db = { package = "bitflags", version = "1.3.2" }
-bitflags-f595c2ba2a3f28df = { package = "bitflags", version = "2.9.4", default-features = false, features = ["serde"] }
+bitflags-f595c2ba2a3f28df = { package = "bitflags", version = "2.9.4", default-features = false, features = ["serde", "std"] }
 bstr = { version = "1.10.0" }
 buf-list = { version = "1.0.3", default-features = false, features = ["tokio1"] }
 byteorder = { version = "1.5.0" }
-bytes = { version = "1.10.1", features = ["serde"] }
+bytes = { version = "1.11.1", features = ["serde"] }
 cc = { version = "1.2.30", default-features = false, features = ["parallel"] }
 chrono = { version = "0.4.43", features = ["serde"] }
 cipher = { version = "0.4.4", default-features = false, features = ["block-padding", "zeroize"] }
@@ -305,7 +305,6 @@ zip-164d15cefe24d7eb = { package = "zip", version = "4.2.0", default-features = 
 zip-3b31131e45eafb45 = { package = "zip", version = "0.6.6", default-features = false, features = ["bzip2", "deflate"] }
 
 [target.x86_64-unknown-linux-gnu.dependencies]
-bitflags-f595c2ba2a3f28df = { package = "bitflags", version = "2.9.4", default-features = false, features = ["std"] }
 cookie = { version = "0.18.1", default-features = false, features = ["percent-encode"] }
 dof-468e82937335b1c9 = { package = "dof", version = "0.3.0", default-features = false, features = ["des"] }
 dof-9fbad63c4bcf4a8f = { package = "dof", version = "0.4.0", default-features = false, features = ["des"] }
@@ -320,7 +319,6 @@ rustix-dff4ba8e3ae991db = { package = "rustix", version = "1.1.3", features = ["
 zerocopy-ca01ad9e24f5d932 = { package = "zerocopy", version = "0.7.35", features = ["derive", "simd"] }
 
 [target.x86_64-unknown-linux-gnu.build-dependencies]
-bitflags-f595c2ba2a3f28df = { package = "bitflags", version = "2.9.4", default-features = false, features = ["std"] }
 cookie = { version = "0.18.1", default-features = false, features = ["percent-encode"] }
 dof-468e82937335b1c9 = { package = "dof", version = "0.3.0", default-features = false, features = ["des"] }
 dof-9fbad63c4bcf4a8f = { package = "dof", version = "0.4.0", default-features = false, features = ["des"] }
@@ -335,7 +333,6 @@ rustix-dff4ba8e3ae991db = { package = "rustix", version = "1.1.3", features = ["
 zerocopy-ca01ad9e24f5d932 = { package = "zerocopy", version = "0.7.35", features = ["derive", "simd"] }
 
 [target.x86_64-apple-darwin.dependencies]
-bitflags-f595c2ba2a3f28df = { package = "bitflags", version = "2.9.4", default-features = false, features = ["std"] }
 cookie = { version = "0.18.1", default-features = false, features = ["percent-encode"] }
 getrandom-468e82937335b1c9 = { package = "getrandom", version = "0.3.4", default-features = false, features = ["std"] }
 hyper-rustls = { version = "0.27.7", features = ["http2", "ring", "webpki-tokio"] }
@@ -346,7 +343,6 @@ rustix-d585fab2519d2d1 = { package = "rustix", version = "0.38.37", features = [
 rustix-dff4ba8e3ae991db = { package = "rustix", version = "1.1.3", features = ["fs", "stdio", "termios"] }
 
 [target.x86_64-apple-darwin.build-dependencies]
-bitflags-f595c2ba2a3f28df = { package = "bitflags", version = "2.9.4", default-features = false, features = ["std"] }
 cookie = { version = "0.18.1", default-features = false, features = ["percent-encode"] }
 getrandom-468e82937335b1c9 = { package = "getrandom", version = "0.3.4", default-features = false, features = ["std"] }
 hyper-rustls = { version = "0.27.7", features = ["http2", "ring", "webpki-tokio"] }
@@ -357,7 +353,6 @@ rustix-d585fab2519d2d1 = { package = "rustix", version = "0.38.37", features = [
 rustix-dff4ba8e3ae991db = { package = "rustix", version = "1.1.3", features = ["fs", "stdio", "termios"] }
 
 [target.aarch64-apple-darwin.dependencies]
-bitflags-f595c2ba2a3f28df = { package = "bitflags", version = "2.9.4", default-features = false, features = ["std"] }
 cookie = { version = "0.18.1", default-features = false, features = ["percent-encode"] }
 getrandom-468e82937335b1c9 = { package = "getrandom", version = "0.3.4", default-features = false, features = ["std"] }
 hyper-rustls = { version = "0.27.7", features = ["http2", "ring", "webpki-tokio"] }
@@ -368,7 +363,6 @@ rustix-d585fab2519d2d1 = { package = "rustix", version = "0.38.37", features = [
 rustix-dff4ba8e3ae991db = { package = "rustix", version = "1.1.3", features = ["fs", "stdio", "termios"] }
 
 [target.aarch64-apple-darwin.build-dependencies]
-bitflags-f595c2ba2a3f28df = { package = "bitflags", version = "2.9.4", default-features = false, features = ["std"] }
 cookie = { version = "0.18.1", default-features = false, features = ["percent-encode"] }
 getrandom-468e82937335b1c9 = { package = "getrandom", version = "0.3.4", default-features = false, features = ["std"] }
 hyper-rustls = { version = "0.27.7", features = ["http2", "ring", "webpki-tokio"] }
@@ -379,7 +373,6 @@ rustix-d585fab2519d2d1 = { package = "rustix", version = "0.38.37", features = [
 rustix-dff4ba8e3ae991db = { package = "rustix", version = "1.1.3", features = ["fs", "stdio", "termios"] }
 
 [target.x86_64-unknown-illumos.dependencies]
-bitflags-f595c2ba2a3f28df = { package = "bitflags", version = "2.9.4", default-features = false, features = ["std"] }
 cookie = { version = "0.18.1", default-features = false, features = ["percent-encode"] }
 dof-468e82937335b1c9 = { package = "dof", version = "0.3.0", default-features = false, features = ["des"] }
 dof-9fbad63c4bcf4a8f = { package = "dof", version = "0.4.0", default-features = false, features = ["des"] }
@@ -398,7 +391,6 @@ winnow-3b31131e45eafb45 = { package = "winnow", version = "0.6.26", features = [
 zerocopy-ca01ad9e24f5d932 = { package = "zerocopy", version = "0.7.35", features = ["derive", "simd"] }
 
 [target.x86_64-unknown-illumos.build-dependencies]
-bitflags-f595c2ba2a3f28df = { package = "bitflags", version = "2.9.4", default-features = false, features = ["std"] }
 clang-sys = { version = "1.8.1", default-features = false, features = ["clang_11_0", "runtime"] }
 cookie = { version = "0.18.1", default-features = false, features = ["percent-encode"] }
 dof-468e82937335b1c9 = { package = "dof", version = "0.3.0", default-features = false, features = ["des"] }
