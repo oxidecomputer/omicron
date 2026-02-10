@@ -51,6 +51,9 @@ use sled_agent_types::instance::{
 };
 use sled_agent_types::inventory::{Inventory, OmicronSledConfig};
 use sled_agent_types::probes::ProbeSet;
+use sled_agent_types::rot::{
+    Attestation, CertificateChain, MeasurementLog, Nonce, RotPathParams,
+};
 use sled_agent_types::sled::AddSledRequest;
 use sled_agent_types::support_bundle::{
     RangeRequestHeaders, SupportBundleFilePathParam,
@@ -1437,5 +1440,37 @@ impl SledAgentApi for SledAgentImpl {
             .await
             .map(|_| HttpResponseDeleted())
             .map_err(HttpError::from)
+    }
+
+    async fn rot_measurement_log(
+        request_context: RequestContext<Self::Context>,
+        path_params: Path<RotPathParams>,
+    ) -> Result<HttpResponseOk<MeasurementLog>, HttpError> {
+        let sa = request_context.context();
+        let rot = sa.rot_attestor(path_params.into_inner().rot);
+        let log = rot.get_measurement_log().await?;
+        Ok(HttpResponseOk(log.into()))
+    }
+
+    async fn rot_certificate_chain(
+        request_context: RequestContext<Self::Context>,
+        path_params: Path<RotPathParams>,
+    ) -> Result<HttpResponseOk<CertificateChain>, HttpError> {
+        let sa = request_context.context();
+        let rot = sa.rot_attestor(path_params.into_inner().rot);
+        let chain = rot.get_certificate_chain().await?;
+        Ok(HttpResponseOk(chain.into()))
+    }
+
+    async fn rot_attest(
+        request_context: RequestContext<Self::Context>,
+        path_params: Path<RotPathParams>,
+        body: TypedBody<Nonce>,
+    ) -> Result<HttpResponseOk<Attestation>, HttpError> {
+        let sa = request_context.context();
+        let rot = sa.rot_attestor(path_params.into_inner().rot);
+        let nonce = body.into_inner();
+        let attestation = rot.attest(nonce.into()).await?;
+        Ok(HttpResponseOk(attestation.into()))
     }
 }

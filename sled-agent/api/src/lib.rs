@@ -36,6 +36,7 @@ api_versions!([
     // |  example for the next person.
     // v
     // (next_int, IDENT),
+    (19, ADD_ROT_ATTESTATION),
     (18, ADD_ATTACHED_SUBNETS),
     (17, TWO_TYPES_OF_DELEGATED_ZVOL),
     (16, MEASUREMENT_PROPER_INVENTORY),
@@ -1374,4 +1375,38 @@ pub trait SledAgentApi {
         request_context: RequestContext<Self::Context>,
         path_params: Path<latest::attached_subnet::VmmSubnetPathParam>,
     ) -> Result<HttpResponseDeleted, HttpError>;
+
+    /// Return the set of measurments recorded by the RoT.
+    #[endpoint {
+        method = GET,
+        path = "/rot/{rot}/measurement-log",
+        versions = VERSION_ADD_ROT_ATTESTATION..,
+    }]
+    async fn rot_measurement_log(
+        request_context: RequestContext<Self::Context>,
+        path_params: Path<latest::rot::RotPathParams>,
+    ) -> Result<HttpResponseOk<latest::rot::MeasurementLog>, HttpError>;
+
+    /// Return the certificate chain for the attestation signer from the RoT.
+    #[endpoint {
+        method = GET,
+        path = "/rot/{rot}/certificate-chain",
+        versions = VERSION_ADD_ROT_ATTESTATION..,
+    }]
+    async fn rot_certificate_chain(
+        request_context: RequestContext<Self::Context>,
+        path_params: Path<latest::rot::RotPathParams>,
+    ) -> Result<HttpResponseOk<latest::rot::CertificateChain>, HttpError>;
+
+    /// Return attestation over recorded measurments and nonce from the RoT.
+    #[endpoint {
+        method = POST,
+        path = "/rot/{rot}/attest",
+        versions = VERSION_ADD_ROT_ATTESTATION..,
+    }]
+    async fn rot_attest(
+        request_context: RequestContext<Self::Context>,
+        path_params: Path<latest::rot::RotPathParams>,
+        body: TypedBody<latest::rot::Nonce>,
+    ) -> Result<HttpResponseOk<latest::rot::Attestation>, HttpError>;
 }

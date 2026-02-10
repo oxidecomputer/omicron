@@ -27,3 +27,4 @@ sled-hardware-types.workspace = true
 tufaceous-artifact.workspace = true
 trust-quorum-types.workspace = true
 uuid.workspace = true
+x509-cert.workspace = true
