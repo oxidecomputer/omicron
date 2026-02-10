@@ -1600,34 +1600,24 @@ impl Zfs {
         })
     }
 
-    /// Atomically change the encryption key and set the oxide:epoch property.
+    /// Change the encryption key and set the oxide:epoch property.
     ///
     /// This operation is used for ZFS key rotation when a new Trust Quorum
-    /// epoch is committed.
+    /// epoch is committed. The caller is responsible for writing the new key
+    /// to the dataset's keylocation before calling this, and zeroing the
+    /// keyfile afterward.
     pub async fn change_key(
         dataset: &str,
-        key: &key_manager_types::VersionedAes256GcmDiskEncryptionKey,
+        epoch: u64,
     ) -> Result<(), ChangeKeyError> {
-        // FIXME: Replace the use of `zfs_atomic_change_key` with a native
-        // invocation of `zfs change-key` using the `-o oxide:epoch` option to
-        // set the epoch. At time of writing, the `zfs change-key` command does
-        // not support setting user properties inline, but a patch is pending to
-        // add this feature.
-
-        let ds = zfs_atomic_change_key::Dataset::new(dataset).map_err(|e| {
-            ChangeKeyError {
-                name: dataset.to_string(),
-                err: anyhow::anyhow!("invalid dataset name: {e}"),
-            }
+        let epoch_prop = format!("oxide:epoch={epoch}");
+        let mut cmd = Command::new(PFEXEC);
+        cmd.args(&[ZFS, "change-key", "-o", &epoch_prop, dataset]);
+        execute_async(&mut cmd).await.map_err(|e| ChangeKeyError {
+            name: dataset.to_string(),
+            err: e.into(),
         })?;
-
-        ds.change_key(zfs_atomic_change_key::Key::hex(*key.expose_secret()))
-            .property("oxide:epoch", key.epoch().to_string())
-            .await
-            .map_err(|e| ChangeKeyError {
-                name: dataset.to_string(),
-                err: anyhow::Error::from(e),
-            })
+        Ok(())
     }
 
     /// Load the encryption key for an encrypted ZFS dataset.
