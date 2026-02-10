@@ -25,6 +25,7 @@ http.workspace = true
 iddqd.workspace = true
 ipnetwork.workspace = true
 itertools.workspace = true
+key-manager-types.workspace = true
 libc.workspace = true
 macaddr.workspace = true
 nix.workspace = true
