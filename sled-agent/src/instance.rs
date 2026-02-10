@@ -1555,7 +1555,7 @@ impl InstanceRunner {
             InstanceExternalIpBody::Floating(IpAddr::V4(ipv4)) => {
                 let Some(cfg) = external_ips.ipv4_config_mut() else {
                     // There was no IPv4 config at all before, which means we
-                    // had to be single-stack IPv4. Make a dual-stack config
+                    // had to be single-stack IPv6. Make a dual-stack config
                     // now.
                     let v4 = ExternalIpConfigBuilder::new()
                         .with_floating_ips(vec![*ipv4])
