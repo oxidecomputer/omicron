@@ -25,7 +25,7 @@ const TRUST_QUORUM_NETWORK_CONFIG_FILE: &str =
 /// and because it's hard to manage features with full a4x2 and racklette
 /// deployments. The flag can be changed for local a4x2 builds during iniitial
 /// testing.
-pub const TRUST_QUORUM_INTEGRATION_ENABLED: bool = false;
+pub const TRUST_QUORUM_INTEGRATION_ENABLED: bool = true;
 
 pub fn new_trust_quorum_config(
     cluster_dataset_paths: &[Utf8PathBuf],
