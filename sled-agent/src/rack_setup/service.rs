@@ -978,7 +978,7 @@ impl ServiceInner {
                         shaper: config.shaper.clone(),
                         checker: config.checker.clone(),
                         max_paths: NexusTypes::MaxPathConfig(
-                            config.max_paths.as_u8(),
+                            config.max_paths.as_nonzero_u8(),
                         ),
                     })
                     .collect(),
