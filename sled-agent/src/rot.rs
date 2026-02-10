@@ -111,8 +111,8 @@ pub enum RotError {
     Shutdown,
 }
 
-impl From<TrySendError<RotAttestationMessage>> for RotError {
-    fn from(e: TrySendError<RotAttestationMessage>) -> Self {
+impl From<TrySendError<AttestationMessage>> for RotError {
+    fn from(e: TrySendError<AttestationMessage>) -> Self {
         match e {
             // Given the relatively large queue size, we always attempt to
             // send the attestation messages via `try_send()` instead of
@@ -140,17 +140,17 @@ impl From<RotError> for HttpError {
 /// Depth of the request queue for Sled Agent to the RoT.
 const QUEUE_SIZE: usize = 256;
 
-type RotAttestationResponse<T> = oneshot::Sender<Result<T, AttestError>>;
+type AttestationResponseTx<T> = oneshot::Sender<Result<T, AttestError>>;
 
-enum RotAttestationMessage {
-    GetMeasurementLog(RotAttestationResponse<MeasurementLog>),
-    GetCertificateChain(RotAttestationResponse<CertificateChain>),
-    Attest(Nonce, RotAttestationResponse<Attestation>),
+enum AttestationMessage {
+    GetMeasurementLog(AttestationResponseTx<MeasurementLog>),
+    GetCertificateChain(AttestationResponseTx<CertificateChain>),
+    Attest(Nonce, AttestationResponseTx<Attestation>),
 }
 
 #[derive(Debug)]
 pub struct RotAttestationHandle {
-    tx: mpsc::Sender<RotAttestationMessage>,
+    tx: mpsc::Sender<AttestationMessage>,
 }
 
 impl RotAttestationHandle {
@@ -158,7 +158,7 @@ impl RotAttestationHandle {
         &self,
     ) -> Result<MeasurementLog, RotError> {
         let (tx, rx) = oneshot::channel();
-        self.tx.try_send(RotAttestationMessage::GetMeasurementLog(tx))?;
+        self.tx.try_send(AttestationMessage::GetMeasurementLog(tx))?;
         Ok(rx.await.map_err(|_| RotError::Shutdown)??)
     }
 
@@ -166,13 +166,13 @@ impl RotAttestationHandle {
         &self,
     ) -> Result<CertificateChain, RotError> {
         let (tx, rx) = oneshot::channel();
-        self.tx.try_send(RotAttestationMessage::GetCertificateChain(tx))?;
+        self.tx.try_send(AttestationMessage::GetCertificateChain(tx))?;
         Ok(rx.await.map_err(|_| RotError::Shutdown)??)
     }
 
     pub async fn attest(&self, nonce: Nonce) -> Result<Attestation, RotError> {
         let (tx, rx) = oneshot::channel();
-        self.tx.try_send(RotAttestationMessage::Attest(nonce, tx))?;
+        self.tx.try_send(AttestationMessage::Attest(nonce, tx))?;
         Ok(rx.await.map_err(|_| RotError::Shutdown)??)
     }
 }
@@ -190,7 +190,7 @@ impl RotAttestationHandle {
 ///     `spawn_blocking()` -- [`RotAttestationTask::run`].
 pub struct RotAttestationTask {
     log: Logger,
-    rx: mpsc::Receiver<RotAttestationMessage>,
+    rx: mpsc::Receiver<AttestationMessage>,
     attest: Box<dyn Attest + Send>,
 }
 
@@ -250,11 +250,11 @@ impl RotAttestationTask {
             };
 
             match req {
-                RotAttestationMessage::GetMeasurementLog(reply_tx) => {
+                AttestationMessage::GetMeasurementLog(reply_tx) => {
                     let log = self.attest.get_measurement_log();
                     let _ = reply_tx.send(log.map(Into::into));
                 }
-                RotAttestationMessage::GetCertificateChain(reply_tx) => {
+                AttestationMessage::GetCertificateChain(reply_tx) => {
                     let chain =
                         self.attest.get_certificates().and_then(|chain| {
                             CertificateChain::try_from(chain)
@@ -262,7 +262,7 @@ impl RotAttestationTask {
                         });
                     let _ = reply_tx.send(chain);
                 }
-                RotAttestationMessage::Attest(nonce, reply_tx) => {
+                AttestationMessage::Attest(nonce, reply_tx) => {
                     let attestation = self.attest.attest(&nonce.0);
                     let _ = reply_tx.send(attestation.map(Into::into));
                 }
