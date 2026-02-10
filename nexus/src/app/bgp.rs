@@ -9,11 +9,10 @@ use nexus_db_model::{BgpAnnounceSet, BgpAnnouncement, BgpConfig};
 use nexus_db_queries::context::OpContext;
 use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::{
-    self, BgpExported, BgpImportedRouteIpv4, BgpMessageHistory, BgpPeerStatus,
+    self, BgpExported, BgpImported, BgpMessageHistory, BgpPeerStatus,
     CreateResult, DeleteResult, ListResultVec, LookupResult, NameOrId,
     SwitchBgpHistory,
 };
-use std::net::IpAddr;
 
 impl super::Nexus {
     pub async fn bgp_config_create(
@@ -196,21 +195,14 @@ impl super::Nexus {
                     for ex in exports.iter() {
                         let net = match ex {
                             rdb_types::Prefix::V4(v4) => {
-                                oxnet::Ipv4Net::new_unchecked(
+                                oxnet::IpNet::V4(oxnet::Ipv4Net::new_unchecked(
                                     v4.value, v4.length,
-                                )
+                                ))
                             }
                             rdb_types::Prefix::V6(v6) => {
-                                let v6 = oxnet::IpNet::V6(
-                                    oxnet::Ipv6Net::new_unchecked(
-                                        v6.value, v6.length,
-                                    ),
-                                );
-                                warn!(
-                                    self.log,
-                                    "{v6}: ipv6 exports not supported yet"
-                                );
-                                continue;
+                                oxnet::IpNet::V6(oxnet::Ipv6Net::new_unchecked(
+                                    v6.value, v6.length,
+                                ))
                             }
                         };
                         xps.push(net);
@@ -265,11 +257,11 @@ impl super::Nexus {
         Ok(result)
     }
 
-    pub async fn bgp_imported_routes_ipv4(
+    pub async fn bgp_imported_routes(
         &self,
         opctx: &OpContext,
         _sel: &params::BgpRouteSelector,
-    ) -> ListResultVec<BgpImportedRouteIpv4> {
+    ) -> ListResultVec<BgpImported> {
         opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
         let mut result = Vec::new();
         for (switch, client) in &self.mg_clients().await.map_err(|e| {
@@ -277,7 +269,7 @@ impl super::Nexus {
                 "failed to get mg clients: {e}"
             ))
         })? {
-            let mut imported: Vec<BgpImportedRouteIpv4> = Vec::new();
+            let mut imported: Vec<BgpImported> = Vec::new();
             match client
                 .get_rib_imported_v2(
                     Some(&rdb_types::AddressFamily::Ipv4),
@@ -298,11 +290,7 @@ impl super::Nexus {
                             }
                         };
                         for p in paths.iter() {
-                            let nexthop = match p.nexthop {
-                                IpAddr::V4(addr) => addr,
-                                IpAddr::V6(_) => continue,
-                            };
-                            let x = BgpImportedRouteIpv4 {
+                            let x = BgpImported {
                                 switch: *switch,
                                 prefix: ipnet,
                                 id: p
@@ -310,7 +298,7 @@ impl super::Nexus {
                                     .as_ref()
                                     .map(|bgp| bgp.id)
                                     .unwrap_or(0),
-                                nexthop,
+                                nexthop: p.nexthop,
                             };
                             imported.push(x);
                         }

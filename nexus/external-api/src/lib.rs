@@ -3681,6 +3681,17 @@ pub trait NexusExternalApi {
         method = GET,
         path = "/v1/system/networking/bgp-exported",
         tags = ["system/networking"],
+        versions = ..VERSION_BGP_UNNUMBERED_PEERS,
+    }]
+    async fn v2026020600_networking_bgp_exported(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<v2026020600::BgpExported>, HttpError>;
+
+    #[endpoint {
+        method = GET,
+        path = "/v1/system/networking/bgp-exported",
+        tags = ["system/networking"],
+        versions = VERSION_BGP_UNNUMBERED_PEERS..,
     }]
     async fn networking_bgp_exported(
         rqctx: RequestContext<Self::Context>,
@@ -3703,11 +3714,24 @@ pub trait NexusExternalApi {
         method = GET,
         path = "/v1/system/networking/bgp-routes-ipv4",
         tags = ["system/networking"],
+        versions = ..VERSION_BGP_UNNUMBERED_PEERS,
     }]
     async fn networking_bgp_imported_routes_ipv4(
         rqctx: RequestContext<Self::Context>,
         query_params: Query<params::BgpRouteSelector>,
-    ) -> Result<HttpResponseOk<Vec<BgpImportedRouteIpv4>>, HttpError>;
+    ) -> Result<HttpResponseOk<Vec<v2026020600::BgpImportedRouteIpv4>>, HttpError>;
+
+    /// Get imported IPv4 BGP routes
+    #[endpoint {
+        method = GET,
+        path = "/v1/system/networking/bgp-imported",
+        tags = ["system/networking"],
+        versions = VERSION_BGP_UNNUMBERED_PEERS..,
+    }]
+    async fn networking_bgp_imported(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<params::BgpRouteSelector>,
+    ) -> Result<HttpResponseOk<Vec<BgpImported>>, HttpError>;
 
     /// Delete BGP configuration
     #[endpoint {

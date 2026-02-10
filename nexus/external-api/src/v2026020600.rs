@@ -10,6 +10,8 @@
 //! - [`BgpPeer`] has a required `addr` field. Newer versions make `addr`
 //!   optional to support BGP unnumbered sessions where the peer address
 //!   is discovered dynamically via the interface rather than being specified.
+//! - [`BgpPeer`] lacks the `router_lifetime` field. Newer versions include
+//!   `router_lifetime` to configure IPv6 router advertisement lifetime.
 //! - [`BgpPeerConfig`] contains the old [`BgpPeer`] type with required `addr`.
 //! - [`SwitchPortSettingsCreate`] uses the old [`BgpPeerConfig`] type.
 //! - [`SwitchPortSettings`] contains the old [`BgpPeer`] type with required `addr`.
@@ -17,6 +19,12 @@
 //!   `max_paths` to configure BGP multipath support.
 //! - [`BgpConfig`] lacks the `max_paths` field. Newer versions include
 //!   `max_paths` to configure BGP multipath support.
+//! - [`BgpPeerStatus`] lacks the `peer_id` field. Newer versions include
+//!   `peer_id` to identify the peer.
+//! - [`BgpImportedRouteIpv4`] is IPv4-only. Newer versions use a generic
+//!   `BgpImported` type that supports both IPv4 and IPv6.
+//! - [`BgpExported`] is IPv4-only with peer addresses as strings. Newer
+//!   versions use a type that supports both IPv4 and IPv6.
 //!
 //! [`BgpPeer`]: self::BgpPeer
 //! [`BgpPeerConfig`]: self::BgpPeerConfig
@@ -24,16 +32,22 @@
 //! [`SwitchPortSettings`]: self::SwitchPortSettings
 //! [`BgpConfigCreate`]: self::BgpConfigCreate
 //! [`BgpConfig`]: self::BgpConfig
+//! [`BgpPeerStatus`]: self::BgpPeerStatus
+//! [`BgpImportedRouteIpv4`]: self::BgpImportedRouteIpv4
+//! [`BgpExported`]: self::BgpExported
 
 use api_identity::ObjectIdentity;
-use omicron_common::api::external::ObjectIdentity;
 use omicron_common::api::external::{
     self, IdentityMetadata, IdentityMetadataCreateParams, ImportExportPolicy,
     Name, NameOrId,
 };
+use omicron_common::api::external::{
+    BgpImported, ObjectIdentity, SwitchLocation,
+};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use std::net::IpAddr;
+use std::collections::HashMap;
+use std::net::{IpAddr, Ipv4Addr};
 
 /// A BGP peer configuration for an interface. Includes the set of announcements
 /// that will be advertised to the peer identified by `addr`. The `bgp_config`
@@ -416,5 +430,75 @@ impl From<external::BgpPeerStatus> for BgpPeerStatus {
             state_duration_millis: value.state_duration_millis,
             switch: value.switch,
         }
+    }
+}
+
+/// A route imported from a BGP peer.
+#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq)]
+pub struct BgpImportedRouteIpv4 {
+    /// The destination network prefix.
+    pub prefix: oxnet::Ipv4Net,
+
+    /// The nexthop the prefix is reachable through.
+    pub nexthop: Ipv4Addr,
+
+    /// BGP identifier of the originating router.
+    pub id: u32,
+
+    /// Switch the route is imported into.
+    pub switch: SwitchLocation,
+}
+
+impl TryFrom<BgpImported> for BgpImportedRouteIpv4 {
+    type Error = String;
+
+    fn try_from(value: BgpImported) -> Result<Self, Self::Error> {
+        let BgpImported { prefix, nexthop, id, switch } = value;
+
+        let prefix = match prefix {
+            oxnet::IpNet::V4(ipv4_net) => Ok(ipv4_net),
+            oxnet::IpNet::V6(ipv6_net) => {
+                Err(format!("prefix must be Ipv4Net but it is {ipv6_net}"))
+            }
+        }?;
+
+        let nexthop = match nexthop {
+            IpAddr::V4(ipv4_addr) => Ok(ipv4_addr),
+            IpAddr::V6(ipv6_addr) => {
+                Err(format!("nexthop must be Ipv4Addr but it is {ipv6_addr}"))
+            }
+        }?;
+
+        Ok(Self { prefix, nexthop, id, switch })
+    }
+}
+
+/// The current status of a BGP peer.
+#[derive(
+    Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq, Default,
+)]
+pub struct BgpExported {
+    /// Exported routes indexed by peer address.
+    pub exports: HashMap<String, Vec<oxnet::Ipv4Net>>,
+}
+
+impl From<external::BgpExported> for BgpExported {
+    fn from(value: external::BgpExported) -> Self {
+        let mut out = Self::default();
+
+        for (key, ipnets) in value.exports {
+            let prefixes: Vec<oxnet::Ipv4Net> = ipnets
+                .iter()
+                .flat_map(|net| match net {
+                    oxnet::IpNet::V4(ipv4_net) => Some(*ipv4_net),
+                    _ => None,
+                })
+                .collect();
+            if !prefixes.is_empty() {
+                out.exports.insert(key, prefixes);
+            }
+        }
+
+        out
     }
 }

@@ -3474,7 +3474,7 @@ pub struct BgpPeerStatus {
 )]
 pub struct BgpExported {
     /// Exported routes indexed by peer address.
-    pub exports: HashMap<String, Vec<Ipv4Net>>,
+    pub exports: HashMap<String, Vec<IpNet>>,
 }
 
 /// Opaque object representing BGP message history for a given BGP peer. The
@@ -3529,12 +3529,12 @@ impl AggregateBgpMessageHistory {
 
 /// A route imported from a BGP peer.
 #[derive(Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq)]
-pub struct BgpImportedRouteIpv4 {
+pub struct BgpImported {
     /// The destination network prefix.
-    pub prefix: oxnet::Ipv4Net,
+    pub prefix: oxnet::IpNet,
 
     /// The nexthop the prefix is reachable through.
-    pub nexthop: Ipv4Addr,
+    pub nexthop: IpAddr,
 
     /// BGP identifier of the originating router.
     pub id: u32,

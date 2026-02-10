@@ -10736,7 +10736,6 @@
         "tags": [
           "system/networking"
         ],
-        "summary": "Get BGP exported routes",
         "operationId": "networking_bgp_exported",
         "responses": {
           "200": {
@@ -10745,6 +10744,50 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/BgpExported"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/system/networking/bgp-imported": {
+      "get": {
+        "tags": [
+          "system/networking"
+        ],
+        "summary": "Get imported IPv4 BGP routes",
+        "operationId": "networking_bgp_imported",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "asn",
+            "description": "The ASN to filter on. Required.",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Array_of_BgpImported",
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/BgpImported"
+                  }
                 }
               }
             }
@@ -10785,50 +10828,6 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/AggregateBgpMessageHistory"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      }
-    },
-    "/v1/system/networking/bgp-routes-ipv4": {
-      "get": {
-        "tags": [
-          "system/networking"
-        ],
-        "summary": "Get imported IPv4 BGP routes",
-        "operationId": "networking_bgp_imported_routes_ipv4",
-        "parameters": [
-          {
-            "in": "query",
-            "name": "asn",
-            "description": "The ASN to filter on. Required.",
-            "required": true,
-            "schema": {
-              "type": "integer",
-              "format": "uint32",
-              "minimum": 0
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "title": "Array_of_BgpImportedRouteIpv4",
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/BgpImportedRouteIpv4"
-                  }
                 }
               }
             }
@@ -17262,7 +17261,7 @@
             "additionalProperties": {
               "type": "array",
               "items": {
-                "$ref": "#/components/schemas/Ipv4Net"
+                "$ref": "#/components/schemas/IpNet"
               }
             }
           }
@@ -17271,7 +17270,7 @@
           "exports"
         ]
       },
-      "BgpImportedRouteIpv4": {
+      "BgpImported": {
         "description": "A route imported from a BGP peer.",
         "type": "object",
         "properties": {
@@ -17284,13 +17283,13 @@
           "nexthop": {
             "description": "The nexthop the prefix is reachable through.",
             "type": "string",
-            "format": "ipv4"
+            "format": "ip"
           },
           "prefix": {
             "description": "The destination network prefix.",
             "allOf": [
               {
-                "$ref": "#/components/schemas/Ipv4Net"
+                "$ref": "#/components/schemas/IpNet"
               }
             ]
           },
