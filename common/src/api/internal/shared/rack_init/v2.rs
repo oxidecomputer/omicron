@@ -184,10 +184,6 @@ impl MaxPathConfig {
         Ok(Self(v))
     }
 
-    pub fn new_unchecked(v: u8) -> Self {
-        Self(v)
-    }
-
     pub fn as_u8(&self) -> u8 {
         self.0
     }

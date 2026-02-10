@@ -4275,7 +4275,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 max_paths: Default::default(),
             };
             let new: BgpConfig =
-                nexus.bgp_config_create(&opctx, &config).await?.into();
+                nexus.bgp_config_create(&opctx, &config).await?.try_into()?;
             let result = v2026020600::BgpConfig {
                 identity: new.identity,
                 asn: new.asn,
@@ -4293,7 +4293,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
         audit_and_time(&rqctx, |opctx, nexus| async move {
             let config = config.into_inner();
             let result = nexus.bgp_config_create(&opctx, &config).await?;
-            Ok(HttpResponseCreated::<BgpConfig>(result.into()))
+            Ok(HttpResponseCreated::<BgpConfig>(result.try_into()?))
         })
         .await
     }
@@ -4353,8 +4353,8 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 .bgp_config_list(&opctx, &paginated_by)
                 .await?
                 .into_iter()
-                .map(|p| p.into())
-                .collect();
+                .map(|p| p.try_into())
+                .collect::<Result<Vec<_>, _>>()?;
 
             Ok(HttpResponseOk(ScanByNameOrId::results_page(
                 &query,

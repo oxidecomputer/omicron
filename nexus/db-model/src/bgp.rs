@@ -10,11 +10,13 @@ use nexus_db_schema::schema::{
 };
 use nexus_types::external_api::params;
 use nexus_types::identity::Resource;
+use omicron_common::api::external::Error;
 use omicron_common::api::{
     external::{self, IdentityMetadataCreateParams},
     internal::shared::rack_init::MaxPathConfig,
 };
 use serde::{Deserialize, Serialize};
+use slog_error_chain::InlineErrorChain;
 use uuid::Uuid;
 
 #[derive(
@@ -39,14 +41,24 @@ pub struct BgpConfig {
     pub max_paths: SqlU8,
 }
 
-impl Into<external::BgpConfig> for BgpConfig {
-    fn into(self) -> external::BgpConfig {
-        external::BgpConfig {
-            identity: self.identity(),
-            asn: self.asn.into(),
-            vrf: self.vrf,
-            max_paths: MaxPathConfig::new_unchecked(*self.max_paths),
-        }
+impl TryFrom<BgpConfig> for external::BgpConfig {
+    type Error = Error;
+
+    fn try_from(value: BgpConfig) -> Result<Self, Self::Error> {
+        let max_paths =
+            MaxPathConfig::new(*value.max_paths).map_err(|err| {
+                Error::internal_error(&format!(
+                    "invalid database contents: \
+                     could not convert MaxPathConfig: {}",
+                    InlineErrorChain::new(&err)
+                ))
+            })?;
+        Ok(Self {
+            identity: value.identity(),
+            asn: value.asn.into(),
+            vrf: value.vrf,
+            max_paths,
+        })
     }
 }
 
