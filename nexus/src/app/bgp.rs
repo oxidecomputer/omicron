@@ -180,7 +180,7 @@ impl super::Nexus {
                     peer: None,
                 };
 
-                let exported = match client.get_exported_v2(&selector).await {
+                let exported = match client.get_exported_v3(&selector).await {
                     Ok(result) => result.into_inner(),
                     Err(e) => {
                         error!(
