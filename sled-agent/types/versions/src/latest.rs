@@ -116,8 +116,6 @@ pub mod inventory {
     pub use crate::v11::inventory::OmicronZoneType;
     pub use crate::v11::inventory::OmicronZonesConfig;
 
-    pub use crate::v12::inventory::HealthMonitorInventory;
-
     pub use crate::v14::inventory::ConfigReconcilerInventoryStatus;
     pub use crate::v14::inventory::OmicronFileSourceResolverInventory;
     pub use crate::v14::inventory::OmicronSingleMeasurement;
@@ -125,8 +123,10 @@ pub mod inventory {
     pub use crate::v14::inventory::ReconciledSingleMeasurement;
 
     pub use crate::v16::inventory::ConfigReconcilerInventory;
-    pub use crate::v16::inventory::Inventory;
     pub use crate::v16::inventory::SingleMeasurementInventory;
+
+    pub use crate::v19::inventory::HealthMonitorInventory;
+    pub use crate::v19::inventory::Inventory;
 
     pub use crate::impls::inventory::ManifestBootInventoryDisplay;
     pub use crate::impls::inventory::ManifestInventoryDisplay;
