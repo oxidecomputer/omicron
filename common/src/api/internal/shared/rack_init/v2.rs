@@ -93,7 +93,7 @@ pub struct BgpPeerConfig {
     pub vlan_id: Option<u16>,
     /// Router lifetime in seconds for unnumbered BGP peers.
     #[serde(default)]
-    pub router_lifetime: u16,
+    pub router_lifetime: RouterLifetimeConfig,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq, JsonSchema)]

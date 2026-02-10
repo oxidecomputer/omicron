@@ -637,7 +637,7 @@ impl super::Nexus {
                     allowed_import: r.allowed_import.clone(),
                     allowed_export: r.allowed_export.clone(),
                     vlan_id: r.vlan_id,
-                    router_lifetime: r.router_lifetime,
+                    router_lifetime: r.router_lifetime.as_u16(),
                 })
                 .collect();
 

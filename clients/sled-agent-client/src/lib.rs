@@ -38,6 +38,7 @@ progenitor::generate_api!(
         OmicronPhysicalDiskConfig = { derives = [Eq, Hash, PartialOrd, Ord] },
         PortConfig = { derives = [Eq, Hash] },
         RouteConfig = { derives = [Eq, Hash] },
+        RouterLifetimeConfig = { derives = [Eq, Hash] },
         UplinkAddressConfig = { derives = [Eq, Hash] },
         VirtualNetworkInterfaceHost = { derives = [Eq, Hash] },
     },

@@ -755,6 +755,7 @@ fn build_port_config(
     use bootstrap_agent_lockstep_client::types::PortFec as BaPortFec;
     use bootstrap_agent_lockstep_client::types::PortSpeed as BaPortSpeed;
     use bootstrap_agent_lockstep_client::types::RouteConfig as BaRouteConfig;
+    use bootstrap_agent_lockstep_client::types::RouterLifetimeConfig as BaRouterLifetimeConfig;
     use bootstrap_agent_lockstep_client::types::SwitchLocation as BaSwitchLocation;
     use bootstrap_agent_lockstep_client::types::TxEqConfig as BaTxEqConfig;
     use bootstrap_agent_lockstep_client::types::UplinkAddressConfig as BaUplinkAddressConfig;
@@ -826,7 +827,7 @@ fn build_port_config(
                     allowed_export: p.allowed_export.clone().into(),
                     allowed_import: p.allowed_import.clone().into(),
                     vlan_id: p.vlan_id,
-                    router_lifetime: p.router_lifetime,
+                    router_lifetime: BaRouterLifetimeConfig(p.router_lifetime),
                 }
             })
             .collect(),

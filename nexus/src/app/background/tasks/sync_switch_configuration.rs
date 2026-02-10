@@ -56,7 +56,9 @@ use sled_agent_client::types::{
     BgpConfig as SledBgpConfig, BgpPeerConfig as SledBgpPeerConfig,
     EarlyNetworkConfig, EarlyNetworkConfigBody, HostPortConfig,
     LldpAdminStatus, LldpPortConfig, PortConfig, RackNetworkConfig,
-    RouteConfig as SledRouteConfig, TxEqConfig, UplinkAddressConfig,
+    RouteConfig as SledRouteConfig,
+    RouterLifetimeConfig as SledRouterLifetimeConfig, TxEqConfig,
+    UplinkAddressConfig,
 };
 use std::{
     collections::{HashMap, HashSet, hash_map::Entry},
@@ -1182,7 +1184,7 @@ impl BackgroundTask for SwitchPortSettingsManager {
                                     allowed_export: ImportExportPolicy::NoFiltering,
                                     allowed_import: ImportExportPolicy::NoFiltering,
                                     vlan_id: c.vlan_id.map(|x| x.0),
-                                    router_lifetime: c.router_lifetime.0,
+                                    router_lifetime: SledRouterLifetimeConfig(c.router_lifetime.0),
                                 }
                         }).collect(),
                         port: port.port_name.to_string(),

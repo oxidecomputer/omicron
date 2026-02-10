@@ -421,9 +421,11 @@
           "router_lifetime": {
             "description": "Router lifetime in seconds for unnumbered BGP peers.",
             "default": 0,
-            "type": "integer",
-            "format": "uint16",
-            "minimum": 0
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/RouterLifetimeConfig"
+              }
+            ]
           },
           "vlan_id": {
             "nullable": true,
@@ -1247,6 +1249,12 @@
           "destination",
           "nexthop"
         ]
+      },
+      "RouterLifetimeConfig": {
+        "description": "Router lifetime in seconds for unnumbered BGP peers.\n\nThis value is used in IPv6 Router Advertisements to indicate how long the router should be considered valid by neighbors.",
+        "type": "integer",
+        "format": "uint16",
+        "minimum": 0
       },
       "RssStep": {
         "description": "Steps we go through during initial rack setup. Keep this list in order that they happen.",
