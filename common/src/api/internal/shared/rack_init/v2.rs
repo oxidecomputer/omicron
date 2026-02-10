@@ -22,6 +22,7 @@ use oxnet::{IpNet, Ipv6Net};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::net::IpAddr;
+use std::num::NonZeroU8;
 
 /// Initial network configuration
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, JsonSchema)]
@@ -164,8 +165,7 @@ pub struct BgpConfig {
     pub max_paths: MaxPathConfig,
 }
 
-#[derive(Debug, Copy, Clone, Eq, PartialEq, Serialize, JsonSchema)]
-#[serde(transparent)]
+#[derive(Debug, Copy, Clone, Eq, PartialEq, Serialize)]
 pub struct MaxPathConfig(u8);
 
 impl MaxPathConfig {
@@ -187,6 +187,12 @@ impl MaxPathConfig {
     pub fn as_u8(&self) -> u8 {
         self.0
     }
+
+    pub fn as_nonzero_u8(&self) -> NonZeroU8 {
+        // By construction, we guarantee self.0 is at least Self::MIN (1), so we
+        // can unwrap this conversion.
+        NonZeroU8::new(self.0).unwrap()
+    }
 }
 
 impl Default for MaxPathConfig {
@@ -202,6 +208,27 @@ impl<'de> Deserialize<'de> for MaxPathConfig {
     {
         let value = u8::deserialize(deserializer)?;
         MaxPathConfig::new(value).map_err(serde::de::Error::custom)
+    }
+}
+
+impl JsonSchema for MaxPathConfig {
+    fn schema_name() -> String {
+        "MaxPathConfig".to_string()
+    }
+
+    fn json_schema(
+        _: &mut schemars::r#gen::SchemaGenerator,
+    ) -> schemars::schema::Schema {
+        schemars::schema::Schema::Object(schemars::schema::SchemaObject {
+            instance_type: Some(schemars::schema::InstanceType::Integer.into()),
+            format: Some("uint8".to_string()),
+            number: Some(Box::new(schemars::schema::NumberValidation {
+                minimum: Some(f64::from(Self::MIN)),
+                maximum: Some(f64::from(Self::MAX)),
+                ..Default::default()
+            })),
+            ..Default::default()
+        })
     }
 }
 

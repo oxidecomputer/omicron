@@ -689,7 +689,7 @@ fn validate_rack_network_config(
                 originate: config.originate.clone(),
                 checker: config.checker.clone(),
                 shaper: config.shaper.clone(),
-                max_paths: BaMaxPathConfig(config.max_paths.as_u8()),
+                max_paths: BaMaxPathConfig(config.max_paths.as_nonzero_u8()),
             })
             .collect(),
         //TODO bfd config in wicket

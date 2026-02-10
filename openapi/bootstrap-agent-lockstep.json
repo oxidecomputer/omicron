@@ -729,7 +729,8 @@
       "MaxPathConfig": {
         "type": "integer",
         "format": "uint8",
-        "minimum": 0
+        "minimum": 1,
+        "maximum": 32
       },
       "Name": {
         "title": "A name unique within the parent collection",
