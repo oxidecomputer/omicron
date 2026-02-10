@@ -10743,7 +10743,11 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/BgpExported"
+                  "title": "Array_of_BgpExported",
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/BgpExported"
+                  }
                 }
               }
             }
@@ -17254,22 +17258,34 @@
         ]
       },
       "BgpExported": {
-        "description": "The current status of a BGP peer.",
+        "description": "Route exported to a peer.",
         "type": "object",
         "properties": {
-          "exports": {
-            "description": "Exported routes indexed by peer address.",
-            "type": "object",
-            "additionalProperties": {
-              "type": "array",
-              "items": {
+          "peer_id": {
+            "description": "Identifier for the BGP peer.",
+            "type": "string"
+          },
+          "prefix": {
+            "description": "The destination network prefix.",
+            "allOf": [
+              {
                 "$ref": "#/components/schemas/IpNet"
               }
-            }
+            ]
+          },
+          "switch": {
+            "description": "Switch the route is exported from.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SwitchLocation"
+              }
+            ]
           }
         },
         "required": [
-          "exports"
+          "peer_id",
+          "prefix",
+          "switch"
         ]
       },
       "BgpImported": {

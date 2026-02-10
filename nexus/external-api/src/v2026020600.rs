@@ -47,6 +47,7 @@ use omicron_common::api::external::{
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::collections::hash_map::Entry;
 use std::net::{IpAddr, Ipv4Addr};
 
 /// A BGP peer configuration for an interface. Includes the set of announcements
@@ -482,20 +483,21 @@ pub struct BgpExported {
     pub exports: HashMap<String, Vec<oxnet::Ipv4Net>>,
 }
 
-impl From<external::BgpExported> for BgpExported {
-    fn from(value: external::BgpExported) -> Self {
+impl From<Vec<external::BgpExported>> for BgpExported {
+    fn from(values: Vec<external::BgpExported>) -> Self {
         let mut out = Self::default();
 
-        for (key, ipnets) in value.exports {
-            let prefixes: Vec<oxnet::Ipv4Net> = ipnets
-                .iter()
-                .flat_map(|net| match net {
-                    oxnet::IpNet::V4(ipv4_net) => Some(*ipv4_net),
-                    _ => None,
-                })
-                .collect();
-            if !prefixes.is_empty() {
-                out.exports.insert(key, prefixes);
+        for export in values {
+            let oxnet::IpNet::V4(net) = export.prefix else {
+                continue;
+            };
+            match out.exports.entry(export.peer_id) {
+                Entry::Occupied(mut occupied_entry) => {
+                    occupied_entry.get_mut().push(net);
+                }
+                Entry::Vacant(vacant_entry) => {
+                    vacant_entry.insert(vec![net]);
+                }
             }
         }
 

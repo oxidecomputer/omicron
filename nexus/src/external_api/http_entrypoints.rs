@@ -4407,7 +4407,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
 
     async fn networking_bgp_exported(
         rqctx: RequestContext<ApiContext>,
-    ) -> Result<HttpResponseOk<BgpExported>, HttpError> {
+    ) -> Result<HttpResponseOk<Vec<BgpExported>>, HttpError> {
         let apictx = rqctx.context();
         let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
         let handler = async {

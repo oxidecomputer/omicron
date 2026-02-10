@@ -3468,13 +3468,17 @@ pub struct BgpPeerStatus {
     pub switch: SwitchLocation,
 }
 
-/// The current status of a BGP peer.
-#[derive(
-    Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq, Default,
-)]
+/// Route exported to a peer.
+#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq)]
 pub struct BgpExported {
-    /// Exported routes indexed by peer address.
-    pub exports: HashMap<String, Vec<IpNet>>,
+    /// Identifier for the BGP peer.
+    pub peer_id: String,
+
+    /// Switch the route is exported from.
+    pub switch: SwitchLocation,
+
+    /// The destination network prefix.
+    pub prefix: oxnet::IpNet,
 }
 
 /// Opaque object representing BGP message history for a given BGP peer. The

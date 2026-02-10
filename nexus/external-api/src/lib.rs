@@ -3695,7 +3695,7 @@ pub trait NexusExternalApi {
     }]
     async fn networking_bgp_exported(
         rqctx: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseOk<BgpExported>, HttpError>;
+    ) -> Result<HttpResponseOk<Vec<BgpExported>>, HttpError>;
 
     /// Get BGP router message history
     #[endpoint {

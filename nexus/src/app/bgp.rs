@@ -153,9 +153,9 @@ impl super::Nexus {
     pub async fn bgp_exported(
         &self,
         opctx: &OpContext,
-    ) -> LookupResult<BgpExported> {
+    ) -> LookupResult<Vec<BgpExported>> {
         opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
-        let mut result = BgpExported::default();
+        let mut result = vec![];
         for (switch, client) in &self.mg_clients().await.map_err(|e| {
             external::Error::internal_error(&format!(
                 "failed to get mg clients: {e}"
@@ -191,10 +191,9 @@ impl super::Nexus {
                     }
                 };
 
-                for (addr, exports) in exported {
-                    let mut xps = Vec::new();
+                for (peer_id, exports) in exported {
                     for ex in exports.iter() {
-                        let net = match ex {
+                        let prefix = match ex {
                             rdb_types::Prefix::V4(v4) => {
                                 oxnet::IpNet::V4(oxnet::Ipv4Net::new_unchecked(
                                     v4.value, v4.length,
@@ -206,9 +205,13 @@ impl super::Nexus {
                                 ))
                             }
                         };
-                        xps.push(net);
+                        let export = BgpExported {
+                            peer_id: peer_id.clone(),
+                            switch: *switch,
+                            prefix,
+                        };
+                        result.push(export);
                     }
-                    result.exports.insert(addr.to_string(), xps);
                 }
             }
         }
