@@ -475,6 +475,25 @@ pub struct SubnetPool {
     pub ip_version: IpVersion,
 }
 
+/// A subnet pool in the context of a silo
+#[derive(
+    ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq,
+)]
+pub struct SiloSubnetPool {
+    #[serde(flatten)]
+    pub identity: IdentityMetadata,
+
+    /// When a pool is the default for a silo, external subnet allocations will
+    /// come from that pool when no other pool is specified.
+    ///
+    /// A silo can have at most one default pool per IP version (IPv4 or IPv6),
+    /// allowing up to 2 default pools total.
+    pub is_default: bool,
+
+    /// The IP version for the pool.
+    pub ip_version: IpVersion,
+}
+
 /// A member (subnet) within a subnet pool
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
 pub struct SubnetPoolMember {

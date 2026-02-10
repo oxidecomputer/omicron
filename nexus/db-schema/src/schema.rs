@@ -826,6 +826,12 @@ table! {
 }
 
 allow_tables_to_appear_in_same_query!(external_subnet, project);
+allow_tables_to_appear_in_same_query!(external_subnet, instance);
+allow_tables_to_appear_in_same_query!(external_subnet, vmm);
+allow_tables_to_appear_in_same_query!(external_subnet, sled);
+allow_tables_to_appear_in_same_query!(external_subnet, network_interface);
+allow_tables_to_appear_in_same_query!(external_subnet, vpc);
+allow_tables_to_appear_in_same_query!(external_subnet, vpc_subnet);
 
 table! {
     silo (id) {
@@ -2580,6 +2586,10 @@ table! {
 allow_tables_to_appear_in_same_query!(instance, migration);
 allow_tables_to_appear_in_same_query!(migration, vmm);
 joinable!(instance -> migration (migration_id));
+
+allow_tables_to_appear_in_same_query!(subnet_pool, subnet_pool_silo_link, silo);
+joinable!(subnet_pool_silo_link -> subnet_pool (subnet_pool_id));
+joinable!(subnet_pool_silo_link -> silo (silo_id));
 
 allow_tables_to_appear_in_same_query!(
     ip_pool_range,
