@@ -175,7 +175,7 @@ impl super::Nexus {
             for r in &router_info {
                 let asn = r.asn;
                 let selector = mg_admin_client::types::ExportedSelector {
-                    afi: Some(mg_admin_client::types::Afi::Ipv4),
+                    afi: None,
                     asn,
                     peer: None,
                 };
@@ -190,6 +190,7 @@ impl super::Nexus {
                         continue;
                     }
                 };
+
                 for (addr, exports) in exported {
                     let mut xps = Vec::new();
                     for ex in exports.iter() {
@@ -270,13 +271,7 @@ impl super::Nexus {
             ))
         })? {
             let mut imported: Vec<BgpImported> = Vec::new();
-            match client
-                .get_rib_imported_v2(
-                    Some(&rdb_types::AddressFamily::Ipv4),
-                    None,
-                )
-                .await
-            {
+            match client.get_rib_imported_v2(None, None).await {
                 Ok(result) => {
                     for (prefix, paths) in result.into_inner().iter() {
                         let ipnet = match prefix.parse() {
