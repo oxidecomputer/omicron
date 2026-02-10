@@ -62,12 +62,7 @@ impl FromStr for MaxPathConfig {
     type Err = MaxPathConfigError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let v: u8 = s.parse().map_err(|e| {
-            MaxPathConfigError(format!(
-                "failed to parse value for max path config: {e}"
-            ))
-        })?;
-
+        let v: u8 = s.parse()?;
         Self::new(v)
     }
 }

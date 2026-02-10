@@ -164,22 +164,21 @@ pub struct BgpConfig {
     pub max_paths: MaxPathConfig,
 }
 
-#[derive(
-    Debug, Copy, Clone, Eq, PartialEq, Deserialize, Serialize, JsonSchema,
-)]
+#[derive(Debug, Copy, Clone, Eq, PartialEq, Serialize, JsonSchema)]
+#[serde(transparent)]
 pub struct MaxPathConfig(u8);
 
 impl MaxPathConfig {
+    const MIN: u8 = 1;
+    const MAX: u8 = 32;
+
     pub fn new(v: u8) -> Result<Self, MaxPathConfigError> {
-        if v == 0 {
-            let msg = "Max path value cannot be zero".into();
-            return Err(MaxPathConfigError(msg));
+        if v < Self::MIN {
+            return Err(MaxPathConfigError::ValueTooSmall);
         }
 
-        if v > 32 {
-            let msg =
-                "System does not support more than 32 paths for ECMP".into();
-            return Err(MaxPathConfigError(msg));
+        if v > Self::MAX {
+            return Err(MaxPathConfigError::ValueTooLarge);
         }
 
         Ok(Self(v))
@@ -196,12 +195,33 @@ impl MaxPathConfig {
 
 impl Default for MaxPathConfig {
     fn default() -> Self {
-        Self(1)
+        Self(Self::MIN)
     }
 }
 
-#[derive(Debug, PartialEq, Eq, Deserialize, Serialize)]
-pub struct MaxPathConfigError(pub(super) String);
+impl<'de> Deserialize<'de> for MaxPathConfig {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let value = u8::deserialize(deserializer)?;
+        MaxPathConfig::new(value).map_err(serde::de::Error::custom)
+    }
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum MaxPathConfigError {
+    #[error("max path value cannot be less than {}", MaxPathConfig::MIN)]
+    ValueTooSmall,
+    #[error("max path value cannot be greater than {}", MaxPathConfig::MAX)]
+    ValueTooLarge,
+    #[error(
+        "max path value must be an integer between {} and {}",
+        MaxPathConfig::MIN,
+        MaxPathConfig::MAX
+    )]
+    ParseIntError(#[from] std::num::ParseIntError),
+}
 
 /// Router lifetime in seconds for unnumbered BGP peers.
 ///
