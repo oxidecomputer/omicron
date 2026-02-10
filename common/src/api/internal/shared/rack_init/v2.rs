@@ -250,27 +250,22 @@ pub enum MaxPathConfigError {
 ///
 /// This value is used in IPv6 Router Advertisements to indicate how long
 /// the router should be considered valid by neighbors.
-#[derive(
-    Debug, Copy, Clone, Eq, PartialEq, Deserialize, Serialize, JsonSchema,
-)]
+#[derive(Debug, Copy, Clone, Eq, PartialEq, Serialize)]
 pub struct RouterLifetimeConfig(u16);
 
 impl RouterLifetimeConfig {
     /// Default router lifetime: 0 seconds (disabled)
     pub const DEFAULT: u16 = 0;
 
+    // Maximum valid router lifetime is 9000 seconds (2.5 hours) per RFC 4861
+    const MAX: u16 = 9000;
+
     pub fn new(v: u16) -> Result<Self, RouterLifetimeConfigError> {
-        // Maximum valid router lifetime is 9000 seconds (2.5 hours) per RFC 4861
-        if v > 9000 {
-            let msg = "Router lifetime cannot exceed 9000 seconds".into();
-            return Err(RouterLifetimeConfigError(msg));
+        if v > Self::MAX {
+            return Err(RouterLifetimeConfigError::ValueTooLarge);
         }
 
         Ok(Self(v))
-    }
-
-    pub fn new_unchecked(v: u16) -> Self {
-        Self(v)
     }
 
     pub fn as_u16(&self) -> u16 {
@@ -284,8 +279,58 @@ impl Default for RouterLifetimeConfig {
     }
 }
 
-#[derive(Debug, PartialEq, Eq, Deserialize, Serialize)]
-pub struct RouterLifetimeConfigError(pub(super) String);
+impl<'de> Deserialize<'de> for RouterLifetimeConfig {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let value = u16::deserialize(deserializer)?;
+        RouterLifetimeConfig::new(value).map_err(serde::de::Error::custom)
+    }
+}
+
+impl JsonSchema for RouterLifetimeConfig {
+    fn schema_name() -> String {
+        "RouterLifetimeConfig".to_string()
+    }
+
+    fn json_schema(
+        _: &mut schemars::r#gen::SchemaGenerator,
+    ) -> schemars::schema::Schema {
+        schemars::schema::Schema::Object(schemars::schema::SchemaObject {
+            metadata: Some(Box::new(schemars::schema::Metadata {
+                description: Some(
+                    "Router lifetime in seconds for unnumbered BGP peers"
+                        .to_string(),
+                ),
+                ..Default::default()
+            })),
+            instance_type: Some(schemars::schema::InstanceType::Integer.into()),
+            format: Some("uint16".to_string()),
+            number: Some(Box::new(schemars::schema::NumberValidation {
+                minimum: Some(f64::from(Self::DEFAULT)),
+                maximum: Some(f64::from(Self::MAX)),
+                ..Default::default()
+            })),
+            ..Default::default()
+        })
+    }
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum RouterLifetimeConfigError {
+    #[error(
+        "router lifetime config cannot be greater than {}",
+        RouterLifetimeConfig::MAX
+    )]
+    ValueTooLarge,
+    #[error(
+        "max path value must be an integer between {} and {}",
+        RouterLifetimeConfig::DEFAULT,
+        RouterLifetimeConfig::MAX
+    )]
+    ParseIntError(#[from] std::num::ParseIntError),
+}
 
 /// A set of switch uplinks.
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]

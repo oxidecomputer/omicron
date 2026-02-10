@@ -77,12 +77,7 @@ impl FromStr for RouterLifetimeConfig {
     type Err = RouterLifetimeConfigError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let v: u16 = s.parse().map_err(|e| {
-            RouterLifetimeConfigError(format!(
-                "failed to parse value for router lifetime config: {e}"
-            ))
-        })?;
-
+        let v: u16 = s.parse()?;
         Self::new(v)
     }
 }
