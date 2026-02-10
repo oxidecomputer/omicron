@@ -68,7 +68,7 @@ impl BgpConfig {
             vrf: c.vrf.as_ref().map(|x| x.to_string()),
             shaper: c.shaper.as_ref().map(|x| x.to_string()),
             checker: c.checker.as_ref().map(|x| x.to_string()),
-            max_paths: c.max_paths.0.into(),
+            max_paths: c.max_paths.as_u8().into(),
         }
     }
 }

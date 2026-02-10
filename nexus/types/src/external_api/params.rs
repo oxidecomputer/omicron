@@ -18,8 +18,8 @@ use omicron_common::api::external::{
     AddressLotKind, AffinityPolicy, AllowedSourceIps, BfdMode, BgpPeer,
     ByteCount, FailureDomain, Hostname, IdentityMetadataCreateParams,
     IdentityMetadataUpdateParams, InstanceAutoRestartPolicy, InstanceCpuCount,
-    InstanceCpuPlatform, IpVersion, LinkFec, LinkSpeed, Name, NameOrId,
-    Nullable, PaginationOrder, RouteDestination, RouteTarget, UserId,
+    InstanceCpuPlatform, IpVersion, LinkFec, LinkSpeed, MaxPathConfig, Name,
+    NameOrId, Nullable, PaginationOrder, RouteDestination, RouteTarget, UserId,
 };
 use omicron_common::disk::DiskVariant;
 use omicron_common::vlan::VlanID;
@@ -2871,60 +2871,8 @@ pub struct BgpConfigCreate {
     pub checker: Option<String>,
 
     /// Maximum number of paths to use when multiple "best paths" exist
-    #[serde(default, deserialize_with = "validate_max_path_config")]
+    #[serde(default)]
     pub max_paths: MaxPathConfig,
-}
-
-#[derive(
-    Debug,
-    Display,
-    Copy,
-    Clone,
-    Eq,
-    PartialEq,
-    Deserialize,
-    Serialize,
-    JsonSchema,
-)]
-#[display("{0}")]
-#[serde(transparent)]
-pub struct MaxPathConfig(pub u8);
-
-fn validate_max_path_config<'de, D>(
-    deserializer: D,
-) -> Result<MaxPathConfig, D::Error>
-where
-    D: serde::Deserializer<'de>,
-{
-    let value = MaxPathConfig::deserialize(deserializer)?;
-
-    if value.0 == 0 {
-        let msg = "Max path value cannot be zero";
-        return Err(serde::de::Error::custom(msg));
-    }
-
-    if value.0 > 32 {
-        let msg = "System does not support more than 32 paths for ECMP";
-        return Err(serde::de::Error::custom(msg));
-    }
-
-    Ok(value)
-}
-
-impl Default for MaxPathConfig {
-    fn default() -> Self {
-        Self(1)
-    }
-}
-
-impl From<omicron_common::api::internal::shared::rack_init::MaxPathConfig>
-    for MaxPathConfig
-{
-    fn from(
-        c: omicron_common::api::internal::shared::rack_init::MaxPathConfig,
-    ) -> Self {
-        Self(c.as_u8())
-    }
 }
 
 /// Select a BGP status information by BGP config id.
