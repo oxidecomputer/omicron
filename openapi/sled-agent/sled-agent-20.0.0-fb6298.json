@@ -7,7 +7,7 @@
       "url": "https://oxide.computer",
       "email": "api@oxide.computer"
     },
-    "version": "19.0.0"
+    "version": "20.0.0"
   },
   "paths": {
     "/artifacts": {
@@ -500,6 +500,121 @@
         "responses": {
           "204": {
             "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/rot/{rot}/attest": {
+      "post": {
+        "summary": "Return attestation over recorded measurments and nonce from the RoT.",
+        "operationId": "rot_attest",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "rot",
+            "description": "Which RoT to use",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Rot"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Nonce"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Attestation"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/rot/{rot}/certificate-chain": {
+      "get": {
+        "summary": "Return the certificate chain for the attestation signer from the RoT.",
+        "operationId": "rot_certificate_chain",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "rot",
+            "description": "Which RoT to use",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Rot"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CertificateChain"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/rot/{rot}/measurement-log": {
+      "get": {
+        "summary": "Return the set of measurments recorded by the RoT.",
+        "operationId": "rot_measurement_log",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "rot",
+            "description": "Which RoT to use",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Rot"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MeasurementLog"
+                }
+              }
+            }
           },
           "4XX": {
             "$ref": "#/components/responses/Error"
@@ -3089,6 +3204,25 @@
           "subnets"
         ]
       },
+      "Attestation": {
+        "description": "An RoT produced attestation that represents a signature over the provided [`Nonce`] combined with the [`MeasurementLog`] and signed by a key certified by the [`CertificateChain`].",
+        "oneOf": [
+          {
+            "description": "An Ed25519 signature.",
+            "type": "object",
+            "properties": {
+              "ed25519": {
+                "type": "string",
+                "format": "hex string (64 bytes)"
+              }
+            },
+            "required": [
+              "ed25519"
+            ],
+            "additionalProperties": false
+          }
+        ]
+      },
       "Baseboard": {
         "description": "Describes properties that should uniquely identify a Gimlet.",
         "oneOf": [
@@ -3802,6 +3936,13 @@
         "type": "integer",
         "format": "uint64",
         "minimum": 0
+      },
+      "CertificateChain": {
+        "description": "A chain of PEM-encoded X.509 certificates (RFC5280) that link an attestation signing key to a trusted PKI root.",
+        "type": "array",
+        "items": {
+          "type": "string"
+        }
       },
       "Chipset": {
         "description": "A kind of virtual chipset.",
@@ -7007,6 +7148,32 @@
         "minimum": 1,
         "maximum": 32
       },
+      "Measurement": {
+        "description": "An RoT provided measurement which represents a digest of some component in the trusted computing base (TCB) for the attestor.",
+        "oneOf": [
+          {
+            "description": "A SHA3-256 digest.",
+            "type": "object",
+            "properties": {
+              "sha3_256": {
+                "type": "string",
+                "format": "hex string (32 bytes)"
+              }
+            },
+            "required": [
+              "sha3_256"
+            ],
+            "additionalProperties": false
+          }
+        ]
+      },
+      "MeasurementLog": {
+        "description": "The set of measurments provided by the RoT.",
+        "type": "array",
+        "items": {
+          "$ref": "#/components/schemas/Measurement"
+        }
+      },
       "MigrationFailureInjector": {
         "description": "Describes a synthetic device that registers for VM lifecycle notifications and returns errors during attempts to migrate.\n\nThis is only supported by Propolis servers compiled with the `failure-injection` feature.",
         "type": "object",
@@ -7437,6 +7604,16 @@
           "connected_peers",
           "persistent_state",
           "proxied_requests"
+        ]
+      },
+      "Nonce": {
+        "description": "A random nonce provided as part of an attestation challenge to guarantee freshness thereby preventing replay attacks.",
+        "anyOf": [
+          {
+            "description": "A 32-byte nonce.",
+            "type": "string",
+            "format": "hex string (32 bytes)"
+          }
         ]
       },
       "NvmeDisk": {
@@ -10545,6 +10722,18 @@
         },
         "type": "string",
         "format": "uuid"
+      },
+      "Rot": {
+        "description": "A Root of Trust (RoT) which provides measurments and signed attestations.",
+        "oneOf": [
+          {
+            "description": "The per-sled RoT in an Oxide rack.",
+            "type": "string",
+            "enum": [
+              "oxide"
+            ]
+          }
+        ]
       },
       "PropolisUuid": {
         "x-rust-type": {

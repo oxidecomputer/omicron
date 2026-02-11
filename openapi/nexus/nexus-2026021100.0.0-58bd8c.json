@@ -7,7 +7,7 @@
       "url": "https://oxide.computer",
       "email": "api@oxide.computer"
     },
-    "version": "2026020700.0.0"
+    "version": "2026021100.0.0"
   },
   "paths": {
     "/device/auth": {
@@ -3058,7 +3058,6 @@
           "external-subnets"
         ],
         "summary": "Attach an external subnet to an instance",
-        "description": "Begins an asynchronous attach operation. Returns the subnet with `instance_id` set to the target instance. The attach completes asynchronously; poll the subnet to check completion.",
         "operationId": "external_subnet_attach",
         "parameters": [
           {
@@ -3115,7 +3114,6 @@
           "external-subnets"
         ],
         "summary": "Detach an external subnet from an instance",
-        "description": "Begins an asynchronous detach operation. Returns the subnet with `instance_id` cleared. The detach completes asynchronously.",
         "operationId": "external_subnet_detach",
         "parameters": [
           {
@@ -5883,10 +5881,10 @@
     "/v1/ip-pools": {
       "get": {
         "tags": [
-          "projects"
+          "ip-pools"
         ],
         "summary": "List IP pools",
-        "operationId": "project_ip_pool_list",
+        "operationId": "ip_pool_list",
         "parameters": [
           {
             "in": "query",
@@ -5942,10 +5940,10 @@
     "/v1/ip-pools/{pool}": {
       "get": {
         "tags": [
-          "projects"
+          "ip-pools"
         ],
         "summary": "Fetch IP pool",
-        "operationId": "project_ip_pool_view",
+        "operationId": "ip_pool_view",
         "parameters": [
           {
             "in": "path",
@@ -7522,10 +7520,10 @@
     "/v1/subnet-pools": {
       "get": {
         "tags": [
-          "projects"
+          "subnet-pools"
         ],
-        "summary": "List subnet pools linked to the user's current silo",
-        "operationId": "current_silo_subnet_pool_list",
+        "summary": "List subnet pools",
+        "operationId": "subnet_pool_list",
         "parameters": [
           {
             "in": "query",
@@ -7575,6 +7573,44 @@
         },
         "x-dropshot-pagination": {
           "required": []
+        }
+      }
+    },
+    "/v1/subnet-pools/{pool}": {
+      "get": {
+        "tags": [
+          "subnet-pools"
+        ],
+        "summary": "Fetch subnet pool",
+        "operationId": "subnet_pool_view",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "pool",
+            "description": "Name or ID of the subnet pool",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SiloSubnetPool"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
         }
       }
     },
@@ -9208,7 +9244,7 @@
           "system/ip-pools"
         ],
         "summary": "List IP pools",
-        "operationId": "ip_pool_list",
+        "operationId": "system_ip_pool_list",
         "parameters": [
           {
             "in": "query",
@@ -9266,7 +9302,7 @@
         ],
         "summary": "Create IP pool",
         "description": "IPv6 is not yet supported for unicast pools.",
-        "operationId": "ip_pool_create",
+        "operationId": "system_ip_pool_create",
         "requestBody": {
           "content": {
             "application/json": {
@@ -9303,7 +9339,7 @@
           "system/ip-pools"
         ],
         "summary": "Fetch IP pool",
-        "operationId": "ip_pool_view",
+        "operationId": "system_ip_pool_view",
         "parameters": [
           {
             "in": "path",
@@ -9339,7 +9375,7 @@
           "system/ip-pools"
         ],
         "summary": "Update IP pool",
-        "operationId": "ip_pool_update",
+        "operationId": "system_ip_pool_update",
         "parameters": [
           {
             "in": "path",
@@ -9385,7 +9421,7 @@
           "system/ip-pools"
         ],
         "summary": "Delete IP pool",
-        "operationId": "ip_pool_delete",
+        "operationId": "system_ip_pool_delete",
         "parameters": [
           {
             "in": "path",
@@ -9417,7 +9453,7 @@
         ],
         "summary": "List ranges for IP pool",
         "description": "Ranges are ordered by their first address.",
-        "operationId": "ip_pool_range_list",
+        "operationId": "system_ip_pool_range_list",
         "parameters": [
           {
             "in": "path",
@@ -9477,9 +9513,9 @@
         "tags": [
           "system/ip-pools"
         ],
-        "summary": "Add range to an IP pool",
+        "summary": "Add range to IP pool",
         "description": "IPv6 ranges are not allowed yet for unicast pools.\n\nFor multicast pools, all ranges must be either Any-Source Multicast (ASM) or Source-Specific Multicast (SSM), but not both. Mixing ASM and SSM ranges in the same pool is not allowed.\n\nASM: IPv4 addresses outside 232.0.0.0/8, IPv6 addresses with flag field != 3 SSM: IPv4 addresses in 232.0.0.0/8, IPv6 addresses with flag field = 3",
-        "operationId": "ip_pool_range_add",
+        "operationId": "system_ip_pool_range_add",
         "parameters": [
           {
             "in": "path",
@@ -9527,7 +9563,7 @@
           "system/ip-pools"
         ],
         "summary": "Remove range from IP pool",
-        "operationId": "ip_pool_range_remove",
+        "operationId": "system_ip_pool_range_remove",
         "parameters": [
           {
             "in": "path",
@@ -9568,7 +9604,7 @@
           "system/ip-pools"
         ],
         "summary": "List IP pool's linked silos",
-        "operationId": "ip_pool_silo_list",
+        "operationId": "system_ip_pool_silo_list",
         "parameters": [
           {
             "in": "path",
@@ -9635,7 +9671,7 @@
         ],
         "summary": "Link IP pool to silo",
         "description": "Users in linked silos can allocate external IPs from this pool for their instances. A silo can have at most one default pool. IPs are allocated from the default pool when users ask for one without specifying a pool.",
-        "operationId": "ip_pool_silo_link",
+        "operationId": "system_ip_pool_silo_link",
         "parameters": [
           {
             "in": "path",
@@ -9684,7 +9720,7 @@
         ],
         "summary": "Make IP pool default for silo",
         "description": "When a user asks for an IP (e.g., at instance create time) without specifying a pool, the IP comes from the default pool if a default is configured. When a pool is made the default for a silo, any existing default will remain linked to the silo, but will no longer be the default.",
-        "operationId": "ip_pool_silo_update",
+        "operationId": "system_ip_pool_silo_update",
         "parameters": [
           {
             "in": "path",
@@ -9738,7 +9774,7 @@
         ],
         "summary": "Unlink IP pool from silo",
         "description": "Will fail if there are any outstanding IPs allocated in the silo.",
-        "operationId": "ip_pool_silo_unlink",
+        "operationId": "system_ip_pool_silo_unlink",
         "parameters": [
           {
             "in": "path",
@@ -9776,7 +9812,7 @@
           "system/ip-pools"
         ],
         "summary": "Fetch IP pool utilization",
-        "operationId": "ip_pool_utilization_view",
+        "operationId": "system_ip_pool_utilization_view",
         "parameters": [
           {
             "in": "path",
@@ -9814,7 +9850,7 @@
           "system/ip-pools"
         ],
         "summary": "Fetch Oxide service IP pool",
-        "operationId": "ip_pool_service_view",
+        "operationId": "system_ip_pool_service_view",
         "responses": {
           "200": {
             "description": "successful operation",
@@ -9842,7 +9878,7 @@
         ],
         "summary": "List IP ranges for the Oxide service pool",
         "description": "Ranges are ordered by their first address.",
-        "operationId": "ip_pool_service_range_list",
+        "operationId": "system_ip_pool_service_range_list",
         "parameters": [
           {
             "in": "query",
@@ -9895,7 +9931,7 @@
         ],
         "summary": "Add IP range to Oxide service pool",
         "description": "IPv6 ranges are not allowed yet.",
-        "operationId": "ip_pool_service_range_add",
+        "operationId": "system_ip_pool_service_range_add",
         "requestBody": {
           "content": {
             "application/json": {
@@ -9932,7 +9968,7 @@
           "system/ip-pools"
         ],
         "summary": "Remove IP range from Oxide service pool",
-        "operationId": "ip_pool_service_range_remove",
+        "operationId": "system_ip_pool_service_range_remove",
         "requestBody": {
           "content": {
             "application/json": {
@@ -12019,7 +12055,7 @@
           "system/subnet-pools"
         ],
         "summary": "List subnet pools",
-        "operationId": "subnet_pool_list",
+        "operationId": "system_subnet_pool_list",
         "parameters": [
           {
             "in": "query",
@@ -12075,8 +12111,8 @@
         "tags": [
           "system/subnet-pools"
         ],
-        "summary": "Create a subnet pool",
-        "operationId": "subnet_pool_create",
+        "summary": "Create subnet pool",
+        "operationId": "system_subnet_pool_create",
         "requestBody": {
           "content": {
             "application/json": {
@@ -12112,8 +12148,8 @@
         "tags": [
           "system/subnet-pools"
         ],
-        "summary": "Fetch a subnet pool",
-        "operationId": "subnet_pool_view",
+        "summary": "Fetch subnet pool",
+        "operationId": "system_subnet_pool_view",
         "parameters": [
           {
             "in": "path",
@@ -12148,8 +12184,8 @@
         "tags": [
           "system/subnet-pools"
         ],
-        "summary": "Update a subnet pool",
-        "operationId": "subnet_pool_update",
+        "summary": "Update subnet pool",
+        "operationId": "system_subnet_pool_update",
         "parameters": [
           {
             "in": "path",
@@ -12194,8 +12230,8 @@
         "tags": [
           "system/subnet-pools"
         ],
-        "summary": "Delete a subnet pool",
-        "operationId": "subnet_pool_delete",
+        "summary": "Delete subnet pool",
+        "operationId": "system_subnet_pool_delete",
         "parameters": [
           {
             "in": "path",
@@ -12225,8 +12261,8 @@
         "tags": [
           "system/subnet-pools"
         ],
-        "summary": "List members in a subnet pool",
-        "operationId": "subnet_pool_member_list",
+        "summary": "List members in subnet pool",
+        "operationId": "system_subnet_pool_member_list",
         "parameters": [
           {
             "in": "path",
@@ -12286,8 +12322,8 @@
         "tags": [
           "system/subnet-pools"
         ],
-        "summary": "Add a member to a subnet pool",
-        "operationId": "subnet_pool_member_add",
+        "summary": "Add member to subnet pool",
+        "operationId": "system_subnet_pool_member_add",
         "parameters": [
           {
             "in": "path",
@@ -12334,8 +12370,8 @@
         "tags": [
           "system/subnet-pools"
         ],
-        "summary": "Remove a member from a subnet pool",
-        "operationId": "subnet_pool_member_remove",
+        "summary": "Remove member from subnet pool",
+        "operationId": "system_subnet_pool_member_remove",
         "parameters": [
           {
             "in": "path",
@@ -12375,8 +12411,8 @@
         "tags": [
           "system/subnet-pools"
         ],
-        "summary": "List silos linked to a subnet pool",
-        "operationId": "subnet_pool_silo_list",
+        "summary": "List silos linked to subnet pool",
+        "operationId": "system_subnet_pool_silo_list",
         "parameters": [
           {
             "in": "path",
@@ -12441,8 +12477,8 @@
         "tags": [
           "system/subnet-pools"
         ],
-        "summary": "Link a subnet pool to a silo",
-        "operationId": "subnet_pool_silo_link",
+        "summary": "Link subnet pool to silo",
+        "operationId": "system_subnet_pool_silo_link",
         "parameters": [
           {
             "in": "path",
@@ -12489,8 +12525,8 @@
         "tags": [
           "system/subnet-pools"
         ],
-        "summary": "Update a subnet pool's link to a silo",
-        "operationId": "subnet_pool_silo_update",
+        "summary": "Update subnet pool's link to silo",
+        "operationId": "system_subnet_pool_silo_update",
         "parameters": [
           {
             "in": "path",
@@ -12544,8 +12580,8 @@
         "tags": [
           "system/subnet-pools"
         ],
-        "summary": "Unlink a subnet pool from a silo",
-        "operationId": "subnet_pool_silo_unlink",
+        "summary": "Unlink subnet pool from silo",
+        "operationId": "system_subnet_pool_silo_unlink",
         "parameters": [
           {
             "in": "path",
@@ -12585,7 +12621,7 @@
           "system/subnet-pools"
         ],
         "summary": "Fetch subnet pool utilization",
-        "operationId": "subnet_pool_utilization_view",
+        "operationId": "system_subnet_pool_utilization_view",
         "parameters": [
           {
             "in": "path",
@@ -31615,6 +31651,13 @@
       }
     },
     {
+      "name": "ip-pools",
+      "description": "IP pools are collections of external IPs that can be allocated and attached to instances.",
+      "externalDocs": {
+        "url": "http://docs.oxide.computer/api/ip-pools"
+      }
+    },
+    {
       "name": "login",
       "description": "Authentication endpoints",
       "externalDocs": {
@@ -31664,6 +31707,13 @@
       }
     },
     {
+      "name": "subnet-pools",
+      "description": "Subnet pools are collections of external subnets that can be allocated and attached to instances.",
+      "externalDocs": {
+        "url": "http://docs.oxide.computer/api/subnet-pools"
+      }
+    },
+    {
       "name": "system/alerts",
       "description": "Alerts deliver notifications for events that occur on the Oxide rack",
       "externalDocs": {
@@ -31686,7 +31736,7 @@
     },
     {
       "name": "system/ip-pools",
-      "description": "IP pools are collections of external IPs that can be assigned to silos. When a pool is linked to a silo, users in that silo can allocate IPs from the pool for their instances.",
+      "description": "IP pools are collections of external IPs. Linking a pool to a silo makes it available for allocation by users in that silo.",
       "externalDocs": {
         "url": "http://docs.oxide.computer/api/system-ip-pools"
       }
@@ -31728,7 +31778,7 @@
     },
     {
       "name": "system/subnet-pools",
-      "description": "Subnet pools are collections of IP subnets that can be assigned to silos. When a pool is linked to a silo, users in that silo can allocate external subnets from the pool.",
+      "description": "Subnet pools are collections of external subnets. Linking a pool to a silo makes it available for allocation by users in that silo.",
       "externalDocs": {
         "url": "http://docs.oxide.computer/api/system-subnet-pools"
       }

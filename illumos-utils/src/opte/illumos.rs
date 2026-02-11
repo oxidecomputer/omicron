@@ -43,8 +43,8 @@ pub enum Error {
     #[error(transparent)]
     ResetLinkpropError(#[from] crate::dladm::ResetLinkpropError),
 
-    #[error("Invalid IP configuration for port")]
-    InvalidPortIpConfig,
+    #[error("Invalid IP configuration for port: {0}")]
+    InvalidPortIpConfig(String),
 
     #[error("Tried to release non-existent port ({0}, {1:?})")]
     ReleaseMissingPort(uuid::Uuid, NetworkInterfaceKind),
