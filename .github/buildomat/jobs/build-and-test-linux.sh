@@ -29,7 +29,16 @@
 #: series = "build-info-linux"
 #: name = "crate-build-timings.json"
 #: from_output = "/work/crate-build-timings.json"
-
+#:
+#: [[publish]]
+#: series = "build-info-without-nexus-linux"
+#: name = "cargo-timing-without-nexus.html"
+#: from_output = "/work/cargo-timing-without-nexus.html"
+#:
+#: [[publish]]
+#: series = "build-info-with-nexus-linux"
+#: name = "cargo-timing-with-nexus.html"
+#: from_output = "/work/cargo-timing-with-nexus.html"
 
 sudo apt-get install -y jq
 exec .github/buildomat/build-and-test.sh linux
