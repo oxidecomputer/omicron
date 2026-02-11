@@ -4252,10 +4252,14 @@ pub trait NexusExternalApi {
         rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<Vec<v2026020600::BgpPeerStatus>>, HttpError>
     {
-        let result = Self::networking_bgp_status(rqctx).await?.0;
-        let shit: Vec<_> =
-            result.into_iter().map(v2026020600::BgpPeerStatus::from).collect();
-        Ok(HttpResponseOk(shit))
+        Ok(HttpResponseOk(
+            Self::networking_bgp_status(rqctx)
+                .await?
+                .0
+                .into_iter()
+                .map(v2026020600::BgpPeerStatus::from)
+                .collect(),
+        ))
     }
 
     /// Get BGP peer status
@@ -4281,6 +4285,7 @@ pub trait NexusExternalApi {
         rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<v2026020600::BgpExported>, HttpError>;
 
+    /// List BGP exported routes
     #[endpoint {
         method = GET,
         path = "/v1/system/networking/bgp-exported",
