@@ -83,11 +83,32 @@ async fn disk_view(
 }
 ----
 
+Here, `DiskPath` is the user-provided identifier and corresponds to `{disk}` in the path above (`/v1/disks/{disk}`).
+
 ==== App Layer
 
-The details of authz at the app layer depend on the kind of resource.  See the section below.
+The details of authz at the app layer depend on the kind of resource.  See the various sections below.  Continuing the example above, `Disk` is a dynamic project-level resource.  You'd wind up having either the `disk_id` already:
 
-In the end, though, you'll wind up having resolved the user-provided identifier to an `authz` object that can be used for doing authz checks or (more often) passing to the datastore layer.
+[source,rust]
+----
+let authz_disk = LookupPath::new(&opctx, &datastore)
+    .disk_id(disk_id)
+    .lookup_for(authz::Action::Delete)
+    .await?;
+----
+
+or else having the project name (or id) and disk name:
+
+[source,rust]
+----
+let authz_disk = LookupPath::new(&opctx, &datastore)
+    .project_name(project_name)
+    .disk_name(disk_name)
+    .lookup_for(authz::Action::Delete)
+    .await?;
+----
+
+However this winds up looking for the type of resource you're working with, you'll end up having resolved the user-provided identifier to an `authz` object that can be used for doing authz checks.
 
 ==== Datastore Layer
 
