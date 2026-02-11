@@ -1993,6 +1993,15 @@ impl DataStore {
                 })
             })?;
 
+        // Randomize the IDs in the copied VCR: even read-only downstairs will
+        // still be sad if multiple connections share upstairs UUIDs and try to
+        // connect.
+        let copy_of_vcr = Self::randomize_ids(&copy_of_vcr).map_err(|e| {
+            err.bail(Error::InternalError {
+                internal_message: format!("failed to randomize VCR IDs: {e}"),
+            })
+        })?;
+
         let crucible_targets = {
             let mut crucible_targets = CrucibleTargets::default();
             read_only_resources_associated_with_volume(
