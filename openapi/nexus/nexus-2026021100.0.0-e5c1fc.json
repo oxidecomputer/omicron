@@ -10772,6 +10772,7 @@
         "tags": [
           "system/networking"
         ],
+        "summary": "List BGP exported routes",
         "operationId": "networking_bgp_exported",
         "responses": {
           "200": {
