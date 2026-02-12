@@ -43,7 +43,6 @@ use nexus_lockstep_client::types::LastResult;
 use nexus_lockstep_client::types::PhysicalDiskPath;
 use nexus_lockstep_client::types::SagaState;
 use nexus_lockstep_client::types::SledSelector;
-use nexus_lockstep_client::types::UninitializedSledId;
 use nexus_saga_recovery::LastPass;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::ClickhouseMode;
@@ -4248,25 +4247,6 @@ async fn cmd_nexus_sleds_list_uninitialized(
         .with(tabled::settings::Padding::new(0, 1, 0, 0))
         .to_string();
     println!("{}", table);
-    Ok(())
-}
-
-/// Runs `omdb nexus sleds add`
-async fn cmd_nexus_sled_add(
-    client: &nexus_lockstep_client::Client,
-    args: &SledAddArgs,
-    _destruction_token: DestructiveOperationToken,
-) -> Result<(), anyhow::Error> {
-    let sled_id = client
-        .sled_add(&UninitializedSledId {
-            part: args.part.clone(),
-            serial: args.serial.clone(),
-        })
-        .await
-        .context("adding sled")?
-        .into_inner()
-        .id;
-    eprintln!("added sled {} ({}): {sled_id}", args.serial, args.part);
     Ok(())
 }
 

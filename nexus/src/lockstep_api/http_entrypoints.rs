@@ -39,7 +39,6 @@ use nexus_types::external_api::params::SledSelector;
 use nexus_types::external_api::params::SupportBundleFilePath;
 use nexus_types::external_api::params::SupportBundlePath;
 use nexus_types::external_api::params::SupportBundleUpdate;
-use nexus_types::external_api::params::UninitializedSledId;
 use nexus_types::external_api::shared;
 use nexus_types::external_api::shared::UninitializedSled;
 use nexus_types::external_api::views::SledPolicy;

@@ -5,18 +5,12 @@
 use dropshot::ResultsPage;
 use http::Method;
 use http::StatusCode;
-use nexus_db_model::SledBaseboard;
-use nexus_db_model::SledCpuFamily as DbSledCpuFamily;
-use nexus_db_model::SledSystemHardware;
-use nexus_db_model::SledUpdate;
-use nexus_lockstep_client::types::SledId;
 use nexus_test_utils::TEST_SUITE_PASSWORD;
 use nexus_test_utils::http_testing::AuthnMode;
 use nexus_test_utils::http_testing::NexusRequest;
 use nexus_test_utils::http_testing::RequestBuilder;
 use nexus_test_utils::resource_helpers::test_params;
 use nexus_test_utils_macros::nexus_test;
-use nexus_types::external_api::params;
 use nexus_types::external_api::shared::UninitializedSled;
 use nexus_types::external_api::views::Rack;
 use omicron_common::api::external::ByteCount;
@@ -153,118 +147,4 @@ async fn test_sled_list_uninitialized(cptestctx: &ControlPlaneTestContext) {
     debug!(cptestctx.logctx.log, "{:#?}", uninitialized_sleds);
     assert_eq!(1, uninitialized_sleds_2.len());
     assert_eq!(uninitialized_sleds, uninitialized_sleds_2);
-}
-
-#[nexus_test]
-async fn test_sled_add(cptestctx: &ControlPlaneTestContext) {
-    // Setup: wait until we've collected an inventory from the system set
-    // up by `#[nexus_test].
-    cptestctx
-        .wait_for_at_least_one_inventory_collection(Duration::from_secs(60))
-        .await;
-
-    let external_client = &cptestctx.external_client;
-    let list_url = "/v1/system/hardware/sleds-uninitialized";
-    let mut uninitialized_sleds =
-        NexusRequest::object_get(external_client, list_url)
-            .authn_as(AuthnMode::PrivilegedUser)
-            .execute()
-            .await
-            .expect("failed to get uninitialized sleds")
-            .parsed_body::<ResultsPage<UninitializedSled>>()
-            .unwrap()
-            .items;
-    debug!(cptestctx.logctx.log, "{:#?}", uninitialized_sleds);
-
-    // There are currently two fake sim gimlets created in the latest inventory
-    // collection as part of test setup.
-    assert_eq!(2, uninitialized_sleds.len());
-
-    // Add one of these sleds.
-    let add_url = "/v1/system/hardware/sleds/";
-    let baseboard = uninitialized_sleds.pop().unwrap().baseboard;
-    let sled_id = NexusRequest::objects_post(
-        external_client,
-        add_url,
-        &params::UninitializedSledId {
-            serial: baseboard.serial.clone(),
-            part: baseboard.part.clone(),
-        },
-    )
-    .authn_as(AuthnMode::PrivilegedUser)
-    .execute_and_parse_unwrap::<SledId>()
-    .await
-    .id;
-
-    // Attempting to add the same sled again should succeed with the same sled
-    // ID: this operation should be idempotent up until the point at which the
-    // sled is inserted in the db.
-    let repeat_sled_id = NexusRequest::objects_post(
-        external_client,
-        add_url,
-        &params::UninitializedSledId {
-            serial: baseboard.serial.clone(),
-            part: baseboard.part.clone(),
-        },
-    )
-    .authn_as(AuthnMode::PrivilegedUser)
-    .execute_and_parse_unwrap::<SledId>()
-    .await
-    .id;
-    assert_eq!(sled_id, repeat_sled_id);
-
-    // Now upsert the sled.
-    let nexus = &cptestctx.server.server_context().nexus;
-    nexus
-        .datastore()
-        .sled_upsert(SledUpdate::new(
-            sled_id,
-            "[::1]:0".parse().unwrap(),
-            0,
-            SledBaseboard {
-                serial_number: baseboard.serial.clone(),
-                part_number: baseboard.part.clone(),
-                revision: 0,
-            },
-            SledSystemHardware {
-                is_scrimlet: false,
-                usable_hardware_threads: 8,
-                usable_physical_ram: (1 << 30).try_into().unwrap(),
-                reservoir_size: (1 << 20).try_into().unwrap(),
-                cpu_family: DbSledCpuFamily::Unknown,
-            },
-            nexus.rack_id(),
-            Generation::new().into(),
-        ))
-        .await
-        .expect("inserted sled");
-
-    // The sled has been commissioned as part of the rack, so adding it should
-    // fail.
-    let error: dropshot::HttpErrorResponseBody =
-        NexusRequest::expect_failure_with_body(
-            external_client,
-            http::StatusCode::BAD_REQUEST,
-            http::Method::POST,
-            add_url,
-            &params::UninitializedSledId {
-                serial: baseboard.serial.clone(),
-                part: baseboard.part.clone(),
-            },
-        )
-        .authn_as(AuthnMode::PrivilegedUser)
-        .execute()
-        .await
-        .expect("adding sled")
-        .parsed_body()
-        .expect("parsing error body");
-    assert_eq!(error.error_code, Some("ObjectAlreadyExists".to_string()));
-    assert!(
-        error.message.contains(&baseboard.serial)
-            && error.message.contains(&baseboard.part),
-        "expected to find {} and {} within error message: {}",
-        baseboard.serial,
-        baseboard.part,
-        error.message
-    );
 }
