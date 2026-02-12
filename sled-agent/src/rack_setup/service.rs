@@ -72,7 +72,6 @@ use crate::bootstrap::early_networking::{
     EarlyNetworkSetup, EarlyNetworkSetupError,
 };
 use crate::bootstrap::rss_handle::BootstrapAgentHandle;
-use crate::bootstrap::trust_quorum_setup::TRUST_QUORUM_INTEGRATION_ENABLED;
 use crate::rack_setup::plan::service::PlanError as ServicePlanError;
 use crate::rack_setup::plan::sled::Plan as SledPlan;
 use bootstore::schemes::v0 as bootstore;
@@ -1287,16 +1286,8 @@ impl ServiceInner {
         rss_step.update(RssStep::InitTrustQuorum);
         // Initialize the trust quorum if there are peers configured.
 
-        let initial_trust_quorum_configuration = if let Some(peers) =
-            &config.trust_quorum_peers
-        {
-            let initial_membership: BTreeSet<_> =
-                peers.iter().cloned().collect();
-            bootstore
-                .init_rack(sled_plan.rack_id.into(), initial_membership)
-                .await?;
-
-            if TRUST_QUORUM_INTEGRATION_ENABLED {
+        let initial_trust_quorum_configuration =
+            if let Some(peers) = &config.trust_quorum_peers {
                 let tq_members: BTreeSet<BaseboardId> = peers
                     .iter()
                     .cloned()
@@ -1318,15 +1309,16 @@ impl ServiceInner {
                 })
             } else {
                 None
-            }
-        } else {
-            None
-        };
+            };
 
         // Save the relevant network config in the bootstore. We want this to
         // happen before we `initialize_sleds` so each scrimlet (including us)
         // can use its normal boot path of "read network config for our switch
         // from the bootstore".
+        //
+        // TODO: In future releases, we will get rid of the bootstore entirely,
+        // and early_network_config will be replicated by the trust quorum
+        // nodes.
         let early_network_config = EarlyNetworkConfig {
             generation: 1,
             schema_version: 2,

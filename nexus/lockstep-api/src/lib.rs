@@ -30,7 +30,6 @@ use nexus_types::external_api::headers::RangeRequest;
 use nexus_types::external_api::params;
 use nexus_types::external_api::params::PhysicalDiskPath;
 use nexus_types::external_api::params::SledSelector;
-use nexus_types::external_api::params::UninitializedSledId;
 use nexus_types::external_api::shared;
 use nexus_types::external_api::shared::UninitializedSled;
 use nexus_types::external_api::views::Ping;
@@ -348,21 +347,6 @@ pub trait NexusLockstepApi {
     async fn sled_list_uninitialized(
         rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<ResultsPage<UninitializedSled>>, HttpError>;
-
-    /// Add sled to initialized rack
-    //
-    // TODO: In the future this should really be a PUT request, once we resolve
-    // https://github.com/oxidecomputer/omicron/issues/4494. It should also
-    // explicitly be tied to a rack via a `rack_id` path param. For now we assume
-    // we are only operating on single rack systems.
-    #[endpoint {
-        method = POST,
-        path = "/sleds/add",
-    }]
-    async fn sled_add(
-        rqctx: RequestContext<Self::Context>,
-        sled: TypedBody<UninitializedSledId>,
-    ) -> Result<HttpResponseCreated<SledId>, HttpError>;
 
     /// Mark a sled as expunged
     ///

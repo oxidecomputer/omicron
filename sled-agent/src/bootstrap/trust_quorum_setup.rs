@@ -18,15 +18,6 @@ const TRUST_QUORUM_STATE_FILE: &str = "trust-quorum-state.json";
 const TRUST_QUORUM_NETWORK_CONFIG_FILE: &str =
     "trust-quorum-network-config.json";
 
-/// Certain active bits, such as running trust quorum initialization as a result
-/// of RSS, should remain disabled until the full integration is complete.
-///
-/// This is a constant, since we expect to remove the gating all at once,
-/// and because it's hard to manage features with full a4x2 and racklette
-/// deployments. The flag can be changed for local a4x2 builds during iniitial
-/// testing.
-pub const TRUST_QUORUM_INTEGRATION_ENABLED: bool = false;
-
 pub fn new_trust_quorum_config(
     cluster_dataset_paths: &[Utf8PathBuf],
     baseboard_id: BaseboardId,

@@ -79,6 +79,7 @@ api_versions!([
     // |  date-based version should be at the top of the list.
     // v
     // (next_yyyymmddnn, IDENT),
+    (2026021100, REMOVE_SLED_ADD),
     (2026020901, UPDATE_EXTERNAL_SUBNET_DOCS),
     (2026020900, RENAME_POOL_ENDPOINTS),
     (2026020600, ADD_SILO_SUBNET_POOLS),
@@ -5412,15 +5413,13 @@ pub trait NexusExternalApi {
     ) -> Result<HttpResponseOk<ResultsPage<shared::UninitializedSled>>, HttpError>;
 
     /// Add sled to initialized rack
-    //
-    // TODO: In the future this should really be a PUT request, once we resolve
-    // https://github.com/oxidecomputer/omicron/issues/4494. It should also
-    // explicitly be tied to a rack via a `rack_id` path param. For now we assume
-    // we are only operating on single rack systems.
+    ///
+    // Removed in favor of rack membership operations
     #[endpoint {
         method = POST,
         path = "/v1/system/hardware/sleds",
-        tags = ["system/hardware"]
+        tags = ["system/hardware"],
+        versions = ..VERSION_REMOVE_SLED_ADD
     }]
     async fn sled_add(
         rqctx: RequestContext<Self::Context>,

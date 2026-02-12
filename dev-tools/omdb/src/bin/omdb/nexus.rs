@@ -508,8 +508,6 @@ struct SledsArgs {
 enum SledsCommands {
     /// List all uninitialized sleds
     ListUninitialized,
-    /// Add an uninitialized sled
-    Add(SledAddArgs),
     /// Expunge a sled (DANGEROUS)
     Expunge(SledExpungeArgs),
     /// Expunge a disk (DANGEROUS)
@@ -858,12 +856,6 @@ impl NexusArgs {
             NexusCommands::Sleds(SledsArgs {
                 command: SledsCommands::ListUninitialized,
             }) => cmd_nexus_sleds_list_uninitialized(&client).await,
-            NexusCommands::Sleds(SledsArgs {
-                command: SledsCommands::Add(args),
-            }) => {
-                let token = omdb.check_allow_destructive()?;
-                cmd_nexus_sled_add(&client, args, token).await
-            }
             NexusCommands::Sleds(SledsArgs {
                 command: SledsCommands::Expunge(args),
             }) => {

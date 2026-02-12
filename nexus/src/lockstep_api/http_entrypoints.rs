@@ -580,24 +580,6 @@ impl NexusLockstepApi for NexusLockstepApiImpl {
             .await
     }
 
-    async fn sled_add(
-        rqctx: RequestContext<Self::Context>,
-        sled: TypedBody<UninitializedSledId>,
-    ) -> Result<HttpResponseCreated<SledId>, HttpError> {
-        let apictx = &rqctx.context().context;
-        let nexus = &apictx.nexus;
-        let handler = async {
-            let opctx =
-                crate::context::op_context_for_internal_api(&rqctx).await;
-            let id = nexus.sled_add(&opctx, sled.into_inner()).await?;
-            Ok(HttpResponseCreated(SledId { id }))
-        };
-        apictx
-            .internal_latencies
-            .instrument_dropshot_handler(&rqctx, handler)
-            .await
-    }
-
     async fn sled_expunge(
         rqctx: RequestContext<Self::Context>,
         sled: TypedBody<SledSelector>,
