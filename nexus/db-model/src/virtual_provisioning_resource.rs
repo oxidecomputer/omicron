@@ -28,12 +28,11 @@ impl std::fmt::Display for ResourceTypeProvisioned {
 }
 
 /// Describes virtual_provisioning_resource for a resource.
-#[derive(Clone, Selectable, Queryable, Insertable, Debug)]
+#[derive(Clone, Selectable, Queryable, Debug)]
 #[diesel(table_name = virtual_provisioning_resource)]
-#[diesel(treat_none_as_default_value = true)]
 pub struct VirtualProvisioningResource {
     pub id: Uuid,
-    pub time_modified: Option<DateTime<Utc>>,
+    pub time_modified: DateTime<Utc>,
     pub resource_type: String,
 
     pub virtual_disk_bytes_provisioned: ByteCount,
@@ -41,11 +40,23 @@ pub struct VirtualProvisioningResource {
     pub ram_provisioned: ByteCount,
 }
 
-impl VirtualProvisioningResource {
+/// Insertable form of [`VirtualProvisioningResource`], omitting
+/// DB-defaulted columns (`time_modified`).
+#[derive(Clone, Insertable, Debug)]
+#[diesel(table_name = virtual_provisioning_resource)]
+pub struct VirtualProvisioningResourceNew {
+    pub id: Uuid,
+    pub resource_type: String,
+
+    pub virtual_disk_bytes_provisioned: ByteCount,
+    pub cpus_provisioned: i64,
+    pub ram_provisioned: ByteCount,
+}
+
+impl VirtualProvisioningResourceNew {
     pub fn new(id: Uuid, resource_type: ResourceTypeProvisioned) -> Self {
         Self {
             id,
-            time_modified: None,
             resource_type: resource_type.to_string(),
             virtual_disk_bytes_provisioned: ByteCount(
                 external::ByteCount::from(0),

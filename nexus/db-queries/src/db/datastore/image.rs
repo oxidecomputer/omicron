@@ -500,6 +500,7 @@ impl DataStore {
                         read_only_phys_bytes,
                         project_id,
                         super::StorageType::Image,
+                        None,
                     )
                     .get_results_async::<crate::db::model::PhysicalProvisioningCollection>(
                         &conn,
@@ -593,6 +594,7 @@ impl DataStore {
                         read_only_phys_bytes,
                         silo_id,
                         super::StorageType::Image,
+                        None,
                     )
                     .get_results_async::<crate::db::model::PhysicalProvisioningCollection>(
                         &conn,
@@ -653,7 +655,7 @@ impl DataStore {
                     let zero: crate::db::model::ByteCount =
                         0.try_into().unwrap();
                     let dedup = DedupInfo::ImageDelete { image_id };
-                    PhysicalProvisioningCollectionUpdate::new_delete_storage_deduped(
+                    PhysicalProvisioningCollectionUpdate::new_delete_storage(
                         image_id,
                         zero,
                         zero,
@@ -662,7 +664,7 @@ impl DataStore {
                         zero,
                         read_only_phys_bytes,
                         project_id,
-                        dedup,
+                        Some(dedup),
                     )
                     .get_results_async::<crate::db::model::PhysicalProvisioningCollection>(
                         &conn,
@@ -728,13 +730,13 @@ impl DataStore {
                     let zero: crate::db::model::ByteCount =
                         0.try_into().unwrap();
                     let dedup = DedupInfo::ImageDelete { image_id };
-                    PhysicalProvisioningCollectionUpdate::new_delete_storage_silo_level_deduped(
+                    PhysicalProvisioningCollectionUpdate::new_delete_storage_silo_level(
                         image_id,
                         zero,
                         zero,
                         read_only_phys_bytes,
                         silo_id,
-                        dedup,
+                        Some(dedup),
                     )
                     .get_results_async::<crate::db::model::PhysicalProvisioningCollection>(
                         &conn,

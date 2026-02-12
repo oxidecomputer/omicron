@@ -16,8 +16,8 @@ use crate::db::model::CollectionTypeProvisioned;
 use crate::db::model::IpPoolResourceType;
 use crate::db::model::Name;
 use crate::db::model::Silo;
-use crate::db::model::PhysicalProvisioningCollection;
-use crate::db::model::VirtualProvisioningCollection;
+use crate::db::model::PhysicalProvisioningCollectionNew;
+use crate::db::model::VirtualProvisioningCollectionNew;
 use crate::db::pagination::Paginator;
 use crate::db::pagination::paginated;
 use async_bb8_diesel::AsyncRunQueryDsl;
@@ -104,7 +104,7 @@ impl DataStore {
 
         self.virtual_provisioning_collection_create(
             opctx,
-            VirtualProvisioningCollection::new(
+            VirtualProvisioningCollectionNew::new(
                 DEFAULT_SILO.id(),
                 CollectionTypeProvisioned::Silo,
             ),
@@ -113,7 +113,7 @@ impl DataStore {
 
         self.physical_provisioning_collection_create(
             opctx,
-            PhysicalProvisioningCollection::new(
+            PhysicalProvisioningCollectionNew::new(
                 DEFAULT_SILO.id(),
                 CollectionTypeProvisioned::Silo,
             ),
@@ -293,7 +293,7 @@ impl DataStore {
                     })?;
                 self.virtual_provisioning_collection_create_on_connection(
                     &conn,
-                    VirtualProvisioningCollection::new(
+                    VirtualProvisioningCollectionNew::new(
                         silo.id(),
                         CollectionTypeProvisioned::Silo,
                     ),
@@ -301,7 +301,7 @@ impl DataStore {
                 .await?;
                 self.physical_provisioning_collection_create_on_connection(
                     &conn,
-                    PhysicalProvisioningCollection::new(
+                    PhysicalProvisioningCollectionNew::new(
                         silo.id(),
                         CollectionTypeProvisioned::Silo,
                     ),

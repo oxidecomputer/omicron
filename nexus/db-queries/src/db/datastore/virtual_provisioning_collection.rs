@@ -9,6 +9,7 @@ use crate::context::OpContext;
 use crate::db;
 use crate::db::model::ByteCount;
 use crate::db::model::VirtualProvisioningCollection;
+use crate::db::model::VirtualProvisioningCollectionNew;
 use crate::db::queries::virtual_provisioning_collection_update::VirtualProvisioningCollectionUpdate;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use diesel::prelude::*;
@@ -50,7 +51,7 @@ impl DataStore {
     pub async fn virtual_provisioning_collection_create(
         &self,
         opctx: &OpContext,
-        virtual_provisioning_collection: VirtualProvisioningCollection,
+        virtual_provisioning_collection: VirtualProvisioningCollectionNew,
     ) -> Result<Vec<VirtualProvisioningCollection>, Error> {
         let conn = self.pool_connection_authorized(opctx).await?;
         self.virtual_provisioning_collection_create_on_connection(
@@ -64,7 +65,7 @@ impl DataStore {
     pub(crate) async fn virtual_provisioning_collection_create_on_connection(
         &self,
         conn: &async_bb8_diesel::Connection<DbConnection>,
-        virtual_provisioning_collection: VirtualProvisioningCollection,
+        virtual_provisioning_collection: VirtualProvisioningCollectionNew,
     ) -> Result<Vec<VirtualProvisioningCollection>, DieselError> {
         use nexus_db_schema::schema::virtual_provisioning_collection::dsl;
 
@@ -315,7 +316,7 @@ impl DataStore {
         let id = *nexus_db_fixed_data::FLEET_ID;
         self.virtual_provisioning_collection_create(
             opctx,
-            db::model::VirtualProvisioningCollection::new(
+            db::model::VirtualProvisioningCollectionNew::new(
                 id,
                 db::model::CollectionTypeProvisioned::Fleet,
             ),

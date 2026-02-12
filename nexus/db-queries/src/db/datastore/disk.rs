@@ -989,7 +989,7 @@ impl DataStore {
                     physical.into_byte_count(),
                 );
                 let writable = if *read_only { zero } else { phys_bytes };
-                PhysicalProvisioningCollectionUpdate::new_insert_storage_deduped(
+                PhysicalProvisioningCollectionUpdate::new_insert_storage(
                     disk_id,
                     writable,
                     zero,
@@ -999,11 +999,11 @@ impl DataStore {
                     phys_bytes,
                     project_id,
                     StorageType::Disk,
-                    DedupInfo::Disk {
+                    Some(DedupInfo::Disk {
                         origin_column: DedupOriginColumn::Image,
                         origin_id: *image_id,
                         disk_id,
-                    },
+                    }),
                 )
                 .get_results_async::<crate::db::model::PhysicalProvisioningCollection>(conn)
                 .await
@@ -1023,7 +1023,7 @@ impl DataStore {
                     physical.into_byte_count(),
                 );
                 let writable = if *read_only { zero } else { phys_bytes };
-                PhysicalProvisioningCollectionUpdate::new_insert_storage_deduped(
+                PhysicalProvisioningCollectionUpdate::new_insert_storage(
                     disk_id,
                     writable,
                     zero,
@@ -1033,11 +1033,11 @@ impl DataStore {
                     phys_bytes,
                     project_id,
                     StorageType::Disk,
-                    DedupInfo::Disk {
+                    Some(DedupInfo::Disk {
                         origin_column: DedupOriginColumn::Snapshot,
                         origin_id: *snapshot_id,
                         disk_id,
-                    },
+                    }),
                 )
                 .get_results_async::<crate::db::model::PhysicalProvisioningCollection>(conn)
                 .await
@@ -1064,6 +1064,7 @@ impl DataStore {
                     zero,
                     project_id,
                     StorageType::Disk,
+                    None,
                 )
                 .get_results_async::<crate::db::model::PhysicalProvisioningCollection>(conn)
                 .await
@@ -1087,6 +1088,7 @@ impl DataStore {
                     zero,
                     project_id,
                     StorageType::Disk,
+                    None,
                 )
                 .get_results_async::<crate::db::model::PhysicalProvisioningCollection>(conn)
                 .await

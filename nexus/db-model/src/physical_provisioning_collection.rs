@@ -14,12 +14,11 @@ use uuid::Uuid;
 /// Physical provisioning tracks actual physical bytes consumed, including
 /// replication overhead, unlike virtual provisioning which tracks
 /// user-visible (virtual) sizes.
-#[derive(Clone, Selectable, Queryable, Insertable, Debug)]
+#[derive(Clone, Selectable, Queryable, Debug)]
 #[diesel(table_name = physical_provisioning_collection)]
-#[diesel(treat_none_as_default_value = true)]
 pub struct PhysicalProvisioningCollection {
     pub id: Uuid,
-    pub time_modified: Option<DateTime<Utc>>,
+    pub time_modified: DateTime<Utc>,
     pub collection_type: String,
 
     pub physical_writable_disk_bytes: ByteCount,
@@ -30,10 +29,34 @@ pub struct PhysicalProvisioningCollection {
 }
 
 impl PhysicalProvisioningCollection {
+    pub fn is_empty(&self) -> bool {
+        self.physical_writable_disk_bytes.to_bytes() == 0
+            && self.physical_zfs_snapshot_bytes.to_bytes() == 0
+            && self.physical_read_only_disk_bytes.to_bytes() == 0
+            && self.cpus_provisioned == 0
+            && self.ram_provisioned.to_bytes() == 0
+    }
+}
+
+/// Insertable form of [`PhysicalProvisioningCollection`], omitting
+/// DB-defaulted columns (`time_modified`).
+#[derive(Clone, Insertable, Debug)]
+#[diesel(table_name = physical_provisioning_collection)]
+pub struct PhysicalProvisioningCollectionNew {
+    pub id: Uuid,
+    pub collection_type: String,
+
+    pub physical_writable_disk_bytes: ByteCount,
+    pub physical_zfs_snapshot_bytes: ByteCount,
+    pub physical_read_only_disk_bytes: ByteCount,
+    pub cpus_provisioned: i64,
+    pub ram_provisioned: ByteCount,
+}
+
+impl PhysicalProvisioningCollectionNew {
     pub fn new(id: Uuid, collection_type: CollectionTypeProvisioned) -> Self {
         Self {
             id,
-            time_modified: None,
             collection_type: collection_type.to_string(),
             physical_writable_disk_bytes: ByteCount(
                 external::ByteCount::from(0),
@@ -47,13 +70,5 @@ impl PhysicalProvisioningCollection {
             cpus_provisioned: 0,
             ram_provisioned: ByteCount(external::ByteCount::from(0)),
         }
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.physical_writable_disk_bytes.to_bytes() == 0
-            && self.physical_zfs_snapshot_bytes.to_bytes() == 0
-            && self.physical_read_only_disk_bytes.to_bytes() == 0
-            && self.cpus_provisioned == 0
-            && self.ram_provisioned.to_bytes() == 0
     }
 }

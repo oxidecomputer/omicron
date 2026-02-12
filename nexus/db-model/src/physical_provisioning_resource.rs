@@ -13,12 +13,11 @@ use uuid::Uuid;
 ///
 /// Physical provisioning tracks actual physical bytes consumed, including
 /// replication overhead.
-#[derive(Clone, Selectable, Queryable, Insertable, Debug)]
+#[derive(Clone, Selectable, Queryable, Debug)]
 #[diesel(table_name = physical_provisioning_resource)]
-#[diesel(treat_none_as_default_value = true)]
 pub struct PhysicalProvisioningResource {
     pub id: Uuid,
-    pub time_modified: Option<DateTime<Utc>>,
+    pub time_modified: DateTime<Utc>,
     pub resource_type: String,
 
     pub physical_writable_disk_bytes: ByteCount,
@@ -28,14 +27,28 @@ pub struct PhysicalProvisioningResource {
     pub ram_provisioned: ByteCount,
 }
 
-impl PhysicalProvisioningResource {
+/// Insertable form of [`PhysicalProvisioningResource`], omitting
+/// DB-defaulted columns (`time_modified`).
+#[derive(Clone, Insertable, Debug)]
+#[diesel(table_name = physical_provisioning_resource)]
+pub struct PhysicalProvisioningResourceNew {
+    pub id: Uuid,
+    pub resource_type: String,
+
+    pub physical_writable_disk_bytes: ByteCount,
+    pub physical_zfs_snapshot_bytes: ByteCount,
+    pub physical_read_only_disk_bytes: ByteCount,
+    pub cpus_provisioned: i64,
+    pub ram_provisioned: ByteCount,
+}
+
+impl PhysicalProvisioningResourceNew {
     pub fn new(
         id: Uuid,
         resource_type: ResourceTypeProvisioned,
     ) -> Self {
         Self {
             id,
-            time_modified: None,
             resource_type: resource_type.to_string(),
             physical_writable_disk_bytes: ByteCount(
                 external::ByteCount::from(0),

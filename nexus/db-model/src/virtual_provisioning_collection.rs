@@ -17,12 +17,11 @@ pub enum CollectionTypeProvisioned {
 }
 
 /// Describes virtual_provisioning_collection for a collection
-#[derive(Clone, Selectable, Queryable, Insertable, Debug)]
+#[derive(Clone, Selectable, Queryable, Debug)]
 #[diesel(table_name = virtual_provisioning_collection)]
-#[diesel(treat_none_as_default_value = true)]
 pub struct VirtualProvisioningCollection {
     pub id: Uuid,
-    pub time_modified: Option<DateTime<Utc>>,
+    pub time_modified: DateTime<Utc>,
     pub collection_type: String,
 
     pub virtual_disk_bytes_provisioned: ByteCount,
@@ -31,10 +30,30 @@ pub struct VirtualProvisioningCollection {
 }
 
 impl VirtualProvisioningCollection {
+    pub fn is_empty(&self) -> bool {
+        self.virtual_disk_bytes_provisioned.to_bytes() == 0
+            && self.cpus_provisioned == 0
+            && self.ram_provisioned.to_bytes() == 0
+    }
+}
+
+/// Insertable form of [`VirtualProvisioningCollection`], omitting
+/// DB-defaulted columns (`time_modified`).
+#[derive(Clone, Insertable, Debug)]
+#[diesel(table_name = virtual_provisioning_collection)]
+pub struct VirtualProvisioningCollectionNew {
+    pub id: Uuid,
+    pub collection_type: String,
+
+    pub virtual_disk_bytes_provisioned: ByteCount,
+    pub cpus_provisioned: i64,
+    pub ram_provisioned: ByteCount,
+}
+
+impl VirtualProvisioningCollectionNew {
     pub fn new(id: Uuid, collection_type: CollectionTypeProvisioned) -> Self {
         Self {
             id,
-            time_modified: None,
             collection_type: collection_type.to_string(),
             virtual_disk_bytes_provisioned: ByteCount(
                 external::ByteCount::from(0),
@@ -42,11 +61,5 @@ impl VirtualProvisioningCollection {
             cpus_provisioned: 0,
             ram_provisioned: ByteCount(external::ByteCount::from(0)),
         }
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.virtual_disk_bytes_provisioned.to_bytes() == 0
-            && self.cpus_provisioned == 0
-            && self.ram_provisioned.to_bytes() == 0
     }
 }

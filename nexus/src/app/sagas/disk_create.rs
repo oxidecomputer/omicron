@@ -511,17 +511,17 @@ async fn sdc_undo_physical_provisioning(
             let writable = if *read_only { zero } else { phys_bytes };
             osagactx
                 .datastore()
-                .physical_provisioning_collection_delete_disk_deduped(
+                .physical_provisioning_collection_delete_disk(
                     opctx,
                     disk_id,
                     params.project_id,
                     writable,
                     phys_bytes,
-                    DedupInfo::Disk {
+                    Some(DedupInfo::Disk {
                         origin_column: DedupOriginColumn::Image,
                         origin_id: *image_id,
                         disk_id,
-                    },
+                    }),
                 )
                 .await
                 .map_err(ActionError::action_failed)?;
@@ -536,17 +536,17 @@ async fn sdc_undo_physical_provisioning(
             let writable = if *read_only { zero } else { phys_bytes };
             osagactx
                 .datastore()
-                .physical_provisioning_collection_delete_disk_deduped(
+                .physical_provisioning_collection_delete_disk(
                     opctx,
                     disk_id,
                     params.project_id,
                     writable,
                     phys_bytes,
-                    DedupInfo::Disk {
+                    Some(DedupInfo::Disk {
                         origin_column: DedupOriginColumn::Snapshot,
                         origin_id: *snapshot_id,
                         disk_id,
-                    },
+                    }),
                 )
                 .await
                 .map_err(ActionError::action_failed)?;
@@ -562,8 +562,7 @@ async fn sdc_undo_physical_provisioning(
                     opctx,
                     disk_id,
                     params.project_id,
-                    phys_bytes, zero, zero,
-                    phys_bytes, zero, zero,
+                    phys_bytes, zero, None,
                 )
                 .await
                 .map_err(ActionError::action_failed)?;
@@ -579,8 +578,7 @@ async fn sdc_undo_physical_provisioning(
                     opctx,
                     disk_id,
                     params.project_id,
-                    phys_bytes, zero, zero,
-                    phys_bytes, zero, zero,
+                    phys_bytes, zero, None,
                 )
                 .await
                 .map_err(ActionError::action_failed)?;

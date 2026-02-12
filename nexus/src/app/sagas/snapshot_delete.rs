@@ -159,16 +159,27 @@ async fn ssd_account_space(
         nexus_db_model::VirtualDiskBytes(*params.snapshot.size),
     );
     let phys_bytes = nexus_db_model::ByteCount::from(physical.into_byte_count());
+    let zero = nexus_db_model::ByteCount::from(
+        omicron_common::api::external::ByteCount::from(0u32),
+    );
     // Snapshot charges both zfs_snapshot AND read_only (2x pre-accounting).
     // Delete with dedup: if surviving disks still reference this snapshot,
     // the read_only charge is preserved.
     osagactx
         .datastore()
-        .physical_provisioning_collection_delete_snapshot_deduped(
+        .physical_provisioning_collection_delete_snapshot(
             &opctx,
             params.authz_snapshot.id(),
             params.snapshot.project_id,
+            zero,
             phys_bytes,
+            phys_bytes,
+            zero,
+            phys_bytes,
+            phys_bytes,
+            Some(nexus_db_queries::db::queries::physical_provisioning_collection_update::DedupInfo::SnapshotDelete {
+                snapshot_id: params.authz_snapshot.id(),
+            }),
         )
         .await
         .map_err(ActionError::action_failed)?;

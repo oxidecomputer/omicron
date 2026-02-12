@@ -12,7 +12,7 @@
 use crate::db::column_walker::AllColumnsOf;
 use crate::db::model::ByteCount;
 use crate::db::model::PhysicalProvisioningCollection;
-use crate::db::model::PhysicalProvisioningResource;
+use crate::db::model::PhysicalProvisioningResourceNew;
 use crate::db::model::ResourceTypeProvisioned;
 use crate::db::raw_query_builder::{QueryBuilder, TypedSqlQuery};
 use crate::db::true_or_cast_error::matches_sentinel;
@@ -141,7 +141,7 @@ enum UpdateKind {
     /// Insert storage provisioning. The resource stores project-level diffs
     /// for idempotency. Silo/fleet diffs may differ due to deduplication.
     InsertStorage {
-        resource: PhysicalProvisioningResource,
+        resource: PhysicalProvisioningResourceNew,
         // Silo/fleet-level diffs (may differ from project diffs stored in
         // resource)
         silo_writable: ByteCount,
@@ -163,7 +163,7 @@ enum UpdateKind {
         // Optional dedup info for atomic read-only deduplication
         dedup: Option<DedupInfo>,
     },
-    InsertInstance(PhysicalProvisioningResource),
+    InsertInstance(PhysicalProvisioningResourceNew),
     DeleteInstance {
         id: uuid::Uuid,
         cpus_diff: i64,
@@ -1167,9 +1167,10 @@ FROM
         silo_read_only: ByteCount,
         silo_id: uuid::Uuid,
         storage_type: crate::db::datastore::StorageType,
+        dedup: Option<DedupInfo>,
     ) -> TypedSqlQuery<SelectableSql<PhysicalProvisioningCollection>> {
         let mut resource =
-            PhysicalProvisioningResource::new(id, storage_type.into());
+            PhysicalProvisioningResourceNew::new(id, storage_type.into());
         // For silo-level resources, the resource record stores silo-level
         // diffs (there is no project level).
         resource.physical_writable_disk_bytes = silo_writable;
@@ -1182,7 +1183,7 @@ FROM
                 silo_writable,
                 silo_zfs_snapshot,
                 silo_read_only,
-                dedup: None,
+                dedup,
             },
             silo_id,
         )
@@ -1196,6 +1197,7 @@ FROM
         silo_zfs_snapshot: ByteCount,
         silo_read_only: ByteCount,
         silo_id: uuid::Uuid,
+        dedup: Option<DedupInfo>,
     ) -> TypedSqlQuery<SelectableSql<PhysicalProvisioningCollection>> {
         Self::apply_update_silo_level(
             UpdateKind::DeleteStorage {
@@ -1206,31 +1208,7 @@ FROM
                 silo_writable,
                 silo_zfs_snapshot,
                 silo_read_only,
-                dedup: None,
-            },
-            silo_id,
-        )
-    }
-
-    /// Delete storage provisioning at silo level with dedup.
-    pub fn new_delete_storage_silo_level_deduped(
-        id: uuid::Uuid,
-        silo_writable: ByteCount,
-        silo_zfs_snapshot: ByteCount,
-        silo_read_only: ByteCount,
-        silo_id: uuid::Uuid,
-        dedup: DedupInfo,
-    ) -> TypedSqlQuery<SelectableSql<PhysicalProvisioningCollection>> {
-        Self::apply_update_silo_level(
-            UpdateKind::DeleteStorage {
-                id,
-                project_writable: silo_writable,
-                project_zfs_snapshot: silo_zfs_snapshot,
-                project_read_only: silo_read_only,
-                silo_writable,
-                silo_zfs_snapshot,
-                silo_read_only,
-                dedup: Some(dedup),
+                dedup,
             },
             silo_id,
         )
@@ -1241,63 +1219,11 @@ FROM
     /// The `resource` contains project-level diffs (stored in the resource
     /// table for idempotency). The silo_* parameters are the silo/fleet-level
     /// diffs (may differ from project diffs due to deduplication).
-    pub fn new_insert_storage(
-        id: uuid::Uuid,
-        project_writable: ByteCount,
-        project_zfs_snapshot: ByteCount,
-        project_read_only: ByteCount,
-        silo_writable: ByteCount,
-        silo_zfs_snapshot: ByteCount,
-        silo_read_only: ByteCount,
-        project_id: uuid::Uuid,
-        storage_type: crate::db::datastore::StorageType,
-    ) -> TypedSqlQuery<SelectableSql<PhysicalProvisioningCollection>> {
-        Self::new_insert_storage_impl(
-            id,
-            project_writable,
-            project_zfs_snapshot,
-            project_read_only,
-            silo_writable,
-            silo_zfs_snapshot,
-            silo_read_only,
-            project_id,
-            storage_type,
-            None,
-        )
-    }
-
-    /// Insert storage provisioning with atomic dedup.
     ///
-    /// Like `new_insert_storage`, but atomically checks whether the given
+    /// When `dedup` is `Some`, the CTE atomically checks whether the given
     /// origin image/snapshot is already referenced by another disk. If so,
     /// the `read_only` diff is zeroed out at the appropriate level.
-    pub fn new_insert_storage_deduped(
-        id: uuid::Uuid,
-        project_writable: ByteCount,
-        project_zfs_snapshot: ByteCount,
-        project_read_only: ByteCount,
-        silo_writable: ByteCount,
-        silo_zfs_snapshot: ByteCount,
-        silo_read_only: ByteCount,
-        project_id: uuid::Uuid,
-        storage_type: crate::db::datastore::StorageType,
-        dedup: DedupInfo,
-    ) -> TypedSqlQuery<SelectableSql<PhysicalProvisioningCollection>> {
-        Self::new_insert_storage_impl(
-            id,
-            project_writable,
-            project_zfs_snapshot,
-            project_read_only,
-            silo_writable,
-            silo_zfs_snapshot,
-            silo_read_only,
-            project_id,
-            storage_type,
-            Some(dedup),
-        )
-    }
-
-    fn new_insert_storage_impl(
+    pub fn new_insert_storage(
         id: uuid::Uuid,
         project_writable: ByteCount,
         project_zfs_snapshot: ByteCount,
@@ -1310,7 +1236,7 @@ FROM
         dedup: Option<DedupInfo>,
     ) -> TypedSqlQuery<SelectableSql<PhysicalProvisioningCollection>> {
         let mut resource =
-            PhysicalProvisioningResource::new(id, storage_type.into());
+            PhysicalProvisioningResourceNew::new(id, storage_type.into());
         resource.physical_writable_disk_bytes = project_writable;
         resource.physical_zfs_snapshot_bytes = project_zfs_snapshot;
         resource.physical_read_only_disk_bytes = project_read_only;
@@ -1328,55 +1254,11 @@ FROM
     }
 
     /// Delete storage provisioning with per-level diffs.
+    ///
+    /// When `dedup` is `Some`, the CTE atomically checks whether the given
+    /// origin is still referenced. If so, the `read_only` diff is zeroed
+    /// out at the appropriate level.
     pub fn new_delete_storage(
-        id: uuid::Uuid,
-        project_writable: ByteCount,
-        project_zfs_snapshot: ByteCount,
-        project_read_only: ByteCount,
-        silo_writable: ByteCount,
-        silo_zfs_snapshot: ByteCount,
-        silo_read_only: ByteCount,
-        project_id: uuid::Uuid,
-    ) -> TypedSqlQuery<SelectableSql<PhysicalProvisioningCollection>> {
-        Self::new_delete_storage_impl(
-            id,
-            project_writable,
-            project_zfs_snapshot,
-            project_read_only,
-            silo_writable,
-            silo_zfs_snapshot,
-            silo_read_only,
-            project_id,
-            None,
-        )
-    }
-
-    /// Delete storage provisioning with atomic dedup.
-    pub fn new_delete_storage_deduped(
-        id: uuid::Uuid,
-        project_writable: ByteCount,
-        project_zfs_snapshot: ByteCount,
-        project_read_only: ByteCount,
-        silo_writable: ByteCount,
-        silo_zfs_snapshot: ByteCount,
-        silo_read_only: ByteCount,
-        project_id: uuid::Uuid,
-        dedup: DedupInfo,
-    ) -> TypedSqlQuery<SelectableSql<PhysicalProvisioningCollection>> {
-        Self::new_delete_storage_impl(
-            id,
-            project_writable,
-            project_zfs_snapshot,
-            project_read_only,
-            silo_writable,
-            silo_zfs_snapshot,
-            silo_read_only,
-            project_id,
-            Some(dedup),
-        )
-    }
-
-    fn new_delete_storage_impl(
         id: uuid::Uuid,
         project_writable: ByteCount,
         project_zfs_snapshot: ByteCount,
@@ -1408,7 +1290,7 @@ FROM
         ram_diff: ByteCount,
         project_id: uuid::Uuid,
     ) -> TypedSqlQuery<SelectableSql<PhysicalProvisioningCollection>> {
-        let mut resource = PhysicalProvisioningResource::new(
+        let mut resource = PhysicalProvisioningResourceNew::new(
             id.into_untyped_uuid(),
             ResourceTypeProvisioned::Instance,
         );
@@ -1474,6 +1356,7 @@ mod test {
                 silo_read_only,
                 project_id,
                 storage_type,
+                None,
             );
         expectorate_query_contents(
             &query,
@@ -1503,6 +1386,7 @@ mod test {
                 silo_zfs_snapshot,
                 silo_read_only,
                 project_id,
+                None,
             );
 
         expectorate_query_contents(
@@ -1551,7 +1435,7 @@ mod test {
     }
 
     #[tokio::test]
-    async fn expectorate_query_insert_storage_deduped() {
+    async fn expectorate_query_insert_storage_with_dedup() {
         let id = Uuid::nil();
         let project_id = Uuid::nil();
         let project_writable = 2048.try_into().unwrap();
@@ -1568,7 +1452,7 @@ mod test {
         };
 
         let query =
-            PhysicalProvisioningCollectionUpdate::new_insert_storage_deduped(
+            PhysicalProvisioningCollectionUpdate::new_insert_storage(
                 id,
                 project_writable,
                 project_zfs_snapshot,
@@ -1578,17 +1462,17 @@ mod test {
                 silo_read_only,
                 project_id,
                 storage_type,
-                dedup,
+                Some(dedup),
             );
         expectorate_query_contents(
             &query,
-            "tests/output/physical_provisioning_collection_update_insert_storage_deduped.sql",
+            "tests/output/physical_provisioning_collection_update_insert_storage_with_dedup.sql",
         )
         .await;
     }
 
     #[tokio::test]
-    async fn expectorate_query_delete_storage_deduped() {
+    async fn expectorate_query_delete_storage_with_dedup() {
         let id = Uuid::nil();
         let project_id = Uuid::nil();
         let project_writable = 2048.try_into().unwrap();
@@ -1604,7 +1488,7 @@ mod test {
         };
 
         let query =
-            PhysicalProvisioningCollectionUpdate::new_delete_storage_deduped(
+            PhysicalProvisioningCollectionUpdate::new_delete_storage(
                 id,
                 project_writable,
                 project_zfs_snapshot,
@@ -1613,12 +1497,12 @@ mod test {
                 silo_zfs_snapshot,
                 silo_read_only,
                 project_id,
-                dedup,
+                Some(dedup),
             );
 
         expectorate_query_contents(
             &query,
-            "tests/output/physical_provisioning_collection_update_delete_storage_deduped.sql",
+            "tests/output/physical_provisioning_collection_update_delete_storage_with_dedup.sql",
         )
         .await;
     }
@@ -1656,6 +1540,7 @@ mod test {
                 silo_read_only,
                 project_id,
                 storage_type,
+                None,
             );
         let _ = query
             .explain_async(&conn)
@@ -1694,6 +1579,7 @@ mod test {
                 silo_zfs_snapshot,
                 silo_read_only,
                 project_id,
+                None,
             );
         let _ = query
             .explain_async(&conn)
@@ -1759,9 +1645,9 @@ mod test {
     }
 
     #[tokio::test]
-    async fn explain_insert_storage_deduped() {
+    async fn explain_insert_storage_with_dedup() {
         let logctx = dev::test_setup_log(
-            "explain_physical_provisioning_insert_storage_deduped",
+            "explain_physical_provisioning_insert_storage_with_dedup",
         );
         let db = TestDatabase::new_with_pool(&logctx.log).await;
         let pool = db.pool();
@@ -1783,7 +1669,7 @@ mod test {
         };
 
         let query =
-            PhysicalProvisioningCollectionUpdate::new_insert_storage_deduped(
+            PhysicalProvisioningCollectionUpdate::new_insert_storage(
                 id,
                 project_writable,
                 project_zfs_snapshot,
@@ -1793,7 +1679,7 @@ mod test {
                 silo_read_only,
                 project_id,
                 storage_type,
-                dedup,
+                Some(dedup),
             );
         let _ = query
             .explain_async(&conn)
@@ -1805,9 +1691,9 @@ mod test {
     }
 
     #[tokio::test]
-    async fn explain_delete_storage_deduped() {
+    async fn explain_delete_storage_with_dedup() {
         let logctx = dev::test_setup_log(
-            "explain_physical_provisioning_delete_storage_deduped",
+            "explain_physical_provisioning_delete_storage_with_dedup",
         );
         let db = TestDatabase::new_with_pool(&logctx.log).await;
         let pool = db.pool();
@@ -1828,7 +1714,7 @@ mod test {
         };
 
         let query =
-            PhysicalProvisioningCollectionUpdate::new_delete_storage_deduped(
+            PhysicalProvisioningCollectionUpdate::new_delete_storage(
                 id,
                 project_writable,
                 project_zfs_snapshot,
@@ -1837,7 +1723,7 @@ mod test {
                 silo_zfs_snapshot,
                 silo_read_only,
                 project_id,
-                dedup,
+                Some(dedup),
             );
         let _ = query
             .explain_async(&conn)
@@ -1849,7 +1735,7 @@ mod test {
     }
 
     #[tokio::test]
-    async fn expectorate_query_delete_storage_snapshot_delete_deduped() {
+    async fn expectorate_query_delete_storage_with_snapshot_dedup() {
         let id = Uuid::nil();
         let project_id = Uuid::nil();
         let project_writable = 0.try_into().unwrap();
@@ -1863,7 +1749,7 @@ mod test {
         };
 
         let query =
-            PhysicalProvisioningCollectionUpdate::new_delete_storage_deduped(
+            PhysicalProvisioningCollectionUpdate::new_delete_storage(
                 id,
                 project_writable,
                 project_zfs_snapshot,
@@ -1872,20 +1758,20 @@ mod test {
                 silo_zfs_snapshot,
                 silo_read_only,
                 project_id,
-                dedup,
+                Some(dedup),
             );
 
         expectorate_query_contents(
             &query,
-            "tests/output/physical_provisioning_collection_update_delete_storage_snapshot_delete_deduped.sql",
+            "tests/output/physical_provisioning_collection_update_delete_storage_with_snapshot_dedup.sql",
         )
         .await;
     }
 
     #[tokio::test]
-    async fn explain_delete_storage_snapshot_delete_deduped() {
+    async fn explain_delete_storage_with_snapshot_dedup() {
         let logctx = dev::test_setup_log(
-            "explain_physical_provisioning_delete_storage_snapshot_delete_deduped",
+            "explain_physical_provisioning_delete_storage_with_snapshot_dedup",
         );
         let db = TestDatabase::new_with_pool(&logctx.log).await;
         let pool = db.pool();
@@ -1904,7 +1790,7 @@ mod test {
         };
 
         let query =
-            PhysicalProvisioningCollectionUpdate::new_delete_storage_deduped(
+            PhysicalProvisioningCollectionUpdate::new_delete_storage(
                 id,
                 project_writable,
                 project_zfs_snapshot,
@@ -1913,7 +1799,7 @@ mod test {
                 silo_zfs_snapshot,
                 silo_read_only,
                 project_id,
-                dedup,
+                Some(dedup),
             );
         let _ = query
             .explain_async(&conn)
