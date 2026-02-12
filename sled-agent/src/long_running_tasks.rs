@@ -19,7 +19,7 @@ use crate::bootstrap::bootstore_setup::{
 use crate::bootstrap::secret_retriever::{
     ConfigurableSecretRetriever, ConfigurableSecretRetrieverHandle,
 };
-use crate::bootstrap::trust_quorum_setup::new_trust_quorum_config;
+//use crate::bootstrap::trust_quorum_setup::new_trust_quorum_config;
 use crate::config::Config;
 use crate::hardware_monitor::{HardwareMonitor, HardwareMonitorHandle};
 use crate::services::ServiceManager;
@@ -39,11 +39,11 @@ use sled_hardware::{HardwareManager, SledMode, UnparsedDisk};
 use sled_storage::config::MountConfig;
 use sled_storage::disk::RawSyntheticDisk;
 use slog::{Logger, info};
-use sprockets_tls::keys::SprocketsConfig;
+//use sprockets_tls::keys::SprocketsConfig;
 use std::net::Ipv6Addr;
 use std::sync::Arc;
 use tokio::sync::oneshot;
-use trust_quorum;
+//use trust_quorum;
 
 /// A mechanism for interacting with all long running tasks that can be shared
 /// between the bootstrap-agent and sled-agent code.
@@ -77,7 +77,8 @@ pub struct LongRunningTaskHandles {
     pub health_monitor: HealthMonitorHandle,
 
     /// A handle for interacting with the trust quorum
-    pub trust_quorum: trust_quorum::NodeTaskHandle,
+    /// Re-enable after R18
+    /*pub trust_quorum: trust_quorum::NodeTaskHandle, */
 
     /// Handle to configure the secret retriever used by the KeyManager.
     pub secret_retriever: ConfigurableSecretRetrieverHandle,
@@ -176,7 +177,9 @@ pub async fn spawn_all_longrunning_tasks(
         .await,
     );
 
-    let trust_quorum = spawn_trust_quorum_task(
+    // TODO: Re-enable post R18
+    // This is disabled because it exacerbates a pre-existing IPCC bug.
+    /*let trust_quorum = spawn_trust_quorum_task(
         log,
         &config_reconciler,
         &hardware_manager,
@@ -185,13 +188,14 @@ pub async fn spawn_all_longrunning_tasks(
         measurements.clone(),
     )
     .await;
+    */
 
     let bootstore = spawn_bootstore_tasks(
         log,
         &config_reconciler,
         &hardware_manager,
         global_zone_bootstrap_ip,
-        trust_quorum.clone(),
+        /*trust_quorum.clone() */
     )
     .await;
 
@@ -206,7 +210,7 @@ pub async fn spawn_all_longrunning_tasks(
             zone_bundler,
             zone_image_resolver,
             health_monitor,
-            trust_quorum,
+            /*trust_quorum, */
             secret_retriever: secret_retriever_config,
             artifact_store,
             measurements,
@@ -265,7 +269,7 @@ fn spawn_hardware_monitor(
     (monitor, sled_agent_started_tx, service_manager_ready_tx)
 }
 
-async fn spawn_trust_quorum_task(
+/*async fn spawn_trust_quorum_task(
     log: &Logger,
     config_reconciler: &ConfigReconcilerHandle,
     hardware_manager: &HardwareManager,
@@ -300,13 +304,14 @@ async fn spawn_trust_quorum_task(
     tokio::spawn(async move { node.run().await });
     handle
 }
+*/
 
 async fn spawn_bootstore_tasks(
     log: &Logger,
     config_reconciler: &ConfigReconcilerHandle,
     hardware_manager: &HardwareManager,
     global_zone_bootstrap_ip: Ipv6Addr,
-    tq_handle: trust_quorum::NodeTaskHandle,
+    /* tq_handle: trust_quorum::NodeTaskHandle, */
 ) -> bootstore::NodeHandle {
     let config = new_bootstore_config(
         &config_reconciler
@@ -329,8 +334,11 @@ async fn spawn_bootstore_tasks(
     let log = log.new(o!("component" => "bootstore_ddmd_poller"));
     let node_handle2 = node_handle.clone();
     tokio::spawn(async move {
-        poll_ddmd_for_bootstore_and_tq_peer_update(log, node_handle2, tq_handle)
-            .await
+        poll_ddmd_for_bootstore_and_tq_peer_update(
+            log,
+            node_handle2, /*tq_handle */
+        )
+        .await
     });
 
     node_handle

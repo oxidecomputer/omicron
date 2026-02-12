@@ -16,7 +16,7 @@ use crate::bootstrap::pre_server::BootstrapAgentStartup;
 use crate::bootstrap::pumpkind;
 use crate::bootstrap::rack_ops::RssAccess;
 use crate::bootstrap::secret_retriever::{
-    HardcodedSecretRetriever, TqOrLrtqSecretRetriever,
+    HardcodedSecretRetriever, LrtqSecretRetriever,
 };
 use crate::bootstrap::sprockets_server::SprocketsServer;
 use crate::config::Config as SledConfig;
@@ -217,7 +217,7 @@ impl Server {
             updates: config.updates.clone(),
             sled_reset_tx,
             sprockets: config.sprockets.clone(),
-            trust_quorum_handle: long_running_task_handles.trust_quorum.clone(),
+            /*trust_quorum_handle: long_running_task_handles.trust_quorum.clone(), */
             measurements: long_running_task_handles.measurements.clone(),
         };
         let bootstrap_http_server = start_dropshot_server(bootstrap_context)?;
@@ -378,13 +378,24 @@ async fn start_sled_agent(
     if request.body.use_trust_quorum {
         info!(log, "KeyManager: using TQ/LRTQ secret retriever");
         let salt = request.hash_rack_id();
+
         long_running_task_handles.secret_retriever.init(
+            LrtqSecretRetriever::new(
+                salt,
+                long_running_task_handles.bootstore.clone(),
+            ),
+        );
+        // TODO: Re-enable this after R18. It's currently disabled because the
+        // tq long running tasks have been disabled due to exacerbating an IPCC
+        // bug.
+        /*long_running_task_handles.secret_retriever.init(
             TqOrLrtqSecretRetriever::new(
                 salt,
                 long_running_task_handles.trust_quorum.clone(),
                 long_running_task_handles.bootstore.clone(),
             ),
         );
+        */
     } else {
         info!(log, "KeyManager: using hardcoded secret retriever");
         long_running_task_handles

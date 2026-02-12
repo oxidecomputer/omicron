@@ -56,7 +56,7 @@ impl RssHandle {
         internal_disks_rx: InternalDisksReceiver,
         measurements: Arc<MeasurementsHandle>,
         bootstore: bootstore::NodeHandle,
-        trust_quorum: trust_quorum::NodeTaskHandle,
+        /*        trust_quorum: trust_quorum::NodeTaskHandle, */
         step_tx: watch::Sender<RssStep>,
     ) -> Result<(), SetupServiceError> {
         let (tx, rx) =
@@ -68,7 +68,7 @@ impl RssHandle {
             internal_disks_rx,
             tx,
             bootstore,
-            trust_quorum,
+            /*            trust_quorum, */
             step_tx,
         );
         let log = log.new(o!("component" => "BootstrapAgentRssHandler"));
