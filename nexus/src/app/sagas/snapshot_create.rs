@@ -231,6 +231,13 @@ impl NexusSaga for SagaSnapshotCreate {
         params: &Self::Params,
         mut builder: steno::DagBuilder,
     ) -> Result<steno::Dag, SagaInitError> {
+        if params.disk.is_read_only() {
+            return Err(SagaInitError::InvalidParameter(format!(
+                "cannot snapshot read-only disk {}!",
+                params.disk.id(),
+            )));
+        }
+
         // Generate IDs
         builder.append(Node::action(
             "snapshot_id",
