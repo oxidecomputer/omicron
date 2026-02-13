@@ -1337,13 +1337,7 @@ impl BackgroundTask for SwitchPortSettingsManager {
 
                 let (infra_ip_first, infra_ip_last)= match blocks.get(0) {
                     Some(AddressLotBlock{ first_address, last_address, ..}) => {
-                        match (first_address, last_address) {
-                            (IpNetwork::V4(first), IpNetwork::V4(last)) => (first.ip(), last.ip()),
-                            _ =>  {
-                                error!(log, "infra lot block must be ipv4"; "block" => ?blocks.get(0));
-                                continue;
-                            },
-                        }
+                        (first_address.ip(), last_address.ip())
                     },
                     None => {
                         error!(log, "no blocks assigned to infra lot");
@@ -1368,8 +1362,8 @@ impl BackgroundTask for SwitchPortSettingsManager {
                         ntp_servers,
                         rack_network_config: Some(RackNetworkConfig {
                             rack_subnet: subnet,
-                            infra_ip_first: std::net::IpAddr::V4(infra_ip_first),
-                            infra_ip_last: std::net::IpAddr::V4(infra_ip_last),
+                            infra_ip_first,
+                            infra_ip_last,
                             ports,
                             bgp,
                             bfd,
