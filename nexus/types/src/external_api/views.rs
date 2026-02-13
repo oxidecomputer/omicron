@@ -384,10 +384,10 @@ pub struct InternetGatewayIpAddress {
     #[serde(flatten)]
     pub identity: IdentityMetadata,
 
-    /// The associated internet gateway.
+    /// The associated internet gateway
     pub internet_gateway_id: Uuid,
 
-    /// The associated IP address.
+    /// The associated IP address
     pub address: IpAddr,
 }
 
