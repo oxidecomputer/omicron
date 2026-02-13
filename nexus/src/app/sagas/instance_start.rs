@@ -517,17 +517,33 @@ async fn sis_account_virtual_resources(
         &params.serialized_authn,
     );
 
+    let cpus = i64::from(params.db_instance.ncpus.0.0);
+    let memory = nexus_db_model::ByteCount(*params.db_instance.memory);
+
     osagactx
         .datastore()
         .virtual_provisioning_collection_insert_instance(
             &opctx,
             instance_id,
             params.db_instance.project_id,
-            i64::from(params.db_instance.ncpus.0.0),
-            nexus_db_model::ByteCount(*params.db_instance.memory),
+            cpus,
+            memory,
         )
         .await
         .map_err(ActionError::action_failed)?;
+
+    osagactx
+        .datastore()
+        .physical_provisioning_collection_insert_instance(
+            &opctx,
+            instance_id,
+            params.db_instance.project_id,
+            cpus,
+            memory,
+        )
+        .await
+        .map_err(ActionError::action_failed)?;
+
     Ok(())
 }
 
@@ -543,17 +559,33 @@ async fn sis_account_virtual_resources_undo(
         &params.serialized_authn,
     );
 
+    let cpus = i64::from(params.db_instance.ncpus.0.0);
+    let memory = nexus_db_model::ByteCount(*params.db_instance.memory);
+
     osagactx
         .datastore()
         .virtual_provisioning_collection_delete_instance(
             &opctx,
             instance_id,
             params.db_instance.project_id,
-            i64::from(params.db_instance.ncpus.0.0),
-            nexus_db_model::ByteCount(*params.db_instance.memory),
+            cpus,
+            memory,
         )
         .await
         .map_err(ActionError::action_failed)?;
+
+    osagactx
+        .datastore()
+        .physical_provisioning_collection_delete_instance(
+            &opctx,
+            instance_id,
+            params.db_instance.project_id,
+            cpus,
+            memory,
+        )
+        .await
+        .map_err(ActionError::action_failed)?;
+
     Ok(())
 }
 

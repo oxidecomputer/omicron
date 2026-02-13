@@ -299,6 +299,7 @@ async fn test_quotas(cptestctx: &ControlPlaneTestContext) {
                 cpus: Some(4),
                 memory: Some(ByteCount::from_gibibytes_u32(15)),
                 storage: Some(ByteCount::from_gibibytes_u32(2)),
+                physical_storage: None,
             },
         )
         .await
@@ -363,6 +364,7 @@ async fn test_quota_limits(cptestctx: &ControlPlaneTestContext) {
         cpus: Some(i64::MAX),
         memory: Some(i64::MAX.try_into().unwrap()),
         storage: Some(i64::MAX.try_into().unwrap()),
+        physical_storage: None,
     };
     system
         .set_quotas(client, quota_limit.clone())
@@ -460,6 +462,7 @@ async fn test_negative_quota(cptestctx: &ControlPlaneTestContext) {
         cpus: Some(-1),
         memory: Some(0_u64.try_into().unwrap()),
         storage: Some(0_u64.try_into().unwrap()),
+        physical_storage: None,
     };
     let response = system
         .set_quotas_expect_error(

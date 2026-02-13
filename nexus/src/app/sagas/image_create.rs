@@ -63,9 +63,9 @@ declare_saga_actions! {
         + simc_get_source_volume
         - simc_get_source_volume_undo
     }
-    CREATE_IMAGE_RECORD -> "created_image" {
-        + simc_create_image_record
-        - simc_create_image_record_undo
+    CREATE_IMAGE_RECORD_AND_ACCOUNT -> "created_image" {
+        + simc_create_image_record_and_account
+        - simc_create_image_record_and_account_undo
     }
 }
 
@@ -110,7 +110,7 @@ impl NexusSaga for SagaImageCreate {
         }
 
         builder.append(get_source_volume_action());
-        builder.append(create_image_record_action());
+        builder.append(create_image_record_and_account_action());
 
         Ok(builder.build()?)
     }
@@ -233,7 +233,9 @@ async fn simc_get_source_volume_undo(
     Ok(())
 }
 
-async fn simc_create_image_record(
+/// Combined action: atomically creates the image record AND inserts
+/// physical provisioning in a single database transaction.
+async fn simc_create_image_record_and_account(
     sagactx: NexusActionContext,
 ) -> Result<db::model::Image, ActionError> {
     let osagactx = sagactx.user_data();
@@ -288,7 +290,7 @@ async fn simc_create_image_record(
     match &params.image_type {
         ImageType::Project { authz_project, .. } => osagactx
             .datastore()
-            .project_image_create(
+            .project_image_create_and_account(
                 &opctx,
                 &authz_project,
                 record.try_into().map_err(ActionError::action_failed)?,
@@ -298,7 +300,7 @@ async fn simc_create_image_record(
 
         ImageType::Silo { authz_silo, .. } => osagactx
             .datastore()
-            .silo_image_create(
+            .silo_image_create_and_account(
                 &opctx,
                 &authz_silo,
                 record.try_into().map_err(ActionError::action_failed)?,
@@ -308,7 +310,8 @@ async fn simc_create_image_record(
     }
 }
 
-async fn simc_create_image_record_undo(
+/// Combined undo: atomically removes both provisioning AND image record.
+async fn simc_create_image_record_and_account_undo(
     sagactx: NexusActionContext,
 ) -> Result<(), anyhow::Error> {
     let osagactx = sagactx.user_data();
@@ -323,29 +326,51 @@ async fn simc_create_image_record_undo(
 
     match &params.image_type {
         ImageType::Project { .. } => {
-            let (.., authz_image, db_image) =
-                LookupPath::new(&opctx, osagactx.datastore())
-                    .project_image_id(image_id)
-                    .fetch()
-                    .await?;
+            let looked_up = LookupPath::new(&opctx, osagactx.datastore())
+                .project_image_id(image_id)
+                .fetch()
+                .await;
 
-            osagactx
-                .datastore()
-                .project_image_delete(&opctx, &authz_image, db_image)
-                .await?;
+            match looked_up {
+                Ok((.., authz_image, db_image)) => {
+                    // Use the combined delete method that atomically
+                    // removes provisioning and soft-deletes the record.
+                    osagactx
+                        .datastore()
+                        .project_image_delete_and_account(
+                            &opctx,
+                            &authz_image,
+                            db_image,
+                        )
+                        .await?;
+                }
+                Err(_) => {
+                    // Image already deleted (idempotent undo).
+                }
+            }
         }
 
         ImageType::Silo { .. } => {
-            let (.., authz_image, db_image) =
-                LookupPath::new(&opctx, osagactx.datastore())
-                    .silo_image_id(image_id)
-                    .fetch()
-                    .await?;
+            let looked_up = LookupPath::new(&opctx, osagactx.datastore())
+                .silo_image_id(image_id)
+                .fetch()
+                .await;
 
-            osagactx
-                .datastore()
-                .silo_image_delete(&opctx, &authz_image, db_image)
-                .await?;
+            match looked_up {
+                Ok((.., authz_image, db_image)) => {
+                    osagactx
+                        .datastore()
+                        .silo_image_delete_and_account(
+                            &opctx,
+                            &authz_image,
+                            db_image,
+                        )
+                        .await?;
+                }
+                Err(_) => {
+                    // Image already deleted (idempotent undo).
+                }
+            }
         }
     }
 

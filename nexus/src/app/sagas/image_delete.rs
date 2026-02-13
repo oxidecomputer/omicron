@@ -37,8 +37,9 @@ pub(crate) struct Params {
 
 declare_saga_actions! {
     image_delete;
-    DELETE_IMAGE_RECORD -> "no_result1" {
-        + sid_delete_image_record
+    ACCOUNT_SPACE_AND_DELETE_RECORD -> "account_space_no_result" {
+        + sid_account_space_and_delete_record
+        - sid_account_space_and_delete_record_undo
     }
 }
 
@@ -56,7 +57,7 @@ impl NexusSaga for SagaImageDelete {
         params: &Self::Params,
         mut builder: steno::DagBuilder,
     ) -> Result<steno::Dag, super::SagaInitError> {
-        builder.append(delete_image_record_action());
+        builder.append(account_space_and_delete_record_action());
 
         const DELETE_VOLUME_PARAMS: &'static str = "delete_volume_params";
 
@@ -92,7 +93,11 @@ impl NexusSaga for SagaImageDelete {
 
 // image delete saga: action implementations
 
-async fn sid_delete_image_record(
+use nexus_types::identity::Resource;
+
+/// Combined action: atomically deletes physical provisioning AND
+/// soft-deletes the image record in a single database transaction.
+async fn sid_account_space_and_delete_record(
     sagactx: NexusActionContext,
 ) -> Result<(), ActionError> {
     let osagactx = sagactx.user_data();
@@ -102,19 +107,99 @@ async fn sid_delete_image_record(
         &params.serialized_authn,
     );
 
-    match params.image_param {
+    match &params.image_param {
         ImageParam::Project { authz_image, image } => {
             osagactx
                 .datastore()
-                .project_image_delete(&opctx, &authz_image, image)
+                .project_image_delete_and_account(
+                    &opctx,
+                    authz_image,
+                    image.clone(),
+                )
                 .await
                 .map_err(ActionError::action_failed)?;
         }
-
         ImageParam::Silo { authz_image, image } => {
             osagactx
                 .datastore()
-                .silo_image_delete(&opctx, &authz_image, image)
+                .silo_image_delete_and_account(
+                    &opctx,
+                    authz_image,
+                    image.clone(),
+                )
+                .await
+                .map_err(ActionError::action_failed)?;
+        }
+    }
+
+    Ok(())
+}
+
+/// Combined undo: re-creates the image record and re-inserts provisioning.
+async fn sid_account_space_and_delete_record_undo(
+    sagactx: NexusActionContext,
+) -> Result<(), anyhow::Error> {
+    let osagactx = sagactx.user_data();
+    let params = sagactx.saga_params::<Params>()?;
+    let opctx = crate::context::op_context_for_saga_action(
+        &sagactx,
+        &params.serialized_authn,
+    );
+
+    match &params.image_param {
+        ImageParam::Project { image, .. } => {
+            // Re-create the image record (undelete) and re-insert
+            // provisioning. Since the combined delete used a transaction,
+            // we need to restore both parts.
+            //
+            // Undelete the image record.
+            osagactx
+                .datastore()
+                .image_undelete(&opctx, image.id())
+                .await
+                .map_err(ActionError::action_failed)?;
+
+            // Re-insert the physical provisioning.
+            let read_only_phys =
+                nexus_db_model::distributed_disk_physical_bytes(
+                    nexus_db_model::VirtualDiskBytes(image.size.into()),
+                );
+            let read_only_phys_bytes = nexus_db_model::ByteCount::from(
+                read_only_phys.into_byte_count(),
+            );
+            osagactx
+                .datastore()
+                .physical_provisioning_collection_insert_image(
+                    &opctx,
+                    image.id(),
+                    image.project_id,
+                    read_only_phys_bytes,
+                )
+                .await
+                .map_err(ActionError::action_failed)?;
+        }
+        ImageParam::Silo { image, .. } => {
+            osagactx
+                .datastore()
+                .image_undelete(&opctx, image.id())
+                .await
+                .map_err(ActionError::action_failed)?;
+
+            let read_only_phys =
+                nexus_db_model::distributed_disk_physical_bytes(
+                    nexus_db_model::VirtualDiskBytes(image.size.into()),
+                );
+            let read_only_phys_bytes = nexus_db_model::ByteCount::from(
+                read_only_phys.into_byte_count(),
+            );
+            osagactx
+                .datastore()
+                .physical_provisioning_collection_insert_image_silo(
+                    &opctx,
+                    image.id(),
+                    image.silo_id,
+                    read_only_phys_bytes,
+                )
                 .await
                 .map_err(ActionError::action_failed)?;
         }

@@ -351,6 +351,10 @@ async fn datastore_test(
         .load_builtin_fleet_virtual_provisioning_collection(&opctx)
         .await
         .unwrap();
+    datastore
+        .load_builtin_fleet_physical_provisioning_collection(&opctx)
+        .await
+        .unwrap();
     datastore.load_builtin_rack_data(&opctx, rack_id).await.unwrap();
 
     // Create an OpContext with the credentials of "test-privileged" for general

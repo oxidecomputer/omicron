@@ -31,6 +31,10 @@ pub struct SiloQuotas {
     /// The amount of storage (in bytes) that this silo is allowed to use
     #[diesel(column_name = storage_bytes)]
     pub storage: ByteCount,
+
+    /// The optional physical storage quota in bytes.
+    /// NULL = no limit, 0 = zero allowed, >0 = byte limit.
+    pub physical_storage_bytes: Option<i64>,
 }
 
 impl SiloQuotas {
@@ -39,6 +43,7 @@ impl SiloQuotas {
         cpus: i64,
         memory: ByteCount,
         storage: ByteCount,
+        physical_storage_bytes: Option<i64>,
     ) -> Self {
         Self {
             silo_id,
@@ -47,6 +52,7 @@ impl SiloQuotas {
             cpus,
             memory,
             storage,
+            physical_storage_bytes,
         }
     }
 
@@ -57,6 +63,7 @@ impl SiloQuotas {
             count.cpus,
             count.memory.into(),
             count.storage.into(),
+            count.physical_storage,
         )
     }
 }
@@ -70,6 +77,7 @@ impl From<SiloQuotas> for views::SiloQuotas {
                 memory: silo_quotas.memory.into(),
                 storage: silo_quotas.storage.into(),
             },
+            physical_storage: silo_quotas.physical_storage_bytes,
         }
     }
 }
@@ -83,6 +91,7 @@ pub struct SiloQuotasUpdate {
     pub memory: Option<ByteCount>,
     #[diesel(column_name = storage_bytes)]
     pub storage: Option<ByteCount>,
+    pub physical_storage_bytes: Option<Option<i64>>,
     pub time_modified: DateTime<Utc>,
 }
 
@@ -92,6 +101,7 @@ impl From<params::SiloQuotasUpdate> for SiloQuotasUpdate {
             cpus: params.cpus,
             memory: params.memory.map(|f| f.into()),
             storage: params.storage.map(|f| f.into()),
+            physical_storage_bytes: params.physical_storage,
             time_modified: Utc::now(),
         }
     }

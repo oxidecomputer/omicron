@@ -88,6 +88,8 @@ mod network_interface;
 mod oximeter;
 mod oximeter_read_policy;
 mod physical_disk;
+mod physical_disk_size;
+mod physical_provisioning_collection;
 mod probe;
 mod project;
 mod quota;

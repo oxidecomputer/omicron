@@ -13,6 +13,7 @@ pub enum ResourceTypeProvisioned {
     Instance,
     Disk,
     Snapshot,
+    Image,
 }
 
 impl std::fmt::Display for ResourceTypeProvisioned {
@@ -21,6 +22,7 @@ impl std::fmt::Display for ResourceTypeProvisioned {
             ResourceTypeProvisioned::Instance => write!(f, "instance"),
             ResourceTypeProvisioned::Disk => write!(f, "disk"),
             ResourceTypeProvisioned::Snapshot => write!(f, "snapshot"),
+            ResourceTypeProvisioned::Image => write!(f, "image"),
         }
     }
 }

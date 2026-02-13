@@ -5,6 +5,7 @@
 //! [`DataStore`] methods on [`Disk`]s.
 
 use super::DataStore;
+use super::StorageType;
 use crate::authz;
 use crate::authz::ApiResource;
 use crate::context::OpContext;
@@ -881,6 +882,221 @@ impl DataStore {
             })?;
 
         Ok(disk)
+    }
+
+    /// Atomically create a disk record AND insert virtual + physical
+    /// provisioning in a single database transaction.
+    ///
+    /// This eliminates the race window where the dedup query could see
+    /// the disk record without its provisioning entry (or vice versa).
+    pub async fn project_create_disk_and_provision(
+        &self,
+        opctx: &OpContext,
+        authz_project: &authz::Project,
+        disk: Disk,
+        create_params: &params::DiskCreate,
+    ) -> CreateResult<Disk> {
+        opctx.authorize(authz::Action::CreateChild, authz_project).await?;
+
+        let err = OptionalError::new();
+        let conn = self.pool_connection_authorized(opctx).await?;
+
+        let disk_id = disk.id();
+        let project_id = disk.project_id();
+        let create_params = create_params.clone();
+
+        let disk = self
+            .transaction_retry_wrapper("project_create_disk_and_provision")
+            .transaction(&conn, |conn| {
+                let disk = disk.clone();
+                let err = err.clone();
+                let create_params = create_params.clone();
+                async move {
+                    // Step 1: Create the disk record (and disk_type_*).
+                    let created_disk = Self::project_create_disk_in_txn(
+                        &conn,
+                        err.clone(),
+                        authz_project,
+                        disk,
+                    )
+                    .await?;
+
+                    // Step 2: Virtual provisioning.
+                    use crate::db::queries::virtual_provisioning_collection_update::VirtualProvisioningCollectionUpdate;
+                    VirtualProvisioningCollectionUpdate::new_insert_storage(
+                        disk_id,
+                        crate::db::model::ByteCount::from(create_params.size),
+                        project_id,
+                        StorageType::Disk,
+                    )
+                    .get_results_async::<crate::db::model::VirtualProvisioningCollection>(&conn)
+                    .await
+                    .map_err(|e| {
+                        err.bail(crate::db::queries::virtual_provisioning_collection_update::from_diesel(e))
+                    })?;
+
+                    // Step 3: Physical provisioning.
+                    Self::insert_physical_provisioning_in_txn(
+                        &conn,
+                        err.clone(),
+                        disk_id,
+                        project_id,
+                        &create_params,
+                    )
+                    .await?;
+
+                    Ok(created_disk)
+                }
+            })
+            .await
+            .map_err(|e| {
+                if let Some(err) = err.take() {
+                    err
+                } else {
+                    public_error_from_diesel(e, ErrorHandler::Server)
+                }
+            })?;
+
+        Ok(disk)
+    }
+
+    /// Helper: insert physical provisioning for a disk inside a transaction.
+    async fn insert_physical_provisioning_in_txn(
+        conn: &async_bb8_diesel::Connection<DbConnection>,
+        err: OptionalError<Error>,
+        disk_id: Uuid,
+        project_id: Uuid,
+        create_params: &params::DiskCreate,
+    ) -> Result<(), diesel::result::Error> {
+        use crate::db::queries::physical_provisioning_collection_update::{
+            DedupInfo, DedupOriginColumn, PhysicalProvisioningCollectionUpdate,
+        };
+
+        let virtual_bytes =
+            nexus_db_model::VirtualDiskBytes(create_params.size);
+        let zero: crate::db::model::ByteCount = 0.try_into().unwrap();
+
+        match &create_params.disk_backend {
+            params::DiskBackend::Distributed {
+                disk_source:
+                    params::DiskSource::Image { image_id, read_only },
+            } => {
+                let physical =
+                    nexus_db_model::distributed_disk_physical_bytes(
+                        virtual_bytes,
+                    );
+                let phys_bytes = crate::db::model::ByteCount::from(
+                    physical.into_byte_count(),
+                );
+                let writable = if *read_only { zero } else { phys_bytes };
+                PhysicalProvisioningCollectionUpdate::new_insert_storage_deduped(
+                    disk_id,
+                    writable,
+                    zero,
+                    phys_bytes,
+                    writable,
+                    zero,
+                    phys_bytes,
+                    project_id,
+                    StorageType::Disk,
+                    DedupInfo::Disk {
+                        origin_column: DedupOriginColumn::Image,
+                        origin_id: *image_id,
+                        disk_id,
+                    },
+                )
+                .get_results_async::<crate::db::model::PhysicalProvisioningCollection>(conn)
+                .await
+                .map_err(|e| {
+                    err.bail(crate::db::queries::physical_provisioning_collection_update::from_diesel(e))
+                })?;
+            }
+            params::DiskBackend::Distributed {
+                disk_source:
+                    params::DiskSource::Snapshot { snapshot_id, read_only },
+            } => {
+                let physical =
+                    nexus_db_model::distributed_disk_physical_bytes(
+                        virtual_bytes,
+                    );
+                let phys_bytes = crate::db::model::ByteCount::from(
+                    physical.into_byte_count(),
+                );
+                let writable = if *read_only { zero } else { phys_bytes };
+                PhysicalProvisioningCollectionUpdate::new_insert_storage_deduped(
+                    disk_id,
+                    writable,
+                    zero,
+                    phys_bytes,
+                    writable,
+                    zero,
+                    phys_bytes,
+                    project_id,
+                    StorageType::Disk,
+                    DedupInfo::Disk {
+                        origin_column: DedupOriginColumn::Snapshot,
+                        origin_id: *snapshot_id,
+                        disk_id,
+                    },
+                )
+                .get_results_async::<crate::db::model::PhysicalProvisioningCollection>(conn)
+                .await
+                .map_err(|e| {
+                    err.bail(crate::db::queries::physical_provisioning_collection_update::from_diesel(e))
+                })?;
+            }
+            params::DiskBackend::Distributed { .. } => {
+                // Blank or importing: writable only, no read-only
+                let physical =
+                    nexus_db_model::distributed_disk_physical_bytes(
+                        virtual_bytes,
+                    );
+                let phys_bytes = crate::db::model::ByteCount::from(
+                    physical.into_byte_count(),
+                );
+                PhysicalProvisioningCollectionUpdate::new_insert_storage(
+                    disk_id,
+                    phys_bytes,
+                    zero,
+                    zero,
+                    phys_bytes,
+                    zero,
+                    zero,
+                    project_id,
+                    StorageType::Disk,
+                )
+                .get_results_async::<crate::db::model::PhysicalProvisioningCollection>(conn)
+                .await
+                .map_err(|e| {
+                    err.bail(crate::db::queries::physical_provisioning_collection_update::from_diesel(e))
+                })?;
+            }
+            params::DiskBackend::Local {} => {
+                let physical =
+                    nexus_db_model::local_disk_physical_bytes(virtual_bytes);
+                let phys_bytes = crate::db::model::ByteCount::from(
+                    physical.into_byte_count(),
+                );
+                PhysicalProvisioningCollectionUpdate::new_insert_storage(
+                    disk_id,
+                    phys_bytes,
+                    zero,
+                    zero,
+                    phys_bytes,
+                    zero,
+                    zero,
+                    project_id,
+                    StorageType::Disk,
+                )
+                .get_results_async::<crate::db::model::PhysicalProvisioningCollection>(conn)
+                .await
+                .map_err(|e| {
+                    err.bail(crate::db::queries::physical_provisioning_collection_update::from_diesel(e))
+                })?;
+            }
+        }
+
+        Ok(())
     }
 
     pub async fn disk_list(
@@ -1864,6 +2080,116 @@ impl DataStore {
                         src,
                     )
                     .await
+                }
+            })
+            .await
+            .map_err(|e| {
+                if let Some(err) = err.take() {
+                    err
+                } else {
+                    public_error_from_diesel(e, ErrorHandler::Server)
+                }
+            })?;
+
+        Ok(disk)
+    }
+
+    /// Atomically create a read-only disk record AND insert virtual +
+    /// physical provisioning in a single database transaction.
+    pub async fn project_create_read_only_disk_and_provision(
+        &self,
+        opctx: &OpContext,
+        authz_project: &authz::Project,
+        disk_id: &Uuid,
+        params: &params::DiskCreate,
+    ) -> CreateResult<db::datastore::Disk> {
+        opctx.authorize(authz::Action::CreateChild, authz_project).await?;
+
+        let params::DiskBackend::Distributed { ref disk_source } =
+            params.disk_backend
+        else {
+            return Err(Error::internal_error(
+                "invalid disk_backend for \
+                 `project_create_read_only_disk_and_provision` \
+                 (must be `Distributed`)",
+            ));
+        };
+
+        let src = match disk_source {
+            &params::DiskSource::Image { image_id, read_only: true } => {
+                let (_, authz_image, _) = LookupPath::new(opctx, self)
+                    .image_id(image_id)
+                    .fetch()
+                    .await?;
+                ReadOnlyDiskSource::Image(authz_image)
+            }
+            &params::DiskSource::Snapshot { snapshot_id, read_only: true } => {
+                let (_, _, authz_snapshot, _) = LookupPath::new(opctx, self)
+                    .snapshot_id(snapshot_id)
+                    .fetch()
+                    .await?;
+                ReadOnlyDiskSource::Snapshot(authz_snapshot)
+            }
+            src => {
+                return Err(Error::InternalError {
+                    internal_message: format!(
+                        "invalid `DiskSource` for \
+                         `project_create_read_only_disk_and_provision`: \
+                         {src:?}"
+                    ),
+                });
+            }
+        };
+
+        let err = OptionalError::new();
+        let conn = self.pool_connection_authorized(opctx).await?;
+
+        let disk = self
+            .transaction_retry_wrapper(
+                "project_create_read_only_disk_and_provision",
+            )
+            .transaction(&conn, |conn| {
+                let err = err.clone();
+                let params = &params;
+                let src = &src;
+                async move {
+                    // Step 1: Create the read-only disk record.
+                    let created_disk =
+                        Self::project_create_read_only_disk_in_txn(
+                            &conn,
+                            err.clone(),
+                            authz_project,
+                            disk_id,
+                            params,
+                            src,
+                        )
+                        .await?;
+
+                    // Step 2: Virtual provisioning.
+                    use crate::db::queries::virtual_provisioning_collection_update::VirtualProvisioningCollectionUpdate;
+                    VirtualProvisioningCollectionUpdate::new_insert_storage(
+                        *disk_id,
+                        crate::db::model::ByteCount::from(params.size),
+                        authz_project.id(),
+                        StorageType::Disk,
+                    )
+                    .get_results_async::<crate::db::model::VirtualProvisioningCollection>(&conn)
+                    .await
+                    .map_err(|e| {
+                        err.bail(crate::db::queries::virtual_provisioning_collection_update::from_diesel(e))
+                    })?;
+
+                    // Step 3: Physical provisioning.
+                    Self::insert_physical_provisioning_in_txn(
+                        &conn,
+                        err.clone(),
+                        *disk_id,
+                        authz_project.id(),
+                        params,
+                    )
+                    .await?;
+
+                    Ok(created_disk)
                 }
             })
             .await
