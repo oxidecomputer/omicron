@@ -9,7 +9,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::v2025112000::disk::BlockSize;
+use crate::v2025_11_20_00::disk::BlockSize;
 use omicron_common::api::external::ByteCount;
 
 /// Different sources for a Distributed Disk
@@ -64,42 +64,44 @@ pub struct DiskCreate {
 
 // -- Conversions from the previous version (READ_ONLY_DISKS) --
 
-impl From<crate::v2026013001::disk::DiskSource> for DiskSource {
-    fn from(old: crate::v2026013001::disk::DiskSource) -> Self {
+impl From<crate::v2026_01_30_01::disk::DiskSource> for DiskSource {
+    fn from(old: crate::v2026_01_30_01::disk::DiskSource) -> Self {
         // The types are structurally identical; only `#[serde(default)]`
         // differs between versions.
         match old {
-            crate::v2026013001::disk::DiskSource::Blank { block_size } => {
+            crate::v2026_01_30_01::disk::DiskSource::Blank { block_size } => {
                 Self::Blank { block_size }
             }
-            crate::v2026013001::disk::DiskSource::Snapshot {
+            crate::v2026_01_30_01::disk::DiskSource::Snapshot {
                 snapshot_id,
                 read_only,
             } => Self::Snapshot { snapshot_id, read_only },
-            crate::v2026013001::disk::DiskSource::Image {
+            crate::v2026_01_30_01::disk::DiskSource::Image {
                 image_id,
                 read_only,
             } => Self::Image { image_id, read_only },
-            crate::v2026013001::disk::DiskSource::ImportingBlocks {
+            crate::v2026_01_30_01::disk::DiskSource::ImportingBlocks {
                 block_size,
             } => Self::ImportingBlocks { block_size },
         }
     }
 }
 
-impl From<crate::v2026013001::disk::DiskBackend> for DiskBackend {
-    fn from(old: crate::v2026013001::disk::DiskBackend) -> Self {
+impl From<crate::v2026_01_30_01::disk::DiskBackend> for DiskBackend {
+    fn from(old: crate::v2026_01_30_01::disk::DiskBackend) -> Self {
         match old {
-            crate::v2026013001::disk::DiskBackend::Local {} => Self::Local {},
-            crate::v2026013001::disk::DiskBackend::Distributed {
+            crate::v2026_01_30_01::disk::DiskBackend::Local {} => {
+                Self::Local {}
+            }
+            crate::v2026_01_30_01::disk::DiskBackend::Distributed {
                 disk_source,
             } => Self::Distributed { disk_source: disk_source.into() },
         }
     }
 }
 
-impl From<crate::v2026013001::disk::DiskCreate> for DiskCreate {
-    fn from(old: crate::v2026013001::disk::DiskCreate) -> Self {
+impl From<crate::v2026_01_30_01::disk::DiskCreate> for DiskCreate {
+    fn from(old: crate::v2026_01_30_01::disk::DiskCreate) -> Self {
         Self {
             identity: old.identity,
             disk_backend: old.disk_backend.into(),

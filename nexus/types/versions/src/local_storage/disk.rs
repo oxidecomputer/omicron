@@ -9,8 +9,8 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::v2025112000;
-use crate::v2025112000::disk::BlockSize;
+use crate::v2025_11_20_00;
+use crate::v2025_11_20_00::disk::BlockSize;
 
 /// Different sources for a Distributed Disk
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
@@ -33,21 +33,21 @@ pub enum DiskSource {
     ImportingBlocks { block_size: BlockSize },
 }
 
-impl From<v2025112000::disk::DiskSource> for DiskSource {
-    fn from(old: v2025112000::disk::DiskSource) -> Self {
+impl From<v2025_11_20_00::disk::DiskSource> for DiskSource {
+    fn from(old: v2025_11_20_00::disk::DiskSource) -> Self {
         match old {
-            v2025112000::disk::DiskSource::Blank { block_size } => {
+            v2025_11_20_00::disk::DiskSource::Blank { block_size } => {
                 DiskSource::Blank { block_size }
             }
-            v2025112000::disk::DiskSource::Snapshot { snapshot_id } => {
+            v2025_11_20_00::disk::DiskSource::Snapshot { snapshot_id } => {
                 DiskSource::Snapshot { snapshot_id }
             }
-            v2025112000::disk::DiskSource::Image { image_id } => {
+            v2025_11_20_00::disk::DiskSource::Image { image_id } => {
                 DiskSource::Image { image_id }
             }
-            v2025112000::disk::DiskSource::ImportingBlocks { block_size } => {
-                DiskSource::ImportingBlocks { block_size }
-            }
+            v2025_11_20_00::disk::DiskSource::ImportingBlocks {
+                block_size,
+            } => DiskSource::ImportingBlocks { block_size },
         }
     }
 }
@@ -78,8 +78,8 @@ pub struct DiskCreate {
     pub size: ByteCount,
 }
 
-impl From<v2025112000::disk::DiskCreate> for DiskCreate {
-    fn from(old: v2025112000::disk::DiskCreate) -> Self {
+impl From<v2025_11_20_00::disk::DiskCreate> for DiskCreate {
+    fn from(old: v2025_11_20_00::disk::DiskCreate) -> Self {
         DiskCreate {
             identity: old.identity,
             disk_backend: DiskBackend::Distributed {
@@ -90,14 +90,16 @@ impl From<v2025112000::disk::DiskCreate> for DiskCreate {
     }
 }
 
-// Response type conversion: new Disk (from omicron-common) to old v2025112000 Disk
-impl TryFrom<omicron_common::api::external::Disk> for v2025112000::disk::Disk {
+// Response type conversion: new Disk (from omicron-common) to old v2025_11_20_00 Disk
+impl TryFrom<omicron_common::api::external::Disk>
+    for v2025_11_20_00::disk::Disk
+{
     type Error = dropshot::HttpError;
 
     fn try_from(
         new: omicron_common::api::external::Disk,
     ) -> Result<Self, Self::Error> {
-        Ok(v2025112000::disk::Disk {
+        Ok(v2025_11_20_00::disk::Disk {
             identity: new.identity,
             project_id: new.project_id,
             snapshot_id: new.snapshot_id,
@@ -108,7 +110,7 @@ impl TryFrom<omicron_common::api::external::Disk> for v2025112000::disk::Disk {
             device_path: new.device_path,
             disk_type: match new.disk_type {
                 omicron_common::api::external::DiskType::Distributed => {
-                    v2025112000::disk::DiskType::Crucible
+                    v2025_11_20_00::disk::DiskType::Crucible
                 }
                 _ => {
                     return Err(dropshot::HttpError::for_client_error(
@@ -125,12 +127,12 @@ impl TryFrom<omicron_common::api::external::Disk> for v2025112000::disk::Disk {
 }
 
 // Forward conversion for request types: old DiskType to new DiskType
-impl From<v2025112000::disk::DiskType>
+impl From<v2025_11_20_00::disk::DiskType>
     for omicron_common::api::external::DiskType
 {
-    fn from(old: v2025112000::disk::DiskType) -> Self {
+    fn from(old: v2025_11_20_00::disk::DiskType) -> Self {
         match old {
-            v2025112000::disk::DiskType::Crucible => {
+            v2025_11_20_00::disk::DiskType::Crucible => {
                 omicron_common::api::external::DiskType::Distributed
             }
         }
@@ -138,8 +140,8 @@ impl From<v2025112000::disk::DiskType>
 }
 
 // Forward conversion: old Disk to new Disk
-impl From<v2025112000::disk::Disk> for omicron_common::api::external::Disk {
-    fn from(old: v2025112000::disk::Disk) -> Self {
+impl From<v2025_11_20_00::disk::Disk> for omicron_common::api::external::Disk {
+    fn from(old: v2025_11_20_00::disk::Disk) -> Self {
         omicron_common::api::external::Disk {
             identity: old.identity,
             project_id: old.project_id,

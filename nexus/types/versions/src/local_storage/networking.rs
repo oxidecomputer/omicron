@@ -4,8 +4,8 @@
 
 //! Networking types for version LOCAL_STORAGE.
 //!
-//! These types existed from LOCAL_STORAGE (v2025120300) and changed at
-//! BGP_PEER_COLLISION_STATE (v2025121200) which added a `Collision` state.
+//! These types existed from LOCAL_STORAGE (v2025_12_03_00) and changed at
+//! BGP_PEER_COLLISION_STATE (v2025_12_12_00) which added a `Collision` state.
 
 use std::net::IpAddr;
 

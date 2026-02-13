@@ -9,7 +9,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::net::IpAddr;
 
-use crate::v2026010500::ip_pool::PoolSelector;
+use crate::v2026_01_05_00::ip_pool::PoolSelector;
 
 /// Specify how to allocate a floating IP address.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
@@ -39,18 +39,20 @@ impl Default for AddressAllocator {
     }
 }
 
-impl From<crate::v2026011600::floating_ip::AddressAllocator>
+impl From<crate::v2026_01_16_00::floating_ip::AddressAllocator>
     for AddressAllocator
 {
-    fn from(value: crate::v2026011600::floating_ip::AddressAllocator) -> Self {
+    fn from(
+        value: crate::v2026_01_16_00::floating_ip::AddressAllocator,
+    ) -> Self {
         match value {
             // Pool field is dropped since the IP uniquely identifies
             // the pool.
-            crate::v2026011600::floating_ip::AddressAllocator::Explicit {
+            crate::v2026_01_16_00::floating_ip::AddressAllocator::Explicit {
                 ip,
                 pool: _,
             } => AddressAllocator::Explicit { ip },
-            crate::v2026011600::floating_ip::AddressAllocator::Auto {
+            crate::v2026_01_16_00::floating_ip::AddressAllocator::Auto {
                 pool_selector,
             } => AddressAllocator::Auto { pool_selector },
         }
@@ -68,10 +70,12 @@ pub struct FloatingIpCreate {
     pub address_allocator: AddressAllocator,
 }
 
-impl From<crate::v2026011600::floating_ip::FloatingIpCreate>
+impl From<crate::v2026_01_16_00::floating_ip::FloatingIpCreate>
     for FloatingIpCreate
 {
-    fn from(value: crate::v2026011600::floating_ip::FloatingIpCreate) -> Self {
+    fn from(
+        value: crate::v2026_01_16_00::floating_ip::FloatingIpCreate,
+    ) -> Self {
         Self {
             identity: value.identity,
             address_allocator: value.address_allocator.into(),

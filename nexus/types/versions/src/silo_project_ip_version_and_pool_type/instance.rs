@@ -17,10 +17,10 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::net::IpAddr;
 
-use crate::v2025112000;
-use crate::v2025112000::instance::{UserData, bool_true};
-use crate::v2025120300;
-use crate::v2025120300::instance::InstanceDiskAttachment;
+use crate::v2025_11_20_00;
+use crate::v2025_11_20_00::instance::{UserData, bool_true};
+use crate::v2025_12_03_00;
+use crate::v2025_12_03_00::instance::InstanceDiskAttachment;
 
 /// Describes an attachment of an `InstanceNetworkInterface` to an `Instance`.
 #[derive(Clone, Debug, Default, Deserialize, Serialize, JsonSchema)]
@@ -38,22 +38,22 @@ pub enum InstanceNetworkInterfaceAttachment {
     None,
 }
 
-impl From<v2025112000::instance::InstanceNetworkInterfaceAttachment>
+impl From<v2025_11_20_00::instance::InstanceNetworkInterfaceAttachment>
     for InstanceNetworkInterfaceAttachment
 {
     fn from(
-        old: v2025112000::instance::InstanceNetworkInterfaceAttachment,
+        old: v2025_11_20_00::instance::InstanceNetworkInterfaceAttachment,
     ) -> Self {
         match old {
-            v2025112000::instance::InstanceNetworkInterfaceAttachment::Create(
+            v2025_11_20_00::instance::InstanceNetworkInterfaceAttachment::Create(
                 nics,
             ) => InstanceNetworkInterfaceAttachment::Create(
                 nics.into_iter().map(Into::into).collect(),
             ),
-            v2025112000::instance::InstanceNetworkInterfaceAttachment::Default => {
+            v2025_11_20_00::instance::InstanceNetworkInterfaceAttachment::Default => {
                 InstanceNetworkInterfaceAttachment::Default
             }
-            v2025112000::instance::InstanceNetworkInterfaceAttachment::None => {
+            v2025_11_20_00::instance::InstanceNetworkInterfaceAttachment::None => {
                 InstanceNetworkInterfaceAttachment::None
             }
         }
@@ -77,11 +77,11 @@ pub struct InstanceNetworkInterfaceCreate {
     pub transit_ips: Vec<IpNet>,
 }
 
-impl From<v2025112000::instance::InstanceNetworkInterfaceCreate>
+impl From<v2025_11_20_00::instance::InstanceNetworkInterfaceCreate>
     for InstanceNetworkInterfaceCreate
 {
     fn from(
-        old: v2025112000::instance::InstanceNetworkInterfaceCreate,
+        old: v2025_11_20_00::instance::InstanceNetworkInterfaceCreate,
     ) -> Self {
         InstanceNetworkInterfaceCreate {
             identity: old.identity,
@@ -114,13 +114,15 @@ pub enum ExternalIpCreate {
     Floating { floating_ip: NameOrId },
 }
 
-impl From<v2025112000::instance::ExternalIpCreate> for ExternalIpCreate {
-    fn from(old: v2025112000::instance::ExternalIpCreate) -> ExternalIpCreate {
+impl From<v2025_11_20_00::instance::ExternalIpCreate> for ExternalIpCreate {
+    fn from(
+        old: v2025_11_20_00::instance::ExternalIpCreate,
+    ) -> ExternalIpCreate {
         match old {
-            v2025112000::instance::ExternalIpCreate::Ephemeral { pool } => {
+            v2025_11_20_00::instance::ExternalIpCreate::Ephemeral { pool } => {
                 ExternalIpCreate::Ephemeral { pool, ip_version: None }
             }
-            v2025112000::instance::ExternalIpCreate::Floating {
+            v2025_11_20_00::instance::ExternalIpCreate::Floating {
                 floating_ip,
             } => ExternalIpCreate::Floating { floating_ip },
         }
@@ -138,9 +140,9 @@ pub struct EphemeralIpCreate {
     pub ip_version: Option<IpVersion>,
 }
 
-impl From<v2025112000::instance::EphemeralIpCreate> for EphemeralIpCreate {
+impl From<v2025_11_20_00::instance::EphemeralIpCreate> for EphemeralIpCreate {
     fn from(
-        old: v2025112000::instance::EphemeralIpCreate,
+        old: v2025_11_20_00::instance::EphemeralIpCreate,
     ) -> EphemeralIpCreate {
         EphemeralIpCreate { pool: old.pool, ip_version: None }
     }
@@ -177,8 +179,8 @@ pub struct InstanceCreate {
     pub cpu_platform: Option<InstanceCpuPlatform>,
 }
 
-impl From<v2025120300::instance::InstanceCreate> for InstanceCreate {
-    fn from(old: v2025120300::instance::InstanceCreate) -> Self {
+impl From<v2025_12_03_00::instance::InstanceCreate> for InstanceCreate {
+    fn from(old: v2025_12_03_00::instance::InstanceCreate) -> Self {
         InstanceCreate {
             identity: old.identity,
             ncpus: old.ncpus,

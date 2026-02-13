@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! Types from API version 2026013000 that cannot live in `nexus-types-versions`
+//! Types from API version 2026_01_30_00 that cannot live in `nexus-types-versions`
 //! because they convert to/from `omicron-common` types (orphan rule).
 
 use api_identity::ObjectIdentity;
@@ -46,7 +46,7 @@ impl From<external::Disk> for Disk {
             state,
             device_path,
             disk_type,
-            read_only: _, // read_only doth not exist in v2026013000
+            read_only: _, // read_only doth not exist in v2026_01_30_00
         } = new;
         Self {
             identity,

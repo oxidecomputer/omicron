@@ -4,16 +4,47 @@
 
 //! External subnet types for version EXTERNAL_SUBNET_ATTACHMENT.
 //!
-//! This version's `ExternalSubnetAllocator::Explicit` variant accepted a
-//! `pool` field that was later removed. We accept it on the wire but reject
-//! requests where it is set.
+//! This is the earliest version where external subnet endpoints exist. Types
+//! here include both wire-format shims and first definitions of unchanged
+//! types.
+//!
+//! Wire-format shims:
+//! - `ExternalSubnetAllocator::Explicit` accepts a `pool` field that was
+//!   later removed. We accept it on the wire but reject requests where it is
+//!   set.
+//! - `ExternalSubnetCreate` wraps the above allocator.
 
-use omicron_common::api::external::{IdentityMetadataCreateParams, NameOrId};
+use api_identity::ObjectIdentity;
+use omicron_common::api::external::{
+    IdentityMetadata, IdentityMetadataCreateParams,
+    IdentityMetadataUpdateParams, NameOrId, ObjectIdentity,
+};
 use oxnet::IpNet;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use uuid::Uuid;
 
-use crate::v2026010500::ip_pool::PoolSelector;
+use crate::v2026_01_05_00::ip_pool::PoolSelector;
+
+// -- Path params / selectors --
+
+/// Path parameters for external subnet operations.
+#[derive(Serialize, Deserialize, JsonSchema)]
+pub struct ExternalSubnetPath {
+    /// Name or ID of the external subnet.
+    pub external_subnet: NameOrId,
+}
+
+/// Selector for looking up an external subnet.
+#[derive(Deserialize, JsonSchema, Clone)]
+pub struct ExternalSubnetSelector {
+    /// Name or ID of the project (required if `external_subnet` is a Name).
+    pub project: Option<NameOrId>,
+    /// Name or ID of the external subnet.
+    pub external_subnet: NameOrId,
+}
+
+// -- Create/update params --
 
 /// Specify how to allocate an external subnet.
 ///
@@ -52,4 +83,37 @@ pub struct ExternalSubnetCreate {
 
     /// Subnet allocation method.
     pub allocator: ExternalSubnetAllocator,
+}
+
+/// Update an external subnet.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct ExternalSubnetUpdate {
+    #[serde(flatten)]
+    pub identity: IdentityMetadataUpdateParams,
+}
+
+/// Attach an external subnet to an instance.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct ExternalSubnetAttach {
+    /// Name or ID of the instance to attach to.
+    pub instance: NameOrId,
+}
+
+/// An external subnet allocated from a subnet pool.
+#[derive(
+    ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq,
+)]
+pub struct ExternalSubnet {
+    #[serde(flatten)]
+    pub identity: IdentityMetadata,
+    /// The allocated subnet CIDR.
+    pub subnet: IpNet,
+    /// The project this subnet belongs to.
+    pub project_id: Uuid,
+    /// The subnet pool this was allocated from.
+    pub subnet_pool_id: Uuid,
+    /// The subnet pool member this subnet corresponds to.
+    pub subnet_pool_member_id: Uuid,
+    /// The instance this subnet is attached to, if any.
+    pub instance_id: Option<Uuid>,
 }

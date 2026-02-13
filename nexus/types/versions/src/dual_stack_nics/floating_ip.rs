@@ -13,7 +13,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::net::IpAddr;
 
-use crate::v2026010100;
+use crate::v2026_01_01_00;
 
 /// Parameters for creating a new floating IP address for instances.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
@@ -28,9 +28,9 @@ pub struct FloatingIpCreate {
     pub ip_version: Option<IpVersion>,
 }
 
-impl From<v2026010100::floating_ip::FloatingIpCreate> for FloatingIpCreate {
+impl From<v2026_01_01_00::floating_ip::FloatingIpCreate> for FloatingIpCreate {
     fn from(
-        old: v2026010100::floating_ip::FloatingIpCreate,
+        old: v2026_01_01_00::floating_ip::FloatingIpCreate,
     ) -> FloatingIpCreate {
         FloatingIpCreate {
             identity: old.identity,

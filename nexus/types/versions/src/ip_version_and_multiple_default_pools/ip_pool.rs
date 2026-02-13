@@ -10,7 +10,7 @@ use omicron_common::api::external::IdentityMetadata;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-/// An IP pool in the context of a silo (pre-2026010100 API version).
+/// An IP pool in the context of a silo (pre-2026_01_01_00 API version).
 ///
 /// This version does not include `ip_version` or `pool_type` fields.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]

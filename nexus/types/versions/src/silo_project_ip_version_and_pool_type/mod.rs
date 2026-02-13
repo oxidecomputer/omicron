@@ -4,7 +4,7 @@
 
 //! Version `SILO_PROJECT_IP_VERSION_AND_POOL_TYPE` of the Nexus external API.
 //!
-//! This version (2026010100) adds `ip_version` and `pool_type` fields to
+//! This version (2026_01_01_00) adds `ip_version` and `pool_type` fields to
 //! SiloIpPool responses, and uses old-style single-IP network interfaces.
 
 pub mod floating_ip;

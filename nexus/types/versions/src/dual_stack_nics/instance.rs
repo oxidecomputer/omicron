@@ -18,9 +18,9 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::net::{Ipv4Addr, Ipv6Addr};
 
-use crate::v2025112000::instance::{UserData, bool_true};
-use crate::v2025120300::instance::InstanceDiskAttachment;
-use crate::v2026010100;
+use crate::v2025_11_20_00::instance::{UserData, bool_true};
+use crate::v2025_12_03_00::instance::InstanceDiskAttachment;
+use crate::v2026_01_01_00;
 
 // Shadow type for JsonSchema generation
 #[derive(Clone, Copy, Debug, Default, Deserialize, JsonSchema, Serialize)]
@@ -158,26 +158,26 @@ pub enum InstanceNetworkInterfaceAttachment {
     None,
 }
 
-impl TryFrom<v2026010100::instance::InstanceNetworkInterfaceAttachment>
+impl TryFrom<v2026_01_01_00::instance::InstanceNetworkInterfaceAttachment>
     for InstanceNetworkInterfaceAttachment
 {
     type Error = Error;
 
     fn try_from(
-        value: v2026010100::instance::InstanceNetworkInterfaceAttachment,
+        value: v2026_01_01_00::instance::InstanceNetworkInterfaceAttachment,
     ) -> Result<Self, Self::Error> {
         match value {
-            v2026010100::instance::InstanceNetworkInterfaceAttachment::Create(
+            v2026_01_01_00::instance::InstanceNetworkInterfaceAttachment::Create(
                 nics,
             ) => nics
                 .into_iter()
                 .map(TryInto::try_into)
                 .collect::<Result<_, _>>()
                 .map(Self::Create),
-            v2026010100::instance::InstanceNetworkInterfaceAttachment::Default => {
+            v2026_01_01_00::instance::InstanceNetworkInterfaceAttachment::Default => {
                 Ok(Self::DefaultIpv4)
             }
-            v2026010100::instance::InstanceNetworkInterfaceAttachment::None => {
+            v2026_01_01_00::instance::InstanceNetworkInterfaceAttachment::None => {
                 Ok(Self::None)
             }
         }
@@ -198,13 +198,13 @@ pub struct InstanceNetworkInterfaceCreate {
     pub ip_config: PrivateIpStackCreate,
 }
 
-impl TryFrom<v2026010100::instance::InstanceNetworkInterfaceCreate>
+impl TryFrom<v2026_01_01_00::instance::InstanceNetworkInterfaceCreate>
     for InstanceNetworkInterfaceCreate
 {
     type Error = Error;
 
     fn try_from(
-        value: v2026010100::instance::InstanceNetworkInterfaceCreate,
+        value: v2026_01_01_00::instance::InstanceNetworkInterfaceCreate,
     ) -> Result<Self, Self::Error> {
         use oxnet::IpNet;
 
@@ -288,14 +288,16 @@ pub enum ExternalIpCreate {
     },
 }
 
-impl From<v2026010100::instance::ExternalIpCreate> for ExternalIpCreate {
-    fn from(old: v2026010100::instance::ExternalIpCreate) -> ExternalIpCreate {
+impl From<v2026_01_01_00::instance::ExternalIpCreate> for ExternalIpCreate {
+    fn from(
+        old: v2026_01_01_00::instance::ExternalIpCreate,
+    ) -> ExternalIpCreate {
         match old {
-            v2026010100::instance::ExternalIpCreate::Ephemeral {
+            v2026_01_01_00::instance::ExternalIpCreate::Ephemeral {
                 pool,
                 ip_version,
             } => ExternalIpCreate::Ephemeral { pool, ip_version },
-            v2026010100::instance::ExternalIpCreate::Floating {
+            v2026_01_01_00::instance::ExternalIpCreate::Floating {
                 floating_ip,
             } => ExternalIpCreate::Floating { floating_ip },
         }
@@ -311,9 +313,9 @@ pub struct EphemeralIpCreate {
     pub ip_version: Option<IpVersion>,
 }
 
-impl From<v2026010100::instance::EphemeralIpCreate> for EphemeralIpCreate {
+impl From<v2026_01_01_00::instance::EphemeralIpCreate> for EphemeralIpCreate {
     fn from(
-        old: v2026010100::instance::EphemeralIpCreate,
+        old: v2026_01_01_00::instance::EphemeralIpCreate,
     ) -> EphemeralIpCreate {
         EphemeralIpCreate { pool: old.pool, ip_version: old.ip_version }
     }
@@ -350,11 +352,11 @@ pub struct InstanceCreate {
     pub cpu_platform: Option<InstanceCpuPlatform>,
 }
 
-impl TryFrom<v2026010100::instance::InstanceCreate> for InstanceCreate {
+impl TryFrom<v2026_01_01_00::instance::InstanceCreate> for InstanceCreate {
     type Error = Error;
 
     fn try_from(
-        old: v2026010100::instance::InstanceCreate,
+        old: v2026_01_01_00::instance::InstanceCreate,
     ) -> Result<Self, Self::Error> {
         let network_interfaces = old.network_interfaces.try_into()?;
         Ok(InstanceCreate {

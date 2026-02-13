@@ -4,7 +4,7 @@
 
 //! Version `POOL_SELECTION_ENUMS` of the Nexus external API.
 //!
-//! This version (2026010500) refactors IP pool selection to use tagged enums
+//! This version (2026_01_05_00) refactors IP pool selection to use tagged enums
 //! (`PoolSelector` and `AddressSelector`) that make invalid states
 //! unrepresentable.
 

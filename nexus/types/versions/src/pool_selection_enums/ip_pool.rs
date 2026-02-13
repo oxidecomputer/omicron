@@ -35,7 +35,7 @@ impl Default for PoolSelector {
     }
 }
 
-// Conversion from v2026010300's flat pool/ip_version fields.
+// Conversion from v2026_01_03_00's flat pool/ip_version fields.
 impl TryFrom<(Option<NameOrId>, Option<IpVersion>)> for PoolSelector {
     type Error = omicron_common::api::external::Error;
 
@@ -72,8 +72,10 @@ pub struct IpPoolSiloUpdate {
     pub is_default: bool,
 }
 
-impl From<crate::v2025112000::ip_pool::IpPoolSiloUpdate> for IpPoolSiloUpdate {
-    fn from(old: crate::v2025112000::ip_pool::IpPoolSiloUpdate) -> Self {
+impl From<crate::v2025_11_20_00::ip_pool::IpPoolSiloUpdate>
+    for IpPoolSiloUpdate
+{
+    fn from(old: crate::v2025_11_20_00::ip_pool::IpPoolSiloUpdate) -> Self {
         IpPoolSiloUpdate { is_default: old.is_default }
     }
 }
@@ -91,8 +93,8 @@ pub struct IpPoolLinkSilo {
     pub is_default: bool,
 }
 
-impl From<crate::v2025112000::ip_pool::IpPoolLinkSilo> for IpPoolLinkSilo {
-    fn from(old: crate::v2025112000::ip_pool::IpPoolLinkSilo) -> Self {
+impl From<crate::v2025_11_20_00::ip_pool::IpPoolLinkSilo> for IpPoolLinkSilo {
+    fn from(old: crate::v2025_11_20_00::ip_pool::IpPoolLinkSilo) -> Self {
         IpPoolLinkSilo { silo: old.silo, is_default: old.is_default }
     }
 }

@@ -69,7 +69,7 @@ use nexus_types::external_api::ssh_key::SshKey;
 use nexus_types::external_api::user::{Group, User, UserBuiltin};
 use nexus_types::external_api::vpc::{Vpc, VpcRouter, VpcSubnet};
 use nexus_types_versions::latest::headers::RangeRequest;
-use nexus_types_versions::v2025112000;
+use nexus_types_versions::v2025_11_20_00;
 use omicron_common::address::IpRange;
 use omicron_common::api::external::AddressLot;
 use omicron_common::api::external::AddressLotBlock;
@@ -5254,12 +5254,14 @@ impl NexusExternalApi for NexusExternalApiImpl {
     // Cannot delegate to lib.rs: old API version has no body parameter, but the
     // new `instance_multicast_group_join` requires `TypedBody<InstanceMulticastGroupJoin>`.
     // TypedBody has no public constructor, so we can't create a default body for delegation.
-    async fn v2025121200_instance_multicast_group_join(
+    async fn instance_multicast_group_join_v2025_11_20_00(
         rqctx: RequestContext<ApiContext>,
-        path_params: Path<v2025112000::multicast::InstanceMulticastGroupPath>,
+        path_params: Path<
+            v2025_11_20_00::multicast::InstanceMulticastGroupPath,
+        >,
         query_params: Query<project::OptionalProjectSelector>,
     ) -> Result<
-        HttpResponseCreated<v2025112000::multicast::MulticastGroupMember>,
+        HttpResponseCreated<v2025_11_20_00::multicast::MulticastGroupMember>,
         HttpError,
     > {
         let apictx = rqctx.context();

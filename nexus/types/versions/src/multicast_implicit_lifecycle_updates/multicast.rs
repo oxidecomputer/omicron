@@ -18,7 +18,7 @@ use std::str::FromStr;
 use uuid::Uuid;
 
 // Re-use validators from initial module.
-use crate::v2025112000::multicast::validate_source_ips_param;
+use crate::v2025_11_20_00::multicast::validate_source_ips_param;
 
 use omicron_common::api::external::Name;
 
@@ -253,9 +253,9 @@ pub struct MulticastGroupMember {
     pub state: String,
 }
 
-// -- Conversions between v2026010800 and v2025112000 multicast types --
+// -- Conversions between v2026_01_08_00 and v2025_11_20_00 multicast types --
 
-impl From<MulticastGroup> for crate::v2025112000::multicast::MulticastGroup {
+impl From<MulticastGroup> for crate::v2025_11_20_00::multicast::MulticastGroup {
     fn from(new: MulticastGroup) -> Self {
         Self {
             identity: new.identity,
@@ -269,7 +269,7 @@ impl From<MulticastGroup> for crate::v2025112000::multicast::MulticastGroup {
 }
 
 impl From<MulticastGroupMember>
-    for crate::v2025112000::multicast::MulticastGroupMember
+    for crate::v2025_11_20_00::multicast::MulticastGroupMember
 {
     fn from(new: MulticastGroupMember) -> Self {
         // Drop multicast_ip and source_ips which were added in this version.
@@ -282,29 +282,31 @@ impl From<MulticastGroupMember>
     }
 }
 
-impl From<crate::v2025112000::path_params::MulticastGroupPath>
+impl From<crate::v2025_11_20_00::path_params::MulticastGroupPath>
     for MulticastGroupPath
 {
-    fn from(old: crate::v2025112000::path_params::MulticastGroupPath) -> Self {
+    fn from(
+        old: crate::v2025_11_20_00::path_params::MulticastGroupPath,
+    ) -> Self {
         Self { multicast_group: old.multicast_group.into() }
     }
 }
 
-impl From<crate::v2025112000::multicast::MulticastGroupIpLookupPath>
+impl From<crate::v2025_11_20_00::multicast::MulticastGroupIpLookupPath>
     for MulticastGroupPath
 {
     fn from(
-        old: crate::v2025112000::multicast::MulticastGroupIpLookupPath,
+        old: crate::v2025_11_20_00::multicast::MulticastGroupIpLookupPath,
     ) -> Self {
         Self { multicast_group: old.address.into() }
     }
 }
 
-impl From<crate::v2025112000::multicast::MulticastGroupMemberPath>
+impl From<crate::v2025_11_20_00::multicast::MulticastGroupMemberPath>
     for MulticastGroupMemberPath
 {
     fn from(
-        old: crate::v2025112000::multicast::MulticastGroupMemberPath,
+        old: crate::v2025_11_20_00::multicast::MulticastGroupMemberPath,
     ) -> Self {
         Self {
             multicast_group: old.multicast_group.into(),
@@ -313,11 +315,11 @@ impl From<crate::v2025112000::multicast::MulticastGroupMemberPath>
     }
 }
 
-impl From<crate::v2025112000::multicast::InstanceMulticastGroupPath>
+impl From<crate::v2025_11_20_00::multicast::InstanceMulticastGroupPath>
     for InstanceMulticastGroupPath
 {
     fn from(
-        old: crate::v2025112000::multicast::InstanceMulticastGroupPath,
+        old: crate::v2025_11_20_00::multicast::InstanceMulticastGroupPath,
     ) -> Self {
         Self {
             instance: old.instance,
@@ -326,11 +328,11 @@ impl From<crate::v2025112000::multicast::InstanceMulticastGroupPath>
     }
 }
 
-impl From<crate::v2025112000::multicast::MulticastGroupMemberAdd>
+impl From<crate::v2025_11_20_00::multicast::MulticastGroupMemberAdd>
     for MulticastGroupMemberAdd
 {
     fn from(
-        old: crate::v2025112000::multicast::MulticastGroupMemberAdd,
+        old: crate::v2025_11_20_00::multicast::MulticastGroupMemberAdd,
     ) -> Self {
         Self { instance: old.instance, source_ips: None }
     }

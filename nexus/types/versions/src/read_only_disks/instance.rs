@@ -11,11 +11,11 @@ use omicron_common::api::external::{
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use crate::v2025112000::instance::InstanceDiskAttach;
-use crate::v2025112000::instance::{UserData, bool_true};
-use crate::v2026010300::instance::InstanceNetworkInterfaceAttachment;
-use crate::v2026010500::instance::ExternalIpCreate;
-use crate::v2026010800::multicast::MulticastGroupJoinSpec;
+use crate::v2025_11_20_00::instance::InstanceDiskAttach;
+use crate::v2025_11_20_00::instance::{UserData, bool_true};
+use crate::v2026_01_03_00::instance::InstanceNetworkInterfaceAttachment;
+use crate::v2026_01_05_00::instance::ExternalIpCreate;
+use crate::v2026_01_08_00::multicast::MulticastGroupJoinSpec;
 
 use super::disk::DiskCreate;
 
@@ -29,15 +29,17 @@ pub enum InstanceDiskAttachment {
     Attach(InstanceDiskAttach),
 }
 
-impl From<crate::v2026013000::instance::InstanceDiskAttachment>
+impl From<crate::v2026_01_08_00::instance::InstanceDiskAttachment>
     for InstanceDiskAttachment
 {
-    fn from(old: crate::v2026013000::instance::InstanceDiskAttachment) -> Self {
+    fn from(
+        old: crate::v2026_01_08_00::instance::InstanceDiskAttachment,
+    ) -> Self {
         match old {
-            crate::v2026013000::instance::InstanceDiskAttachment::Create(
+            crate::v2026_01_08_00::instance::InstanceDiskAttachment::Create(
                 create,
             ) => Self::Create(create.into()),
-            crate::v2026013000::instance::InstanceDiskAttachment::Attach(
+            crate::v2026_01_08_00::instance::InstanceDiskAttachment::Attach(
                 attach,
             ) => Self::Attach(attach),
         }
@@ -75,8 +77,8 @@ pub struct InstanceCreate {
     pub cpu_platform: Option<InstanceCpuPlatform>,
 }
 
-impl From<crate::v2026013000::instance::InstanceCreate> for InstanceCreate {
-    fn from(old: crate::v2026013000::instance::InstanceCreate) -> Self {
+impl From<crate::v2026_01_08_00::instance::InstanceCreate> for InstanceCreate {
+    fn from(old: crate::v2026_01_08_00::instance::InstanceCreate) -> Self {
         Self {
             identity: old.identity,
             ncpus: old.ncpus,

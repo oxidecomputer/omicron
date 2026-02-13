@@ -4,7 +4,7 @@
 
 //! Version `LOCAL_STORAGE` of the Nexus external API.
 //!
-//! This version (2025120300) adds support for local storage disks.
+//! This version (2025_12_03_00) adds support for local storage disks.
 
 pub mod disk;
 pub mod instance;

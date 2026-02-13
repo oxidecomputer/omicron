@@ -4,7 +4,7 @@
 
 //! Version `DUAL_STACK_NICS` of the Nexus external API.
 //!
-//! This version (2026010300) introduces dual-stack network interface support,
+//! This version (2026_01_03_00) introduces dual-stack network interface support,
 //! allowing instances to have both IPv4 and IPv6 addresses on a single NIC.
 //! It also adds `ip_version` support for IP pool selection.
 

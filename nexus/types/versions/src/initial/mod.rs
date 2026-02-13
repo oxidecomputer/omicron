@@ -5,7 +5,7 @@
 //! Version `INITIAL` of the Nexus external API.
 //!
 //! This was the first server-side versioned release of the Nexus external API
-//! (version 2025112000).
+//! (version 2025_11_20_00).
 
 pub mod affinity;
 pub mod alert;

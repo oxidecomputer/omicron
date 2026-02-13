@@ -13,8 +13,8 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use super::disk::DiskCreate;
-use crate::v2025112000;
-use crate::v2025112000::instance::{
+use crate::v2025_11_20_00;
+use crate::v2025_11_20_00::instance::{
     ExternalIpCreate, InstanceDiskAttach, InstanceNetworkInterfaceAttachment,
     UserData, bool_true,
 };
@@ -40,17 +40,17 @@ impl InstanceDiskAttachment {
     }
 }
 
-impl From<v2025112000::instance::InstanceDiskAttachment>
+impl From<v2025_11_20_00::instance::InstanceDiskAttachment>
     for InstanceDiskAttachment
 {
-    fn from(old: v2025112000::instance::InstanceDiskAttachment) -> Self {
+    fn from(old: v2025_11_20_00::instance::InstanceDiskAttachment) -> Self {
         match old {
-            v2025112000::instance::InstanceDiskAttachment::Create(create) => {
-                InstanceDiskAttachment::Create(create.into())
-            }
-            v2025112000::instance::InstanceDiskAttachment::Attach(attach) => {
-                InstanceDiskAttachment::Attach(attach)
-            }
+            v2025_11_20_00::instance::InstanceDiskAttachment::Create(
+                create,
+            ) => InstanceDiskAttachment::Create(create.into()),
+            v2025_11_20_00::instance::InstanceDiskAttachment::Attach(
+                attach,
+            ) => InstanceDiskAttachment::Attach(attach),
         }
     }
 }
@@ -163,8 +163,8 @@ pub struct InstanceCreate {
     pub cpu_platform: Option<InstanceCpuPlatform>,
 }
 
-impl From<v2025112000::instance::InstanceCreate> for InstanceCreate {
-    fn from(old: v2025112000::instance::InstanceCreate) -> Self {
+impl From<v2025_11_20_00::instance::InstanceCreate> for InstanceCreate {
+    fn from(old: v2025_11_20_00::instance::InstanceCreate) -> Self {
         InstanceCreate {
             identity: old.identity,
             ncpus: old.ncpus,

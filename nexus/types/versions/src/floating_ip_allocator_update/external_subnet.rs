@@ -3,34 +3,16 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 //! External subnet types for version FLOATING_IP_ALLOCATOR_UPDATE.
+//!
+//! This version removes the `pool` field from
+//! `ExternalSubnetAllocator::Explicit`.
 
-use api_identity::ObjectIdentity;
-use omicron_common::api::external::{
-    Error, IdentityMetadata, IdentityMetadataCreateParams,
-    IdentityMetadataUpdateParams, NameOrId, ObjectIdentity,
-};
+use omicron_common::api::external::{Error, IdentityMetadataCreateParams};
 use oxnet::IpNet;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use uuid::Uuid;
 
-use crate::v2026010500::ip_pool::PoolSelector;
-
-/// Path parameters for external subnet operations
-#[derive(Serialize, Deserialize, JsonSchema)]
-pub struct ExternalSubnetPath {
-    /// Name or ID of the external subnet
-    pub external_subnet: NameOrId,
-}
-
-/// Selector for looking up an external subnet
-#[derive(Deserialize, JsonSchema, Clone)]
-pub struct ExternalSubnetSelector {
-    /// Name or ID of the project (required if `external_subnet` is a Name)
-    pub project: Option<NameOrId>,
-    /// Name or ID of the external subnet
-    pub external_subnet: NameOrId,
-}
+use crate::v2026_01_05_00::ip_pool::PoolSelector;
 
 /// Specify how to allocate an external subnet.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
@@ -51,7 +33,7 @@ pub enum ExternalSubnetAllocator {
     },
 }
 
-/// Create an external subnet
+/// Create an external subnet.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct ExternalSubnetCreate {
     #[serde(flatten)]
@@ -63,16 +45,16 @@ pub struct ExternalSubnetCreate {
 // Conversion from the prior version (EXTERNAL_SUBNET_ATTACHMENT), which
 // accepted a `pool` field on ExternalSubnetAllocator::Explicit that was
 // later removed.
-impl TryFrom<crate::v2026011601::external_subnet::ExternalSubnetAllocator>
+impl TryFrom<crate::v2026_01_16_01::external_subnet::ExternalSubnetAllocator>
     for ExternalSubnetAllocator
 {
     type Error = Error;
 
     fn try_from(
-        value: crate::v2026011601::external_subnet::ExternalSubnetAllocator,
+        value: crate::v2026_01_16_01::external_subnet::ExternalSubnetAllocator,
     ) -> Result<Self, Self::Error> {
         match value {
-            crate::v2026011601::external_subnet::ExternalSubnetAllocator::Explicit {
+            crate::v2026_01_16_01::external_subnet::ExternalSubnetAllocator::Explicit {
                 subnet,
                 pool,
             } => {
@@ -83,7 +65,7 @@ impl TryFrom<crate::v2026011601::external_subnet::ExternalSubnetAllocator>
                 }
                 Ok(Self::Explicit { subnet })
             }
-            crate::v2026011601::external_subnet::ExternalSubnetAllocator::Auto {
+            crate::v2026_01_16_01::external_subnet::ExternalSubnetAllocator::Auto {
                 prefix_len,
                 pool_selector,
             } => Ok(Self::Auto { prefix_len, pool_selector }),
@@ -91,51 +73,18 @@ impl TryFrom<crate::v2026011601::external_subnet::ExternalSubnetAllocator>
     }
 }
 
-impl TryFrom<crate::v2026011601::external_subnet::ExternalSubnetCreate>
+impl TryFrom<crate::v2026_01_16_01::external_subnet::ExternalSubnetCreate>
     for ExternalSubnetCreate
 {
     type Error = Error;
 
     fn try_from(
-        value: crate::v2026011601::external_subnet::ExternalSubnetCreate,
+        value: crate::v2026_01_16_01::external_subnet::ExternalSubnetCreate,
     ) -> Result<Self, Self::Error> {
-        let crate::v2026011601::external_subnet::ExternalSubnetCreate {
+        let crate::v2026_01_16_01::external_subnet::ExternalSubnetCreate {
             identity,
             allocator,
         } = value;
         allocator.try_into().map(|allocator| Self { identity, allocator })
     }
-}
-
-/// Update an external subnet
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-pub struct ExternalSubnetUpdate {
-    #[serde(flatten)]
-    pub identity: IdentityMetadataUpdateParams,
-}
-
-/// Attach an external subnet to an instance
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-pub struct ExternalSubnetAttach {
-    /// Name or ID of the instance to attach to
-    pub instance: NameOrId,
-}
-
-/// An external subnet allocated from a subnet pool
-#[derive(
-    ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq,
-)]
-pub struct ExternalSubnet {
-    #[serde(flatten)]
-    pub identity: IdentityMetadata,
-    /// The allocated subnet CIDR
-    pub subnet: IpNet,
-    /// The project this subnet belongs to
-    pub project_id: Uuid,
-    /// The subnet pool this was allocated from
-    pub subnet_pool_id: Uuid,
-    /// The subnet pool member this subnet corresponds to
-    pub subnet_pool_member_id: Uuid,
-    /// The instance this subnet is attached to, if any
-    pub instance_id: Option<Uuid>,
 }

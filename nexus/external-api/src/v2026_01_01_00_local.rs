@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! Types from API version 2026010100 that cannot live in `nexus-types-versions`
+//! Types from API version 2026_01_01_00 that cannot live in `nexus-types-versions`
 //! because they convert to/from `omicron-common` types (orphan rule).
 
 use itertools::Either;

@@ -2,10 +2,10 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! Types from API version 2025112000 that cannot live in `nexus-types-versions`
+//! Types from API version 2025_11_20_00 that cannot live in `nexus-types-versions`
 //! because they convert to/from `omicron-common` types (orphan rule).
 
-use crate::v2026013000_local;
+use crate::v2026_01_30_00_local;
 use omicron_common::api::external;
 use schemars::JsonSchema;
 use serde::Deserialize;
@@ -91,9 +91,9 @@ impl TryFrom<external::Disk> for Disk {
     }
 }
 
-impl From<Disk> for v2026013000_local::Disk {
-    fn from(old: Disk) -> v2026013000_local::Disk {
-        v2026013000_local::Disk {
+impl From<Disk> for v2026_01_30_00_local::Disk {
+    fn from(old: Disk) -> v2026_01_30_00_local::Disk {
+        v2026_01_30_00_local::Disk {
             identity: old.identity,
             project_id: old.project_id,
             snapshot_id: old.snapshot_id,
@@ -107,10 +107,10 @@ impl From<Disk> for v2026013000_local::Disk {
     }
 }
 
-impl TryFrom<v2026013000_local::Disk> for Disk {
+impl TryFrom<v2026_01_30_00_local::Disk> for Disk {
     type Error = dropshot::HttpError;
 
-    fn try_from(new: v2026013000_local::Disk) -> Result<Disk, Self::Error> {
+    fn try_from(new: v2026_01_30_00_local::Disk) -> Result<Disk, Self::Error> {
         Ok(Disk {
             identity: new.identity,
             project_id: new.project_id,

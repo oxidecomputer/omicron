@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 use std::net::IpAddr;
 use uuid::Uuid;
 
-use crate::v2025112000::audit::{AuditLogEntryActor, AuditLogEntryResult};
+use crate::v2025_11_20_00::audit::{AuditLogEntryActor, AuditLogEntryResult};
 
 /// Authentication method used for a request
 #[derive(

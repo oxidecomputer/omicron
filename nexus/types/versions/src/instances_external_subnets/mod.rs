@@ -4,14 +4,8 @@
 
 //! Version `INSTANCES_EXTERNAL_SUBNETS` of the Nexus external API.
 //!
-//! This version (2026013000) uses the old `DiskSource` from `v2025112000`
-//! (without `read_only`) and the new `DiskType` from `omicron_common`
-//! (without the old `Crucible` variant). The `Disk` view type does not
+//! The `Disk` view type for this version uses the new `DiskType` from
+//! `omicron_common` (without the old `Crucible` variant) but does not
 //! include a `read_only` field.
-//!
-//! Subnet pool views still include `pool_type` and subnet pool members
-//! still include identity metadata.
 
 pub mod disk;
-pub mod instance;
-pub mod subnet_pool;

@@ -20,16 +20,17 @@ use ipnetwork::IpNetwork;
 use nexus_types::authn::cookies::Cookies;
 use nexus_types_versions::latest;
 use nexus_types_versions::latest::headers;
-use nexus_types_versions::v2025112000;
-use nexus_types_versions::v2025120300;
-use nexus_types_versions::v2025122300;
-use nexus_types_versions::v2026010100;
-use nexus_types_versions::v2026010300;
-use nexus_types_versions::v2026010500;
-use nexus_types_versions::v2026011600;
-use nexus_types_versions::v2026011601;
-use nexus_types_versions::v2026013000;
-use nexus_types_versions::v2026013001;
+use nexus_types_versions::v2025_11_20_00;
+use nexus_types_versions::v2025_12_03_00;
+use nexus_types_versions::v2025_12_23_00;
+use nexus_types_versions::v2026_01_01_00;
+use nexus_types_versions::v2026_01_03_00;
+use nexus_types_versions::v2026_01_05_00;
+use nexus_types_versions::v2026_01_08_00;
+use nexus_types_versions::v2026_01_16_00;
+use nexus_types_versions::v2026_01_16_01;
+use nexus_types_versions::v2026_01_22_00;
+use nexus_types_versions::v2026_01_30_01;
 use omicron_common::address::IpRange;
 use omicron_common::api::external::{
     http_pagination::{
@@ -42,22 +43,23 @@ use openapiv3::OpenAPI;
 
 /// Types that convert to/from `omicron-common` types and thus cannot live in
 /// `nexus-types-versions` due to the orphan rule.
-mod v2025112000_local;
-mod v2026010100_local;
-mod v2026013000_local;
+mod v2025_11_20_00_local;
+mod v2026_01_01_00_local;
+mod v2026_01_30_00_local;
 
 api_versions!([
-    // API versions are in the format YYYYMMDDNN.0.0, defined below as
-    // YYYYMMDDNN. Here, NN is a two-digit number starting at 00 for a
+    // API versions are in the format YYYY_MM_DD_NN.0.0, defined below as
+    // YYYY_MM_DD_NN. Here, NN is a two-digit number starting at 00 for a
     // particular date.
     //
     // WHEN CHANGING THE API (part 1 of 2):
     //
     // +- First, determine the next API version number to use.
     // |
-    // |  * On the main branch: Take today's date in YYYYMMDD format, e.g. 20251112.
-    // |    Find the smallest NN that isn't already defined in the list below. In
-    // |    most cases, that is 00, but if 00 is already taken, use 01, 02, etc.
+    // |  * On the main branch: Take today's date in YYYY_MM_DD format, e.g.
+    // |    2025_11_12. Find the smallest NN that isn't already defined in the
+    // |    list below. In most cases, that is 00, but if 00 is already taken,
+    // |    use 01, 02, etc.
     // |
     // |  * On a release branch, don't alter the date. Instead, always bump the NN.
     // |
@@ -73,33 +75,33 @@ api_versions!([
     // |  will panic at runtime if they're not in descending order.) The newest
     // |  date-based version should be at the top of the list.
     // v
-    // (next_yyyymmddnn, IDENT),
-    (2026020901, UPDATE_EXTERNAL_SUBNET_DOCS),
-    (2026020900, RENAME_POOL_ENDPOINTS),
-    (2026020600, ADD_SILO_SUBNET_POOLS),
-    (2026020200, TRUST_QUORUM_ABORT_CONFIG),
-    (2026013100, READ_ONLY_DISKS_NULLABLE),
-    (2026013001, READ_ONLY_DISKS),
-    (2026013000, INSTANCES_EXTERNAL_SUBNETS),
-    (2026012800, REMOVE_SUBNET_POOL_POOL_TYPE),
-    (2026012300, DUAL_STACK_EPHEMERAL_IP),
-    (2026012201, EXTERNAL_SUBNET_ALLOCATOR_UPDATE),
-    (2026012200, FLOATING_IP_ALLOCATOR_UPDATE),
-    (2026012100, TRUST_QUORUM_ADD_SLEDS_AND_GET_LATEST_CONFIG),
-    (2026011601, EXTERNAL_SUBNET_ATTACHMENT),
-    (2026011600, RENAME_ADDRESS_SELECTOR_TO_ADDRESS_ALLOCATOR),
-    (2026011501, AUDIT_LOG_CREDENTIAL_ID),
-    (2026011500, AUDIT_LOG_AUTH_METHOD_ENUM),
-    (2026011300, DOC_LINT_SUMMARY_TRAILING_PERIOD),
-    (2026011100, MULTICAST_JOIN_LEAVE_DOCS),
-    (2026010800, MULTICAST_IMPLICIT_LIFECYCLE_UPDATES),
-    (2026010500, POOL_SELECTION_ENUMS),
-    (2026010300, DUAL_STACK_NICS),
-    (2026010100, SILO_PROJECT_IP_VERSION_AND_POOL_TYPE),
-    (2025122300, IP_VERSION_AND_MULTIPLE_DEFAULT_POOLS),
-    (2025121200, BGP_PEER_COLLISION_STATE),
-    (2025120300, LOCAL_STORAGE),
-    (2025112000, INITIAL),
+    // (next_yyyy_mm_dd_nn, IDENT),
+    (2026_02_09_01, UPDATE_EXTERNAL_SUBNET_DOCS),
+    (2026_02_09_00, RENAME_POOL_ENDPOINTS),
+    (2026_02_06_00, ADD_SILO_SUBNET_POOLS),
+    (2026_02_02_00, TRUST_QUORUM_ABORT_CONFIG),
+    (2026_01_31_00, READ_ONLY_DISKS_NULLABLE),
+    (2026_01_30_01, READ_ONLY_DISKS),
+    (2026_01_30_00, INSTANCES_EXTERNAL_SUBNETS),
+    (2026_01_28_00, REMOVE_SUBNET_POOL_POOL_TYPE),
+    (2026_01_23_00, DUAL_STACK_EPHEMERAL_IP),
+    (2026_01_22_01, EXTERNAL_SUBNET_ALLOCATOR_UPDATE),
+    (2026_01_22_00, FLOATING_IP_ALLOCATOR_UPDATE),
+    (2026_01_21_00, TRUST_QUORUM_ADD_SLEDS_AND_GET_LATEST_CONFIG),
+    (2026_01_16_01, EXTERNAL_SUBNET_ATTACHMENT),
+    (2026_01_16_00, RENAME_ADDRESS_SELECTOR_TO_ADDRESS_ALLOCATOR),
+    (2026_01_15_01, AUDIT_LOG_CREDENTIAL_ID),
+    (2026_01_15_00, AUDIT_LOG_AUTH_METHOD_ENUM),
+    (2026_01_13_00, DOC_LINT_SUMMARY_TRAILING_PERIOD),
+    (2026_01_11_00, MULTICAST_JOIN_LEAVE_DOCS),
+    (2026_01_08_00, MULTICAST_IMPLICIT_LIFECYCLE_UPDATES),
+    (2026_01_05_00, POOL_SELECTION_ENUMS),
+    (2026_01_03_00, DUAL_STACK_NICS),
+    (2026_01_01_00, SILO_PROJECT_IP_VERSION_AND_POOL_TYPE),
+    (2025_12_23_00, IP_VERSION_AND_MULTIPLE_DEFAULT_POOLS),
+    (2025_12_12_00, BGP_PEER_COLLISION_STATE),
+    (2025_12_03_00, LOCAL_STORAGE),
+    (2025_11_20_00, INITIAL),
 ]);
 
 // WHEN CHANGING THE API (part 2 of 2):
@@ -109,7 +111,7 @@ api_versions!([
 // the version when a particular endpoint was added or removed.  For example, if
 // you used:
 //
-//     (2025120100, ADD_FOOBAR)
+//     (2025_12_01_00, ADD_FOOBAR)
 //
 // Then you could use `VERSION_ADD_FOOBAR` as the version in which endpoints
 // were added or removed.
@@ -571,34 +573,6 @@ pub trait NexusExternalApi {
     /// can have at most one default pool. IPs are allocated from the default
     /// pool when users ask for one without specifying a pool.
     #[endpoint {
-        operation_id = "silo_ip_pool_list",
-        method = GET,
-        path = "/v1/system/silos/{silo}/ip-pools",
-        tags = ["system/silos"],
-        versions = ..VERSION_SILO_PROJECT_IP_VERSION_AND_POOL_TYPE,
-    }]
-    async fn v2025122300_silo_ip_pool_list(
-        rqctx: RequestContext<Self::Context>,
-        path_params: Path<latest::path_params::SiloPath>,
-        query_params: Query<PaginatedByNameOrId>,
-    ) -> Result<
-        HttpResponseOk<ResultsPage<v2025122300::ip_pool::SiloIpPool>>,
-        HttpError,
-    > {
-        let page =
-            Self::silo_ip_pool_list(rqctx, path_params, query_params).await?.0;
-        Ok(HttpResponseOk(ResultsPage {
-            items: page.items.into_iter().map(Into::into).collect(),
-            next_page: page.next_page,
-        }))
-    }
-
-    /// List IP pools linked to silo
-    ///
-    /// Linked IP pools are available to users in the specified silo. A silo
-    /// can have at most one default pool. IPs are allocated from the default
-    /// pool when users ask for one without specifying a pool.
-    #[endpoint {
         method = GET,
         path = "/v1/system/silos/{silo}/ip-pools",
         tags = ["system/silos"],
@@ -612,6 +586,34 @@ pub trait NexusExternalApi {
         HttpResponseOk<ResultsPage<latest::ip_pool::SiloIpPool>>,
         HttpError,
     >;
+
+    /// List IP pools linked to silo
+    ///
+    /// Linked IP pools are available to users in the specified silo. A silo
+    /// can have at most one default pool. IPs are allocated from the default
+    /// pool when users ask for one without specifying a pool.
+    #[endpoint {
+        operation_id = "silo_ip_pool_list",
+        method = GET,
+        path = "/v1/system/silos/{silo}/ip-pools",
+        tags = ["system/silos"],
+        versions = ..VERSION_SILO_PROJECT_IP_VERSION_AND_POOL_TYPE,
+    }]
+    async fn silo_ip_pool_list_v2025_11_20_00(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<v2025_11_20_00::path_params::SiloPath>,
+        query_params: Query<PaginatedByNameOrId>,
+    ) -> Result<
+        HttpResponseOk<ResultsPage<v2025_12_23_00::ip_pool::SiloIpPool>>,
+        HttpError,
+    > {
+        let page =
+            Self::silo_ip_pool_list(rqctx, path_params, query_params).await?.0;
+        Ok(HttpResponseOk(ResultsPage {
+            items: page.items.into_iter().map(Into::into).collect(),
+            next_page: page.next_page,
+        }))
+    }
 
     /// Delete silo
     ///
@@ -1087,46 +1089,6 @@ pub trait NexusExternalApi {
 
     /// List IP pools
     #[endpoint {
-        operation_id = "project_ip_pool_list",
-        method = GET,
-        path = "/v1/ip-pools",
-        tags = ["projects"],
-        versions = ..VERSION_SILO_PROJECT_IP_VERSION_AND_POOL_TYPE,
-    }]
-    async fn v2025122300_project_ip_pool_list(
-        rqctx: RequestContext<Self::Context>,
-        query_params: Query<PaginatedByNameOrId>,
-    ) -> Result<
-        HttpResponseOk<ResultsPage<v2025122300::ip_pool::SiloIpPool>>,
-        HttpError,
-    > {
-        let page = Self::ip_pool_list(rqctx, query_params).await?.0;
-        Ok(HttpResponseOk(ResultsPage {
-            items: page.items.into_iter().map(Into::into).collect(),
-            next_page: page.next_page,
-        }))
-    }
-
-    /// List IP pools
-    #[endpoint {
-        operation_id = "project_ip_pool_list",
-        method = GET,
-        path = "/v1/ip-pools",
-        tags = ["projects"],
-        versions = VERSION_SILO_PROJECT_IP_VERSION_AND_POOL_TYPE..VERSION_RENAME_POOL_ENDPOINTS,
-    }]
-    async fn v2026020900_project_ip_pool_list(
-        rqctx: RequestContext<Self::Context>,
-        query_params: Query<PaginatedByNameOrId>,
-    ) -> Result<
-        HttpResponseOk<ResultsPage<latest::ip_pool::SiloIpPool>>,
-        HttpError,
-    > {
-        Self::ip_pool_list(rqctx, query_params).await
-    }
-
-    /// List IP pools
-    #[endpoint {
         method = GET,
         path = "/v1/ip-pools",
         tags = ["ip-pools"],
@@ -1140,37 +1102,44 @@ pub trait NexusExternalApi {
         HttpError,
     >;
 
-    /// Fetch IP pool
+    /// List IP pools
     #[endpoint {
-        operation_id = "project_ip_pool_view",
+        operation_id = "project_ip_pool_list",
         method = GET,
-        path = "/v1/ip-pools/{pool}",
-        tags = ["projects"],
-        versions = ..VERSION_SILO_PROJECT_IP_VERSION_AND_POOL_TYPE,
-    }]
-    async fn v2025122300_project_ip_pool_view(
-        rqctx: RequestContext<Self::Context>,
-        path_params: Path<latest::path_params::IpPoolPath>,
-    ) -> Result<HttpResponseOk<v2025122300::ip_pool::SiloIpPool>, HttpError>
-    {
-        Self::ip_pool_view(rqctx, path_params)
-            .await
-            .map(|resp| resp.map(Into::into))
-    }
-
-    /// Fetch IP pool
-    #[endpoint {
-        operation_id = "project_ip_pool_view",
-        method = GET,
-        path = "/v1/ip-pools/{pool}",
+        path = "/v1/ip-pools",
         tags = ["projects"],
         versions = VERSION_SILO_PROJECT_IP_VERSION_AND_POOL_TYPE..VERSION_RENAME_POOL_ENDPOINTS,
     }]
-    async fn v2026020900_project_ip_pool_view(
+    async fn project_ip_pool_list_v2026_01_01_00(
         rqctx: RequestContext<Self::Context>,
-        path_params: Path<latest::path_params::IpPoolPath>,
-    ) -> Result<HttpResponseOk<latest::ip_pool::SiloIpPool>, HttpError> {
-        Self::ip_pool_view(rqctx, path_params).await
+        query_params: Query<PaginatedByNameOrId>,
+    ) -> Result<
+        HttpResponseOk<ResultsPage<v2026_01_01_00::ip_pool::SiloIpPool>>,
+        HttpError,
+    > {
+        Self::ip_pool_list(rqctx, query_params).await
+    }
+
+    /// List IP pools
+    #[endpoint {
+        operation_id = "project_ip_pool_list",
+        method = GET,
+        path = "/v1/ip-pools",
+        tags = ["projects"],
+        versions = ..VERSION_SILO_PROJECT_IP_VERSION_AND_POOL_TYPE,
+    }]
+    async fn project_ip_pool_list_v2025_11_20_00(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<PaginatedByNameOrId>,
+    ) -> Result<
+        HttpResponseOk<ResultsPage<v2025_12_23_00::ip_pool::SiloIpPool>>,
+        HttpError,
+    > {
+        let page = Self::ip_pool_list(rqctx, query_params).await?.0;
+        Ok(HttpResponseOk(ResultsPage {
+            items: page.items.into_iter().map(Into::into).collect(),
+            next_page: page.next_page,
+        }))
     }
 
     /// Fetch IP pool
@@ -1185,20 +1154,38 @@ pub trait NexusExternalApi {
         path_params: Path<latest::path_params::IpPoolPath>,
     ) -> Result<HttpResponseOk<latest::ip_pool::SiloIpPool>, HttpError>;
 
-    /// List IP pools
+    /// Fetch IP pool
     #[endpoint {
-        operation_id = "ip_pool_list",
+        operation_id = "project_ip_pool_view",
         method = GET,
-        path = "/v1/system/ip-pools",
-        tags = ["system/ip-pools"],
-        versions = ..VERSION_RENAME_POOL_ENDPOINTS,
+        path = "/v1/ip-pools/{pool}",
+        tags = ["projects"],
+        versions = VERSION_SILO_PROJECT_IP_VERSION_AND_POOL_TYPE..VERSION_RENAME_POOL_ENDPOINTS,
     }]
-    async fn v2026020900_ip_pool_list(
+    async fn project_ip_pool_view_v2026_01_01_00(
         rqctx: RequestContext<Self::Context>,
-        query_params: Query<PaginatedByNameOrId>,
-    ) -> Result<HttpResponseOk<ResultsPage<latest::ip_pool::IpPool>>, HttpError>
+        path_params: Path<v2025_11_20_00::path_params::IpPoolPath>,
+    ) -> Result<HttpResponseOk<v2026_01_01_00::ip_pool::SiloIpPool>, HttpError>
     {
-        Self::system_ip_pool_list(rqctx, query_params).await
+        Self::ip_pool_view(rqctx, path_params).await
+    }
+
+    /// Fetch IP pool
+    #[endpoint {
+        operation_id = "project_ip_pool_view",
+        method = GET,
+        path = "/v1/ip-pools/{pool}",
+        tags = ["projects"],
+        versions = ..VERSION_SILO_PROJECT_IP_VERSION_AND_POOL_TYPE,
+    }]
+    async fn project_ip_pool_view_v2025_11_20_00(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<v2025_11_20_00::path_params::IpPoolPath>,
+    ) -> Result<HttpResponseOk<v2025_12_23_00::ip_pool::SiloIpPool>, HttpError>
+    {
+        Self::ip_pool_view(rqctx, path_params)
+            .await
+            .map(|resp| resp.map(Into::into))
     }
 
     /// List IP pools
@@ -1213,21 +1200,22 @@ pub trait NexusExternalApi {
         query_params: Query<PaginatedByNameOrId>,
     ) -> Result<HttpResponseOk<ResultsPage<latest::ip_pool::IpPool>>, HttpError>;
 
-    /// Create IP pool
-    ///
-    /// IPv6 is not yet supported for unicast pools.
+    /// List IP pools
     #[endpoint {
-        operation_id = "ip_pool_create",
-        method = POST,
+        operation_id = "ip_pool_list",
+        method = GET,
         path = "/v1/system/ip-pools",
         tags = ["system/ip-pools"],
         versions = ..VERSION_RENAME_POOL_ENDPOINTS,
     }]
-    async fn v2026020900_ip_pool_create(
+    async fn ip_pool_list_v2025_11_20_00(
         rqctx: RequestContext<Self::Context>,
-        pool_params: TypedBody<latest::ip_pool::IpPoolCreate>,
-    ) -> Result<HttpResponseCreated<latest::ip_pool::IpPool>, HttpError> {
-        Self::system_ip_pool_create(rqctx, pool_params).await
+        query_params: Query<PaginatedByNameOrId>,
+    ) -> Result<
+        HttpResponseOk<ResultsPage<v2025_11_20_00::ip_pool::IpPool>>,
+        HttpError,
+    > {
+        Self::system_ip_pool_list(rqctx, query_params).await
     }
 
     /// Create IP pool
@@ -1244,19 +1232,22 @@ pub trait NexusExternalApi {
         pool_params: TypedBody<latest::ip_pool::IpPoolCreate>,
     ) -> Result<HttpResponseCreated<latest::ip_pool::IpPool>, HttpError>;
 
-    /// Fetch IP pool
+    /// Create IP pool
+    ///
+    /// IPv6 is not yet supported for unicast pools.
     #[endpoint {
-        operation_id = "ip_pool_view",
-        method = GET,
-        path = "/v1/system/ip-pools/{pool}",
+        operation_id = "ip_pool_create",
+        method = POST,
+        path = "/v1/system/ip-pools",
         tags = ["system/ip-pools"],
         versions = ..VERSION_RENAME_POOL_ENDPOINTS,
     }]
-    async fn v2026020900_ip_pool_view(
+    async fn ip_pool_create_v2025_11_20_00(
         rqctx: RequestContext<Self::Context>,
-        path_params: Path<latest::path_params::IpPoolPath>,
-    ) -> Result<HttpResponseOk<latest::ip_pool::IpPool>, HttpError> {
-        Self::system_ip_pool_view(rqctx, path_params).await
+        pool_params: TypedBody<v2025_11_20_00::ip_pool::IpPoolCreate>,
+    ) -> Result<HttpResponseCreated<v2025_11_20_00::ip_pool::IpPool>, HttpError>
+    {
+        Self::system_ip_pool_create(rqctx, pool_params).await
     }
 
     /// Fetch IP pool
@@ -1271,19 +1262,20 @@ pub trait NexusExternalApi {
         path_params: Path<latest::path_params::IpPoolPath>,
     ) -> Result<HttpResponseOk<latest::ip_pool::IpPool>, HttpError>;
 
-    /// Delete IP pool
+    /// Fetch IP pool
     #[endpoint {
-        operation_id = "ip_pool_delete",
-        method = DELETE,
+        operation_id = "ip_pool_view",
+        method = GET,
         path = "/v1/system/ip-pools/{pool}",
         tags = ["system/ip-pools"],
         versions = ..VERSION_RENAME_POOL_ENDPOINTS,
     }]
-    async fn v2026020900_ip_pool_delete(
+    async fn ip_pool_view_v2025_11_20_00(
         rqctx: RequestContext<Self::Context>,
-        path_params: Path<latest::path_params::IpPoolPath>,
-    ) -> Result<HttpResponseDeleted, HttpError> {
-        Self::system_ip_pool_delete(rqctx, path_params).await
+        path_params: Path<v2025_11_20_00::path_params::IpPoolPath>,
+    ) -> Result<HttpResponseOk<v2025_11_20_00::ip_pool::IpPool>, HttpError>
+    {
+        Self::system_ip_pool_view(rqctx, path_params).await
     }
 
     /// Delete IP pool
@@ -1298,20 +1290,19 @@ pub trait NexusExternalApi {
         path_params: Path<latest::path_params::IpPoolPath>,
     ) -> Result<HttpResponseDeleted, HttpError>;
 
-    /// Update IP pool
+    /// Delete IP pool
     #[endpoint {
-        operation_id = "ip_pool_update",
-        method = PUT,
+        operation_id = "ip_pool_delete",
+        method = DELETE,
         path = "/v1/system/ip-pools/{pool}",
         tags = ["system/ip-pools"],
         versions = ..VERSION_RENAME_POOL_ENDPOINTS,
     }]
-    async fn v2026020900_ip_pool_update(
+    async fn ip_pool_delete_v2025_11_20_00(
         rqctx: RequestContext<Self::Context>,
-        path_params: Path<latest::path_params::IpPoolPath>,
-        updates: TypedBody<latest::ip_pool::IpPoolUpdate>,
-    ) -> Result<HttpResponseOk<latest::ip_pool::IpPool>, HttpError> {
-        Self::system_ip_pool_update(rqctx, path_params, updates).await
+        path_params: Path<v2025_11_20_00::path_params::IpPoolPath>,
+    ) -> Result<HttpResponseDeleted, HttpError> {
+        Self::system_ip_pool_delete(rqctx, path_params).await
     }
 
     /// Update IP pool
@@ -1327,20 +1318,21 @@ pub trait NexusExternalApi {
         updates: TypedBody<latest::ip_pool::IpPoolUpdate>,
     ) -> Result<HttpResponseOk<latest::ip_pool::IpPool>, HttpError>;
 
-    /// Fetch IP pool utilization
+    /// Update IP pool
     #[endpoint {
-        operation_id = "ip_pool_utilization_view",
-        method = GET,
-        path = "/v1/system/ip-pools/{pool}/utilization",
+        operation_id = "ip_pool_update",
+        method = PUT,
+        path = "/v1/system/ip-pools/{pool}",
         tags = ["system/ip-pools"],
         versions = ..VERSION_RENAME_POOL_ENDPOINTS,
     }]
-    async fn v2026020900_ip_pool_utilization_view(
+    async fn ip_pool_update_v2025_11_20_00(
         rqctx: RequestContext<Self::Context>,
-        path_params: Path<latest::path_params::IpPoolPath>,
-    ) -> Result<HttpResponseOk<latest::ip_pool::IpPoolUtilization>, HttpError>
+        path_params: Path<v2025_11_20_00::path_params::IpPoolPath>,
+        updates: TypedBody<v2025_11_20_00::ip_pool::IpPoolUpdate>,
+    ) -> Result<HttpResponseOk<v2025_11_20_00::ip_pool::IpPool>, HttpError>
     {
-        Self::system_ip_pool_utilization_view(rqctx, path_params).await
+        Self::system_ip_pool_update(rqctx, path_params, updates).await
     }
 
     /// Fetch IP pool utilization
@@ -1355,23 +1347,22 @@ pub trait NexusExternalApi {
         path_params: Path<latest::path_params::IpPoolPath>,
     ) -> Result<HttpResponseOk<latest::ip_pool::IpPoolUtilization>, HttpError>;
 
-    /// List IP pool's linked silos
+    /// Fetch IP pool utilization
     #[endpoint {
-        operation_id = "ip_pool_silo_list",
+        operation_id = "ip_pool_utilization_view",
         method = GET,
-        path = "/v1/system/ip-pools/{pool}/silos",
+        path = "/v1/system/ip-pools/{pool}/utilization",
         tags = ["system/ip-pools"],
         versions = ..VERSION_RENAME_POOL_ENDPOINTS,
     }]
-    async fn v2026020900_ip_pool_silo_list(
+    async fn ip_pool_utilization_view_v2025_11_20_00(
         rqctx: RequestContext<Self::Context>,
-        path_params: Path<latest::path_params::IpPoolPath>,
-        query_params: Query<PaginatedById>,
+        path_params: Path<v2025_11_20_00::path_params::IpPoolPath>,
     ) -> Result<
-        HttpResponseOk<ResultsPage<latest::ip_pool::IpPoolSiloLink>>,
+        HttpResponseOk<v2025_11_20_00::ip_pool::IpPoolUtilization>,
         HttpError,
     > {
-        Self::system_ip_pool_silo_list(rqctx, path_params, query_params).await
+        Self::system_ip_pool_utilization_view(rqctx, path_params).await
     }
 
     /// List IP pool's linked silos
@@ -1400,25 +1391,23 @@ pub trait NexusExternalApi {
         HttpError,
     >;
 
-    /// Link IP pool to silo
-    ///
-    /// Users in linked silos can allocate external IPs from this pool for their
-    /// instances. A silo can have at most one default pool. IPs are allocated
-    /// from the default pool when users ask for one without specifying a pool.
+    /// List IP pool's linked silos
     #[endpoint {
-        operation_id = "ip_pool_silo_link",
-        method = POST,
+        operation_id = "ip_pool_silo_list",
+        method = GET,
         path = "/v1/system/ip-pools/{pool}/silos",
         tags = ["system/ip-pools"],
         versions = ..VERSION_RENAME_POOL_ENDPOINTS,
     }]
-    async fn v2026020900_ip_pool_silo_link(
+    async fn ip_pool_silo_list_v2025_11_20_00(
         rqctx: RequestContext<Self::Context>,
-        path_params: Path<latest::path_params::IpPoolPath>,
-        resource_assoc: TypedBody<latest::ip_pool::IpPoolLinkSilo>,
-    ) -> Result<HttpResponseCreated<latest::ip_pool::IpPoolSiloLink>, HttpError>
-    {
-        Self::system_ip_pool_silo_link(rqctx, path_params, resource_assoc).await
+        path_params: Path<v2025_11_20_00::path_params::IpPoolPath>,
+        query_params: Query<PaginatedById>,
+    ) -> Result<
+        HttpResponseOk<ResultsPage<v2025_11_20_00::ip_pool::IpPoolSiloLink>>,
+        HttpError,
+    > {
+        Self::system_ip_pool_silo_list(rqctx, path_params, query_params).await
     }
 
     /// Link IP pool to silo
@@ -1438,21 +1427,32 @@ pub trait NexusExternalApi {
         resource_assoc: TypedBody<latest::ip_pool::IpPoolLinkSilo>,
     ) -> Result<HttpResponseCreated<latest::ip_pool::IpPoolSiloLink>, HttpError>;
 
-    /// Unlink IP pool from silo
+    /// Link IP pool to silo
     ///
-    /// Will fail if there are any outstanding IPs allocated in the silo.
+    /// Users in linked silos can allocate external IPs from this pool for their
+    /// instances. A silo can have at most one default pool. IPs are allocated
+    /// from the default pool when users ask for one without specifying a pool.
     #[endpoint {
-        operation_id = "ip_pool_silo_unlink",
-        method = DELETE,
-        path = "/v1/system/ip-pools/{pool}/silos/{silo}",
+        operation_id = "ip_pool_silo_link",
+        method = POST,
+        path = "/v1/system/ip-pools/{pool}/silos",
         tags = ["system/ip-pools"],
         versions = ..VERSION_RENAME_POOL_ENDPOINTS,
     }]
-    async fn v2026020900_ip_pool_silo_unlink(
+    async fn ip_pool_silo_link_v2025_11_20_00(
         rqctx: RequestContext<Self::Context>,
-        path_params: Path<latest::ip_pool::IpPoolSiloPath>,
-    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
-        Self::system_ip_pool_silo_unlink(rqctx, path_params).await
+        path_params: Path<v2025_11_20_00::path_params::IpPoolPath>,
+        resource_assoc: TypedBody<v2025_11_20_00::ip_pool::IpPoolLinkSilo>,
+    ) -> Result<
+        HttpResponseCreated<v2025_11_20_00::ip_pool::IpPoolSiloLink>,
+        HttpError,
+    > {
+        Self::system_ip_pool_silo_link(
+            rqctx,
+            path_params,
+            resource_assoc.map(Into::into),
+        )
+        .await
     }
 
     /// Unlink IP pool from silo
@@ -1469,27 +1469,21 @@ pub trait NexusExternalApi {
         path_params: Path<latest::ip_pool::IpPoolSiloPath>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
 
-    /// Make IP pool default for silo
+    /// Unlink IP pool from silo
     ///
-    /// When a user asks for an IP (e.g., at instance create time) without
-    /// specifying a pool, the IP comes from the default pool if a default is
-    /// configured. When a pool is made the default for a silo, any existing
-    /// default will remain linked to the silo, but will no longer be the
-    /// default.
+    /// Will fail if there are any outstanding IPs allocated in the silo.
     #[endpoint {
-        operation_id = "ip_pool_silo_update",
-        method = PUT,
+        operation_id = "ip_pool_silo_unlink",
+        method = DELETE,
         path = "/v1/system/ip-pools/{pool}/silos/{silo}",
         tags = ["system/ip-pools"],
         versions = ..VERSION_RENAME_POOL_ENDPOINTS,
     }]
-    async fn v2026020900_ip_pool_silo_update(
+    async fn ip_pool_silo_unlink_v2025_11_20_00(
         rqctx: RequestContext<Self::Context>,
-        path_params: Path<latest::ip_pool::IpPoolSiloPath>,
-        update: TypedBody<latest::ip_pool::IpPoolSiloUpdate>,
-    ) -> Result<HttpResponseOk<latest::ip_pool::IpPoolSiloLink>, HttpError>
-    {
-        Self::system_ip_pool_silo_update(rqctx, path_params, update).await
+        path_params: Path<v2025_11_20_00::ip_pool::IpPoolSiloPath>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        Self::system_ip_pool_silo_unlink(rqctx, path_params).await
     }
 
     /// Make IP pool default for silo
@@ -1511,18 +1505,34 @@ pub trait NexusExternalApi {
         update: TypedBody<latest::ip_pool::IpPoolSiloUpdate>,
     ) -> Result<HttpResponseOk<latest::ip_pool::IpPoolSiloLink>, HttpError>;
 
-    /// Fetch Oxide service IP pool
+    /// Make IP pool default for silo
+    ///
+    /// When a user asks for an IP (e.g., at instance create time) without
+    /// specifying a pool, the IP comes from the default pool if a default is
+    /// configured. When a pool is made the default for a silo, any existing
+    /// default will remain linked to the silo, but will no longer be the
+    /// default.
     #[endpoint {
-        operation_id = "ip_pool_service_view",
-        method = GET,
-        path = "/v1/system/ip-pools-service",
+        operation_id = "ip_pool_silo_update",
+        method = PUT,
+        path = "/v1/system/ip-pools/{pool}/silos/{silo}",
         tags = ["system/ip-pools"],
         versions = ..VERSION_RENAME_POOL_ENDPOINTS,
     }]
-    async fn v2026020900_ip_pool_service_view(
+    async fn ip_pool_silo_update_v2025_11_20_00(
         rqctx: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseOk<latest::ip_pool::IpPool>, HttpError> {
-        Self::system_ip_pool_service_view(rqctx).await
+        path_params: Path<v2025_11_20_00::ip_pool::IpPoolSiloPath>,
+        update: TypedBody<v2025_11_20_00::ip_pool::IpPoolSiloUpdate>,
+    ) -> Result<
+        HttpResponseOk<v2025_11_20_00::ip_pool::IpPoolSiloLink>,
+        HttpError,
+    > {
+        Self::system_ip_pool_silo_update(
+            rqctx,
+            path_params,
+            update.map(Into::into),
+        )
+        .await
     }
 
     /// Fetch Oxide service IP pool
@@ -1536,25 +1546,19 @@ pub trait NexusExternalApi {
         rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<latest::ip_pool::IpPool>, HttpError>;
 
-    /// List ranges for IP pool
-    ///
-    /// Ranges are ordered by their first address.
+    /// Fetch Oxide service IP pool
     #[endpoint {
-        operation_id = "ip_pool_range_list",
+        operation_id = "ip_pool_service_view",
         method = GET,
-        path = "/v1/system/ip-pools/{pool}/ranges",
+        path = "/v1/system/ip-pools-service",
         tags = ["system/ip-pools"],
         versions = ..VERSION_RENAME_POOL_ENDPOINTS,
     }]
-    async fn v2026020900_ip_pool_range_list(
+    async fn ip_pool_service_view_v2025_11_20_00(
         rqctx: RequestContext<Self::Context>,
-        path_params: Path<latest::path_params::IpPoolPath>,
-        query_params: Query<IpPoolRangePaginationParams>,
-    ) -> Result<
-        HttpResponseOk<ResultsPage<latest::ip_pool::IpPoolRange>>,
-        HttpError,
-    > {
-        Self::system_ip_pool_range_list(rqctx, path_params, query_params).await
+    ) -> Result<HttpResponseOk<v2025_11_20_00::ip_pool::IpPool>, HttpError>
+    {
+        Self::system_ip_pool_service_view(rqctx).await
     }
 
     /// List ranges for IP pool
@@ -1575,30 +1579,25 @@ pub trait NexusExternalApi {
         HttpError,
     >;
 
-    /// Add range to IP pool
+    /// List ranges for IP pool
     ///
-    /// IPv6 ranges are not allowed yet for unicast pools.
-    ///
-    /// For multicast pools, all ranges must be either Any-Source Multicast (ASM)
-    /// or Source-Specific Multicast (SSM), but not both. Mixing ASM and SSM
-    /// ranges in the same pool is not allowed.
-    ///
-    /// ASM: IPv4 addresses outside 232.0.0.0/8, IPv6 addresses with flag field != 3
-    /// SSM: IPv4 addresses in 232.0.0.0/8, IPv6 addresses with flag field = 3
+    /// Ranges are ordered by their first address.
     #[endpoint {
-        operation_id = "ip_pool_range_add",
-        method = POST,
-        path = "/v1/system/ip-pools/{pool}/ranges/add",
+        operation_id = "ip_pool_range_list",
+        method = GET,
+        path = "/v1/system/ip-pools/{pool}/ranges",
         tags = ["system/ip-pools"],
         versions = ..VERSION_RENAME_POOL_ENDPOINTS,
     }]
-    async fn v2026020900_ip_pool_range_add(
+    async fn ip_pool_range_list_v2025_11_20_00(
         rqctx: RequestContext<Self::Context>,
-        path_params: Path<latest::path_params::IpPoolPath>,
-        range_params: TypedBody<IpRange>,
-    ) -> Result<HttpResponseCreated<latest::ip_pool::IpPoolRange>, HttpError>
-    {
-        Self::system_ip_pool_range_add(rqctx, path_params, range_params).await
+        path_params: Path<v2025_11_20_00::path_params::IpPoolPath>,
+        query_params: Query<IpPoolRangePaginationParams>,
+    ) -> Result<
+        HttpResponseOk<ResultsPage<v2025_11_20_00::ip_pool::IpPoolRange>>,
+        HttpError,
+    > {
+        Self::system_ip_pool_range_list(rqctx, path_params, query_params).await
     }
 
     /// Add range to IP pool
@@ -1623,21 +1622,32 @@ pub trait NexusExternalApi {
         range_params: TypedBody<IpRange>,
     ) -> Result<HttpResponseCreated<latest::ip_pool::IpPoolRange>, HttpError>;
 
-    /// Remove range from IP pool
+    /// Add range to IP pool
+    ///
+    /// IPv6 ranges are not allowed yet for unicast pools.
+    ///
+    /// For multicast pools, all ranges must be either Any-Source Multicast (ASM)
+    /// or Source-Specific Multicast (SSM), but not both. Mixing ASM and SSM
+    /// ranges in the same pool is not allowed.
+    ///
+    /// ASM: IPv4 addresses outside 232.0.0.0/8, IPv6 addresses with flag field != 3
+    /// SSM: IPv4 addresses in 232.0.0.0/8, IPv6 addresses with flag field = 3
     #[endpoint {
-        operation_id = "ip_pool_range_remove",
+        operation_id = "ip_pool_range_add",
         method = POST,
-        path = "/v1/system/ip-pools/{pool}/ranges/remove",
+        path = "/v1/system/ip-pools/{pool}/ranges/add",
         tags = ["system/ip-pools"],
         versions = ..VERSION_RENAME_POOL_ENDPOINTS,
     }]
-    async fn v2026020900_ip_pool_range_remove(
+    async fn ip_pool_range_add_v2025_11_20_00(
         rqctx: RequestContext<Self::Context>,
-        path_params: Path<latest::path_params::IpPoolPath>,
+        path_params: Path<v2025_11_20_00::path_params::IpPoolPath>,
         range_params: TypedBody<IpRange>,
-    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
-        Self::system_ip_pool_range_remove(rqctx, path_params, range_params)
-            .await
+    ) -> Result<
+        HttpResponseCreated<v2025_11_20_00::ip_pool::IpPoolRange>,
+        HttpError,
+    > {
+        Self::system_ip_pool_range_add(rqctx, path_params, range_params).await
     }
 
     /// Remove range from IP pool
@@ -1653,24 +1663,21 @@ pub trait NexusExternalApi {
         range_params: TypedBody<IpRange>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
 
-    /// List IP ranges for the Oxide service pool
-    ///
-    /// Ranges are ordered by their first address.
+    /// Remove range from IP pool
     #[endpoint {
-        operation_id = "ip_pool_service_range_list",
-        method = GET,
-        path = "/v1/system/ip-pools-service/ranges",
+        operation_id = "ip_pool_range_remove",
+        method = POST,
+        path = "/v1/system/ip-pools/{pool}/ranges/remove",
         tags = ["system/ip-pools"],
         versions = ..VERSION_RENAME_POOL_ENDPOINTS,
     }]
-    async fn v2026020900_ip_pool_service_range_list(
+    async fn ip_pool_range_remove_v2025_11_20_00(
         rqctx: RequestContext<Self::Context>,
-        query_params: Query<IpPoolRangePaginationParams>,
-    ) -> Result<
-        HttpResponseOk<ResultsPage<latest::ip_pool::IpPoolRange>>,
-        HttpError,
-    > {
-        Self::system_ip_pool_service_range_list(rqctx, query_params).await
+        path_params: Path<v2025_11_20_00::path_params::IpPoolPath>,
+        range_params: TypedBody<IpRange>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        Self::system_ip_pool_range_remove(rqctx, path_params, range_params)
+            .await
     }
 
     /// List IP ranges for the Oxide service pool
@@ -1690,22 +1697,24 @@ pub trait NexusExternalApi {
         HttpError,
     >;
 
-    /// Add IP range to Oxide service pool
+    /// List IP ranges for the Oxide service pool
     ///
-    /// IPv6 ranges are not allowed yet.
+    /// Ranges are ordered by their first address.
     #[endpoint {
-        operation_id = "ip_pool_service_range_add",
-        method = POST,
-        path = "/v1/system/ip-pools-service/ranges/add",
+        operation_id = "ip_pool_service_range_list",
+        method = GET,
+        path = "/v1/system/ip-pools-service/ranges",
         tags = ["system/ip-pools"],
         versions = ..VERSION_RENAME_POOL_ENDPOINTS,
     }]
-    async fn v2026020900_ip_pool_service_range_add(
+    async fn ip_pool_service_range_list_v2025_11_20_00(
         rqctx: RequestContext<Self::Context>,
-        range_params: TypedBody<IpRange>,
-    ) -> Result<HttpResponseCreated<latest::ip_pool::IpPoolRange>, HttpError>
-    {
-        Self::system_ip_pool_service_range_add(rqctx, range_params).await
+        query_params: Query<IpPoolRangePaginationParams>,
+    ) -> Result<
+        HttpResponseOk<ResultsPage<v2025_11_20_00::ip_pool::IpPoolRange>>,
+        HttpError,
+    > {
+        Self::system_ip_pool_service_range_list(rqctx, query_params).await
     }
 
     /// Add IP range to Oxide service pool
@@ -1722,19 +1731,24 @@ pub trait NexusExternalApi {
         range_params: TypedBody<IpRange>,
     ) -> Result<HttpResponseCreated<latest::ip_pool::IpPoolRange>, HttpError>;
 
-    /// Remove IP range from Oxide service pool
+    /// Add IP range to Oxide service pool
+    ///
+    /// IPv6 ranges are not allowed yet.
     #[endpoint {
-        operation_id = "ip_pool_service_range_remove",
+        operation_id = "ip_pool_service_range_add",
         method = POST,
-        path = "/v1/system/ip-pools-service/ranges/remove",
+        path = "/v1/system/ip-pools-service/ranges/add",
         tags = ["system/ip-pools"],
         versions = ..VERSION_RENAME_POOL_ENDPOINTS,
     }]
-    async fn v2026020900_ip_pool_service_range_remove(
+    async fn ip_pool_service_range_add_v2025_11_20_00(
         rqctx: RequestContext<Self::Context>,
         range_params: TypedBody<IpRange>,
-    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
-        Self::system_ip_pool_service_range_remove(rqctx, range_params).await
+    ) -> Result<
+        HttpResponseCreated<v2025_11_20_00::ip_pool::IpPoolRange>,
+        HttpError,
+    > {
+        Self::system_ip_pool_service_range_add(rqctx, range_params).await
     }
 
     /// Remove IP range from Oxide service pool
@@ -1748,6 +1762,21 @@ pub trait NexusExternalApi {
         rqctx: RequestContext<Self::Context>,
         range_params: TypedBody<IpRange>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
+
+    /// Remove IP range from Oxide service pool
+    #[endpoint {
+        operation_id = "ip_pool_service_range_remove",
+        method = POST,
+        path = "/v1/system/ip-pools-service/ranges/remove",
+        tags = ["system/ip-pools"],
+        versions = ..VERSION_RENAME_POOL_ENDPOINTS,
+    }]
+    async fn ip_pool_service_range_remove_v2025_11_20_00(
+        rqctx: RequestContext<Self::Context>,
+        range_params: TypedBody<IpRange>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        Self::system_ip_pool_service_range_remove(rqctx, range_params).await
+    }
 
     // Subnet Pools
 
@@ -1774,11 +1803,11 @@ pub trait NexusExternalApi {
         tags = ["system/subnet-pools"],
         versions = VERSION_REMOVE_SUBNET_POOL_POOL_TYPE..VERSION_RENAME_POOL_ENDPOINTS,
     }]
-    async fn v2026020900_subnet_pool_list(
+    async fn subnet_pool_list_v2026_01_28_00(
         rqctx: RequestContext<Self::Context>,
         query_params: Query<PaginatedByNameOrId>,
     ) -> Result<
-        HttpResponseOk<ResultsPage<latest::subnet_pool::SubnetPool>>,
+        HttpResponseOk<ResultsPage<v2026_01_22_00::subnet_pool::SubnetPool>>,
         HttpError,
     > {
         Self::system_subnet_pool_list(rqctx, query_params).await
@@ -1792,11 +1821,11 @@ pub trait NexusExternalApi {
         tags = ["system/subnet-pools"],
         versions = VERSION_EXTERNAL_SUBNET_ATTACHMENT..VERSION_REMOVE_SUBNET_POOL_POOL_TYPE,
     }]
-    async fn v2026012300_subnet_pool_list(
+    async fn subnet_pool_list_v2026_01_16_01(
         rqctx: RequestContext<Self::Context>,
         query_params: Query<PaginatedByNameOrId>,
     ) -> Result<
-        HttpResponseOk<ResultsPage<v2026013000::subnet_pool::SubnetPool>>,
+        HttpResponseOk<ResultsPage<v2026_01_16_01::subnet_pool::SubnetPool>>,
         HttpError,
     > {
         let HttpResponseOk(ResultsPage { items, next_page }) =
@@ -1825,11 +1854,13 @@ pub trait NexusExternalApi {
         tags = ["system/subnet-pools"],
         versions = VERSION_REMOVE_SUBNET_POOL_POOL_TYPE..VERSION_RENAME_POOL_ENDPOINTS,
     }]
-    async fn v2026020900_subnet_pool_create(
+    async fn subnet_pool_create_v2026_01_28_00(
         rqctx: RequestContext<Self::Context>,
-        pool_params: TypedBody<latest::subnet_pool::SubnetPoolCreate>,
-    ) -> Result<HttpResponseCreated<latest::subnet_pool::SubnetPool>, HttpError>
-    {
+        pool_params: TypedBody<v2026_01_22_00::subnet_pool::SubnetPoolCreate>,
+    ) -> Result<
+        HttpResponseCreated<v2026_01_22_00::subnet_pool::SubnetPool>,
+        HttpError,
+    > {
         Self::system_subnet_pool_create(rqctx, pool_params).await
     }
 
@@ -1842,11 +1873,11 @@ pub trait NexusExternalApi {
         versions =
             VERSION_EXTERNAL_SUBNET_ALLOCATOR_UPDATE..VERSION_REMOVE_SUBNET_POOL_POOL_TYPE,
     }]
-    async fn v2026012300_subnet_pool_create(
+    async fn subnet_pool_create_v2026_01_22_01(
         rqctx: RequestContext<Self::Context>,
-        pool_params: TypedBody<latest::subnet_pool::SubnetPoolCreate>,
+        pool_params: TypedBody<v2026_01_22_00::subnet_pool::SubnetPoolCreate>,
     ) -> Result<
-        HttpResponseCreated<v2026013000::subnet_pool::SubnetPool>,
+        HttpResponseCreated<v2026_01_16_01::subnet_pool::SubnetPool>,
         HttpError,
     > {
         let HttpResponseCreated(pool) =
@@ -1863,16 +1894,16 @@ pub trait NexusExternalApi {
         versions =
             VERSION_EXTERNAL_SUBNET_ATTACHMENT..VERSION_EXTERNAL_SUBNET_ALLOCATOR_UPDATE,
     }]
-    async fn v2026012200_subnet_pool_create(
+    async fn subnet_pool_create_v2026_01_16_01(
         rqctx: RequestContext<Self::Context>,
-        pool_params: TypedBody<v2026011601::subnet_pool::SubnetPoolCreate>,
+        pool_params: TypedBody<v2026_01_16_01::subnet_pool::SubnetPoolCreate>,
     ) -> Result<
-        HttpResponseCreated<v2026013000::subnet_pool::SubnetPool>,
+        HttpResponseCreated<v2026_01_16_01::subnet_pool::SubnetPool>,
         HttpError,
     > {
         let pool_params = pool_params.try_map(TryInto::try_into)?;
         let HttpResponseCreated(pool) =
-            Self::v2026012300_subnet_pool_create(rqctx, pool_params).await?;
+            Self::subnet_pool_create_v2026_01_22_01(rqctx, pool_params).await?;
         Ok(HttpResponseCreated(pool))
     }
 
@@ -1896,11 +1927,13 @@ pub trait NexusExternalApi {
         tags = ["system/subnet-pools"],
         versions = VERSION_REMOVE_SUBNET_POOL_POOL_TYPE..VERSION_RENAME_POOL_ENDPOINTS,
     }]
-    async fn v2026020900_subnet_pool_view(
+    async fn subnet_pool_view_v2026_01_28_00(
         rqctx: RequestContext<Self::Context>,
-        path_params: Path<latest::subnet_pool::SubnetPoolPath>,
-    ) -> Result<HttpResponseOk<latest::subnet_pool::SubnetPool>, HttpError>
-    {
+        path_params: Path<v2026_01_16_01::subnet_pool::SubnetPoolPath>,
+    ) -> Result<
+        HttpResponseOk<v2026_01_22_00::subnet_pool::SubnetPool>,
+        HttpError,
+    > {
         Self::system_subnet_pool_view(rqctx, path_params).await
     }
 
@@ -1913,11 +1946,13 @@ pub trait NexusExternalApi {
         versions =
             VERSION_EXTERNAL_SUBNET_ATTACHMENT..VERSION_REMOVE_SUBNET_POOL_POOL_TYPE,
     }]
-    async fn v2026012300_subnet_pool_view(
+    async fn subnet_pool_view_v2026_01_16_01(
         rqctx: RequestContext<Self::Context>,
-        path_params: Path<latest::subnet_pool::SubnetPoolPath>,
-    ) -> Result<HttpResponseOk<v2026013000::subnet_pool::SubnetPool>, HttpError>
-    {
+        path_params: Path<v2026_01_16_01::subnet_pool::SubnetPoolPath>,
+    ) -> Result<
+        HttpResponseOk<v2026_01_16_01::subnet_pool::SubnetPool>,
+        HttpError,
+    > {
         let HttpResponseOk(pool) =
             Self::system_subnet_pool_view(rqctx, path_params).await?;
         Ok(HttpResponseOk(pool.into()))
@@ -1944,12 +1979,14 @@ pub trait NexusExternalApi {
         tags = ["system/subnet-pools"],
         versions = VERSION_REMOVE_SUBNET_POOL_POOL_TYPE..VERSION_RENAME_POOL_ENDPOINTS,
     }]
-    async fn v2026020900_subnet_pool_update(
+    async fn subnet_pool_update_v2026_01_28_00(
         rqctx: RequestContext<Self::Context>,
-        path_params: Path<latest::subnet_pool::SubnetPoolPath>,
-        updates: TypedBody<latest::subnet_pool::SubnetPoolUpdate>,
-    ) -> Result<HttpResponseOk<latest::subnet_pool::SubnetPool>, HttpError>
-    {
+        path_params: Path<v2026_01_16_01::subnet_pool::SubnetPoolPath>,
+        updates: TypedBody<v2026_01_16_01::subnet_pool::SubnetPoolUpdate>,
+    ) -> Result<
+        HttpResponseOk<v2026_01_22_00::subnet_pool::SubnetPool>,
+        HttpError,
+    > {
         Self::system_subnet_pool_update(rqctx, path_params, updates).await
     }
 
@@ -1962,31 +1999,18 @@ pub trait NexusExternalApi {
         versions =
             VERSION_EXTERNAL_SUBNET_ATTACHMENT..VERSION_REMOVE_SUBNET_POOL_POOL_TYPE,
     }]
-    async fn v2026012300_subnet_pool_update(
+    async fn subnet_pool_update_v2026_01_16_01(
         rqctx: RequestContext<Self::Context>,
-        path_params: Path<latest::subnet_pool::SubnetPoolPath>,
-        updates: TypedBody<latest::subnet_pool::SubnetPoolUpdate>,
-    ) -> Result<HttpResponseOk<v2026013000::subnet_pool::SubnetPool>, HttpError>
-    {
+        path_params: Path<v2026_01_16_01::subnet_pool::SubnetPoolPath>,
+        updates: TypedBody<v2026_01_16_01::subnet_pool::SubnetPoolUpdate>,
+    ) -> Result<
+        HttpResponseOk<v2026_01_16_01::subnet_pool::SubnetPool>,
+        HttpError,
+    > {
         let HttpResponseOk(pool) =
             Self::system_subnet_pool_update(rqctx, path_params, updates)
                 .await?;
         Ok(HttpResponseOk(pool.into()))
-    }
-
-    /// Delete subnet pool
-    #[endpoint {
-        operation_id = "subnet_pool_delete",
-        method = DELETE,
-        path = "/v1/system/subnet-pools/{pool}",
-        tags = ["system/subnet-pools"],
-        versions = VERSION_EXTERNAL_SUBNET_ATTACHMENT..VERSION_RENAME_POOL_ENDPOINTS,
-    }]
-    async fn v2026020900_subnet_pool_delete(
-        rqctx: RequestContext<Self::Context>,
-        path_params: Path<latest::subnet_pool::SubnetPoolPath>,
-    ) -> Result<HttpResponseDeleted, HttpError> {
-        Self::system_subnet_pool_delete(rqctx, path_params).await
     }
 
     /// Delete subnet pool
@@ -2000,6 +2024,21 @@ pub trait NexusExternalApi {
         rqctx: RequestContext<Self::Context>,
         path_params: Path<latest::subnet_pool::SubnetPoolPath>,
     ) -> Result<HttpResponseDeleted, HttpError>;
+
+    /// Delete subnet pool
+    #[endpoint {
+        operation_id = "subnet_pool_delete",
+        method = DELETE,
+        path = "/v1/system/subnet-pools/{pool}",
+        tags = ["system/subnet-pools"],
+        versions = VERSION_EXTERNAL_SUBNET_ATTACHMENT..VERSION_RENAME_POOL_ENDPOINTS,
+    }]
+    async fn subnet_pool_delete_v2026_01_16_01(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<v2026_01_16_01::subnet_pool::SubnetPoolPath>,
+    ) -> Result<HttpResponseDeleted, HttpError> {
+        Self::system_subnet_pool_delete(rqctx, path_params).await
+    }
 
     /// List members in subnet pool
     #[endpoint {
@@ -2025,12 +2064,14 @@ pub trait NexusExternalApi {
         tags = ["system/subnet-pools"],
         versions = VERSION_REMOVE_SUBNET_POOL_POOL_TYPE..VERSION_RENAME_POOL_ENDPOINTS,
     }]
-    async fn v2026020900_subnet_pool_member_list(
+    async fn subnet_pool_member_list_v2026_01_28_00(
         rqctx: RequestContext<Self::Context>,
-        path_params: Path<latest::subnet_pool::SubnetPoolPath>,
+        path_params: Path<v2026_01_16_01::subnet_pool::SubnetPoolPath>,
         query_params: Query<SubnetPoolMemberPaginationParams>,
     ) -> Result<
-        HttpResponseOk<ResultsPage<latest::subnet_pool::SubnetPoolMember>>,
+        HttpResponseOk<
+            ResultsPage<v2026_01_22_00::subnet_pool::SubnetPoolMember>,
+        >,
         HttpError,
     > {
         Self::system_subnet_pool_member_list(rqctx, path_params, query_params)
@@ -2055,12 +2096,14 @@ pub trait NexusExternalApi {
         versions =
             VERSION_EXTERNAL_SUBNET_ATTACHMENT..VERSION_REMOVE_SUBNET_POOL_POOL_TYPE,
     }]
-    async fn v2026012300_subnet_pool_member_list(
+    async fn subnet_pool_member_list_v2026_01_16_01(
         _rqctx: RequestContext<Self::Context>,
-        _path_params: Path<latest::subnet_pool::SubnetPoolPath>,
+        _path_params: Path<v2026_01_16_01::subnet_pool::SubnetPoolPath>,
         _query_params: Query<PaginatedByNameOrId>,
     ) -> Result<
-        HttpResponseOk<ResultsPage<v2026013000::subnet_pool::SubnetPoolMember>>,
+        HttpResponseOk<
+            ResultsPage<v2026_01_16_01::subnet_pool::SubnetPoolMember>,
+        >,
         HttpError,
     > {
         Err(HttpError::for_internal_error(
@@ -2092,12 +2135,14 @@ pub trait NexusExternalApi {
         tags = ["system/subnet-pools"],
         versions = VERSION_REMOVE_SUBNET_POOL_POOL_TYPE..VERSION_RENAME_POOL_ENDPOINTS,
     }]
-    async fn v2026020900_subnet_pool_member_add(
+    async fn subnet_pool_member_add_v2026_01_28_00(
         rqctx: RequestContext<Self::Context>,
-        path_params: Path<latest::subnet_pool::SubnetPoolPath>,
-        subnet_params: TypedBody<latest::subnet_pool::SubnetPoolMemberAdd>,
+        path_params: Path<v2026_01_16_01::subnet_pool::SubnetPoolPath>,
+        subnet_params: TypedBody<
+            v2026_01_22_00::subnet_pool::SubnetPoolMemberAdd,
+        >,
     ) -> Result<
-        HttpResponseCreated<latest::subnet_pool::SubnetPoolMember>,
+        HttpResponseCreated<v2026_01_22_00::subnet_pool::SubnetPoolMember>,
         HttpError,
     > {
         Self::system_subnet_pool_member_add(rqctx, path_params, subnet_params)
@@ -2113,12 +2158,14 @@ pub trait NexusExternalApi {
         versions =
             VERSION_EXTERNAL_SUBNET_ALLOCATOR_UPDATE..VERSION_REMOVE_SUBNET_POOL_POOL_TYPE,
     }]
-    async fn v2026012300_subnet_pool_member_add(
+    async fn subnet_pool_member_add_v2026_01_22_01(
         rqctx: RequestContext<Self::Context>,
-        path_params: Path<latest::subnet_pool::SubnetPoolPath>,
-        subnet_params: TypedBody<latest::subnet_pool::SubnetPoolMemberAdd>,
+        path_params: Path<v2026_01_16_01::subnet_pool::SubnetPoolPath>,
+        subnet_params: TypedBody<
+            v2026_01_22_00::subnet_pool::SubnetPoolMemberAdd,
+        >,
     ) -> Result<
-        HttpResponseCreated<v2026013000::subnet_pool::SubnetPoolMember>,
+        HttpResponseCreated<v2026_01_16_01::subnet_pool::SubnetPoolMember>,
         HttpError,
     > {
         let HttpResponseCreated(pool) = Self::system_subnet_pool_member_add(
@@ -2139,12 +2186,14 @@ pub trait NexusExternalApi {
         versions =
             VERSION_EXTERNAL_SUBNET_ATTACHMENT..VERSION_EXTERNAL_SUBNET_ALLOCATOR_UPDATE,
     }]
-    async fn v2026012200_subnet_pool_member_add(
+    async fn subnet_pool_member_add_v2026_01_16_01(
         rqctx: RequestContext<Self::Context>,
-        path_params: Path<latest::subnet_pool::SubnetPoolPath>,
-        subnet_params: TypedBody<v2026011601::subnet_pool::SubnetPoolMemberAdd>,
+        path_params: Path<v2026_01_16_01::subnet_pool::SubnetPoolPath>,
+        subnet_params: TypedBody<
+            v2026_01_16_01::subnet_pool::SubnetPoolMemberAdd,
+        >,
     ) -> Result<
-        HttpResponseCreated<v2026013000::subnet_pool::SubnetPoolMember>,
+        HttpResponseCreated<v2026_01_16_01::subnet_pool::SubnetPoolMember>,
         HttpError,
     > {
         let HttpResponseCreated(pool) = Self::system_subnet_pool_member_add(
@@ -2154,27 +2203,6 @@ pub trait NexusExternalApi {
         )
         .await?;
         Ok(HttpResponseCreated(pool.into()))
-    }
-
-    /// Remove member from subnet pool
-    #[endpoint {
-        operation_id = "subnet_pool_member_remove",
-        method = POST,
-        path = "/v1/system/subnet-pools/{pool}/members/remove",
-        tags = ["system/subnet-pools"],
-        versions = VERSION_EXTERNAL_SUBNET_ATTACHMENT..VERSION_RENAME_POOL_ENDPOINTS,
-    }]
-    async fn v2026020900_subnet_pool_member_remove(
-        rqctx: RequestContext<Self::Context>,
-        path_params: Path<latest::subnet_pool::SubnetPoolPath>,
-        subnet_params: TypedBody<latest::subnet_pool::SubnetPoolMemberRemove>,
-    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
-        Self::system_subnet_pool_member_remove(
-            rqctx,
-            path_params,
-            subnet_params,
-        )
-        .await
     }
 
     /// Remove member from subnet pool
@@ -2190,24 +2218,27 @@ pub trait NexusExternalApi {
         subnet_params: TypedBody<latest::subnet_pool::SubnetPoolMemberRemove>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
 
-    /// List silos linked to subnet pool
+    /// Remove member from subnet pool
     #[endpoint {
-        operation_id = "subnet_pool_silo_list",
-        method = GET,
-        path = "/v1/system/subnet-pools/{pool}/silos",
+        operation_id = "subnet_pool_member_remove",
+        method = POST,
+        path = "/v1/system/subnet-pools/{pool}/members/remove",
         tags = ["system/subnet-pools"],
         versions = VERSION_EXTERNAL_SUBNET_ATTACHMENT..VERSION_RENAME_POOL_ENDPOINTS,
     }]
-    async fn v2026020900_subnet_pool_silo_list(
+    async fn subnet_pool_member_remove_v2026_01_16_01(
         rqctx: RequestContext<Self::Context>,
-        path_params: Path<latest::subnet_pool::SubnetPoolPath>,
-        query_params: Query<PaginatedById>,
-    ) -> Result<
-        HttpResponseOk<ResultsPage<latest::subnet_pool::SubnetPoolSiloLink>>,
-        HttpError,
-    > {
-        Self::system_subnet_pool_silo_list(rqctx, path_params, query_params)
-            .await
+        path_params: Path<v2026_01_16_01::subnet_pool::SubnetPoolPath>,
+        subnet_params: TypedBody<
+            v2026_01_16_01::subnet_pool::SubnetPoolMemberRemove,
+        >,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        Self::system_subnet_pool_member_remove(
+            rqctx,
+            path_params,
+            subnet_params,
+        )
+        .await
     }
 
     /// List silos linked to subnet pool
@@ -2225,6 +2256,28 @@ pub trait NexusExternalApi {
         HttpResponseOk<ResultsPage<latest::subnet_pool::SubnetPoolSiloLink>>,
         HttpError,
     >;
+
+    /// List silos linked to subnet pool
+    #[endpoint {
+        operation_id = "subnet_pool_silo_list",
+        method = GET,
+        path = "/v1/system/subnet-pools/{pool}/silos",
+        tags = ["system/subnet-pools"],
+        versions = VERSION_EXTERNAL_SUBNET_ATTACHMENT..VERSION_RENAME_POOL_ENDPOINTS,
+    }]
+    async fn subnet_pool_silo_list_v2026_01_16_01(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<v2026_01_16_01::subnet_pool::SubnetPoolPath>,
+        query_params: Query<PaginatedById>,
+    ) -> Result<
+        HttpResponseOk<
+            ResultsPage<v2026_01_16_01::subnet_pool::SubnetPoolSiloLink>,
+        >,
+        HttpError,
+    > {
+        Self::system_subnet_pool_silo_list(rqctx, path_params, query_params)
+            .await
+    }
 
     /// List subnet pools linked to a silo
     #[endpoint {
@@ -2244,24 +2297,6 @@ pub trait NexusExternalApi {
 
     /// List subnet pools
     #[endpoint {
-        operation_id = "current_silo_subnet_pool_list",
-        method = GET,
-        path = "/v1/subnet-pools",
-        tags = ["projects"],
-        versions = VERSION_ADD_SILO_SUBNET_POOLS..VERSION_RENAME_POOL_ENDPOINTS,
-    }]
-    async fn v2026020900_current_silo_subnet_pool_list(
-        rqctx: RequestContext<Self::Context>,
-        query_params: Query<PaginatedByNameOrId>,
-    ) -> Result<
-        HttpResponseOk<ResultsPage<latest::subnet_pool::SiloSubnetPool>>,
-        HttpError,
-    > {
-        Self::subnet_pool_list(rqctx, query_params).await
-    }
-
-    /// List subnet pools
-    #[endpoint {
         method = GET,
         path = "/v1/subnet-pools",
         tags = ["subnet-pools"],
@@ -2275,6 +2310,26 @@ pub trait NexusExternalApi {
         HttpError,
     >;
 
+    /// List subnet pools
+    #[endpoint {
+        operation_id = "current_silo_subnet_pool_list",
+        method = GET,
+        path = "/v1/subnet-pools",
+        tags = ["projects"],
+        versions = VERSION_ADD_SILO_SUBNET_POOLS..VERSION_RENAME_POOL_ENDPOINTS,
+    }]
+    async fn current_silo_subnet_pool_list_v2026_02_06_00(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<PaginatedByNameOrId>,
+    ) -> Result<
+        HttpResponseOk<
+            ResultsPage<v2026_01_22_00::subnet_pool::SiloSubnetPool>,
+        >,
+        HttpError,
+    > {
+        Self::subnet_pool_list(rqctx, query_params).await
+    }
+
     /// Fetch subnet pool
     #[endpoint {
         method = GET,
@@ -2286,25 +2341,6 @@ pub trait NexusExternalApi {
         rqctx: RequestContext<Self::Context>,
         path_params: Path<latest::subnet_pool::SubnetPoolPath>,
     ) -> Result<HttpResponseOk<latest::subnet_pool::SiloSubnetPool>, HttpError>;
-
-    /// Link subnet pool to silo
-    #[endpoint {
-        operation_id = "subnet_pool_silo_link",
-        method = POST,
-        path = "/v1/system/subnet-pools/{pool}/silos",
-        tags = ["system/subnet-pools"],
-        versions = VERSION_EXTERNAL_SUBNET_ATTACHMENT..VERSION_RENAME_POOL_ENDPOINTS,
-    }]
-    async fn v2026020900_subnet_pool_silo_link(
-        rqctx: RequestContext<Self::Context>,
-        path_params: Path<latest::subnet_pool::SubnetPoolPath>,
-        silo_link: TypedBody<latest::subnet_pool::SubnetPoolLinkSilo>,
-    ) -> Result<
-        HttpResponseCreated<latest::subnet_pool::SubnetPoolSiloLink>,
-        HttpError,
-    > {
-        Self::system_subnet_pool_silo_link(rqctx, path_params, silo_link).await
-    }
 
     /// Link subnet pool to silo
     #[endpoint {
@@ -2322,23 +2358,23 @@ pub trait NexusExternalApi {
         HttpError,
     >;
 
-    /// Update subnet pool's link to silo
+    /// Link subnet pool to silo
     #[endpoint {
-        operation_id = "subnet_pool_silo_update",
-        method = PUT,
-        path = "/v1/system/subnet-pools/{pool}/silos/{silo}",
+        operation_id = "subnet_pool_silo_link",
+        method = POST,
+        path = "/v1/system/subnet-pools/{pool}/silos",
         tags = ["system/subnet-pools"],
         versions = VERSION_EXTERNAL_SUBNET_ATTACHMENT..VERSION_RENAME_POOL_ENDPOINTS,
     }]
-    async fn v2026020900_subnet_pool_silo_update(
+    async fn subnet_pool_silo_link_v2026_01_16_01(
         rqctx: RequestContext<Self::Context>,
-        path_params: Path<latest::subnet_pool::SubnetPoolSiloPath>,
-        update: TypedBody<latest::subnet_pool::SubnetPoolSiloUpdate>,
+        path_params: Path<v2026_01_16_01::subnet_pool::SubnetPoolPath>,
+        silo_link: TypedBody<v2026_01_16_01::subnet_pool::SubnetPoolLinkSilo>,
     ) -> Result<
-        HttpResponseOk<latest::subnet_pool::SubnetPoolSiloLink>,
+        HttpResponseCreated<v2026_01_16_01::subnet_pool::SubnetPoolSiloLink>,
         HttpError,
     > {
-        Self::system_subnet_pool_silo_update(rqctx, path_params, update).await
+        Self::system_subnet_pool_silo_link(rqctx, path_params, silo_link).await
     }
 
     /// Update subnet pool's link to silo
@@ -2357,19 +2393,23 @@ pub trait NexusExternalApi {
         HttpError,
     >;
 
-    /// Unlink subnet pool from silo
+    /// Update subnet pool's link to silo
     #[endpoint {
-        operation_id = "subnet_pool_silo_unlink",
-        method = DELETE,
+        operation_id = "subnet_pool_silo_update",
+        method = PUT,
         path = "/v1/system/subnet-pools/{pool}/silos/{silo}",
         tags = ["system/subnet-pools"],
         versions = VERSION_EXTERNAL_SUBNET_ATTACHMENT..VERSION_RENAME_POOL_ENDPOINTS,
     }]
-    async fn v2026020900_subnet_pool_silo_unlink(
+    async fn subnet_pool_silo_update_v2026_01_16_01(
         rqctx: RequestContext<Self::Context>,
-        path_params: Path<latest::subnet_pool::SubnetPoolSiloPath>,
-    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
-        Self::system_subnet_pool_silo_unlink(rqctx, path_params).await
+        path_params: Path<v2026_01_16_01::subnet_pool::SubnetPoolSiloPath>,
+        update: TypedBody<v2026_01_16_01::subnet_pool::SubnetPoolSiloUpdate>,
+    ) -> Result<
+        HttpResponseOk<v2026_01_16_01::subnet_pool::SubnetPoolSiloLink>,
+        HttpError,
+    > {
+        Self::system_subnet_pool_silo_update(rqctx, path_params, update).await
     }
 
     /// Unlink subnet pool from silo
@@ -2384,22 +2424,19 @@ pub trait NexusExternalApi {
         path_params: Path<latest::subnet_pool::SubnetPoolSiloPath>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
 
-    /// Fetch subnet pool utilization
+    /// Unlink subnet pool from silo
     #[endpoint {
-        operation_id = "subnet_pool_utilization_view",
-        method = GET,
-        path = "/v1/system/subnet-pools/{pool}/utilization",
+        operation_id = "subnet_pool_silo_unlink",
+        method = DELETE,
+        path = "/v1/system/subnet-pools/{pool}/silos/{silo}",
         tags = ["system/subnet-pools"],
         versions = VERSION_EXTERNAL_SUBNET_ATTACHMENT..VERSION_RENAME_POOL_ENDPOINTS,
     }]
-    async fn v2026020900_subnet_pool_utilization_view(
+    async fn subnet_pool_silo_unlink_v2026_01_16_01(
         rqctx: RequestContext<Self::Context>,
-        path_params: Path<latest::subnet_pool::SubnetPoolPath>,
-    ) -> Result<
-        HttpResponseOk<latest::subnet_pool::SubnetPoolUtilization>,
-        HttpError,
-    > {
-        Self::system_subnet_pool_utilization_view(rqctx, path_params).await
+        path_params: Path<v2026_01_16_01::subnet_pool::SubnetPoolSiloPath>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        Self::system_subnet_pool_silo_unlink(rqctx, path_params).await
     }
 
     /// Fetch subnet pool utilization
@@ -2416,6 +2453,24 @@ pub trait NexusExternalApi {
         HttpResponseOk<latest::subnet_pool::SubnetPoolUtilization>,
         HttpError,
     >;
+
+    /// Fetch subnet pool utilization
+    #[endpoint {
+        operation_id = "subnet_pool_utilization_view",
+        method = GET,
+        path = "/v1/system/subnet-pools/{pool}/utilization",
+        tags = ["system/subnet-pools"],
+        versions = VERSION_EXTERNAL_SUBNET_ATTACHMENT..VERSION_RENAME_POOL_ENDPOINTS,
+    }]
+    async fn subnet_pool_utilization_view_v2026_01_16_01(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<v2026_01_16_01::subnet_pool::SubnetPoolPath>,
+    ) -> Result<
+        HttpResponseOk<v2026_01_16_01::subnet_pool::SubnetPoolUtilization>,
+        HttpError,
+    > {
+        Self::system_subnet_pool_utilization_view(rqctx, path_params).await
+    }
 
     // External Subnets
 
@@ -2461,11 +2516,11 @@ pub trait NexusExternalApi {
         versions =
             VERSION_EXTERNAL_SUBNET_ATTACHMENT..VERSION_EXTERNAL_SUBNET_ALLOCATOR_UPDATE,
     }]
-    async fn v2026012200_external_subnet_create(
+    async fn external_subnet_create_v2026_01_16_01(
         rqctx: RequestContext<Self::Context>,
         query_params: Query<latest::project::ProjectSelector>,
         subnet_params: TypedBody<
-            v2026011601::external_subnet::ExternalSubnetCreate,
+            v2026_01_16_01::external_subnet::ExternalSubnetCreate,
         >,
     ) -> Result<
         HttpResponseCreated<latest::external_subnet::ExternalSubnet>,
@@ -2596,12 +2651,16 @@ pub trait NexusExternalApi {
         tags = ["floating-ips"],
         versions = VERSION_RENAME_ADDRESS_SELECTOR_TO_ADDRESS_ALLOCATOR..VERSION_FLOATING_IP_ALLOCATOR_UPDATE,
     }]
-    async fn v2026011600_floating_ip_create(
+    async fn floating_ip_create_v2026_01_16_00(
         rqctx: RequestContext<Self::Context>,
-        query_params: Query<latest::project::ProjectSelector>,
-        floating_params: TypedBody<v2026011600::floating_ip::FloatingIpCreate>,
-    ) -> Result<HttpResponseCreated<latest::floating_ip::FloatingIp>, HttpError>
-    {
+        query_params: Query<v2025_11_20_00::project::ProjectSelector>,
+        floating_params: TypedBody<
+            v2026_01_16_00::floating_ip::FloatingIpCreate,
+        >,
+    ) -> Result<
+        HttpResponseCreated<v2025_11_20_00::floating_ip::FloatingIp>,
+        HttpError,
+    > {
         Self::floating_ip_create(
             rqctx,
             query_params,
@@ -2618,13 +2677,17 @@ pub trait NexusExternalApi {
         tags = ["floating-ips"],
         versions = VERSION_POOL_SELECTION_ENUMS..VERSION_RENAME_ADDRESS_SELECTOR_TO_ADDRESS_ALLOCATOR,
     }]
-    async fn v2026011501_floating_ip_create(
+    async fn floating_ip_create_v2026_01_05_00(
         rqctx: RequestContext<Self::Context>,
-        query_params: Query<latest::project::ProjectSelector>,
-        floating_params: TypedBody<v2026010500::floating_ip::FloatingIpCreate>,
-    ) -> Result<HttpResponseCreated<latest::floating_ip::FloatingIp>, HttpError>
-    {
-        Self::v2026011600_floating_ip_create(
+        query_params: Query<v2025_11_20_00::project::ProjectSelector>,
+        floating_params: TypedBody<
+            v2026_01_05_00::floating_ip::FloatingIpCreate,
+        >,
+    ) -> Result<
+        HttpResponseCreated<v2025_11_20_00::floating_ip::FloatingIp>,
+        HttpError,
+    > {
+        Self::floating_ip_create_v2026_01_16_00(
             rqctx,
             query_params,
             floating_params.map(Into::into),
@@ -2641,14 +2704,18 @@ pub trait NexusExternalApi {
         versions = VERSION_IP_VERSION_AND_MULTIPLE_DEFAULT_POOLS
             ..VERSION_POOL_SELECTION_ENUMS,
     }]
-    async fn v2026010300_floating_ip_create(
+    async fn floating_ip_create_v2025_12_23_00(
         rqctx: RequestContext<Self::Context>,
-        query_params: Query<latest::project::ProjectSelector>,
-        floating_params: TypedBody<v2026010300::floating_ip::FloatingIpCreate>,
-    ) -> Result<HttpResponseCreated<latest::floating_ip::FloatingIp>, HttpError>
-    {
+        query_params: Query<v2025_11_20_00::project::ProjectSelector>,
+        floating_params: TypedBody<
+            v2026_01_03_00::floating_ip::FloatingIpCreate,
+        >,
+    ) -> Result<
+        HttpResponseCreated<v2025_11_20_00::floating_ip::FloatingIp>,
+        HttpError,
+    > {
         let floating_params = floating_params.try_map(TryInto::try_into)?;
-        Self::v2026011501_floating_ip_create(
+        Self::floating_ip_create_v2026_01_05_00(
             rqctx,
             query_params,
             floating_params,
@@ -2664,17 +2731,21 @@ pub trait NexusExternalApi {
         tags = ["floating-ips"],
         versions = ..VERSION_IP_VERSION_AND_MULTIPLE_DEFAULT_POOLS,
     }]
-    async fn v2025121200_floating_ip_create(
+    async fn floating_ip_create_v2025_11_20_00(
         rqctx: RequestContext<Self::Context>,
-        query_params: Query<latest::project::ProjectSelector>,
-        floating_params: TypedBody<v2025112000::floating_ip::FloatingIpCreate>,
-    ) -> Result<HttpResponseCreated<latest::floating_ip::FloatingIp>, HttpError>
-    {
-        Self::v2026010300_floating_ip_create(
+        query_params: Query<v2025_11_20_00::project::ProjectSelector>,
+        floating_params: TypedBody<
+            v2025_11_20_00::floating_ip::FloatingIpCreate,
+        >,
+    ) -> Result<
+        HttpResponseCreated<v2025_11_20_00::floating_ip::FloatingIp>,
+        HttpError,
+    > {
+        Self::floating_ip_create_v2025_12_23_00(
             rqctx,
             query_params,
             floating_params.map(|old| {
-                let mid: v2026010100::floating_ip::FloatingIpCreate =
+                let mid: v2026_01_01_00::floating_ip::FloatingIpCreate =
                     old.into();
                 mid.into()
             }),
@@ -2758,14 +2829,29 @@ pub trait NexusExternalApi {
         method = GET,
         path = "/v1/multicast-groups",
         tags = ["experimental"],
-        operation_id = "multicast_group_list",
-        versions = ..VERSION_MULTICAST_IMPLICIT_LIFECYCLE_UPDATES,
+        versions = VERSION_MULTICAST_IMPLICIT_LIFECYCLE_UPDATES..,
     }]
-    async fn v2025121200_multicast_group_list(
+    async fn multicast_group_list(
         rqctx: RequestContext<Self::Context>,
         query_params: Query<PaginatedByNameOrId>,
     ) -> Result<
-        HttpResponseOk<ResultsPage<v2025112000::multicast::MulticastGroup>>,
+        HttpResponseOk<ResultsPage<latest::multicast::MulticastGroup>>,
+        HttpError,
+    >;
+
+    /// List multicast groups
+    #[endpoint {
+        method = GET,
+        path = "/v1/multicast-groups",
+        tags = ["experimental"],
+        operation_id = "multicast_group_list",
+        versions = ..VERSION_MULTICAST_IMPLICIT_LIFECYCLE_UPDATES,
+    }]
+    async fn multicast_group_list_v2025_11_20_00(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<PaginatedByNameOrId>,
+    ) -> Result<
+        HttpResponseOk<ResultsPage<v2025_11_20_00::multicast::MulticastGroup>>,
         HttpError,
     > {
         Self::multicast_group_list(rqctx, query_params).await.map(
@@ -2778,21 +2864,6 @@ pub trait NexusExternalApi {
         )
     }
 
-    /// List multicast groups
-    #[endpoint {
-        method = GET,
-        path = "/v1/multicast-groups",
-        tags = ["experimental"],
-        versions = VERSION_MULTICAST_IMPLICIT_LIFECYCLE_UPDATES..,
-    }]
-    async fn multicast_group_list(
-        rqctx: RequestContext<Self::Context>,
-        query_params: Query<PaginatedByNameOrId>,
-    ) -> Result<
-        HttpResponseOk<ResultsPage<latest::multicast::MulticastGroup>>,
-        HttpError,
-    >;
-
     /// Create a multicast group
     ///
     /// Deprecated: Groups are created implicitly when adding members in newer
@@ -2804,11 +2875,11 @@ pub trait NexusExternalApi {
         tags = ["experimental"],
         versions = ..VERSION_MULTICAST_IMPLICIT_LIFECYCLE_UPDATES,
     }]
-    async fn v2025121200_multicast_group_create(
+    async fn multicast_group_create_v2025_11_20_00(
         _rqctx: RequestContext<Self::Context>,
-        _new_group: TypedBody<v2025112000::multicast::MulticastGroupCreate>,
+        _new_group: TypedBody<v2025_11_20_00::multicast::MulticastGroupCreate>,
     ) -> Result<
-        HttpResponseCreated<v2025112000::multicast::MulticastGroup>,
+        HttpResponseCreated<v2025_11_20_00::multicast::MulticastGroup>,
         HttpError,
     > {
         Err(HttpError::for_client_error(
@@ -2819,27 +2890,6 @@ pub trait NexusExternalApi {
              PUT /v1/instances/{instance}/multicast-groups/{group}"
                 .to_string(),
         ))
-    }
-
-    /// Fetch a multicast group
-    ///
-    /// The group can be specified by name or UUID.
-    #[endpoint {
-        method = GET,
-        path = "/v1/multicast-groups/{multicast_group}",
-        tags = ["experimental"],
-        operation_id = "multicast_group_view",
-        versions = ..VERSION_MULTICAST_IMPLICIT_LIFECYCLE_UPDATES,
-    }]
-    async fn v2025121200_multicast_group_view(
-        rqctx: RequestContext<Self::Context>,
-        path_params: Path<v2025112000::path_params::MulticastGroupPath>,
-    ) -> Result<HttpResponseOk<v2025112000::multicast::MulticastGroup>, HttpError>
-    {
-        let path = path_params.map(Into::into);
-        Self::multicast_group_view(rqctx, path)
-            .await
-            .map(|resp| resp.map(Into::into))
     }
 
     /// Fetch multicast group
@@ -2857,6 +2907,29 @@ pub trait NexusExternalApi {
         path_params: Path<latest::multicast::MulticastGroupPath>,
     ) -> Result<HttpResponseOk<latest::multicast::MulticastGroup>, HttpError>;
 
+    /// Fetch a multicast group
+    ///
+    /// The group can be specified by name or UUID.
+    #[endpoint {
+        method = GET,
+        path = "/v1/multicast-groups/{multicast_group}",
+        tags = ["experimental"],
+        operation_id = "multicast_group_view",
+        versions = ..VERSION_MULTICAST_IMPLICIT_LIFECYCLE_UPDATES,
+    }]
+    async fn multicast_group_view_v2025_11_20_00(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<v2025_11_20_00::path_params::MulticastGroupPath>,
+    ) -> Result<
+        HttpResponseOk<v2025_11_20_00::multicast::MulticastGroup>,
+        HttpError,
+    > {
+        let path = path_params.map(Into::into);
+        Self::multicast_group_view(rqctx, path)
+            .await
+            .map(|resp| resp.map(Into::into))
+    }
+
     /// Update a multicast group
     ///
     /// Deprecated: groups are managed implicitly through member operations.
@@ -2867,12 +2940,16 @@ pub trait NexusExternalApi {
         tags = ["experimental"],
         versions = ..VERSION_MULTICAST_IMPLICIT_LIFECYCLE_UPDATES,
     }]
-    async fn v2025121200_multicast_group_update(
+    async fn multicast_group_update_v2025_11_20_00(
         _rqctx: RequestContext<Self::Context>,
-        _path_params: Path<v2025112000::path_params::MulticastGroupPath>,
-        _update_params: TypedBody<v2025112000::multicast::MulticastGroupUpdate>,
-    ) -> Result<HttpResponseOk<v2025112000::multicast::MulticastGroup>, HttpError>
-    {
+        _path_params: Path<v2025_11_20_00::path_params::MulticastGroupPath>,
+        _update_params: TypedBody<
+            v2025_11_20_00::multicast::MulticastGroupUpdate,
+        >,
+    ) -> Result<
+        HttpResponseOk<v2025_11_20_00::multicast::MulticastGroup>,
+        HttpError,
+    > {
         Err(HttpError::for_client_error(
             None,
             dropshot::ClientErrorStatusCode::GONE,
@@ -2892,9 +2969,9 @@ pub trait NexusExternalApi {
         tags = ["experimental"],
         versions = ..VERSION_MULTICAST_IMPLICIT_LIFECYCLE_UPDATES,
     }]
-    async fn v2025121200_multicast_group_delete(
+    async fn multicast_group_delete_v2025_11_20_00(
         _rqctx: RequestContext<Self::Context>,
-        _path_params: Path<v2025112000::path_params::MulticastGroupPath>,
+        _path_params: Path<v2025_11_20_00::path_params::MulticastGroupPath>,
     ) -> Result<HttpResponseDeleted, HttpError> {
         Err(HttpError::for_client_error(
             None,
@@ -2903,37 +2980,6 @@ pub trait NexusExternalApi {
              automatically deleted when all members leave"
                 .to_string(),
         ))
-    }
-
-    /// List members of multicast group
-    ///
-    /// The group can be specified by name or UUID.
-    #[endpoint {
-        method = GET,
-        path = "/v1/multicast-groups/{multicast_group}/members",
-        tags = ["experimental"],
-        operation_id = "multicast_group_member_list",
-        versions = ..VERSION_MULTICAST_IMPLICIT_LIFECYCLE_UPDATES,
-    }]
-    async fn v2025121200_multicast_group_member_list(
-        rqctx: RequestContext<Self::Context>,
-        path_params: Path<v2025112000::path_params::MulticastGroupPath>,
-        query_params: Query<PaginatedById>,
-    ) -> Result<
-        HttpResponseOk<
-            ResultsPage<v2025112000::multicast::MulticastGroupMember>,
-        >,
-        HttpError,
-    > {
-        let path = path_params.map(Into::into);
-        Self::multicast_group_member_list(rqctx, path, query_params).await.map(
-            |HttpResponseOk(page)| {
-                HttpResponseOk(ResultsPage {
-                    items: page.items.into_iter().map(|m| m.into()).collect(),
-                    next_page: page.next_page,
-                })
-            },
-        )
     }
 
     /// List members of multicast group
@@ -2954,6 +3000,37 @@ pub trait NexusExternalApi {
         HttpError,
     >;
 
+    /// List members of multicast group
+    ///
+    /// The group can be specified by name or UUID.
+    #[endpoint {
+        method = GET,
+        path = "/v1/multicast-groups/{multicast_group}/members",
+        tags = ["experimental"],
+        operation_id = "multicast_group_member_list",
+        versions = ..VERSION_MULTICAST_IMPLICIT_LIFECYCLE_UPDATES,
+    }]
+    async fn multicast_group_member_list_v2025_11_20_00(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<v2025_11_20_00::path_params::MulticastGroupPath>,
+        query_params: Query<PaginatedById>,
+    ) -> Result<
+        HttpResponseOk<
+            ResultsPage<v2025_11_20_00::multicast::MulticastGroupMember>,
+        >,
+        HttpError,
+    > {
+        let path = path_params.map(Into::into);
+        Self::multicast_group_member_list(rqctx, path, query_params).await.map(
+            |HttpResponseOk(page)| {
+                HttpResponseOk(ResultsPage {
+                    items: page.items.into_iter().map(|m| m.into()).collect(),
+                    next_page: page.next_page,
+                })
+            },
+        )
+    }
+
     /// Add instance to multicast group
     ///
     /// Deprecated: use the instance join endpoint which supports implicit group
@@ -2965,15 +3042,15 @@ pub trait NexusExternalApi {
         operation_id = "multicast_group_member_add",
         versions = ..VERSION_MULTICAST_IMPLICIT_LIFECYCLE_UPDATES,
     }]
-    async fn v2025121200_multicast_group_member_add(
+    async fn multicast_group_member_add_v2025_11_20_00(
         _rqctx: RequestContext<Self::Context>,
-        _path_params: Path<v2025112000::path_params::MulticastGroupPath>,
-        _query_params: Query<latest::project::OptionalProjectSelector>,
+        _path_params: Path<v2025_11_20_00::path_params::MulticastGroupPath>,
+        _query_params: Query<v2025_11_20_00::project::OptionalProjectSelector>,
         _member_params: TypedBody<
-            v2025112000::multicast::MulticastGroupMemberAdd,
+            v2025_11_20_00::multicast::MulticastGroupMemberAdd,
         >,
     ) -> Result<
-        HttpResponseCreated<v2025112000::multicast::MulticastGroupMember>,
+        HttpResponseCreated<v2025_11_20_00::multicast::MulticastGroupMember>,
         HttpError,
     > {
         Err(HttpError::for_client_error(
@@ -2996,10 +3073,10 @@ pub trait NexusExternalApi {
         operation_id = "multicast_group_member_remove",
         versions = ..VERSION_MULTICAST_IMPLICIT_LIFECYCLE_UPDATES,
     }]
-    async fn v2025121200_multicast_group_member_remove(
+    async fn multicast_group_member_remove_v2025_11_20_00(
         _rqctx: RequestContext<Self::Context>,
-        _path_params: Path<v2025112000::multicast::MulticastGroupMemberPath>,
-        _query_params: Query<latest::project::OptionalProjectSelector>,
+        _path_params: Path<v2025_11_20_00::multicast::MulticastGroupMemberPath>,
+        _query_params: Query<v2025_11_20_00::project::OptionalProjectSelector>,
     ) -> Result<HttpResponseDeleted, HttpError> {
         Err(HttpError::for_client_error(
             None,
@@ -3020,11 +3097,15 @@ pub trait NexusExternalApi {
         tags = ["experimental"],
         versions = ..VERSION_MULTICAST_IMPLICIT_LIFECYCLE_UPDATES,
     }]
-    async fn v2025121200_lookup_multicast_group_by_ip(
+    async fn lookup_multicast_group_by_ip_v2025_11_20_00(
         rqctx: RequestContext<Self::Context>,
-        path_params: Path<v2025112000::multicast::MulticastGroupIpLookupPath>,
-    ) -> Result<HttpResponseOk<v2025112000::multicast::MulticastGroup>, HttpError>
-    {
+        path_params: Path<
+            v2025_11_20_00::multicast::MulticastGroupIpLookupPath,
+        >,
+    ) -> Result<
+        HttpResponseOk<v2025_11_20_00::multicast::MulticastGroup>,
+        HttpError,
+    > {
         let path = path_params.map(Into::into);
         Self::multicast_group_view(rqctx, path)
             .await
@@ -3032,59 +3113,6 @@ pub trait NexusExternalApi {
     }
 
     // Disks
-
-    /// List disks
-    #[endpoint {
-        operation_id = "disk_list",
-        method = GET,
-        path = "/v1/disks",
-        tags = ["disks"],
-        versions = ..VERSION_LOCAL_STORAGE,
-    }]
-    async fn v2025112000_disk_list(
-        rqctx: RequestContext<Self::Context>,
-        query_params: Query<
-            PaginatedByNameOrId<latest::project::ProjectSelector>,
-        >,
-    ) -> Result<HttpResponseOk<ResultsPage<v2025112000_local::Disk>>, HttpError>
-    {
-        Self::v2026013000_disk_list(rqctx, query_params).await.and_then(
-            |HttpResponseOk(page)| {
-                let items: Result<Vec<_>, _> =
-                    page.items.into_iter().map(TryInto::try_into).collect();
-                items.map(|items| {
-                    HttpResponseOk(ResultsPage {
-                        next_page: page.next_page,
-                        items,
-                    })
-                })
-            },
-        )
-    }
-
-    /// List disks
-    #[endpoint {
-        operation_id = "disk_list",
-        method = GET,
-        path = "/v1/disks",
-        tags = ["disks"],
-        versions = VERSION_LOCAL_STORAGE..VERSION_READ_ONLY_DISKS,
-    }]
-    async fn v2026013000_disk_list(
-        rqctx: RequestContext<Self::Context>,
-        query_params: Query<
-            PaginatedByNameOrId<latest::project::ProjectSelector>,
-        >,
-    ) -> Result<HttpResponseOk<ResultsPage<v2026013000_local::Disk>>, HttpError>
-    {
-        Self::disk_list(rqctx, query_params).await.map(
-            |HttpResponseOk(page)| {
-                let items: Vec<_> =
-                    page.items.into_iter().map(Into::into).collect();
-                HttpResponseOk(ResultsPage { next_page: page.next_page, items })
-            },
-        )
-    }
 
     /// List disks
     #[endpoint {
@@ -3100,68 +3128,61 @@ pub trait NexusExternalApi {
         >,
     ) -> Result<HttpResponseOk<ResultsPage<Disk>>, HttpError>;
 
-    // TODO-correctness See note about instance create.  This should be async.
-    /// Create a disk
+    /// List disks
     #[endpoint {
-        operation_id = "disk_create",
-        method = POST,
-        path = "/v1/disks",
-        tags = ["disks"],
-        versions = ..VERSION_LOCAL_STORAGE,
-    }]
-    async fn v2025112000_disk_create(
-        rqctx: RequestContext<Self::Context>,
-        query_params: Query<latest::project::ProjectSelector>,
-        new_disk: TypedBody<v2025112000::disk::DiskCreate>,
-    ) -> Result<HttpResponseCreated<v2025112000_local::Disk>, HttpError> {
-        let body = new_disk.map(|old| {
-            let step1: v2025120300::disk::DiskCreate = old.into();
-            let step2: v2026013000::disk::DiskCreate = step1.into();
-            step2
-        });
-        Self::v2026013000_disk_create(rqctx, query_params, body)
-            .await
-            .and_then(|resp| resp.try_map(TryInto::try_into))
-    }
-
-    // TODO-correctness See note about instance create.  This should be async.
-    /// Create disk
-    #[endpoint {
-        operation_id = "disk_create",
-        method = POST,
+        operation_id = "disk_list",
+        method = GET,
         path = "/v1/disks",
         tags = ["disks"],
         versions = VERSION_LOCAL_STORAGE..VERSION_READ_ONLY_DISKS,
     }]
-    async fn v2026013000_disk_create(
+    async fn disk_list_v2025_12_03_00(
         rqctx: RequestContext<Self::Context>,
-        query_params: Query<latest::project::ProjectSelector>,
-        new_disk: TypedBody<v2026013000::disk::DiskCreate>,
-    ) -> Result<HttpResponseCreated<v2026013000_local::Disk>, HttpError> {
-        Self::v2026013001_disk_create(
-            rqctx,
-            query_params,
-            new_disk.map(Into::into),
+        query_params: Query<
+            PaginatedByNameOrId<v2025_11_20_00::project::ProjectSelector>,
+        >,
+    ) -> Result<
+        HttpResponseOk<ResultsPage<v2026_01_30_00_local::Disk>>,
+        HttpError,
+    > {
+        Self::disk_list(rqctx, query_params).await.map(
+            |HttpResponseOk(page)| {
+                let items: Vec<_> =
+                    page.items.into_iter().map(Into::into).collect();
+                HttpResponseOk(ResultsPage { next_page: page.next_page, items })
+            },
         )
-        .await
-        .map(|resp| resp.map(Into::into))
     }
 
-    // TODO-correctness See note about instance create.  This should be async.
-    /// Create disk
+    /// List disks
     #[endpoint {
-        operation_id = "disk_create",
-        method = POST,
+        operation_id = "disk_list",
+        method = GET,
         path = "/v1/disks",
         tags = ["disks"],
-        versions = VERSION_READ_ONLY_DISKS..VERSION_READ_ONLY_DISKS_NULLABLE,
+        versions = ..VERSION_LOCAL_STORAGE,
     }]
-    async fn v2026013001_disk_create(
+    async fn disk_list_v2025_11_20_00(
         rqctx: RequestContext<Self::Context>,
-        query_params: Query<latest::project::ProjectSelector>,
-        new_disk: TypedBody<v2026013001::disk::DiskCreate>,
-    ) -> Result<HttpResponseCreated<Disk>, HttpError> {
-        Self::disk_create(rqctx, query_params, new_disk.map(Into::into)).await
+        query_params: Query<
+            PaginatedByNameOrId<v2025_11_20_00::project::ProjectSelector>,
+        >,
+    ) -> Result<
+        HttpResponseOk<ResultsPage<v2025_11_20_00_local::Disk>>,
+        HttpError,
+    > {
+        Self::disk_list_v2025_12_03_00(rqctx, query_params).await.and_then(
+            |HttpResponseOk(page)| {
+                let items: Result<Vec<_>, _> =
+                    page.items.into_iter().map(TryInto::try_into).collect();
+                items.map(|items| {
+                    HttpResponseOk(ResultsPage {
+                        next_page: page.next_page,
+                        items,
+                    })
+                })
+            },
+        )
     }
 
     // TODO-correctness See note about instance create.  This should be async.
@@ -3178,40 +3199,66 @@ pub trait NexusExternalApi {
         new_disk: TypedBody<latest::disk::DiskCreate>,
     ) -> Result<HttpResponseCreated<Disk>, HttpError>;
 
-    /// Fetch disk
+    // TODO-correctness See note about instance create.  This should be async.
+    /// Create disk
     #[endpoint {
-        operation_id = "disk_view",
-        method = GET,
-        path = "/v1/disks/{disk}",
+        operation_id = "disk_create",
+        method = POST,
+        path = "/v1/disks",
         tags = ["disks"],
-        versions = ..VERSION_LOCAL_STORAGE,
+        versions = VERSION_READ_ONLY_DISKS..VERSION_READ_ONLY_DISKS_NULLABLE,
     }]
-    async fn v2025112000_disk_view(
+    async fn disk_create_v2026_01_30_01(
         rqctx: RequestContext<Self::Context>,
-        path_params: Path<latest::path_params::DiskPath>,
-        query_params: Query<latest::project::OptionalProjectSelector>,
-    ) -> Result<HttpResponseOk<v2025112000_local::Disk>, HttpError> {
-        Self::disk_view(rqctx, path_params, query_params)
-            .await
-            .and_then(|resp| resp.try_map(TryInto::try_into))
+        query_params: Query<v2025_11_20_00::project::ProjectSelector>,
+        new_disk: TypedBody<v2026_01_30_01::disk::DiskCreate>,
+    ) -> Result<HttpResponseCreated<Disk>, HttpError> {
+        Self::disk_create(rqctx, query_params, new_disk.map(Into::into)).await
     }
 
-    /// Fetch disk
+    // TODO-correctness See note about instance create.  This should be async.
+    /// Create disk
     #[endpoint {
-        operation_id = "disk_view",
-        method = GET,
-        path = "/v1/disks/{disk}",
+        operation_id = "disk_create",
+        method = POST,
+        path = "/v1/disks",
         tags = ["disks"],
         versions = VERSION_LOCAL_STORAGE..VERSION_READ_ONLY_DISKS,
     }]
-    async fn v2026013000_disk_view(
+    async fn disk_create_v2025_12_03_00(
         rqctx: RequestContext<Self::Context>,
-        path_params: Path<latest::path_params::DiskPath>,
-        query_params: Query<latest::project::OptionalProjectSelector>,
-    ) -> Result<HttpResponseOk<v2026013000_local::Disk>, HttpError> {
-        Self::disk_view(rqctx, path_params, query_params)
+        query_params: Query<v2025_11_20_00::project::ProjectSelector>,
+        new_disk: TypedBody<v2025_12_03_00::disk::DiskCreate>,
+    ) -> Result<HttpResponseCreated<v2026_01_30_00_local::Disk>, HttpError>
+    {
+        Self::disk_create_v2026_01_30_01(
+            rqctx,
+            query_params,
+            new_disk.map(Into::into),
+        )
+        .await
+        .map(|resp| resp.map(Into::into))
+    }
+
+    // TODO-correctness See note about instance create.  This should be async.
+    /// Create a disk
+    #[endpoint {
+        operation_id = "disk_create",
+        method = POST,
+        path = "/v1/disks",
+        tags = ["disks"],
+        versions = ..VERSION_LOCAL_STORAGE,
+    }]
+    async fn disk_create_v2025_11_20_00(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<v2025_11_20_00::project::ProjectSelector>,
+        new_disk: TypedBody<v2025_11_20_00::disk::DiskCreate>,
+    ) -> Result<HttpResponseCreated<v2025_11_20_00_local::Disk>, HttpError>
+    {
+        let body = new_disk.map(Into::into);
+        Self::disk_create_v2025_12_03_00(rqctx, query_params, body)
             .await
-            .map(|resp| resp.map(Into::into))
+            .and_then(|resp| resp.try_map(TryInto::try_into))
     }
 
     /// Fetch disk
@@ -3226,6 +3273,42 @@ pub trait NexusExternalApi {
         path_params: Path<latest::path_params::DiskPath>,
         query_params: Query<latest::project::OptionalProjectSelector>,
     ) -> Result<HttpResponseOk<Disk>, HttpError>;
+
+    /// Fetch disk
+    #[endpoint {
+        operation_id = "disk_view",
+        method = GET,
+        path = "/v1/disks/{disk}",
+        tags = ["disks"],
+        versions = VERSION_LOCAL_STORAGE..VERSION_READ_ONLY_DISKS,
+    }]
+    async fn disk_view_v2025_12_03_00(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<v2025_11_20_00::path_params::DiskPath>,
+        query_params: Query<v2025_11_20_00::project::OptionalProjectSelector>,
+    ) -> Result<HttpResponseOk<v2026_01_30_00_local::Disk>, HttpError> {
+        Self::disk_view(rqctx, path_params, query_params)
+            .await
+            .map(|resp| resp.map(Into::into))
+    }
+
+    /// Fetch disk
+    #[endpoint {
+        operation_id = "disk_view",
+        method = GET,
+        path = "/v1/disks/{disk}",
+        tags = ["disks"],
+        versions = ..VERSION_LOCAL_STORAGE,
+    }]
+    async fn disk_view_v2025_11_20_00(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<v2025_11_20_00::path_params::DiskPath>,
+        query_params: Query<v2025_11_20_00::project::OptionalProjectSelector>,
+    ) -> Result<HttpResponseOk<v2025_11_20_00_local::Disk>, HttpError> {
+        Self::disk_view(rqctx, path_params, query_params)
+            .await
+            .and_then(|resp| resp.try_map(TryInto::try_into))
+    }
 
     /// Delete disk
     #[endpoint {
@@ -3311,18 +3394,47 @@ pub trait NexusExternalApi {
 
     /// Create instance
     #[endpoint {
+        method = POST,
+        path = "/v1/instances",
+        tags = ["instances"],
+        versions = VERSION_READ_ONLY_DISKS_NULLABLE..,
+    }]
+    async fn instance_create(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<latest::project::ProjectSelector>,
+        new_instance: TypedBody<latest::instance::InstanceCreate>,
+    ) -> Result<HttpResponseCreated<Instance>, HttpError>;
+
+    #[endpoint {
         operation_id = "instance_create",
         method = POST,
         path = "/v1/instances",
         tags = ["instances"],
-        versions = ..VERSION_LOCAL_STORAGE,
+        versions = VERSION_READ_ONLY_DISKS..VERSION_READ_ONLY_DISKS_NULLABLE,
     }]
-    async fn v2025112000_instance_create(
+    async fn instance_create_v2026_01_30_01(
         rqctx: RequestContext<Self::Context>,
-        query_params: Query<latest::project::ProjectSelector>,
-        new_instance: TypedBody<v2025112000::instance::InstanceCreate>,
+        query_params: Query<v2025_11_20_00::project::ProjectSelector>,
+        new_instance: TypedBody<v2026_01_30_01::instance::InstanceCreate>,
     ) -> Result<HttpResponseCreated<Instance>, HttpError> {
-        Self::v2025121200_instance_create(
+        Self::instance_create(rqctx, query_params, new_instance.map(Into::into))
+            .await
+    }
+
+    /// Create instance
+    #[endpoint {
+        operation_id = "instance_create",
+        method = POST,
+        path = "/v1/instances",
+        tags = ["instances"],
+        versions = VERSION_MULTICAST_IMPLICIT_LIFECYCLE_UPDATES..VERSION_READ_ONLY_DISKS,
+    }]
+    async fn instance_create_v2026_01_08_00(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<v2025_11_20_00::project::ProjectSelector>,
+        new_instance: TypedBody<v2026_01_08_00::instance::InstanceCreate>,
+    ) -> Result<HttpResponseCreated<Instance>, HttpError> {
+        Self::instance_create_v2026_01_30_01(
             rqctx,
             query_params,
             new_instance.map(Into::into),
@@ -3336,19 +3448,37 @@ pub trait NexusExternalApi {
         method = POST,
         path = "/v1/instances",
         tags = ["instances"],
-        versions = VERSION_LOCAL_STORAGE..VERSION_IP_VERSION_AND_MULTIPLE_DEFAULT_POOLS,
+        versions = VERSION_POOL_SELECTION_ENUMS..VERSION_MULTICAST_IMPLICIT_LIFECYCLE_UPDATES,
     }]
-    async fn v2025121200_instance_create(
+    async fn instance_create_v2026_01_05_00(
         rqctx: RequestContext<Self::Context>,
-        query_params: Query<latest::project::ProjectSelector>,
-        new_instance: TypedBody<v2025120300::instance::InstanceCreate>,
+        query_params: Query<v2025_11_20_00::project::ProjectSelector>,
+        new_instance: TypedBody<v2026_01_05_00::instance::InstanceCreate>,
     ) -> Result<HttpResponseCreated<Instance>, HttpError> {
-        Self::v2026010100_instance_create(
+        Self::instance_create_v2026_01_08_00(
             rqctx,
             query_params,
             new_instance.map(Into::into),
         )
         .await
+    }
+
+    /// Create instance
+    #[endpoint {
+        operation_id = "instance_create",
+        method = POST,
+        path = "/v1/instances",
+        tags = ["instances"],
+        versions = VERSION_DUAL_STACK_NICS..VERSION_POOL_SELECTION_ENUMS,
+    }]
+    async fn instance_create_v2026_01_03_00(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<v2025_11_20_00::project::ProjectSelector>,
+        new_instance: TypedBody<v2026_01_03_00::instance::InstanceCreate>,
+    ) -> Result<HttpResponseCreated<Instance>, HttpError> {
+        let new_instance = new_instance.try_map(TryInto::try_into)?;
+        Self::instance_create_v2026_01_05_00(rqctx, query_params, new_instance)
+            .await
     }
 
     /// Create instance
@@ -3360,13 +3490,13 @@ pub trait NexusExternalApi {
         versions =
             VERSION_IP_VERSION_AND_MULTIPLE_DEFAULT_POOLS..VERSION_DUAL_STACK_NICS,
     }]
-    async fn v2026010100_instance_create(
+    async fn instance_create_v2025_12_23_00(
         rqctx: RequestContext<Self::Context>,
-        query_params: Query<latest::project::ProjectSelector>,
-        new_instance: TypedBody<v2026010100::instance::InstanceCreate>,
+        query_params: Query<v2025_11_20_00::project::ProjectSelector>,
+        new_instance: TypedBody<v2026_01_01_00::instance::InstanceCreate>,
     ) -> Result<HttpResponseCreated<Instance>, HttpError> {
         let new_instance = new_instance.try_map(TryInto::try_into)?;
-        Self::v2026010300_instance_create(rqctx, query_params, new_instance)
+        Self::instance_create_v2026_01_03_00(rqctx, query_params, new_instance)
             .await
     }
 
@@ -3376,32 +3506,14 @@ pub trait NexusExternalApi {
         method = POST,
         path = "/v1/instances",
         tags = ["instances"],
-        versions = VERSION_DUAL_STACK_NICS..VERSION_POOL_SELECTION_ENUMS,
+        versions = VERSION_LOCAL_STORAGE..VERSION_IP_VERSION_AND_MULTIPLE_DEFAULT_POOLS,
     }]
-    async fn v2026010300_instance_create(
+    async fn instance_create_v2025_12_03_00(
         rqctx: RequestContext<Self::Context>,
-        query_params: Query<latest::project::ProjectSelector>,
-        new_instance: TypedBody<v2026010300::instance::InstanceCreate>,
+        query_params: Query<v2025_11_20_00::project::ProjectSelector>,
+        new_instance: TypedBody<v2025_12_03_00::instance::InstanceCreate>,
     ) -> Result<HttpResponseCreated<Instance>, HttpError> {
-        let new_instance = new_instance.try_map(TryInto::try_into)?;
-        Self::v2026010500_instance_create(rqctx, query_params, new_instance)
-            .await
-    }
-
-    /// Create instance
-    #[endpoint {
-        operation_id = "instance_create",
-        method = POST,
-        path = "/v1/instances",
-        tags = ["instances"],
-        versions = VERSION_POOL_SELECTION_ENUMS..VERSION_MULTICAST_IMPLICIT_LIFECYCLE_UPDATES,
-    }]
-    async fn v2026010500_instance_create(
-        rqctx: RequestContext<Self::Context>,
-        query_params: Query<latest::project::ProjectSelector>,
-        new_instance: TypedBody<v2026010500::instance::InstanceCreate>,
-    ) -> Result<HttpResponseCreated<Instance>, HttpError> {
-        Self::v2026013000_instance_create(
+        Self::instance_create_v2025_12_23_00(
             rqctx,
             query_params,
             new_instance.map(Into::into),
@@ -3415,49 +3527,20 @@ pub trait NexusExternalApi {
         method = POST,
         path = "/v1/instances",
         tags = ["instances"],
-        versions = VERSION_MULTICAST_IMPLICIT_LIFECYCLE_UPDATES..VERSION_READ_ONLY_DISKS,
+        versions = ..VERSION_LOCAL_STORAGE,
     }]
-    async fn v2026013000_instance_create(
+    async fn instance_create_v2025_11_20_00(
         rqctx: RequestContext<Self::Context>,
-        query_params: Query<latest::project::ProjectSelector>,
-        new_instance: TypedBody<v2026013000::instance::InstanceCreate>,
+        query_params: Query<v2025_11_20_00::project::ProjectSelector>,
+        new_instance: TypedBody<v2025_11_20_00::instance::InstanceCreate>,
     ) -> Result<HttpResponseCreated<Instance>, HttpError> {
-        Self::v2026013001_instance_create(
+        Self::instance_create_v2025_12_03_00(
             rqctx,
             query_params,
             new_instance.map(Into::into),
         )
         .await
     }
-
-    #[endpoint {
-        operation_id = "instance_create",
-        method = POST,
-        path = "/v1/instances",
-        tags = ["instances"],
-        versions = VERSION_READ_ONLY_DISKS..VERSION_READ_ONLY_DISKS_NULLABLE,
-    }]
-    async fn v2026013001_instance_create(
-        rqctx: RequestContext<Self::Context>,
-        query_params: Query<latest::project::ProjectSelector>,
-        new_instance: TypedBody<v2026013001::instance::InstanceCreate>,
-    ) -> Result<HttpResponseCreated<Instance>, HttpError> {
-        Self::instance_create(rqctx, query_params, new_instance.map(Into::into))
-            .await
-    }
-
-    /// Create instance
-    #[endpoint {
-        method = POST,
-        path = "/v1/instances",
-        tags = ["instances"],
-        versions = VERSION_READ_ONLY_DISKS_NULLABLE..,
-    }]
-    async fn instance_create(
-        rqctx: RequestContext<Self::Context>,
-        query_params: Query<latest::project::ProjectSelector>,
-        new_instance: TypedBody<latest::instance::InstanceCreate>,
-    ) -> Result<HttpResponseCreated<Instance>, HttpError>;
 
     /// Fetch instance
     #[endpoint {
@@ -3485,29 +3568,6 @@ pub trait NexusExternalApi {
 
     /// Update instance
     #[endpoint {
-        operation_id = "instance_update",
-        method = PUT,
-        path = "/v1/instances/{instance}",
-        tags = ["instances"],
-        versions = ..VERSION_MULTICAST_IMPLICIT_LIFECYCLE_UPDATES,
-    }]
-    async fn v2025120300_instance_update(
-        rqctx: RequestContext<Self::Context>,
-        query_params: Query<latest::project::OptionalProjectSelector>,
-        path_params: Path<latest::path_params::InstancePath>,
-        instance_config: TypedBody<v2025112000::instance::InstanceUpdate>,
-    ) -> Result<HttpResponseOk<Instance>, HttpError> {
-        Self::instance_update(
-            rqctx,
-            query_params,
-            path_params,
-            instance_config.map(Into::into),
-        )
-        .await
-    }
-
-    /// Update instance
-    #[endpoint {
         method = PUT,
         path = "/v1/instances/{instance}",
         tags = ["instances"],
@@ -3519,6 +3579,29 @@ pub trait NexusExternalApi {
         path_params: Path<latest::path_params::InstancePath>,
         instance_config: TypedBody<latest::instance::InstanceUpdate>,
     ) -> Result<HttpResponseOk<Instance>, HttpError>;
+
+    /// Update instance
+    #[endpoint {
+        operation_id = "instance_update",
+        method = PUT,
+        path = "/v1/instances/{instance}",
+        tags = ["instances"],
+        versions = ..VERSION_MULTICAST_IMPLICIT_LIFECYCLE_UPDATES,
+    }]
+    async fn instance_update_v2025_11_20_00(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<v2025_11_20_00::project::OptionalProjectSelector>,
+        path_params: Path<v2025_11_20_00::path_params::InstancePath>,
+        instance_config: TypedBody<v2025_11_20_00::instance::InstanceUpdate>,
+    ) -> Result<HttpResponseOk<Instance>, HttpError> {
+        Self::instance_update(
+            rqctx,
+            query_params,
+            path_params,
+            instance_config.map(Into::into),
+        )
+        .await
+    }
 
     /// Reboot instance
     #[endpoint {
@@ -3606,61 +3689,6 @@ pub trait NexusExternalApi {
 
     /// List disks for instance
     #[endpoint {
-        operation_id = "instance_disk_list",
-        method = GET,
-        path = "/v1/instances/{instance}/disks",
-        tags = ["instances"],
-        versions = ..VERSION_LOCAL_STORAGE,
-    }]
-    async fn v2025112000_instance_disk_list(
-        rqctx: RequestContext<Self::Context>,
-        query_params: Query<
-            PaginatedByNameOrId<latest::project::OptionalProjectSelector>,
-        >,
-        path_params: Path<latest::path_params::InstancePath>,
-    ) -> Result<HttpResponseOk<ResultsPage<v2025112000_local::Disk>>, HttpError>
-    {
-        Self::instance_disk_list(rqctx, query_params, path_params)
-            .await
-            .and_then(|HttpResponseOk(page)| {
-                let items: Result<Vec<_>, _> =
-                    page.items.into_iter().map(TryInto::try_into).collect();
-                items.map(|items| {
-                    HttpResponseOk(ResultsPage {
-                        next_page: page.next_page,
-                        items,
-                    })
-                })
-            })
-    }
-
-    /// List disks for instance
-    #[endpoint {
-        operation_id = "instance_disk_list",
-        method = GET,
-        path = "/v1/instances/{instance}/disks",
-        tags = ["instances"],
-        versions = VERSION_LOCAL_STORAGE..VERSION_READ_ONLY_DISKS,
-    }]
-    async fn v2026013000_instance_disk_list(
-        rqctx: RequestContext<Self::Context>,
-        query_params: Query<
-            PaginatedByNameOrId<latest::project::OptionalProjectSelector>,
-        >,
-        path_params: Path<latest::path_params::InstancePath>,
-    ) -> Result<HttpResponseOk<ResultsPage<v2026013000_local::Disk>>, HttpError>
-    {
-        Self::instance_disk_list(rqctx, query_params, path_params).await.map(
-            |HttpResponseOk(page)| {
-                let items: Vec<_> =
-                    page.items.into_iter().map(Into::into).collect();
-                HttpResponseOk(ResultsPage { next_page: page.next_page, items })
-            },
-        )
-    }
-
-    /// List disks for instance
-    #[endpoint {
         method = GET,
         path = "/v1/instances/{instance}/disks",
         tags = ["instances"],
@@ -3674,52 +3702,67 @@ pub trait NexusExternalApi {
         path_params: Path<latest::path_params::InstancePath>,
     ) -> Result<HttpResponseOk<ResultsPage<Disk>>, HttpError>;
 
-    /// Attach disk to instance
+    /// List disks for instance
     #[endpoint {
-        operation_id = "instance_disk_attach",
-        method = POST,
-        path = "/v1/instances/{instance}/disks/attach",
-        tags = ["instances"],
-        versions = ..VERSION_LOCAL_STORAGE,
-    }]
-    async fn v2025112000_instance_disk_attach(
-        rqctx: RequestContext<Self::Context>,
-        path_params: Path<latest::path_params::InstancePath>,
-        query_params: Query<latest::project::OptionalProjectSelector>,
-        disk_to_attach: TypedBody<latest::path_params::DiskPath>,
-    ) -> Result<HttpResponseAccepted<v2025112000_local::Disk>, HttpError> {
-        Self::instance_disk_attach(
-            rqctx,
-            path_params,
-            query_params,
-            disk_to_attach,
-        )
-        .await
-        .and_then(|resp| resp.try_map(TryInto::try_into))
-    }
-
-    /// Attach disk to instance
-    #[endpoint {
-        operation_id = "instance_disk_attach",
-        method = POST,
-        path = "/v1/instances/{instance}/disks/attach",
+        operation_id = "instance_disk_list",
+        method = GET,
+        path = "/v1/instances/{instance}/disks",
         tags = ["instances"],
         versions = VERSION_LOCAL_STORAGE..VERSION_READ_ONLY_DISKS,
     }]
-    async fn v2026013000_instance_disk_attach(
+    async fn instance_disk_list_v2025_12_03_00(
         rqctx: RequestContext<Self::Context>,
-        path_params: Path<latest::path_params::InstancePath>,
-        query_params: Query<latest::project::OptionalProjectSelector>,
-        disk_to_attach: TypedBody<latest::path_params::DiskPath>,
-    ) -> Result<HttpResponseAccepted<v2026013000_local::Disk>, HttpError> {
-        Self::instance_disk_attach(
-            rqctx,
-            path_params,
-            query_params,
-            disk_to_attach,
+        query_params: Query<
+            PaginatedByNameOrId<
+                v2025_11_20_00::project::OptionalProjectSelector,
+            >,
+        >,
+        path_params: Path<v2025_11_20_00::path_params::InstancePath>,
+    ) -> Result<
+        HttpResponseOk<ResultsPage<v2026_01_30_00_local::Disk>>,
+        HttpError,
+    > {
+        Self::instance_disk_list(rqctx, query_params, path_params).await.map(
+            |HttpResponseOk(page)| {
+                let items: Vec<_> =
+                    page.items.into_iter().map(Into::into).collect();
+                HttpResponseOk(ResultsPage { next_page: page.next_page, items })
+            },
         )
-        .await
-        .map(|resp| resp.map(Into::into))
+    }
+
+    /// List disks for instance
+    #[endpoint {
+        operation_id = "instance_disk_list",
+        method = GET,
+        path = "/v1/instances/{instance}/disks",
+        tags = ["instances"],
+        versions = ..VERSION_LOCAL_STORAGE,
+    }]
+    async fn instance_disk_list_v2025_11_20_00(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<
+            PaginatedByNameOrId<
+                v2025_11_20_00::project::OptionalProjectSelector,
+            >,
+        >,
+        path_params: Path<v2025_11_20_00::path_params::InstancePath>,
+    ) -> Result<
+        HttpResponseOk<ResultsPage<v2025_11_20_00_local::Disk>>,
+        HttpError,
+    > {
+        Self::instance_disk_list(rqctx, query_params, path_params)
+            .await
+            .and_then(|HttpResponseOk(page)| {
+                let items: Result<Vec<_>, _> =
+                    page.items.into_iter().map(TryInto::try_into).collect();
+                items.map(|items| {
+                    HttpResponseOk(ResultsPage {
+                        next_page: page.next_page,
+                        items,
+                    })
+                })
+            })
     }
 
     /// Attach disk to instance
@@ -3736,52 +3779,54 @@ pub trait NexusExternalApi {
         disk_to_attach: TypedBody<latest::path_params::DiskPath>,
     ) -> Result<HttpResponseAccepted<Disk>, HttpError>;
 
-    /// Detach disk from instance
+    /// Attach disk to instance
     #[endpoint {
-        operation_id = "instance_disk_detach",
+        operation_id = "instance_disk_attach",
         method = POST,
-        path = "/v1/instances/{instance}/disks/detach",
-        tags = ["instances"],
-        versions = ..VERSION_LOCAL_STORAGE,
-    }]
-    async fn v2025112000_instance_disk_detach(
-        rqctx: RequestContext<Self::Context>,
-        path_params: Path<latest::path_params::InstancePath>,
-        query_params: Query<latest::project::OptionalProjectSelector>,
-        disk_to_detach: TypedBody<latest::path_params::DiskPath>,
-    ) -> Result<HttpResponseAccepted<v2025112000_local::Disk>, HttpError> {
-        Self::instance_disk_detach(
-            rqctx,
-            path_params,
-            query_params,
-            disk_to_detach,
-        )
-        .await
-        .and_then(|resp| resp.try_map(TryInto::try_into))
-    }
-
-    /// Detach disk from instance
-    #[endpoint {
-        operation_id = "instance_disk_detach",
-        method = POST,
-        path = "/v1/instances/{instance}/disks/detach",
+        path = "/v1/instances/{instance}/disks/attach",
         tags = ["instances"],
         versions = VERSION_LOCAL_STORAGE..VERSION_READ_ONLY_DISKS,
     }]
-    async fn v2026013000_instance_disk_detach(
+    async fn instance_disk_attach_v2025_12_03_00(
         rqctx: RequestContext<Self::Context>,
-        path_params: Path<latest::path_params::InstancePath>,
-        query_params: Query<latest::project::OptionalProjectSelector>,
-        disk_to_detach: TypedBody<latest::path_params::DiskPath>,
-    ) -> Result<HttpResponseAccepted<v2026013000_local::Disk>, HttpError> {
-        Self::instance_disk_detach(
+        path_params: Path<v2025_11_20_00::path_params::InstancePath>,
+        query_params: Query<v2025_11_20_00::project::OptionalProjectSelector>,
+        disk_to_attach: TypedBody<v2025_11_20_00::path_params::DiskPath>,
+    ) -> Result<HttpResponseAccepted<v2026_01_30_00_local::Disk>, HttpError>
+    {
+        Self::instance_disk_attach(
             rqctx,
             path_params,
             query_params,
-            disk_to_detach,
+            disk_to_attach,
         )
         .await
         .map(|resp| resp.map(Into::into))
+    }
+
+    /// Attach disk to instance
+    #[endpoint {
+        operation_id = "instance_disk_attach",
+        method = POST,
+        path = "/v1/instances/{instance}/disks/attach",
+        tags = ["instances"],
+        versions = ..VERSION_LOCAL_STORAGE,
+    }]
+    async fn instance_disk_attach_v2025_11_20_00(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<v2025_11_20_00::path_params::InstancePath>,
+        query_params: Query<v2025_11_20_00::project::OptionalProjectSelector>,
+        disk_to_attach: TypedBody<v2025_11_20_00::path_params::DiskPath>,
+    ) -> Result<HttpResponseAccepted<v2025_11_20_00_local::Disk>, HttpError>
+    {
+        Self::instance_disk_attach(
+            rqctx,
+            path_params,
+            query_params,
+            disk_to_attach,
+        )
+        .await
+        .and_then(|resp| resp.try_map(TryInto::try_into))
     }
 
     /// Detach disk from instance
@@ -3797,6 +3842,56 @@ pub trait NexusExternalApi {
         query_params: Query<latest::project::OptionalProjectSelector>,
         disk_to_detach: TypedBody<latest::path_params::DiskPath>,
     ) -> Result<HttpResponseAccepted<Disk>, HttpError>;
+
+    /// Detach disk from instance
+    #[endpoint {
+        operation_id = "instance_disk_detach",
+        method = POST,
+        path = "/v1/instances/{instance}/disks/detach",
+        tags = ["instances"],
+        versions = VERSION_LOCAL_STORAGE..VERSION_READ_ONLY_DISKS,
+    }]
+    async fn instance_disk_detach_v2025_12_03_00(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<v2025_11_20_00::path_params::InstancePath>,
+        query_params: Query<v2025_11_20_00::project::OptionalProjectSelector>,
+        disk_to_detach: TypedBody<v2025_11_20_00::path_params::DiskPath>,
+    ) -> Result<HttpResponseAccepted<v2026_01_30_00_local::Disk>, HttpError>
+    {
+        Self::instance_disk_detach(
+            rqctx,
+            path_params,
+            query_params,
+            disk_to_detach,
+        )
+        .await
+        .map(|resp| resp.map(Into::into))
+    }
+
+    /// Detach disk from instance
+    #[endpoint {
+        operation_id = "instance_disk_detach",
+        method = POST,
+        path = "/v1/instances/{instance}/disks/detach",
+        tags = ["instances"],
+        versions = ..VERSION_LOCAL_STORAGE,
+    }]
+    async fn instance_disk_detach_v2025_11_20_00(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<v2025_11_20_00::path_params::InstancePath>,
+        query_params: Query<v2025_11_20_00::project::OptionalProjectSelector>,
+        disk_to_detach: TypedBody<v2025_11_20_00::path_params::DiskPath>,
+    ) -> Result<HttpResponseAccepted<v2025_11_20_00_local::Disk>, HttpError>
+    {
+        Self::instance_disk_detach(
+            rqctx,
+            path_params,
+            query_params,
+            disk_to_detach,
+        )
+        .await
+        .and_then(|resp| resp.try_map(TryInto::try_into))
+    }
 
     /// List affinity groups containing instance
     #[endpoint {
@@ -4386,59 +4481,6 @@ pub trait NexusExternalApi {
         query_params: Query<PaginatedByNameOrId>,
     ) -> Result<HttpResponseOk<ResultsPage<BgpConfig>>, HttpError>;
 
-    #[endpoint {
-        operation_id = "networking_bgp_status",
-        method = GET,
-        path = "/v1/system/networking/bgp-status",
-        tags = ["system/networking"],
-        versions = ..VERSION_BGP_PEER_COLLISION_STATE,
-    }]
-    async fn v2025120300_networking_bgp_status(
-        rqctx: RequestContext<Self::Context>,
-    ) -> Result<
-        HttpResponseOk<Vec<v2025120300::networking::BgpPeerStatus>>,
-        HttpError,
-    > {
-        let result = Self::networking_bgp_status(rqctx).await?.0;
-        Ok(HttpResponseOk(
-            result
-                .into_iter()
-                .map(|x| v2025120300::networking::BgpPeerStatus {
-                    addr: x.addr,
-                    local_asn: x.local_asn,
-                    remote_asn: x.remote_asn,
-                    state: match x.state {
-                        BgpPeerState::Idle => {
-                            v2025120300::networking::BgpPeerState::Idle
-                        }
-                        BgpPeerState::Connect => {
-                            v2025120300::networking::BgpPeerState::Connect
-                        }
-                        BgpPeerState::Active => {
-                            v2025120300::networking::BgpPeerState::Active
-                        }
-                        BgpPeerState::OpenSent => {
-                            v2025120300::networking::BgpPeerState::OpenSent
-                        }
-                        BgpPeerState::OpenConfirm => {
-                            v2025120300::networking::BgpPeerState::OpenConfirm
-                        }
-                        BgpPeerState::ConnectionCollision
-                        | BgpPeerState::SessionSetup => {
-                            v2025120300::networking::BgpPeerState::SessionSetup
-                        }
-                        BgpPeerState::Established => {
-                            v2025120300::networking::BgpPeerState::Established
-                        }
-                    },
-                    state_duration_millis: x.state_duration_millis,
-                    switch: x.switch,
-                })
-                .collect(),
-        ))
-    }
-
-    //TODO pagination? the normal by-name/by-id stuff does not work here
     /// Get BGP peer status
     #[endpoint {
         method = GET,
@@ -4449,6 +4491,59 @@ pub trait NexusExternalApi {
     async fn networking_bgp_status(
         rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<Vec<BgpPeerStatus>>, HttpError>;
+
+    //TODO pagination? the normal by-name/by-id stuff does not work here
+    #[endpoint {
+        operation_id = "networking_bgp_status",
+        method = GET,
+        path = "/v1/system/networking/bgp-status",
+        tags = ["system/networking"],
+        versions = ..VERSION_BGP_PEER_COLLISION_STATE,
+    }]
+    async fn networking_bgp_status_v2025_11_20_00(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<
+        HttpResponseOk<Vec<v2025_12_03_00::networking::BgpPeerStatus>>,
+        HttpError,
+    > {
+        let result = Self::networking_bgp_status(rqctx).await?.0;
+        Ok(HttpResponseOk(
+            result
+                .into_iter()
+                .map(|x| v2025_12_03_00::networking::BgpPeerStatus {
+                    addr: x.addr,
+                    local_asn: x.local_asn,
+                    remote_asn: x.remote_asn,
+                    state: match x.state {
+                        BgpPeerState::Idle => {
+                            v2025_12_03_00::networking::BgpPeerState::Idle
+                        }
+                        BgpPeerState::Connect => {
+                            v2025_12_03_00::networking::BgpPeerState::Connect
+                        }
+                        BgpPeerState::Active => {
+                            v2025_12_03_00::networking::BgpPeerState::Active
+                        }
+                        BgpPeerState::OpenSent => {
+                            v2025_12_03_00::networking::BgpPeerState::OpenSent
+                        }
+                        BgpPeerState::OpenConfirm => {
+                            v2025_12_03_00::networking::BgpPeerState::OpenConfirm
+                        }
+                        BgpPeerState::ConnectionCollision
+                        | BgpPeerState::SessionSetup => {
+                            v2025_12_03_00::networking::BgpPeerState::SessionSetup
+                        }
+                        BgpPeerState::Established => {
+                            v2025_12_03_00::networking::BgpPeerState::Established
+                        }
+                    },
+                    state_duration_millis: x.state_duration_millis,
+                    switch: x.switch,
+                })
+                .collect(),
+        ))
+    }
 
     //TODO pagination? the normal by-name/by-id stuff does not work here
     /// Get BGP exported routes
@@ -4710,35 +4805,6 @@ pub trait NexusExternalApi {
 
     /// List network interfaces
     #[endpoint {
-        operation_id = "instance_network_interface_list",
-        method = GET,
-        path = "/v1/network-interfaces",
-        tags = ["instances"],
-        versions = ..VERSION_DUAL_STACK_NICS,
-    }]
-    async fn v2026010100_instance_network_interface_list(
-        rqctx: RequestContext<Self::Context>,
-        query_params: Query<
-            PaginatedByNameOrId<latest::instance::InstanceSelector>,
-        >,
-    ) -> Result<
-        HttpResponseOk<
-            ResultsPage<v2026010100_local::InstanceNetworkInterface>,
-        >,
-        HttpError,
-    > {
-        let HttpResponseOk(ResultsPage { next_page, items }) =
-            Self::instance_network_interface_list(rqctx, query_params).await?;
-        items
-            .into_iter()
-            .map(TryInto::try_into)
-            .collect::<Result<_, _>>()
-            .map(|items| HttpResponseOk(ResultsPage { next_page, items }))
-            .map_err(HttpError::from)
-    }
-
-    /// List network interfaces
-    #[endpoint {
         method = GET,
         path = "/v1/network-interfaces",
         tags = ["instances"],
@@ -4751,32 +4817,33 @@ pub trait NexusExternalApi {
         >,
     ) -> Result<HttpResponseOk<ResultsPage<InstanceNetworkInterface>>, HttpError>;
 
-    /// Create network interface
+    /// List network interfaces
     #[endpoint {
-        operation_id = "instance_network_interface_create",
-        method = POST,
+        operation_id = "instance_network_interface_list",
+        method = GET,
         path = "/v1/network-interfaces",
         tags = ["instances"],
         versions = ..VERSION_DUAL_STACK_NICS,
     }]
-    async fn v2026010100_instance_network_interface_create(
+    async fn instance_network_interface_list_v2025_11_20_00(
         rqctx: RequestContext<Self::Context>,
-        query_params: Query<latest::instance::InstanceSelector>,
-        interface_params: TypedBody<
-            v2026010100_local::InstanceNetworkInterfaceCreate,
+        query_params: Query<
+            PaginatedByNameOrId<v2025_11_20_00::instance::InstanceSelector>,
         >,
     ) -> Result<
-        HttpResponseCreated<v2026010100_local::InstanceNetworkInterface>,
+        HttpResponseOk<
+            ResultsPage<v2026_01_01_00_local::InstanceNetworkInterface>,
+        >,
         HttpError,
     > {
-        let interface_params = interface_params.try_map(TryInto::try_into)?;
-        let HttpResponseCreated(nic) = Self::instance_network_interface_create(
-            rqctx,
-            query_params,
-            interface_params,
-        )
-        .await?;
-        nic.try_into().map(HttpResponseCreated).map_err(HttpError::from)
+        let HttpResponseOk(ResultsPage { next_page, items }) =
+            Self::instance_network_interface_list(rqctx, query_params).await?;
+        items
+            .into_iter()
+            .map(TryInto::try_into)
+            .collect::<Result<_, _>>()
+            .map(|items| HttpResponseOk(ResultsPage { next_page, items }))
+            .map_err(HttpError::from)
     }
 
     /// Create network interface
@@ -4793,6 +4860,34 @@ pub trait NexusExternalApi {
             latest::instance::InstanceNetworkInterfaceCreate,
         >,
     ) -> Result<HttpResponseCreated<InstanceNetworkInterface>, HttpError>;
+
+    /// Create network interface
+    #[endpoint {
+        operation_id = "instance_network_interface_create",
+        method = POST,
+        path = "/v1/network-interfaces",
+        tags = ["instances"],
+        versions = ..VERSION_DUAL_STACK_NICS,
+    }]
+    async fn instance_network_interface_create_v2025_11_20_00(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<v2025_11_20_00::instance::InstanceSelector>,
+        interface_params: TypedBody<
+            v2026_01_01_00_local::InstanceNetworkInterfaceCreate,
+        >,
+    ) -> Result<
+        HttpResponseCreated<v2026_01_01_00_local::InstanceNetworkInterface>,
+        HttpError,
+    > {
+        let interface_params = interface_params.try_map(TryInto::try_into)?;
+        let HttpResponseCreated(nic) = Self::instance_network_interface_create(
+            rqctx,
+            query_params,
+            interface_params,
+        )
+        .await?;
+        nic.try_into().map(HttpResponseCreated).map_err(HttpError::from)
+    }
 
     /// Delete network interface
     ///
@@ -4813,31 +4908,6 @@ pub trait NexusExternalApi {
 
     /// Fetch network interface
     #[endpoint {
-        operation_id = "instance_network_interface_view",
-        method = GET,
-        path = "/v1/network-interfaces/{interface}",
-        tags = ["instances"],
-        versions = ..VERSION_DUAL_STACK_NICS,
-    }]
-    async fn v2026010100_instance_network_interface_view(
-        rqctx: RequestContext<Self::Context>,
-        path_params: Path<latest::path_params::NetworkInterfacePath>,
-        query_params: Query<latest::instance::OptionalInstanceSelector>,
-    ) -> Result<
-        HttpResponseOk<v2026010100_local::InstanceNetworkInterface>,
-        HttpError,
-    > {
-        let HttpResponseOk(nic) = Self::instance_network_interface_view(
-            rqctx,
-            path_params,
-            query_params,
-        )
-        .await?;
-        nic.try_into().map(HttpResponseOk).map_err(HttpError::from)
-    }
-
-    /// Fetch network interface
-    #[endpoint {
         method = GET,
         path = "/v1/network-interfaces/{interface}",
         tags = ["instances"],
@@ -4849,30 +4919,26 @@ pub trait NexusExternalApi {
         query_params: Query<latest::instance::OptionalInstanceSelector>,
     ) -> Result<HttpResponseOk<InstanceNetworkInterface>, HttpError>;
 
-    /// Update network interface
+    /// Fetch network interface
     #[endpoint {
-        operation_id = "instance_network_interface_update",
-        method = PUT,
+        operation_id = "instance_network_interface_view",
+        method = GET,
         path = "/v1/network-interfaces/{interface}",
         tags = ["instances"],
         versions = ..VERSION_DUAL_STACK_NICS,
     }]
-    async fn v2026010100_instance_network_interface_update(
+    async fn instance_network_interface_view_v2025_11_20_00(
         rqctx: RequestContext<Self::Context>,
-        path_params: Path<latest::path_params::NetworkInterfacePath>,
-        query_params: Query<latest::instance::OptionalInstanceSelector>,
-        updated_iface: TypedBody<
-            latest::instance::InstanceNetworkInterfaceUpdate,
-        >,
+        path_params: Path<v2025_11_20_00::path_params::NetworkInterfacePath>,
+        query_params: Query<v2025_11_20_00::instance::OptionalInstanceSelector>,
     ) -> Result<
-        HttpResponseOk<v2026010100_local::InstanceNetworkInterface>,
+        HttpResponseOk<v2026_01_01_00_local::InstanceNetworkInterface>,
         HttpError,
     > {
-        let HttpResponseOk(nic) = Self::instance_network_interface_update(
+        let HttpResponseOk(nic) = Self::instance_network_interface_view(
             rqctx,
             path_params,
             query_params,
-            updated_iface,
         )
         .await?;
         nic.try_into().map(HttpResponseOk).map_err(HttpError::from)
@@ -4894,6 +4960,35 @@ pub trait NexusExternalApi {
         >,
     ) -> Result<HttpResponseOk<InstanceNetworkInterface>, HttpError>;
 
+    /// Update network interface
+    #[endpoint {
+        operation_id = "instance_network_interface_update",
+        method = PUT,
+        path = "/v1/network-interfaces/{interface}",
+        tags = ["instances"],
+        versions = ..VERSION_DUAL_STACK_NICS,
+    }]
+    async fn instance_network_interface_update_v2025_11_20_00(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<v2025_11_20_00::path_params::NetworkInterfacePath>,
+        query_params: Query<v2025_11_20_00::instance::OptionalInstanceSelector>,
+        updated_iface: TypedBody<
+            v2025_11_20_00::instance::InstanceNetworkInterfaceUpdate,
+        >,
+    ) -> Result<
+        HttpResponseOk<v2026_01_01_00_local::InstanceNetworkInterface>,
+        HttpError,
+    > {
+        let HttpResponseOk(nic) = Self::instance_network_interface_update(
+            rqctx,
+            path_params,
+            query_params,
+            updated_iface,
+        )
+        .await?;
+        nic.try_into().map(HttpResponseOk).map_err(HttpError::from)
+    }
+
     // External IP addresses for instances
 
     /// List external IP addresses
@@ -4913,61 +5008,6 @@ pub trait NexusExternalApi {
 
     /// Allocate and attach ephemeral IP to instance
     #[endpoint {
-        operation_id = "instance_ephemeral_ip_attach",
-        method = POST,
-        path = "/v1/instances/{instance}/external-ips/ephemeral",
-        tags = ["instances"],
-        versions = ..VERSION_IP_VERSION_AND_MULTIPLE_DEFAULT_POOLS,
-    }]
-    async fn v2025121200_instance_ephemeral_ip_attach(
-        rqctx: RequestContext<Self::Context>,
-        path_params: Path<latest::path_params::InstancePath>,
-        query_params: Query<latest::project::OptionalProjectSelector>,
-        ip_to_create: TypedBody<v2025112000::instance::EphemeralIpCreate>,
-    ) -> Result<HttpResponseAccepted<latest::external_ip::ExternalIp>, HttpError>
-    {
-        let ip_to_create = ip_to_create.map(|old| {
-            let step1: v2026010100::instance::EphemeralIpCreate = old.into();
-            let step2: v2026010300::instance::EphemeralIpCreate = step1.into();
-            step2
-        });
-        Self::v2026010300_instance_ephemeral_ip_attach(
-            rqctx,
-            path_params,
-            query_params,
-            ip_to_create,
-        )
-        .await
-    }
-
-    /// Allocate and attach ephemeral IP to instance
-    #[endpoint {
-        operation_id = "instance_ephemeral_ip_attach",
-        method = POST,
-        path = "/v1/instances/{instance}/external-ips/ephemeral",
-        tags = ["instances"],
-        versions = VERSION_IP_VERSION_AND_MULTIPLE_DEFAULT_POOLS
-            ..VERSION_POOL_SELECTION_ENUMS,
-    }]
-    async fn v2026010300_instance_ephemeral_ip_attach(
-        rqctx: RequestContext<Self::Context>,
-        path_params: Path<latest::path_params::InstancePath>,
-        query_params: Query<latest::project::OptionalProjectSelector>,
-        ip_to_create: TypedBody<v2026010300::instance::EphemeralIpCreate>,
-    ) -> Result<HttpResponseAccepted<latest::external_ip::ExternalIp>, HttpError>
-    {
-        let ip_to_create = ip_to_create.try_map(TryInto::try_into)?;
-        Self::instance_ephemeral_ip_attach(
-            rqctx,
-            path_params,
-            query_params,
-            ip_to_create,
-        )
-        .await
-    }
-
-    /// Allocate and attach ephemeral IP to instance
-    #[endpoint {
         method = POST,
         path = "/v1/instances/{instance}/external-ips/ephemeral",
         tags = ["instances"],
@@ -4980,26 +5020,64 @@ pub trait NexusExternalApi {
         ip_to_create: TypedBody<latest::instance::EphemeralIpCreate>,
     ) -> Result<HttpResponseAccepted<latest::external_ip::ExternalIp>, HttpError>;
 
-    /// Detach and deallocate ephemeral IP from instance
+    /// Allocate and attach ephemeral IP to instance
     #[endpoint {
-        operation_id = "instance_ephemeral_ip_detach",
-        method = DELETE,
+        operation_id = "instance_ephemeral_ip_attach",
+        method = POST,
         path = "/v1/instances/{instance}/external-ips/ephemeral",
         tags = ["instances"],
-        versions = ..VERSION_DUAL_STACK_EPHEMERAL_IP,
+        versions = VERSION_IP_VERSION_AND_MULTIPLE_DEFAULT_POOLS
+            ..VERSION_POOL_SELECTION_ENUMS,
     }]
-    async fn v2026012200_instance_ephemeral_ip_detach(
+    async fn instance_ephemeral_ip_attach_v2025_12_23_00(
         rqctx: RequestContext<Self::Context>,
-        path_params: Path<latest::path_params::InstancePath>,
-        query_params: Query<latest::project::OptionalProjectSelector>,
-    ) -> Result<HttpResponseDeleted, HttpError> {
-        let query_params =
-            query_params.map(|q| latest::instance::EphemeralIpDetachSelector {
-                project: q.project,
-                ip_version: None,
-            });
-        Self::instance_ephemeral_ip_detach(rqctx, path_params, query_params)
-            .await
+        path_params: Path<v2025_11_20_00::path_params::InstancePath>,
+        query_params: Query<v2025_11_20_00::project::OptionalProjectSelector>,
+        ip_to_create: TypedBody<v2026_01_03_00::instance::EphemeralIpCreate>,
+    ) -> Result<
+        HttpResponseAccepted<v2025_11_20_00::external_ip::ExternalIp>,
+        HttpError,
+    > {
+        let ip_to_create = ip_to_create.try_map(TryInto::try_into)?;
+        Self::instance_ephemeral_ip_attach(
+            rqctx,
+            path_params,
+            query_params,
+            ip_to_create,
+        )
+        .await
+    }
+
+    /// Allocate and attach ephemeral IP to instance
+    #[endpoint {
+        operation_id = "instance_ephemeral_ip_attach",
+        method = POST,
+        path = "/v1/instances/{instance}/external-ips/ephemeral",
+        tags = ["instances"],
+        versions = ..VERSION_IP_VERSION_AND_MULTIPLE_DEFAULT_POOLS,
+    }]
+    async fn instance_ephemeral_ip_attach_v2025_11_20_00(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<v2025_11_20_00::path_params::InstancePath>,
+        query_params: Query<v2025_11_20_00::project::OptionalProjectSelector>,
+        ip_to_create: TypedBody<v2025_11_20_00::instance::EphemeralIpCreate>,
+    ) -> Result<
+        HttpResponseAccepted<v2025_11_20_00::external_ip::ExternalIp>,
+        HttpError,
+    > {
+        let ip_to_create = ip_to_create.map(|old| {
+            let step1: v2026_01_01_00::instance::EphemeralIpCreate = old.into();
+            let step2: v2026_01_03_00::instance::EphemeralIpCreate =
+                step1.into();
+            step2
+        });
+        Self::instance_ephemeral_ip_attach_v2025_12_23_00(
+            rqctx,
+            path_params,
+            query_params,
+            ip_to_create,
+        )
+        .await
     }
 
     /// Detach and deallocate ephemeral IP from instance
@@ -5017,6 +5095,28 @@ pub trait NexusExternalApi {
         path_params: Path<latest::path_params::InstancePath>,
         query_params: Query<latest::instance::EphemeralIpDetachSelector>,
     ) -> Result<HttpResponseDeleted, HttpError>;
+
+    /// Detach and deallocate ephemeral IP from instance
+    #[endpoint {
+        operation_id = "instance_ephemeral_ip_detach",
+        method = DELETE,
+        path = "/v1/instances/{instance}/external-ips/ephemeral",
+        tags = ["instances"],
+        versions = ..VERSION_DUAL_STACK_EPHEMERAL_IP,
+    }]
+    async fn instance_ephemeral_ip_detach_v2025_11_20_00(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<v2025_11_20_00::path_params::InstancePath>,
+        query_params: Query<v2025_11_20_00::project::OptionalProjectSelector>,
+    ) -> Result<HttpResponseDeleted, HttpError> {
+        let query_params =
+            query_params.map(|q| latest::instance::EphemeralIpDetachSelector {
+                project: q.project,
+                ip_version: None,
+            });
+        Self::instance_ephemeral_ip_detach(rqctx, path_params, query_params)
+            .await
+    }
 
     // Instance External Subnets
 
@@ -5043,16 +5143,34 @@ pub trait NexusExternalApi {
         method = GET,
         path = "/v1/instances/{instance}/multicast-groups",
         tags = ["experimental"],
+        versions = VERSION_MULTICAST_IMPLICIT_LIFECYCLE_UPDATES..,
+    }]
+    async fn instance_multicast_group_list(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<
+            PaginatedById<latest::project::OptionalProjectSelector>,
+        >,
+        path_params: Path<latest::path_params::InstancePath>,
+    ) -> Result<
+        HttpResponseOk<ResultsPage<latest::multicast::MulticastGroupMember>>,
+        HttpError,
+    >;
+
+    /// List multicast groups for an instance
+    #[endpoint {
+        method = GET,
+        path = "/v1/instances/{instance}/multicast-groups",
+        tags = ["experimental"],
         operation_id = "instance_multicast_group_list",
         versions = ..VERSION_MULTICAST_IMPLICIT_LIFECYCLE_UPDATES,
     }]
-    async fn v2025121200_instance_multicast_group_list(
+    async fn instance_multicast_group_list_v2025_11_20_00(
         rqctx: RequestContext<Self::Context>,
-        query_params: Query<latest::project::OptionalProjectSelector>,
-        path_params: Path<latest::path_params::InstancePath>,
+        query_params: Query<v2025_11_20_00::project::OptionalProjectSelector>,
+        path_params: Path<v2025_11_20_00::path_params::InstancePath>,
     ) -> Result<
         HttpResponseOk<
-            ResultsPage<v2025112000::multicast::MulticastGroupMember>,
+            ResultsPage<v2025_11_20_00::multicast::MulticastGroupMember>,
         >,
         HttpError,
     > {
@@ -5075,45 +5193,6 @@ pub trait NexusExternalApi {
                 })
             })
     }
-
-    /// List multicast groups for an instance
-    #[endpoint {
-        method = GET,
-        path = "/v1/instances/{instance}/multicast-groups",
-        tags = ["experimental"],
-        versions = VERSION_MULTICAST_IMPLICIT_LIFECYCLE_UPDATES..,
-    }]
-    async fn instance_multicast_group_list(
-        rqctx: RequestContext<Self::Context>,
-        query_params: Query<
-            PaginatedById<latest::project::OptionalProjectSelector>,
-        >,
-        path_params: Path<latest::path_params::InstancePath>,
-    ) -> Result<
-        HttpResponseOk<ResultsPage<latest::multicast::MulticastGroupMember>>,
-        HttpError,
-    >;
-
-    /// Join multicast group
-    ///
-    /// Deprecated: newer version supports implicit group creation, accepts group
-    /// by name/UUID/IP and allows specifying source IPs (optional for ASM,
-    /// required for SSM).
-    #[endpoint {
-        method = PUT,
-        path = "/v1/instances/{instance}/multicast-groups/{multicast_group}",
-        tags = ["experimental"],
-        operation_id = "instance_multicast_group_join",
-        versions = ..VERSION_MULTICAST_IMPLICIT_LIFECYCLE_UPDATES,
-    }]
-    async fn v2025121200_instance_multicast_group_join(
-        rqctx: RequestContext<Self::Context>,
-        path_params: Path<v2025112000::multicast::InstanceMulticastGroupPath>,
-        query_params: Query<latest::project::OptionalProjectSelector>,
-    ) -> Result<
-        HttpResponseCreated<v2025112000::multicast::MulticastGroupMember>,
-        HttpError,
-    >;
 
     /// Join multicast group by name, IP address, or UUID
     ///
@@ -5141,24 +5220,28 @@ pub trait NexusExternalApi {
         HttpError,
     >;
 
-    /// Leave multicast group
+    /// Join multicast group
     ///
-    /// Deprecated: newer version accepts group by name, UUID, or IP address.
+    /// Deprecated: newer version supports implicit group creation, accepts group
+    /// by name/UUID/IP and allows specifying source IPs (optional for ASM,
+    /// required for SSM).
     #[endpoint {
-        method = DELETE,
+        method = PUT,
         path = "/v1/instances/{instance}/multicast-groups/{multicast_group}",
         tags = ["experimental"],
-        operation_id = "instance_multicast_group_leave",
+        operation_id = "instance_multicast_group_join",
         versions = ..VERSION_MULTICAST_IMPLICIT_LIFECYCLE_UPDATES,
     }]
-    async fn v2025121200_instance_multicast_group_leave(
+    async fn instance_multicast_group_join_v2025_11_20_00(
         rqctx: RequestContext<Self::Context>,
-        path_params: Path<v2025112000::multicast::InstanceMulticastGroupPath>,
-        query_params: Query<latest::project::OptionalProjectSelector>,
-    ) -> Result<HttpResponseDeleted, HttpError> {
-        let path = path_params.map(Into::into);
-        Self::instance_multicast_group_leave(rqctx, path, query_params).await
-    }
+        path_params: Path<
+            v2025_11_20_00::multicast::InstanceMulticastGroupPath,
+        >,
+        query_params: Query<v2025_11_20_00::project::OptionalProjectSelector>,
+    ) -> Result<
+        HttpResponseCreated<v2025_11_20_00::multicast::MulticastGroupMember>,
+        HttpError,
+    >;
 
     /// Leave multicast group by name, IP address, or UUID
     #[endpoint {
@@ -5172,6 +5255,27 @@ pub trait NexusExternalApi {
         path_params: Path<latest::multicast::InstanceMulticastGroupPath>,
         query_params: Query<latest::project::OptionalProjectSelector>,
     ) -> Result<HttpResponseDeleted, HttpError>;
+
+    /// Leave multicast group
+    ///
+    /// Deprecated: newer version accepts group by name, UUID, or IP address.
+    #[endpoint {
+        method = DELETE,
+        path = "/v1/instances/{instance}/multicast-groups/{multicast_group}",
+        tags = ["experimental"],
+        operation_id = "instance_multicast_group_leave",
+        versions = ..VERSION_MULTICAST_IMPLICIT_LIFECYCLE_UPDATES,
+    }]
+    async fn instance_multicast_group_leave_v2025_11_20_00(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<
+            v2025_11_20_00::multicast::InstanceMulticastGroupPath,
+        >,
+        query_params: Query<v2025_11_20_00::project::OptionalProjectSelector>,
+    ) -> Result<HttpResponseDeleted, HttpError> {
+        let path = path_params.map(Into::into);
+        Self::instance_multicast_group_leave(rqctx, path, query_params).await
+    }
 
     // Snapshots
 
@@ -5359,21 +5463,36 @@ pub trait NexusExternalApi {
 
     /// List network interfaces
     #[endpoint {
+        method = GET,
+        path = "/v1/vpc-subnets/{subnet}/network-interfaces",
+        tags = ["vpcs"],
+        versions = VERSION_DUAL_STACK_NICS..,
+    }]
+    async fn vpc_subnet_list_network_interfaces(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::path_params::SubnetPath>,
+        query_params: Query<
+            PaginatedByNameOrId<latest::vpc::OptionalVpcSelector>,
+        >,
+    ) -> Result<HttpResponseOk<ResultsPage<InstanceNetworkInterface>>, HttpError>;
+
+    /// List network interfaces
+    #[endpoint {
         operation_id = "vpc_subnet_list_network_interfaces",
         method = GET,
         path = "/v1/vpc-subnets/{subnet}/network-interfaces",
         tags = ["vpcs"],
         versions = ..VERSION_DUAL_STACK_NICS,
     }]
-    async fn v2026010100_vpc_subnet_list_network_interfaces(
+    async fn vpc_subnet_list_network_interfaces_v2025_11_20_00(
         rqctx: RequestContext<Self::Context>,
-        path_params: Path<latest::path_params::SubnetPath>,
+        path_params: Path<v2025_11_20_00::path_params::SubnetPath>,
         query_params: Query<
-            PaginatedByNameOrId<latest::vpc::OptionalVpcSelector>,
+            PaginatedByNameOrId<v2025_11_20_00::vpc::OptionalVpcSelector>,
         >,
     ) -> Result<
         HttpResponseOk<
-            ResultsPage<v2026010100_local::InstanceNetworkInterface>,
+            ResultsPage<v2026_01_01_00_local::InstanceNetworkInterface>,
         >,
         HttpError,
     > {
@@ -5391,21 +5510,6 @@ pub trait NexusExternalApi {
             .map(|items| HttpResponseOk(ResultsPage { items, next_page }))
             .map_err(HttpError::from)
     }
-
-    /// List network interfaces
-    #[endpoint {
-        method = GET,
-        path = "/v1/vpc-subnets/{subnet}/network-interfaces",
-        tags = ["vpcs"],
-        versions = VERSION_DUAL_STACK_NICS..,
-    }]
-    async fn vpc_subnet_list_network_interfaces(
-        rqctx: RequestContext<Self::Context>,
-        path_params: Path<latest::path_params::SubnetPath>,
-        query_params: Query<
-            PaginatedByNameOrId<latest::vpc::OptionalVpcSelector>,
-        >,
-    ) -> Result<HttpResponseOk<ResultsPage<InstanceNetworkInterface>>, HttpError>;
 
     // VPC Firewalls
 
@@ -6543,33 +6647,6 @@ pub trait NexusExternalApi {
 
     /// List instrumentation probes
     #[endpoint {
-        operation_id = "probe_list",
-        method = GET,
-        path = "/experimental/v1/probes",
-        tags = ["experimental"], // system/probes: only one tag is allowed
-        versions = ..VERSION_DUAL_STACK_NICS,
-    }]
-    async fn v2026010100_probe_list(
-        rqctx: RequestContext<Self::Context>,
-        query_params: Query<
-            PaginatedByNameOrId<latest::project::ProjectSelector>,
-        >,
-    ) -> Result<
-        HttpResponseOk<ResultsPage<v2025112000::probe::ProbeInfo>>,
-        HttpError,
-    > {
-        let HttpResponseOk(ResultsPage { items, next_page }) =
-            Self::probe_list(rqctx, query_params).await?;
-        items
-            .into_iter()
-            .map(TryInto::try_into)
-            .collect::<Result<_, _>>()
-            .map(|items| HttpResponseOk(ResultsPage { items, next_page }))
-            .map_err(HttpError::from)
-    }
-
-    /// List instrumentation probes
-    #[endpoint {
         method = GET,
         path = "/experimental/v1/probes",
         tags = ["experimental"], // system/probes: only one tag is allowed
@@ -6582,22 +6659,31 @@ pub trait NexusExternalApi {
         >,
     ) -> Result<HttpResponseOk<ResultsPage<latest::probe::ProbeInfo>>, HttpError>;
 
-    /// View instrumentation probe
+    /// List instrumentation probes
     #[endpoint {
-        operation_id = "probe_view",
+        operation_id = "probe_list",
         method = GET,
-        path = "/experimental/v1/probes/{probe}",
+        path = "/experimental/v1/probes",
         tags = ["experimental"], // system/probes: only one tag is allowed
         versions = ..VERSION_DUAL_STACK_NICS,
     }]
-    async fn v2026010100_probe_view(
+    async fn probe_list_v2025_11_20_00(
         rqctx: RequestContext<Self::Context>,
-        path_params: Path<latest::path_params::ProbePath>,
-        query_params: Query<latest::project::ProjectSelector>,
-    ) -> Result<HttpResponseOk<v2025112000::probe::ProbeInfo>, HttpError> {
-        let HttpResponseOk(info) =
-            Self::probe_view(rqctx, path_params, query_params).await?;
-        info.try_into().map(HttpResponseOk).map_err(HttpError::from)
+        query_params: Query<
+            PaginatedByNameOrId<v2025_11_20_00::project::ProjectSelector>,
+        >,
+    ) -> Result<
+        HttpResponseOk<ResultsPage<v2025_11_20_00::probe::ProbeInfo>>,
+        HttpError,
+    > {
+        let HttpResponseOk(ResultsPage { items, next_page }) =
+            Self::probe_list(rqctx, query_params).await?;
+        items
+            .into_iter()
+            .map(TryInto::try_into)
+            .collect::<Result<_, _>>()
+            .map(|items| HttpResponseOk(ResultsPage { items, next_page }))
+            .map_err(HttpError::from)
     }
 
     /// View instrumentation probe
@@ -6613,20 +6699,23 @@ pub trait NexusExternalApi {
         query_params: Query<latest::project::ProjectSelector>,
     ) -> Result<HttpResponseOk<latest::probe::ProbeInfo>, HttpError>;
 
-    /// Create instrumentation probe
+    /// View instrumentation probe
     #[endpoint {
-        operation_id = "probe_create",
-        method = POST,
-        path = "/experimental/v1/probes",
+        operation_id = "probe_view",
+        method = GET,
+        path = "/experimental/v1/probes/{probe}",
         tags = ["experimental"], // system/probes: only one tag is allowed
-        versions = ..VERSION_POOL_SELECTION_ENUMS,
+        versions = ..VERSION_DUAL_STACK_NICS,
     }]
-    async fn v2026010300_probe_create(
+    async fn probe_view_v2025_11_20_00(
         rqctx: RequestContext<Self::Context>,
-        query_params: Query<latest::project::ProjectSelector>,
-        new_probe: TypedBody<v2026010300::probe::ProbeCreate>,
-    ) -> Result<HttpResponseCreated<Probe>, HttpError> {
-        Self::probe_create(rqctx, query_params, new_probe.map(Into::into)).await
+        path_params: Path<v2025_11_20_00::path_params::ProbePath>,
+        query_params: Query<v2025_11_20_00::project::ProjectSelector>,
+    ) -> Result<HttpResponseOk<v2025_11_20_00::probe::ProbeInfo>, HttpError>
+    {
+        let HttpResponseOk(info) =
+            Self::probe_view(rqctx, path_params, query_params).await?;
+        info.try_into().map(HttpResponseOk).map_err(HttpError::from)
     }
 
     /// Create instrumentation probe
@@ -6641,6 +6730,22 @@ pub trait NexusExternalApi {
         query_params: Query<latest::project::ProjectSelector>,
         new_probe: TypedBody<latest::probe::ProbeCreate>,
     ) -> Result<HttpResponseCreated<Probe>, HttpError>;
+
+    /// Create instrumentation probe
+    #[endpoint {
+        operation_id = "probe_create",
+        method = POST,
+        path = "/experimental/v1/probes",
+        tags = ["experimental"], // system/probes: only one tag is allowed
+        versions = ..VERSION_POOL_SELECTION_ENUMS,
+    }]
+    async fn probe_create_v2025_11_20_00(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<v2025_11_20_00::project::ProjectSelector>,
+        new_probe: TypedBody<v2026_01_03_00::probe::ProbeCreate>,
+    ) -> Result<HttpResponseCreated<Probe>, HttpError> {
+        Self::probe_create(rqctx, query_params, new_probe.map(Into::into)).await
+    }
 
     /// Delete instrumentation probe
     #[endpoint {

@@ -14,7 +14,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::v2025112000::probe::ProbeExternalIp;
+use crate::v2025_11_20_00::probe::ProbeExternalIp;
 
 /// Information about a probe.
 #[derive(Debug, Clone, JsonSchema, Serialize, Deserialize)]
@@ -27,13 +27,13 @@ pub struct ProbeInfo {
     pub interface: NetworkInterface,
 }
 
-impl TryFrom<ProbeInfo> for crate::v2025112000::probe::ProbeInfo {
+impl TryFrom<ProbeInfo> for crate::v2025_11_20_00::probe::ProbeInfo {
     type Error = external::Error;
 
     fn try_from(
         new: ProbeInfo,
-    ) -> Result<crate::v2025112000::probe::ProbeInfo, Self::Error> {
-        Ok(crate::v2025112000::probe::ProbeInfo {
+    ) -> Result<crate::v2025_11_20_00::probe::ProbeInfo, Self::Error> {
+        Ok(crate::v2025_11_20_00::probe::ProbeInfo {
             id: new.id,
             name: new.name,
             sled: new.sled,
@@ -53,8 +53,8 @@ pub struct ProbeCreate {
     pub ip_pool: Option<NameOrId>,
 }
 
-impl From<crate::v2025112000::probe::ProbeCreate> for ProbeCreate {
-    fn from(old: crate::v2025112000::probe::ProbeCreate) -> ProbeCreate {
+impl From<crate::v2025_11_20_00::probe::ProbeCreate> for ProbeCreate {
+    fn from(old: crate::v2025_11_20_00::probe::ProbeCreate) -> ProbeCreate {
         ProbeCreate {
             identity: old.identity,
             sled: old.sled,
