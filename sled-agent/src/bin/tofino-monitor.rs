@@ -86,7 +86,7 @@ mod illumos {
                     Err(e) => {
                         error!(
                             log, "failed devinfo lookup";
-                            InlineErrorChain::new(&e),
+                            InlineErrorChain::new(&*e),
                         );
                     }
                     Ok(Some(x)) => return x,
