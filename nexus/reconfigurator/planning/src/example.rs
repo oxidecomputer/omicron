@@ -23,6 +23,7 @@ use anyhow::Context;
 use anyhow::bail;
 use camino::Utf8Path;
 use camino_tempfile::Utf8TempDir;
+use chrono::Utc;
 use clap::Parser;
 use nexus_inventory::CollectionBuilderRng;
 use nexus_types::deployment::Blueprint;
@@ -30,6 +31,8 @@ use nexus_types::deployment::BlueprintArtifactVersion;
 use nexus_types::deployment::BlueprintHostPhase2DesiredContents;
 use nexus_types::deployment::BlueprintHostPhase2DesiredSlots;
 use nexus_types::deployment::BlueprintSource;
+use nexus_types::deployment::ClickhouseMode;
+use nexus_types::deployment::ClickhousePolicy;
 use nexus_types::deployment::ExpectedVersion;
 use nexus_types::deployment::OmicronZoneNic;
 use nexus_types::deployment::PlanningInput;
@@ -44,6 +47,7 @@ use omicron_common::policy::INTERNAL_DNS_REDUNDANCY;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::SledKind;
 use omicron_uuid_kinds::VnicUuid;
+use sled_agent_types::inventory::SledRole;
 use sled_agent_types::inventory::ZoneKind;
 use tufaceous_artifact::ArtifactHash;
 use tufaceous_artifact::ArtifactKind;
@@ -212,6 +216,11 @@ pub struct ExampleSystemBuilder {
     internal_dns_count: ZoneCount,
     external_dns_count: ZoneCount,
     crucible_pantry_count: ZoneCount,
+    oximeter_count: ZoneCount,
+    cockroachdb_count: ZoneCount,
+    boundary_ntp_count: ZoneCount,
+    clickhouse_policy: ClickhousePolicy,
+    scrimlet_count: u8,
     create_zones: bool,
     create_disks_in_blueprint: bool,
     target_release: TargetReleaseDescription,
@@ -248,6 +257,15 @@ impl ExampleSystemBuilder {
             internal_dns_count: ZoneCount(INTERNAL_DNS_REDUNDANCY),
             external_dns_count: ZoneCount(Self::DEFAULT_EXTERNAL_DNS_COUNT),
             crucible_pantry_count: ZoneCount(CRUCIBLE_PANTRY_REDUNDANCY),
+            oximeter_count: ZoneCount(0),
+            cockroachdb_count: ZoneCount(0),
+            boundary_ntp_count: ZoneCount(0),
+            clickhouse_policy: ClickhousePolicy {
+                version: 1,
+                mode: ClickhouseMode::SingleNodeOnly,
+                time_created: Utc::now(),
+            },
+            scrimlet_count: 0,
             create_zones: true,
             create_disks_in_blueprint: true,
             target_release: TargetReleaseDescription::Initial,
@@ -271,6 +289,15 @@ impl ExampleSystemBuilder {
     /// If [`Self::create_zones`] is set to `false`, this is ignored.
     pub fn ndisks_per_sled(mut self, ndisks_per_sled: u8) -> Self {
         self.ndisks_per_sled = ndisks_per_sled;
+        self
+    }
+
+    /// Set the number of sleds that identify as Scrimlets in the example
+    /// system.
+    ///
+    /// The default value is 0.
+    pub fn scrimlet_count(mut self, scrimlet_count: u8) -> Self {
+        self.scrimlet_count = scrimlet_count;
         self
     }
 
@@ -335,6 +362,47 @@ impl ExampleSystemBuilder {
         crucible_pantry_count: usize,
     ) -> Self {
         self.crucible_pantry_count = ZoneCount(crucible_pantry_count);
+        self
+    }
+
+    /// Set the number of Oximeter instances in the example system.
+    ///
+    /// The default value is 0. A value of 0 is permitted.
+    ///
+    /// If [`Self::create_zones`] is set to `false`, this is ignored.
+    pub fn oximeter_count(mut self, oximeter_count: usize) -> Self {
+        self.oximeter_count = ZoneCount(oximeter_count);
+        self
+    }
+
+    /// Set the number of CockroachDB instances in the example system.
+    ///
+    /// The default value is 0. A value of 0 is permitted.
+    ///
+    /// If [`Self::create_zones`] is set to `false`, this is ignored.
+    pub fn cockroachdb_count(mut self, cockroachdb_count: usize) -> Self {
+        self.cockroachdb_count = ZoneCount(cockroachdb_count);
+        self
+    }
+
+    /// Set the number of boundary NTP zones in the example system.
+    ///
+    /// This implicitly controls the number of internal NTP zones in the system.
+    /// Each sled with no boundary NTP zone gets an internal NTP zone.
+    ///
+    /// If [`Self::create_zones`] is set to `false`, this is ignored.
+    pub fn boundary_ntp_count(mut self, boundary_ntp_count: usize) -> Self {
+        self.boundary_ntp_count = ZoneCount(boundary_ntp_count);
+        self
+    }
+
+    /// Set the Clickhouse policy for the example system.
+    ///
+    /// The default is that only single-node Clickhouse is deployed.
+    ///
+    /// If [`Self::create_zones`] is set to `false`, this is ignored.
+    pub fn clickhouse_policy(mut self, policy: ClickhousePolicy) -> Self {
+        self.clickhouse_policy = policy;
         self
     }
 
@@ -428,6 +496,18 @@ impl ExampleSystemBuilder {
         self.external_dns_count.0
     }
 
+    pub fn get_oximeter_zones(&self) -> usize {
+        self.oximeter_count.0
+    }
+
+    pub fn get_cockroachdb_zones(&self) -> usize {
+        self.cockroachdb_count.0
+    }
+
+    pub fn get_boundary_ntp_count(&self) -> usize {
+        self.boundary_ntp_count.0
+    }
+
     /// Create a new example system with the given modifications.
     ///
     /// Return the system, and the initial blueprint that matches it.
@@ -443,6 +523,10 @@ impl ExampleSystemBuilder {
             "internal_dns_count" => self.internal_dns_count.0,
             "external_dns_count" => self.external_dns_count.0,
             "crucible_pantry_count" => self.crucible_pantry_count.0,
+            "oximeter_count" => self.oximeter_count.0,
+            "cockroachdb_count" => self.cockroachdb_count.0,
+            "boundary_ntp_count" => self.boundary_ntp_count.0,
+            "clickhouse_policy" => ?self.clickhouse_policy,
             "create_zones" => self.create_zones,
             "create_disks_in_blueprint" => self.create_disks_in_blueprint,
         );
@@ -450,14 +534,28 @@ impl ExampleSystemBuilder {
         let mut rng = self.rng.clone();
 
         let mut system = SystemDescription::new();
-        // Update the system's target counts with the counts. (Note that
-        // there's no external DNS count.)
+        // Update the system's target counts with the counts configured by the
+        // caller.  The target counts are essentially planner configuration
+        // (part of system policy).  The idea here is to configure the resulting
+        // system's policy to match what the user configured so that if you were
+        // to run the planner on it (with planning input generated from the
+        // SystemDescription, which is what we're configuring here), it would be
+        // happy with the system we've created and wouldn't try to add/remove
+        // zones if what the caller configured differs from the defaults.
+        //
+        // Note that external DNS does not get configured in this way because
+        // the target count is determined from the number of distinct external
+        // IPs configured for the external DNS servers.
         system
             .set_target_nexus_zone_count(nexus_count.0)
             .set_target_internal_dns_zone_count(self.internal_dns_count.0)
-            .set_target_crucible_pantry_zone_count(
-                self.crucible_pantry_count.0,
-            );
+            .set_target_crucible_pantry_zone_count(self.crucible_pantry_count.0)
+            .set_target_oximeter_zone_count(self.oximeter_count.0)
+            .set_target_cockroachdb_zone_count(self.cockroachdb_count.0)
+            .set_target_boundary_ntp_zone_count(self.boundary_ntp_count.0);
+
+        // Set the clickhouse policy
+        system.clickhouse_policy(self.clickhouse_policy.clone());
 
         // Set the target release if one is available. We don't do this
         // unconditionally because we don't want the target release generation
@@ -470,7 +568,16 @@ impl ExampleSystemBuilder {
         let sled_ids_with_settings: Vec<_> = self
             .sled_settings
             .iter()
-            .map(|settings| (rng.sled_rng.next(), settings))
+            .enumerate()
+            .map(|(i, settings)| {
+                let role = if i < usize::from(self.scrimlet_count) {
+                    SledRole::Scrimlet
+                } else {
+                    SledRole::Gimlet
+                };
+
+                (rng.sled_rng.next(), settings, role)
+            })
             .collect();
 
         let artifacts_by_kind = if let TargetReleaseDescription::TufRepo(repo) =
@@ -492,11 +599,12 @@ impl ExampleSystemBuilder {
             None
         };
 
-        for (sled_id, settings) in &sled_ids_with_settings {
+        for (sled_id, settings, role) in &sled_ids_with_settings {
             let _ = system
                 .sled(
                     SledBuilder::new()
                         .id(*sled_id)
+                        .sled_role(*role)
                         .npools(self.ndisks_per_sled)
                         .policy(settings.policy),
                 )
@@ -574,18 +682,26 @@ impl ExampleSystemBuilder {
                     .unwrap();
             }
             if self.create_zones {
-                let _ = builder
-                    .sled_ensure_zone_ntp(
-                        sled_id,
-                        self.target_release
-                            .zone_image_source(ZoneKind::BoundaryNtp)
-                            .expect("obtained BoundaryNtp image source"),
-                    )
-                    .unwrap();
+                // Add NTP zones. On the first N discretionary sleds, we'll add
+                // BoundaryNtp zones. On all other sleds, add InternalNtp zones.
+                let is_discretionary = SledFilter::Discretionary
+                    .matches_policy(sled_details.policy);
+                let will_get_boundary_ntp = is_discretionary
+                    && discretionary_ix < self.boundary_ntp_count.0;
+
+                if !will_get_boundary_ntp {
+                    let _ = builder
+                        .sled_ensure_zone_ntp(
+                            sled_id,
+                            self.target_release
+                                .zone_image_source(ZoneKind::InternalNtp)
+                                .expect("obtained InternalNtp image source"),
+                        )
+                        .unwrap();
+                }
 
                 // Create discretionary zones if allowed.
-                if SledFilter::Discretionary.matches_policy(sled_details.policy)
-                {
+                if is_discretionary {
                     for _ in 0..nexus_count
                         .on(discretionary_ix, discretionary_sled_count)
                     {
@@ -605,7 +721,10 @@ impl ExampleSystemBuilder {
                             )
                             .unwrap();
                     }
-                    if discretionary_ix == 0 {
+                    // Add single-node Clickhouse zone if the policy enables it.
+                    if discretionary_ix == 0
+                        && self.clickhouse_policy.mode.single_node_enabled()
+                    {
                         builder
                             .sled_add_zone_clickhouse(
                                 sled_id,
@@ -614,6 +733,57 @@ impl ExampleSystemBuilder {
                                     .expect("obtained Clickhouse image source"),
                             )
                             .unwrap();
+                    }
+                    // Add ClickhouseKeeper and ClickhouseServer zones if the
+                    // policy enables clustering.
+                    if self.clickhouse_policy.mode.cluster_enabled() {
+                        let policy = &self.clickhouse_policy;
+                        let (target_keepers, target_servers) =
+                            match &policy.mode {
+                                ClickhouseMode::Both {
+                                    target_keepers,
+                                    target_servers,
+                                }
+                                | ClickhouseMode::ClusterOnly {
+                                    target_keepers,
+                                    target_servers,
+                                } => (*target_keepers, *target_servers),
+                                ClickhouseMode::SingleNodeOnly => (0, 0),
+                            };
+                        for _ in 0..ZoneCount(target_keepers.into())
+                            .on(discretionary_ix, discretionary_sled_count)
+                        {
+                            builder
+                                .sled_add_zone_clickhouse_keeper(
+                                    sled_id,
+                                    self.target_release
+                                        .zone_image_source(
+                                            ZoneKind::ClickhouseKeeper,
+                                        )
+                                        .expect(
+                                            "obtained ClickhouseKeeper image \
+                                             source",
+                                        ),
+                                )
+                                .unwrap();
+                        }
+                        for _ in 0..ZoneCount(target_servers.into())
+                            .on(discretionary_ix, discretionary_sled_count)
+                        {
+                            builder
+                                .sled_add_zone_clickhouse_server(
+                                    sled_id,
+                                    self.target_release
+                                        .zone_image_source(
+                                            ZoneKind::ClickhouseServer,
+                                        )
+                                        .expect(
+                                            "obtained ClickhouseServer image \
+                                             source",
+                                        ),
+                                )
+                                .unwrap();
+                        }
                     }
                     let mut internal_dns_subnets =
                         builder.available_internal_dns_subnets().unwrap();
@@ -668,6 +838,59 @@ impl ExampleSystemBuilder {
                                     .expect(
                                         "obtained CruciblePantry image source",
                                     ),
+                            )
+                            .unwrap();
+                    }
+                    for _ in 0..self
+                        .oximeter_count
+                        .on(discretionary_ix, discretionary_sled_count)
+                    {
+                        builder
+                            .sled_add_zone_oximeter(
+                                sled_id,
+                                self.target_release
+                                    .zone_image_source(ZoneKind::Oximeter)
+                                    .expect("obtained Oximeter image source"),
+                            )
+                            .unwrap();
+                    }
+                    for _ in 0..self
+                        .cockroachdb_count
+                        .on(discretionary_ix, discretionary_sled_count)
+                    {
+                        builder
+                            .sled_add_zone_cockroachdb(
+                                sled_id,
+                                self.target_release
+                                    .zone_image_source(ZoneKind::CockroachDb)
+                                    .expect(
+                                        "obtained CockroachDb image source",
+                                    ),
+                            )
+                            .unwrap();
+                    }
+                    // Add BoundaryNtp zones on the first N discretionary sleds.
+                    if will_get_boundary_ntp {
+                        let ntp_servers = vec!["ntp.example.com".to_string()];
+                        let dns_servers = vec!["8.8.8.8".parse().unwrap()];
+                        let domain = Some("example.com".to_string());
+                        let external_ip = external_networking_alloc
+                            .for_new_boundary_ntp()
+                            .expect(
+                                "should have an external IP for BoundaryNtp",
+                            );
+                        builder
+                            .sled_add_zone_boundary_ntp_with_config(
+                                sled_id,
+                                ntp_servers,
+                                dns_servers,
+                                domain,
+                                self.target_release
+                                    .zone_image_source(ZoneKind::BoundaryNtp)
+                                    .expect(
+                                        "obtained BoundaryNtp image source",
+                                    ),
+                                external_ip,
                             )
                             .unwrap();
                     }
@@ -923,6 +1146,14 @@ impl Default for BuilderSledSettings {
 struct ZoneCount(pub usize);
 
 impl ZoneCount {
+    /// Helper for determining how many instances of a particular zone should be
+    /// on a particular sled
+    ///
+    /// The assumption is that the caller is looping over `0..total_sleds` and
+    /// invoking this function for each sled with `sled_id` as the loop index.
+    /// This function returns how many instances of this zone should be on the
+    /// given sled, assuming the caller wants to distribute all of the instances
+    /// (`self.0`) as evenly as possible over all of the sleds (`total_sleds`).
     fn on(self, sled_id: usize, total_sleds: usize) -> usize {
         // Spread instances out as evenly as possible. If there are 5 sleds and 3
         // instances, we want to spread them out as 2, 2, 1.
@@ -1006,6 +1237,7 @@ pub fn extract_tuf_repo_description(
 #[cfg(test)]
 mod tests {
     use std::collections::BTreeMap;
+    use std::collections::BTreeSet;
     use std::time::Duration;
 
     use anyhow::anyhow;
@@ -1024,9 +1256,12 @@ mod tests {
     use omicron_common::address::REPO_DEPOT_PORT;
     use omicron_common::address::get_sled_address;
     use omicron_common::api::external::Generation;
+    use omicron_common::policy::COCKROACHDB_REDUNDANCY;
+    use omicron_common::policy::OXIMETER_REDUNDANCY;
     use omicron_test_utils::dev::test_setup_log;
     use sled_agent_types::inventory::{OmicronZoneConfig, ZoneKind};
     use slog_error_chain::InlineErrorChain;
+    use strum::IntoEnumIterator;
 
     use super::*;
 
@@ -1065,15 +1300,21 @@ mod tests {
                 .unwrap()
                 .external_dns_count(10)
                 .unwrap()
+                .oximeter_count(4)
+                .cockroachdb_count(3)
+                .boundary_ntp_count(2)
+                .clickhouse_policy(ClickhousePolicy {
+                    version: 0,
+                    mode: ClickhouseMode::Both {
+                        target_servers: 3,
+                        target_keepers: 4,
+                    },
+                    time_created: chrono::Utc::now(),
+                })
                 .build();
 
         // Define a time_created for consistent output across runs.
         blueprint.time_created = DateTime::<Utc>::UNIX_EPOCH;
-
-        expectorate::assert_contents(
-            "tests/output/example_builder_zone_counts_blueprint.txt",
-            &blueprint.display().to_string(),
-        );
 
         // Check that the system's target counts are set correctly.
         assert_eq!(example.system.target_nexus_zone_count(), 6);
@@ -1165,6 +1406,153 @@ mod tests {
             crucible_pantry_zones,
         );
 
+        let clickhouse_keeper_zones =
+            blueprint_zones_of_kind(&blueprint, ZoneKind::ClickhouseKeeper);
+        assert_eq!(
+            clickhouse_keeper_zones.len(),
+            4,
+            "expected 4 ClickhouseKeeper zones in blueprint, got {}: {:#?}",
+            clickhouse_keeper_zones.len(),
+            clickhouse_keeper_zones,
+        );
+        let clickhouse_keeper_zones = collection_ledgered_zones_of_kind(
+            &example.collection,
+            ZoneKind::ClickhouseKeeper,
+        );
+        assert_eq!(
+            clickhouse_keeper_zones.len(),
+            4,
+            "expected 4 ClickhouseKeeper zones in collection, got {}: {:#?}",
+            clickhouse_keeper_zones.len(),
+            clickhouse_keeper_zones,
+        );
+
+        let clickhouse_server_zones =
+            blueprint_zones_of_kind(&blueprint, ZoneKind::ClickhouseServer);
+        assert_eq!(
+            clickhouse_server_zones.len(),
+            3,
+            "expected 3 ClickhouseServer zones in blueprint, got {}: {:#?}",
+            clickhouse_server_zones.len(),
+            clickhouse_server_zones,
+        );
+        let clickhouse_server_zones = collection_ledgered_zones_of_kind(
+            &example.collection,
+            ZoneKind::ClickhouseServer,
+        );
+        assert_eq!(
+            clickhouse_server_zones.len(),
+            3,
+            "expected 3 ClickhouseServer zones in collection, got {}: {:#?}",
+            clickhouse_server_zones.len(),
+            clickhouse_server_zones,
+        );
+
+        let oximeter_zones =
+            blueprint_zones_of_kind(&blueprint, ZoneKind::Oximeter);
+        assert_eq!(
+            oximeter_zones.len(),
+            4,
+            "expected 4 Oximeter zones in blueprint, got {}: {:#?}",
+            oximeter_zones.len(),
+            oximeter_zones,
+        );
+        let oximeter_zones = collection_ledgered_zones_of_kind(
+            &example.collection,
+            ZoneKind::Oximeter,
+        );
+        assert_eq!(
+            oximeter_zones.len(),
+            4,
+            "expected 4 Oximeter zones in collection, got {}: {:#?}",
+            oximeter_zones.len(),
+            oximeter_zones,
+        );
+
+        let cockroachdb_zones =
+            blueprint_zones_of_kind(&blueprint, ZoneKind::CockroachDb);
+        assert_eq!(
+            cockroachdb_zones.len(),
+            3,
+            "expected 3 CockroachDB zones in blueprint, got {}: {:#?}",
+            cockroachdb_zones.len(),
+            cockroachdb_zones,
+        );
+        let cockroachdb_zones = collection_ledgered_zones_of_kind(
+            &example.collection,
+            ZoneKind::CockroachDb,
+        );
+        assert_eq!(
+            cockroachdb_zones.len(),
+            3,
+            "expected 3 CockroachDB zones in collection, got {}: {:#?}",
+            cockroachdb_zones.len(),
+            cockroachdb_zones,
+        );
+
+        let boundary_ntp_zones =
+            blueprint_zones_of_kind(&blueprint, ZoneKind::BoundaryNtp);
+        assert_eq!(
+            boundary_ntp_zones.len(),
+            2,
+            "expected 2 BoundaryNtp zones in blueprint, got {}: {:#?}",
+            boundary_ntp_zones.len(),
+            boundary_ntp_zones,
+        );
+        let boundary_ntp_zones = collection_ledgered_zones_of_kind(
+            &example.collection,
+            ZoneKind::BoundaryNtp,
+        );
+        assert_eq!(
+            boundary_ntp_zones.len(),
+            2,
+            "expected 2 BoundaryNtp zones in collection, got {}: {:#?}",
+            boundary_ntp_zones.len(),
+            boundary_ntp_zones,
+        );
+
+        logctx.cleanup_successful();
+    }
+
+    #[test]
+    fn builder_all_zone_types() {
+        static TEST_NAME: &str = "example_builder_all_zone_types";
+        let logctx = test_setup_log(TEST_NAME);
+
+        // Build an example system with all supported zone types.
+        let (_example, blueprint) =
+            ExampleSystemBuilder::new(&logctx.log, TEST_NAME)
+                .nsleds(5)
+                .oximeter_count(OXIMETER_REDUNDANCY)
+                .cockroachdb_count(COCKROACHDB_REDUNDANCY)
+                .boundary_ntp_count(2)
+                .external_dns_count(1)
+                .unwrap()
+                .clickhouse_policy(ClickhousePolicy {
+                    version: 0,
+                    mode: ClickhouseMode::Both {
+                        target_servers: 2,
+                        target_keepers: 3,
+                    },
+                    time_created: chrono::Utc::now(),
+                })
+                .build();
+
+        // Verify that we deploy every type of zone by iterating all ZoneKind
+        // variants and checking that each is represented in the blueprint.
+        let mut uncovered_zone_kinds: BTreeSet<ZoneKind> =
+            ZoneKind::iter().collect();
+
+        for (_, zone_config) in blueprint.in_service_zones() {
+            uncovered_zone_kinds.remove(&zone_config.zone_type.kind());
+        }
+
+        assert!(
+            uncovered_zone_kinds.is_empty(),
+            "the following zone kinds were not found in the blueprint: {:?}",
+            uncovered_zone_kinds
+        );
+
         logctx.cleanup_successful();
     }
 
@@ -1183,6 +1571,20 @@ mod tests {
             ExampleSystemBuilder::new(&logctx.log, TEST_NAME)
                 .nsleds(32)
                 .nexus_count(6)
+                .cockroachdb_count(5)
+                .boundary_ntp_count(2)
+                .oximeter_count(1)
+                .external_dns_count(5)
+                .expect("expected to be able to set external_dns_count")
+                .scrimlet_count(2)
+                .clickhouse_policy(ClickhousePolicy {
+                    version: 0,
+                    mode: ClickhouseMode::Both {
+                        target_servers: 2,
+                        target_keepers: 3,
+                    },
+                    time_created: chrono::Utc::now(),
+                })
                 .build();
         let sleds_by_id = blueprint
             .sleds
@@ -1394,37 +1796,34 @@ mod tests {
         for service in ServiceName::iter() {
             match service {
                 // Services that exist in the example system.
-                ServiceName::Clickhouse
+                ServiceName::BoundaryNtp
+                | ServiceName::Clickhouse
+                | ServiceName::ClickhouseAdminKeeper
+                | ServiceName::ClickhouseAdminServer
                 | ServiceName::ClickhouseAdminSingleServer
+                | ServiceName::ClickhouseClusterNative
+                | ServiceName::ClickhouseKeeper
                 | ServiceName::ClickhouseNative
+                | ServiceName::ClickhouseServer
+                | ServiceName::Cockroach
+                | ServiceName::CruciblePantry
+                | ServiceName::ExternalDns
                 | ServiceName::InternalDns
                 | ServiceName::Nexus
                 | ServiceName::NexusLockstep
+                | ServiceName::Oximeter
                 | ServiceName::OximeterReader
                 | ServiceName::RepoDepot
-                | ServiceName::CruciblePantry => {
+                | ServiceName::ManagementGatewayService
+                | ServiceName::Dendrite
+                | ServiceName::Mgd => {
                     out.insert(service, Ok(()));
                 }
-                // Services that are not currently part of the example system.
-                //
-                // TODO: They really should be part of the example system (at
-                // least in an optional mode). See
-                // https://github.com/oxidecomputer/omicron/issues/9349.
-                ServiceName::ClickhouseAdminKeeper
-                | ServiceName::ClickhouseAdminServer
-                | ServiceName::ClickhouseClusterNative
-                | ServiceName::ClickhouseKeeper
-                | ServiceName::ClickhouseServer
-                | ServiceName::Cockroach
-                | ServiceName::ExternalDns
-                | ServiceName::Oximeter
-                | ServiceName::ManagementGatewayService
-                | ServiceName::Wicketd
-                | ServiceName::Dendrite
+                // DNS records for Wicketd, Tfportd, and Maghemite don't
+                // currently exist, even on real deployed systems.
+                ServiceName::Wicketd
                 | ServiceName::Tfport
-                | ServiceName::BoundaryNtp
-                | ServiceName::Maghemite
-                | ServiceName::Mgd => {
+                | ServiceName::Maghemite => {
                     out.insert(service, Err(QueryError::NoRecordsFound));
                 }
                 // InternalNtp is too large to fit in a single DNS packet and

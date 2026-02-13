@@ -12,8 +12,7 @@ use omicron_common::api::external::{
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-// Re-use the canonical IpPoolType from the initial version.
-pub use crate::v2025112000::ip_pool::IpPoolType;
+use crate::v2025112000::ip_pool::IpPoolType;
 
 /// An IP pool in the context of a silo.
 #[derive(
@@ -39,4 +38,11 @@ pub struct SiloIpPool {
     pub pool_type: IpPoolType,
 }
 
-// Note: Conversion to v2025122300::ip_pool::SiloIpPool is defined in that module
+impl From<SiloIpPool> for crate::v2025122300::ip_pool::SiloIpPool {
+    fn from(new: SiloIpPool) -> crate::v2025122300::ip_pool::SiloIpPool {
+        crate::v2025122300::ip_pool::SiloIpPool {
+            identity: new.identity,
+            is_default: new.is_default,
+        }
+    }
+}

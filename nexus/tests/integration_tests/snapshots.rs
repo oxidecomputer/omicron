@@ -111,6 +111,7 @@ async fn test_snapshot_basic(cptestctx: &ControlPlaneTestContext) {
         disk_backend: disk::DiskBackend::Distributed {
             disk_source: disk::DiskSource::Image {
                 image_id: image.identity.id,
+                read_only: false,
             },
         },
         size: disk_size,
@@ -226,6 +227,7 @@ async fn test_snapshot_without_instance(cptestctx: &ControlPlaneTestContext) {
         disk_backend: disk::DiskBackend::Distributed {
             disk_source: disk::DiskSource::Image {
                 image_id: image.identity.id,
+                read_only: false,
             },
         },
         size: disk_size,
@@ -327,6 +329,7 @@ async fn test_snapshot_stopped_instance(cptestctx: &ControlPlaneTestContext) {
         disk_backend: disk::DiskBackend::Distributed {
             disk_source: disk::DiskSource::Image {
                 image_id: image.identity.id,
+                read_only: false,
             },
         },
         size: disk_size,
@@ -629,6 +632,7 @@ async fn test_reject_creating_disk_from_snapshot(
                 disk_backend: disk::DiskBackend::Distributed {
                     disk_source: disk::DiskSource::Snapshot {
                         snapshot_id: snapshot.id(),
+                        read_only: false,
                     },
                 },
 
@@ -663,6 +667,7 @@ async fn test_reject_creating_disk_from_snapshot(
                 disk_backend: disk::DiskBackend::Distributed {
                     disk_source: disk::DiskSource::Snapshot {
                         snapshot_id: snapshot.id(),
+                        read_only: false,
                     },
                 },
 
@@ -698,6 +703,7 @@ async fn test_reject_creating_disk_from_snapshot(
                 disk_backend: disk::DiskBackend::Distributed {
                     disk_source: disk::DiskSource::Snapshot {
                         snapshot_id: snapshot.id(),
+                        read_only: false,
                     },
                 },
 
@@ -797,6 +803,7 @@ async fn test_reject_creating_disk_from_illegal_snapshot(
                 disk_backend: disk::DiskBackend::Distributed {
                     disk_source: disk::DiskSource::Snapshot {
                         snapshot_id: snapshot.id(),
+                        read_only: false,
                     },
                 },
 
@@ -888,6 +895,7 @@ async fn test_reject_creating_disk_from_other_project_snapshot(
                 disk_backend: disk::DiskBackend::Distributed {
                     disk_source: disk::DiskSource::Snapshot {
                         snapshot_id: snapshot.id(),
+                        read_only: false,
                     },
                 },
 
@@ -998,6 +1006,7 @@ async fn test_snapshot_unwind(cptestctx: &ControlPlaneTestContext) {
         disk_backend: disk::DiskBackend::Distributed {
             disk_source: disk::DiskSource::Image {
                 image_id: image.identity.id,
+                read_only: false,
             },
         },
         size: disk_size,

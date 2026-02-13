@@ -41,11 +41,14 @@ declare_saga_actions! {
     DEALLOCATE_EXTERNAL_IP -> "no_result3" {
         + sid_deallocate_external_ip
     }
-    LEAVE_MULTICAST_GROUPS -> "no_result4" {
+    DETACH_EXTERNAL_SUBNETS -> "no_result4" {
+        + sid_detach_external_subnets
+    }
+    LEAVE_MULTICAST_GROUPS -> "no_result5" {
         + sid_leave_multicast_groups
     }
-    INSTANCE_DELETE_NAT -> "no_result5" {
-        + sid_delete_nat
+    INSTANCE_DELETE_DENDRITE_CONFIG -> "no_result6" {
+        + sid_delete_dendrite_config
     }
 }
 
@@ -65,10 +68,11 @@ impl NexusSaga for SagaInstanceDelete {
         _params: &Self::Params,
         mut builder: steno::DagBuilder,
     ) -> Result<steno::Dag, super::SagaInitError> {
-        builder.append(instance_delete_nat_action());
+        builder.append(instance_delete_dendrite_config_action());
         builder.append(instance_delete_record_action());
         builder.append(delete_network_interfaces_action());
         builder.append(deallocate_external_ip_action());
+        builder.append(detach_external_subnets_action());
         builder.append(leave_multicast_groups_action());
         Ok(builder.build()?)
     }
@@ -112,7 +116,7 @@ async fn sid_delete_network_interfaces(
     Ok(())
 }
 
-async fn sid_delete_nat(
+async fn sid_delete_dendrite_config(
     sagactx: NexusActionContext,
 ) -> Result<(), ActionError> {
     let params = sagactx.saga_params::<Params>()?;
@@ -197,6 +201,23 @@ async fn sid_deallocate_external_ip(
     osagactx
         .datastore()
         .detach_floating_ips_by_instance_id(&opctx, params.authz_instance.id())
+        .await
+        .map_err(ActionError::action_failed)?;
+    Ok(())
+}
+
+async fn sid_detach_external_subnets(
+    sagactx: NexusActionContext,
+) -> Result<(), ActionError> {
+    let osagactx = sagactx.user_data();
+    let params = sagactx.saga_params::<Params>()?;
+    let opctx = crate::context::op_context_for_saga_action(
+        &sagactx,
+        &params.serialized_authn,
+    );
+    osagactx
+        .datastore()
+        .instance_detach_external_subnets(&opctx, params.authz_instance.id())
         .await
         .map_err(ActionError::action_failed)?;
     Ok(())

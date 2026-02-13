@@ -15,21 +15,9 @@ use serde::{Deserialize, Serialize};
 use super::disk::DiskCreate;
 use crate::v2025112000;
 use crate::v2025112000::instance::{
-    ExternalIpCreate, InstanceNetworkInterfaceAttachment, UserData, bool_true,
+    ExternalIpCreate, InstanceDiskAttach, InstanceNetworkInterfaceAttachment,
+    UserData, bool_true,
 };
-
-/// During instance creation, attach this disk
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-pub struct InstanceDiskAttach {
-    /// A disk name to attach
-    pub name: Name,
-}
-
-impl From<v2025112000::instance::InstanceDiskAttach> for InstanceDiskAttach {
-    fn from(old: v2025112000::instance::InstanceDiskAttach) -> Self {
-        InstanceDiskAttach { name: old.name }
-    }
-}
 
 /// Describe the instance's disks at creation time
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
@@ -47,7 +35,7 @@ impl InstanceDiskAttachment {
     pub fn name(&self) -> Name {
         match self {
             Self::Create(create) => create.identity.name.clone(),
-            Self::Attach(InstanceDiskAttach { name }) => name.clone(),
+            Self::Attach(attach) => attach.name.clone(),
         }
     }
 }
@@ -61,7 +49,7 @@ impl From<v2025112000::instance::InstanceDiskAttachment>
                 InstanceDiskAttachment::Create(create.into())
             }
             v2025112000::instance::InstanceDiskAttachment::Attach(attach) => {
-                InstanceDiskAttachment::Attach(attach.into())
+                InstanceDiskAttachment::Attach(attach)
             }
         }
     }

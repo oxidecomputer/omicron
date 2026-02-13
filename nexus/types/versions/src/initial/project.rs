@@ -12,8 +12,6 @@ use omicron_common::api::external::{
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-// SELECTORS
-
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
 pub struct ProjectSelector {
     /// Name or ID of the project
@@ -26,8 +24,6 @@ pub struct OptionalProjectSelector {
     pub project: Option<NameOrId>,
 }
 
-// VIEWS
-
 /// View of a Project
 #[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct Project {
@@ -37,8 +33,6 @@ pub struct Project {
     pub identity: IdentityMetadata,
     // Important: Silo ID does not get presented to user
 }
-
-// PARAMS
 
 /// Create-time parameters for a `Project`
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]

@@ -10,21 +10,17 @@
 use omicron_common::address::ConcreteIp;
 use omicron_common::api::external::{
     ByteCount, Error, Hostname, IdentityMetadataCreateParams,
-    InstanceAutoRestartPolicy, InstanceCpuCount, InstanceCpuPlatform, Name,
-    NameOrId,
+    InstanceAutoRestartPolicy, InstanceCpuCount, InstanceCpuPlatform,
+    IpVersion, Name, NameOrId,
 };
 use oxnet::{Ipv4Net, Ipv6Net};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::net::{Ipv4Addr, Ipv6Addr};
 
-use crate::v2025112000;
-use crate::v2026010100;
-
 use crate::v2025112000::instance::{UserData, bool_true};
 use crate::v2025120300::instance::InstanceDiskAttachment;
-
-// --- IP Assignment Types ---
+use crate::v2026010100;
 
 // Shadow type for JsonSchema generation
 #[derive(Clone, Copy, Debug, Default, Deserialize, JsonSchema, Serialize)]
@@ -89,8 +85,6 @@ pub type Ipv4Assignment = IpAssignment<Ipv4Addr>;
 /// How to assign an IPv6 address.
 pub type Ipv6Assignment = IpAssignment<Ipv6Addr>;
 
-// --- Private IP Stack Types ---
-
 /// Configuration for a network interface's IPv4 addressing.
 #[derive(Clone, Debug, Default, Deserialize, JsonSchema, Serialize)]
 pub struct PrivateIpv4StackCreate {
@@ -138,8 +132,6 @@ impl PrivateIpStackCreate {
     }
 }
 
-// --- Network Interface Types ---
-
 /// Describes an attachment of an `InstanceNetworkInterface` to an `Instance`,
 /// at the time the instance is created.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
@@ -166,26 +158,26 @@ pub enum InstanceNetworkInterfaceAttachment {
     None,
 }
 
-impl TryFrom<v2025112000::instance::InstanceNetworkInterfaceAttachment>
+impl TryFrom<v2026010100::instance::InstanceNetworkInterfaceAttachment>
     for InstanceNetworkInterfaceAttachment
 {
     type Error = Error;
 
     fn try_from(
-        value: v2025112000::instance::InstanceNetworkInterfaceAttachment,
+        value: v2026010100::instance::InstanceNetworkInterfaceAttachment,
     ) -> Result<Self, Self::Error> {
         match value {
-            v2025112000::instance::InstanceNetworkInterfaceAttachment::Create(
+            v2026010100::instance::InstanceNetworkInterfaceAttachment::Create(
                 nics,
             ) => nics
                 .into_iter()
                 .map(TryInto::try_into)
                 .collect::<Result<_, _>>()
                 .map(Self::Create),
-            v2025112000::instance::InstanceNetworkInterfaceAttachment::Default => {
+            v2026010100::instance::InstanceNetworkInterfaceAttachment::Default => {
                 Ok(Self::DefaultIpv4)
             }
-            v2025112000::instance::InstanceNetworkInterfaceAttachment::None => {
+            v2026010100::instance::InstanceNetworkInterfaceAttachment::None => {
                 Ok(Self::None)
             }
         }
@@ -206,13 +198,13 @@ pub struct InstanceNetworkInterfaceCreate {
     pub ip_config: PrivateIpStackCreate,
 }
 
-impl TryFrom<v2025112000::instance::InstanceNetworkInterfaceCreate>
+impl TryFrom<v2026010100::instance::InstanceNetworkInterfaceCreate>
     for InstanceNetworkInterfaceCreate
 {
     type Error = Error;
 
     fn try_from(
-        value: v2025112000::instance::InstanceNetworkInterfaceCreate,
+        value: v2026010100::instance::InstanceNetworkInterfaceCreate,
     ) -> Result<Self, Self::Error> {
         use oxnet::IpNet;
 
@@ -277,7 +269,55 @@ impl TryFrom<v2025112000::instance::InstanceNetworkInterfaceCreate>
     }
 }
 
-// --- Instance Create ---
+/// The type of IP address to attach to an instance during creation.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum ExternalIpCreate {
+    /// An IP address providing both inbound and outbound access.
+    Ephemeral {
+        /// Name or ID of the IP pool to use. If unspecified, the
+        /// default IP pool will be used.
+        pool: Option<NameOrId>,
+        /// The IP version preference for address allocation.
+        ip_version: Option<IpVersion>,
+    },
+    /// A floating IP address.
+    Floating {
+        /// The name or ID of the floating IP address to attach.
+        floating_ip: NameOrId,
+    },
+}
+
+impl From<v2026010100::instance::ExternalIpCreate> for ExternalIpCreate {
+    fn from(old: v2026010100::instance::ExternalIpCreate) -> ExternalIpCreate {
+        match old {
+            v2026010100::instance::ExternalIpCreate::Ephemeral {
+                pool,
+                ip_version,
+            } => ExternalIpCreate::Ephemeral { pool, ip_version },
+            v2026010100::instance::ExternalIpCreate::Floating {
+                floating_ip,
+            } => ExternalIpCreate::Floating { floating_ip },
+        }
+    }
+}
+
+/// Parameters for creating an ephemeral IP address for an instance.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct EphemeralIpCreate {
+    /// Name or ID of the IP pool used to allocate an address.
+    pub pool: Option<NameOrId>,
+    /// The IP version preference for address allocation.
+    pub ip_version: Option<IpVersion>,
+}
+
+impl From<v2026010100::instance::EphemeralIpCreate> for EphemeralIpCreate {
+    fn from(
+        old: v2026010100::instance::EphemeralIpCreate,
+    ) -> EphemeralIpCreate {
+        EphemeralIpCreate { pool: old.pool, ip_version: old.ip_version }
+    }
+}
 
 /// Create-time parameters for an `Instance`
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
@@ -291,9 +331,8 @@ pub struct InstanceCreate {
     pub user_data: Vec<u8>,
     #[serde(default)]
     pub network_interfaces: InstanceNetworkInterfaceAttachment,
-    // ExternalIpCreate is unchanged from v2026010100.
     #[serde(default)]
-    pub external_ips: Vec<v2026010100::instance::ExternalIpCreate>,
+    pub external_ips: Vec<ExternalIpCreate>,
     #[serde(default)]
     pub multicast_groups: Vec<NameOrId>,
     #[serde(default)]
@@ -325,8 +364,11 @@ impl TryFrom<v2026010100::instance::InstanceCreate> for InstanceCreate {
             hostname: old.hostname,
             user_data: old.user_data,
             network_interfaces,
-            // ExternalIpCreate is unchanged from v2026010100.
-            external_ips: old.external_ips,
+            external_ips: old
+                .external_ips
+                .into_iter()
+                .map(Into::into)
+                .collect(),
             multicast_groups: old.multicast_groups,
             disks: old.disks,
             boot_disk: old.boot_disk,

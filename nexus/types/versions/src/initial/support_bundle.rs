@@ -12,8 +12,6 @@ use serde::Deserialize;
 use serde::Serialize;
 use uuid::Uuid;
 
-// PARAMS
-
 #[derive(Serialize, Deserialize, JsonSchema)]
 pub struct SupportBundlePath {
     #[doc = "ID of the "]
@@ -41,8 +39,6 @@ pub struct SupportBundleUpdate {
     /// User comment for the support bundle
     pub user_comment: Option<String>,
 }
-
-// VIEWS
 
 #[derive(
     Debug, Clone, Copy, JsonSchema, Serialize, Deserialize, Eq, PartialEq,

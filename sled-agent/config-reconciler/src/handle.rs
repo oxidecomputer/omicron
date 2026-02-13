@@ -22,6 +22,7 @@ use slog::Logger;
 use std::collections::HashSet;
 use std::sync::Arc;
 use std::sync::OnceLock;
+use tokio::sync::oneshot;
 use tokio::sync::watch;
 
 #[cfg(feature = "testing")]
@@ -82,7 +83,7 @@ pub enum TimeSyncConfig {
 }
 
 #[derive(Debug)]
-pub struct ConfigReconcilerSpawnToken {
+struct SpawnTokenCommon {
     key_requester: StorageKeyRequester,
     time_sync_config: TimeSyncConfig,
     reconciler_result_tx: watch::Sender<ReconcilerResult>,
@@ -90,8 +91,19 @@ pub struct ConfigReconcilerSpawnToken {
     external_disks_tx: watch::Sender<HashSet<Disk>>,
     former_zone_root_archiver: FormerZoneRootArchiver,
     raw_disks_rx: RawDisksReceiver,
-    ledger_task_log: Logger,
     reconciler_task_log: Logger,
+}
+
+#[derive(Debug)]
+pub struct LedgerTaskSpawnToken {
+    common: SpawnTokenCommon,
+    ledger_task_log: Logger,
+}
+
+#[derive(Debug)]
+pub struct ConfigReconcilerSpawnToken {
+    common: SpawnTokenCommon,
+    ledger_rx: watch::Receiver<CurrentSledConfig>,
 }
 
 #[derive(Debug)]
@@ -110,18 +122,25 @@ impl ConfigReconcilerHandle {
     /// Create a `ConfigReconcilerHandle` and spawn many of the early-sled-agent
     /// background tasks (e.g., managing internal disks).
     ///
-    /// The config reconciler subsystem splits initialization into two phases:
-    /// the main reconcilation task will not be spawned until
-    /// `spawn_reconciliation_task()` is called on the returned handle.
+    /// The config reconciler subsystem splits initialization into three phases:
+    /// - This function returns a `LedgerTaskSpawnToken`
+    /// - `spawn_ledger_task` takes a `LedgerTaskSpawnToken` and is responsible
+    /// for spawning the ledger task and returning a `ConfigReconcilerSpawnToken`.
+    /// The ledger task needs to be spawned early for access to reference measurements.
+    ///  - The main reconciliation task will not be spawned until
+    /// `spawn_reconciliation_task()` is called with a `ConfigReconcilerSpawnToken`.
     /// `spawn_reconciliation_task()` cannot be called by sled-agent proper
     /// until rack setup has occurred (or sled-agent has found its config from a
     /// prior rack setup, during a cold boot).
+    ///
+    /// This is designed to be difficult (if not impossible!) to mess up the
+    /// ordering of functions to call
     pub fn new(
         mount_config: MountConfig,
         key_requester: StorageKeyRequester,
         time_sync_config: TimeSyncConfig,
         base_log: &Logger,
-    ) -> (Self, ConfigReconcilerSpawnToken) {
+    ) -> (Self, LedgerTaskSpawnToken) {
         let mount_config = Arc::new(mount_config);
 
         // Spawn the task that monitors our internal disks (M.2s).
@@ -168,54 +187,49 @@ impl ConfigReconcilerHandle {
             // Stash the dependencies the reconciler task will need in
             // `spawn_reconciliation_task()` inside this token that the caller
             // has to hold until it has the other outside dependencies ready.
-            ConfigReconcilerSpawnToken {
-                key_requester,
-                time_sync_config,
-                reconciler_result_tx,
-                currently_managed_zpools_tx,
-                external_disks_tx,
-                former_zone_root_archiver,
-                raw_disks_rx,
+            LedgerTaskSpawnToken {
+                common: SpawnTokenCommon {
+                    key_requester,
+                    time_sync_config,
+                    reconciler_result_tx,
+                    currently_managed_zpools_tx,
+                    external_disks_tx,
+                    former_zone_root_archiver,
+                    raw_disks_rx,
+                    reconciler_task_log: base_log
+                        .new(slog::o!("component" => "ConfigReconcilerTask")),
+                },
                 ledger_task_log: base_log
                     .new(slog::o!("component" => "SledConfigLedgerTask")),
-                reconciler_task_log: base_log
-                    .new(slog::o!("component" => "ConfigReconcilerTask")),
             },
         )
     }
 
-    /// Spawn the primary config reconciliation task.
+    /// Spawn the ledger task
+    ///
+    /// This is the first half of spawning the reconciliation task. We need to
+    /// spawn the ledger task early to allow for access to the ledger for
+    /// early measurement reconciliation.
     ///
     /// This method can effectively only be called once, because the caller must
     /// supply the `token` returned by `new()` when this handle was created.
     ///
+    /// This returns a watch channel for use by the measurement handler to
+    /// know when the ledger task has started running and has found M.2 disks.
+    ///
     /// # Panics
     ///
     /// Panics if called multiple times, which is statically impossible outside
-    /// shenanigans to get a second [`ConfigReconcilerSpawnToken`].
-    pub fn spawn_reconciliation_task<
-        T: SledAgentFacilities,
-        U: SledAgentArtifactStore + Clone,
-    >(
+    /// shenanigans to get a second `LedgerTaskSpawnToken`.
+    pub fn spawn_ledger_task<U: SledAgentArtifactStore + Clone>(
         &self,
-        sled_agent_facilities: T,
         sled_agent_artifact_store: U,
-        token: ConfigReconcilerSpawnToken,
-    ) {
-        let ConfigReconcilerSpawnToken {
-            key_requester,
-            time_sync_config,
-            reconciler_result_tx,
-            currently_managed_zpools_tx,
-            external_disks_tx,
-            former_zone_root_archiver,
-            raw_disks_rx,
-            ledger_task_log,
-            reconciler_task_log,
-        } = token;
+        token: LedgerTaskSpawnToken,
+    ) -> (ConfigReconcilerSpawnToken, oneshot::Receiver<()>) {
+        let LedgerTaskSpawnToken { common, ledger_task_log } = token;
 
         // Spawn the task that manages our config ledger.
-        let (ledger_task, current_config_rx) =
+        let (ledger_task, current_config_rx, ledger_task_run_rx) =
             LedgerTaskHandle::spawn_ledger_task(
                 self.internal_disks_rx.clone(),
                 sled_agent_artifact_store.clone(),
@@ -227,18 +241,51 @@ impl ConfigReconcilerHandle {
             // we document that we panic if called multiple times via some
             // multi-token shenanigans.
             Err(_) => {
-                panic!(
-                    "spawn_reconciliation_task() called with multiple tokens"
-                )
+                panic!("spawn_ledger_task() called with multiple tokens")
             }
         }
+
+        (
+            ConfigReconcilerSpawnToken { common, ledger_rx: current_config_rx },
+            ledger_task_run_rx,
+        )
+    }
+
+    /// Spawn the primary config reconciliation task.
+    ///
+    /// This method can effectively only be called once, because the caller must
+    /// supply the `token` returned by `spawn_ledger_task()` when this handle was created.
+    ///
+    pub fn spawn_reconciliation_task<
+        T: SledAgentFacilities,
+        U: SledAgentArtifactStore + Clone,
+    >(
+        &self,
+        sled_agent_facilities: T,
+        sled_agent_artifact_store: U,
+        token: ConfigReconcilerSpawnToken,
+    ) {
+        let ConfigReconcilerSpawnToken {
+            common:
+                SpawnTokenCommon {
+                    key_requester,
+                    time_sync_config,
+                    reconciler_result_tx,
+                    currently_managed_zpools_tx,
+                    external_disks_tx,
+                    former_zone_root_archiver,
+                    raw_disks_rx,
+                    reconciler_task_log,
+                },
+            ledger_rx,
+        } = token;
 
         reconciler_task::spawn(
             Arc::clone(self.internal_disks_rx.mount_config()),
             self.dataset_task.clone(),
             key_requester,
             time_sync_config,
-            current_config_rx,
+            ledger_rx,
             reconciler_result_tx,
             currently_managed_zpools_tx,
             self.internal_disks_rx.clone(),
@@ -508,6 +555,34 @@ impl AvailableDatasetsReceiver {
             AvailableDatasetsReceiverInner::Real(receiver) => {
                 receiver.borrow().all_mounted_local_storage_datasets().collect()
             }
+            #[cfg(feature = "testing")]
+            AvailableDatasetsReceiverInner::FakeTempDir { zpool, tempdir } => {
+                vec![PathInPool {
+                    pool: zpool.clone(),
+                    path: tempdir
+                        .path()
+                        .join(DatasetKind::LocalStorage.to_string()),
+                }]
+            }
+            #[cfg(feature = "testing")]
+            AvailableDatasetsReceiverInner::FakeStatic(pools) => pools
+                .iter()
+                .map(|(pool, path)| PathInPool {
+                    pool: ZpoolOrRamdisk::Zpool(*pool),
+                    path: path.join(DatasetKind::LocalStorage.to_string()),
+                })
+                .collect(),
+        }
+    }
+
+    pub fn all_mounted_local_storage_unencrypted_datasets(
+        &self,
+    ) -> Vec<PathInPool> {
+        match &self.inner {
+            AvailableDatasetsReceiverInner::Real(receiver) => receiver
+                .borrow()
+                .all_mounted_local_storage_unencrypted_datasets()
+                .collect(),
             #[cfg(feature = "testing")]
             AvailableDatasetsReceiverInner::FakeTempDir { zpool, tempdir } => {
                 vec![PathInPool {

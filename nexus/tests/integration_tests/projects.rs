@@ -24,8 +24,10 @@ use nexus_test_utils::resource_helpers::project_get;
 use nexus_test_utils::resource_helpers::projects_list;
 use nexus_test_utils::resource_helpers::test_params;
 use nexus_test_utils_macros::nexus_test;
+use nexus_types::external_api::floating_ip;
 use nexus_types::external_api::image;
 use nexus_types::external_api::instance;
+use nexus_types::external_api::ip_pool;
 use nexus_types::external_api::policy::SiloRole;
 use nexus_types::external_api::project;
 use nexus_types::external_api::project::Project;
@@ -251,8 +253,11 @@ async fn test_project_deletion_with_floating_ip(
         &client,
         "my-fip",
         &name,
-        None,
-        Some(v6_pool.identity.name.as_str()),
+        floating_ip::AddressAllocator::Auto {
+            pool_selector: ip_pool::PoolSelector::Explicit {
+                pool: v6_pool.identity.name.clone().into(),
+            },
+        },
     )
     .await;
     assert_eq!(

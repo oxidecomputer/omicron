@@ -18,7 +18,7 @@
 //!
 //! ## Operations Handled
 //! - **"Creating" state**: Initiate DPD "ensure" to apply configuration
-//! - **"Active" state**: Detect DPD drift and launch UPDATE saga when DB state differs
+//! - **"Active" state**: Detect DPD drift and sync directly
 //! - **"Deleting" state**: Switch cleanup and database removal
 //! - **Extensible processing**: Support for different group types
 //!
@@ -47,8 +47,8 @@
 //! | Condition | DPD State | Action | Next State |
 //! |-----------|-----------|---------|------------|
 //! | 1 | Matches DB | No action | "Active" (NoChange) |
-//! | 2 | Differs from DB | Launch UPDATE saga to fix drift | "Active" (StateChanged) |
-//! | 3 | Missing/error | Launch UPDATE saga to fix drift | "Active" (StateChanged) |
+//! | 2 | Differs/missing | Direct dataplane call succeeds | "Active" (StateChanged) |
+//! | 3 | Differs/missing | Direct dataplane call fails | "Active" (NoChange, retry) |
 //!
 //! ### DELETING State Transitions
 //! | Condition | DPD cleanup (external+underlay) | DB cleanup (row) | Action | Next State |
@@ -62,10 +62,10 @@
 //! "Deleted" because the reconciler no longer sees the group.
 //!
 //! ## Triggering Events
-//! - **"Creating"**: User API creates group → DB inserts with "Creating" state
-//! - **"Active"**: DPD ensure completes successfully → state = "Active"
-//! - **"Deleting"**: User API deletes group → DB sets state = "Deleting"
-//! - **"Deleted"**: RPW reconciler completes cleanup → removes from DB
+//! - **"Creating"**: Instance joins group (implicitly creates if needed) → DB inserts with "Creating" state
+//! - **"Active"**: DPD ensure saga completes successfully → state = "Active"
+//! - **"Deleting"**: Last member leaves group → state = "Deleting" (implicit lifecycle)
+//! - **"Deleted"**: RPW reconciler completes DPD cleanup → removes from DB
 //!
 //! ## Error Handling
 //! - **Saga failures**: Group stays in "Creating", reconciler retries
@@ -74,51 +74,96 @@
 //! - **Partial cleanup**: "Deleting" state preserved until complete cleanup
 
 use anyhow::Context;
+use chrono::Utc;
 use futures::stream::{self, StreamExt};
-use slog::{debug, error, trace, warn};
+use slog::{debug, error, info, trace, warn};
 
-use nexus_db_model::{MulticastGroup, MulticastGroupState};
+use nexus_db_model::{MulticastGroup, MulticastGroupState, SqlU8};
 use nexus_db_queries::context::OpContext;
+use nexus_db_queries::db::datastore::multicast::EnsureUnderlayResult;
+use nexus_db_queries::db::datastore::multicast::members::SourceFilterState;
 use nexus_types::identity::Resource;
-use omicron_common::api::external::DataPageParams;
+use omicron_common::address::is_ssm_address;
+use omicron_common::api::external::{self, DataPageParams};
 use omicron_uuid_kinds::{GenericUuid, MulticastGroupUuid};
 
-use super::{MulticastGroupReconciler, StateTransition};
-use crate::app::multicast::dataplane::MulticastDataplaneClient;
+use super::{
+    MulticastGroupReconciler, StateTransition, map_external_to_underlay_ip,
+};
+use crate::app::multicast::dataplane::{
+    GroupUpdateParams, MulticastDataplaneClient,
+};
 use crate::app::saga::create_saga_dag;
 use crate::app::sagas;
 
-/// Check if DPD tag matches database name.
-fn dpd_state_matches_name(
+/// Minimum age before an orphaned group in "Creating" state can be cleaned up.
+///
+/// This grace period avoids racing with in-progress member attachment operations
+/// that occur immediately after group creation.
+const ORPHAN_GROUP_MIN_AGE: chrono::Duration = chrono::Duration::seconds(10);
+
+/// Check if DPD tag matches the database group's tag.
+///
+/// Tags use format `{uuid}:{ip}` to prevent collision when group names are reused.
+fn dpd_state_matches_tag(
     dpd_group: &dpd_client::types::MulticastGroupExternalResponse,
     db_group: &MulticastGroup,
 ) -> bool {
-    dpd_group.tag.as_ref().map_or(false, |tag| tag == db_group.name().as_str())
+    match (&dpd_group.tag, &db_group.tag) {
+        (Some(dpd_tag), Some(db_tag)) => dpd_tag == db_tag,
+        _ => false,
+    }
 }
 
-/// Check if DPD sources match database sources.
+/// Check if DPD sources match the expected state based on source filter.
+///
+/// Source filtering logic per RFC 4607 (mirrors dataplane code):
+/// - SSM (232/8, ff3x::/32): MUST have specific sources. `has_any_source_member`
+///   is ignored because API validation prevents SSM joins without sources.
+/// - ASM: Currently expects `None` (Dendrite doesn't support ASM filtering yet).
+///
+/// TODO: Once Dendrite accepts ASM source filtering, enable it for ASM groups
+/// where `has_any_source_member=false`.
 fn dpd_state_matches_sources(
     dpd_group: &dpd_client::types::MulticastGroupExternalResponse,
-    db_group: &MulticastGroup,
+    source_filter: &SourceFilterState,
+    group: &MulticastGroup,
 ) -> bool {
-    let db_sources: Vec<_> =
-        db_group.source_ips.iter().map(|ip| ip.ip()).collect();
-    let dpd_sources = dpd_group.sources.clone().unwrap_or_default();
+    let dpd_sources = dpd_group.sources.clone();
+    let group_ip = group.multicast_ip.ip();
 
-    // Extract exact IPs from DPD sources (filter out subnets)
-    let mut dpd_ips: Vec<_> = dpd_sources
-        .into_iter()
-        .filter_map(|src| match src {
-            dpd_client::types::IpSrc::Exact(ip) => Some(ip),
-            dpd_client::types::IpSrc::Subnet(_) => None,
-        })
-        .collect();
+    // Expected DPD state based on source filter logic (RFC 4607)
+    let expected_sources = if is_ssm_address(group_ip) {
+        // SSM: always expect specific sources
+        Some(&source_filter.specific_sources)
+    } else {
+        // ASM: Dendrite doesn't support ASM filtering yet
+        // TODO: check `has_any_source_member` to enable/disable filtering
+        None
+    };
 
-    let mut db_sources_sorted = db_sources;
-    dpd_ips.sort();
-    db_sources_sorted.sort();
+    match (dpd_sources, expected_sources) {
+        (None, None) => true,
+        (Some(_), None) => false, // DPD has sources but shouldn't
+        (None, Some(_)) => false, // DPD missing sources
+        (Some(dpd_srcs), Some(expected)) => {
+            // Extract exact IPs from DPD sources
+            let mut dpd_ips: Vec<_> = dpd_srcs
+                .into_iter()
+                .filter_map(|src| match src {
+                    dpd_client::types::IpSrc::Exact(ip) => Some(ip),
+                    _ => None, // Subnet matching removed in follow-up Dendrite TODO
+                })
+                .collect();
+            dpd_ips.sort();
 
-    dpd_ips == db_sources_sorted
+            let mut expected_sorted: Vec<_> =
+                expected.iter().copied().collect();
+            expected_sorted.sort();
+
+            dpd_ips == expected_sorted
+        }
+    }
 }
 
 /// Check if DPD vlan_id matches database mvlan.
@@ -201,6 +246,97 @@ impl GroupStateProcessor for ExternalGroupProcessor {
 }
 
 impl MulticastGroupReconciler {
+    /// Ensure an underlay group exists for the given external group.
+    ///
+    /// Handles the XOR-fold mapping and collision retry with salt increment.
+    /// Returns `Some(underlay)` on success, `None` if the group was deleted.
+    ///
+    /// Salt is a `u8`, so we can try up to 256 different values (0-255).
+    async fn ensure_underlay_for_external(
+        &self,
+        opctx: &OpContext,
+        group: &MulticastGroup,
+    ) -> anyhow::Result<Option<nexus_db_model::UnderlayMulticastGroup>> {
+        let initial_salt: u8 = group.underlay_salt.map_or(0, |s| *s);
+        let group_id = MulticastGroupUuid::from_untyped_uuid(group.id());
+
+        for salt in initial_salt..=u8::MAX {
+            let underlay_ip =
+                map_external_to_underlay_ip(group.multicast_ip.ip(), salt);
+
+            let result = self
+                .datastore
+                .ensure_underlay_multicast_group(
+                    opctx,
+                    group.clone(),
+                    underlay_ip.into(),
+                )
+                .await;
+
+            match result {
+                Ok(
+                    EnsureUnderlayResult::Created(underlay)
+                    | EnsureUnderlayResult::Existing(underlay),
+                ) => {
+                    if salt != initial_salt {
+                        // Persist the new salt. If the group was deleted during
+                        // processing, return None; caller handles appropriately.
+                        match self
+                            .datastore
+                            .multicast_group_set_underlay_salt(
+                                opctx,
+                                group_id,
+                                SqlU8::new(salt),
+                            )
+                            .await
+                        {
+                            Ok(()) => {}
+                            Err(external::Error::ObjectNotFound { .. }) => {
+                                info!(
+                                    opctx.log,
+                                    "Group deleted during salt update";
+                                    "group_id" => %group.id(),
+                                );
+                                return Ok(None);
+                            }
+                            Err(e) => {
+                                return Err(e)
+                                    .context("failed to update underlay salt");
+                            }
+                        }
+                    }
+                    return Ok(Some(underlay));
+                }
+                Ok(EnsureUnderlayResult::Collision) => {
+                    info!(
+                        opctx.log,
+                        "Underlay IP collision at salt {salt}, will retry";
+                        "group_id" => %group.id(),
+                    );
+                }
+                Err(external::Error::ObjectNotFound { .. }) => {
+                    info!(
+                        opctx.log,
+                        "Group deleted during underlay creation";
+                        "group_id" => %group.id(),
+                    );
+                    return Ok(None);
+                }
+                Err(e) => {
+                    return Err(e).context("failed to ensure underlay group");
+                }
+            }
+        }
+
+        // Exhausted all 256 possible salt values (0-255)
+        anyhow::bail!(
+            "failed to find non-colliding underlay IP after {} attempts \
+             (salt range {initial_salt}..={})",
+            u16::from(u8::MAX) - u16::from(initial_salt) + 1,
+            u8::MAX
+        )
+    }
+
     /// Generic group reconciliation logic for any state.
     ///
     /// This consolidates the common pattern of:
@@ -371,21 +507,15 @@ impl MulticastGroupReconciler {
                 processor.process_creating(self, opctx, group).await
             }
             MulticastGroupState::Deleting => {
-                let dataplane_client = dataplane_client.ok_or_else(|| {
-                    anyhow::Error::msg(
-                        "dataplane client required for deleting state",
-                    )
-                })?;
+                let dataplane_client = dataplane_client
+                    .context("dataplane client required for deleting state")?;
                 processor
                     .process_deleting(self, opctx, group, dataplane_client)
                     .await
             }
             MulticastGroupState::Active => {
-                let dataplane_client = dataplane_client.ok_or_else(|| {
-                    anyhow::Error::msg(
-                        "dataplane client required for active state",
-                    )
-                })?;
+                let dataplane_client = dataplane_client
+                    .context("dataplane client required for active state")?;
                 processor
                     .process_active(self, opctx, group, dataplane_client)
                     .await
@@ -439,6 +569,45 @@ impl MulticastGroupReconciler {
             "underlay_linked" => group.underlay_group_id.is_some()
         );
 
+        // Clean up orphaned groups stuck in "Creating" state with no members.
+        // This handles cases where implicit group creation succeeded but member
+        // attachment failed (e.g., SSM validation error, transient failures).
+        //
+        // We only clean up groups that have been in "Creating" for at least
+        // ORPHAN_GROUP_MIN_AGE to avoid racing with in-progress member
+        // attachment operations.
+        let age = Utc::now() - group.time_created();
+        if age > ORPHAN_GROUP_MIN_AGE {
+            let group_id = MulticastGroupUuid::from_untyped_uuid(group.id());
+            match self
+                .datastore
+                .mark_multicast_group_for_removal_if_no_members(opctx, group_id)
+                .await
+            {
+                Ok(true) => {
+                    info!(
+                        opctx.log,
+                        "cleaned up orphaned multicast group in \"Creating\" state with no members";
+                        "group_id" => %group.id(),
+                        "group_name" => group.name().as_str(),
+                        "age_seconds" => age.num_seconds(),
+                    );
+                    return Ok(StateTransition::NeedsCleanup);
+                }
+                Ok(false) => {
+                    // Group has members, continue with normal processing
+                }
+                Err(e) => {
+                    warn!(
+                        opctx.log,
+                        "failed to check/cleanup orphaned group";
+                        "group_id" => %group.id(),
+                        "error" => ?e,
+                    );
+                }
+            }
+        }
+
         // TODO: Add front port selection for egress traffic (instances →
         // external). When transitioning groups to Active, we need to identify
         // and validate front ports against DPD's QSFP topology (similar to
@@ -450,7 +619,9 @@ impl MulticastGroupReconciler {
         // configurable, and later learned (i.e., via `mcastd`/IGMP).
 
         // Handle underlay group creation/linking (same logic as before)
-        self.process_creating_group_inner(opctx, group).await?;
+        if !self.process_creating_group_inner(opctx, group).await? {
+            return Ok(StateTransition::EntityGone);
+        }
 
         // Successfully started saga - the saga will handle state transition to "Active".
         // We return NoChange because the reconciler shouldn't change the state;
@@ -484,19 +655,26 @@ impl MulticastGroupReconciler {
     /// External group handler for groups in "Active" state.
     ///
     /// Checks if the group's DPD state matches the database state. If not,
-    /// launches the UPDATE saga to sync. This handles updates triggered by
-    /// the UPDATE API endpoint and self-corrects any DPD drift.
+    /// we make dataplane calls to sync. This self-corrects any DPD drift.
     async fn handle_active_external_group(
         &self,
         opctx: &OpContext,
         group: &MulticastGroup,
         dataplane_client: &MulticastDataplaneClient,
     ) -> Result<StateTransition, anyhow::Error> {
-        let underlay_group_id = group.underlay_group_id.ok_or_else(|| {
-            anyhow::Error::msg(
-                "active multicast group missing underlay_group_id",
-            )
-        })?;
+        let underlay_group_id = group
+            .underlay_group_id
+            .context("active multicast group missing underlay_group_id")?;
+
+        // Get source filter state for DPD comparison/update.
+        let group_id = MulticastGroupUuid::from_untyped_uuid(group.id());
+        let filter_state_map = self
+            .datastore
+            .multicast_groups_source_filter_state(opctx, &[group_id])
+            .await
+            .context("failed to fetch source filter state")?;
+        let source_filter =
+            filter_state_map.get(&group.id()).cloned().unwrap_or_default();
 
         // Check if DPD state matches DB state (read-before-write for drift detection)
         let needs_update = match dataplane_client
@@ -504,20 +682,23 @@ impl MulticastGroupReconciler {
             .await
         {
             Ok(Some(dpd_group)) => {
-                let name_matches = dpd_state_matches_name(&dpd_group, group);
-                let sources_match =
-                    dpd_state_matches_sources(&dpd_group, group);
+                let tag_matches = dpd_state_matches_tag(&dpd_group, group);
+                let sources_match = dpd_state_matches_sources(
+                    &dpd_group,
+                    &source_filter,
+                    group,
+                );
                 let mvlan_matches = dpd_state_matches_mvlan(&dpd_group, group);
 
                 let needs_update =
-                    !name_matches || !sources_match || !mvlan_matches;
+                    !tag_matches || !sources_match || !mvlan_matches;
 
                 if needs_update {
                     debug!(
                         opctx.log,
                         "detected DPD state mismatch for active group";
                         "group_id" => %group.id(),
-                        "name_matches" => name_matches,
+                        "tag_matches" => tag_matches,
                         "sources_match" => sources_match,
                         "mvlan_matches" => mvlan_matches
                     );
@@ -526,7 +707,7 @@ impl MulticastGroupReconciler {
                 needs_update
             }
             Ok(None) => {
-                // Group not found in DPD - need to create
+                // Group not found in DPD
                 debug!(
                     opctx.log,
                     "active group not found in DPD, will update";
@@ -535,7 +716,7 @@ impl MulticastGroupReconciler {
                 true
             }
             Err(e) => {
-                // Error fetching from DPD - log and retry
+                // Error fetching from DPD -> log and retry
                 warn!(
                     opctx.log,
                     "error fetching active group from DPD, will retry update";
@@ -554,43 +735,58 @@ impl MulticastGroupReconciler {
                 "multicast_ip" => %group.multicast_ip
             );
 
-            let saga_params = sagas::multicast_group_dpd_update::Params {
-                serialized_authn:
-                    nexus_db_queries::authn::saga::Serialized::for_opctx(opctx),
-                external_group_id: group.id(),
-                underlay_group_id,
-            };
-
-            let dag = create_saga_dag::<
-                sagas::multicast_group_dpd_update::SagaMulticastGroupDpdUpdate,
-            >(saga_params)
-            .context("failed to create multicast group update saga")?;
-
-            let saga_id = self
-                .sagas
-                .saga_start(dag)
+            // Fetch underlay group for the update
+            let underlay_group = self
+                .datastore
+                .underlay_multicast_group_fetch(opctx, underlay_group_id)
                 .await
-                .context("failed to start multicast group update saga")?;
+                .context(
+                    "failed to fetch underlay group for drift correction",
+                )?;
 
-            debug!(
-                opctx.log,
-                "DPD update saga initiated for active group";
-                "external_group_id" => %group.id(),
-                "saga_id" => %saga_id,
-            );
-
-            Ok(StateTransition::StateChanged)
+            // Direct dataplane call for drift correction
+            // If update fails, we leave existing state and retry on next RPW cycle.
+            match dataplane_client
+                .update_groups(GroupUpdateParams {
+                    external_group: group,
+                    underlay_group: &underlay_group,
+                    new_name: group.name().as_str(),
+                    source_filter: &source_filter,
+                })
+                .await
+            {
+                Ok(_) => {
+                    info!(
+                        opctx.log,
+                        "drift correction completed for active group";
+                        "group_id" => %group.id(),
+                        "multicast_ip" => %group.multicast_ip
+                    );
+                    Ok(StateTransition::StateChanged)
+                }
+                Err(e) => {
+                    warn!(
+                        opctx.log,
+                        "drift correction failed, will retry on next cycle";
+                        "group_id" => %group.id(),
+                        "error" => %e
+                    );
+                    // Return NoChange so RPW retries on next activation
+                    Ok(StateTransition::NoChange)
+                }
+            }
         } else {
             Ok(StateTransition::NoChange)
         }
     }
 
     /// Process a single multicast group in "Creating" state.
+    /// Returns `false` if the group was deleted during processing.
     async fn process_creating_group_inner(
         &self,
         opctx: &OpContext,
         group: &MulticastGroup,
-    ) -> Result<(), anyhow::Error> {
+    ) -> Result<bool, anyhow::Error> {
         debug!(
             opctx.log,
             "processing creating multicast group";
@@ -622,25 +818,10 @@ impl MulticastGroupReconciler {
                     "creating new underlay group";
                     "group" => ?group
                 );
-
-                // Generate underlay multicast IP using IPv6 admin-local scope (RFC 7346)
-                let underlay_ip = self
-                    .map_external_to_underlay_ip(group.multicast_ip.ip())
-                    .context(
-                        "failed to map customer multicast IP to underlay",
-                    )?;
-
-                let new_underlay = self
-                    .datastore
-                    .ensure_underlay_multicast_group(
-                        opctx,
-                        group.clone(),
-                        underlay_ip.into(),
-                    )
-                    .await
-                    .context("failed to create underlay multicast group")?;
-
-                new_underlay
+                match self.ensure_underlay_for_external(opctx, &group).await? {
+                    Some(underlay) => underlay,
+                    None => return Ok(false), // Group deleted during processing
+                }
             }
         };
 
@@ -685,7 +866,7 @@ impl MulticastGroupReconciler {
             "expected_outcome" => "Creating → Active"
         );
 
-        Ok(())
+        Ok(true)
     }
 
     /// Process a single multicast group in "Deleting" state.
@@ -695,7 +876,8 @@ impl MulticastGroupReconciler {
         group: &MulticastGroup,
         dataplane_client: &MulticastDataplaneClient,
     ) -> Result<(), anyhow::Error> {
-        let tag = Self::generate_multicast_tag(group);
+        let tag = Self::get_multicast_tag(group)
+            .context("multicast group missing tag")?;
 
         debug!(
             opctx.log,
@@ -723,6 +905,15 @@ impl MulticastGroupReconciler {
                 .context("failed to delete underlay group from database")?;
         }
 
+        // Delete all membership records for this group
+        self.datastore
+            .multicast_group_members_delete_by_group(
+                opctx,
+                MulticastGroupUuid::from_untyped_uuid(group.id()),
+            )
+            .await
+            .context("failed to delete group members from database")?;
+
         // Delete of external group record
         self.datastore
             .multicast_group_delete(
@@ -733,5 +924,175 @@ impl MulticastGroupReconciler {
             .context("failed to complete external group deletion")?;
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    use std::collections::BTreeSet;
+    use std::net::IpAddr;
+
+    use uuid::Uuid;
+
+    use nexus_db_model::{
+        ExternalMulticastGroup, ExternalMulticastGroupIdentity, Generation,
+        MulticastGroupState, Vni,
+    };
+    use omicron_common::api::external::IdentityMetadataCreateParams;
+
+    fn create_dpd_group(
+        sources: Option<Vec<dpd_client::types::IpSrc>>,
+    ) -> dpd_client::types::MulticastGroupExternalResponse {
+        dpd_client::types::MulticastGroupExternalResponse {
+            group_ip: "232.1.1.1".parse().unwrap(),
+            sources,
+            tag: Some("test-tag".to_string()),
+            external_group_id: 1,
+            external_forwarding: dpd_client::types::ExternalForwarding {
+                vlan_id: None,
+            },
+            internal_forwarding: dpd_client::types::InternalForwarding {
+                nat_target: None,
+            },
+        }
+    }
+
+    fn create_group(multicast_ip: &str) -> MulticastGroup {
+        ExternalMulticastGroup {
+            identity: ExternalMulticastGroupIdentity::new(
+                Uuid::new_v4(),
+                IdentityMetadataCreateParams {
+                    name: "test-group".parse().unwrap(),
+                    description: "test".to_string(),
+                },
+            ),
+            ip_pool_id: Uuid::new_v4(),
+            ip_pool_range_id: Uuid::new_v4(),
+            vni: Vni(omicron_common::api::external::Vni::DEFAULT_MULTICAST_VNI),
+            multicast_ip: multicast_ip.parse().unwrap(),
+            mvlan: None,
+            underlay_group_id: None,
+            underlay_salt: None,
+            tag: Some("test-tag".to_string()),
+            state: MulticastGroupState::Active,
+            version_added: Generation::new(),
+            version_removed: None,
+        }
+    }
+
+    #[test]
+    fn test_dpd_state_matches_sources_ssm_with_sources() {
+        // SSM address (232.x.x.x) with specific sources from all members
+        let source_filter = SourceFilterState {
+            specific_sources: BTreeSet::from([
+                "10.0.0.1".parse::<IpAddr>().unwrap(),
+                "10.0.0.2".parse::<IpAddr>().unwrap(),
+            ]),
+            has_any_source_member: false,
+        };
+
+        let group = create_group("232.1.1.1"); // SSM address
+
+        // DPD has matching sources
+        let dpd_group = create_dpd_group(Some(vec![
+            dpd_client::types::IpSrc::Exact("10.0.0.1".parse().unwrap()),
+            dpd_client::types::IpSrc::Exact("10.0.0.2".parse().unwrap()),
+        ]));
+        assert!(dpd_state_matches_sources(&dpd_group, &source_filter, &group));
+
+        // DPD has sources in different order (should still match)
+        let dpd_group = create_dpd_group(Some(vec![
+            dpd_client::types::IpSrc::Exact("10.0.0.2".parse().unwrap()),
+            dpd_client::types::IpSrc::Exact("10.0.0.1".parse().unwrap()),
+        ]));
+        assert!(dpd_state_matches_sources(&dpd_group, &source_filter, &group));
+
+        // DPD missing sources (mismatch)
+        let dpd_group = create_dpd_group(None);
+        assert!(!dpd_state_matches_sources(&dpd_group, &source_filter, &group));
+
+        // DPD has wrong sources (mismatch)
+        let dpd_group = create_dpd_group(Some(vec![
+            dpd_client::types::IpSrc::Exact("10.0.0.1".parse().unwrap()),
+            dpd_client::types::IpSrc::Exact("10.0.0.3".parse().unwrap()), // wrong
+        ]));
+        assert!(!dpd_state_matches_sources(&dpd_group, &source_filter, &group));
+    }
+
+    #[test]
+    fn test_dpd_state_matches_sources_ssm_ignores_has_any_source_member() {
+        // SSM address with has_any_source_member=true should still use specific_sources
+        // per RFC 4607: SSM MUST have source specification. The has_any_source_member
+        // flag is ignored for SSM because API validation prevents SSM joins without
+        // sources. This is defense-in-depth.
+        let source_filter = SourceFilterState {
+            specific_sources: BTreeSet::from([
+                "10.0.0.1".parse::<IpAddr>().unwrap(),
+                "10.0.0.2".parse::<IpAddr>().unwrap(),
+            ]),
+            has_any_source_member: true, // Ignored for SSM
+        };
+
+        let group = create_group("232.1.1.1"); // SSM address
+
+        // DPD should have specific sources (RFC 4607 compliance)
+        let dpd_group = create_dpd_group(Some(vec![
+            dpd_client::types::IpSrc::Exact("10.0.0.1".parse().unwrap()),
+            dpd_client::types::IpSrc::Exact("10.0.0.2".parse().unwrap()),
+        ]));
+        assert!(dpd_state_matches_sources(&dpd_group, &source_filter, &group));
+
+        // DPD has None (mismatch: SSM must have sources)
+        let dpd_group = create_dpd_group(None);
+        assert!(!dpd_state_matches_sources(&dpd_group, &source_filter, &group));
+    }
+
+    #[test]
+    fn test_dpd_state_matches_sources_asm_address() {
+        // ASM address (not 232.x.x.x) - should always expect None from DPD
+        // regardless of specific_sources (Dendrite limitation, see TODO)
+        let source_filter = SourceFilterState {
+            specific_sources: BTreeSet::from(["10.0.0.1"
+                .parse::<IpAddr>()
+                .unwrap()]),
+            has_any_source_member: false,
+        };
+
+        let group = create_group("224.1.1.1"); // ASM address (not 232.x.x.x)
+
+        // DPD has None (correct for ASM)
+        let dpd_group = create_dpd_group(None);
+        assert!(dpd_state_matches_sources(&dpd_group, &source_filter, &group));
+
+        // DPD has sources (mismatch: ASM should have none)
+        let dpd_group =
+            create_dpd_group(Some(vec![dpd_client::types::IpSrc::Exact(
+                "10.0.0.1".parse().unwrap(),
+            )]));
+        assert!(!dpd_state_matches_sources(&dpd_group, &source_filter, &group));
+    }
+
+    #[test]
+    fn test_dpd_state_matches_sources_asm_with_any_source_member() {
+        // ASM address with has_any_source_member=true - expects None from DPD
+        let source_filter = SourceFilterState {
+            specific_sources: BTreeSet::new(),
+            has_any_source_member: true,
+        };
+
+        let group = create_group("224.1.1.1"); // ASM address
+
+        // DPD has None (correct for ASM with any-source members)
+        let dpd_group = create_dpd_group(None);
+        assert!(dpd_state_matches_sources(&dpd_group, &source_filter, &group));
+
+        // DPD has sources (mismatch: should be none)
+        let dpd_group =
+            create_dpd_group(Some(vec![dpd_client::types::IpSrc::Exact(
+                "10.0.0.1".parse().unwrap(),
+            )]));
+        assert!(!dpd_state_matches_sources(&dpd_group, &source_filter, &group));
     }
 }

@@ -4,15 +4,16 @@
 
 //! Floating IP types for version SILO_PROJECT_IP_VERSION_AND_POOL_TYPE.
 //!
-//! This version has floating IP creation with pool only (no ip_version).
+//! This version adds `ip_version` to floating IP creation for pool selection.
 
-use omicron_common::api::external::{IdentityMetadataCreateParams, NameOrId};
+use omicron_common::api::external::{
+    IdentityMetadataCreateParams, IpVersion, NameOrId,
+};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::net::IpAddr;
 
 use crate::v2025112000;
-use crate::v2025121200;
 
 /// Parameters for creating a new floating IP address for instances.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
@@ -23,20 +24,20 @@ pub struct FloatingIpCreate {
     pub ip: Option<IpAddr>,
     /// The parent IP pool that a floating IP is pulled from.
     pub pool: Option<NameOrId>,
+    /// The IP version preference for address allocation.
+    #[serde(default)]
+    pub ip_version: Option<IpVersion>,
 }
 
 impl From<v2025112000::floating_ip::FloatingIpCreate> for FloatingIpCreate {
     fn from(
         old: v2025112000::floating_ip::FloatingIpCreate,
     ) -> FloatingIpCreate {
-        FloatingIpCreate { identity: old.identity, ip: old.ip, pool: old.pool }
-    }
-}
-
-impl From<v2025121200::floating_ip::FloatingIpCreate> for FloatingIpCreate {
-    fn from(
-        old: v2025121200::floating_ip::FloatingIpCreate,
-    ) -> FloatingIpCreate {
-        FloatingIpCreate { identity: old.identity, ip: old.ip, pool: old.pool }
+        FloatingIpCreate {
+            identity: old.identity,
+            ip: old.ip,
+            pool: old.pool,
+            ip_version: None,
+        }
     }
 }

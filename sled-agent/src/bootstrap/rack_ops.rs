@@ -10,6 +10,7 @@ use bootstore::schemes::v0 as bootstore;
 use omicron_uuid_kinds::RackInitUuid;
 use omicron_uuid_kinds::RackResetUuid;
 use sled_agent_config_reconciler::InternalDisksReceiver;
+use sled_agent_measurements::MeasurementsHandle;
 use sled_agent_types::rack_init::RackInitializeRequestParams;
 use sled_agent_types::rack_ops::{RackOperationStatus, RssStep};
 use slog::Logger;
@@ -149,8 +150,9 @@ impl RssAccess {
         sprockets: SprocketsConfig,
         global_zone_bootstrap_ip: Ipv6Addr,
         internal_disks_rx: &InternalDisksReceiver,
+        measurements: Arc<MeasurementsHandle>,
         bootstore_node_handle: &bootstore::NodeHandle,
-        trust_quorum_handle: &trust_quorum::NodeTaskHandle,
+        /*        trust_quorum_handle: &trust_quorum::NodeTaskHandle, */
         request: RackInitializeRequestParams,
     ) -> Result<RackInitUuid, RssAccessError> {
         let mut status = self.status.lock().unwrap();
@@ -190,15 +192,16 @@ impl RssAccess {
                 let internal_disks_rx = internal_disks_rx.clone();
                 let bootstore_node_handle = bootstore_node_handle.clone();
                 let status = Arc::clone(&self.status);
-                let trust_quorum_handle = trust_quorum_handle.clone();
+                /* let trust_quorum_handle = trust_quorum_handle.clone(); */
                 tokio::spawn(async move {
                     let result = rack_initialize(
                         &parent_log,
                         sprockets,
                         global_zone_bootstrap_ip,
                         internal_disks_rx,
+                        measurements,
                         bootstore_node_handle,
-                        trust_quorum_handle,
+                        /*trust_quorum_handle, */
                         request,
                         step_tx,
                     )
@@ -225,6 +228,7 @@ impl RssAccess {
         parent_log: &Logger,
         sprockets: SprocketsConfig,
         global_zone_bootstrap_ip: Ipv6Addr,
+        measurements: Arc<MeasurementsHandle>,
     ) -> Result<RackResetUuid, RssAccessError> {
         let mut status = self.status.lock().unwrap();
 
@@ -265,6 +269,7 @@ impl RssAccess {
                         &parent_log,
                         sprockets,
                         global_zone_bootstrap_ip,
+                        measurements,
                     )
                     .await;
                     let new_status = match result {
@@ -339,8 +344,9 @@ async fn rack_initialize(
     sprockets: SprocketsConfig,
     global_zone_bootstrap_ip: Ipv6Addr,
     internal_disks_rx: InternalDisksReceiver,
+    measurements: Arc<MeasurementsHandle>,
     bootstore_node_handle: bootstore::NodeHandle,
-    trust_quorum_handle: trust_quorum::NodeTaskHandle,
+    /*    trust_quorum_handle: trust_quorum::NodeTaskHandle, */
     request: RackInitializeRequestParams,
     step_tx: watch::Sender<RssStep>,
 ) -> Result<(), SetupServiceError> {
@@ -350,8 +356,9 @@ async fn rack_initialize(
         request,
         global_zone_bootstrap_ip,
         internal_disks_rx,
+        measurements,
         bootstore_node_handle,
-        trust_quorum_handle,
+        /* trust_quorum_handle, */
         step_tx,
     )
     .await
@@ -361,7 +368,13 @@ async fn rack_reset(
     parent_log: &Logger,
     sprockets: SprocketsConfig,
     global_zone_bootstrap_ip: Ipv6Addr,
+    measurements: Arc<MeasurementsHandle>,
 ) -> Result<(), SetupServiceError> {
-    RssHandle::run_rss_reset(parent_log, global_zone_bootstrap_ip, sprockets)
-        .await
+    RssHandle::run_rss_reset(
+        parent_log,
+        global_zone_bootstrap_ip,
+        sprockets,
+        measurements,
+    )
+    .await
 }

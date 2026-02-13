@@ -55,10 +55,12 @@ pub mod alert {
 }
 
 pub mod audit {
-    pub use crate::v2025112000::audit::AuditLogEntry;
     pub use crate::v2025112000::audit::AuditLogEntryActor;
     pub use crate::v2025112000::audit::AuditLogEntryResult;
     pub use crate::v2025112000::audit::AuditLogParams;
+
+    pub use crate::v2026011501::audit::AuditLogEntry;
+    pub use crate::v2026011501::audit::AuthMethod;
 }
 
 pub mod bfd {
@@ -94,17 +96,17 @@ pub mod device_params {
 }
 
 pub mod disk {
-    // View types from omicron-common (latest version)
+    // View types from omicron-common (latest version).
     pub use omicron_common::api::external::{Disk, DiskType};
 
-    // Request types - BlockSize and DiskSource are unchanged since INITIAL
+    // Request types unchanged since INITIAL.
     pub use crate::v2025112000::disk::{
         BlockSize, DiskMetricName, DiskMetricsPath, DiskSelector,
         ExpectedDigest, FinalizeDisk, ImportBlocksBulkWrite,
     };
 
-    // Request types from LOCAL_STORAGE
-    pub use crate::v2025120300::disk::{DiskBackend, DiskCreate, DiskSource};
+    // Request types from READ_ONLY_DISKS_NULLABLE.
+    pub use crate::v2026013100::disk::{DiskBackend, DiskCreate, DiskSource};
 }
 
 pub mod external_ip {
@@ -120,8 +122,8 @@ pub mod floating_ip {
     pub use crate::v2025112000::floating_ip::FloatingIpSelector;
     pub use crate::v2025112000::floating_ip::FloatingIpUpdate;
 
-    pub use crate::v2026010500::floating_ip::AddressSelector;
-    pub use crate::v2026010500::floating_ip::FloatingIpCreate;
+    pub use crate::v2026012200::floating_ip::AddressAllocator;
+    pub use crate::v2026012200::floating_ip::FloatingIpCreate;
 }
 
 pub mod hardware {
@@ -144,21 +146,17 @@ pub mod image {
 }
 
 pub mod instance {
-    pub use crate::v2025112000::instance::ExternalIpDetach;
+    pub use crate::v2025112000::instance::InstanceDiskAttach;
     pub use crate::v2025112000::instance::InstanceNetworkInterfaceSelector;
     pub use crate::v2025112000::instance::InstanceNetworkInterfaceUpdate;
     pub use crate::v2025112000::instance::InstanceSelector;
     pub use crate::v2025112000::instance::InstanceSerialConsoleData;
     pub use crate::v2025112000::instance::InstanceSerialConsoleRequest;
     pub use crate::v2025112000::instance::InstanceSerialConsoleStreamRequest;
-    pub use crate::v2025112000::instance::InstanceUpdate;
     pub use crate::v2025112000::instance::MAX_USER_DATA_BYTES;
     pub use crate::v2025112000::instance::OptionalInstanceSelector;
     pub use crate::v2025112000::instance::UserData;
     pub use crate::v2025112000::instance::bool_true;
-
-    pub use crate::v2025120300::instance::InstanceDiskAttach;
-    pub use crate::v2025120300::instance::InstanceDiskAttachment;
 
     pub use crate::v2026010300::instance::InstanceNetworkInterfaceAttachment;
     pub use crate::v2026010300::instance::InstanceNetworkInterfaceCreate;
@@ -171,7 +169,14 @@ pub mod instance {
 
     pub use crate::v2026010500::instance::EphemeralIpCreate;
     pub use crate::v2026010500::instance::ExternalIpCreate;
-    pub use crate::v2026010500::instance::InstanceCreate;
+
+    pub use crate::v2026010800::instance::InstanceUpdate;
+
+    pub use crate::v2026012300::instance::EphemeralIpDetachSelector;
+    pub use crate::v2026012300::instance::ExternalIpDetach;
+
+    pub use crate::v2026013100::instance::InstanceCreate;
+    pub use crate::v2026013100::instance::InstanceDiskAttachment;
 }
 
 pub mod internet_gateway {
@@ -213,16 +218,24 @@ pub mod metrics {
 }
 
 pub mod multicast {
-    pub use crate::v2025112000::multicast::InstanceMulticastGroupPath;
-    pub use crate::v2025112000::multicast::MulticastGroup;
     pub use crate::v2025112000::multicast::MulticastGroupCreate;
     pub use crate::v2025112000::multicast::MulticastGroupIpLookupPath;
-    pub use crate::v2025112000::multicast::MulticastGroupMember;
-    pub use crate::v2025112000::multicast::MulticastGroupMemberAdd;
-    pub use crate::v2025112000::multicast::MulticastGroupMemberPath;
     pub use crate::v2025112000::multicast::MulticastGroupMemberRemove;
-    pub use crate::v2025112000::multicast::MulticastGroupSelector;
     pub use crate::v2025112000::multicast::MulticastGroupUpdate;
+
+    pub use crate::v2026010800::multicast::InstanceMulticastGroupJoin;
+    pub use crate::v2026010800::multicast::InstanceMulticastGroupPath;
+    pub use crate::v2026010800::multicast::MulticastGroup;
+    pub use crate::v2026010800::multicast::MulticastGroupIdentifier;
+    pub use crate::v2026010800::multicast::MulticastGroupJoinSpec;
+    pub use crate::v2026010800::multicast::MulticastGroupMember;
+    pub use crate::v2026010800::multicast::MulticastGroupMemberAdd;
+    pub use crate::v2026010800::multicast::MulticastGroupMemberPath;
+    pub use crate::v2026010800::multicast::MulticastGroupPath;
+    pub use crate::v2026010800::multicast::MulticastGroupSelector;
+
+    pub use crate::impls::multicast::validate_multicast_ip;
+    pub use crate::impls::multicast::validate_source_ip;
 }
 
 pub mod networking {
@@ -263,9 +276,6 @@ pub mod networking {
     pub use crate::v2025112000::networking::SwitchVlanInterface;
     pub use crate::v2025112000::networking::SwtichPortSettingsGroupCreate;
     pub use crate::v2025112000::networking::TxEqConfig;
-
-    pub use crate::v2025120300::networking::BgpPeerState;
-    pub use crate::v2025120300::networking::BgpPeerStatus;
 }
 
 pub mod oxql {
@@ -288,7 +298,9 @@ pub mod probe {
     pub use crate::v2025112000::probe::ProbeExternalIp;
     pub use crate::v2025112000::probe::ProbeExternalIpKind;
     pub use crate::v2025112000::probe::ProbeListSelector;
+
     pub use crate::v2026010300::probe::ProbeInfo;
+
     pub use crate::v2026010500::probe::ProbeCreate;
 }
 
@@ -420,6 +432,39 @@ pub mod physical_disk {
 
 pub mod rack {
     pub use crate::v2025112000::rack::Rack;
+
+    pub use crate::v2026012100::rack::RackMembershipAddSledsRequest;
+    pub use crate::v2026012100::rack::RackMembershipChangeState;
+    pub use crate::v2026012100::rack::RackMembershipConfigPathParams;
+    pub use crate::v2026012100::rack::RackMembershipStatus;
+    pub use crate::v2026012100::rack::RackMembershipVersion;
+    pub use crate::v2026012100::rack::RackMembershipVersionParam;
+}
+
+pub mod subnet_pool {
+    pub use crate::v2026012200::subnet_pool::SiloSubnetPool;
+    pub use crate::v2026012200::subnet_pool::SubnetPool;
+    pub use crate::v2026012200::subnet_pool::SubnetPoolCreate;
+    pub use crate::v2026012200::subnet_pool::SubnetPoolLinkSilo;
+    pub use crate::v2026012200::subnet_pool::SubnetPoolMember;
+    pub use crate::v2026012200::subnet_pool::SubnetPoolMemberAdd;
+    pub use crate::v2026012200::subnet_pool::SubnetPoolMemberRemove;
+    pub use crate::v2026012200::subnet_pool::SubnetPoolPath;
+    pub use crate::v2026012200::subnet_pool::SubnetPoolSiloLink;
+    pub use crate::v2026012200::subnet_pool::SubnetPoolSiloPath;
+    pub use crate::v2026012200::subnet_pool::SubnetPoolSiloUpdate;
+    pub use crate::v2026012200::subnet_pool::SubnetPoolUpdate;
+    pub use crate::v2026012200::subnet_pool::SubnetPoolUtilization;
+}
+
+pub mod external_subnet {
+    pub use crate::v2026012200::external_subnet::ExternalSubnet;
+    pub use crate::v2026012200::external_subnet::ExternalSubnetAllocator;
+    pub use crate::v2026012200::external_subnet::ExternalSubnetAttach;
+    pub use crate::v2026012200::external_subnet::ExternalSubnetCreate;
+    pub use crate::v2026012200::external_subnet::ExternalSubnetPath;
+    pub use crate::v2026012200::external_subnet::ExternalSubnetSelector;
+    pub use crate::v2026012200::external_subnet::ExternalSubnetUpdate;
 }
 
 pub mod sled {
@@ -470,7 +515,6 @@ pub mod path_params {
     pub use crate::v2025112000::path_params::InternetGatewayPath;
     pub use crate::v2025112000::path_params::IpAddressPath;
     pub use crate::v2025112000::path_params::IpPoolPath;
-    pub use crate::v2025112000::path_params::MulticastGroupPath;
     pub use crate::v2025112000::path_params::NetworkInterfacePath;
     pub use crate::v2025112000::path_params::PhysicalDiskPath;
     pub use crate::v2025112000::path_params::ProbePath;

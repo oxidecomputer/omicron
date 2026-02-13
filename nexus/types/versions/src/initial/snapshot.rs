@@ -13,8 +13,6 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-// SELECTORS
-
 #[derive(Deserialize, JsonSchema)]
 pub struct SnapshotSelector {
     /// Name or ID of the project, only required if `snapshot` is provided as a `Name`
@@ -22,8 +20,6 @@ pub struct SnapshotSelector {
     /// Name or ID of the snapshot
     pub snapshot: NameOrId,
 }
-
-// VIEWS
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
@@ -47,8 +43,6 @@ pub struct Snapshot {
 
     pub size: ByteCount,
 }
-
-// PARAMS
 
 /// Create-time parameters for a `Snapshot`
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]

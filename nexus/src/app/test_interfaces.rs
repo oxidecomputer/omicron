@@ -172,12 +172,9 @@ impl TestInterfaces for super::Nexus {
     }
 
     fn invalidate_multicast_caches(&self) {
-        if let Some(flag) =
-            &self.background_tasks_internal.multicast_invalidate_cache
-        {
-            flag.store(true, std::sync::atomic::Ordering::SeqCst);
-            self.background_tasks
-                .activate(&self.background_tasks.task_multicast_reconciler);
-        }
+        // Cache invalidation happens automatically when the reconciler detects
+        // sled location changes. Activating the reconciler is sufficient.
+        self.background_tasks
+            .activate(&self.background_tasks.task_multicast_reconciler);
     }
 }

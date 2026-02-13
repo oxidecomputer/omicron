@@ -23,9 +23,3 @@ pub struct SiloIpPool {
     /// There can be at most one default for a given silo.
     pub is_default: bool,
 }
-
-impl From<crate::v2026010100::ip_pool::SiloIpPool> for SiloIpPool {
-    fn from(new: crate::v2026010100::ip_pool::SiloIpPool) -> SiloIpPool {
-        SiloIpPool { identity: new.identity, is_default: new.is_default }
-    }
-}

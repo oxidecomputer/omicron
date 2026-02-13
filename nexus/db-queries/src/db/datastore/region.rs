@@ -133,7 +133,7 @@ impl DataStore {
                 Ok(db::model::BlockSize::try_from(*block_size)
                     .map_err(|e| Error::invalid_request(&e.to_string()))?)
             }
-            disk_types::DiskSource::Snapshot { snapshot_id } => {
+            disk_types::DiskSource::Snapshot { snapshot_id, read_only: _ } => {
                 let (.., db_snapshot) = LookupPath::new(opctx, self)
                     .snapshot_id(*snapshot_id)
                     .fetch()
@@ -141,7 +141,7 @@ impl DataStore {
 
                 Ok(db_snapshot.block_size)
             }
-            disk_types::DiskSource::Image { image_id } => {
+            disk_types::DiskSource::Image { image_id, read_only: _ } => {
                 let (.., db_image) = LookupPath::new(opctx, self)
                     .image_id(*image_id)
                     .fetch()

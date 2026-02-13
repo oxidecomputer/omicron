@@ -13,8 +13,6 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-// SELECTORS
-
 #[derive(Deserialize, JsonSchema)]
 pub struct ImageSelector {
     /// Name or ID of the project, only required if `image` is provided as a `Name`
@@ -22,8 +20,6 @@ pub struct ImageSelector {
     /// Name or ID of the image
     pub image: NameOrId,
 }
-
-// VIEWS
 
 /// View of an image
 ///
@@ -53,8 +49,6 @@ pub struct Image {
     /// total size in bytes
     pub size: ByteCount,
 }
-
-// PARAMS
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(tag = "type", rename_all = "snake_case")]

@@ -17,6 +17,7 @@ use nexus_test_utils::{
     },
 };
 use nexus_test_utils_macros::nexus_test;
+use nexus_types::external_api::floating_ip;
 use nexus_types::external_api::instance::{
     ExternalIpCreate, InstanceNetworkInterfaceAttachment,
     InstanceNetworkInterfaceCreate, PrivateIpStackCreate,
@@ -25,6 +26,7 @@ use nexus_types::external_api::internet_gateway::{
     InternetGateway, InternetGatewayIpAddress, InternetGatewayIpPool,
     InternetGatewayIpPoolCreate,
 };
+use nexus_types::external_api::ip_pool;
 use nexus_types::external_api::policy::SiloRole;
 use nexus_types::external_api::silo::Silo;
 use nexus_types::identity::Resource;
@@ -362,8 +364,11 @@ async fn test_setup(c: &ClientTestContext) {
         c,
         FLOATING_IP_NAME,
         PROJECT_NAME,
-        None,
-        Some(IP_POOL_NAME),
+        floating_ip::AddressAllocator::Auto {
+            pool_selector: ip_pool::PoolSelector::Explicit {
+                pool: NameOrId::Name(IP_POOL_NAME.parse().unwrap()),
+            },
+        },
     )
     .await;
     let nic_attach = InstanceNetworkInterfaceAttachment::Create(vec![

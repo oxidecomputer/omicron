@@ -10,4 +10,3 @@
 pub mod floating_ip;
 pub mod instance;
 pub mod ip_pool;
-pub mod probe;

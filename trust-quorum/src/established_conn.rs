@@ -25,6 +25,9 @@ const CONN_BUF_SIZE: usize = 1024 * 1024;
 /// Each message starts with a 4 bytes size header
 const FRAME_HEADER_SIZE: usize = 4;
 
+/// Maximum allowed serialized message (frame) size
+const MAX_FRAME_SIZE: usize = CONN_BUF_SIZE - FRAME_HEADER_SIZE;
+
 /// The number of serialized messages to queue for writing before closing the socket.
 /// This means the remote side is very slow.
 ///
@@ -55,6 +58,10 @@ pub enum ConnErr {
     WriteQueueFull,
     #[error("Inactivity timeout")]
     InactivityTimeout,
+    #[error("Read zero bytes")]
+    ZeroByteRead,
+    #[error("Message size exceeds maximum: Expected {max}, Got {0}", max = MAX_FRAME_SIZE)]
+    MaxFrameSizeExceeded(usize),
 }
 
 /// Container for code running in its own task per sprockets connection
@@ -163,6 +170,9 @@ impl EstablishedConn {
         res: Result<usize, std::io::Error>,
     ) -> Result<(), ConnErr> {
         let n = res.map_err(ConnErr::FailedRead)?;
+        if n == 0 {
+            return Err(ConnErr::ZeroByteRead);
+        }
         self.total_read += n;
 
         // We may have more than one message that has been read
@@ -174,6 +184,11 @@ impl EstablishedConn {
             let size = read_frame_size(
                 self.read_buf[..FRAME_HEADER_SIZE].try_into().unwrap(),
             );
+
+            if size > MAX_FRAME_SIZE {
+                return Err(ConnErr::MaxFrameSizeExceeded(size));
+            }
+
             let end = size + FRAME_HEADER_SIZE;
 
             // If we haven't read the whole message yet, then return

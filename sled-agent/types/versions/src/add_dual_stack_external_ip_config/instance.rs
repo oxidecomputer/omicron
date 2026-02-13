@@ -7,7 +7,6 @@ use std::net::SocketAddr;
 use omicron_common::api::external;
 use omicron_common::api::external::Hostname;
 use omicron_common::api::internal::nexus::VmmRuntimeState;
-use omicron_common::api::internal::shared::DelegatedZvol;
 use omicron_common::api::internal::shared::DhcpConfig;
 use omicron_common::api::internal::shared::ExternalIpConfig;
 use omicron_common::api::internal::shared::NetworkInterface;
@@ -20,6 +19,7 @@ use uuid::Uuid;
 use crate::v1::instance::InstanceMetadata;
 use crate::v1::instance::VmmSpec;
 use crate::v7::instance::InstanceMulticastMembership;
+use crate::v9::instance::DelegatedZvol;
 use crate::v10;
 
 /// The body of a request to ensure that a instance and VMM are known to a sled

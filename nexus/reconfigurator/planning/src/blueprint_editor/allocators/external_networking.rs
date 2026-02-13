@@ -6,7 +6,6 @@ use anyhow::bail;
 use debug_ignore::DebugIgnore;
 use nexus_config::NUM_INITIAL_RESERVED_IP_ADDRESSES;
 use nexus_types::deployment::BlueprintZoneConfig;
-use nexus_types::deployment::BlueprintZoneDisposition;
 use nexus_types::deployment::BlueprintZoneType;
 use nexus_types::deployment::ExternalIpPolicy;
 use nexus_types::deployment::OmicronZoneExternalIp;
@@ -99,9 +98,7 @@ impl ExternalNetworkingAllocator {
         external_ip_policy: &ExternalIpPolicy,
     ) -> anyhow::Result<Self> {
         Self::new(
-            builder
-                .current_zones(BlueprintZoneDisposition::is_in_service)
-                .map(|(_sled_id, zone)| zone),
+            builder.current_in_service_zones().map(|(_sled_id, zone)| zone),
             external_ip_policy,
         )
     }

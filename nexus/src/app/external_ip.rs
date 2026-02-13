@@ -12,6 +12,7 @@ use nexus_db_model::IpAttachState;
 use nexus_db_model::IpVersion;
 use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
+use nexus_db_queries::db::datastore::FloatingIpAllocation;
 use nexus_types::external_api::external_ip;
 use nexus_types::external_api::floating_ip;
 use nexus_types::external_api::instance;
@@ -119,35 +120,34 @@ impl super::Nexus {
         let (.., authz_project) =
             project_lookup.lookup_for(authz::Action::CreateChild).await?;
 
-        let floating_ip::FloatingIpCreate { identity, address_selector } =
+        let floating_ip::FloatingIpCreate { identity, address_allocator } =
             params;
 
-        // Destructure address_selector enum to get pool, ip, and ip_version
-        let (pool, ip, ip_version) = match address_selector {
-            floating_ip::AddressSelector::Explicit { ip, pool } => {
-                (pool, Some(ip), None)
+        let allocation = match address_allocator {
+            floating_ip::AddressAllocator::Explicit { ip } => {
+                FloatingIpAllocation::Explicit { ip }
             }
-            floating_ip::AddressSelector::Auto { pool_selector } => {
+            floating_ip::AddressAllocator::Auto { pool_selector } => {
                 match pool_selector {
                     ip_pool::PoolSelector::Explicit { pool } => {
-                        (Some(pool), None, None)
+                        let authz_pool = self
+                            .ip_pool_lookup(opctx, &pool)?
+                            .lookup_for(authz::Action::CreateChild)
+                            .await?
+                            .0;
+                        FloatingIpAllocation::Auto {
+                            pool: Some(authz_pool),
+                            ip_version: None,
+                        }
                     }
                     ip_pool::PoolSelector::Auto { ip_version } => {
-                        (None, None, ip_version)
+                        FloatingIpAllocation::Auto {
+                            pool: None,
+                            ip_version: ip_version.map(Into::into),
+                        }
                     }
                 }
             }
-        };
-
-        // resolve NameOrId into authz::IpPool
-        let pool = match pool {
-            Some(pool) => Some(
-                self.ip_pool_lookup(opctx, &pool)?
-                    .lookup_for(authz::Action::CreateChild)
-                    .await?
-                    .0,
-            ),
-            None => None,
         };
 
         Ok(self
@@ -156,9 +156,7 @@ impl super::Nexus {
                 opctx,
                 authz_project.id(),
                 identity,
-                ip,
-                pool,
-                ip_version.map(Into::into),
+                allocation,
             )
             .await?
             .try_into()

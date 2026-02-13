@@ -1389,6 +1389,79 @@
         }
       }
     },
+    "/trust-quorum/config/{rack_id}": {
+      "get": {
+        "summary": "Retrieve the trust quorum configuration for the given epoch, or latest",
+        "operationId": "trust_quorum_get_config",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "rack_id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "query",
+            "name": "epoch",
+            "schema": {
+              "nullable": true,
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TrustQuorumConfig"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/trust-quorum/lrtq-upgrade": {
+      "post": {
+        "summary": "Initiate an LRTQ upgrade",
+        "description": "Return the epoch of the proposed configuration, so it can be polled asynchronously.",
+        "operationId": "trust_quorum_lrtq_upgrade",
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "uint64",
+                  "type": "integer",
+                  "format": "uint64",
+                  "minimum": 0
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/v1/ping": {
       "get": {
         "summary": "Ping API",
@@ -3943,6 +4016,26 @@
         "required": [
           "nanos",
           "secs"
+        ]
+      },
+      "EncryptedRackSecrets": {
+        "description": "All possibly relevant __encrypted__ rack secrets for _prior_ committed configurations.",
+        "type": "object",
+        "properties": {
+          "data": {
+            "description": "Encrypted data.",
+            "type": "string",
+            "format": "hex string"
+          },
+          "salt": {
+            "description": "A random value used to derive the key to encrypt the rack secrets for prior committed epochs.",
+            "type": "string",
+            "format": "hex string (32 bytes)"
+          }
+        },
+        "required": [
+          "data",
+          "salt"
         ]
       },
       "Error": {
@@ -7953,6 +8046,15 @@
           "rack_subnet"
         ]
       },
+      "RackUuid": {
+        "x-rust-type": {
+          "crate": "omicron-uuid-kinds",
+          "path": "omicron_uuid_kinds::RackUuid",
+          "version": "*"
+        },
+        "type": "string",
+        "format": "uuid"
+      },
       "ReconfiguratorConfig": {
         "type": "object",
         "properties": {
@@ -8835,6 +8937,133 @@
               "switch1"
             ]
           }
+        ]
+      },
+      "TrustQuorumConfig": {
+        "type": "object",
+        "properties": {
+          "abort_reason": {
+            "nullable": true,
+            "type": "string"
+          },
+          "commit_crash_tolerance": {
+            "type": "integer",
+            "format": "uint8",
+            "minimum": 0
+          },
+          "coordinator": {
+            "$ref": "#/components/schemas/BaseboardId"
+          },
+          "encrypted_rack_secrets": {
+            "nullable": true,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/EncryptedRackSecrets"
+              }
+            ]
+          },
+          "epoch": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "last_committed_epoch": {
+            "nullable": true,
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "members": {
+            "type": "object",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/TrustQuorumMemberData"
+            }
+          },
+          "rack_id": {
+            "$ref": "#/components/schemas/RackUuid"
+          },
+          "state": {
+            "$ref": "#/components/schemas/TrustQuorumConfigState"
+          },
+          "threshold": {
+            "type": "integer",
+            "format": "uint8",
+            "minimum": 0
+          },
+          "time_aborted": {
+            "nullable": true,
+            "type": "string",
+            "format": "date-time"
+          },
+          "time_committed": {
+            "nullable": true,
+            "type": "string",
+            "format": "date-time"
+          },
+          "time_committing": {
+            "nullable": true,
+            "type": "string",
+            "format": "date-time"
+          },
+          "time_created": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "commit_crash_tolerance",
+          "coordinator",
+          "epoch",
+          "members",
+          "rack_id",
+          "state",
+          "threshold",
+          "time_created"
+        ]
+      },
+      "TrustQuorumConfigState": {
+        "type": "string",
+        "enum": [
+          "preparing",
+          "preparing_lrtq_upgrade",
+          "committing",
+          "committed",
+          "committed_partially",
+          "aborted"
+        ]
+      },
+      "TrustQuorumMemberData": {
+        "type": "object",
+        "properties": {
+          "share_digest": {
+            "nullable": true,
+            "type": "string",
+            "format": "hex string (32 bytes)"
+          },
+          "state": {
+            "$ref": "#/components/schemas/TrustQuorumMemberState"
+          },
+          "time_committed": {
+            "nullable": true,
+            "type": "string",
+            "format": "date-time"
+          },
+          "time_prepared": {
+            "nullable": true,
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "state"
+        ]
+      },
+      "TrustQuorumMemberState": {
+        "type": "string",
+        "enum": [
+          "unacked",
+          "prepared",
+          "committed"
         ]
       },
       "TufRepoVersion": {

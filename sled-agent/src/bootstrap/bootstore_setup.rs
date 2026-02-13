@@ -7,7 +7,7 @@
 
 #![allow(clippy::result_large_err)]
 
-use crate::bootstrap::config::TRUST_QUORUM_PORT;
+//use crate::bootstrap::config::TRUST_QUORUM_PORT;
 
 use super::config::BOOTSTORE_PORT;
 use super::server::StartError;
@@ -47,7 +47,7 @@ pub fn new_bootstore_config(
     })
 }
 
-fn bootstore_fsm_state_paths(
+pub fn bootstore_fsm_state_paths(
     cluster_dataset_paths: &[Utf8PathBuf],
 ) -> Result<Vec<Utf8PathBuf>, StartError> {
     let paths: Vec<_> = cluster_dataset_paths
@@ -78,10 +78,10 @@ fn bootstore_network_config_paths(
 pub async fn poll_ddmd_for_bootstore_and_tq_peer_update(
     log: Logger,
     bootstore_node_handle: bootstore::NodeHandle,
-    trust_quorum_handle: trust_quorum::NodeTaskHandle,
+    /*    trust_quorum_handle: trust_quorum::NodeTaskHandle, */
 ) {
     let mut current_bootstore_peers: BTreeSet<SocketAddrV6> = BTreeSet::new();
-    let mut current_tq_peers: BTreeSet<SocketAddrV6> = BTreeSet::new();
+    //let mut current_tq_peers: BTreeSet<SocketAddrV6> = BTreeSet::new();
     // We're talking to a service's admin interface on localhost and
     // we're only asking for its current state. We use a retry in a loop
     // instead of `backoff`.
@@ -122,6 +122,8 @@ pub async fn poll_ddmd_for_bootstore_and_tq_peer_update(
                     }
                 }
                 // Inform the trust quorum node of all known peer addresses
+                // Re-enable after R18
+                /*
                 let tq_peers: BTreeSet<_> = addrs
                     .iter()
                     .map(|ip| SocketAddrV6::new(*ip, TRUST_QUORUM_PORT, 0, 0))
@@ -140,6 +142,7 @@ pub async fn poll_ddmd_for_bootstore_and_tq_peer_update(
                         return;
                     }
                 }
+                */
             }
             Err(err) => {
                 warn!(

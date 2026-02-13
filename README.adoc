@@ -230,7 +230,7 @@ OpenAPI documents are tracked by the `cargo xtask openapi` command.
   openapi check`.
 
 For more information, see the documentation in
-link:./dev-tools/openapi-manager[`dev-tools/openapi-manager`].
+https://github.com/oxidecomputer/dropshot-api-manager[`dropshot-openapi-manager`].
 
 Note that Omicron contains a nominally circular dependency:
 

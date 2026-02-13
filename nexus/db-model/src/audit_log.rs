@@ -38,7 +38,10 @@ pub struct AuditLogEntryInitParams {
     pub source_ip: IpAddr,
     pub user_agent: Option<String>,
     pub actor: AuditLogActor,
-    pub auth_method: Option<String>,
+    pub auth_method: Option<AuditLogAuthMethod>,
+    /// ID of the credential used to authenticate (session ID, access token ID,
+    /// or SCIM token ID). Not set for unauthenticated requests or spoof auth.
+    pub credential_id: Option<Uuid>,
 }
 
 impl_enum_type!(
@@ -86,6 +89,54 @@ impl_enum_type!(
     Timeout => b"timeout"
 );
 
+impl_enum_type!(
+    AuditLogAuthMethodEnum:
+
+    #[derive(
+        Clone,
+        Copy,
+        Debug,
+        AsExpression,
+        FromSqlRow,
+        Serialize,
+        Deserialize,
+        PartialEq,
+        Eq,
+    )]
+    pub enum AuditLogAuthMethod;
+
+    // Enum values
+    SessionCookie => b"session_cookie"
+    AccessToken => b"access_token"
+    ScimToken => b"scim_token"
+    Spoof => b"spoof"
+);
+
+impl From<AuditLogAuthMethod> for audit::AuthMethod {
+    fn from(m: AuditLogAuthMethod) -> Self {
+        match m {
+            AuditLogAuthMethod::SessionCookie => {
+                audit::AuthMethod::SessionCookie
+            }
+            AuditLogAuthMethod::AccessToken => audit::AuthMethod::AccessToken,
+            AuditLogAuthMethod::ScimToken => audit::AuthMethod::ScimToken,
+            AuditLogAuthMethod::Spoof => audit::AuthMethod::Spoof,
+        }
+    }
+}
+
+impl From<&nexus_types::authn::SchemeName> for AuditLogAuthMethod {
+    fn from(s: &nexus_types::authn::SchemeName) -> Self {
+        use nexus_types::authn::SchemeName;
+        match s {
+            SchemeName::SessionCookie => AuditLogAuthMethod::SessionCookie,
+            SchemeName::AccessToken => AuditLogAuthMethod::AccessToken,
+            SchemeName::ScimToken => AuditLogAuthMethod::ScimToken,
+            SchemeName::Spoof => AuditLogAuthMethod::Spoof,
+        }
+    }
+}
+
 #[derive(Queryable, Insertable, Selectable, Clone, Debug)]
 #[diesel(table_name = audit_log)]
 pub struct AuditLogEntryInit {
@@ -115,7 +166,11 @@ pub struct AuditLogEntryInit {
 
     /// API token or session cookie. Optional because it will not be defined
     /// on unauthenticated requests like login attempts.
-    pub auth_method: Option<String>,
+    pub auth_method: Option<AuditLogAuthMethod>,
+
+    /// ID of the credential used to authenticate (session ID, access token ID,
+    /// or SCIM token ID). Not set for unauthenticated requests or spoof auth.
+    pub credential_id: Option<Uuid>,
 }
 
 impl From<AuditLogEntryInitParams> for AuditLogEntryInit {
@@ -128,6 +183,7 @@ impl From<AuditLogEntryInitParams> for AuditLogEntryInit {
             user_agent,
             actor,
             auth_method,
+            credential_id,
         } = params;
 
         let (actor_id, actor_silo_id, actor_kind) = match actor {
@@ -161,6 +217,7 @@ impl From<AuditLogEntryInitParams> for AuditLogEntryInit {
             source_ip: source_ip.into(),
             user_agent,
             auth_method,
+            credential_id,
         }
     }
 }
@@ -182,20 +239,24 @@ pub struct AuditLogEntry {
     /// Actor kind indicating builtin user, silo user, or unauthenticated
     pub actor_kind: AuditLogActorKind,
 
-    /// The name of the authn scheme used. None if unauthenticated.
-    pub auth_method: Option<String>,
-
     // Fields that are not present on init
     /// Time log entry was completed with info about result of operation
     pub time_completed: DateTime<Utc>,
-    /// Result kind indicating success, error, or timeout
-    pub result_kind: AuditLogResultKind,
     /// Optional because not present for timeout result
     pub http_status_code: Option<SqlU16>,
     /// Optional even if result is an error
     pub error_code: Option<String>,
     /// Always present if result is an error
     pub error_message: Option<String>,
+    /// Result kind indicating success, error, or timeout
+    pub result_kind: AuditLogResultKind,
+
+    /// The authn scheme used. None if unauthenticated.
+    pub auth_method: Option<AuditLogAuthMethod>,
+
+    /// ID of the credential used to authenticate (session ID, access token ID,
+    /// or SCIM token ID). Not set for unauthenticated requests or spoof auth.
+    pub credential_id: Option<Uuid>,
 }
 
 /// Struct that we can use as a kind of constructor arg for our actual audit
@@ -320,7 +381,7 @@ impl TryFrom<AuditLogEntry> for audit::AuditLogEntry {
                     audit::AuditLogEntryActor::Unauthenticated
                 }
             },
-            auth_method: entry.auth_method,
+            auth_method: entry.auth_method.map(Into::into),
             time_completed: entry.time_completed,
             result: match entry.result_kind {
                 AuditLogResultKind::Success => {
@@ -353,6 +414,7 @@ impl TryFrom<AuditLogEntry> for audit::AuditLogEntry {
                     audit::AuditLogEntryResult::Unknown
                 }
             },
+            credential_id: entry.credential_id,
         })
     }
 }

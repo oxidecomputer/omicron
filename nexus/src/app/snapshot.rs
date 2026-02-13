@@ -112,6 +112,15 @@ impl super::Nexus {
                 }
             };
 
+        // Do not allow snapshots of read-only disks. (Note that the snapshot
+        // create saga will also not allow this, but will bubble up to the user
+        // as a 500 level error, whereas this is a 400 level error).
+        if disk.is_read_only() {
+            return Err(Error::invalid_request(
+                "can't create a snapshot of a read-only disk",
+            ));
+        }
+
         // If there isn't a running propolis, Nexus needs to use the Crucible
         // Pantry to make this snapshot
         let use_the_pantry = if let Some(attach_instance_id) =

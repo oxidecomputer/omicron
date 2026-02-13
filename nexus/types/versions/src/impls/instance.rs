@@ -5,12 +5,24 @@
 //! Functional code for instance-related types.
 
 use crate::latest::instance::{
-    IpAssignment, Ipv4Assignment, Ipv6Assignment, PrivateIpStackCreate,
-    PrivateIpv4StackCreate, PrivateIpv6StackCreate,
+    InstanceDiskAttach, InstanceDiskAttachment, IpAssignment, Ipv4Assignment,
+    Ipv6Assignment, PrivateIpStackCreate, PrivateIpv4StackCreate,
+    PrivateIpv6StackCreate,
 };
+use omicron_common::api::external::Name;
 use oxnet::IpNet;
 use oxnet::Ipv4Net;
 use oxnet::Ipv6Net;
+
+impl InstanceDiskAttachment {
+    /// Get the name of the disk described by this attachment.
+    pub fn name(&self) -> Name {
+        match self {
+            Self::Create(create) => create.identity.name.clone(),
+            Self::Attach(InstanceDiskAttach { name }) => name.clone(),
+        }
+    }
+}
 
 impl PrivateIpStackCreate {
     /// Construct an IPv4 configuration with no transit IPs.

@@ -46,6 +46,7 @@ use nexus_test_utils::wait_for_producer;
 use nexus_types::external_api::affinity;
 use nexus_types::external_api::disk;
 use nexus_types::external_api::external_ip::{ExternalIp, IpKind};
+use nexus_types::external_api::floating_ip;
 use nexus_types::external_api::image;
 use nexus_types::external_api::instance;
 use nexus_types::external_api::instance::ExternalIpCreate;
@@ -66,6 +67,7 @@ use nexus_types::external_api::vpc::VpcSubnet;
 use nexus_types::identity::Resource;
 use nexus_types::internal_api::params::InstanceMigrateRequest;
 use nexus_types::silo::DEFAULT_SILO_ID;
+use omicron_common::address::IpVersion;
 use omicron_common::api::external::AffinityPolicy;
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::Disk;
@@ -2644,6 +2646,7 @@ async fn test_instance_using_image_from_other_project_fails(
                         disk_backend: disk::DiskBackend::Distributed {
                             disk_source: disk::DiskSource::Image {
                                 image_id: image.identity.id,
+                                read_only: false,
                             },
                         },
                         size: ByteCount::from_gibibytes_u32(4),
@@ -7617,7 +7620,9 @@ async fn test_instance_ephemeral_ip_no_default_pool_error(
         user_data: vec![],
         network_interfaces:
             instance::InstanceNetworkInterfaceAttachment::DefaultIpv4,
-        external_ips: vec![],
+        external_ips: vec![ExternalIpCreate::Ephemeral {
+            pool_selector: PoolSelector::Auto { ip_version: None },
+        }],
         ssh_public_keys: None,
         disks: vec![],
         boot_disk: None,
@@ -7635,24 +7640,39 @@ async fn test_instance_ephemeral_ip_no_default_pool_error(
         "not found: default unicast IPv4 pool for current silo".to_string();
     assert_eq!(error.message, msg);
 
-    // same deal if you specify a pool that doesn't exist
-    let body2 = instance::InstanceCreate {
+    // Specifying a nonexistent pool also fails with 404, but we need to
+    // avoid SNAT allocation (which uses the default pool) to actually
+    // exercise the explicit pool lookup. Use network_interfaces: None.
+    let body = instance::InstanceCreate {
         identity: IdentityMetadataCreateParams {
-            name: "nonexistent-pool".parse().unwrap(),
+            name: "nonexistent-pool-inst".parse().unwrap(),
             description: "".to_string(),
         },
+        ncpus: InstanceCpuCount(4),
+        memory: ByteCount::from_gibibytes_u32(1),
+        hostname: "the-host".parse().unwrap(),
+        user_data: vec![],
+        network_interfaces: instance::InstanceNetworkInterfaceAttachment::None,
         external_ips: vec![ExternalIpCreate::Ephemeral {
             pool_selector: PoolSelector::Explicit {
                 pool: "nonexistent-pool".parse::<Name>().unwrap().into(),
             },
         }],
-        ..body
+        ssh_public_keys: None,
+        disks: vec![],
+        boot_disk: None,
+        cpu_platform: None,
+        start: true,
+        auto_restart_policy: Default::default(),
+        anti_affinity_groups: Vec::new(),
+        multicast_groups: Vec::new(),
     };
     let error =
-        object_create_error(client, &url, &body2, StatusCode::NOT_FOUND).await;
+        object_create_error(client, &url, &body, StatusCode::NOT_FOUND).await;
+    assert_eq!(error.error_code.unwrap(), "ObjectNotFound".to_string());
     assert_eq!(
         error.message,
-        "not found: ip-pool with name \"nonexistent-pool\""
+        "not found: ip-pool with name \"nonexistent-pool\"".to_string()
     );
 }
 
@@ -7683,7 +7703,13 @@ async fn test_instance_attach_several_external_ips(
     for i in 1..8 {
         let name = format!("fip-{i}");
         fips.push(
-            create_floating_ip(&client, &name, PROJECT_NAME, None, None).await,
+            create_floating_ip(
+                &client,
+                &name,
+                PROJECT_NAME,
+                floating_ip::AddressAllocator::default(),
+            )
+            .await,
         );
         external_ip_create.push(ExternalIpCreate::Floating {
             floating_ip: name.parse::<Name>().unwrap().into(),
@@ -7746,7 +7772,7 @@ async fn test_instance_attach_several_external_ips(
 }
 
 #[nexus_test]
-async fn test_instance_allow_only_one_ephemeral_ip(
+async fn test_instance_rejects_three_ephemeral_ips(
     cptestctx: &ControlPlaneTestContext,
 ) {
     let client = &cptestctx.external_client;
@@ -7771,7 +7797,11 @@ async fn test_instance_allow_only_one_ephemeral_ip(
         ssh_public_keys: None,
         network_interfaces:
             instance::InstanceNetworkInterfaceAttachment::DefaultIpv4,
-        external_ips: vec![ephemeral_create.clone(), ephemeral_create],
+        external_ips: vec![
+            ephemeral_create.clone(),
+            ephemeral_create.clone(),
+            ephemeral_create,
+        ],
         disks: vec![],
         boot_disk: None,
         cpu_platform: None,
@@ -7790,7 +7820,172 @@ async fn test_instance_allow_only_one_ephemeral_ip(
 
     assert_eq!(
         error.message,
-        "An instance may not have more than 1 ephemeral IP address"
+        "An instance may not have more than 2 ephemeral IP addresses"
+    );
+}
+
+#[nexus_test]
+async fn test_instance_rejects_two_ephemeral_auto_without_version(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+
+    let _ = create_project(&client, PROJECT_NAME).await;
+
+    let external_ips = vec![
+        ExternalIpCreate::Ephemeral {
+            pool_selector: PoolSelector::Auto { ip_version: None },
+        },
+        ExternalIpCreate::Ephemeral {
+            pool_selector: PoolSelector::Auto { ip_version: None },
+        },
+    ];
+    let create_params = instance::InstanceCreate {
+        identity: IdentityMetadataCreateParams {
+            name: "two-auto-ephemeral".parse().unwrap(),
+            description: "instance two-auto-ephemeral".into(),
+        },
+        ncpus: InstanceCpuCount(4),
+        memory: ByteCount::from_gibibytes_u32(1),
+        hostname: "the-host".parse().unwrap(),
+        user_data: vec![],
+        ssh_public_keys: None,
+        network_interfaces:
+            instance::InstanceNetworkInterfaceAttachment::DefaultIpv4,
+        external_ips,
+        disks: vec![],
+        boot_disk: None,
+        cpu_platform: None,
+        start: true,
+        auto_restart_policy: Default::default(),
+        anti_affinity_groups: Vec::new(),
+        multicast_groups: Vec::new(),
+    };
+    let error = object_create_error(
+        client,
+        &get_instances_url(),
+        &create_params,
+        StatusCode::BAD_REQUEST,
+    )
+    .await;
+
+    assert_eq!(
+        error.message,
+        "when requesting two ephemeral IPs, IP version or explicit \
+         pool name must be specified on each"
+    );
+}
+
+#[nexus_test]
+async fn test_instance_rejects_two_ephemeral_auto_none_with_explicit(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+
+    create_project(&client, PROJECT_NAME).await;
+    create_default_ip_pools(client).await;
+
+    // One explicit pool, one auto without version: rejected because the auto
+    // selector doesn't specify ip_version.
+    let external_ips = vec![
+        ExternalIpCreate::Ephemeral {
+            pool_selector: PoolSelector::Auto { ip_version: None },
+        },
+        ExternalIpCreate::Ephemeral {
+            pool_selector: PoolSelector::Explicit {
+                pool: "default-v4".parse::<Name>().unwrap().into(),
+            },
+        },
+    ];
+    let create_params = instance::InstanceCreate {
+        identity: IdentityMetadataCreateParams {
+            name: "explicit-plus-auto-ephemeral".parse().unwrap(),
+            description: "instance explicit-plus-auto-ephemeral".into(),
+        },
+        ncpus: InstanceCpuCount(4),
+        memory: ByteCount::from_gibibytes_u32(1),
+        hostname: "the-host".parse().unwrap(),
+        user_data: vec![],
+        ssh_public_keys: None,
+        network_interfaces:
+            instance::InstanceNetworkInterfaceAttachment::DefaultDualStack,
+        external_ips,
+        disks: vec![],
+        boot_disk: None,
+        cpu_platform: None,
+        start: true,
+        auto_restart_policy: Default::default(),
+        anti_affinity_groups: Vec::new(),
+        multicast_groups: Vec::new(),
+    };
+    let error = object_create_error(
+        client,
+        &get_instances_url(),
+        &create_params,
+        StatusCode::BAD_REQUEST,
+    )
+    .await;
+
+    assert_eq!(
+        error.message,
+        "when requesting two ephemeral IPs, IP version or explicit \
+         pool name must be specified on each"
+    );
+}
+
+#[nexus_test]
+async fn test_instance_rejects_two_ephemeral_same_pool(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+
+    create_project(&client, PROJECT_NAME).await;
+    create_default_ip_pools(client).await;
+
+    let external_ips = vec![
+        ExternalIpCreate::Ephemeral {
+            pool_selector: PoolSelector::Explicit {
+                pool: "default-v4".parse::<Name>().unwrap().into(),
+            },
+        },
+        ExternalIpCreate::Ephemeral {
+            pool_selector: PoolSelector::Explicit {
+                pool: "default-v4".parse::<Name>().unwrap().into(),
+            },
+        },
+    ];
+    let create_params = instance::InstanceCreate {
+        identity: IdentityMetadataCreateParams {
+            name: "same-pool-ephemeral".parse().unwrap(),
+            description: "instance same-pool-ephemeral".into(),
+        },
+        ncpus: InstanceCpuCount(4),
+        memory: ByteCount::from_gibibytes_u32(1),
+        hostname: "the-host".parse().unwrap(),
+        user_data: vec![],
+        ssh_public_keys: None,
+        network_interfaces:
+            instance::InstanceNetworkInterfaceAttachment::DefaultIpv4,
+        external_ips,
+        disks: vec![],
+        boot_disk: None,
+        cpu_platform: None,
+        start: true,
+        auto_restart_policy: Default::default(),
+        anti_affinity_groups: Vec::new(),
+        multicast_groups: Vec::new(),
+    };
+    let error = object_create_error(
+        client,
+        &get_instances_url(),
+        &create_params,
+        StatusCode::BAD_REQUEST,
+    )
+    .await;
+
+    assert_eq!(
+        error.message,
+        "cannot request two ephemeral IPs from the same pool"
     );
 }
 
@@ -7799,27 +7994,44 @@ async fn create_instance_with_pool(
     instance_name: &str,
     pool_name: Option<&str>,
 ) -> Instance {
-    let external_ips = match pool_name {
-        Some(name) => vec![ExternalIpCreate::Ephemeral {
-            pool_selector: PoolSelector::Explicit {
-                pool: name.parse::<Name>().unwrap().into(),
-            },
-        }],
-        None => vec![],
-    };
     create_instance_with(
         client,
         PROJECT_NAME,
         instance_name,
         &instance::InstanceNetworkInterfaceAttachment::DefaultIpv4,
         vec![],
-        external_ips,
+        vec![ExternalIpCreate::Ephemeral {
+            pool_selector: match pool_name {
+                Some(name) => PoolSelector::Explicit {
+                    pool: name.parse::<Name>().unwrap().into(),
+                },
+                None => PoolSelector::Auto { ip_version: None },
+            },
+        }],
         true,
         Default::default(),
         None,
         Vec::new(),
     )
     .await
+}
+
+pub async fn fetch_instance_network_interfaces(
+    client: &ClientTestContext,
+    instance_name: &str,
+    project_name: &str,
+) -> Vec<InstanceNetworkInterface> {
+    let url = format!(
+        "/v1/network-interfaces?project={project_name}&instance={instance_name}"
+    );
+    let nics = NexusRequest::object_get(client, &url)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .expect("Failed to fetch instance NICs")
+        .parsed_body::<ResultsPage<InstanceNetworkInterface>>()
+        .expect("Failed to parse NICs");
+    nics.items
 }
 
 pub async fn fetch_instance_external_ips(
@@ -8815,6 +9027,35 @@ pub async fn instance_simulate(nexus: &Arc<Nexus>, id: &InstanceUuid) {
     sled_info.sled_client.vmm_finish_transition(sled_info.propolis_id).await;
 }
 
+/// Fallible version of instance_simulate for test cleanup.
+///
+/// Returns an error instead of panicking if the sled agent communication fails.
+/// This is useful during test cleanup where the sled agent may be unavailable.
+// This is currently only consumed by tests behind the multicast feature gate.
+// If/when it has another consumer, this cfg can be removed.
+#[cfg(feature = "multicast")]
+pub async fn try_instance_simulate(
+    nexus: &Arc<Nexus>,
+    id: &InstanceUuid,
+) -> Result<(), anyhow::Error> {
+    let sled_info = nexus
+        .active_instance_info(id, None)
+        .await?
+        .ok_or_else(|| anyhow::anyhow!("instance not on a sled"))?;
+
+    sled_info
+        .sled_client
+        .try_vmm_finish_transition(sled_info.propolis_id)
+        .await
+        .map_err(|e| {
+            anyhow::anyhow!(
+                "sled agent communication failed for VMM {}: {e}",
+                sled_info.propolis_id
+            )
+        })?;
+    Ok(())
+}
+
 /// Simulate one step of an ongoing instance state transition.  To do this, we
 /// have to look up the instance, then get the sled agent associated with that
 /// instance, and then tell it to finish simulating whatever async transition is
@@ -8909,7 +9150,7 @@ async fn instance_wait_for_simulated_transition(
 /// Simulates state transitions for the incarnation of the instance on the
 /// supplied sled (which may not be the sled ID currently stored in the
 /// instance's CRDB record).
-async fn vmm_simulate_on_sled(
+pub async fn vmm_simulate_on_sled(
     cptestctx: &ControlPlaneTestContext,
     nexus: &Arc<Nexus>,
     sled_id: SledUuid,
@@ -9048,4 +9289,78 @@ async fn test_instance_with_max_disks(cptestctx: &ControlPlaneTestContext) {
     // Ensure that each disk attached ok
     let disks = get_instance_disks(&client, name).await;
     assert_eq!(disks.len(), MAX_DISKS_PER_INSTANCE as usize);
+}
+
+// Regression for https://github.com/oxidecomputer/omicron/issues/9775.
+#[nexus_test]
+async fn can_create_instance_with_multiple_nics_and_ephemeral_ip(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+    create_project_and_pool(&client).await;
+    let second_vpc_subnet_name = "second";
+    create_vpc_subnet(
+        &client,
+        PROJECT_NAME,
+        "default",
+        second_vpc_subnet_name,
+        "10.2.0.0/24".parse().unwrap(),
+        None,
+        None,
+    )
+    .await;
+    let nics = instance::InstanceNetworkInterfaceAttachment::Create(vec![
+        instance::InstanceNetworkInterfaceCreate {
+            identity: IdentityMetadataCreateParams {
+                name: "net0".parse().unwrap(),
+                description: String::new(),
+            },
+            vpc_name: "default".parse().unwrap(),
+            subnet_name: "default".parse().unwrap(),
+            ip_config: PrivateIpStackCreate::DualStack {
+                v4: PrivateIpv4StackCreate {
+                    ip: instance::Ipv4Assignment::Auto,
+                    transit_ips: vec![],
+                },
+                v6: PrivateIpv6StackCreate {
+                    ip: instance::Ipv6Assignment::Auto,
+                    transit_ips: vec![],
+                },
+            },
+        },
+        instance::InstanceNetworkInterfaceCreate {
+            identity: IdentityMetadataCreateParams {
+                name: "net1".parse().unwrap(),
+                description: String::new(),
+            },
+            vpc_name: "default".parse().unwrap(),
+            subnet_name: second_vpc_subnet_name.parse().unwrap(),
+            ip_config: PrivateIpStackCreate::DualStack {
+                v4: PrivateIpv4StackCreate {
+                    ip: instance::Ipv4Assignment::Auto,
+                    transit_ips: vec![],
+                },
+                v6: PrivateIpv6StackCreate {
+                    ip: instance::Ipv6Assignment::Auto,
+                    transit_ips: vec![],
+                },
+            },
+        },
+    ]);
+    let external_ips = vec![ExternalIpCreate::Ephemeral {
+        pool_selector: PoolSelector::Auto { ip_version: Some(IpVersion::V4) },
+    }];
+    let _ = create_instance_with(
+        client,
+        PROJECT_NAME,
+        "multi-niccy",
+        &nics,
+        vec![],
+        external_ips,
+        false,
+        None,
+        None,
+        vec![],
+    )
+    .await;
 }

@@ -45,6 +45,7 @@ use sled_agent_types_versions::latest::inventory::InventoryZpool;
 use sled_agent_types_versions::latest::inventory::OmicronFileSourceResolverInventory;
 use sled_agent_types_versions::latest::inventory::OmicronSledConfig;
 use sled_agent_types_versions::latest::inventory::OmicronZoneConfig;
+use sled_agent_types_versions::latest::inventory::SingleMeasurementInventory;
 use sled_agent_types_versions::latest::inventory::SledCpuFamily;
 use sled_agent_types_versions::latest::inventory::SledRole;
 use sled_hardware_types::BaseboardId;
@@ -643,6 +644,7 @@ pub struct SledAgent {
     pub last_reconciliation: Option<ConfigReconcilerInventory>,
     pub file_source_resolver: OmicronFileSourceResolverInventory,
     pub health_monitor: HealthMonitorInventory,
+    pub reference_measurements: IdOrdMap<SingleMeasurementInventory>,
 }
 
 impl IdOrdItem for SledAgent {

@@ -774,7 +774,7 @@ async fn test_limited_collaborator_can_manage_floating_ips_and_nics(
                 name: fip_name.parse().unwrap(),
                 description: "test floating ip".to_string(),
             },
-            address_selector: floating_ip::AddressSelector::Auto {
+            address_allocator: floating_ip::AddressAllocator::Auto {
                 pool_selector: ip_pool::PoolSelector::Explicit {
                     pool: v4_pool.identity.name.clone().into(),
                 },

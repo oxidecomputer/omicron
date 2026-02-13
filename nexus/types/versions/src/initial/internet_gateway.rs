@@ -13,8 +13,6 @@ use serde::{Deserialize, Serialize};
 use std::net::IpAddr;
 use uuid::Uuid;
 
-// VIEWS
-
 /// An internet gateway provides a path between VPC networks and external
 /// networks.
 #[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
@@ -51,8 +49,6 @@ pub struct InternetGatewayIpAddress {
     /// The associated IP address,
     pub address: IpAddr,
 }
-
-// SELECTORS
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
 pub struct InternetGatewayDeleteSelector {
@@ -121,8 +117,6 @@ pub struct InternetGatewayIpAddressSelector {
     /// Name or ID of the address
     pub address: NameOrId,
 }
-
-// CREATE PARAMS
 
 /// Create-time parameters for an `InternetGateway`
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]

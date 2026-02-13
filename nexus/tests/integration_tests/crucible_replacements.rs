@@ -1359,7 +1359,8 @@ mod region_snapshot_replacement {
                 &client,
                 PROJECT_NAME,
                 "disk-from-snapshot",
-                snapshot.identity.id,
+                &snapshot,
+                false,
             )
             .await;
 
@@ -2070,7 +2071,8 @@ async fn test_replacement_sanity(cptestctx: &ControlPlaneTestContext) {
         &client,
         PROJECT_NAME,
         "disk-from-snap",
-        snapshot.identity.id,
+        &snapshot,
+        false,
     )
     .await;
 
@@ -2181,7 +2183,8 @@ async fn test_region_replacement_triple_sanity(
         &client,
         PROJECT_NAME,
         "disk-from-snap",
-        snapshot.identity.id,
+        &snapshot,
+        false,
     )
     .await;
 
@@ -2307,7 +2310,8 @@ async fn test_region_replacement_triple_sanity_2(
         &client,
         PROJECT_NAME,
         "disk-from-snap",
-        snapshot.identity.id,
+        &snapshot,
+        false,
     )
     .await;
 
@@ -2467,7 +2471,8 @@ async fn test_replacement_sanity_twice(cptestctx: &ControlPlaneTestContext) {
         &client,
         PROJECT_NAME,
         "disk-from-snap",
-        snapshot.identity.id,
+        &snapshot,
+        false,
     )
     .await;
 
@@ -2570,11 +2575,23 @@ async fn test_read_only_replacement_sanity(
 
     let disk = create_disk(&client, PROJECT_NAME, "disk").await;
     let snapshot = create_snapshot(&client, PROJECT_NAME, "disk", "snap").await;
-    let _disk_from_snapshot = create_disk_from_snapshot(
+    // Create both read/write and read-only disks from the snapshot. These will
+    // behave differently, as the read-only disk is backed by the snapshot
+    // directly.
+    let _rw_disk_from_snapshot = create_disk_from_snapshot(
         &client,
         PROJECT_NAME,
-        "disk-from-snap",
-        snapshot.identity.id,
+        "read-write-disk-from-snap",
+        &snapshot,
+        false,
+    )
+    .await;
+    let _ro_disk_from_snapshot = create_disk_from_snapshot(
+        &client,
+        PROJECT_NAME,
+        "readonly-disk-from-snap",
+        &snapshot,
+        true,
     )
     .await;
 
@@ -2706,21 +2723,24 @@ async fn test_replacement_sanity_twice_after_snapshot_delete(
         &client,
         PROJECT_NAME,
         "snap-disk-1",
-        snapshot.identity.id,
+        &snapshot,
+        false,
     )
     .await;
     create_disk_from_snapshot(
         &client,
         PROJECT_NAME,
         "snap-disk-2",
-        snapshot.identity.id,
+        &snapshot,
+        false,
     )
     .await;
     create_disk_from_snapshot(
         &client,
         PROJECT_NAME,
         "snap-disk-3",
-        snapshot.identity.id,
+        &snapshot,
+        false,
     )
     .await;
 

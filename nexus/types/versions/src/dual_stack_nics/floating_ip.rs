@@ -36,7 +36,7 @@ impl From<v2026010100::floating_ip::FloatingIpCreate> for FloatingIpCreate {
             identity: old.identity,
             ip: old.ip,
             pool: old.pool,
-            ip_version: None,
+            ip_version: old.ip_version,
         }
     }
 }

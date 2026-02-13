@@ -150,6 +150,8 @@ impl From<v2025112000::disk::Disk> for omicron_common::api::external::Disk {
             state: old.state,
             device_path: old.device_path,
             disk_type: old.disk_type.into(),
+            // Old Disk type predates read-only disks; default to false.
+            read_only: false,
         }
     }
 }

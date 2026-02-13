@@ -4,7 +4,6 @@
 
 //! Multicast group types for version INITIAL.
 
-use crate::impls::multicast::{validate_multicast_ip, validate_source_ip};
 use api_identity::ObjectIdentity;
 use omicron_common::api::external::{
     IdentityMetadata, NameOrId, ObjectIdentity,
@@ -56,8 +55,6 @@ pub struct MulticastGroupSelector {
     /// Name or ID of the multicast group (fleet-scoped)
     pub multicast_group: NameOrId,
 }
-
-// MULTICAST PARAMS
 
 use omicron_common::api::external::{
     IdentityMetadataCreateParams, IdentityMetadataUpdateParams, Nullable,
@@ -153,12 +150,10 @@ pub struct InstanceMulticastGroupPath {
     pub multicast_group: NameOrId,
 }
 
-// MVLAN validators
-
 /// Dendrite requires VLAN IDs >= 2 (rejects 0 and 1)
 ///
 /// Valid range is 2-4094
-fn validate_mvlan(vlan_id: VlanID) -> Result<VlanID, String> {
+pub(crate) fn validate_mvlan(vlan_id: VlanID) -> Result<VlanID, String> {
     let value: u16 = vlan_id.into();
     if value >= 2 {
         Ok(vlan_id)
@@ -169,7 +164,7 @@ fn validate_mvlan(vlan_id: VlanID) -> Result<VlanID, String> {
     }
 }
 
-fn validate_mvlan_option<'de, D>(
+pub(crate) fn validate_mvlan_option<'de, D>(
     deserializer: D,
 ) -> Result<Option<VlanID>, D::Error>
 where
@@ -184,7 +179,7 @@ where
     }
 }
 
-fn validate_mvlan_option_nullable<'de, D>(
+pub(crate) fn validate_mvlan_option_nullable<'de, D>(
     deserializer: D,
 ) -> Result<Option<Nullable<VlanID>>, D::Error>
 where
@@ -202,8 +197,10 @@ where
     }
 }
 
+use crate::impls::multicast::{validate_multicast_ip, validate_source_ip};
+
 /// Deserializer for validating multicast IP addresses.
-fn validate_multicast_ip_param<'de, D>(
+pub(crate) fn validate_multicast_ip_param<'de, D>(
     deserializer: D,
 ) -> Result<Option<IpAddr>, D::Error>
 where
@@ -217,7 +214,7 @@ where
 }
 
 /// Deserializer for validating source IP addresses.
-fn validate_source_ips_param<'de, D>(
+pub(crate) fn validate_source_ips_param<'de, D>(
     deserializer: D,
 ) -> Result<Option<Vec<IpAddr>>, D::Error>
 where

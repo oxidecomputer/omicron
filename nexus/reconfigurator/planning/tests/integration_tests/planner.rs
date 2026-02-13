@@ -229,9 +229,17 @@ fn test_basic_add_sled() {
     assert_eq!(summary.diff.sleds.added.len(), 1);
     assert_eq!(summary.total_disks_added(), 10);
 
-    // 10 disks added means 30 datasets (each disk adds a debug + zone root
-    //    + local storage), plus one transient zone root for the NTP zone
-    assert_eq!(summary.total_datasets_added(), 31);
+    // 10 disks added means 40 datasets:
+    //
+    // - from ActiveSledEditor::ensure_disk, every disk has the following
+    //   datasets:
+    //   - debug
+    //   - zone root
+    //   - encrypted local storage
+    //   - unencrypted local storage
+    //
+    // plus one transient zone root for the NTP zone brings it to 41
+    assert_eq!(summary.total_datasets_added(), 41);
 
     let (&sled_id, sled_added) =
         summary.diff.sleds.added.first_key_value().unwrap();
@@ -902,13 +910,20 @@ fn test_crucible_allocation_skips_nonprovisionable_disks() {
     assert_eq!(summary.total_disks_added(), NEW_IN_SERVICE_DISKS);
     assert_eq!(summary.total_disks_removed(), 0);
 
-    // Five new datasets created per disk:
+    // From ActiveSledEditor::ensure_disk, each disk gets the following
+    // datasets:
+    //
     // - Zone Root
     // - Debug
-    // - Local Storage
+    // - encrypted Local Storage
+    // - unencrypted Local Storage
+    //
+    // Plus (due to adding a Crucible zone):
     // - 1 for the Crucible Agent
     // - Transient Crucible Zone Root
-    assert_eq!(summary.total_datasets_added(), NEW_IN_SERVICE_DISKS * 5);
+    //
+    // So six per disk
+    assert_eq!(summary.total_datasets_added(), NEW_IN_SERVICE_DISKS * 6);
     assert_eq!(summary.total_datasets_removed(), 0);
     assert_eq!(summary.total_datasets_modified(), 0);
 
@@ -1205,10 +1220,10 @@ fn test_disk_expungement_removes_zones_durable_zpool() {
     // "decommissioned_disk_cleaner" background task for more context.
     assert_eq!(summary.total_datasets_removed(), 0);
 
-    // The disposition has changed from `InService` to `Expunged` for the 5
-    // datasets (debug, zone root, local storage, crucible zone root, and
-    // crucible agent) on this sled.
-    assert_eq!(summary.total_datasets_modified(), 5);
+    // The disposition has changed from `InService` to `Expunged` for the 6
+    // datasets (debug, zone root, encrypted local storage, unencrypted local
+    // storage, crucible zone root, and crucible agent) on this sled.
+    assert_eq!(summary.total_datasets_modified(), 6);
     // We don't know the expected name, other than the fact it's a crucible zone
     let test_transient_zone_kind = DatasetKind::TransientZone {
         name: "some-crucible-zone-name".to_string(),
@@ -1218,6 +1233,7 @@ fn test_disk_expungement_removes_zones_durable_zpool() {
         DatasetKind::Debug,
         DatasetKind::TransientZoneRoot,
         DatasetKind::LocalStorage,
+        DatasetKind::LocalStorageUnencrypted,
         test_transient_zone_kind.clone(),
     ]);
     let mut modified_sled_configs = Vec::new();
@@ -3142,7 +3158,7 @@ fn test_update_crucible_pantry_before_nexus() {
         artifacts,
     });
     sim.change_description("set new target release", |desc| {
-        desc.set_target_release_and_old_repo(description);
+        desc.set_target_release(description);
         Ok(())
     })
     .unwrap();
@@ -3514,7 +3530,7 @@ fn test_update_cockroach() {
         artifacts,
     });
     sim.change_description("set new target release", |desc| {
-        desc.set_target_release_and_old_repo(description);
+        desc.set_target_release(description);
         Ok(())
     })
     .unwrap();
@@ -3884,7 +3900,7 @@ fn test_update_boundary_ntp() {
         artifacts,
     });
     sim.change_description("set new target release", |desc| {
-        desc.set_target_release_and_old_repo(description);
+        desc.set_target_release(description);
         Ok(())
     })
     .unwrap();
@@ -4274,7 +4290,7 @@ fn test_update_internal_dns() {
         artifacts,
     });
     sim.change_description("set new target release", |desc| {
-        desc.set_target_release_and_old_repo(description);
+        desc.set_target_release(description);
         Ok(())
     })
     .unwrap();
@@ -4523,7 +4539,7 @@ fn test_update_all_zones() {
     });
 
     sim.change_description("set new target release", |desc| {
-        desc.set_target_release_and_old_repo(description);
+        desc.set_target_release(description);
         Ok(())
     })
     .unwrap();

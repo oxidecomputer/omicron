@@ -19,8 +19,6 @@ pub enum ServiceUsingCertificate {
     ExternalApi,
 }
 
-// VIEWS
-
 /// View of a Certificate
 #[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct Certificate {
@@ -31,8 +29,6 @@ pub struct Certificate {
     /// PEM-formatted string containing public certificate chain
     pub cert: String,
 }
-
-// PARAMS
 
 /// Create-time parameters for a `Certificate`
 #[derive(Clone, Deserialize, Serialize, JsonSchema)]

@@ -30,8 +30,6 @@ pub enum IpPoolType {
     Multicast,
 }
 
-// VIEWS
-
 /// A collection of IP ranges. If a pool is linked to a silo, IP addresses from
 /// the pool can be allocated within that silo
 #[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
@@ -91,8 +89,6 @@ pub struct IpPoolRange {
     pub time_created: DateTime<Utc>,
     pub range: IpRange,
 }
-
-// PARAMS
 
 /// Create-time parameters for an `IpPool`.
 ///

@@ -13,8 +13,8 @@ use nexus_db_queries::db::fixed_data::silo::DEFAULT_SILO;
 use nexus_db_queries::db::identity::{Asset, Resource};
 use nexus_test_utils::http_testing::TestResponse;
 use nexus_test_utils::resource_helpers::{
-    create_local_user, create_session_for_user, object_delete_error,
-    object_get, object_put, object_put_error, test_params,
+    create_local_user, create_session_for_user, get_device_token,
+    object_delete_error, object_get, object_put, object_put_error, test_params,
 };
 use nexus_test_utils::{
     http_testing::{AuthnMode, NexusRequest, RequestBuilder},
@@ -244,64 +244,6 @@ async fn test_device_auth_flow(cptestctx: &ControlPlaneTestContext) {
     .execute()
     .await
     .expect("double delete should 404");
-}
-
-/// Helper to make the test cute. Goes through the whole flow, returns the token
-/// as a string
-async fn get_device_token(
-    testctx: &ClientTestContext,
-    authn_mode: AuthnMode,
-) -> DeviceAccessTokenGrant {
-    let client_id = Uuid::new_v4();
-    let authn_params = DeviceAuthRequest { client_id, ttl_seconds: None };
-
-    // Start a device authentication flow
-    let auth_response: DeviceAuthResponse =
-        RequestBuilder::new(testctx, Method::POST, "/device/auth")
-            .allow_non_dropshot_errors()
-            .body_urlencoded(Some(&authn_params))
-            .expect_status(Some(StatusCode::OK))
-            .execute()
-            .await
-            .expect("failed to start client authentication flow")
-            .parsed_body()
-            .expect("client authentication response");
-
-    let device_code = auth_response.device_code;
-    let user_code = auth_response.user_code;
-
-    let confirm_params = DeviceAuthVerify { user_code };
-
-    // Confirm the device authentication
-    NexusRequest::new(
-        RequestBuilder::new(testctx, Method::POST, "/device/confirm")
-            .body(Some(&confirm_params))
-            .expect_status(Some(StatusCode::NO_CONTENT)),
-    )
-    .authn_as(authn_mode.clone())
-    .execute()
-    .await
-    .expect("failed to confirm");
-
-    let token_params = DeviceAccessTokenRequest {
-        grant_type: "urn:ietf:params:oauth:grant-type:device_code".to_string(),
-        device_code,
-        client_id,
-    };
-
-    // Get the token and return it
-    NexusRequest::new(
-        RequestBuilder::new(testctx, Method::POST, "/device/token")
-            .allow_non_dropshot_errors()
-            .body_urlencoded(Some(&token_params))
-            .expect_status(Some(StatusCode::OK)),
-    )
-    .authn_as(authn_mode)
-    .execute()
-    .await
-    .expect("failed to get token")
-    .parsed_body()
-    .expect("failed to deserialize token response")
 }
 
 #[nexus_test]

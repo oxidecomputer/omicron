@@ -14,8 +14,6 @@ use serde::{Deserialize, Serialize};
 use strum::EnumIter;
 use uuid::Uuid;
 
-// PARAMS
-
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, JsonSchema, PartialEq)]
 pub struct SledSelector {
     /// ID of the sled
@@ -44,8 +42,6 @@ pub struct SwitchSelector {
     /// ID of the switch
     pub switch: Uuid,
 }
-
-// VIEWS
 
 /// The unique ID of a sled.
 #[derive(Clone, Debug, Serialize, JsonSchema)]

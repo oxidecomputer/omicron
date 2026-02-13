@@ -4,8 +4,8 @@
 
 use super::instance_common::{
     ModifyStateForExternalIp, VmmAndSledIds, instance_ip_add_nat,
-    instance_ip_add_opte, instance_ip_get_instance_state,
-    instance_ip_move_state, instance_ip_remove_nat, instance_ip_remove_opte,
+    instance_ip_add_opte, instance_ip_move_state, instance_ip_remove_nat,
+    instance_ip_remove_opte, networking_resource_instance_state,
 };
 use super::{ActionRegistry, NexusActionContext, NexusSaga};
 use crate::app::sagas::declare_saga_actions;
@@ -14,7 +14,7 @@ use nexus_db_lookup::LookupPath;
 use nexus_db_model::IpAttachState;
 use nexus_types::external_api::external_ip;
 use nexus_types::external_api::instance;
-use omicron_common::api::external::NameOrId;
+use omicron_common::api::external::{Error, NameOrId};
 use omicron_uuid_kinds::{GenericUuid, InstanceUuid};
 use ref_cast::RefCast;
 use serde::Deserialize;
@@ -75,11 +75,28 @@ async fn siid_begin_detach_ip(
     let instance_id =
         InstanceUuid::from_untyped_uuid(params.authz_instance.id());
     match &params.delete_params {
-        instance::ExternalIpDetach::Ephemeral => {
-            let eip = datastore
-                .instance_lookup_ephemeral_ip(&opctx, instance_id)
+        instance::ExternalIpDetach::Ephemeral { ip_version } => {
+            let eph_ips = datastore
+                .instance_lookup_ephemeral_ips(&opctx, instance_id)
                 .await
                 .map_err(ActionError::action_failed)?;
+
+            let eip = match ip_version {
+                Some(v) => eph_ips.get((*v).into()),
+                None => match (eph_ips.v4, eph_ips.v6) {
+                    (Some(ip), None) | (None, Some(ip)) => Some(ip),
+                    (None, None) => None,
+                    // Says "two" because that's the max (one per IP version).
+                    (Some(_), Some(_)) => {
+                        return Err(ActionError::action_failed(
+                            Error::invalid_request(
+                                "instance has two ephemeral IPs; \
+                                 specify ip_version to select which to detach",
+                            ),
+                        ));
+                    }
+                },
+            };
 
             if let Some(eph_ip) = eip {
                 datastore
@@ -157,7 +174,7 @@ async fn siid_get_instance_state(
     sagactx: NexusActionContext,
 ) -> Result<Option<VmmAndSledIds>, ActionError> {
     let params = sagactx.saga_params::<Params>()?;
-    instance_ip_get_instance_state(
+    networking_resource_instance_state(
         &sagactx,
         &params.serialized_authn,
         &params.authz_instance,
@@ -318,7 +335,7 @@ pub(crate) mod test {
                 floating_ip: FIP_NAME.parse::<Name>().unwrap().into(),
             }
         } else {
-            instance::ExternalIpDetach::Ephemeral
+            instance::ExternalIpDetach::Ephemeral { ip_version: None }
         };
 
         let (.., authz_project, authz_instance) =
