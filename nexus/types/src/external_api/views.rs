@@ -91,10 +91,12 @@ pub struct SiloQuotas {
 /// View of the current silo's resource utilization and capacity
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct Utilization {
-    /// Accounts for resources allocated to running instances or storage allocated via disks or snapshots.
+    /// Accounts for resources allocated to running instances or
+    /// storage allocated via disks or snapshots.
     ///
-    /// Note that CPU and memory resources associated with stopped instances are not counted here,
-    /// whereas associated disks will still be counted.
+    /// Note that CPU and memory resources associated with stopped
+    /// instances are not counted here, whereas associated disks will
+    /// still be counted.
     pub provisioned: VirtualResourceCounts,
     /// The total amount of resources that can be provisioned in this silo.
     /// Actions that would exceed this limit will fail.
@@ -107,12 +109,15 @@ pub struct Utilization {
 pub struct SiloUtilization {
     pub silo_id: Uuid,
     pub silo_name: Name,
-    /// Accounts for the total resources allocated by the silo, including CPU and memory for
-    /// running instances and storage for disks and snapshots.
+    /// Accounts for the total resources allocated by the silo,
+    /// including CPU and memory for running instances and storage
+    /// for disks and snapshots.
     ///
-    /// Note that CPU and memory resources associated with stopped instances are not counted here.
+    /// Note that CPU and memory resources associated with stopped
+    /// instances are not counted here.
     pub provisioned: VirtualResourceCounts,
-    /// Accounts for the total amount of resources reserved for silos via their quotas.
+    /// Accounts for the total amount of resources reserved for
+    /// silos via their quotas.
     pub allocated: VirtualResourceCounts,
 }
 
@@ -310,8 +315,9 @@ pub struct Vpc {
     pub dns_name: Name,
 }
 
-/// A VPC subnet represents a logical grouping for instances that allows network traffic between
-/// them, within an IPv4 subnetwork or optionally an IPv6 subnetwork.
+/// A VPC subnet represents a logical grouping for instances that
+/// allows network traffic between them, within an IPv4 subnetwork
+/// or optionally an IPv6 subnetwork.
 #[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct VpcSubnet {
     /// Common identifying metadata

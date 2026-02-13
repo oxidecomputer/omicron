@@ -796,7 +796,8 @@ pub struct DerEncodedKeyPair {
     #[serde(deserialize_with = "x509_cert_from_base64_encoded_der")]
     pub public_cert: String,
 
-    /// Request signing RSA private key in PKCS#1 format (base64 encoded DER file)
+    /// Request signing RSA private key in PKCS#1 format
+    /// (base64 encoded DER file)
     #[serde(deserialize_with = "key_from_base64_encoded_der")]
     pub private_key: String,
 }
