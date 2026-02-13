@@ -79,6 +79,7 @@ api_versions!([
     // |  date-based version should be at the top of the list.
     // v
     // (next_yyyymmddnn, IDENT),
+    (2026021300, REMOVE_STALE_IPV6_DOCS),
     (2026020901, UPDATE_EXTERNAL_SUBNET_DOCS),
     (2026020900, RENAME_POOL_ENDPOINTS),
     (2026020600, ADD_SILO_SUBNET_POOLS),
@@ -1152,8 +1153,6 @@ pub trait NexusExternalApi {
     ) -> Result<HttpResponseOk<ResultsPage<views::IpPool>>, HttpError>;
 
     /// Create IP pool
-    ///
-    /// IPv6 is not yet supported for unicast pools.
     #[endpoint {
         operation_id = "ip_pool_create",
         method = POST,
@@ -1169,8 +1168,6 @@ pub trait NexusExternalApi {
     }
 
     /// Create IP pool
-    ///
-    /// IPv6 is not yet supported for unicast pools.
     #[endpoint {
         method = POST,
         path = "/v1/system/ip-pools",
@@ -1502,8 +1499,6 @@ pub trait NexusExternalApi {
 
     /// Add range to IP pool
     ///
-    /// IPv6 ranges are not allowed yet for unicast pools.
-    ///
     /// For multicast pools, all ranges must be either Any-Source Multicast (ASM)
     /// or Source-Specific Multicast (SSM), but not both. Mixing ASM and SSM
     /// ranges in the same pool is not allowed.
@@ -1526,8 +1521,6 @@ pub trait NexusExternalApi {
     }
 
     /// Add range to IP pool
-    ///
-    /// IPv6 ranges are not allowed yet for unicast pools.
     ///
     /// For multicast pools, all ranges must be either Any-Source Multicast (ASM)
     /// or Source-Specific Multicast (SSM), but not both. Mixing ASM and SSM
