@@ -36,7 +36,6 @@ use omicron_common::api::external::LookupType;
 use omicron_common::api::external::NameOrId;
 use omicron_common::api::external::ResourceType;
 use omicron_common::api::external::http_pagination::PaginatedBy;
-use omicron_common::api::internal::shared::network_interface::v1::NetworkInterface as NetworkInterfaceV1;
 use omicron_uuid_kinds::GenericUuid as _;
 use omicron_uuid_kinds::ProbeUuid;
 use omicron_uuid_kinds::SledUuid;
@@ -100,11 +99,13 @@ impl super::DataStore {
                     public_error_from_diesel(e, ErrorHandler::Server)
                 })?;
 
-            let mut interface_v1: NetworkInterfaceV1 = interface
-                .into_internal(db_subnet.ipv4_block.0, db_subnet.ipv6_block.0)?
-                .try_into()?;
-            interface_v1.vni = vni.0;
-            let interface: NetworkInterface = interface_v1.try_into()?;
+            let interface = NetworkInterface {
+                vni: vni.0,
+                ..interface.into_internal(
+                    db_subnet.ipv4_block.0,
+                    db_subnet.ipv6_block.0,
+                )?
+            };
 
             result.push(ProbeInfo {
                 id: probe.id(),
@@ -145,11 +146,11 @@ impl super::DataStore {
 
         let vni = self.resolve_vpc_to_vni(opctx, interface.vpc_id).await?;
 
-        let mut interface_v1: NetworkInterfaceV1 = interface
-            .into_internal(db_subnet.ipv4_block.0, db_subnet.ipv6_block.0)?
-            .try_into()?;
-        interface_v1.vni = vni.0;
-        let interface: NetworkInterface = interface_v1.try_into()?;
+        let interface = NetworkInterface {
+            vni: vni.0,
+            ..interface
+                .into_internal(db_subnet.ipv4_block.0, db_subnet.ipv6_block.0)?
+        };
 
         Ok(ProbeInfo {
             id: probe.id(),

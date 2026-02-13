@@ -7699,7 +7699,9 @@ async fn test_instance_attach_several_external_ips(
 
     // Create several floating IPs for the instance, totalling 8 IPs.
     let mut fips = vec![];
-    let mut external_ip_create = vec![];
+    let mut external_ip_create = vec![ExternalIpCreate::Ephemeral {
+        pool_selector: PoolSelector::Auto { ip_version: None },
+    }];
     for i in 1..8 {
         let name = format!("fip-{i}");
         fips.push(
