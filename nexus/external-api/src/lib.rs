@@ -79,7 +79,7 @@ api_versions!([
     // |  date-based version should be at the top of the list.
     // v
     // (next_yyyymmddnn, IDENT),
-    (2026021300, REMOVE_STALE_IPV6_DOCS),
+    (2026021300, STALE_DOCS_AND_PUNCTUATION),
     (2026020901, UPDATE_EXTERNAL_SUBNET_DOCS),
     (2026020900, RENAME_POOL_ENDPOINTS),
     (2026020600, ADD_SILO_SUBNET_POOLS),
