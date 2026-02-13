@@ -11,8 +11,8 @@ use omicron_common::api::external::{
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use crate::v2025112000::instance::{UserData, bool_true};
 use crate::v2025112000::instance::InstanceDiskAttach;
+use crate::v2025112000::instance::{UserData, bool_true};
 use crate::v2026010300::instance::InstanceNetworkInterfaceAttachment;
 use crate::v2026010500::instance::ExternalIpCreate;
 use crate::v2026010800::multicast::MulticastGroupJoinSpec;
