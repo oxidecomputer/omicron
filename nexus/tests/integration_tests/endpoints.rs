@@ -107,11 +107,6 @@ pub static HARDWARE_SLED_DISK_URL: LazyLock<String> = LazyLock::new(|| {
 pub static SLED_INSTANCES_URL: LazyLock<String> = LazyLock::new(|| {
     format!("/v1/system/hardware/sleds/{}/instances", SLED_AGENT_UUID)
 });
-pub static DEMO_UNINITIALIZED_SLED: LazyLock<params::UninitializedSledId> =
-    LazyLock::new(|| params::UninitializedSledId {
-        serial: "demo-serial".to_string(),
-        part: "demo-part".to_string(),
-    });
 
 pub const SUPPORT_BUNDLES_URL: &'static str =
     "/experimental/v1/system/support-bundles";
@@ -2922,13 +2917,7 @@ pub static VERIFY_ENDPOINTS: LazyLock<Vec<VerifyEndpoint>> = LazyLock::new(
                 url: "/v1/system/hardware/sleds",
                 visibility: Visibility::Public,
                 unprivileged_access: UnprivilegedAccess::None,
-                allowed_methods: vec![
-                    AllowedMethod::Get,
-                    AllowedMethod::Post(
-                        serde_json::to_value(&*DEMO_UNINITIALIZED_SLED)
-                            .unwrap(),
-                    ),
-                ],
+                allowed_methods: vec![AllowedMethod::Get],
             },
             VerifyEndpoint {
                 url: &SLED_INSTANCES_URL,
