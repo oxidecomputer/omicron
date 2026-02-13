@@ -14,7 +14,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use super::ip_pool::PoolSelector;
-use crate::v2026_01_03_00;
+use crate::v2025_11_20_00;
 
 /// Create time parameters for probes.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
@@ -28,8 +28,8 @@ pub struct ProbeCreate {
     pub pool_selector: PoolSelector,
 }
 
-impl From<v2026_01_03_00::probe::ProbeCreate> for ProbeCreate {
-    fn from(old: v2026_01_03_00::probe::ProbeCreate) -> ProbeCreate {
+impl From<v2025_11_20_00::probe::ProbeCreate> for ProbeCreate {
+    fn from(old: v2025_11_20_00::probe::ProbeCreate) -> ProbeCreate {
         let pool_selector = match old.ip_pool {
             Some(pool) => PoolSelector::Explicit { pool },
             None => PoolSelector::Auto { ip_version: None },

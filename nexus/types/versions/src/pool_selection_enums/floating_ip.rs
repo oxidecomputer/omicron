@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 use std::net::IpAddr;
 
 use super::ip_pool::PoolSelector;
-use crate::v2026_01_03_00;
+use crate::v2025_12_23_00;
 
 /// Specify how to allocate a floating IP address.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
@@ -56,13 +56,13 @@ pub struct FloatingIpCreate {
     pub address_selector: AddressSelector,
 }
 
-impl TryFrom<v2026_01_03_00::floating_ip::FloatingIpCreate>
+impl TryFrom<v2025_12_23_00::floating_ip::FloatingIpCreate>
     for FloatingIpCreate
 {
     type Error = omicron_common::api::external::Error;
 
     fn try_from(
-        old: v2026_01_03_00::floating_ip::FloatingIpCreate,
+        old: v2025_12_23_00::floating_ip::FloatingIpCreate,
     ) -> Result<Self, Self::Error> {
         let address_selector = match (old.ip, old.pool, old.ip_version) {
             // Explicit IP address provided -> ip_version must not be set

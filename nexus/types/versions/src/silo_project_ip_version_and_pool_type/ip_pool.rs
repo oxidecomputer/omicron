@@ -38,9 +38,9 @@ pub struct SiloIpPool {
     pub pool_type: IpPoolType,
 }
 
-impl From<SiloIpPool> for crate::v2025_12_23_00::ip_pool::SiloIpPool {
-    fn from(new: SiloIpPool) -> crate::v2025_12_23_00::ip_pool::SiloIpPool {
-        crate::v2025_12_23_00::ip_pool::SiloIpPool {
+impl From<SiloIpPool> for crate::v2025_11_20_00::ip_pool::SiloIpPool {
+    fn from(new: SiloIpPool) -> crate::v2025_11_20_00::ip_pool::SiloIpPool {
+        crate::v2025_11_20_00::ip_pool::SiloIpPool {
             identity: new.identity,
             is_default: new.is_default,
         }

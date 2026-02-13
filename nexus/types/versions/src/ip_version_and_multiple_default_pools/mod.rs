@@ -4,7 +4,8 @@
 
 //! Version `IP_VERSION_AND_MULTIPLE_DEFAULT_POOLS` of the Nexus external API.
 //!
-//! This version (2025_12_23_00) supports multiple default pools but SiloIpPool
-//! views don't yet include ip_version or pool_type fields.
+//! This version (2025_12_23_00) adds `ip_version` to floating IP and instance
+//! IP creation types.
 
-pub mod ip_pool;
+pub mod floating_ip;
+pub mod instance;

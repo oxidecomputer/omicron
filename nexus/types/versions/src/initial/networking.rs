@@ -7,6 +7,7 @@
 //! This includes address lot, switch port, BGP, BFD, and routing configuration
 //! types.
 
+use omicron_common::api::external;
 use omicron_common::api::external::{
     AddressLotKind, BfdMode, BgpPeer, IdentityMetadataCreateParams, LinkFec,
     LinkSpeed, Name, NameOrId,
@@ -574,4 +575,56 @@ pub struct LldpPortPathSelector {
 
     /// A name to use when selecting switch ports.
     pub port: Name,
+}
+
+// BGP STATUS
+
+/// The current status of a BGP peer.
+#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq)]
+pub struct BgpPeerStatus {
+    /// IP address of the peer.
+    pub addr: IpAddr,
+
+    /// Local autonomous system number.
+    pub local_asn: u32,
+
+    /// Remote autonomous system number.
+    pub remote_asn: u32,
+
+    /// State of the peer.
+    pub state: BgpPeerState,
+
+    /// Time of last state change.
+    pub state_duration_millis: u64,
+
+    /// Switch with the peer session.
+    pub switch: external::SwitchLocation,
+}
+
+/// The current state of a BGP peer.
+#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum BgpPeerState {
+    /// Initial state. Refuse all incoming BGP connections. No resources
+    /// allocated to peer.
+    Idle,
+
+    /// Waiting for the TCP connection to be completed.
+    Connect,
+
+    /// Trying to acquire peer by listening for and accepting a TCP connection.
+    Active,
+
+    /// Waiting for open message from peer.
+    OpenSent,
+
+    /// Waiting for keepalive or notification from peer.
+    OpenConfirm,
+
+    /// Synchronizing with peer.
+    SessionSetup,
+
+    /// Session established. Able to exchange update, notification and keepalive
+    /// messages with peers.
+    Established,
 }

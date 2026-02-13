@@ -2,9 +2,10 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! Instance types for version SILO_PROJECT_IP_VERSION_AND_POOL_TYPE.
+//! Instance types for version IP_VERSION_AND_MULTIPLE_DEFAULT_POOLS.
 //!
-//! This version has old-style network interfaces with single IP + transit_ips.
+//! This version has old-style network interfaces with single IP + transit_ips,
+//! and adds `ip_version` to ExternalIpCreate and EphemeralIpCreate.
 
 use omicron_common::address::IpVersion;
 use omicron_common::api::external::{

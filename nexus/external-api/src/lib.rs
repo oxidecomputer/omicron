@@ -604,7 +604,7 @@ pub trait NexusExternalApi {
         path_params: Path<v2025_11_20_00::path_params::SiloPath>,
         query_params: Query<PaginatedByNameOrId>,
     ) -> Result<
-        HttpResponseOk<ResultsPage<v2025_12_23_00::ip_pool::SiloIpPool>>,
+        HttpResponseOk<ResultsPage<v2025_11_20_00::ip_pool::SiloIpPool>>,
         HttpError,
     > {
         let page =
@@ -1132,7 +1132,7 @@ pub trait NexusExternalApi {
         rqctx: RequestContext<Self::Context>,
         query_params: Query<PaginatedByNameOrId>,
     ) -> Result<
-        HttpResponseOk<ResultsPage<v2025_12_23_00::ip_pool::SiloIpPool>>,
+        HttpResponseOk<ResultsPage<v2025_11_20_00::ip_pool::SiloIpPool>>,
         HttpError,
     > {
         let page = Self::ip_pool_list(rqctx, query_params).await?.0;
@@ -1181,7 +1181,7 @@ pub trait NexusExternalApi {
     async fn project_ip_pool_view_v2025_11_20_00(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<v2025_11_20_00::path_params::IpPoolPath>,
-    ) -> Result<HttpResponseOk<v2025_12_23_00::ip_pool::SiloIpPool>, HttpError>
+    ) -> Result<HttpResponseOk<v2025_11_20_00::ip_pool::SiloIpPool>, HttpError>
     {
         Self::ip_pool_view(rqctx, path_params)
             .await
@@ -2708,7 +2708,7 @@ pub trait NexusExternalApi {
         rqctx: RequestContext<Self::Context>,
         query_params: Query<v2025_11_20_00::project::ProjectSelector>,
         floating_params: TypedBody<
-            v2026_01_03_00::floating_ip::FloatingIpCreate,
+            v2025_12_23_00::floating_ip::FloatingIpCreate,
         >,
     ) -> Result<
         HttpResponseCreated<v2025_11_20_00::floating_ip::FloatingIp>,
@@ -2744,11 +2744,7 @@ pub trait NexusExternalApi {
         Self::floating_ip_create_v2025_12_23_00(
             rqctx,
             query_params,
-            floating_params.map(|old| {
-                let mid: v2026_01_01_00::floating_ip::FloatingIpCreate =
-                    old.into();
-                mid.into()
-            }),
+            floating_params.map(Into::into),
         )
         .await
     }
@@ -3493,7 +3489,7 @@ pub trait NexusExternalApi {
     async fn instance_create_v2025_12_23_00(
         rqctx: RequestContext<Self::Context>,
         query_params: Query<v2025_11_20_00::project::ProjectSelector>,
-        new_instance: TypedBody<v2026_01_01_00::instance::InstanceCreate>,
+        new_instance: TypedBody<v2025_12_23_00::instance::InstanceCreate>,
     ) -> Result<HttpResponseCreated<Instance>, HttpError> {
         let new_instance = new_instance.try_map(TryInto::try_into)?;
         Self::instance_create_v2026_01_03_00(rqctx, query_params, new_instance)
@@ -4503,39 +4499,39 @@ pub trait NexusExternalApi {
     async fn networking_bgp_status_v2025_11_20_00(
         rqctx: RequestContext<Self::Context>,
     ) -> Result<
-        HttpResponseOk<Vec<v2025_12_03_00::networking::BgpPeerStatus>>,
+        HttpResponseOk<Vec<v2025_11_20_00::networking::BgpPeerStatus>>,
         HttpError,
     > {
         let result = Self::networking_bgp_status(rqctx).await?.0;
         Ok(HttpResponseOk(
             result
                 .into_iter()
-                .map(|x| v2025_12_03_00::networking::BgpPeerStatus {
+                .map(|x| v2025_11_20_00::networking::BgpPeerStatus {
                     addr: x.addr,
                     local_asn: x.local_asn,
                     remote_asn: x.remote_asn,
                     state: match x.state {
                         BgpPeerState::Idle => {
-                            v2025_12_03_00::networking::BgpPeerState::Idle
+                            v2025_11_20_00::networking::BgpPeerState::Idle
                         }
                         BgpPeerState::Connect => {
-                            v2025_12_03_00::networking::BgpPeerState::Connect
+                            v2025_11_20_00::networking::BgpPeerState::Connect
                         }
                         BgpPeerState::Active => {
-                            v2025_12_03_00::networking::BgpPeerState::Active
+                            v2025_11_20_00::networking::BgpPeerState::Active
                         }
                         BgpPeerState::OpenSent => {
-                            v2025_12_03_00::networking::BgpPeerState::OpenSent
+                            v2025_11_20_00::networking::BgpPeerState::OpenSent
                         }
                         BgpPeerState::OpenConfirm => {
-                            v2025_12_03_00::networking::BgpPeerState::OpenConfirm
+                            v2025_11_20_00::networking::BgpPeerState::OpenConfirm
                         }
                         BgpPeerState::ConnectionCollision
                         | BgpPeerState::SessionSetup => {
-                            v2025_12_03_00::networking::BgpPeerState::SessionSetup
+                            v2025_11_20_00::networking::BgpPeerState::SessionSetup
                         }
                         BgpPeerState::Established => {
-                            v2025_12_03_00::networking::BgpPeerState::Established
+                            v2025_11_20_00::networking::BgpPeerState::Established
                         }
                     },
                     state_duration_millis: x.state_duration_millis,
@@ -5033,7 +5029,7 @@ pub trait NexusExternalApi {
         rqctx: RequestContext<Self::Context>,
         path_params: Path<v2025_11_20_00::path_params::InstancePath>,
         query_params: Query<v2025_11_20_00::project::OptionalProjectSelector>,
-        ip_to_create: TypedBody<v2026_01_03_00::instance::EphemeralIpCreate>,
+        ip_to_create: TypedBody<v2025_12_23_00::instance::EphemeralIpCreate>,
     ) -> Result<
         HttpResponseAccepted<v2025_11_20_00::external_ip::ExternalIp>,
         HttpError,
@@ -5065,17 +5061,11 @@ pub trait NexusExternalApi {
         HttpResponseAccepted<v2025_11_20_00::external_ip::ExternalIp>,
         HttpError,
     > {
-        let ip_to_create = ip_to_create.map(|old| {
-            let step1: v2026_01_01_00::instance::EphemeralIpCreate = old.into();
-            let step2: v2026_01_03_00::instance::EphemeralIpCreate =
-                step1.into();
-            step2
-        });
         Self::instance_ephemeral_ip_attach_v2025_12_23_00(
             rqctx,
             path_params,
             query_params,
-            ip_to_create,
+            ip_to_create.map(Into::into),
         )
         .await
     }
@@ -6742,7 +6732,7 @@ pub trait NexusExternalApi {
     async fn probe_create_v2025_11_20_00(
         rqctx: RequestContext<Self::Context>,
         query_params: Query<v2025_11_20_00::project::ProjectSelector>,
-        new_probe: TypedBody<v2026_01_03_00::probe::ProbeCreate>,
+        new_probe: TypedBody<v2025_11_20_00::probe::ProbeCreate>,
     ) -> Result<HttpResponseCreated<Probe>, HttpError> {
         Self::probe_create(rqctx, query_params, new_probe.map(Into::into)).await
     }

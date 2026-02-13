@@ -8,6 +8,5 @@
 //! allowing instances to have both IPv4 and IPv6 addresses on a single NIC.
 //! It also adds `ip_version` support for IP pool selection.
 
-pub mod floating_ip;
 pub mod instance;
 pub mod probe;

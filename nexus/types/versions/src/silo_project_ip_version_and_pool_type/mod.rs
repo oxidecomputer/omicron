@@ -7,6 +7,4 @@
 //! This version (2026_01_01_00) adds `ip_version` and `pool_type` fields to
 //! SiloIpPool responses, and uses old-style single-IP network interfaces.
 
-pub mod floating_ip;
-pub mod instance;
 pub mod ip_pool;

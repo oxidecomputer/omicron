@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! Floating IP types for version DUAL_STACK_NICS.
+//! Floating IP types for version IP_VERSION_AND_MULTIPLE_DEFAULT_POOLS.
 //!
 //! This version adds `ip_version` to floating IP creation for pool selection.
 
@@ -13,7 +13,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::net::IpAddr;
 
-use crate::v2026_01_01_00;
+use crate::v2025_11_20_00;
 
 /// Parameters for creating a new floating IP address for instances.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
@@ -25,18 +25,19 @@ pub struct FloatingIpCreate {
     /// The parent IP pool that a floating IP is pulled from.
     pub pool: Option<NameOrId>,
     /// The IP version preference for address allocation.
+    #[serde(default)]
     pub ip_version: Option<IpVersion>,
 }
 
-impl From<v2026_01_01_00::floating_ip::FloatingIpCreate> for FloatingIpCreate {
+impl From<v2025_11_20_00::floating_ip::FloatingIpCreate> for FloatingIpCreate {
     fn from(
-        old: v2026_01_01_00::floating_ip::FloatingIpCreate,
+        old: v2025_11_20_00::floating_ip::FloatingIpCreate,
     ) -> FloatingIpCreate {
         FloatingIpCreate {
             identity: old.identity,
             ip: old.ip,
             pool: old.pool,
-            ip_version: old.ip_version,
+            ip_version: None,
         }
     }
 }

@@ -17,6 +17,7 @@ use serde::{Deserialize, Serialize};
 use super::ip_pool::PoolSelector;
 use crate::v2025_11_20_00::instance::{UserData, bool_true};
 use crate::v2025_12_03_00::instance::InstanceDiskAttachment;
+use crate::v2025_12_23_00;
 use crate::v2026_01_03_00;
 use crate::v2026_01_03_00::instance::InstanceNetworkInterfaceAttachment;
 
@@ -38,21 +39,21 @@ pub enum ExternalIpCreate {
     Floating { floating_ip: NameOrId },
 }
 
-impl TryFrom<v2026_01_03_00::instance::ExternalIpCreate> for ExternalIpCreate {
+impl TryFrom<v2025_12_23_00::instance::ExternalIpCreate> for ExternalIpCreate {
     type Error = omicron_common::api::external::Error;
 
     fn try_from(
-        old: v2026_01_03_00::instance::ExternalIpCreate,
+        old: v2025_12_23_00::instance::ExternalIpCreate,
     ) -> Result<Self, Self::Error> {
         match old {
-            v2026_01_03_00::instance::ExternalIpCreate::Ephemeral {
+            v2025_12_23_00::instance::ExternalIpCreate::Ephemeral {
                 pool,
                 ip_version,
             } => {
                 let pool_selector = (pool, ip_version).try_into()?;
                 Ok(ExternalIpCreate::Ephemeral { pool_selector })
             }
-            v2026_01_03_00::instance::ExternalIpCreate::Floating {
+            v2025_12_23_00::instance::ExternalIpCreate::Floating {
                 floating_ip,
             } => Ok(ExternalIpCreate::Floating { floating_ip }),
         }
@@ -67,13 +68,13 @@ pub struct EphemeralIpCreate {
     pub pool_selector: PoolSelector,
 }
 
-impl TryFrom<v2026_01_03_00::instance::EphemeralIpCreate>
+impl TryFrom<v2025_12_23_00::instance::EphemeralIpCreate>
     for EphemeralIpCreate
 {
     type Error = omicron_common::api::external::Error;
 
     fn try_from(
-        old: v2026_01_03_00::instance::EphemeralIpCreate,
+        old: v2025_12_23_00::instance::EphemeralIpCreate,
     ) -> Result<Self, Self::Error> {
         let pool_selector = (old.pool, old.ip_version).try_into()?;
         Ok(EphemeralIpCreate { pool_selector })
