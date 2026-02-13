@@ -324,13 +324,7 @@ async fn sdc_create_disk_record_undo(
         .await
         .map_err(ActionError::action_failed)?;
 
-    sdc_undo_physical_provisioning(
-        osagactx,
-        &opctx,
-        &params,
-        disk_id,
-    )
-    .await?;
+    sdc_undo_physical_provisioning(osagactx, &opctx, &params, disk_id).await?;
 
     osagactx
         .datastore()
@@ -562,7 +556,9 @@ async fn sdc_undo_physical_provisioning(
                     opctx,
                     disk_id,
                     params.project_id,
-                    phys_bytes, zero, None,
+                    phys_bytes,
+                    zero,
+                    None,
                 )
                 .await
                 .map_err(ActionError::action_failed)?;
@@ -578,7 +574,9 @@ async fn sdc_undo_physical_provisioning(
                     opctx,
                     disk_id,
                     params.project_id,
-                    phys_bytes, zero, None,
+                    phys_bytes,
+                    zero,
+                    None,
                 )
                 .await
                 .map_err(ActionError::action_failed)?;

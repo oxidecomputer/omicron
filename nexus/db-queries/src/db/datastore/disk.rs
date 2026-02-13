@@ -969,7 +969,8 @@ impl DataStore {
         create_params: &params::DiskCreate,
     ) -> Result<(), diesel::result::Error> {
         use crate::db::queries::physical_provisioning_collection_update::{
-            DedupInfo, DedupOriginColumn, PhysicalProvisioningCollectionUpdate,
+            DedupInfo, DedupOriginColumn, PhysicalDiskBytes,
+            PhysicalProvisioningCollectionUpdate,
         };
 
         let virtual_bytes =
@@ -978,25 +979,24 @@ impl DataStore {
 
         match &create_params.disk_backend {
             params::DiskBackend::Distributed {
-                disk_source:
-                    params::DiskSource::Image { image_id, read_only },
+                disk_source: params::DiskSource::Image { image_id, read_only },
             } => {
-                let physical =
-                    nexus_db_model::distributed_disk_physical_bytes(
-                        virtual_bytes,
-                    );
+                let physical = nexus_db_model::distributed_disk_physical_bytes(
+                    virtual_bytes,
+                );
                 let phys_bytes = crate::db::model::ByteCount::from(
                     physical.into_byte_count(),
                 );
                 let writable = if *read_only { zero } else { phys_bytes };
+                let bytes = PhysicalDiskBytes {
+                    writable,
+                    zfs_snapshot: zero,
+                    read_only: phys_bytes,
+                };
                 PhysicalProvisioningCollectionUpdate::new_insert_storage(
                     disk_id,
-                    writable,
-                    zero,
-                    phys_bytes,
-                    writable,
-                    zero,
-                    phys_bytes,
+                    bytes,
+                    bytes,
                     project_id,
                     StorageType::Disk,
                     Some(DedupInfo::Disk {
@@ -1015,22 +1015,22 @@ impl DataStore {
                 disk_source:
                     params::DiskSource::Snapshot { snapshot_id, read_only },
             } => {
-                let physical =
-                    nexus_db_model::distributed_disk_physical_bytes(
-                        virtual_bytes,
-                    );
+                let physical = nexus_db_model::distributed_disk_physical_bytes(
+                    virtual_bytes,
+                );
                 let phys_bytes = crate::db::model::ByteCount::from(
                     physical.into_byte_count(),
                 );
                 let writable = if *read_only { zero } else { phys_bytes };
+                let bytes = PhysicalDiskBytes {
+                    writable,
+                    zfs_snapshot: zero,
+                    read_only: phys_bytes,
+                };
                 PhysicalProvisioningCollectionUpdate::new_insert_storage(
                     disk_id,
-                    writable,
-                    zero,
-                    phys_bytes,
-                    writable,
-                    zero,
-                    phys_bytes,
+                    bytes,
+                    bytes,
                     project_id,
                     StorageType::Disk,
                     Some(DedupInfo::Disk {
@@ -1047,21 +1047,21 @@ impl DataStore {
             }
             params::DiskBackend::Distributed { .. } => {
                 // Blank or importing: writable only, no read-only
-                let physical =
-                    nexus_db_model::distributed_disk_physical_bytes(
-                        virtual_bytes,
-                    );
+                let physical = nexus_db_model::distributed_disk_physical_bytes(
+                    virtual_bytes,
+                );
                 let phys_bytes = crate::db::model::ByteCount::from(
                     physical.into_byte_count(),
                 );
+                let bytes = PhysicalDiskBytes {
+                    writable: phys_bytes,
+                    zfs_snapshot: zero,
+                    read_only: zero,
+                };
                 PhysicalProvisioningCollectionUpdate::new_insert_storage(
                     disk_id,
-                    phys_bytes,
-                    zero,
-                    zero,
-                    phys_bytes,
-                    zero,
-                    zero,
+                    bytes,
+                    bytes,
                     project_id,
                     StorageType::Disk,
                     None,
@@ -1078,14 +1078,15 @@ impl DataStore {
                 let phys_bytes = crate::db::model::ByteCount::from(
                     physical.into_byte_count(),
                 );
+                let bytes = PhysicalDiskBytes {
+                    writable: phys_bytes,
+                    zfs_snapshot: zero,
+                    read_only: zero,
+                };
                 PhysicalProvisioningCollectionUpdate::new_insert_storage(
                     disk_id,
-                    phys_bytes,
-                    zero,
-                    zero,
-                    phys_bytes,
-                    zero,
-                    zero,
+                    bytes,
+                    bytes,
                     project_id,
                     StorageType::Disk,
                     None,

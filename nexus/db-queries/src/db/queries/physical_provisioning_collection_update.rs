@@ -68,20 +68,26 @@ pub enum DedupInfo {
     },
     /// Image delete dedup: checks if any surviving disk references this
     /// image. If so, the read_only charge is not subtracted.
-    ImageDelete {
-        image_id: uuid::Uuid,
-    },
+    ImageDelete { image_id: uuid::Uuid },
     /// Snapshot delete dedup: checks if any surviving disk references this
     /// snapshot. If so, the read_only charge is not subtracted.
-    SnapshotDelete {
-        snapshot_id: uuid::Uuid,
-    },
+    SnapshotDelete { snapshot_id: uuid::Uuid },
 }
 
-const NOT_ENOUGH_CPUS_SENTINEL: &'static str =
-    "Not enough cpus (physical)";
-const NOT_ENOUGH_MEMORY_SENTINEL: &'static str =
-    "Not enough memory (physical)";
+/// A triplet of physical byte diffs for (writable, zfs_snapshot, read_only).
+///
+/// Groups the three `ByteCount` parameters that are always passed together
+/// through the physical provisioning system. Using a struct instead of 3
+/// loose `ByteCount` values prevents accidental parameter swaps.
+#[derive(Copy, Clone, Debug)]
+pub struct PhysicalDiskBytes {
+    pub writable: ByteCount,
+    pub zfs_snapshot: ByteCount,
+    pub read_only: ByteCount,
+}
+
+const NOT_ENOUGH_CPUS_SENTINEL: &'static str = "Not enough cpus (physical)";
+const NOT_ENOUGH_MEMORY_SENTINEL: &'static str = "Not enough memory (physical)";
 const NOT_ENOUGH_PHYSICAL_STORAGE_SENTINEL: &'static str =
     "Not enough physical storage";
 
@@ -144,22 +150,16 @@ enum UpdateKind {
         resource: PhysicalProvisioningResourceNew,
         // Silo/fleet-level diffs (may differ from project diffs stored in
         // resource)
-        silo_writable: ByteCount,
-        silo_zfs_snapshot: ByteCount,
-        silo_read_only: ByteCount,
+        silo: PhysicalDiskBytes,
         // Optional dedup info for atomic read-only deduplication
         dedup: Option<DedupInfo>,
     },
     DeleteStorage {
         id: uuid::Uuid,
         // Project-level diffs (how much to subtract from project)
-        project_writable: ByteCount,
-        project_zfs_snapshot: ByteCount,
-        project_read_only: ByteCount,
+        project: PhysicalDiskBytes,
         // Silo/fleet-level diffs
-        silo_writable: ByteCount,
-        silo_zfs_snapshot: ByteCount,
-        silo_read_only: ByteCount,
+        silo: PhysicalDiskBytes,
         // Optional dedup info for atomic read-only deduplication
         dedup: Option<DedupInfo>,
     },
@@ -244,19 +244,34 @@ WITH
                     // referenced by another (non-deleted) disk in the same
                     // project, OR (for image origins) if the image itself has
                     // a physical_provisioning_resource entry.
-                    query.sql("
+                    query
+                        .sql(
+                            "
   dedup_in_project AS (
     SELECT (
       EXISTS (
         SELECT 1 FROM disk_type_crucible dtc
         INNER JOIN disk d ON d.id = dtc.disk_id
-        WHERE dtc.")
+        WHERE dtc.",
+                        )
                         .sql(col)
-                        .sql(" = ").param().sql("
-        AND d.project_id = ").param().sql("
+                        .sql(" = ")
+                        .param()
+                        .sql(
+                            "
+        AND d.project_id = ",
+                        )
+                        .param()
+                        .sql(
+                            "
         AND d.time_deleted IS NULL
-        AND d.id != ").param().sql("
-      )");
+        AND d.id != ",
+                        )
+                        .param()
+                        .sql(
+                            "
+      )",
+                        );
                     // Also check if the origin itself has a
                     // physical_provisioning_resource entry (meaning its
                     // accounting is active). For images, join against the
@@ -264,15 +279,26 @@ WITH
                     // table.
                     match origin_column {
                         DedupOriginColumn::Image => {
-                            query.sql("
+                            query
+                                .sql(
+                                    "
       OR EXISTS (
         SELECT 1 FROM physical_provisioning_resource ppr
         INNER JOIN image i ON i.id = ppr.id
-        WHERE i.id = ").param().sql("
-        AND i.project_id = ").param().sql("
+        WHERE i.id = ",
+                                )
+                                .param()
+                                .sql(
+                                    "
+        AND i.project_id = ",
+                                )
+                                .param()
+                                .sql(
+                                    "
         AND i.time_deleted IS NULL
         AND ppr.physical_read_only_disk_bytes > 0
-      )");
+      )",
+                                );
                             query
                                 .bind::<sql_types::Uuid, _>(*origin_id)
                                 .bind::<sql_types::Uuid, _>(project_id)
@@ -281,15 +307,26 @@ WITH
                                 .bind::<sql_types::Uuid, _>(project_id);
                         }
                         DedupOriginColumn::Snapshot => {
-                            query.sql("
+                            query
+                                .sql(
+                                    "
       OR EXISTS (
         SELECT 1 FROM physical_provisioning_resource ppr
         INNER JOIN snapshot s ON s.id = ppr.id
-        WHERE s.id = ").param().sql("
-        AND s.project_id = ").param().sql("
+        WHERE s.id = ",
+                                )
+                                .param()
+                                .sql(
+                                    "
+        AND s.project_id = ",
+                                )
+                                .param()
+                                .sql(
+                                    "
         AND s.time_deleted IS NULL
         AND ppr.physical_read_only_disk_bytes > 0
-      )");
+      )",
+                                );
                             query
                                 .bind::<sql_types::Uuid, _>(*origin_id)
                                 .bind::<sql_types::Uuid, _>(project_id)
@@ -298,39 +335,59 @@ WITH
                                 .bind::<sql_types::Uuid, _>(project_id);
                         }
                     }
-                    query.sql("
+                    query.sql(
+                        "
     ) AS already_referenced
-  ),");
+  ),",
+                    );
 
                     // dedup_in_silo: check if this origin is already
                     // referenced by another (non-deleted) disk anywhere in
                     // the same silo, OR (for image origins) if the image
                     // itself has a physical_provisioning_resource entry.
-                    query.sql("
+                    query
+                        .sql(
+                            "
   dedup_in_silo AS (
     SELECT (
       EXISTS (
         SELECT 1 FROM disk_type_crucible dtc
         INNER JOIN disk d ON d.id = dtc.disk_id
         INNER JOIN project p ON d.project_id = p.id
-        WHERE dtc.")
+        WHERE dtc.",
+                        )
                         .sql(col)
-                        .sql(" = ").param().sql("
+                        .sql(" = ")
+                        .param()
+                        .sql(
+                            "
         AND p.silo_id = (SELECT id FROM parent_silo)
         AND d.time_deleted IS NULL
-        AND d.id != ").param().sql("
-      )");
+        AND d.id != ",
+                        )
+                        .param()
+                        .sql(
+                            "
+      )",
+                        );
                     match origin_column {
                         DedupOriginColumn::Image => {
-                            query.sql("
+                            query
+                                .sql(
+                                    "
       OR EXISTS (
         SELECT 1 FROM physical_provisioning_resource ppr
         INNER JOIN image i ON i.id = ppr.id
-        WHERE i.id = ").param().sql("
+        WHERE i.id = ",
+                                )
+                                .param()
+                                .sql(
+                                    "
         AND i.silo_id = (SELECT id FROM parent_silo)
         AND i.time_deleted IS NULL
         AND ppr.physical_read_only_disk_bytes > 0
-      )");
+      )",
+                                );
                             query
                                 .bind::<sql_types::Uuid, _>(*origin_id)
                                 .bind::<sql_types::Uuid, _>(*disk_id)
@@ -339,88 +396,133 @@ WITH
                         DedupOriginColumn::Snapshot => {
                             // Snapshots don't have silo_id directly;
                             // join through project to find the silo.
-                            query.sql("
+                            query
+                                .sql(
+                                    "
       OR EXISTS (
         SELECT 1 FROM physical_provisioning_resource ppr
         INNER JOIN snapshot s ON s.id = ppr.id
         INNER JOIN project p ON s.project_id = p.id
-        WHERE s.id = ").param().sql("
+        WHERE s.id = ",
+                                )
+                                .param()
+                                .sql(
+                                    "
         AND p.silo_id = (SELECT id FROM parent_silo)
         AND s.time_deleted IS NULL
         AND ppr.physical_read_only_disk_bytes > 0
-      )");
+      )",
+                                );
                             query
                                 .bind::<sql_types::Uuid, _>(*origin_id)
                                 .bind::<sql_types::Uuid, _>(*disk_id)
                                 .bind::<sql_types::Uuid, _>(*origin_id);
                         }
                     }
-                    query.sql("
+                    query.sql(
+                        "
     ) AS already_referenced
-  ),");
+  ),",
+                    );
                 }
 
                 DedupInfo::ImageDelete { image_id } => {
                     // dedup_in_project: check if any surviving disk
                     // references this image in the same project.
-                    query.sql("
+                    query
+                        .sql(
+                            "
   dedup_in_project AS (
     SELECT EXISTS (
       SELECT 1 FROM disk_type_crucible dtc
       INNER JOIN disk d ON d.id = dtc.disk_id
-      WHERE dtc.origin_image = ").param().sql("
-      AND d.project_id = ").param().sql("
+      WHERE dtc.origin_image = ",
+                        )
+                        .param()
+                        .sql(
+                            "
+      AND d.project_id = ",
+                        )
+                        .param()
+                        .sql(
+                            "
       AND d.time_deleted IS NULL
     ) AS already_referenced
-  ),")
+  ),",
+                        )
                         .bind::<sql_types::Uuid, _>(*image_id)
                         .bind::<sql_types::Uuid, _>(project_id);
 
                     // dedup_in_silo: check if any surviving disk references
                     // this image anywhere in the same silo.
-                    query.sql("
+                    query
+                        .sql(
+                            "
   dedup_in_silo AS (
     SELECT EXISTS (
       SELECT 1 FROM disk_type_crucible dtc
       INNER JOIN disk d ON d.id = dtc.disk_id
       INNER JOIN project p ON d.project_id = p.id
-      WHERE dtc.origin_image = ").param().sql("
+      WHERE dtc.origin_image = ",
+                        )
+                        .param()
+                        .sql(
+                            "
       AND p.silo_id = (SELECT id FROM parent_silo)
       AND d.time_deleted IS NULL
     ) AS already_referenced
-  ),")
+  ),",
+                        )
                         .bind::<sql_types::Uuid, _>(*image_id);
                 }
 
                 DedupInfo::SnapshotDelete { snapshot_id } => {
                     // dedup_in_project: check if any surviving disk
                     // references this snapshot in the same project.
-                    query.sql("
+                    query
+                        .sql(
+                            "
   dedup_in_project AS (
     SELECT EXISTS (
       SELECT 1 FROM disk_type_crucible dtc
       INNER JOIN disk d ON d.id = dtc.disk_id
-      WHERE dtc.origin_snapshot = ").param().sql("
-      AND d.project_id = ").param().sql("
+      WHERE dtc.origin_snapshot = ",
+                        )
+                        .param()
+                        .sql(
+                            "
+      AND d.project_id = ",
+                        )
+                        .param()
+                        .sql(
+                            "
       AND d.time_deleted IS NULL
     ) AS already_referenced
-  ),")
+  ),",
+                        )
                         .bind::<sql_types::Uuid, _>(*snapshot_id)
                         .bind::<sql_types::Uuid, _>(project_id);
 
                     // dedup_in_silo: check if any surviving disk references
                     // this snapshot anywhere in the same silo.
-                    query.sql("
+                    query
+                        .sql(
+                            "
   dedup_in_silo AS (
     SELECT EXISTS (
       SELECT 1 FROM disk_type_crucible dtc
       INNER JOIN disk d ON d.id = dtc.disk_id
       INNER JOIN project p ON d.project_id = p.id
-      WHERE dtc.origin_snapshot = ").param().sql("
+      WHERE dtc.origin_snapshot = ",
+                        )
+                        .param()
+                        .sql(
+                            "
       AND p.silo_id = (SELECT id FROM parent_silo)
       AND d.time_deleted IS NULL
     ) AS already_referenced
-  ),")
+  ),",
+                        )
                         .bind::<sql_types::Uuid, _>(*snapshot_id);
                 }
             }
@@ -481,7 +583,7 @@ WITH
                 .bind::<sql_types::BigInt, _>(resource.ram_provisioned)
                 .bind::<sql_types::BigInt, _>(resource.ram_provisioned)
             },
-            UpdateKind::InsertStorage { ref resource, silo_writable, silo_zfs_snapshot, silo_read_only, .. } => {
+            UpdateKind::InsertStorage { ref resource, silo, .. } => {
                 // For storage inserts, check physical storage quota.
                 // Physical quota is nullable: NULL = no limit.
                 // Total silo physical = writable + zfs_snapshot + read_only.
@@ -525,9 +627,9 @@ WITH
           AS update
     ),"))
                 .bind::<sql_types::Uuid, _>(resource.id)
-                .bind::<sql_types::BigInt, _>(silo_writable)
-                .bind::<sql_types::BigInt, _>(silo_zfs_snapshot)
-                .bind::<sql_types::BigInt, _>(silo_read_only)
+                .bind::<sql_types::BigInt, _>(silo.writable)
+                .bind::<sql_types::BigInt, _>(silo.zfs_snapshot)
+                .bind::<sql_types::BigInt, _>(silo.read_only)
             },
             UpdateKind::DeleteStorage { id, .. } => {
                 query.sql("
@@ -685,7 +787,7 @@ WITH
                 .param()
                 .bind::<sql_types::BigInt, _>(resource.cpus_provisioned)
                 .bind::<sql_types::BigInt, _>(resource.ram_provisioned),
-            UpdateKind::InsertStorage { ref resource, silo_writable, silo_zfs_snapshot, silo_read_only, ref dedup } => {
+            UpdateKind::InsertStorage { ref resource, silo, ref dedup } => {
                 // Use CASE to apply different diffs at project vs silo/fleet level.
                 query
                 .sql("
@@ -733,13 +835,13 @@ WITH
                 query.sql(" END")
                 .bind::<sql_types::Uuid, _>(project_id)
                 .bind::<sql_types::BigInt, _>(resource.physical_writable_disk_bytes)
-                .bind::<sql_types::BigInt, _>(silo_writable)
+                .bind::<sql_types::BigInt, _>(silo.writable)
                 .bind::<sql_types::Uuid, _>(project_id)
                 .bind::<sql_types::BigInt, _>(resource.physical_zfs_snapshot_bytes)
-                .bind::<sql_types::BigInt, _>(silo_zfs_snapshot)
+                .bind::<sql_types::BigInt, _>(silo.zfs_snapshot)
                 .bind::<sql_types::Uuid, _>(project_id)
                 .bind::<sql_types::BigInt, _>(resource.physical_read_only_disk_bytes)
-                .bind::<sql_types::BigInt, _>(silo_read_only)
+                .bind::<sql_types::BigInt, _>(silo.read_only)
             },
             UpdateKind::DeleteInstance { cpus_diff, ram_diff, .. } => query
                 .sql(
@@ -756,8 +858,7 @@ WITH
                 .bind::<sql_types::BigInt, _>(cpus_diff)
                 .bind::<sql_types::BigInt, _>(ram_diff),
             UpdateKind::DeleteStorage {
-                project_writable, project_zfs_snapshot, project_read_only,
-                silo_writable, silo_zfs_snapshot, silo_read_only,
+                project, silo,
                 ref dedup,
                 ..
             } => {
@@ -807,14 +908,14 @@ WITH
                 }
                 query.sql(" END")
                 .bind::<sql_types::Uuid, _>(project_id)
-                .bind::<sql_types::BigInt, _>(project_writable)
-                .bind::<sql_types::BigInt, _>(silo_writable)
+                .bind::<sql_types::BigInt, _>(project.writable)
+                .bind::<sql_types::BigInt, _>(silo.writable)
                 .bind::<sql_types::Uuid, _>(project_id)
-                .bind::<sql_types::BigInt, _>(project_zfs_snapshot)
-                .bind::<sql_types::BigInt, _>(silo_zfs_snapshot)
+                .bind::<sql_types::BigInt, _>(project.zfs_snapshot)
+                .bind::<sql_types::BigInt, _>(silo.zfs_snapshot)
                 .bind::<sql_types::Uuid, _>(project_id)
-                .bind::<sql_types::BigInt, _>(project_read_only)
-                .bind::<sql_types::BigInt, _>(silo_read_only)
+                .bind::<sql_types::BigInt, _>(project.read_only)
+                .bind::<sql_types::BigInt, _>(silo.read_only)
             },
         };
 
@@ -895,30 +996,44 @@ WITH
                     // dedup_in_project is unused but we emit it for
                     // consistency with the CTE shape; set it to the same
                     // as silo check.
-                    query.sql("
+                    query
+                        .sql(
+                            "
   dedup_in_project AS (
     SELECT EXISTS (
       SELECT 1 FROM disk_type_crucible dtc
       INNER JOIN disk d ON d.id = dtc.disk_id
       INNER JOIN project p ON d.project_id = p.id
-      WHERE dtc.origin_image = ").param().sql("
+      WHERE dtc.origin_image = ",
+                        )
+                        .param()
+                        .sql(
+                            "
       AND p.silo_id = (SELECT id FROM parent_silo)
       AND d.time_deleted IS NULL
     ) AS already_referenced
-  ),")
+  ),",
+                        )
                         .bind::<sql_types::Uuid, _>(*image_id);
 
-                    query.sql("
+                    query
+                        .sql(
+                            "
   dedup_in_silo AS (
     SELECT EXISTS (
       SELECT 1 FROM disk_type_crucible dtc
       INNER JOIN disk d ON d.id = dtc.disk_id
       INNER JOIN project p ON d.project_id = p.id
-      WHERE dtc.origin_image = ").param().sql("
+      WHERE dtc.origin_image = ",
+                        )
+                        .param()
+                        .sql(
+                            "
       AND p.silo_id = (SELECT id FROM parent_silo)
       AND d.time_deleted IS NULL
     ) AS already_referenced
-  ),")
+  ),",
+                        )
                         .bind::<sql_types::Uuid, _>(*image_id);
                 }
                 _ => {
@@ -932,8 +1047,9 @@ WITH
         }
 
         match update_kind.clone() {
-            UpdateKind::InsertStorage { ref resource, silo_writable, silo_zfs_snapshot, silo_read_only, .. } => {
-                query.sql("
+            UpdateKind::InsertStorage { ref resource, silo, .. } => query
+                .sql(
+                    "
   do_update
     AS (
       SELECT
@@ -941,7 +1057,11 @@ WITH
           (
             SELECT count(*)
             FROM physical_provisioning_resource
-            WHERE physical_provisioning_resource.id = ").param().sql("
+            WHERE physical_provisioning_resource.id = ",
+                )
+                .param()
+                .sql(
+                    "
             LIMIT 1
           )
           = 0
@@ -961,24 +1081,35 @@ WITH
                           LIMIT
                             1
                         )
-                        + ").param().sql(" + ").param().sql(" + ").param().sql(concatcp!("
+                        + ",
+                )
+                .param()
+                .sql(" + ")
+                .param()
+                .sql(" + ")
+                .param()
+                .sql(concatcp!(
+                    "
                       )
                 ),
                 'TRUE',
-                '", NOT_ENOUGH_PHYSICAL_STORAGE_SENTINEL, "'
+                '",
+                    NOT_ENOUGH_PHYSICAL_STORAGE_SENTINEL,
+                    "'
               )
                 AS BOOL
             )
         )
           AS update
-    ),"))
+    ),"
+                ))
                 .bind::<sql_types::Uuid, _>(resource.id)
-                .bind::<sql_types::BigInt, _>(silo_writable)
-                .bind::<sql_types::BigInt, _>(silo_zfs_snapshot)
-                .bind::<sql_types::BigInt, _>(silo_read_only)
-            },
-            UpdateKind::DeleteStorage { id, .. } => {
-                query.sql("
+                .bind::<sql_types::BigInt, _>(silo.writable)
+                .bind::<sql_types::BigInt, _>(silo.zfs_snapshot)
+                .bind::<sql_types::BigInt, _>(silo.read_only),
+            UpdateKind::DeleteStorage { id, .. } => query
+                .sql(
+                    "
   do_update
     AS (
       SELECT
@@ -988,15 +1119,21 @@ WITH
           FROM
             physical_provisioning_resource
           WHERE
-            physical_provisioning_resource.id = ").param().sql("
+            physical_provisioning_resource.id = ",
+                )
+                .param()
+                .sql(
+                    "
           LIMIT
             1
         ) = 1
           AS update
-    ),")
-                .bind::<sql_types::Uuid, _>(id)
-            },
-            _ => unreachable!("silo-level CTE only supports storage operations"),
+    ),",
+                )
+                .bind::<sql_types::Uuid, _>(id),
+            _ => {
+                unreachable!("silo-level CTE only supports storage operations")
+            }
         };
 
         match update_kind.clone() {
@@ -1079,7 +1216,9 @@ WITH
                 ))
                 .sql("),")
                 .bind::<sql_types::Uuid, _>(id),
-            _ => unreachable!("silo-level CTE only supports storage operations"),
+            _ => {
+                unreachable!("silo-level CTE only supports storage operations")
+            }
         };
 
         // For silo-level, there's no project, so storage diffs are uniform
@@ -1093,15 +1232,26 @@ WITH
       SET",
         );
         match update_kind.clone() {
-            UpdateKind::InsertStorage { silo_writable, silo_zfs_snapshot, silo_read_only, ref dedup, .. } => {
-                query.sql("
+            UpdateKind::InsertStorage { silo, ref dedup, .. } => {
+                query
+                    .sql(
+                        "
         time_modified = current_timestamp(),
         physical_writable_disk_bytes
-          = physical_provisioning_collection.physical_writable_disk_bytes + ").param().sql(",
+          = physical_provisioning_collection.physical_writable_disk_bytes + ",
+                    )
+                    .param()
+                    .sql(
+                        ",
         physical_zfs_snapshot_bytes
-          = physical_provisioning_collection.physical_zfs_snapshot_bytes + ").param().sql(",
+          = physical_provisioning_collection.physical_zfs_snapshot_bytes + ",
+                    )
+                    .param()
+                    .sql(
+                        ",
         physical_read_only_disk_bytes
-          = physical_provisioning_collection.physical_read_only_disk_bytes + ");
+          = physical_provisioning_collection.physical_read_only_disk_bytes + ",
+                    );
                 if dedup.is_some() {
                     query.sql(
                         "CASE WHEN (SELECT already_referenced FROM dedup_in_silo) THEN 0 ELSE "
@@ -1110,23 +1260,30 @@ WITH
                     query.param();
                 }
                 query
-                    .bind::<sql_types::BigInt, _>(silo_writable)
-                    .bind::<sql_types::BigInt, _>(silo_zfs_snapshot)
-                    .bind::<sql_types::BigInt, _>(silo_read_only)
-            },
-            UpdateKind::DeleteStorage {
-                silo_writable, silo_zfs_snapshot, silo_read_only,
-                ref dedup,
-                ..
-            } => {
-                query.sql("
+                    .bind::<sql_types::BigInt, _>(silo.writable)
+                    .bind::<sql_types::BigInt, _>(silo.zfs_snapshot)
+                    .bind::<sql_types::BigInt, _>(silo.read_only)
+            }
+            UpdateKind::DeleteStorage { silo, ref dedup, .. } => {
+                query
+                    .sql(
+                        "
         time_modified = current_timestamp(),
         physical_writable_disk_bytes
-          = physical_provisioning_collection.physical_writable_disk_bytes - ").param().sql(",
+          = physical_provisioning_collection.physical_writable_disk_bytes - ",
+                    )
+                    .param()
+                    .sql(
+                        ",
         physical_zfs_snapshot_bytes
-          = physical_provisioning_collection.physical_zfs_snapshot_bytes - ").param().sql(",
+          = physical_provisioning_collection.physical_zfs_snapshot_bytes - ",
+                    )
+                    .param()
+                    .sql(
+                        ",
         physical_read_only_disk_bytes
-          = physical_provisioning_collection.physical_read_only_disk_bytes - ");
+          = physical_provisioning_collection.physical_read_only_disk_bytes - ",
+                    );
                 if dedup.is_some() {
                     query.sql(
                         "CASE WHEN (SELECT already_referenced FROM dedup_in_silo) THEN 0 ELSE "
@@ -1135,11 +1292,13 @@ WITH
                     query.param();
                 }
                 query
-                    .bind::<sql_types::BigInt, _>(silo_writable)
-                    .bind::<sql_types::BigInt, _>(silo_zfs_snapshot)
-                    .bind::<sql_types::BigInt, _>(silo_read_only)
-            },
-            _ => unreachable!("silo-level CTE only supports storage operations"),
+                    .bind::<sql_types::BigInt, _>(silo.writable)
+                    .bind::<sql_types::BigInt, _>(silo.zfs_snapshot)
+                    .bind::<sql_types::BigInt, _>(silo.read_only)
+            }
+            _ => {
+                unreachable!("silo-level CTE only supports storage operations")
+            }
         };
 
         query.sql("
@@ -1162,9 +1321,7 @@ FROM
     /// Used for silo-scoped image accounting.
     pub fn new_insert_storage_silo_level(
         id: uuid::Uuid,
-        silo_writable: ByteCount,
-        silo_zfs_snapshot: ByteCount,
-        silo_read_only: ByteCount,
+        silo: PhysicalDiskBytes,
         silo_id: uuid::Uuid,
         storage_type: crate::db::datastore::StorageType,
         dedup: Option<DedupInfo>,
@@ -1173,18 +1330,12 @@ FROM
             PhysicalProvisioningResourceNew::new(id, storage_type.into());
         // For silo-level resources, the resource record stores silo-level
         // diffs (there is no project level).
-        resource.physical_writable_disk_bytes = silo_writable;
-        resource.physical_zfs_snapshot_bytes = silo_zfs_snapshot;
-        resource.physical_read_only_disk_bytes = silo_read_only;
+        resource.physical_writable_disk_bytes = silo.writable;
+        resource.physical_zfs_snapshot_bytes = silo.zfs_snapshot;
+        resource.physical_read_only_disk_bytes = silo.read_only;
 
         Self::apply_update_silo_level(
-            UpdateKind::InsertStorage {
-                resource,
-                silo_writable,
-                silo_zfs_snapshot,
-                silo_read_only,
-                dedup,
-            },
+            UpdateKind::InsertStorage { resource, silo, dedup },
             silo_id,
         )
     }
@@ -1193,62 +1344,41 @@ FROM
     /// Used for silo-scoped image accounting.
     pub fn new_delete_storage_silo_level(
         id: uuid::Uuid,
-        silo_writable: ByteCount,
-        silo_zfs_snapshot: ByteCount,
-        silo_read_only: ByteCount,
+        silo: PhysicalDiskBytes,
         silo_id: uuid::Uuid,
         dedup: Option<DedupInfo>,
     ) -> TypedSqlQuery<SelectableSql<PhysicalProvisioningCollection>> {
         Self::apply_update_silo_level(
-            UpdateKind::DeleteStorage {
-                id,
-                project_writable: silo_writable,
-                project_zfs_snapshot: silo_zfs_snapshot,
-                project_read_only: silo_read_only,
-                silo_writable,
-                silo_zfs_snapshot,
-                silo_read_only,
-                dedup,
-            },
+            UpdateKind::DeleteStorage { id, project: silo, silo, dedup },
             silo_id,
         )
     }
 
     /// Insert storage provisioning with per-level diffs.
     ///
-    /// The `resource` contains project-level diffs (stored in the resource
-    /// table for idempotency). The silo_* parameters are the silo/fleet-level
-    /// diffs (may differ from project diffs due to deduplication).
+    /// The `project` bytes are stored in the resource table for idempotency.
+    /// The `silo` bytes are the silo/fleet-level diffs (may differ from
+    /// project diffs due to deduplication).
     ///
     /// When `dedup` is `Some`, the CTE atomically checks whether the given
     /// origin image/snapshot is already referenced by another disk. If so,
     /// the `read_only` diff is zeroed out at the appropriate level.
     pub fn new_insert_storage(
         id: uuid::Uuid,
-        project_writable: ByteCount,
-        project_zfs_snapshot: ByteCount,
-        project_read_only: ByteCount,
-        silo_writable: ByteCount,
-        silo_zfs_snapshot: ByteCount,
-        silo_read_only: ByteCount,
+        project: PhysicalDiskBytes,
+        silo: PhysicalDiskBytes,
         project_id: uuid::Uuid,
         storage_type: crate::db::datastore::StorageType,
         dedup: Option<DedupInfo>,
     ) -> TypedSqlQuery<SelectableSql<PhysicalProvisioningCollection>> {
         let mut resource =
             PhysicalProvisioningResourceNew::new(id, storage_type.into());
-        resource.physical_writable_disk_bytes = project_writable;
-        resource.physical_zfs_snapshot_bytes = project_zfs_snapshot;
-        resource.physical_read_only_disk_bytes = project_read_only;
+        resource.physical_writable_disk_bytes = project.writable;
+        resource.physical_zfs_snapshot_bytes = project.zfs_snapshot;
+        resource.physical_read_only_disk_bytes = project.read_only;
 
         Self::apply_update(
-            UpdateKind::InsertStorage {
-                resource,
-                silo_writable,
-                silo_zfs_snapshot,
-                silo_read_only,
-                dedup,
-            },
+            UpdateKind::InsertStorage { resource, silo, dedup },
             project_id,
         )
     }
@@ -1260,26 +1390,13 @@ FROM
     /// out at the appropriate level.
     pub fn new_delete_storage(
         id: uuid::Uuid,
-        project_writable: ByteCount,
-        project_zfs_snapshot: ByteCount,
-        project_read_only: ByteCount,
-        silo_writable: ByteCount,
-        silo_zfs_snapshot: ByteCount,
-        silo_read_only: ByteCount,
+        project: PhysicalDiskBytes,
+        silo: PhysicalDiskBytes,
         project_id: uuid::Uuid,
         dedup: Option<DedupInfo>,
     ) -> TypedSqlQuery<SelectableSql<PhysicalProvisioningCollection>> {
         Self::apply_update(
-            UpdateKind::DeleteStorage {
-                id,
-                project_writable,
-                project_zfs_snapshot,
-                project_read_only,
-                silo_writable,
-                silo_zfs_snapshot,
-                silo_read_only,
-                dedup,
-            },
+            UpdateKind::DeleteStorage { id, project, silo, dedup },
             project_id,
         )
     }
@@ -1297,10 +1414,7 @@ FROM
         resource.cpus_provisioned = cpus_diff;
         resource.ram_provisioned = ram_diff;
 
-        Self::apply_update(
-            UpdateKind::InsertInstance(resource),
-            project_id,
-        )
+        Self::apply_update(UpdateKind::InsertInstance(resource), project_id)
     }
 
     pub fn new_delete_instance(
@@ -1337,27 +1451,26 @@ mod test {
     async fn expectorate_query_insert_storage() {
         let id = Uuid::nil();
         let project_id = Uuid::nil();
-        let project_writable = 2048.try_into().unwrap();
-        let project_zfs_snapshot = 0.try_into().unwrap();
-        let project_read_only = 0.try_into().unwrap();
-        let silo_writable = 2048.try_into().unwrap();
-        let silo_zfs_snapshot = 0.try_into().unwrap();
-        let silo_read_only = 0.try_into().unwrap();
+        let project = PhysicalDiskBytes {
+            writable: 2048.try_into().unwrap(),
+            zfs_snapshot: 0.try_into().unwrap(),
+            read_only: 0.try_into().unwrap(),
+        };
+        let silo = PhysicalDiskBytes {
+            writable: 2048.try_into().unwrap(),
+            zfs_snapshot: 0.try_into().unwrap(),
+            read_only: 0.try_into().unwrap(),
+        };
         let storage_type = crate::db::datastore::StorageType::Disk;
 
-        let query =
-            PhysicalProvisioningCollectionUpdate::new_insert_storage(
-                id,
-                project_writable,
-                project_zfs_snapshot,
-                project_read_only,
-                silo_writable,
-                silo_zfs_snapshot,
-                silo_read_only,
-                project_id,
-                storage_type,
-                None,
-            );
+        let query = PhysicalProvisioningCollectionUpdate::new_insert_storage(
+            id,
+            project,
+            silo,
+            project_id,
+            storage_type,
+            None,
+        );
         expectorate_query_contents(
             &query,
             "tests/output/physical_provisioning_collection_update_insert_storage.sql",
@@ -1369,25 +1482,20 @@ mod test {
     async fn expectorate_query_delete_storage() {
         let id = Uuid::nil();
         let project_id = Uuid::nil();
-        let project_writable = 2048.try_into().unwrap();
-        let project_zfs_snapshot = 0.try_into().unwrap();
-        let project_read_only = 0.try_into().unwrap();
-        let silo_writable = 2048.try_into().unwrap();
-        let silo_zfs_snapshot = 0.try_into().unwrap();
-        let silo_read_only = 0.try_into().unwrap();
+        let project = PhysicalDiskBytes {
+            writable: 2048.try_into().unwrap(),
+            zfs_snapshot: 0.try_into().unwrap(),
+            read_only: 0.try_into().unwrap(),
+        };
+        let silo = PhysicalDiskBytes {
+            writable: 2048.try_into().unwrap(),
+            zfs_snapshot: 0.try_into().unwrap(),
+            read_only: 0.try_into().unwrap(),
+        };
 
-        let query =
-            PhysicalProvisioningCollectionUpdate::new_delete_storage(
-                id,
-                project_writable,
-                project_zfs_snapshot,
-                project_read_only,
-                silo_writable,
-                silo_zfs_snapshot,
-                silo_read_only,
-                project_id,
-                None,
-            );
+        let query = PhysicalProvisioningCollectionUpdate::new_delete_storage(
+            id, project, silo, project_id, None,
+        );
 
         expectorate_query_contents(
             &query,
@@ -1403,10 +1511,9 @@ mod test {
         let cpus_diff = 4;
         let ram_diff = 2048.try_into().unwrap();
 
-        let query =
-            PhysicalProvisioningCollectionUpdate::new_insert_instance(
-                id, cpus_diff, ram_diff, project_id,
-            );
+        let query = PhysicalProvisioningCollectionUpdate::new_insert_instance(
+            id, cpus_diff, ram_diff, project_id,
+        );
 
         expectorate_query_contents(
             &query,
@@ -1422,10 +1529,9 @@ mod test {
         let cpus_diff = 4;
         let ram_diff = 2048.try_into().unwrap();
 
-        let query =
-            PhysicalProvisioningCollectionUpdate::new_delete_instance(
-                id, cpus_diff, ram_diff, project_id,
-            );
+        let query = PhysicalProvisioningCollectionUpdate::new_delete_instance(
+            id, cpus_diff, ram_diff, project_id,
+        );
 
         expectorate_query_contents(
             &query,
@@ -1438,12 +1544,16 @@ mod test {
     async fn expectorate_query_insert_storage_with_dedup() {
         let id = Uuid::nil();
         let project_id = Uuid::nil();
-        let project_writable = 2048.try_into().unwrap();
-        let project_zfs_snapshot = 0.try_into().unwrap();
-        let project_read_only = 1024.try_into().unwrap();
-        let silo_writable = 2048.try_into().unwrap();
-        let silo_zfs_snapshot = 0.try_into().unwrap();
-        let silo_read_only = 1024.try_into().unwrap();
+        let project = PhysicalDiskBytes {
+            writable: 2048.try_into().unwrap(),
+            zfs_snapshot: 0.try_into().unwrap(),
+            read_only: 1024.try_into().unwrap(),
+        };
+        let silo = PhysicalDiskBytes {
+            writable: 2048.try_into().unwrap(),
+            zfs_snapshot: 0.try_into().unwrap(),
+            read_only: 1024.try_into().unwrap(),
+        };
         let storage_type = crate::db::datastore::StorageType::Disk;
         let dedup = DedupInfo::Disk {
             origin_column: DedupOriginColumn::Image,
@@ -1451,19 +1561,14 @@ mod test {
             disk_id: Uuid::nil(),
         };
 
-        let query =
-            PhysicalProvisioningCollectionUpdate::new_insert_storage(
-                id,
-                project_writable,
-                project_zfs_snapshot,
-                project_read_only,
-                silo_writable,
-                silo_zfs_snapshot,
-                silo_read_only,
-                project_id,
-                storage_type,
-                Some(dedup),
-            );
+        let query = PhysicalProvisioningCollectionUpdate::new_insert_storage(
+            id,
+            project,
+            silo,
+            project_id,
+            storage_type,
+            Some(dedup),
+        );
         expectorate_query_contents(
             &query,
             "tests/output/physical_provisioning_collection_update_insert_storage_with_dedup.sql",
@@ -1475,30 +1580,29 @@ mod test {
     async fn expectorate_query_delete_storage_with_dedup() {
         let id = Uuid::nil();
         let project_id = Uuid::nil();
-        let project_writable = 2048.try_into().unwrap();
-        let project_zfs_snapshot = 0.try_into().unwrap();
-        let project_read_only = 1024.try_into().unwrap();
-        let silo_writable = 2048.try_into().unwrap();
-        let silo_zfs_snapshot = 0.try_into().unwrap();
-        let silo_read_only = 1024.try_into().unwrap();
+        let project = PhysicalDiskBytes {
+            writable: 2048.try_into().unwrap(),
+            zfs_snapshot: 0.try_into().unwrap(),
+            read_only: 1024.try_into().unwrap(),
+        };
+        let silo = PhysicalDiskBytes {
+            writable: 2048.try_into().unwrap(),
+            zfs_snapshot: 0.try_into().unwrap(),
+            read_only: 1024.try_into().unwrap(),
+        };
         let dedup = DedupInfo::Disk {
             origin_column: DedupOriginColumn::Snapshot,
             origin_id: Uuid::nil(),
             disk_id: Uuid::nil(),
         };
 
-        let query =
-            PhysicalProvisioningCollectionUpdate::new_delete_storage(
-                id,
-                project_writable,
-                project_zfs_snapshot,
-                project_read_only,
-                silo_writable,
-                silo_zfs_snapshot,
-                silo_read_only,
-                project_id,
-                Some(dedup),
-            );
+        let query = PhysicalProvisioningCollectionUpdate::new_delete_storage(
+            id,
+            project,
+            silo,
+            project_id,
+            Some(dedup),
+        );
 
         expectorate_query_contents(
             &query,
@@ -1512,36 +1616,34 @@ mod test {
 
     #[tokio::test]
     async fn explain_insert_storage() {
-        let logctx = dev::test_setup_log(
-            "explain_physical_provisioning_insert_storage",
-        );
+        let logctx =
+            dev::test_setup_log("explain_physical_provisioning_insert_storage");
         let db = TestDatabase::new_with_pool(&logctx.log).await;
         let pool = db.pool();
         let conn = pool.claim().await.unwrap();
 
         let id = Uuid::nil();
         let project_id = Uuid::nil();
-        let project_writable = 2048.try_into().unwrap();
-        let project_zfs_snapshot = 0.try_into().unwrap();
-        let project_read_only = 0.try_into().unwrap();
-        let silo_writable = 2048.try_into().unwrap();
-        let silo_zfs_snapshot = 0.try_into().unwrap();
-        let silo_read_only = 0.try_into().unwrap();
+        let project = PhysicalDiskBytes {
+            writable: 2048.try_into().unwrap(),
+            zfs_snapshot: 0.try_into().unwrap(),
+            read_only: 0.try_into().unwrap(),
+        };
+        let silo = PhysicalDiskBytes {
+            writable: 2048.try_into().unwrap(),
+            zfs_snapshot: 0.try_into().unwrap(),
+            read_only: 0.try_into().unwrap(),
+        };
         let storage_type = crate::db::datastore::StorageType::Disk;
 
-        let query =
-            PhysicalProvisioningCollectionUpdate::new_insert_storage(
-                id,
-                project_writable,
-                project_zfs_snapshot,
-                project_read_only,
-                silo_writable,
-                silo_zfs_snapshot,
-                silo_read_only,
-                project_id,
-                storage_type,
-                None,
-            );
+        let query = PhysicalProvisioningCollectionUpdate::new_insert_storage(
+            id,
+            project,
+            silo,
+            project_id,
+            storage_type,
+            None,
+        );
         let _ = query
             .explain_async(&conn)
             .await
@@ -1553,34 +1655,28 @@ mod test {
 
     #[tokio::test]
     async fn explain_delete_storage() {
-        let logctx = dev::test_setup_log(
-            "explain_physical_provisioning_delete_storage",
-        );
+        let logctx =
+            dev::test_setup_log("explain_physical_provisioning_delete_storage");
         let db = TestDatabase::new_with_pool(&logctx.log).await;
         let pool = db.pool();
         let conn = pool.claim().await.unwrap();
 
         let id = Uuid::nil();
         let project_id = Uuid::nil();
-        let project_writable = 2048.try_into().unwrap();
-        let project_zfs_snapshot = 0.try_into().unwrap();
-        let project_read_only = 0.try_into().unwrap();
-        let silo_writable = 2048.try_into().unwrap();
-        let silo_zfs_snapshot = 0.try_into().unwrap();
-        let silo_read_only = 0.try_into().unwrap();
+        let project = PhysicalDiskBytes {
+            writable: 2048.try_into().unwrap(),
+            zfs_snapshot: 0.try_into().unwrap(),
+            read_only: 0.try_into().unwrap(),
+        };
+        let silo = PhysicalDiskBytes {
+            writable: 2048.try_into().unwrap(),
+            zfs_snapshot: 0.try_into().unwrap(),
+            read_only: 0.try_into().unwrap(),
+        };
 
-        let query =
-            PhysicalProvisioningCollectionUpdate::new_delete_storage(
-                id,
-                project_writable,
-                project_zfs_snapshot,
-                project_read_only,
-                silo_writable,
-                silo_zfs_snapshot,
-                silo_read_only,
-                project_id,
-                None,
-            );
+        let query = PhysicalProvisioningCollectionUpdate::new_delete_storage(
+            id, project, silo, project_id, None,
+        );
         let _ = query
             .explain_async(&conn)
             .await
@@ -1604,10 +1700,9 @@ mod test {
         let cpus_diff = 16.try_into().unwrap();
         let ram_diff = 2048.try_into().unwrap();
 
-        let query =
-            PhysicalProvisioningCollectionUpdate::new_insert_instance(
-                id, cpus_diff, ram_diff, project_id,
-            );
+        let query = PhysicalProvisioningCollectionUpdate::new_insert_instance(
+            id, cpus_diff, ram_diff, project_id,
+        );
         let _ = query
             .explain_async(&conn)
             .await
@@ -1631,10 +1726,9 @@ mod test {
         let cpus_diff = 16.try_into().unwrap();
         let ram_diff = 2048.try_into().unwrap();
 
-        let query =
-            PhysicalProvisioningCollectionUpdate::new_delete_instance(
-                id, cpus_diff, ram_diff, project_id,
-            );
+        let query = PhysicalProvisioningCollectionUpdate::new_delete_instance(
+            id, cpus_diff, ram_diff, project_id,
+        );
         let _ = query
             .explain_async(&conn)
             .await
@@ -1655,12 +1749,16 @@ mod test {
 
         let id = Uuid::nil();
         let project_id = Uuid::nil();
-        let project_writable = 2048.try_into().unwrap();
-        let project_zfs_snapshot = 0.try_into().unwrap();
-        let project_read_only = 1024.try_into().unwrap();
-        let silo_writable = 2048.try_into().unwrap();
-        let silo_zfs_snapshot = 0.try_into().unwrap();
-        let silo_read_only = 1024.try_into().unwrap();
+        let project = PhysicalDiskBytes {
+            writable: 2048.try_into().unwrap(),
+            zfs_snapshot: 0.try_into().unwrap(),
+            read_only: 1024.try_into().unwrap(),
+        };
+        let silo = PhysicalDiskBytes {
+            writable: 2048.try_into().unwrap(),
+            zfs_snapshot: 0.try_into().unwrap(),
+            read_only: 1024.try_into().unwrap(),
+        };
         let storage_type = crate::db::datastore::StorageType::Disk;
         let dedup = DedupInfo::Disk {
             origin_column: DedupOriginColumn::Image,
@@ -1668,19 +1766,14 @@ mod test {
             disk_id: Uuid::nil(),
         };
 
-        let query =
-            PhysicalProvisioningCollectionUpdate::new_insert_storage(
-                id,
-                project_writable,
-                project_zfs_snapshot,
-                project_read_only,
-                silo_writable,
-                silo_zfs_snapshot,
-                silo_read_only,
-                project_id,
-                storage_type,
-                Some(dedup),
-            );
+        let query = PhysicalProvisioningCollectionUpdate::new_insert_storage(
+            id,
+            project,
+            silo,
+            project_id,
+            storage_type,
+            Some(dedup),
+        );
         let _ = query
             .explain_async(&conn)
             .await
@@ -1701,30 +1794,29 @@ mod test {
 
         let id = Uuid::nil();
         let project_id = Uuid::nil();
-        let project_writable = 2048.try_into().unwrap();
-        let project_zfs_snapshot = 0.try_into().unwrap();
-        let project_read_only = 1024.try_into().unwrap();
-        let silo_writable = 2048.try_into().unwrap();
-        let silo_zfs_snapshot = 0.try_into().unwrap();
-        let silo_read_only = 1024.try_into().unwrap();
+        let project = PhysicalDiskBytes {
+            writable: 2048.try_into().unwrap(),
+            zfs_snapshot: 0.try_into().unwrap(),
+            read_only: 1024.try_into().unwrap(),
+        };
+        let silo = PhysicalDiskBytes {
+            writable: 2048.try_into().unwrap(),
+            zfs_snapshot: 0.try_into().unwrap(),
+            read_only: 1024.try_into().unwrap(),
+        };
         let dedup = DedupInfo::Disk {
             origin_column: DedupOriginColumn::Snapshot,
             origin_id: Uuid::nil(),
             disk_id: Uuid::nil(),
         };
 
-        let query =
-            PhysicalProvisioningCollectionUpdate::new_delete_storage(
-                id,
-                project_writable,
-                project_zfs_snapshot,
-                project_read_only,
-                silo_writable,
-                silo_zfs_snapshot,
-                silo_read_only,
-                project_id,
-                Some(dedup),
-            );
+        let query = PhysicalProvisioningCollectionUpdate::new_delete_storage(
+            id,
+            project,
+            silo,
+            project_id,
+            Some(dedup),
+        );
         let _ = query
             .explain_async(&conn)
             .await
@@ -1738,28 +1830,25 @@ mod test {
     async fn expectorate_query_delete_storage_with_snapshot_dedup() {
         let id = Uuid::nil();
         let project_id = Uuid::nil();
-        let project_writable = 0.try_into().unwrap();
-        let project_zfs_snapshot = 1024.try_into().unwrap();
-        let project_read_only = 1024.try_into().unwrap();
-        let silo_writable = 0.try_into().unwrap();
-        let silo_zfs_snapshot = 1024.try_into().unwrap();
-        let silo_read_only = 1024.try_into().unwrap();
-        let dedup = DedupInfo::SnapshotDelete {
-            snapshot_id: Uuid::nil(),
+        let project = PhysicalDiskBytes {
+            writable: 0.try_into().unwrap(),
+            zfs_snapshot: 1024.try_into().unwrap(),
+            read_only: 1024.try_into().unwrap(),
         };
+        let silo = PhysicalDiskBytes {
+            writable: 0.try_into().unwrap(),
+            zfs_snapshot: 1024.try_into().unwrap(),
+            read_only: 1024.try_into().unwrap(),
+        };
+        let dedup = DedupInfo::SnapshotDelete { snapshot_id: Uuid::nil() };
 
-        let query =
-            PhysicalProvisioningCollectionUpdate::new_delete_storage(
-                id,
-                project_writable,
-                project_zfs_snapshot,
-                project_read_only,
-                silo_writable,
-                silo_zfs_snapshot,
-                silo_read_only,
-                project_id,
-                Some(dedup),
-            );
+        let query = PhysicalProvisioningCollectionUpdate::new_delete_storage(
+            id,
+            project,
+            silo,
+            project_id,
+            Some(dedup),
+        );
 
         expectorate_query_contents(
             &query,
@@ -1779,28 +1868,25 @@ mod test {
 
         let id = Uuid::nil();
         let project_id = Uuid::nil();
-        let project_writable = 0.try_into().unwrap();
-        let project_zfs_snapshot = 1024.try_into().unwrap();
-        let project_read_only = 1024.try_into().unwrap();
-        let silo_writable = 0.try_into().unwrap();
-        let silo_zfs_snapshot = 1024.try_into().unwrap();
-        let silo_read_only = 1024.try_into().unwrap();
-        let dedup = DedupInfo::SnapshotDelete {
-            snapshot_id: Uuid::nil(),
+        let project = PhysicalDiskBytes {
+            writable: 0.try_into().unwrap(),
+            zfs_snapshot: 1024.try_into().unwrap(),
+            read_only: 1024.try_into().unwrap(),
         };
+        let silo = PhysicalDiskBytes {
+            writable: 0.try_into().unwrap(),
+            zfs_snapshot: 1024.try_into().unwrap(),
+            read_only: 1024.try_into().unwrap(),
+        };
+        let dedup = DedupInfo::SnapshotDelete { snapshot_id: Uuid::nil() };
 
-        let query =
-            PhysicalProvisioningCollectionUpdate::new_delete_storage(
-                id,
-                project_writable,
-                project_zfs_snapshot,
-                project_read_only,
-                silo_writable,
-                silo_zfs_snapshot,
-                silo_read_only,
-                project_id,
-                Some(dedup),
-            );
+        let query = PhysicalProvisioningCollectionUpdate::new_delete_storage(
+            id,
+            project,
+            silo,
+            project_id,
+            Some(dedup),
+        );
         let _ = query
             .explain_async(&conn)
             .await

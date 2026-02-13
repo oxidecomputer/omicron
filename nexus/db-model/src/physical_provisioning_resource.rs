@@ -43,19 +43,16 @@ pub struct PhysicalProvisioningResourceNew {
 }
 
 impl PhysicalProvisioningResourceNew {
-    pub fn new(
-        id: Uuid,
-        resource_type: ResourceTypeProvisioned,
-    ) -> Self {
+    pub fn new(id: Uuid, resource_type: ResourceTypeProvisioned) -> Self {
         Self {
             id,
             resource_type: resource_type.to_string(),
-            physical_writable_disk_bytes: ByteCount(
-                external::ByteCount::from(0),
-            ),
-            physical_zfs_snapshot_bytes: ByteCount(
-                external::ByteCount::from(0),
-            ),
+            physical_writable_disk_bytes: ByteCount(external::ByteCount::from(
+                0,
+            )),
+            physical_zfs_snapshot_bytes: ByteCount(external::ByteCount::from(
+                0,
+            )),
             physical_read_only_disk_bytes: ByteCount(
                 external::ByteCount::from(0),
             ),

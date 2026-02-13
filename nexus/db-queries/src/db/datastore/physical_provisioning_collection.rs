@@ -12,6 +12,7 @@ use crate::db::model::ByteCount;
 use crate::db::model::PhysicalProvisioningCollection;
 use crate::db::model::PhysicalProvisioningCollectionNew;
 use crate::db::queries::physical_provisioning_collection_update::DedupInfo;
+use crate::db::queries::physical_provisioning_collection_update::PhysicalDiskBytes;
 use crate::db::queries::physical_provisioning_collection_update::PhysicalProvisioningCollectionUpdate;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use diesel::prelude::*;
@@ -100,15 +101,17 @@ impl DataStore {
         // NOTE: We don't really need to extract the value we're deleting from
         // the DB, but by doing so, we can validate that we haven't
         // miscalculated our usage accounting.
-        let collection =
-            diesel::delete(dsl::physical_provisioning_collection)
-                .filter(dsl::id.eq(id))
-                .returning(PhysicalProvisioningCollection::as_select())
-                .get_result_async(conn)
-                .await?;
+        let collection = diesel::delete(dsl::physical_provisioning_collection)
+            .filter(dsl::id.eq(id))
+            .returning(PhysicalProvisioningCollection::as_select())
+            .get_result_async(conn)
+            .await?;
 
         if !collection.is_empty() {
-            warn!(log, "Physical collection deleted while non-empty: {collection:?}");
+            warn!(
+                log,
+                "Physical collection deleted while non-empty: {collection:?}"
+            );
             return Err(DieselError::RollbackTransaction);
         }
         Ok(())
@@ -130,15 +133,16 @@ impl DataStore {
         dedup: Option<DedupInfo>,
     ) -> Result<Vec<PhysicalProvisioningCollection>, Error> {
         let zero: ByteCount = 0.try_into().unwrap();
+        let bytes = PhysicalDiskBytes {
+            writable: writable_phys,
+            zfs_snapshot: zero,
+            read_only: read_only_phys,
+        };
         let provisions =
             PhysicalProvisioningCollectionUpdate::new_insert_storage(
                 id,
-                writable_phys,
-                zero,
-                read_only_phys,
-                writable_phys,
-                zero,
-                read_only_phys,
+                bytes,
+                bytes,
                 project_id,
                 StorageType::Disk,
                 dedup,
@@ -168,15 +172,16 @@ impl DataStore {
         dedup: Option<DedupInfo>,
     ) -> Result<Vec<PhysicalProvisioningCollection>, Error> {
         let zero: ByteCount = 0.try_into().unwrap();
+        let bytes = PhysicalDiskBytes {
+            writable: writable_phys,
+            zfs_snapshot: zero,
+            read_only: read_only_phys,
+        };
         let provisions =
             PhysicalProvisioningCollectionUpdate::new_delete_storage(
                 id,
-                writable_phys,
-                zero,
-                read_only_phys,
-                writable_phys,
-                zero,
-                read_only_phys,
+                bytes,
+                bytes,
                 project_id,
                 dedup,
             )
@@ -195,22 +200,14 @@ impl DataStore {
         opctx: &OpContext,
         id: Uuid,
         project_id: Uuid,
-        project_writable: ByteCount,
-        project_zfs_snapshot: ByteCount,
-        project_read_only: ByteCount,
-        silo_writable: ByteCount,
-        silo_zfs_snapshot: ByteCount,
-        silo_read_only: ByteCount,
+        project: PhysicalDiskBytes,
+        silo: PhysicalDiskBytes,
     ) -> Result<Vec<PhysicalProvisioningCollection>, Error> {
         let provisions =
             PhysicalProvisioningCollectionUpdate::new_insert_storage(
                 id,
-                project_writable,
-                project_zfs_snapshot,
-                project_read_only,
-                silo_writable,
-                silo_zfs_snapshot,
-                silo_read_only,
+                project,
+                silo,
                 project_id,
                 StorageType::Snapshot,
                 None,
@@ -235,23 +232,15 @@ impl DataStore {
         opctx: &OpContext,
         id: Uuid,
         project_id: Uuid,
-        project_writable: ByteCount,
-        project_zfs_snapshot: ByteCount,
-        project_read_only: ByteCount,
-        silo_writable: ByteCount,
-        silo_zfs_snapshot: ByteCount,
-        silo_read_only: ByteCount,
+        project: PhysicalDiskBytes,
+        silo: PhysicalDiskBytes,
         dedup: Option<DedupInfo>,
     ) -> Result<Vec<PhysicalProvisioningCollection>, Error> {
         let provisions =
             PhysicalProvisioningCollectionUpdate::new_delete_storage(
                 id,
-                project_writable,
-                project_zfs_snapshot,
-                project_read_only,
-                silo_writable,
-                silo_zfs_snapshot,
-                silo_read_only,
+                project,
+                silo,
                 project_id,
                 dedup,
             )
@@ -325,14 +314,10 @@ impl DataStore {
         dsl::disk_type_crucible
             .filter(dsl::disk_id.eq(disk_id))
             .select(db::model::DiskTypeCrucible::as_select())
-            .get_result_async(
-                &*self.pool_connection_authorized(opctx).await?,
-            )
+            .get_result_async(&*self.pool_connection_authorized(opctx).await?)
             .await
             .optional()
-            .map_err(|e| {
-                public_error_from_diesel(e, ErrorHandler::Server)
-            })
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 
     /// Insert physical provisioning for a project-scoped image.
@@ -346,15 +331,16 @@ impl DataStore {
         read_only_phys: ByteCount,
     ) -> Result<Vec<PhysicalProvisioningCollection>, Error> {
         let zero: ByteCount = 0.try_into().unwrap();
+        let bytes = PhysicalDiskBytes {
+            writable: zero,
+            zfs_snapshot: zero,
+            read_only: read_only_phys,
+        };
         let provisions =
             PhysicalProvisioningCollectionUpdate::new_insert_storage(
                 id,
-                zero,
-                zero,
-                read_only_phys,
-                zero,
-                zero,
-                read_only_phys,
+                bytes,
+                bytes,
                 project_id,
                 StorageType::Image,
                 None,
@@ -380,12 +366,15 @@ impl DataStore {
         read_only_phys: ByteCount,
     ) -> Result<Vec<PhysicalProvisioningCollection>, Error> {
         let zero: ByteCount = 0.try_into().unwrap();
+        let bytes = PhysicalDiskBytes {
+            writable: zero,
+            zfs_snapshot: zero,
+            read_only: read_only_phys,
+        };
         let provisions =
             PhysicalProvisioningCollectionUpdate::new_insert_storage_silo_level(
                 id,
-                zero,
-                zero,
-                read_only_phys,
+                bytes,
                 silo_id,
                 StorageType::Image,
                 None,
@@ -411,15 +400,16 @@ impl DataStore {
     ) -> Result<Vec<PhysicalProvisioningCollection>, Error> {
         let zero: ByteCount = 0.try_into().unwrap();
         let dedup = DedupInfo::ImageDelete { image_id };
+        let bytes = PhysicalDiskBytes {
+            writable: zero,
+            zfs_snapshot: zero,
+            read_only: read_only_phys,
+        };
         let provisions =
             PhysicalProvisioningCollectionUpdate::new_delete_storage(
                 image_id,
-                zero,
-                zero,
-                read_only_phys,
-                zero,
-                zero,
-                read_only_phys,
+                bytes,
+                bytes,
                 project_id,
                 Some(dedup),
             )
@@ -444,12 +434,15 @@ impl DataStore {
     ) -> Result<Vec<PhysicalProvisioningCollection>, Error> {
         let zero: ByteCount = 0.try_into().unwrap();
         let dedup = DedupInfo::ImageDelete { image_id };
+        let bytes = PhysicalDiskBytes {
+            writable: zero,
+            zfs_snapshot: zero,
+            read_only: read_only_phys,
+        };
         let provisions =
             PhysicalProvisioningCollectionUpdate::new_delete_storage_silo_level(
                 image_id,
-                zero,
-                zero,
-                read_only_phys,
+                bytes,
                 silo_id,
                 Some(dedup),
             )
@@ -688,7 +681,14 @@ mod test {
 
         for id in ids {
             verify_physical_collection_usage(
-                &datastore, &opctx, id, 12, 1 << 30, 0, 0, 0,
+                &datastore,
+                &opctx,
+                id,
+                12,
+                1 << 30,
+                0,
+                0,
+                0,
             )
             .await;
         }
@@ -757,7 +757,14 @@ mod test {
 
         for id in ids {
             verify_physical_collection_usage(
-                &datastore, &opctx, id, 12, 1 << 30, 0, 0, 0,
+                &datastore,
+                &opctx,
+                id,
+                12,
+                1 << 30,
+                0,
+                0,
+                0,
             )
             .await;
         }
@@ -776,7 +783,14 @@ mod test {
 
         for id in ids {
             verify_physical_collection_usage(
-                &datastore, &opctx, id, 12, 1 << 30, 0, 0, 0,
+                &datastore,
+                &opctx,
+                id,
+                12,
+                1 << 30,
+                0,
+                0,
+                0,
             )
             .await;
         }
@@ -855,7 +869,14 @@ mod test {
 
         for id in ids {
             verify_physical_collection_usage(
-                &datastore, &opctx, id, 0, 0, 1 << 30, 0, 0,
+                &datastore,
+                &opctx,
+                id,
+                0,
+                0,
+                1 << 30,
+                0,
+                0,
             )
             .await;
         }
@@ -904,7 +925,14 @@ mod test {
 
         for id in ids {
             verify_physical_collection_usage(
-                &datastore, &opctx, id, 0, 0, 1 << 30, 0, 0,
+                &datastore,
+                &opctx,
+                id,
+                0,
+                0,
+                1 << 30,
+                0,
+                0,
             )
             .await;
         }
@@ -919,7 +947,14 @@ mod test {
 
         for id in ids {
             verify_physical_collection_usage(
-                &datastore, &opctx, id, 0, 0, 1 << 30, 0, 0,
+                &datastore,
+                &opctx,
+                id,
+                0,
+                0,
+                1 << 30,
+                0,
+                0,
             )
             .await;
         }
@@ -982,17 +1017,18 @@ mod test {
         }
 
         // Insert snapshot: zfs_snapshot + read_only at all levels
+        let snapshot_bytes = PhysicalDiskBytes {
+            writable: zero,
+            zfs_snapshot: phys_bytes,
+            read_only: phys_bytes,
+        };
         datastore
             .physical_provisioning_collection_insert_snapshot(
                 &opctx,
                 snapshot_id,
                 project_id,
-                zero,
-                phys_bytes,
-                phys_bytes,
-                zero,
-                phys_bytes,
-                phys_bytes,
+                snapshot_bytes,
+                snapshot_bytes,
             )
             .await
             .unwrap();
@@ -1012,12 +1048,8 @@ mod test {
                 &opctx,
                 snapshot_id,
                 project_id,
-                zero,
-                phys_bytes,
-                phys_bytes,
-                zero,
-                phys_bytes,
-                phys_bytes,
+                snapshot_bytes,
+                snapshot_bytes,
                 Some(DedupInfo::SnapshotDelete { snapshot_id }),
             )
             .await
@@ -1047,10 +1079,8 @@ mod test {
         use omicron_common::api::external::ByteCount as ExtByteCount;
         use omicron_uuid_kinds::VolumeUuid;
 
-        let disk_source = params::DiskSource::Image {
-            image_id,
-            read_only: true,
-        };
+        let disk_source =
+            params::DiskSource::Image { image_id, read_only: true };
         let create_params = params::DiskCreate {
             identity: IdentityMetadataCreateParams {
                 name: format!("disk-{disk_id}").parse().unwrap(),
@@ -1096,9 +1126,8 @@ mod test {
             DedupInfo, DedupOriginColumn,
         };
 
-        let logctx = dev::test_setup_log(
-            "test_physical_dedup_same_image_two_disks",
-        );
+        let logctx =
+            dev::test_setup_log("test_physical_dedup_same_image_two_disks");
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
 
@@ -1126,7 +1155,12 @@ mod test {
         // Disk records must be created before provisioning so the dedup
         // CTE can find them in disk_type_crucible.
         create_disk_with_origin_image(
-            &datastore, &opctx, authz_project, disk1_id, project_id, image_id,
+            &datastore,
+            &opctx,
+            authz_project,
+            disk1_id,
+            project_id,
+            image_id,
         )
         .await;
 
@@ -1160,7 +1194,12 @@ mod test {
 
         // Create disk2 record, then insert its provisioning.
         create_disk_with_origin_image(
-            &datastore, &opctx, authz_project, disk2_id, project_id, image_id,
+            &datastore,
+            &opctx,
+            authz_project,
+            disk2_id,
+            project_id,
+            image_id,
         )
         .await;
 
@@ -1357,9 +1396,8 @@ mod test {
             DedupInfo, DedupOriginColumn,
         };
 
-        let logctx = dev::test_setup_log(
-            "test_physical_dedup_cross_project_same_silo",
-        );
+        let logctx =
+            dev::test_setup_log("test_physical_dedup_cross_project_same_silo");
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
 
@@ -1371,8 +1409,7 @@ mod test {
 
         // Setup project B in the same silo.
         let (project_b_id, authz_project_b) =
-            setup_second_project(&datastore, &opctx, silo_id, "projectb")
-                .await;
+            setup_second_project(&datastore, &opctx, silo_id, "projectb").await;
 
         let image_id = Uuid::new_v4();
         let disk_a_id = Uuid::new_v4();
@@ -1426,7 +1463,14 @@ mod test {
         }
         // Project B still zero.
         verify_physical_collection_usage(
-            &datastore, &opctx, project_b_id, 0, 0, 0, 0, 0,
+            &datastore,
+            &opctx,
+            project_b_id,
+            0,
+            0,
+            0,
+            0,
+            0,
         )
         .await;
 
@@ -1458,23 +1502,51 @@ mod test {
 
         // Project A: unchanged (writable + read_only).
         verify_physical_collection_usage(
-            &datastore, &opctx, project_a_id, 0, 0, w, 0, ro,
+            &datastore,
+            &opctx,
+            project_a_id,
+            0,
+            0,
+            w,
+            0,
+            ro,
         )
         .await;
         // Project B: gets writable + read_only (no project-level dedup
         // because disk A is in a different project).
         verify_physical_collection_usage(
-            &datastore, &opctx, project_b_id, 0, 0, w, 0, ro,
+            &datastore,
+            &opctx,
+            project_b_id,
+            0,
+            0,
+            w,
+            0,
+            ro,
         )
         .await;
         // Silo/fleet: writable accumulates (2×w), but read_only is deduped
         // (disk A already exists in this silo for the same image).
         verify_physical_collection_usage(
-            &datastore, &opctx, silo_id, 0, 0, 2 * w, 0, ro,
+            &datastore,
+            &opctx,
+            silo_id,
+            0,
+            0,
+            2 * w,
+            0,
+            ro,
         )
         .await;
         verify_physical_collection_usage(
-            &datastore, &opctx, fleet_id, 0, 0, 2 * w, 0, ro,
+            &datastore,
+            &opctx,
+            fleet_id,
+            0,
+            0,
+            2 * w,
+            0,
+            ro,
         )
         .await;
 
@@ -1506,12 +1578,26 @@ mod test {
         // Project B: writable subtracted, and read_only subtracted because
         // no other disk in project B references the image.
         verify_physical_collection_usage(
-            &datastore, &opctx, project_b_id, 0, 0, 0, 0, 0,
+            &datastore,
+            &opctx,
+            project_b_id,
+            0,
+            0,
+            0,
+            0,
+            0,
         )
         .await;
         // Project A: unchanged.
         verify_physical_collection_usage(
-            &datastore, &opctx, project_a_id, 0, 0, w, 0, ro,
+            &datastore,
+            &opctx,
+            project_a_id,
+            0,
+            0,
+            w,
+            0,
+            ro,
         )
         .await;
         // Silo/fleet: writable goes back to 1×w, read_only stays (disk A
@@ -1604,8 +1690,11 @@ mod test {
         // Step 2: Simulate promote step 1 — delete from project-level CTE.
         // This subtracts read_only from project, silo, fleet.
         PhysicalProvisioningCollectionUpdate::new_delete_storage(
-            image_id, zero, zero, read_only, zero, zero, read_only,
-            project_id, None,
+            image_id,
+            PhysicalDiskBytes { writable: zero, zfs_snapshot: zero, read_only },
+            PhysicalDiskBytes { writable: zero, zfs_snapshot: zero, read_only },
+            project_id,
+            None,
         )
         .get_results_async::<PhysicalProvisioningCollection>(
             &*datastore.pool_connection_authorized(&opctx).await.unwrap(),
@@ -1645,8 +1734,10 @@ mod test {
 
         // Step 4: Simulate demote step 1 — delete from silo-level CTE.
         // Uses the direct CTE call (same as image.rs:281-294).
+        let image_bytes =
+            PhysicalDiskBytes { writable: zero, zfs_snapshot: zero, read_only };
         PhysicalProvisioningCollectionUpdate::new_delete_storage_silo_level(
-            image_id, zero, zero, read_only, silo_id, None,
+            image_id, image_bytes, silo_id, None,
         )
         .get_results_async::<PhysicalProvisioningCollection>(
             &*datastore.pool_connection_authorized(&opctx).await.unwrap(),
@@ -1729,17 +1820,18 @@ mod test {
 
         // Attempt insert — should fail with InsufficientCapacity.
         // The 2x charge (zfs_snapshot + read_only) exceeds the quota.
+        let snapshot_bytes = PhysicalDiskBytes {
+            writable: zero,
+            zfs_snapshot: phys_bytes,
+            read_only: phys_bytes,
+        };
         let result = datastore
             .physical_provisioning_collection_insert_snapshot(
                 &opctx,
                 snapshot_id,
                 project_id,
-                zero,
-                phys_bytes,
-                phys_bytes,
-                zero,
-                phys_bytes,
-                phys_bytes,
+                snapshot_bytes,
+                snapshot_bytes,
             )
             .await;
         assert!(
@@ -1783,12 +1875,8 @@ mod test {
                 &opctx,
                 snapshot_id,
                 project_id,
-                zero,
-                phys_bytes,
-                phys_bytes,
-                zero,
-                phys_bytes,
-                phys_bytes,
+                snapshot_bytes,
+                snapshot_bytes,
             )
             .await
             .unwrap();
@@ -1807,12 +1895,8 @@ mod test {
                 &opctx,
                 snapshot_id,
                 project_id,
-                zero,
-                phys_bytes,
-                phys_bytes,
-                zero,
-                phys_bytes,
-                phys_bytes,
+                snapshot_bytes,
+                snapshot_bytes,
                 Some(DedupInfo::SnapshotDelete { snapshot_id }),
             )
             .await
@@ -1839,8 +1923,7 @@ mod test {
             DedupInfo, DedupOriginColumn,
         };
 
-        let logctx =
-            dev::test_setup_log("test_physical_dedup_image_ppr_entry");
+        let logctx = dev::test_setup_log("test_physical_dedup_image_ppr_entry");
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
 
@@ -1964,8 +2047,7 @@ mod test {
     async fn test_physical_silo_image_lifecycle() {
         use crate::db::queries::physical_provisioning_collection_update::PhysicalProvisioningCollectionUpdate;
 
-        let logctx =
-            dev::test_setup_log("test_physical_silo_image_lifecycle");
+        let logctx = dev::test_setup_log("test_physical_silo_image_lifecycle");
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
 
@@ -2010,8 +2092,10 @@ mod test {
         .await;
 
         // Delete via silo-level CTE -> all back to zero.
+        let image_bytes =
+            PhysicalDiskBytes { writable: zero, zfs_snapshot: zero, read_only };
         PhysicalProvisioningCollectionUpdate::new_delete_storage_silo_level(
-            image_id, zero, zero, read_only, silo_id, None,
+            image_id, image_bytes, silo_id, None,
         )
         .get_results_async::<PhysicalProvisioningCollection>(
             &*datastore.pool_connection_authorized(&opctx).await.unwrap(),
@@ -2080,7 +2164,10 @@ mod test {
         .await;
         datastore
             .physical_provisioning_collection_insert_image(
-                &opctx, image_id, project_a_id, read_only,
+                &opctx,
+                image_id,
+                project_a_id,
+                read_only,
             )
             .await
             .unwrap();
@@ -2114,7 +2201,14 @@ mod test {
 
         // Project A: writable + read_only (deduped via image PPR).
         verify_physical_collection_usage(
-            &datastore, &opctx, project_a_id, 0, 0, w, 0, ro,
+            &datastore,
+            &opctx,
+            project_a_id,
+            0,
+            0,
+            w,
+            0,
+            ro,
         )
         .await;
 
@@ -2147,16 +2241,37 @@ mod test {
         // Project B: writable + read_only (no project-level dedup — image
         // PPR is in project A, not B, and no other disk in B).
         verify_physical_collection_usage(
-            &datastore, &opctx, project_b_id, 0, 0, w, 0, ro,
+            &datastore,
+            &opctx,
+            project_b_id,
+            0,
+            0,
+            w,
+            0,
+            ro,
         )
         .await;
         // Silo/fleet: 2×w writable, but read_only stays at ro (deduped).
         verify_physical_collection_usage(
-            &datastore, &opctx, silo_id, 0, 0, 2 * w, 0, ro,
+            &datastore,
+            &opctx,
+            silo_id,
+            0,
+            0,
+            2 * w,
+            0,
+            ro,
         )
         .await;
         verify_physical_collection_usage(
-            &datastore, &opctx, fleet_id, 0, 0, 2 * w, 0, ro,
+            &datastore,
+            &opctx,
+            fleet_id,
+            0,
+            0,
+            2 * w,
+            0,
+            ro,
         )
         .await;
 
@@ -2175,21 +2290,49 @@ mod test {
         // Project A: the image PPR read_only is NOT subtracted (disk A
         // survives with origin_image = image_id). Writable unchanged.
         verify_physical_collection_usage(
-            &datastore, &opctx, project_a_id, 0, 0, w, 0, ro,
+            &datastore,
+            &opctx,
+            project_a_id,
+            0,
+            0,
+            w,
+            0,
+            ro,
         )
         .await;
         // Project B unchanged.
         verify_physical_collection_usage(
-            &datastore, &opctx, project_b_id, 0, 0, w, 0, ro,
+            &datastore,
+            &opctx,
+            project_b_id,
+            0,
+            0,
+            w,
+            0,
+            ro,
         )
         .await;
         // Silo/fleet: read_only still ro (surviving disks detected).
         verify_physical_collection_usage(
-            &datastore, &opctx, silo_id, 0, 0, 2 * w, 0, ro,
+            &datastore,
+            &opctx,
+            silo_id,
+            0,
+            0,
+            2 * w,
+            0,
+            ro,
         )
         .await;
         verify_physical_collection_usage(
-            &datastore, &opctx, fleet_id, 0, 0, 2 * w, 0, ro,
+            &datastore,
+            &opctx,
+            fleet_id,
+            0,
+            0,
+            2 * w,
+            0,
+            ro,
         )
         .await;
 
@@ -2221,12 +2364,26 @@ mod test {
         // Project A: writable subtracted, read_only subtracted (no other
         // disk or image PPR in project A references this image).
         verify_physical_collection_usage(
-            &datastore, &opctx, project_a_id, 0, 0, 0, 0, 0,
+            &datastore,
+            &opctx,
+            project_a_id,
+            0,
+            0,
+            0,
+            0,
+            0,
         )
         .await;
         // Project B: unchanged.
         verify_physical_collection_usage(
-            &datastore, &opctx, project_b_id, 0, 0, w, 0, ro,
+            &datastore,
+            &opctx,
+            project_b_id,
+            0,
+            0,
+            w,
+            0,
+            ro,
         )
         .await;
         // Silo/fleet: writable = w, read_only stays (disk B alive).
@@ -2358,10 +2515,8 @@ mod test {
         use omicron_common::api::external::ByteCount as ExtByteCount;
         use omicron_uuid_kinds::VolumeUuid;
 
-        let disk_source = params::DiskSource::Snapshot {
-            snapshot_id,
-            read_only: true,
-        };
+        let disk_source =
+            params::DiskSource::Snapshot { snapshot_id, read_only: true };
         let create_params = params::DiskCreate {
             identity: IdentityMetadataCreateParams {
                 name: format!("disk-{disk_id}").parse().unwrap(),
@@ -2442,17 +2597,18 @@ mod test {
 
         // Step 2: Insert snapshot PPR -> zfs_snapshot + read_only charged
         // at all levels (2x pre-accounting).
+        let snapshot_bytes = PhysicalDiskBytes {
+            writable: 0.try_into().unwrap(),
+            zfs_snapshot: phys_bytes,
+            read_only: phys_bytes,
+        };
         datastore
             .physical_provisioning_collection_insert_snapshot(
                 &opctx,
                 snapshot_id,
                 project_id,
-                0.try_into().unwrap(),
-                phys_bytes,
-                phys_bytes,
-                0.try_into().unwrap(),
-                phys_bytes,
-                phys_bytes,
+                snapshot_bytes,
+                snapshot_bytes,
             )
             .await
             .unwrap();
@@ -2547,8 +2703,7 @@ mod test {
             DedupInfo, DedupOriginColumn,
         };
 
-        let logctx =
-            dev::test_setup_log("test_physical_snapshot_2x_lifecycle");
+        let logctx = dev::test_setup_log("test_physical_snapshot_2x_lifecycle");
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
 
@@ -2579,17 +2734,18 @@ mod test {
         .await;
 
         // Step 2: Insert snapshot PPR (2x pre-accounting).
+        let snapshot_bytes = PhysicalDiskBytes {
+            writable: zero,
+            zfs_snapshot: phys_bytes,
+            read_only: phys_bytes,
+        };
         datastore
             .physical_provisioning_collection_insert_snapshot(
                 &opctx,
                 snapshot_id,
                 project_id,
-                0.try_into().unwrap(),
-                phys_bytes,
-                phys_bytes,
-                0.try_into().unwrap(),
-                phys_bytes,
-                phys_bytes,
+                snapshot_bytes,
+                snapshot_bytes,
             )
             .await
             .unwrap();
@@ -2645,12 +2801,8 @@ mod test {
                 &opctx,
                 snapshot_id,
                 project_id,
-                zero,
-                phys_bytes,
-                phys_bytes,
-                zero,
-                phys_bytes,
-                phys_bytes,
+                snapshot_bytes,
+                snapshot_bytes,
                 Some(DedupInfo::SnapshotDelete { snapshot_id }),
             )
             .await
@@ -2712,9 +2864,8 @@ mod test {
             DedupInfo, DedupOriginColumn,
         };
 
-        let logctx = dev::test_setup_log(
-            "test_physical_dedup_same_snapshot_two_disks",
-        );
+        let logctx =
+            dev::test_setup_log("test_physical_dedup_same_snapshot_two_disks");
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
 
@@ -2744,17 +2895,18 @@ mod test {
             source_disk_id,
         )
         .await;
+        let snapshot_bytes = PhysicalDiskBytes {
+            writable: zero,
+            zfs_snapshot: phys_bytes,
+            read_only: phys_bytes,
+        };
         datastore
             .physical_provisioning_collection_insert_snapshot(
                 &opctx,
                 snapshot_id,
                 project_id,
-                0.try_into().unwrap(),
-                phys_bytes,
-                phys_bytes,
-                0.try_into().unwrap(),
-                phys_bytes,
-                phys_bytes,
+                snapshot_bytes,
+                snapshot_bytes,
             )
             .await
             .unwrap();
@@ -2912,12 +3064,8 @@ mod test {
                 &opctx,
                 snapshot_id,
                 project_id,
-                zero,
-                phys_bytes,
-                phys_bytes,
-                zero,
-                phys_bytes,
-                phys_bytes,
+                snapshot_bytes,
+                snapshot_bytes,
                 Some(DedupInfo::SnapshotDelete { snapshot_id }),
             )
             .await
@@ -2944,9 +3092,8 @@ mod test {
             DedupInfo, DedupOriginColumn,
         };
 
-        let logctx = dev::test_setup_log(
-            "test_physical_dedup_snapshot_read_only_disk",
-        );
+        let logctx =
+            dev::test_setup_log("test_physical_dedup_snapshot_read_only_disk");
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
 
@@ -2977,17 +3124,18 @@ mod test {
             source_disk_id,
         )
         .await;
+        let snapshot_bytes = PhysicalDiskBytes {
+            writable: zero,
+            zfs_snapshot: phys_bytes,
+            read_only: phys_bytes,
+        };
         datastore
             .physical_provisioning_collection_insert_snapshot(
                 &opctx,
                 snapshot_id,
                 project_id,
-                0.try_into().unwrap(),
-                phys_bytes,
-                phys_bytes,
-                0.try_into().unwrap(),
-                phys_bytes,
-                phys_bytes,
+                snapshot_bytes,
+                snapshot_bytes,
             )
             .await
             .unwrap();
@@ -3078,12 +3226,8 @@ mod test {
                 &opctx,
                 snapshot_id,
                 project_id,
-                zero,
-                phys_bytes,
-                phys_bytes,
-                zero,
-                phys_bytes,
-                phys_bytes,
+                snapshot_bytes,
+                snapshot_bytes,
                 Some(DedupInfo::SnapshotDelete { snapshot_id }),
             )
             .await
@@ -3227,9 +3371,8 @@ mod test {
             DedupInfo, DedupOriginColumn,
         };
 
-        let logctx = dev::test_setup_log(
-            "test_physical_image_promote_with_active_disk",
-        );
+        let logctx =
+            dev::test_setup_log("test_physical_image_promote_with_active_disk");
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
 
@@ -3411,9 +3554,8 @@ mod test {
             DedupInfo, DedupOriginColumn,
         };
 
-        let logctx = dev::test_setup_log(
-            "test_physical_image_demote_with_active_disk",
-        );
+        let logctx =
+            dev::test_setup_log("test_physical_image_demote_with_active_disk");
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
 
@@ -3432,10 +3574,7 @@ mod test {
         let ro = read_only.0.to_bytes() as i64;
 
         // Step 1: Create silo image I1 with PPR at silo level.
-        create_silo_image_record(
-            &datastore, &opctx, image_id, silo_id,
-        )
-        .await;
+        create_silo_image_record(&datastore, &opctx, image_id, silo_id).await;
         datastore
             .physical_provisioning_collection_insert_image_silo(
                 &opctx, image_id, silo_id, read_only,
@@ -3625,10 +3764,7 @@ mod test {
         let ro = read_only.0.to_bytes() as i64;
 
         // Step 1: Create silo image I1 with PPR at silo level.
-        create_silo_image_record(
-            &datastore, &opctx, image_id, silo_id,
-        )
-        .await;
+        create_silo_image_record(&datastore, &opctx, image_id, silo_id).await;
         datastore
             .physical_provisioning_collection_insert_image_silo(
                 &opctx, image_id, silo_id, read_only,
@@ -3698,7 +3834,14 @@ mod test {
         // Silo/fleet: 2*writable, read_only deduped (still ro).
         for id in [silo_id, fleet_id] {
             verify_physical_collection_usage(
-                &datastore, &opctx, id, 0, 0, 2 * w, 0, ro,
+                &datastore,
+                &opctx,
+                id,
+                0,
+                0,
+                2 * w,
+                0,
+                ro,
             )
             .await;
         }
@@ -3722,7 +3865,14 @@ mod test {
         // Silo/fleet: read_only still alive (surviving disks detected).
         for id in [silo_id, fleet_id] {
             verify_physical_collection_usage(
-                &datastore, &opctx, id, 0, 0, 2 * w, 0, ro,
+                &datastore,
+                &opctx,
+                id,
+                0,
+                0,
+                2 * w,
+                0,
+                ro,
             )
             .await;
         }
@@ -3753,12 +3903,26 @@ mod test {
 
         // Project A: all zeros (no dedup refs in project A).
         verify_physical_collection_usage(
-            &datastore, &opctx, project_a_id, 0, 0, 0, 0, 0,
+            &datastore,
+            &opctx,
+            project_a_id,
+            0,
+            0,
+            0,
+            0,
+            0,
         )
         .await;
         // Project B unchanged.
         verify_physical_collection_usage(
-            &datastore, &opctx, project_b_id, 0, 0, w, 0, ro,
+            &datastore,
+            &opctx,
+            project_b_id,
+            0,
+            0,
+            w,
+            0,
+            ro,
         )
         .await;
         // Silo/fleet: writable = w (D2), read_only still alive (D2).
@@ -3841,10 +4005,7 @@ mod test {
         let ro = read_only.0.to_bytes() as i64;
 
         // Step 1: Create silo image I1 with PPR at silo level.
-        create_silo_image_record(
-            &datastore, &opctx, image_id, silo_id,
-        )
-        .await;
+        create_silo_image_record(&datastore, &opctx, image_id, silo_id).await;
         datastore
             .physical_provisioning_collection_insert_image_silo(
                 &opctx, image_id, silo_id, read_only,
@@ -3853,11 +4014,25 @@ mod test {
             .unwrap();
 
         verify_physical_collection_usage(
-            &datastore, &opctx, project_a_id, 0, 0, 0, 0, 0,
+            &datastore,
+            &opctx,
+            project_a_id,
+            0,
+            0,
+            0,
+            0,
+            0,
         )
         .await;
         verify_physical_collection_usage(
-            &datastore, &opctx, project_b_id, 0, 0, 0, 0, 0,
+            &datastore,
+            &opctx,
+            project_b_id,
+            0,
+            0,
+            0,
+            0,
+            0,
         )
         .await;
         for id in [silo_id, fleet_id] {
@@ -3898,7 +4073,14 @@ mod test {
 
         // Project A: writable + read_only.
         verify_physical_collection_usage(
-            &datastore, &opctx, project_a_id, 0, 0, w, 0, ro,
+            &datastore,
+            &opctx,
+            project_a_id,
+            0,
+            0,
+            w,
+            0,
+            ro,
         )
         .await;
         // Silo: writable accumulates, read_only deduped (still ro).
@@ -3936,16 +4118,37 @@ mod test {
         // Project B: writable + read_only (no project-level dedup — image
         // is silo-scoped).
         verify_physical_collection_usage(
-            &datastore, &opctx, project_b_id, 0, 0, w, 0, ro,
+            &datastore,
+            &opctx,
+            project_b_id,
+            0,
+            0,
+            w,
+            0,
+            ro,
         )
         .await;
         // Silo/fleet: writable = 2*w, read_only still ro (silo deduped).
         verify_physical_collection_usage(
-            &datastore, &opctx, silo_id, 0, 0, 2 * w, 0, ro,
+            &datastore,
+            &opctx,
+            silo_id,
+            0,
+            0,
+            2 * w,
+            0,
+            ro,
         )
         .await;
         verify_physical_collection_usage(
-            &datastore, &opctx, fleet_id, 0, 0, 2 * w, 0, ro,
+            &datastore,
+            &opctx,
+            fleet_id,
+            0,
+            0,
+            2 * w,
+            0,
+            ro,
         )
         .await;
 
@@ -3975,7 +4178,14 @@ mod test {
 
         // Project A: all zeros.
         verify_physical_collection_usage(
-            &datastore, &opctx, project_a_id, 0, 0, 0, 0, 0,
+            &datastore,
+            &opctx,
+            project_a_id,
+            0,
+            0,
+            0,
+            0,
+            0,
         )
         .await;
         // Silo/fleet: writable = w (D2), read_only still ro (D2 + image
@@ -4051,8 +4261,7 @@ mod test {
 
     #[tokio::test]
     async fn test_physical_disk_quota_failure() {
-        let logctx =
-            dev::test_setup_log("test_physical_disk_quota_failure");
+        let logctx = dev::test_setup_log("test_physical_disk_quota_failure");
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
 
@@ -4126,9 +4335,8 @@ mod test {
             DedupInfo, DedupOriginColumn,
         };
 
-        let logctx = dev::test_setup_log(
-            "test_physical_snapshot_cross_project_dedup",
-        );
+        let logctx =
+            dev::test_setup_log("test_physical_snapshot_cross_project_dedup");
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
 
@@ -4164,17 +4372,18 @@ mod test {
             source_disk_id,
         )
         .await;
+        let snapshot_bytes = PhysicalDiskBytes {
+            writable: zero,
+            zfs_snapshot: phys_bytes,
+            read_only: phys_bytes,
+        };
         datastore
             .physical_provisioning_collection_insert_snapshot(
                 &opctx,
                 snapshot_id,
                 project_a_id,
-                0.try_into().unwrap(),
-                phys_bytes,
-                phys_bytes,
-                0.try_into().unwrap(),
-                phys_bytes,
-                phys_bytes,
+                snapshot_bytes,
+                snapshot_bytes,
             )
             .await
             .unwrap();
@@ -4215,7 +4424,14 @@ mod test {
 
         // Project A: writable + (deduped) read_only.
         verify_physical_collection_usage(
-            &datastore, &opctx, project_a_id, 0, 0, w, p, p,
+            &datastore,
+            &opctx,
+            project_a_id,
+            0,
+            0,
+            w,
+            p,
+            p,
         )
         .await;
 
@@ -4250,16 +4466,37 @@ mod test {
 
         // Project B: writable + read_only (no project-level dedup).
         verify_physical_collection_usage(
-            &datastore, &opctx, project_b_id, 0, 0, w, 0, p,
+            &datastore,
+            &opctx,
+            project_b_id,
+            0,
+            0,
+            w,
+            0,
+            p,
         )
         .await;
         // Silo/fleet: 2*writable, zfs_snapshot + read_only unchanged.
         verify_physical_collection_usage(
-            &datastore, &opctx, silo_id, 0, 0, 2 * w, p, p,
+            &datastore,
+            &opctx,
+            silo_id,
+            0,
+            0,
+            2 * w,
+            p,
+            p,
         )
         .await;
         verify_physical_collection_usage(
-            &datastore, &opctx, fleet_id, 0, 0, 2 * w, p, p,
+            &datastore,
+            &opctx,
+            fleet_id,
+            0,
+            0,
+            2 * w,
+            p,
+            p,
         )
         .await;
 
@@ -4270,12 +4507,8 @@ mod test {
                 &opctx,
                 snapshot_id,
                 project_a_id,
-                zero,
-                phys_bytes,
-                phys_bytes,
-                zero,
-                phys_bytes,
-                phys_bytes,
+                snapshot_bytes,
+                snapshot_bytes,
                 Some(DedupInfo::SnapshotDelete { snapshot_id }),
             )
             .await
@@ -4283,21 +4516,49 @@ mod test {
 
         // Project A: zfs_snapshot gone, read_only stays (D1 survives).
         verify_physical_collection_usage(
-            &datastore, &opctx, project_a_id, 0, 0, w, 0, p,
+            &datastore,
+            &opctx,
+            project_a_id,
+            0,
+            0,
+            w,
+            0,
+            p,
         )
         .await;
         // Project B unchanged.
         verify_physical_collection_usage(
-            &datastore, &opctx, project_b_id, 0, 0, w, 0, p,
+            &datastore,
+            &opctx,
+            project_b_id,
+            0,
+            0,
+            w,
+            0,
+            p,
         )
         .await;
         // Silo/fleet: zfs_snapshot subtracted, read_only stays.
         verify_physical_collection_usage(
-            &datastore, &opctx, silo_id, 0, 0, 2 * w, 0, p,
+            &datastore,
+            &opctx,
+            silo_id,
+            0,
+            0,
+            2 * w,
+            0,
+            p,
         )
         .await;
         verify_physical_collection_usage(
-            &datastore, &opctx, fleet_id, 0, 0, 2 * w, 0, p,
+            &datastore,
+            &opctx,
+            fleet_id,
+            0,
+            0,
+            2 * w,
+            0,
+            p,
         )
         .await;
 
@@ -4328,7 +4589,14 @@ mod test {
         // Project A: all zeros (no dedup refs in project A — snapshot PPR
         // was deleted in step 4).
         verify_physical_collection_usage(
-            &datastore, &opctx, project_a_id, 0, 0, 0, 0, 0,
+            &datastore,
+            &opctx,
+            project_a_id,
+            0,
+            0,
+            0,
+            0,
+            0,
         )
         .await;
         // Silo/fleet: writable = w (D2), read_only stays (D2).
@@ -4386,8 +4654,7 @@ mod test {
             local_disk_physical_bytes,
         };
 
-        let logctx =
-            dev::test_setup_log("test_physical_local_disk_accounting");
+        let logctx = dev::test_setup_log("test_physical_local_disk_accounting");
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
 
@@ -4411,8 +4678,7 @@ mod test {
             "local and distributed formulas should differ"
         );
 
-        let writable: ByteCount =
-            local_phys.into_byte_count().into();
+        let writable: ByteCount = local_phys.into_byte_count().into();
         let zero: ByteCount = 0.try_into().unwrap();
 
         // Initial state: all zeros.

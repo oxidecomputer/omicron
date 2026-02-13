@@ -515,7 +515,10 @@ pub trait NexusExternalApi {
     async fn v2026020200_silo_utilization_list(
         rqctx: RequestContext<Self::Context>,
         query_params: Query<PaginatedByNameOrId>,
-    ) -> Result<HttpResponseOk<ResultsPage<v2026020200::SiloUtilization>>, HttpError> {
+    ) -> Result<
+        HttpResponseOk<ResultsPage<v2026020200::SiloUtilization>>,
+        HttpError,
+    > {
         Self::silo_utilization_list(rqctx, query_params).await.map(
             |HttpResponseOk(page)| {
                 let items: Vec<_> =
@@ -548,7 +551,8 @@ pub trait NexusExternalApi {
     async fn v2026020200_system_quotas_list(
         rqctx: RequestContext<Self::Context>,
         query_params: Query<PaginatedById>,
-    ) -> Result<HttpResponseOk<ResultsPage<v2026020200::SiloQuotas>>, HttpError> {
+    ) -> Result<HttpResponseOk<ResultsPage<v2026020200::SiloQuotas>>, HttpError>
+    {
         Self::system_quotas_list(rqctx, query_params).await.map(
             |HttpResponseOk(page)| {
                 let items: Vec<_> =

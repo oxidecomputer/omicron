@@ -186,9 +186,8 @@ impl DataStore {
         let read_only_phys = nexus_db_model::distributed_disk_physical_bytes(
             nexus_db_model::VirtualDiskBytes(project_image.size.into()),
         );
-        let read_only_phys_bytes = crate::db::model::ByteCount::from(
-            read_only_phys.into_byte_count(),
-        );
+        let read_only_phys_bytes =
+            crate::db::model::ByteCount::from(read_only_phys.into_byte_count());
 
         let err = OptionalError::new();
         let conn = self.pool_connection_authorized(opctx).await?;
@@ -289,9 +288,8 @@ impl DataStore {
         let read_only_phys = nexus_db_model::distributed_disk_physical_bytes(
             nexus_db_model::VirtualDiskBytes(silo_image.size.into()),
         );
-        let read_only_phys_bytes = crate::db::model::ByteCount::from(
-            read_only_phys.into_byte_count(),
-        );
+        let read_only_phys_bytes =
+            crate::db::model::ByteCount::from(read_only_phys.into_byte_count());
 
         let err = OptionalError::new();
         let conn = self.pool_connection_authorized(opctx).await?;
@@ -444,9 +442,8 @@ impl DataStore {
         let read_only_phys = nexus_db_model::distributed_disk_physical_bytes(
             nexus_db_model::VirtualDiskBytes(image.size.into()),
         );
-        let read_only_phys_bytes = crate::db::model::ByteCount::from(
-            read_only_phys.into_byte_count(),
-        );
+        let read_only_phys_bytes =
+            crate::db::model::ByteCount::from(read_only_phys.into_byte_count());
 
         let err = OptionalError::new();
         let conn = self.pool_connection_authorized(opctx).await?;
@@ -458,7 +455,9 @@ impl DataStore {
                 let image = image.clone();
                 let name = name.clone();
                 async move {
-                    use crate::db::queries::physical_provisioning_collection_update::PhysicalProvisioningCollectionUpdate;
+                    use crate::db::queries::physical_provisioning_collection_update::{
+                        PhysicalDiskBytes, PhysicalProvisioningCollectionUpdate,
+                    };
                     use nexus_db_schema::schema::image::dsl;
 
                     // Step 1: Create the image record.
@@ -490,14 +489,15 @@ impl DataStore {
                     // Step 2: Insert physical provisioning for the image.
                     let zero: crate::db::model::ByteCount =
                         0.try_into().unwrap();
+                    let bytes = PhysicalDiskBytes {
+                        writable: zero,
+                        zfs_snapshot: zero,
+                        read_only: read_only_phys_bytes,
+                    };
                     PhysicalProvisioningCollectionUpdate::new_insert_storage(
                         created_image.id(),
-                        zero,
-                        zero,
-                        read_only_phys_bytes,
-                        zero,
-                        zero,
-                        read_only_phys_bytes,
+                        bytes,
+                        bytes,
                         project_id,
                         super::StorageType::Image,
                         None,
@@ -541,9 +541,8 @@ impl DataStore {
         let read_only_phys = nexus_db_model::distributed_disk_physical_bytes(
             nexus_db_model::VirtualDiskBytes(image.size.into()),
         );
-        let read_only_phys_bytes = crate::db::model::ByteCount::from(
-            read_only_phys.into_byte_count(),
-        );
+        let read_only_phys_bytes =
+            crate::db::model::ByteCount::from(read_only_phys.into_byte_count());
 
         let err = OptionalError::new();
         let conn = self.pool_connection_authorized(opctx).await?;
@@ -555,7 +554,9 @@ impl DataStore {
                 let image = image.clone();
                 let name = name.clone();
                 async move {
-                    use crate::db::queries::physical_provisioning_collection_update::PhysicalProvisioningCollectionUpdate;
+                    use crate::db::queries::physical_provisioning_collection_update::{
+                        PhysicalDiskBytes, PhysicalProvisioningCollectionUpdate,
+                    };
                     use nexus_db_schema::schema::image::dsl;
 
                     // Step 1: Create the image record.
@@ -587,11 +588,14 @@ impl DataStore {
                     // Step 2: Insert physical provisioning at silo level.
                     let zero: crate::db::model::ByteCount =
                         0.try_into().unwrap();
+                    let bytes = PhysicalDiskBytes {
+                        writable: zero,
+                        zfs_snapshot: zero,
+                        read_only: read_only_phys_bytes,
+                    };
                     PhysicalProvisioningCollectionUpdate::new_insert_storage_silo_level(
                         created_image.id(),
-                        zero,
-                        zero,
-                        read_only_phys_bytes,
+                        bytes,
                         silo_id,
                         super::StorageType::Image,
                         None,
@@ -632,9 +636,8 @@ impl DataStore {
         let read_only_phys = nexus_db_model::distributed_disk_physical_bytes(
             nexus_db_model::VirtualDiskBytes(image.size.into()),
         );
-        let read_only_phys_bytes = crate::db::model::ByteCount::from(
-            read_only_phys.into_byte_count(),
-        );
+        let read_only_phys_bytes =
+            crate::db::model::ByteCount::from(read_only_phys.into_byte_count());
         let image_id = image.id();
         let project_id = image.project_id;
 
@@ -646,7 +649,8 @@ impl DataStore {
                 let err = err.clone();
                 async move {
                     use crate::db::queries::physical_provisioning_collection_update::{
-                        DedupInfo, PhysicalProvisioningCollectionUpdate,
+                        DedupInfo, PhysicalDiskBytes,
+                        PhysicalProvisioningCollectionUpdate,
                     };
                     use nexus_db_schema::schema::image::dsl;
 
@@ -655,14 +659,15 @@ impl DataStore {
                     let zero: crate::db::model::ByteCount =
                         0.try_into().unwrap();
                     let dedup = DedupInfo::ImageDelete { image_id };
+                    let bytes = PhysicalDiskBytes {
+                        writable: zero,
+                        zfs_snapshot: zero,
+                        read_only: read_only_phys_bytes,
+                    };
                     PhysicalProvisioningCollectionUpdate::new_delete_storage(
                         image_id,
-                        zero,
-                        zero,
-                        read_only_phys_bytes,
-                        zero,
-                        zero,
-                        read_only_phys_bytes,
+                        bytes,
+                        bytes,
                         project_id,
                         Some(dedup),
                     )
@@ -707,9 +712,8 @@ impl DataStore {
         let read_only_phys = nexus_db_model::distributed_disk_physical_bytes(
             nexus_db_model::VirtualDiskBytes(image.size.into()),
         );
-        let read_only_phys_bytes = crate::db::model::ByteCount::from(
-            read_only_phys.into_byte_count(),
-        );
+        let read_only_phys_bytes =
+            crate::db::model::ByteCount::from(read_only_phys.into_byte_count());
         let image_id = image.id();
         let silo_id = image.silo_id;
 
@@ -721,7 +725,8 @@ impl DataStore {
                 let err = err.clone();
                 async move {
                     use crate::db::queries::physical_provisioning_collection_update::{
-                        DedupInfo, PhysicalProvisioningCollectionUpdate,
+                        DedupInfo, PhysicalDiskBytes,
+                        PhysicalProvisioningCollectionUpdate,
                     };
                     use nexus_db_schema::schema::image::dsl;
 
@@ -730,11 +735,14 @@ impl DataStore {
                     let zero: crate::db::model::ByteCount =
                         0.try_into().unwrap();
                     let dedup = DedupInfo::ImageDelete { image_id };
+                    let bytes = PhysicalDiskBytes {
+                        writable: zero,
+                        zfs_snapshot: zero,
+                        read_only: read_only_phys_bytes,
+                    };
                     PhysicalProvisioningCollectionUpdate::new_delete_storage_silo_level(
                         image_id,
-                        zero,
-                        zero,
-                        read_only_phys_bytes,
+                        bytes,
                         silo_id,
                         Some(dedup),
                     )

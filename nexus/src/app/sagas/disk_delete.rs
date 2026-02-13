@@ -135,7 +135,8 @@ async fn sdd_delete_disk_record_and_account(
 
     // Look up origin info from disk_type_crucible BEFORE soft-deleting
     // the disk, so we can determine dedup behavior.
-    let dtc = sdd_lookup_disk_type_crucible(osagactx, &opctx, params.disk.id()).await?;
+    let dtc = sdd_lookup_disk_type_crucible(osagactx, &opctx, params.disk.id())
+        .await?;
 
     // Soft-delete the disk record.
     let deleted_disk = osagactx
@@ -160,8 +161,7 @@ async fn sdd_delete_disk_record_and_account(
         .map_err(ActionError::action_failed)?;
 
     // Remove physical provisioning.
-    let virtual_bytes =
-        nexus_db_model::VirtualDiskBytes(*deleted_disk.size);
+    let virtual_bytes = nexus_db_model::VirtualDiskBytes(*deleted_disk.size);
     let zero = nexus_db_model::ByteCount::from(
         omicron_common::api::external::ByteCount::from(0u32),
     );
@@ -220,10 +220,14 @@ async fn sdd_delete_disk_record_and_account(
         _ => {
             // Blank/importing disk or local disk: writable only
             let physical = match &params.disk {
-                datastore::Disk::LocalStorage(_) =>
-                    nexus_db_model::local_disk_physical_bytes(virtual_bytes),
-                datastore::Disk::Crucible(_) =>
-                    nexus_db_model::distributed_disk_physical_bytes(virtual_bytes),
+                datastore::Disk::LocalStorage(_) => {
+                    nexus_db_model::local_disk_physical_bytes(virtual_bytes)
+                }
+                datastore::Disk::Crucible(_) => {
+                    nexus_db_model::distributed_disk_physical_bytes(
+                        virtual_bytes,
+                    )
+                }
             };
             let phys_bytes =
                 nexus_db_model::ByteCount::from(physical.into_byte_count());
@@ -233,7 +237,9 @@ async fn sdd_delete_disk_record_and_account(
                     &opctx,
                     deleted_disk.id(),
                     params.project_id,
-                    phys_bytes, zero, None,
+                    phys_bytes,
+                    zero,
+                    None,
                 )
                 .await
                 .map_err(ActionError::action_failed)?;
@@ -269,8 +275,7 @@ async fn sdd_delete_disk_record_and_account_undo(
         .map_err(ActionError::action_failed)?;
 
     // Re-insert physical provisioning.
-    let virtual_bytes =
-        nexus_db_model::VirtualDiskBytes(*deleted_disk.size);
+    let virtual_bytes = nexus_db_model::VirtualDiskBytes(*deleted_disk.size);
     let zero = nexus_db_model::ByteCount::from(
         omicron_common::api::external::ByteCount::from(0u32),
     );
@@ -279,8 +284,10 @@ async fn sdd_delete_disk_record_and_account_undo(
         DedupInfo, DedupOriginColumn,
     };
 
-    let dtc = sdd_lookup_disk_type_crucible(osagactx, &opctx, deleted_disk.id()).await
-        .map_err(ActionError::action_failed)?;
+    let dtc =
+        sdd_lookup_disk_type_crucible(osagactx, &opctx, deleted_disk.id())
+            .await
+            .map_err(ActionError::action_failed)?;
 
     match dtc {
         Some(ref dtc) if dtc.create_image_id.is_some() => {
@@ -331,10 +338,14 @@ async fn sdd_delete_disk_record_and_account_undo(
         }
         _ => {
             let physical = match &params.disk {
-                datastore::Disk::LocalStorage(_) =>
-                    nexus_db_model::local_disk_physical_bytes(virtual_bytes),
-                datastore::Disk::Crucible(_) =>
-                    nexus_db_model::distributed_disk_physical_bytes(virtual_bytes),
+                datastore::Disk::LocalStorage(_) => {
+                    nexus_db_model::local_disk_physical_bytes(virtual_bytes)
+                }
+                datastore::Disk::Crucible(_) => {
+                    nexus_db_model::distributed_disk_physical_bytes(
+                        virtual_bytes,
+                    )
+                }
             };
             let phys_bytes =
                 nexus_db_model::ByteCount::from(physical.into_byte_count());
@@ -344,7 +355,9 @@ async fn sdd_delete_disk_record_and_account_undo(
                     &opctx,
                     deleted_disk.id(),
                     params.project_id,
-                    phys_bytes, zero, None,
+                    phys_bytes,
+                    zero,
+                    None,
                 )
                 .await
                 .map_err(ActionError::action_failed)?;

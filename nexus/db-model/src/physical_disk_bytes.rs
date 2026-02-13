@@ -49,8 +49,8 @@ pub fn distributed_disk_physical_bytes(
     virtual_size: VirtualDiskBytes,
 ) -> PhysicalDiskBytes {
     let v = virtual_size.to_bytes();
-    let physical =
-        v * REGION_REDUNDANCY * ZFS_OVERHEAD_NUMERATOR / ZFS_OVERHEAD_DENOMINATOR;
+    let physical = v * REGION_REDUNDANCY * ZFS_OVERHEAD_NUMERATOR
+        / ZFS_OVERHEAD_DENOMINATOR;
     PhysicalDiskBytes(ByteCount::try_from(physical).unwrap())
 }
 

@@ -58,12 +58,12 @@ impl PhysicalProvisioningCollectionNew {
         Self {
             id,
             collection_type: collection_type.to_string(),
-            physical_writable_disk_bytes: ByteCount(
-                external::ByteCount::from(0),
-            ),
-            physical_zfs_snapshot_bytes: ByteCount(
-                external::ByteCount::from(0),
-            ),
+            physical_writable_disk_bytes: ByteCount(external::ByteCount::from(
+                0,
+            )),
+            physical_zfs_snapshot_bytes: ByteCount(external::ByteCount::from(
+                0,
+            )),
             physical_read_only_disk_bytes: ByteCount(
                 external::ByteCount::from(0),
             ),
