@@ -137,7 +137,13 @@ pub struct UplinkAddressConfig {
 
 impl From<super::v1::UplinkAddressConfig> for UplinkAddressConfig {
     fn from(value: super::v1::UplinkAddressConfig) -> Self {
-        Self { address: Some(value.address), vlan_id: value.vlan_id }
+        let address = if value.address.addr().is_unspecified() {
+            None
+        } else {
+            Some(value.address)
+        };
+
+        Self { address, vlan_id: value.vlan_id }
     }
 }
 

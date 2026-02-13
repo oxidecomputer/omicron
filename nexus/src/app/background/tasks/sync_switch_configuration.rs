@@ -1160,12 +1160,15 @@ impl BackgroundTask for SwitchPortSettingsManager {
                     };
 
                     let mut port_config = PortConfig {
-                        addresses: info.addresses.iter().map(|a|
-            			    UplinkAddressConfig {
-            				    address: Some(a.address),
-            				    vlan_id: a.vlan_id
-            			    }
-            			).collect(),
+                        addresses: info
+                            .addresses
+                            .iter()
+                            .map(|a|
+                                 UplinkAddressConfig {
+                                     address: if a.address.addr().is_unspecified() {None} else {Some(a.address)},
+                                     vlan_id: a.vlan_id
+                                 }
+                            ).collect(),
                         autoneg: info
                             .links
                             .get(0) //TODO breakout support
@@ -1793,7 +1796,11 @@ fn uplinks(
                 .addresses
                 .iter()
                 .map(|a| UplinkAddressConfig {
-                    address: Some(a.address),
+                    address: if a.address.addr().is_unspecified() {
+                        None
+                    } else {
+                        Some(a.address)
+                    },
                     vlan_id: a.vlan_id,
                 })
                 .collect(),

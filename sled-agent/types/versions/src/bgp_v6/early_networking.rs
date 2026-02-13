@@ -73,7 +73,15 @@ impl From<crate::v1::early_networking::EarlyNetworkConfig>
                                 .addresses
                                 .into_iter()
                                 .map(|a| UplinkAddressConfig {
-                                    address: Some(a.address),
+                                    address: if a
+                                        .address
+                                        .addr()
+                                        .is_unspecified()
+                                    {
+                                        None
+                                    } else {
+                                        Some(a.address)
+                                    },
                                     vlan_id: a.vlan_id,
                                 })
                                 .collect(),
