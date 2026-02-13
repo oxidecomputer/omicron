@@ -99,9 +99,17 @@ impl UplinkAddressConfig {
 
 impl std::fmt::Display for UplinkAddressConfig {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        fn addr_string(addr: &oxnet::IpNet) -> String {
+            if addr.addr().is_unspecified() {
+                "link-local".into()
+            } else {
+                addr.to_string()
+            }
+        }
+
         match (&self.address, self.vlan_id) {
-            (Some(addr), None) => write!(f, "{addr}"),
-            (Some(addr), Some(v)) => write!(f, "{addr};{v}"),
+            (Some(addr), None) => write!(f, "{}", addr_string(addr)),
+            (Some(addr), Some(v)) => write!(f, "{};{v}", addr_string(addr)),
             (None, None) => write!(f, "link-local"),
             (None, Some(v)) => write!(f, "link-local;{v}"),
         }
