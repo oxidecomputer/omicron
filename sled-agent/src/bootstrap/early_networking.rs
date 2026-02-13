@@ -16,10 +16,10 @@ use internal_dns_resolver::{ResolveError, Resolver as DnsResolver};
 use internal_dns_types::names::ServiceName;
 use mg_admin_client::Client as MgdClient;
 use mg_admin_client::types::{
-    AddStaticRoute4Request, ApplyRequest, CheckerSource,
-    ImportExportPolicy4 as MgImportExportPolicy4,
+    AddStaticRoute4Request, AddStaticRoute6Request, ApplyRequest,
+    CheckerSource, ImportExportPolicy4 as MgImportExportPolicy4,
     ImportExportPolicy6 as MgImportExportPolicy6, JitterRange, ShaperSource,
-    StaticRoute4, StaticRoute4List,
+    StaticRoute4, StaticRoute4List, StaticRoute6, StaticRoute6List,
 };
 use mg_admin_client::types::{
     BfdPeerConfig as MgBfdPeerConfig, Ipv4UnicastConfig,
@@ -713,32 +713,66 @@ impl<'a> EarlyNetworkSetup<'a> {
         let mut rq = AddStaticRoute4Request {
             routes: StaticRoute4List { list: Vec::new() },
         };
+
+        let mut rqv6 = AddStaticRoute6Request {
+            routes: StaticRoute6List { list: Vec::new() },
+        };
+
         for port in &our_ports {
             for r in &port.routes {
-                let nexthop = match r.nexthop {
-                    IpAddr::V4(v4) => v4,
-                    IpAddr::V6(_) => continue,
-                };
-                let prefix = match r.destination.addr() {
-                    IpAddr::V4(v4) => {
-                        Prefix4 { value: v4, length: r.destination.width() }
-                    }
-                    IpAddr::V6(_) => continue,
-                };
                 let vlan_id = r.vlan_id;
-                let rib_priority = r.rib_priority;
-                let sr = StaticRoute4 {
-                    nexthop,
-                    prefix,
-                    vlan_id,
-                    rib_priority: rib_priority
-                        .unwrap_or(DEFAULT_RIB_PRIORITY_STATIC),
-                };
-                rq.routes.list.push(sr);
+                let rib_priority =
+                    r.rib_priority.unwrap_or(DEFAULT_RIB_PRIORITY_STATIC);
+
+                match (r.nexthop, r.destination.addr()) {
+                    (IpAddr::V4(nexthop), IpAddr::V4(dest_addr)) => {
+                        let prefix = Prefix4 {
+                            value: dest_addr,
+                            length: r.destination.width(),
+                        };
+                        let sr = StaticRoute4 {
+                            nexthop,
+                            prefix,
+                            vlan_id,
+                            rib_priority,
+                        };
+                        rq.routes.list.push(sr);
+                    }
+                    (IpAddr::V6(nexthop), IpAddr::V6(dest_addr)) => {
+                        let prefix = Prefix6 {
+                            value: dest_addr,
+                            length: r.destination.width(),
+                        };
+                        let sr = StaticRoute6 {
+                            nexthop,
+                            prefix,
+                            vlan_id,
+                            rib_priority,
+                        };
+                        rqv6.routes.list.push(sr);
+                    }
+                    _ => {
+                        error!(
+                            self.log,
+                            "nexthop and destination are different address types";
+                            "nexthop" => ?r.nexthop,
+                            "destination" => ?r.destination.addr(),
+                        );
+                    }
+                }
             }
         }
 
         if let Err(e) = mgd.static_add_v4_route(&rq).await {
+            error!(
+                self.log,
+                "static route configuration failed";
+                "error" => ?e,
+                "configuration" => ?rq,
+            );
+        };
+
+        if let Err(e) = mgd.static_add_v6_route(&rqv6).await {
             error!(
                 self.log,
                 "static route configuration failed";
