@@ -18,8 +18,8 @@ use omicron_common::api::external::{
     AddressLotKind, AffinityPolicy, AllowedSourceIps, BfdMode, BgpPeer,
     ByteCount, FailureDomain, Hostname, IdentityMetadataCreateParams,
     IdentityMetadataUpdateParams, InstanceAutoRestartPolicy, InstanceCpuCount,
-    InstanceCpuPlatform, IpVersion, LinkFec, LinkSpeed, Name, NameOrId,
-    Nullable, PaginationOrder, RouteDestination, RouteTarget, UserId,
+    InstanceCpuPlatform, IpVersion, LinkFec, LinkSpeed, MaxPathConfig, Name,
+    NameOrId, Nullable, PaginationOrder, RouteDestination, RouteTarget, UserId,
 };
 use omicron_common::disk::DiskVariant;
 use omicron_common::vlan::VlanID;
@@ -2461,6 +2461,21 @@ pub struct AddressLotBlockCreate {
     pub last_address: IpAddr,
 }
 
+impl From<IpNet> for AddressLotBlockCreate {
+    fn from(ipnet: IpNet) -> AddressLotBlockCreate {
+        match ipnet {
+            IpNet::V4(ipv4_net) => AddressLotBlockCreate {
+                first_address: ipv4_net.first_addr().into(),
+                last_address: ipv4_net.last_addr().into(),
+            },
+            IpNet::V6(ipv6_net) => AddressLotBlockCreate {
+                first_address: ipv6_net.first_addr().into(),
+                last_address: ipv6_net.last_addr().into(),
+            },
+        }
+    }
+}
+
 /// Parameters for creating a loopback address on a particular rack switch.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct LoopbackAddressCreate {
@@ -2856,6 +2871,10 @@ pub struct BgpConfigCreate {
     /// A checker program to apply to incoming open and update messages.
     #[serde(skip)]
     pub checker: Option<String>,
+
+    /// Maximum number of paths to use when multiple "best paths" exist
+    #[serde(default)]
+    pub max_paths: MaxPathConfig,
 }
 
 /// Select a BGP status information by BGP config id.

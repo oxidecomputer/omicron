@@ -7,7 +7,9 @@
 use super::BootstrapError;
 use super::RssAccessError;
 use super::config::BOOTSTRAP_AGENT_HTTP_PORT;
+use super::config::BOOTSTRAP_AGENT_LOCKSTEP_PORT;
 use super::http_entrypoints;
+use super::http_entrypoints_lockstep;
 use super::views::SledAgentResponse;
 use crate::bootstrap::config::BOOTSTRAP_AGENT_RACK_INIT_PORT;
 use crate::bootstrap::http_entrypoints::BootstrapServerContext;
@@ -167,6 +169,11 @@ pub enum StartError {
 pub struct Server {
     inner_task: JoinHandle<()>,
     bootstrap_http_server: HttpServer<BootstrapServerContext>,
+    // The lockstep server shares the same context as bootstrap_http_server.
+    // We hold this handle to keep the server running; the actual rack
+    // initialization calls go through bootstrap_http_server.app_private().
+    #[allow(dead_code)]
+    lockstep_http_server: HttpServer<BootstrapServerContext>,
 }
 
 impl Server {
@@ -220,7 +227,12 @@ impl Server {
             /*trust_quorum_handle: long_running_task_handles.trust_quorum.clone(), */
             measurements: long_running_task_handles.measurements.clone(),
         };
-        let bootstrap_http_server = start_dropshot_server(bootstrap_context)?;
+        let bootstrap_http_server =
+            start_dropshot_server(bootstrap_context.clone())?;
+
+        // Start the lockstep dropshot server for rack initialization.
+        let lockstep_http_server =
+            start_lockstep_dropshot_server(bootstrap_context)?;
 
         // Create a channel for proxying sled-initialization requests that land
         // in the sprockets server to our bootstrap agent `Inner` task.
@@ -290,7 +302,7 @@ impl Server {
         };
         let inner_task = tokio::spawn(inner.run());
 
-        Ok(Self { inner_task, bootstrap_http_server })
+        Ok(Self { inner_task, bootstrap_http_server, lockstep_http_server })
     }
 
     pub fn start_rack_initialize(
@@ -481,6 +493,38 @@ fn start_dropshot_server(
             bootstrap_agent_api::latest_version(),
         ),
     )))
+    .start()
+    .map_err(|error| {
+        StartError::InitBootstrapDropshotServer(error.to_string())
+    })?;
+
+    Ok(http_server)
+}
+
+// Clippy doesn't like `StartError` due to
+// https://github.com/oxidecomputer/usdt/issues/133; remove this once that issue
+// is addressed.
+#[allow(clippy::result_large_err)]
+fn start_lockstep_dropshot_server(
+    context: BootstrapServerContext,
+) -> Result<HttpServer<BootstrapServerContext>, StartError> {
+    let mut dropshot_config = dropshot::ConfigDropshot::default();
+    dropshot_config.default_request_body_max_bytes = 1024 * 1024;
+    dropshot_config.bind_address = SocketAddr::V6(SocketAddrV6::new(
+        context.global_zone_bootstrap_ip,
+        BOOTSTRAP_AGENT_LOCKSTEP_PORT,
+        0,
+        0,
+    ));
+    let dropshot_log = context
+        .base_log
+        .new(o!("component" => "dropshot (BootstrapAgentLockstep)"));
+    let http_server = dropshot::ServerBuilder::new(
+        http_entrypoints_lockstep::api(),
+        context,
+        dropshot_log,
+    )
+    .config(dropshot_config)
     .start()
     .map_err(|error| {
         StartError::InitBootstrapDropshotServer(error.to_string())

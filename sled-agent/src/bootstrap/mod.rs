@@ -9,6 +9,7 @@ pub mod client;
 pub mod config;
 pub mod early_networking;
 mod http_entrypoints;
+mod http_entrypoints_lockstep;
 mod maghemite;
 pub(crate) mod params;
 mod pre_server;

@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use crate::{SqlU16, SqlU32};
+use crate::{SqlU8, SqlU16, SqlU32};
 use db_macros::Resource;
 use ipnetwork::IpNetwork;
 use nexus_db_schema::schema::{
@@ -10,8 +10,13 @@ use nexus_db_schema::schema::{
 };
 use nexus_types::external_api::params;
 use nexus_types::identity::Resource;
-use omicron_common::api::external::{self, IdentityMetadataCreateParams};
+use omicron_common::api::external::Error;
+use omicron_common::api::{
+    external::{self, IdentityMetadataCreateParams},
+    internal::shared::rack_init::MaxPathConfig,
+};
 use serde::{Deserialize, Serialize};
+use slog_error_chain::InlineErrorChain;
 use uuid::Uuid;
 
 #[derive(
@@ -33,15 +38,27 @@ pub struct BgpConfig {
     pub vrf: Option<String>,
     pub shaper: Option<String>,
     pub checker: Option<String>,
+    pub max_paths: SqlU8,
 }
 
-impl Into<external::BgpConfig> for BgpConfig {
-    fn into(self) -> external::BgpConfig {
-        external::BgpConfig {
-            identity: self.identity(),
-            asn: self.asn.into(),
-            vrf: self.vrf,
-        }
+impl TryFrom<BgpConfig> for external::BgpConfig {
+    type Error = Error;
+
+    fn try_from(value: BgpConfig) -> Result<Self, Self::Error> {
+        let max_paths =
+            MaxPathConfig::new(*value.max_paths).map_err(|err| {
+                Error::internal_error(&format!(
+                    "invalid database contents: \
+                     could not convert MaxPathConfig: {}",
+                    InlineErrorChain::new(&err)
+                ))
+            })?;
+        Ok(Self {
+            identity: value.identity(),
+            asn: value.asn.into(),
+            vrf: value.vrf,
+            max_paths,
+        })
     }
 }
 
@@ -63,6 +80,7 @@ impl BgpConfig {
             vrf: c.vrf.as_ref().map(|x| x.to_string()),
             shaper: c.shaper.as_ref().map(|x| x.to_string()),
             checker: c.checker.as_ref().map(|x| x.to_string()),
+            max_paths: c.max_paths.as_u8().into(),
         }
     }
 }
@@ -128,7 +146,7 @@ impl Into<external::BgpAnnouncement> for BgpAnnouncement {
 pub struct BgpPeerView {
     pub switch_location: String,
     pub port_name: String,
-    pub addr: IpNetwork,
+    pub addr: Option<IpNetwork>,
     pub asn: SqlU32,
     pub connect_retry: SqlU32,
     pub delay_open: SqlU32,
@@ -142,4 +160,5 @@ pub struct BgpPeerView {
     pub local_pref: Option<SqlU32>,
     pub enforce_first_as: bool,
     pub vlan_id: Option<SqlU16>,
+    pub router_lifetime: SqlU16,
 }

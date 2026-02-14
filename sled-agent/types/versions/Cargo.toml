@@ -8,6 +8,7 @@ license = "MPL-2.0"
 workspace = true
 
 [dependencies]
+anyhow.workspace = true
 camino.workspace = true
 chrono.workspace = true
 daft.workspace = true
