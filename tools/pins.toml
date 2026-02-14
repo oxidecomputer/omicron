@@ -1,4 +1,4 @@
 # Helios should *not* be pinned except on release branches.
-#[helios]
-#commit = ""
-#incorporation = ""
+[helios]
+commit = "76cdbbf702bf2e8a1deabce13e83e5f7485ac548"
+incorporation = "18.0.0.0"
