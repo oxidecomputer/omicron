@@ -1,7 +1,5 @@
 [toolchain]
 # We choose a specific toolchain (rather than "stable") for repeatability.  The
 # intent is to keep this up-to-date with recently-released stable Rust.
-#
-# Rust 1.92.0 runs into https://github.com/rust-lang/rust/issues/147648.
-channel = "1.91.1"
+channel = "1.93.0"
 profile = "default"
