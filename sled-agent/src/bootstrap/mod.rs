@@ -19,7 +19,7 @@ pub(crate) mod rss_handle;
 pub mod secret_retriever;
 pub mod server;
 mod sprockets_server;
-pub(crate) mod trust_quorum_setup;
+//pub(crate) mod trust_quorum_setup;
 mod views;
 
 pub(crate) use pre_server::BootstrapNetworking;

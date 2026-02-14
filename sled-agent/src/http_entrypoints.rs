@@ -70,7 +70,7 @@ use sled_agent_types::zone_bundle::{
     ZoneBundleMetadata, ZonePathParam,
 };
 use sled_hardware_types::BaseboardId;
-use slog_error_chain::InlineErrorChain;
+//use slog_error_chain::InlineErrorChain;
 use trust_quorum_types::messages::{
     CommitRequest, LrtqUpgradeMsg, PrepareAndCommitRequest, ReconfigureMsg,
 };
@@ -1186,9 +1186,10 @@ impl SledAgentApi for SledAgentImpl {
     }
 
     async fn trust_quorum_reconfigure(
-        request_context: RequestContext<Self::Context>,
-        body: TypedBody<ReconfigureMsg>,
+        _request_context: RequestContext<Self::Context>,
+        _body: TypedBody<ReconfigureMsg>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        /*
         let sa = request_context.context();
         let msg = body.into_inner();
 
@@ -1196,27 +1197,34 @@ impl SledAgentApi for SledAgentImpl {
             HttpError::for_internal_error(InlineErrorChain::new(&e).to_string())
         })?;
 
+
         Ok(HttpResponseUpdatedNoContent())
+        */
+        Err(HttpError::for_not_found(None, "Unsupported API".to_string()))
     }
 
     async fn trust_quorum_upgrade_from_lrtq(
-        request_context: RequestContext<Self::Context>,
-        body: TypedBody<LrtqUpgradeMsg>,
+        _request_context: RequestContext<Self::Context>,
+        _body: TypedBody<LrtqUpgradeMsg>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        /*
         let sa = request_context.context();
         let msg = body.into_inner();
 
-        sa.trust_quorum().upgrade_from_lrtq(msg).await.map_err(|e| {
+            sa.trust_quorum().upgrade_from_lrtq(msg).await.map_err(|e| {
             HttpError::for_internal_error(InlineErrorChain::new(&e).to_string())
         })?;
 
         Ok(HttpResponseUpdatedNoContent())
+        */
+        Err(HttpError::for_not_found(None, "Unsupported API".to_string()))
     }
 
     async fn trust_quorum_commit(
-        request_context: RequestContext<Self::Context>,
-        body: TypedBody<CommitRequest>,
+        _request_context: RequestContext<Self::Context>,
+        _body: TypedBody<CommitRequest>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        /*
         let sa = request_context.context();
         let request = body.into_inner();
 
@@ -1236,13 +1244,15 @@ impl SledAgentApi for SledAgentImpl {
                 "commit returned Pending, which is unexpected".to_string(),
             ));
         }
-
         Ok(HttpResponseUpdatedNoContent())
+        */
+        Err(HttpError::for_not_found(None, "Unsupported API".to_string()))
     }
 
     async fn trust_quorum_coordinator_status(
-        request_context: RequestContext<Self::Context>,
+        _request_context: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<Option<CoordinatorStatus>>, HttpError> {
+        /*
         let sa = request_context.context();
 
         let status =
@@ -1252,13 +1262,17 @@ impl SledAgentApi for SledAgentImpl {
                 )
             })?;
 
+
         Ok(HttpResponseOk(status))
+        */
+        Err(HttpError::for_not_found(None, "Unsupported API".to_string()))
     }
 
     async fn trust_quorum_prepare_and_commit(
-        request_context: RequestContext<Self::Context>,
-        body: TypedBody<PrepareAndCommitRequest>,
+        _request_context: RequestContext<Self::Context>,
+        _body: TypedBody<PrepareAndCommitRequest>,
     ) -> Result<HttpResponseOk<CommitStatus>, HttpError> {
+        /*
         let sa = request_context.context();
         let request = body.into_inner();
 
@@ -1273,12 +1287,16 @@ impl SledAgentApi for SledAgentImpl {
             })?;
 
         Ok(HttpResponseOk(status))
+        */
+
+        Err(HttpError::for_not_found(None, "Unsupported API".to_string()))
     }
 
     async fn trust_quorum_proxy_commit(
-        request_context: RequestContext<Self::Context>,
-        body: TypedBody<ProxyCommitRequest>,
+        _request_context: RequestContext<Self::Context>,
+        _body: TypedBody<ProxyCommitRequest>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        /*
         let sa = request_context.context();
         let request = body.into_inner();
 
@@ -1297,20 +1315,23 @@ impl SledAgentApi for SledAgentImpl {
                 )
             })?;
 
+
         // Pending is not expected for commit operations - it indicates an error
         if status == CommitStatus::Pending {
             return Err(HttpError::for_internal_error(
                 "commit returned Pending, which is unexpected".to_string(),
             ));
         }
-
         Ok(HttpResponseUpdatedNoContent())
+        */
+        Err(HttpError::for_not_found(None, "Unsupported API".to_string()))
     }
 
     async fn trust_quorum_proxy_prepare_and_commit(
-        request_context: RequestContext<Self::Context>,
-        body: TypedBody<ProxyPrepareAndCommitRequest>,
+        _request_context: RequestContext<Self::Context>,
+        _body: TypedBody<ProxyPrepareAndCommitRequest>,
     ) -> Result<HttpResponseOk<CommitStatus>, HttpError> {
+        /*
         let sa = request_context.context();
         let request = body.into_inner();
 
@@ -1326,12 +1347,16 @@ impl SledAgentApi for SledAgentImpl {
             })?;
 
         Ok(HttpResponseOk(status))
+        */
+
+        Err(HttpError::for_not_found(None, "Unsupported API".to_string()))
     }
 
     async fn trust_quorum_proxy_status(
-        request_context: RequestContext<Self::Context>,
-        query_params: Query<BaseboardId>,
+        _request_context: RequestContext<Self::Context>,
+        _query_params: Query<BaseboardId>,
     ) -> Result<HttpResponseOk<NodeStatus>, HttpError> {
+        /*
         let sa = request_context.context();
         let destination = query_params.into_inner();
 
@@ -1345,11 +1370,14 @@ impl SledAgentApi for SledAgentImpl {
             )?;
 
         Ok(HttpResponseOk(status))
+        */
+        Err(HttpError::for_not_found(None, "Unsupported API".to_string()))
     }
 
     async fn trust_quorum_status(
-        request_context: RequestContext<Self::Context>,
+        _request_context: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<NodeStatus>, HttpError> {
+        /*
         let sa = request_context.context();
 
         let status = sa.trust_quorum().status().await.map_err(|e| {
@@ -1357,12 +1385,15 @@ impl SledAgentApi for SledAgentImpl {
         })?;
 
         Ok(HttpResponseOk(status))
+            */
+        Err(HttpError::for_not_found(None, "Unsupported API".to_string()))
     }
 
     async fn trust_quorum_network_config_get(
-        request_context: RequestContext<Self::Context>,
+        _request_context: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<Option<TrustQuorumNetworkConfig>>, HttpError>
     {
+        /*
         let sa = request_context.context();
 
         let config = sa.trust_quorum().network_config().await.map_err(|e| {
@@ -1370,12 +1401,15 @@ impl SledAgentApi for SledAgentImpl {
         })?;
 
         Ok(HttpResponseOk(config.map(TrustQuorumNetworkConfig::from)))
+            */
+        Err(HttpError::for_not_found(None, "Unsupported API".to_string()))
     }
 
     async fn trust_quorum_network_config_put(
-        request_context: RequestContext<Self::Context>,
-        body: TypedBody<TrustQuorumNetworkConfig>,
+        _request_context: RequestContext<Self::Context>,
+        _body: TypedBody<TrustQuorumNetworkConfig>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        /*
         let sa = request_context.context();
         let config = body.into_inner();
 
@@ -1388,6 +1422,8 @@ impl SledAgentApi for SledAgentImpl {
         )?;
 
         Ok(HttpResponseUpdatedNoContent())
+        */
+        Err(HttpError::for_not_found(None, "Unsupported API".to_string()))
     }
 
     async fn vmm_put_attached_subnets(

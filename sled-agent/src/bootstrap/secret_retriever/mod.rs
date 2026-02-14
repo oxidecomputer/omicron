@@ -14,4 +14,5 @@ pub use configurable::{
     ConfigurableSecretRetriever, ConfigurableSecretRetrieverHandle,
 };
 pub use hardcoded::HardcodedSecretRetriever;
+pub use lrtq::LrtqSecretRetriever;
 pub use tq_or_lrtq::TqOrLrtqSecretRetriever;
