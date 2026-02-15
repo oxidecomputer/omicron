@@ -1082,7 +1082,7 @@ impl BackgroundTask for SwitchPortSettingsManager {
                 };
 
                 // TODO: is this correct? Do we place the BgpConfig for both switches in a single Vec to send to the bootstore?
-                let mut bgp: Vec<SledBgpConfig> = switch_bgp_config.iter().filter_map(|(_location, (_id, config))| {
+                let mut bgp: Vec<SledBgpConfig> = switch_bgp_config.iter().map(|(_location, (_id, config))| {
                     let announcements = bgp_announce_prefixes
                         .get(&config.bgp_announce_set_id)
                         .expect("bgp config is present but announce set is not populated")
@@ -1102,17 +1102,15 @@ impl BackgroundTask for SwitchPortSettingsManager {
                             }
                         }).collect();
 
-                    let Some(max_paths) = NonZeroU8::new(*config.max_paths) else {
-                        // This should be impossible - our db constraint
-                        // requires this column to be nonzero.
-                        error!(
-                            log,
-                            "database contains illegal max_paths value 0"
-                        );
-                        return None;
+                    let max_paths = match  NonZeroU8::new(*config.max_paths) {
+                        Some(value) => value,
+                        // If we have a null entry in the db for max paths,
+                        // default to 1 which was the implicit behavior prior to
+                        // release 18.
+                        None => NonZeroU8::MIN,
                     };
 
-                    Some(SledBgpConfig {
+                    SledBgpConfig {
                         asn: config.asn.0,
                         originate: announcements,
                         checker: config.checker.clone(),
@@ -1120,7 +1118,7 @@ impl BackgroundTask for SwitchPortSettingsManager {
                         max_paths: sled_agent_client::types::MaxPathConfig(
                             max_paths,
                         ),
-                    })
+                    }
                 }).collect();
 
                 bgp.dedup();
