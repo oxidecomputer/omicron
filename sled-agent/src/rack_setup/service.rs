@@ -72,7 +72,7 @@ use crate::bootstrap::early_networking::{
     EarlyNetworkSetup, EarlyNetworkSetupError,
 };
 use crate::bootstrap::rss_handle::BootstrapAgentHandle;
-use crate::bootstrap::trust_quorum_setup::TRUST_QUORUM_INTEGRATION_ENABLED;
+//use crate::bootstrap::trust_quorum_setup::TRUST_QUORUM_INTEGRATION_ENABLED;
 use crate::rack_setup::plan::service::PlanError as ServicePlanError;
 use crate::rack_setup::plan::sled::Plan as SledPlan;
 use bootstore::schemes::v0 as bootstore;
@@ -100,7 +100,7 @@ use omicron_common::disk::DatasetKind;
 use omicron_common::ledger::{self, Ledger, Ledgerable};
 use omicron_ddm_admin_client::{Client as DdmAdminClient, DdmError};
 use omicron_uuid_kinds::GenericUuid;
-use omicron_uuid_kinds::RackUuid;
+//use omicron_uuid_kinds::RackUuid;
 use omicron_uuid_kinds::ZpoolUuid;
 use serde::{Deserialize, Serialize};
 use sled_agent_client::{
@@ -132,7 +132,7 @@ use thiserror::Error;
 use tokio::sync::watch;
 use trust_quorum::{NodeApiError, ProxyError};
 use trust_quorum_protocol::CommitError;
-use trust_quorum_types::messages::ReconfigureMsg as TqReconfigureMsg;
+//use trust_quorum_types::messages::ReconfigureMsg as TqReconfigureMsg;
 
 pub(crate) use crate::rack_setup::plan::service::Plan as ServicePlan;
 pub(crate) use crate::rack_setup::plan::service::PlannedSledDescription;
@@ -275,7 +275,7 @@ impl RackSetupService {
         internal_disks_rx: InternalDisksReceiver,
         local_bootstrap_agent: BootstrapAgentHandle,
         bootstore: bootstore::NodeHandle,
-        trust_quorum: trust_quorum::NodeTaskHandle,
+        /*        trust_quorum: trust_quorum::NodeTaskHandle, */
         step_tx: watch::Sender<RssStep>,
     ) -> Self {
         let handle = tokio::task::spawn(async move {
@@ -286,7 +286,7 @@ impl RackSetupService {
                     &internal_disks_rx,
                     local_bootstrap_agent,
                     bootstore,
-                    trust_quorum,
+                    /*                    trust_quorum, */
                     step_tx,
                 )
                 .await
@@ -870,14 +870,14 @@ impl ServiceInner {
 
         let rack_network_config = {
             let config = &config.rack_network_config;
-            NexusTypes::RackNetworkConfigV2 {
+            NexusTypes::RackNetworkConfig {
                 rack_subnet: config.rack_subnet,
                 infra_ip_first: config.infra_ip_first,
                 infra_ip_last: config.infra_ip_last,
                 ports: config
                     .ports
                     .iter()
-                    .map(|config| NexusTypes::PortConfigV2 {
+                    .map(|config| NexusTypes::PortConfig {
                         port: config.port.clone(),
                         routes: config
                             .routes
@@ -926,6 +926,10 @@ impl ServiceInner {
                                 allowed_export: b.allowed_export.clone(),
                                 allowed_import: b.allowed_import.clone(),
                                 vlan_id: b.vlan_id,
+                                router_lifetime:
+                                    NexusTypes::RouterLifetimeConfig(
+                                        b.router_lifetime.as_u16(),
+                                    ),
                             })
                             .collect(),
                         lldp: config.lldp.as_ref().map(|lp| {
@@ -973,6 +977,9 @@ impl ServiceInner {
                         originate: config.originate.to_vec(),
                         shaper: config.shaper.clone(),
                         checker: config.checker.clone(),
+                        max_paths: NexusTypes::MaxPathConfig(
+                            config.max_paths.as_nonzero_u8(),
+                        ),
                     })
                     .collect(),
                 bfd: config
@@ -1190,7 +1197,7 @@ impl ServiceInner {
         internal_disks_rx: &InternalDisksReceiver,
         local_bootstrap_agent: BootstrapAgentHandle,
         bootstore: bootstore::NodeHandle,
-        trust_quorum: trust_quorum::NodeTaskHandle,
+        /*        trust_quorum: trust_quorum::NodeTaskHandle, */
         step_tx: watch::Sender<RssStep>,
     ) -> Result<(), SetupServiceError> {
         info!(self.log, "Injecting RSS configuration: {:#?}", request);
@@ -1287,41 +1294,46 @@ impl ServiceInner {
         rss_step.update(RssStep::InitTrustQuorum);
         // Initialize the trust quorum if there are peers configured.
 
-        let initial_trust_quorum_configuration = if let Some(peers) =
-            &config.trust_quorum_peers
-        {
-            let initial_membership: BTreeSet<_> =
-                peers.iter().cloned().collect();
-            bootstore
-                .init_rack(sled_plan.rack_id.into(), initial_membership)
-                .await?;
+        let initial_trust_quorum_configuration =
+            if let Some(peers) = &config.trust_quorum_peers {
+                let initial_membership: BTreeSet<_> =
+                    peers.iter().cloned().collect();
+                bootstore
+                    .init_rack(sled_plan.rack_id.into(), initial_membership)
+                    .await?;
 
-            if TRUST_QUORUM_INTEGRATION_ENABLED {
-                let tq_members: BTreeSet<BaseboardId> = peers
-                    .iter()
-                    .cloned()
-                    .map(|id| id.try_into().expect("known baseboard type"))
-                    .collect();
-                let rack_id = RackUuid::from_untyped_uuid(sled_plan.rack_id);
+                // Re-enable after R18
+                /*
+                if TRUST_QUORUM_INTEGRATION_ENABLED {
+                    let tq_members: BTreeSet<BaseboardId> = peers
+                        .iter()
+                        .cloned()
+                        .map(|id| id.try_into().expect("known baseboard type"))
+                        .collect();
+                    let rack_id = RackUuid::from_untyped_uuid(sled_plan.rack_id);
 
-                init_trust_quorum(
-                    &self.log,
-                    trust_quorum.clone(),
-                    tq_members.clone(),
-                    rack_id,
-                )
-                .await?;
 
-                Some(InitialTrustQuorumConfig {
-                    members: tq_members.into_iter().collect(),
-                    coordinator: trust_quorum.baseboard_id().clone(),
-                })
+                    init_trust_quorum(
+                        &self.log,
+                        trust_quorum.clone(),
+                        tq_members.clone(),
+                        rack_id,
+                    )
+                    .await?;
+
+
+                    Some(InitialTrustQuorumConfig {
+                        members: tq_members.into_iter().collect(),
+                        coordinator: trust_quorum.baseboard_id().clone(),
+                    })
+                } else {
+                    None
+                }
+                */
+                None
             } else {
                 None
-            }
-        } else {
-            None
-        };
+            };
 
         // Save the relevant network config in the bootstore. We want this to
         // happen before we `initialize_sleds` so each scrimlet (including us)
@@ -1526,6 +1538,8 @@ impl ServiceInner {
     }
 }
 
+// Re-enable after R18
+/*
 async fn init_trust_quorum(
     log: &Logger,
     trust_quorum_handle: trust_quorum::NodeTaskHandle,
@@ -1615,6 +1629,8 @@ async fn init_trust_quorum(
 
     Ok(())
 }
+
+*/
 
 /// The service plan describes all the zones that we will eventually
 /// deploy on each sled.  But we cannot currently just deploy them all
@@ -1761,6 +1777,7 @@ mod test {
         Inventory, InventoryDisk, OmicronFileSourceResolverInventory,
         OmicronZoneType, SledCpuFamily, SledRole,
     };
+    use sled_agent_types::rack_init::rack_initialize_request_test_config;
 
     fn make_sled_info(
         sled_id: SledUuid,
@@ -1838,7 +1855,7 @@ mod test {
     }
 
     fn make_test_service_plan() -> ServicePlan {
-        let rss_config = Config::test_config();
+        let rss_config = rack_initialize_request_test_config();
         let fake_sleds = make_fake_sleds();
         let service_plan =
             ServicePlan::create_transient(&rss_config, fake_sleds)
@@ -1969,7 +1986,7 @@ mod test {
 
         let fake_sleds = make_fake_sleds();
 
-        let rss_config = Config::test_config();
+        let rss_config = rack_initialize_request_test_config();
         let service_plan =
             ServicePlan::create_transient(&rss_config, fake_sleds)
                 .expect("created service plan");

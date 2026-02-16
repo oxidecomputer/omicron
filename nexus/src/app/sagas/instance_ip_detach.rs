@@ -4,8 +4,8 @@
 
 use super::instance_common::{
     ModifyStateForExternalIp, VmmAndSledIds, instance_ip_add_nat,
-    instance_ip_add_opte, instance_ip_get_instance_state,
-    instance_ip_move_state, instance_ip_remove_nat, instance_ip_remove_opte,
+    instance_ip_add_opte, instance_ip_move_state, instance_ip_remove_nat,
+    instance_ip_remove_opte, networking_resource_instance_state,
 };
 use super::{ActionRegistry, NexusActionContext, NexusSaga};
 use crate::app::sagas::declare_saga_actions;
@@ -174,7 +174,7 @@ async fn siid_get_instance_state(
     sagactx: NexusActionContext,
 ) -> Result<Option<VmmAndSledIds>, ActionError> {
     let params = sagactx.saga_params::<Params>()?;
-    instance_ip_get_instance_state(
+    networking_resource_instance_state(
         &sagactx,
         &params.serialized_authn,
         &params.authz_instance,

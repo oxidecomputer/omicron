@@ -7,6 +7,7 @@
 use super::DataStore;
 use crate::authz;
 use crate::context::OpContext;
+use crate::db::pagination::paginated;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::Utc;
 use diesel::prelude::*;
@@ -27,7 +28,9 @@ use nexus_types::trust_quorum::{
     TrustQuorumConfig, TrustQuorumConfigState, TrustQuorumMemberData,
     TrustQuorumMemberState,
 };
+use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
+use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupType;
 use omicron_common::api::external::OptionalLookupResult;
 use omicron_common::bail_unless;
@@ -175,6 +178,29 @@ impl DataStore {
         Self::tq_get_latest_config_with_members_conn(conn, rack_id)
             .await
             .map_err(|err| err.into_public_ignore_retries())
+    }
+
+    pub async fn tq_list_config(
+        &self,
+        opctx: &OpContext,
+        rack_id: RackUuid,
+        pagparams: &DataPageParams<'_, i64>,
+    ) -> ListResultVec<DbTrustQuorumConfiguration> {
+        let authz_rack = authz::Rack::new(
+            authz::FLEET,
+            rack_id.into_untyped_uuid(),
+            LookupType::ById(rack_id.into_untyped_uuid()),
+        );
+        opctx.authorize(authz::Action::Read, &authz_rack).await?;
+        let conn = &*self.pool_connection_authorized(opctx).await?;
+
+        use nexus_db_schema::schema::trust_quorum_configuration::dsl;
+        paginated(dsl::trust_quorum_configuration, dsl::epoch, pagparams)
+            .filter(dsl::rack_id.eq(DbTypedUuid::<RackKind>::from(rack_id)))
+            .select(DbTrustQuorumConfiguration::as_select())
+            .load_async(conn)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 
     /// Get the trust quorum configuration from the database for the given Epoch

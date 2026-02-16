@@ -28,6 +28,7 @@ use nexus_test_utils::resource_helpers::create_default_ip_pools;
 use nexus_test_utils::resource_helpers::create_disk;
 use nexus_test_utils::resource_helpers::create_instance;
 use nexus_test_utils::resource_helpers::create_project;
+use nexus_test_utils::resource_helpers::object_create_error;
 use nexus_test_utils_macros::nexus_test;
 use nexus_types::external_api::params;
 use nexus_types::external_api::views;
@@ -2932,6 +2933,106 @@ async fn test_create_read_only_disk_from_image(
     assert_eq!(rw_disk.image_id, Some(image.identity.id));
     assert_eq!(rw_disk.snapshot_id, None);
     assert_eq!(rw_disk.size, image.size);
+}
+
+#[nexus_test]
+async fn test_cannot_snapshot_read_only_disk(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+    DiskTest::new(&cptestctx).await;
+    create_project_and_pool(client).await;
+    let disks_url = get_disks_url();
+
+    // Define a global image
+    let image_create_params = params::ImageCreate {
+        identity: IdentityMetadataCreateParams {
+            name: "alpine".parse().unwrap(),
+            description: String::from(
+                "you can boot any image, as long as it's alpine",
+            ),
+        },
+        source: params::ImageSource::YouCanBootAnythingAsLongAsItsAlpine,
+        os: "alpine".to_string(),
+        version: "edge".to_string(),
+    };
+
+    let images_url = format!("/v1/images?project={}", PROJECT_NAME);
+    let image =
+        NexusRequest::objects_post(client, &images_url, &image_create_params)
+            .authn_as(AuthnMode::PrivilegedUser)
+            .execute_and_parse_unwrap::<views::Image>()
+            .await;
+
+    // Create a base disk from this image, which we will then create a snapshot
+    // from in order to create our read-only disk from that snapshot.
+    let disk_size = ByteCount::from_gibibytes_u32(2);
+    let base_disk_name = "base-disk";
+    let base_disk = params::DiskCreate {
+        identity: IdentityMetadataCreateParams {
+            name: base_disk_name.parse().unwrap(),
+            description: String::from("sells rainsticks"),
+        },
+        disk_backend: params::DiskBackend::Distributed {
+            disk_source: params::DiskSource::Image {
+                image_id: image.identity.id,
+                read_only: false,
+            },
+        },
+        size: disk_size,
+    };
+
+    NexusRequest::new(
+        RequestBuilder::new(client, Method::POST, &disks_url)
+            .body(Some(&base_disk))
+            .expect_status(Some(StatusCode::CREATED)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute_and_parse_unwrap::<Disk>()
+    .await;
+
+    // Assert the base disk is detached
+    let base_disk = disk_get(client, &get_disk_url(base_disk_name)).await;
+    assert_eq!(base_disk.state, DiskState::Detached);
+
+    // Create a snapshot of the base disk.
+    let snapshot = resource_helpers::create_snapshot(
+        client,
+        PROJECT_NAME,
+        base_disk_name,
+        "ro-snapshot",
+    )
+    .await;
+    assert_eq!(snapshot.disk_id, base_disk.identity.id);
+    assert_eq!(snapshot.size, base_disk.size);
+
+    // Okay, now make a read-only disk out of that snapshot.
+    let ro_disk = resource_helpers::create_disk_from_snapshot(
+        client,
+        PROJECT_NAME,
+        "ro-disk-from-snap",
+        &snapshot,
+        true,
+    )
+    .await;
+
+    assert!(ro_disk.read_only);
+
+    // Now try to take a snapshot of the read-only disk. It should fail with a
+    // 400.
+    object_create_error(
+        client,
+        &format!("/v1/snapshots?project={}", PROJECT_NAME),
+        &params::SnapshotCreate {
+            identity: IdentityMetadataCreateParams {
+                name: "will-not-work".parse().unwrap(),
+                description: String::from("no thanks"),
+            },
+            disk: ro_disk.identity.name.clone().try_into().unwrap(),
+        },
+        http::StatusCode::BAD_REQUEST,
+    )
+    .await;
 }
 
 async fn disk_get(client: &ClientTestContext, disk_url: &str) -> Disk {

@@ -18,6 +18,8 @@ use nexus_db_queries::db::fixed_data::silo::DEFAULT_SILO;
 use nexus_test_interface::NexusServer;
 use nexus_types::deployment::Blueprint;
 use nexus_types::external_api::params;
+use nexus_types::external_api::params::ExternalSubnetAllocator;
+use nexus_types::external_api::params::PoolSelector;
 use nexus_types::external_api::params::{
     DeviceAccessTokenRequest, DeviceAuthRequest, DeviceAuthVerify,
 };
@@ -28,6 +30,7 @@ use nexus_types::external_api::views;
 use nexus_types::external_api::views::AffinityGroup;
 use nexus_types::external_api::views::AntiAffinityGroup;
 use nexus_types::external_api::views::Certificate;
+use nexus_types::external_api::views::ExternalSubnet;
 use nexus_types::external_api::views::FloatingIp;
 use nexus_types::external_api::views::InternetGateway;
 use nexus_types::external_api::views::InternetGatewayIpAddress;
@@ -457,6 +460,48 @@ pub async fn create_subnet_pool_member_with_prefix_lengths(
             min_prefix_length: Some(min_prefix_length),
             max_prefix_length: Some(max_prefix_length),
         },
+    )
+    .await
+}
+
+pub async fn link_subnet_pool(
+    client: &ClientTestContext,
+    pool_name: &str,
+    silo_id: &Uuid,
+    is_default: bool,
+) {
+    let link =
+        params::SubnetPoolLinkSilo { silo: NameOrId::Id(*silo_id), is_default };
+    let url = format!("/v1/system/subnet-pools/{pool_name}/silos");
+    object_create::<params::SubnetPoolLinkSilo, views::SubnetPoolSiloLink>(
+        client, &url, &link,
+    )
+    .await;
+}
+
+pub async fn create_external_subnet_in_pool(
+    client: &ClientTestContext,
+    pool_name: &str,
+    project_name: &str,
+    subnet_name: &str,
+    prefix_len: u8,
+) -> ExternalSubnet {
+    let params = params::ExternalSubnetCreate {
+        identity: IdentityMetadataCreateParams {
+            name: subnet_name.parse().unwrap(),
+            description: format!("external subnet {subnet_name}"),
+        },
+        allocator: ExternalSubnetAllocator::Auto {
+            prefix_len,
+            pool_selector: PoolSelector::Explicit {
+                pool: pool_name.parse::<Name>().unwrap().into(),
+            },
+        },
+    };
+    object_create(
+        client,
+        &format!("/v1/external-subnets?project={project_name}"),
+        &params,
     )
     .await
 }

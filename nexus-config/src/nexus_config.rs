@@ -433,6 +433,8 @@ pub struct BackgroundTaskConfig {
     pub multicast_reconciler: MulticastGroupReconcilerConfig,
     /// configuration for trust quorum manager task
     pub trust_quorum: TrustQuorumConfig,
+    /// configuration for the attached subnet manager
+    pub attached_subnet_manager: AttachedSubnetManagerConfig,
 }
 
 #[serde_as]
@@ -1016,6 +1018,15 @@ pub struct PackageConfig {
     pub default_region_allocation_strategy: RegionAllocationStrategy,
 }
 
+#[serde_as]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct AttachedSubnetManagerConfig {
+    /// period (in seconds) for periodic activations of the background task that
+    /// pushes attached subnets to the switches and sleds.
+    #[serde_as(as = "DurationSeconds<u64>")]
+    pub period_secs: Duration,
+}
+
 // Re-export SchemeName from nexus-types for use in config parsing.
 pub use nexus_types::authn::SchemeName;
 
@@ -1241,6 +1252,7 @@ mod test {
             probe_distributor.period_secs = 50
             multicast_reconciler.period_secs = 60
             trust_quorum.period_secs = 60
+            attached_subnet_manager.period_secs = 60
             [default_region_allocation_strategy]
             type = "random"
             seed = 0
@@ -1501,6 +1513,9 @@ mod test {
                         trust_quorum: TrustQuorumConfig {
                             period_secs: Duration::from_secs(60),
                         },
+                        attached_subnet_manager: AttachedSubnetManagerConfig {
+                            period_secs: Duration::from_secs(60),
+                        },
                     },
                     multicast: MulticastConfig { enabled: false },
                     default_region_allocation_strategy:
@@ -1605,6 +1620,7 @@ mod test {
             probe_distributor.period_secs = 47
             multicast_reconciler.period_secs = 60
             trust_quorum.period_secs = 60
+            attached_subnet_manager.period_secs = 60
 
             [default_region_allocation_strategy]
             type = "random"
