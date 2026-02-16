@@ -4388,6 +4388,18 @@ pub trait NexusExternalApi {
         HttpError,
     >;
 
+    /// Get information about switch port
+    #[endpoint {
+        method = GET,
+        path = "/v1/system/networking/switch-port-settings/{port}",
+        tags = ["system/networking"],
+        versions = VERSION_BGP_UNNUMBERED_PEERS..,
+    }]
+    async fn networking_switch_port_settings_view(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::networking::SwitchPortSettingsInfoSelector>,
+    ) -> Result<HttpResponseOk<SwitchPortSettings>, HttpError>;
+
     /// Get information about switch port (old version with required BgpPeer.addr)
     #[endpoint {
         operation_id = "networking_switch_port_settings_view",
@@ -4412,18 +4424,6 @@ pub trait NexusExternalApi {
             Err(e) => Err(e),
         }
     }
-
-    /// Get information about switch port
-    #[endpoint {
-        method = GET,
-        path = "/v1/system/networking/switch-port-settings/{port}",
-        tags = ["system/networking"],
-        versions = VERSION_BGP_UNNUMBERED_PEERS..,
-    }]
-    async fn networking_switch_port_settings_view(
-        rqctx: RequestContext<Self::Context>,
-        path_params: Path<latest::networking::SwitchPortSettingsInfoSelector>,
-    ) -> Result<HttpResponseOk<SwitchPortSettings>, HttpError>;
 
     /// List switch ports
     #[endpoint {
@@ -4514,6 +4514,18 @@ pub trait NexusExternalApi {
 
     /// Create new BGP configuration
     #[endpoint {
+        method = POST,
+        path = "/v1/system/networking/bgp",
+        tags = ["system/networking"],
+        versions = VERSION_BGP_UNNUMBERED_PEERS..,
+    }]
+    async fn networking_bgp_config_create(
+        rqctx: RequestContext<Self::Context>,
+        config: TypedBody<latest::networking::BgpConfigCreate>,
+    ) -> Result<HttpResponseCreated<BgpConfig>, HttpError>;
+
+    /// Create new BGP configuration
+    #[endpoint {
         operation_id = "networking_bgp_config_create",
         method = POST,
         path = "/v1/system/networking/bgp",
@@ -4537,17 +4549,17 @@ pub trait NexusExternalApi {
         }
     }
 
-    /// Create new BGP configuration
+    /// List BGP configurations
     #[endpoint {
-        method = POST,
+        method = GET,
         path = "/v1/system/networking/bgp",
         tags = ["system/networking"],
         versions = VERSION_BGP_UNNUMBERED_PEERS..,
     }]
-    async fn networking_bgp_config_create(
+    async fn networking_bgp_config_list(
         rqctx: RequestContext<Self::Context>,
-        config: TypedBody<latest::networking::BgpConfigCreate>,
-    ) -> Result<HttpResponseCreated<BgpConfig>, HttpError>;
+        query_params: Query<PaginatedByNameOrId>,
+    ) -> Result<HttpResponseOk<ResultsPage<BgpConfig>>, HttpError>;
 
     /// List BGP configurations
     #[endpoint {
@@ -4571,18 +4583,6 @@ pub trait NexusExternalApi {
             next_page: page.next_page,
         }))
     }
-
-    /// List BGP configurations
-    #[endpoint {
-        method = GET,
-        path = "/v1/system/networking/bgp",
-        tags = ["system/networking"],
-        versions = VERSION_BGP_UNNUMBERED_PEERS..,
-    }]
-    async fn networking_bgp_config_list(
-        rqctx: RequestContext<Self::Context>,
-        query_params: Query<PaginatedByNameOrId>,
-    ) -> Result<HttpResponseOk<ResultsPage<BgpConfig>>, HttpError>;
 
     /// Get BGP peer status
     #[endpoint {

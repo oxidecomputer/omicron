@@ -455,6 +455,11 @@ pub struct BgpPeer {
     pub vlan_id: Option<u16>,
 }
 
+// TODO: per RFD 619, these conversion impls between initial types and
+// `omicron_common::api::external` types should live in the later version
+// module that introduced the shape change (e.g. `bgp_unnumbered_peers`).
+// They currently live here because `omicron-common-versions` does not yet
+// exist; once it does, move these conversions out of the initial module.
 impl From<BgpPeer> for external::BgpPeer {
     fn from(old: BgpPeer) -> external::BgpPeer {
         external::BgpPeer {
@@ -780,6 +785,10 @@ pub struct BgpImportedRouteIpv4 {
     pub switch: SwitchLocation,
 }
 
+// TODO: these conversion impls between initial types and
+// `omicron_common::api::external` types should live in the later version
+// module that introduced the shape change. They currently live here because
+// `omicron-common-versions` does not yet exist.
 impl TryFrom<external::BgpImported> for BgpImportedRouteIpv4 {
     type Error = String;
 
@@ -815,6 +824,7 @@ pub struct BgpExported {
     pub exports: HashMap<String, Vec<oxnet::Ipv4Net>>,
 }
 
+// TODO: see above comment on `TryFrom<external::BgpImported>`.
 impl From<Vec<external::BgpExported>> for BgpExported {
     fn from(values: Vec<external::BgpExported>) -> Self {
         let mut out = Self::default();
@@ -855,6 +865,10 @@ pub struct BgpConfig {
     pub vrf: Option<String>,
 }
 
+// TODO: these conversion impls between initial types and
+// `omicron_common::api::external` types should live in the later version
+// module that introduced the shape change. They currently live here because
+// `omicron-common-versions` does not yet exist.
 impl From<external::BgpConfig> for BgpConfig {
     fn from(new: external::BgpConfig) -> Self {
         BgpConfig { identity: new.identity, asn: new.asn, vrf: new.vrf }
@@ -875,6 +889,11 @@ impl From<BgpConfig> for external::BgpConfig {
 // SWITCH PORT SETTINGS (old response type with required BgpPeer.addr)
 
 /// Switch port settings (old version with required BgpPeer.addr).
+// TODO: several fields below embed `external::*` types directly from
+// `omicron-common`, which means their serialized shape is not truly frozen.
+// Once `omicron-common-versions` exists, replace these with version-local
+// copies of the types to ensure the initial version's wire format is
+// immutable.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct SwitchPortSettings {
     #[serde(flatten)]
@@ -905,6 +924,8 @@ pub struct SwitchPortSettings {
     pub addresses: Vec<external::SwitchPortAddressView>,
 }
 
+// TODO: this conversion impl should move out of the initial module once
+// `omicron-common-versions` exists. See comment on `BgpPeer` above.
 impl TryFrom<external::SwitchPortSettings> for SwitchPortSettings {
     type Error = external::Error;
 

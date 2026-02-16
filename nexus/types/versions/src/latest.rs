@@ -275,6 +275,7 @@ pub mod networking {
     pub use crate::v2025_11_20_00::networking::SwitchVlanInterface;
     pub use crate::v2025_11_20_00::networking::SwtichPortSettingsGroupCreate;
     pub use crate::v2025_11_20_00::networking::TxEqConfig;
+
     pub use crate::v2026_02_13_01::networking::BgpConfigCreate;
     pub use crate::v2026_02_13_01::networking::BgpPeerConfig;
     pub use crate::v2026_02_13_01::networking::SwitchPortSettingsCreate;
@@ -444,15 +445,6 @@ pub mod rack {
 }
 
 pub mod subnet_pool {
-    // View types from FLOATING_IP_ALLOCATOR_UPDATE (pool_type removed).
-    pub use crate::v2026_01_22_00::subnet_pool::SiloSubnetPool;
-    pub use crate::v2026_01_22_00::subnet_pool::SubnetPool;
-    pub use crate::v2026_01_22_00::subnet_pool::SubnetPoolMember;
-
-    // Create/update types from FLOATING_IP_ALLOCATOR_UPDATE.
-    pub use crate::v2026_01_22_00::subnet_pool::SubnetPoolCreate;
-    pub use crate::v2026_01_22_00::subnet_pool::SubnetPoolMemberAdd;
-
     // Types unchanged since EXTERNAL_SUBNET_ATTACHMENT.
     pub use crate::v2026_01_16_01::subnet_pool::SubnetPoolLinkSilo;
     pub use crate::v2026_01_16_01::subnet_pool::SubnetPoolMemberRemove;
@@ -462,19 +454,27 @@ pub mod subnet_pool {
     pub use crate::v2026_01_16_01::subnet_pool::SubnetPoolSiloUpdate;
     pub use crate::v2026_01_16_01::subnet_pool::SubnetPoolUpdate;
     pub use crate::v2026_01_16_01::subnet_pool::SubnetPoolUtilization;
+
+    // View types from FLOATING_IP_ALLOCATOR_UPDATE (pool_type removed).
+    pub use crate::v2026_01_22_00::subnet_pool::SiloSubnetPool;
+    pub use crate::v2026_01_22_00::subnet_pool::SubnetPool;
+    pub use crate::v2026_01_22_00::subnet_pool::SubnetPoolMember;
+    // Create/update types from FLOATING_IP_ALLOCATOR_UPDATE.
+    pub use crate::v2026_01_22_00::subnet_pool::SubnetPoolCreate;
+    pub use crate::v2026_01_22_00::subnet_pool::SubnetPoolMemberAdd;
 }
 
 pub mod external_subnet {
-    // Create types from FLOATING_IP_ALLOCATOR_UPDATE (pool field removed).
-    pub use crate::v2026_01_22_00::external_subnet::ExternalSubnetAllocator;
-    pub use crate::v2026_01_22_00::external_subnet::ExternalSubnetCreate;
-
     // Types unchanged since EXTERNAL_SUBNET_ATTACHMENT.
     pub use crate::v2026_01_16_01::external_subnet::ExternalSubnet;
     pub use crate::v2026_01_16_01::external_subnet::ExternalSubnetAttach;
     pub use crate::v2026_01_16_01::external_subnet::ExternalSubnetPath;
     pub use crate::v2026_01_16_01::external_subnet::ExternalSubnetSelector;
     pub use crate::v2026_01_16_01::external_subnet::ExternalSubnetUpdate;
+
+    // Create types from FLOATING_IP_ALLOCATOR_UPDATE (pool field removed).
+    pub use crate::v2026_01_22_00::external_subnet::ExternalSubnetAllocator;
+    pub use crate::v2026_01_22_00::external_subnet::ExternalSubnetCreate;
 }
 
 pub mod sled {
