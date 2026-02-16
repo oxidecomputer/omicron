@@ -3751,7 +3751,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.bgp_config (
     bgp_announce_set_id UUID NOT NULL,
     shaper TEXT,
     checker TEXT,
-    max_paths INT2 CHECK (max_paths > 0 AND max_paths <= 32)
+    max_paths INT2 NOT NULL CHECK (max_paths > 0 AND max_paths <= 32)
 );
 
 CREATE UNIQUE INDEX IF NOT EXISTS lookup_bgp_config_by_name ON omicron.public.bgp_config (
@@ -8192,7 +8192,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '230.0.0', NULL)
+    (TRUE, NOW(), NOW(), '231.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;
