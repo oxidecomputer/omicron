@@ -883,11 +883,19 @@ impl NexusExternalApi for NexusExternalApiImpl {
         rqctx: RequestContext<Self::Context>,
         query_params: Query<scim2_rs::QueryParams>,
     ) -> Result<Response<Body>, HttpError> {
-        audit_and_time(&rqctx, |opctx, nexus| async move {
+        let apictx = rqctx.context();
+        let handler = async {
+            let nexus = &apictx.context.nexus;
             let query = query_params.into_inner();
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
             nexus.scim_v2_list_users(&opctx, query).await
-        })
-        .await
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
     }
 
     async fn scim_v2_get_user(
@@ -895,12 +903,20 @@ impl NexusExternalApi for NexusExternalApiImpl {
         path_params: Path<params::ScimV2UserPathParam>,
         query_params: Query<scim2_rs::QueryParams>,
     ) -> Result<Response<Body>, HttpError> {
-        audit_and_time(&rqctx, |opctx, nexus| async move {
+        let apictx = rqctx.context();
+        let handler = async {
+            let nexus = &apictx.context.nexus;
             let query = query_params.into_inner();
             let path = path_params.into_inner();
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
             nexus.scim_v2_get_user_by_id(&opctx, query, path.user_id).await
-        })
-        .await
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
     }
 
     async fn scim_v2_create_user(
@@ -955,11 +971,19 @@ impl NexusExternalApi for NexusExternalApiImpl {
         rqctx: RequestContext<Self::Context>,
         query_params: Query<scim2_rs::QueryParams>,
     ) -> Result<Response<Body>, HttpError> {
-        audit_and_time(&rqctx, |opctx, nexus| async move {
+        let apictx = rqctx.context();
+        let handler = async {
+            let nexus = &apictx.context.nexus;
             let query = query_params.into_inner();
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
             nexus.scim_v2_list_groups(&opctx, query).await
-        })
-        .await
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
     }
 
     async fn scim_v2_get_group(
@@ -967,12 +991,20 @@ impl NexusExternalApi for NexusExternalApiImpl {
         path_params: Path<params::ScimV2GroupPathParam>,
         query_params: Query<scim2_rs::QueryParams>,
     ) -> Result<Response<Body>, HttpError> {
-        audit_and_time(&rqctx, |opctx, nexus| async move {
+        let apictx = rqctx.context();
+        let handler = async {
+            let nexus = &apictx.context.nexus;
             let query = query_params.into_inner();
             let path = path_params.into_inner();
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
             nexus.scim_v2_get_group_by_id(&opctx, query, path.group_id).await
-        })
-        .await
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
     }
 
     async fn scim_v2_create_group(
