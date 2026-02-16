@@ -2,6 +2,8 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+use std::net::IpAddr;
+
 use super::DataStore;
 use crate::authz;
 use crate::context::OpContext;
@@ -95,22 +97,6 @@ impl DataStore {
                 let found_blocks: Vec<AddressLotBlock> =
                     block_dsl::address_lot_block
                         .filter(block_dsl::address_lot_id.eq(db_lot.id()))
-                        .filter(
-                            block_dsl::first_address.eq_any(
-                                desired_blocks
-                                    .iter()
-                                    .map(|b| b.first_address)
-                                    .collect::<Vec<_>>(),
-                            ),
-                        )
-                        .filter(
-                            block_dsl::last_address.eq_any(
-                                desired_blocks
-                                    .iter()
-                                    .map(|b| b.last_address)
-                                    .collect::<Vec<_>>(),
-                            ),
-                        )
                         .get_results_async(&conn)
                         .await?;
 
@@ -118,7 +104,7 @@ impl DataStore {
 
                 // If the block is found in the database, use the found block.
                 // If the block is not found in the database, insert it.
-                for desired_block in desired_blocks {
+                for desired_block in &desired_blocks {
                     let block = match found_blocks.iter().find(|db_b| {
                         db_b.first_address == desired_block.first_address
                             && db_b.last_address == desired_block.last_address
@@ -126,7 +112,7 @@ impl DataStore {
                         Some(block) => block.clone(),
                         None => {
                             diesel::insert_into(block_dsl::address_lot_block)
-                                .values(desired_block)
+                                .values(desired_block.clone())
                                 .returning(AddressLotBlock::as_returning())
                                 .get_results_async(&conn)
                                 .await?[0]
@@ -134,6 +120,21 @@ impl DataStore {
                         }
                     };
                     blocks.push(block);
+                }
+
+                // If the block is found in the database, but not desired,
+                // remove it.
+                for found_block in &found_blocks {
+                    if !desired_blocks.iter().any(|x| {
+                        x.first_address == found_block.first_address
+                            && x.last_address == found_block.last_address
+                    }) {
+                        diesel::delete(block_dsl::address_lot_block)
+                            .filter(block_dsl::address_lot_id.eq(db_lot.id()))
+                            .filter(block_dsl::id.eq(found_block.id))
+                            .execute_async(&conn)
+                            .await?;
+                    }
                 }
 
                 Ok(AddressLotCreateResult { lot: db_lot, blocks })
@@ -354,31 +355,38 @@ pub(crate) async fn try_reserve_block(
 
     // Ensure the address is not already taken.
 
-    let results: Vec<Uuid> = if anycast {
-        // Ensure that a non-anycast reservation has not already been made
-        rsvd_block_dsl::address_lot_rsvd_block
-            .filter(address_lot_rsvd_block::address_lot_id.eq(lot_id))
-            .filter(address_lot_rsvd_block::first_address.le(inet))
-            .filter(address_lot_rsvd_block::last_address.ge(inet))
-            .filter(address_lot_rsvd_block::anycast.eq(false))
-            .select(address_lot_rsvd_block::id)
-            .get_results_async(conn)
-            .await?
-    } else {
-        // Ensure that a reservation of any kind has not already been made
-        rsvd_block_dsl::address_lot_rsvd_block
-            .filter(address_lot_rsvd_block::address_lot_id.eq(lot_id))
-            .filter(address_lot_rsvd_block::first_address.le(inet))
-            .filter(address_lot_rsvd_block::last_address.ge(inet))
-            .select(address_lot_rsvd_block::id)
-            .get_results_async(conn)
-            .await?
+    let no_reserve = match inet.ip() {
+        IpAddr::V4(a) => a.is_unspecified(),
+        IpAddr::V6(a) => a.is_unspecified() || a.is_unicast_link_local(),
     };
 
-    if !results.is_empty() {
-        return Err(ReserveBlockTxnError::CustomError(
-            ReserveBlockError::AddressUnavailable,
-        ));
+    if !no_reserve {
+        let results: Vec<Uuid> = if anycast {
+            // Ensure that a non-anycast reservation has not already been made
+            rsvd_block_dsl::address_lot_rsvd_block
+                .filter(address_lot_rsvd_block::address_lot_id.eq(lot_id))
+                .filter(address_lot_rsvd_block::first_address.le(inet))
+                .filter(address_lot_rsvd_block::last_address.ge(inet))
+                .filter(address_lot_rsvd_block::anycast.eq(false))
+                .select(address_lot_rsvd_block::id)
+                .get_results_async(conn)
+                .await?
+        } else {
+            // Ensure that a reservation of any kind has not already been made
+            rsvd_block_dsl::address_lot_rsvd_block
+                .filter(address_lot_rsvd_block::address_lot_id.eq(lot_id))
+                .filter(address_lot_rsvd_block::first_address.le(inet))
+                .filter(address_lot_rsvd_block::last_address.ge(inet))
+                .select(address_lot_rsvd_block::id)
+                .get_results_async(conn)
+                .await?
+        };
+
+        if !results.is_empty() {
+            return Err(ReserveBlockTxnError::CustomError(
+                ReserveBlockError::AddressUnavailable,
+            ));
+        }
     }
 
     // 3. Mark the address as in use.

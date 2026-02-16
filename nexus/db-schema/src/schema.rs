@@ -227,11 +227,11 @@ table! {
 }
 
 table! {
-    switch_port_settings_bgp_peer_config (port_settings_id, interface_name, addr) {
+    switch_port_settings_bgp_peer_config (id) {
         port_settings_id -> Uuid,
         bgp_config_id -> Uuid,
         interface_name -> Text,
-        addr -> Inet,
+        addr -> Nullable<Inet>,
         hold_time -> Int8,
         idle_hold_time -> Int8,
         delay_open -> Int8,
@@ -245,7 +245,9 @@ table! {
         enforce_first_as -> Bool,
         allow_import_list_active -> Bool,
         allow_export_list_active -> Bool,
-        vlan_id -> Nullable<Int4>
+        vlan_id -> Nullable<Int4>,
+        id -> Uuid,
+        router_lifetime -> Int4,
     }
 }
 
@@ -289,6 +291,7 @@ table! {
         vrf -> Nullable<Text>,
         shaper -> Nullable<Text>,
         checker -> Nullable<Text>,
+        max_paths -> Int2,
     }
 }
 
@@ -296,7 +299,7 @@ table! {
     bgp_peer_view (switch_location, port_name) {
         switch_location -> Text,
         port_name -> Text,
-        addr -> Inet,
+        addr -> Nullable<Inet>,
         asn -> Int8,
         connect_retry -> Int8,
         delay_open -> Int8,
@@ -310,6 +313,7 @@ table! {
         local_pref -> Nullable<Int8>,
         enforce_first_as -> Bool,
         vlan_id -> Nullable<Int4>,
+        router_lifetime -> Int4,
     }
 }
 

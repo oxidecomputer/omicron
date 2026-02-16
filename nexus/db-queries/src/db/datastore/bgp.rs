@@ -828,19 +828,28 @@ impl DataStore {
         Ok(results)
     }
 
+    /// Look up communities for a BGP peer.
+    ///
+    /// For numbered peers, pass `Some(addr)`. For unnumbered peers, pass `None`
+    /// (the function will query using the sentinel value 0.0.0.0/32).
     pub async fn communities_for_peer(
         &self,
         opctx: &OpContext,
         port_settings_id: Uuid,
         interface_name: &str,
-        addr: IpNetwork,
+        addr: Option<IpNetwork>,
     ) -> ListResultVec<SwitchPortBgpPeerConfigCommunity> {
         use nexus_db_schema::schema::switch_port_settings_bgp_peer_config_communities::dsl;
+
+        // For unnumbered peers (addr is None), use UNSPECIFIED as sentinel
+        let db_addr: IpNetwork = addr.unwrap_or_else(|| {
+            std::net::IpAddr::V4(std::net::Ipv4Addr::UNSPECIFIED).into()
+        });
 
         let results = dsl::switch_port_settings_bgp_peer_config_communities
             .filter(dsl::port_settings_id.eq(port_settings_id))
             .filter(dsl::interface_name.eq(interface_name.to_owned()))
-            .filter(dsl::addr.eq(addr))
+            .filter(dsl::addr.eq(db_addr))
             .load_async(&*self.pool_connection_authorized(opctx).await?)
             .await
             .map_err(|e| {
@@ -852,17 +861,26 @@ impl DataStore {
         Ok(results)
     }
 
+    /// Look up allowed exports for a BGP peer.
+    ///
+    /// For numbered peers, pass `Some(addr)`. For unnumbered peers, pass `None`.
     pub async fn allow_export_for_peer(
         &self,
         opctx: &OpContext,
         port_settings_id: Uuid,
         interface_name: &str,
-        addr: IpNetwork,
+        addr: Option<IpNetwork>,
     ) -> LookupResult<Option<Vec<SwitchPortBgpPeerConfigAllowExport>>> {
         use nexus_db_schema::schema::switch_port_settings_bgp_peer_config as db_peer;
         use nexus_db_schema::schema::switch_port_settings_bgp_peer_config::dsl as peer_dsl;
         use nexus_db_schema::schema::switch_port_settings_bgp_peer_config_allow_export as db_allow;
         use nexus_db_schema::schema::switch_port_settings_bgp_peer_config_allow_export::dsl;
+
+        // For unnumbered peers (addr is None), use UNSPECIFIED as sentinel
+        // for the allow_export table (which has non-nullable addr)
+        let db_addr: IpNetwork = addr.unwrap_or_else(|| {
+            std::net::IpAddr::V4(std::net::Ipv4Addr::UNSPECIFIED).into()
+        });
 
         let conn = self.pool_connection_authorized(opctx).await?;
         let err = OptionalError::new();
@@ -870,25 +888,39 @@ impl DataStore {
             .transaction(&conn, |conn| {
                 let err = err.clone();
                 async move {
-                    let active = peer_dsl::switch_port_settings_bgp_peer_config
-                        .filter(db_peer::port_settings_id.eq(port_settings_id))
-                        .filter(db_peer::addr.eq(addr))
-                        .select(db_peer::allow_export_list_active)
-                        .limit(1)
-                        .first_async::<bool>(&conn)
-                        .await
-                        .map_err(|e| {
-                            let msg = "failed to lookup export settings for peer";
-                            error!(opctx.log, "{msg}"; "error" => ?e);
+                    // Query the main peer config table. For unnumbered peers,
+                    // addr is NULL; for numbered peers, addr matches.
+                    let active = if addr.is_some() {
+                        peer_dsl::switch_port_settings_bgp_peer_config
+                            .filter(db_peer::port_settings_id.eq(port_settings_id))
+                            .filter(db_peer::addr.eq(addr))
+                            .select(db_peer::allow_export_list_active)
+                            .limit(1)
+                            .first_async::<bool>(&conn)
+                            .await
+                    } else {
+                        peer_dsl::switch_port_settings_bgp_peer_config
+                            .filter(db_peer::port_settings_id.eq(port_settings_id))
+                            .filter(db_peer::addr.is_null())
+                            .filter(db_peer::interface_name.eq(interface_name.to_owned()))
+                            .select(db_peer::allow_export_list_active)
+                            .limit(1)
+                            .first_async::<bool>(&conn)
+                            .await
+                    };
 
-                            match e {
-                                diesel::result::Error::NotFound => {
-                                    let not_found_msg = format!("peer with {addr} not found for port settings {port_settings_id}");
-                                    err.bail(Error::non_resourcetype_not_found(not_found_msg))
-                                },
-                                _ => err.bail(Error::internal_error(msg)),
-                            }
-                        })?;
+                    let active = active.map_err(|e| {
+                        let msg = "failed to lookup export settings for peer";
+                        error!(opctx.log, "{msg}"; "error" => ?e);
+
+                        match e {
+                            diesel::result::Error::NotFound => {
+                                let not_found_msg = format!("peer with {:?} not found for port settings {port_settings_id}", addr);
+                                err.bail(Error::non_resourcetype_not_found(not_found_msg))
+                            },
+                            _ => err.bail(Error::internal_error(msg)),
+                        }
+                    })?;
 
                     if !active {
                         return Ok(None);
@@ -903,7 +935,7 @@ impl DataStore {
                             db_allow::interface_name
                                 .eq(interface_name.to_owned()),
                         )
-                        .filter(db_allow::addr.eq(addr))
+                        .filter(db_allow::addr.eq(db_addr))
                         .load_async(&conn)
                         .await?;
 
@@ -923,17 +955,26 @@ impl DataStore {
             })
     }
 
+    /// Look up allowed imports for a BGP peer.
+    ///
+    /// For numbered peers, pass `Some(addr)`. For unnumbered peers, pass `None`.
     pub async fn allow_import_for_peer(
         &self,
         opctx: &OpContext,
         port_settings_id: Uuid,
         interface_name: &str,
-        addr: IpNetwork,
+        addr: Option<IpNetwork>,
     ) -> LookupResult<Option<Vec<SwitchPortBgpPeerConfigAllowImport>>> {
         use nexus_db_schema::schema::switch_port_settings_bgp_peer_config as db_peer;
         use nexus_db_schema::schema::switch_port_settings_bgp_peer_config::dsl as peer_dsl;
         use nexus_db_schema::schema::switch_port_settings_bgp_peer_config_allow_import as db_allow;
         use nexus_db_schema::schema::switch_port_settings_bgp_peer_config_allow_import::dsl;
+
+        // For unnumbered peers (addr is None), use UNSPECIFIED as sentinel
+        // for the allow_import table (which has non-nullable addr)
+        let db_addr: IpNetwork = addr.unwrap_or_else(|| {
+            std::net::IpAddr::V4(std::net::Ipv4Addr::UNSPECIFIED).into()
+        });
 
         let err = OptionalError::new();
         let conn = self.pool_connection_authorized(opctx).await?;
@@ -942,25 +983,39 @@ impl DataStore {
             .transaction(&conn, |conn| {
                 let err = err.clone();
                 async move {
-                    let active = peer_dsl::switch_port_settings_bgp_peer_config
-                        .filter(db_peer::port_settings_id.eq(port_settings_id))
-                        .filter(db_peer::addr.eq(addr))
-                        .select(db_peer::allow_import_list_active)
-                        .limit(1)
-                        .first_async::<bool>(&conn)
-                        .await
-                        .map_err(|e| {
-                            let msg = "failed to lookup import settings for peer";
-                            error!(opctx.log, "{msg}"; "error" => ?e);
+                    // Query the main peer config table. For unnumbered peers,
+                    // addr is NULL; for numbered peers, addr matches.
+                    let active = if addr.is_some() {
+                        peer_dsl::switch_port_settings_bgp_peer_config
+                            .filter(db_peer::port_settings_id.eq(port_settings_id))
+                            .filter(db_peer::addr.eq(addr))
+                            .select(db_peer::allow_import_list_active)
+                            .limit(1)
+                            .first_async::<bool>(&conn)
+                            .await
+                    } else {
+                        peer_dsl::switch_port_settings_bgp_peer_config
+                            .filter(db_peer::port_settings_id.eq(port_settings_id))
+                            .filter(db_peer::addr.is_null())
+                            .filter(db_peer::interface_name.eq(interface_name.to_owned()))
+                            .select(db_peer::allow_import_list_active)
+                            .limit(1)
+                            .first_async::<bool>(&conn)
+                            .await
+                    };
 
-                            match e {
-                                diesel::result::Error::NotFound => {
-                                    let not_found_msg = format!("peer with {addr} not found for port settings {port_settings_id}");
-                                    err.bail(Error::non_resourcetype_not_found(not_found_msg))
-                                },
-                                _ => err.bail(Error::internal_error(msg)),
-                            }
-                        })?;
+                    let active = active.map_err(|e| {
+                        let msg = "failed to lookup import settings for peer";
+                        error!(opctx.log, "{msg}"; "error" => ?e);
+
+                        match e {
+                            diesel::result::Error::NotFound => {
+                                let not_found_msg = format!("peer with {:?} not found for port settings {port_settings_id}", addr);
+                                err.bail(Error::non_resourcetype_not_found(not_found_msg))
+                            },
+                            _ => err.bail(Error::internal_error(msg)),
+                        }
+                    })?;
 
                     if !active {
                         return Ok(None);
@@ -975,7 +1030,7 @@ impl DataStore {
                             db_allow::interface_name
                                 .eq(interface_name.to_owned()),
                         )
-                        .filter(db_allow::addr.eq(addr))
+                        .filter(db_allow::addr.eq(db_addr))
                         .load_async(&conn)
                         .await?;
 
@@ -1042,6 +1097,7 @@ mod tests {
                     vrf: None,
                     shaper: None,
                     checker: None,
+                    max_paths: Default::default(),
                 },
             )
             .await

@@ -237,6 +237,13 @@ pub trait NexusInternalApi {
 
     /// Fetch NAT ChangeSet
     ///
+    /// NOTE: This is no longer just IPv4, it includes IPv6. However, this API
+    /// cannot have forward-incompatable changes (e.g. clients running against
+    /// new API definitions need to be able to talk to older server still) so
+    /// we cannot add a generic nat_changeset API endpoint which would only be
+    /// backwards compatiable. So for the time being we are stuck with this
+    /// misleading name.
+    ///
     /// Caller provides their generation as `from_gen`, along with a query
     /// parameter for the page size (`limit`). Endpoint will return changes
     /// that have occured since the caller's generation number up to the latest

@@ -16,6 +16,7 @@ mod disk;
 mod hardware;
 mod instance;
 pub(crate) mod multicast;
+mod networking;
 mod physical_disk;
 mod policy;
 mod saml;

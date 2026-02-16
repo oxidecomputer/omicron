@@ -4232,6 +4232,148 @@ fn after_229_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
     })
 }
 
+// Migration 230 added bgp_config.max_paths as a nullable column.
+// Migration 231 backfills NULL rows with 1 and sets NOT NULL.
+// We test both: a row that existed before the column was added (pre-230),
+// and rows inserted after the column exists but before the NOT NULL fix (pre-231).
+const BGP_ANNOUNCE_SET_230: Uuid =
+    Uuid::from_u128(0x23000001_0000_0000_0000_000000000001);
+// Row inserted before migration 230 (no max_paths column yet).
+const BGP_CONFIG_230_PRE: Uuid =
+    Uuid::from_u128(0x23000002_0000_0000_0000_000000000001);
+// Row inserted after migration 230 with an explicit max_paths value.
+const BGP_CONFIG_231_EXPLICIT: Uuid =
+    Uuid::from_u128(0x23100002_0000_0000_0000_000000000001);
+// Row inserted after migration 230 with NULL max_paths.
+const BGP_CONFIG_231_NULL: Uuid =
+    Uuid::from_u128(0x23100002_0000_0000_0000_000000000002);
+
+fn before_230_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
+    Box::pin(async move {
+        // Insert a bgp_announce_set (required FK) and a bgp_config row
+        // BEFORE migration 230 adds the max_paths column.
+        ctx.client
+            .batch_execute(&format!(
+                "
+                INSERT INTO omicron.public.bgp_announce_set
+                    (id, name, description, time_created, time_modified)
+                VALUES
+                    ('{BGP_ANNOUNCE_SET_230}', 'test-announce-set-230',
+                     'test', now(), now());
+
+                INSERT INTO omicron.public.bgp_config
+                    (id, name, description, time_created, time_modified,
+                     asn, bgp_announce_set_id)
+                VALUES
+                    ('{BGP_CONFIG_230_PRE}', 'bgp-pre-max-paths-230',
+                     'inserted before max_paths column exists', now(), now(),
+                     64500, '{BGP_ANNOUNCE_SET_230}');
+                "
+            ))
+            .await
+            .expect("failed to insert pre-migration rows for 230");
+    })
+}
+
+fn before_231_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
+    Box::pin(async move {
+        // Now max_paths column exists (added by migration 230) but is nullable.
+        // Insert one row with an explicit value and one with NULL.
+        ctx.client
+            .batch_execute(&format!(
+                "
+                INSERT INTO omicron.public.bgp_config
+                    (id, name, description, time_created, time_modified,
+                     asn, bgp_announce_set_id, max_paths)
+                VALUES
+                    ('{BGP_CONFIG_231_EXPLICIT}', 'bgp-explicit-max-paths-231',
+                     'has explicit max_paths', now(), now(),
+                     64501, '{BGP_ANNOUNCE_SET_230}', 4);
+
+                INSERT INTO omicron.public.bgp_config
+                    (id, name, description, time_created, time_modified,
+                     asn, bgp_announce_set_id)
+                VALUES
+                    ('{BGP_CONFIG_231_NULL}', 'bgp-null-max-paths-231',
+                     'has NULL max_paths', now(), now(),
+                     64502, '{BGP_ANNOUNCE_SET_230}');
+                "
+            ))
+            .await
+            .expect("failed to insert pre-migration rows for 231");
+    })
+}
+
+fn after_231_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
+    Box::pin(async move {
+        // The pre-230 row (no max_paths column when inserted) should now be 1.
+        let rows = ctx
+            .client
+            .query(
+                &format!(
+                    "SELECT max_paths FROM omicron.public.bgp_config
+                     WHERE id = '{BGP_CONFIG_230_PRE}'"
+                ),
+                &[],
+            )
+            .await
+            .expect("failed to query bgp_config for pre-230 row");
+        assert_eq!(rows.len(), 1);
+        let max_paths: i16 = rows[0].get("max_paths");
+        assert_eq!(
+            max_paths, 1,
+            "pre-230 row should have max_paths backfilled to 1"
+        );
+
+        // The row with explicit max_paths = 4 should be preserved.
+        let rows = ctx
+            .client
+            .query(
+                &format!(
+                    "SELECT max_paths FROM omicron.public.bgp_config
+                     WHERE id = '{BGP_CONFIG_231_EXPLICIT}'"
+                ),
+                &[],
+            )
+            .await
+            .expect("failed to query bgp_config for explicit row");
+        assert_eq!(rows.len(), 1);
+        let max_paths: i16 = rows[0].get("max_paths");
+        assert_eq!(max_paths, 4, "explicit max_paths should be preserved");
+
+        // The row with NULL max_paths should now be 1.
+        let rows = ctx
+            .client
+            .query(
+                &format!(
+                    "SELECT max_paths FROM omicron.public.bgp_config
+                     WHERE id = '{BGP_CONFIG_231_NULL}'"
+                ),
+                &[],
+            )
+            .await
+            .expect("failed to query bgp_config for NULL row");
+        assert_eq!(rows.len(), 1);
+        let max_paths: i16 = rows[0].get("max_paths");
+        assert_eq!(max_paths, 1, "NULL max_paths should be backfilled to 1");
+
+        // Clean up test data
+        ctx.client
+            .batch_execute(&format!(
+                "
+                DELETE FROM omicron.public.bgp_config
+                    WHERE id IN ('{BGP_CONFIG_230_PRE}',
+                                 '{BGP_CONFIG_231_EXPLICIT}',
+                                 '{BGP_CONFIG_231_NULL}');
+                DELETE FROM omicron.public.bgp_announce_set
+                    WHERE id = '{BGP_ANNOUNCE_SET_230}';
+                "
+            ))
+            .await
+            .expect("failed to clean up migration 231 test data");
+    })
+}
+
 // Lazily initializes all migration checks. The combination of Rust function
 // pointers and async makes defining a static table fairly painful, so we're
 // using lazy initialization instead.
@@ -4365,6 +4507,14 @@ fn get_migration_checks() -> BTreeMap<Version, DataMigrationFns> {
     map.insert(
         Version::new(229, 0, 0),
         DataMigrationFns::new().before(before_229_0_0).after(after_229_0_0),
+    );
+    map.insert(
+        Version::new(230, 0, 0),
+        DataMigrationFns::new().before(before_230_0_0),
+    );
+    map.insert(
+        Version::new(231, 0, 0),
+        DataMigrationFns::new().before(before_231_0_0).after(after_231_0_0),
     );
     map
 }

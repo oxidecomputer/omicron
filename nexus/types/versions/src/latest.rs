@@ -252,9 +252,7 @@ pub mod networking {
     pub use crate::v2025_11_20_00::networking::BgpAnnounceSetCreate;
     pub use crate::v2025_11_20_00::networking::BgpAnnounceSetSelector;
     pub use crate::v2025_11_20_00::networking::BgpAnnouncementCreate;
-    pub use crate::v2025_11_20_00::networking::BgpConfigCreate;
     pub use crate::v2025_11_20_00::networking::BgpConfigSelector;
-    pub use crate::v2025_11_20_00::networking::BgpPeerConfig;
     pub use crate::v2025_11_20_00::networking::BgpRouteSelector;
     pub use crate::v2025_11_20_00::networking::BgpStatusSelector;
     pub use crate::v2025_11_20_00::networking::LinkConfigCreate;
@@ -272,12 +270,14 @@ pub mod networking {
     pub use crate::v2025_11_20_00::networking::SwitchPortPageSelector;
     pub use crate::v2025_11_20_00::networking::SwitchPortPathSelector;
     pub use crate::v2025_11_20_00::networking::SwitchPortSelector;
-    pub use crate::v2025_11_20_00::networking::SwitchPortSettingsCreate;
     pub use crate::v2025_11_20_00::networking::SwitchPortSettingsInfoSelector;
     pub use crate::v2025_11_20_00::networking::SwitchPortSettingsSelector;
     pub use crate::v2025_11_20_00::networking::SwitchVlanInterface;
     pub use crate::v2025_11_20_00::networking::SwtichPortSettingsGroupCreate;
     pub use crate::v2025_11_20_00::networking::TxEqConfig;
+    pub use crate::v2026_02_13_01::networking::BgpConfigCreate;
+    pub use crate::v2026_02_13_01::networking::BgpPeerConfig;
+    pub use crate::v2026_02_13_01::networking::SwitchPortSettingsCreate;
 }
 
 pub mod oxql {

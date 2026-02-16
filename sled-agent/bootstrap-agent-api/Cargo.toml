@@ -16,5 +16,6 @@ omicron-workspace-hack.workspace = true
 schemars.workspace = true
 serde.workspace = true
 sled-agent-types.workspace = true
+sled-agent-types-versions.workspace = true
 sled-hardware-types.workspace = true
 tufaceous-artifact.workspace = true

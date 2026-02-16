@@ -35,6 +35,8 @@ pub mod latest;
 pub mod v2025_11_20_00;
 #[path = "local_storage/mod.rs"]
 pub mod v2025_12_03_00;
+#[path = "bgp_peer_collision_state/mod.rs"]
+pub mod v2025_12_12_00;
 #[path = "ip_version_and_multiple_default_pools/mod.rs"]
 pub mod v2025_12_23_00;
 #[path = "silo_project_ip_version_and_pool_type/mod.rs"]
@@ -63,3 +65,5 @@ pub mod v2026_01_30_00;
 pub mod v2026_01_30_01;
 #[path = "read_only_disks_nullable/mod.rs"]
 pub mod v2026_01_31_00;
+#[path = "bgp_unnumbered_peers/mod.rs"]
+pub mod v2026_02_13_01;

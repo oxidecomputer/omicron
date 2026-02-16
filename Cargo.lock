@@ -1021,6 +1021,7 @@ dependencies = [
  "schemars 0.8.22",
  "serde",
  "sled-agent-types",
+ "sled-agent-types-versions",
  "sled-hardware-types",
  "tufaceous-artifact",
 ]
@@ -1042,6 +1043,39 @@ dependencies = [
  "sled-hardware-types",
  "slog",
  "uuid",
+]
+
+[[package]]
+name = "bootstrap-agent-lockstep-api"
+version = "0.1.0"
+dependencies = [
+ "dropshot",
+ "omicron-common",
+ "omicron-passwords",
+ "omicron-uuid-kinds",
+ "omicron-workspace-hack",
+ "schemars 0.8.22",
+ "serde",
+ "sled-agent-types",
+ "sled-hardware-types",
+]
+
+[[package]]
+name = "bootstrap-agent-lockstep-client"
+version = "0.1.0"
+dependencies = [
+ "omicron-common",
+ "omicron-uuid-kinds",
+ "omicron-workspace-hack",
+ "oxnet",
+ "progenitor 0.10.0",
+ "regress",
+ "reqwest",
+ "schemars 0.8.22",
+ "serde",
+ "serde_json",
+ "sled-hardware-types",
+ "slog",
 ]
 
 [[package]]
@@ -1790,7 +1824,7 @@ dependencies = [
 [[package]]
 name = "common"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/dendrite?rev=7a66c1b2415122b821611fd51012032a03e14ada#7a66c1b2415122b821611fd51012032a03e14ada"
+source = "git+https://github.com/oxidecomputer/dendrite?rev=37992295b5dc708d8f120cee805d67418741b556#37992295b5dc708d8f120cee805d67418741b556"
 dependencies = [
  "anyhow",
  "chrono",
@@ -2519,7 +2553,7 @@ dependencies = [
 [[package]]
 name = "ddm-admin-client"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/maghemite?rev=3abfb8eb7f6d4ca4658981b4a7a76759a0a3f8ec#3abfb8eb7f6d4ca4658981b4a7a76759a0a3f8ec"
+source = "git+https://github.com/oxidecomputer/maghemite?rev=8f5527da3c53398c95c50b1af088637e7b6c5718#8f5527da3c53398c95c50b1af088637e7b6c5718"
 dependencies = [
  "oxnet",
  "progenitor 0.11.2",
@@ -3076,11 +3110,11 @@ dependencies = [
 [[package]]
 name = "dpd-client"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/dendrite?rev=7a66c1b2415122b821611fd51012032a03e14ada#7a66c1b2415122b821611fd51012032a03e14ada"
+source = "git+https://github.com/oxidecomputer/dendrite?rev=37992295b5dc708d8f120cee805d67418741b556#37992295b5dc708d8f120cee805d67418741b556"
 dependencies = [
  "async-trait",
  "chrono",
- "common 0.1.0 (git+https://github.com/oxidecomputer/dendrite?rev=7a66c1b2415122b821611fd51012032a03e14ada)",
+ "common 0.1.0 (git+https://github.com/oxidecomputer/dendrite?rev=37992295b5dc708d8f120cee805d67418741b556)",
  "crc8",
  "futures",
  "http",
@@ -6478,7 +6512,7 @@ dependencies = [
 [[package]]
 name = "mg-admin-client"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/maghemite?rev=3abfb8eb7f6d4ca4658981b4a7a76759a0a3f8ec#3abfb8eb7f6d4ca4658981b4a7a76759a0a3f8ec"
+source = "git+https://github.com/oxidecomputer/maghemite?rev=8f5527da3c53398c95c50b1af088637e7b6c5718#8f5527da3c53398c95c50b1af088637e7b6c5718"
 dependencies = [
  "chrono",
  "colored 3.0.0",
@@ -7582,7 +7616,7 @@ dependencies = [
  "crucible-agent-client",
  "dns-server",
  "dns-service-client",
- "dpd-client 0.1.0 (git+https://github.com/oxidecomputer/dendrite?rev=7a66c1b2415122b821611fd51012032a03e14ada)",
+ "dpd-client 0.1.0 (git+https://github.com/oxidecomputer/dendrite?rev=37992295b5dc708d8f120cee805d67418741b556)",
  "dropshot",
  "futures",
  "gateway-messages",
@@ -8341,6 +8375,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "bootstrap-agent-api",
+ "bootstrap-agent-lockstep-api",
  "camino",
  "clap",
  "clickhouse-admin-api",
@@ -8505,7 +8540,7 @@ dependencies = [
  "display-error-chain",
  "dns-server",
  "dns-service-client",
- "dpd-client 0.1.0 (git+https://github.com/oxidecomputer/dendrite?rev=7a66c1b2415122b821611fd51012032a03e14ada)",
+ "dpd-client 0.1.0 (git+https://github.com/oxidecomputer/dendrite?rev=37992295b5dc708d8f120cee805d67418741b556)",
  "dropshot",
  "ereport-types",
  "expectorate",
@@ -8978,6 +9013,7 @@ dependencies = [
  "bootstore",
  "bootstrap-agent-api",
  "bootstrap-agent-client",
+ "bootstrap-agent-lockstep-api",
  "bytes",
  "camino",
  "camino-tempfile",
@@ -11615,7 +11651,7 @@ dependencies = [
 [[package]]
 name = "rdb-types"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/maghemite?rev=3abfb8eb7f6d4ca4658981b4a7a76759a0a3f8ec#3abfb8eb7f6d4ca4658981b4a7a76759a0a3f8ec"
+source = "git+https://github.com/oxidecomputer/maghemite?rev=8f5527da3c53398c95c50b1af088637e7b6c5718#8f5527da3c53398c95c50b1af088637e7b6c5718"
 dependencies = [
  "oxnet",
  "schemars 0.8.22",
@@ -13376,6 +13412,7 @@ dependencies = [
 name = "sled-agent-types-versions"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "async-trait",
  "bootstore",
  "camino",
@@ -16464,7 +16501,7 @@ name = "wicket-common"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "dpd-client 0.1.0 (git+https://github.com/oxidecomputer/dendrite?rev=7a66c1b2415122b821611fd51012032a03e14ada)",
+ "dpd-client 0.1.0 (git+https://github.com/oxidecomputer/dendrite?rev=37992295b5dc708d8f120cee805d67418741b556)",
  "dropshot",
  "gateway-client",
  "gateway-types",
@@ -16517,6 +16554,7 @@ dependencies = [
  "async-trait",
  "base64 0.22.1",
  "bootstrap-agent-client",
+ "bootstrap-agent-lockstep-client",
  "buf-list",
  "bytes",
  "camino",
@@ -16524,7 +16562,7 @@ dependencies = [
  "clap",
  "debug-ignore",
  "display-error-chain",
- "dpd-client 0.1.0 (git+https://github.com/oxidecomputer/dendrite?rev=7a66c1b2415122b821611fd51012032a03e14ada)",
+ "dpd-client 0.1.0 (git+https://github.com/oxidecomputer/dendrite?rev=37992295b5dc708d8f120cee805d67418741b556)",
  "dropshot",
  "either",
  "expectorate",
@@ -16601,7 +16639,7 @@ dependencies = [
 name = "wicketd-api"
 version = "0.1.0"
 dependencies = [
- "bootstrap-agent-client",
+ "bootstrap-agent-lockstep-client",
  "dropshot",
  "gateway-client",
  "omicron-common",

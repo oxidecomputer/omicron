@@ -15,20 +15,26 @@ use http::StatusCode;
 use internal_dns_resolver::{ResolveError, Resolver as DnsResolver};
 use internal_dns_types::names::ServiceName;
 use mg_admin_client::Client as MgdClient;
-use mg_admin_client::types::BfdPeerConfig as MgBfdPeerConfig;
-use mg_admin_client::types::BgpPeerConfig as MgBgpPeerConfig;
-use mg_admin_client::types::ImportExportPolicy as MgImportExportPolicy;
 use mg_admin_client::types::{
-    AddStaticRoute4Request, ApplyRequest, CheckerSource, ShaperSource,
-    StaticRoute4, StaticRoute4List,
+    AddStaticRoute4Request, AddStaticRoute6Request, ApplyRequest,
+    CheckerSource, ImportExportPolicy4 as MgImportExportPolicy4,
+    ImportExportPolicy6 as MgImportExportPolicy6, JitterRange, ShaperSource,
+    StaticRoute4, StaticRoute4List, StaticRoute6, StaticRoute6List,
+};
+use mg_admin_client::types::{
+    BfdPeerConfig as MgBfdPeerConfig, Ipv4UnicastConfig,
+};
+use mg_admin_client::types::{
+    BgpPeerConfig as MgBgpPeerConfig, Ipv6UnicastConfig,
+    UnnumberedBgpPeerConfig as MgUnnumberedBgpPeerConfig,
 };
 use omicron_common::OMICRON_DPD_TAG;
 use omicron_common::address::DENDRITE_PORT;
 use omicron_common::address::{MGD_PORT, MGS_PORT};
 use omicron_common::api::external::{BfdMode, ImportExportPolicy};
 use omicron_common::api::internal::shared::{
-    BgpConfig, PortConfig, PortFec, PortSpeed, RackNetworkConfig,
-    SwitchLocation,
+    BgpConfig, BgpPeerConfig, PortConfig, PortFec, PortSpeed,
+    RackNetworkConfig, SwitchLocation,
 };
 use omicron_common::backoff::{
     BackoffError, ExponentialBackoff, ExponentialBackoffBuilder, retry_notify,
@@ -432,6 +438,96 @@ impl<'a> EarlyNetworkSetup<'a> {
         let mut config: Option<BgpConfig> = None;
         let mut bgp_peer_configs =
             HashMap::<String, Vec<MgBgpPeerConfig>>::new();
+        let mut bgp_unnumbered_peer_configs =
+            HashMap::<String, Vec<MgUnnumberedBgpPeerConfig>>::new();
+
+        // Helper function to build IPv4 unicast import/export policies
+        let build_ipv4_unicast =
+            |peer: &omicron_common::api::internal::shared::BgpPeerConfig| {
+                Ipv4UnicastConfig {
+                    nexthop: None,
+                    import_policy: match &peer.allowed_import {
+                        ImportExportPolicy::NoFiltering => {
+                            MgImportExportPolicy4::NoFiltering
+                        }
+                        ImportExportPolicy::Allow(list) => {
+                            MgImportExportPolicy4::Allow(
+                                list.iter()
+                                    .filter_map(|x| match x {
+                                        IpNet::V4(p) => Some(Prefix4 {
+                                            length: p.width(),
+                                            value: p.addr(),
+                                        }),
+                                        IpNet::V6(_) => None,
+                                    })
+                                    .collect(),
+                            )
+                        }
+                    },
+                    export_policy: match &peer.allowed_export {
+                        ImportExportPolicy::NoFiltering => {
+                            MgImportExportPolicy4::NoFiltering
+                        }
+                        ImportExportPolicy::Allow(list) => {
+                            MgImportExportPolicy4::Allow(
+                                list.iter()
+                                    .filter_map(|x| match x {
+                                        IpNet::V4(p) => Some(Prefix4 {
+                                            length: p.width(),
+                                            value: p.addr(),
+                                        }),
+                                        IpNet::V6(_) => None,
+                                    })
+                                    .collect(),
+                            )
+                        }
+                    },
+                }
+            };
+
+        // Helper function to build IPv6 unicast import/export policies
+        let build_ipv6_unicast =
+            |peer: &omicron_common::api::internal::shared::BgpPeerConfig| {
+                Ipv6UnicastConfig {
+                    nexthop: None,
+                    import_policy: match &peer.allowed_import {
+                        ImportExportPolicy::NoFiltering => {
+                            MgImportExportPolicy6::NoFiltering
+                        }
+                        ImportExportPolicy::Allow(list) => {
+                            MgImportExportPolicy6::Allow(
+                                list.iter()
+                                    .filter_map(|x| match x {
+                                        IpNet::V6(p) => Some(Prefix6 {
+                                            length: p.width(),
+                                            value: p.addr(),
+                                        }),
+                                        IpNet::V4(_) => None,
+                                    })
+                                    .collect(),
+                            )
+                        }
+                    },
+                    export_policy: match &peer.allowed_export {
+                        ImportExportPolicy::NoFiltering => {
+                            MgImportExportPolicy6::NoFiltering
+                        }
+                        ImportExportPolicy::Allow(list) => {
+                            MgImportExportPolicy6::Allow(
+                                list.iter()
+                                    .filter_map(|x| match x {
+                                        IpNet::V6(p) => Some(Prefix6 {
+                                            length: p.width(),
+                                            value: p.addr(),
+                                        }),
+                                        IpNet::V4(_) => None,
+                                    })
+                                    .collect(),
+                            )
+                        }
+                    },
+                }
+            };
 
         // Iterate through ports and apply BGP config.
         for port in &our_ports {
@@ -466,85 +562,118 @@ impl<'a> EarlyNetworkSetup<'a> {
                     }
                 }
 
-                let bpc = MgBgpPeerConfig {
-                    name: format!("{}", peer.addr),
-                    host: format!("{}:179", peer.addr),
-                    hold_time: peer.hold_time.unwrap_or(6),
-                    idle_hold_time: peer.idle_hold_time.unwrap_or(3),
-                    delay_open: peer.delay_open.unwrap_or(0),
-                    connect_retry: peer.connect_retry.unwrap_or(3),
-                    keepalive: peer.keepalive.unwrap_or(2),
-                    resolution: BGP_SESSION_RESOLUTION,
-                    passive: false,
-                    remote_asn: peer.remote_asn,
-                    min_ttl: peer.min_ttl,
-                    md5_auth_key: peer.md5_auth_key.clone(),
-                    multi_exit_discriminator: peer.multi_exit_discriminator,
-                    communities: peer.communities.clone(),
-                    local_pref: peer.local_pref,
-                    enforce_first_as: peer.enforce_first_as,
-                    allow_export: match &peer.allowed_export {
-                        ImportExportPolicy::NoFiltering => {
-                            MgImportExportPolicy::NoFiltering
+                // Determine if this is a numbered or unnumbered peer based on
+                // whether an address is specified (unspecified = unnumbered)
+                if !peer.addr.is_unspecified() {
+                    let addr = peer.addr;
+                    // Numbered peer - identified by address
+                    let bpc = MgBgpPeerConfig {
+                        name: format!("{}", addr),
+                        host: format!("{}:179", addr),
+                        hold_time: peer
+                            .hold_time
+                            .unwrap_or(BgpPeerConfig::DEFAULT_HOLD_TIME),
+                        idle_hold_time: peer
+                            .idle_hold_time
+                            .unwrap_or(BgpPeerConfig::DEFAULT_IDLE_HOLD_TIME),
+                        delay_open: peer
+                            .delay_open
+                            .unwrap_or(BgpPeerConfig::DEFAULT_DELAY_OPEN),
+                        connect_retry: peer
+                            .connect_retry
+                            .unwrap_or(BgpPeerConfig::DEFAULT_CONNECT_RETRY),
+                        keepalive: peer
+                            .keepalive
+                            .unwrap_or(BgpPeerConfig::DEFAULT_KEEPALIVE),
+                        resolution: BGP_SESSION_RESOLUTION,
+                        passive: false,
+                        remote_asn: peer.remote_asn,
+                        min_ttl: peer.min_ttl,
+                        md5_auth_key: peer.md5_auth_key.clone(),
+                        multi_exit_discriminator: peer.multi_exit_discriminator,
+                        communities: peer.communities.clone(),
+                        local_pref: peer.local_pref,
+                        enforce_first_as: peer.enforce_first_as,
+                        ipv4_unicast: Some(build_ipv4_unicast(peer)),
+                        ipv6_unicast: Some(build_ipv6_unicast(peer)),
+                        vlan_id: peer.vlan_id,
+                        connect_retry_jitter: Some(JitterRange {
+                            max: 1.0,
+                            min: 0.75,
+                        }),
+                        deterministic_collision_resolution: false,
+                        idle_hold_jitter: None,
+                    };
+                    match bgp_peer_configs.get_mut(&port.port) {
+                        Some(peers) => {
+                            peers.push(bpc);
                         }
-                        ImportExportPolicy::Allow(list) => {
-                            MgImportExportPolicy::Allow(
-                                list.clone()
-                                    .iter()
-                                    .map(|x| match x {
-                                        IpNet::V4(p) => Prefix::V4(Prefix4 {
-                                            length: p.width(),
-                                            value: p.addr(),
-                                        }),
-                                        IpNet::V6(p) => Prefix::V6(Prefix6 {
-                                            length: p.width(),
-                                            value: p.addr(),
-                                        }),
-                                    })
-                                    .collect(),
-                            )
+                        None => {
+                            bgp_peer_configs
+                                .insert(port.port.clone(), vec![bpc]);
                         }
-                    },
-                    allow_import: match &peer.allowed_import {
-                        ImportExportPolicy::NoFiltering => {
-                            MgImportExportPolicy::NoFiltering
-                        }
-                        ImportExportPolicy::Allow(list) => {
-                            MgImportExportPolicy::Allow(
-                                list.clone()
-                                    .iter()
-                                    .map(|x| match x {
-                                        IpNet::V4(p) => Prefix::V4(Prefix4 {
-                                            length: p.width(),
-                                            value: p.addr(),
-                                        }),
-                                        IpNet::V6(p) => Prefix::V6(Prefix6 {
-                                            length: p.width(),
-                                            value: p.addr(),
-                                        }),
-                                    })
-                                    .collect(),
-                            )
-                        }
-                    },
-                    vlan_id: peer.vlan_id,
-                };
-                match bgp_peer_configs.get_mut(&port.port) {
-                    Some(peers) => {
-                        peers.push(bpc);
                     }
-                    None => {
-                        bgp_peer_configs.insert(port.port.clone(), vec![bpc]);
+                } else {
+                    // Unnumbered peer - identified by interface
+                    let bpc = MgUnnumberedBgpPeerConfig {
+                        name: format!("unnumbered-{}", port.port),
+                        interface: format!("tfport{}_0", port.port),
+                        hold_time: peer
+                            .hold_time
+                            .unwrap_or(BgpPeerConfig::DEFAULT_HOLD_TIME),
+                        idle_hold_time: peer
+                            .idle_hold_time
+                            .unwrap_or(BgpPeerConfig::DEFAULT_IDLE_HOLD_TIME),
+                        delay_open: peer
+                            .delay_open
+                            .unwrap_or(BgpPeerConfig::DEFAULT_DELAY_OPEN),
+                        connect_retry: peer
+                            .connect_retry
+                            .unwrap_or(BgpPeerConfig::DEFAULT_CONNECT_RETRY),
+                        keepalive: peer
+                            .keepalive
+                            .unwrap_or(BgpPeerConfig::DEFAULT_KEEPALIVE),
+                        resolution: BGP_SESSION_RESOLUTION,
+                        passive: false,
+                        remote_asn: peer.remote_asn,
+                        min_ttl: peer.min_ttl,
+                        md5_auth_key: peer.md5_auth_key.clone(),
+                        multi_exit_discriminator: peer.multi_exit_discriminator,
+                        communities: peer.communities.clone(),
+                        local_pref: peer.local_pref,
+                        enforce_first_as: peer.enforce_first_as,
+                        ipv4_unicast: Some(build_ipv4_unicast(peer)),
+                        ipv6_unicast: Some(build_ipv6_unicast(peer)),
+                        vlan_id: peer.vlan_id,
+                        connect_retry_jitter: Some(JitterRange {
+                            max: 1.0,
+                            min: 0.75,
+                        }),
+                        deterministic_collision_resolution: false,
+                        idle_hold_jitter: None,
+                        router_lifetime: peer.router_lifetime.as_u16(),
+                    };
+                    match bgp_unnumbered_peer_configs.get_mut(&port.port) {
+                        Some(peers) => {
+                            peers.push(bpc);
+                        }
+                        None => {
+                            bgp_unnumbered_peer_configs
+                                .insert(port.port.clone(), vec![bpc]);
+                        }
                     }
                 }
             }
         }
 
-        if !bgp_peer_configs.is_empty() {
+        let has_bgp_config = !bgp_peer_configs.is_empty()
+            || !bgp_unnumbered_peer_configs.is_empty();
+        if has_bgp_config {
             if let Some(config) = &config {
                 let request = ApplyRequest {
                     asn: config.asn,
                     peers: bgp_peer_configs,
+                    unnumbered_peers: bgp_unnumbered_peer_configs,
                     shaper: config.shaper.as_ref().map(|x| ShaperSource {
                         code: x.clone(),
                         asn: config.asn,
@@ -556,11 +685,20 @@ impl<'a> EarlyNetworkSetup<'a> {
                     originate: config
                         .originate
                         .iter()
-                        .map(|x| Prefix4 { length: x.width(), value: x.addr() })
+                        .map(|x| match x {
+                            IpNet::V4(ipv4_net) => Prefix::V4(Prefix4 {
+                                length: ipv4_net.width(),
+                                value: ipv4_net.addr(),
+                            }),
+                            IpNet::V6(ipv6_net) => Prefix::V6(Prefix6 {
+                                length: ipv6_net.width(),
+                                value: ipv6_net.addr(),
+                            }),
+                        })
                         .collect(),
                 };
 
-                if let Err(e) = mgd.bgp_apply(&request).await {
+                if let Err(e) = mgd.bgp_apply_v2(&request).await {
                     error!(
                         self.log,
                         "BGP peer configuration failed";
@@ -575,32 +713,66 @@ impl<'a> EarlyNetworkSetup<'a> {
         let mut rq = AddStaticRoute4Request {
             routes: StaticRoute4List { list: Vec::new() },
         };
+
+        let mut rqv6 = AddStaticRoute6Request {
+            routes: StaticRoute6List { list: Vec::new() },
+        };
+
         for port in &our_ports {
             for r in &port.routes {
-                let nexthop = match r.nexthop {
-                    IpAddr::V4(v4) => v4,
-                    IpAddr::V6(_) => continue,
-                };
-                let prefix = match r.destination.addr() {
-                    IpAddr::V4(v4) => {
-                        Prefix4 { value: v4, length: r.destination.width() }
-                    }
-                    IpAddr::V6(_) => continue,
-                };
                 let vlan_id = r.vlan_id;
-                let rib_priority = r.rib_priority;
-                let sr = StaticRoute4 {
-                    nexthop,
-                    prefix,
-                    vlan_id,
-                    rib_priority: rib_priority
-                        .unwrap_or(DEFAULT_RIB_PRIORITY_STATIC),
-                };
-                rq.routes.list.push(sr);
+                let rib_priority =
+                    r.rib_priority.unwrap_or(DEFAULT_RIB_PRIORITY_STATIC);
+
+                match (r.nexthop, r.destination.addr()) {
+                    (IpAddr::V4(nexthop), IpAddr::V4(dest_addr)) => {
+                        let prefix = Prefix4 {
+                            value: dest_addr,
+                            length: r.destination.width(),
+                        };
+                        let sr = StaticRoute4 {
+                            nexthop,
+                            prefix,
+                            vlan_id,
+                            rib_priority,
+                        };
+                        rq.routes.list.push(sr);
+                    }
+                    (IpAddr::V6(nexthop), IpAddr::V6(dest_addr)) => {
+                        let prefix = Prefix6 {
+                            value: dest_addr,
+                            length: r.destination.width(),
+                        };
+                        let sr = StaticRoute6 {
+                            nexthop,
+                            prefix,
+                            vlan_id,
+                            rib_priority,
+                        };
+                        rqv6.routes.list.push(sr);
+                    }
+                    _ => {
+                        error!(
+                            self.log,
+                            "nexthop and destination are different address types";
+                            "nexthop" => ?r.nexthop,
+                            "destination" => ?r.destination.addr(),
+                        );
+                    }
+                }
             }
         }
 
         if let Err(e) = mgd.static_add_v4_route(&rq).await {
+            error!(
+                self.log,
+                "static route configuration failed";
+                "error" => ?e,
+                "configuration" => ?rq,
+            );
+        };
+
+        if let Err(e) = mgd.static_add_v6_route(&rqv6).await {
             error!(
                 self.log,
                 "static route configuration failed";
@@ -653,6 +825,9 @@ impl<'a> EarlyNetworkSetup<'a> {
 
         let mut addrs = Vec::new();
         for a in &port_config.addresses {
+            if a.addr().is_unspecified() {
+                continue;
+            }
             // TODO We're discarding the `uplink_cidr.prefix()` here and only using
             // the IP address; at some point we probably need to give the full CIDR
             // to dendrite?

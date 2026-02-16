@@ -82,7 +82,7 @@ use omicron_common::api::external::BgpAnnounceSet;
 use omicron_common::api::external::BgpAnnouncement;
 use omicron_common::api::external::BgpConfig;
 use omicron_common::api::external::BgpExported;
-use omicron_common::api::external::BgpImportedRouteIpv4;
+use omicron_common::api::external::BgpImported;
 use omicron_common::api::external::BgpPeerStatus;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Disk;
@@ -4330,7 +4330,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
         audit_and_time(&rqctx, |opctx, nexus| async move {
             let config = config.into_inner();
             let result = nexus.bgp_config_create(&opctx, &config).await?;
-            Ok(HttpResponseCreated::<BgpConfig>(result.into()))
+            Ok(HttpResponseCreated::<BgpConfig>(result.try_into()?))
         })
         .await
     }
@@ -4352,8 +4352,8 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 .bgp_config_list(&opctx, &paginated_by)
                 .await?
                 .into_iter()
-                .map(|p| p.into())
-                .collect();
+                .map(|p| p.try_into())
+                .collect::<Result<Vec<_>, _>>()?;
 
             Ok(HttpResponseOk(ScanByNameOrId::results_page(
                 &query,
@@ -4386,10 +4386,9 @@ impl NexusExternalApi for NexusExternalApiImpl {
             .await
     }
 
-    //TODO pagination? the normal by-name/by-id stuff does not work here
     async fn networking_bgp_exported(
         rqctx: RequestContext<ApiContext>,
-    ) -> Result<HttpResponseOk<BgpExported>, HttpError> {
+    ) -> Result<HttpResponseOk<Vec<BgpExported>>, HttpError> {
         let apictx = rqctx.context();
         let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
         let handler = async {
@@ -4427,13 +4426,37 @@ impl NexusExternalApi for NexusExternalApiImpl {
     async fn networking_bgp_imported_routes_ipv4(
         rqctx: RequestContext<ApiContext>,
         query_params: Query<networking::BgpRouteSelector>,
-    ) -> Result<HttpResponseOk<Vec<BgpImportedRouteIpv4>>, HttpError> {
+    ) -> Result<
+        HttpResponseOk<Vec<v2025_11_20_00::networking::BgpImportedRouteIpv4>>,
+        HttpError,
+    > {
         let apictx = rqctx.context();
         let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
         let handler = async {
             let nexus = &apictx.context.nexus;
             let sel = query_params.into_inner();
-            let result = nexus.bgp_imported_routes_ipv4(&opctx, &sel).await?;
+            let all_routes = nexus.bgp_imported_routes(&opctx, &sel).await?;
+            let result: Vec<v2025_11_20_00::networking::BgpImportedRouteIpv4> =
+                all_routes.into_iter().flat_map(|r| r.try_into().ok()).collect();
+            Ok(HttpResponseOk(result))
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    async fn networking_bgp_imported(
+        rqctx: RequestContext<ApiContext>,
+        query_params: Query<networking::BgpRouteSelector>,
+    ) -> Result<HttpResponseOk<Vec<BgpImported>>, HttpError> {
+        let apictx = rqctx.context();
+        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
+        let handler = async {
+            let nexus = &apictx.context.nexus;
+            let sel = query_params.into_inner();
+            let result = nexus.bgp_imported_routes(&opctx, &sel).await?;
             Ok(HttpResponseOk(result))
         };
         apictx
