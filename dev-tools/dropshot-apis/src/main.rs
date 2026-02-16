@@ -68,8 +68,9 @@ fn all_apis() -> anyhow::Result<ManagedApis> {
             api_description: bootstrap_agent_api_mod::stub_api_description,
             ident: "bootstrap-agent",
         })
-        // The bootstrap-agent API is client-side-versioned and currently frozen,
-        // so we allow trivial changes to go through.
+        // The bootstrap-agent API is client-side-versioned and currently frozen.
+        // We allow trivial changes to go through. If we did not, we would need to
+        // unfreeze the API and bump the version number for trivial changes.
         .allow_trivial_changes_for_latest(),
         ManagedApi::from(ManagedApiConfig {
             title: "Bootstrap Agent Lockstep API",
@@ -203,8 +204,9 @@ fn all_apis() -> anyhow::Result<ManagedApis> {
             api_description: installinator_api_mod::stub_api_description,
             ident: "installinator",
         })
-        // The installinator API is client-side-versioned and currently frozen,
-        // so we allow trivial changes to go through.
+        // The installinator API is client-side-versioned and currently frozen.
+        // We allow trivial changes to go through. If we did not, we would need to
+        // unfreeze the API and bump the version number for trivial changes.
         .allow_trivial_changes_for_latest(),
         ManagedApi::from(ManagedApiConfig {
             title: "Oxide Region API",
@@ -237,8 +239,9 @@ fn all_apis() -> anyhow::Result<ManagedApis> {
             api_description: nexus_internal_api_mod::stub_api_description,
             ident: "nexus-internal",
         })
-        // The Nexus internal API is client-side-versioned and currently frozen,
-        // so we allow trivial changes to go through.
+        // The Nexus internal API is client-side-versioned and currently frozen.
+        // We allow trivial changes to go through. If we did not, we would need
+        // to unfreeze the API and bump the version number for trivial changes.
         .allow_trivial_changes_for_latest(),
         ManagedApi::from(ManagedApiConfig {
             title: "Nexus lockstep API",
@@ -294,8 +297,9 @@ fn all_apis() -> anyhow::Result<ManagedApis> {
             api_description: repo_depot_api_mod::stub_api_description,
             ident: "repo-depot",
         })
-        // The Repo Depot API is client-side-versioned and currently frozen,
-        // so we allow trivial changes to go through.
+        // The Repo Depot API is client-side-versioned and currently frozen. We
+        // allow trivial changes to go through. If we did not, we would need to
+        // unfreeze the API and bump the version number for trivial changes.
         .allow_trivial_changes_for_latest(),
         ManagedApi::from(ManagedApiConfig {
             title: "Oxide Sled Agent API",
