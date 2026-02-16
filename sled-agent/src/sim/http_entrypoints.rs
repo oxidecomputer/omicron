@@ -41,9 +41,12 @@ use sled_agent_types::artifact::{
     ArtifactListResponse, ArtifactPathParam, ArtifactPutResponse,
     ArtifactQueryParam,
 };
+use sled_agent_types::attached_subnet::AttachedSubnet;
+use sled_agent_types::attached_subnet::AttachedSubnets;
+use sled_agent_types::attached_subnet::VmmSubnetPathParam;
 use sled_agent_types::bootstore::BootstoreStatus;
 use sled_agent_types::dataset::{
-    LocalStorageDatasetEnsureRequest, LocalStoragePathParam,
+    LocalStorageDatasetDeleteRequest, LocalStorageDatasetEnsureRequest,
 };
 use sled_agent_types::debug::OperatorSwitchZonePolicy;
 use sled_agent_types::diagnostics::{
@@ -60,6 +63,9 @@ use sled_agent_types::instance::{
 };
 use sled_agent_types::inventory::{Inventory, OmicronSledConfig};
 use sled_agent_types::probes::ProbeSet;
+use sled_agent_types::rot::{
+    Attestation, CertificateChain, MeasurementLog, Nonce, RotPathParams,
+};
 use sled_agent_types::sled::AddSledRequest;
 use sled_agent_types::support_bundle::{
     RangeRequestHeaders, SupportBundleFilePathParam,
@@ -67,15 +73,25 @@ use sled_agent_types::support_bundle::{
     SupportBundleMetadata, SupportBundlePathParam,
     SupportBundleTransferQueryParams,
 };
+use sled_agent_types::trust_quorum::{
+    ProxyCommitRequest, ProxyPrepareAndCommitRequest, TrustQuorumNetworkConfig,
+};
 use sled_agent_types::zone_bundle::{
     BundleUtilization, CleanupContext, CleanupContextUpdate, CleanupCount,
     ZoneBundleFilter, ZoneBundleId, ZoneBundleMetadata, ZonePathParam,
 };
+use sled_hardware_types::BaseboardId;
 // Fixed identifiers for prior versions only
 use sled_agent_types_versions::v1;
 use sled_diagnostics::SledDiagnosticsQueryOutput;
 use std::collections::BTreeMap;
 use std::sync::Arc;
+use trust_quorum_types::messages::{
+    CommitRequest, LrtqUpgradeMsg, PrepareAndCommitRequest, ReconfigureMsg,
+};
+use trust_quorum_types::status::CommitStatus;
+use trust_quorum_types::status::CoordinatorStatus;
+use trust_quorum_types::status::NodeStatus;
 
 use super::sled_agent::SledAgent;
 
@@ -679,31 +695,28 @@ impl SledAgentApi for SledAgentSimImpl {
 
     async fn local_storage_dataset_ensure(
         rqctx: RequestContext<Self::Context>,
-        path_params: Path<LocalStoragePathParam>,
         body: TypedBody<LocalStorageDatasetEnsureRequest>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
         let sa = rqctx.context();
 
-        let LocalStoragePathParam { zpool_id, dataset_id } =
-            path_params.into_inner();
-
-        sa.ensure_local_storage_dataset(
-            zpool_id,
-            dataset_id,
-            body.into_inner(),
-        );
+        sa.ensure_local_storage_dataset(body.into_inner());
 
         Ok(HttpResponseUpdatedNoContent())
     }
 
     async fn local_storage_dataset_delete(
         rqctx: RequestContext<Self::Context>,
-        path_params: Path<LocalStoragePathParam>,
+        body: TypedBody<LocalStorageDatasetDeleteRequest>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
         let sa = rqctx.context();
 
-        let LocalStoragePathParam { zpool_id, dataset_id } =
-            path_params.into_inner();
+        let LocalStorageDatasetDeleteRequest {
+            zpool_id,
+            dataset_id,
+            // Ignored for now: dataset uuids will be unique enough to delete
+            // the correct thing
+            encrypted_at_rest: _,
+        } = body.into_inner();
 
         sa.drop_dataset(
             ZpoolUuid::from_untyped_uuid(zpool_id.into_untyped_uuid()),
@@ -921,6 +934,156 @@ impl SledAgentApi for SledAgentSimImpl {
         _body: TypedBody<ProbeSet>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
         Ok(HttpResponseUpdatedNoContent())
+    }
+
+    async fn trust_quorum_reconfigure(
+        _request_context: RequestContext<Self::Context>,
+        _body: TypedBody<ReconfigureMsg>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        method_unimplemented()
+    }
+
+    async fn trust_quorum_upgrade_from_lrtq(
+        _request_context: RequestContext<Self::Context>,
+        _body: TypedBody<LrtqUpgradeMsg>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        method_unimplemented()
+    }
+
+    async fn trust_quorum_commit(
+        _request_context: RequestContext<Self::Context>,
+        _body: TypedBody<CommitRequest>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        method_unimplemented()
+    }
+
+    async fn trust_quorum_coordinator_status(
+        _request_context: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<Option<CoordinatorStatus>>, HttpError> {
+        method_unimplemented()
+    }
+
+    async fn trust_quorum_prepare_and_commit(
+        _request_context: RequestContext<Self::Context>,
+        _body: TypedBody<PrepareAndCommitRequest>,
+    ) -> Result<HttpResponseOk<CommitStatus>, HttpError> {
+        method_unimplemented()
+    }
+
+    async fn trust_quorum_proxy_commit(
+        _request_context: RequestContext<Self::Context>,
+        _body: TypedBody<ProxyCommitRequest>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        method_unimplemented()
+    }
+
+    async fn trust_quorum_proxy_prepare_and_commit(
+        _request_context: RequestContext<Self::Context>,
+        _body: TypedBody<ProxyPrepareAndCommitRequest>,
+    ) -> Result<HttpResponseOk<CommitStatus>, HttpError> {
+        method_unimplemented()
+    }
+
+    async fn trust_quorum_proxy_status(
+        _request_context: RequestContext<Self::Context>,
+        _query_params: Query<BaseboardId>,
+    ) -> Result<HttpResponseOk<NodeStatus>, HttpError> {
+        method_unimplemented()
+    }
+
+    async fn trust_quorum_status(
+        _request_context: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<NodeStatus>, HttpError> {
+        method_unimplemented()
+    }
+
+    async fn trust_quorum_network_config_get(
+        _request_context: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<Option<TrustQuorumNetworkConfig>>, HttpError>
+    {
+        method_unimplemented()
+    }
+
+    async fn trust_quorum_network_config_put(
+        _request_context: RequestContext<Self::Context>,
+        _body: TypedBody<TrustQuorumNetworkConfig>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        method_unimplemented()
+    }
+
+    async fn vmm_put_attached_subnets(
+        request_context: RequestContext<Self::Context>,
+        path_params: Path<VmmPathParam>,
+        body: TypedBody<AttachedSubnets>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        let sa = request_context.context();
+        let id = path_params.into_inner().propolis_id;
+        let subnets = body.into_inner();
+        sa.instance_put_attached_subnets(id, subnets)
+            .await
+            .map(|_| HttpResponseUpdatedNoContent())
+            .map_err(HttpError::from)
+    }
+
+    async fn vmm_delete_attached_subnets(
+        request_context: RequestContext<Self::Context>,
+        path_params: Path<VmmPathParam>,
+    ) -> Result<HttpResponseDeleted, HttpError> {
+        let sa = request_context.context();
+        let propolis_id = path_params.into_inner().propolis_id;
+        sa.instance_delete_attached_subnets(propolis_id)
+            .await
+            .map(|_| HttpResponseDeleted())
+            .map_err(HttpError::from)
+    }
+
+    async fn vmm_post_attached_subnet(
+        request_context: RequestContext<Self::Context>,
+        path_params: Path<VmmPathParam>,
+        body: TypedBody<AttachedSubnet>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        let sa = request_context.context();
+        let id = path_params.into_inner().propolis_id;
+        let subnet = body.into_inner();
+        sa.instance_post_attached_subnet(id, subnet)
+            .await
+            .map(|_| HttpResponseUpdatedNoContent())
+            .map_err(HttpError::from)
+    }
+
+    async fn vmm_delete_attached_subnet(
+        request_context: RequestContext<Self::Context>,
+        path_params: Path<VmmSubnetPathParam>,
+    ) -> Result<HttpResponseDeleted, HttpError> {
+        let sa = request_context.context();
+        let VmmSubnetPathParam { propolis_id, subnet } =
+            path_params.into_inner();
+        sa.instance_delete_attached_subnet(propolis_id, subnet)
+            .await
+            .map(|_| HttpResponseDeleted())
+            .map_err(HttpError::from)
+    }
+
+    async fn rot_measurement_log(
+        _request_context: RequestContext<Self::Context>,
+        _path_params: Path<RotPathParams>,
+    ) -> Result<HttpResponseOk<MeasurementLog>, HttpError> {
+        method_unimplemented()
+    }
+
+    async fn rot_certificate_chain(
+        _request_context: RequestContext<Self::Context>,
+        _path_params: Path<RotPathParams>,
+    ) -> Result<HttpResponseOk<CertificateChain>, HttpError> {
+        method_unimplemented()
+    }
+
+    async fn rot_attest(
+        _request_context: RequestContext<Self::Context>,
+        _path_params: Path<RotPathParams>,
+        _body: TypedBody<Nonce>,
+    ) -> Result<HttpResponseOk<Attestation>, HttpError> {
+        method_unimplemented()
     }
 }
 

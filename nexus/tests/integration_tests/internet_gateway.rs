@@ -20,7 +20,7 @@ use nexus_test_utils_macros::nexus_test;
 use nexus_types::external_api::{
     params::{
         self, ExternalIpCreate, InstanceNetworkInterfaceAttachment,
-        InstanceNetworkInterfaceCreate,
+        InstanceNetworkInterfaceCreate, PrivateIpStackCreate,
     },
     shared::SiloRole,
     views::{InternetGateway, InternetGatewayIpAddress, InternetGatewayIpPool},
@@ -360,8 +360,11 @@ async fn test_setup(c: &ClientTestContext) {
         c,
         FLOATING_IP_NAME,
         PROJECT_NAME,
-        None,
-        Some(IP_POOL_NAME),
+        params::AddressAllocator::Auto {
+            pool_selector: params::PoolSelector::Explicit {
+                pool: NameOrId::Name(IP_POOL_NAME.parse().unwrap()),
+            },
+        },
     )
     .await;
     let nic_attach = InstanceNetworkInterfaceAttachment::Create(vec![
@@ -370,10 +373,9 @@ async fn test_setup(c: &ClientTestContext) {
                 description: String::from("description"),
                 name: "noname".parse().unwrap(),
             },
-            ip: None,
+            ip_config: PrivateIpStackCreate::auto_ipv4(),
             subnet_name: "default".parse().unwrap(),
             vpc_name: VPC_NAME.parse().unwrap(),
-            transit_ips: vec![],
         },
     ]);
     let _inst = create_instance_with(

@@ -8,6 +8,7 @@ use crate::PRODUCER_UUID;
 use crate::SLED_AGENT_UUID;
 use crate::SLED_AGENT2_UUID;
 use crate::TEST_SUITE_PASSWORD;
+use crate::TEST_SUITE_PASSWORD_HASH;
 use anyhow::Result;
 use camino::Utf8Path;
 use camino::Utf8PathBuf;
@@ -45,6 +46,7 @@ use nexus_types::deployment::BlueprintZoneDisposition;
 use nexus_types::deployment::BlueprintZoneImageSource;
 use nexus_types::deployment::BlueprintZoneType;
 use nexus_types::deployment::CockroachDbPreserveDowngrade;
+use nexus_types::deployment::LastAllocatedSubnetIpOffset;
 use nexus_types::deployment::OmicronZoneExternalFloatingAddr;
 use nexus_types::deployment::OmicronZoneExternalFloatingIp;
 use nexus_types::deployment::OmicronZoneExternalSnatIp;
@@ -92,7 +94,7 @@ use oximeter_producer::LogConfig;
 use oximeter_producer::Server as ProducerServer;
 use sled_agent_client::types::EarlyNetworkConfig;
 use sled_agent_client::types::EarlyNetworkConfigBody;
-use sled_agent_client::types::RackNetworkConfigV2;
+use sled_agent_client::types::RackNetworkConfig;
 use sled_agent_types::inventory::HostPhase2DesiredSlots;
 use sled_agent_types::inventory::OmicronSledConfig;
 use sled_agent_types::inventory::OmicronZoneDataset;
@@ -100,6 +102,7 @@ use sled_agent_types::inventory::SledCpuFamily;
 use sled_agent_types::rack_init::RecoverySiloConfig;
 use slog::{Logger, debug, error, o};
 use std::collections::BTreeMap;
+use std::collections::BTreeSet;
 use std::collections::HashMap;
 use std::fmt::Debug;
 use std::iter::{once, repeat, zip};
@@ -751,14 +754,7 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
         let silo_name: Name = "test-suite-silo".parse().unwrap();
         let user_name =
             UserId::try_from("test-privileged".to_string()).unwrap();
-        let user_password_hash = omicron_passwords::Hasher::default()
-            .create_password(
-                &omicron_passwords::Password::new(TEST_SUITE_PASSWORD).unwrap(),
-            )
-            .unwrap()
-            .as_str()
-            .parse()
-            .unwrap();
+        let user_password_hash = TEST_SUITE_PASSWORD_HASH.parse().unwrap();
         let recovery_silo = RecoverySiloConfig {
             silo_name: silo_name.clone(),
             user_name: user_name.clone(),
@@ -922,7 +918,7 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
         let early_network_config = EarlyNetworkConfig {
             body: EarlyNetworkConfigBody {
                 ntp_servers: Vec::new(),
-                rack_network_config: Some(RackNetworkConfigV2 {
+                rack_network_config: Some(RackNetworkConfig {
                     bfd: Vec::new(),
                     bgp: Vec::new(),
                     infra_ip_first: "192.0.2.10".parse().unwrap(),
@@ -977,6 +973,7 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
                     zones,
                     remove_mupdate_override: None,
                     host_phase_2: HostPhase2DesiredSlots::current_contents(),
+                    measurements: BTreeSet::new(),
                 })
                 .await
                 .expect("Failed to configure sled agent {sled_id} with zones");
@@ -1254,6 +1251,7 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
             logctx: self.logctx,
             gateway: self.gateway,
             dendrite: RwLock::new(self.dendrite.into_inner().unwrap()),
+            stopped_dendrite_ports: RwLock::new(HashMap::new()),
             mgd: self.mgd,
             external_dns_zone_name: self.external_dns_zone_name.unwrap(),
             external_dns: self.external_dns.unwrap(),
@@ -1389,6 +1387,8 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
                 BlueprintSledConfig {
                     state: SledState::Active,
                     subnet: Ipv6Subnet::new(Ipv6Addr::LOCALHOST),
+                    last_allocated_ip_subnet_offset:
+                        LastAllocatedSubnetIpOffset::initial(),
                     sled_agent_generation,
                     disks,
                     datasets,

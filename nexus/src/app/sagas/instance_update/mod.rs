@@ -342,7 +342,7 @@
 
 use super::{
     ACTION_GENERATE_ID, ActionRegistry, NexusActionContext, NexusSaga,
-    SagaInitError,
+    SagaContext, SagaInitError,
 };
 use crate::app::db::datastore::InstanceGestalt;
 use crate::app::db::datastore::VmmStateUpdateResult;
@@ -355,6 +355,7 @@ use crate::app::db::model::InstanceState;
 use crate::app::db::model::MigrationState;
 use crate::app::db::model::Vmm;
 use crate::app::db::model::VmmState;
+use crate::app::instance_network::InstanceNetworkFilters;
 use crate::app::sagas::declare_saga_actions;
 use anyhow::Context;
 use chrono::Utc;
@@ -1068,7 +1069,7 @@ async fn siu_update_network_config(
                     &opctx,
                     instance_id,
                     &sled.address(),
-                    None,
+                    InstanceNetworkFilters::all(),
                 )
                 .await
                 .map_err(ActionError::action_failed)?;
@@ -1338,37 +1339,7 @@ async fn siu_chain_successor_saga(
                 "instance_id" => %instance_id,
             );
         } else {
-            // If the instance has transitioned to the `Failed` state and no
-            // additional update saga is required, check if the instance's
-            // auto-restart policy allows it to be automatically restarted. If
-            // it does, activate the instance-reincarnation background task to
-            // automatically restart it.
-            let karmic_state = new_state
-                .instance
-                .auto_restart_status(new_state.active_vmm.as_ref());
-            if karmic_state.should_reincarnate() {
-                info!(
-                    log,
-                    "instance update: instance transitioned to Failed, \
-                     but can be automatically restarted; activating \
-                     reincarnation.";
-                    "instance_id" => %instance_id,
-                    "auto_restart_config" => ?new_state.instance.auto_restart,
-                    "runtime_state" => ?new_state.instance.runtime_state,
-                    "intended_state" => %new_state.instance.intended_state,
-                );
-                nexus.background_tasks.task_instance_reincarnation.activate();
-            } else {
-                debug!(
-                    log,
-                    "instance update: instance will not reincarnate";
-                    "instance_id" => %instance_id,
-                    "auto_restart_config" => ?new_state.instance.auto_restart,
-                    "needs_reincarnation" => karmic_state.needs_reincarnation,
-                    "karmic_state" => ?karmic_state.can_reincarnate,
-                    "intended_state" => %new_state.instance.intended_state,
-                )
-            }
+            reincarnate_if_needed(osagactx, &new_state)
         }
 
         Ok::<(), anyhow::Error>(())
@@ -1390,6 +1361,43 @@ async fn siu_chain_successor_saga(
     }
 
     Ok(())
+}
+
+fn reincarnate_if_needed(osagactx: &SagaContext, state: &InstanceGestalt) {
+    // If the instance has transitioned to the `Failed` state and no
+    // additional update saga is required, check if the instance's
+    // auto-restart policy allows it to be automatically restarted. If
+    // it does, activate the instance-reincarnation background task to
+    // automatically restart it.
+    let karmic_state =
+        state.instance.auto_restart_status(state.active_vmm.as_ref());
+    if karmic_state.should_reincarnate() {
+        info!(
+            &osagactx.log(),
+            "instance update: instance transitioned to Failed, \
+             but can be automatically restarted; activating \
+             reincarnation.";
+            "instance_id" => %state.instance.id(),
+            "auto_restart_config" => ?state.instance.auto_restart,
+            "runtime_state" => ?state.instance.runtime_state,
+            "intended_state" => %state.instance.intended_state,
+        );
+        osagactx
+            .nexus()
+            .background_tasks
+            .task_instance_reincarnation
+            .activate();
+    } else {
+        debug!(
+            &osagactx.log(),
+            "instance update: instance will not reincarnate";
+            "instance_id" => %state.instance.id(),
+            "auto_restart_config" => ?state.instance.auto_restart,
+            "needs_reincarnation" => karmic_state.needs_reincarnation,
+            "karmic_state" => ?karmic_state.can_reincarnate,
+            "intended_state" => %state.instance.intended_state,
+        )
+    }
 }
 
 /// Unlock the instance record while unwinding.
@@ -1538,7 +1546,7 @@ mod test {
     use nexus_db_lookup::LookupPath;
     use nexus_db_queries::db::datastore::InstanceAndActiveVmm;
     use nexus_test_utils::resource_helpers::{
-        create_default_ip_pool, create_project, object_create,
+        create_default_ip_pools, create_project, object_create,
     };
     use nexus_test_utils_macros::nexus_test;
     use nexus_types::internal_api::params::InstanceMigrateRequest;
@@ -1578,7 +1586,7 @@ mod test {
     // 6. migration source failed
 
     async fn setup_test_project(client: &ClientTestContext) -> Uuid {
-        create_default_ip_pool(&client).await;
+        create_default_ip_pools(&client).await;
         let project = create_project(&client, PROJECT_NAME).await;
         project.identity.id
     }

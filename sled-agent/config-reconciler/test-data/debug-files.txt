@@ -1,0 +1,88 @@
+# In this file, blank lines and lines starting with '#' are ignored.
+#
+# This file contains the full paths to files seen on deployed systems
+# (like the dogfood environment) that the debug collector is responsible for
+# archiving.  There are tests that use these paths to verify that the debug
+# collector's path rules correctly collect files from production systems.
+#
+# If you need to update or regenerate this, you'll want to use something like:
+#
+#    find PATHS -type f
+#
+# for each of several different paths.  Using `find` like this makes sure that
+# these are real paths from real systems.  If you hand-construct a path here to
+# match what the test expects, that defeats the point!
+#
+# Here are paths that we include:
+#
+#    # Not-yet-archived kernel crash dumps and core files
+#    /pool/int/*/crash
+#
+#    # Pick some zone and get its un-archived SMF logs and syslog.
+#    # You'll want to make sure to find one with recently rotated
+#    # log files (which is a little tricky since logadm only rotates
+#    # them every hour and the archiver picks them up within 5
+#    # minutes).
+#    /pool/ext/*/crypt/zone/$PICK_A_ZONE/root/var/svc/log/*
+#    /pool/ext/*/crypt/zone/$PICK_A_ZONE/root/var/adm/messages*
+#
+# though you should beware that this will produce an enormous amount of output
+# on systems that have been deployed for a long time.  You will probably want to
+# prune most of the log files out.
+#
+# The output here has been constructed from similar invocations on several
+# systems in order to assemble a representative set.
+
+# User process core files in the "crash" dataset
+/pool/int/5a058adc-8208-4bff-b4f3-44e2651435b0/crash/core.oxz_switch.cat.27751.1765577436
+/pool/int/7c377f39-95bf-4074-8dda-7a7a102b9d2c/crash/core.oxz_propolis-server_081c9d2b-2d89-4830-b3c5-ff4439013794.propolis-server.5047.1765579111
+/pool/int/41eda85a-0820-4c91-8067-7f28af0cd408/crash/core.oxz_propolis-server_1182aa44-0367-4ea5-be41-f207a95b52bf.propolis-server.28517.1765579115
+
+# Live SMF log files
+/pool/ext/0c4ef358-5533-43db-ad38-a8eff716e53a/crypt/zone/oxz_crucible_5cc7c840-8e6b-48c8-ac4b-f4297f8cf61a/root/var/svc/log/application-management-net-snmp:default.log
+/pool/ext/0c4ef358-5533-43db-ad38-a8eff716e53a/crypt/zone/oxz_crucible_5cc7c840-8e6b-48c8-ac4b-f4297f8cf61a/root/var/svc/log/application-security-tcsd:default.log
+/pool/ext/0c4ef358-5533-43db-ad38-a8eff716e53a/crypt/zone/oxz_crucible_5cc7c840-8e6b-48c8-ac4b-f4297f8cf61a/root/var/svc/log/milestone-devices:default.log
+/pool/ext/0c4ef358-5533-43db-ad38-a8eff716e53a/crypt/zone/oxz_crucible_5cc7c840-8e6b-48c8-ac4b-f4297f8cf61a/root/var/svc/log/network-tcpkey:default.log
+/pool/ext/0c4ef358-5533-43db-ad38-a8eff716e53a/crypt/zone/oxz_crucible_5cc7c840-8e6b-48c8-ac4b-f4297f8cf61a/root/var/svc/log/oxide-crucible-agent:default.log
+/pool/ext/0c4ef358-5533-43db-ad38-a8eff716e53a/crypt/zone/oxz_crucible_5cc7c840-8e6b-48c8-ac4b-f4297f8cf61a/root/var/svc/log/oxide-crucible-downstairs:default.log
+/pool/ext/0c4ef358-5533-43db-ad38-a8eff716e53a/crypt/zone/oxz_crucible_5cc7c840-8e6b-48c8-ac4b-f4297f8cf61a/root/var/svc/log/oxide-crucible-downstairs:downstairs-5275dc20-1d32-4304-8b61-a62a575839ad.log
+/pool/ext/0c4ef358-5533-43db-ad38-a8eff716e53a/crypt/zone/oxz_crucible_5cc7c840-8e6b-48c8-ac4b-f4297f8cf61a/root/var/svc/log/svc.startd.log
+/pool/ext/0c4ef358-5533-43db-ad38-a8eff716e53a/crypt/zone/oxz_ntp_0460bff0-4cef-487f-aa5c-fd7e1ecef3e0/root/var/svc/log/oxide-chrony-setup:default.log
+/pool/ext/0c4ef358-5533-43db-ad38-a8eff716e53a/crypt/zone/oxz_ntp_0460bff0-4cef-487f-aa5c-fd7e1ecef3e0/root/var/svc/log/oxide-ntp-admin:default.log
+/pool/ext/0c4ef358-5533-43db-ad38-a8eff716e53a/crypt/zone/oxz_ntp_0460bff0-4cef-487f-aa5c-fd7e1ecef3e0/root/var/svc/log/oxide-ntp:default.log
+
+# Live syslog files
+/pool/ext/0c4ef358-5533-43db-ad38-a8eff716e53a/crypt/zone/oxz_crucible_5cc7c840-8e6b-48c8-ac4b-f4297f8cf61a/root/var/adm/messages
+/pool/ext/0c4ef358-5533-43db-ad38-a8eff716e53a/crypt/zone/oxz_ntp_0460bff0-4cef-487f-aa5c-fd7e1ecef3e0/root/var/adm/messages
+/pool/ext/34dadf3f-f60c-4acc-b82b-4b0c82224222/crypt/zone/oxz_crucible_b12aa520-a769-4eac-b56b-09960550a831/root/var/adm/messages
+/pool/ext/34dadf3f-f60c-4acc-b82b-4b0c82224222/crypt/zone/oxz_propolis-server_c78103ae-b241-4655-93fb-5f2f8bf50041/root/var/adm/messages
+/pool/ext/416232c1-bc8f-403f-bacb-28403dd8fced/crypt/zone/oxz_cockroachdb_e86845b5-eabd-49f5-9a10-6dfef9066209/root/var/adm/messages
+/pool/ext/416232c1-bc8f-403f-bacb-28403dd8fced/crypt/zone/oxz_crucible_85bd9bdb-1ec5-4a8d-badb-8b5d502546a1/root/var/adm/messages
+
+# Rotated SMF log files
+/pool/ext/2115b084-be0f-4fba-941b-33a659798a9e/crypt/zone/oxz_ntp_a700528f-f600-4908-94ac-9c06442ef6b4/root/var/svc/log/application-management-net-snmp:default.log.0
+/pool/ext/2115b084-be0f-4fba-941b-33a659798a9e/crypt/zone/oxz_ntp_a700528f-f600-4908-94ac-9c06442ef6b4/root/var/svc/log/oxide-ntp:default.log.0
+
+# Rotated syslog files
+/pool/ext/2115b084-be0f-4fba-941b-33a659798a9e/crypt/zone/oxz_ntp_a700528f-f600-4908-94ac-9c06442ef6b4/root/var/adm/messages.0
+
+# Global zone: live syslog
+/var/adm/messages
+
+# Global zone: rotated syslog
+/var/adm/messages.0
+/var/adm/messages.1
+/var/adm/messages.2
+/var/adm/messages.3
+
+# Global zone: live SMF logs
+/var/svc/log/site-postboot:default.log
+/var/svc/log/oxide-pumpkind:default.log
+/var/svc/log/oxide-sled-agent:default.log
+
+# Global zone: rotated SMF logs
+/var/svc/log/oxide-mg-ddm:default.log.0
+/var/svc/log/oxide-mg-ddm:default.log.1
+/var/svc/log/oxide-sled-agent:default.log.0
+/var/svc/log/oxide-sled-agent:default.log.1
+/var/svc/log/oxide-sled-agent:default.log.2

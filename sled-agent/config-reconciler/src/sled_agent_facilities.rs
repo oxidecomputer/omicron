@@ -11,9 +11,9 @@ use illumos_utils::zpool::PathInPool;
 use omicron_common::address::Ipv6Subnet;
 use omicron_common::address::SLED_PREFIX;
 use omicron_uuid_kinds::MupdateOverrideUuid;
-use sled_agent_types::zone_images::PreparedOmicronZone;
-use sled_agent_types::zone_images::RemoveMupdateOverrideResult;
-use sled_agent_types::zone_images::ResolverStatus;
+use sled_agent_types::resolvable_files::PreparedOmicronZone;
+use sled_agent_types::resolvable_files::RemoveMupdateOverrideResult;
+use sled_agent_types::resolvable_files::ResolverStatus;
 use std::future::Future;
 use tufaceous_artifact::ArtifactHash;
 
@@ -40,10 +40,11 @@ pub trait SledAgentFacilities: Send + Sync + 'static {
         zone_root_path: PathInPool,
     ) -> impl Future<Output = anyhow::Result<RunningZone>> + Send;
 
-    /// Get the status of the zone image resolver.
-    ///
+    /// Get the status of the file source resolver.
+    /// This is designed to translate information about a file into
+    /// something usable at runtime.
     /// This can be used to prepare zones as well as start them.
-    fn zone_image_resolver_status(&self) -> ResolverStatus;
+    fn file_source_resolver_status(&self) -> ResolverStatus;
 
     /// Remove the mupdate override file from disk.
     fn remove_mupdate_override(

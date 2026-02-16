@@ -42,13 +42,13 @@ async fn run_test() -> Result<()> {
 
     let (first, last) = get_system_ip_pool().await?;
 
-    // ===== CREATE IP POOL ===== //
+    // ===== CREATE IPv4 POOL ===== //
     let ip_version =
         if first.is_ipv4() { IpVersion::V4 } else { IpVersion::V6 };
     eprintln!("creating IP{} IP pool... {:?} - {:?}", ip_version, first, last);
     let pool_name = "default";
     client
-        .ip_pool_create()
+        .system_ip_pool_create()
         .body(IpPoolCreate {
             name: pool_name.parse().unwrap(),
             description: "Default IP pool".to_string(),
@@ -58,7 +58,7 @@ async fn run_test() -> Result<()> {
         .send()
         .await?;
     client
-        .ip_pool_silo_link()
+        .system_ip_pool_silo_link()
         .pool(pool_name)
         .body(IpPoolLinkSilo {
             silo: NameOrId::Name(params.silo_name().parse().unwrap()),
@@ -67,7 +67,45 @@ async fn run_test() -> Result<()> {
         .send()
         .await?;
     client
-        .ip_pool_range_add()
+        .system_ip_pool_range_add()
+        .pool(pool_name)
+        .body(try_create_ip_range(first, last)?)
+        .send()
+        .await?;
+
+    // ===== CREATE IPv6 POOL ===== //
+    //
+    // NOTE: This is not currently used. We don't have IPv6 routable addresses
+    // set up in the lab yet, see
+    // https://github.com/oxidecomputer/meta/issues/824. But we do need an
+    // external IPv6 IP Pool for the instance-launch test, which creates an
+    // instance with a dual-stack NIC, and so allocates an SNAT IPv6 address.
+    let first = "fd00::aa".parse().unwrap();
+    let last = "fd00::bb".parse().unwrap();
+    let ip_version = IpVersion::V6;
+    eprintln!("creating IP{} IP pool... {:?} - {:?}", ip_version, first, last);
+    let pool_name = "default-v6";
+    client
+        .system_ip_pool_create()
+        .body(IpPoolCreate {
+            name: pool_name.parse().unwrap(),
+            description: "Default IPv6 pool".to_string(),
+            ip_version,
+            pool_type: IpPoolType::Unicast,
+        })
+        .send()
+        .await?;
+    client
+        .system_ip_pool_silo_link()
+        .pool(pool_name)
+        .body(IpPoolLinkSilo {
+            silo: NameOrId::Name(params.silo_name().parse().unwrap()),
+            is_default: true,
+        })
+        .send()
+        .await?;
+    client
+        .system_ip_pool_range_add()
         .pool(pool_name)
         .body(try_create_ip_range(first, last)?)
         .send()

@@ -12,7 +12,7 @@ use dropshot::{
 use dropshot_api_manager_types::api_versions;
 use nexus_types::{
     external_api::{
-        shared::ProbeInfo,
+        shared::ProbeExternalIp,
         views::{Ping, PingStatus},
     },
     internal_api::{
@@ -22,8 +22,9 @@ use nexus_types::{
         views::NatEntryView,
     },
 };
+use omicron_common::api::internal::shared::network_interface::v1::NetworkInterface as NetworkInterfaceV1;
 use omicron_common::api::{
-    external::http_pagination::PaginatedById,
+    external::{Name, http_pagination::PaginatedById},
     internal::nexus::{
         DiskRuntimeState, DownstairsClientStopRequest, DownstairsClientStopped,
         ProducerEndpoint, ProducerRegistrationResponse, RepairFinishInfo,
@@ -236,6 +237,13 @@ pub trait NexusInternalApi {
 
     /// Fetch NAT ChangeSet
     ///
+    /// NOTE: This is no longer just IPv4, it includes IPv6. However, this API
+    /// cannot have forward-incompatable changes (e.g. clients running against
+    /// new API definitions need to be able to talk to older server still) so
+    /// we cannot add a generic nat_changeset API endpoint which would only be
+    /// backwards compatiable. So for the time being we are stuck with this
+    /// misleading name.
+    ///
     /// Caller provides their generation as `from_gen`, along with a query
     /// parameter for the page size (`limit`). Endpoint will return changes
     /// that have occured since the caller's generation number up to the latest
@@ -278,6 +286,25 @@ pub trait NexusInternalApi {
     async fn refresh_vpc_routes(
         rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
+}
+
+/// Information about a networking probe.
+//
+// This type is used by the abandoned `probes_get` endpoint which always
+// returns 410 Gone. That type uses V1 of the shared network interface type. We
+// cannot update the actual API type, since that's part of the client-side
+// versioned Nexus internal API. When that's supported, we can make this change
+// versioned too.
+//
+// See https://github.com/oxidecomputer/omicron/issues/9290.
+#[derive(Debug, Clone, JsonSchema, Serialize, Deserialize)]
+pub struct ProbeInfo {
+    pub id: Uuid,
+    pub name: Name,
+    #[schemars(with = "Uuid")]
+    pub sled: SledUuid,
+    pub external_ips: Vec<ProbeExternalIp>,
+    pub interface: NetworkInterfaceV1,
 }
 
 /// Path parameters for Sled Agent requests (internal API)

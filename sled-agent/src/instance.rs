@@ -16,16 +16,22 @@ use crate::profile::*;
 use crate::zone_bundle::ZoneBundler;
 
 use chrono::Utc;
+use iddqd::IdOrdMap;
+use iddqd::id_ord_map::Entry;
 use illumos_utils::dladm::Etherstub;
 use illumos_utils::link::VnicAllocator;
-use illumos_utils::opte::{DhcpCfg, PortCreateParams, PortManager};
+use illumos_utils::opte::{
+    DhcpCfg, EnsureAttachedSubnetResult, PortCreateParams, PortManager,
+    cidr_to_net, net_to_cidr,
+};
 use illumos_utils::running_zone::{RunningZone, ZoneBuilderFactory};
 use illumos_utils::zone::PROPOLIS_ZONE_PREFIX;
 use illumos_utils::zpool::ZpoolOrRamdisk;
 use omicron_common::api::internal::nexus::{SledVmmState, VmmRuntimeState};
+use omicron_common::api::internal::shared::external_ip::ExternalIpsError;
 use omicron_common::api::internal::shared::{
-    DelegatedZvol, ExternalIpConfig, NetworkInterface, ResolvedVpcFirewallRule,
-    SledIdentifiers,
+    DelegatedZvol, ExternalIpConfig, ExternalIpConfigBuilder, NetworkInterface,
+    ResolvedVpcFirewallRule, SledIdentifiers,
 };
 use omicron_common::backoff;
 use omicron_common::backoff::BackoffError;
@@ -33,15 +39,19 @@ use omicron_common::zpool_name::ZpoolName;
 use omicron_uuid_kinds::{
     GenericUuid, InstanceUuid, OmicronZoneUuid, PropolisUuid,
 };
+use oxnet::IpNet;
 use propolis_api_types::ErrorCode as PropolisErrorCode;
 use propolis_client::Client as PropolisClient;
-use propolis_client::instance_spec::{ComponentV0, SpecKey};
+use propolis_client::instance_spec::{
+    ComponentV0, InstanceSpec, InstanceSpecV0, SpecKey,
+};
 use rand::SeedableRng;
 use rand::prelude::IteratorRandom;
 use sled_agent_config_reconciler::AvailableDatasetsReceiver;
+use sled_agent_resolvable_files::ramdisk_file_source;
+use sled_agent_types::attached_subnet::{AttachedSubnet, AttachedSubnets};
 use sled_agent_types::instance::*;
 use sled_agent_types::zone_bundle::ZoneBundleCause;
-use sled_agent_zone_images::ramdisk_file_source;
 use slog::Logger;
 use std::net::IpAddr;
 use std::net::SocketAddr;
@@ -137,6 +147,12 @@ pub enum Error {
 
     #[error("Instance is terminating")]
     Terminating,
+
+    #[error("The IP subnet {0} is already attached")]
+    SubnetAlreadyAttached(IpNet),
+
+    #[error("Failed to create external IP config")]
+    ExternalIps(#[from] ExternalIpsError),
 }
 
 type PropolisClientError =
@@ -252,6 +268,21 @@ enum InstanceRequest {
     RefreshMulticastGroups {
         tx: oneshot::Sender<Result<(), ManagerError>>,
     },
+    SetAttachedSubnets {
+        subnets: AttachedSubnets,
+        tx: oneshot::Sender<Result<(), ManagerError>>,
+    },
+    ClearAttachedSubnets {
+        tx: oneshot::Sender<Result<(), ManagerError>>,
+    },
+    AttachSubnet {
+        subnet: AttachedSubnet,
+        tx: oneshot::Sender<Result<(), ManagerError>>,
+    },
+    DetachSubnet {
+        subnet: IpNet,
+        tx: oneshot::Sender<Result<(), ManagerError>>,
+    },
 }
 
 impl InstanceRequest {
@@ -296,7 +327,11 @@ impl InstanceRequest {
             | Self::RefreshExternalIps { tx }
             | Self::JoinMulticastGroup { tx, .. }
             | Self::LeaveMulticastGroup { tx, .. }
-            | Self::RefreshMulticastGroups { tx } => tx
+            | Self::RefreshMulticastGroups { tx }
+            | Self::SetAttachedSubnets { tx, .. }
+            | Self::ClearAttachedSubnets { tx }
+            | Self::AttachSubnet { tx, .. }
+            | Self::DetachSubnet { tx, .. } => tx
                 .send(Err(error.into()))
                 .map_err(|_| Error::FailedSendClientClosed),
         }
@@ -515,7 +550,7 @@ struct InstanceRunner {
     monitor_handle: Option<tokio::task::JoinHandle<()>>,
 
     // Properties visible to Propolis
-    properties: propolis_client::types::InstanceProperties,
+    properties: propolis_client::instance_spec::InstanceProperties,
 
     // The ID of the Propolis server (and zone) running this instance
     propolis_id: PropolisUuid,
@@ -562,6 +597,22 @@ struct InstanceRunner {
 
     // Zvols to delegate to the Propolis zone
     delegated_zvols: Vec<DelegatedZvol>,
+
+    // Subnets attached to this instance.
+    attached_subnets: IdOrdMap<AttachedSubnet>,
+}
+
+/// Translate a `propolis-client` `InstanceSpecV0` into the newer
+/// `InstanceSpec`.
+///
+/// This can be done losslessly, and probably should be an `impl From` or
+/// inherent method in `propolis-client`, but Propolis itself converts between
+/// these types a little less directly. It hadn't occurred to me that this is
+/// useful for clients as well.
+pub(crate) fn spec_v0_to_v1(orig_spec: InstanceSpecV0) -> InstanceSpec {
+    let InstanceSpecV0 { board, components } = orig_spec;
+
+    InstanceSpec { board, components, smbios: None }
 }
 
 impl InstanceRunner {
@@ -742,6 +793,22 @@ impl InstanceRunner {
                                 tx.send(self.refresh_multicast_groups().map_err(|e| e.into()))
                                 .map_err(|_| Error::FailedSendClientClosed)
                             }
+                            SetAttachedSubnets { tx, subnets } => {
+                                tx.send(self.set_attached_subnets(subnets).map_err(|e| e.into()))
+                                .map_err(|_| Error::FailedSendClientClosed)
+                            }
+                            ClearAttachedSubnets { tx } => {
+                                tx.send(self.clear_attached_subnets().map_err(|e| e.into()))
+                                .map_err(|_| Error::FailedSendClientClosed)
+                            }
+                            AttachSubnet { tx, subnet } => {
+                                tx.send(self.attach_subnet(subnet).map_err(|e| e.into()))
+                                .map_err(|_| Error::FailedSendClientClosed)
+                            }
+                            DetachSubnet { tx, subnet } => {
+                                tx.send(self.detach_subnet(subnet).map_err(|e| e.into()))
+                                .map_err(|_| Error::FailedSendClientClosed)
+                            }
                         }
                     };
                     tokio::select! {
@@ -846,6 +913,18 @@ impl InstanceRunner {
                     tx.send(Err(Error::Terminating.into())).map_err(|_| ())
                 }
                 RefreshMulticastGroups { tx } => {
+                    tx.send(Err(Error::Terminating.into())).map_err(|_| ())
+                }
+                SetAttachedSubnets { tx, .. } => {
+                    tx.send(Err(Error::Terminating.into())).map_err(|_| ())
+                }
+                ClearAttachedSubnets { tx } => {
+                    tx.send(Err(Error::Terminating.into())).map_err(|_| ())
+                }
+                AttachSubnet { tx, .. } => {
+                    tx.send(Err(Error::Terminating.into())).map_err(|_| ())
+                }
+                DetachSubnet { tx, .. } => {
                     tx.send(Err(Error::Terminating.into())).map_err(|_| ())
                 }
             };
@@ -1161,7 +1240,9 @@ impl InstanceRunner {
         } else {
             propolis_client::types::InstanceEnsureRequest {
                 properties: self.properties.clone(),
-                init: InstanceInitializationMethod::Spec { spec: spec.0 },
+                init: InstanceInitializationMethod::Spec {
+                    spec: spec_v0_to_v1(spec.0),
+                },
             }
         };
 
@@ -1345,6 +1426,191 @@ impl InstanceRunner {
         running_state.running_zone.release_opte_ports();
     }
 
+    fn merge_existing_ip_stack_with_request(
+        config: Option<ExternalIpConfig>,
+        request: &InstanceExternalIpBody,
+    ) -> Result<ExternalIpConfig, Error> {
+        // If we have no external IP config at all, create one that supports the
+        // address.
+        let Some(mut external_ips) = config else {
+            let new_config = match request {
+                InstanceExternalIpBody::Ephemeral(IpAddr::V4(ip)) => {
+                    ExternalIpConfigBuilder::new()
+                        .with_ephemeral_ip(*ip)
+                        .build()
+                        .map_err(Error::from)
+                        .map(Into::into)
+                }
+                InstanceExternalIpBody::Ephemeral(IpAddr::V6(ip)) => {
+                    ExternalIpConfigBuilder::new()
+                        .with_ephemeral_ip(*ip)
+                        .build()
+                        .map_err(Error::from)
+                        .map(Into::into)
+                }
+                InstanceExternalIpBody::Floating(IpAddr::V4(ip)) => {
+                    ExternalIpConfigBuilder::new()
+                        .with_floating_ips(vec![*ip])
+                        .build()
+                        .map_err(Error::from)
+                        .map(Into::into)
+                }
+                InstanceExternalIpBody::Floating(IpAddr::V6(ip)) => {
+                    ExternalIpConfigBuilder::new()
+                        .with_floating_ips(vec![*ip])
+                        .build()
+                        .map_err(Error::from)
+                        .map(Into::into)
+                }
+            };
+            return new_config;
+        };
+
+        // Validate the request against an existing config, possibly adding a
+        // new stack to support the requested address.
+        match request {
+            InstanceExternalIpBody::Ephemeral(IpAddr::V4(ipv4)) => {
+                let Some(cfg) = external_ips.ipv4_config_mut() else {
+                    // There was no IPv4 config at all before, which means we
+                    // had to be single-stack IPv6. Make a dual-stack config
+                    // now.
+                    let v4 = ExternalIpConfigBuilder::new()
+                        .with_ephemeral_ip(*ipv4)
+                        .build()?;
+                    let ExternalIpConfig::V6(v6) = external_ips else {
+                        // This _really_ should be unreachable, but it's the
+                        // sled-agent. Return an error message that will cause a
+                        // 500.
+                        let msg = format!(
+                            "expected a single-stack IPv6 config, found {external_ips:?}"
+                        );
+                        return Err(Error::Opte(
+                            illumos_utils::opte::Error::InvalidPortIpConfig(
+                                msg,
+                            ),
+                        ));
+                    };
+                    return Ok(ExternalIpConfig::DualStack { v4, v6 });
+                };
+
+                // We have an existing configuration. We need to support
+                // idempotent attempts to set an ephemeral address, so
+                // we return successfully if the contained address is
+                // the same as our requested one, and fail otherwise.
+                match cfg.ephemeral_ip_mut() {
+                    Some(eip) if eip == ipv4 => {}
+                    Some(eip) => return Err(Error::Opte(
+                        illumos_utils::opte::Error::ImplicitEphemeralIpDetach(
+                            (*ipv4).into(),
+                            (*eip).into(),
+                        ),
+                    )),
+                    empty @ None => {
+                        let _ = empty.insert(*ipv4);
+                    }
+                };
+                Ok(external_ips)
+            }
+            InstanceExternalIpBody::Ephemeral(IpAddr::V6(ipv6)) => {
+                let Some(cfg) = external_ips.ipv6_config_mut() else {
+                    // There was no IPv6 config at all before, which means we
+                    // had to be single-stack IPv4. Make a dual-stack config
+                    // now.
+                    let v6 = ExternalIpConfigBuilder::new()
+                        .with_ephemeral_ip(*ipv6)
+                        .build()?;
+                    let ExternalIpConfig::V4(v4) = external_ips else {
+                        // This _really_ should be unreachable, but it's the
+                        // sled-agent. Return an error message that will cause a
+                        // 500.
+                        let msg = format!(
+                            "expected a single-stack IPv4 config, found {external_ips:?}"
+                        );
+                        return Err(Error::Opte(
+                            illumos_utils::opte::Error::InvalidPortIpConfig(
+                                msg,
+                            ),
+                        ));
+                    };
+                    return Ok(ExternalIpConfig::DualStack { v4, v6 });
+                };
+                // We have an existing configuration. We need to support
+                // idempotent attempts to set an ephemeral address, so
+                // we return successfully if the contained address is
+                // the same as our requested one, and fail otherwise.
+                match cfg.ephemeral_ip_mut() {
+                    Some(eip) if eip == ipv6 => {}
+                    Some(eip) => return Err(Error::Opte(
+                        illumos_utils::opte::Error::ImplicitEphemeralIpDetach(
+                            (*ipv6).into(),
+                            (*eip).into(),
+                        ),
+                    )),
+                    empty @ None => {
+                        let _ = empty.insert(*ipv6);
+                    }
+                };
+                Ok(external_ips)
+            }
+            InstanceExternalIpBody::Floating(IpAddr::V4(ipv4)) => {
+                let Some(cfg) = external_ips.ipv4_config_mut() else {
+                    // There was no IPv4 config at all before, which means we
+                    // had to be single-stack IPv6. Make a dual-stack config
+                    // now.
+                    let v4 = ExternalIpConfigBuilder::new()
+                        .with_floating_ips(vec![*ipv4])
+                        .build()?;
+                    let ExternalIpConfig::V6(v6) = external_ips else {
+                        // This _really_ should be unreachable, but it's the
+                        // sled-agent. Return an error message that will cause a
+                        // 500.
+                        let msg = format!(
+                            "expected a single-stack IPv6 config, found {external_ips:?}"
+                        );
+                        return Err(Error::Opte(
+                            illumos_utils::opte::Error::InvalidPortIpConfig(
+                                msg,
+                            ),
+                        ));
+                    };
+                    return Ok(ExternalIpConfig::DualStack { v4, v6 });
+                };
+                if !cfg.floating_ips().contains(ipv4) {
+                    cfg.floating_ips_mut().push(*ipv4);
+                }
+                Ok(external_ips)
+            }
+            InstanceExternalIpBody::Floating(IpAddr::V6(ipv6)) => {
+                let Some(cfg) = external_ips.ipv6_config_mut() else {
+                    // There was no IPv6 config at all before, which means we
+                    // had to be single-stack IPv4. Make a dual-stack config
+                    // now.
+                    let v6 = ExternalIpConfigBuilder::new()
+                        .with_floating_ips(vec![*ipv6])
+                        .build()?;
+                    let ExternalIpConfig::V4(v4) = external_ips else {
+                        // This _really_ should be unreachable, but it's the
+                        // sled-agent. Return an error message that will cause a
+                        // 500.
+                        let msg = format!(
+                            "expected a single-stack IPv4 config, found {external_ips:?}"
+                        );
+                        return Err(Error::Opte(
+                            illumos_utils::opte::Error::InvalidPortIpConfig(
+                                msg,
+                            ),
+                        ));
+                    };
+                    return Ok(ExternalIpConfig::DualStack { v4, v6 });
+                };
+                if !cfg.floating_ips().contains(ipv6) {
+                    cfg.floating_ips_mut().push(*ipv6);
+                }
+                Ok(external_ips)
+            }
+        }
+    }
+
     fn add_external_ip_inner(
         &mut self,
         request: &InstanceExternalIpBody,
@@ -1355,102 +1621,24 @@ impl InstanceRunner {
         let nic_id = primary_nic.id;
         let nic_kind = primary_nic.kind;
 
-        // TODO-completeness:
+        // Construct the new external IP config necessary to support the
+        // incoming request.
         //
-        // If we have no external IP configuration for the requested address
-        // version, then we fail the overall request. We _could_ support this,
-        // dynamically creating the external IP configuration for the specified
-        // address on-demand. But it's not clear that's what we want right now,
-        // and so we'll defer it. Instead, this means instances need to be
-        // created with the IP stacks they need.
+        // This fails in a few cases where we can't support the request, such as
+        // asking for an Ephemeral IP when we already have a different one
+        // attached.
         //
-        // We should revisit this when actually implementing the public API for
-        // external dual-stack addressing, see
-        // https://github.com/oxidecomputer/omicron/issues/9248.
-        let Some(external_ips) = &mut self.external_ips else {
-            return Err(Error::Opte(
-                illumos_utils::opte::Error::InvalidPortIpConfig,
-            ));
-        };
-
-        // v4 + v6 handling is delegated to `external_ips_ensure`.
-        // If OPTE is unhappy, we undo at `Instance` level.
-
-        // In each match arm below, we check a few things
-        //
-        // - We have an IP configuration of the same IP version as the requested
-        //   address.
-        // - And either:
-        //      - The new address and the existing one are equal, for
-        //        idempotency. This returns early.
-        //      - Or we have no existing address of this type, in which case we
-        //        assign it.
-        match request {
-            InstanceExternalIpBody::Ephemeral(IpAddr::V4(ipv4)) => {
-                let Some(cfg) = external_ips.ipv4_config_mut() else {
-                    return Err(Error::Opte(
-                        illumos_utils::opte::Error::InvalidPortIpConfig,
-                    ));
-                };
-                match cfg.ephemeral_ip_mut() {
-                    Some(eip) if eip == ipv4 => return Ok(()),
-                    Some(eip) => return Err(Error::Opte(
-                        illumos_utils::opte::Error::ImplicitEphemeralIpDetach(
-                            (*ipv4).into(),
-                            (*eip).into(),
-                        ),
-                    )),
-                    empty @ None => {
-                        let _ = empty.insert(*ipv4);
-                    }
-                }
-            }
-            InstanceExternalIpBody::Ephemeral(IpAddr::V6(ipv6)) => {
-                let Some(cfg) = external_ips.ipv6_config_mut() else {
-                    return Err(Error::Opte(
-                        illumos_utils::opte::Error::InvalidPortIpConfig,
-                    ));
-                };
-                match cfg.ephemeral_ip_mut() {
-                    Some(eip) if eip == ipv6 => return Ok(()),
-                    Some(eip) => return Err(Error::Opte(
-                        illumos_utils::opte::Error::ImplicitEphemeralIpDetach(
-                            (*ipv6).into(),
-                            (*eip).into(),
-                        ),
-                    )),
-                    empty @ None => {
-                        let _ = empty.insert(*ipv6);
-                    }
-                }
-            }
-            InstanceExternalIpBody::Floating(IpAddr::V4(ipv4)) => {
-                let Some(cfg) = external_ips.ipv4_config_mut() else {
-                    return Err(Error::Opte(
-                        illumos_utils::opte::Error::InvalidPortIpConfig,
-                    ));
-                };
-                if cfg.floating_ips().contains(ipv4) {
-                    return Ok(());
-                }
-                cfg.floating_ips_mut().push(*ipv4);
-            }
-            InstanceExternalIpBody::Floating(IpAddr::V6(ipv6)) => {
-                let Some(cfg) = external_ips.ipv6_config_mut() else {
-                    return Err(Error::Opte(
-                        illumos_utils::opte::Error::InvalidPortIpConfig,
-                    ));
-                };
-                if cfg.floating_ips().contains(ipv6) {
-                    return Ok(());
-                }
-                cfg.floating_ips_mut().push(*ipv6);
-            }
-        }
-
-        self.port_manager
-            .external_ips_ensure(nic_id, nic_kind, external_ips)
-            .map_err(Error::Opte)
+        // It's important that we return a _new_ IP stack here, but don't yet
+        // set our own. We'll ask OPTE to actually ensure the addresses, and if
+        // that fails, we would need to unwind. We only overwrite our own if the
+        // request to OPTE succeeds.
+        let new_config = Self::merge_existing_ip_stack_with_request(
+            self.external_ips.clone(),
+            request,
+        )?;
+        self.port_manager.external_ips_ensure(nic_id, nic_kind, &new_config)?;
+        self.external_ips = Some(new_config);
+        Ok(())
     }
 
     fn refresh_external_ips_inner(&mut self) -> Result<(), Error> {
@@ -1471,6 +1659,50 @@ impl InstanceRunner {
             .map_err(Error::Opte)
     }
 
+    fn prune_existing_ip_stack_with_request(
+        mut config: ExternalIpConfig,
+        request: &InstanceExternalIpBody,
+    ) -> ExternalIpConfig {
+        match request {
+            InstanceExternalIpBody::Ephemeral(IpAddr::V4(ipv4)) => {
+                if let Some(cfg) = config.ipv4_config_mut() {
+                    // Take out of the option only if it contains the requested
+                    // address. If it doesn't, either it's None or has another
+                    // address, both of which mean we've "succeeded".
+                    cfg.ephemeral_ip_mut().take_if(|eip| eip == ipv4);
+                }
+            }
+            InstanceExternalIpBody::Ephemeral(IpAddr::V6(ipv6)) => {
+                if let Some(cfg) = config.ipv6_config_mut() {
+                    cfg.ephemeral_ip_mut().take_if(|eip| eip == ipv6);
+                }
+            }
+            InstanceExternalIpBody::Floating(IpAddr::V4(ipv4)) => {
+                if let Some(cfg) = config.ipv4_config_mut() {
+                    let fips = cfg.floating_ips_mut();
+                    let floating_index = fips.iter().position(|v| v == ipv4);
+                    if let Some(pos) = floating_index {
+                        // Swap remove is valid here, OPTE is not sensitive
+                        // to Floating Ip ordering.
+                        fips.swap_remove(pos);
+                    }
+                }
+            }
+            InstanceExternalIpBody::Floating(IpAddr::V6(ipv6)) => {
+                if let Some(cfg) = config.ipv6_config_mut() {
+                    let fips = cfg.floating_ips_mut();
+                    let floating_index = fips.iter().position(|v| v == ipv6);
+                    if let Some(pos) = floating_index {
+                        // Swap remove is valid here, OPTE is not sensitive
+                        // to Floating Ip ordering.
+                        fips.swap_remove(pos);
+                    }
+                }
+            }
+        }
+        config
+    }
+
     fn delete_external_ip_inner(
         &mut self,
         request: &InstanceExternalIpBody,
@@ -1482,87 +1714,173 @@ impl InstanceRunner {
         let nic_kind = primary_nic.kind;
 
         // See note at the top of `add_external_ip_inner()`.
-        let Some(external_ips) = &mut self.external_ips else {
-            return Err(Error::Opte(
-                illumos_utils::opte::Error::InvalidPortIpConfig,
-            ));
+        //
+        // In addition, if we have no external IP config at all, there's nothing
+        // to delete.
+        let Some(external_ips) = &self.external_ips else {
+            return Ok(());
         };
-
-        // v4 + v6 handling is delegated to `external_ips_ensure`.
-        // If OPTE is unhappy, we undo at `Instance` level.
-
-        // We want to idempotently delete addresses, but it's not really
-        // possible to tell the difference between:
-        //
-        // - Having no IP at all
-        // - Having deleted the requested IP but afterwards reassigned a new
-        //   one.
-        //
-        // Also note that we don't fail if we're asked to delete an external
-        // address that we don't have an IP stack for (i.e., delete an IPv4 when
-        // we're IPv6-only). This is to preserve the original behavior, which
-        // would not fail in this case either.
-        match request {
-            InstanceExternalIpBody::Ephemeral(IpAddr::V4(ipv4)) => {
-                let Some(cfg) = external_ips.ipv4_config_mut() else {
-                    return Ok(());
-                };
-                // Take out of the option only if it contains the requested
-                // address. If it doesn't, either it's None or has another
-                // address, both of which mean we've "succeeded".
-                if cfg.ephemeral_ip_mut().take_if(|eip| eip == ipv4).is_none() {
-                    return Ok(());
-                }
-            }
-            InstanceExternalIpBody::Ephemeral(IpAddr::V6(ipv6)) => {
-                let Some(cfg) = external_ips.ipv6_config_mut() else {
-                    return Ok(());
-                };
-                if cfg.ephemeral_ip_mut().take_if(|eip| eip == ipv6).is_none() {
-                    return Ok(());
-                }
-            }
-            InstanceExternalIpBody::Floating(IpAddr::V4(ipv4)) => {
-                let Some(cfg) = external_ips.ipv4_config_mut() else {
-                    return Ok(());
-                };
-                let fips = cfg.floating_ips_mut();
-                let floating_index = fips.iter().position(|v| v == ipv4);
-                if let Some(pos) = floating_index {
-                    // Swap remove is valid here, OPTE is not sensitive
-                    // to Floating Ip ordering.
-                    fips.swap_remove(pos);
-                } else {
-                    return Ok(());
-                }
-            }
-            InstanceExternalIpBody::Floating(IpAddr::V6(ipv6)) => {
-                let Some(cfg) = external_ips.ipv6_config_mut() else {
-                    return Ok(());
-                };
-                let fips = cfg.floating_ips_mut();
-                let floating_index = fips.iter().position(|v| v == ipv6);
-                if let Some(pos) = floating_index {
-                    // Swap remove is valid here, OPTE is not sensitive
-                    // to Floating Ip ordering.
-                    fips.swap_remove(pos);
-                } else {
-                    return Ok(());
-                }
-            }
-        }
-
-        self.port_manager.external_ips_ensure(
-            nic_id,
-            nic_kind,
-            &external_ips,
-        )?;
-
+        let new_config = Self::prune_existing_ip_stack_with_request(
+            external_ips.clone(),
+            request,
+        );
+        self.port_manager.external_ips_ensure(nic_id, nic_kind, &new_config)?;
+        self.external_ips = Some(new_config);
         Ok(())
     }
 
     fn primary_nic(&self) -> Option<&NetworkInterface> {
         self.requested_nics.iter().find(|nic| nic.primary)
+    }
+
+    /// Replace the set of attached subnets, setting it to exactly the input.
+    fn set_attached_subnets(
+        &mut self,
+        subnets: AttachedSubnets,
+    ) -> Result<(), Error> {
+        let Some(primary_nic) = self.primary_nic() else {
+            return Err(Error::Opte(illumos_utils::opte::Error::NoPrimaryNic));
+        };
+
+        // NOTE: There are a lot of really annoying conversions here at the API
+        // boundary between Omicron, illumos-utils, and OPTE. We want to work
+        // with the sled-agent API type, because it uses `oxnet` and we can
+        // stuff those types into the `iddqd` map types.
+        //
+        // But that means we need to convert both on the way in and the way out,
+        // since the calls into the OPTE code return the chagnes it actually
+        // applied, in _that module's_ native types.
+        //
+        // https://github.com/oxidecomputer/opte/issues/933 tracks moving OPTE
+        // to the `oxnet` types. That will be a bit of a lift, since the kernel
+        // context requires some more care, but it's definitely worth it to not
+        // have at least 3-4 different "IP network" types floating around here.
+
+        // OPTE itself either inserts a new subnet, or updates the mapping it
+        // currently has, so we can "add" the full set here.
+        //
+        // We do need to compute the set of subnets we want to remove, which are
+        // just those we have locally, but not in the requested set.
+        let requested = subnets.subnets;
+        let to_remove = self
+            .attached_subnets
+            .iter()
+            .filter_map(|s| {
+                if requested.contains_key(&s.subnet) {
+                    None
+                } else {
+                    Some(net_to_cidr(s.subnet))
+                }
+            })
+            .collect::<Vec<_>>();
+        let to_ensure =
+            requested.iter().copied().map(Into::into).collect::<Vec<_>>();
+        let nic_id = primary_nic.id;
+        let nic_kind = primary_nic.kind;
+        let result = self
+            .port_manager
+            .attached_subnets_ensure(nic_id, nic_kind, to_remove, to_ensure);
+        self.update_with_subnet_ensure_result(result)
+    }
+
+    /// Delete all attached subnets.
+    fn clear_attached_subnets(&mut self) -> Result<(), Error> {
+        let Some(primary_nic) = self.primary_nic() else {
+            return Err(Error::Opte(illumos_utils::opte::Error::NoPrimaryNic));
+        };
+        let nic_id = primary_nic.id;
+        let nic_kind = primary_nic.kind;
+        let to_remove = self
+            .attached_subnets
+            .iter()
+            .map(|s| net_to_cidr(s.subnet))
+            .collect();
+        let result = self.port_manager.attached_subnets_ensure(
+            nic_id,
+            nic_kind,
+            to_remove,
+            vec![],
+        );
+        self.update_with_subnet_ensure_result(result)
+    }
+
+    fn update_with_subnet_ensure_result(
+        &mut self,
+        result: EnsureAttachedSubnetResult,
+    ) -> Result<(), Error> {
+        let EnsureAttachedSubnetResult { diff, error } = result;
+        // Update our own set with the result that we _did_ actually apply,
+        // since we could have failed partway through.
+        for removed in diff.detached.iter().copied().map(cidr_to_net) {
+            if self.attached_subnets.remove(&removed).is_none() {
+                error!(
+                    self.log,
+                    "we computed an attached subnet to detach, successfully \
+                    removed it from OPTE, but now it appears not to be in \
+                    our set!";
+                    "removed" => %removed,
+                );
+            }
+        }
+        for attached in diff.attached.into_iter().map(Into::into) {
+            if let Err(e) = self.attached_subnets.insert_unique(attached) {
+                error!(
+                    self.log,
+                    "we computed a new attached subnet to attach, successfully \
+                    added it to OPTE, but now it appears we already had it!";
+                    "duplicate" => ?e,
+                );
+            }
+        }
+        match error {
+            Some(e) => Err(e.into()),
+            None => Ok(()),
+        }
+    }
+
+    /// Attach a single subnet.
+    ///
+    /// This returns an error if a subnet with the matching IP CIDR is already
+    /// attached. Detach it first.
+    fn attach_subnet(&mut self, subnet: AttachedSubnet) -> Result<(), Error> {
+        let Some((nic_id, nic_kind)) =
+            self.primary_nic().map(|nic| (nic.id, nic.kind))
+        else {
+            return Err(Error::Opte(illumos_utils::opte::Error::NoPrimaryNic));
+        };
+        let entry = match self.attached_subnets.entry(&subnet.subnet) {
+            Entry::Vacant(entry) => entry,
+            Entry::Occupied(_) => {
+                return Err(Error::SubnetAlreadyAttached(subnet.subnet));
+            }
+        };
+        self.port_manager
+            .attach_subnet(nic_id, nic_kind, subnet.into())
+            .map_err(Error::from)?;
+        entry.insert(subnet);
+        Ok(())
+    }
+
+    /// Detach a single subnet.
+    ///
+    /// This is idempotent, returning successfully even if the subnet is gone.
+    fn detach_subnet(&mut self, subnet: IpNet) -> Result<(), Error> {
+        let Some((nic_id, nic_kind)) =
+            self.primary_nic().map(|nic| (nic.id, nic.kind))
+        else {
+            return Err(Error::Opte(illumos_utils::opte::Error::NoPrimaryNic));
+        };
+        let Some(entry) = self.attached_subnets.remove(&subnet) else {
+            return Ok(());
+        };
+        let res = self
+            .port_manager
+            .detach_subnet(nic_id, nic_kind, net_to_cidr(subnet))
+            .map_err(Error::from);
+        if res.is_err() {
+            let _ = self.attached_subnets.insert_unique(entry);
+        }
+        res
     }
 }
 
@@ -1747,7 +2065,7 @@ impl Instance {
         // the `InstanceRunner`) and awaiting a termination request.
         let (terminate_tx, terminate_rx) = mpsc::channel(QUEUE_SIZE);
 
-        let metadata = propolis_client::types::InstanceMetadata {
+        let metadata = propolis_client::instance_spec::InstanceMetadata {
             project_id: metadata.project_id,
             silo_id: metadata.silo_id,
             sled_id: sled_identifiers.sled_id,
@@ -1763,7 +2081,7 @@ impl Instance {
             tx_monitor,
             rx_monitor,
             monitor_handle: None,
-            properties: propolis_client::types::InstanceProperties {
+            properties: propolis_client::instance_spec::InstanceProperties {
                 id: id.into_untyped_uuid(),
                 name: local_config.hostname.to_string(),
                 description: "Omicron-managed VM".to_string(),
@@ -1787,6 +2105,7 @@ impl Instance {
             zone_bundler,
             metrics_queue,
             delegated_zvols: local_config.delegated_zvols,
+            attached_subnets: IdOrdMap::new(),
         };
 
         let runner_handle = tokio::task::spawn(async move {
@@ -1945,6 +2264,45 @@ impl Instance {
     ) -> Result<(), Error> {
         self.tx
             .try_send(InstanceRequest::RefreshMulticastGroups { tx })
+            .or_else(InstanceRequest::fail_try_send)
+    }
+
+    pub(crate) fn set_attached_subnets(
+        &self,
+        tx: oneshot::Sender<Result<(), ManagerError>>,
+        subnets: AttachedSubnets,
+    ) -> Result<(), Error> {
+        self.tx
+            .try_send(InstanceRequest::SetAttachedSubnets { subnets, tx })
+            .or_else(InstanceRequest::fail_try_send)
+    }
+
+    pub(crate) fn clear_attached_subnets(
+        &self,
+        tx: oneshot::Sender<Result<(), ManagerError>>,
+    ) -> Result<(), Error> {
+        self.tx
+            .try_send(InstanceRequest::ClearAttachedSubnets { tx })
+            .or_else(InstanceRequest::fail_try_send)
+    }
+
+    pub(crate) fn attach_subnet(
+        &self,
+        tx: oneshot::Sender<Result<(), ManagerError>>,
+        subnet: AttachedSubnet,
+    ) -> Result<(), Error> {
+        self.tx
+            .try_send(InstanceRequest::AttachSubnet { subnet, tx })
+            .or_else(InstanceRequest::fail_try_send)
+    }
+
+    pub(crate) fn detach_subnet(
+        &self,
+        tx: oneshot::Sender<Result<(), ManagerError>>,
+        subnet: IpNet,
+    ) -> Result<(), Error> {
+        self.tx
+            .try_send(InstanceRequest::DetachSubnet { subnet, tx })
             .or_else(InstanceRequest::fail_try_send)
     }
 }
@@ -2145,6 +2503,12 @@ impl InstanceRunner {
                 external_ips: &self.external_ips,
                 firewall_rules: &self.firewall_rules,
                 dhcp_config: self.dhcp_config.clone(),
+                attached_subnets: self
+                    .attached_subnets
+                    .iter()
+                    .copied()
+                    .map(Into::into)
+                    .collect(),
             })?;
             opte_port_names.push(port.0.name().to_string());
             opte_ports.push(port);
@@ -2803,6 +3167,7 @@ mod tests {
                 search_domains: vec![],
             },
             delegated_zvols: vec![],
+            attached_subnets: vec![],
         };
 
         InstanceInitialState {
@@ -3353,7 +3718,7 @@ mod tests {
                 serial: "fake-serial".into(),
             };
 
-            let metadata = propolis_client::types::InstanceMetadata {
+            let metadata = propolis_client::instance_spec::InstanceMetadata {
                 project_id: metadata.project_id,
                 silo_id: metadata.silo_id,
                 sled_id: sled_identifiers.sled_id,
@@ -3389,12 +3754,13 @@ mod tests {
                 tx_monitor: monitor_tx,
                 rx_monitor: monitor_rx,
                 monitor_handle: None,
-                properties: propolis_client::types::InstanceProperties {
-                    id: propolis_id.into_untyped_uuid(),
-                    name: "test instance".to_string(),
-                    description: "test instance".to_string(),
-                    metadata,
-                },
+                properties:
+                    propolis_client::instance_spec::InstanceProperties {
+                        id: propolis_id.into_untyped_uuid(),
+                        name: "test instance".to_string(),
+                        description: "test instance".to_string(),
+                        metadata,
+                    },
                 propolis_spec: vmm_spec,
                 propolis_id,
                 propolis_addr,
@@ -3413,6 +3779,7 @@ mod tests {
                 zone_bundler,
                 metrics_queue,
                 delegated_zvols: local_config.delegated_zvols,
+                attached_subnets: IdOrdMap::new(),
             }
         }
     }
@@ -3626,5 +3993,225 @@ mod tests {
 
         assert_eq!(membership1, membership2);
         assert_ne!(membership1, membership3);
+    }
+
+    #[test]
+    fn add_ephemeral_ip_with_no_ip_stack_at_all() {
+        let expected_stack: ExternalIpConfig = ExternalIpConfigBuilder::new()
+            .with_ephemeral_ip(Ipv4Addr::new(10, 0, 0, 1))
+            .build()
+            .unwrap()
+            .into();
+        let new_stack = InstanceRunner::merge_existing_ip_stack_with_request(
+            None,
+            &InstanceExternalIpBody::Ephemeral(
+                Ipv4Addr::new(10, 0, 0, 1).into(),
+            ),
+        )
+        .unwrap();
+        assert_eq!(new_stack, expected_stack);
+    }
+
+    #[test]
+    fn add_floating_ip_with_no_ip_stack_at_all() {
+        let expected_stack: ExternalIpConfig = ExternalIpConfigBuilder::new()
+            .with_floating_ips(vec![Ipv4Addr::new(10, 0, 0, 1)])
+            .build()
+            .unwrap()
+            .into();
+        let new_stack = InstanceRunner::merge_existing_ip_stack_with_request(
+            None,
+            &InstanceExternalIpBody::Floating(
+                Ipv4Addr::new(10, 0, 0, 1).into(),
+            ),
+        )
+        .unwrap();
+        assert_eq!(new_stack, expected_stack);
+    }
+
+    #[test]
+    fn add_floating_ip_with_existing_ephemeral_ip() {
+        let expected_stack: ExternalIpConfig = ExternalIpConfigBuilder::new()
+            .with_ephemeral_ip(Ipv4Addr::new(10, 0, 0, 2))
+            .with_floating_ips(vec![Ipv4Addr::new(10, 0, 0, 1)])
+            .build()
+            .unwrap()
+            .into();
+        let new_stack = InstanceRunner::merge_existing_ip_stack_with_request(
+            Some(
+                ExternalIpConfigBuilder::new()
+                    .with_ephemeral_ip(Ipv4Addr::new(10, 0, 0, 2))
+                    .build()
+                    .unwrap()
+                    .into(),
+            ),
+            &InstanceExternalIpBody::Floating(
+                Ipv4Addr::new(10, 0, 0, 1).into(),
+            ),
+        )
+        .unwrap();
+        assert_eq!(new_stack, expected_stack);
+    }
+
+    #[test]
+    fn add_ephemeral_ip_with_existing_floating_ip() {
+        let expected_stack: ExternalIpConfig = ExternalIpConfigBuilder::new()
+            .with_ephemeral_ip(Ipv4Addr::new(10, 0, 0, 2))
+            .with_floating_ips(vec![Ipv4Addr::new(10, 0, 0, 1)])
+            .build()
+            .unwrap()
+            .into();
+        let new_stack = InstanceRunner::merge_existing_ip_stack_with_request(
+            Some(
+                ExternalIpConfigBuilder::new()
+                    .with_floating_ips(vec![Ipv4Addr::new(10, 0, 0, 1)])
+                    .build()
+                    .unwrap()
+                    .into(),
+            ),
+            &InstanceExternalIpBody::Ephemeral(
+                Ipv4Addr::new(10, 0, 0, 2).into(),
+            ),
+        )
+        .unwrap();
+        assert_eq!(new_stack, expected_stack);
+    }
+
+    #[test]
+    fn add_ephemeral_ip_of_different_ip_version() {
+        let v4 = ExternalIpConfigBuilder::new()
+            .with_ephemeral_ip(Ipv4Addr::new(10, 0, 0, 1))
+            .build()
+            .unwrap();
+        let v6 = ExternalIpConfigBuilder::new()
+            .with_ephemeral_ip(Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 1))
+            .build()
+            .unwrap();
+        let expected_stack = ExternalIpConfig::DualStack { v4: v4.clone(), v6 };
+        let new_stack = InstanceRunner::merge_existing_ip_stack_with_request(
+            Some(v4.into()),
+            &InstanceExternalIpBody::Ephemeral(
+                Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 1).into(),
+            ),
+        )
+        .unwrap();
+        assert_eq!(new_stack, expected_stack);
+    }
+
+    #[test]
+    fn add_floating_ip_of_different_ip_version() {
+        let v4 = ExternalIpConfigBuilder::new()
+            .with_ephemeral_ip(Ipv4Addr::new(10, 0, 0, 1))
+            .build()
+            .unwrap();
+        let v6 = ExternalIpConfigBuilder::new()
+            .with_floating_ips(vec![Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 1)])
+            .build()
+            .unwrap();
+        let expected_stack = ExternalIpConfig::DualStack { v4: v4.clone(), v6 };
+        let new_stack = InstanceRunner::merge_existing_ip_stack_with_request(
+            Some(v4.into()),
+            &InstanceExternalIpBody::Floating(
+                Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 1).into(),
+            ),
+        )
+        .unwrap();
+        assert_eq!(new_stack, expected_stack);
+    }
+
+    #[test]
+    fn add_new_floating_ip() {
+        let v6 = ExternalIpConfigBuilder::new()
+            .with_floating_ips(vec![Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 1)])
+            .build()
+            .unwrap()
+            .into();
+        let expected_stack = ExternalIpConfigBuilder::new()
+            .with_floating_ips(vec![
+                Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 1),
+                Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 2),
+            ])
+            .build()
+            .unwrap()
+            .into();
+        let new_stack = InstanceRunner::merge_existing_ip_stack_with_request(
+            Some(v6),
+            &InstanceExternalIpBody::Floating(
+                Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 2).into(),
+            ),
+        )
+        .unwrap();
+        assert_eq!(new_stack, expected_stack);
+    }
+
+    #[test]
+    fn prune_existing_ephemeral_ipv4_address() {
+        let v4 = ExternalIpConfigBuilder::new()
+            .with_ephemeral_ip(Ipv4Addr::new(10, 0, 0, 1))
+            .build()
+            .unwrap()
+            .into();
+        let new_stack = InstanceRunner::prune_existing_ip_stack_with_request(
+            v4,
+            &InstanceExternalIpBody::Ephemeral(
+                Ipv4Addr::new(10, 0, 0, 1).into(),
+            ),
+        );
+        let Some(new_v4) = new_stack.ipv4_config() else {
+            panic!("Expected an IPv4 config, found: {new_stack:?}");
+        };
+        println!("{new_v4:?}");
+        assert!(new_v4.ephemeral_ip().is_none());
+    }
+
+    #[test]
+    fn prune_existing_ephemeral_ipv6_address() {
+        let v6 = ExternalIpConfigBuilder::new()
+            .with_ephemeral_ip(Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 1))
+            .build()
+            .unwrap()
+            .into();
+        let new_stack = InstanceRunner::prune_existing_ip_stack_with_request(
+            v6,
+            &InstanceExternalIpBody::Ephemeral(
+                Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 1).into(),
+            ),
+        );
+
+        // This is an example of why we need to address
+        // https://github.com/oxidecomputer/omicron/issues/9839.
+        //
+        // It's possible to get an external IP configuration that you can't
+        // construct directly, by creating one with an Ephemeral address and
+        // then deleting it.
+        let Some(new_v6) = new_stack.ipv6_config() else {
+            panic!("Expected an IPv6 config, found: {new_stack:?}");
+        };
+        println!("{new_v6:?}");
+        assert!(new_v6.ephemeral_ip().is_none());
+    }
+
+    #[test]
+    fn prune_existing_floating_ip() {
+        let v6 = ExternalIpConfigBuilder::new()
+            .with_floating_ips(vec![
+                Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 1),
+                Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 2),
+            ])
+            .build()
+            .unwrap()
+            .into();
+        let expected_stack = ExternalIpConfigBuilder::new()
+            .with_floating_ips(vec![Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 1)])
+            .build()
+            .unwrap()
+            .into();
+        let new_stack = InstanceRunner::prune_existing_ip_stack_with_request(
+            v6,
+            &InstanceExternalIpBody::Floating(
+                Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 2).into(),
+            ),
+        );
+        assert_eq!(new_stack, expected_stack);
     }
 }

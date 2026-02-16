@@ -4,9 +4,9 @@
 
 //! CAS operations for reconciling "Joining" state members.
 //!
-//! Compare-And-Swap operations for the "Joining" member state. Unlike the atomic
-//! CTE in member_attach (handles initial attachment), these simpler CAS operations
-//! work for reconciliation since:
+//! Compare-And-Swap operations for the "Joining" member state. Unlike
+//! `attach_to_instance` (handles initial attachment), these CAS operations
+//! are specifically for reconciliation since:
 //!
 //! - Instance state is fetched before calling
 //! - Multiple reconcilers on same member is safe (idempotent)
@@ -118,12 +118,12 @@ pub async fn reconcile_joining_member(
     instance_valid: bool,
     current_sled_id: Option<DbTypedUuid<SledKind>>,
 ) -> Result<ReconcileJoiningResult, ReconcileMemberError> {
-    // First, read the current member state
     let member_opt: Option<MulticastGroupMember> = dsl::multicast_group_member
         .filter(dsl::external_group_id.eq(group_id))
         .filter(dsl::parent_id.eq(instance_id))
         .filter(dsl::time_deleted.is_null())
         .filter(dsl::state.eq(MulticastGroupMemberState::Joining))
+        .select(MulticastGroupMember::as_select())
         .first_async(conn)
         .await
         .optional()
@@ -241,6 +241,7 @@ mod tests {
     use crate::db::pub_test_utils::helpers::{
         SledUpdateBuilder, create_instance_with_vmm,
     };
+    use crate::db::pub_test_utils::multicast::NO_SOURCE_IPS;
     use crate::db::pub_test_utils::{TestDatabase, multicast};
 
     #[tokio::test]
@@ -261,7 +262,6 @@ mod tests {
         let group = multicast::create_test_group_with_state(
             &opctx,
             &datastore,
-            &setup,
             "test-group",
             "224.10.1.12",
             true,
@@ -284,6 +284,7 @@ mod tests {
                 &opctx,
                 MulticastGroupUuid::from_untyped_uuid(group.id()),
                 InstanceUuid::from_untyped_uuid(instance_id),
+                Some(NO_SOURCE_IPS),
             )
             .await
             .expect("Should attach instance");
@@ -349,7 +350,6 @@ mod tests {
         let group = multicast::create_test_group_with_state(
             &opctx,
             &datastore,
-            &setup,
             "test-group",
             "224.10.1.13",
             true,
@@ -372,6 +372,7 @@ mod tests {
                 &opctx,
                 MulticastGroupUuid::from_untyped_uuid(group.id()),
                 InstanceUuid::from_untyped_uuid(instance_id),
+                Some(NO_SOURCE_IPS),
             )
             .await
             .expect("Should attach instance");
@@ -437,7 +438,6 @@ mod tests {
         let group = multicast::create_test_group_with_state(
             &opctx,
             &datastore,
-            &setup,
             "test-group",
             "224.10.1.14",
             true,
@@ -460,6 +460,7 @@ mod tests {
                 &opctx,
                 MulticastGroupUuid::from_untyped_uuid(group.id()),
                 InstanceUuid::from_untyped_uuid(instance_id),
+                Some(NO_SOURCE_IPS),
             )
             .await
             .expect("Should attach instance");
@@ -529,7 +530,6 @@ mod tests {
         let group = multicast::create_test_group_with_state(
             &opctx,
             &datastore,
-            &setup,
             "test-group",
             "224.10.1.15",
             true,
@@ -586,7 +586,6 @@ mod tests {
         let group = multicast::create_test_group_with_state(
             &opctx,
             &datastore,
-            &setup,
             "test-group",
             "224.10.1.16",
             true,
@@ -609,6 +608,7 @@ mod tests {
                 &opctx,
                 MulticastGroupUuid::from_untyped_uuid(group.id()),
                 InstanceUuid::from_untyped_uuid(instance_id),
+                Some(NO_SOURCE_IPS),
             )
             .await
             .expect("Should attach instance");
@@ -686,7 +686,6 @@ mod tests {
         let group = multicast::create_test_group_with_state(
             &opctx,
             &datastore,
-            &setup,
             "test-group",
             "224.10.1.17",
             true,
@@ -709,6 +708,7 @@ mod tests {
                 &opctx,
                 MulticastGroupUuid::from_untyped_uuid(group.id()),
                 InstanceUuid::from_untyped_uuid(instance_id),
+                Some(NO_SOURCE_IPS),
             )
             .await
             .expect("Should attach instance");
@@ -731,7 +731,7 @@ mod tests {
                 assert_eq!(old, Some(sled_id_a.into()));
                 assert_eq!(new, Some(sled_id_b.into()));
             }
-            other => panic!("Expected UpdatedSledId, got {:?}", other),
+            other => panic!("Expected UpdatedSledId, got {other:?}"),
         }
         assert_eq!(
             result.current_state,

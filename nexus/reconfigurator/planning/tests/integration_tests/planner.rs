@@ -16,6 +16,7 @@ use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::BlueprintArtifactVersion;
 use nexus_types::deployment::BlueprintDatasetDisposition;
 use nexus_types::deployment::BlueprintDiffSummary;
+use nexus_types::deployment::BlueprintExpungedZoneAccessReason;
 use nexus_types::deployment::BlueprintPhysicalDiskDisposition;
 use nexus_types::deployment::BlueprintSource;
 use nexus_types::deployment::BlueprintZoneConfig;
@@ -30,6 +31,7 @@ use nexus_types::deployment::CockroachDbSettings;
 use nexus_types::deployment::OmicronZoneExternalSnatIp;
 use nexus_types::deployment::SledDisk;
 use nexus_types::deployment::TargetReleaseDescription;
+use nexus_types::deployment::ZoneRunningStatus;
 use nexus_types::deployment::blueprint_zone_type;
 use nexus_types::deployment::blueprint_zone_type::InternalDns;
 use nexus_types::external_api::views::PhysicalDiskPolicy;
@@ -116,7 +118,7 @@ fn get_nexus_ids_at_generation(
     generation: Generation,
 ) -> BTreeSet<OmicronZoneUuid> {
     blueprint
-        .all_omicron_zones(BlueprintZoneDisposition::is_in_service)
+        .in_service_zones()
         .filter_map(|(_, z)| match &z.zone_type {
             BlueprintZoneType::Nexus(nexus_zone)
                 if nexus_zone.nexus_generation == generation =>
@@ -227,9 +229,17 @@ fn test_basic_add_sled() {
     assert_eq!(summary.diff.sleds.added.len(), 1);
     assert_eq!(summary.total_disks_added(), 10);
 
-    // 10 disks added means 30 datasets (each disk adds a debug + zone root
-    //    + local storage), plus one transient zone root for the NTP zone
-    assert_eq!(summary.total_datasets_added(), 31);
+    // 10 disks added means 40 datasets:
+    //
+    // - from ActiveSledEditor::ensure_disk, every disk has the following
+    //   datasets:
+    //   - debug
+    //   - zone root
+    //   - encrypted local storage
+    //   - unencrypted local storage
+    //
+    // plus one transient zone root for the NTP zone brings it to 41
+    assert_eq!(summary.total_datasets_added(), 41);
 
     let (&sled_id, sled_added) =
         summary.diff.sleds.added.first_key_value().unwrap();
@@ -502,7 +512,7 @@ fn test_spread_internal_dns_zones_across_sleds() {
     // Expunge two of the internal DNS zones; the planner should put new
     // zones back in their places.
     let zones_to_expunge = blueprint1
-        .all_omicron_zones(BlueprintZoneDisposition::is_in_service)
+        .in_service_zones()
         .filter_map(|(sled_id, zone)| {
             zone.zone_type.is_internal_dns().then_some((sled_id, zone.id))
         })
@@ -760,7 +770,7 @@ fn test_reuse_external_dns_ips_from_expunged_zones() {
 
     assert_eq!(
         blueprint1a
-            .all_omicron_zones(BlueprintZoneDisposition::is_in_service)
+            .in_service_zones()
             .filter(|(_, zone)| zone.zone_type.is_external_dns())
             .count(),
         3,
@@ -775,7 +785,7 @@ fn test_reuse_external_dns_ips_from_expunged_zones() {
     // This blueprint should have three external DNS zones.
     assert_eq!(
         blueprint2
-            .all_omicron_zones(BlueprintZoneDisposition::is_in_service)
+            .in_service_zones()
             .filter(|(_, zone)| zone.zone_type.is_external_dns())
             .count(),
         3,
@@ -810,7 +820,7 @@ fn test_reuse_external_dns_ips_from_expunged_zones() {
     // The IP addresses of the new external DNS zones should be the
     // same as the original set that we set up.
     let mut ips = blueprint3
-        .all_omicron_zones(BlueprintZoneDisposition::is_in_service)
+        .in_service_zones()
         .filter_map(|(_id, zone)| {
             zone.zone_type
                 .is_external_dns()
@@ -900,13 +910,20 @@ fn test_crucible_allocation_skips_nonprovisionable_disks() {
     assert_eq!(summary.total_disks_added(), NEW_IN_SERVICE_DISKS);
     assert_eq!(summary.total_disks_removed(), 0);
 
-    // Five new datasets created per disk:
+    // From ActiveSledEditor::ensure_disk, each disk gets the following
+    // datasets:
+    //
     // - Zone Root
     // - Debug
-    // - Local Storage
+    // - encrypted Local Storage
+    // - unencrypted Local Storage
+    //
+    // Plus (due to adding a Crucible zone):
     // - 1 for the Crucible Agent
     // - Transient Crucible Zone Root
-    assert_eq!(summary.total_datasets_added(), NEW_IN_SERVICE_DISKS * 5);
+    //
+    // So six per disk
+    assert_eq!(summary.total_datasets_added(), NEW_IN_SERVICE_DISKS * 6);
     assert_eq!(summary.total_datasets_removed(), 0);
     assert_eq!(summary.total_datasets_modified(), 0);
 
@@ -1203,10 +1220,10 @@ fn test_disk_expungement_removes_zones_durable_zpool() {
     // "decommissioned_disk_cleaner" background task for more context.
     assert_eq!(summary.total_datasets_removed(), 0);
 
-    // The disposition has changed from `InService` to `Expunged` for the 5
-    // datasets (debug, zone root, local storage, crucible zone root, and
-    // crucible agent) on this sled.
-    assert_eq!(summary.total_datasets_modified(), 5);
+    // The disposition has changed from `InService` to `Expunged` for the 6
+    // datasets (debug, zone root, encrypted local storage, unencrypted local
+    // storage, crucible zone root, and crucible agent) on this sled.
+    assert_eq!(summary.total_datasets_modified(), 6);
     // We don't know the expected name, other than the fact it's a crucible zone
     let test_transient_zone_kind = DatasetKind::TransientZone {
         name: "some-crucible-zone-name".to_string(),
@@ -1216,6 +1233,7 @@ fn test_disk_expungement_removes_zones_durable_zpool() {
         DatasetKind::Debug,
         DatasetKind::TransientZoneRoot,
         DatasetKind::LocalStorage,
+        DatasetKind::LocalStorageUnencrypted,
         test_transient_zone_kind.clone(),
     ]);
     let mut modified_sled_configs = Vec::new();
@@ -1341,9 +1359,7 @@ fn test_disk_expungement_removes_zones_transient_filesystem() {
     // Find all the zones using this same zpool.
     let mut zones_on_pool = BTreeSet::new();
     let mut zone_kinds_on_pool = BTreeMap::<_, usize>::new();
-    for (_, zone_config) in
-        blueprint1.all_omicron_zones(BlueprintZoneDisposition::is_in_service)
-    {
+    for (_, zone_config) in blueprint1.in_service_zones() {
         if pool_to_expunge == zone_config.filesystem_pool {
             zones_on_pool.insert(zone_config.id);
             *zone_kinds_on_pool
@@ -1959,7 +1975,7 @@ fn test_crucible_pantry() {
     // We should start with CRUCIBLE_PANTRY_REDUNDANCY pantries spread out
     // to at most 1 per sled. Find one of the sleds running one.
     let pantry_sleds = blueprint1
-        .all_omicron_zones(BlueprintZoneDisposition::is_in_service)
+        .in_service_zones()
         .filter_map(|(sled_id, zone)| {
             zone.zone_type.is_crucible_pantry().then_some(sled_id)
         })
@@ -1981,7 +1997,7 @@ fn test_crucible_pantry() {
     println!("1 -> 2 (expunged sled):\n{}", diff.display());
     assert_eq!(
         blueprint2
-            .all_omicron_zones(BlueprintZoneDisposition::is_in_service)
+            .in_service_zones()
             .filter(|(sled_id, zone)| *sled_id != expunged_sled_id
                 && zone.zone_type.is_crucible_pantry())
             .count(),
@@ -2013,7 +2029,7 @@ fn test_single_node_clickhouse() {
 
     // We should start with one ClickHouse zone. Find out which sled it's on.
     let clickhouse_sleds = blueprint1
-        .all_omicron_zones(BlueprintZoneDisposition::any)
+        .in_service_zones()
         .filter_map(|(sled, zone)| {
             zone.zone_type.is_clickhouse().then(|| Some(sled))
         })
@@ -2034,7 +2050,7 @@ fn test_single_node_clickhouse() {
     println!("1 -> 2 (expunged sled):\n{}", diff.display());
     assert_eq!(
         blueprint2
-            .all_omicron_zones(BlueprintZoneDisposition::is_in_service)
+            .in_service_zones()
             .filter(|(sled, zone)| *sled != clickhouse_sled
                 && zone.zone_type.is_clickhouse())
             .count(),
@@ -2086,10 +2102,8 @@ fn test_plan_deploy_all_clickhouse_cluster_nodes() {
     );
 
     // We should see zones for 3 clickhouse keepers, and 2 servers created
-    let active_zones: Vec<_> = blueprint2
-        .all_omicron_zones(BlueprintZoneDisposition::is_in_service)
-        .map(|(_, z)| z.clone())
-        .collect();
+    let active_zones: Vec<_> =
+        blueprint2.in_service_zones().map(|(_, z)| z.clone()).collect();
 
     let keeper_zone_ids: BTreeSet<_> = active_zones
         .iter()
@@ -2213,10 +2227,8 @@ fn test_plan_deploy_all_clickhouse_cluster_nodes() {
         &diff.display().to_string(),
     );
 
-    let active_zones: Vec<_> = blueprint5
-        .all_omicron_zones(BlueprintZoneDisposition::is_in_service)
-        .map(|(_, z)| z.clone())
-        .collect();
+    let active_zones: Vec<_> =
+        blueprint5.in_service_zones().map(|(_, z)| z.clone()).collect();
 
     let new_keeper_zone_ids: BTreeSet<_> = active_zones
         .iter()
@@ -2348,10 +2360,8 @@ fn test_expunge_clickhouse_clusters() {
     let blueprint2 = sim.run_planner().expect("planning succeeded");
 
     // We should see zones for 3 clickhouse keepers, and 2 servers created
-    let active_zones: Vec<_> = blueprint2
-        .all_omicron_zones(BlueprintZoneDisposition::is_in_service)
-        .map(|(_, z)| z.clone())
-        .collect();
+    let active_zones: Vec<_> =
+        blueprint2.in_service_zones().map(|(_, z)| z.clone()).collect();
 
     let keeper_zone_ids: BTreeSet<_> = active_zones
         .iter()
@@ -2422,7 +2432,7 @@ fn test_expunge_clickhouse_clusters() {
 
     // Find the sled containing one of the keeper zones and expunge it
     let (sled_id, bp_zone_config) = blueprint3
-        .all_omicron_zones(BlueprintZoneDisposition::is_in_service)
+        .in_service_zones()
         .find(|(_, z)| z.zone_type.is_clickhouse_keeper())
         .unwrap();
 
@@ -2546,10 +2556,8 @@ fn test_expunge_clickhouse_zones_after_policy_is_changed() {
     let blueprint2 = sim.run_planner().expect("planning succeeded");
 
     // We should see zones for 3 clickhouse keepers, and 2 servers created
-    let active_zones: Vec<_> = blueprint2
-        .all_omicron_zones(BlueprintZoneDisposition::is_in_service)
-        .map(|(_, z)| z.clone())
-        .collect();
+    let active_zones: Vec<_> =
+        blueprint2.in_service_zones().map(|(_, z)| z.clone()).collect();
 
     let keeper_zone_ids: BTreeSet<_> = active_zones
         .iter()
@@ -2580,9 +2588,13 @@ fn test_expunge_clickhouse_zones_after_policy_is_changed() {
     );
     let blueprint3 = sim.run_planner().expect("planning succeeded");
 
-    // We should have expunged our single-node clickhouse zone
+    // We should have expunged our single-node clickhouse zone, but it won't be
+    // `ready_for_cleanup` yet.
     let expunged_zones: Vec<_> = blueprint3
-        .all_omicron_zones(BlueprintZoneDisposition::is_expunged)
+        .expunged_zones(
+            ZoneRunningStatus::MaybeRunning,
+            BlueprintExpungedZoneAccessReason::Test,
+        )
         .map(|(_, z)| z.clone())
         .collect();
 
@@ -2605,7 +2617,10 @@ fn test_expunge_clickhouse_zones_after_policy_is_changed() {
     // All our clickhouse keeper and server zones that we created when we
     // enabled our clickhouse policy should be expunged when we disable it.
     let expunged_zones: Vec<_> = blueprint4
-        .all_omicron_zones(BlueprintZoneDisposition::is_expunged)
+        .expunged_zones(
+            ZoneRunningStatus::MaybeRunning,
+            BlueprintExpungedZoneAccessReason::Test,
+        )
         .map(|(_, z)| z.clone())
         .collect();
 
@@ -2627,7 +2642,7 @@ fn test_expunge_clickhouse_zones_after_policy_is_changed() {
     assert_eq!(
         1,
         blueprint4
-            .all_omicron_zones(BlueprintZoneDisposition::is_in_service)
+            .in_service_zones()
             .filter(|(_, z)| z.zone_type.is_clickhouse())
             .count()
     );
@@ -3113,17 +3128,13 @@ fn test_update_crucible_pantry_before_nexus() {
 
     // All zones should be sourced from the initial 0.0.1 target release by
     // default.
-    assert!(
-        blueprint1
-            .all_omicron_zones(BlueprintZoneDisposition::is_in_service)
-            .all(|(_, z)| matches!(
-                &z.image_source,
-                BlueprintZoneImageSource::Artifact { version, hash: _ }
-                    if version == &BlueprintArtifactVersion::Available {
-                        version: ArtifactVersion::new_const("0.0.1")
-                    }
-            ))
-    );
+    assert!(blueprint1.in_service_zones().all(|(_, z)| matches!(
+        &z.image_source,
+        BlueprintZoneImageSource::Artifact { version, hash: _ }
+            if version == &BlueprintArtifactVersion::Available {
+                version: ArtifactVersion::new_const("0.0.1")
+            }
+    )));
 
     // Manually specify a TUF repo with fake zone images.
     let version = ArtifactVersion::new_static("1.0.0-freeform")
@@ -3147,7 +3158,7 @@ fn test_update_crucible_pantry_before_nexus() {
         artifacts,
     });
     sim.change_description("set new target release", |desc| {
-        desc.set_target_release_and_old_repo(description);
+        desc.set_target_release(description);
         Ok(())
     })
     .unwrap();
@@ -3296,16 +3307,19 @@ fn test_update_crucible_pantry_before_nexus() {
     // All Crucible Pantries should now be updated.
     assert_eq!(
         blueprint
-            .all_omicron_zones(BlueprintZoneDisposition::is_in_service)
+            .in_service_zones()
             .filter(|(_, z)| is_up_to_date_pantry(z))
             .count(),
         CRUCIBLE_PANTRY_REDUNDANCY
     );
 
-    // All old Pantry zones should now be expunged.
+    // All old Pantry zones should now be expunged and ready for cleanup.
     assert_eq!(
         blueprint
-            .all_omicron_zones(BlueprintZoneDisposition::is_expunged)
+            .expunged_zones(
+                ZoneRunningStatus::Shutdown,
+                BlueprintExpungedZoneAccessReason::Test
+            )
             .filter(|(_, z)| is_old_pantry(z))
             .count(),
         CRUCIBLE_PANTRY_REDUNDANCY
@@ -3415,16 +3429,13 @@ fn test_update_crucible_pantry_before_nexus() {
     let blueprint12 = parent;
     assert_eq!(
         blueprint12
-            .all_omicron_zones(BlueprintZoneDisposition::is_in_service)
+            .in_service_zones()
             .filter(|(_, z)| is_up_to_date_nexus(z))
             .count(),
         NEXUS_REDUNDANCY,
     );
     assert_eq!(
-        blueprint12
-            .all_omicron_zones(BlueprintZoneDisposition::is_in_service)
-            .filter(|(_, z)| is_old_nexus(z))
-            .count(),
+        blueprint12.in_service_zones().filter(|(_, z)| is_old_nexus(z)).count(),
         0,
     );
 
@@ -3483,17 +3494,13 @@ fn test_update_cockroach() {
     // All zones should be sourced from the initial 0.0.1 target release by
     // default.
     eprintln!("{}", blueprint.display());
-    assert!(
-        blueprint
-            .all_omicron_zones(BlueprintZoneDisposition::is_in_service)
-            .all(|(_, z)| matches!(
-                &z.image_source,
-                BlueprintZoneImageSource::Artifact { version, hash: _ }
-                    if version == &BlueprintArtifactVersion::Available {
-                        version: ArtifactVersion::new_const("0.0.1")
-                    }
-            ))
-    );
+    assert!(blueprint.in_service_zones().all(|(_, z)| matches!(
+        &z.image_source,
+        BlueprintZoneImageSource::Artifact { version, hash: _ }
+            if version == &BlueprintArtifactVersion::Available {
+                version: ArtifactVersion::new_const("0.0.1")
+            }
+    )));
 
     // This test "starts" here -- we specify a new TUF repo with an updated
     // CockroachDB image. We create a new TUF repo where version of
@@ -3523,7 +3530,7 @@ fn test_update_cockroach() {
         artifacts,
     });
     sim.change_description("set new target release", |desc| {
-        desc.set_target_release_and_old_repo(description);
+        desc.set_target_release(description);
         Ok(())
     })
     .unwrap();
@@ -3658,14 +3665,14 @@ fn test_update_cockroach() {
 
         assert_eq!(
             blueprint
-                .all_omicron_zones(BlueprintZoneDisposition::is_in_service)
+                .in_service_zones()
                 .filter(|(_, z)| is_old_cockroach(z))
                 .count(),
             COCKROACHDB_REDUNDANCY - i
         );
         assert_eq!(
             blueprint
-                .all_omicron_zones(BlueprintZoneDisposition::is_in_service)
+                .in_service_zones()
                 .filter(|(_, z)| is_up_to_date_cockroach(z))
                 .count(),
             i
@@ -3857,17 +3864,13 @@ fn test_update_boundary_ntp() {
     );
 
     // All zones should be sourced from the 0.0.1 repo by default.
-    assert!(
-        blueprint
-            .all_omicron_zones(BlueprintZoneDisposition::is_in_service)
-            .all(|(_, z)| matches!(
-                &z.image_source,
-                BlueprintZoneImageSource::Artifact { version, hash: _ }
-                    if version == &BlueprintArtifactVersion::Available {
-                        version: ArtifactVersion::new_const("0.0.1")
-                    }
-            ))
-    );
+    assert!(blueprint.in_service_zones().all(|(_, z)| matches!(
+        &z.image_source,
+        BlueprintZoneImageSource::Artifact { version, hash: _ }
+            if version == &BlueprintArtifactVersion::Available {
+                version: ArtifactVersion::new_const("0.0.1")
+            }
+    )));
 
     // This test "starts" here -- we specify a new TUF repo with an updated
     // Boundary NTP image. We create a new TUF repo where version of
@@ -3897,7 +3900,7 @@ fn test_update_boundary_ntp() {
         artifacts,
     });
     sim.change_description("set new target release", |desc| {
-        desc.set_target_release_and_old_repo(description);
+        desc.set_target_release(description);
         Ok(())
     })
     .unwrap();
@@ -3939,7 +3942,7 @@ fn test_update_boundary_ntp() {
     };
     let old_boundary_ntp_count = |blueprint: &Blueprint| -> usize {
         blueprint
-            .all_omicron_zones(BlueprintZoneDisposition::is_in_service)
+            .in_service_zones()
             .filter(|(_, z)| is_old_boundary_ntp(z))
             .count()
     };
@@ -3948,7 +3951,7 @@ fn test_update_boundary_ntp() {
     };
     let up_to_date_boundary_ntp_count = |blueprint: &Blueprint| -> usize {
         blueprint
-            .all_omicron_zones(BlueprintZoneDisposition::is_in_service)
+            .in_service_zones()
             .filter(|(_, z)| is_up_to_date_boundary_ntp(z))
             .count()
     };
@@ -4251,17 +4254,13 @@ fn test_update_internal_dns() {
     let blueprint = sim.assert_latest_blueprint_is_blippy_clean();
 
     // All zones should be sourced from the initial TUF repo by default.
-    assert!(
-        blueprint
-            .all_omicron_zones(BlueprintZoneDisposition::is_in_service)
-            .all(|(_, z)| matches!(
-                &z.image_source,
-                BlueprintZoneImageSource::Artifact { version, hash: _ }
-                    if version == &BlueprintArtifactVersion::Available {
-                        version: ArtifactVersion::new_const("0.0.1")
-                    }
-            ))
-    );
+    assert!(blueprint.in_service_zones().all(|(_, z)| matches!(
+        &z.image_source,
+        BlueprintZoneImageSource::Artifact { version, hash: _ }
+            if version == &BlueprintArtifactVersion::Available {
+                version: ArtifactVersion::new_const("0.0.1")
+            }
+    )));
 
     // This test "starts" here -- we specify a new TUF repo with an updated
     // Internal DNS image. We create a new TUF repo where version of
@@ -4291,7 +4290,7 @@ fn test_update_internal_dns() {
         artifacts,
     });
     sim.change_description("set new target release", |desc| {
-        desc.set_target_release_and_old_repo(description);
+        desc.set_target_release(description);
         Ok(())
     })
     .unwrap();
@@ -4452,14 +4451,14 @@ fn test_update_internal_dns() {
 
         assert_eq!(
             blueprint
-                .all_omicron_zones(BlueprintZoneDisposition::is_in_service)
+                .in_service_zones()
                 .filter(|(_, z)| is_old_internal_dns(z))
                 .count(),
             INTERNAL_DNS_REDUNDANCY - i
         );
         assert_eq!(
             blueprint
-                .all_omicron_zones(BlueprintZoneDisposition::is_in_service)
+                .in_service_zones()
                 .filter(|(_, z)| is_up_to_date_internal_dns(z))
                 .count(),
             i
@@ -4507,17 +4506,13 @@ fn test_update_all_zones() {
     let blueprint1 = sim.assert_latest_blueprint_is_blippy_clean();
 
     // All zones should be sourced from the 0.0.1 repo by default.
-    assert!(
-        blueprint1
-            .all_omicron_zones(BlueprintZoneDisposition::is_in_service)
-            .all(|(_, z)| matches!(
-                &z.image_source,
-                BlueprintZoneImageSource::Artifact { version, hash: _ }
-                    if version == &BlueprintArtifactVersion::Available {
-                        version: ArtifactVersion::new_const("0.0.1")
-                    }
-            ))
-    );
+    assert!(blueprint1.in_service_zones().all(|(_, z)| matches!(
+        &z.image_source,
+        BlueprintZoneImageSource::Artifact { version, hash: _ }
+            if version == &BlueprintArtifactVersion::Available {
+                version: ArtifactVersion::new_const("0.0.1")
+            }
+    )));
 
     // Manually specify a TUF repo with fake images for all zones.
     // Only the name and kind of the artifacts matter.
@@ -4544,7 +4539,7 @@ fn test_update_all_zones() {
     });
 
     sim.change_description("set new target release", |desc| {
-        desc.set_target_release_and_old_repo(description);
+        desc.set_target_release(description);
         Ok(())
     })
     .unwrap();
@@ -4581,9 +4576,7 @@ fn test_update_all_zones() {
             {
                 assert!(
                     blueprint
-                        .all_omicron_zones(
-                            BlueprintZoneDisposition::is_in_service
-                        )
+                        .in_service_zones()
                         .all(|(_, zone)| zone.image_source == image_source),
                     "failed to update all zones"
                 );

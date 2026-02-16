@@ -9,21 +9,22 @@ use anyhow::Context;
 use anyhow::Result;
 use anyhow::anyhow;
 use anyhow::bail;
-use bootstrap_agent_client::types::BootstrapAddressDiscovery;
-use bootstrap_agent_client::types::Certificate;
-use bootstrap_agent_client::types::Name;
-use bootstrap_agent_client::types::PortConfigV2 as BaPortConfigV2;
-use bootstrap_agent_client::types::RackInitializeRequest;
-use bootstrap_agent_client::types::RecoverySiloConfig;
-use bootstrap_agent_client::types::UserId;
+use bootstrap_agent_lockstep_client::types::BootstrapAddressDiscovery;
+use bootstrap_agent_lockstep_client::types::Certificate;
+use bootstrap_agent_lockstep_client::types::Name;
+use bootstrap_agent_lockstep_client::types::PortConfig as BaPortConfig;
+use bootstrap_agent_lockstep_client::types::RackInitializeRequest;
+use bootstrap_agent_lockstep_client::types::RecoverySiloConfig;
+use bootstrap_agent_lockstep_client::types::UserId;
 use display_error_chain::DisplayErrorChain;
 use omicron_certificates::CertificateError;
 use omicron_common::address;
+use omicron_common::address::IpRange;
 use omicron_common::address::Ipv4Range;
-use omicron_common::address::Ipv6Subnet;
-use omicron_common::address::RACK_PREFIX;
+use omicron_common::address::Ipv6Range;
 use omicron_common::api::external::AllowedSourceIps;
 use omicron_common::api::external::SwitchLocation;
+use oxnet::Ipv6Net;
 use sled_hardware_types::Baseboard;
 use slog::debug;
 use slog::warn;
@@ -33,7 +34,6 @@ use std::collections::btree_map;
 use std::mem;
 use std::net::IpAddr;
 use std::net::Ipv6Addr;
-use std::sync::LazyLock;
 use thiserror::Error;
 use wicket_common::inventory::MgsV1Inventory;
 use wicket_common::inventory::SpType;
@@ -51,14 +51,6 @@ use wicketd_api::CertificateUploadResponse;
 use wicketd_api::CurrentRssUserConfig;
 use wicketd_api::CurrentRssUserConfigSensitive;
 use wicketd_api::SetBgpAuthKeyStatus;
-
-// TODO-correctness For now, we always use the same rack subnet when running
-// RSS. When we get to multirack, this will be wrong, but there are many other
-// RSS-related things that need to change then too.
-static RACK_SUBNET: LazyLock<Ipv6Subnet<RACK_PREFIX>> = LazyLock::new(|| {
-    let ip = Ipv6Addr::new(0xfd00, 0x1122, 0x3344, 0x0100, 0, 0, 0, 0);
-    Ipv6Subnet::new(ip)
-});
 
 const RECOVERY_SILO_NAME: &str = "recovery";
 const RECOVERY_SILO_USERNAME: &str = "recovery";
@@ -251,35 +243,35 @@ impl CurrentRssConfig {
         // a small rack cluster that does not support trust quorum.
         // https://github.com/oxidecomputer/omicron/issues/3690
         const TRUST_QUORUM_MIN_SIZE: usize = 3;
-        let trust_quorum_peers: Option<
-            Vec<bootstrap_agent_client::types::Baseboard>,
-        > = if self.bootstrap_sleds.len() >= TRUST_QUORUM_MIN_SIZE {
-            Some(
-                self.bootstrap_sleds
-                    .iter()
-                    .map(|sled| sled.baseboard.clone().into())
-                    .collect(),
-            )
-        } else {
-            warn!(
-                log,
-                "Trust quorum disabled: requires at least {} sleds",
-                TRUST_QUORUM_MIN_SIZE
-            );
-            None
-        };
+        let trust_quorum_peers: Option<Vec<Baseboard>> =
+            if self.bootstrap_sleds.len() >= TRUST_QUORUM_MIN_SIZE {
+                Some(
+                    self.bootstrap_sleds
+                        .iter()
+                        .map(|sled| sled.baseboard.clone())
+                        .collect(),
+                )
+            } else {
+                warn!(
+                    log,
+                    "Trust quorum disabled: requires at least {} sleds",
+                    TRUST_QUORUM_MIN_SIZE
+                );
+                None
+            };
 
         // Convert between internal and progenitor types.
-        let user_password_hash = bootstrap_agent_client::types::NewPasswordHash(
-            recovery_silo_password_hash.to_string(),
-        );
+        let user_password_hash =
+            bootstrap_agent_lockstep_client::types::NewPasswordHash(
+                recovery_silo_password_hash.to_string(),
+            );
         let internal_services_ip_pool_ranges = self
             .internal_services_ip_pool_ranges
             .iter()
             .map(|pool| {
-                use bootstrap_agent_client::types::IpRange;
-                use bootstrap_agent_client::types::Ipv4Range;
-                use bootstrap_agent_client::types::Ipv6Range;
+                use bootstrap_agent_lockstep_client::types::IpRange;
+                use bootstrap_agent_lockstep_client::types::Ipv4Range;
+                use bootstrap_agent_lockstep_client::types::Ipv6Range;
                 match pool {
                     address::IpRange::V4(range) => IpRange::V4(Ipv4Range {
                         first: range.first,
@@ -619,8 +611,9 @@ pub(crate) enum BgpAuthKeyError {
 fn validate_rack_network_config(
     config: &UserSpecifiedRackNetworkConfig,
     bgp_auth_keys: &BTreeMap<BgpAuthKeyId, Option<BgpAuthKey>>,
-) -> Result<bootstrap_agent_client::types::RackNetworkConfigV2> {
-    use bootstrap_agent_client::types::BgpConfig as BaBgpConfig;
+) -> Result<bootstrap_agent_lockstep_client::types::RackNetworkConfig> {
+    use bootstrap_agent_lockstep_client::types::BgpConfig as BaBgpConfig;
+    use bootstrap_agent_lockstep_client::types::MaxPathConfig as BaMaxPathConfig;
 
     // Ensure that there is at least one uplink
     if !config.has_any_uplinks() {
@@ -628,21 +621,33 @@ fn validate_rack_network_config(
     }
 
     // Make sure `infra_ip_first`..`infra_ip_last` is a well-defined range...
-    let infra_ip_range =
-        Ipv4Range::new(config.infra_ip_first, config.infra_ip_last).map_err(
-            |s: String| {
+    let infra_ip_range = match (config.infra_ip_first, config.infra_ip_last) {
+        (IpAddr::V4(first), IpAddr::V4(last)) => Ipv4Range::new(first, last)
+            .map_err(|s: String| {
                 anyhow!("invalid `infra_ip_first`, `infra_ip_last` range: {s}")
-            },
-        )?;
+            })
+            .map(|v| IpRange::V4(v)),
+        (IpAddr::V6(first), IpAddr::V6(last)) => Ipv6Range::new(first, last)
+            .map_err(|s: String| {
+                anyhow!("invalid `infra_ip_first`, `infra_ip_last` range: {s}")
+            })
+            .map(|v| IpRange::V6(v)),
+        _ => Err(anyhow!(
+            "`infra_ip_first` and `infra_ip_last` must be of the same type"
+        )),
+    }?;
 
     // TODO this implies a single contiguous range for port IPs which is over
     // constraining
     // iterate through each port config
     for (_, _, port_config) in config.iter_uplinks() {
         for addr in &port_config.addresses {
+            if addr.addr().is_unspecified() {
+                continue;
+            }
             // ... and check that it contains `uplink_ip`.
-            if addr.addr() < infra_ip_range.first
-                || addr.addr() > infra_ip_range.last
+            if addr.addr() < infra_ip_range.first_address()
+                || addr.addr() > infra_ip_range.last_address()
             {
                 bail!(
                     "`uplink_cidr`'s IP address must be in the range defined by \
@@ -659,10 +664,15 @@ fn validate_rack_network_config(
         }
     }
 
+    let rack_subnet = match validate_rack_subnet(config.rack_subnet_address) {
+        Ok(v) => v,
+        Err(e) => bail!(e),
+    };
+
     // TODO Add more client side checks on `rack_network_config` contents?
 
-    Ok(bootstrap_agent_client::types::RackNetworkConfigV2 {
-        rack_subnet: RACK_SUBNET.net(),
+    Ok(bootstrap_agent_lockstep_client::types::RackNetworkConfig {
+        rack_subnet,
         infra_ip_first: config.infra_ip_first,
         infra_ip_last: config.infra_ip_last,
         ports: config
@@ -679,6 +689,7 @@ fn validate_rack_network_config(
                 originate: config.originate.clone(),
                 checker: config.checker.clone(),
                 shaper: config.shaper.clone(),
+                max_paths: BaMaxPathConfig(config.max_paths.as_nonzero_u8()),
             })
             .collect(),
         //TODO bfd config in wicket
@@ -686,7 +697,50 @@ fn validate_rack_network_config(
     })
 }
 
-/// Builds a `BaPortConfigV2` from a `UserSpecifiedPortConfig`.
+pub fn validate_rack_subnet(
+    subnet_address: Option<Ipv6Addr>,
+) -> Result<Ipv6Net, String> {
+    use rand::prelude::*;
+
+    let rack_subnet_address = match subnet_address {
+        Some(addr) => addr,
+        None => {
+            let mut rng = rand::rng();
+            let a: u16 = 0xfd00 + Into::<u16>::into(rng.random::<u8>());
+            Ipv6Addr::new(
+                a,
+                rng.random::<u16>(),
+                rng.random::<u16>(),
+                0x0100,
+                0,
+                0,
+                0,
+                0,
+            )
+        }
+    };
+
+    // first octet must be fd
+    if rack_subnet_address.octets()[0] != 0xfd {
+        return Err("rack subnet address must begin with 0xfd".into());
+    };
+
+    // Do not allow rack0
+    if rack_subnet_address.octets()[6] == 0x00 {
+        return Err("rack number (seventh octet) cannot be 0".into());
+    };
+
+    // Do not allow addresses more specific than /56
+    if rack_subnet_address.octets()[7..].iter().any(|x| *x != 0x00) {
+        return Err("rack subnet address is /56, \
+                   but a more specific prefix was provided"
+            .into());
+    };
+
+    Ipv6Net::new(rack_subnet_address, 56).map_err(|e| e.to_string())
+}
+
+/// Builds a `BaPortConfig` from a `UserSpecifiedPortConfig`.
 ///
 /// Assumes that all auth keys are present in `bgp_auth_keys`.
 fn build_port_config(
@@ -694,21 +748,22 @@ fn build_port_config(
     port: &str,
     config: &UserSpecifiedPortConfig,
     bgp_auth_keys: &BTreeMap<BgpAuthKeyId, Option<BgpAuthKey>>,
-) -> BaPortConfigV2 {
-    use bootstrap_agent_client::types::BgpPeerConfig as BaBgpPeerConfig;
-    use bootstrap_agent_client::types::LldpAdminStatus as BaLldpAdminStatus;
-    use bootstrap_agent_client::types::LldpPortConfig as BaLldpPortConfig;
-    use bootstrap_agent_client::types::PortFec as BaPortFec;
-    use bootstrap_agent_client::types::PortSpeed as BaPortSpeed;
-    use bootstrap_agent_client::types::RouteConfig as BaRouteConfig;
-    use bootstrap_agent_client::types::SwitchLocation as BaSwitchLocation;
-    use bootstrap_agent_client::types::TxEqConfig as BaTxEqConfig;
-    use bootstrap_agent_client::types::UplinkAddressConfig as BaUplinkAddressConfig;
+) -> BaPortConfig {
+    use bootstrap_agent_lockstep_client::types::BgpPeerConfig as BaBgpPeerConfig;
+    use bootstrap_agent_lockstep_client::types::LldpAdminStatus as BaLldpAdminStatus;
+    use bootstrap_agent_lockstep_client::types::LldpPortConfig as BaLldpPortConfig;
+    use bootstrap_agent_lockstep_client::types::PortFec as BaPortFec;
+    use bootstrap_agent_lockstep_client::types::PortSpeed as BaPortSpeed;
+    use bootstrap_agent_lockstep_client::types::RouteConfig as BaRouteConfig;
+    use bootstrap_agent_lockstep_client::types::RouterLifetimeConfig as BaRouterLifetimeConfig;
+    use bootstrap_agent_lockstep_client::types::SwitchLocation as BaSwitchLocation;
+    use bootstrap_agent_lockstep_client::types::TxEqConfig as BaTxEqConfig;
+    use bootstrap_agent_lockstep_client::types::UplinkAddressConfig as BaUplinkAddressConfig;
     use omicron_common::api::internal::shared::LldpAdminStatus;
     use omicron_common::api::internal::shared::PortFec;
     use omicron_common::api::internal::shared::PortSpeed;
 
-    BaPortConfigV2 {
+    BaPortConfig {
         port: port.to_owned(),
         routes: config
             .routes
@@ -752,7 +807,9 @@ fn build_port_config(
                 });
 
                 BaBgpPeerConfig {
-                    addr: p.addr,
+                    addr: p
+                        .addr
+                        .unwrap_or_else(|| IpAddr::V6(Ipv6Addr::UNSPECIFIED)),
                     asn: p.asn,
                     port: p.port.clone(),
                     hold_time: p.hold_time,
@@ -770,6 +827,7 @@ fn build_port_config(
                     allowed_export: p.allowed_export.clone().into(),
                     allowed_import: p.allowed_import.clone().into(),
                     vlan_id: p.vlan_id,
+                    router_lifetime: BaRouterLifetimeConfig(p.router_lifetime),
                 }
             })
             .collect(),

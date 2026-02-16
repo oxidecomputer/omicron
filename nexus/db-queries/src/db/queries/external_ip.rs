@@ -67,15 +67,27 @@ const EXTERNAL_IP_FROM_CLAUSE: ExternalIpFromClause =
 
 const REALLOCATION_WITH_DIFFERENT_IP_SENTINEL: &'static str =
     "Reallocation of IP with different value";
+const NIC_IS_MISSING_IP_STACK_SENTINEL: &'static str = "nic-missing-ip-stack";
+const NIC_IS_MISSING_IP_STACK_ERROR_MESSAGE: &'static str = "Cannot assign an external IP address from this IP \
+    Pool because the network interface does not have an \
+    IP stack of the same IP version as the pool.";
 
 /// Translates a generic pool error to an external error.
 pub fn from_diesel(e: DieselError) -> external::Error {
-    let sentinels = [REALLOCATION_WITH_DIFFERENT_IP_SENTINEL];
+    let sentinels = [
+        REALLOCATION_WITH_DIFFERENT_IP_SENTINEL,
+        NIC_IS_MISSING_IP_STACK_SENTINEL,
+    ];
     if let Some(sentinel) = matches_sentinel(&e, &sentinels) {
         match sentinel {
             REALLOCATION_WITH_DIFFERENT_IP_SENTINEL => {
                 return external::Error::invalid_request(
                     "Re-allocating IP address with a different value",
+                );
+            }
+            NIC_IS_MISSING_IP_STACK_SENTINEL => {
+                return external::Error::invalid_request(
+                    NIC_IS_MISSING_IP_STACK_ERROR_MESSAGE,
                 );
             }
             // Fall-through to the generic error conversion.
@@ -690,6 +702,53 @@ impl NextExternalIp {
         );
         Ok(())
     }
+
+    // Push the subquery that fetches the primary NIC for the object we're
+    // allocating the address for, and ensures that it has an IP stack with the
+    // same version as the IP Pool we're selecting the address from.
+    fn push_ensure_parent_has_matching_ip_stack<'a>(
+        &'a self,
+        mut out: AstPass<'_, 'a, Pg>,
+        parent_id: &'a Uuid,
+    ) -> QueryResult<()> {
+        out.push_sql("\
+            SELECT CAST(\
+                CASE \
+                    WHEN ip.ip_version = 'v4' AND nic.has_ipv4_stack THEN 'TRUE' \
+                    WHEN ip.ip_version = 'v6' and nic.has_ipv6_stack THEN 'TRUE' \
+                    ELSE "
+        );
+        out.push_bind_param::<sql_types::Text, _>(
+            NIC_IS_MISSING_IP_STACK_SENTINEL,
+        )?;
+        out.push_sql(
+            " \
+                END \
+                AS BOOL) \
+            FROM \
+                (SELECT ip_version FROM ip_pool WHERE id = ",
+        );
+        out.push_bind_param::<sql_types::Uuid, _>(self.ip.pool_id())?;
+        out.push_sql(
+            " AND time_deleted IS NULL) AS ip \
+            CROSS JOIN (\
+                SELECT \
+                    ip IS NOT NULL AS has_ipv4_stack, \
+                    ipv6 IS NOT NULL AS has_ipv6_stack \
+                FROM \
+                    network_interface \
+                WHERE \
+                    parent_id = ",
+        );
+        out.push_bind_param::<sql_types::Uuid, _>(parent_id)?;
+        out.push_sql(
+            " \
+                    AND time_deleted IS NULL \
+                    AND is_primary\
+                ) AS nic",
+        );
+        Ok(())
+    }
 }
 
 impl QueryId for NextExternalIp {
@@ -783,6 +842,26 @@ impl QueryFragment<Pg> for NextExternalIp {
         self.push_update_ip_pool_range_subquery(out.reborrow())?;
         out.push_sql(") ");
 
+        // Push the subquery that ensures that the primary NIC of the object
+        // we're allocating the address for (instance or service) actually has
+        // an IP stack of the same version as the IP Pool we're selecting from.
+        //
+        // Note that today, Ephemeral and Floating IPs are allocated without a
+        // parent, and then attached to an instance with
+        // `DataStore::begin_attach_ip()`. This check is here to ensure we still
+        // handle SNAT addresses, and as a safeguard in the event that we remove
+        // the two-step attach process.
+        if let Some(parent_id) = self.ip.parent_id().as_ref() {
+            out.push_sql(
+                ", parent_primary_nic_matches_version AS MATERIALIZED(",
+            );
+            self.push_ensure_parent_has_matching_ip_stack(
+                out.reborrow(),
+                parent_id,
+            )?;
+            out.push_sql(") ");
+        }
+
         // Select the contents of the actual record that was created or updated.
         out.push_sql("SELECT * FROM external_ip");
 
@@ -810,23 +889,26 @@ mod tests {
     use crate::db::queries::external_ip::NextExternalIp;
     use crate::db::raw_query_builder::expectorate_query_contents;
     use async_bb8_diesel::AsyncRunQueryDsl;
+    use diesel::sql_types;
     use diesel::{ExpressionMethods, QueryDsl, SelectableHelper};
     use dropshot::test_util::LogContext;
     use nexus_db_lookup::LookupPath;
     use nexus_db_model::ByteCount;
     use nexus_db_model::ExternalIp;
     use nexus_db_model::IncompleteExternalIp;
+    use nexus_db_model::IncompleteIpPoolResource;
     use nexus_db_model::Instance;
     use nexus_db_model::InstanceCpuCount;
     use nexus_db_model::IpPoolReservationType;
-    use nexus_db_model::IpPoolResource;
     use nexus_db_model::IpPoolResourceType;
-    use nexus_db_model::IpVersion;
     use nexus_db_model::Name;
+    use nexus_db_model::NetworkInterfaceKind;
+    use nexus_db_schema::enums::NetworkInterfaceKindEnum;
     use nexus_types::deployment::OmicronZoneExternalFloatingIp;
     use nexus_types::deployment::OmicronZoneExternalIp;
     use nexus_types::deployment::OmicronZoneExternalSnatIp;
     use nexus_types::external_api::params::InstanceCreate;
+    use nexus_types::external_api::params::InstanceNetworkInterfaceAttachment;
     use nexus_types::external_api::shared::IpRange;
     use nexus_types::inventory::SourceNatConfigGeneric;
     use omicron_common::address::NUM_SOURCE_NAT_PORTS;
@@ -863,12 +945,13 @@ mod tests {
             range: IpRange,
             is_default: bool,
         ) -> (authz::IpPool, IpPool) {
+            let ip_version = range.version();
             let pool = IpPool::new(
                 &IdentityMetadataCreateParams {
                     name: name.parse().unwrap(),
                     description: format!("ip pool {}", name),
                 },
-                IpVersion::V4,
+                ip_version.into(),
                 IpPoolReservationType::ExternalSilos,
             );
 
@@ -880,7 +963,7 @@ mod tests {
                 .expect("Failed to create IP pool");
 
             let silo_id = self.db.opctx().authn.silo_required().unwrap().id();
-            let association = IpPoolResource {
+            let association = IncompleteIpPoolResource {
                 resource_id: silo_id,
                 resource_type: IpPoolResourceType::Silo,
                 ip_pool_id: pool.id(),
@@ -976,6 +1059,49 @@ mod tests {
                 .execute_async(&*conn)
                 .await
                 .expect("Failed to create Instance");
+
+            // Insert NIC for the instance too.
+            let count = diesel::sql_query(
+                "INSERT INTO omicron.public.network_interface VALUES (
+                    $1,
+                    $2,
+                    $3,
+                    now(),
+                    now(),
+                    NULL,
+                    $4,
+                    $5,
+                    $6,
+                    $7,
+                    $8,
+                    $9,
+                    $10,
+                    $11,
+                    ARRAY[]::INET[],
+                    $12,
+                    ARRAY[]::INET[]
+                );",
+            )
+            .bind::<sql_types::Uuid, _>(Uuid::new_v4())
+            .bind::<sql_types::Text, _>("net0")
+            .bind::<sql_types::Text, _>("description")
+            .bind::<NetworkInterfaceKindEnum, _>(NetworkInterfaceKind::Instance)
+            .bind::<sql_types::Uuid, _>(instance_id.into_untyped_uuid())
+            .bind::<sql_types::Uuid, _>(Uuid::new_v4())
+            .bind::<sql_types::Uuid, _>(Uuid::new_v4())
+            .bind::<sql_types::Int8, _>(0xa84025070707)
+            .bind::<sql_types::Inet, _>(nexus_db_model::Ipv4Addr::from(
+                "172.31.0.0".parse::<Ipv4Addr>().unwrap(),
+            ))
+            .bind::<sql_types::Int2, _>(0)
+            .bind::<sql_types::Bool, _>(true)
+            .bind::<sql_types::Inet, _>(nexus_db_model::Ipv6Addr::from(
+                "fd00::1".parse::<Ipv6Addr>().unwrap(),
+            ))
+            .execute_async(&*conn)
+            .await
+            .expect("Insert a NetworkInterface");
+            assert_eq!(count, 1);
 
             instance_id
         }
@@ -1074,6 +1200,7 @@ mod tests {
                 Uuid::new_v4(),
                 instance_id,
                 /* pool_name = */ None,
+                None,
                 true,
             )
             .await
@@ -1118,6 +1245,7 @@ mod tests {
                 Uuid::new_v4(),
                 instance_id,
                 /* pool_name = */ None,
+                None,
                 true,
             )
             .await;
@@ -1269,6 +1397,7 @@ mod tests {
                 id,
                 instance_id,
                 pool_name,
+                None,
                 true,
             )
             .await
@@ -1631,6 +1760,7 @@ mod tests {
                 id,
                 instance_id,
                 Some(p1),
+                None,
                 true,
             )
             .await
@@ -1677,6 +1807,7 @@ mod tests {
                     Uuid::new_v4(),
                     instance_id,
                     Some(p1.clone()),
+                    None,
                     true,
                 )
                 .await
@@ -1700,6 +1831,7 @@ mod tests {
                 Uuid::new_v4(),
                 instance_id,
                 Some(p1),
+                None,
                 true,
             )
             .await
@@ -1842,6 +1974,7 @@ mod tests {
                     Uuid::new_v4(),
                     iid,
                     Some(p1.clone()),
+                    None,
                     true,
                 )
                 .await
@@ -1865,6 +1998,7 @@ mod tests {
                 ips[0].id,
                 instance_id.unwrap(),
                 Some(p1),
+                None,
                 true,
             )
             .await
@@ -1964,6 +2098,7 @@ mod tests {
                     id,
                     iid,
                     Some(pool.clone()),
+                    None,
                     true,
                 )
                 .await
@@ -1994,6 +2129,7 @@ mod tests {
                 Uuid::new_v4(),
                 instance_id,
                 Some(pool),
+                None,
                 true,
             )
             .await
@@ -2127,6 +2263,7 @@ mod tests {
                 Uuid::new_v4(),
                 iid,
                 Some(authz_pool.clone()),
+                None,
                 true,
             )
             .await
@@ -2149,6 +2286,7 @@ mod tests {
                 Uuid::new_v4(),
                 iid,
                 Some(authz_pool.clone()),
+                None,
                 true,
             )
             .await
@@ -2229,6 +2367,157 @@ mod tests {
         } else {
             panic!("Expected an IPv4 address");
         }
+
+        context.success().await;
+    }
+
+    #[tokio::test]
+    async fn cannot_allocate_instance_ip_from_pool_with_different_version() {
+        let context = TestContext::new(
+            "cannot_allocate_instance_ip_from_pool_with_different_version",
+        )
+        .await;
+
+        // Create an IPv6 pool, as the default in the silo.
+        let addrs = [
+            Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 0),
+            Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 0xff),
+        ];
+        let range1 = IpRange::try_from((addrs[0], addrs[0])).unwrap();
+        let range2 = IpRange::try_from((addrs[1], addrs[1])).unwrap();
+        let (authz_pool, db_pool) =
+            context.create_ip_pool("default", range1, true).await;
+        let _ = context
+            .db
+            .datastore()
+            .ip_pool_add_range(
+                context.db.opctx(),
+                &authz_pool,
+                &db_pool,
+                &range2,
+            )
+            .await
+            .expect("able to add a second range to the pool");
+
+        let opctx = context.db.opctx();
+
+        // Create an instance with only an IPv4 stack.
+        let instance_id = InstanceUuid::new_v4();
+        let project_id = Uuid::new_v4();
+        let instance = Instance::new(instance_id, project_id, &InstanceCreate {
+            identity: IdentityMetadataCreateParams {
+                name: String::from("inst").parse().unwrap(),
+                description: String::from("test instance"),
+            },
+            ncpus: InstanceCpuCount(omicron_common::api::external::InstanceCpuCount(1)).into(),
+            memory: ByteCount(omicron_common::api::external::ByteCount::from_gibibytes_u32(1)).into(),
+            hostname: "test".parse().unwrap(),
+            ssh_public_keys: None,
+            user_data: vec![],
+            network_interfaces: InstanceNetworkInterfaceAttachment::DefaultIpv4,
+            external_ips: vec![],
+            disks: vec![],
+            boot_disk: None,
+            cpu_platform: None,
+            start: false,
+            auto_restart_policy: Default::default(),
+            anti_affinity_groups: Vec::new(),
+            multicast_groups: Vec::new(),
+        });
+
+        let conn = context
+            .db
+            .datastore()
+            .pool_connection_authorized(opctx)
+            .await
+            .unwrap();
+
+        use nexus_db_schema::schema::instance::dsl as instance_dsl;
+        diesel::insert_into(instance_dsl::instance)
+            .values(instance.clone())
+            .execute_async(&*conn)
+            .await
+            .expect("Failed to create Instance");
+
+        // Note that this query relies on the NIC itself also existing, so
+        // insert that too. This is pretty annoying -- we have to create an
+        // actual project / VPC / VPC Subnet, because the NetworkInterface type
+        // isn't `Insertable`. That is intentional, since we use a custom query
+        // to ensure VPC Subnet IP address constraints.
+        //
+        // We could create the project, VPC, and Subnet, but that's all verbose
+        // and mechanical at this layer in the code. Instead, insert the record
+        // directly using raw SQL.
+        let count = diesel::sql_query(
+            "INSERT INTO omicron.public.network_interface VALUES (
+                $1,
+                $2,
+                $3,
+                now(),
+                now(),
+                NULL,
+                $4,
+                $5,
+                $6,
+                $7,
+                $8,
+                $9,
+                $10,
+                $11,
+                ARRAY[]::INET[],
+                NULL,
+                ARRAY[]::INET[]
+            );",
+        )
+        .bind::<sql_types::Uuid, _>(uuid::uuid!(
+            "ab09167e-1a3a-45e4-9384-2c54e03a5c8f"
+        ))
+        .bind::<sql_types::Text, _>("net0")
+        .bind::<sql_types::Text, _>("description")
+        .bind::<NetworkInterfaceKindEnum, _>(NetworkInterfaceKind::Instance)
+        .bind::<sql_types::Uuid, _>(instance_id.into_untyped_uuid())
+        .bind::<sql_types::Uuid, _>(uuid::uuid!(
+            "ab09167e-1a3a-45e4-9384-2c54e03a5c8f"
+        ))
+        .bind::<sql_types::Uuid, _>(uuid::uuid!(
+            "ab09167e-1a3a-45e4-9384-2c54e03a5c8f"
+        ))
+        .bind::<sql_types::Int8, _>(0xa84025070707)
+        .bind::<sql_types::Inet, _>(nexus_db_model::Ipv4Addr::from(
+            "172.31.0.0".parse::<Ipv4Addr>().unwrap(),
+        ))
+        .bind::<sql_types::Int2, _>(0)
+        .bind::<sql_types::Bool, _>(true)
+        .execute_async(&*conn)
+        .await
+        .expect("Insert a NetworkInterface");
+        assert_eq!(count, 1, "failed to insert NIC");
+
+        // This should fail, because the NIC has no private IP stack to NAT the
+        // external IPv6 address to.
+        let res = context
+            .db
+            .datastore()
+            .allocate_instance_snat_ip(
+                context.db.opctx(),
+                Uuid::new_v4(),
+                instance_id,
+                db_pool.id(),
+            )
+            .await;
+        let Err(e) = &res else {
+            panic!(
+                "Expected to fail allocating an IPv4 SNAT address \
+                    from an IPv6-only pool, found {res:#?}"
+            );
+        };
+        let Error::InvalidRequest { message } = &e else {
+            panic!("Expected an InvalidRequest, found {e:#?}");
+        };
+        assert_eq!(
+            message.external_message(),
+            super::NIC_IS_MISSING_IP_STACK_ERROR_MESSAGE,
+        );
 
         context.success().await;
     }

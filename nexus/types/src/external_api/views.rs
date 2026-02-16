@@ -5,10 +5,11 @@
 //! Views are response bodies, most of which are public lenses onto DB models.
 
 use crate::external_api::shared::{
-    self, Baseboard, IpKind, IpRange, ServiceUsingCertificate,
-    TufSignedRootRole,
+    self, Baseboard, IpKind, IpRange, RackMembershipVersion,
+    ServiceUsingCertificate, TufSignedRootRole,
 };
 use crate::identity::AssetIdentityMetadata;
+use crate::trust_quorum::{TrustQuorumConfig, TrustQuorumMemberState};
 use api_identity::ObjectIdentity;
 use chrono::DateTime;
 use chrono::Utc;
@@ -21,10 +22,11 @@ use omicron_common::api::external::{
 };
 use omicron_common::vlan::VlanID;
 use omicron_uuid_kinds::*;
-use oxnet::{Ipv4Net, Ipv6Net};
+use oxnet::{IpNet, Ipv4Net, Ipv6Net};
 use schemars::JsonSchema;
 use semver::Version;
 use serde::{Deserialize, Serialize};
+use sled_hardware_types::BaseboardId;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::fmt;
@@ -89,12 +91,15 @@ pub struct SiloQuotas {
 /// View of the current silo's resource utilization and capacity
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct Utilization {
-    /// Accounts for resources allocated to running instances or storage allocated via disks or snapshots
-    /// Note that CPU and memory resources associated with a stopped instances are not counted here
-    /// whereas associated disks will still be counted
+    /// Accounts for resources allocated to running instances or
+    /// storage allocated via disks or snapshots.
+    ///
+    /// Note that CPU and memory resources associated with stopped
+    /// instances are not counted here, whereas associated disks will
+    /// still be counted.
     pub provisioned: VirtualResourceCounts,
-    /// The total amount of resources that can be provisioned in this silo
-    /// Actions that would exceed this limit will fail
+    /// The total amount of resources that can be provisioned in this silo.
+    /// Actions that would exceed this limit will fail.
     pub capacity: VirtualResourceCounts,
 }
 
@@ -104,10 +109,15 @@ pub struct Utilization {
 pub struct SiloUtilization {
     pub silo_id: Uuid,
     pub silo_name: Name,
-    /// Accounts for resources allocated by in silos like CPU or memory for running instances and storage for disks and snapshots
-    /// Note that CPU and memory resources associated with a stopped instances are not counted here
+    /// Accounts for the total resources allocated by the silo,
+    /// including CPU and memory for running instances and storage
+    /// for disks and snapshots.
+    ///
+    /// Note that CPU and memory resources associated with stopped
+    /// instances are not counted here.
     pub provisioned: VirtualResourceCounts,
-    /// Accounts for the total amount of resources reserved for silos via their quotas
+    /// Accounts for the total amount of resources reserved for
+    /// silos via their quotas.
     pub allocated: VirtualResourceCounts,
 }
 
@@ -251,10 +261,10 @@ pub struct Image {
     /// Hash of the image contents, if applicable
     pub digest: Option<Digest>,
 
-    /// size of blocks in bytes
+    /// Size of blocks in bytes
     pub block_size: ByteCount,
 
-    /// total size in bytes
+    /// Total size in bytes
     pub size: ByteCount,
 }
 
@@ -291,10 +301,10 @@ pub struct Vpc {
     #[serde(flatten)]
     pub identity: IdentityMetadata,
 
-    /// id for the project containing this VPC
+    /// ID for the project containing this VPC
     pub project_id: Uuid,
 
-    /// id for the system router where subnet default routes are registered
+    /// ID for the system router where subnet default routes are registered
     pub system_router_id: Uuid,
 
     /// The unique local IPv6 address range for subnets in this VPC
@@ -305,11 +315,12 @@ pub struct Vpc {
     pub dns_name: Name,
 }
 
-/// A VPC subnet represents a logical grouping for instances that allows network traffic between
-/// them, within a IPv4 subnetwork or optionally an IPv6 subnetwork.
+/// A VPC subnet represents a logical grouping for instances that
+/// allows network traffic between them, within an IPv4 subnetwork
+/// or optionally an IPv6 subnetwork.
 #[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct VpcSubnet {
-    /// common identifying metadata
+    /// Common identifying metadata
     #[serde(flatten)]
     pub identity: IdentityMetadata,
 
@@ -337,7 +348,7 @@ pub enum VpcRouterKind {
 /// should be sent depending on its destination.
 #[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct VpcRouter {
-    /// common identifying metadata
+    /// Common identifying metadata
     #[serde(flatten)]
     pub identity: IdentityMetadata,
 
@@ -379,24 +390,24 @@ pub struct InternetGatewayIpAddress {
     #[serde(flatten)]
     pub identity: IdentityMetadata,
 
-    /// The associated internet gateway.
+    /// The associated internet gateway
     pub internet_gateway_id: Uuid,
 
-    /// The associated IP address,
+    /// The associated IP address
     pub address: IpAddr,
 }
 
 // IP POOLS
 
 /// A collection of IP ranges. If a pool is linked to a silo, IP addresses from
-/// the pool can be allocated within that silo
+/// the pool can be allocated within that silo.
 #[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct IpPool {
     #[serde(flatten)]
     pub identity: IdentityMetadata,
     /// The IP version for the pool.
     pub ip_version: IpVersion,
-    /// Type of IP pool (unicast or multicast)
+    /// Type of IP pool (unicast or multicast).
     pub pool_type: shared::IpPoolType,
 }
 
@@ -424,8 +435,17 @@ pub struct SiloIpPool {
 
     /// When a pool is the default for a silo, floating IPs and instance
     /// ephemeral IPs will come from that pool when no other pool is specified.
-    /// There can be at most one default for a given silo.
+    ///
+    /// A silo can have at most one default pool per combination of pool type
+    /// (unicast or multicast) and IP version (IPv4 or IPv6), allowing up to 4
+    /// default pools total.
     pub is_default: bool,
+
+    /// The IP version for the pool.
+    pub ip_version: IpVersion,
+
+    /// Type of IP pool (unicast or multicast).
+    pub pool_type: shared::IpPoolType,
 }
 
 /// A link between an IP pool and a silo that allows one to allocate IPs from
@@ -436,7 +456,10 @@ pub struct IpPoolSiloLink {
     pub silo_id: Uuid,
     /// When a pool is the default for a silo, floating IPs and instance
     /// ephemeral IPs will come from that pool when no other pool is specified.
-    /// There can be at most one default for a given silo.
+    ///
+    /// A silo can have at most one default pool per combination of pool type
+    /// (unicast or multicast) and IP version (IPv4 or IPv6), allowing up to 4
+    /// default pools total.
     pub is_default: bool,
 }
 
@@ -446,6 +469,97 @@ pub struct IpPoolRange {
     pub ip_pool_id: Uuid,
     pub time_created: DateTime<Utc>,
     pub range: IpRange,
+}
+
+// SUBNET POOLS
+
+/// A pool of subnets for external subnet allocation
+#[derive(
+    ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq,
+)]
+pub struct SubnetPool {
+    #[serde(flatten)]
+    pub identity: IdentityMetadata,
+    /// The IP version for this pool
+    pub ip_version: IpVersion,
+}
+
+/// A subnet pool in the context of a silo
+#[derive(
+    ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq,
+)]
+pub struct SiloSubnetPool {
+    #[serde(flatten)]
+    pub identity: IdentityMetadata,
+
+    /// When a pool is the default for a silo, external subnet allocations will
+    /// come from that pool when no other pool is specified.
+    ///
+    /// A silo can have at most one default pool per IP version (IPv4 or IPv6),
+    /// allowing up to 2 default pools total.
+    pub is_default: bool,
+
+    /// The IP version for the pool.
+    pub ip_version: IpVersion,
+}
+
+/// A member (subnet) within a subnet pool
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
+pub struct SubnetPoolMember {
+    /// ID of the pool member
+    pub id: Uuid,
+    /// Time the pool member was created.
+    pub time_created: DateTime<Utc>,
+    /// ID of the parent subnet pool
+    pub subnet_pool_id: Uuid,
+    /// The subnet CIDR
+    pub subnet: IpNet,
+    /// Minimum prefix length for allocations from this subnet; a smaller prefix
+    /// means larger allocations are allowed (e.g. a /16 prefix yields larger
+    /// subnet allocations than a /24 prefix).
+    pub min_prefix_length: u8,
+    /// Maximum prefix length for allocations from this subnet; a larger prefix
+    /// means smaller allocations are allowed (e.g. a /24 prefix yields smaller
+    /// subnet allocations than a /16 prefix).
+    pub max_prefix_length: u8,
+}
+
+/// A link between a subnet pool and a silo
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
+pub struct SubnetPoolSiloLink {
+    pub subnet_pool_id: Uuid,
+    pub silo_id: Uuid,
+    pub is_default: bool,
+}
+
+/// Utilization information for a subnet pool
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct SubnetPoolUtilization {
+    /// Number of addresses allocated from this pool
+    pub allocated: f64,
+    /// Total capacity of this pool in addresses
+    pub capacity: f64,
+}
+
+// EXTERNAL SUBNETS
+
+/// An external subnet allocated from a subnet pool
+#[derive(
+    ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq,
+)]
+pub struct ExternalSubnet {
+    #[serde(flatten)]
+    pub identity: IdentityMetadata,
+    /// The allocated subnet CIDR
+    pub subnet: IpNet,
+    /// The project this subnet belongs to
+    pub project_id: Uuid,
+    /// The subnet pool this was allocated from
+    pub subnet_pool_id: Uuid,
+    /// The subnet pool member this subnet corresponds to
+    pub subnet_pool_member_id: Uuid,
+    /// The instance this subnet is attached to, if any
+    pub instance_id: Option<Uuid>,
 }
 
 // INSTANCE EXTERNAL IP ADDRESSES
@@ -547,11 +661,16 @@ pub struct MulticastGroup {
     pub identity: IdentityMetadata,
     /// The multicast IP address held by this resource.
     pub multicast_ip: IpAddr,
-    /// Source IP addresses for Source-Specific Multicast (SSM).
-    /// Empty array means any source is allowed.
+    /// Union of all member source IP addresses (computed, read-only).
+    ///
+    /// This field shows the combined source IPs across all group members.
+    /// Individual members may subscribe to different sources; this union
+    /// reflects all sources that any member is subscribed to.
+    /// Empty array means no members have source filtering enabled.
     pub source_ips: Vec<IpAddr>,
     /// Multicast VLAN (MVLAN) for egress multicast traffic to upstream networks.
     /// None means no VLAN tagging on egress.
+    // TODO(multicast): Remove mvlan field - being deprecated from multicast groups
     pub mvlan: Option<VlanID>,
     /// The ID of the IP pool this resource belongs to.
     pub ip_pool_id: Uuid,
@@ -568,19 +687,94 @@ pub struct MulticastGroupMember {
     pub identity: IdentityMetadata,
     /// The ID of the multicast group this member belongs to.
     pub multicast_group_id: Uuid,
+    /// The multicast IP address of the group this member belongs to.
+    pub multicast_ip: IpAddr,
     /// The ID of the instance that is a member of this group.
     pub instance_id: Uuid,
+    /// Source IP addresses for this member's multicast subscription.
+    ///
+    /// - **ASM**: Sources are optional. Empty array means any source is allowed.
+    ///   Non-empty array enables source filtering (IGMPv3/MLDv2).
+    /// - **SSM**: Sources are required for SSM addresses (232/8, ff3x::/32).
+    pub source_ips: Vec<IpAddr>,
     /// Current state of the multicast group membership.
     pub state: String,
 }
 
 // RACKS
 
-/// View of an Rack
+/// View of a Rack
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct Rack {
     #[serde(flatten)]
     pub identity: AssetIdentityMetadata,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum RackMembershipChangeState {
+    InProgress,
+    Committed,
+    Aborted,
+}
+
+/// Status of the rack membership uniquely identified by the (rack_id, version)
+/// pair
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct RackMembershipStatus {
+    pub rack_id: Uuid,
+    /// Version that uniquely identifies the rack membership at a given point
+    /// in time
+    pub version: RackMembershipVersion,
+    pub state: RackMembershipChangeState,
+    /// All members of the rack for this version
+    pub members: BTreeSet<BaseboardId>,
+    /// All members that have not yet confirmed this membership version
+    pub unacknowledged_members: BTreeSet<BaseboardId>,
+    pub time_created: DateTime<Utc>,
+    pub time_committed: Option<DateTime<Utc>>,
+    pub time_aborted: Option<DateTime<Utc>>,
+}
+
+impl From<TrustQuorumConfig> for RackMembershipStatus {
+    fn from(value: TrustQuorumConfig) -> Self {
+        // `Unacked` means that a member has not received and acked a `Prepare`
+        // yet. `Prepared` means that a member has acknowledged the prepare but
+        // not the commit. `Committed` is when the member starts participating
+        // in the new group.
+        //
+        // Since we don't want to expose trust quorum specific knowledge to
+        // the operator, and they really only want to know when the membership
+        // change has started to take effect, we say that any member that hasn't
+        // yet committed is unacknowledged.
+        let unacknowledged_members = value
+            .members
+            .iter()
+            .filter_map(|(id, data)| match data.state {
+                TrustQuorumMemberState::Unacked
+                | TrustQuorumMemberState::Prepared => Some(id.clone()),
+                TrustQuorumMemberState::Committed => None,
+            })
+            .collect();
+        let state = if value.state.is_committed() {
+            RackMembershipChangeState::Committed
+        } else if value.state.is_aborted() {
+            RackMembershipChangeState::Aborted
+        } else {
+            RackMembershipChangeState::InProgress
+        };
+
+        Self {
+            rack_id: value.rack_id.into_untyped_uuid(),
+            version: RackMembershipVersion(value.epoch.0),
+            state,
+            members: value.members.keys().cloned().collect(),
+            unacknowledged_members,
+            time_created: value.time_created,
+            time_committed: value.time_committed,
+            time_aborted: value.time_aborted,
+        }
+    }
 }
 
 // FRUs
@@ -1013,8 +1207,9 @@ pub struct SshKey {
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
 pub struct DeviceAccessToken {
     /// A unique, immutable, system-controlled identifier for the token.
+    ///
     /// Note that this ID is not the bearer token itself, which starts with
-    /// "oxide-token-"
+    /// "oxide-token-".
     pub id: Uuid,
     pub time_created: DateTime<Utc>,
 
@@ -1299,8 +1494,8 @@ impl PartialEq<AlertReceiver> for WebhookReceiver {
 pub struct WebhookReceiverConfig {
     /// The URL that webhook notification requests are sent to.
     pub endpoint: Url,
-    // A list containing the IDs of the secret keys used to sign payloads sent
-    // to this receiver.
+    /// A list containing the IDs of the secret keys used to sign payloads sent
+    /// to this receiver.
     pub secrets: Vec<WebhookSecret>,
 }
 
@@ -1774,6 +1969,23 @@ pub enum AuditLogEntryActor {
     Unauthenticated,
 }
 
+/// Authentication method used for a request
+#[derive(
+    Debug, Clone, Copy, Deserialize, Serialize, JsonSchema, PartialEq, Eq,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum AuthMethod {
+    /// Console session cookie
+    SessionCookie,
+    /// Device access token (OAuth 2.0 device authorization flow)
+    AccessToken,
+    /// SCIM client bearer token
+    ScimToken,
+    /// Spoof authentication (test only)
+    #[schemars(skip)]
+    Spoof,
+}
+
 /// Result of an audit log entry
 #[derive(Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
 #[serde(tag = "kind", rename_all = "snake_case")]
@@ -1826,10 +2038,14 @@ pub struct AuditLogEntry {
 
     pub actor: AuditLogEntryActor,
 
-    /// How the user authenticated the request. Possible values are
-    /// "session_cookie" and "access_token". Optional because it will not be
-    /// defined on unauthenticated requests like login attempts.
-    pub auth_method: Option<String>,
+    /// How the user authenticated the request (access token, session, or SCIM
+    /// token). Null for unauthenticated requests like login attempts.
+    pub auth_method: Option<AuthMethod>,
+
+    /// ID of the credential used for authentication. Null for unauthenticated
+    /// requests. The value of `auth_method` indicates what kind of credential
+    /// it is (access token, session, or SCIM token).
+    pub credential_id: Option<Uuid>,
 
     // Fields that are optional because they get filled in after the action completes
     /// Time operation completed

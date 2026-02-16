@@ -77,6 +77,7 @@ use std::collections::HashMap;
 use crate::app::instance::InstanceRegisterReason;
 use crate::cidata::InstanceCiData;
 
+use super::LOCAL_STORAGE_WORKERS;
 use crate::db::datastore::Disk;
 use nexus_db_queries::db;
 use omicron_common::api::external::Error;
@@ -263,7 +264,7 @@ impl DisksByIdBuilder {
     ) -> Result<(), Error> {
         let backend =
             ComponentV0::CrucibleStorageBackend(CrucibleStorageBackend {
-                readonly: false,
+                readonly: disk.is_read_only(),
                 request_json: volume.data().to_owned(),
             });
 
@@ -277,9 +278,11 @@ impl DisksByIdBuilder {
     ) -> Result<(), Error> {
         let backend = ComponentV0::FileStorageBackend(FileStorageBackend {
             path,
-            readonly: false,
+            // Presently, this will always be false for local storage disks, but
+            // we may as well ask the disk rather than hard-coding it...
+            readonly: disk.is_read_only(),
             block_size: disk.block_size().to_bytes(),
-            workers: None,
+            workers: Some(LOCAL_STORAGE_WORKERS),
         });
 
         self.add_generic_disk(disk, backend)

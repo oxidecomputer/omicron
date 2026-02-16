@@ -16,6 +16,7 @@ base64.workspace = true
 bootstore.workspace = true
 bootstrap-agent-api.workspace = true
 bootstrap-agent-client.workspace = true
+bootstrap-agent-lockstep-api.workspace = true
 bytes.workspace = true
 camino.workspace = true
 camino-tempfile.workspace = true
@@ -28,10 +29,14 @@ cockroach-admin-client.workspace = true
 # Only used by the simulated sled agent.
 crucible-agent-client.workspace = true
 derive_more.workspace = true
+dice-verifier = { workspace = true, features = ["ipcc", "mock"] }
 display-error-chain.workspace = true
 dns-server.workspace = true
 dns-service-client.workspace = true
-dpd-client.workspace = true
+# XXX NOTE this is due to https://github.com/oxidecomputer/omicron/issues/9704
+# This is the R17 dpd client
+# dpd-client.workspace = true
+dpd-client = { git = "https://github.com/oxidecomputer/dendrite", rev = "cc8e02a0800034c431c8cf96b889ea638da3d194" }
 dropshot.workspace = true
 flate2.workspace = true
 flume.workspace = true
@@ -89,14 +94,16 @@ sled-agent-api.workspace = true
 sled-agent-client.workspace = true
 sled-agent-config-reconciler.workspace = true
 sled-agent-health-monitor.workspace = true
+sled-agent-measurements.workspace = true
 sled-agent-types.workspace = true
 sled-agent-types-versions.workspace = true
-sled-agent-zone-images.workspace = true
+sled-agent-resolvable-files.workspace = true
 sled-diagnostics.workspace = true
 sled-hardware.workspace = true
 sled-hardware-types.workspace = true
 sled-storage.workspace = true
 sp-sim.workspace = true
+secrecy.workspace = true
 slog.workspace = true
 slog-async.workspace = true
 slog-dtrace.workspace = true
@@ -115,11 +122,13 @@ tokio-util.workspace = true
 toml.workspace = true
 trust-quorum.workspace = true
 trust-quorum-protocol.workspace = true
+trust-quorum-types.workspace = true
 tufaceous-artifact.workspace = true
 tufaceous-brand-metadata.workspace = true
 usdt.workspace = true
 uuid.workspace = true
 walkdir.workspace = true
+x509-cert.workspace = true
 zeroize.workspace = true
 zip.workspace = true
 zone.workspace = true

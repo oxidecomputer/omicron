@@ -1389,6 +1389,79 @@
         }
       }
     },
+    "/trust-quorum/config/{rack_id}": {
+      "get": {
+        "summary": "Retrieve the trust quorum configuration for the given epoch, or latest",
+        "operationId": "trust_quorum_get_config",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "rack_id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "query",
+            "name": "epoch",
+            "schema": {
+              "nullable": true,
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TrustQuorumConfig"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/trust-quorum/lrtq-upgrade": {
+      "post": {
+        "summary": "Initiate an LRTQ upgrade",
+        "description": "Return the epoch of the proposed configuration, so it can be polled asynchronously.",
+        "operationId": "trust_quorum_lrtq_upgrade",
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "uint64",
+                  "type": "integer",
+                  "format": "uint64",
+                  "minimum": 0
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/v1/ping": {
       "get": {
         "summary": "Ping API",
@@ -1557,7 +1630,7 @@
         ]
       },
       "BaseboardId": {
-        "description": "A unique baseboard id found during a collection\n\nBaseboard ids are the keys used to link up information from disparate sources (like a service processor and a sled agent).\n\nThese are normalized in the database.  Each distinct baseboard id is assigned a uuid and shared across the many possible collections that reference it.\n\nUsually, the part number and serial number are combined with a revision number.  We do not include that here.  If we ever did find a baseboard with the same part number and serial number but a new revision number, we'd want to treat that as the same baseboard as one with a different revision number.",
+        "description": "A representation of a Baseboard ID as used in the inventory subsystem.\n\nThis type is essentially the same as a `Baseboard` except it doesn't have a revision or HW type (Gimlet, PC, Unknown).",
         "type": "object",
         "properties": {
           "part_number": {
@@ -1634,11 +1707,20 @@
             "default": null,
             "type": "string"
           },
+          "max_paths": {
+            "description": "Maximum number of paths to use when multiple \"best paths\" exist",
+            "default": 1,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/MaxPathConfig"
+              }
+            ]
+          },
           "originate": {
             "description": "The set of prefixes for the BGP router to originate.",
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/Ipv4Net"
+              "$ref": "#/components/schemas/IpNet"
             }
           },
           "shaper": {
@@ -1657,9 +1739,9 @@
         "type": "object",
         "properties": {
           "addr": {
-            "description": "Address of the peer.",
+            "description": "Address of the peer. Use `UNSPECIFIED` to indicate an unnumbered BGP session established over the interface specified by `port`.",
             "type": "string",
-            "format": "ipv4"
+            "format": "ip"
           },
           "allowed_export": {
             "description": "Define export policy for a peer.",
@@ -1780,6 +1862,15 @@
             "type": "integer",
             "format": "uint32",
             "minimum": 0
+          },
+          "router_lifetime": {
+            "description": "Router lifetime in seconds for unnumbered BGP peers.",
+            "default": 0,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/RouterLifetimeConfig"
+              }
+            ]
           },
           "vlan_id": {
             "nullable": true,
@@ -2370,6 +2461,12 @@
           "host_phase_2": {
             "$ref": "#/components/schemas/BlueprintHostPhase2DesiredSlots"
           },
+          "last_allocated_ip_subnet_offset": {
+            "description": "Each sled is assigned an IPv6 /64 `subnet` (above). Currently, the lowest /112 subnet within the sled subnet is reserved for control plane services, and of that the lowest 32 IPs are reserved for special zones (global zone, switch zone) and rack setup. `last_allocated_ip_subnet_offset` therefore starts at 32 for new sleds, and the planner chooses IP addresses for new zones by incrementing it and taking that offset into `subnet`.\n\nPlanning will fail if `last_allocated_ip_subnet_offset` reaches its maximal value. This is very unlikely given current rates of updates and IP assignments, but is well within the realm of \"possible\". Giving Reconfigurator a larger chunk of IPs is tracked by <https://github.com/oxidecomputer/omicron/issues/9534>.",
+            "type": "integer",
+            "format": "uint16",
+            "minimum": 0
+          },
           "remove_mupdate_override": {
             "nullable": true,
             "allOf": [
@@ -2415,6 +2512,7 @@
           "datasets",
           "disks",
           "host_phase_2",
+          "last_allocated_ip_subnet_offset",
           "sled_agent_generation",
           "state",
           "subnet",
@@ -3938,6 +4036,26 @@
           "secs"
         ]
       },
+      "EncryptedRackSecrets": {
+        "description": "All possibly relevant __encrypted__ rack secrets for _prior_ committed configurations.",
+        "type": "object",
+        "properties": {
+          "data": {
+            "description": "Encrypted data.",
+            "type": "string",
+            "format": "hex string"
+          },
+          "salt": {
+            "description": "A random value used to derive the key to encrypt the rack secrets for prior committed epochs.",
+            "type": "string",
+            "format": "hex string (32 bytes)"
+          }
+        },
+        "required": [
+          "data",
+          "salt"
+        ]
+      },
       "Error": {
         "description": "Error information from a response.",
         "type": "object",
@@ -4985,6 +5103,26 @@
           "time_started"
         ]
       },
+      "InitialTrustQuorumConfig": {
+        "description": "The configuration generated by RSS and used to initialize trust quorum",
+        "type": "object",
+        "properties": {
+          "coordinator": {
+            "$ref": "#/components/schemas/BaseboardId"
+          },
+          "members": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BaseboardId"
+            },
+            "uniqueItems": true
+          }
+        },
+        "required": [
+          "coordinator",
+          "members"
+        ]
+      },
       "Instance": {
         "description": "View of an Instance",
         "type": "object",
@@ -5517,6 +5655,12 @@
         "pattern": "^([0-9a-fA-F]{0,2}:){5}[0-9a-fA-F]{0,2}$",
         "minLength": 5,
         "maxLength": 17
+      },
+      "MaxPathConfig": {
+        "type": "integer",
+        "format": "uint8",
+        "minimum": 1,
+        "maximum": 32
       },
       "MgsDrivenUpdateStatus": {
         "type": "object",
@@ -7281,7 +7425,7 @@
           "waiting_zones"
         ]
       },
-      "PortConfigV2": {
+      "PortConfig": {
         "type": "object",
         "properties": {
           "addresses": {
@@ -7808,6 +7952,15 @@
               }
             ]
           },
+          "initial_trust_quorum_configuration": {
+            "nullable": true,
+            "description": "Data used to write the initial trust quorum configuration to CRDB\n\nThis is optional for two reasons: * For clusters fewer than 3 nodes, we don't support trust quorum. * Trust quorum is not fully complete yet, and we only want this to be used in production once it is complete.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/InitialTrustQuorumConfig"
+              }
+            ]
+          },
           "internal_dns_zone_config": {
             "description": "initial internal DNS config",
             "allOf": [
@@ -7834,7 +7987,7 @@
             "description": "Initial rack network configuration",
             "allOf": [
               {
-                "$ref": "#/components/schemas/RackNetworkConfigV2"
+                "$ref": "#/components/schemas/RackNetworkConfig"
               }
             ]
           },
@@ -7869,7 +8022,7 @@
           "zpools"
         ]
       },
-      "RackNetworkConfigV2": {
+      "RackNetworkConfig": {
         "description": "Initial network configuration",
         "type": "object",
         "properties": {
@@ -7891,18 +8044,18 @@
           "infra_ip_first": {
             "description": "First ip address to be used for configuring network infrastructure",
             "type": "string",
-            "format": "ipv4"
+            "format": "ip"
           },
           "infra_ip_last": {
             "description": "Last ip address to be used for configuring network infrastructure",
             "type": "string",
-            "format": "ipv4"
+            "format": "ip"
           },
           "ports": {
             "description": "Uplinks for connecting the rack to external networks",
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/PortConfigV2"
+              "$ref": "#/components/schemas/PortConfig"
             }
           },
           "rack_subnet": {
@@ -7916,6 +8069,15 @@
           "ports",
           "rack_subnet"
         ]
+      },
+      "RackUuid": {
+        "x-rust-type": {
+          "crate": "omicron-uuid-kinds",
+          "path": "omicron_uuid_kinds::RackUuid",
+          "version": "*"
+        },
+        "type": "string",
+        "format": "uuid"
       },
       "ReconfiguratorConfig": {
         "type": "object",
@@ -8102,6 +8264,13 @@
           "destination",
           "nexthop"
         ]
+      },
+      "RouterLifetimeConfig": {
+        "description": "Router lifetime in seconds for unnumbered BGP peers",
+        "type": "integer",
+        "format": "uint16",
+        "minimum": 0,
+        "maximum": 9000
       },
       "Saga": {
         "description": "Sagas\n\nThese are currently only intended for observability by developers.  We will eventually want to flesh this out into something more observable for end users.",
@@ -8801,6 +8970,133 @@
           }
         ]
       },
+      "TrustQuorumConfig": {
+        "type": "object",
+        "properties": {
+          "abort_reason": {
+            "nullable": true,
+            "type": "string"
+          },
+          "commit_crash_tolerance": {
+            "type": "integer",
+            "format": "uint8",
+            "minimum": 0
+          },
+          "coordinator": {
+            "$ref": "#/components/schemas/BaseboardId"
+          },
+          "encrypted_rack_secrets": {
+            "nullable": true,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/EncryptedRackSecrets"
+              }
+            ]
+          },
+          "epoch": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "last_committed_epoch": {
+            "nullable": true,
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "members": {
+            "type": "object",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/TrustQuorumMemberData"
+            }
+          },
+          "rack_id": {
+            "$ref": "#/components/schemas/RackUuid"
+          },
+          "state": {
+            "$ref": "#/components/schemas/TrustQuorumConfigState"
+          },
+          "threshold": {
+            "type": "integer",
+            "format": "uint8",
+            "minimum": 0
+          },
+          "time_aborted": {
+            "nullable": true,
+            "type": "string",
+            "format": "date-time"
+          },
+          "time_committed": {
+            "nullable": true,
+            "type": "string",
+            "format": "date-time"
+          },
+          "time_committing": {
+            "nullable": true,
+            "type": "string",
+            "format": "date-time"
+          },
+          "time_created": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "commit_crash_tolerance",
+          "coordinator",
+          "epoch",
+          "members",
+          "rack_id",
+          "state",
+          "threshold",
+          "time_created"
+        ]
+      },
+      "TrustQuorumConfigState": {
+        "type": "string",
+        "enum": [
+          "preparing",
+          "preparing_lrtq_upgrade",
+          "committing",
+          "committed",
+          "committed_partially",
+          "aborted"
+        ]
+      },
+      "TrustQuorumMemberData": {
+        "type": "object",
+        "properties": {
+          "share_digest": {
+            "nullable": true,
+            "type": "string",
+            "format": "hex string (32 bytes)"
+          },
+          "state": {
+            "$ref": "#/components/schemas/TrustQuorumMemberState"
+          },
+          "time_committed": {
+            "nullable": true,
+            "type": "string",
+            "format": "date-time"
+          },
+          "time_prepared": {
+            "nullable": true,
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "state"
+        ]
+      },
+      "TrustQuorumMemberState": {
+        "type": "string",
+        "enum": [
+          "unacked",
+          "prepared",
+          "committed"
+        ]
+      },
       "TufRepoVersion": {
         "oneOf": [
           {
@@ -9038,7 +9334,13 @@
         "type": "object",
         "properties": {
           "address": {
-            "$ref": "#/components/schemas/IpNet"
+            "nullable": true,
+            "description": "The address to be used on the uplink. Set to `None` for an Ipv6 Link Local address.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/IpNet"
+              }
+            ]
           },
           "vlan_id": {
             "nullable": true,
@@ -9048,10 +9350,7 @@
             "format": "uint16",
             "minimum": 0
           }
-        },
-        "required": [
-          "address"
-        ]
+        }
       },
       "UserId": {
         "title": "A username for a local-only user",

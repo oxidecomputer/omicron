@@ -41,11 +41,14 @@ declare_saga_actions! {
     DEALLOCATE_EXTERNAL_IP -> "no_result3" {
         + sid_deallocate_external_ip
     }
-    LEAVE_MULTICAST_GROUPS -> "no_result4" {
+    DETACH_EXTERNAL_SUBNETS -> "no_result4" {
+        + sid_detach_external_subnets
+    }
+    LEAVE_MULTICAST_GROUPS -> "no_result5" {
         + sid_leave_multicast_groups
     }
-    INSTANCE_DELETE_NAT -> "no_result5" {
-        + sid_delete_nat
+    INSTANCE_DELETE_DENDRITE_CONFIG -> "no_result6" {
+        + sid_delete_dendrite_config
     }
 }
 
@@ -65,10 +68,11 @@ impl NexusSaga for SagaInstanceDelete {
         _params: &Self::Params,
         mut builder: steno::DagBuilder,
     ) -> Result<steno::Dag, super::SagaInitError> {
-        builder.append(instance_delete_nat_action());
+        builder.append(instance_delete_dendrite_config_action());
         builder.append(instance_delete_record_action());
         builder.append(delete_network_interfaces_action());
         builder.append(deallocate_external_ip_action());
+        builder.append(detach_external_subnets_action());
         builder.append(leave_multicast_groups_action());
         Ok(builder.build()?)
     }
@@ -112,7 +116,7 @@ async fn sid_delete_network_interfaces(
     Ok(())
 }
 
-async fn sid_delete_nat(
+async fn sid_delete_dendrite_config(
     sagactx: NexusActionContext,
 ) -> Result<(), ActionError> {
     let params = sagactx.saga_params::<Params>()?;
@@ -202,6 +206,23 @@ async fn sid_deallocate_external_ip(
     Ok(())
 }
 
+async fn sid_detach_external_subnets(
+    sagactx: NexusActionContext,
+) -> Result<(), ActionError> {
+    let osagactx = sagactx.user_data();
+    let params = sagactx.saga_params::<Params>()?;
+    let opctx = crate::context::op_context_for_saga_action(
+        &sagactx,
+        &params.serialized_authn,
+    );
+    osagactx
+        .datastore()
+        .instance_detach_external_subnets(&opctx, params.authz_instance.id())
+        .await
+        .map_err(ActionError::action_failed)?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod test {
     use crate::{
@@ -214,11 +235,12 @@ mod test {
     use nexus_db_lookup::LookupPath;
     use nexus_db_queries::{authn::saga::Serialized, context::OpContext, db};
     use nexus_test_utils::resource_helpers::DiskTest;
-    use nexus_test_utils::resource_helpers::create_default_ip_pool;
+    use nexus_test_utils::resource_helpers::create_default_ip_pools;
     use nexus_test_utils::resource_helpers::create_disk;
     use nexus_test_utils::resource_helpers::create_project;
     use nexus_test_utils_macros::nexus_test;
     use nexus_types::identity::Resource;
+    use omicron_common::address::IpVersion;
     use omicron_common::api::external::{
         ByteCount, IdentityMetadataCreateParams, InstanceCpuCount,
     };
@@ -234,7 +256,7 @@ mod test {
     const DISK_NAME: &str = "my-disk";
 
     async fn create_org_project_and_disk(client: &ClientTestContext) -> Uuid {
-        create_default_ip_pool(&client).await;
+        create_default_ip_pools(&client).await;
         let project = create_project(client, PROJECT_NAME).await;
         create_disk(&client, PROJECT_NAME, DISK_NAME).await;
         project.identity.id
@@ -273,9 +295,11 @@ mod test {
             user_data: vec![],
             ssh_public_keys: Some(Vec::new()),
             network_interfaces:
-                params::InstanceNetworkInterfaceAttachment::Default,
+                params::InstanceNetworkInterfaceAttachment::DefaultDualStack,
             external_ips: vec![params::ExternalIpCreate::Ephemeral {
-                pool: None,
+                pool_selector: params::PoolSelector::Auto {
+                    ip_version: Some(IpVersion::V4),
+                },
             }],
             boot_disk: Some(params::InstanceDiskAttachment::Attach(
                 params::InstanceDiskAttach { name: DISK_NAME.parse().unwrap() },

@@ -71,6 +71,7 @@ mod disk;
 mod dns;
 mod ereport;
 mod external_ip;
+mod external_subnet;
 pub mod fm;
 mod identity_provider;
 mod image;
@@ -116,6 +117,7 @@ mod switch_port;
 mod target_release;
 #[cfg(test)]
 pub(crate) mod test_utils;
+mod trust_quorum;
 pub mod update;
 mod user_data_export;
 mod utilization;
@@ -134,10 +136,14 @@ pub use db_metadata::ValidatedDatastoreSetupAction;
 pub use deployment::BlueprintLimitReachedOutput;
 pub use disk::CrucibleDisk;
 pub use disk::Disk;
+pub use disk::LocalStorageAllocation;
 pub use disk::LocalStorageDisk;
 pub use dns::DataStoreDnsTest;
 pub use dns::DnsVersionUpdateBuilder;
 pub use ereport::EreportFilters;
+pub use external_ip::FloatingIpAllocation;
+pub use external_subnet::ExternalSubnetBeginOpResult;
+pub use external_subnet::ExternalSubnetCompleteOpResult;
 pub use instance::{
     InstanceAndActiveVmm, InstanceGestalt, InstanceStateComputer,
 };
@@ -289,9 +295,9 @@ impl DataStore {
             || async {
                 if let Some(try_for) = try_for {
                     if std::time::Instant::now() > start + try_for {
-                        return Err(BackoffError::permanent(
+                        return Err(BackoffError::permanent(String::from(
                             "Timeout waiting for DataStore::new_with_timeout",
-                        ));
+                        )));
                     }
                 }
 
@@ -308,9 +314,9 @@ impl DataStore {
                                 "Cannot check schema version / Nexus access";
                                 InlineErrorChain::new(err.as_ref()),
                             );
-                            BackoffError::transient(
-                                "Cannot check schema version / Nexus access",
-                            )
+                            BackoffError::transient(format!(
+                                "Cannot check schema version / Nexus access: {err:#}",
+                            ))
                         })?;
 
                     match checked_action.action() {
@@ -325,14 +331,11 @@ impl DataStore {
                                 .attempt_handoff(*nexus_id)
                                 .await
                                 .map_err(|err| {
-                                    warn!(
-                                        log,
-                                        "Could not handoff to new nexus";
-                                        err
+                                    let msg = format!(
+                                        "Could not handoff to new nexus: {err}"
                                     );
-                                    BackoffError::transient(
-                                        "Could not handoff to new nexus",
-                                    )
+                                    warn!(log, "{msg}");
+                                    BackoffError::transient(msg)
                                 })?;
 
                             // If the handoff was successful, immediately
@@ -342,9 +345,9 @@ impl DataStore {
                         }
                         DatastoreSetupAction::TryLater => {
                             error!(log, "Waiting for metadata; trying later");
-                            return Err(BackoffError::permanent(
+                            return Err(BackoffError::permanent(String::from(
                                 "Waiting for metadata; trying later",
-                            ));
+                            )));
                         }
                         DatastoreSetupAction::Update => {
                             info!(
@@ -354,23 +357,38 @@ impl DataStore {
                             datastore
                                 .update_schema(checked_action, config)
                                 .await
-                                .map_err(|err| {
-                                    warn!(
-                                        log,
-                                        "Failed to update schema version";
-                                        InlineErrorChain::new(err.as_ref())
-                                    );
-                                    BackoffError::transient(
-                                        "Failed to update schema version",
-                                    )
+                                .map_err(|err| match err {
+                                    BackoffError::Permanent(e) => {
+                                        error!(
+                                            log,
+                                            "Failed to update schema version \
+                                            (permanent error, will not retry)";
+                                            InlineErrorChain::new(e.as_ref())
+                                        );
+                                        BackoffError::permanent(format!(
+                                            "Failed to update schema version: {e:#}"
+                                        ))
+                                    }
+                                    BackoffError::Transient {
+                                        err: e, ..
+                                    } => {
+                                        warn!(
+                                            log,
+                                            "Failed to update schema version";
+                                            InlineErrorChain::new(e.as_ref())
+                                        );
+                                        BackoffError::transient(format!(
+                                            "Failed to update schema version: {e:#}"
+                                        ))
+                                    }
                                 })?;
                             return Ok(());
                         }
                         DatastoreSetupAction::Refuse => {
                             error!(log, "Datastore should not be used");
-                            return Err(BackoffError::permanent(
+                            return Err(BackoffError::permanent(String::from(
                                 "Datastore should not be used",
-                            ));
+                            )));
                         }
                     }
                 }

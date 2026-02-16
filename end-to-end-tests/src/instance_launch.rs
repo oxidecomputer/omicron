@@ -7,7 +7,8 @@ use omicron_test_utils::dev::poll::{CondCheckError, wait_for_condition};
 use oxide_client::types::{
     ByteCount, DiskBackend, DiskCreate, DiskSource, ExternalIp,
     ExternalIpCreate, InstanceCpuCount, InstanceCreate, InstanceDiskAttachment,
-    InstanceNetworkInterfaceAttachment, InstanceState, SshKeyCreate,
+    InstanceNetworkInterfaceAttachment, InstanceState, IpVersion, PoolSelector,
+    SshKeyCreate,
 };
 use oxide_client::{ClientCurrentUserExt, ClientDisksExt, ClientInstancesExt};
 use russh::{ChannelMsg, Disconnect};
@@ -47,6 +48,7 @@ async fn instance_launch() -> Result<()> {
             description: String::new(),
             disk_backend: DiskBackend::Distributed(DiskSource::Image {
                 image_id: ctx.get_silo_image_id("debian11").await?,
+                read_only: false,
             }),
             size: ByteCount(2048 * 1024 * 1024),
         })
@@ -70,8 +72,13 @@ async fn instance_launch() -> Result<()> {
                 name: disk_name.clone(),
             }),
             disks: Vec::new(),
-            network_interfaces: InstanceNetworkInterfaceAttachment::Default,
-            external_ips: vec![ExternalIpCreate::Ephemeral { pool: None }],
+            network_interfaces:
+                InstanceNetworkInterfaceAttachment::DefaultDualStack,
+            external_ips: vec![ExternalIpCreate::Ephemeral {
+                pool_selector: PoolSelector::Auto {
+                    ip_version: Some(IpVersion::V4),
+                },
+            }],
             user_data: String::new(),
             ssh_public_keys: Some(vec![oxide_client::types::NameOrId::Name(
                 ssh_key_name.clone(),

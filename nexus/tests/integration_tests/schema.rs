@@ -278,6 +278,37 @@ async fn crdb_list_enums(crdb: &CockroachInstance) -> Vec<Row> {
     process_rows(&rows)
 }
 
+/// Returns a map from table name to an ordered list of column names.
+///
+/// The column names are ordered by their ordinal position in the table,
+/// which allows us to verify that the relative order of columns is the
+/// same between dbinit.sql and migrations.
+async fn crdb_column_ordering(
+    crdb: &CockroachInstance,
+) -> BTreeMap<String, Vec<String>> {
+    let client = crdb.connect().await.expect("failed to connect");
+
+    let rows = client
+        .query(
+            "SELECT table_name, column_name \
+             FROM information_schema.columns \
+             WHERE table_schema = 'public' \
+             ORDER BY table_name, ordinal_position",
+            &[],
+        )
+        .await
+        .expect("failed to query column ordering");
+    client.cleanup().await.expect("cleaning up after query");
+
+    let mut result: BTreeMap<String, Vec<String>> = BTreeMap::new();
+    for row in rows {
+        let table_name: String = row.get(0);
+        let column_name: String = row.get(1);
+        result.entry(table_name).or_default().push(column_name);
+    }
+    result
+}
+
 fn read_all_schema_versions() -> AllSchemaVersions {
     AllSchemaVersions::load(camino::Utf8Path::new(SCHEMA_DIR)).unwrap()
 }
@@ -521,6 +552,8 @@ const TABLES: [&'static str; 4] =
 #[derive(PartialEq, Debug)]
 struct InformationSchema {
     columns: Vec<Row>,
+    // "Table Name" -> "Columns"
+    column_ordering: BTreeMap<String, Vec<String>>,
     constraint_column_usage: Vec<Row>,
     enums: Vec<Row>,
     key_column_usage: Vec<Row>,
@@ -539,6 +572,15 @@ impl InformationSchema {
         // the columns diff especially needs this: it can be 20k lines otherwise
         similar_asserts::assert_eq!(self.tables, other.tables);
         similar_asserts::assert_eq!(self.columns, other.columns);
+
+        similar_asserts::assert_eq!(
+            self.column_ordering,
+            other.column_ordering,
+            "Column ordering did not match. The relative order of columns within \
+            each table must be the same in dbinit.sql and migrations. Since \
+            migrations can only add columns at the end of a table, new columns \
+            in dbinit.sql should also be added at the end of the table definition."
+        );
         similar_asserts::assert_eq!(
             self.enums,
             other.enums,
@@ -563,14 +605,7 @@ impl InformationSchema {
             self.referential_constraints,
             other.referential_constraints
         );
-        similar_asserts::assert_eq!(
-            self.statistics,
-            other.statistics,
-            "Statistics did not match. This often means that in dbinit.sql, a new \
-            column was added into the middle of a table rather than to the end. \
-            If that is the case, change dbinit.sql to add the column to the \
-            end of the table.\n"
-        );
+        similar_asserts::assert_eq!(self.statistics, other.statistics,);
         similar_asserts::assert_eq!(self.sequences, other.sequences);
         similar_asserts::assert_eq!(self.pg_indexes, other.pg_indexes);
     }
@@ -587,6 +622,8 @@ impl InformationSchema {
             Some("table_schema = 'public'"),
         )
         .await;
+
+        let column_ordering = crdb_column_ordering(crdb).await;
 
         let enums = crdb_list_enums(crdb).await;
 
@@ -659,6 +696,7 @@ impl InformationSchema {
 
         Self {
             columns,
+            column_ordering,
             constraint_column_usage,
             enums,
             key_column_usage,
@@ -1390,7 +1428,7 @@ fn at_current_101_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
                         user_data: vec![],
                         ssh_public_keys: None,
                         network_interfaces:
-                            params::InstanceNetworkInterfaceAttachment::Default,
+                            params::InstanceNetworkInterfaceAttachment::DefaultIpv4,
                         external_ips: vec![],
                         boot_disk: None,
                         cpu_platform: None,
@@ -3781,6 +3819,561 @@ mod migration_211 {
     }
 }
 
+mod migration_219 {
+    use super::*;
+    use pretty_assertions::assert_eq;
+    use std::collections::BTreeMap;
+
+    // randomly-generated IDs
+    const SLED_ID_1: &str = "ee1f2a5e-6b82-4487-8e78-779cf2b0a860";
+    const SLED_ID_2: &str = "a653a2d2-91f7-4604-adda-9bcc525db254";
+    const SLED_ID_3: &str = "8317bea6-bebc-4e58-ae09-8f1cef72ff4d";
+
+    const BP_ID_1: &str = "64ec2dba-922c-43b3-a576-699c3564d729";
+    const BP_ID_2: &str = "dd58e3d3-2760-48e9-8669-6ff0f076ba84";
+    const BP_ID_3: &str = "046b9d8f-f152-4370-86b8-e48445670aff";
+
+    const SLED_SUBNET_1: &str = "fd00:1122:3344:0101";
+    const SLED_SUBNET_2: &str = "fd00:1122:3344:0102";
+    const SLED_SUBNET_3: &str = "fd00:1122:3344:0103";
+
+    async fn before_impl(ctx: &MigrationContext<'_>) {
+        // Blueprint 1: 2 sleds with 3 zones each, IPs with final hextet both
+        // above and below ::20 (SLED_RESERVED_ADDRESSES).
+        //
+        // Blueprint 2: all 3 sleds, but the third sled has no zones
+        //
+        // Blueprint 3: all 3 sleds with zones, but the third has no zones with
+        // IPs above ::20.
+        ctx.client
+            .batch_execute(&format!(
+                "
+        -- Remove detritus from earlier migrations.
+        DELETE FROM omicron.public.bp_sled_metadata WHERE 1=1;
+        DELETE FROM omicron.public.bp_omicron_zone WHERE 1=1;
+
+        -- Blueprint 1
+        INSERT INTO omicron.public.bp_sled_metadata (
+            blueprint_id, sled_id, sled_state, sled_agent_generation,
+            remove_mupdate_override, host_phase_2_desired_slot_a,
+            host_phase_2_desired_slot_b, subnet
+        )
+        VALUES
+        ('{BP_ID_1}', '{SLED_ID_1}', 'active', 1, NULL, NULL, NULL,
+         '{SLED_SUBNET_1}::/64'),
+        ('{BP_ID_1}', '{SLED_ID_2}', 'active', 1, NULL, NULL, NULL,
+         '{SLED_SUBNET_2}::/64');
+
+        -- Blueprint 1 sled 1 zones
+        INSERT INTO omicron.public.bp_omicron_zone (
+            blueprint_id, sled_id, id, zone_type,
+            primary_service_ip, primary_service_port,
+            filesystem_pool, disposition,
+            disposition_expunged_ready_for_cleanup, image_source
+        )
+        VALUES
+        ('{BP_ID_1}', '{SLED_ID_1}', gen_random_uuid(), 'clickhouse',
+         '{SLED_SUBNET_1}::10', 8080, gen_random_uuid(), 'in_service',
+         false, 'install_dataset'),
+        ('{BP_ID_1}', '{SLED_ID_1}', gen_random_uuid(), 'oximeter',
+         '{SLED_SUBNET_1}::50', 8081, gen_random_uuid(), 'in_service',
+         false, 'install_dataset'),
+        ('{BP_ID_1}', '{SLED_ID_1}', gen_random_uuid(), 'crucible',
+         '{SLED_SUBNET_1}::100', 8082, gen_random_uuid(), 'in_service',
+         false, 'install_dataset');
+
+        -- Blueprint 1 sled 2 zones
+        INSERT INTO omicron.public.bp_omicron_zone (
+            blueprint_id, sled_id, id, zone_type,
+            primary_service_ip, primary_service_port,
+            filesystem_pool, disposition,
+            disposition_expunged_ready_for_cleanup, image_source
+        )
+        VALUES
+        ('{BP_ID_1}', '{SLED_ID_2}', gen_random_uuid(), 'clickhouse',
+         '{SLED_SUBNET_2}::15', 8080, gen_random_uuid(), 'in_service',
+         false, 'install_dataset'),
+        ('{BP_ID_1}', '{SLED_ID_2}', gen_random_uuid(), 'oximeter',
+         '{SLED_SUBNET_2}::25', 8081, gen_random_uuid(), 'in_service',
+         false, 'install_dataset'),
+        ('{BP_ID_1}', '{SLED_ID_2}', gen_random_uuid(), 'crucible',
+         '{SLED_SUBNET_2}::200', 8082, gen_random_uuid(), 'in_service',
+         false, 'install_dataset'),
+        ('{BP_ID_1}', '{SLED_ID_2}', gen_random_uuid(), 'internal_dns',
+         '{SLED_SUBNET_2}::ffff', 8053, gen_random_uuid(), 'in_service',
+         false, 'install_dataset');
+
+        -- Blueprint 2
+        INSERT INTO omicron.public.bp_sled_metadata (
+            blueprint_id, sled_id, sled_state, sled_agent_generation,
+            remove_mupdate_override, host_phase_2_desired_slot_a,
+            host_phase_2_desired_slot_b, subnet
+        )
+        VALUES
+        ('{BP_ID_2}', '{SLED_ID_1}', 'active', 1, NULL, NULL, NULL,
+         '{SLED_SUBNET_1}::/64'),
+        ('{BP_ID_2}', '{SLED_ID_2}', 'active', 1, NULL, NULL, NULL,
+         '{SLED_SUBNET_2}::/64'),
+        ('{BP_ID_2}', '{SLED_ID_3}', 'active', 1, NULL, NULL, NULL,
+         '{SLED_SUBNET_3}::/64');
+
+        -- Blueprint 2 sled 1 zones
+        INSERT INTO omicron.public.bp_omicron_zone (
+            blueprint_id, sled_id, id, zone_type,
+            primary_service_ip, primary_service_port,
+            filesystem_pool, disposition,
+            disposition_expunged_ready_for_cleanup, image_source
+        )
+        VALUES
+        ('{BP_ID_2}', '{SLED_ID_1}', gen_random_uuid(), 'clickhouse',
+         '{SLED_SUBNET_1}::150', 8080, gen_random_uuid(), 'in_service',
+         false, 'install_dataset');
+
+        -- Blueprint 2 sled 2 zones
+        INSERT INTO omicron.public.bp_omicron_zone (
+            blueprint_id, sled_id, id, zone_type,
+            primary_service_ip, primary_service_port,
+            filesystem_pool, disposition,
+            disposition_expunged_ready_for_cleanup, image_source
+        )
+        VALUES
+        ('{BP_ID_2}', '{SLED_ID_2}', gen_random_uuid(), 'oximeter',
+         '{SLED_SUBNET_2}::250', 8081, gen_random_uuid(), 'in_service',
+         false, 'install_dataset');
+
+        -- Blueprint 2 sled 3: NO zones
+
+        -- Blueprint 3
+        INSERT INTO omicron.public.bp_sled_metadata (
+            blueprint_id, sled_id, sled_state, sled_agent_generation,
+            remove_mupdate_override, host_phase_2_desired_slot_a,
+            host_phase_2_desired_slot_b, subnet
+        )
+        VALUES
+        ('{BP_ID_3}', '{SLED_ID_1}', 'active', 1, NULL, NULL, NULL,
+         '{SLED_SUBNET_1}::/64'),
+        ('{BP_ID_3}', '{SLED_ID_2}', 'active', 1, NULL, NULL, NULL,
+         '{SLED_SUBNET_2}::/64'),
+        ('{BP_ID_3}', '{SLED_ID_3}', 'active', 1, NULL, NULL, NULL,
+         '{SLED_SUBNET_3}::/64');
+
+        -- Blueprint 3 sled 1
+        INSERT INTO omicron.public.bp_omicron_zone (
+            blueprint_id, sled_id, id, zone_type,
+            primary_service_ip, primary_service_port,
+            filesystem_pool, disposition,
+            disposition_expunged_ready_for_cleanup, image_source
+        )
+        VALUES
+        ('{BP_ID_3}', '{SLED_ID_1}', gen_random_uuid(), 'clickhouse',
+         '{SLED_SUBNET_1}::300', 8080, gen_random_uuid(), 'in_service',
+         false, 'install_dataset');
+
+        -- Blueprint 3 sled 2
+        INSERT INTO omicron.public.bp_omicron_zone (
+            blueprint_id, sled_id, id, zone_type,
+            primary_service_ip, primary_service_port,
+            filesystem_pool, disposition,
+            disposition_expunged_ready_for_cleanup, image_source
+        )
+        VALUES
+        ('{BP_ID_3}', '{SLED_ID_2}', gen_random_uuid(), 'oximeter',
+         '{SLED_SUBNET_2}::400', 8081, gen_random_uuid(), 'in_service',
+         false, 'install_dataset');
+
+        -- Blueprint 3 sled 3
+        INSERT INTO omicron.public.bp_omicron_zone (
+            blueprint_id, sled_id, id, zone_type,
+            primary_service_ip, primary_service_port,
+            filesystem_pool, disposition,
+            disposition_expunged_ready_for_cleanup, image_source
+        )
+        VALUES
+        ('{BP_ID_3}', '{SLED_ID_3}', gen_random_uuid(), 'crucible',
+         '{SLED_SUBNET_3}::5', 8082, gen_random_uuid(), 'in_service',
+         false, 'install_dataset'),
+        ('{BP_ID_3}', '{SLED_ID_3}', gen_random_uuid(), 'clickhouse',
+         '{SLED_SUBNET_3}::1f', 8080, gen_random_uuid(), 'in_service',
+         false, 'install_dataset');
+                "
+            ))
+            .await
+            .expect("inserted pre-migration data");
+    }
+
+    async fn after_impl(ctx: &MigrationContext<'_>) {
+        let bp_id_1: Uuid = BP_ID_1.parse().unwrap();
+        let bp_id_2: Uuid = BP_ID_2.parse().unwrap();
+        let bp_id_3: Uuid = BP_ID_3.parse().unwrap();
+        let sled_id_1: Uuid = SLED_ID_1.parse().unwrap();
+        let sled_id_2: Uuid = SLED_ID_2.parse().unwrap();
+        let sled_id_3: Uuid = SLED_ID_3.parse().unwrap();
+
+        // BP1, Sled1: max IP is ::100
+        // BP1, Sled2: max IP is ::200
+        // BP2, Sled1: max IP is ::150
+        // BP2, Sled2: max IP is ::250
+        // BP2, Sled3: no zones, default to 32
+        // BP3, Sled1: max IP is ::300
+        // BP3, Sled2: max IP is ::400
+        // BP3, Sled3: max IP is ::1f (31); should get bumped to 32
+        let expected = [
+            ((bp_id_1, sled_id_1), 0x100),
+            ((bp_id_1, sled_id_2), 0x200),
+            ((bp_id_2, sled_id_1), 0x150),
+            ((bp_id_2, sled_id_2), 0x250),
+            ((bp_id_2, sled_id_3), 32),
+            ((bp_id_3, sled_id_1), 0x300),
+            ((bp_id_3, sled_id_2), 0x400),
+            ((bp_id_3, sled_id_3), 32),
+        ]
+        .into_iter()
+        .collect::<BTreeMap<_, _>>();
+
+        let rows = ctx
+            .client
+            .query(
+                "
+                SELECT blueprint_id, sled_id, last_allocated_ip_subnet_offset
+                FROM omicron.public.bp_sled_metadata
+                WHERE blueprint_id IN ($1, $2, $3)
+                ORDER BY blueprint_id, sled_id
+                ",
+                &[&bp_id_1, &bp_id_2, &bp_id_3],
+            )
+            .await
+            .expect("queried post-migration data");
+
+        let got = rows
+            .into_iter()
+            .map(|row| {
+                (
+                    (
+                        row.get::<_, Uuid>("blueprint_id"),
+                        row.get::<_, Uuid>("sled_id"),
+                    ),
+                    row.get::<_, i32>("last_allocated_ip_subnet_offset"),
+                )
+            })
+            .collect::<BTreeMap<_, _>>();
+
+        assert_eq!(expected, got);
+    }
+
+    pub(super) fn before<'a>(
+        ctx: &'a MigrationContext<'a>,
+    ) -> BoxFuture<'a, ()> {
+        Box::pin(before_impl(ctx))
+    }
+
+    pub(super) fn after<'a>(
+        ctx: &'a MigrationContext<'a>,
+    ) -> BoxFuture<'a, ()> {
+        Box::pin(after_impl(ctx))
+    }
+}
+
+// Test that the audit_log credential_id constraint migration (version 222)
+// handles existing rows with auth_method set but credential_id NULL.
+fn before_222_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
+    Box::pin(async move {
+        // Insert an audit_log entry with auth_method = 'session_cookie'.
+        // After version 222's up1.sql adds credential_id, this row will have
+        // credential_id = NULL. The migration must handle this case.
+        let id = Uuid::new_v4();
+        let actor_id = Uuid::new_v4();
+
+        ctx.client
+            .execute(
+                "INSERT INTO omicron.public.audit_log (
+                    id,
+                    time_started,
+                    request_id,
+                    request_uri,
+                    operation_id,
+                    source_ip,
+                    actor_id,
+                    actor_kind,
+                    auth_method
+                ) VALUES (
+                    $1,
+                    now(),
+                    'test-request-id',
+                    '/test/uri',
+                    'test_operation',
+                    '127.0.0.1',
+                    $2,
+                    'user_builtin',
+                    'session_cookie'
+                )",
+                &[&id, &actor_id],
+            )
+            .await
+            .expect("inserted audit_log row with session_cookie auth_method");
+    })
+}
+
+fn after_222_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
+    Box::pin(async move {
+        // Clean up the test row
+        ctx.client
+            .execute(
+                "DELETE FROM omicron.public.audit_log WHERE request_id = 'test-request-id'",
+                &[],
+            )
+            .await
+            .expect("cleaned up audit_log test row");
+    })
+}
+
+// Migration 229 fixes column ordering in console_session and device_access_token.
+// The "id" column was added via ALTER TABLE in migration 145, placing it at the
+// end. This migration recreates the tables with "id" as the first column.
+const SESSION_229_ID: Uuid =
+    Uuid::from_u128(0x22900001_0000_0000_0000_000000000001);
+const SESSION_229_TOKEN: &str = "tok-console-229-migration-test";
+const SESSION_229_SILO_USER: Uuid =
+    Uuid::from_u128(0x22900001_0000_0000_0000_000000000002);
+
+const DEVICE_229_ID: Uuid =
+    Uuid::from_u128(0x22900002_0000_0000_0000_000000000001);
+const DEVICE_229_TOKEN: &str = "tok-device-229-migration-test";
+const DEVICE_229_CLIENT_ID: Uuid =
+    Uuid::from_u128(0x22900002_0000_0000_0000_000000000002);
+const DEVICE_229_DEVICE_CODE: &str = "code-229-migration-test";
+const DEVICE_229_SILO_USER: Uuid =
+    Uuid::from_u128(0x22900002_0000_0000_0000_000000000003);
+
+fn before_229_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
+    Box::pin(async move {
+        // Insert test data into console_session and device_access_token.
+        // These tables currently have "id" as the last column (from migration 145).
+        ctx.client
+            .batch_execute(&format!(
+                "
+                INSERT INTO omicron.public.console_session
+                    (id, token, time_created, time_last_used, silo_user_id)
+                VALUES
+                    ('{SESSION_229_ID}', '{SESSION_229_TOKEN}', now(), now(), '{SESSION_229_SILO_USER}');
+
+                INSERT INTO omicron.public.device_access_token
+                    (id, token, client_id, device_code, silo_user_id, time_requested, time_created)
+                VALUES
+                    ('{DEVICE_229_ID}', '{DEVICE_229_TOKEN}', '{DEVICE_229_CLIENT_ID}',
+                     '{DEVICE_229_DEVICE_CODE}', '{DEVICE_229_SILO_USER}', now(), now());
+                "
+            ))
+            .await
+            .expect("failed to insert pre-migration rows for 229");
+    })
+}
+
+fn after_229_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
+    Box::pin(async move {
+        // Verify data was preserved after the column reordering migration.
+
+        // Check console_session
+        let rows = ctx
+            .client
+            .query(
+                &format!(
+                    "SELECT id, token, silo_user_id FROM omicron.public.console_session
+                     WHERE id = '{SESSION_229_ID}'"
+                ),
+                &[],
+            )
+            .await
+            .expect("failed to query post-migration console_session");
+        assert_eq!(rows.len(), 1, "console_session row should still exist");
+
+        let id: Uuid = rows[0].get("id");
+        assert_eq!(id, SESSION_229_ID);
+        let token: &str = rows[0].get("token");
+        assert_eq!(token, SESSION_229_TOKEN);
+        let silo_user_id: Uuid = rows[0].get("silo_user_id");
+        assert_eq!(silo_user_id, SESSION_229_SILO_USER);
+
+        // Check device_access_token
+        let rows = ctx
+            .client
+            .query(
+                &format!(
+                    "SELECT id, token, client_id, device_code, silo_user_id
+                     FROM omicron.public.device_access_token
+                     WHERE id = '{DEVICE_229_ID}'"
+                ),
+                &[],
+            )
+            .await
+            .expect("failed to query post-migration device_access_token");
+        assert_eq!(rows.len(), 1, "device_access_token row should still exist");
+
+        let id: Uuid = rows[0].get("id");
+        assert_eq!(id, DEVICE_229_ID);
+        let token: &str = rows[0].get("token");
+        assert_eq!(token, DEVICE_229_TOKEN);
+        let client_id: Uuid = rows[0].get("client_id");
+        assert_eq!(client_id, DEVICE_229_CLIENT_ID);
+        let device_code: &str = rows[0].get("device_code");
+        assert_eq!(device_code, DEVICE_229_DEVICE_CODE);
+        let silo_user_id: Uuid = rows[0].get("silo_user_id");
+        assert_eq!(silo_user_id, DEVICE_229_SILO_USER);
+
+        // Clean up test data
+        ctx.client
+            .batch_execute(&format!(
+                "
+                DELETE FROM omicron.public.console_session WHERE id = '{SESSION_229_ID}';
+                DELETE FROM omicron.public.device_access_token WHERE id = '{DEVICE_229_ID}';
+                "
+            ))
+            .await
+            .expect("failed to clean up migration 229 test data");
+    })
+}
+
+// Migration 230 added bgp_config.max_paths as a nullable column.
+// Migration 231 backfills NULL rows with 1 and sets NOT NULL.
+// We test both: a row that existed before the column was added (pre-230),
+// and rows inserted after the column exists but before the NOT NULL fix (pre-231).
+const BGP_ANNOUNCE_SET_230: Uuid =
+    Uuid::from_u128(0x23000001_0000_0000_0000_000000000001);
+// Row inserted before migration 230 (no max_paths column yet).
+const BGP_CONFIG_230_PRE: Uuid =
+    Uuid::from_u128(0x23000002_0000_0000_0000_000000000001);
+// Row inserted after migration 230 with an explicit max_paths value.
+const BGP_CONFIG_231_EXPLICIT: Uuid =
+    Uuid::from_u128(0x23100002_0000_0000_0000_000000000001);
+// Row inserted after migration 230 with NULL max_paths.
+const BGP_CONFIG_231_NULL: Uuid =
+    Uuid::from_u128(0x23100002_0000_0000_0000_000000000002);
+
+fn before_230_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
+    Box::pin(async move {
+        // Insert a bgp_announce_set (required FK) and a bgp_config row
+        // BEFORE migration 230 adds the max_paths column.
+        ctx.client
+            .batch_execute(&format!(
+                "
+                INSERT INTO omicron.public.bgp_announce_set
+                    (id, name, description, time_created, time_modified)
+                VALUES
+                    ('{BGP_ANNOUNCE_SET_230}', 'test-announce-set-230',
+                     'test', now(), now());
+
+                INSERT INTO omicron.public.bgp_config
+                    (id, name, description, time_created, time_modified,
+                     asn, bgp_announce_set_id)
+                VALUES
+                    ('{BGP_CONFIG_230_PRE}', 'bgp-pre-max-paths-230',
+                     'inserted before max_paths column exists', now(), now(),
+                     64500, '{BGP_ANNOUNCE_SET_230}');
+                "
+            ))
+            .await
+            .expect("failed to insert pre-migration rows for 230");
+    })
+}
+
+fn before_231_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
+    Box::pin(async move {
+        // Now max_paths column exists (added by migration 230) but is nullable.
+        // Insert one row with an explicit value and one with NULL.
+        ctx.client
+            .batch_execute(&format!(
+                "
+                INSERT INTO omicron.public.bgp_config
+                    (id, name, description, time_created, time_modified,
+                     asn, bgp_announce_set_id, max_paths)
+                VALUES
+                    ('{BGP_CONFIG_231_EXPLICIT}', 'bgp-explicit-max-paths-231',
+                     'has explicit max_paths', now(), now(),
+                     64501, '{BGP_ANNOUNCE_SET_230}', 4);
+
+                INSERT INTO omicron.public.bgp_config
+                    (id, name, description, time_created, time_modified,
+                     asn, bgp_announce_set_id)
+                VALUES
+                    ('{BGP_CONFIG_231_NULL}', 'bgp-null-max-paths-231',
+                     'has NULL max_paths', now(), now(),
+                     64502, '{BGP_ANNOUNCE_SET_230}');
+                "
+            ))
+            .await
+            .expect("failed to insert pre-migration rows for 231");
+    })
+}
+
+fn after_231_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
+    Box::pin(async move {
+        // The pre-230 row (no max_paths column when inserted) should now be 1.
+        let rows = ctx
+            .client
+            .query(
+                &format!(
+                    "SELECT max_paths FROM omicron.public.bgp_config
+                     WHERE id = '{BGP_CONFIG_230_PRE}'"
+                ),
+                &[],
+            )
+            .await
+            .expect("failed to query bgp_config for pre-230 row");
+        assert_eq!(rows.len(), 1);
+        let max_paths: i16 = rows[0].get("max_paths");
+        assert_eq!(
+            max_paths, 1,
+            "pre-230 row should have max_paths backfilled to 1"
+        );
+
+        // The row with explicit max_paths = 4 should be preserved.
+        let rows = ctx
+            .client
+            .query(
+                &format!(
+                    "SELECT max_paths FROM omicron.public.bgp_config
+                     WHERE id = '{BGP_CONFIG_231_EXPLICIT}'"
+                ),
+                &[],
+            )
+            .await
+            .expect("failed to query bgp_config for explicit row");
+        assert_eq!(rows.len(), 1);
+        let max_paths: i16 = rows[0].get("max_paths");
+        assert_eq!(max_paths, 4, "explicit max_paths should be preserved");
+
+        // The row with NULL max_paths should now be 1.
+        let rows = ctx
+            .client
+            .query(
+                &format!(
+                    "SELECT max_paths FROM omicron.public.bgp_config
+                     WHERE id = '{BGP_CONFIG_231_NULL}'"
+                ),
+                &[],
+            )
+            .await
+            .expect("failed to query bgp_config for NULL row");
+        assert_eq!(rows.len(), 1);
+        let max_paths: i16 = rows[0].get("max_paths");
+        assert_eq!(max_paths, 1, "NULL max_paths should be backfilled to 1");
+
+        // Clean up test data
+        ctx.client
+            .batch_execute(&format!(
+                "
+                DELETE FROM omicron.public.bgp_config
+                    WHERE id IN ('{BGP_CONFIG_230_PRE}',
+                                 '{BGP_CONFIG_231_EXPLICIT}',
+                                 '{BGP_CONFIG_231_NULL}');
+                DELETE FROM omicron.public.bgp_announce_set
+                    WHERE id = '{BGP_ANNOUNCE_SET_230}';
+                "
+            ))
+            .await
+            .expect("failed to clean up migration 231 test data");
+    })
+}
+
 // Lazily initializes all migration checks. The combination of Rust function
 // pointers and async makes defining a static table fairly painful, so we're
 // using lazy initialization instead.
@@ -3900,6 +4493,28 @@ fn get_migration_checks() -> BTreeMap<Version, DataMigrationFns> {
         DataMigrationFns::new()
             .before(migration_211::before)
             .after(migration_211::after),
+    );
+    map.insert(
+        Version::new(219, 0, 0),
+        DataMigrationFns::new()
+            .before(migration_219::before)
+            .after(migration_219::after),
+    );
+    map.insert(
+        Version::new(222, 0, 0),
+        DataMigrationFns::new().before(before_222_0_0).after(after_222_0_0),
+    );
+    map.insert(
+        Version::new(229, 0, 0),
+        DataMigrationFns::new().before(before_229_0_0).after(after_229_0_0),
+    );
+    map.insert(
+        Version::new(230, 0, 0),
+        DataMigrationFns::new().before(before_230_0_0),
+    );
+    map.insert(
+        Version::new(231, 0, 0),
+        DataMigrationFns::new().before(before_231_0_0).after(after_231_0_0),
     );
     map
 }

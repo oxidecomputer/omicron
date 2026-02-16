@@ -19,6 +19,8 @@ omicron-common.workspace = true
 omicron-uuid-kinds.workspace = true
 # See omicron-rpaths for more about the "pq-sys" dependency.
 pq-sys = "*"
+sled-agent-types.workspace = true
+sled-hardware-types.workspace = true
 slog.workspace = true
 slog-error-chain.workspace = true
 

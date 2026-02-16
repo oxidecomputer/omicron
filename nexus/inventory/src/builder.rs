@@ -17,7 +17,6 @@ use cockroach_admin_types::node::InternalNodeId;
 use gateway_client::types::SpComponentCaboose;
 use gateway_client::types::SpState;
 use iddqd::IdOrdMap;
-use nexus_types::inventory::BaseboardId;
 use nexus_types::inventory::Caboose;
 use nexus_types::inventory::CabooseFound;
 use nexus_types::inventory::CabooseWhich;
@@ -41,6 +40,7 @@ use omicron_common::disk::M2Slot;
 use omicron_uuid_kinds::CollectionKind;
 use sled_agent_types::inventory::Baseboard;
 use sled_agent_types::inventory::Inventory;
+use sled_hardware_types::BaseboardId;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::hash::Hash;
@@ -674,8 +674,9 @@ impl CollectionBuilder {
             ledgered_sled_config: inventory.ledgered_sled_config,
             reconciler_status: inventory.reconciler_status,
             last_reconciliation: inventory.last_reconciliation,
-            zone_image_resolver: inventory.zone_image_resolver,
+            file_source_resolver: inventory.file_source_resolver,
             health_monitor: inventory.health_monitor,
+            reference_measurements: inventory.reference_measurements,
         };
 
         self.sleds
@@ -771,18 +772,7 @@ impl CollectionBuilder {
     }
 }
 
-/// Returns the current time, truncated to the previous microsecond.
-///
-/// This exists because the database doesn't store nanosecond-precision, so if
-/// we store nanosecond-precision timestamps, then DateTime conversion is lossy
-/// when round-tripping through the database.  That's rather inconvenient.
-pub fn now_db_precision() -> DateTime<Utc> {
-    let ts = Utc::now();
-    let nanosecs = ts.timestamp_subsec_nanos();
-    let micros = ts.timestamp_subsec_micros();
-    let only_nanos = nanosecs - micros * 1000;
-    ts - std::time::Duration::from_nanos(u64::from(only_nanos))
-}
+pub use omicron_common::now_db_precision;
 
 #[cfg(test)]
 mod test {
@@ -797,7 +787,6 @@ mod test {
     use gateway_client::types::SpComponentCaboose;
     use gateway_client::types::SpState;
     use gateway_types::rot::RotSlot;
-    use nexus_types::inventory::BaseboardId;
     use nexus_types::inventory::Caboose;
     use nexus_types::inventory::CabooseWhich;
     use nexus_types::inventory::RotPage;
@@ -805,6 +794,7 @@ mod test {
     use nexus_types::inventory::SpType;
     use omicron_common::api::external::ByteCount;
     use sled_agent_types::inventory::SledRole;
+    use sled_hardware_types::BaseboardId;
 
     // Verify the contents of an empty collection.
     #[test]

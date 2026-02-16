@@ -24,6 +24,7 @@ use chrono::Utc;
 use dropshot::Body;
 use dropshot::HttpError;
 use futures::Stream;
+use iddqd::IdOrdMap;
 use omicron_common::api::external::{
     ByteCount, DiskState, Error, Generation, ResourceType,
 };
@@ -40,10 +41,10 @@ use omicron_common::disk::{
     DisksManagementResult, OmicronPhysicalDisksConfig,
 };
 use omicron_uuid_kinds::{
-    DatasetUuid, ExternalZpoolUuid, GenericUuid, PhysicalDiskUuid,
-    PropolisUuid, SledUuid, SupportBundleUuid, ZpoolUuid,
+    DatasetUuid, GenericUuid, PhysicalDiskUuid, PropolisUuid, SledUuid,
+    SupportBundleUuid, ZpoolUuid,
 };
-use oxnet::Ipv6Net;
+use oxnet::{IpNet, Ipv6Net};
 use propolis_client::instance_spec::FileStorageBackend;
 use propolis_client::instance_spec::SpecKey;
 use propolis_client::{
@@ -51,6 +52,7 @@ use propolis_client::{
 };
 use range_requests::PotentialRange;
 use sled_agent_health_monitor::HealthMonitorHandle;
+use sled_agent_types::attached_subnet::{AttachedSubnet, AttachedSubnets};
 use sled_agent_types::dataset::LocalStorageDatasetEnsureRequest;
 use sled_agent_types::disk::DiskStateRequested;
 use sled_agent_types::early_networking::{
@@ -61,10 +63,11 @@ use sled_agent_types::instance::{
     VmmPutStateResponse, VmmStateRequested, VmmUnregisterResponse,
 };
 use sled_agent_types::inventory::{
-    ConfigReconcilerInventory, ConfigReconcilerInventoryStatus,
-    HostPhase2DesiredSlots, Inventory, InventoryDataset, InventoryDisk,
-    InventoryZpool, OmicronSledConfig, OmicronZonesConfig, SledRole,
-    ZoneImageResolverInventory,
+    ConfigReconcilerInventory, ConfigReconcilerInventoryResult,
+    ConfigReconcilerInventoryStatus, HostPhase2DesiredSlots, Inventory,
+    InventoryDataset, InventoryDisk, InventoryZpool,
+    OmicronFileSourceResolverInventory, OmicronSledConfig, OmicronZonesConfig,
+    SingleMeasurementInventory, SledRole,
 };
 use sled_agent_types::support_bundle::SupportBundleMetadata;
 
@@ -103,6 +106,9 @@ pub struct SledAgent {
     /// lists of external IPs assigned to instances
     pub external_ips:
         Mutex<HashMap<PropolisUuid, HashSet<InstanceExternalIpBody>>>,
+    /// subnets attached to instances.
+    pub attached_subnets:
+        Mutex<HashMap<PropolisUuid, IdOrdMap<AttachedSubnet>>>,
     /// multicast group memberships for instances
     pub multicast_groups:
         Mutex<HashMap<PropolisUuid, HashSet<InstanceMulticastMembership>>>,
@@ -145,8 +151,8 @@ impl SledAgent {
                 rack_network_config: Some(RackNetworkConfig {
                     rack_subnet: Ipv6Net::new(Ipv6Addr::UNSPECIFIED, 56)
                         .unwrap(),
-                    infra_ip_first: Ipv4Addr::UNSPECIFIED,
-                    infra_ip_last: Ipv4Addr::UNSPECIFIED,
+                    infra_ip_first: IpAddr::V4(Ipv4Addr::UNSPECIFIED),
+                    infra_ip_last: IpAddr::V4(Ipv4Addr::UNSPECIFIED),
                     ports: Vec::new(),
                     bgp: Vec::new(),
                     bfd: Vec::new(),
@@ -190,6 +196,7 @@ impl SledAgent {
             simulated_upstairs,
             v2p_mappings: Mutex::new(HashSet::new()),
             external_ips: Mutex::new(HashMap::new()),
+            attached_subnets: Mutex::new(HashMap::new()),
             multicast_groups: Mutex::new(HashMap::new()),
             vpc_routes: Mutex::new(HashMap::new()),
             mock_propolis: futures::lock::Mutex::new(None),
@@ -220,9 +227,10 @@ impl SledAgent {
             metadata,
             ..
         } = instance;
+        let v1_spec = crate::instance::spec_v0_to_v1(vmm_spec.0.clone());
         // respond with a fake 500 level failure if asked to ensure an instance
         // with more than 16 CPUs.
-        let ncpus = vmm_spec.0.board.cpus;
+        let ncpus = v1_spec.board.cpus;
         if ncpus > 16 {
             return Err(Error::internal_error(
                 &"could not allocate an instance: ran out of CPUs!",
@@ -238,13 +246,15 @@ impl SledAgent {
             // pool name.
             let dataset = path.strip_prefix("/dev/zvol/rdsk/oxp_").unwrap();
 
-            // what remains is: UUID/crypt/local_storage/UUID/vol
+            // what remains is: UUID/local_storage_unencrypted/UUID/vol
             let parts: Vec<&str> = dataset.split("/").collect();
             let zpool_id: ZpoolUuid = parts[0].parse().unwrap();
-            let dataset_id: DatasetUuid = parts[3].parse().unwrap();
+            let dataset_id: DatasetUuid = parts[2].parse().unwrap();
 
             // This panics if this dataset was not already created
-            self.storage.lock().get_local_storage_dataset(zpool_id, dataset_id);
+            self.storage
+                .lock()
+                .get_local_storage_unencrypted_dataset(zpool_id, dataset_id);
         }
 
         for (id, _disk) in vmm_spec.crucible_backends() {
@@ -289,36 +299,41 @@ impl SledAgent {
         let mock_lock = self.mock_propolis.lock().await;
         if let Some((_srv, client)) = mock_lock.as_ref() {
             if !self.vmms.contains_key(&instance_id.into_untyped_uuid()).await {
-                let metadata = propolis_client::types::InstanceMetadata {
-                    project_id: metadata.project_id,
-                    silo_id: metadata.silo_id,
-                    sled_id: self.id.into_untyped_uuid(),
-                    sled_model: self
-                        .config
-                        .hardware
-                        .baseboard
-                        .model()
-                        .to_string(),
-                    sled_revision: self.config.hardware.baseboard.revision(),
-                    sled_serial: self
-                        .config
-                        .hardware
-                        .baseboard
-                        .identifier()
-                        .to_string(),
-                };
-                let properties = propolis_client::types::InstanceProperties {
-                    id: propolis_id.into_untyped_uuid(),
-                    name: local_config.hostname.to_string(),
-                    description: "sled-agent-sim created instance".to_string(),
-                    metadata,
-                };
+                let metadata =
+                    propolis_client::instance_spec::InstanceMetadata {
+                        project_id: metadata.project_id,
+                        silo_id: metadata.silo_id,
+                        sled_id: self.id.into_untyped_uuid(),
+                        sled_model: self
+                            .config
+                            .hardware
+                            .baseboard
+                            .model()
+                            .to_string(),
+                        sled_revision: self
+                            .config
+                            .hardware
+                            .baseboard
+                            .revision(),
+                        sled_serial: self
+                            .config
+                            .hardware
+                            .baseboard
+                            .identifier()
+                            .to_string(),
+                    };
+                let properties =
+                    propolis_client::instance_spec::InstanceProperties {
+                        id: propolis_id.into_untyped_uuid(),
+                        name: local_config.hostname.to_string(),
+                        description: "sled-agent-sim created instance"
+                            .to_string(),
+                        metadata,
+                    };
 
                 let body = propolis_client::types::InstanceEnsureRequest {
                     properties,
-                    init: InstanceInitializationMethod::Spec {
-                        spec: vmm_spec.0.clone(),
-                    },
+                    init: InstanceInitializationMethod::Spec { spec: v1_spec },
                 };
 
                 // Try to create the instance
@@ -720,6 +735,75 @@ impl SledAgent {
         Ok(())
     }
 
+    pub async fn instance_put_attached_subnets(
+        &self,
+        propolis_id: PropolisUuid,
+        subnets: AttachedSubnets,
+    ) -> Result<(), Error> {
+        if !self.vmms.contains_key(&propolis_id.into_untyped_uuid()).await {
+            return Err(Error::internal_error(
+                "can't alter subnet state for VMM that's not registered",
+            ));
+        }
+        self.attached_subnets
+            .lock()
+            .unwrap()
+            .insert(propolis_id, subnets.subnets);
+        Ok(())
+    }
+
+    pub async fn instance_delete_attached_subnets(
+        &self,
+        propolis_id: PropolisUuid,
+    ) -> Result<(), Error> {
+        if !self.vmms.contains_key(&propolis_id.into_untyped_uuid()).await {
+            return Err(Error::internal_error(
+                "can't alter subnet state for VMM that's not registered",
+            ));
+        }
+        self.attached_subnets
+            .lock()
+            .unwrap()
+            .entry(propolis_id)
+            .or_default()
+            .clear();
+        Ok(())
+    }
+
+    pub async fn instance_post_attached_subnet(
+        &self,
+        propolis_id: PropolisUuid,
+        subnet: AttachedSubnet,
+    ) -> Result<(), Error> {
+        if !self.vmms.contains_key(&propolis_id.into_untyped_uuid()).await {
+            return Err(Error::internal_error(
+                "can't alter subnet state for VMM that's not registered",
+            ));
+        }
+        let mut subnets = self.attached_subnets.lock().unwrap();
+        let instance_subnets = subnets.entry(propolis_id).or_default();
+        instance_subnets
+            .insert_unique(subnet)
+            .map_err(|_| Error::conflict("Subnet already attached"))
+    }
+
+    pub async fn instance_delete_attached_subnet(
+        &self,
+        propolis_id: PropolisUuid,
+        subnet: IpNet,
+    ) -> Result<(), Error> {
+        if !self.vmms.contains_key(&propolis_id.into_untyped_uuid()).await {
+            return Err(Error::internal_error(
+                "can't alter subnet state for VMM that's not registered",
+            ));
+        }
+        let mut subnets = self.attached_subnets.lock().unwrap();
+        if let Some(instance_subnets) = subnets.get_mut(&propolis_id) {
+            instance_subnets.remove(&subnet);
+        }
+        Ok(())
+    }
+
     pub async fn instance_join_multicast_group(
         &self,
         propolis_id: PropolisUuid,
@@ -820,7 +904,23 @@ impl SledAgent {
             zones: zones_config.zones.into_iter().collect(),
             remove_mupdate_override: None,
             host_phase_2: HostPhase2DesiredSlots::current_contents(),
+            measurements: Default::default(),
         };
+
+        let reference_measurements = vec![
+            SingleMeasurementInventory {
+                path: "this/is/fake1".into(),
+                result: ConfigReconcilerInventoryResult::Ok,
+            },
+            SingleMeasurementInventory {
+                path: "this/is/fake2".into(),
+                result: ConfigReconcilerInventoryResult::Err {
+                    message: "this is an error".to_string(),
+                },
+            },
+        ]
+        .into_iter()
+        .collect();
 
         Ok(Inventory {
             sled_id: self.id,
@@ -892,9 +992,11 @@ impl SledAgent {
             last_reconciliation: Some(
                 ConfigReconcilerInventory::debug_assume_success(sled_config),
             ),
-            // TODO: simulate the zone image resolver with greater fidelity
-            zone_image_resolver: ZoneImageResolverInventory::new_fake(),
+            // TODO: simulate the file source resolver with greater fidelity
+            file_source_resolver: OmicronFileSourceResolverInventory::new_fake(
+            ),
             health_monitor,
+            reference_measurements,
         })
     }
 
@@ -1102,13 +1204,15 @@ impl SledAgent {
 
     pub fn ensure_local_storage_dataset(
         &self,
-        zpool_id: ExternalZpoolUuid,
-        dataset_id: DatasetUuid,
         request: LocalStorageDatasetEnsureRequest,
     ) {
-        self.storage
-            .lock()
-            .ensure_local_storage_dataset(zpool_id, dataset_id, request);
+        assert!(!request.encrypted_at_rest);
+
+        self.storage.lock().ensure_local_storage_unencrypted_dataset(
+            request.zpool_id,
+            request.dataset_id,
+            request,
+        );
     }
 }
 
