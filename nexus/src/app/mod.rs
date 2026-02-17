@@ -648,6 +648,16 @@ impl Nexus {
             // start the background tasks so that whatever can work will work.
             info!(task_log, "activating background tasks");
 
+            let console_session_absolute_timeout =
+                chrono::TimeDelta::try_minutes(
+                    task_config
+                        .pkg
+                        .console
+                        .session_absolute_timeout_minutes
+                        .into(),
+                )
+                .expect("session_absolute_timeout_minutes out of range");
+
             let driver = background_tasks_initializer.start(
                 &task_nexus.background_tasks,
                 BackgroundTasksData {
@@ -677,6 +687,7 @@ impl Nexus {
                     mgs_updates_tx,
                     blueprint_load_tx,
                     sitrep_load_tx,
+                    console_session_absolute_timeout,
                 },
             );
 

@@ -435,6 +435,19 @@ pub struct BackgroundTaskConfig {
     pub trust_quorum: TrustQuorumConfig,
     /// configuration for the attached subnet manager
     pub attached_subnet_manager: AttachedSubnetManagerConfig,
+    /// configuration for console session cleanup task
+    pub session_cleanup: SessionCleanupConfig,
+}
+
+#[serde_as]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct SessionCleanupConfig {
+    /// period (in seconds) for periodic activations of the session cleanup task
+    #[serde_as(as = "DurationSeconds<u64>")]
+    pub period_secs: Duration,
+
+    /// maximum rows hard-deleted per activation
+    pub max_delete_per_activation: u32,
 }
 
 #[serde_as]
@@ -1252,6 +1265,8 @@ mod test {
             multicast_reconciler.period_secs = 60
             trust_quorum.period_secs = 60
             attached_subnet_manager.period_secs = 60
+            session_cleanup.period_secs = 300
+            session_cleanup.max_delete_per_activation = 10000
             [default_region_allocation_strategy]
             type = "random"
             seed = 0
@@ -1515,6 +1530,10 @@ mod test {
                         attached_subnet_manager: AttachedSubnetManagerConfig {
                             period_secs: Duration::from_secs(60),
                         },
+                        session_cleanup: SessionCleanupConfig {
+                            period_secs: Duration::from_secs(300),
+                            max_delete_per_activation: 10_000,
+                        },
                     },
                     multicast: MulticastConfig { enabled: false },
                     default_region_allocation_strategy:
@@ -1620,6 +1639,8 @@ mod test {
             multicast_reconciler.period_secs = 60
             trust_quorum.period_secs = 60
             attached_subnet_manager.period_secs = 60
+            session_cleanup.period_secs = 300
+            session_cleanup.max_delete_per_activation = 10000
 
             [default_region_allocation_strategy]
             type = "random"
