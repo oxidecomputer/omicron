@@ -12,7 +12,9 @@ use clap::Parser;
 use clickhouse_admin_api::*;
 use cockroach_admin_api::*;
 use dns_server_api::*;
-use dropshot_api_manager::{Environment, ManagedApiConfig, ManagedApis};
+use dropshot_api_manager::{
+    Environment, ManagedApi, ManagedApiConfig, ManagedApis,
+};
 use dropshot_api_manager_types::{
     ManagedApiMetadata, ValidationContext, Versions,
 };
@@ -52,7 +54,7 @@ fn environment() -> anyhow::Result<Environment> {
 // TODO The metadata here overlaps with metadata in api-manifest.toml.
 fn all_apis() -> anyhow::Result<ManagedApis> {
     let apis = vec![
-        ManagedApiConfig {
+        ManagedApi::from(ManagedApiConfig {
             title: "Bootstrap Agent API",
             versions: Versions::new_versioned(
                 bootstrap_agent_api::supported_versions(),
@@ -65,9 +67,12 @@ fn all_apis() -> anyhow::Result<ManagedApis> {
             },
             api_description: bootstrap_agent_api_mod::stub_api_description,
             ident: "bootstrap-agent",
-            extra_validation: None,
-        },
-        ManagedApiConfig {
+        })
+        // The bootstrap-agent API is client-side-versioned and currently frozen.
+        // We allow trivial changes to go through. If we did not, we would need to
+        // unfreeze the API and bump the version number for trivial changes.
+        .allow_trivial_changes_for_latest(),
+        ManagedApi::from(ManagedApiConfig {
             title: "Bootstrap Agent Lockstep API",
             versions: Versions::new_lockstep(semver::Version::new(0, 0, 1)),
             metadata: ManagedApiMetadata {
@@ -81,9 +86,8 @@ fn all_apis() -> anyhow::Result<ManagedApis> {
             api_description:
                 bootstrap_agent_lockstep_api_mod::stub_api_description,
             ident: "bootstrap-agent-lockstep",
-            extra_validation: None,
-        },
-        ManagedApiConfig {
+        }),
+        ManagedApi::from(ManagedApiConfig {
             title: "ClickHouse Cluster Admin Keeper API",
             versions: Versions::new_versioned(
                 clickhouse_admin_api::supported_versions(),
@@ -100,9 +104,8 @@ fn all_apis() -> anyhow::Result<ManagedApis> {
             api_description:
                 clickhouse_admin_keeper_api_mod::stub_api_description,
             ident: "clickhouse-admin-keeper",
-            extra_validation: None,
-        },
-        ManagedApiConfig {
+        }),
+        ManagedApi::from(ManagedApiConfig {
             title: "ClickHouse Cluster Admin Server API",
             versions: Versions::new_versioned(
                 clickhouse_admin_api::supported_versions(),
@@ -119,9 +122,8 @@ fn all_apis() -> anyhow::Result<ManagedApis> {
             api_description:
                 clickhouse_admin_server_api_mod::stub_api_description,
             ident: "clickhouse-admin-server",
-            extra_validation: None,
-        },
-        ManagedApiConfig {
+        }),
+        ManagedApi::from(ManagedApiConfig {
             title: "ClickHouse Single-Node Admin Server API",
             versions: Versions::new_versioned(
                 clickhouse_admin_api::supported_versions(),
@@ -138,9 +140,8 @@ fn all_apis() -> anyhow::Result<ManagedApis> {
             api_description:
                 clickhouse_admin_single_api_mod::stub_api_description,
             ident: "clickhouse-admin-single",
-            extra_validation: None,
-        },
-        ManagedApiConfig {
+        }),
+        ManagedApi::from(ManagedApiConfig {
             title: "CockroachDB Cluster Admin API",
             versions: Versions::new_versioned(
                 cockroach_admin_api::supported_versions(),
@@ -156,9 +157,8 @@ fn all_apis() -> anyhow::Result<ManagedApis> {
             },
             api_description: cockroach_admin_api_mod::stub_api_description,
             ident: "cockroach-admin",
-            extra_validation: None,
-        },
-        ManagedApiConfig {
+        }),
+        ManagedApi::from(ManagedApiConfig {
             title: "Internal DNS",
             versions: Versions::new_versioned(
                 dns_server_api::supported_versions(),
@@ -171,9 +171,8 @@ fn all_apis() -> anyhow::Result<ManagedApis> {
             },
             api_description: dns_server_api_mod::stub_api_description,
             ident: "dns-server",
-            extra_validation: None,
-        },
-        ManagedApiConfig {
+        }),
+        ManagedApi::from(ManagedApiConfig {
             title: "Oxide Management Gateway Service API",
             versions: Versions::new_versioned(gateway_api::supported_versions()),
             metadata: ManagedApiMetadata {
@@ -187,9 +186,8 @@ fn all_apis() -> anyhow::Result<ManagedApis> {
             },
             api_description: gateway_api_mod::stub_api_description,
             ident: "gateway",
-            extra_validation: None,
-        },
-        ManagedApiConfig {
+        }),
+        ManagedApi::from(ManagedApiConfig {
             title: "Installinator API",
             versions: Versions::new_versioned(
                 installinator_api::supported_versions(),
@@ -205,9 +203,12 @@ fn all_apis() -> anyhow::Result<ManagedApis> {
             },
             api_description: installinator_api_mod::stub_api_description,
             ident: "installinator",
-            extra_validation: None,
-        },
-        ManagedApiConfig {
+        })
+        // The installinator API is client-side-versioned and currently frozen.
+        // We allow trivial changes to go through. If we did not, we would need to
+        // unfreeze the API and bump the version number for trivial changes.
+        .allow_trivial_changes_for_latest(),
+        ManagedApi::from(ManagedApiConfig {
             title: "Oxide Region API",
             versions: Versions::new_versioned(
                 nexus_external_api::supported_versions(),
@@ -222,9 +223,9 @@ fn all_apis() -> anyhow::Result<ManagedApis> {
             },
             api_description: nexus_external_api_mod::stub_api_description,
             ident: "nexus",
-            extra_validation: Some(nexus_external_api::validate_api),
-        },
-        ManagedApiConfig {
+        })
+        .with_extra_validation(nexus_external_api::validate_api),
+        ManagedApi::from(ManagedApiConfig {
             title: "Nexus internal API",
             versions: Versions::new_versioned(
                 nexus_internal_api::supported_versions(),
@@ -237,9 +238,12 @@ fn all_apis() -> anyhow::Result<ManagedApis> {
             },
             api_description: nexus_internal_api_mod::stub_api_description,
             ident: "nexus-internal",
-            extra_validation: None,
-        },
-        ManagedApiConfig {
+        })
+        // The Nexus internal API is client-side-versioned and currently frozen.
+        // We allow trivial changes to go through. If we did not, we would need
+        // to unfreeze the API and bump the version number for trivial changes.
+        .allow_trivial_changes_for_latest(),
+        ManagedApi::from(ManagedApiConfig {
             title: "Nexus lockstep API",
             versions: Versions::new_lockstep(semver::Version::new(0, 0, 1)),
             metadata: ManagedApiMetadata {
@@ -250,9 +254,8 @@ fn all_apis() -> anyhow::Result<ManagedApis> {
             },
             api_description: nexus_lockstep_api_mod::stub_api_description,
             ident: "nexus-lockstep",
-            extra_validation: None,
-        },
-        ManagedApiConfig {
+        }),
+        ManagedApi::from(ManagedApiConfig {
             title: "NTP Admin API",
             versions: Versions::new_versioned(
                 ntp_admin_api::supported_versions(),
@@ -265,9 +268,8 @@ fn all_apis() -> anyhow::Result<ManagedApis> {
             },
             api_description: ntp_admin_api_mod::stub_api_description,
             ident: "ntp-admin",
-            extra_validation: None,
-        },
-        ManagedApiConfig {
+        }),
+        ManagedApi::from(ManagedApiConfig {
             title: "Oxide Oximeter API",
             versions: Versions::new_versioned(
                 oximeter_api::supported_versions(),
@@ -280,9 +282,8 @@ fn all_apis() -> anyhow::Result<ManagedApis> {
             },
             api_description: oximeter_api_mod::stub_api_description,
             ident: "oximeter",
-            extra_validation: None,
-        },
-        ManagedApiConfig {
+        }),
+        ManagedApi::from(ManagedApiConfig {
             title: "Oxide TUF Repo Depot API",
             versions: Versions::new_versioned(
                 repo_depot_api::supported_versions(),
@@ -295,9 +296,12 @@ fn all_apis() -> anyhow::Result<ManagedApis> {
             },
             api_description: repo_depot_api_mod::stub_api_description,
             ident: "repo-depot",
-            extra_validation: None,
-        },
-        ManagedApiConfig {
+        })
+        // The Repo Depot API is client-side-versioned and currently frozen. We
+        // allow trivial changes to go through. If we did not, we would need to
+        // unfreeze the API and bump the version number for trivial changes.
+        .allow_trivial_changes_for_latest(),
+        ManagedApi::from(ManagedApiConfig {
             title: "Oxide Sled Agent API",
             versions: Versions::new_versioned(
                 sled_agent_api::supported_versions(),
@@ -310,9 +314,8 @@ fn all_apis() -> anyhow::Result<ManagedApis> {
             },
             api_description: sled_agent_api_mod::stub_api_description,
             ident: "sled-agent",
-            extra_validation: None,
-        },
-        ManagedApiConfig {
+        }),
+        ManagedApi::from(ManagedApiConfig {
             title: "Oxide Technician Port Control Service",
             versions: Versions::new_lockstep(semver::Version::new(0, 0, 1)),
             metadata: ManagedApiMetadata {
@@ -325,8 +328,7 @@ fn all_apis() -> anyhow::Result<ManagedApis> {
             },
             api_description: wicketd_api_mod::stub_api_description,
             ident: "wicketd",
-            extra_validation: None,
-        },
+        }),
     ];
 
     let apis = ManagedApis::new(apis)
