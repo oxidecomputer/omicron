@@ -172,7 +172,7 @@ pub struct InstanceMulticastGroupJoin {
 /// Path parameters for multicast group operations.
 #[derive(Serialize, Deserialize, JsonSchema)]
 pub struct MulticastGroupPath {
-    /// Name, ID, or IP address of the multicast group.
+    /// Name, ID, or IP address of the multicast group
     pub multicast_group: MulticastGroupIdentifier,
 }
 

@@ -43,13 +43,14 @@ pub struct Image {
     /// Hash of the image contents, if applicable
     pub digest: Option<Digest>,
 
-    /// size of blocks in bytes
+    /// Size of blocks in bytes
     pub block_size: ByteCount,
 
-    /// total size in bytes
+    /// Total size in bytes
     pub size: ByteCount,
 }
 
+/// The source of the underlying image.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ImageSource {

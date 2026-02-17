@@ -61,7 +61,6 @@ impl From<crate::v2025_11_20_00::networking::BgpConfigCreate>
     }
 }
 
-/// BGP peer configuration for a link.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct BgpPeerConfig {
     /// Link that the peer is reachable on.

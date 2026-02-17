@@ -312,8 +312,7 @@ pub struct InstanceNetworkInterfaceUpdate {
     #[serde(default)]
     pub primary: bool,
 
-    /// A set of additional networks that this interface may send and
-    /// receive traffic on.
+    /// A set of additional networks that this interface may send and receive traffic on
     #[serde(default)]
     pub transit_ips: Vec<IpNet>,
 }

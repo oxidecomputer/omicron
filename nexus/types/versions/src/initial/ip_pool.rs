@@ -31,14 +31,14 @@ pub enum IpPoolType {
 }
 
 /// A collection of IP ranges. If a pool is linked to a silo, IP addresses from
-/// the pool can be allocated within that silo
+/// the pool can be allocated within that silo.
 #[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct IpPool {
     #[serde(flatten)]
     pub identity: IdentityMetadata,
     /// The IP version for the pool.
     pub ip_version: IpVersion,
-    /// Type of IP pool (unicast or multicast)
+    /// Type of IP pool (unicast or multicast).
     pub pool_type: IpPoolType,
 }
 
@@ -78,7 +78,10 @@ pub struct IpPoolSiloLink {
     pub silo_id: Uuid,
     /// When a pool is the default for a silo, floating IPs and instance
     /// ephemeral IPs will come from that pool when no other pool is specified.
-    /// There can be at most one default for a given silo.
+    ///
+    /// A silo can have at most one default pool per combination of pool type
+    /// (unicast or multicast) and IP version (IPv4 or IPv6), allowing up to 4
+    /// default pools total.
     pub is_default: bool,
 }
 

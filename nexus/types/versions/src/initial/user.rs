@@ -87,9 +87,9 @@ pub struct OptionalGroupSelector {
 /// Create-time parameters for a `User`
 #[derive(Clone, Deserialize, JsonSchema)]
 pub struct UserCreate {
-    /// username used to log in
+    /// Username used to log in
     pub external_id: UserId,
-    /// how to set the user's login password
+    /// How to set the user's login password
     pub password: UserPassword,
 }
 

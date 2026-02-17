@@ -23,7 +23,7 @@ use crate::v2025_11_20_00::ip_pool::IpPoolType;
 
 // -- Create/update params --
 
-/// Create a subnet pool.
+/// Create a subnet pool
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct SubnetPoolCreate {
     #[serde(flatten)]
@@ -33,14 +33,24 @@ pub struct SubnetPoolCreate {
     pub ip_version: IpVersion,
 }
 
-/// Add a member (subnet) to a subnet pool.
+/// Add a member (subnet) to a subnet pool
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct SubnetPoolMemberAdd {
-    /// The subnet to add to the pool.
+    /// The subnet to add to the pool
     pub subnet: IpNet,
-    /// Minimum prefix length for allocations from this subnet.
+    /// Minimum prefix length for allocations from this subnet; a smaller prefix
+    /// means larger allocations are allowed (e.g. a /16 prefix yields larger
+    /// subnet allocations than a /24 prefix).
+    ///
+    /// Valid values: 0-32 for IPv4, 0-128 for IPv6.
+    /// Default if not specified is equal to the subnet's prefix length.
     pub min_prefix_length: Option<u8>,
-    /// Maximum prefix length for allocations from this subnet.
+    /// Maximum prefix length for allocations from this subnet; a larger prefix
+    /// means smaller allocations are allowed (e.g. a /24 prefix yields smaller
+    /// subnet allocations than a /16 prefix).
+    ///
+    /// Valid values: 0-32 for IPv4, 0-128 for IPv6.
+    /// Default if not specified is 32 for IPv4 and 128 for IPv6.
     pub max_prefix_length: Option<u8>,
 }
 
@@ -89,14 +99,14 @@ impl From<crate::v2026_01_16_01::subnet_pool::SubnetPoolMemberAdd>
 
 // -- View types --
 
-/// A pool of subnets for external subnet allocation.
+/// A pool of subnets for external subnet allocation
 #[derive(
     ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq,
 )]
 pub struct SubnetPool {
     #[serde(flatten)]
     pub identity: IdentityMetadata,
-    /// The IP version for this pool.
+    /// The IP version for this pool
     pub ip_version: IpVersion,
 }
 
@@ -113,7 +123,7 @@ impl From<SubnetPool> for crate::v2026_01_16_01::subnet_pool::SubnetPool {
     }
 }
 
-/// A subnet pool in the context of a silo.
+/// A subnet pool in the context of a silo
 #[derive(
     ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq,
 )]
@@ -122,25 +132,32 @@ pub struct SiloSubnetPool {
     pub identity: IdentityMetadata,
     /// When a pool is the default for a silo, external subnet allocations will
     /// come from that pool when no other pool is specified.
+    ///
+    /// A silo can have at most one default pool per IP version (IPv4 or IPv6),
+    /// allowing up to 2 default pools total.
     pub is_default: bool,
     /// The IP version for the pool.
     pub ip_version: IpVersion,
 }
 
-/// A member (subnet) within a subnet pool.
+/// A member (subnet) within a subnet pool
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
 pub struct SubnetPoolMember {
-    /// ID of the pool member.
+    /// ID of the pool member
     pub id: Uuid,
     /// Time the pool member was created.
     pub time_created: DateTime<Utc>,
-    /// ID of the parent subnet pool.
+    /// ID of the parent subnet pool
     pub subnet_pool_id: Uuid,
-    /// The subnet CIDR.
+    /// The subnet CIDR
     pub subnet: IpNet,
-    /// Minimum prefix length for allocations from this subnet.
+    /// Minimum prefix length for allocations from this subnet; a smaller prefix
+    /// means larger allocations are allowed (e.g. a /16 prefix yields larger
+    /// subnet allocations than a /24 prefix).
     pub min_prefix_length: u8,
-    /// Maximum prefix length for allocations from this subnet.
+    /// Maximum prefix length for allocations from this subnet; a larger prefix
+    /// means smaller allocations are allowed (e.g. a /24 prefix yields smaller
+    /// subnet allocations than a /16 prefix).
     pub max_prefix_length: u8,
 }
 

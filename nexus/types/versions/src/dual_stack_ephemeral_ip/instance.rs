@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 /// Query parameters for ephemeral IP detach operations.
 #[derive(Deserialize, JsonSchema, Clone)]
 pub struct EphemeralIpDetachSelector {
-    /// Name or ID of the project.
+    /// Name or ID of the project
     pub project: Option<NameOrId>,
     /// The IP version of the ephemeral IP to detach.
     ///

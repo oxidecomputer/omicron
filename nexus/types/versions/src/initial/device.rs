@@ -14,8 +14,9 @@ use uuid::Uuid;
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
 pub struct DeviceAccessToken {
     /// A unique, immutable, system-controlled identifier for the token.
+    ///
     /// Note that this ID is not the bearer token itself, which starts with
-    /// "oxide-token-"
+    /// "oxide-token-".
     pub id: Uuid,
     pub time_created: DateTime<Utc>,
 

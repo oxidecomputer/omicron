@@ -27,19 +27,47 @@ use super::multicast::MulticastGroupJoinSpec;
 /// Parameters of an `Instance` that can be reconfigured after creation.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct InstanceUpdate {
-    /// The number of vCPUs to be allocated to the instance.
+    /// The number of vCPUs to be allocated to the instance
     pub ncpus: InstanceCpuCount,
 
-    /// The amount of RAM (in bytes) to be allocated to the instance.
+    /// The amount of RAM (in bytes) to be allocated to the instance
     pub memory: ByteCount,
 
     /// The disk the instance is configured to boot from.
+    ///
+    /// Setting a boot disk is optional but recommended to ensure predictable
+    /// boot behavior. The boot disk can be set during instance creation or
+    /// later if the instance is stopped. The boot disk counts against the
+    /// disk attachment limit.
+    ///
+    /// An instance that does not have a boot disk set will use the boot
+    /// options specified in its UEFI settings, which are controlled by both
+    /// the instance's UEFI firmware and the guest operating system. Boot
+    /// options can change as disks are attached and detached, which may
+    /// result in an instance that only boots to the EFI shell until a boot
+    /// disk is set.
     pub boot_disk: Nullable<NameOrId>,
 
     /// The auto-restart policy for this instance.
+    ///
+    /// This policy determines whether the instance should be automatically
+    /// restarted by the control plane on failure. If this is `null`, any
+    /// explicitly configured auto-restart policy will be unset, and the
+    /// control plane will select the default policy when determining whether
+    /// the instance can be automatically restarted.
+    ///
+    /// Currently, the global default auto-restart policy is "best-effort",
+    /// so instances with `null` auto-restart policies will be automatically
+    /// restarted. However, in the future, the default policy may be
+    /// configurable through other mechanisms, such as on a per-project
+    /// basis. In that case, any configured default policy will be used if
+    /// this is `null`.
     pub auto_restart_policy: Nullable<InstanceAutoRestartPolicy>,
 
-    /// The CPU platform to be used for this instance.
+    /// The CPU platform to be used for this instance. If this is `null`,
+    /// the instance requires no particular CPU platform; when it is started
+    /// the instance will have the most general CPU platform supported by
+    /// the sled it is initially placed on.
     pub cpu_platform: Nullable<InstanceCpuPlatform>,
 
     /// Multicast groups this instance should join.

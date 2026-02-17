@@ -28,12 +28,16 @@ pub enum ExternalSubnetAllocator {
         /// The prefix length for the allocated subnet (e.g., 24 for a /24).
         prefix_len: u8,
         /// Pool selection.
+        ///
+        /// If omitted, this field uses the silo's default pool. If the
+        /// silo has default pools for both IPv4 and IPv6, the request will
+        /// fail unless `ip_version` is specified in the pool selector.
         #[serde(default)]
         pool_selector: PoolSelector,
     },
 }
 
-/// Create an external subnet.
+/// Create an external subnet
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct ExternalSubnetCreate {
     #[serde(flatten)]

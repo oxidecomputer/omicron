@@ -59,13 +59,13 @@ impl From<crate::v2026_01_16_00::floating_ip::AddressAllocator>
     }
 }
 
-/// Create-time parameters for a `FloatingIp`
+/// Parameters for creating a new floating IP address for instances.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct FloatingIpCreate {
     #[serde(flatten)]
     pub identity: IdentityMetadataCreateParams,
 
-    /// How to allocate the floating IP address.
+    /// IP address allocation method.
     #[serde(default)]
     pub address_allocator: AddressAllocator,
 }

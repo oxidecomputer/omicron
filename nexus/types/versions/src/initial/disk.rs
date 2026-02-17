@@ -26,7 +26,7 @@ impl schemars::JsonSchema for BlockSize {
         schemars::schema::Schema::Object(schemars::schema::SchemaObject {
             metadata: Some(Box::new(schemars::schema::Metadata {
                 id: None,
-                title: Some("disk block size in bytes".to_string()),
+                title: Some("Disk block size in bytes".to_string()),
                 ..Default::default()
             })),
             instance_type: Some(schemars::schema::InstanceType::Integer.into()),
@@ -69,7 +69,7 @@ pub struct Disk {
 pub enum DiskSource {
     /// Create a blank disk
     Blank {
-        /// size of blocks for this Disk. valid values are: 512, 2048, or 4096
+        /// Size of blocks for this disk. Valid values are: 512, 2048, or 4096.
         block_size: BlockSize,
     },
 

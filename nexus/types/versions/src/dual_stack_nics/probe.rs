@@ -14,7 +14,6 @@ use uuid::Uuid;
 
 use crate::v2025_11_20_00::probe::ProbeExternalIp;
 
-/// Information about a probe.
 #[derive(Debug, Clone, JsonSchema, Serialize, Deserialize)]
 pub struct ProbeInfo {
     pub id: Uuid,

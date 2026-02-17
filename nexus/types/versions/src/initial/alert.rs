@@ -150,8 +150,8 @@ impl PartialEq<AlertReceiver> for WebhookReceiver {
 pub struct WebhookReceiverConfig {
     /// The URL that webhook notification requests are sent to.
     pub endpoint: Url,
-    // A list containing the IDs of the secret keys used to sign payloads sent
-    // to this receiver.
+    /// A list containing the IDs of the secret keys used to sign payloads sent
+    /// to this receiver.
     pub secrets: Vec<WebhookSecret>,
 }
 

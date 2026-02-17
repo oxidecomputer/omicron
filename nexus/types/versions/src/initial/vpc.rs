@@ -79,10 +79,10 @@ pub struct Vpc {
     #[serde(flatten)]
     pub identity: IdentityMetadata,
 
-    /// id for the project containing this VPC
+    /// ID for the project containing this VPC
     pub project_id: Uuid,
 
-    /// id for the system router where subnet default routes are registered
+    /// ID for the system router where subnet default routes are registered
     pub system_router_id: Uuid,
 
     /// The unique local IPv6 address range for subnets in this VPC
@@ -94,7 +94,7 @@ pub struct Vpc {
 }
 
 /// A VPC subnet represents a logical grouping for instances that allows network traffic between
-/// them, within a IPv4 subnetwork or optionally an IPv6 subnetwork.
+/// them, within an IPv4 subnetwork or optionally an IPv6 subnetwork.
 #[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct VpcSubnet {
     /// common identifying metadata

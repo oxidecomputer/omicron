@@ -70,11 +70,11 @@ pub struct SamlIdentityProviderSelector {
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct DerEncodedKeyPair {
-    /// request signing public certificate (base64 encoded der file)
+    /// Request signing public certificate (base64 encoded DER file)
     #[serde(deserialize_with = "x509_cert_from_base64_encoded_der")]
     pub public_cert: String,
 
-    /// request signing RSA private key in PKCS#1 format (base64 encoded der file)
+    /// Request signing RSA private key in PKCS#1 format (base64 encoded DER file)
     #[serde(deserialize_with = "key_from_base64_encoded_der")]
     pub private_key: String,
 }
@@ -190,25 +190,25 @@ pub struct SamlIdentityProviderCreate {
     #[serde(flatten)]
     pub identity: IdentityMetadataCreateParams,
 
-    /// the source of an identity provider metadata descriptor
+    /// The source of an identity provider metadata descriptor
     pub idp_metadata_source: IdpMetadataSource,
 
-    /// idp's entity id
+    /// IdP's entity ID
     pub idp_entity_id: String,
 
-    /// sp's client id
+    /// SP's client ID
     pub sp_client_id: String,
 
-    /// service provider endpoint where the response will be sent
+    /// Service provider endpoint where the response will be sent
     pub acs_url: String,
 
-    /// service provider endpoint where the idp should send log out requests
+    /// Service provider endpoint where the IdP should send log out requests
     pub slo_url: String,
 
-    /// customer's technical contact for saml configuration
+    /// Customer's technical contact for SAML configuration
     pub technical_contact_email: String,
 
-    /// request signing key pair
+    /// Request signing key pair
     #[serde(default)]
     #[serde(deserialize_with = "validate_key_pair")]
     pub signing_keypair: Option<DerEncodedKeyPair>,

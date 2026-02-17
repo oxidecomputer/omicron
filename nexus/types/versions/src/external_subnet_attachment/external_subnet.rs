@@ -31,7 +31,7 @@ use crate::v2026_01_05_00::ip_pool::PoolSelector;
 /// Path parameters for external subnet operations.
 #[derive(Serialize, Deserialize, JsonSchema)]
 pub struct ExternalSubnetPath {
-    /// Name or ID of the external subnet.
+    /// Name or ID of the external subnet
     pub external_subnet: NameOrId,
 }
 
@@ -40,7 +40,7 @@ pub struct ExternalSubnetPath {
 pub struct ExternalSubnetSelector {
     /// Name or ID of the project (required if `external_subnet` is a Name).
     pub project: Option<NameOrId>,
-    /// Name or ID of the external subnet.
+    /// Name or ID of the external subnet
     pub external_subnet: NameOrId,
 }
 
@@ -75,7 +75,7 @@ pub enum ExternalSubnetAllocator {
     },
 }
 
-/// Create an external subnet.
+/// Create an external subnet
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct ExternalSubnetCreate {
     #[serde(flatten)]
@@ -85,35 +85,35 @@ pub struct ExternalSubnetCreate {
     pub allocator: ExternalSubnetAllocator,
 }
 
-/// Update an external subnet.
+/// Update an external subnet
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct ExternalSubnetUpdate {
     #[serde(flatten)]
     pub identity: IdentityMetadataUpdateParams,
 }
 
-/// Attach an external subnet to an instance.
+/// Attach an external subnet to an instance
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct ExternalSubnetAttach {
-    /// Name or ID of the instance to attach to.
+    /// Name or ID of the instance to attach to
     pub instance: NameOrId,
 }
 
-/// An external subnet allocated from a subnet pool.
+/// An external subnet allocated from a subnet pool
 #[derive(
     ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq,
 )]
 pub struct ExternalSubnet {
     #[serde(flatten)]
     pub identity: IdentityMetadata,
-    /// The allocated subnet CIDR.
+    /// The allocated subnet CIDR
     pub subnet: IpNet,
-    /// The project this subnet belongs to.
+    /// The project this subnet belongs to
     pub project_id: Uuid,
-    /// The subnet pool this was allocated from.
+    /// The subnet pool this was allocated from
     pub subnet_pool_id: Uuid,
-    /// The subnet pool member this subnet corresponds to.
+    /// The subnet pool member this subnet corresponds to
     pub subnet_pool_member_id: Uuid,
-    /// The instance this subnet is attached to, if any.
+    /// The instance this subnet is attached to, if any
     pub instance_id: Option<Uuid>,
 }

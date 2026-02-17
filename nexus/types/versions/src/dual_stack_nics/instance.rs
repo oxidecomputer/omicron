@@ -22,11 +22,14 @@ use crate::v2025_12_03_00::instance::InstanceDiskAttachment;
 use crate::v2025_12_23_00;
 
 // Shadow type for JsonSchema generation
+/// How a VPC-private IP address is assigned to a network interface.
 #[derive(Clone, Copy, Debug, Default, Deserialize, JsonSchema, Serialize)]
 #[serde(rename_all = "snake_case", tag = "type", content = "value")]
 enum IpAssignmentShadow<T: ConcreteIp> {
+    /// Automatically assign an IP address from the VPC Subnet.
     #[default]
     Auto,
+    /// Explicitly assign a specific address, if available.
     Explicit(T),
 }
 
@@ -138,18 +141,27 @@ impl PrivateIpStackCreate {
 #[derive(Default)]
 pub enum InstanceNetworkInterfaceAttachment {
     /// Create one or more `InstanceNetworkInterface`s for the `Instance`.
+    ///
+    /// If more than one interface is provided, then the first will be
+    /// designated the primary interface for the instance.
     Create(Vec<InstanceNetworkInterfaceCreate>),
 
     /// Create a single primary interface with an automatically-assigned IPv4
     /// address.
+    ///
+    /// The IP will be pulled from the Project's default VPC / VPC Subnet.
     DefaultIpv4,
 
     /// Create a single primary interface with an automatically-assigned IPv6
     /// address.
+    ///
+    /// The IP will be pulled from the Project's default VPC / VPC Subnet.
     DefaultIpv6,
 
     /// Create a single primary interface with automatically-assigned IPv4 and
     /// IPv6 addresses.
+    ///
+    /// The IPs will be pulled from the Project's default VPC / VPC Subnet.
     #[default]
     DefaultDualStack,
 
@@ -193,6 +205,9 @@ pub struct InstanceNetworkInterfaceCreate {
     /// The VPC Subnet in which to create the interface.
     pub subnet_name: Name,
     /// The IP stack configuration for this interface.
+    ///
+    /// If not provided, a default configuration will be used, which creates
+    /// a dual-stack IPv4 / IPv6 interface.
     #[serde(default = "PrivateIpStackCreate::auto_dual_stack")]
     pub ip_config: PrivateIpStackCreate,
 }

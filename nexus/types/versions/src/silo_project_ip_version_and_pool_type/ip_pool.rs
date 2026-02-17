@@ -14,7 +14,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::v2025_11_20_00::ip_pool::IpPoolType;
 
-/// An IP pool in the context of a silo.
+/// An IP pool in the context of a silo
 #[derive(
     api_identity::ObjectIdentity,
     Clone,
@@ -29,12 +29,16 @@ pub struct SiloIpPool {
 
     /// When a pool is the default for a silo, floating IPs and instance
     /// ephemeral IPs will come from that pool when no other pool is specified.
+    ///
+    /// A silo can have at most one default pool per combination of pool type
+    /// (unicast or multicast) and IP version (IPv4 or IPv6), allowing up to 4
+    /// default pools total.
     pub is_default: bool,
 
-    /// The IP version of addresses in this pool.
+    /// The IP version for the pool.
     pub ip_version: IpVersion,
 
-    /// The type of pool (unicast or multicast).
+    /// Type of IP pool (unicast or multicast).
     pub pool_type: IpPoolType,
 }
 

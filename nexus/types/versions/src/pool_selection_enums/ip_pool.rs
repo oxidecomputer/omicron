@@ -11,7 +11,7 @@ use omicron_common::api::external::{IpVersion, NameOrId};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-/// Specify which IP pool to allocate from.
+/// Specify which IP or external subnet pool to allocate from.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum PoolSelector {
@@ -58,7 +58,6 @@ impl TryFrom<(Option<NameOrId>, Option<IpVersion>)> for PoolSelector {
     }
 }
 
-/// Parameters for updating an IP Pool
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct IpPoolSiloUpdate {
     /// When a pool is the default for a silo, floating IPs and instance
@@ -80,7 +79,6 @@ impl From<crate::v2025_11_20_00::ip_pool::IpPoolSiloUpdate>
     }
 }
 
-/// Parameters for linking an IP pool to a silo
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct IpPoolLinkSilo {
     pub silo: NameOrId,

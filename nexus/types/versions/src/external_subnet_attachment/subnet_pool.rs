@@ -35,22 +35,22 @@ use crate::v2025_11_20_00::ip_pool::IpPoolType;
 /// Path parameters for subnet pool operations.
 #[derive(Serialize, Deserialize, JsonSchema)]
 pub struct SubnetPoolPath {
-    /// Name or ID of the subnet pool.
+    /// Name or ID of the subnet pool
     pub pool: NameOrId,
 }
 
 /// Path parameters for subnet pool silo operations.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct SubnetPoolSiloPath {
-    /// Name or ID of the subnet pool.
+    /// Name or ID of the subnet pool
     pub pool: NameOrId,
-    /// Name or ID of the silo.
+    /// Name or ID of the silo
     pub silo: NameOrId,
 }
 
 // -- Create/update params --
 
-/// Create a subnet pool.
+/// Create a subnet pool
 ///
 /// This version of the type accepts a `pool_type` field. The only valid
 /// value is `unicast`; any other value is rejected.
@@ -66,14 +66,14 @@ pub struct SubnetPoolCreate {
     pub pool_type: IpPoolType,
 }
 
-/// Update a subnet pool.
+/// Update a subnet pool
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct SubnetPoolUpdate {
     #[serde(flatten)]
     pub identity: IdentityMetadataUpdateParams,
 }
 
-/// Add a member (subnet) to a subnet pool.
+/// Add a member (subnet) to a subnet pool
 ///
 /// This version of the type accepts an `identity` field (flattened as
 /// `name` / `description`). The field is silently discarded.
@@ -81,7 +81,7 @@ pub struct SubnetPoolUpdate {
 pub struct SubnetPoolMemberAdd {
     #[serde(flatten)]
     pub identity: IdentityMetadataCreateParams,
-    /// The subnet to add to the pool.
+    /// The subnet to add to the pool
     pub subnet: IpNet,
     /// Minimum prefix length for allocations from this subnet; a smaller prefix
     /// means larger allocations are allowed (e.g. a /16 prefix yields larger
@@ -99,32 +99,33 @@ pub struct SubnetPoolMemberAdd {
     pub max_prefix_length: Option<u8>,
 }
 
-/// Remove a subnet from a pool.
+/// Remove a subnet from a pool
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct SubnetPoolMemberRemove {
     /// The subnet to remove from the pool. Must match an existing entry exactly.
     pub subnet: IpNet,
 }
 
-/// Link a subnet pool to a silo.
+/// Link a subnet pool to a silo
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct SubnetPoolLinkSilo {
-    /// The silo to link.
+    /// The silo to link
     pub silo: NameOrId,
-    /// Whether this is the default subnet pool for the silo.
+    /// Whether this is the default subnet pool for the silo. When true,
+    /// external subnet allocations that don't specify a pool use this one.
     pub is_default: bool,
 }
 
-/// Update a subnet pool's silo link.
+/// Update a subnet pool's silo link
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct SubnetPoolSiloUpdate {
-    /// Whether this is the default subnet pool for the silo.
+    /// Whether this is the default subnet pool for the silo
     pub is_default: bool,
 }
 
 // -- View types --
 
-/// A pool of subnets for external subnet allocation.
+/// A pool of subnets for external subnet allocation
 ///
 /// This version includes a `pool_type` field that was removed in
 /// `REMOVE_SUBNET_POOL_POOL_TYPE`.
@@ -132,13 +133,13 @@ pub struct SubnetPoolSiloUpdate {
 pub struct SubnetPool {
     #[serde(flatten)]
     pub identity: IdentityMetadata,
-    /// The IP version for this pool.
+    /// The IP version for this pool
     pub ip_version: IpVersion,
     /// Type of subnet pool (unicast or multicast).
     pub pool_type: IpPoolType,
 }
 
-/// A member (subnet) within a subnet pool.
+/// A member (subnet) within a subnet pool
 ///
 /// This version includes identity metadata that was removed in
 /// `REMOVE_SUBNET_POOL_POOL_TYPE`.
@@ -146,9 +147,9 @@ pub struct SubnetPool {
 pub struct SubnetPoolMember {
     #[serde(flatten)]
     pub identity: IdentityMetadata,
-    /// ID of the parent subnet pool.
+    /// ID of the parent subnet pool
     pub subnet_pool_id: Uuid,
-    /// The subnet CIDR.
+    /// The subnet CIDR
     pub subnet: IpNet,
     /// Minimum prefix length for allocations from this subnet; a smaller prefix
     /// means larger allocations are allowed (e.g. a /16 prefix yields larger
@@ -160,7 +161,7 @@ pub struct SubnetPoolMember {
     pub max_prefix_length: u8,
 }
 
-/// A link between a subnet pool and a silo.
+/// A link between a subnet pool and a silo
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
 pub struct SubnetPoolSiloLink {
     pub subnet_pool_id: Uuid,
@@ -168,11 +169,11 @@ pub struct SubnetPoolSiloLink {
     pub is_default: bool,
 }
 
-/// Utilization information for a subnet pool.
+/// Utilization information for a subnet pool
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct SubnetPoolUtilization {
-    /// Number of addresses allocated from this pool.
+    /// Number of addresses allocated from this pool
     pub allocated: f64,
-    /// Total capacity of this pool in addresses.
+    /// Total capacity of this pool in addresses
     pub capacity: f64,
 }

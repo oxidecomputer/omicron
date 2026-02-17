@@ -8,7 +8,7 @@ use super::asset::AssetIdentityMetadata;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-/// View of an Rack
+/// View of a Rack
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct Rack {
     #[serde(flatten)]

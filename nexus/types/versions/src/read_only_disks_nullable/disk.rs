@@ -18,7 +18,7 @@ use omicron_common::api::external::ByteCount;
 pub enum DiskSource {
     /// Create a blank disk
     Blank {
-        /// size of blocks for this Disk. valid values are: 512, 2048, or 4096
+        /// Size of blocks for this disk. Valid values are: 512, 2048, or 4096.
         block_size: BlockSize,
     },
     /// Create a disk from a disk snapshot
@@ -58,7 +58,7 @@ pub struct DiskCreate {
     pub identity: IdentityMetadataCreateParams,
     /// The source for this `Disk`'s blocks
     pub disk_backend: DiskBackend,
-    /// Total size of the Disk in bytes
+    /// The total size of the Disk (in bytes)
     pub size: ByteCount,
 }
 

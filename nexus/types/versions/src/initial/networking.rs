@@ -42,7 +42,7 @@ pub struct AddressLotCreate {
     pub blocks: Vec<AddressLotBlockCreate>,
 }
 
-/// Parameters for creating an address lot block. Fist and last addresses are
+/// Parameters for creating an address lot block. First and last addresses are
 /// inclusive.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct AddressLotBlockCreate {
@@ -74,6 +74,7 @@ pub struct LoopbackAddressCreate {
     pub mask: u8,
 
     /// Address is an anycast address.
+    ///
     /// This allows the address to be assigned to multiple locations simultaneously.
     pub anycast: bool,
 }
