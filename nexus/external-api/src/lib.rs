@@ -80,6 +80,7 @@ api_versions!([
     // |  date-based version should be at the top of the list.
     // v
     // (next_yyyymmddnn, IDENT),
+    (2026021800, BUMP_AUDIT_LOG_DOCS),
     (2026021301, BGP_UNNUMBERED_PEERS),
     (2026021300, STALE_DOCS_AND_PUNCTUATION),
     (2026020901, UPDATE_EXTERNAL_SUBNET_DOCS),
@@ -6374,10 +6375,10 @@ pub trait NexusExternalApi {
     ///
     /// Audit log entries are designed to be immutable: once you see an entry,
     /// fetching it again will never get you a different result. The list is
-    /// ordered by `time_completed`, not `time_started`. If you fetch the audit
-    /// log for a time range that is fully in the past, the resulting list is
-    /// guaranteed to be complete, i.e., fetching the same timespan again later
-    /// will always produce the same set of entries.
+    /// ordered and filtered by `time_completed`, not `time_started`. If
+    /// you fetch the audit log for a time range that is fully in the past,
+    /// the resulting list is guaranteed to be complete, i.e., fetching the
+    /// same timespan again later will always produce the same set of entries.
     #[endpoint {
         method = GET,
         path = "/v1/system/audit-log",

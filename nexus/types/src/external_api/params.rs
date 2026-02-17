@@ -3456,9 +3456,9 @@ pub struct AlertReceiverProbe {
 /// Audit log has its own pagination scheme because it paginates by timestamp.
 #[derive(Deserialize, JsonSchema, Serialize, PartialEq, Debug, Clone)]
 pub struct AuditLog {
-    /// Required, inclusive
+    /// Start of time range (inclusive). Filters on `time_completed`.
     pub start_time: DateTime<Utc>,
-    /// Exclusive
+    /// End of time range (exclusive). Filters on `time_completed`.
     pub end_time: Option<DateTime<Utc>>,
 }
 
