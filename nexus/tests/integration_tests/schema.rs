@@ -4170,30 +4170,22 @@ fn before_229_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
 
 fn after_229_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
     Box::pin(async move {
-        // Verify data was preserved after the column reordering migration.
-
-        // Check console_session
-        let rows = ctx
+        // The migration intentionally drops all console_session data.
+        let row = ctx
             .client
-            .query(
-                &format!(
-                    "SELECT id, token, silo_user_id FROM omicron.public.console_session
-                     WHERE id = '{SESSION_229_ID}'"
-                ),
+            .query_one(
+                "SELECT COUNT(*) AS count FROM omicron.public.console_session",
                 &[],
             )
             .await
             .expect("failed to query post-migration console_session");
-        assert_eq!(rows.len(), 1, "console_session row should still exist");
+        let count: i64 = row.get("count");
+        assert_eq!(
+            count, 0,
+            "console_session table should be empty after migration"
+        );
 
-        let id: Uuid = rows[0].get("id");
-        assert_eq!(id, SESSION_229_ID);
-        let token: &str = rows[0].get("token");
-        assert_eq!(token, SESSION_229_TOKEN);
-        let silo_user_id: Uuid = rows[0].get("silo_user_id");
-        assert_eq!(silo_user_id, SESSION_229_SILO_USER);
-
-        // Check device_access_token
+        // Check device_access_token (this table's data IS still copied)
         let rows = ctx
             .client
             .query(
@@ -4223,7 +4215,6 @@ fn after_229_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
         ctx.client
             .batch_execute(&format!(
                 "
-                DELETE FROM omicron.public.console_session WHERE id = '{SESSION_229_ID}';
                 DELETE FROM omicron.public.device_access_token WHERE id = '{DEVICE_229_ID}';
                 "
             ))
