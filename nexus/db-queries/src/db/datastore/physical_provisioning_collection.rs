@@ -489,6 +489,7 @@ mod test {
     use omicron_test_utils::dev;
     use uuid::Uuid;
 
+    #[allow(clippy::too_many_arguments)]
     async fn verify_physical_collection_usage(
         datastore: &DataStore,
         opctx: &OpContext,
@@ -1797,7 +1798,7 @@ mod test {
         let zero: ByteCount = 0.try_into().unwrap();
 
         // Set a tight physical storage quota (100 bytes).
-        let authz_silo = LookupPath::new(&opctx, &*datastore)
+        let authz_silo = LookupPath::new(&opctx, datastore)
             .silo_id(silo_id)
             .lookup_for(crate::authz::Action::Modify)
             .await
@@ -3454,7 +3455,7 @@ mod test {
         // should see the active disk and NOT subtract read_only from the
         // project PPC.
         let (authz_silo, _, authz_project_image, project_image) =
-            LookupPath::new(&opctx, &*datastore)
+            LookupPath::new(&opctx, datastore)
                 .project_image_id(image_id)
                 .fetch_for(crate::authz::Action::Modify)
                 .await
@@ -3641,7 +3642,7 @@ mod test {
         // the active disk and NOT add read_only to the project PPC (would
         // double-count).
         let (.., authz_silo_image, silo_image) =
-            LookupPath::new(&opctx, &*datastore)
+            LookupPath::new(&opctx, datastore)
                 .silo_image_id(image_id)
                 .fetch_for(crate::authz::Action::Modify)
                 .await
@@ -4275,7 +4276,7 @@ mod test {
         let zero: ByteCount = 0.try_into().unwrap();
 
         // Set a tight physical storage quota (100 bytes).
-        let authz_silo = LookupPath::new(&opctx, &*datastore)
+        let authz_silo = LookupPath::new(&opctx, datastore)
             .silo_id(silo_id)
             .lookup_for(crate::authz::Action::Modify)
             .await
