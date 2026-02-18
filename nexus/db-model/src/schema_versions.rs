@@ -11,8 +11,7 @@ use camino::Utf8Path;
 use regex::Regex;
 use semver::Version;
 use sqlparser::ast::{
-    AlterColumnOperation, AlterTableOperation, ObjectType, Statement,
-    TableConstraint,
+    AlterColumnOperation, AlterTableOperation, Statement, TableConstraint,
 };
 use sqlparser::dialect::PostgreSqlDialect;
 use sqlparser::parser::Parser;
@@ -338,23 +337,6 @@ pub enum SchemaChangeInfo {
         table_name: SqlIdentifier,
         index_name: SqlIdentifier,
     },
-    DropIndex {
-        index_name: SqlIdentifier,
-    },
-    CreateTable {
-        table_name: SqlIdentifier,
-    },
-    DropTable {
-        table_name: SqlIdentifier,
-    },
-    AlterTableAddColumn {
-        table_name: SqlIdentifier,
-        column_name: SqlIdentifier,
-    },
-    AlterTableDropColumn {
-        table_name: SqlIdentifier,
-        column_name: SqlIdentifier,
-    },
     AlterColumnSetNotNull {
         table_name: SqlIdentifier,
         column_name: SqlIdentifier,
@@ -363,29 +345,8 @@ pub enum SchemaChangeInfo {
         table_name: SqlIdentifier,
         constraint_name: SqlIdentifier,
     },
-    AlterTableDropConstraint {
-        table_name: SqlIdentifier,
-        constraint_name: SqlIdentifier,
-    },
-    AlterTableRename {
-        new_name: SqlIdentifier,
-    },
-    AlterIndexRename {
-        new_name: SqlIdentifier,
-    },
-    CreateType {
-        type_name: SqlIdentifier,
-    },
-    AlterTypeAddValue {
-        type_name: SqlIdentifier,
-        value: SqlIdentifier,
-    },
-    CreateView {
-        view_name: SqlIdentifier,
-    },
-    DropView {
-        view_name: SqlIdentifier,
-    },
+    /// Any DDL statement that doesn't need a verification query.
+    OtherDdl,
 }
 
 impl SchemaChangeInfo {
@@ -465,8 +426,8 @@ impl SchemaChangeInfo {
                     ) AS BOOL\
                 );"
             )),
-            // All other DDL variants are metadata-only or synchronous.
-            _ => None,
+            // OtherDdl operations are metadata-only or synchronous.
+            SchemaChangeInfo::OtherDdl => None,
         }
     }
 }
@@ -515,18 +476,14 @@ fn constraint_name(
     name.map(|i| SqlIdentifier::new(i.value.clone()))
 }
 
-/// Pre-process CockroachDB-specific SQL so that `sqlparser` (PostgreSQL
+/// Pre-process a single DDL statement so that `sqlparser` (PostgreSQL
 /// dialect) can parse it.
 ///
-/// Returns the preprocessed SQL string suitable for `sqlparser`.
-///
-/// This is **only for classification** — the original SQL is always what
-/// gets executed against the database.
-fn preprocess_crdb_sql(sql: &str) -> Result<String, anyhow::Error> {
-    // We compile these once per call — we could use LazyLock, but this
-    // runs infrequently (once per migration file at startup).
-
-    let mut result = sql.to_string();
+/// Only applies the regexes needed for CREATE INDEX and ALTER TABLE
+/// statements. The original SQL is always what gets executed against
+/// the database; this preprocessing is only for classification.
+fn preprocess_for_sqlparser(stmt: &str) -> String {
+    let mut result = stmt.to_string();
 
     // Strip STORING(...) clauses from CREATE INDEX.
     let storing_re = Regex::new(r"(?is)\bSTORING\s*\([^)]*\)").unwrap();
@@ -539,25 +496,6 @@ fn preprocess_crdb_sql(sql: &str) -> Result<String, anyhow::Error> {
     let type_array_re = Regex::new(r"(?i)(\w+)\s+ARRAY\s*([,)\n])").unwrap();
     result = type_array_re.replace_all(&result, "$1[] $2").to_string();
 
-    // Handle table@index notation in DROP INDEX and ALTER INDEX.
-    // CockroachDB uses `table@index` (with optional spaces around @)
-    // to reference an index; standard SQL just uses the index name.
-    let table_at_idx_re = Regex::new(
-        r"(?i)((DROP|ALTER)\s+INDEX\s+(?:IF\s+EXISTS\s+)?)\S+\s*@\s*(\w+)",
-    )
-    .unwrap();
-    result = table_at_idx_re.replace_all(&result, "$1$3").to_string();
-
-    // Strip ALTER SEQUENCE and ALTER TYPE ... DROP VALUE statements
-    // entirely.  sqlparser doesn't support these.  They are
-    // metadata-only and don't need verification.
-    let alter_seq_re = Regex::new(r"(?is)ALTER\s+SEQUENCE\s+[^;]*;?").unwrap();
-    result = alter_seq_re.replace_all(&result, "").to_string();
-    let alter_type_drop_re =
-        Regex::new(r"(?is)ALTER\s+TYPE\s+\S+\s+DROP\s+VALUE\s+[^;]*;?")
-            .unwrap();
-    result = alter_type_drop_re.replace_all(&result, "").to_string();
-
     // Strip IF NOT EXISTS from ADD CONSTRAINT.
     // CockroachDB supports this but standard PostgreSQL / sqlparser
     // does not.
@@ -565,51 +503,7 @@ fn preprocess_crdb_sql(sql: &str) -> Result<String, anyhow::Error> {
         Regex::new(r"(?i)(ADD\s+CONSTRAINT)\s+IF\s+NOT\s+EXISTS").unwrap();
     result = add_constraint_ine_re.replace_all(&result, "$1").to_string();
 
-    // Strip IF NOT EXISTS from CREATE TYPE.
-    // CockroachDB supports this but sqlparser does not.
-    let create_type_ine_re =
-        Regex::new(r"(?i)(CREATE\s+TYPE)\s+IF\s+NOT\s+EXISTS").unwrap();
-    result = create_type_ine_re.replace_all(&result, "$1").to_string();
-
-    // Strip IF EXISTS from ALTER INDEX.
-    // CockroachDB supports this but sqlparser does not.
-    let alter_idx_ie_re =
-        Regex::new(r"(?i)(ALTER\s+INDEX)\s+IF\s+EXISTS").unwrap();
-    result = alter_idx_ie_re.replace_all(&result, "$1").to_string();
-
-    // Strip computed column definitions (`AS (<expr>) VIRTUAL`).
-    // CockroachDB supports virtual computed columns; sqlparser does not.
-    // We match `AS (` through the corresponding `) VIRTUAL` — the word
-    // VIRTUAL only appears in this context in our migrations.
-    let computed_col_re = Regex::new(r"(?is)\bAS\s*\(.*?\)\s*VIRTUAL").unwrap();
-    result = computed_col_re.replace_all(&result, "").to_string();
-
-    // Reorder CREATE SEQUENCE options.
-    // sqlparser expects INCREMENT before START, but CockroachDB
-    // allows them in any order.  Rewrite to: INCREMENT BY <n> START WITH <n>.
-    let seq_re = Regex::new(
-        r"(?i)(CREATE\s+SEQUENCE\s+(?:IF\s+NOT\s+EXISTS\s+)?\S+)\s+START\s+(\d+)\s+INCREMENT\s+(\d+)",
-    )
-    .unwrap();
-    result = seq_re
-        .replace_all(&result, "$1 INCREMENT BY $3 START WITH $2")
-        .to_string();
-
-    // Strip ALTER TABLE ... ALTER PRIMARY KEY USING COLUMNS entirely.
-    // CockroachDB-specific syntax for changing primary keys;
-    // sqlparser doesn't support it.
-    let alter_pk_re = Regex::new(
-        r"(?is)ALTER\s+TABLE\s+\S+\s+ALTER\s+PRIMARY\s+KEY\s+USING\s+COLUMNS\s*\([^)]*\)\s*;?",
-    )
-    .unwrap();
-    result = alter_pk_re.replace_all(&result, "").to_string();
-
-    // Strip top-level DML statements (INSERT, UPDATE, DELETE, SELECT,
-    // SET, WITH).  We only need DDL for classification; DML may
-    // contain CRDB-specific syntax that sqlparser can't handle.
-    result = keep_ddl_statements(&result);
-
-    Ok(result)
+    result
 }
 
 /// Strip SQL comments (`-- ...` and `/* ... */`) from the input.
@@ -622,26 +516,6 @@ fn strip_sql_comments(sql: &str) -> String {
     block_comment_re.replace_all(&result, "").to_string()
 }
 
-/// Keep only DDL statements that we know how to classify.  After
-/// comments are removed we split on `;` and retain only statements
-/// whose first keyword matches DDL we care about (CREATE TABLE/INDEX/
-/// VIEW/TYPE/SEQUENCE, DROP TABLE/INDEX/VIEW, ALTER TABLE/INDEX).
-/// Everything else (DML, session settings, admin commands, etc.) is
-/// discarded.
-fn keep_ddl_statements(sql: &str) -> String {
-    let without_comments = strip_sql_comments(sql);
-    let ddl_start = Regex::new(
-        r"(?is)^\s*(?:CREATE\s+(?:UNIQUE\s+)?(?:TABLE|INDEX|VIEW|TYPE|SEQUENCE)|DROP\s+(?:TABLE|INDEX|VIEW|TYPE)|ALTER\s+(?:TABLE|INDEX|TYPE))\b",
-    )
-    .unwrap();
-    without_comments
-        .split(';')
-        .filter(|stmt| ddl_start.is_match(stmt))
-        .collect::<Vec<_>>()
-        .join(";")
-        + ";" // Trailing semicolon so the last statement parses.
-}
-
 /// Parse a SQL migration file and classify all schema-changing (DDL)
 /// statements it contains.
 ///
@@ -649,99 +523,95 @@ fn keep_ddl_statements(sql: &str) -> String {
 /// the filename).
 ///
 /// DML statements (INSERT, UPDATE, DELETE, SELECT, SET, etc.) are
-/// ignored — only DDL is returned.
+/// ignored — only DDL is returned.  Only CREATE INDEX and ALTER TABLE
+/// statements are parsed with `sqlparser`; all other DDL is classified
+/// as `OtherDdl` without parsing.
 pub fn classify_sql_statements(
     sql: &str,
     label: &str,
 ) -> Result<ClassifiedDdl, anyhow::Error> {
-    // Pre-process CRDB-specific SQL so sqlparser can parse it.
-    let preprocessed = preprocess_crdb_sql(sql)?;
+    let without_comments = strip_sql_comments(sql);
+
+    // Skip DML, session settings, and other non-DDL statements.
+    let dml_start = Regex::new(
+        r"(?is)^\s*(?:INSERT|UPDATE|DELETE|SELECT|SET|WITH|EXPLAIN|SHOW|USE|BEGIN|COMMIT|ROLLBACK|GRANT|REVOKE)\b",
+    )
+    .unwrap();
+
+    // Detect unparseable CockroachDB-specific ALTER PRIMARY KEY.
+    let alter_table_pk_re = Regex::new(
+        r"(?is)^\s*ALTER\s+TABLE\s+\S+\s+ALTER\s+PRIMARY\s+KEY\s+USING\s+COLUMNS",
+    )
+    .unwrap();
+
+    // Detect statements that need sqlparser for verification extraction.
+    let create_index_re =
+        Regex::new(r"(?is)^\s*CREATE\s+(?:UNIQUE\s+)?INDEX\b").unwrap();
+    let alter_table_re = Regex::new(r"(?is)^\s*ALTER\s+TABLE\b").unwrap();
+
     let mut changes = Vec::new();
     let mut statement_count = 0;
-    let statements = Parser::parse_sql(&PostgreSqlDialect {}, &preprocessed)
-        .with_context(|| format!("failed to parse SQL in {label}"))?;
 
-    for stmt in &statements {
-        match stmt {
-            Statement::CreateIndex(ci) => {
-                statement_count += 1;
-                let idx_name =
-                    last_ident(ci.name.as_ref().with_context(|| {
-                        format!("CREATE INDEX without a name in {label}")
-                    })?)?;
-                let tbl = last_ident(&ci.table_name)?;
-                changes.push(SchemaChangeInfo::CreateIndex {
-                    table_name: tbl,
-                    index_name: idx_name,
-                });
-            }
-            Statement::CreateTable(ct) => {
-                statement_count += 1;
-                changes.push(SchemaChangeInfo::CreateTable {
-                    table_name: last_ident(&ct.name)?,
-                });
-            }
-            Statement::CreateView(cv) => {
-                statement_count += 1;
-                changes.push(SchemaChangeInfo::CreateView {
-                    view_name: last_ident(&cv.name)?,
-                });
-            }
-            Statement::CreateType { name, .. } => {
-                statement_count += 1;
-                // Covers both composite types and ENUM types.
-                changes.push(SchemaChangeInfo::CreateType {
-                    type_name: last_ident(name)?,
-                });
-            }
-            Statement::Drop { object_type, names, .. } => {
-                statement_count += 1;
-                for obj_name in names {
-                    let n = last_ident(obj_name)?;
-                    match object_type {
-                        ObjectType::Table => {
-                            changes.push(SchemaChangeInfo::DropTable {
-                                table_name: n,
-                            });
-                        }
-                        ObjectType::Index => {
-                            changes.push(SchemaChangeInfo::DropIndex {
-                                index_name: n,
-                            });
-                        }
-                        ObjectType::View => {
-                            changes.push(SchemaChangeInfo::DropView {
-                                view_name: n,
-                            });
-                        }
-                        _ => {}
-                    }
+    for raw_stmt in without_comments.split(';') {
+        let trimmed = raw_stmt.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+
+        // Skip DML, session settings, and other non-DDL statements.
+        if dml_start.is_match(trimmed) {
+            continue;
+        }
+
+        statement_count += 1;
+
+        let might_have_async_backfill = create_index_re.is_match(trimmed)
+            || alter_table_re.is_match(trimmed);
+
+        if !might_have_async_backfill {
+            changes.push(SchemaChangeInfo::OtherDdl);
+            continue;
+        }
+
+        // CockroachDB-specific ALTER PRIMARY KEY USING COLUMNS
+        // can't be parsed by sqlparser; just mark as OtherDdl.
+        if alter_table_pk_re.is_match(trimmed) {
+            changes.push(SchemaChangeInfo::OtherDdl);
+            continue;
+        }
+
+        // CREATE INDEX and ALTER TABLE may produce verification
+        // queries, so we parse them with sqlparser.
+        let preprocessed = preprocess_for_sqlparser(trimmed);
+        let stmts = Parser::parse_sql(&PostgreSqlDialect {}, &preprocessed)
+            .with_context(|| format!("failed to parse SQL in {label}"))?;
+
+        for stmt in &stmts {
+            match stmt {
+                Statement::CreateIndex(ci) => {
+                    let idx_name =
+                        last_ident(ci.name.as_ref().with_context(|| {
+                            format!(
+                                "CREATE INDEX without a name \
+                                     in {label}"
+                            )
+                        })?)?;
+                    let tbl = last_ident(&ci.table_name)?;
+                    changes.push(SchemaChangeInfo::CreateIndex {
+                        table_name: tbl,
+                        index_name: idx_name,
+                    });
                 }
-            }
-            Statement::AlterTable(at) => {
-                statement_count += 1;
-                let tbl = last_ident(&at.name)?;
-                for op in &at.operations {
-                    match op {
-                        AlterTableOperation::AddColumn {
-                            column_def, ..
-                        } => {
-                            changes.push(
-                                SchemaChangeInfo::AlterTableAddColumn {
-                                    table_name: tbl.clone(),
-                                    column_name: SqlIdentifier::new(
-                                        column_def.name.value.clone(),
-                                    )?,
-                                },
-                            );
-                        }
-                        AlterTableOperation::DropColumn {
-                            column_names,
-                            ..
-                        } => {
-                            for column_name in column_names {
+                Statement::AlterTable(at) => {
+                    let tbl = last_ident(&at.name)?;
+                    for op in &at.operations {
+                        match op {
+                            AlterTableOperation::AlterColumn {
+                                column_name,
+                                op: AlterColumnOperation::SetNotNull,
+                            } => {
                                 changes.push(
-                                    SchemaChangeInfo::AlterTableDropColumn {
+                                    SchemaChangeInfo::AlterColumnSetNotNull {
                                         table_name: tbl.clone(),
                                         column_name: SqlIdentifier::new(
                                             column_name.value.clone(),
@@ -749,101 +619,38 @@ pub fn classify_sql_statements(
                                     },
                                 );
                             }
+                            AlterTableOperation::AddConstraint {
+                                constraint: tc,
+                                ..
+                            } => {
+                                let cname = constraint_name(tc).with_context(
+                                    || {
+                                        format!(
+                                            "ADD CONSTRAINT without \
+                                             a name on table {tbl} \
+                                             in {label}"
+                                        )
+                                    },
+                                )??;
+                                changes.push(
+                                    SchemaChangeInfo::AlterTableAddConstraint {
+                                        table_name: tbl.clone(),
+                                        constraint_name: cname,
+                                    },
+                                );
+                            }
+                            _ => {
+                                changes.push(SchemaChangeInfo::OtherDdl);
+                            }
                         }
-                        AlterTableOperation::AlterColumn {
-                            column_name,
-                            op: AlterColumnOperation::SetNotNull,
-                        } => {
-                            changes.push(
-                                SchemaChangeInfo::AlterColumnSetNotNull {
-                                    table_name: tbl.clone(),
-                                    column_name: SqlIdentifier::new(
-                                        column_name.value.clone(),
-                                    )?,
-                                },
-                            );
-                        }
-                        AlterTableOperation::AddConstraint {
-                            constraint: tc,
-                            ..
-                        } => {
-                            let cname = constraint_name(tc).with_context(
-                                || format!(
-                                    "ADD CONSTRAINT without a name on table {tbl} in {label}"
-                                ),
-                            )??;
-                            changes.push(
-                                SchemaChangeInfo::AlterTableAddConstraint {
-                                    table_name: tbl.clone(),
-                                    constraint_name: cname,
-                                },
-                            );
-                        }
-                        AlterTableOperation::DropConstraint {
-                            name: cname,
-                            ..
-                        } => {
-                            changes.push(
-                                SchemaChangeInfo::AlterTableDropConstraint {
-                                    table_name: tbl.clone(),
-                                    constraint_name: SqlIdentifier::new(
-                                        cname.value.clone(),
-                                    )?,
-                                },
-                            );
-                        }
-                        AlterTableOperation::RenameTable {
-                            table_name: new_name,
-                        } => {
-                            let obj_name = match new_name {
-                                sqlparser::ast::RenameTableNameKind::As(n)
-                                | sqlparser::ast::RenameTableNameKind::To(n) => {
-                                    n
-                                }
-                            };
-                            changes.push(SchemaChangeInfo::AlterTableRename {
-                                new_name: last_ident(obj_name)?,
-                            });
-                        }
-                        // Other AlterTableOperation variants (SET DEFAULT,
-                        // DROP DEFAULT, DROP NOT NULL, SET DATA TYPE, etc.)
-                        // are not schema-changing in the DDL sense we care
-                        // about for verification or the one-DDL-per-file
-                        // rule.
-                        _ => {}
                     }
                 }
-            }
-            Statement::AlterIndex { name, operation } => {
-                statement_count += 1;
-                let sqlparser::ast::AlterIndexOperation::RenameIndex {
-                    index_name,
-                } = operation;
-                let _ = name; // original name
-                changes.push(SchemaChangeInfo::AlterIndexRename {
-                    new_name: last_ident(index_name)?,
-                });
-            }
-            Statement::AlterType(sqlparser::ast::AlterType {
-                name,
-                operation,
-            }) => {
-                statement_count += 1;
-                if let sqlparser::ast::AlterTypeOperation::AddValue(add_val) =
-                    operation
-                {
-                    let type_name = last_ident(name)?;
-                    let value = SqlIdentifier::new(&add_val.value.value)?;
-                    changes.push(SchemaChangeInfo::AlterTypeAddValue {
-                        type_name,
-                        value,
-                    });
+                // Shouldn't normally happen (we only parse CREATE
+                // INDEX and ALTER TABLE), but handle gracefully.
+                _ => {
+                    changes.push(SchemaChangeInfo::OtherDdl);
                 }
-                // Other ALTER TYPE ops (Rename, RenameValue) are
-                // metadata-only.
             }
-            // DML, session settings, and everything else — not DDL.
-            _ => {}
         }
     }
 
@@ -1653,13 +1460,8 @@ mod test {
                         id UUID PRIMARY KEY\
                     );";
         let classified = classify_sql_statements(sql, "test").unwrap();
-        let changes = classified.changes;
-        assert_eq!(
-            changes,
-            vec![SchemaChangeInfo::CreateTable {
-                table_name: SqlIdentifier::new("widget").unwrap(),
-            }]
-        );
+        assert_eq!(classified.statement_count, 1);
+        assert_eq!(classified.changes, vec![SchemaChangeInfo::OtherDdl]);
     }
 
     #[test]
@@ -1683,14 +1485,8 @@ mod test {
         let sql = "ALTER TABLE omicron.public.sled \
                     ADD COLUMN IF NOT EXISTS cpu_family TEXT;";
         let classified = classify_sql_statements(sql, "test").unwrap();
-        let changes = classified.changes;
-        assert_eq!(
-            changes,
-            vec![SchemaChangeInfo::AlterTableAddColumn {
-                table_name: SqlIdentifier::new("sled").unwrap(),
-                column_name: SqlIdentifier::new("cpu_family").unwrap(),
-            }]
-        );
+        assert_eq!(classified.statement_count, 1);
+        assert_eq!(classified.changes, vec![SchemaChangeInfo::OtherDdl]);
     }
 
     #[test]
@@ -1698,14 +1494,8 @@ mod test {
         let sql = "ALTER TABLE omicron.public.instance \
                     DROP COLUMN IF EXISTS active_sled_id;";
         let classified = classify_sql_statements(sql, "test").unwrap();
-        let changes = classified.changes;
-        assert_eq!(
-            changes,
-            vec![SchemaChangeInfo::AlterTableDropColumn {
-                table_name: SqlIdentifier::new("instance").unwrap(),
-                column_name: SqlIdentifier::new("active_sled_id").unwrap(),
-            }]
-        );
+        assert_eq!(classified.statement_count, 1);
+        assert_eq!(classified.changes, vec![SchemaChangeInfo::OtherDdl]);
     }
 
     #[test]
@@ -1758,43 +1548,26 @@ mod test {
         let sql = "ALTER TABLE omicron.public.external_ip \
                     DROP CONSTRAINT IF EXISTS null_non_fip_parent_id;";
         let classified = classify_sql_statements(sql, "test").unwrap();
-        let changes = classified.changes;
-        assert_eq!(
-            changes,
-            vec![SchemaChangeInfo::AlterTableDropConstraint {
-                table_name: SqlIdentifier::new("external_ip").unwrap(),
-                constraint_name: SqlIdentifier::new("null_non_fip_parent_id")
-                    .unwrap(),
-            }]
-        );
+        assert_eq!(classified.statement_count, 1);
+        assert_eq!(classified.changes, vec![SchemaChangeInfo::OtherDdl]);
     }
 
     #[test]
     fn test_classify_alter_index_rename() {
+        // ALTER INDEX is DDL but doesn't need verification — OtherDdl.
         let sql = "ALTER INDEX omicron.public.old_idx RENAME TO new_idx;";
         let classified = classify_sql_statements(sql, "test").unwrap();
-        let changes = classified.changes;
-        assert_eq!(
-            changes,
-            vec![SchemaChangeInfo::AlterIndexRename {
-                new_name: SqlIdentifier::new("new_idx").unwrap(),
-            }]
-        );
+        assert_eq!(classified.statement_count, 1);
+        assert_eq!(classified.changes, vec![SchemaChangeInfo::OtherDdl]);
     }
 
     #[test]
     fn test_classify_create_type_enum() {
-        // CREATE TYPE ... AS ENUM is parsed by sqlparser 0.61+.
         let sql = "CREATE TYPE IF NOT EXISTS omicron.public.sled_policy \
                     AS ENUM ('in_service', 'no_provision', 'expunged');";
         let classified = classify_sql_statements(sql, "test").unwrap();
-        let changes = classified.changes;
-        assert_eq!(
-            changes,
-            vec![SchemaChangeInfo::CreateType {
-                type_name: SqlIdentifier::new("sled_policy").unwrap(),
-            }]
-        );
+        assert_eq!(classified.statement_count, 1);
+        assert_eq!(classified.changes, vec![SchemaChangeInfo::OtherDdl]);
     }
 
     #[test]
@@ -1803,83 +1576,54 @@ mod test {
                     ADD VALUE IF NOT EXISTS 'clickhouse_keeper2' \
                     AFTER 'clickhouse';";
         let classified = classify_sql_statements(sql, "test").unwrap();
-        let changes = classified.changes;
-        assert_eq!(
-            changes,
-            vec![SchemaChangeInfo::AlterTypeAddValue {
-                type_name: SqlIdentifier::new("dataset_kind").unwrap(),
-                value: SqlIdentifier::new("clickhouse_keeper2").unwrap(),
-            }]
-        );
+        assert_eq!(classified.statement_count, 1);
+        assert_eq!(classified.changes, vec![SchemaChangeInfo::OtherDdl]);
     }
 
     #[test]
     fn test_classify_drop_index() {
         let sql = "DROP INDEX IF EXISTS my_idx;";
         let classified = classify_sql_statements(sql, "test").unwrap();
-        let changes = classified.changes;
-        assert_eq!(
-            changes,
-            vec![SchemaChangeInfo::DropIndex {
-                index_name: SqlIdentifier::new("my_idx").unwrap(),
-            }]
-        );
+        assert_eq!(classified.statement_count, 1);
+        assert_eq!(classified.changes, vec![SchemaChangeInfo::OtherDdl]);
     }
 
     #[test]
     fn test_classify_drop_index_table_at_notation() {
-        // CRDB table@index notation should be preprocessed.
+        // CRDB table@index notation — DROP INDEX is now OtherDdl
+        // (no parsing needed).
         let sql = "DROP INDEX IF EXISTS \
                     omicron.public.sw_caboose@caboose_properties;";
         let classified = classify_sql_statements(sql, "test").unwrap();
-        let changes = classified.changes;
-        assert_eq!(
-            changes,
-            vec![SchemaChangeInfo::DropIndex {
-                index_name: SqlIdentifier::new("caboose_properties").unwrap(),
-            }]
-        );
+        assert_eq!(classified.statement_count, 1);
+        assert_eq!(classified.changes, vec![SchemaChangeInfo::OtherDdl]);
     }
 
     #[test]
     fn test_classify_drop_table() {
         let sql = "DROP TABLE IF EXISTS omicron.public.widget;";
         let classified = classify_sql_statements(sql, "test").unwrap();
-        let changes = classified.changes;
-        assert_eq!(
-            changes,
-            vec![SchemaChangeInfo::DropTable {
-                table_name: SqlIdentifier::new("widget").unwrap(),
-            }]
-        );
+        assert_eq!(classified.statement_count, 1);
+        assert_eq!(classified.changes, vec![SchemaChangeInfo::OtherDdl]);
     }
 
     #[test]
     fn test_classify_create_drop_view() {
-        // Note: IF NOT EXISTS on CREATE VIEW is stripped during
-        // preprocessing (CRDB-specific).
         let sql = "CREATE VIEW IF NOT EXISTS omicron.public.my_view \
                     AS SELECT 1;\n\
                     DROP VIEW IF EXISTS omicron.public.my_view;";
         let classified = classify_sql_statements(sql, "test").unwrap();
-        let changes = classified.changes;
+        assert_eq!(classified.statement_count, 2);
         assert_eq!(
-            changes,
-            vec![
-                SchemaChangeInfo::CreateView {
-                    view_name: SqlIdentifier::new("my_view").unwrap(),
-                },
-                SchemaChangeInfo::DropView {
-                    view_name: SqlIdentifier::new("my_view").unwrap()
-                },
-            ]
+            classified.changes,
+            vec![SchemaChangeInfo::OtherDdl, SchemaChangeInfo::OtherDdl]
         );
     }
 
     #[test]
     fn test_preprocess_storing() {
-        let input = "CREATE INDEX foo ON bar (col1) STORING (col2, col3);";
-        let output = preprocess_crdb_sql(input).unwrap();
+        let input = "CREATE INDEX foo ON bar (col1) STORING (col2, col3)";
+        let output = preprocess_for_sqlparser(input);
         assert!(
             !output.contains("STORING"),
             "STORING should be stripped: {output}"
@@ -1888,78 +1632,10 @@ mod test {
     }
 
     #[test]
-    fn test_preprocess_drop_index_at_notation() {
-        let input = "DROP INDEX IF EXISTS omicron.public.foo@bar_idx;";
-        let output = preprocess_crdb_sql(input).unwrap();
-        assert_eq!(output, "DROP INDEX IF EXISTS bar_idx;");
-    }
-
-    #[test]
-    fn test_preprocess_create_type_enum() {
-        let input =
-            "CREATE TYPE IF NOT EXISTS my_enum AS ENUM ('a', 'b', 'c');";
-        let output = preprocess_crdb_sql(input).unwrap();
-        // CREATE TYPE AS ENUM is now handled by sqlparser, not stripped
-        // by preprocess.  IF NOT EXISTS is stripped since sqlparser
-        // doesn't support it on CREATE TYPE.
-        assert!(
-            output.contains("CREATE TYPE"),
-            "CREATE TYPE should be preserved: {output}"
-        );
-        assert!(
-            !output.contains("IF NOT EXISTS"),
-            "IF NOT EXISTS should be stripped: {output}"
-        );
-    }
-
-    #[test]
-    fn test_preprocess_add_constraint_if_not_exists() {
-        let input = "ALTER TABLE t ADD CONSTRAINT IF NOT EXISTS my_fk FOREIGN KEY (col) REFERENCES other(id);";
-        let output = preprocess_crdb_sql(input).unwrap();
-        // IF NOT EXISTS should be stripped so sqlparser can parse it.
-        assert!(
-            !output.contains("IF NOT EXISTS"),
-            "IF NOT EXISTS should be stripped: {output}"
-        );
-        assert!(output.contains("ADD CONSTRAINT my_fk"));
-    }
-
-    #[test]
-    fn test_preprocess_alter_index_if_exists() {
-        let input =
-            "ALTER INDEX IF EXISTS omicron.public.my_idx RENAME TO new_idx;";
-        let output = preprocess_crdb_sql(input).unwrap();
-        assert!(
-            !output.contains("IF EXISTS"),
-            "IF EXISTS should be stripped: {output}"
-        );
-        assert!(output.contains("ALTER INDEX omicron.public.my_idx"));
-    }
-
-    #[test]
-    fn test_preprocess_computed_column_virtual() {
-        let input = "CREATE TABLE t (\n\
-                          id INT PRIMARY KEY,\n\
-                          addr INET NOT NULL,\n\
-                          first INET AS (addr & netmask(addr)) VIRTUAL,\n\
-                          last INET AS (\n\
-                              broadcast(addr) & (netmask(addr) | hostmask(addr))\n\
-                          ) VIRTUAL\n\
-                      );";
-        let output = preprocess_crdb_sql(input).unwrap();
-        assert!(
-            !output.contains("VIRTUAL"),
-            "VIRTUAL computed columns should be stripped: {output}"
-        );
-        assert!(!output.contains("netmask"));
-        assert!(output.contains("first INET"));
-        assert!(output.contains("last INET"));
-    }
-
-    #[test]
     fn test_preprocess_type_array() {
-        let input = "CREATE TABLE t (addrs INET ARRAY, id INT PRIMARY KEY);";
-        let output = preprocess_crdb_sql(input).unwrap();
+        let input =
+            "ALTER TABLE t ADD COLUMN addrs INET ARRAY, ADD COLUMN x INT";
+        let output = preprocess_for_sqlparser(input);
         assert!(
             !output.contains("ARRAY"),
             "ARRAY keyword should be replaced with []: {output}"
@@ -1968,70 +1644,85 @@ mod test {
     }
 
     #[test]
-    fn test_preprocess_alter_sequence() {
+    fn test_preprocess_add_constraint_if_not_exists() {
         let input =
-            "ALTER SEQUENCE IF EXISTS omicron.public.my_seq RENAME TO new_seq;";
-        let output = preprocess_crdb_sql(input).unwrap();
+            "ALTER TABLE t ADD CONSTRAINT IF NOT EXISTS my_ck CHECK (x > 0)";
+        let output = preprocess_for_sqlparser(input);
         assert!(
-            !output.contains("ALTER SEQUENCE"),
-            "ALTER SEQUENCE should be stripped: {output}"
+            !output.contains("IF NOT EXISTS"),
+            "IF NOT EXISTS should be stripped: {output}"
+        );
+        assert!(output.contains("ADD CONSTRAINT my_ck"));
+    }
+
+    #[test]
+    fn test_classify_alter_primary_key() {
+        // CockroachDB-specific ALTER PRIMARY KEY USING COLUMNS can't
+        // be parsed by sqlparser, but should still count as DDL.
+        let sql = "ALTER TABLE omicron.public.t \
+                    ALTER PRIMARY KEY USING COLUMNS (a, b);";
+        let classified = classify_sql_statements(sql, "test").unwrap();
+        assert_eq!(classified.statement_count, 1);
+        assert_eq!(classified.changes, vec![SchemaChangeInfo::OtherDdl]);
+    }
+
+    #[test]
+    fn test_classify_mixed_dml_and_ddl() {
+        // DML should be ignored; only DDL should be counted.
+        let sql = "SET LOCAL disallow_full_table_scans = off;\n\
+                    INSERT INTO t (a) VALUES (1);\n\
+                    CREATE TABLE t2 (id INT PRIMARY KEY);\n\
+                    UPDATE t SET a = 2;\n\
+                    CREATE INDEX my_idx ON t2 (id);";
+        let classified = classify_sql_statements(sql, "test").unwrap();
+        assert_eq!(classified.statement_count, 2, "Only DDL should be counted");
+        // CREATE TABLE → OtherDdl, CREATE INDEX → CreateIndex
+        assert_eq!(classified.changes.len(), 2);
+        assert_eq!(classified.changes[0], SchemaChangeInfo::OtherDdl);
+        assert!(
+            matches!(
+                &classified.changes[1],
+                SchemaChangeInfo::CreateIndex { .. }
+            ),
+            "CREATE INDEX should be classified: {:?}",
+            classified.changes[1]
         );
     }
 
     #[test]
-    fn test_preprocess_create_sequence_options() {
-        let input = "CREATE SEQUENCE IF NOT EXISTS omicron.public.my_seq START 1 INCREMENT 1;";
-        let output = preprocess_crdb_sql(input).unwrap();
-        assert!(
-            output.contains("INCREMENT BY 1"),
-            "INCREMENT should become INCREMENT BY: {output}"
-        );
-        assert!(
-            output.contains("START WITH 1"),
-            "START should become START WITH: {output}"
-        );
-    }
-
-    #[test]
-    fn test_preprocess_alter_primary_key() {
-        let input = "ALTER TABLE omicron.public.t ALTER PRIMARY KEY USING COLUMNS (a, b);";
-        let output = preprocess_crdb_sql(input).unwrap();
-        assert!(
-            !output.contains("ALTER PRIMARY KEY"),
-            "ALTER PRIMARY KEY should be stripped: {output}"
-        );
-    }
-
-    #[test]
-    fn test_preprocess_strips_dml_keeps_ddl() {
-        let input = "SET LOCAL disallow_full_table_scans = off;\n\
-                      INSERT INTO t (a) VALUES (1);\n\
-                      CREATE TABLE t2 (id INT PRIMARY KEY);\n\
-                      UPDATE t SET a = 2;\n\
-                      CREATE INDEX my_idx ON t2 (id);";
-        let output = preprocess_crdb_sql(input).unwrap();
-        // DML should be stripped.
-        assert!(
-            !output.contains("SET LOCAL"),
-            "SET should be stripped: {output}"
-        );
-        assert!(
-            !output.contains("INSERT"),
-            "INSERT should be stripped: {output}"
-        );
-        assert!(
-            !output.contains("UPDATE"),
-            "UPDATE should be stripped: {output}"
-        );
-        // DDL should be kept.
-        assert!(
-            output.contains("CREATE TABLE"),
-            "CREATE TABLE should be kept: {output}"
-        );
-        assert!(
-            output.contains("CREATE INDEX"),
-            "CREATE INDEX should be kept: {output}"
-        );
+    fn test_classify_other_ddl_varieties() {
+        // Various DDL statements that don't need verification should
+        // all produce OtherDdl with the correct statement_count.
+        for (sql, expected_count) in [
+            ("CREATE TABLE t (id INT PRIMARY KEY);", 1),
+            ("DROP TABLE IF EXISTS t;", 1),
+            ("DROP INDEX IF EXISTS my_idx;", 1),
+            ("CREATE TYPE my_enum AS ENUM ('a', 'b');", 1),
+            ("ALTER TYPE my_enum ADD VALUE 'c';", 1),
+            (
+                "CREATE TABLE t1 (id INT PRIMARY KEY);\n\
+                 DROP TABLE IF EXISTS t2;",
+                2,
+            ),
+        ] {
+            let classified = classify_sql_statements(sql, "test").unwrap();
+            assert_eq!(
+                classified.statement_count, expected_count,
+                "wrong statement_count for: {sql}"
+            );
+            assert_eq!(
+                classified.changes.len(),
+                expected_count,
+                "wrong changes count for: {sql}"
+            );
+            for change in &classified.changes {
+                assert_eq!(
+                    *change,
+                    SchemaChangeInfo::OtherDdl,
+                    "expected OtherDdl for: {sql}"
+                );
+            }
+        }
     }
 
     #[test]
@@ -2131,56 +1822,11 @@ mod test {
     }
 
     #[test]
-    fn test_verification_query_metadata_only_returns_none() {
-        // Operations that don't involve async backfill should return None.
-        let cases = vec![
-            SchemaChangeInfo::CreateTable {
-                table_name: SqlIdentifier::new("t").unwrap(),
-            },
-            SchemaChangeInfo::DropTable {
-                table_name: SqlIdentifier::new("t").unwrap(),
-            },
-            SchemaChangeInfo::DropIndex {
-                index_name: SqlIdentifier::new("i").unwrap(),
-            },
-            SchemaChangeInfo::AlterTableAddColumn {
-                table_name: SqlIdentifier::new("t").unwrap(),
-                column_name: SqlIdentifier::new("c").unwrap(),
-            },
-            SchemaChangeInfo::AlterTableDropColumn {
-                table_name: SqlIdentifier::new("t").unwrap(),
-                column_name: SqlIdentifier::new("c").unwrap(),
-            },
-            SchemaChangeInfo::AlterTableDropConstraint {
-                table_name: SqlIdentifier::new("t").unwrap(),
-                constraint_name: SqlIdentifier::new("c").unwrap(),
-            },
-            SchemaChangeInfo::AlterTableRename {
-                new_name: SqlIdentifier::new("t2").unwrap(),
-            },
-            SchemaChangeInfo::AlterIndexRename {
-                new_name: SqlIdentifier::new("i2").unwrap(),
-            },
-            SchemaChangeInfo::CreateType {
-                type_name: SqlIdentifier::new("t").unwrap(),
-            },
-            SchemaChangeInfo::AlterTypeAddValue {
-                type_name: SqlIdentifier::new("t").unwrap(),
-                value: SqlIdentifier::new("v").unwrap(),
-            },
-            SchemaChangeInfo::CreateView {
-                view_name: SqlIdentifier::new("v").unwrap(),
-            },
-            SchemaChangeInfo::DropView {
-                view_name: SqlIdentifier::new("v").unwrap(),
-            },
-        ];
-        for change in cases {
-            assert!(
-                change.verification_query().is_none(),
-                "Expected None for {change:?}"
-            );
-        }
+    fn test_verification_query_other_ddl_returns_none() {
+        assert!(
+            SchemaChangeInfo::OtherDdl.verification_query().is_none(),
+            "OtherDdl should return None"
+        );
     }
 
     // The most important regression test: verify that ALL existing
@@ -2227,16 +1873,8 @@ mod test {
             2,
             "DROP CONSTRAINT + ADD CONSTRAINT = 2 changes"
         );
-        assert_eq!(
-            classified.changes[0],
-            SchemaChangeInfo::AlterTableDropConstraint {
-                table_name: SqlIdentifier::new("bgp_peer_config").unwrap(),
-                constraint_name: SqlIdentifier::new(
-                    "bgp_peer_config_addr_unique"
-                )
-                .unwrap(),
-            }
-        );
+        // DROP CONSTRAINT is now OtherDdl (no verification needed).
+        assert_eq!(classified.changes[0], SchemaChangeInfo::OtherDdl);
         assert_eq!(
             classified.changes[1],
             SchemaChangeInfo::AlterTableAddConstraint {
@@ -2281,13 +1919,8 @@ mod test {
             2,
             "Both operations should be stored"
         );
-        assert_eq!(
-            step.schema_changes()[0],
-            SchemaChangeInfo::AlterTableDropConstraint {
-                table_name: SqlIdentifier::new("t").unwrap(),
-                constraint_name: SqlIdentifier::new("old_check").unwrap(),
-            }
-        );
+        // DROP CONSTRAINT is now OtherDdl.
+        assert_eq!(step.schema_changes()[0], SchemaChangeInfo::OtherDdl);
         assert_eq!(
             step.schema_changes()[1],
             SchemaChangeInfo::AlterTableAddConstraint {
