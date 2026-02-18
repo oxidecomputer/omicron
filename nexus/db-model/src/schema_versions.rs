@@ -516,34 +516,21 @@ fn constraint_name(
 }
 
 /// Pre-process CockroachDB-specific SQL so that `sqlparser` (PostgreSQL
-/// dialect) can parse it.  Returns:
+/// dialect) can parse it.
 ///
-/// 1. The preprocessed SQL string (for `sqlparser`).
-/// 2. `SchemaChangeInfo` entries for CRDB-specific DDL that had to be
-///    stripped entirely — these can't be represented in `sqlparser`'s
-///    AST at all, so we detect them via regex here, in the same pass
-///    that removes them.
+/// Returns the preprocessed SQL string suitable for `sqlparser`.
 ///
 /// This is **only for classification** — the original SQL is always what
 /// gets executed against the database.
-fn preprocess_crdb_sql(
-    sql: &str,
-) -> Result<(String, Vec<SchemaChangeInfo>, usize), anyhow::Error> {
+fn preprocess_crdb_sql(sql: &str) -> Result<String, anyhow::Error> {
     // We compile these once per call — we could use LazyLock, but this
     // runs infrequently (once per migration file at startup).
 
     let mut result = sql.to_string();
-    let crdb_changes = Vec::new();
-    let crdb_statement_count: usize = 0;
 
     // Strip STORING(...) clauses from CREATE INDEX.
     let storing_re = Regex::new(r"(?is)\bSTORING\s*\([^)]*\)").unwrap();
     result = storing_re.replace_all(&result, "").to_string();
-
-    // Replace STRING(N) with VARCHAR(N).
-    // CockroachDB accepts STRING(N) as an alias for VARCHAR(N).
-    let string_re = Regex::new(r"(?i)\bSTRING\s*\((\d+)\)").unwrap();
-    result = string_re.replace_all(&result, "VARCHAR($1)").to_string();
 
     // Replace `<type> ARRAY` with `<type>[]` in column definitions.
     // Both are valid PostgreSQL, but sqlparser only handles the
@@ -578,13 +565,6 @@ fn preprocess_crdb_sql(
         Regex::new(r"(?i)(ADD\s+CONSTRAINT)\s+IF\s+NOT\s+EXISTS").unwrap();
     result = add_constraint_ine_re.replace_all(&result, "$1").to_string();
 
-    // Strip IF NOT EXISTS from CREATE VIEW.
-    // CockroachDB supports this but sqlparser's PostgreSQL dialect
-    // does not (it only supports OR REPLACE).
-    let create_view_ine_re =
-        Regex::new(r"(?i)(CREATE\s+VIEW)\s+IF\s+NOT\s+EXISTS").unwrap();
-    result = create_view_ine_re.replace_all(&result, "$1").to_string();
-
     // Strip IF NOT EXISTS from CREATE TYPE.
     // CockroachDB supports this but sqlparser does not.
     let create_type_ine_re =
@@ -603,27 +583,6 @@ fn preprocess_crdb_sql(
     // VIRTUAL only appears in this context in our migrations.
     let computed_col_re = Regex::new(r"(?is)\bAS\s*\(.*?\)\s*VIRTUAL").unwrap();
     result = computed_col_re.replace_all(&result, "").to_string();
-
-    // Strip NOT VALID from ADD CONSTRAINT.
-    // PostgreSQL/CockroachDB use NOT VALID to skip validation of
-    // existing rows; sqlparser does not support it.
-    let not_valid_re = Regex::new(r"(?i)\)\s*NOT\s+VALID").unwrap();
-    result = not_valid_re.replace_all(&result, ")").to_string();
-
-    // Strip ASC/DESC from PRIMARY KEY column lists.
-    // CockroachDB supports ordering in PRIMARY KEY constraints;
-    // sqlparser does not.  We match the PRIMARY KEY (...) block and
-    // remove ASC/DESC keywords within it.
-    let pk_re = Regex::new(r"(?is)(PRIMARY\s+KEY\s*\()([^)]*)\)").unwrap();
-    result = pk_re
-        .replace_all(&result, |caps: &regex::Captures| {
-            let prefix = &caps[1];
-            let inner = Regex::new(r"(?i)\s+(?:ASC|DESC)")
-                .unwrap()
-                .replace_all(&caps[2], "");
-            format!("{prefix}{inner})")
-        })
-        .to_string();
 
     // Reorder CREATE SEQUENCE options.
     // sqlparser expects INCREMENT before START, but CockroachDB
@@ -650,7 +609,7 @@ fn preprocess_crdb_sql(
     // contain CRDB-specific syntax that sqlparser can't handle.
     result = keep_ddl_statements(&result);
 
-    Ok((result, crdb_changes, crdb_statement_count))
+    Ok(result)
 }
 
 /// Strip SQL comments (`-- ...` and `/* ... */`) from the input.
@@ -696,8 +655,9 @@ pub fn classify_sql_statements(
     label: &str,
 ) -> Result<ClassifiedDdl, anyhow::Error> {
     // Pre-process CRDB-specific SQL so sqlparser can parse it.
-    let (preprocessed, mut changes, mut statement_count) =
-        preprocess_crdb_sql(sql)?;
+    let preprocessed = preprocess_crdb_sql(sql)?;
+    let mut changes = Vec::new();
+    let mut statement_count = 0;
     let statements = Parser::parse_sql(&PostgreSqlDialect {}, &preprocessed)
         .with_context(|| format!("failed to parse SQL in {label}"))?;
 
@@ -1919,7 +1879,7 @@ mod test {
     #[test]
     fn test_preprocess_storing() {
         let input = "CREATE INDEX foo ON bar (col1) STORING (col2, col3);";
-        let (output, _, _) = preprocess_crdb_sql(input).unwrap();
+        let output = preprocess_crdb_sql(input).unwrap();
         assert!(
             !output.contains("STORING"),
             "STORING should be stripped: {output}"
@@ -1928,44 +1888,17 @@ mod test {
     }
 
     #[test]
-    fn test_preprocess_string_type() {
-        let input = "CREATE TABLE t (name STRING(63) NOT NULL);";
-        let (output, _, _) = preprocess_crdb_sql(input).unwrap();
-        assert!(
-            output.contains("VARCHAR(63)"),
-            "STRING(63) should become VARCHAR(63): {output}"
-        );
-        assert!(
-            !output.contains("STRING"),
-            "STRING should be replaced: {output}"
-        );
-    }
-
-    #[test]
     fn test_preprocess_drop_index_at_notation() {
         let input = "DROP INDEX IF EXISTS omicron.public.foo@bar_idx;";
-        let (output, _, _) = preprocess_crdb_sql(input).unwrap();
+        let output = preprocess_crdb_sql(input).unwrap();
         assert_eq!(output, "DROP INDEX IF EXISTS bar_idx;");
-    }
-
-    #[test]
-    fn test_preprocess_alter_type_add_value() {
-        let input = "ALTER TYPE omicron.public.my_enum ADD VALUE IF NOT EXISTS 'new_variant';";
-        let (output, changes, count) = preprocess_crdb_sql(input).unwrap();
-        // ALTER TYPE is now handled by sqlparser, not stripped by preprocess.
-        assert!(
-            output.contains("ALTER TYPE"),
-            "ALTER TYPE should be preserved: {output}"
-        );
-        assert!(changes.is_empty());
-        assert_eq!(count, 0);
     }
 
     #[test]
     fn test_preprocess_create_type_enum() {
         let input =
             "CREATE TYPE IF NOT EXISTS my_enum AS ENUM ('a', 'b', 'c');";
-        let (output, changes, count) = preprocess_crdb_sql(input).unwrap();
+        let output = preprocess_crdb_sql(input).unwrap();
         // CREATE TYPE AS ENUM is now handled by sqlparser, not stripped
         // by preprocess.  IF NOT EXISTS is stripped since sqlparser
         // doesn't support it on CREATE TYPE.
@@ -1977,50 +1910,30 @@ mod test {
             !output.contains("IF NOT EXISTS"),
             "IF NOT EXISTS should be stripped: {output}"
         );
-        assert!(changes.is_empty());
-        assert_eq!(count, 0);
     }
 
     #[test]
     fn test_preprocess_add_constraint_if_not_exists() {
         let input = "ALTER TABLE t ADD CONSTRAINT IF NOT EXISTS my_fk FOREIGN KEY (col) REFERENCES other(id);";
-        let (output, changes, _) = preprocess_crdb_sql(input).unwrap();
+        let output = preprocess_crdb_sql(input).unwrap();
         // IF NOT EXISTS should be stripped so sqlparser can parse it.
         assert!(
             !output.contains("IF NOT EXISTS"),
             "IF NOT EXISTS should be stripped: {output}"
         );
         assert!(output.contains("ADD CONSTRAINT my_fk"));
-        // This is just syntax normalization, not a CRDB-specific DDL
-        // detection — no SchemaChangeInfo entries from preprocessing.
-        assert!(changes.is_empty());
-    }
-
-    #[test]
-    fn test_preprocess_create_view_if_not_exists() {
-        let input = "CREATE VIEW IF NOT EXISTS my_view AS SELECT 1;";
-        let (output, changes, _) = preprocess_crdb_sql(input).unwrap();
-        // IF NOT EXISTS should be stripped so sqlparser can parse it.
-        assert!(
-            !output.contains("IF NOT EXISTS"),
-            "IF NOT EXISTS should be stripped: {output}"
-        );
-        assert!(output.contains("CREATE VIEW my_view"));
-        // Syntax normalization only — no CRDB-specific DDL detected.
-        assert!(changes.is_empty());
     }
 
     #[test]
     fn test_preprocess_alter_index_if_exists() {
         let input =
             "ALTER INDEX IF EXISTS omicron.public.my_idx RENAME TO new_idx;";
-        let (output, changes, _) = preprocess_crdb_sql(input).unwrap();
+        let output = preprocess_crdb_sql(input).unwrap();
         assert!(
             !output.contains("IF EXISTS"),
             "IF EXISTS should be stripped: {output}"
         );
         assert!(output.contains("ALTER INDEX omicron.public.my_idx"));
-        assert!(changes.is_empty());
     }
 
     #[test]
@@ -2033,7 +1946,7 @@ mod test {
                               broadcast(addr) & (netmask(addr) | hostmask(addr))\n\
                           ) VIRTUAL\n\
                       );";
-        let (output, changes, _) = preprocess_crdb_sql(input).unwrap();
+        let output = preprocess_crdb_sql(input).unwrap();
         assert!(
             !output.contains("VIRTUAL"),
             "VIRTUAL computed columns should be stripped: {output}"
@@ -2041,75 +1954,34 @@ mod test {
         assert!(!output.contains("netmask"));
         assert!(output.contains("first INET"));
         assert!(output.contains("last INET"));
-        assert!(changes.is_empty());
-    }
-
-    #[test]
-    fn test_preprocess_not_valid() {
-        let input =
-            "ALTER TABLE t ADD CONSTRAINT my_check CHECK (x > 0) NOT VALID;";
-        let (output, changes, _) = preprocess_crdb_sql(input).unwrap();
-        assert!(
-            !output.contains("NOT VALID"),
-            "NOT VALID should be stripped: {output}"
-        );
-        assert!(output.contains("CHECK (x > 0)"));
-        assert!(changes.is_empty());
     }
 
     #[test]
     fn test_preprocess_type_array() {
         let input = "CREATE TABLE t (addrs INET ARRAY, id INT PRIMARY KEY);";
-        let (output, changes, _) = preprocess_crdb_sql(input).unwrap();
+        let output = preprocess_crdb_sql(input).unwrap();
         assert!(
             !output.contains("ARRAY"),
             "ARRAY keyword should be replaced with []: {output}"
         );
         assert!(output.contains("INET[]"));
-        assert!(changes.is_empty());
     }
 
     #[test]
     fn test_preprocess_alter_sequence() {
         let input =
             "ALTER SEQUENCE IF EXISTS omicron.public.my_seq RENAME TO new_seq;";
-        let (output, changes, _) = preprocess_crdb_sql(input).unwrap();
+        let output = preprocess_crdb_sql(input).unwrap();
         assert!(
             !output.contains("ALTER SEQUENCE"),
             "ALTER SEQUENCE should be stripped: {output}"
         );
-        assert!(changes.is_empty());
-    }
-
-    #[test]
-    fn test_preprocess_drop_type() {
-        let input = "DROP TYPE IF EXISTS omicron.public.my_enum;";
-        let (output, changes, count) = preprocess_crdb_sql(input).unwrap();
-        // DROP TYPE is now handled by sqlparser, not stripped by preprocess.
-        assert!(
-            output.contains("DROP TYPE"),
-            "DROP TYPE should be preserved: {output}"
-        );
-        assert!(changes.is_empty());
-        assert_eq!(count, 0);
-    }
-
-    #[test]
-    fn test_preprocess_primary_key_desc() {
-        let input = "CREATE TABLE t (a INT, b INT, PRIMARY KEY (a, b DESC));";
-        let (output, changes, _) = preprocess_crdb_sql(input).unwrap();
-        assert!(
-            !output.contains("DESC"),
-            "DESC should be stripped from PRIMARY KEY: {output}"
-        );
-        assert!(output.contains("PRIMARY KEY (a, b)"));
-        assert!(changes.is_empty());
     }
 
     #[test]
     fn test_preprocess_create_sequence_options() {
         let input = "CREATE SEQUENCE IF NOT EXISTS omicron.public.my_seq START 1 INCREMENT 1;";
-        let (output, changes, _) = preprocess_crdb_sql(input).unwrap();
+        let output = preprocess_crdb_sql(input).unwrap();
         assert!(
             output.contains("INCREMENT BY 1"),
             "INCREMENT should become INCREMENT BY: {output}"
@@ -2118,18 +1990,16 @@ mod test {
             output.contains("START WITH 1"),
             "START should become START WITH: {output}"
         );
-        assert!(changes.is_empty());
     }
 
     #[test]
     fn test_preprocess_alter_primary_key() {
         let input = "ALTER TABLE omicron.public.t ALTER PRIMARY KEY USING COLUMNS (a, b);";
-        let (output, changes, _) = preprocess_crdb_sql(input).unwrap();
+        let output = preprocess_crdb_sql(input).unwrap();
         assert!(
             !output.contains("ALTER PRIMARY KEY"),
             "ALTER PRIMARY KEY should be stripped: {output}"
         );
-        assert!(changes.is_empty());
     }
 
     #[test]
@@ -2139,7 +2009,7 @@ mod test {
                       CREATE TABLE t2 (id INT PRIMARY KEY);\n\
                       UPDATE t SET a = 2;\n\
                       CREATE INDEX my_idx ON t2 (id);";
-        let (output, changes, _) = preprocess_crdb_sql(input).unwrap();
+        let output = preprocess_crdb_sql(input).unwrap();
         // DML should be stripped.
         assert!(
             !output.contains("SET LOCAL"),
@@ -2162,7 +2032,6 @@ mod test {
             output.contains("CREATE INDEX"),
             "CREATE INDEX should be kept: {output}"
         );
-        assert!(changes.is_empty());
     }
 
     #[test]
