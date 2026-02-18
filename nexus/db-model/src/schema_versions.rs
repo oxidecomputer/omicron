@@ -329,7 +329,7 @@ impl std::fmt::Display for SqlIdentifier {
 ///
 /// Used to:
 /// 1. Enforce at-most-one DDL per migration file (for versions >
-///    [`LAST_MULTI_DDL_VERSION`])
+///    `LAST_MULTI_DDL_VERSION`)
 /// 2. Generate verification queries for operations that involve async
 ///    backfill in CockroachDB (e.g., CREATE INDEX, ADD CONSTRAINT)
 #[derive(Debug, Clone, PartialEq)]
