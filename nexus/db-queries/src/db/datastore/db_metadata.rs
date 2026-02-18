@@ -2705,4 +2705,348 @@ mod test {
         db.terminate().await;
         logctx.cleanup_successful();
     }
+
+    // Reproduces the CREATE INDEX backfill race condition described in
+    // https://github.com/oxidecomputer/omicron/issues/9866
+    //
+    // When multiple connections run CREATE INDEX IF NOT EXISTS concurrently
+    // on a large table with limited SQL memory, the backfill can fail with
+    // OOM and the index is silently rolled back. CREATE INDEX IF NOT EXISTS
+    // returns "success" for some clients (because IF NOT EXISTS saw the
+    // in-progress index descriptor), but the index is gone.
+    //
+    // This test shows that our verification query (which checks
+    // crdb_internal.table_indexes) acts as a barrier that catches the
+    // missing index.
+    #[tokio::test]
+    async fn test_create_index_backfill_race() {
+        let logctx = dev::test_setup_log("test_create_index_backfill_race");
+
+        // Start a fresh CRDB with tightly constrained SQL memory to make
+        // the backfill OOM-susceptible. We bypass the normal test database
+        // setup since we don't need the Omicron schema.
+        let mut builder =
+            omicron_test_utils::dev::db::CockroachStarterBuilder::new();
+        builder.arg("--max-sql-memory=32MiB");
+        let starter = builder.build().expect("Failed to build CRDB starter");
+        let mut instance = starter.start().await.expect("Failed to start CRDB");
+        instance
+            .disable_synchronization()
+            .await
+            .expect("Failed to disable synchronization");
+
+        let client =
+            instance.connect().await.expect("Failed to connect to CRDB");
+
+        // Create the database and table matching the reproduction script
+        // from https://github.com/oxidecomputer/omicron/issues/9866
+        client
+            .batch_execute("CREATE DATABASE IF NOT EXISTS omicron;")
+            .await
+            .expect("Failed to create database");
+
+        client
+            .batch_execute(
+                "CREATE TABLE omicron.public.test_race ( \
+                     id UUID PRIMARY KEY DEFAULT gen_random_uuid(), \
+                     token STRING(40) NOT NULL, \
+                     time_created TIMESTAMPTZ NOT NULL, \
+                     time_last_used TIMESTAMPTZ NOT NULL, \
+                     silo_user_id UUID NOT NULL \
+                 );",
+            )
+            .await
+            .expect("Failed to create test table");
+
+        // Insert rows so the table isn't empty and CREATE INDEX triggers
+        // a backfill. With --max-sql-memory=32MiB, the OOM is caused by
+        // concurrent BulkAdder allocations (each requesting 32MiB),
+        // not by data volume, so a small number of rows suffices.
+        client
+            .batch_execute(
+                "INSERT INTO omicron.public.test_race \
+                 (token, time_created, time_last_used, silo_user_id) \
+                 SELECT \
+                     substr(gen_random_uuid()::STRING, 1, 40), \
+                     now() - (random() * interval '30 days'), \
+                     now() - (random() * interval '1 day'), \
+                     gen_random_uuid() \
+                 FROM generate_series(1, 100);",
+            )
+            .await
+            .expect("Failed to insert rows");
+
+        // Phase 2: Reproduce the bug by running 3 concurrent CREATE INDEX
+        // operations. Each gets its own connection, just like separate
+        // Nexus instances would.
+        let task_clients: Vec<_> =
+            futures::future::try_join_all((0..3).map(|_| instance.connect()))
+                .await
+                .expect("Failed to create task connections");
+
+        let handles: Vec<_> = task_clients
+            .into_iter()
+            .enumerate()
+            .map(|(task_id, task_client)| {
+                tokio::spawn(async move {
+                    let result = task_client
+                        .batch_execute(
+                            "CREATE INDEX IF NOT EXISTS test_idx \
+                             ON omicron.public.test_race (time_created);",
+                        )
+                        .await;
+                    eprintln!(
+                        "test_create_index_backfill_race: \
+                         task {task_id} CREATE INDEX result: {result:?}"
+                    );
+                    let _ = task_client.cleanup().await;
+                    result
+                })
+            })
+            .collect();
+
+        // Wait for all tasks to complete. Some should return Ok (IF NOT
+        // EXISTS no-op), and at least one should error (OOM).
+        let results: Vec<_> = futures::future::join_all(handles)
+            .await
+            .into_iter()
+            .map(|r| r.expect("Task panicked"))
+            .collect();
+        eprintln!(
+            "test_create_index_backfill_race: \
+             concurrent CREATE INDEX results: {results:?}"
+        );
+
+        // The bug requires that at least one task returned Ok — that's a
+        // client that saw the in-progress index descriptor via IF NOT
+        // EXISTS and treated it as a no-op. Without our verification
+        // query, this client would proceed past the migration step
+        // believing the index exists.
+        assert!(
+            results.iter().any(|r| r.is_ok()),
+            "Bug not reproduced: all CREATE INDEX tasks failed. \
+             The race requires at least one task to return Ok \
+             (via IF NOT EXISTS no-op) while the backfill is in \
+             progress. Results: {results:?}"
+        );
+
+        // Phase 3: Verify that our verification query catches the missing
+        // index. Even though some CREATE INDEX IF NOT EXISTS calls returned
+        // Ok, the backfill failed and the index was rolled back.
+        //
+        // Without the verification query, a Nexus that got Ok from
+        // CREATE INDEX IF NOT EXISTS would proceed past the migration
+        // step, not knowing the index is gone. The verification query
+        // acts as a barrier: it checks crdb_internal.table_indexes and
+        // fails if the index isn't actually present.
+        let change = nexus_db_model::SchemaChangeInfo::CreateIndex {
+            table_name: nexus_db_model::SqlIdentifier::new("test_race")
+                .unwrap(),
+            index_name: nexus_db_model::SqlIdentifier::new("test_idx").unwrap(),
+        };
+        let verify_sql = change.verification_query().unwrap();
+
+        let verification_result = client.batch_execute(&verify_sql).await;
+        let err = verification_result.unwrap_err();
+        let err_msg = err.to_string();
+        assert!(
+            err_msg.contains("Schema change verification failed"),
+            "Verification error should be our expected barrier message, \
+             not a SQL syntax error or other unexpected failure. \
+             Got: {err_msg}"
+        );
+
+        // Phase 4: Show that when the index actually exists, the
+        // verification query passes. Recreate the table with the index
+        // defined inline (no backfill needed — at 32MiB, even a single
+        // CREATE INDEX backfill exceeds the memory budget).
+        client
+            .batch_execute(
+                "DROP TABLE omicron.public.test_race CASCADE; \
+                 CREATE TABLE omicron.public.test_race ( \
+                     id UUID PRIMARY KEY DEFAULT gen_random_uuid(), \
+                     token STRING(40) NOT NULL, \
+                     time_created TIMESTAMPTZ NOT NULL, \
+                     time_last_used TIMESTAMPTZ NOT NULL, \
+                     silo_user_id UUID NOT NULL, \
+                     INDEX test_idx (time_created) \
+                 );",
+            )
+            .await
+            .expect("Failed to recreate table with inline index");
+
+        client
+            .batch_execute(&verify_sql)
+            .await
+            .expect("Verification should pass when the index actually exists");
+
+        // Clean up
+        client
+            .batch_execute(
+                "DROP TABLE IF EXISTS omicron.public.test_race CASCADE;",
+            )
+            .await
+            .expect("Failed to drop test table");
+        let _ = client.cleanup().await;
+        instance.cleanup().await.expect("Failed to clean up CRDB");
+        logctx.cleanup_successful();
+    }
+
+    // Emulates the real-world scenario from
+    // https://github.com/oxidecomputer/omicron/issues/9866:
+    // multiple Nexus instances each run CREATE INDEX IF NOT EXISTS
+    // immediately followed by the verification query, back-to-back.
+    //
+    // Without the verification barrier, a Nexus that got Ok from
+    // CREATE INDEX IF NOT EXISTS (because it saw the in-progress index
+    // descriptor via IF NOT EXISTS) would proceed, not knowing the
+    // backfill later failed. With the barrier, the verification query
+    // catches the missing index and prevents that Nexus from proceeding.
+    //
+    // The key assertion: no task gets Ok from BOTH the DDL and the
+    // verification query. Either the DDL errors (OOM), or the DDL
+    // "succeeds" (IF NOT EXISTS no-op) but verification catches it.
+    #[tokio::test]
+    async fn test_create_index_backfill_race_with_verification() {
+        let logctx = dev::test_setup_log(
+            "test_create_index_backfill_race_with_verification",
+        );
+
+        let mut builder =
+            omicron_test_utils::dev::db::CockroachStarterBuilder::new();
+        builder.arg("--max-sql-memory=32MiB");
+        let starter = builder.build().expect("Failed to build CRDB starter");
+        let mut instance = starter.start().await.expect("Failed to start CRDB");
+        instance
+            .disable_synchronization()
+            .await
+            .expect("Failed to disable synchronization");
+
+        let client =
+            instance.connect().await.expect("Failed to connect to CRDB");
+
+        client
+            .batch_execute("CREATE DATABASE IF NOT EXISTS omicron;")
+            .await
+            .expect("Failed to create database");
+
+        client
+            .batch_execute(
+                "CREATE TABLE omicron.public.test_race ( \
+                     id UUID PRIMARY KEY DEFAULT gen_random_uuid(), \
+                     token STRING(40) NOT NULL, \
+                     time_created TIMESTAMPTZ NOT NULL, \
+                     time_last_used TIMESTAMPTZ NOT NULL, \
+                     silo_user_id UUID NOT NULL \
+                 );",
+            )
+            .await
+            .expect("Failed to create test table");
+
+        client
+            .batch_execute(
+                "INSERT INTO omicron.public.test_race \
+                 (token, time_created, time_last_used, silo_user_id) \
+                 SELECT \
+                     substr(gen_random_uuid()::STRING, 1, 40), \
+                     now() - (random() * interval '30 days'), \
+                     now() - (random() * interval '1 day'), \
+                     gen_random_uuid() \
+                 FROM generate_series(1, 100);",
+            )
+            .await
+            .expect("Failed to insert rows");
+
+        // Build the verification query that each task will run
+        // immediately after CREATE INDEX, just like a real Nexus
+        // migration would.
+        let change = nexus_db_model::SchemaChangeInfo::CreateIndex {
+            table_name: nexus_db_model::SqlIdentifier::new("test_race")
+                .unwrap(),
+            index_name: nexus_db_model::SqlIdentifier::new("test_idx").unwrap(),
+        };
+        let verify_sql = change.verification_query().unwrap();
+
+        // Spawn 3 concurrent tasks, each running CREATE INDEX IF NOT
+        // EXISTS followed immediately by the verification query —
+        // emulating multiple Nexus instances running the same migration.
+        let task_clients: Vec<_> =
+            futures::future::try_join_all((0..3).map(|_| instance.connect()))
+                .await
+                .expect("Failed to create task connections");
+
+        let handles: Vec<_> = task_clients
+            .into_iter()
+            .enumerate()
+            .map(|(task_id, task_client)| {
+                let verify_sql = verify_sql.clone();
+                tokio::spawn(async move {
+                    let ddl_result = task_client
+                        .batch_execute(
+                            "CREATE INDEX IF NOT EXISTS test_idx \
+                             ON omicron.public.test_race (time_created);",
+                        )
+                        .await;
+
+                    // Run verification immediately, just like Nexus would.
+                    let verify_result =
+                        task_client.batch_execute(&verify_sql).await;
+
+                    eprintln!(
+                        "test_create_index_backfill_race_with_verification: \
+                         task {task_id}: DDL={ddl_result:?}, \
+                         verify={verify_result:?}"
+                    );
+                    let _ = task_client.cleanup().await;
+                    (ddl_result, verify_result)
+                })
+            })
+            .collect();
+
+        let results: Vec<_> = futures::future::join_all(handles)
+            .await
+            .into_iter()
+            .map(|r| r.expect("Task panicked"))
+            .collect();
+
+        // The critical invariant: no task should get Ok from BOTH the
+        // DDL and the verification query. If DDL returned Ok (IF NOT
+        // EXISTS no-op while backfill was in progress), verification
+        // must fail to prevent that Nexus from proceeding.
+        for (task_id, (ddl_result, verify_result)) in results.iter().enumerate()
+        {
+            let ddl_ok = ddl_result.is_ok();
+            let verify_ok = verify_result.is_ok();
+
+            if ddl_ok && verify_ok {
+                panic!(
+                    "Task {task_id}: DDL and verification both succeeded! \
+                     This means a Nexus would proceed past the migration \
+                     step without the index actually being present. \
+                     The verification barrier failed to catch the race."
+                );
+            }
+        }
+
+        // Also verify at least one task got Ok from the DDL — this
+        // confirms the IF NOT EXISTS race actually happened (a task
+        // saw the in-progress index and returned early).
+        assert!(
+            results.iter().any(|(ddl, _)| ddl.is_ok()),
+            "Bug not reproduced: all CREATE INDEX tasks failed. \
+             The race requires at least one task to return Ok \
+             (via IF NOT EXISTS no-op). Results: {results:?}"
+        );
+
+        // Clean up
+        client
+            .batch_execute(
+                "DROP TABLE IF EXISTS omicron.public.test_race CASCADE;",
+            )
+            .await
+            .expect("Failed to drop test table");
+        let _ = client.cleanup().await;
+        instance.cleanup().await.expect("Failed to clean up CRDB");
+        logctx.cleanup_successful();
+    }
 }
