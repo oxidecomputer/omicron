@@ -80,6 +80,7 @@ api_versions!([
     // |  date-based version should be at the top of the list.
     // v
     // (next_yyyymmddnn, IDENT),
+    (2026021800, SET_TARGET_RELEASE_UPDATE_RECOVERY),
     (2026021301, BGP_UNNUMBERED_PEERS),
     (2026021300, STALE_DOCS_AND_PUNCTUATION),
     (2026020901, UPDATE_EXTERNAL_SUBNET_DOCS),
@@ -5912,6 +5913,7 @@ pub trait NexusExternalApi {
         method = PUT,
         path = "/v1/system/update/target-release/recovery",
         tags = ["system/update"],
+        versions = VERSION_SET_TARGET_RELEASE_UPDATE_RECOVERY..
     }]
     async fn target_release_update_recovery(
         rqctx: RequestContext<Self::Context>,
