@@ -87,7 +87,7 @@ pub enum VolumeCheckoutReason {
 }
 
 #[derive(Debug, thiserror::Error)]
-enum VolumeGetError {
+pub(super) enum VolumeGetError {
     #[error("Serde error during volume_checkout: {0}")]
     SerdeError(#[from] serde_json::Error),
 
@@ -101,8 +101,22 @@ enum VolumeGetError {
     InvalidVolume(String),
 }
 
+impl From<VolumeGetError> for Error {
+    fn from(err: VolumeGetError) -> Self {
+        match err {
+            VolumeGetError::CheckoutConditionFailed(message) => {
+                Self::conflict(message)
+            }
+
+            _ => Self::InternalError {
+                internal_message: format!("Transaction error: {err}"),
+            },
+        }
+    }
+}
+
 #[derive(Debug, thiserror::Error)]
-enum VolumeCreationError {
+pub(super) enum VolumeCreationError {
     #[error("Error from Volume creation: {0}")]
     Public(Error),
 
@@ -114,6 +128,32 @@ enum VolumeCreationError {
 
     #[error("Could not match read-only resource to {0}")]
     CouldNotFindResource(SocketAddrV6),
+}
+
+impl From<VolumeCreationError> for Error {
+    fn from(err: VolumeCreationError) -> Self {
+        match err {
+            VolumeCreationError::Public(err) => err,
+
+            VolumeCreationError::SerdeError(err) => Self::InternalError {
+                internal_message: format!("SerdeError error: {err}"),
+            },
+
+            VolumeCreationError::CouldNotFindResource(s) => {
+                Self::InternalError {
+                    internal_message: format!(
+                        "CouldNotFindResource error: {s}"
+                    ),
+                }
+            }
+
+            VolumeCreationError::AddressParseError(err) => {
+                Self::InternalError {
+                    internal_message: format!("AddressParseError error: {err}"),
+                }
+            }
+        }
+    }
 }
 
 enum RegionType {
@@ -202,7 +242,7 @@ pub struct SourceVolume(pub VolumeUuid);
 pub struct DestVolume(pub VolumeUuid);
 
 impl DataStore {
-    async fn volume_create_in_txn(
+    pub(super) async fn volume_create_in_txn(
         conn: &async_bb8_diesel::Connection<DbConnection>,
         err: OptionalError<VolumeCreationError>,
         volume_id: VolumeUuid,
@@ -411,27 +451,7 @@ impl DataStore {
             .await
             .map_err(|e| {
                 if let Some(err) = err.take() {
-                    match err {
-                        VolumeCreationError::Public(err) => err,
-
-                        VolumeCreationError::SerdeError(err) => {
-                            Error::internal_error(&format!(
-                                "SerdeError error: {err}"
-                            ))
-                        }
-
-                        VolumeCreationError::CouldNotFindResource(s) => {
-                            Error::internal_error(&format!(
-                                "CouldNotFindResource error: {s}"
-                            ))
-                        }
-
-                        VolumeCreationError::AddressParseError(err) => {
-                            Error::internal_error(&format!(
-                                "AddressParseError error: {err}"
-                            ))
-                        }
-                    }
+                    return Error::from(err);
                 } else {
                     public_error_from_diesel(e, ErrorHandler::Server)
                 }
@@ -834,7 +854,7 @@ impl DataStore {
         }
     }
 
-    async fn volume_checkout_in_txn(
+    pub(super) async fn volume_checkout_in_txn(
         conn: &async_bb8_diesel::Connection<DbConnection>,
         err: OptionalError<VolumeGetError>,
         volume_id: VolumeUuid,
@@ -1048,18 +1068,7 @@ impl DataStore {
             .await
             .map_err(|e| {
                 if let Some(err) = err.take() {
-                    match err {
-                        VolumeGetError::CheckoutConditionFailed(message) => {
-                            return Error::conflict(message);
-                        }
-
-                        _ => {
-                            return Error::internal_error(&format!(
-                                "Transaction error: {}",
-                                err
-                            ));
-                        }
-                    }
+                    return Error::from(err);
                 }
 
                 public_error_from_diesel(e, ErrorHandler::Server)

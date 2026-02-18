@@ -2,17 +2,17 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use omicron_common::api::external::Generation;
-use omicron_common::disk::DiskVariant;
-use omicron_uuid_kinds::SledUuid;
-
 use crate::vmm_reservoir::VmmReservoirManagerHandle;
 use internal_dns_resolver::Resolver;
 use internal_dns_types::names::ServiceName;
 use nexus_client::types::SledAgentInfo;
 use omicron_common::address::NEXUS_INTERNAL_PORT;
+use omicron_common::api::external::Generation;
+use omicron_common::disk::DiskVariant;
+use omicron_uuid_kinds::SledUuid;
 use sled_hardware::HardwareManager;
 use slog::Logger;
+use slog_error_chain::InlineErrorChain;
 use std::net::SocketAddrV6;
 use std::sync::Arc;
 use tokio::sync::{Notify, broadcast, mpsc, oneshot};
@@ -554,7 +554,8 @@ impl NexusNotifierTask {
                 self.nexus_known_info = None;
                 warn!(
                     self.log,
-                    "Received Error from Nexus for Get request: {:?}", e
+                    "Received Error from Nexus for Get request";
+                    InlineErrorChain::new(&e),
                 );
             }
             (NexusOp::Put, Err(e)) => {
@@ -562,7 +563,8 @@ impl NexusNotifierTask {
                 self.nexus_known_info = None;
                 warn!(
                     self.log,
-                    "Received Error from Nexus for Put request: {:?}", e
+                    "Received Error from Nexus for Put request";
+                    InlineErrorChain::new(&e),
                 );
             }
         }

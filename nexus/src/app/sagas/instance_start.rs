@@ -16,10 +16,12 @@ use crate::app::instance::{
     InstanceEnsureRegisteredApiResources, InstanceRegisterReason,
     InstanceStateChangeError,
 };
+use crate::app::instance_network::InstanceNetworkFilters;
 use crate::app::sagas::declare_saga_actions;
 use chrono::Utc;
 use nexus_db_lookup::LookupPath;
 use nexus_db_queries::db::datastore::Disk;
+use nexus_db_queries::db::datastore::LocalStorageAllocation;
 use nexus_db_queries::db::datastore::LocalStorageDisk;
 use nexus_db_queries::db::identity::Resource;
 use nexus_db_queries::{authn, authz, db};
@@ -173,8 +175,14 @@ impl NexusSaga for SagaInstanceStart {
 
         // Changing MAX_DISKS_PER_INSTANCE requires changing this saga
         static_assertions::const_assert!(MAX_DISKS_PER_INSTANCE == 12);
+
+        // In parallel, ensure all local storage related to this instance.
         seq!(N in 0..12 {
-            builder.append(paste!([<ensure_local_storage_ N _action>]()));
+            builder.append_parallel(vec![
+                #(
+                paste!([<ensure_local_storage_ N _action>]()),
+                )*
+            ]);
         });
 
         builder.append(dpd_ensure_action());
@@ -625,16 +633,6 @@ async fn sis_ensure_local_storage(
         local_storage_dataset_allocation,
     } = &local_storage_records[which];
 
-    // Make sure this was a complete allocation.
-
-    let Some(local_storage_dataset_allocation) =
-        local_storage_dataset_allocation
-    else {
-        return Err(ActionError::action_failed(format!(
-            "local storage record {which} has a None allocation!",
-        )));
-    };
-
     // All local storage volumes will be created with 4k blocks. Double check
     // here.
 
@@ -646,13 +644,40 @@ async fn sis_ensure_local_storage(
         )));
     }
 
-    let dataset_id = local_storage_dataset_allocation.id();
-    let pool_id = local_storage_dataset_allocation.pool_id();
-    let sled_id = local_storage_dataset_allocation.sled_id();
-    let dataset_size = local_storage_dataset_allocation.dataset_size.into();
-    let volume_size = disk.size.into();
+    // Make sure this was a complete allocation.
 
-    // Get a sled agent client
+    let Some(allocation) = local_storage_dataset_allocation else {
+        return Err(ActionError::action_failed(format!(
+            "local storage record {which} has a None unencrypted allocation!",
+        )));
+    };
+
+    // Ensure that the local storage is created
+
+    let (sled_id, ensure_request) = match allocation {
+        LocalStorageAllocation::Unencrypted(allocation) => {
+            let sled_id = allocation.sled_id();
+
+            let ensure_request = LocalStorageDatasetEnsureRequest {
+                zpool_id: allocation.pool_id(),
+                dataset_id: allocation.id(),
+                dataset_size: allocation.dataset_size.into(),
+                volume_size: disk.size.into(),
+                encrypted_at_rest: false,
+            };
+
+            (sled_id, ensure_request)
+        }
+
+        LocalStorageAllocation::Encrypted(_) => {
+            // This enum variant has been left in pending an investigation of
+            // how we're going to support encryption at rest, but right now we
+            // don't support this yet.
+            return Err(ActionError::action_failed(format!(
+                "local storage record {which} has a encrypted allocation!",
+            )));
+        }
+    };
 
     let sled_agent_client = osagactx
         .nexus()
@@ -660,16 +685,8 @@ async fn sis_ensure_local_storage(
         .await
         .map_err(ActionError::action_failed)?;
 
-    // Ensure that the local storage is created
-
     let ensure_operation = || async {
-        sled_agent_client
-            .local_storage_dataset_ensure(
-                &pool_id,
-                &dataset_id,
-                &LocalStorageDatasetEnsureRequest { dataset_size, volume_size },
-            )
-            .await
+        sled_agent_client.local_storage_dataset_ensure(&ensure_request).await
     };
 
     let gone_check = || async {
@@ -731,7 +748,12 @@ async fn sis_dpd_ensure(
 
     osagactx
         .nexus()
-        .instance_ensure_dpd_config(&opctx, instance_id, &sled.address(), None)
+        .instance_ensure_dpd_config(
+            &opctx,
+            instance_id,
+            &sled.address(),
+            InstanceNetworkFilters::all(),
+        )
         .await
         .map_err(ActionError::action_failed)?;
 

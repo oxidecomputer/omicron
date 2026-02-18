@@ -496,14 +496,6 @@ mod test {
         // Link pool to silo
         link_ip_pool(client, pool_name, &DEFAULT_SILO.id(), false).await;
 
-        // Create multicast group directly via datastore.
-        let (authz_pool, _) = nexus
-            .ip_pool_lookup(&opctx, &pool_name.parse().unwrap())
-            .expect("Pool lookup should succeed")
-            .fetch()
-            .await
-            .expect("Pool should exist");
-
         let group_params = MulticastGroupCreate {
             identity: IdentityMetadataCreateParams {
                 name: "saga-reject-test".parse().unwrap(),
@@ -515,7 +507,7 @@ mod test {
         };
 
         let external_group = datastore
-            .multicast_group_create(&opctx, &group_params, Some(authz_pool))
+            .multicast_group_create(&opctx, &group_params)
             .await
             .expect("Multicast group should be created");
         let group_id =

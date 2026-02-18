@@ -2085,9 +2085,15 @@ fn cmd_sled_update_install_dataset(
     let mut state = sim.current_state().to_mut();
     let system = state.system_mut();
     let sled_id = args.sled_id.to_sled_id(system.description())?;
-    system
-        .description_mut()
-        .sled_set_zone_manifest(sled_id, description.to_boot_inventory())?;
+    system.description_mut().sled_set_zone_manifest(
+        sled_id,
+        description.to_zone_boot_inventory(),
+    )?;
+
+    system.description_mut().sled_set_measurement_manifest(
+        sled_id,
+        description.to_measurement_boot_inventory(),
+    )?;
 
     sim.commit_and_bump(
         format!(
@@ -3463,6 +3469,9 @@ fn mupdate_source_to_description(
         let description = extract_tuf_repo_description(&sim.log, repo_path)?;
         let mut sim_source = SimTufRepoSource::new(
             description,
+            // We might consider having these be different for testing purposes
+            // but for now having them be the same is fine
+            manifest_source,
             manifest_source,
             format!("from repo at {repo_path}"),
         )?;
@@ -3485,6 +3494,7 @@ fn mupdate_source_to_description(
             TargetReleaseDescription::TufRepo(desc) => {
                 let mut sim_source = SimTufRepoSource::new(
                     desc.clone(),
+                    manifest_source,
                     manifest_source,
                     "to target release".to_owned(),
                 )?;

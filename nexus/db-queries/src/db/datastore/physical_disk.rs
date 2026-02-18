@@ -339,6 +339,7 @@ mod test {
     use crate::db::pub_test_utils::TestDatabase;
     use crate::db::pub_test_utils::helpers::SledUpdateBuilder;
     use dropshot::PaginationOrder;
+    use iddqd::IdOrdMap;
     use nexus_db_lookup::LookupPath;
     use nexus_types::identity::Asset;
     use omicron_common::api::external::ByteCount;
@@ -708,6 +709,7 @@ mod test {
                     file_source_resolver:
                         OmicronFileSourceResolverInventory::new_fake(),
                     health_monitor: HealthMonitorInventory::new(),
+                    reference_measurements: IdOrdMap::new(),
                 },
             )
             .unwrap();

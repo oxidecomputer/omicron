@@ -127,7 +127,7 @@ impl LedgerTaskHandle {
         internal_disks_rx: InternalDisksReceiver,
         artifact_store: T,
         log: Logger,
-    ) -> (Self, watch::Receiver<CurrentSledConfig>) {
+    ) -> (Self, watch::Receiver<CurrentSledConfig>, oneshot::Receiver<()>) {
         // We only accept two kinds of requests on this channel, both of which
         // come from HTTP requests to sled agent:
         //
@@ -152,6 +152,11 @@ impl LedgerTaskHandle {
         let (current_config_tx, current_config_rx) =
             watch::channel(CurrentSledConfig::WaitingForInternalDisks);
 
+        // The measurement handler relies on the ledger task running.
+        // Give a channel to wait for that to happen instead of relying
+        // on polling.
+        let (ledger_run_tx, ledger_run_rx) = oneshot::channel();
+
         tokio::spawn(
             LedgerTask {
                 artifact_store,
@@ -160,12 +165,13 @@ impl LedgerTaskHandle {
                 current_config_tx,
                 log,
             }
-            .run(),
+            .run(ledger_run_tx),
         );
 
         (
             Self { request_tx, current_config_rx: current_config_rx.clone() },
             current_config_rx,
+            ledger_run_rx,
         )
     }
 
@@ -255,10 +261,10 @@ struct LedgerTask<T> {
 }
 
 impl<T: SledAgentArtifactStore> LedgerTask<T> {
-    async fn run(self) {
+    async fn run(self, ledger_run_tx: oneshot::Sender<()>) {
         // This pattern match looks strange, but `run_impl()` cannot return
         // `Ok(_)`; it must run forever (or until failure).
-        let Err((log, err)) = self.run_impl().await;
+        let Err((log, err)) = self.run_impl(ledger_run_tx).await;
         error!(
             log,
             "LedgerTask::run() unexpectedly exited; this should only be \
@@ -269,6 +275,7 @@ impl<T: SledAgentArtifactStore> LedgerTask<T> {
 
     async fn run_impl(
         mut self,
+        ledger_run_tx: oneshot::Sender<()>,
     ) -> Result<Infallible, (Logger, LedgerTaskExit)> {
         // We created `self.current_config_tx` in `spawn_ledger_task()` and own
         // the only sender, so it should start out in the `WaitingForM2Disks`
@@ -282,6 +289,9 @@ impl<T: SledAgentArtifactStore> LedgerTask<T> {
             *self.current_config_tx.borrow(),
             CurrentSledConfig::WaitingForInternalDisks
         );
+
+        // We've gotten far enough that our disks should be ready!
+        let _ = ledger_run_tx.send(());
 
         loop {
             let Some(request) = self.request_rx.recv().await else {
@@ -800,12 +810,15 @@ mod tests {
             }
 
             // Spawn the ledger task.
-            let (task_handle, mut current_config_rx) =
+            let (task_handle, mut current_config_rx, ledger_task_run_rx) =
                 LedgerTaskHandle::spawn_ledger_task(
                     internal_disks_rx.clone(),
                     fake_artifact_store,
                     log,
                 );
+
+            // This better run!
+            let _ = ledger_task_run_rx.await.unwrap();
 
             // Wait for the task to check our fake disk and progress to either
             // `Ledgered` (if we copied in a config) or
@@ -896,7 +909,7 @@ mod tests {
 
         // Spawn the ledger task. It should sit in the `WaitingForInternalDisks`
         // state.
-        let (_task_handle, mut current_config_rx) =
+        let (_task_handle, mut current_config_rx, ledger_task_run_rx) =
             LedgerTaskHandle::spawn_ledger_task(
                 internal_disks_rx,
                 FakeArtifactStore::default(),
@@ -910,6 +923,8 @@ mod tests {
 
         // Populate a fake disk.
         disks_tx.send(vec![make_fake_disk()]).expect("receiver still exists");
+
+        let _ = ledger_task_run_rx.await.unwrap();
 
         // Confirm the ledger task notices and progresses to
         // `WaitingForInitialConfig`.

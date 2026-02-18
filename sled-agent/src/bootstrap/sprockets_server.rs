@@ -10,6 +10,7 @@ use crate::bootstrap::params::version;
 use crate::bootstrap::views::Response;
 use crate::bootstrap::views::ResponseEnvelope;
 use crate::bootstrap::views::SledAgentResponse;
+use sled_agent_measurements::MeasurementsHandle;
 use sled_agent_types::sled::StartSledAgentRequest;
 use slog::Logger;
 use sprockets_tls::Stream;
@@ -17,6 +18,7 @@ use sprockets_tls::keys::SprocketsConfig;
 use sprockets_tls::server::Server;
 use std::io;
 use std::net::SocketAddrV6;
+use std::sync::Arc;
 use tokio::io::AsyncReadExt;
 use tokio::io::AsyncWriteExt;
 use tokio::io::BufStream;
@@ -33,12 +35,14 @@ pub(super) struct SprocketsServer {
     listener: Server,
     tx_requests: TxRequestsChannel,
     log: Logger,
+    measurements: Arc<MeasurementsHandle>,
 }
 
 impl SprocketsServer {
     pub(super) async fn bind(
         bind_addr: SocketAddrV6,
         tx_requests: TxRequestsChannel,
+        measurements: Arc<MeasurementsHandle>,
         sprockets_conf: SprocketsConfig,
         base_log: &Logger,
     ) -> io::Result<Self> {
@@ -49,7 +53,7 @@ impl SprocketsServer {
         let listener =
             Server::new(sprockets_conf, bind_addr, log.clone()).await.unwrap();
         info!(log, "Started listening"; "local_addr" => %bind_addr);
-        Ok(Self { listener, tx_requests, log })
+        Ok(Self { listener, tx_requests, log, measurements })
     }
 
     /// Run the sprockets server.
@@ -62,9 +66,16 @@ impl SprocketsServer {
     pub(super) async fn run(self) {
         loop {
             // Sprockets actually _uses_ the key here!
-            // TODO: Once we have a corpus, use it.
             // Will we ever have one at RSS time?
-            let corpus = vec![];
+            let corpus = match self.measurements.current_measurements() {
+                Ok(c) => c,
+                Err(e) => {
+                    // Not much we can do here besides log the error and use
+                    // an empty corpus
+                    error!(self.log, "measurement error; using empty corpus"; &e);
+                    vec![]
+                }
+            };
             let acceptor = match self.listener.accept(corpus).await {
                 Ok(acceptor) => acceptor,
                 Err(err) => {

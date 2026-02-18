@@ -20,6 +20,7 @@ oximeter = { workspace = true, optional = true }
 schemars = { workspace = true, optional = true }
 serde = { workspace = true, optional = true }
 slog = { workspace = true, optional = true }
+slog-error-chain = { workspace = true, optional = true }
 tokio = { workspace = true, optional = true }
 thiserror = { workspace = true, optional = true }
 uuid = { workspace = true, optional = true }
@@ -47,6 +48,7 @@ kstat = [
     "dep:libc",
     "dep:oximeter",
     "dep:slog",
+    "dep:slog-error-chain",
     "dep:tokio",
     "dep:thiserror",
     "dep:uuid"

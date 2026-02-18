@@ -104,6 +104,7 @@ mod switch;
 mod switch_interface;
 mod switch_port;
 pub mod test_interfaces;
+mod trust_quorum;
 mod update;
 mod utilization;
 mod volume;
@@ -134,7 +135,7 @@ use sagas::demo::CompletingDemoSagas;
 pub(crate) const MAX_EXTERNAL_IPS_PER_INSTANCE: usize =
     nexus_db_queries::db::queries::external_ip::MAX_EXTERNAL_IPS_PER_INSTANCE
         as usize;
-pub(crate) const MAX_EPHEMERAL_IPS_PER_INSTANCE: usize = 1;
+pub(crate) const MAX_EPHEMERAL_IPS_PER_INSTANCE: usize = 2;
 pub(crate) const MAX_MULTICAST_GROUPS_PER_INSTANCE: usize = 32;
 
 pub const MAX_VCPU_PER_INSTANCE: u16 = 254;

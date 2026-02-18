@@ -18,6 +18,8 @@ use nexus_db_queries::db::fixed_data::silo::DEFAULT_SILO;
 use nexus_test_interface::NexusServer;
 use nexus_types::deployment::Blueprint;
 use nexus_types::external_api::params;
+use nexus_types::external_api::params::ExternalSubnetAllocator;
+use nexus_types::external_api::params::PoolSelector;
 use nexus_types::external_api::params::{
     DeviceAccessTokenRequest, DeviceAuthRequest, DeviceAuthVerify,
 };
@@ -28,12 +30,16 @@ use nexus_types::external_api::views;
 use nexus_types::external_api::views::AffinityGroup;
 use nexus_types::external_api::views::AntiAffinityGroup;
 use nexus_types::external_api::views::Certificate;
+use nexus_types::external_api::views::ExternalSubnet;
 use nexus_types::external_api::views::FloatingIp;
 use nexus_types::external_api::views::InternetGateway;
 use nexus_types::external_api::views::InternetGatewayIpAddress;
 use nexus_types::external_api::views::InternetGatewayIpPool;
 use nexus_types::external_api::views::IpPool;
 use nexus_types::external_api::views::IpPoolRange;
+use nexus_types::external_api::views::IpVersion;
+use nexus_types::external_api::views::SubnetPool;
+use nexus_types::external_api::views::SubnetPoolMember;
 use nexus_types::external_api::views::User;
 use nexus_types::external_api::views::VpcSubnet;
 use nexus_types::external_api::views::{
@@ -75,6 +81,7 @@ use omicron_uuid_kinds::SiloGroupUuid;
 use omicron_uuid_kinds::SiloUserUuid;
 use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::ZpoolUuid;
+use oxnet::IpNet;
 use oxnet::Ipv4Net;
 use oxnet::Ipv6Net;
 use slog::debug;
@@ -384,8 +391,7 @@ pub async fn create_floating_ip(
     client: &ClientTestContext,
     fip_name: &str,
     project: &str,
-    ip: Option<IpAddr>,
-    parent_pool_name: Option<&str>,
+    address_allocator: params::AddressAllocator,
 ) -> FloatingIp {
     object_create(
         client,
@@ -395,23 +401,107 @@ pub async fn create_floating_ip(
                 name: fip_name.parse().unwrap(),
                 description: String::from("a floating ip"),
             },
-            address_allocator: match (ip, parent_pool_name) {
-                (Some(ip), pool) => params::AddressAllocator::Explicit {
-                    ip,
-                    pool: pool.map(|v| NameOrId::Name(v.parse().unwrap())),
-                },
-                (None, Some(pool)) => params::AddressAllocator::Auto {
-                    pool_selector: params::PoolSelector::Explicit {
-                        pool: NameOrId::Name(pool.parse().unwrap()),
-                    },
-                },
-                (None, None) => params::AddressAllocator::Auto {
-                    pool_selector: params::PoolSelector::Auto {
-                        ip_version: None,
-                    },
-                },
+            address_allocator,
+        },
+    )
+    .await
+}
+
+pub async fn create_subnet_pool(
+    client: &ClientTestContext,
+    pool_name: &str,
+    ip_version: IpVersion,
+) -> SubnetPool {
+    object_create(
+        client,
+        "/v1/system/subnet-pools/",
+        &params::SubnetPoolCreate {
+            identity: IdentityMetadataCreateParams {
+                name: pool_name.parse().unwrap(),
+                description: String::from("a subnet pool"),
+            },
+            ip_version,
+        },
+    )
+    .await
+}
+
+/// Create a subnet pool member, with the min / max prefix lengths taken from
+/// the subnet itself.
+pub async fn create_subnet_pool_member(
+    client: &ClientTestContext,
+    pool_name: &str,
+    subnet: IpNet,
+) -> SubnetPoolMember {
+    object_create(
+        client,
+        &format!("/v1/system/subnet-pools/{pool_name}/members/add"),
+        &params::SubnetPoolMemberAdd {
+            subnet,
+            min_prefix_length: None,
+            max_prefix_length: None,
+        },
+    )
+    .await
+}
+
+pub async fn create_subnet_pool_member_with_prefix_lengths(
+    client: &ClientTestContext,
+    pool_name: &str,
+    subnet: IpNet,
+    min_prefix_length: u8,
+    max_prefix_length: u8,
+) -> SubnetPoolMember {
+    object_create(
+        client,
+        &format!("/v1/system/subnet-pools/{pool_name}/members/add"),
+        &params::SubnetPoolMemberAdd {
+            subnet,
+            min_prefix_length: Some(min_prefix_length),
+            max_prefix_length: Some(max_prefix_length),
+        },
+    )
+    .await
+}
+
+pub async fn link_subnet_pool(
+    client: &ClientTestContext,
+    pool_name: &str,
+    silo_id: &Uuid,
+    is_default: bool,
+) {
+    let link =
+        params::SubnetPoolLinkSilo { silo: NameOrId::Id(*silo_id), is_default };
+    let url = format!("/v1/system/subnet-pools/{pool_name}/silos");
+    object_create::<params::SubnetPoolLinkSilo, views::SubnetPoolSiloLink>(
+        client, &url, &link,
+    )
+    .await;
+}
+
+pub async fn create_external_subnet_in_pool(
+    client: &ClientTestContext,
+    pool_name: &str,
+    project_name: &str,
+    subnet_name: &str,
+    prefix_len: u8,
+) -> ExternalSubnet {
+    let params = params::ExternalSubnetCreate {
+        identity: IdentityMetadataCreateParams {
+            name: subnet_name.parse().unwrap(),
+            description: format!("external subnet {subnet_name}"),
+        },
+        allocator: ExternalSubnetAllocator::Auto {
+            prefix_len,
+            pool_selector: PoolSelector::Explicit {
+                pool: pool_name.parse::<Name>().unwrap().into(),
             },
         },
+    };
+    object_create(
+        client,
+        &format!("/v1/external-subnets?project={project_name}"),
+        &params,
     )
     .await
 }
@@ -606,7 +696,8 @@ pub async fn create_disk_from_snapshot(
     client: &ClientTestContext,
     project_name: &str,
     disk_name: &str,
-    snapshot_id: Uuid,
+    snapshot: &views::Snapshot,
+    read_only: bool,
 ) -> Disk {
     let url = format!("/v1/disks?project={}", project_name);
     object_create(
@@ -618,9 +709,40 @@ pub async fn create_disk_from_snapshot(
                 description: String::from("sells rainsticks"),
             },
             disk_backend: params::DiskBackend::Distributed {
-                disk_source: params::DiskSource::Snapshot { snapshot_id },
+                disk_source: params::DiskSource::Snapshot {
+                    snapshot_id: snapshot.identity.id,
+                    read_only,
+                },
             },
-            size: ByteCount::from_gibibytes_u32(1),
+            size: snapshot.size,
+        },
+    )
+    .await
+}
+
+pub async fn create_disk_from_image(
+    client: &ClientTestContext,
+    project_name: &str,
+    disk_name: &str,
+    image: &views::Image,
+    read_only: bool,
+) -> Disk {
+    let url = format!("/v1/disks?project={}", project_name);
+    object_create(
+        client,
+        &url,
+        &params::DiskCreate {
+            identity: IdentityMetadataCreateParams {
+                name: disk_name.parse().unwrap(),
+                description: String::from("sells rainsticks"),
+            },
+            disk_backend: params::DiskBackend::Distributed {
+                disk_source: params::DiskSource::Image {
+                    image_id: image.identity.id,
+                    read_only,
+                },
+            },
+            size: image.size,
         },
     )
     .await

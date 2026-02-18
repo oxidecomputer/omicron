@@ -3,12 +3,12 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 //! Nexus external types from 2026010800 (`MULTICAST_IMPLICIT_LIFECYCLE_UPDATES`)
-//! that changed in 2026012100 (`MULTICAST_DROP_MVLAN_ADD_HAS_ANY`).
+//! that changed in 2026021800 (`MULTICAST_DROP_MVLAN_ADD_HAS_ANY`).
 //!
 //! ## MulticastGroup
 //!
 //! [`MulticastGroup`] includes the deprecated `mvlan` field (always None) and
-//! omits `has_any_source_member` which was added in 2026012100.
+//! omits `has_any_source_member` which was added in 2026021800.
 //!
 //! Affected endpoints:
 //! - `GET /v1/multicast-groups` (multicast_group_list)

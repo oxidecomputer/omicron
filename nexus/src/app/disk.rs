@@ -90,10 +90,10 @@ impl super::Nexus {
             | params::DiskSource::ImportingBlocks { block_size } => {
                 (*block_size).into()
             }
-            params::DiskSource::Snapshot { snapshot_id } => {
+            &params::DiskSource::Snapshot { snapshot_id, read_only } => {
                 let (.., db_snapshot) =
                     LookupPath::new(opctx, &self.db_datastore)
-                        .snapshot_id(*snapshot_id)
+                        .snapshot_id(snapshot_id)
                         .fetch()
                         .await?;
 
@@ -105,21 +105,35 @@ impl super::Nexus {
                     ));
                 }
 
-                // If the size of the snapshot is greater than the size of the
-                // disk, return an error.
-                if db_snapshot.size.to_bytes() > size.to_bytes() {
+                // Check that the size of the disk and the size of the snapshot
+                // are compatible.
+                let snapshot_size = db_snapshot.size.to_bytes();
+                let size = size.to_bytes();
+                if read_only && snapshot_size != size {
+                    // Read-only disks are backed directly by the same Crucible
+                    // regions as the snapshot, so they must be exactly the same
+                    // size as the snapshot. Even if this were not the case,
+                    // making a read-only disk bigger than the snapshot wouldn't
+                    // make sense, since you couldn't ... you know, *do*
+                    // anything ... with the extra space.
                     return Err(Error::invalid_request(&format!(
-                        "disk size {} must be greater than or equal to snapshot size {}",
-                        size.to_bytes(),
-                        db_snapshot.size.to_bytes(),
+                        "read-only disk size {size} must be equal to \
+                         source snapshot size {snapshot_size}",
+                    )));
+                } else if snapshot_size > size {
+                    // If the size of the snapshot is greater than the size of
+                    // the disk, return an error.
+                    return Err(Error::invalid_request(&format!(
+                        "disk size {size} must be greater than or equal to \
+                        snapshot size {snapshot_size}",
                     )));
                 }
 
                 db_snapshot.block_size.to_bytes().into()
             }
-            params::DiskSource::Image { image_id } => {
+            &params::DiskSource::Image { image_id, read_only } => {
                 let (.., db_image) = LookupPath::new(opctx, &self.db_datastore)
-                    .image_id(*image_id)
+                    .image_id(image_id)
                     .fetch()
                     .await?;
 
@@ -133,16 +147,29 @@ impl super::Nexus {
                     }
                 }
 
-                // If the size of the image is greater than the size of the
-                // disk, return an error.
-                if db_image.size.to_bytes() > size.to_bytes() {
+                // Check that the size of the disk and the size of the image
+                // are compatible.
+                let image_size = db_image.size.to_bytes();
+                let size = size.to_bytes();
+                if read_only && image_size != size {
+                    // Read-only disks are backed directly by the same Crucible
+                    // regions as the image, so they must be exactly the same
+                    // size as the image. Even if this were not the case,
+                    // making a read-only disk bigger than the image wouldn't
+                    // make sense, since you couldn't ... you know, *do*
+                    // anything ... with the extra space.
                     return Err(Error::invalid_request(&format!(
-                        "disk size {} must be greater than or equal to image size {}",
-                        size.to_bytes(),
-                        db_image.size.to_bytes(),
+                        "read-only disk size {size} must be equal to \
+                         source image size {image_size}",
+                    )));
+                } else if image_size > size {
+                    // If the size of the image is greater than the size of
+                    // the disk, return an error.
+                    return Err(Error::invalid_request(&format!(
+                        "disk size {size} must be greater than or equal to \
+                        image size {image_size}",
                     )));
                 }
-
                 db_image.block_size.to_bytes().into()
             }
         };
@@ -157,11 +184,11 @@ impl super::Nexus {
         params: &params::DiskCreate,
     ) -> Result<(), Error> {
         let block_size: u64 = match &params.disk_backend {
-            params::DiskBackend::Distributed { disk_source, .. } => {
+            params::DiskBackend::Distributed { disk_source } => {
                 self.validate_crucible_disk_create_params(
                     opctx,
                     &authz_project,
-                    &disk_source,
+                    disk_source,
                     params.size,
                 )
                 .await?

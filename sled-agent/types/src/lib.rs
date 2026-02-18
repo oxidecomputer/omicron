@@ -5,6 +5,7 @@
 //! Common types for sled-agent.
 
 pub mod artifact;
+pub mod attached_subnet;
 pub mod boot_disk;
 pub mod bootstore;
 pub mod dataset;
@@ -19,6 +20,7 @@ pub mod probes;
 pub mod rack_init;
 pub mod rack_ops;
 pub mod resolvable_files;
+pub mod rot;
 pub mod sled;
 pub mod support_bundle;
 pub mod trust_quorum;

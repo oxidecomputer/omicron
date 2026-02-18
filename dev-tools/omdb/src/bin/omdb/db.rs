@@ -120,6 +120,7 @@ use nexus_db_queries::db::datastore::CrucibleTargets;
 use nexus_db_queries::db::datastore::Disk;
 use nexus_db_queries::db::datastore::InstanceAndActiveVmm;
 use nexus_db_queries::db::datastore::InstanceStateComputer;
+use nexus_db_queries::db::datastore::LocalStorageAllocation;
 use nexus_db_queries::db::datastore::LocalStorageDisk;
 use nexus_db_queries::db::datastore::SQL_BATCH_SIZE;
 use nexus_db_queries::db::datastore::VolumeCookedResult;
@@ -160,6 +161,7 @@ use omicron_uuid_kinds::InstanceUuid;
 use omicron_uuid_kinds::ParseError;
 use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::PropolisUuid;
+use omicron_uuid_kinds::RackUuid;
 use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::VolumeUuid;
 use omicron_uuid_kinds::ZpoolUuid;
@@ -297,9 +299,8 @@ impl DbUrlOptions {
         let db_url = self.resolve_pg_url(omdb, log).await?;
         eprintln!("note: using database URL {}", &db_url);
 
-        let db_config = db::Config { url: db_url.clone() };
-        let pool =
-            Arc::new(db::Pool::new_single_host(&log.clone(), &db_config));
+        let addrs = db_url.all_addresses()?;
+        let pool = Arc::new(db::Pool::new_fixed_hosts(log, addrs));
 
         // Being a dev tool, we want to try this operation even if the schema
         // doesn't match what we expect.  So we use `DataStore::new_unchecked()`
@@ -434,6 +435,8 @@ enum DbCommands {
     /// More precisely, `omdb db whatis` reports tables containing a unique UUID
     /// column with the specified value.
     Whatis(whatis::WhatisArgs),
+    /// Print information about trust quorum configurations
+    TrustQuorum(TrustQuorumArgs),
 }
 
 #[derive(Debug, Args, Clone)]
@@ -488,7 +491,7 @@ enum DiskCommands {
     /// Get info for a specific disk
     Info(DiskInfoArgs),
     /// Summarize current disks
-    List,
+    List(DiskListArgs),
     /// Determine what crucible resources are on the given physical disk.
     Physical(DiskPhysicalArgs),
 }
@@ -497,6 +500,13 @@ enum DiskCommands {
 struct DiskInfoArgs {
     /// The UUID of the disk
     uuid: Uuid,
+}
+
+#[derive(Debug, Args, Clone)]
+struct DiskListArgs {
+    /// Include only disks of a given type.
+    #[clap(long = "type", short = 't', value_enum)]
+    disk_type: Option<DiskType>,
 }
 
 #[derive(Debug, Args, Clone)]
@@ -1154,6 +1164,25 @@ struct SetStorageBufferArgs {
     storage_buffer: i64,
 }
 
+#[derive(Debug, Args, Clone)]
+struct TrustQuorumArgs {
+    #[command(subcommand)]
+    command: TrustQuorumCommands,
+}
+
+#[derive(Debug, Subcommand, Clone)]
+enum TrustQuorumCommands {
+    /// List trust quorum configurations for a rack
+    ListConfigs(TrustQuorumListConfigsArgs),
+}
+
+#[derive(Debug, Args, Clone)]
+struct TrustQuorumListConfigsArgs {
+    /// Rack ID to list configurations for
+    #[arg(long)]
+    rack_id: RackUuid,
+}
+
 impl DbArgs {
     /// Run a `omdb db` subcommand.
     ///
@@ -1234,8 +1263,8 @@ impl DbArgs {
                     DbCommands::Disks(DiskArgs {
                         command: DiskCommands::Info(uuid),
                     }) => cmd_db_disk_info(&opctx, &datastore, uuid).await,
-                    DbCommands::Disks(DiskArgs { command: DiskCommands::List }) => {
-                        cmd_db_disk_list(&datastore, &fetch_opts).await
+                    DbCommands::Disks(DiskArgs { command: DiskCommands::List(args) }) => {
+                        cmd_db_disk_list(&datastore, &fetch_opts, args).await
                     }
                     DbCommands::Disks(DiskArgs {
                         command: DiskCommands::Physical(uuid),
@@ -1523,6 +1552,11 @@ impl DbArgs {
                     }
                     DbCommands::Whatis(args) => {
                         whatis::cmd_db_whatis(&datastore, args).await
+                    }
+                    DbCommands::TrustQuorum(TrustQuorumArgs {
+                        command: TrustQuorumCommands::ListConfigs(args),
+                    }) => {
+                        cmd_db_trust_quorum_list_configs(&opctx, &datastore, &fetch_opts, &args).await
                     }
                 }
             }
@@ -1913,8 +1947,38 @@ async fn cmd_crucible_dataset_mark_provisionable(
 struct DiskIdentity {
     id: Uuid,
     size: String,
+    #[tabled(rename = "TYPE")]
+    disk_type: DiskType,
     state: String,
     name: String,
+}
+
+#[derive(
+    Debug, Copy, Clone, PartialEq, Eq, clap::ValueEnum, strum::Display,
+)]
+#[clap(rename_all = "snake_case")]
+#[strum(serialize_all = "snake_case")]
+enum DiskType {
+    Crucible,
+    Local,
+}
+
+impl From<db::model::DiskType> for DiskType {
+    fn from(disk_type: db::model::DiskType) -> Self {
+        match disk_type {
+            db::model::DiskType::Crucible => DiskType::Crucible,
+            db::model::DiskType::LocalStorage => DiskType::Local,
+        }
+    }
+}
+
+impl From<DiskType> for db::model::DiskType {
+    fn from(disk_type: DiskType) -> Self {
+        match disk_type {
+            DiskType::Crucible => db::model::DiskType::Crucible,
+            DiskType::Local => db::model::DiskType::LocalStorage,
+        }
+    }
 }
 
 impl From<&'_ db::model::Disk> for DiskIdentity {
@@ -1922,6 +1986,7 @@ impl From<&'_ db::model::Disk> for DiskIdentity {
         Self {
             name: disk.name().to_string(),
             id: disk.id(),
+            disk_type: disk.disk_type.into(),
             size: disk.size.to_string(),
             state: disk.runtime().disk_state,
         }
@@ -1932,6 +1997,7 @@ impl From<&'_ db::model::Disk> for DiskIdentity {
 async fn cmd_db_disk_list(
     datastore: &DataStore,
     fetch_opts: &DbFetchOptions,
+    args: &DiskListArgs,
 ) -> Result<(), anyhow::Error> {
     let ctx = || "listing disks".to_string();
 
@@ -1939,6 +2005,11 @@ async fn cmd_db_disk_list(
     let mut query = dsl::disk.into_boxed();
     if !fetch_opts.include_deleted {
         query = query.filter(dsl::time_deleted.is_null());
+    }
+
+    if let Some(disk_type) = args.disk_type {
+        let disk_type = db::model::DiskType::from(disk_type);
+        query = query.filter(dsl::disk_type.eq(disk_type));
     }
 
     #[derive(Tabled)]
@@ -2165,6 +2236,7 @@ async fn crucible_disk_info(
         volume_id: String,
         disk_state: String,
         import_address: String,
+        readonly: bool,
     }
 
     // The rows describing the downstairs regions for this disk/volume
@@ -2184,6 +2256,8 @@ async fn crucible_disk_info(
     let volume_id = disk.volume_id().to_string();
 
     let disk_state = disk.runtime().disk_state.to_string();
+
+    let readonly = disk.is_read_only();
 
     let import_address = match disk.pantry_address() {
         Some(ref pa) => pa.clone().to_string(),
@@ -2241,6 +2315,7 @@ async fn crucible_disk_info(
                 volume_id,
                 disk_state,
                 import_address,
+                readonly,
             }
         } else {
             UpstairsRow {
@@ -2251,6 +2326,7 @@ async fn crucible_disk_info(
                 volume_id,
                 disk_state,
                 import_address,
+                readonly,
             }
         }
     } else {
@@ -2263,6 +2339,7 @@ async fn crucible_disk_info(
             volume_id,
             disk_state,
             import_address,
+            readonly,
         }
     };
     rows.push(usr);
@@ -2415,6 +2492,8 @@ async fn local_storage_disk_info(
         #[tabled(display_with = "display_option_blank")]
         time_deleted: Option<DateTime<Utc>>,
 
+        allocation_type: String,
+
         dataset_id: DatasetUuid,
         pool_id: ExternalZpoolUuid,
         sled_id: SledUuid,
@@ -2423,18 +2502,39 @@ async fn local_storage_disk_info(
     }
 
     if let Some(allocation) = &disk.local_storage_dataset_allocation {
-        let rows = vec![Row {
-            disk_name: disk.name().to_string(),
+        let row = match allocation {
+            LocalStorageAllocation::Unencrypted(allocation) => Row {
+                disk_name: disk.name().to_string(),
 
-            time_created: allocation.time_created,
-            time_deleted: allocation.time_deleted,
+                time_created: allocation.time_created,
+                time_deleted: allocation.time_deleted,
 
-            dataset_id: allocation.local_storage_dataset_id(),
-            pool_id: allocation.pool_id(),
-            sled_id: allocation.sled_id(),
+                allocation_type: String::from("unencrypted"),
 
-            dataset_size: allocation.dataset_size.to_bytes(),
-        }];
+                dataset_id: allocation.local_storage_unencrypted_dataset_id(),
+                pool_id: allocation.pool_id(),
+                sled_id: allocation.sled_id(),
+
+                dataset_size: allocation.dataset_size.to_bytes(),
+            },
+
+            LocalStorageAllocation::Encrypted(allocation) => Row {
+                disk_name: disk.name().to_string(),
+
+                time_created: allocation.time_created,
+                time_deleted: allocation.time_deleted,
+
+                allocation_type: String::from("encrypted"),
+
+                dataset_id: allocation.local_storage_dataset_id(),
+                pool_id: allocation.pool_id(),
+                sled_id: allocation.sled_id(),
+
+                dataset_size: allocation.dataset_size.to_bytes(),
+            },
+        };
+
+        let rows = vec![row];
 
         let table = tabled::Table::new(rows)
             .with(tabled::settings::Style::empty())
@@ -2455,7 +2555,20 @@ async fn cmd_db_disk_info(
     datastore: &DataStore,
     args: &DiskInfoArgs,
 ) -> Result<(), anyhow::Error> {
-    match datastore.disk_get(opctx, args.uuid).await? {
+    let disk = {
+        use nexus_db_schema::schema::disk::dsl;
+
+        let conn = datastore.pool_connection_for_tests().await?;
+
+        dsl::disk
+            .filter(dsl::id.eq(args.uuid))
+            .select(nexus_db_model::Disk::as_select())
+            .get_result_async(&*conn)
+            .await
+            .unwrap()
+    };
+
+    match datastore.disk_get_with_model(opctx, disk).await? {
         Disk::Crucible(disk) => {
             crucible_disk_info(opctx, datastore, disk).await
         }
@@ -8018,6 +8131,72 @@ async fn cmd_db_zpool_set_storage_buffer(
         "set pool {} control plane storage buffer bytes to {}",
         args.id, args.storage_buffer,
     );
+
+    Ok(())
+}
+
+/// Run `omdb db trust-quorum list-configs`.
+async fn cmd_db_trust_quorum_list_configs(
+    opctx: &OpContext,
+    datastore: &DataStore,
+    fetch_opts: &DbFetchOptions,
+    args: &TrustQuorumListConfigsArgs,
+) -> Result<(), anyhow::Error> {
+    #[derive(Tabled)]
+    #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
+    struct TqConfigRow {
+        epoch: i64,
+        #[tabled(display_with = "option_impl_display")]
+        last_committed_epoch: Option<i64>,
+        state: String,
+        threshold: u8,
+        commit_crash_tolerance: u8,
+        coordinator_hardware_baseboard_id: Uuid,
+        #[tabled(display_with = "datetime_rfc3339_concise")]
+        time_created: DateTime<Utc>,
+        #[tabled(display_with = "option_datetime_rfc3339_concise")]
+        time_committing: Option<DateTime<Utc>>,
+        #[tabled(display_with = "option_datetime_rfc3339_concise")]
+        time_committed: Option<DateTime<Utc>>,
+        #[tabled(display_with = "option_datetime_rfc3339_concise")]
+        time_aborted: Option<DateTime<Utc>>,
+        #[tabled(display_with = "display_option_blank")]
+        abort_reason: Option<String>,
+    }
+
+    let limit = fetch_opts.fetch_limit;
+    let configs = datastore
+        .tq_list_config(opctx, args.rack_id, &first_page::<i64>(limit))
+        .await
+        .context("listing trust quorum configurations")?;
+
+    check_limit(&configs, limit, || {
+        String::from("listing trust quorum configurations")
+    });
+
+    let rows: Vec<TqConfigRow> = configs
+        .into_iter()
+        .map(|config| TqConfigRow {
+            epoch: config.epoch,
+            last_committed_epoch: config.last_committed_epoch,
+            state: format!("{:?}", config.state),
+            threshold: config.threshold.into(),
+            commit_crash_tolerance: config.commit_crash_tolerance.into(),
+            coordinator_hardware_baseboard_id: config.coordinator,
+            time_created: config.time_created,
+            time_committing: config.time_committing,
+            time_committed: config.time_committed,
+            time_aborted: config.time_aborted,
+            abort_reason: config.abort_reason,
+        })
+        .collect();
+
+    let table = tabled::Table::new(rows)
+        .with(tabled::settings::Style::empty())
+        .with(tabled::settings::Padding::new(0, 1, 0, 0))
+        .to_string();
+
+    println!("{}", table);
 
     Ok(())
 }

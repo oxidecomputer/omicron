@@ -431,6 +431,10 @@ pub struct BackgroundTaskConfig {
     pub probe_distributor: ProbeDistributorConfig,
     /// configuration for multicast reconciler (group+members) task
     pub multicast_reconciler: MulticastGroupReconcilerConfig,
+    /// configuration for trust quorum manager task
+    pub trust_quorum: TrustQuorumConfig,
+    /// configuration for the attached subnet manager
+    pub attached_subnet_manager: AttachedSubnetManagerConfig,
 }
 
 #[serde_as]
@@ -962,6 +966,15 @@ pub struct ProbeDistributorConfig {
     pub period_secs: Duration,
 }
 
+#[serde_as]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct TrustQuorumConfig {
+    /// period (in seconds) for periodic activations of the background task that
+    /// completes trust quorum reconfigurations.
+    #[serde_as(as = "DurationSeconds<u64>")]
+    pub period_secs: Duration,
+}
+
 /// Configuration for a nexus server
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct PackageConfig {
@@ -1003,6 +1016,15 @@ pub struct PackageConfig {
     pub multicast: MulticastConfig,
     /// Default Crucible region allocation strategy
     pub default_region_allocation_strategy: RegionAllocationStrategy,
+}
+
+#[serde_as]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct AttachedSubnetManagerConfig {
+    /// period (in seconds) for periodic activations of the background task that
+    /// pushes attached subnets to the switches and sleds.
+    #[serde_as(as = "DurationSeconds<u64>")]
+    pub period_secs: Duration,
 }
 
 // Re-export SchemeName from nexus-types for use in config parsing.
@@ -1229,6 +1251,8 @@ mod test {
             fm.sitrep_gc_period_secs = 49
             probe_distributor.period_secs = 50
             multicast_reconciler.period_secs = 60
+            trust_quorum.period_secs = 60
+            attached_subnet_manager.period_secs = 60
             [default_region_allocation_strategy]
             type = "random"
             seed = 0
@@ -1486,6 +1510,12 @@ mod test {
                             sled_cache_ttl_secs: MulticastGroupReconcilerConfig::default_sled_cache_ttl_secs(),
                             backplane_cache_ttl_secs: MulticastGroupReconcilerConfig::default_backplane_cache_ttl_secs(),
                         },
+                        trust_quorum: TrustQuorumConfig {
+                            period_secs: Duration::from_secs(60),
+                        },
+                        attached_subnet_manager: AttachedSubnetManagerConfig {
+                            period_secs: Duration::from_secs(60),
+                        },
                     },
                     multicast: MulticastConfig { enabled: false },
                     default_region_allocation_strategy:
@@ -1589,6 +1619,8 @@ mod test {
             fm.sitrep_gc_period_secs = 46
             probe_distributor.period_secs = 47
             multicast_reconciler.period_secs = 60
+            trust_quorum.period_secs = 60
+            attached_subnet_manager.period_secs = 60
 
             [default_region_allocation_strategy]
             type = "random"

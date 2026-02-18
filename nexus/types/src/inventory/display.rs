@@ -620,6 +620,7 @@ fn display_sleds(
             last_reconciliation,
             file_source_resolver,
             health_monitor,
+            reference_measurements,
         } = sled;
 
         writeln!(
@@ -736,7 +737,6 @@ fn display_sleds(
                 zones,
                 boot_partitions,
                 remove_mupdate_override,
-                measurements,
             } = last_reconciliation;
 
             display_boot_partition_contents(boot_partitions, &mut indented)?;
@@ -857,16 +857,6 @@ fn display_sleds(
                     }
                 }
             }
-
-            writeln!(indented, "reference measurements:")?;
-            let mut indent2 = IndentWriter::new("    ", &mut indented);
-            if measurements.is_empty() {
-                writeln!(indent2, "(measurement set is empty)")?;
-            } else {
-                for m in measurements {
-                    writeln!(indent2, "{}", m.display())?;
-                }
-            }
         }
 
         write!(indented, "reconciler task status: ")?;
@@ -938,6 +928,16 @@ fn display_sleds(
                         "failed to retrieve SMF services in maintenance: {e}"
                     )?;
                 }
+            }
+        }
+
+        writeln!(indented, "reference measurements:")?;
+        let mut indent2 = IndentWriter::new("    ", &mut indented);
+        if reference_measurements.is_empty() {
+            writeln!(indent2, "(measurement set is empty)")?;
+        } else {
+            for m in reference_measurements {
+                writeln!(indent2, "{}", m.display())?;
             }
         }
 

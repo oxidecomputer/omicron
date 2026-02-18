@@ -360,8 +360,11 @@ async fn test_setup(c: &ClientTestContext) {
         c,
         FLOATING_IP_NAME,
         PROJECT_NAME,
-        None,
-        Some(IP_POOL_NAME),
+        params::AddressAllocator::Auto {
+            pool_selector: params::PoolSelector::Explicit {
+                pool: NameOrId::Name(IP_POOL_NAME.parse().unwrap()),
+            },
+        },
     )
     .await;
     let nic_attach = InstanceNetworkInterfaceAttachment::Create(vec![
