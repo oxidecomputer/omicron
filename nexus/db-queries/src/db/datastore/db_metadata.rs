@@ -773,7 +773,7 @@ impl DataStore {
         // If the backfill fails (e.g., OOM), the index is silently rolled
         // back. We run a verification query in a **separate transaction**
         // to confirm the change actually landed.
-        if step.schema_change().is_some() {
+        if !step.schema_changes().is_empty() {
             self.verify_schema_change(log, step).await.with_context(|| {
                 format!(
                     "update to {}, verifying step {:?}",
@@ -800,32 +800,37 @@ impl DataStore {
         log: &Logger,
         step: &SchemaUpgradeStep,
     ) -> Result<(), anyhow::Error> {
-        let change = step.schema_change().expect(
-            "verify_schema_change called on a step with no schema change",
+        assert!(
+            !step.schema_changes().is_empty(),
+            "verify_schema_change called on a step with no schema changes",
         );
-        if let Some(verify_sql) = change.verification_query() {
-            info!(
-                log,
-                "Verifying schema change";
-                "change" => ?change,
-            );
-            let conn = self
-                .pool_connection_unauthorized()
-                .await
-                .context("verification: failed to get connection")?;
-            conn.batch_execute_async(&verify_sql).await.with_context(|| {
-                format!(
-                    "schema change verification failed for \
-                         {:?} in {:?}",
-                    change,
-                    step.label()
-                )
-            })?;
-            info!(
-                log,
-                "Schema change verified";
-                "change" => ?change,
-            );
+        for change in step.schema_changes() {
+            if let Some(verify_sql) = change.verification_query() {
+                info!(
+                    log,
+                    "Verifying schema change";
+                    "change" => ?change,
+                );
+                let conn = self
+                    .pool_connection_unauthorized()
+                    .await
+                    .context("verification: failed to get connection")?;
+                conn.batch_execute_async(&verify_sql).await.with_context(
+                    || {
+                        format!(
+                            "schema change verification failed for \
+                             {:?} in {:?}",
+                            change,
+                            step.label()
+                        )
+                    },
+                )?;
+                info!(
+                    log,
+                    "Schema change verified";
+                    "change" => ?change,
+                );
+            }
         }
         Ok(())
     }
@@ -2478,8 +2483,9 @@ mod test {
 
         // Verify the index exists using our verification query pattern.
         let change = nexus_db_model::SchemaChangeInfo::CreateIndex {
-            table_name: "test_verify_idx".to_string(),
-            index_name: "test_idx".to_string(),
+            table_name: nexus_db_model::SqlIdentifier::new("test_verify_idx")
+                .unwrap(),
+            index_name: nexus_db_model::SqlIdentifier::new("test_idx").unwrap(),
         };
         let verify_sql = change.verification_query().unwrap();
         conn.batch_execute_async(&verify_sql)
@@ -2515,8 +2521,12 @@ mod test {
 
         // The verification query should fail because the index doesn't exist.
         let change = nexus_db_model::SchemaChangeInfo::CreateIndex {
-            table_name: "test_verify_no_idx".to_string(),
-            index_name: "nonexistent_idx".to_string(),
+            table_name: nexus_db_model::SqlIdentifier::new(
+                "test_verify_no_idx",
+            )
+            .unwrap(),
+            index_name: nexus_db_model::SqlIdentifier::new("nonexistent_idx")
+                .unwrap(),
         };
         let verify_sql = change.verification_query().unwrap();
         let result = conn.batch_execute_async(&verify_sql).await;
@@ -2550,8 +2560,9 @@ mod test {
 
         // "name" is NOT NULL — verification should pass.
         let change = nexus_db_model::SchemaChangeInfo::AlterColumnSetNotNull {
-            table_name: "test_verify_nn".to_string(),
-            column_name: "name".to_string(),
+            table_name: nexus_db_model::SqlIdentifier::new("test_verify_nn")
+                .unwrap(),
+            column_name: nexus_db_model::SqlIdentifier::new("name").unwrap(),
         };
         let verify_sql = change.verification_query().unwrap();
         conn.batch_execute_async(&verify_sql)
@@ -2586,8 +2597,11 @@ mod test {
 
         // "name" is nullable — verification should fail.
         let change = nexus_db_model::SchemaChangeInfo::AlterColumnSetNotNull {
-            table_name: "test_verify_nullable".to_string(),
-            column_name: "name".to_string(),
+            table_name: nexus_db_model::SqlIdentifier::new(
+                "test_verify_nullable",
+            )
+            .unwrap(),
+            column_name: nexus_db_model::SqlIdentifier::new("name").unwrap(),
         };
         let verify_sql = change.verification_query().unwrap();
         let result = conn.batch_execute_async(&verify_sql).await;
@@ -2624,8 +2638,14 @@ mod test {
 
         let change =
             nexus_db_model::SchemaChangeInfo::AlterTableAddConstraint {
-                table_name: "test_verify_ck".to_string(),
-                constraint_name: "val_positive".to_string(),
+                table_name: nexus_db_model::SqlIdentifier::new(
+                    "test_verify_ck",
+                )
+                .unwrap(),
+                constraint_name: nexus_db_model::SqlIdentifier::new(
+                    "val_positive",
+                )
+                .unwrap(),
             };
         let verify_sql = change.verification_query().unwrap();
         conn.batch_execute_async(&verify_sql)
@@ -2660,8 +2680,14 @@ mod test {
 
         let change =
             nexus_db_model::SchemaChangeInfo::AlterTableAddConstraint {
-                table_name: "test_verify_no_ck".to_string(),
-                constraint_name: "nonexistent_constraint".to_string(),
+                table_name: nexus_db_model::SqlIdentifier::new(
+                    "test_verify_no_ck",
+                )
+                .unwrap(),
+                constraint_name: nexus_db_model::SqlIdentifier::new(
+                    "nonexistent_constraint",
+                )
+                .unwrap(),
             };
         let verify_sql = change.verification_query().unwrap();
         let result = conn.batch_execute_async(&verify_sql).await;
