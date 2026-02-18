@@ -483,8 +483,6 @@ pub struct ClassifiedDdl {
     /// Number of distinct DDL **statements** in the file.
     ///
     /// A single `ALTER TABLE` with multiple operations counts as 1.
-    /// Each `ALTER TYPE ADD VALUE` / `CREATE TYPE AS ENUM` detected by
-    /// `preprocess_crdb_sql` also counts as 1 each.
     pub statement_count: usize,
 }
 
@@ -495,6 +493,7 @@ fn last_ident(
     let s = name
         .0
         .last()
+        .and_then(|p| p.as_ident())
         .map(|i| i.value.clone())
         .with_context(|| format!("empty ObjectName: {name}"))?;
     SqlIdentifier::new(s)
@@ -504,17 +503,16 @@ fn last_ident(
 fn constraint_name(
     tc: &TableConstraint,
 ) -> Option<anyhow::Result<SqlIdentifier>> {
-    match tc {
-        TableConstraint::Unique { name, .. }
-        | TableConstraint::PrimaryKey { name, .. }
-        | TableConstraint::ForeignKey { name, .. }
-        | TableConstraint::Check { name, .. } => {
-            name.as_ref().map(|i| SqlIdentifier::new(i.value.clone()))
-        }
+    let name = match tc {
+        TableConstraint::Unique(c) => c.name.as_ref(),
+        TableConstraint::PrimaryKey(c) => c.name.as_ref(),
+        TableConstraint::ForeignKey(c) => c.name.as_ref(),
+        TableConstraint::Check(c) => c.name.as_ref(),
         // Other variants (Index, FulltextOrSpatial) don't carry a
         // constraint name.
-        _ => None,
-    }
+        _ => return None,
+    };
+    name.map(|i| SqlIdentifier::new(i.value.clone()))
 }
 
 /// Pre-process CockroachDB-specific SQL so that `sqlparser` (PostgreSQL
@@ -522,9 +520,9 @@ fn constraint_name(
 ///
 /// 1. The preprocessed SQL string (for `sqlparser`).
 /// 2. `SchemaChangeInfo` entries for CRDB-specific DDL that had to be
-///    stripped entirely (ALTER TYPE ADD VALUE, CREATE TYPE AS ENUM) —
-///    these can't be represented in `sqlparser`'s AST at all, so we
-///    detect them via regex here, in the same pass that removes them.
+///    stripped entirely — these can't be represented in `sqlparser`'s
+///    AST at all, so we detect them via regex here, in the same pass
+///    that removes them.
 ///
 /// This is **only for classification** — the original SQL is always what
 /// gets executed against the database.
@@ -535,8 +533,8 @@ fn preprocess_crdb_sql(
     // runs infrequently (once per migration file at startup).
 
     let mut result = sql.to_string();
-    let mut crdb_changes = Vec::new();
-    let mut crdb_statement_count: usize = 0;
+    let crdb_changes = Vec::new();
+    let crdb_statement_count: usize = 0;
 
     // Strip STORING(...) clauses from CREATE INDEX.
     let storing_re = Regex::new(r"(?is)\bSTORING\s*\([^)]*\)").unwrap();
@@ -563,50 +561,15 @@ fn preprocess_crdb_sql(
     .unwrap();
     result = table_at_idx_re.replace_all(&result, "$1$3").to_string();
 
-    // Strip ALTER SEQUENCE and DROP TYPE statements entirely.
-    // sqlparser 0.45 doesn't support these.  They are metadata-only
-    // and don't need verification.
+    // Strip ALTER SEQUENCE and ALTER TYPE ... DROP VALUE statements
+    // entirely.  sqlparser doesn't support these.  They are
+    // metadata-only and don't need verification.
     let alter_seq_re = Regex::new(r"(?is)ALTER\s+SEQUENCE\s+[^;]*;?").unwrap();
     result = alter_seq_re.replace_all(&result, "").to_string();
-    let drop_type_re = Regex::new(r"(?is)DROP\s+TYPE\s+[^;]*;?").unwrap();
-    result = drop_type_re.replace_all(&result, "").to_string();
-
-    // Detect ALTER TYPE ... ADD VALUE for classification, then strip
-    // ALL ALTER TYPE statements (ADD VALUE, DROP VALUE, RENAME VALUE,
-    // etc.) — sqlparser 0.45 has no AlterType support at all.
-    let alter_type_detect_re = Regex::new(
-        r"(?i)ALTER\s+TYPE\s+(\S+)\s+ADD\s+VALUE\s+(?:IF\s+NOT\s+EXISTS\s+)?'([^']*)'",
-    )
-    .unwrap();
-    for cap in alter_type_detect_re.captures_iter(&result) {
-        let type_name =
-            SqlIdentifier::new(cap[1].rsplit('.').next().unwrap_or(&cap[1]))?;
-        let value = SqlIdentifier::new(&cap[2])?;
-        crdb_changes
-            .push(SchemaChangeInfo::AlterTypeAddValue { type_name, value });
-        crdb_statement_count += 1;
-    }
-    let alter_type_strip_re =
-        Regex::new(r"(?is)ALTER\s+TYPE\s+\S+\s+\w+\s+[^;]*;?").unwrap();
-    result = alter_type_strip_re.replace_all(&result, "").to_string();
-
-    // Detect and strip CREATE TYPE ... AS ENUM (...) statements.
-    // sqlparser 0.45 only supports composite types, not ENUM.
-    let create_type_detect_re = Regex::new(
-        r"(?i)CREATE\s+TYPE\s+(?:IF\s+NOT\s+EXISTS\s+)?(\S+)\s+AS\s+ENUM",
-    )
-    .unwrap();
-    for cap in create_type_detect_re.captures_iter(&result) {
-        let type_name =
-            SqlIdentifier::new(cap[1].rsplit('.').next().unwrap_or(&cap[1]))?;
-        crdb_changes.push(SchemaChangeInfo::CreateType { type_name });
-        crdb_statement_count += 1;
-    }
-    let create_type_strip_re = Regex::new(
-        r"(?is)CREATE\s+TYPE\s+(?:IF\s+NOT\s+EXISTS\s+)?\S+\s+AS\s+ENUM\s*\([^)]*\)\s*;?",
-    )
-    .unwrap();
-    result = create_type_strip_re.replace_all(&result, "").to_string();
+    let alter_type_drop_re =
+        Regex::new(r"(?is)ALTER\s+TYPE\s+\S+\s+DROP\s+VALUE\s+[^;]*;?")
+            .unwrap();
+    result = alter_type_drop_re.replace_all(&result, "").to_string();
 
     // Strip IF NOT EXISTS from ADD CONSTRAINT.
     // CockroachDB supports this but standard PostgreSQL / sqlparser
@@ -621,6 +584,12 @@ fn preprocess_crdb_sql(
     let create_view_ine_re =
         Regex::new(r"(?i)(CREATE\s+VIEW)\s+IF\s+NOT\s+EXISTS").unwrap();
     result = create_view_ine_re.replace_all(&result, "$1").to_string();
+
+    // Strip IF NOT EXISTS from CREATE TYPE.
+    // CockroachDB supports this but sqlparser does not.
+    let create_type_ine_re =
+        Regex::new(r"(?i)(CREATE\s+TYPE)\s+IF\s+NOT\s+EXISTS").unwrap();
+    result = create_type_ine_re.replace_all(&result, "$1").to_string();
 
     // Strip IF EXISTS from ALTER INDEX.
     // CockroachDB supports this but sqlparser does not.
@@ -703,7 +672,7 @@ fn strip_sql_comments(sql: &str) -> String {
 fn keep_ddl_statements(sql: &str) -> String {
     let without_comments = strip_sql_comments(sql);
     let ddl_start = Regex::new(
-        r"(?is)^\s*(?:CREATE\s+(?:UNIQUE\s+)?(?:TABLE|INDEX|VIEW|TYPE|SEQUENCE)|DROP\s+(?:TABLE|INDEX|VIEW)|ALTER\s+(?:TABLE|INDEX))\b",
+        r"(?is)^\s*(?:CREATE\s+(?:UNIQUE\s+)?(?:TABLE|INDEX|VIEW|TYPE|SEQUENCE)|DROP\s+(?:TABLE|INDEX|VIEW|TYPE)|ALTER\s+(?:TABLE|INDEX|TYPE))\b",
     )
     .unwrap();
     without_comments
@@ -726,8 +695,7 @@ pub fn classify_sql_statements(
     sql: &str,
     label: &str,
 ) -> Result<ClassifiedDdl, anyhow::Error> {
-    // Pre-process CRDB-specific SQL and detect DDL that sqlparser can't
-    // represent (ALTER TYPE ADD VALUE, CREATE TYPE AS ENUM).
+    // Pre-process CRDB-specific SQL so sqlparser can parse it.
     let (preprocessed, mut changes, mut statement_count) =
         preprocess_crdb_sql(sql)?;
     let statements = Parser::parse_sql(&PostgreSqlDialect {}, &preprocessed)
@@ -735,34 +703,33 @@ pub fn classify_sql_statements(
 
     for stmt in &statements {
         match stmt {
-            Statement::CreateIndex { name, table_name, .. } => {
+            Statement::CreateIndex(ci) => {
                 statement_count += 1;
                 let idx_name =
-                    last_ident(name.as_ref().with_context(|| {
+                    last_ident(ci.name.as_ref().with_context(|| {
                         format!("CREATE INDEX without a name in {label}")
                     })?)?;
-                let tbl = last_ident(table_name)?;
+                let tbl = last_ident(&ci.table_name)?;
                 changes.push(SchemaChangeInfo::CreateIndex {
                     table_name: tbl,
                     index_name: idx_name,
                 });
             }
-            Statement::CreateTable { name, .. } => {
+            Statement::CreateTable(ct) => {
                 statement_count += 1;
                 changes.push(SchemaChangeInfo::CreateTable {
-                    table_name: last_ident(name)?,
+                    table_name: last_ident(&ct.name)?,
                 });
             }
-            Statement::CreateView { name, .. } => {
+            Statement::CreateView(cv) => {
                 statement_count += 1;
                 changes.push(SchemaChangeInfo::CreateView {
-                    view_name: last_ident(name)?,
+                    view_name: last_ident(&cv.name)?,
                 });
             }
             Statement::CreateType { name, .. } => {
                 statement_count += 1;
-                // This fires for CREATE TYPE ... AS (composite).
-                // ENUM types are handled by preprocess_crdb_sql.
+                // Covers both composite types and ENUM types.
                 changes.push(SchemaChangeInfo::CreateType {
                     type_name: last_ident(name)?,
                 });
@@ -791,10 +758,10 @@ pub fn classify_sql_statements(
                     }
                 }
             }
-            Statement::AlterTable { name, operations, .. } => {
+            Statement::AlterTable(at) => {
                 statement_count += 1;
-                let tbl = last_ident(name)?;
-                for op in operations {
+                let tbl = last_ident(&at.name)?;
+                for op in &at.operations {
                     match op {
                         AlterTableOperation::AddColumn {
                             column_def, ..
@@ -809,16 +776,19 @@ pub fn classify_sql_statements(
                             );
                         }
                         AlterTableOperation::DropColumn {
-                            column_name, ..
+                            column_names,
+                            ..
                         } => {
-                            changes.push(
-                                SchemaChangeInfo::AlterTableDropColumn {
-                                    table_name: tbl.clone(),
-                                    column_name: SqlIdentifier::new(
-                                        column_name.value.clone(),
-                                    )?,
-                                },
-                            );
+                            for column_name in column_names {
+                                changes.push(
+                                    SchemaChangeInfo::AlterTableDropColumn {
+                                        table_name: tbl.clone(),
+                                        column_name: SqlIdentifier::new(
+                                            column_name.value.clone(),
+                                        )?,
+                                    },
+                                );
+                            }
                         }
                         AlterTableOperation::AlterColumn {
                             column_name,
@@ -833,7 +803,10 @@ pub fn classify_sql_statements(
                                 },
                             );
                         }
-                        AlterTableOperation::AddConstraint(tc) => {
+                        AlterTableOperation::AddConstraint {
+                            constraint: tc,
+                            ..
+                        } => {
                             let cname = constraint_name(tc).with_context(
                                 || format!(
                                     "ADD CONSTRAINT without a name on table {tbl} in {label}"
@@ -862,8 +835,14 @@ pub fn classify_sql_statements(
                         AlterTableOperation::RenameTable {
                             table_name: new_name,
                         } => {
+                            let obj_name = match new_name {
+                                sqlparser::ast::RenameTableNameKind::As(n)
+                                | sqlparser::ast::RenameTableNameKind::To(n) => {
+                                    n
+                                }
+                            };
                             changes.push(SchemaChangeInfo::AlterTableRename {
-                                new_name: last_ident(new_name)?,
+                                new_name: last_ident(obj_name)?,
                             });
                         }
                         // Other AlterTableOperation variants (SET DEFAULT,
@@ -884,6 +863,24 @@ pub fn classify_sql_statements(
                 changes.push(SchemaChangeInfo::AlterIndexRename {
                     new_name: last_ident(index_name)?,
                 });
+            }
+            Statement::AlterType(sqlparser::ast::AlterType {
+                name,
+                operation,
+            }) => {
+                statement_count += 1;
+                if let sqlparser::ast::AlterTypeOperation::AddValue(add_val) =
+                    operation
+                {
+                    let type_name = last_ident(name)?;
+                    let value = SqlIdentifier::new(&add_val.value.value)?;
+                    changes.push(SchemaChangeInfo::AlterTypeAddValue {
+                        type_name,
+                        value,
+                    });
+                }
+                // Other ALTER TYPE ops (Rename, RenameValue) are
+                // metadata-only.
             }
             // DML, session settings, and everything else — not DDL.
             _ => {}
@@ -1827,7 +1824,7 @@ mod test {
 
     #[test]
     fn test_classify_create_type_enum() {
-        // CREATE TYPE ... AS ENUM is CRDB-specific; detected via regex.
+        // CREATE TYPE ... AS ENUM is parsed by sqlparser 0.61+.
         let sql = "CREATE TYPE IF NOT EXISTS omicron.public.sled_policy \
                     AS ENUM ('in_service', 'no_provision', 'expunged');";
         let classified = classify_sql_statements(sql, "test").unwrap();
@@ -1954,41 +1951,34 @@ mod test {
     #[test]
     fn test_preprocess_alter_type_add_value() {
         let input = "ALTER TYPE omicron.public.my_enum ADD VALUE IF NOT EXISTS 'new_variant';";
-        let (output, changes, _) = preprocess_crdb_sql(input).unwrap();
-        // Statement should be stripped from the output.
+        let (output, changes, count) = preprocess_crdb_sql(input).unwrap();
+        // ALTER TYPE is now handled by sqlparser, not stripped by preprocess.
         assert!(
-            !output.contains("ALTER TYPE"),
-            "ALTER TYPE should be stripped: {output}"
+            output.contains("ALTER TYPE"),
+            "ALTER TYPE should be preserved: {output}"
         );
-        // The DDL should be detected and returned.
-        assert_eq!(changes.len(), 1);
-        assert_eq!(
-            changes[0],
-            SchemaChangeInfo::AlterTypeAddValue {
-                type_name: SqlIdentifier::new("my_enum").unwrap(),
-                value: SqlIdentifier::new("new_variant").unwrap(),
-            }
-        );
+        assert!(changes.is_empty());
+        assert_eq!(count, 0);
     }
 
     #[test]
     fn test_preprocess_create_type_enum() {
         let input =
             "CREATE TYPE IF NOT EXISTS my_enum AS ENUM ('a', 'b', 'c');";
-        let (output, changes, _) = preprocess_crdb_sql(input).unwrap();
-        // Statement should be stripped from the output.
+        let (output, changes, count) = preprocess_crdb_sql(input).unwrap();
+        // CREATE TYPE AS ENUM is now handled by sqlparser, not stripped
+        // by preprocess.  IF NOT EXISTS is stripped since sqlparser
+        // doesn't support it on CREATE TYPE.
         assert!(
-            !output.contains("CREATE TYPE"),
-            "CREATE TYPE AS ENUM should be stripped: {output}"
+            output.contains("CREATE TYPE"),
+            "CREATE TYPE should be preserved: {output}"
         );
-        // The DDL should be detected and returned.
-        assert_eq!(changes.len(), 1);
-        assert_eq!(
-            changes[0],
-            SchemaChangeInfo::CreateType {
-                type_name: SqlIdentifier::new("my_enum").unwrap()
-            }
+        assert!(
+            !output.contains("IF NOT EXISTS"),
+            "IF NOT EXISTS should be stripped: {output}"
         );
+        assert!(changes.is_empty());
+        assert_eq!(count, 0);
     }
 
     #[test]
@@ -2094,12 +2084,14 @@ mod test {
     #[test]
     fn test_preprocess_drop_type() {
         let input = "DROP TYPE IF EXISTS omicron.public.my_enum;";
-        let (output, changes, _) = preprocess_crdb_sql(input).unwrap();
+        let (output, changes, count) = preprocess_crdb_sql(input).unwrap();
+        // DROP TYPE is now handled by sqlparser, not stripped by preprocess.
         assert!(
-            !output.contains("DROP TYPE"),
-            "DROP TYPE should be stripped: {output}"
+            output.contains("DROP TYPE"),
+            "DROP TYPE should be preserved: {output}"
         );
         assert!(changes.is_empty());
+        assert_eq!(count, 0);
     }
 
     #[test]
