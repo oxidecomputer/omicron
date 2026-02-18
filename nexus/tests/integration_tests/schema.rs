@@ -4129,11 +4129,18 @@ fn after_222_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
 // Migration 229 fixes column ordering in console_session and device_access_token.
 // The "id" column was added via ALTER TABLE in migration 145, placing it at the
 // end. This migration recreates the tables with "id" as the first column.
+// It also drops console sessions created more than 24 hours ago.
 const SESSION_229_ID: Uuid =
     Uuid::from_u128(0x22900001_0000_0000_0000_000000000001);
 const SESSION_229_TOKEN: &str = "tok-console-229-migration-test";
 const SESSION_229_SILO_USER: Uuid =
     Uuid::from_u128(0x22900001_0000_0000_0000_000000000002);
+
+const SESSION_229_OLD_ID: Uuid =
+    Uuid::from_u128(0x22900001_0000_0000_0000_000000000003);
+const SESSION_229_OLD_TOKEN: &str = "tok-console-229-old-session";
+const SESSION_229_OLD_SILO_USER: Uuid =
+    Uuid::from_u128(0x22900001_0000_0000_0000_000000000004);
 
 const DEVICE_229_ID: Uuid =
     Uuid::from_u128(0x22900002_0000_0000_0000_000000000001);
@@ -4148,6 +4155,8 @@ fn before_229_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
     Box::pin(async move {
         // Insert test data into console_session and device_access_token.
         // These tables currently have "id" as the last column (from migration 145).
+        // We insert two console sessions: one recent (should be kept) and one
+        // created over 24 hours ago (should be dropped).
         ctx.client
             .batch_execute(&format!(
                 "
@@ -4155,6 +4164,13 @@ fn before_229_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
                     (id, token, time_created, time_last_used, silo_user_id)
                 VALUES
                     ('{SESSION_229_ID}', '{SESSION_229_TOKEN}', now(), now(), '{SESSION_229_SILO_USER}');
+
+                INSERT INTO omicron.public.console_session
+                    (id, token, time_created, time_last_used, silo_user_id)
+                VALUES
+                    ('{SESSION_229_OLD_ID}', '{SESSION_229_OLD_TOKEN}',
+                     now() - INTERVAL '48 hours', now() - INTERVAL '48 hours',
+                     '{SESSION_229_OLD_SILO_USER}');
 
                 INSERT INTO omicron.public.device_access_token
                     (id, token, client_id, device_code, silo_user_id, time_requested, time_created)
@@ -4172,7 +4188,7 @@ fn after_229_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
     Box::pin(async move {
         // Verify data was preserved after the column reordering migration.
 
-        // Check console_session
+        // Check that the recent console_session was kept
         let rows = ctx
             .client
             .query(
@@ -4184,7 +4200,11 @@ fn after_229_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
             )
             .await
             .expect("failed to query post-migration console_session");
-        assert_eq!(rows.len(), 1, "console_session row should still exist");
+        assert_eq!(
+            rows.len(),
+            1,
+            "recent console_session row should still exist"
+        );
 
         let id: Uuid = rows[0].get("id");
         assert_eq!(id, SESSION_229_ID);
@@ -4192,6 +4212,26 @@ fn after_229_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
         assert_eq!(token, SESSION_229_TOKEN);
         let silo_user_id: Uuid = rows[0].get("silo_user_id");
         assert_eq!(silo_user_id, SESSION_229_SILO_USER);
+
+        // Check that the old (>24h) console_session was dropped
+        let rows = ctx
+            .client
+            .query(
+                &format!(
+                    "SELECT id FROM omicron.public.console_session
+                     WHERE id = '{SESSION_229_OLD_ID}'"
+                ),
+                &[],
+            )
+            .await
+            .expect(
+                "failed to query post-migration console_session for old row",
+            );
+        assert_eq!(
+            rows.len(),
+            0,
+            "console_session row older than 24h should have been dropped"
+        );
 
         // Check device_access_token
         let rows = ctx
