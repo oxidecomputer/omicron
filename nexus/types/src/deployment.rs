@@ -1944,7 +1944,7 @@ pub enum BlueprintMeasurements {
     Artifacts { artifacts: BTreeSet<BlueprintSingleMeasurement> },
 }
 
-// Enums will get treated as a `Leaf` which doesn't product correct
+// Enums will get treated as a `Leaf` which doesn't produce correct
 // results for what we want
 impl Diffable for BlueprintMeasurements {
     type Diff<'daft> = daft::BTreeSetDiff<'daft, BlueprintSingleMeasurement>;
