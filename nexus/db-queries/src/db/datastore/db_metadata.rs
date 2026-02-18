@@ -765,6 +765,68 @@ impl DataStore {
             log,
             "Applied subcomponent of schema upgrade";
         );
+
+        // Verify that backfill-prone schema changes completed.
+        //
+        // CockroachDB applies some DDL asynchronously (e.g., CREATE INDEX
+        // adds metadata synchronously but backfills data asynchronously).
+        // If the backfill fails (e.g., OOM), the index is silently rolled
+        // back. We run a verification query in a **separate transaction**
+        // to confirm the change actually landed.
+        if step.schema_change().is_some() {
+            self.verify_schema_change(log, step).await.with_context(|| {
+                format!(
+                    "update to {}, verifying step {:?}",
+                    target_step.version,
+                    step.label()
+                )
+            })?;
+        }
+
+        Ok(())
+    }
+
+    /// Verify that a backfill-prone schema change completed successfully.
+    ///
+    /// Runs a verification query in a **separate transaction** from the DDL
+    /// that was just applied. Only operations that involve async backfill
+    /// (CREATE INDEX, ALTER COLUMN SET NOT NULL, ADD CONSTRAINT) generate
+    /// verification queries.
+    ///
+    /// If verification fails, the error propagates immediately — the outer
+    /// startup retry loop will re-attempt the entire migration.
+    async fn verify_schema_change(
+        &self,
+        log: &Logger,
+        step: &SchemaUpgradeStep,
+    ) -> Result<(), anyhow::Error> {
+        let change = step.schema_change().expect(
+            "verify_schema_change called on a step with no schema change",
+        );
+        if let Some(verify_sql) = change.verification_query() {
+            info!(
+                log,
+                "Verifying schema change";
+                "change" => ?change,
+            );
+            let conn = self
+                .pool_connection_unauthorized()
+                .await
+                .context("verification: failed to get connection")?;
+            conn.batch_execute_async(&verify_sql).await.with_context(|| {
+                format!(
+                    "schema change verification failed for \
+                         {:?} in {:?}",
+                    change,
+                    step.label()
+                )
+            })?;
+            info!(
+                log,
+                "Schema change verified";
+                "change" => ?change,
+            );
+        }
         Ok(())
     }
 
@@ -2387,6 +2449,232 @@ mod test {
             .database_nexus_access_delete(&opctx, OmicronZoneUuid::new_v4())
             .await
             .expect("Failed to delete non-existent record");
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    // ---------------------------------------------------------------
+    // Integration tests for schema change verification
+    // ---------------------------------------------------------------
+
+    // Test that CREATE INDEX verification passes against a real CRDB.
+    #[tokio::test]
+    async fn test_verify_create_index() {
+        let logctx = dev::test_setup_log("test_verify_create_index");
+        let db = TestDatabase::new_with_pool(&logctx.log).await;
+        let pool = db.pool();
+        let conn = pool.claim().await.unwrap();
+
+        // Set up: create a table and index directly.
+        conn.batch_execute_async(
+            "CREATE TABLE IF NOT EXISTS omicron.public.test_verify_idx \
+             (id INT PRIMARY KEY, name TEXT NOT NULL); \
+             CREATE INDEX IF NOT EXISTS test_idx \
+             ON omicron.public.test_verify_idx (name);",
+        )
+        .await
+        .expect("Failed to create test table and index");
+
+        // Verify the index exists using our verification query pattern.
+        let change = nexus_db_model::SchemaChangeInfo::CreateIndex {
+            table_name: "test_verify_idx".to_string(),
+            index_name: "test_idx".to_string(),
+        };
+        let verify_sql = change.verification_query().unwrap();
+        conn.batch_execute_async(&verify_sql)
+            .await
+            .expect("Verification query should pass for existing index");
+
+        // Clean up.
+        conn.batch_execute_async(
+            "DROP TABLE IF EXISTS omicron.public.test_verify_idx CASCADE;",
+        )
+        .await
+        .expect("Failed to drop test table");
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    // Test that verification correctly fails for a non-existent index.
+    #[tokio::test]
+    async fn test_verify_fails_for_missing_index() {
+        let logctx = dev::test_setup_log("test_verify_fails_for_missing_index");
+        let db = TestDatabase::new_with_pool(&logctx.log).await;
+        let pool = db.pool();
+        let conn = pool.claim().await.unwrap();
+
+        // Create only a table, no index.
+        conn.batch_execute_async(
+            "CREATE TABLE IF NOT EXISTS omicron.public.test_verify_no_idx \
+             (id INT PRIMARY KEY, name TEXT NOT NULL);",
+        )
+        .await
+        .expect("Failed to create test table");
+
+        // The verification query should fail because the index doesn't exist.
+        let change = nexus_db_model::SchemaChangeInfo::CreateIndex {
+            table_name: "test_verify_no_idx".to_string(),
+            index_name: "nonexistent_idx".to_string(),
+        };
+        let verify_sql = change.verification_query().unwrap();
+        let result = conn.batch_execute_async(&verify_sql).await;
+        assert!(result.is_err(), "Verification should fail for missing index");
+
+        // Clean up.
+        conn.batch_execute_async(
+            "DROP TABLE IF EXISTS omicron.public.test_verify_no_idx CASCADE;",
+        )
+        .await
+        .expect("Failed to drop test table");
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    // Test that verification passes for a NOT NULL column.
+    #[tokio::test]
+    async fn test_verify_set_not_null() {
+        let logctx = dev::test_setup_log("test_verify_set_not_null");
+        let db = TestDatabase::new_with_pool(&logctx.log).await;
+        let pool = db.pool();
+        let conn = pool.claim().await.unwrap();
+
+        conn.batch_execute_async(
+            "CREATE TABLE IF NOT EXISTS omicron.public.test_verify_nn \
+             (id INT PRIMARY KEY, name TEXT NOT NULL);",
+        )
+        .await
+        .expect("Failed to create test table");
+
+        // "name" is NOT NULL — verification should pass.
+        let change = nexus_db_model::SchemaChangeInfo::AlterColumnSetNotNull {
+            table_name: "test_verify_nn".to_string(),
+            column_name: "name".to_string(),
+        };
+        let verify_sql = change.verification_query().unwrap();
+        conn.batch_execute_async(&verify_sql)
+            .await
+            .expect("Verification should pass for NOT NULL column");
+
+        conn.batch_execute_async(
+            "DROP TABLE IF EXISTS omicron.public.test_verify_nn CASCADE;",
+        )
+        .await
+        .expect("Failed to drop test table");
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    // Test that verification fails for a nullable column.
+    #[tokio::test]
+    async fn test_verify_fails_for_nullable_column() {
+        let logctx =
+            dev::test_setup_log("test_verify_fails_for_nullable_column");
+        let db = TestDatabase::new_with_pool(&logctx.log).await;
+        let pool = db.pool();
+        let conn = pool.claim().await.unwrap();
+
+        conn.batch_execute_async(
+            "CREATE TABLE IF NOT EXISTS omicron.public.test_verify_nullable \
+             (id INT PRIMARY KEY, name TEXT);",
+        )
+        .await
+        .expect("Failed to create test table");
+
+        // "name" is nullable — verification should fail.
+        let change = nexus_db_model::SchemaChangeInfo::AlterColumnSetNotNull {
+            table_name: "test_verify_nullable".to_string(),
+            column_name: "name".to_string(),
+        };
+        let verify_sql = change.verification_query().unwrap();
+        let result = conn.batch_execute_async(&verify_sql).await;
+        assert!(
+            result.is_err(),
+            "Verification should fail for nullable column"
+        );
+
+        conn.batch_execute_async(
+            "DROP TABLE IF EXISTS omicron.public.test_verify_nullable CASCADE;",
+        )
+        .await
+        .expect("Failed to drop test table");
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    // Test that verification passes for an existing constraint.
+    #[tokio::test]
+    async fn test_verify_add_constraint() {
+        let logctx = dev::test_setup_log("test_verify_add_constraint");
+        let db = TestDatabase::new_with_pool(&logctx.log).await;
+        let pool = db.pool();
+        let conn = pool.claim().await.unwrap();
+
+        conn.batch_execute_async(
+            "CREATE TABLE IF NOT EXISTS omicron.public.test_verify_ck \
+             (id INT PRIMARY KEY, val INT NOT NULL, \
+             CONSTRAINT val_positive CHECK (val > 0));",
+        )
+        .await
+        .expect("Failed to create test table");
+
+        let change =
+            nexus_db_model::SchemaChangeInfo::AlterTableAddConstraint {
+                table_name: "test_verify_ck".to_string(),
+                constraint_name: "val_positive".to_string(),
+            };
+        let verify_sql = change.verification_query().unwrap();
+        conn.batch_execute_async(&verify_sql)
+            .await
+            .expect("Verification should pass for existing constraint");
+
+        conn.batch_execute_async(
+            "DROP TABLE IF EXISTS omicron.public.test_verify_ck CASCADE;",
+        )
+        .await
+        .expect("Failed to drop test table");
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    // Test that verification fails for a missing constraint.
+    #[tokio::test]
+    async fn test_verify_fails_for_missing_constraint() {
+        let logctx =
+            dev::test_setup_log("test_verify_fails_for_missing_constraint");
+        let db = TestDatabase::new_with_pool(&logctx.log).await;
+        let pool = db.pool();
+        let conn = pool.claim().await.unwrap();
+
+        conn.batch_execute_async(
+            "CREATE TABLE IF NOT EXISTS omicron.public.test_verify_no_ck \
+             (id INT PRIMARY KEY, val INT NOT NULL);",
+        )
+        .await
+        .expect("Failed to create test table");
+
+        let change =
+            nexus_db_model::SchemaChangeInfo::AlterTableAddConstraint {
+                table_name: "test_verify_no_ck".to_string(),
+                constraint_name: "nonexistent_constraint".to_string(),
+            };
+        let verify_sql = change.verification_query().unwrap();
+        let result = conn.batch_execute_async(&verify_sql).await;
+        assert!(
+            result.is_err(),
+            "Verification should fail for missing constraint"
+        );
+
+        conn.batch_execute_async(
+            "DROP TABLE IF EXISTS omicron.public.test_verify_no_ck CASCADE;",
+        )
+        .await
+        .expect("Failed to drop test table");
 
         db.terminate().await;
         logctx.cleanup_successful();
