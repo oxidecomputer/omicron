@@ -5281,6 +5281,7 @@ dependencies = [
  "iddqd",
  "ipnetwork",
  "itertools 0.14.0",
+ "key-manager-types",
  "libc",
  "macaddr",
  "nix 0.30.1",
@@ -5870,6 +5871,7 @@ version = "0.1.0"
 dependencies = [
  "async-trait",
  "hkdf",
+ "key-manager-types",
  "omicron-common",
  "omicron-workspace-hack",
  "secrecy 0.10.3",
@@ -5878,6 +5880,14 @@ dependencies = [
  "thiserror 2.0.18",
  "tokio",
  "zeroize",
+]
+
+[[package]]
+name = "key-manager-types"
+version = "0.1.0"
+dependencies = [
+ "omicron-workspace-hack",
+ "secrecy 0.10.3",
 ]
 
 [[package]]
@@ -13219,6 +13229,7 @@ dependencies = [
  "illumos-utils",
  "installinator-common",
  "key-manager",
+ "key-manager-types",
  "ntp-admin-client",
  "omicron-common",
  "omicron-test-utils",
@@ -13229,6 +13240,7 @@ dependencies = [
  "regex",
  "schemars 0.8.22",
  "scopeguard",
+ "secrecy 0.10.3",
  "serde",
  "serde_json",
  "sha2",
@@ -13244,6 +13256,7 @@ dependencies = [
  "test-strategy",
  "thiserror 2.0.18",
  "tokio",
+ "trust-quorum-types",
  "tufaceous-artifact",
  "xshell",
  "zone 0.3.1",

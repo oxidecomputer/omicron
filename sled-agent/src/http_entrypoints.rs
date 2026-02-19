@@ -836,17 +836,6 @@ impl SledAgentApi for SledAgentImpl {
         let sa = rqctx.context();
         let request = body.into_inner();
 
-        // Perform some minimal validation
-        if request.start_request.body.use_trust_quorum
-            && !request.start_request.body.is_lrtq_learner
-        {
-            return Err(HttpError::for_bad_request(
-                None,
-                "New sleds must be LRTQ learners if trust quorum is in use"
-                    .to_string(),
-            ));
-        }
-
         crate::sled_agent::sled_add(
             sa.logger().clone(),
             sa.sprockets().clone(),
