@@ -9,9 +9,9 @@ use crate::app::background::tasks::support_bundle::step::CollectionStep;
 use futures::FutureExt;
 use nexus_types::internal_api::background::SupportBundleCollectionStep;
 
-mod bundle_id;
 mod ereports;
 mod host_info;
+mod metadata;
 mod reconfigurator;
 mod sled_cubby;
 mod sp_dumps;
@@ -26,7 +26,13 @@ pub fn all(cache: &Cache) -> Vec<CollectionStep> {
         CollectionStep::new(
             SupportBundleCollectionStep::STEP_BUNDLE_ID,
             Box::new(|collection, dir| {
-                bundle_id::collect(collection, dir).boxed()
+                metadata::collect_bundle_id(collection, dir).boxed()
+            }),
+        ),
+        CollectionStep::new(
+            SupportBundleCollectionStep::STEP_USER_COMMENT,
+            Box::new(|collection, dir| {
+                metadata::collect_user_comment(collection, dir).boxed()
             }),
         ),
         CollectionStep::new(

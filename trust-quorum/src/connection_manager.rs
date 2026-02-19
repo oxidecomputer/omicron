@@ -546,7 +546,7 @@ impl ConnMgr {
                     return;
                 }
             };
-            let platform_id = stream.peer_platform_id().as_str().unwrap();
+            let platform_id = stream.peer_platform_id().as_str();
             let baseboard_id = platform_id_to_baseboard_id(platform_id);
 
             // TODO: Conversion between `PlatformId` and `BaseboardId` should
@@ -814,7 +814,7 @@ impl ConnMgr {
                     return ();
                 }
             };
-            let platform_id = stream.peer_platform_id().as_str().unwrap();
+            let platform_id = stream.peer_platform_id().as_str();
             let baseboard_id = platform_id_to_baseboard_id(platform_id);
 
             // TODO: Conversion between `PlatformId` and `BaseboardId` should

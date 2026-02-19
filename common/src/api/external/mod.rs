@@ -12,6 +12,7 @@ pub mod http_pagination;
 pub use crate::address::IpVersion;
 pub use crate::api::internal::shared::AllowedSourceIps;
 pub use crate::api::internal::shared::SwitchLocation;
+pub use crate::api::internal::shared::rack_init::MaxPathConfig;
 use crate::update::ArtifactId;
 use anyhow::Context;
 use api_identity::ObjectIdentity;
@@ -284,8 +285,6 @@ impl TryFrom<String> for Name {
 }
 
 impl FromStr for Name {
-    // TODO: We should have better error types here.
-    // See https://github.com/oxidecomputer/omicron/issues/347
     type Err = String;
 
     fn from_str(value: &str) -> Result<Self, Self::Err> {
@@ -376,8 +375,6 @@ impl TryFrom<String> for NameOrId {
 }
 
 impl FromStr for NameOrId {
-    // TODO: We should have better error types here.
-    // See https://github.com/oxidecomputer/omicron/issues/347
     type Err = String;
 
     fn from_str(value: &str) -> Result<Self, Self::Err> {
@@ -957,6 +954,7 @@ pub enum ResourceType {
     DeviceAccessToken,
     DeviceAuthRequest,
     Disk,
+    ExternalSubnet,
     Fleet,
     FloatingIp,
     IdentityProvider,
@@ -1000,6 +998,9 @@ pub enum ResourceType {
     Snapshot,
     SshKey,
     SupportBundle,
+    SubnetPool,
+    SubnetPoolMember,
+    SubnetPoolSiloLink,
     Switch,
     SwitchPort,
     SwitchPortSettings,
@@ -1457,6 +1458,8 @@ pub struct Disk {
     pub state: DiskState,
     pub device_path: String,
     pub disk_type: DiskType,
+    /// Whether or not this disk is read-only.
+    pub read_only: bool,
 }
 
 /// State of a Disk
@@ -3249,8 +3252,10 @@ pub struct BgpPeer {
     /// could be vlan47 to refer to a VLAN interface.
     pub interface_name: Name,
 
-    /// The address of the host to peer with.
-    pub addr: IpAddr,
+    /// The address of the host to peer with. If not provided, this is an
+    /// unnumbered BGP session that will be established over the interface
+    /// specified by `interface_name`.
+    pub addr: Option<IpAddr>,
 
     /// How long to hold peer connections between keepalives (seconds).
     pub hold_time: u32,
@@ -3298,6 +3303,9 @@ pub struct BgpPeer {
 
     /// Associate a VLAN ID with a peer.
     pub vlan_id: Option<u16>,
+
+    /// Router lifetime in seconds for unnumbered BGP peers.
+    pub router_lifetime: u16,
 }
 
 /// A base BGP configuration.
@@ -3314,6 +3322,9 @@ pub struct BgpConfig {
     /// Optional virtual routing and forwarding identifier for this BGP
     /// configuration.
     pub vrf: Option<String>,
+
+    /// Maximum number of paths to use when multiple "best paths" exist
+    pub max_paths: MaxPathConfig,
 }
 
 /// Represents a BGP announce set by id. The id can be used with other API calls
@@ -3438,6 +3449,9 @@ pub struct BgpPeerStatus {
     /// IP address of the peer.
     pub addr: IpAddr,
 
+    /// Interface name
+    pub peer_id: String,
+
     /// Local autonomous system number.
     pub local_asn: u32,
 
@@ -3454,13 +3468,17 @@ pub struct BgpPeerStatus {
     pub switch: SwitchLocation,
 }
 
-/// The current status of a BGP peer.
-#[derive(
-    Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq, Default,
-)]
+/// Route exported to a peer.
+#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq)]
 pub struct BgpExported {
-    /// Exported routes indexed by peer address.
-    pub exports: HashMap<String, Vec<Ipv4Net>>,
+    /// Identifier for the BGP peer.
+    pub peer_id: String,
+
+    /// Switch the route is exported from.
+    pub switch: SwitchLocation,
+
+    /// The destination network prefix.
+    pub prefix: oxnet::IpNet,
 }
 
 /// Opaque object representing BGP message history for a given BGP peer. The
@@ -3515,12 +3533,12 @@ impl AggregateBgpMessageHistory {
 
 /// A route imported from a BGP peer.
 #[derive(Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq)]
-pub struct BgpImportedRouteIpv4 {
+pub struct BgpImported {
     /// The destination network prefix.
-    pub prefix: oxnet::Ipv4Net,
+    pub prefix: oxnet::IpNet,
 
     /// The nexthop the prefix is reachable through.
-    pub nexthop: Ipv4Addr,
+    pub nexthop: IpAddr,
 
     /// BGP identifier of the originating router.
     pub id: u32,

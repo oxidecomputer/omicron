@@ -38,7 +38,7 @@ use serde::{Deserialize, Serialize};
 use nexus_types::external_api::params;
 use omicron_common::api::external;
 
-use crate::{v2026010100, v2026010300};
+use crate::{v2026010100, v2026010300, v2026013000};
 
 // Re-export multicast types from v2025122300.
 // They're identical for both versions (both use NameOrId, explicit
@@ -120,22 +120,15 @@ pub struct FloatingIpCreate {
     pub pool: Option<external::NameOrId>,
 }
 
-// Converts directly to params::FloatingIpCreate using AddressSelector
-impl From<FloatingIpCreate> for params::FloatingIpCreate {
-    fn from(old: FloatingIpCreate) -> params::FloatingIpCreate {
-        let address_selector = match (old.ip, old.pool) {
-            // Explicit IP address provided
-            (Some(ip), pool) => params::AddressSelector::Explicit { ip, pool },
-            // Allocate from specified pool
-            (None, Some(pool)) => params::AddressSelector::Auto {
-                pool_selector: params::PoolSelector::Explicit { pool },
-            },
-            // Allocate from default pool
-            (None, None) => params::AddressSelector::Auto {
-                pool_selector: params::PoolSelector::Auto { ip_version: None },
-            },
-        };
-        params::FloatingIpCreate { identity: old.identity, address_selector }
+// Converts to v2026010300::FloatingIpCreate (adds ip_version: None)
+impl From<FloatingIpCreate> for v2026010300::FloatingIpCreate {
+    fn from(old: FloatingIpCreate) -> v2026010300::FloatingIpCreate {
+        v2026010300::FloatingIpCreate {
+            identity: old.identity,
+            ip: old.ip,
+            pool: old.pool,
+            ip_version: None,
+        }
     }
 }
 
@@ -164,10 +157,10 @@ pub struct InstanceCreate {
     pub multicast_groups: Vec<external::NameOrId>,
     /// A list of disks to be attached to the instance.
     #[serde(default)]
-    pub disks: Vec<params::InstanceDiskAttachment>,
+    pub disks: Vec<v2026013000::InstanceDiskAttachment>,
     /// The disk the instance is configured to boot from.
     #[serde(default)]
-    pub boot_disk: Option<params::InstanceDiskAttachment>,
+    pub boot_disk: Option<v2026013000::InstanceDiskAttachment>,
     /// An allowlist of SSH public keys to be transferred to the instance.
     pub ssh_public_keys: Option<Vec<external::NameOrId>>,
     /// Should this instance be started upon creation; true by default.
@@ -207,5 +200,48 @@ impl From<InstanceCreate> for v2026010100::InstanceCreate {
             anti_affinity_groups: old.anti_affinity_groups,
             cpu_platform: old.cpu_platform,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::test_utils::{
+        identity_strategy, optional_ip_strategy, optional_name_or_id_strategy,
+    };
+    use proptest::prelude::*;
+    use test_strategy::proptest;
+
+    fn floating_ip_create_strategy() -> impl Strategy<Value = FloatingIpCreate>
+    {
+        (
+            identity_strategy(),
+            optional_ip_strategy(),
+            optional_name_or_id_strategy(),
+        )
+            .prop_map(|(identity, ip, pool)| FloatingIpCreate {
+                identity,
+                ip,
+                pool,
+            })
+    }
+
+    /// Verifies that the conversion from v2025121200::FloatingIpCreate to
+    /// v2026010300::FloatingIpCreate preserves all existing fields, and that
+    /// the ip_version field is set to None.
+    #[proptest]
+    fn floating_ip_create_converts_correctly(
+        #[strategy(floating_ip_create_strategy())] input: FloatingIpCreate,
+    ) {
+        let output: v2026010300::FloatingIpCreate = input.clone().into();
+
+        prop_assert_eq!(input.identity.name, output.identity.name);
+        prop_assert_eq!(
+            input.identity.description,
+            output.identity.description
+        );
+        prop_assert_eq!(input.ip, output.ip);
+        prop_assert_eq!(input.pool, output.pool);
+        prop_assert_eq!(output.ip_version, None);
     }
 }

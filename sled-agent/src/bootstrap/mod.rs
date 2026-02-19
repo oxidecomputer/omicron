@@ -9,6 +9,7 @@ pub mod client;
 pub mod config;
 pub mod early_networking;
 mod http_entrypoints;
+mod http_entrypoints_lockstep;
 mod maghemite;
 pub(crate) mod params;
 mod pre_server;
@@ -18,7 +19,7 @@ pub(crate) mod rss_handle;
 pub mod secret_retriever;
 pub mod server;
 mod sprockets_server;
-pub(crate) mod trust_quorum_setup;
+//pub(crate) mod trust_quorum_setup;
 mod views;
 
 pub(crate) use pre_server::BootstrapNetworking;

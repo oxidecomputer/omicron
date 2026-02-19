@@ -29,7 +29,8 @@
 # neither included nor ignored so that we can be sure we're not missing
 # anything.
 #
-# TODO The metadata here overlaps with metadata hardcoded in `openapi-manager`.
+# TODO The metadata here overlaps with metadata hardcoded in
+# `dev-tools/dropshot-apis`.
 
 ################################################################################
 # Ignored non-client packages
@@ -175,6 +176,16 @@ label = "Bootstrap Agent"
 server_package_name = "bootstrap-agent-api"
 versioned_how = "client"
 versioned_how_reason = "depends on itself (i.e., instances call each other)"
+
+[[apis]]
+client_package_name = "bootstrap-agent-lockstep-client"
+label = "Bootstrap Agent Lockstep API"
+server_package_name = "bootstrap-agent-lockstep-api"
+versioned_how = "server"
+notes = """
+Lockstep API for rack initialization. Only used by wicketd, which is in the \
+same deployment unit (Host OS) as the sled-agent that exposes this API.
+"""
 
 [[apis]]
 client_package_name = "clickhouse-admin-keeper-client"

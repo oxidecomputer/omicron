@@ -4,6 +4,7 @@
 
 //! Common objects used for configuration
 
+use anyhow::Context;
 use std::fmt;
 use std::net::SocketAddr;
 use std::ops::Deref;
@@ -30,8 +31,8 @@ pub struct PostgresConfigWithUrl {
 }
 
 impl PostgresConfigWithUrl {
-    pub fn url(&self) -> String {
-        self.url_raw.clone()
+    pub fn url(&self) -> &str {
+        &self.url_raw
     }
 
     /// Accesses the first ip / port pair within the URL.
@@ -55,6 +56,26 @@ impl PostgresConfigWithUrl {
 
         let port = self.config.get_ports()[0];
         SocketAddr::new(ip, port)
+    }
+
+    /// Accesses all ip / port pairs within the URL.
+    ///
+    /// Returns an error if any hostname is non-TCP or not a valid IP address.
+    pub fn all_addresses(&self) -> anyhow::Result<Vec<SocketAddr>> {
+        self.config
+            .get_hosts()
+            .iter()
+            .zip(self.config.get_ports())
+            .map(|(host, port)| {
+                let tokio_postgres::config::Host::Tcp(host) = host else {
+                    anyhow::bail!("non-TCP hostname in database URL");
+                };
+                let ip: std::net::IpAddr = host
+                    .parse()
+                    .context("failed to parse host as IP address")?;
+                Ok(SocketAddr::new(ip, *port))
+            })
+            .collect()
     }
 }
 
@@ -115,5 +136,50 @@ mod test {
             &[tokio_postgres::config::Host::Tcp("10.2.3.4".to_string())]
         );
         assert_eq!(config.get_ports(), &[1789]);
+    }
+
+    #[test]
+    fn test_all_addresses_single_host() {
+        let config = "postgresql://root@10.2.3.4:1234?sslmode=disable"
+            .parse::<PostgresConfigWithUrl>()
+            .unwrap();
+        let addrs = config.all_addresses().unwrap();
+        assert_eq!(
+            addrs,
+            vec!["10.2.3.4:1234".parse::<std::net::SocketAddr>().unwrap()]
+        );
+        // Should agree with address()
+        assert_eq!(addrs[0], config.address());
+    }
+
+    #[test]
+    fn test_all_addresses_multiple_hosts() {
+        let config =
+            "postgresql://root@10.0.0.1:100,10.0.0.2:200,10.0.0.3:300/omicron?sslmode=disable"
+                .parse::<PostgresConfigWithUrl>()
+                .unwrap();
+        let addrs = config.all_addresses().unwrap();
+        assert_eq!(
+            addrs,
+            vec![
+                "10.0.0.1:100".parse::<std::net::SocketAddr>().unwrap(),
+                "10.0.0.2:200".parse::<std::net::SocketAddr>().unwrap(),
+                "10.0.0.3:300".parse::<std::net::SocketAddr>().unwrap(),
+            ]
+        );
+    }
+
+    #[test]
+    fn test_all_addresses_non_ip_hostname() {
+        // tokio_postgres parses hostnames that aren't IPs just fine,
+        // but all_addresses() should return an error for them.
+        let config = "postgresql://root@example.com:5432?sslmode=disable"
+            .parse::<PostgresConfigWithUrl>()
+            .unwrap();
+        let err = config.all_addresses().unwrap_err();
+        assert!(
+            err.to_string().contains("failed to parse host as IP address"),
+            "unexpected error: {err}"
+        );
     }
 }

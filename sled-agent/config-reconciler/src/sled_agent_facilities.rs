@@ -11,9 +11,9 @@ use illumos_utils::zpool::PathInPool;
 use omicron_common::address::Ipv6Subnet;
 use omicron_common::address::SLED_PREFIX;
 use omicron_uuid_kinds::MupdateOverrideUuid;
-use sled_agent_types::zone_images::PreparedOmicronZone;
-use sled_agent_types::zone_images::RemoveMupdateOverrideResult;
-use sled_agent_types::zone_images::ResolverStatus;
+use sled_agent_types::resolvable_files::PreparedOmicronZone;
+use sled_agent_types::resolvable_files::RemoveMupdateOverrideResult;
+use sled_agent_types::resolvable_files::ResolverStatus;
 use std::future::Future;
 use tufaceous_artifact::ArtifactHash;
 

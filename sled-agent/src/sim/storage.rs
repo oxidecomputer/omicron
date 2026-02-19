@@ -1139,7 +1139,7 @@ pub(crate) struct PhysicalDisk {
 /// Describes data being simulated within a dataset.
 pub(crate) enum DatasetContents {
     Crucible(CrucibleServer),
-    LocalStorage(LocalStorageDatasetEnsureRequest),
+    LocalStorageUnencrypted(LocalStorageDatasetEnsureRequest),
 }
 
 pub(crate) struct Zpool {
@@ -1234,12 +1234,13 @@ impl Zpool {
         let _ = self.datasets.remove(&id).expect("Failed to get the dataset");
     }
 
-    fn insert_local_storage_dataset(
+    fn insert_local_storage_unencrypted_dataset(
         &mut self,
         id: DatasetUuid,
         request: LocalStorageDatasetEnsureRequest,
     ) {
-        self.datasets.insert(id, DatasetContents::LocalStorage(request));
+        self.datasets
+            .insert(id, DatasetContents::LocalStorageUnencrypted(request));
     }
 }
 
@@ -1873,7 +1874,7 @@ impl StorageInner {
                 DatasetContents::Crucible(server) => {
                     Some((*id, server.address()))
                 }
-                DatasetContents::LocalStorage(_) => None,
+                DatasetContents::LocalStorageUnencrypted(_) => None,
             })
             .collect()
     }
@@ -1902,8 +1903,8 @@ impl StorageInner {
     ) -> Arc<CrucibleData> {
         match self.get_dataset(zpool_id, dataset_id) {
             DatasetContents::Crucible(crucible) => crucible.data.clone(),
-            DatasetContents::LocalStorage(_) => {
-                panic!("asked for Crucible, got LocalStorage!")
+            DatasetContents::LocalStorageUnencrypted(_) => {
+                panic!("asked for Crucible, got LocalStorageUnencrypted!")
             }
         }
     }
@@ -1946,7 +1947,7 @@ impl StorageInner {
             .drop_dataset(dataset_id)
     }
 
-    pub fn ensure_local_storage_dataset(
+    pub fn ensure_local_storage_unencrypted_dataset(
         &mut self,
         zpool_id: ExternalZpoolUuid,
         dataset_id: DatasetUuid,
@@ -1957,20 +1958,22 @@ impl StorageInner {
         self.zpools
             .get_mut(&zpool_id)
             .expect("Zpool does not exist")
-            .insert_local_storage_dataset(dataset_id, request);
+            .insert_local_storage_unencrypted_dataset(dataset_id, request);
     }
 
-    pub fn get_local_storage_dataset(
+    pub fn get_local_storage_unencrypted_dataset(
         &self,
         zpool_id: ZpoolUuid,
         dataset_id: DatasetUuid,
     ) -> LocalStorageDatasetEnsureRequest {
         match self.get_dataset(zpool_id, dataset_id) {
             DatasetContents::Crucible(_) => {
-                panic!("asked for LocalStorage, got Crucible!")
+                panic!("asked for LocalStorageUnencrypted, got Crucible!")
             }
 
-            DatasetContents::LocalStorage(request) => request.clone(),
+            DatasetContents::LocalStorageUnencrypted(request) => {
+                request.clone()
+            }
         }
     }
 }

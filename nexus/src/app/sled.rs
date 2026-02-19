@@ -92,14 +92,6 @@ impl super::Nexus {
         // the control plane.
         if was_modified {
             self.activate_inventory_collection();
-
-            // Signal multicast cache invalidation since sled topology changed.
-            // The reconciler will be activated via its inventory watchers.
-            if let Some(flag) =
-                &self.background_tasks_internal.multicast_invalidate_cache
-            {
-                flag.store(true, std::sync::atomic::Ordering::SeqCst);
-            }
         }
 
         Ok(())
@@ -130,15 +122,6 @@ impl super::Nexus {
         // ahead and activate it now so that those instances don't need to wait
         // for the next periodic activation before they can be cleaned up.
         self.background_tasks.task_instance_watcher.activate();
-
-        // Signal multicast cache invalidation since sled topology changed.
-        // Inventory collection will be triggered automatically, which will
-        // activate the reconciler via its inventory watchers.
-        if let Some(flag) =
-            &self.background_tasks_internal.multicast_invalidate_cache
-        {
-            flag.store(true, std::sync::atomic::Ordering::SeqCst);
-        }
 
         Ok(prev_policy)
     }
@@ -379,21 +362,5 @@ impl super::Nexus {
         let dataset = db::model::CrucibleDataset::new(id, zpool_id, address);
         self.db_datastore.crucible_dataset_upsert(dataset).await?;
         Ok(())
-    }
-
-    /// Ensure firewall rules for internal services get reflected on all the relevant sleds.
-    pub(crate) async fn plumb_service_firewall_rules(
-        &self,
-        opctx: &OpContext,
-        sleds_filter: &[SledUuid],
-    ) -> Result<(), Error> {
-        nexus_networking::plumb_service_firewall_rules(
-            &self.db_datastore,
-            opctx,
-            sleds_filter,
-            &self.opctx_alloc,
-            &self.log,
-        )
-        .await
     }
 }

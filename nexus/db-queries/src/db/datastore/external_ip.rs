@@ -58,8 +58,59 @@ use omicron_uuid_kinds::InstanceUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use ref_cast::RefCast;
 use sled_agent_types::inventory::ZoneKind;
+use slog::debug;
 use std::net::IpAddr;
 use uuid::Uuid;
+
+/// Ephemeral IPs for an instance, with one slot per IP version.
+///
+/// Only used to have something nice to return from the ephemeral IPs lookup
+/// function. The canonical data structure for representing these to the user is
+/// the list of all external IPs on an instance.
+#[derive(Debug, Clone, Default)]
+pub struct InstanceEphemeralIps {
+    pub v4: Option<ExternalIp>,
+    pub v6: Option<ExternalIp>,
+}
+
+impl InstanceEphemeralIps {
+    pub fn get(self, version: IpVersion) -> Option<ExternalIp> {
+        match version {
+            IpVersion::V4 => self.v4,
+            IpVersion::V6 => self.v6,
+        }
+    }
+}
+
+/// Floating IP allocation method.
+///
+/// Separate from `params::AddressAllocator` because pool resolution requires
+/// async authz lookup. The app layer converts API params to this type.
+#[derive(Debug, Clone)]
+pub enum FloatingIpAllocation {
+    /// Use a specific IP address. Pool is inferred from the address since
+    /// IP pool ranges cannot overlap.
+    Explicit { ip: IpAddr },
+    /// Auto-allocate from a pool.
+    Auto {
+        /// Explicit pool to allocate from. If None, uses the silo's default.
+        pool: Option<authz::IpPool>,
+        /// IP version for default pool selection.
+        /// Required if both IPv4 and IPv6 default pools exist and no explicit
+        /// pool is specified.
+        ip_version: Option<IpVersion>,
+    },
+}
+
+impl std::fmt::Display for FloatingIpAllocation {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Explicit { .. } => write!(f, "inferred"),
+            Self::Auto { pool: Some(_), .. } => write!(f, "explicit"),
+            Self::Auto { pool: None, .. } => write!(f, "default"),
+        }
+    }
+}
 
 // NOTE: This number includes the automatically-created SNAT IP for every
 // instance. We need to change that allocation so that it's only when necessary,
@@ -100,7 +151,7 @@ impl DataStore {
         pool: Option<authz::IpPool>,
         ip_version: Option<IpVersion>,
     ) -> CreateResult<ExternalIp> {
-        let authz_pool = self
+        let (authz_pool, _pool_version) = self
             .resolve_pool_for_allocation(
                 opctx,
                 pool,
@@ -144,7 +195,7 @@ impl DataStore {
         // Naturally, we now *need* to destroy the ephemeral IP if the newly alloc'd
         // IP was not attached, including on idempotent success.
 
-        let authz_pool = self
+        let (authz_pool, pool_version) = self
             .resolve_pool_for_allocation(
                 opctx,
                 pool,
@@ -152,21 +203,24 @@ impl DataStore {
                 ip_version,
             )
             .await?;
+
         let data = IncompleteExternalIp::for_ephemeral(ip_id, authz_pool.id());
 
         // We might not be able to acquire a new IP, but in the event of an
         // idempotent or double attach this failure is allowed.
         let temp_ip = self.allocate_external_ip(opctx, data).await;
         if let Err(e) = temp_ip {
-            let eip = self
-                .instance_lookup_ephemeral_ip(opctx, instance_id)
-                .await?
-                .ok_or(e)?;
-
+            // Use the pool's version for lookup when the request didn't
+            // specify one. This handles the case where an explicit pool was
+            // used and the instance already has both v4 and v6 ephemeral IPs.
+            let lookup_version = ip_version.unwrap_or(pool_version);
+            let eph_ips =
+                self.instance_lookup_ephemeral_ips(opctx, instance_id).await?;
+            let eip = eph_ips.get(lookup_version).ok_or(e)?;
             return Ok((eip, false));
         }
         let temp_ip = temp_ip?;
-        let ip_version = match temp_ip.ip {
+        let allocated_version = match temp_ip.ip {
             ipnetwork::IpNetwork::V4(_) => IpVersion::V4,
             ipnetwork::IpNetwork::V6(_) => IpVersion::V6,
         };
@@ -176,7 +230,7 @@ impl DataStore {
                 opctx,
                 temp_ip.id,
                 instance_id,
-                ip_version,
+                allocated_version,
                 IpKind::Ephemeral,
                 creating_instance,
             )
@@ -189,12 +243,14 @@ impl DataStore {
             // Idempotent case: attach failed due to a caught UniqueViolation.
             Ok(None) => {
                 self.deallocate_external_ip(opctx, temp_ip.id).await?;
-                let eip = self
-                    .instance_lookup_ephemeral_ip(opctx, instance_id)
-                    .await?
-                    .ok_or_else(|| Error::internal_error(
-                        "failed to lookup current ephemeral IP for idempotent attach"
-                    ))?;
+                let eph_ips = self
+                    .instance_lookup_ephemeral_ips(opctx, instance_id)
+                    .await?;
+                let eip = eph_ips.get(allocated_version).ok_or_else(|| {
+                    Error::internal_error(
+                        "failed to lookup current ephemeral IP for idempotent attach",
+                    )
+                })?;
                 let do_saga = eip.state != IpAttachState::Attached;
                 Ok((eip, do_saga))
             }
@@ -220,31 +276,56 @@ impl DataStore {
     }
 
     /// Allocates a floating IP address for instance usage.
-    ///
-    /// If `ip_version` is provided and no pool is specified, the default pool
-    /// lookup will be filtered to that version. If both IPv4 and IPv6 default
-    /// pools exist and `ip_version` is `None`, an error is returned.
     pub async fn allocate_floating_ip(
         &self,
         opctx: &OpContext,
         project_id: Uuid,
         identity: IdentityMetadataCreateParams,
-        ip: Option<IpAddr>,
-        pool: Option<authz::IpPool>,
-        ip_version: Option<IpVersion>,
+        allocation: FloatingIpAllocation,
     ) -> CreateResult<ExternalIp> {
         let ip_id = Uuid::new_v4();
 
-        let authz_pool = self
-            .resolve_pool_for_allocation(
-                opctx,
-                pool,
-                IpPoolType::Unicast,
-                ip_version,
-            )
-            .await?;
+        let (authz_pool, explicit_ip) = match &allocation {
+            FloatingIpAllocation::Explicit { ip } => {
+                let pool = self
+                    .ip_pool_fetch_containing_address(
+                        opctx,
+                        *ip,
+                        IpPoolType::Unicast,
+                    )
+                    .await
+                    .map_err(|e| match e {
+                        Error::ObjectNotFound { .. } => {
+                            Error::invalid_request(format!(
+                                "IP address {ip} is not in any configured pool"
+                            ))
+                        }
+                        other => other,
+                    })?;
+                (pool, Some(*ip))
+            }
+            FloatingIpAllocation::Auto { pool, ip_version } => {
+                let (pool, _pool_version) = self
+                    .resolve_pool_for_allocation(
+                        opctx,
+                        pool.clone(),
+                        IpPoolType::Unicast,
+                        *ip_version,
+                    )
+                    .await?;
+                (pool, None)
+            }
+        };
 
-        let data = if let Some(ip) = ip {
+        debug!(
+            opctx.log,
+            "floating IP allocation";
+            "pool_selection" => %allocation,
+            "pool_id" => %authz_pool.id(),
+            "project_id" => %project_id,
+        );
+
+        let data = if let Some(ip) = explicit_ip {
             IncompleteExternalIp::for_floating_explicit(
                 ip_id,
                 &Name(identity.name),
@@ -489,6 +570,7 @@ impl DataStore {
             .into_boxed()
             .filter(nic_dsl::parent_id.eq(instance_id.into_untyped_uuid()))
             .filter(nic_dsl::time_deleted.is_null())
+            .filter(nic_dsl::is_primary.eq(true))
             .filter(nic_dsl::kind.eq(NetworkInterfaceKind::Instance));
         let has_matching_ip_stack = match ip_version {
             IpVersion::V4 => base_nic_query.select(nic_dsl::ip.is_not_null()),
@@ -904,18 +986,22 @@ impl DataStore {
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 
-    /// Fetch the ephmeral IP address assigned to the provided instance, if this
-    /// has been configured.
-    pub async fn instance_lookup_ephemeral_ip(
+    /// Fetch the ephemeral IPs assigned to the provided instance.
+    pub async fn instance_lookup_ephemeral_ips(
         &self,
         opctx: &OpContext,
         instance_id: InstanceUuid,
-    ) -> LookupResult<Option<ExternalIp>> {
-        Ok(self
-            .instance_lookup_external_ips(opctx, instance_id)
-            .await?
-            .into_iter()
-            .find(|v| v.kind == IpKind::Ephemeral))
+    ) -> LookupResult<InstanceEphemeralIps> {
+        let mut result = InstanceEphemeralIps { v4: None, v6: None };
+        for ip in self.instance_lookup_external_ips(opctx, instance_id).await? {
+            if ip.kind == IpKind::Ephemeral {
+                match ip.ip {
+                    ipnetwork::IpNetwork::V4(_) => result.v4 = Some(ip),
+                    ipnetwork::IpNetwork::V6(_) => result.v6 = Some(ip),
+                }
+            }
+        }
+        Ok(result)
     }
 
     /// Fetch all external IP addresses of any kind for the provided probe.
@@ -1699,7 +1785,7 @@ mod tests {
             .await
             .expect("Should link multicast pool");
 
-        // Try to allocate floating IP
+        // Try to allocate floating IP from default pool (no pool, no IP version)
         let res = datastore
             .allocate_floating_ip(
                 &opctx,
@@ -1708,9 +1794,7 @@ mod tests {
                     name: "my-floating-ip".parse().unwrap(),
                     description: "A floating IP".to_string(),
                 },
-                None, // No specific IP
-                None, // No specific pool - use default
-                None, // No specific IP version
+                FloatingIpAllocation::Auto { pool: None, ip_version: None },
             )
             .await;
 
@@ -1773,7 +1857,7 @@ mod tests {
             .await
             .expect("Should link unicast pool");
 
-        // Now floating IP allocation should succeed
+        // Now floating IP allocation from default pool should succeed
         let floating_ip = datastore
             .allocate_floating_ip(
                 &opctx,
@@ -1782,9 +1866,7 @@ mod tests {
                     name: "my-floating-ip".parse().unwrap(),
                     description: "A floating IP".to_string(),
                 },
-                None, // No specific IP
-                None, // No specific pool - use default
-                None, // No specific IP version, but just 1 default pool
+                FloatingIpAllocation::Auto { pool: None, ip_version: None },
             )
             .await
             .expect("Floating IP allocation should succeed with unicast default pool");

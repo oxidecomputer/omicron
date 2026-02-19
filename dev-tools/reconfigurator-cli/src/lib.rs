@@ -34,16 +34,16 @@ use nexus_reconfigurator_simulation::{
 };
 use nexus_reconfigurator_simulation::{SimStateBuilder, SimTufRepoSource};
 use nexus_reconfigurator_simulation::{SimTufRepoDescription, Simulator};
-use nexus_types::deployment::execution;
+use nexus_types::deployment::ExpectedVersion;
 use nexus_types::deployment::execution::blueprint_external_dns_config;
 use nexus_types::deployment::execution::blueprint_internal_dns_config;
 use nexus_types::deployment::{Blueprint, UnstableReconfiguratorState};
 use nexus_types::deployment::{BlueprintArtifactVersion, PendingMgsUpdate};
+use nexus_types::deployment::{BlueprintExpungedZoneAccessReason, execution};
 use nexus_types::deployment::{
     BlueprintHostPhase2DesiredContents, PlannerConfig,
 };
 use nexus_types::deployment::{BlueprintSource, SledFilter};
-use nexus_types::deployment::{BlueprintZoneDisposition, ExpectedVersion};
 use nexus_types::deployment::{
     BlueprintZoneImageSource, PendingMgsUpdateDetails,
 };
@@ -2085,9 +2085,15 @@ fn cmd_sled_update_install_dataset(
     let mut state = sim.current_state().to_mut();
     let system = state.system_mut();
     let sled_id = args.sled_id.to_sled_id(system.description())?;
-    system
-        .description_mut()
-        .sled_set_zone_manifest(sled_id, description.to_boot_inventory())?;
+    system.description_mut().sled_set_zone_manifest(
+        sled_id,
+        description.to_zone_boot_inventory(),
+    )?;
+
+    system.description_mut().sled_set_measurement_manifest(
+        sled_id,
+        description.to_measurement_boot_inventory(),
+    )?;
 
     sim.commit_and_bump(
         format!(
@@ -2766,9 +2772,12 @@ fn sled_with_zone(
 ) -> anyhow::Result<SledUuid> {
     let mut parent_sled_id = None;
 
-    for sled_id in builder.sled_ids_with_zones() {
+    for sled_id in builder.current_commissioned_sleds() {
         if builder
-            .current_sled_zones(sled_id, BlueprintZoneDisposition::any)
+            .current_in_service_and_expunged_sled_zones(
+                sled_id,
+                BlueprintExpungedZoneAccessReason::ReconfiguratorCli,
+            )
             .any(|z| z.id == *zone_id)
         {
             parent_sled_id = Some(sled_id);
@@ -3460,6 +3469,9 @@ fn mupdate_source_to_description(
         let description = extract_tuf_repo_description(&sim.log, repo_path)?;
         let mut sim_source = SimTufRepoSource::new(
             description,
+            // We might consider having these be different for testing purposes
+            // but for now having them be the same is fine
+            manifest_source,
             manifest_source,
             format!("from repo at {repo_path}"),
         )?;
@@ -3482,6 +3494,7 @@ fn mupdate_source_to_description(
             TargetReleaseDescription::TufRepo(desc) => {
                 let mut sim_source = SimTufRepoSource::new(
                     desc.clone(),
+                    manifest_source,
                     manifest_source,
                     "to target release".to_owned(),
                 )?;

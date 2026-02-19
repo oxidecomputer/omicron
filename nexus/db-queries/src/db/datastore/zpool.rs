@@ -52,8 +52,8 @@ pub struct ZpoolGetForSledReservationResult {
     /// Last reported inventory size for the zpool
     pub last_inv_total_size: i64,
 
-    /// The rendezvous local storage dataset for this zpool
-    pub rendezvous_local_storage_dataset_id: DatasetUuid,
+    /// The rendezvous local storage dataset (unencrypted) for this zpool
+    pub rendezvous_local_storage_unencrypted_dataset_id: DatasetUuid,
 
     /// Upper bound on Crucible dataset usage
     pub crucible_dataset_usage: i64,
@@ -384,7 +384,7 @@ impl DataStore {
         use nexus_db_schema::schema::crucible_dataset;
         use nexus_db_schema::schema::inv_zpool;
         use nexus_db_schema::schema::physical_disk::dsl as physical_disk_dsl;
-        use nexus_db_schema::schema::rendezvous_local_storage_dataset;
+        use nexus_db_schema::schema::rendezvous_local_storage_unencrypted_dataset;
         use nexus_db_schema::schema::zpool::dsl;
 
         let conn = self.pool_connection_authorized(opctx).await?;
@@ -413,27 +413,27 @@ impl DataStore {
                     .filter(crucible_dataset::time_deleted.is_null())
                     .filter(crucible_dataset::pool_id.eq(dsl::id))
                     .single_value(),
-                rendezvous_local_storage_dataset::table
+                rendezvous_local_storage_unencrypted_dataset::table
                     .select(diesel::dsl::sum(
-                        rendezvous_local_storage_dataset::size_used,
+                        rendezvous_local_storage_unencrypted_dataset::size_used,
                     ))
                     .filter(
-                        rendezvous_local_storage_dataset::time_tombstoned
+                        rendezvous_local_storage_unencrypted_dataset::time_tombstoned
                             .is_null(),
                     )
                     .filter(
-                        rendezvous_local_storage_dataset::pool_id.eq(dsl::id),
+                        rendezvous_local_storage_unencrypted_dataset::pool_id.eq(dsl::id),
                     )
                     .single_value(),
                 //
-                rendezvous_local_storage_dataset::table
-                    .select(rendezvous_local_storage_dataset::id)
+                rendezvous_local_storage_unencrypted_dataset::table
+                    .select(rendezvous_local_storage_unencrypted_dataset::id)
                     .filter(
-                        rendezvous_local_storage_dataset::time_tombstoned
+                        rendezvous_local_storage_unencrypted_dataset::time_tombstoned
                             .is_null(),
                     )
                     .filter(
-                        rendezvous_local_storage_dataset::pool_id.eq(dsl::id),
+                        rendezvous_local_storage_unencrypted_dataset::pool_id.eq(dsl::id),
                     )
                     .single_value(),
                 // last reported total size of this pool from inventory
@@ -469,13 +469,13 @@ impl DataStore {
                 pool,
                 crucible_dataset_usage,
                 local_storage_usage,
-                rendezvous_local_storage_dataset_id,
+                rendezvous_local_storage_unencrypted_dataset_id,
                 last_inv_total_size,
             ) = tuple;
 
-            // If this zpool doesn't have a local storage dataset yet, skip it
-            let Some(rendezvous_local_storage_dataset_id) =
-                rendezvous_local_storage_dataset_id
+            // If this zpool doesn't have the local storage dataset yet, skip it
+            let Some(rendezvous_local_storage_unencrypted_dataset_id) =
+                rendezvous_local_storage_unencrypted_dataset_id
             else {
                 continue;
             };
@@ -513,9 +513,9 @@ impl DataStore {
             converted.push(ZpoolGetForSledReservationResult {
                 pool,
                 last_inv_total_size,
-                rendezvous_local_storage_dataset_id:
+                rendezvous_local_storage_unencrypted_dataset_id:
                     DatasetUuid::from_untyped_uuid(
-                        rendezvous_local_storage_dataset_id,
+                        rendezvous_local_storage_unencrypted_dataset_id,
                     ),
                 crucible_dataset_usage: crucible_dataset_usage.into(),
                 local_storage_usage: local_storage_usage.into(),

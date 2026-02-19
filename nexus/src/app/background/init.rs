@@ -91,6 +91,7 @@ use super::Driver;
 use super::driver::TaskDefinition;
 use super::tasks::abandoned_vmm_reaper;
 use super::tasks::alert_dispatcher::AlertDispatcher;
+use super::tasks::attached_subnets;
 use super::tasks::bfd;
 use super::tasks::blueprint_execution;
 use super::tasks::blueprint_load;
@@ -131,6 +132,7 @@ use super::tasks::service_firewall_rules;
 use super::tasks::support_bundle_collector;
 use super::tasks::sync_service_zone_nat::ServiceZoneNatTracker;
 use super::tasks::sync_switch_configuration::SwitchPortSettingsManager;
+use super::tasks::trust_quorum;
 use super::tasks::tuf_artifact_replication;
 use super::tasks::tuf_repo_pruner;
 use super::tasks::v2p_mappings::V2PManager;
@@ -154,7 +156,6 @@ use omicron_uuid_kinds::OmicronZoneUuid;
 use oximeter::types::ProducerRegistry;
 use std::collections::BTreeMap;
 use std::sync::Arc;
-use std::sync::atomic::AtomicBool;
 use tokio::sync::mpsc;
 use tokio::sync::watch;
 use update_common::artifacts::ArtifactsWithPlan;
@@ -168,8 +169,6 @@ pub(crate) struct BackgroundTasksInternal {
     pub(crate) external_endpoints:
         watch::Receiver<Option<external_endpoints::ExternalEndpoints>>,
     inventory_load_rx: watch::Receiver<Option<Arc<Collection>>>,
-    /// Flag to signal cache invalidation for multicast reconciler
-    pub(crate) multicast_invalidate_cache: Option<Arc<AtomicBool>>,
 }
 
 impl BackgroundTasksInternal {
@@ -192,7 +191,6 @@ pub struct BackgroundTasksInitializer {
     external_endpoints_tx:
         watch::Sender<Option<external_endpoints::ExternalEndpoints>>,
     inventory_load_tx: watch::Sender<Option<Arc<Collection>>>,
-    multicast_invalidate_flag: Arc<AtomicBool>,
 }
 
 impl BackgroundTasksInitializer {
@@ -211,15 +209,10 @@ impl BackgroundTasksInitializer {
             watch::channel(None);
         let (inventory_load_tx, inventory_load_rx) = watch::channel(None);
 
-        // Create the multicast cache invalidation flag that will be shared
-        // between the reconciler and Nexus (via `BackgroundTasksInternal`)
-        let multicast_invalidate_flag = Arc::new(AtomicBool::new(false));
-
         let initializer = BackgroundTasksInitializer {
             driver: Driver::new(),
             external_endpoints_tx,
             inventory_load_tx,
-            multicast_invalidate_flag: multicast_invalidate_flag.clone(),
         };
 
         let background_tasks = BackgroundTasks {
@@ -271,6 +264,8 @@ impl BackgroundTasksInitializer {
             task_fm_sitrep_gc: Activator::new(),
             task_probe_distributor: Activator::new(),
             task_multicast_reconciler: Activator::new(),
+            task_trust_quorum_manager: Activator::new(),
+            task_attached_subnet_manager: Activator::new(),
 
             // Handles to activate background tasks that do not get used by Nexus
             // at-large.  These background tasks are implementation details as far as
@@ -283,7 +278,6 @@ impl BackgroundTasksInitializer {
         let internal = BackgroundTasksInternal {
             external_endpoints: external_endpoints_rx,
             inventory_load_rx,
-            multicast_invalidate_cache: Some(multicast_invalidate_flag),
         };
 
         (initializer, background_tasks, internal)
@@ -360,6 +354,8 @@ impl BackgroundTasksInitializer {
             task_fm_sitrep_gc,
             task_probe_distributor,
             task_multicast_reconciler,
+            task_trust_quorum_manager,
+            task_attached_subnet_manager,
             // Add new background tasks here.  Be sure to use this binding in a
             // call to `Driver::register()` below.  That's what actually wires
             // up the Activator to the corresponding background task.
@@ -1082,16 +1078,13 @@ impl BackgroundTasksInitializer {
                 datastore.clone(),
                 resolver.clone(),
                 sagas.clone(),
+                inventory_load_watcher.clone(),
                 args.multicast_enabled,
                 config.multicast_reconciler.sled_cache_ttl_secs,
                 config.multicast_reconciler.backplane_cache_ttl_secs,
-                self.multicast_invalidate_flag.clone(),
             )),
             opctx: opctx.child(BTreeMap::new()),
-            watchers: vec![
-                Box::new(inventory_collect_watcher.clone()),
-                Box::new(inventory_load_watcher.clone()),
-            ],
+            watchers: vec![Box::new(inventory_load_watcher.clone())],
             activator: task_multicast_reconciler,
         });
 
@@ -1101,7 +1094,7 @@ impl BackgroundTasksInitializer {
             period: config.sp_ereport_ingester.period_secs,
             task_impl: Box::new(ereport_ingester::SpEreportIngester::new(
                 datastore.clone(),
-                resolver,
+                resolver.clone(),
                 nexus_id,
                 config.sp_ereport_ingester.disable,
             )),
@@ -1142,12 +1135,36 @@ impl BackgroundTasksInitializer {
             description: "distributes networking probe zones to sleds",
             period: config.probe_distributor.period_secs,
             task_impl: Box::new(probe_distributor::ProbeDistributor::new(
-                datastore,
+                datastore.clone(),
                 vpc_route_manager_tx,
             )),
             opctx: opctx.child(BTreeMap::new()),
             watchers: vec![],
             activator: task_probe_distributor,
+        });
+
+        driver.register(TaskDefinition {
+            name: "trust_quorum_manager",
+            description: "Drive trust quorum reconfigurations to completion",
+            period: config.trust_quorum.period_secs,
+            task_impl: Box::new(trust_quorum::TrustQuorumManager::new(
+                datastore.clone(),
+            )),
+            opctx: opctx.child(BTreeMap::new()),
+            watchers: vec![],
+            activator: task_trust_quorum_manager,
+        });
+
+        driver.register(TaskDefinition {
+            name: "attached_subnet_manager",
+            description: "distributes attached subnets to sleds and switch",
+            period: config.attached_subnet_manager.period_secs,
+            task_impl: Box::new(attached_subnets::Manager::new(
+                resolver, datastore,
+            )),
+            opctx: opctx.child(BTreeMap::new()),
+            watchers: vec![],
+            activator: task_attached_subnet_manager,
         });
 
         driver

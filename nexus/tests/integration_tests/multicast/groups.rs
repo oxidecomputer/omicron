@@ -37,7 +37,7 @@ use nexus_test_utils::http_testing::{
 use nexus_test_utils::resource_helpers::{
     create_default_ip_pools, create_instance, create_project, link_ip_pool,
     object_create, object_create_error, object_delete, object_delete_error,
-    object_get, object_get_error, object_put_error, object_put_upsert,
+    object_get, object_get_error, object_put_error,
 };
 use nexus_test_utils_macros::nexus_test;
 use nexus_types::external_api::params::{
@@ -192,7 +192,7 @@ async fn test_multicast_group_member_operations(
     let join_params =
         InstanceMulticastGroupJoin { source_ips: None, ip_version: None };
     let added_member: MulticastGroupMember =
-        object_put_upsert(client, &join_url, &join_params).await;
+        put_upsert(client, &join_url, &join_params).await;
 
     assert_eq!(
         added_member.instance_id.to_string(),
@@ -385,8 +385,7 @@ async fn test_instance_multicast_endpoints(
         InstanceMulticastGroupJoin { source_ips: None, ip_version: None };
     // Use PUT method and expect 201 Created (implicitly creating group1)
     let member1: MulticastGroupMember =
-        object_put_upsert(client, &instance_join_group1_url, &join_params)
-            .await;
+        put_upsert(client, &instance_join_group1_url, &join_params).await;
     assert_eq!(member1.instance_id, instance.identity.id);
 
     // Wait for group1 to become active after implicitly create
@@ -430,7 +429,7 @@ async fn test_instance_multicast_endpoints(
     let join_params2 =
         InstanceMulticastGroupJoin { source_ips: None, ip_version: None };
     let member2: MulticastGroupMember =
-        object_put_upsert(client, &join_group2_url, &join_params2).await;
+        put_upsert(client, &join_group2_url, &join_params2).await;
     assert_eq!(member2.instance_id, instance.identity.id);
 
     // Wait for group2 to become active after implicitly create
@@ -604,59 +603,6 @@ async fn test_multicast_group_member_errors(
 }
 
 #[nexus_test]
-async fn test_lookup_multicast_group_by_ip(
-    cptestctx: &ControlPlaneTestContext,
-) {
-    let client = &cptestctx.external_client;
-    let project_name = "test-project";
-    let group_name = "test-lookup-group";
-
-    // Create project and IP pools in parallel
-    ops::join3(
-        create_project(&client, project_name),
-        create_default_ip_pools(&client),
-        create_multicast_ip_pool_with_range(
-            &client,
-            "mcast-pool",
-            (224, 7, 0, 10),
-            (224, 7, 0, 255),
-        ),
-    )
-    .await;
-
-    // Implicitly create multicast group by adding an instance as first member
-    let instance_name = "lookup-test-instance";
-    create_instance(client, project_name, instance_name).await;
-
-    // Use instance-centric API to join group (implicit group creation)
-    multicast_group_attach(cptestctx, project_name, instance_name, group_name)
-        .await;
-
-    // Wait for group to become active
-    wait_for_group_active(&client, group_name).await;
-
-    // Get the group to find its auto-allocated IP address
-    let created_group: MulticastGroup =
-        object_get(client, &mcast_group_url(group_name)).await;
-    let multicast_ip = created_group.multicast_ip;
-
-    // Test lookup by IP (using the auto-allocated IP) via the main endpoint
-    // The main multicast-groups endpoint now accepts Name, ID, or IP
-    let lookup_url = format!("/v1/multicast-groups/{multicast_ip}");
-    let found_group: MulticastGroup = object_get(client, &lookup_url).await;
-    assert_groups_eq(&created_group, &found_group);
-
-    // Test lookup with nonexistent IP
-    let nonexistent_ip = IpAddr::V4(Ipv4Addr::new(224, 0, 1, 200));
-    let lookup_bad_url = format!("/v1/multicast-groups/{nonexistent_ip}");
-
-    object_get_error(client, &lookup_bad_url, StatusCode::NOT_FOUND).await;
-
-    cleanup_instances(cptestctx, client, project_name, &[instance_name]).await;
-    wait_for_group_deleted(cptestctx, group_name).await;
-}
-
-#[nexus_test]
 async fn test_instance_deletion_removes_multicast_memberships(
     cptestctx: &ControlPlaneTestContext,
 ) {
@@ -759,7 +705,7 @@ async fn test_member_response_includes_multicast_ip(
 
     // Add member and verify multicast_ip field is present in response
     let added_member: MulticastGroupMember =
-        object_put_upsert(client, &join_url, &join_params).await;
+        put_upsert(client, &join_url, &join_params).await;
 
     // Wait for group to become active
     wait_for_group_active(client, group_name).await;
@@ -812,7 +758,7 @@ async fn test_member_response_includes_multicast_ip(
 
     // Re-create group by adding member again
     let readded_member: MulticastGroupMember =
-        object_put_upsert(client, &join_url, &join_params).await;
+        put_upsert(client, &join_url, &join_params).await;
 
     wait_for_group_active(client, group_name).await;
 
@@ -945,97 +891,92 @@ async fn test_cannot_delete_multicast_pool_with_groups(
         .expect("Should be able to delete pool after ranges are deleted");
 }
 
-/// Assert that two multicast groups are equal in all fields.
-fn assert_groups_eq(left: &MulticastGroup, right: &MulticastGroup) {
-    assert_eq!(left.identity.id, right.identity.id);
-    assert_eq!(left.identity.name, right.identity.name);
-    assert_eq!(left.identity.description, right.identity.description);
-    assert_eq!(left.multicast_ip, right.multicast_ip);
-    assert_eq!(left.source_ips, right.source_ips);
-    assert_eq!(left.mvlan, right.mvlan);
-    assert_eq!(left.ip_pool_id, right.ip_pool_id);
-}
-
-/// Test that source IPs are validated when joining a multicast group.
+/// Consolidated test for SSM (Source-Specific Multicast) source IP behavior.
 ///
-/// Source IPs enable Source-Specific Multicast (SSM) where traffic is filtered
-/// by both destination (multicast IP) and source addresses.
+/// This test covers:
+/// - Source IP union on group view (multiple members with different sources)
+/// - IPv4/IPv6 source address family validation
+/// - Multiple SSM groups from same pool with different sources
 ///
-/// Also verifies that the group view's `source_ips` field contains the
-/// union of all member source IPs.
+/// SSM groups (232.0.0.0/8 for IPv4, ff3x::/32 for IPv6) require source IPs
+/// to be specified on join. The group's `source_ips` field shows the union
+/// of all member sources.
 #[nexus_test]
-async fn test_source_ip_validation_on_join(
-    cptestctx: &ControlPlaneTestContext,
-) {
+async fn test_ssm_source_ip_behavior(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
-    let project_name = "source-ip-validation-project";
-    let instance_name = "source-ip-test-instance";
-    let instance2_name = "source-ip-test-instance-2";
-    let instance3_name = "source-ip-test-instance-3";
-
-    // SSM IP address (232.x.x.x range)
-    let ssm_ip = "232.1.0.100";
+    let project_name = "ssm-source-ip-test";
 
     // Create project and IP pools in parallel
-    ops::join3(
+    // SSM pool uses 232.x.x.x range with enough IPs for multiple groups
+    let (_, _, ssm_pool) = ops::join3(
         create_project(&client, project_name),
         create_default_ip_pools(&client),
         create_multicast_ip_pool_with_range(
             &client,
-            "source-ip-mcast-pool",
+            "ssm-test-pool",
             (232, 1, 0, 1),
-            (232, 1, 0, 255),
+            (232, 1, 0, 100),
         ),
     )
     .await;
 
-    // Create instances
-    create_instance(client, project_name, instance_name).await;
-    create_instance(client, project_name, instance2_name).await;
-    create_instance(client, project_name, instance3_name).await;
+    // Also create IPv6 pool for address family validation tests
+    create_multicast_ip_pool_v6(&client, "ssm-test-pool-v6").await;
 
+    // Create instances for all test cases
+    let instance_names = [
+        "ssm-inst-1",
+        "ssm-inst-2",
+        "ssm-inst-3",
+        "ssm-inst-4",
+        "ssm-inst-5",
+        "ssm-inst-6",
+    ];
+    for name in &instance_names {
+        create_instance(client, project_name, name).await;
+    }
+
+    // Case: Source IP union on group view
+    // Multiple members join with different sources, group view shows union
+    let ssm_union_ip = "232.1.0.10";
     let source1 = IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1));
     let source2 = IpAddr::V4(Ipv4Addr::new(10, 0, 0, 2));
     let source3 = IpAddr::V4(Ipv4Addr::new(10, 0, 0, 3));
 
     // First instance joins with source1 - creates SSM group
     let join_url1 = format!(
-        "/v1/instances/{instance_name}/multicast-groups/{ssm_ip}?project={project_name}"
+        "/v1/instances/{}/multicast-groups/{ssm_union_ip}?project={project_name}",
+        instance_names[0]
     );
     let join_body1 = InstanceMulticastGroupJoin {
         source_ips: Some(vec![source1]),
         ip_version: None,
     };
-    object_put_upsert::<_, MulticastGroupMember>(
-        client,
-        &join_url1,
-        &join_body1,
-    )
-    .await;
+    put_upsert::<_, MulticastGroupMember>(client, &join_url1, &join_body1)
+        .await;
 
     // Verify group source_ips shows source1
     let group: MulticastGroup =
-        object_get(client, &format!("/v1/multicast-groups/{ssm_ip}")).await;
+        object_get(client, &format!("/v1/multicast-groups/{ssm_union_ip}"))
+            .await;
     assert_eq!(group.source_ips, vec![source1], "Group should show source1");
 
     // Second instance joins with source1 and source2
     let join_url2 = format!(
-        "/v1/instances/{instance2_name}/multicast-groups/{ssm_ip}?project={project_name}"
+        "/v1/instances/{}/multicast-groups/{ssm_union_ip}?project={project_name}",
+        instance_names[1]
     );
     let join_body2 = InstanceMulticastGroupJoin {
         source_ips: Some(vec![source1, source2]),
         ip_version: None,
     };
-    object_put_upsert::<_, MulticastGroupMember>(
-        client,
-        &join_url2,
-        &join_body2,
-    )
-    .await;
+    put_upsert::<_, MulticastGroupMember>(client, &join_url2, &join_body2)
+        .await;
 
     // Verify group source_ips is union of member sources (sorted for comparison)
     let group: MulticastGroup =
-        object_get(client, &format!("/v1/multicast-groups/{ssm_ip}")).await;
+        object_get(client, &format!("/v1/multicast-groups/{ssm_union_ip}"))
+            .await;
     let mut actual_sources = group.source_ips.clone();
     actual_sources.sort();
     let mut expected_sources = vec![source1, source2];
@@ -1047,28 +988,26 @@ async fn test_source_ip_validation_on_join(
 
     // Third instance joins with source3 - union should now include all three
     let join_url3 = format!(
-        "/v1/instances/{instance3_name}/multicast-groups/{ssm_ip}?project={project_name}"
+        "/v1/instances/{}/multicast-groups/{ssm_union_ip}?project={project_name}",
+        instance_names[2]
     );
     let join_body3 = InstanceMulticastGroupJoin {
         source_ips: Some(vec![source3]),
         ip_version: None,
     };
-    object_put_upsert::<_, MulticastGroupMember>(
-        client,
-        &join_url3,
-        &join_body3,
-    )
-    .await;
+    put_upsert::<_, MulticastGroupMember>(client, &join_url3, &join_body3)
+        .await;
 
     // Verify group source_ips is union of all three members' sources
     let group: MulticastGroup =
-        object_get(client, &format!("/v1/multicast-groups/{ssm_ip}")).await;
+        object_get(client, &format!("/v1/multicast-groups/{ssm_union_ip}"))
+            .await;
     let mut actual_sources = group.source_ips.clone();
     actual_sources.sort();
-    let mut expected_sources = vec![source1, source2, source3];
-    expected_sources.sort();
+    let mut expected_union_sources = vec![source1, source2, source3];
+    expected_union_sources.sort();
     assert_eq!(
-        actual_sources, expected_sources,
+        actual_sources, expected_union_sources,
         "Group source_ips should be union of all member sources"
     );
 
@@ -1086,12 +1025,12 @@ async fn test_source_ip_validation_on_join(
     let listed_group = groups
         .all_items
         .iter()
-        .find(|g| g.multicast_ip.to_string() == ssm_ip)
+        .find(|g| g.multicast_ip.to_string() == ssm_union_ip)
         .expect("SSM group should appear in list");
     let mut listed_sources = listed_group.source_ips.clone();
     listed_sources.sort();
     assert_eq!(
-        listed_sources, expected_sources,
+        listed_sources, expected_union_sources,
         "List endpoint should also return source_ips as union"
     );
 
@@ -1099,7 +1038,7 @@ async fn test_source_ip_validation_on_join(
     wait_for_multicast_reconciler(&cptestctx.lockstep_client).await;
 
     // Verify DPD external group contains the union of sources
-    let multicast_ip: IpAddr = ssm_ip.parse().unwrap();
+    let multicast_ip: IpAddr = ssm_union_ip.parse().unwrap();
     let dpd_response = dpd_client(cptestctx)
         .multicast_group_get(&multicast_ip)
         .await
@@ -1125,67 +1064,25 @@ async fn test_source_ip_validation_on_join(
     dpd_source_ips.sort();
 
     assert_eq!(
-        dpd_source_ips, expected_sources,
+        dpd_source_ips, expected_union_sources,
         "DPD external group sources should be union of all member sources"
     );
 
-    // Cleanup
-    cleanup_instances(
-        cptestctx,
-        client,
-        project_name,
-        &[instance_name, instance2_name, instance3_name],
-    )
-    .await;
-    wait_for_group_deleted(cptestctx, ssm_ip).await;
-}
-
-/// Test that source IP address family must match multicast group address family.
-///
-/// IPv4 multicast groups can only have IPv4 source IPs, and vice versa.
-/// This test covers both directions:
-/// - IPv6 sources with IPv4 group (fails)
-/// - IPv4 sources with IPv6 group (fails)
-#[nexus_test]
-async fn test_source_ip_address_family_validation(
-    cptestctx: &ControlPlaneTestContext,
-) {
-    let client = &cptestctx.external_client;
-    let project_name = "addr-family-validation-project";
-    let instance_name = "addr-family-test-instance";
-
-    // IPv4 SSM address
-    let ipv4_ssm_ip = "232.5.0.100";
-
-    // Create project and both IPv4 and IPv6 multicast pools
-    ops::join4(
-        create_project(&client, project_name),
-        create_default_ip_pools(&client),
-        create_multicast_ip_pool_with_range(
-            &client,
-            "addr-family-mcast-pool-v4",
-            (232, 5, 0, 1),
-            (232, 5, 0, 255),
-        ),
-        create_multicast_ip_pool_v6(&client, "addr-family-mcast-pool-v6"),
-    )
-    .await;
-
-    create_instance(client, project_name, instance_name).await;
-
-    // Try to join IPv4 group with IPv6 source - should fail
+    // Case: IPv6 source with IPv4 group should fail
+    let ipv4_ssm_ip = "232.1.0.20";
     let ipv6_source: IpAddr = "2001:db8::1".parse().unwrap();
-    let join_url = format!(
-        "/v1/instances/{instance_name}/multicast-groups/{ipv4_ssm_ip}?project={project_name}"
+    let join_url_v4_with_v6 = format!(
+        "/v1/instances/{}/multicast-groups/{ipv4_ssm_ip}?project={project_name}",
+        instance_names[3]
     );
-    let join_body = InstanceMulticastGroupJoin {
+    let join_body_v4_with_v6 = InstanceMulticastGroupJoin {
         source_ips: Some(vec![ipv6_source]),
         ip_version: None,
     };
 
     let error = NexusRequest::new(
-        RequestBuilder::new(client, Method::PUT, &join_url)
-            .body(Some(&join_body))
+        RequestBuilder::new(client, Method::PUT, &join_url_v4_with_v6)
+            .body(Some(&join_body_v4_with_v6))
             .expect_status(Some(StatusCode::BAD_REQUEST)),
     )
     .authn_as(AuthnMode::PrivilegedUser)
@@ -1202,19 +1099,20 @@ async fn test_source_ip_address_family_validation(
         error.error_code
     );
 
-    // Try to join IPv6 group with IPv4 source - should fail
+    // Case: IPv4 source with IPv6 group should fail
     let ipv4_source: IpAddr = "10.0.0.1".parse().unwrap();
-    let join_url_v6 = format!(
-        "/v1/instances/{instance_name}/multicast-groups/ipv6-mismatch-group?project={project_name}"
+    let join_url_v6_with_v4 = format!(
+        "/v1/instances/{}/multicast-groups/ipv6-mismatch-group?project={project_name}",
+        instance_names[3]
     );
-    let join_body_v6 = InstanceMulticastGroupJoin {
+    let join_body_v6_with_v4 = InstanceMulticastGroupJoin {
         source_ips: Some(vec![ipv4_source]),
         ip_version: Some(IpVersion::V6),
     };
 
     let error_v6 = NexusRequest::new(
-        RequestBuilder::new(client, Method::PUT, &join_url_v6)
-            .body(Some(&join_body_v6))
+        RequestBuilder::new(client, Method::PUT, &join_url_v6_with_v4)
+            .body(Some(&join_body_v6_with_v4))
             .expect_status(Some(StatusCode::BAD_REQUEST)),
     )
     .authn_as(AuthnMode::PrivilegedUser)
@@ -1231,7 +1129,102 @@ async fn test_source_ip_address_family_validation(
         error_v6.error_code
     );
 
-    cleanup_instances(cptestctx, client, project_name, &[instance_name]).await;
+    // Case: Multiple SSM groups from same pool with different sources
+    // Each instance joins a different SSM group with unique sources
+    let group_configs = [
+        ("ssm-multi-group-1", "10.1.1.1"),
+        ("ssm-multi-group-2", "10.2.2.2"),
+        ("ssm-multi-group-3", "10.3.3.3"),
+    ];
+
+    // Create 3 different SSM groups from the same pool
+    for (i, (group_name, source_ip)) in group_configs.iter().enumerate() {
+        let instance_name = instance_names[i + 3]; // Use instances 3, 4, 5
+        let join_url = format!(
+            "/v1/instances/{instance_name}/multicast-groups/{group_name}?project={project_name}"
+        );
+        let join_params = InstanceMulticastGroupJoin {
+            source_ips: Some(vec![source_ip.parse().unwrap()]),
+            ip_version: None,
+        };
+        put_upsert::<_, MulticastGroupMember>(client, &join_url, &join_params)
+            .await;
+
+        // Wait for group to become active
+        wait_for_group_active(client, group_name).await;
+    }
+
+    // Verify all groups exist with correct properties
+    let mut allocated_ips = Vec::new();
+    for (group_name, expected_source) in &group_configs {
+        let group: MulticastGroup =
+            object_get(client, &mcast_group_url(group_name)).await;
+
+        // Verify pool reference
+        assert_eq!(
+            group.ip_pool_id, ssm_pool.identity.id,
+            "Group {group_name} should reference the shared SSM pool"
+        );
+
+        // Verify SSM range (232.x.x.x)
+        if let IpAddr::V4(ip) = group.multicast_ip {
+            assert_eq!(
+                ip.octets()[0],
+                232,
+                "Group {group_name} should have IP in SSM range (232.x.x.x)"
+            );
+            assert_eq!(
+                ip.octets()[1],
+                1,
+                "Group {group_name} should have IP from pool range (232.1.x.x)"
+            );
+        } else {
+            panic!("Expected IPv4 multicast address for group {group_name}");
+        }
+
+        // Verify source IPs
+        assert_eq!(
+            group.source_ips.len(),
+            1,
+            "Group {group_name} should have exactly 1 source IP"
+        );
+        assert_eq!(
+            group.source_ips[0].to_string(),
+            *expected_source,
+            "Group {group_name} should have correct source IP"
+        );
+
+        // Collect allocated IP for uniqueness check
+        allocated_ips.push(group.multicast_ip);
+    }
+
+    // Verify all allocated IPs are unique
+    let unique_ips: std::collections::HashSet<_> =
+        allocated_ips.iter().collect();
+    assert_eq!(
+        unique_ips.len(),
+        allocated_ips.len(),
+        "All SSM groups should have unique multicast IPs from the pool"
+    );
+
+    // Verify we can list all members for each group
+    for (group_name, _) in &group_configs {
+        let members = list_multicast_group_members(&client, group_name).await;
+        assert_eq!(
+            members.len(),
+            1,
+            "Group {group_name} should have exactly 1 member"
+        );
+    }
+
+    // Cleanup all instances and wait for groups to be deleted
+    cleanup_instances(cptestctx, client, project_name, &instance_names).await;
+
+    // Wait for all groups to be deleted
+    wait_for_group_deleted(cptestctx, ssm_union_ip).await;
+    for (group_name, _) in &group_configs {
+        wait_for_group_deleted(cptestctx, group_name).await;
+    }
 }
 
 /// Test default pool behavior when no pool is specified on member join.
@@ -1382,175 +1375,6 @@ async fn test_pool_range_allocation(cptestctx: &ControlPlaneTestContext) {
     .await;
 }
 
-/// Test multiple instances joining different SSM groups from the same SSM pool.
-///
-/// Verifies:
-/// - Pool allocates unique multicast IPs to each SSM group
-/// - Different SSM groups can coexist with different source IP requirements
-/// - Proper isolation between SSM groups on the same pool
-#[nexus_test]
-async fn test_multiple_ssm_groups_same_pool(
-    cptestctx: &ControlPlaneTestContext,
-) {
-    let client = &cptestctx.external_client;
-    let project_name = "multiple-ssm-test";
-
-    // Create project and IP pools in parallel
-    let (_, _, ssm_pool) = ops::join3(
-        create_project(&client, project_name),
-        create_default_ip_pools(&client),
-        create_multicast_ip_pool_with_range(
-            &client,
-            "ssm-shared-pool",
-            (232, 50, 0, 10),
-            (232, 50, 0, 50),
-        ),
-    )
-    .await;
-
-    // Create 3 instances
-    let instance_names = ["ssm-inst-1", "ssm-inst-2", "ssm-inst-3"];
-    for name in &instance_names {
-        create_instance(client, project_name, name).await;
-    }
-
-    // Each instance joins a different SSM group with different sources
-    let group_configs = [
-        ("ssm-group-1", "10.1.1.1"),
-        ("ssm-group-2", "10.2.2.2"),
-        ("ssm-group-3", "10.3.3.3"),
-    ];
-
-    // Create all 3 SSM groups from the same pool
-    for (i, (group_name, source_ip)) in group_configs.iter().enumerate() {
-        let instance_name = instance_names[i];
-        let join_url = format!(
-            "/v1/instances/{instance_name}/multicast-groups/{group_name}?project={project_name}"
-        );
-        let join_params = InstanceMulticastGroupJoin {
-            source_ips: Some(vec![source_ip.parse().unwrap()]),
-            ip_version: None,
-        };
-        object_put_upsert::<_, MulticastGroupMember>(
-            client,
-            &join_url,
-            &join_params,
-        )
-        .await;
-
-        // Wait for group to become active
-        wait_for_group_active(client, group_name).await;
-    }
-
-    // Verify all groups exist with correct properties
-    let mut allocated_ips = Vec::new();
-    for (group_name, expected_source) in &group_configs {
-        let group: MulticastGroup =
-            object_get(client, &mcast_group_url(group_name)).await;
-
-        // Verify pool reference
-        assert_eq!(
-            group.ip_pool_id, ssm_pool.identity.id,
-            "Group {} should reference the shared SSM pool",
-            group_name
-        );
-
-        // Verify SSM range (232.x.x.x)
-        if let IpAddr::V4(ip) = group.multicast_ip {
-            assert_eq!(
-                ip.octets()[0],
-                232,
-                "Group {} should have IP in SSM range (232.x.x.x)",
-                group_name
-            );
-            assert_eq!(
-                ip.octets()[1],
-                50,
-                "Group {} should have IP from pool range (232.50.x.x)",
-                group_name
-            );
-        } else {
-            panic!("Expected IPv4 multicast address for group {}", group_name);
-        }
-
-        // Verify source IPs
-        assert_eq!(
-            group.source_ips.len(),
-            1,
-            "Group {} should have exactly 1 source IP",
-            group_name
-        );
-        assert_eq!(
-            group.source_ips[0].to_string(),
-            *expected_source,
-            "Group {} should have correct source IP",
-            group_name
-        );
-
-        // Collect allocated IP for uniqueness check
-        allocated_ips.push(group.multicast_ip);
-    }
-
-    // Verify all allocated IPs are unique
-    let unique_ips: std::collections::HashSet<_> =
-        allocated_ips.iter().collect();
-    assert_eq!(
-        unique_ips.len(),
-        allocated_ips.len(),
-        "All SSM groups should have unique multicast IPs from the pool"
-    );
-
-    // Verify we can list all members for each group
-    for (group_name, _) in &group_configs {
-        let members = list_multicast_group_members(&client, group_name).await;
-        assert_eq!(
-            members.len(),
-            1,
-            "Group {} should have exactly 1 member",
-            group_name
-        );
-    }
-
-    // Test that instances can join groups with different source IPs (sources are per-member)
-    let instance4_name = "ssm-inst-4";
-    create_instance(client, project_name, instance4_name).await;
-
-    let different_source: IpAddr = "10.99.99.99".parse().unwrap();
-    let join_url_diff_source = format!(
-        "/v1/instances/{instance4_name}/multicast-groups/ssm-group-1?project={project_name}"
-    );
-    let join_params_diff_source = InstanceMulticastGroupJoin {
-        source_ips: Some(vec![different_source]),
-        ip_version: None,
-    };
-    object_put_upsert::<_, MulticastGroupMember>(
-        client,
-        &join_url_diff_source,
-        &join_params_diff_source,
-    )
-    .await;
-
-    // Verify group source_ips now includes both the original and new source
-    let group: MulticastGroup =
-        object_get(client, "/v1/multicast-groups/ssm-group-1").await;
-    assert!(
-        group.source_ips.contains(&different_source),
-        "Group source_ips should include new member's source"
-    );
-
-    let all_instances: Vec<_> = instance_names
-        .iter()
-        .chain(std::iter::once(&instance4_name))
-        .map(|s| *s)
-        .collect();
-    cleanup_instances(cptestctx, client, project_name, &all_instances).await;
-
-    // Verify all groups are deleted
-    for (group_name, _) in &group_configs {
-        wait_for_group_deleted(cptestctx, group_name).await;
-    }
-}
-
 /// Test multicast pool selection with custom ASM range.
 ///
 /// Verifies that joining a multicast group by name correctly allocates
@@ -1591,7 +1415,7 @@ async fn test_multicast_group_ip_version_conflict(
     let join_url = format!(
         "/v1/instances/{instance_name}/multicast-groups/conflict-test-group?project={project_name}"
     );
-    object_put_upsert::<_, MulticastGroupMember>(
+    put_upsert::<_, MulticastGroupMember>(
         client,
         &join_url,
         &InstanceMulticastGroupJoin { source_ips: None, ip_version: None },
@@ -1603,7 +1427,7 @@ async fn test_multicast_group_ip_version_conflict(
     let explicit_ip_join_url = format!(
         "/v1/instances/{instance_name}/multicast-groups/{explicit_ip}?project={project_name}"
     );
-    object_put_upsert::<_, MulticastGroupMember>(
+    put_upsert::<_, MulticastGroupMember>(
         client,
         &explicit_ip_join_url,
         &InstanceMulticastGroupJoin { source_ips: None, ip_version: None },

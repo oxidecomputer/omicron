@@ -62,15 +62,17 @@ use omicron_common::api::internal::shared::ExternalPortDiscovery;
 use omicron_common::api::internal::shared::LldpAdminStatus;
 use omicron_uuid_kinds::SledUuid;
 use oxnet::IpNet;
+use oxnet::Ipv6Net;
 use sled_agent_client::types::AddSledRequest;
 use sled_agent_client::types::StartSledAgentRequest;
 use sled_agent_client::types::StartSledAgentRequestBody;
+use sled_hardware_types::BaseboardId;
 
 use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::collections::HashMap;
-use std::net::IpAddr;
+use std::net::Ipv6Addr;
 use std::num::NonZeroU32;
 use std::str::FromStr;
 use uuid::Uuid;
@@ -401,8 +403,8 @@ impl super::Nexus {
 
         let kind = AddressLotKind::Infra;
 
-        let first_address = IpAddr::V4(rack_network_config.infra_ip_first);
-        let last_address = IpAddr::V4(rack_network_config.infra_ip_last);
+        let first_address = rack_network_config.infra_ip_first;
+        let last_address = rack_network_config.infra_ip_last;
         let ipv4_block = AddressLotBlockCreate { first_address, last_address };
 
         let blocks = vec![ipv4_block];
@@ -453,10 +455,7 @@ impl super::Nexus {
                         blocks: bgp_config
                             .originate
                             .iter()
-                            .map(|o| AddressLotBlockCreate {
-                                first_address: o.first_addr().into(),
-                                last_address: o.last_addr().into(),
-                            })
+                            .map(|ipnet| (*ipnet).into())
                             .collect(),
                     },
                 )
@@ -487,13 +486,13 @@ impl super::Nexus {
                         announcement: bgp_config
                             .originate
                             .iter()
-                            .map(|ipv4_net| BgpAnnouncementCreate {
+                            .map(|ipnet| BgpAnnouncementCreate {
                                 address_lot_block: NameOrId::Name(
                                     format!("as{}", bgp_config.asn)
                                         .parse()
                                         .unwrap(),
                                 ),
-                                network: (*ipv4_net).into(),
+                                network: *ipnet,
                             })
                             .collect(),
                     },
@@ -527,6 +526,7 @@ impl super::Nexus {
                         vrf: None,
                         shaper: bgp_config.shaper.clone(),
                         checker: bgp_config.checker.clone(),
+                        max_paths: bgp_config.max_paths,
                     },
                 )
                 .await
@@ -579,7 +579,9 @@ impl super::Nexus {
                 .iter()
                 .map(|a| Address {
                     address_lot: NameOrId::Name(address_lot_name.clone()),
-                    address: a.address,
+                    address: a.address.unwrap_or_else(|| {
+                        IpNet::V6(Ipv6Net::host_net(Ipv6Addr::UNSPECIFIED))
+                    }),
                     vlan_id: a.vlan_id,
                 })
                 .collect();
@@ -615,7 +617,11 @@ impl super::Nexus {
                         format!("as{}", r.asn).parse().unwrap(),
                     ),
                     interface_name: link_name.clone(),
-                    addr: r.addr.into(),
+                    addr: if r.addr.is_unspecified() {
+                        None
+                    } else {
+                        Some(r.addr)
+                    },
                     hold_time: r.hold_time() as u32,
                     idle_hold_time: r.idle_hold_time() as u32,
                     delay_open: r.delay_open() as u32,
@@ -631,6 +637,7 @@ impl super::Nexus {
                     allowed_import: r.allowed_import.clone(),
                     allowed_export: r.allowed_export.clone(),
                     vlan_id: r.vlan_id,
+                    router_lifetime: r.router_lifetime.as_u16(),
                 })
                 .collect();
 
@@ -739,8 +746,10 @@ impl super::Nexus {
             )
             .await?;
 
-        // Plumb the firewall rules for the built-in services
-        self.plumb_service_firewall_rules(opctx, &[]).await?;
+        // Note: Service firewall rules are plumbed in Server::start() via
+        // await_ip_allowlist_plumbing(), which runs before the external HTTP
+        // server starts. This ensures rules are in place for both fresh rack
+        // initialization and Nexus restart scenarios.
 
         // We've potentially updated the list of DNS servers and the DNS
         // configuration for both internal and external DNS, plus the Silo
@@ -890,7 +899,7 @@ impl super::Nexus {
         };
 
         // Convert `UninitializedSledId` to the sled-agent type
-        let baseboard_id = sled_agent_client::types::BaseboardId {
+        let baseboard_id = BaseboardId {
             serial_number: sled.serial.clone(),
             part_number: sled.part.clone(),
         };
