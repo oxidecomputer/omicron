@@ -31,6 +31,8 @@ use omicron_common::api::external::InternalContext;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::LookupType;
+use slog::Logger;
+use slog::warn;
 use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -339,6 +341,7 @@ impl super::Nexus {
                             &current_blueprint,
                             &current_version,
                             &new_system_version,
+                            &self.log,
                         )
                     }
                     SetTargetReleaseIntent::RecoverFromMupdate => {
@@ -463,9 +466,11 @@ fn validate_can_set_target_release_for_mupdate_recovery(
 fn validate_update_version_number_ordering(
     current_version: &semver::Version,
     proposed_new_version: &semver::Version,
+    log: &Logger,
 ) -> Result<(), TargetReleaseChangeError> {
     // We cannot update to the _identical_ version we're already at.
     if proposed_new_version == current_version {
+        warn!(log, "cannot start update: attempt to update to current version");
         return Err(TargetReleaseChangeError::UpdateToIdenticalVersion(
             current_version.clone(),
         ));
@@ -473,6 +478,10 @@ fn validate_update_version_number_ordering(
 
     // We cannot skip major versions.
     if proposed_new_version.major > current_version.major + 1 {
+        warn!(
+            log,
+            "cannot start update: attempt to update past next major version"
+        );
         return Err(TargetReleaseChangeError::CannotSkipMajorVersion {
             current: current_version.major,
             proposed: proposed_new_version.major,
@@ -499,6 +508,7 @@ fn validate_update_version_number_ordering(
         proposed_new_version < current_version
     };
     if is_downgrade {
+        warn!(log, "cannot start update: attempt to downgrade");
         return Err(TargetReleaseChangeError::CannotDowngrade {
             current: current_version.clone(),
             proposed: proposed_new_version.clone(),
@@ -528,10 +538,16 @@ fn validate_can_set_target_release_for_update(
     current_blueprint: &Blueprint,
     current_target_version: &semver::Version,
     proposed_new_version: &semver::Version,
+    log: &Logger,
 ) -> Result<(), TargetReleaseChangeError> {
+    let log = log.new(slog::o!(
+        "current_version" => current_target_version.to_string(),
+        "proposed_version" => proposed_new_version.to_string(),
+    ));
     validate_update_version_number_ordering(
         current_target_version,
         proposed_new_version,
+        &log,
     )?;
 
     // Convert this to a string; comparing "system version as a string" to
@@ -541,9 +557,14 @@ fn validate_can_set_target_release_for_update(
     let current_target_version = current_target_version.to_string();
 
     // Check sled configs first.
-    for (_, sled_config) in current_blueprint.active_sled_configs() {
+    for (sled_id, sled_config) in current_blueprint.active_sled_configs() {
         if sled_config.remove_mupdate_override.is_some() {
             // A mupdate has occurred; we must not allow an update.
+            warn!(
+                log,
+                "cannot start update: mupdate override in place";
+                "sled_id" => %sled_id,
+            );
             return Err(TargetReleaseChangeError::WaitingForMupdateToBeCleared);
         }
 
@@ -595,20 +616,36 @@ fn validate_can_set_target_release_for_update(
         // upgrading to it.
         if !found_current_version_in_either_slot {
             if found_current_contents_in_either_slot {
+                warn!(
+                    log,
+                    "cannot start update: host OS has been mupdated";
+                    "sled_id" => %sled_id,
+                );
                 return Err(
                     TargetReleaseChangeError::WaitingForMupdateToBeCleared,
                 );
             } else {
+                warn!(
+                    log,
+                    "cannot start update: host OS update not complete";
+                    "sled_id" => %sled_id,
+                );
                 return Err(TargetReleaseChangeError::PreviousUpdateInProgress);
             }
         }
     }
 
     // Now check zone configs.
-    for (_, zone_config) in current_blueprint.in_service_zones() {
+    for (sled_id, zone_config) in current_blueprint.in_service_zones() {
         match &zone_config.image_source {
             BlueprintZoneImageSource::InstallDataset => {
                 // A mupdate has occurred; we must not allow an update.
+                warn!(
+                    log,
+                    "cannot start update: zone image source is install dataset";
+                    "sled_id" => %sled_id,
+                    "zone_id" => %zone_config.id,
+                );
                 return Err(
                     TargetReleaseChangeError::WaitingForMupdateToBeCleared,
                 );
@@ -620,6 +657,14 @@ fn validate_can_set_target_release_for_update(
                             // We found a zone not yet on the current target
                             // version; the previous upgrade is not yet
                             // complete.
+                            warn!(
+                                log,
+                                "cannot start update: \
+                                 zone image source is out of date";
+                                "sled_id" => %sled_id,
+                                "zone_id" => %zone_config.id,
+                                "zone_version" => %version,
+                            );
                             return Err(TargetReleaseChangeError::PreviousUpdateInProgress);
                         }
                     }
@@ -631,6 +676,13 @@ fn validate_can_set_target_release_for_update(
                         // hashes?
                         //
                         // For now, treat this as "not the current version".
+                        warn!(
+                            log,
+                            "cannot start update: \
+                             zone image source version is unknown";
+                            "sled_id" => %sled_id,
+                            "zone_id" => %zone_config.id,
+                        );
                         return Err(
                             TargetReleaseChangeError::PreviousUpdateInProgress,
                         );
@@ -657,7 +709,6 @@ mod tests {
     use nexus_types::deployment::BlueprintHostPhase2DesiredSlots;
     use omicron_test_utils::dev::test_setup_log;
     use omicron_uuid_kinds::MupdateOverrideUuid;
-    use slog::Logger;
     use tufaceous_artifact::ArtifactHash;
     use tufaceous_artifact::ArtifactVersion;
 
@@ -740,7 +791,8 @@ mod tests {
                 validate_can_set_target_release_for_update(
                     &blueprint,
                     &current_version,
-                    &v
+                    &v,
+                    log,
                 ),
                 Ok(()),
                 "should be able to update from {current_version} to {v}"
@@ -788,6 +840,7 @@ mod tests {
                 &blueprint,
                 &current_version,
                 v,
+                log,
             ) {
                 Ok(()) => panic!(
                     "unexpected success updating from {current_version} to {v}"
@@ -827,7 +880,8 @@ mod tests {
             validate_can_set_target_release_for_update(
                 &blueprint,
                 &current_version,
-                &next_version
+                &next_version,
+                log,
             ),
             Ok(()),
             "should be able to update from {current_version} to {next_version}"
@@ -976,6 +1030,7 @@ mod tests {
                 &blueprint,
                 &current_version,
                 &next_version,
+                log,
             ) {
                 Ok(()) => {
                     panic!("unexpected success with blueprint: {description}")
