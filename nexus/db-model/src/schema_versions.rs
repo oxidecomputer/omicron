@@ -11,7 +11,8 @@ use camino::Utf8Path;
 use regex::Regex;
 use semver::Version;
 use sqlparser::ast::{
-    AlterColumnOperation, AlterTableOperation, Statement, TableConstraint,
+    AlterColumnOperation, AlterTableOperation, ColumnOption, Expr,
+    GeneratedExpressionMode, Statement, TableConstraint, Value, ValueWithSpan,
 };
 use sqlparser::dialect::PostgreSqlDialect;
 use sqlparser::parser::Parser;
@@ -333,19 +334,50 @@ impl std::fmt::Display for SqlIdentifier {
 ///    backfill in CockroachDB (e.g., CREATE INDEX, ADD CONSTRAINT)
 #[derive(Debug, Clone, PartialEq)]
 pub enum SchemaChangeInfo {
-    CreateIndex {
+    /// `ALTER TABLE ... ADD COLUMN` where CockroachDB's
+    /// `ColumnNeedsBackfill` returns true.
+    ///
+    /// This covers:
+    /// - NOT NULL columns (with or without a default)
+    /// - Nullable columns with a non-NULL default expression
+    /// - Stored computed columns (`GENERATED ALWAYS AS (expr) STORED`)
+    ///
+    /// CockroachDB runs an async column backfill job to write the
+    /// default/computed value (or validate the NOT NULL constraint)
+    /// for all existing rows.
+    AddColumnNeedsBackfill {
         table_name: SqlIdentifier,
-        index_name: SqlIdentifier,
+        column_name: SqlIdentifier,
     },
+
+    /// `ALTER TABLE ... ALTER COLUMN ... SET NOT NULL`
+    ///
+    /// CockroachDB adds a NOT-NULL check constraint in `Validating`
+    /// state, then runs an async validation job that scans the table
+    /// to verify no NULL values exist.
     AlterColumnSetNotNull {
         table_name: SqlIdentifier,
         column_name: SqlIdentifier,
     },
+
+    /// `ALTER TABLE ... ADD CONSTRAINT ...` (CHECK, UNIQUE, FK)
+    ///
+    /// CockroachDB adds the constraint in `Validating` state, then
+    /// runs an async validation job that scans existing rows to
+    /// verify they satisfy the constraint.
     AlterTableAddConstraint {
         table_name: SqlIdentifier,
         constraint_name: SqlIdentifier,
     },
-    /// Any DDL statement that doesn't need a verification query.
+
+    /// `CREATE [UNIQUE] INDEX ...`
+    ///
+    /// CockroachDB runs an async backfill job to populate the index
+    /// over all existing rows. See issue #9866.
+    CreateIndex { table_name: SqlIdentifier, index_name: SqlIdentifier },
+
+    /// Any DDL that does not involve an async backfill or validation
+    /// job (e.g., CREATE TABLE, DROP TABLE, ALTER TYPE ADD VALUE).
     OtherDdl,
 }
 
@@ -401,6 +433,29 @@ impl SchemaChangeInfo {
                         'Schema change verification failed: \
                         column {column_name} on table {table_name} \
                         is still nullable'\
+                    ) AS BOOL\
+                );"
+            )),
+            SchemaChangeInfo::AddColumnNeedsBackfill {
+                table_name,
+                column_name,
+            } => Some(format!(
+                "SELECT CAST(\
+                    IF(\
+                        (\
+                            SELECT true WHERE EXISTS (\
+                                SELECT column_name \
+                                FROM information_schema.columns \
+                                WHERE table_schema = 'public' \
+                                AND table_name = '{table_name}' \
+                                AND column_name = '{column_name}'\
+                            )\
+                        ),\
+                        'true',\
+                        'Schema change verification failed: \
+                        column {column_name} on table {table_name} \
+                        does not exist \
+                        (backfill may not have completed)'\
                     ) AS BOOL\
                 );"
             )),
@@ -638,6 +693,63 @@ pub fn classify_sql_statements(
                                         constraint_name: cname,
                                     },
                                 );
+                            }
+                            AlterTableOperation::AddColumn {
+                                column_def,
+                                ..
+                            } => {
+                                let is_not_null =
+                                    column_def.options.iter().any(|opt| {
+                                        matches!(
+                                            opt.option,
+                                            ColumnOption::NotNull
+                                        )
+                                    });
+                                let has_non_null_default =
+                                    column_def.options.iter().any(|opt| {
+                                        matches!(
+                                            &opt.option,
+                                            ColumnOption::Default(expr)
+                                                if !matches!(
+                                                    expr,
+                                                    Expr::Value(ValueWithSpan {
+                                                        value: Value::Null,
+                                                        ..
+                                                    })
+                                                )
+                                        )
+                                    });
+                                let is_stored_computed =
+                                    column_def.options.iter().any(|opt| {
+                                        matches!(
+                                            &opt.option,
+                                            ColumnOption::Generated {
+                                                generation_expr: Some(_),
+                                                generation_expr_mode: Some(
+                                                    GeneratedExpressionMode::Stored
+                                                ),
+                                                ..
+                                            }
+                                        )
+                                    });
+                                if is_not_null
+                                    || has_non_null_default
+                                    || is_stored_computed
+                                {
+                                    changes.push(
+                                        SchemaChangeInfo::AddColumnNeedsBackfill {
+                                            table_name: tbl.clone(),
+                                            column_name: SqlIdentifier::new(
+                                                column_def
+                                                    .name
+                                                    .value
+                                                    .clone(),
+                                            )?,
+                                        },
+                                    );
+                                } else {
+                                    changes.push(SchemaChangeInfo::OtherDdl);
+                                }
                             }
                             _ => {
                                 changes.push(SchemaChangeInfo::OtherDdl);
@@ -1928,5 +2040,94 @@ mod test {
                 constraint_name: SqlIdentifier::new("new_check").unwrap(),
             }
         );
+    }
+
+    #[test]
+    fn test_classify_add_column_needs_backfill_not_null_default() {
+        let sql = "ALTER TABLE omicron.public.bgp_config \
+                    ADD COLUMN IF NOT EXISTS max_paths INT NOT NULL DEFAULT 1;";
+        let classified = classify_sql_statements(sql, "test").unwrap();
+        assert_eq!(classified.statement_count, 1);
+        assert_eq!(
+            classified.changes,
+            vec![SchemaChangeInfo::AddColumnNeedsBackfill {
+                table_name: SqlIdentifier::new("bgp_config").unwrap(),
+                column_name: SqlIdentifier::new("max_paths").unwrap(),
+            }]
+        );
+    }
+
+    #[test]
+    fn test_classify_add_column_needs_backfill_not_null_no_default() {
+        let sql = "ALTER TABLE omicron.public.my_table \
+                    ADD COLUMN my_col INT NOT NULL;";
+        let classified = classify_sql_statements(sql, "test").unwrap();
+        assert_eq!(classified.statement_count, 1);
+        assert_eq!(
+            classified.changes,
+            vec![SchemaChangeInfo::AddColumnNeedsBackfill {
+                table_name: SqlIdentifier::new("my_table").unwrap(),
+                column_name: SqlIdentifier::new("my_col").unwrap(),
+            }]
+        );
+    }
+
+    #[test]
+    fn test_classify_add_column_needs_backfill_nullable_non_null_default() {
+        // Nullable column with a non-NULL default triggers backfill
+        // (CockroachDB's ColumnNeedsBackfill: HasDefault && !HasNullDefault)
+        let sql = "ALTER TABLE omicron.public.my_table \
+                    ADD COLUMN foo INT DEFAULT 42;";
+        let classified = classify_sql_statements(sql, "test").unwrap();
+        assert_eq!(classified.statement_count, 1);
+        assert_eq!(
+            classified.changes,
+            vec![SchemaChangeInfo::AddColumnNeedsBackfill {
+                table_name: SqlIdentifier::new("my_table").unwrap(),
+                column_name: SqlIdentifier::new("foo").unwrap(),
+            }]
+        );
+    }
+
+    #[test]
+    fn test_classify_add_column_nullable_default_null() {
+        // Nullable column with DEFAULT NULL does NOT trigger backfill
+        let sql = "ALTER TABLE omicron.public.my_table \
+                    ADD COLUMN foo INT DEFAULT NULL;";
+        let classified = classify_sql_statements(sql, "test").unwrap();
+        assert_eq!(classified.statement_count, 1);
+        assert_eq!(classified.changes, vec![SchemaChangeInfo::OtherDdl]);
+    }
+
+    #[test]
+    fn test_classify_add_column_needs_backfill_stored_computed() {
+        // Stored computed column triggers backfill
+        let sql = "ALTER TABLE omicron.public.my_table \
+                    ADD COLUMN foo INT GENERATED ALWAYS AS (bar + 1) STORED;";
+        let classified = classify_sql_statements(sql, "test").unwrap();
+        assert_eq!(classified.statement_count, 1);
+        assert_eq!(
+            classified.changes,
+            vec![SchemaChangeInfo::AddColumnNeedsBackfill {
+                table_name: SqlIdentifier::new("my_table").unwrap(),
+                column_name: SqlIdentifier::new("foo").unwrap(),
+            }]
+        );
+    }
+
+    #[test]
+    fn test_verification_query_add_column_needs_backfill() {
+        let change = SchemaChangeInfo::AddColumnNeedsBackfill {
+            table_name: SqlIdentifier::new("bgp_config").unwrap(),
+            column_name: SqlIdentifier::new("max_paths").unwrap(),
+        };
+        let query = change.verification_query();
+        assert!(query.is_some());
+        let query = query.unwrap();
+        assert!(query.contains("information_schema.columns"));
+        assert!(query.contains("bgp_config"));
+        assert!(query.contains("max_paths"));
+        // This query checks column existence, not nullability
+        assert!(!query.contains("is_nullable"));
     }
 }

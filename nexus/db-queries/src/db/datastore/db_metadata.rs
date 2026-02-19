@@ -2706,6 +2706,82 @@ mod test {
         logctx.cleanup_successful();
     }
 
+    // Test that verification passes for a column that exists.
+    #[tokio::test]
+    async fn test_verify_add_column_needs_backfill() {
+        let logctx =
+            dev::test_setup_log("test_verify_add_column_needs_backfill");
+        let db = TestDatabase::new_with_pool(&logctx.log).await;
+        let pool = db.pool();
+        let conn = pool.claim().await.unwrap();
+
+        conn.batch_execute_async(
+            "CREATE TABLE IF NOT EXISTS omicron.public.test_verify_col \
+             (id INT PRIMARY KEY, name TEXT NOT NULL DEFAULT 'hello');",
+        )
+        .await
+        .expect("Failed to create test table");
+
+        // "name" exists — verification should pass.
+        let change = nexus_db_model::SchemaChangeInfo::AddColumnNeedsBackfill {
+            table_name: nexus_db_model::SqlIdentifier::new("test_verify_col")
+                .unwrap(),
+            column_name: nexus_db_model::SqlIdentifier::new("name").unwrap(),
+        };
+        let verify_sql = change.verification_query().unwrap();
+        conn.batch_execute_async(&verify_sql)
+            .await
+            .expect("Verification should pass for existing column");
+
+        conn.batch_execute_async(
+            "DROP TABLE IF EXISTS omicron.public.test_verify_col CASCADE;",
+        )
+        .await
+        .expect("Failed to drop test table");
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    // Test that verification fails for a column that does not exist.
+    #[tokio::test]
+    async fn test_verify_fails_for_missing_column() {
+        let logctx =
+            dev::test_setup_log("test_verify_fails_for_missing_column");
+        let db = TestDatabase::new_with_pool(&logctx.log).await;
+        let pool = db.pool();
+        let conn = pool.claim().await.unwrap();
+
+        conn.batch_execute_async(
+            "CREATE TABLE IF NOT EXISTS omicron.public.test_verify_no_col \
+             (id INT PRIMARY KEY);",
+        )
+        .await
+        .expect("Failed to create test table");
+
+        // "nonexistent_col" does not exist — verification should fail.
+        let change = nexus_db_model::SchemaChangeInfo::AddColumnNeedsBackfill {
+            table_name: nexus_db_model::SqlIdentifier::new(
+                "test_verify_no_col",
+            )
+            .unwrap(),
+            column_name: nexus_db_model::SqlIdentifier::new("nonexistent_col")
+                .unwrap(),
+        };
+        let verify_sql = change.verification_query().unwrap();
+        let result = conn.batch_execute_async(&verify_sql).await;
+        assert!(result.is_err(), "Verification should fail for missing column");
+
+        conn.batch_execute_async(
+            "DROP TABLE IF EXISTS omicron.public.test_verify_no_col CASCADE;",
+        )
+        .await
+        .expect("Failed to drop test table");
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
     // Reproduces the CREATE INDEX backfill race condition described in
     // https://github.com/oxidecomputer/omicron/issues/9866
     //
