@@ -178,28 +178,6 @@ pub struct ExternalMulticastGroup {
     pub ip_pool_range_id: Uuid,
     /// Primary multicast IP address (overlay/external).
     pub multicast_ip: IpNetwork,
-    /// Multicast VLAN (MVLAN) for egress multicast traffic to upstream networks.
-    ///
-    /// When specified, this VLAN ID is passed to switches (via DPD) as part of
-    /// the `ExternalForwarding` configuration to tag multicast packets leaving
-    /// the rack. This enables multicast traffic to traverse VLAN-segmented
-    /// upstream networks (e.g., peering with external multicast sources/receivers
-    /// on specific VLANs).
-    ///
-    /// The MVLAN value is sent to switches during group creation/updates and
-    /// controls VLAN tagging for egress traffic only; it does not affect ingress
-    /// multicast traffic received by the rack. Switch port selection for egress
-    /// traffic remains pending (see TODOs in `nexus/src/app/multicast/dataplane.rs`).
-    ///
-    /// Valid range when specified: 2-4094 (IEEE 802.1Q; Dendrite requires >= 2).
-    ///
-    /// Database Type: i16 (INT2) - this field uses `i16` (INT2) for storage
-    /// efficiency, unlike other VLAN columns in the schema which use `SqlU16`
-    /// (forcing INT4). Direct `i16` is appropriate here since VLANs fit in
-    /// INT2's range.
-    ///
-    /// TODO(multicast): Remove mvlan field - being deprecated from multicast groups
-    pub mvlan: Option<i16>,
     /// Associated underlay group for NAT.
     /// Initially None in ["Creating"](MulticastGroupState::Creating) state,
     /// populated by reconciler when group becomes ["Active"](MulticastGroupState::Active).
@@ -248,11 +226,11 @@ pub struct MulticastGroupMemberValues {
     pub parent_id: Uuid,
     pub sled_id: Option<DbTypedUuid<SledKind>>,
     pub state: MulticastGroupMemberState,
-    // version_added and version_removed are omitted - database assigns these
-    // via DEFAULT nextval()
     pub multicast_ip: IpNetwork,
     /// Source IPs for source-filtered multicast (optional for ASM, required for SSM).
     pub source_ips: Vec<IpNetwork>,
+    // version_added and version_removed are omitted - database assigns these
+    // via DEFAULT nextval()
 }
 
 /// A member of a multicast group (instance that receives multicast traffic).
@@ -329,9 +307,7 @@ impl TryFrom<MulticastGroupMember> for views::MulticastGroupMember {
 
 /// An incomplete external multicast group, used to store state required for
 /// issuing the database query that selects an available multicast IP and stores
-/// the resulting record.
-///
-/// Note: tag is computed in SQL as `{uuid}:{multicast_ip}`.
+/// the resulting record. Tag is computed in SQL as `{uuid}:{multicast_ip}`.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct IncompleteExternalMulticastGroup {
     pub id: Uuid,
@@ -341,7 +317,6 @@ pub struct IncompleteExternalMulticastGroup {
     pub ip_pool_id: Uuid,
     /// Optional address requesting a specific multicast IP be allocated.
     pub explicit_address: Option<IpNetwork>,
-    pub mvlan: Option<i16>,
     pub vni: Vni,
 }
 
@@ -353,7 +328,6 @@ pub struct IncompleteExternalMulticastGroupParams {
     pub description: String,
     pub ip_pool_id: Uuid,
     pub explicit_address: Option<IpAddr>,
-    pub mvlan: Option<i16>,
     pub vni: Vni,
 }
 
@@ -367,7 +341,6 @@ impl IncompleteExternalMulticastGroup {
             time_created: Utc::now(),
             ip_pool_id: params.ip_pool_id,
             explicit_address: params.explicit_address.map(|ip| ip.into()),
-            mvlan: params.mvlan,
             vni: params.vni,
         }
     }

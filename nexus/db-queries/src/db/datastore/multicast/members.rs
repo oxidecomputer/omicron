@@ -930,7 +930,6 @@ mod tests {
                 description: "Creating test group".to_string(),
             },
             multicast_ip: Some("224.10.1.6".parse().unwrap()),
-            mvlan: None,
             has_sources: false,
             ip_version: None,
         };

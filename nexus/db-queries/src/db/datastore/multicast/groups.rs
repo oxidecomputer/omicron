@@ -38,7 +38,6 @@ use omicron_common::api::external::{
     IdentityMetadataCreateParams, IpVersion, ListResultVec, LookupResult,
     LookupType, ResourceType, UpdateResult,
 };
-use omicron_common::vlan::VlanID;
 use omicron_uuid_kinds::{GenericUuid, MulticastGroupUuid};
 
 use super::EnsureUnderlayResult;
@@ -54,44 +53,24 @@ use crate::db::pagination::paginated;
 use crate::db::queries::external_multicast_group::NextExternalMulticastGroup;
 use crate::db::update_and_check::{UpdateAndCheck, UpdateStatus};
 
-/// External multicast group with computed source IPs from members.
-///
-/// The `source_ips` field contains the union of all member source IPs,
-/// computed via a separate query. This struct enables a clean `TryFrom`
-/// conversion to the API view.
-///
-// TODO(multicast): Remove mvlan field, being deprecated from multicast groups
+/// External multicast group with computed source filter state from members.
 #[derive(Clone, Debug)]
 pub struct ExternalMulticastGroupWithSources {
     pub group: ExternalMulticastGroup,
     pub source_ips: Vec<IpAddr>,
+    pub has_any_source_member: bool,
 }
 
-impl TryFrom<ExternalMulticastGroupWithSources> for views::MulticastGroup {
-    type Error = external::Error;
-
-    fn try_from(
-        value: ExternalMulticastGroupWithSources,
-    ) -> Result<Self, Self::Error> {
-        let mvlan = value
-            .group
-            .mvlan
-            .map(|vlan| VlanID::new(vlan as u16))
-            .transpose()
-            .map_err(|e| {
-                external::Error::internal_error(&format!(
-                    "invalid VLAN ID: {e:#}"
-                ))
-            })?;
-
-        Ok(views::MulticastGroup {
+impl From<ExternalMulticastGroupWithSources> for views::MulticastGroup {
+    fn from(value: ExternalMulticastGroupWithSources) -> Self {
+        views::MulticastGroup {
             identity: value.group.identity(),
             multicast_ip: value.group.multicast_ip.ip(),
             source_ips: value.source_ips,
-            mvlan,
+            has_any_source_member: value.has_any_source_member,
             ip_pool_id: value.group.ip_pool_id,
             state: value.group.state.to_string(),
-        })
+        }
     }
 }
 
@@ -104,7 +83,6 @@ pub(crate) struct MulticastGroupAllocationParams {
     pub identity: IdentityMetadataCreateParams,
     /// How to allocate the multicast IP address.
     pub ip_allocation: MulticastIpAllocation,
-    pub mvlan: Option<VlanID>,
     /// Derived for whether the joining member has source IPs.
     /// Used for default pool selection -> if true, prefer SSM pool first.
     pub has_sources: bool,
@@ -283,7 +261,6 @@ impl DataStore {
             MulticastGroupAllocationParams {
                 identity: params.identity.clone(),
                 ip_allocation,
-                mvlan: params.mvlan,
                 has_sources: params.has_sources,
             },
         )
@@ -344,12 +321,21 @@ impl DataStore {
         let filter_state_map = self
             .multicast_groups_source_filter_state(opctx, &[group_id])
             .await?;
-        let source_ips = filter_state_map
+        let (source_ips, has_any_source_member) = filter_state_map
             .get(&group_id.into_untyped_uuid())
-            .map(|state| state.specific_sources.iter().copied().collect())
+            .map(|state| {
+                (
+                    state.specific_sources.iter().copied().collect(),
+                    state.has_any_source_member,
+                )
+            })
             .unwrap_or_default();
 
-        Ok(ExternalMulticastGroupWithSources { group, source_ips })
+        Ok(ExternalMulticastGroupWithSources {
+            group,
+            source_ips,
+            has_any_source_member,
+        })
     }
 
     /// Lookup an external multicast group by IP address.
@@ -643,7 +629,6 @@ impl DataStore {
                 description: params.identity.description.clone(),
                 ip_pool_id: authz_pool.id(),
                 explicit_address: explicit_ip,
-                mvlan: params.mvlan.map(|vlan_id| u16::from(vlan_id) as i16),
                 vni,
             },
         );
@@ -1012,7 +997,6 @@ mod tests {
                     description: "First group".to_string(),
                 },
                 multicast_ip: None,
-                mvlan: None,
                 has_sources: false,
                 ip_version: None,
             };
@@ -1030,7 +1014,6 @@ mod tests {
                     description: "Second group".to_string(),
                 },
                 multicast_ip: None,
-                mvlan: None,
                 has_sources: false,
                 ip_version: None,
             };
@@ -1048,7 +1031,6 @@ mod tests {
                     description: "Should fail".to_string(),
                 },
                 multicast_ip: None,
-                mvlan: None,
                 has_sources: false,
                 ip_version: None,
             };
@@ -1077,7 +1059,6 @@ mod tests {
                     description: "Should reuse freed IP".to_string(),
                 },
                 multicast_ip: None,
-                mvlan: None,
                 has_sources: false,
                 ip_version: None,
             };
@@ -1160,7 +1141,6 @@ mod tests {
                 description: "Group using default pool".to_string(),
             },
             multicast_ip: None,
-            mvlan: None,
             has_sources: false,
             ip_version: None,
         };
@@ -1186,7 +1166,6 @@ mod tests {
                 description: "Second group from default pool".to_string(),
             },
             multicast_ip: None,
-            mvlan: None,
             has_sources: false,
             ip_version: None,
         };
@@ -1314,7 +1293,6 @@ mod tests {
                 description: "Comprehensive test group".to_string(),
             },
             multicast_ip: Some("224.1.3.3".parse().unwrap()),
-            mvlan: None,
             has_sources: false,
             ip_version: None,
         };
@@ -1415,7 +1393,6 @@ mod tests {
                 description: "Group for IP reuse test".to_string(),
             },
             multicast_ip: Some(target_ip),
-            mvlan: None,
             has_sources: false,
             ip_version: None,
         };
@@ -1443,7 +1420,6 @@ mod tests {
                 description: "Second group reusing same IP".to_string(),
             },
             multicast_ip: Some(target_ip),
-            mvlan: None,
             has_sources: false,
             ip_version: None,
         };
@@ -1524,7 +1500,6 @@ mod tests {
                 description: "Group for deallocation testing".to_string(),
             },
             multicast_ip: None,
-            mvlan: None,
             has_sources: false,
             ip_version: None,
         };
@@ -1649,7 +1624,6 @@ mod tests {
                 description: "Test group for fetch operations".to_string(),
             },
             multicast_ip: Some("224.100.10.5".parse().unwrap()),
-            mvlan: None,
             has_sources: false,
             ip_version: None,
         };
@@ -1756,7 +1730,6 @@ mod tests {
                 description: "Fleet-wide group 1".to_string(),
             },
             multicast_ip: Some("224.100.20.10".parse().unwrap()),
-            mvlan: None,
             has_sources: false,
             ip_version: None,
         };
@@ -1767,7 +1740,6 @@ mod tests {
                 description: "Fleet-wide group 2".to_string(),
             },
             multicast_ip: Some("224.100.20.11".parse().unwrap()),
-            mvlan: None,
             has_sources: false,
             ip_version: None,
         };
@@ -1778,7 +1750,6 @@ mod tests {
                 description: "Fleet-wide group 3".to_string(),
             },
             multicast_ip: Some("224.100.20.12".parse().unwrap()),
-            mvlan: None,
             has_sources: false,
             ip_version: None,
         };
@@ -1887,7 +1858,6 @@ mod tests {
                 description: "Test group for state transitions".to_string(),
             },
             multicast_ip: Some("224.100.30.5".parse().unwrap()),
-            mvlan: None,
             has_sources: false,
             ip_version: None,
         };
@@ -2224,7 +2194,6 @@ mod tests {
                 description: "Group using ASM pool".to_string(),
             },
             multicast_ip: None, // No explicit IP -> triggers pool auto-selection
-            mvlan: None,
             has_sources: false,
             ip_version: None,
         };
@@ -2315,7 +2284,6 @@ mod tests {
                 description: "Should fall back to ASM when no SSM".to_string(),
             },
             multicast_ip: None,
-            mvlan: None,
             has_sources: true,
             ip_version: None,
         };
@@ -2388,7 +2356,6 @@ mod tests {
                 description: "Should prefer SSM over ASM".to_string(),
             },
             multicast_ip: None,
-            mvlan: None,
             has_sources: true,
             ip_version: None,
         };
@@ -2412,7 +2379,6 @@ mod tests {
                 description: "has_sources=false should use ASM".to_string(),
             },
             multicast_ip: None,
-            mvlan: None,
             has_sources: false,
             ip_version: None,
         };
@@ -2492,7 +2458,6 @@ mod tests {
                 description: "First group for collision test".to_string(),
             },
             multicast_ip: Some("224.10.1.1".parse().unwrap()),
-            mvlan: None,
             has_sources: false,
             ip_version: None,
         };
@@ -2508,7 +2473,6 @@ mod tests {
                 description: "Second group for collision test".to_string(),
             },
             multicast_ip: Some("224.10.1.2".parse().unwrap()),
-            mvlan: None,
             has_sources: false,
             ip_version: None,
         };
@@ -2632,7 +2596,6 @@ mod tests {
                 description: "Group for salt testing".to_string(),
             },
             multicast_ip: Some("224.20.1.1".parse().unwrap()),
-            mvlan: None,
             has_sources: false,
             ip_version: None,
         };

@@ -20,7 +20,6 @@ use omicron_common::api::external::{
     Digest, Error, FailureDomain, IdentityMetadata, InstanceState, Name,
     Nullable, ObjectIdentity, SimpleIdentity, SimpleIdentityOrName,
 };
-use omicron_common::vlan::VlanID;
 use omicron_uuid_kinds::*;
 use oxnet::{IpNet, Ipv4Net, Ipv6Net};
 use schemars::JsonSchema;
@@ -661,17 +660,18 @@ pub struct MulticastGroup {
     pub identity: IdentityMetadata,
     /// The multicast IP address held by this resource.
     pub multicast_ip: IpAddr,
-    /// Union of all member source IP addresses (computed, read-only).
+    /// Deduplicated union of source IPs specified by members.
     ///
-    /// This field shows the combined source IPs across all group members.
-    /// Individual members may subscribe to different sources; this union
-    /// reflects all sources that any member is subscribed to.
-    /// Empty array means no members have source filtering enabled.
+    /// Contains only sources from members that joined with explicit `source_ips`.
+    /// Members using any-source multicast (empty `source_ips`) do not contribute,
+    /// so a non-empty value does not imply all members use source filtering.
+    /// For SSM addresses (232/8, ff3x::/32), this is always non-empty.
     pub source_ips: Vec<IpAddr>,
-    /// Multicast VLAN (MVLAN) for egress multicast traffic to upstream networks.
-    /// None means no VLAN tagging on egress.
-    // TODO(multicast): Remove mvlan field - being deprecated from multicast groups
-    pub mvlan: Option<VlanID>,
+    /// True if any member joined without specifying source IPs (any-source).
+    ///
+    /// When true, at least one member receives traffic from any source rather
+    /// than filtering to specific sources.
+    pub has_any_source_member: bool,
     /// The ID of the IP pool this resource belongs to.
     pub ip_pool_id: Uuid,
     /// Current state of the multicast group.

@@ -232,12 +232,22 @@ impl super::Nexus {
             .db_datastore
             .multicast_groups_source_filter_state(opctx, &[group_id])
             .await?;
-        let source_ips = filter_state_map
+        let (source_ips, has_any_source_member) = filter_state_map
             .get(&group.identity.id)
-            .map(|state| state.specific_sources.iter().copied().collect())
+            .map(|state| {
+                (
+                    state.specific_sources.iter().copied().collect(),
+                    state.has_any_source_member,
+                )
+            })
             .unwrap_or_default();
 
-        ExternalMulticastGroupWithSources { group, source_ips }.try_into()
+        Ok(ExternalMulticastGroupWithSources {
+            group,
+            source_ips,
+            has_any_source_member,
+        }
+        .into())
     }
 
     /// List all multicast groups with full view.
@@ -265,19 +275,26 @@ impl super::Nexus {
             .multicast_groups_source_filter_state(opctx, &group_ids)
             .await?;
 
-        groups
+        Ok(groups
             .into_iter()
             .map(|group| {
-                let source_ips = filter_state_map
+                let (source_ips, has_any_source_member) = filter_state_map
                     .get(&group.identity.id)
                     .map(|state| {
-                        state.specific_sources.iter().copied().collect()
+                        (
+                            state.specific_sources.iter().copied().collect(),
+                            state.has_any_source_member,
+                        )
                     })
                     .unwrap_or_default();
-                ExternalMulticastGroupWithSources { group, source_ips }
-                    .try_into()
+                ExternalMulticastGroupWithSources {
+                    group,
+                    source_ips,
+                    has_any_source_member,
+                }
+                .into()
             })
-            .collect()
+            .collect())
     }
 
     /// Join an instance to a multicast group by identifier (IP, name, or ID).
@@ -419,7 +436,6 @@ impl super::Nexus {
                 ),
             },
             multicast_ip: Some(ip),
-            mvlan: None,
             has_sources,
             // IP version is determined by the multicast IP address itself
             ip_version: None,
@@ -500,7 +516,6 @@ impl super::Nexus {
                     .to_string(),
             },
             multicast_ip: None,
-            mvlan: None,
             has_sources,
             ip_version,
         };

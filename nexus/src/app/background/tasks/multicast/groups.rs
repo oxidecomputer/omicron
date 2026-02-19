@@ -166,15 +166,6 @@ fn dpd_state_matches_sources(
     }
 }
 
-/// Check if DPD vlan_id matches database mvlan.
-fn dpd_state_matches_mvlan(
-    dpd_group: &dpd_client::types::MulticastGroupExternalResponse,
-    db_group: &MulticastGroup,
-) -> bool {
-    let db_mvlan = db_group.mvlan.map(|v| v as u16);
-    dpd_group.external_forwarding.vlan_id == db_mvlan
-}
-
 /// Trait for processing different types of multicast groups
 trait GroupStateProcessor {
     /// Process a group in "Creating" state.
@@ -688,10 +679,8 @@ impl MulticastGroupReconciler {
                     &source_filter,
                     group,
                 );
-                let mvlan_matches = dpd_state_matches_mvlan(&dpd_group, group);
 
-                let needs_update =
-                    !tag_matches || !sources_match || !mvlan_matches;
+                let needs_update = !tag_matches || !sources_match;
 
                 if needs_update {
                     debug!(
@@ -699,8 +688,7 @@ impl MulticastGroupReconciler {
                         "detected DPD state mismatch for active group";
                         "group_id" => %group.id(),
                         "tag_matches" => tag_matches,
-                        "sources_match" => sources_match,
-                        "mvlan_matches" => mvlan_matches
+                        "sources_match" => sources_match
                     );
                 }
 
@@ -972,7 +960,6 @@ mod tests {
             ip_pool_range_id: Uuid::new_v4(),
             vni: Vni(omicron_common::api::external::Vni::DEFAULT_MULTICAST_VNI),
             multicast_ip: multicast_ip.parse().unwrap(),
-            mvlan: None,
             underlay_group_id: None,
             underlay_salt: None,
             tag: Some("test-tag".to_string()),

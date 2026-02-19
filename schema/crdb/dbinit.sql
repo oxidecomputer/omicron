@@ -7650,11 +7650,6 @@ CREATE TABLE IF NOT EXISTS omicron.public.multicast_group (
     ip_pool_range_id UUID NOT NULL,
     multicast_ip INET NOT NULL,
 
-    /* Multicast VLAN (MVLAN) for egress to upstream networks */
-    /* Tags packets leaving the rack to traverse VLAN-segmented upstream networks */
-    /* Internal rack traffic uses VNI-based underlay forwarding */
-    mvlan INT2,
-
     /* Associated underlay group for NAT */
     /* We fill this as part of the RPW */
     underlay_group_id UUID,
@@ -7695,11 +7690,6 @@ CREATE TABLE IF NOT EXISTS omicron.public.multicast_group (
             NOT multicast_ip << 'ff01::/16' AND         -- Interface-local scope
             NOT multicast_ip << 'ff02::/16'             -- Link-local scope
         )
-    ),
-
-    -- MVLAN validation (Dendrite requires >= 2)
-    CONSTRAINT mvlan_valid_range CHECK (
-        mvlan IS NULL OR (mvlan >= 2 AND mvlan <= 4094)
     )
 );
 
@@ -8192,7 +8182,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '231.0.0', NULL)
+    (TRUE, NOW(), NOW(), '232.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

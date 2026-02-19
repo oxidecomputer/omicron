@@ -22,7 +22,6 @@ use omicron_common::api::external::{
     NameOrId, Nullable, PaginationOrder, RouteDestination, RouteTarget, UserId,
 };
 use omicron_common::disk::DiskVariant;
-use omicron_common::vlan::VlanID;
 use omicron_uuid_kinds::*;
 use oxnet::{IpNet, Ipv4Net, Ipv6Net};
 use parse_display::Display;
@@ -3482,12 +3481,6 @@ pub struct MulticastGroupCreate {
     /// default multicast pool.
     #[serde(default)]
     pub pool: Option<NameOrId>,
-    /// Multicast VLAN (MVLAN) for egress multicast traffic to upstream networks.
-    /// Tags packets leaving the rack to traverse VLAN-segmented upstream networks.
-    ///
-    /// Valid range: 2-4094 (VLAN IDs 0-1 are reserved by IEEE 802.1Q standard).
-    #[serde(default, deserialize_with = "validate_mvlan_option")]
-    pub mvlan: Option<VlanID>,
 }
 
 /// Update-time parameters for a multicast group.
@@ -3501,15 +3494,6 @@ pub struct MulticastGroupUpdate {
         skip_serializing_if = "Option::is_none"
     )]
     pub source_ips: Option<Vec<IpAddr>>,
-    /// Multicast VLAN (MVLAN) for egress multicast traffic to upstream networks.
-    /// Set to null to clear the MVLAN. Valid range: 2-4094 when provided.
-    /// Omit the field to leave mvlan unchanged.
-    #[serde(
-        default,
-        deserialize_with = "validate_mvlan_option_nullable",
-        skip_serializing_if = "Option::is_none"
-    )]
-    pub mvlan: Option<Nullable<VlanID>>,
 }
 
 /// Parameters for adding an instance to a multicast group.
@@ -3521,53 +3505,6 @@ pub struct MulticastGroupMemberAdd {
     /// required for SSM groups (232.0.0.0/8, ff3x::/32).
     #[serde(default, deserialize_with = "validate_source_ips_param")]
     pub source_ips: Option<Vec<IpAddr>>,
-}
-
-/// Dendrite requires VLAN IDs >= 2 (rejects 0 and 1)
-///
-/// Valid range is 2-4094
-fn validate_mvlan(vlan_id: VlanID) -> Result<VlanID, String> {
-    let value: u16 = vlan_id.into();
-    if value >= 2 {
-        Ok(vlan_id)
-    } else {
-        Err(format!(
-            "invalid mvlan: {value} (must be >= 2, VLAN IDs 0-1 are reserved)"
-        ))
-    }
-}
-
-fn validate_mvlan_option<'de, D>(
-    deserializer: D,
-) -> Result<Option<VlanID>, D::Error>
-where
-    D: serde::Deserializer<'de>,
-{
-    let opt = Option::<VlanID>::deserialize(deserializer)?;
-    match opt {
-        Some(v) => {
-            validate_mvlan(v).map(Some).map_err(serde::de::Error::custom)
-        }
-        None => Ok(None),
-    }
-}
-
-fn validate_mvlan_option_nullable<'de, D>(
-    deserializer: D,
-) -> Result<Option<Nullable<VlanID>>, D::Error>
-where
-    D: serde::Deserializer<'de>,
-{
-    // Deserialize as Nullable<VlanID> directly, which handles null properly
-    // When field has null value, Nullable deserializer returns Nullable(None)
-    // We always wrap in Some because if field is present, we got here
-    let nullable = Nullable::<VlanID>::deserialize(deserializer)?;
-    match nullable.0 {
-        Some(v) => validate_mvlan(v)
-            .map(|vv| Some(Nullable(Some(vv))))
-            .map_err(serde::de::Error::custom),
-        None => Ok(Some(Nullable(None))), // Explicit null to clear
-    }
 }
 
 /// Parameters for removing an instance from a multicast group.
@@ -4011,8 +3948,7 @@ mod tests {
             "description": "Test multicast group",
             "multicast_ip": "224.1.2.3",
             "source_ips": ["10.0.0.1", "10.0.0.2"],
-            "pool": "default",
-            "mvlan": 10
+            "pool": "default"
         }"#;
 
         let result: Result<MulticastGroupCreate, _> =
@@ -4035,7 +3971,7 @@ mod tests {
 
     #[test]
     fn test_multicast_group_create_deserialization_without_optional_fields() {
-        // This is the critical test - multicast_ip, source_ips, pool, and mvlan are all optional
+        // This is the critical test - multicast_ip, source_ips, and pool are all optional
         let json = r#"{
             "name": "test-group",
             "description": "Test multicast group"
@@ -4053,7 +3989,6 @@ mod tests {
         assert_eq!(params.multicast_ip, None);
         assert_eq!(params.source_ips, None);
         assert_eq!(params.pool, None);
-        assert_eq!(params.mvlan, None);
     }
 
     #[test]
@@ -4150,8 +4085,7 @@ mod tests {
             "description": "Test multicast group",
             "multicast_ip": null,
             "source_ips": null,
-            "pool": null,
-            "mvlan": null
+            "pool": null
         }"#;
 
         let result: Result<MulticastGroupCreate, _> =
@@ -4165,7 +4099,6 @@ mod tests {
         assert_eq!(params.multicast_ip, None);
         assert_eq!(params.source_ips, None);
         assert_eq!(params.pool, None);
-        assert_eq!(params.mvlan, None);
     }
 
     #[test]
@@ -4176,8 +4109,7 @@ mod tests {
             "description": "Test multicast group",
             "multicast_ip": "224.1.2.3",
             "source_ips": [],
-            "pool": null,
-            "mvlan": 30
+            "pool": null
         }"#;
 
         let result: Result<MulticastGroupCreate, _> =
@@ -4190,7 +4122,6 @@ mod tests {
         );
         assert_eq!(params.source_ips, Some(vec![]));
         assert_eq!(params.pool, None);
-        assert_eq!(params.mvlan, Some(VlanID::new(30).unwrap()));
     }
 
     #[test]
@@ -4209,44 +4140,6 @@ mod tests {
         );
         let params = result.unwrap();
         assert_eq!(params.source_ips, None);
-        assert_eq!(params.mvlan, None);
-    }
-
-    #[test]
-    fn test_multicast_group_update_deserialization_explicit_null_mvlan() {
-        // When mvlan is explicitly null, it should be Some(Nullable(None)) (clearing the field)
-        let json = r#"{
-            "name": "test-group",
-            "mvlan": null
-        }"#;
-
-        let result: Result<MulticastGroupUpdate, _> =
-            serde_json::from_str(json);
-        assert!(
-            result.is_ok(),
-            "Failed to deserialize update with null mvlan: {:?}",
-            result.err()
-        );
-        let params = result.unwrap();
-        assert_eq!(params.mvlan, Some(Nullable(None)));
-    }
-
-    #[test]
-    fn test_multicast_group_update_deserialization_set_mvlan() {
-        // When mvlan has a value, it should be Some(Nullable(Some(value)))
-        let json = r#"{
-            "name": "test-group",
-            "mvlan": 100
-        }"#;
-
-        let result: Result<MulticastGroupUpdate, _> =
-            serde_json::from_str(json);
-        assert!(result.is_ok());
-        let params = result.unwrap();
-        assert_eq!(
-            params.mvlan,
-            Some(Nullable(Some(VlanID::new(100).unwrap())))
-        );
     }
 
     #[test]
@@ -4283,19 +4176,6 @@ mod tests {
         assert!(result.is_ok());
         let params = result.unwrap();
         assert_eq!(params.source_ips, Some(vec![]));
-    }
-
-    #[test]
-    fn test_multicast_group_update_deserialization_invalid_mvlan() {
-        // VLAN ID 1 should be rejected (reserved)
-        let json = r#"{
-            "name": "test-group",
-            "mvlan": 1
-        }"#;
-
-        let result: Result<MulticastGroupUpdate, _> =
-            serde_json::from_str(json);
-        assert!(result.is_err(), "Should reject reserved VLAN ID 1");
     }
 
     #[test]

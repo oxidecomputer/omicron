@@ -5,7 +5,6 @@
 //! Internal multicast types used by Nexus.
 
 use omicron_common::api::external::{IdentityMetadataCreateParams, IpVersion};
-use omicron_common::vlan::VlanID;
 use std::net::IpAddr;
 
 /// Internal parameters for creating a multicast group.
@@ -22,12 +21,6 @@ pub struct MulticastGroupCreate {
     ///
     /// If `None`, one will be allocated from the default pool.
     pub multicast_ip: Option<IpAddr>,
-    /// Multicast VLAN (MVLAN) for egress multicast traffic to upstream networks.
-    /// Tags packets leaving the rack to traverse VLAN-segmented upstream networks.
-    ///
-    /// Valid range: 2-4094 (VLAN IDs 0-1 are reserved by IEEE 802.1Q standard).
-    // TODO(multicast): Remove mvlan field - being deprecated from multicast groups
-    pub mvlan: Option<VlanID>,
     /// Whether the joining member has source IPs.
     ///
     /// Used for default pool selection when `multicast_ip` is `None`:
