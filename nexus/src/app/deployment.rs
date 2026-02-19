@@ -322,15 +322,16 @@ impl super::Nexus {
                 // It's possible support has intentionally mupdated the system
                 // to a version that wouldn't normally be allowed by the update
                 // system, and we have to provide a way to notify the system of
-                // that change. (A more benign example that has come up in
-                // practice is: system is mupdated to version N. Operator
-                // sets the target release with `RecoverFromMupdate` intent, but
-                // accidentally sets it to version N+1. The sleds remain in the
-                // "waiting for mupdate recovery" state, because N+1 doesn't
-                // match the software deployed, but the thing the operator needs
-                // to do now is set the target release with `RecoverFromMupdate`
-                // intent to version N, which looks like a version _downgrade_
-                // but isn't, in practice.)
+                // that change. (A benign example that has come up in practice
+                // is: system is mupdated to version N. Operator sets the target
+                // release with `RecoverFromMupdate` intent, but accidentally
+                // sets it to version N+1. The sleds remain in the "waiting for
+                // mupdate recovery" state, because N+1 doesn't match the
+                // software deployed, but the thing the operator needs to do now
+                // is set the target release with `RecoverFromMupdate` intent to
+                // version N. From Nexus's point of view this looks like a
+                // version downgrade, but it's not: we're still trying to
+                // recover from a mupdate.)
                 let validation_result = match intent {
                     SetTargetReleaseIntent::Update => {
                         let current_version = self
@@ -410,13 +411,12 @@ enum TargetReleaseChangeError {
 //
 // We must be very generous here, as discussed at our call site in
 // `target_release_update()` above. We only reject this request if there are no
-// sleds waiting for recovery from a mupdate.
-//
-// Note that unlick `validate_can_set_target_release_for_update()`, this
-// function does not take any arguments about the current or proposed system
-// version. Mupdate can bypass all our typical version ordering requirements, so
-// we have to allow recovery to the _actual_ version it installed, regardless of
-// what we currently have on the system.
+// sleds waiting for recovery from a mupdate. Because of this, this function
+// does not take any arguments about the current or proposed system
+// version (unlike `validate_can_set_target_release_for_update()`). Mupdate can
+// bypass all our typical version ordering requirements, so we have to allow
+// recovery to the _actual_ version it installed, regardless of what we
+// currently have on the system.
 fn validate_can_set_target_release_for_mupdate_recovery(
     current_blueprint: &Blueprint,
 ) -> Result<(), TargetReleaseChangeError> {
@@ -427,13 +427,12 @@ fn validate_can_set_target_release_for_mupdate_recovery(
             return Ok(());
         }
 
-        // Be paranoid: also check the host OS slots for `CurrentContents`. This
-        // check isn't as precise as it should be; see the discussion about
-        // checking both slots in
-        // `validate_can_set_target_release_for_update()`.
+        // Be paranoid: also check the host OS slots for `CurrentContents`.
+        // Mupdate writes both slots, so both slots set to `CurrentContents` is
+        // also a sign that we're waiting for a mupdate to be cleared.
         if sled_config.host_phase_2.slot_a
             == BlueprintHostPhase2DesiredContents::CurrentContents
-            || sled_config.host_phase_2.slot_b
+            && sled_config.host_phase_2.slot_b
                 == BlueprintHostPhase2DesiredContents::CurrentContents
         {
             return Ok(());
@@ -575,20 +574,21 @@ fn validate_can_set_target_release_for_update(
         // matches the current system target version, with the expectation that
         // seeing that means we updated this sled to that version.
         //
-        // If neither slot contains the current version, we'll fall back to
-        // checking whether either slot contains `CurrentContents` - that
-        // indicates the sled has been MUPdated, which influences the error we
-        // return.
+        // If neither slot contains the current version, we're going to reject
+        // this update request, but we try to give an accurate error message:
         //
-        // We really ought to only be checking the intended slot, not both.
+        // * If both slots contain `CurrentContents`, this sled has been
+        //   mupdated and we need to recover from that.
+        // * Otherwise, we assume we're on an old version and are still waiting
+        //   to update to the current target release.
         let mut found_current_version_in_either_slot = false;
-        let mut found_current_contents_in_either_slot = false;
+        let mut num_slots_with_current_contents = 0;
         for phase2 in
             [&sled_config.host_phase_2.slot_a, &sled_config.host_phase_2.slot_b]
         {
             match phase2 {
                 BlueprintHostPhase2DesiredContents::CurrentContents => {
-                    found_current_contents_in_either_slot = true;
+                    num_slots_with_current_contents += 1;
                 }
                 BlueprintHostPhase2DesiredContents::Artifact {
                     version,
@@ -597,6 +597,7 @@ fn validate_can_set_target_release_for_update(
                     BlueprintArtifactVersion::Available { version } => {
                         if version.as_str() == current_target_version {
                             found_current_version_in_either_slot = true;
+                            break;
                         }
                     }
                     BlueprintArtifactVersion::Unknown => {
@@ -615,7 +616,13 @@ fn validate_can_set_target_release_for_update(
         // If neither slot contains the current version, we're not done
         // upgrading to it.
         if !found_current_version_in_either_slot {
-            if found_current_contents_in_either_slot {
+            // Mupdate writes both slots - if they're both `CurrentContents`,
+            // inform the operator that we're waiting for a mupdate to be
+            // cleared.
+            //
+            // Otherwise, one or both slots have old or unknown artifact
+            // versions, which indicate an incomplete update.
+            if num_slots_with_current_contents == 2 {
                 warn!(
                     log,
                     "cannot start update: host OS has been mupdated";
@@ -1082,19 +1089,12 @@ mod tests {
             bp
         };
 
-        // sled with a mupdate'd host OS slot A
-        let bp_os_mupdate_a = {
+        // sled with a mupdate'd host OS
+        let bp_os_mupdate = {
             let mut bp = blueprint.clone();
             let sled = bp.sleds.values_mut().next().unwrap();
             sled.host_phase_2.slot_a =
                 BlueprintHostPhase2DesiredContents::CurrentContents;
-            bp
-        };
-
-        // sled with a mupdate'd host OS slot B
-        let bp_os_mupdate_b = {
-            let mut bp = blueprint.clone();
-            let sled = bp.sleds.values_mut().next().unwrap();
             sled.host_phase_2.slot_b =
                 BlueprintHostPhase2DesiredContents::CurrentContents;
             bp
@@ -1117,8 +1117,7 @@ mod tests {
 
         for (description, blueprint) in [
             ("sled with mupdate override", bp_sled_mupdate_override),
-            ("sled with OS mupdate slot A", bp_os_mupdate_a),
-            ("sled with OS mupdate slot B", bp_os_mupdate_b),
+            ("sled with OS mupdate", bp_os_mupdate),
             ("zone set to install dataset", bp_zone_mupdate),
         ] {
             assert_eq!(

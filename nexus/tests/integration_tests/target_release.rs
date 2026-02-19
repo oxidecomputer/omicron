@@ -246,14 +246,10 @@ pub async fn install_target_blueprint_with_update_complete<N: NexusServer>(
         version: ArtifactVersion::new(system_version.to_string()).unwrap(),
     };
     for sled in blueprint.sleds.values_mut() {
-        // We should only need to set the "active" slot, but we don't track that
-        // in the blueprint. Set both.
+        // We should set the "active" slot, but we don't track that in the
+        // blueprint. Just pick one arbitrarily; Nexus's update validation logic
+        // works around the lack of an active slot indicator.
         sled.host_phase_2.slot_a =
-            BlueprintHostPhase2DesiredContents::Artifact {
-                version: bp_artifact_version.clone(),
-                hash: *host_phase_2_artifact_hash,
-            };
-        sled.host_phase_2.slot_b =
             BlueprintHostPhase2DesiredContents::Artifact {
                 version: bp_artifact_version.clone(),
                 hash: *host_phase_2_artifact_hash,
