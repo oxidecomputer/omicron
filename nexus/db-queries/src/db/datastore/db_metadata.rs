@@ -773,7 +773,7 @@ impl DataStore {
         // If the backfill fails (e.g., OOM), the index is silently rolled
         // back. We run a verification query in a **separate transaction**
         // to confirm the change actually landed.
-        if !step.schema_changes().is_empty() {
+        if step.verification_sql().is_some() {
             self.verify_schema_change(log, step).await.with_context(|| {
                 format!(
                     "update to {}, verifying step {:?}",
@@ -788,10 +788,12 @@ impl DataStore {
 
     /// Verify that a backfill-prone schema change completed successfully.
     ///
-    /// Runs a verification query in a **separate transaction** from the DDL
-    /// that was just applied. Only operations that involve async backfill
-    /// (CREATE INDEX, ALTER COLUMN SET NOT NULL, ADD CONSTRAINT) generate
-    /// verification queries.
+    /// Runs pre-computed verification SQL (from a `.verify.sql` file) in a
+    /// **separate transaction** from the DDL that was just applied.
+    /// The verification SQL is generated at test time by parsing each
+    /// migration and detecting operations that involve async backfill in
+    /// CockroachDB (CREATE INDEX, ALTER COLUMN SET NOT NULL, ADD CONSTRAINT,
+    /// ADD COLUMN with backfill).
     ///
     /// If verification fails, the error propagates immediately — the outer
     /// startup retry loop will re-attempt the entire migration.
@@ -800,38 +802,26 @@ impl DataStore {
         log: &Logger,
         step: &SchemaUpgradeStep,
     ) -> Result<(), anyhow::Error> {
-        assert!(
-            !step.schema_changes().is_empty(),
-            "verify_schema_change called on a step with no schema changes",
+        let verify_sql = step.verification_sql().expect(
+            "verify_schema_change called on a step with no verification SQL",
         );
-        for change in step.schema_changes() {
-            if let Some(verify_sql) = change.verification_query() {
-                info!(
-                    log,
-                    "Verifying schema change";
-                    "change" => ?change,
-                );
-                let conn = self
-                    .pool_connection_unauthorized()
-                    .await
-                    .context("verification: failed to get connection")?;
-                conn.batch_execute_async(&verify_sql).await.with_context(
-                    || {
-                        format!(
-                            "schema change verification failed for \
-                             {:?} in {:?}",
-                            change,
-                            step.label()
-                        )
-                    },
-                )?;
-                info!(
-                    log,
-                    "Schema change verified";
-                    "change" => ?change,
-                );
-            }
-        }
+        info!(
+            log,
+            "Verifying schema change";
+            "step" => step.label(),
+        );
+        let conn = self
+            .pool_connection_unauthorized()
+            .await
+            .context("verification: failed to get connection")?;
+        conn.batch_execute_async(verify_sql).await.with_context(|| {
+            format!("schema change verification failed for {:?}", step.label())
+        })?;
+        info!(
+            log,
+            "Schema change verified";
+            "step" => step.label(),
+        );
         Ok(())
     }
 

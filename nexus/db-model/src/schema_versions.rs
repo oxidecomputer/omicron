@@ -8,14 +8,7 @@
 
 use anyhow::{Context, bail, ensure};
 use camino::Utf8Path;
-use regex::Regex;
 use semver::Version;
-use sqlparser::ast::{
-    AlterColumnOperation, AlterTableOperation, ColumnOption, Expr,
-    GeneratedExpressionMode, Statement, TableConstraint, Value, ValueWithSpan,
-};
-use sqlparser::dialect::PostgreSqlDialect;
-use sqlparser::parser::Parser;
 use std::{collections::BTreeMap, sync::LazyLock};
 
 /// The version of the database schema this particular version of Nexus was
@@ -285,15 +278,6 @@ pub const EARLIEST_SUPPORTED_VERSION: Version = Version::new(1, 0, 0);
 /// The version where "db_metadata_nexus" was added.
 pub const DB_METADATA_NEXUS_SCHEMA_VERSION: Version = Version::new(185, 0, 0);
 
-/// The last schema version that is allowed to have multiple DDL statements
-/// per migration file.
-///
-/// Versions after this one must have at most one DDL per file, which enables
-/// us to verify that CockroachDB async backfill operations (CREATE INDEX,
-/// ALTER TABLE ADD CONSTRAINT, etc.) complete successfully before moving on
-/// to the next migration step.
-const LAST_MULTI_DDL_VERSION: u64 = 220;
-
 /// A validated SQL identifier (or enum variant value) that is safe to
 /// interpolate into SQL strings.
 ///
@@ -327,11 +311,10 @@ impl std::fmt::Display for SqlIdentifier {
 
 /// A schema-changing (DDL) operation detected in a migration file.
 ///
-/// Used to:
-/// 1. Enforce at-most-one DDL per migration file (for versions >
-///    `LAST_MULTI_DDL_VERSION`)
-/// 2. Generate verification queries for operations that involve async
-///    backfill in CockroachDB (e.g., CREATE INDEX, ADD CONSTRAINT)
+/// Used at test time to generate verification queries for operations that
+/// involve async backfill in CockroachDB (e.g., CREATE INDEX, ADD
+/// CONSTRAINT). The generated queries are written to `.verify.sql` files
+/// by an expectorate test and read at runtime.
 #[derive(Debug, Clone, PartialEq)]
 pub enum SchemaChangeInfo {
     /// `ALTER TABLE ... ADD COLUMN` where CockroachDB's
@@ -485,288 +468,6 @@ impl SchemaChangeInfo {
             SchemaChangeInfo::OtherDdl => None,
         }
     }
-}
-
-/// The result of classifying all DDL in a single migration file.
-#[derive(Debug, Clone)]
-pub struct ClassifiedDdl {
-    /// Individual schema-change operations detected in the file.
-    ///
-    /// A single DDL statement may produce multiple entries (e.g., an
-    /// `ALTER TABLE ... DROP CONSTRAINT ..., ADD CONSTRAINT ...`
-    /// produces two entries).
-    pub changes: Vec<SchemaChangeInfo>,
-    /// Number of distinct DDL **statements** in the file.
-    ///
-    /// A single `ALTER TABLE` with multiple operations counts as 1.
-    pub statement_count: usize,
-}
-
-/// Extract the last identifier from an `ObjectName` (e.g., `omicron.public.foo` → `foo`).
-fn last_ident(
-    name: &sqlparser::ast::ObjectName,
-) -> anyhow::Result<SqlIdentifier> {
-    let s = name
-        .0
-        .last()
-        .and_then(|p| p.as_ident())
-        .map(|i| i.value.clone())
-        .with_context(|| format!("empty ObjectName: {name}"))?;
-    SqlIdentifier::new(s)
-}
-
-/// Extract a constraint name from a `TableConstraint`, if one is present.
-fn constraint_name(
-    tc: &TableConstraint,
-) -> Option<anyhow::Result<SqlIdentifier>> {
-    let name = match tc {
-        TableConstraint::Unique(c) => c.name.as_ref(),
-        TableConstraint::PrimaryKey(c) => c.name.as_ref(),
-        TableConstraint::ForeignKey(c) => c.name.as_ref(),
-        TableConstraint::Check(c) => c.name.as_ref(),
-        // Other variants (Index, FulltextOrSpatial) don't carry a
-        // constraint name.
-        _ => return None,
-    };
-    name.map(|i| SqlIdentifier::new(i.value.clone()))
-}
-
-/// Pre-process a single DDL statement so that `sqlparser` (PostgreSQL
-/// dialect) can parse it.
-///
-/// Only applies the regexes needed for CREATE INDEX and ALTER TABLE
-/// statements. The original SQL is always what gets executed against
-/// the database; this preprocessing is only for classification.
-fn preprocess_for_sqlparser(stmt: &str) -> String {
-    let mut result = stmt.to_string();
-
-    // Strip STORING(...) clauses from CREATE INDEX.
-    let storing_re = Regex::new(r"(?is)\bSTORING\s*\([^)]*\)").unwrap();
-    result = storing_re.replace_all(&result, "").to_string();
-
-    // Replace `<type> ARRAY` with `<type>[]` in column definitions.
-    // Both are valid PostgreSQL, but sqlparser only handles the
-    // bracket notation.  We match `ARRAY` followed by `,` or end-of-
-    // definition (not `ARRAY[` which is the array literal syntax).
-    let type_array_re = Regex::new(r"(?i)(\w+)\s+ARRAY\s*([,)\n])").unwrap();
-    result = type_array_re.replace_all(&result, "$1[] $2").to_string();
-
-    // Strip IF NOT EXISTS from ADD CONSTRAINT.
-    // CockroachDB supports this but standard PostgreSQL / sqlparser
-    // does not.
-    let add_constraint_ine_re =
-        Regex::new(r"(?i)(ADD\s+CONSTRAINT)\s+IF\s+NOT\s+EXISTS").unwrap();
-    result = add_constraint_ine_re.replace_all(&result, "$1").to_string();
-
-    result
-}
-
-/// Strip SQL comments (`-- ...` and `/* ... */`) from the input.
-fn strip_sql_comments(sql: &str) -> String {
-    // Strip line comments.
-    let line_comment_re = Regex::new(r"--[^\n]*").unwrap();
-    let result = line_comment_re.replace_all(sql, "");
-    // Strip block comments.
-    let block_comment_re = Regex::new(r"(?s)/\*.*?\*/").unwrap();
-    block_comment_re.replace_all(&result, "").to_string()
-}
-
-/// Parse a SQL migration file and classify all schema-changing (DDL)
-/// statements it contains.
-///
-/// `label` is a human-readable identifier for error messages (typically
-/// the filename).
-///
-/// DML statements (INSERT, UPDATE, DELETE, SELECT, SET, etc.) are
-/// ignored — only DDL is returned.  Only CREATE INDEX and ALTER TABLE
-/// statements are parsed with `sqlparser`; all other DDL is classified
-/// as `OtherDdl` without parsing.
-pub fn classify_sql_statements(
-    sql: &str,
-    label: &str,
-) -> Result<ClassifiedDdl, anyhow::Error> {
-    let without_comments = strip_sql_comments(sql);
-
-    // Skip DML, session settings, and other non-DDL statements.
-    let dml_start = Regex::new(
-        r"(?is)^\s*(?:INSERT|UPDATE|DELETE|SELECT|SET|WITH|EXPLAIN|SHOW|USE|BEGIN|COMMIT|ROLLBACK|GRANT|REVOKE)\b",
-    )
-    .unwrap();
-
-    // Detect unparseable CockroachDB-specific ALTER PRIMARY KEY.
-    let alter_table_pk_re = Regex::new(
-        r"(?is)^\s*ALTER\s+TABLE\s+\S+\s+ALTER\s+PRIMARY\s+KEY\s+USING\s+COLUMNS",
-    )
-    .unwrap();
-
-    // Detect statements that need sqlparser for verification extraction.
-    let create_index_re =
-        Regex::new(r"(?is)^\s*CREATE\s+(?:UNIQUE\s+)?INDEX\b").unwrap();
-    let alter_table_re = Regex::new(r"(?is)^\s*ALTER\s+TABLE\b").unwrap();
-
-    let mut changes = Vec::new();
-    let mut statement_count = 0;
-
-    for raw_stmt in without_comments.split(';') {
-        let trimmed = raw_stmt.trim();
-        if trimmed.is_empty() {
-            continue;
-        }
-
-        // Skip DML, session settings, and other non-DDL statements.
-        if dml_start.is_match(trimmed) {
-            continue;
-        }
-
-        statement_count += 1;
-
-        let might_have_async_backfill = create_index_re.is_match(trimmed)
-            || alter_table_re.is_match(trimmed);
-
-        if !might_have_async_backfill {
-            changes.push(SchemaChangeInfo::OtherDdl);
-            continue;
-        }
-
-        // CockroachDB-specific ALTER PRIMARY KEY USING COLUMNS
-        // can't be parsed by sqlparser; just mark as OtherDdl.
-        if alter_table_pk_re.is_match(trimmed) {
-            changes.push(SchemaChangeInfo::OtherDdl);
-            continue;
-        }
-
-        // CREATE INDEX and ALTER TABLE may produce verification
-        // queries, so we parse them with sqlparser.
-        let preprocessed = preprocess_for_sqlparser(trimmed);
-        let stmts = Parser::parse_sql(&PostgreSqlDialect {}, &preprocessed)
-            .with_context(|| format!("failed to parse SQL in {label}"))?;
-
-        for stmt in &stmts {
-            match stmt {
-                Statement::CreateIndex(ci) => {
-                    let idx_name =
-                        last_ident(ci.name.as_ref().with_context(|| {
-                            format!(
-                                "CREATE INDEX without a name \
-                                     in {label}"
-                            )
-                        })?)?;
-                    let tbl = last_ident(&ci.table_name)?;
-                    changes.push(SchemaChangeInfo::CreateIndex {
-                        table_name: tbl,
-                        index_name: idx_name,
-                    });
-                }
-                Statement::AlterTable(at) => {
-                    let tbl = last_ident(&at.name)?;
-                    for op in &at.operations {
-                        match op {
-                            AlterTableOperation::AlterColumn {
-                                column_name,
-                                op: AlterColumnOperation::SetNotNull,
-                            } => {
-                                changes.push(
-                                    SchemaChangeInfo::AlterColumnSetNotNull {
-                                        table_name: tbl.clone(),
-                                        column_name: SqlIdentifier::new(
-                                            column_name.value.clone(),
-                                        )?,
-                                    },
-                                );
-                            }
-                            AlterTableOperation::AddConstraint {
-                                constraint: tc,
-                                ..
-                            } => {
-                                let cname = constraint_name(tc).with_context(
-                                    || {
-                                        format!(
-                                            "ADD CONSTRAINT without \
-                                             a name on table {tbl} \
-                                             in {label}"
-                                        )
-                                    },
-                                )??;
-                                changes.push(
-                                    SchemaChangeInfo::AlterTableAddConstraint {
-                                        table_name: tbl.clone(),
-                                        constraint_name: cname,
-                                    },
-                                );
-                            }
-                            AlterTableOperation::AddColumn {
-                                column_def,
-                                ..
-                            } => {
-                                let is_not_null =
-                                    column_def.options.iter().any(|opt| {
-                                        matches!(
-                                            opt.option,
-                                            ColumnOption::NotNull
-                                        )
-                                    });
-                                let has_non_null_default =
-                                    column_def.options.iter().any(|opt| {
-                                        matches!(
-                                            &opt.option,
-                                            ColumnOption::Default(expr)
-                                                if !matches!(
-                                                    expr,
-                                                    Expr::Value(ValueWithSpan {
-                                                        value: Value::Null,
-                                                        ..
-                                                    })
-                                                )
-                                        )
-                                    });
-                                let is_stored_computed =
-                                    column_def.options.iter().any(|opt| {
-                                        matches!(
-                                            &opt.option,
-                                            ColumnOption::Generated {
-                                                generation_expr: Some(_),
-                                                generation_expr_mode: Some(
-                                                    GeneratedExpressionMode::Stored
-                                                ),
-                                                ..
-                                            }
-                                        )
-                                    });
-                                if is_not_null
-                                    || has_non_null_default
-                                    || is_stored_computed
-                                {
-                                    changes.push(
-                                        SchemaChangeInfo::AddColumnNeedsBackfill {
-                                            table_name: tbl.clone(),
-                                            column_name: SqlIdentifier::new(
-                                                column_def
-                                                    .name
-                                                    .value
-                                                    .clone(),
-                                            )?,
-                                        },
-                                    );
-                                } else {
-                                    changes.push(SchemaChangeInfo::OtherDdl);
-                                }
-                            }
-                            _ => {
-                                changes.push(SchemaChangeInfo::OtherDdl);
-                            }
-                        }
-                    }
-                }
-                // Shouldn't normally happen (we only parse CREATE
-                // INDEX and ALTER TABLE), but handle gracefully.
-                _ => {
-                    changes.push(SchemaChangeInfo::OtherDdl);
-                }
-            }
-        }
-    }
-
-    Ok(ClassifiedDdl { changes, statement_count })
 }
 
 /// Describes one version of the database schema
@@ -933,6 +634,8 @@ impl SchemaVersion {
         directory: &Utf8Path,
     ) -> Result<SchemaVersion, anyhow::Error> {
         let mut up_sqls = vec![];
+        // Track all .verify.sql files so we can detect orphans.
+        let mut verify_files = std::collections::BTreeSet::new();
         let entries = directory
             .read_dir_utf8()
             .with_context(|| format!("Failed to readdir {directory}"))?;
@@ -945,6 +648,15 @@ impl SchemaVersion {
             // Ensure filename ends with ".sql"
             if pathbuf.extension() != Some("sql") {
                 continue;
+            }
+
+            // Skip .verify.sql files — they're handled separately below.
+            if let Some(stem) = pathbuf.file_stem() {
+                if stem.ends_with(".verify") {
+                    verify_files
+                        .insert(pathbuf.file_name().unwrap().to_string());
+                    continue;
+                }
             }
 
             // Ensure filename begins with "up", and extract anything in between
@@ -1012,7 +724,7 @@ impl SchemaVersion {
         }
 
         // This collection of `up*.sql` files is valid.  Read them all, in
-        // order, and classify DDL statements.
+        // order, and look for sibling `.verify.sql` files.
         let mut steps = vec![];
         for (_, path) in up_sqls.into_iter() {
             let sql = std::fs::read_to_string(&path)
@@ -1023,33 +735,30 @@ impl SchemaVersion {
             // `..`.
             let label = path.file_name().unwrap().to_string();
 
-            // Classify DDL statements in the file.
-            let classified = classify_sql_statements(&sql, &label)
-                .with_context(|| {
-                    format!(
-                        "migration file {label} in version {semver} \
-                         must be parseable"
-                    )
-                })?;
-            let schema_changes = if classified.statement_count > 1 {
-                if semver.major > LAST_MULTI_DDL_VERSION {
-                    // New migrations must have at most one DDL.
-                    bail!(
-                        "migration file {label} in version \
-                         {semver} contains {} DDL statements, \
-                         but at most 1 is allowed for versions \
-                         after {LAST_MULTI_DDL_VERSION}",
-                        classified.statement_count,
-                    );
-                }
-                // Old versions may have multiple DDL — skip
-                // verification for those files entirely.
-                Vec::new()
+            // Look for a sibling .verify.sql file (e.g., up.verify.sql
+            // for up.sql, up01.verify.sql for up01.sql).
+            let stem = path.file_stem().unwrap(); // e.g. "up" or "up01"
+            let verify_filename = format!("{stem}.verify.sql");
+            let verify_path = directory.join(&verify_filename);
+            let verification_sql = if verify_path.exists() {
+                verify_files.remove(&verify_filename);
+                let content = std::fs::read_to_string(&verify_path)
+                    .with_context(|| format!("Cannot read {verify_path}"))?;
+                Some(content)
             } else {
-                classified.changes
+                None
             };
 
-            steps.push(SchemaUpgradeStep { label, sql, schema_changes });
+            steps.push(SchemaUpgradeStep { label, sql, verification_sql });
+        }
+
+        // Check for orphaned .verify.sql files that don't correspond to
+        // any up*.sql file.
+        if let Some(orphan) = verify_files.into_iter().next() {
+            bail!(
+                "orphaned verification file {orphan} has no corresponding \
+                 up*.sql file in {directory}"
+            );
         }
 
         Ok(SchemaVersion { semver, upgrade_from_previous: steps })
@@ -1087,14 +796,13 @@ impl std::fmt::Display for SchemaVersion {
 pub struct SchemaUpgradeStep {
     label: String,
     sql: String,
-    /// DDL operations detected in this file.
+    /// Pre-computed verification SQL read from a sibling `.verify.sql` file.
     ///
-    /// New migrations (versions > `LAST_MULTI_DDL_VERSION`)
-    /// are limited to at most one DDL **statement** per file, but a single
-    /// statement may contain multiple operations (e.g., `ALTER TABLE ...
-    /// DROP CONSTRAINT ..., ADD CONSTRAINT ...`).  Older migrations that
-    /// had multiple DDL statements get an empty vec (verification skipped).
-    schema_changes: Vec<SchemaChangeInfo>,
+    /// Generated at test time by an expectorate test that parses each
+    /// migration, detects backfill-prone DDL (CREATE INDEX, ALTER COLUMN
+    /// SET NOT NULL, ADD CONSTRAINT, ADD COLUMN with backfill), and
+    /// produces verification queries.  At runtime we just read the file.
+    verification_sql: Option<String>,
 }
 
 impl SchemaUpgradeStep {
@@ -1109,14 +817,12 @@ impl SchemaUpgradeStep {
         self.sql.as_ref()
     }
 
-    /// Returns the DDL operations detected in this migration file.
+    /// Returns pre-computed verification SQL for this migration step, if any.
     ///
-    /// A single DDL statement may produce multiple entries (e.g.,
-    /// `ALTER TABLE ... DROP CONSTRAINT ..., ADD CONSTRAINT ...`).
-    /// Empty for old migrations with multiple DDL statements (verification
-    /// is skipped for those).
-    pub fn schema_changes(&self) -> &[SchemaChangeInfo] {
-        &self.schema_changes
+    /// This SQL is read from a sibling `.verify.sql` file that is generated
+    /// and kept in sync by an expectorate test.
+    pub fn verification_sql(&self) -> Option<&str> {
+        self.verification_sql.as_deref()
     }
 }
 
@@ -1124,6 +830,308 @@ impl SchemaUpgradeStep {
 mod test {
     use super::*;
     use camino_tempfile::Utf8TempDir;
+    use regex::Regex;
+    use sqlparser::ast::{
+        AlterColumnOperation, AlterTableOperation, ColumnOption, Expr,
+        GeneratedExpressionMode, Statement, TableConstraint, Value,
+        ValueWithSpan,
+    };
+    use sqlparser::dialect::PostgreSqlDialect;
+    use sqlparser::parser::Parser;
+
+    /// The last schema version that is allowed to have multiple DDL statements
+    /// per migration file.
+    ///
+    /// Versions after this one must have at most one DDL per file, which
+    /// enables us to verify that CockroachDB async backfill operations
+    /// (CREATE INDEX, ALTER TABLE ADD CONSTRAINT, etc.) complete
+    /// successfully before moving on to the next migration step.
+    const LAST_MULTI_DDL_VERSION: u64 = 220;
+
+    /// The result of classifying all DDL in a single migration file.
+    #[derive(Debug, Clone)]
+    struct ClassifiedDdl {
+        /// Individual schema-change operations detected in the file.
+        ///
+        /// A single DDL statement may produce multiple entries (e.g., an
+        /// `ALTER TABLE ... DROP CONSTRAINT ..., ADD CONSTRAINT ...`
+        /// produces two entries).
+        changes: Vec<SchemaChangeInfo>,
+        /// Number of distinct DDL **statements** in the file.
+        ///
+        /// A single `ALTER TABLE` with multiple operations counts as 1.
+        statement_count: usize,
+    }
+
+    /// Extract the last identifier from an `ObjectName`
+    /// (e.g., `omicron.public.foo` → `foo`).
+    fn last_ident(
+        name: &sqlparser::ast::ObjectName,
+    ) -> anyhow::Result<SqlIdentifier> {
+        let s = name
+            .0
+            .last()
+            .and_then(|p| p.as_ident())
+            .map(|i| i.value.clone())
+            .with_context(|| format!("empty ObjectName: {name}"))?;
+        SqlIdentifier::new(s)
+    }
+
+    /// Extract a constraint name from a `TableConstraint`, if one is present.
+    fn constraint_name(
+        tc: &TableConstraint,
+    ) -> Option<anyhow::Result<SqlIdentifier>> {
+        let name = match tc {
+            TableConstraint::Unique(c) => c.name.as_ref(),
+            TableConstraint::PrimaryKey(c) => c.name.as_ref(),
+            TableConstraint::ForeignKey(c) => c.name.as_ref(),
+            TableConstraint::Check(c) => c.name.as_ref(),
+            // Other variants (Index, FulltextOrSpatial) don't carry a
+            // constraint name.
+            _ => return None,
+        };
+        name.map(|i| SqlIdentifier::new(i.value.clone()))
+    }
+
+    /// Pre-process a single DDL statement so that `sqlparser` (PostgreSQL
+    /// dialect) can parse it.
+    ///
+    /// Only applies the regexes needed for CREATE INDEX and ALTER TABLE
+    /// statements. The original SQL is always what gets executed against
+    /// the database; this preprocessing is only for classification.
+    fn preprocess_for_sqlparser(stmt: &str) -> String {
+        let mut result = stmt.to_string();
+
+        // Strip STORING(...) clauses from CREATE INDEX.
+        let storing_re = Regex::new(r"(?is)\bSTORING\s*\([^)]*\)").unwrap();
+        result = storing_re.replace_all(&result, "").to_string();
+
+        // Replace `<type> ARRAY` with `<type>[]` in column definitions.
+        // Both are valid PostgreSQL, but sqlparser only handles the
+        // bracket notation.  We match `ARRAY` followed by `,` or
+        // end-of-definition (not `ARRAY[` which is the array literal
+        // syntax).
+        let type_array_re =
+            Regex::new(r"(?i)(\w+)\s+ARRAY\s*([,)\n])").unwrap();
+        result = type_array_re.replace_all(&result, "$1[] $2").to_string();
+
+        // Strip IF NOT EXISTS from ADD CONSTRAINT.
+        // CockroachDB supports this but standard PostgreSQL / sqlparser
+        // does not.
+        let add_constraint_ine_re =
+            Regex::new(r"(?i)(ADD\s+CONSTRAINT)\s+IF\s+NOT\s+EXISTS").unwrap();
+        result = add_constraint_ine_re.replace_all(&result, "$1").to_string();
+
+        result
+    }
+
+    /// Strip SQL comments (`-- ...` and `/* ... */`) from the input.
+    fn strip_sql_comments(sql: &str) -> String {
+        // Strip line comments.
+        let line_comment_re = Regex::new(r"--[^\n]*").unwrap();
+        let result = line_comment_re.replace_all(sql, "");
+        // Strip block comments.
+        let block_comment_re = Regex::new(r"(?s)/\*.*?\*/").unwrap();
+        block_comment_re.replace_all(&result, "").to_string()
+    }
+
+    /// Parse a SQL migration file and classify all schema-changing (DDL)
+    /// statements it contains.
+    ///
+    /// `label` is a human-readable identifier for error messages (typically
+    /// the filename).
+    ///
+    /// DML statements (INSERT, UPDATE, DELETE, SELECT, SET, etc.) are
+    /// ignored — only DDL is returned.  Only CREATE INDEX and ALTER TABLE
+    /// statements are parsed with `sqlparser`; all other DDL is classified
+    /// as `OtherDdl` without parsing.
+    fn classify_sql_statements(
+        sql: &str,
+        label: &str,
+    ) -> Result<ClassifiedDdl, anyhow::Error> {
+        let without_comments = strip_sql_comments(sql);
+
+        // Skip DML, session settings, and other non-DDL statements.
+        let dml_start = Regex::new(
+            r"(?is)^\s*(?:INSERT|UPDATE|DELETE|SELECT|SET|WITH|EXPLAIN|SHOW|USE|BEGIN|COMMIT|ROLLBACK|GRANT|REVOKE)\b",
+        )
+        .unwrap();
+
+        // Detect unparseable CockroachDB-specific ALTER PRIMARY KEY.
+        let alter_table_pk_re = Regex::new(
+            r"(?is)^\s*ALTER\s+TABLE\s+\S+\s+ALTER\s+PRIMARY\s+KEY\s+USING\s+COLUMNS",
+        )
+        .unwrap();
+
+        // Detect statements that need sqlparser for verification extraction.
+        let create_index_re =
+            Regex::new(r"(?is)^\s*CREATE\s+(?:UNIQUE\s+)?INDEX\b").unwrap();
+        let alter_table_re = Regex::new(r"(?is)^\s*ALTER\s+TABLE\b").unwrap();
+
+        let mut changes = Vec::new();
+        let mut statement_count = 0;
+
+        for raw_stmt in without_comments.split(';') {
+            let trimmed = raw_stmt.trim();
+            if trimmed.is_empty() {
+                continue;
+            }
+
+            // Skip DML, session settings, and other non-DDL statements.
+            if dml_start.is_match(trimmed) {
+                continue;
+            }
+
+            statement_count += 1;
+
+            let might_have_async_backfill = create_index_re.is_match(trimmed)
+                || alter_table_re.is_match(trimmed);
+
+            if !might_have_async_backfill {
+                changes.push(SchemaChangeInfo::OtherDdl);
+                continue;
+            }
+
+            // CockroachDB-specific ALTER PRIMARY KEY USING COLUMNS
+            // can't be parsed by sqlparser; just mark as OtherDdl.
+            if alter_table_pk_re.is_match(trimmed) {
+                changes.push(SchemaChangeInfo::OtherDdl);
+                continue;
+            }
+
+            // CREATE INDEX and ALTER TABLE may produce verification
+            // queries, so we parse them with sqlparser.
+            let preprocessed = preprocess_for_sqlparser(trimmed);
+            let stmts = Parser::parse_sql(&PostgreSqlDialect {}, &preprocessed)
+                .with_context(|| format!("failed to parse SQL in {label}"))?;
+
+            for stmt in &stmts {
+                match stmt {
+                    Statement::CreateIndex(ci) => {
+                        let idx_name = last_ident(
+                            ci.name.as_ref().with_context(|| {
+                                format!(
+                                    "CREATE INDEX without a name in {label}"
+                                )
+                            })?,
+                        )?;
+                        let tbl = last_ident(&ci.table_name)?;
+                        changes.push(SchemaChangeInfo::CreateIndex {
+                            table_name: tbl,
+                            index_name: idx_name,
+                        });
+                    }
+                    Statement::AlterTable(at) => {
+                        let tbl = last_ident(&at.name)?;
+                        for op in &at.operations {
+                            match op {
+                                AlterTableOperation::AlterColumn {
+                                    column_name,
+                                    op: AlterColumnOperation::SetNotNull,
+                                } => {
+                                    changes.push(
+                                        SchemaChangeInfo::AlterColumnSetNotNull {
+                                            table_name: tbl.clone(),
+                                            column_name: SqlIdentifier::new(
+                                                column_name.value.clone(),
+                                            )?,
+                                        },
+                                    );
+                                }
+                                AlterTableOperation::AddConstraint {
+                                    constraint: tc,
+                                    ..
+                                } => {
+                                    let cname = constraint_name(tc)
+                                        .with_context(|| {
+                                            format!(
+                                                "ADD CONSTRAINT without \
+                                                     a name on table {tbl} \
+                                                     in {label}"
+                                            )
+                                        })??;
+                                    changes.push(
+                                        SchemaChangeInfo::AlterTableAddConstraint {
+                                            table_name: tbl.clone(),
+                                            constraint_name: cname,
+                                        },
+                                    );
+                                }
+                                AlterTableOperation::AddColumn {
+                                    column_def,
+                                    ..
+                                } => {
+                                    let is_not_null =
+                                        column_def.options.iter().any(|opt| {
+                                            matches!(
+                                                opt.option,
+                                                ColumnOption::NotNull
+                                            )
+                                        });
+                                    let has_non_null_default =
+                                        column_def.options.iter().any(|opt| {
+                                            matches!(
+                                                &opt.option,
+                                                ColumnOption::Default(expr)
+                                                    if !matches!(
+                                                        expr,
+                                                        Expr::Value(ValueWithSpan {
+                                                            value: Value::Null,
+                                                            ..
+                                                        })
+                                                    )
+                                            )
+                                        });
+                                    let is_stored_computed =
+                                        column_def.options.iter().any(|opt| {
+                                            matches!(
+                                                &opt.option,
+                                                ColumnOption::Generated {
+                                                    generation_expr: Some(_),
+                                                    generation_expr_mode: Some(
+                                                        GeneratedExpressionMode::Stored
+                                                    ),
+                                                    ..
+                                                }
+                                            )
+                                        });
+                                    if is_not_null
+                                        || has_non_null_default
+                                        || is_stored_computed
+                                    {
+                                        changes.push(
+                                            SchemaChangeInfo::AddColumnNeedsBackfill {
+                                                table_name: tbl.clone(),
+                                                column_name: SqlIdentifier::new(
+                                                    column_def
+                                                        .name
+                                                        .value
+                                                        .clone(),
+                                                )?,
+                                            },
+                                        );
+                                    } else {
+                                        changes
+                                            .push(SchemaChangeInfo::OtherDdl);
+                                    }
+                                }
+                                _ => {
+                                    changes.push(SchemaChangeInfo::OtherDdl);
+                                }
+                            }
+                        }
+                    }
+                    // Shouldn't normally happen (we only parse CREATE
+                    // INDEX and ALTER TABLE), but handle gracefully.
+                    _ => {
+                        changes.push(SchemaChangeInfo::OtherDdl);
+                    }
+                }
+            }
+        }
+
+        Ok(ClassifiedDdl { changes, statement_count })
+    }
 
     #[test]
     fn test_known_versions() {
@@ -1839,55 +1847,28 @@ mod test {
 
     #[test]
     fn test_one_ddl_enforcement() {
-        // For versions > LAST_MULTI_DDL_VERSION,
-        // multiple DDL per file should be rejected.
-        let tempdir = Utf8TempDir::new().unwrap();
-        let path = tempdir.path().join("up.sql");
-        std::fs::write(
-            &path,
-            "CREATE TABLE t1 (id INT PRIMARY KEY);\n\
-             CREATE TABLE t2 (id INT PRIMARY KEY);",
-        )
-        .unwrap();
-
-        let result = SchemaVersion::load_from_directory(
-            Version::new(LAST_MULTI_DDL_VERSION + 1, 0, 0),
-            tempdir.path(),
-        );
-        assert!(result.is_err(), "Multiple DDL should be rejected");
-        let err = format!("{:#}", result.unwrap_err());
-        assert!(
-            err.contains("contains 2 DDL statements"),
-            "Error message should mention DDL count: {err}"
+        // Multiple DDL statements in a single file should produce
+        // statement_count > 1, which the expectorate test uses to
+        // reject new migrations.
+        let sql = "CREATE TABLE t1 (id INT PRIMARY KEY);\n\
+                    CREATE TABLE t2 (id INT PRIMARY KEY);";
+        let classified = classify_sql_statements(sql, "test").unwrap();
+        assert_eq!(
+            classified.statement_count, 2,
+            "Two DDL statements should produce statement_count == 2"
         );
     }
 
     #[test]
     fn test_multi_ddl_grandfathered() {
-        // For old versions (<= LAST_MULTI_DDL_VERSION),
-        // multiple DDL per file is allowed but verification is skipped.
-        let tempdir = Utf8TempDir::new().unwrap();
-        let path = tempdir.path().join("up.sql");
-        std::fs::write(
-            &path,
-            "CREATE TABLE t1 (id INT PRIMARY KEY);\n\
-             CREATE TABLE t2 (id INT PRIMARY KEY);",
-        )
-        .unwrap();
-
-        let result = SchemaVersion::load_from_directory(
-            Version::new(LAST_MULTI_DDL_VERSION, 0, 0),
-            tempdir.path(),
-        );
-        assert!(
-            result.is_ok(),
-            "Old versions should allow multi-DDL: {:#}",
-            result.unwrap_err()
-        );
-        let version = result.unwrap();
-        let step = version.upgrade_steps().next().unwrap();
-        // Multiple DDL in an old version → verification skipped (empty).
-        assert!(step.schema_changes().is_empty());
+        // For old versions (<= LAST_MULTI_DDL_VERSION), the expectorate
+        // test allows multiple DDL per file and skips verification.
+        // Verify classify_sql_statements can still parse multi-DDL.
+        let sql = "CREATE TABLE t1 (id INT PRIMARY KEY);\n\
+                    CREATE TABLE t2 (id INT PRIMARY KEY);";
+        let classified = classify_sql_statements(sql, "test").unwrap();
+        assert_eq!(classified.statement_count, 2);
+        assert_eq!(classified.changes.len(), 2);
     }
 
     #[test]
@@ -1941,30 +1922,202 @@ mod test {
         );
     }
 
-    // The most important regression test: verify that ALL existing
-    // migration files can be successfully classified.
+    /// Iterate all known migration versions, classify their SQL, and
+    /// validate (or generate via `EXPECTORATE=overwrite`) the `.verify.sql`
+    /// files.
     #[test]
-    fn test_all_existing_migrations_parseable() {
-        // Find the schema/crdb directory relative to this source file.
+    fn test_migration_verification_files() {
         let manifest_dir = env!("CARGO_MANIFEST_DIR");
         let schema_dir =
             camino::Utf8PathBuf::from(manifest_dir).join("../../schema/crdb");
 
-        // Load all schema versions — this calls load_from_directory for
-        // each, which calls classify_sql_statements internally.
-        match AllSchemaVersions::load(&schema_dir) {
-            Ok(all_versions) => {
-                // Verify we loaded a reasonable number of versions.
-                let count = all_versions.iter_versions().count();
-                assert!(
-                    count > 100,
-                    "Expected > 100 schema versions, found {count}"
-                );
+        let mut version_count = 0;
+        let overwrite = std::env::var_os("EXPECTORATE").as_deref()
+            == Some(std::ffi::OsStr::new("overwrite"));
+
+        for known_version in KNOWN_VERSIONS.iter() {
+            version_count += 1;
+            let version_path = schema_dir.join(&known_version.relative_path);
+
+            // Read the up*.sql files from the directory.
+            let mut up_files: Vec<_> = std::fs::read_dir(&version_path)
+                .unwrap_or_else(|e| {
+                    panic!("Cannot read directory {version_path}: {e}")
+                })
+                .filter_map(|entry| {
+                    let entry = entry.unwrap();
+                    let path =
+                        camino::Utf8PathBuf::try_from(entry.path()).unwrap();
+                    let stem = path.file_stem()?;
+                    if path.extension() == Some("sql")
+                        && stem.starts_with("up")
+                        && !stem.ends_with(".verify")
+                    {
+                        Some(path)
+                    } else {
+                        None
+                    }
+                })
+                .collect();
+            up_files.sort();
+
+            // Track which .verify.sql files we expect to find.
+            let mut expected_verify_files = std::collections::BTreeSet::new();
+
+            for up_path in &up_files {
+                let label = up_path.file_name().unwrap();
+                let sql = std::fs::read_to_string(up_path)
+                    .unwrap_or_else(|e| panic!("Cannot read {up_path}: {e}"));
+
+                // Classify DDL statements.
+                let classified = classify_sql_statements(&sql, label)
+                    .unwrap_or_else(|e| {
+                        panic!(
+                            "Failed to classify {label} in version \
+                                 {}: {e:#}",
+                            known_version.semver
+                        )
+                    });
+
+                // Enforce single-DDL-per-file for new versions.
+                if known_version.semver.major > LAST_MULTI_DDL_VERSION {
+                    assert!(
+                        classified.statement_count <= 1,
+                        "migration file {label} in version {} \
+                         contains {} DDL statements, but at most 1 \
+                         is allowed for versions after \
+                         {LAST_MULTI_DDL_VERSION}",
+                        known_version.semver,
+                        classified.statement_count,
+                    );
+                }
+
+                // Determine whether to skip verification for old
+                // multi-DDL versions.
+                let changes = if classified.statement_count > 1 {
+                    // Old versions with multiple DDL — skip verification.
+                    Vec::new()
+                } else {
+                    classified.changes
+                };
+
+                // Build the verification SQL from changes.
+                let verify_queries: Vec<String> = changes
+                    .iter()
+                    .filter_map(|c| c.verification_query())
+                    .collect();
+
+                let stem = up_path.file_stem().unwrap();
+                let verify_filename = format!("{stem}.verify.sql");
+                let verify_path = version_path.join(&verify_filename);
+
+                if verify_queries.is_empty() {
+                    // No verification needed — remove or reject any
+                    // stale .verify.sql file.
+                    if verify_path.exists() {
+                        if overwrite {
+                            std::fs::remove_file(&verify_path).unwrap();
+                        } else {
+                            panic!(
+                                "spurious verification file \
+                                 {verify_path} exists but {label} in \
+                                 version {} does not need verification \
+                                 (run with EXPECTORATE=overwrite to \
+                                 remove it)",
+                                known_version.semver,
+                            );
+                        }
+                    }
+                } else {
+                    expected_verify_files.insert(verify_filename);
+                    let content = format!(
+                        "-- DO NOT EDIT. Generated by test_migration_verification_files.\n{}\n",
+                        verify_queries.join("\n"),
+                    );
+                    expectorate::assert_contents(&verify_path, &content);
+                }
             }
-            Err(e) => {
-                panic!("Failed to load and classify all migrations: {:#}", e);
+
+            // Scan for orphaned .verify.sql files.
+            for entry in std::fs::read_dir(&version_path).unwrap() {
+                let entry = entry.unwrap();
+                let path = camino::Utf8PathBuf::try_from(entry.path()).unwrap();
+                if let Some(stem) = path.file_stem() {
+                    if path.extension() == Some("sql")
+                        && stem.ends_with(".verify")
+                    {
+                        let filename = path.file_name().unwrap().to_string();
+                        if !expected_verify_files.contains(&filename) {
+                            if overwrite {
+                                std::fs::remove_file(&path).unwrap();
+                            } else {
+                                panic!(
+                                    "orphaned verification file \
+                                     {path} has no corresponding \
+                                     up*.sql file in version {} \
+                                     (run with EXPECTORATE=overwrite \
+                                     to remove it)",
+                                    known_version.semver,
+                                );
+                            }
+                        }
+                    }
+                }
             }
         }
+
+        assert!(
+            version_count > 100,
+            "Expected > 100 schema versions, found {version_count}"
+        );
+    }
+
+    #[test]
+    fn test_verify_file_skipped_in_load() {
+        // .verify.sql files should not be treated as migration steps.
+        let tempdir = Utf8TempDir::new().unwrap();
+        let up_path = tempdir.path().join("up.sql");
+        let verify_path = tempdir.path().join("up.verify.sql");
+        std::fs::write(&up_path, "CREATE TABLE t (id INT PRIMARY KEY);")
+            .unwrap();
+        std::fs::write(&verify_path, "SELECT 1;").unwrap();
+
+        let result = SchemaVersion::load_from_directory(
+            Version::new(999, 0, 0),
+            tempdir.path(),
+        );
+        let version = result.unwrap();
+        let steps: Vec<_> = version.upgrade_steps().collect();
+        assert_eq!(steps.len(), 1, "Only up.sql should be loaded as a step");
+        assert_eq!(steps[0].label(), "up.sql");
+        assert_eq!(
+            steps[0].verification_sql(),
+            Some("SELECT 1;"),
+            "verification_sql should be read from up.verify.sql"
+        );
+    }
+
+    #[test]
+    fn test_orphaned_verify_file_detected() {
+        // A .verify.sql file with no corresponding up*.sql should
+        // cause an error.
+        let tempdir = Utf8TempDir::new().unwrap();
+        let up_path = tempdir.path().join("up.sql");
+        let orphan_path = tempdir.path().join("up2.verify.sql");
+        std::fs::write(&up_path, "CREATE TABLE t (id INT PRIMARY KEY);")
+            .unwrap();
+        std::fs::write(&orphan_path, "SELECT 1;").unwrap();
+
+        let result = SchemaVersion::load_from_directory(
+            Version::new(999, 0, 0),
+            tempdir.path(),
+        );
+        assert!(result.is_err(), "Orphaned .verify.sql should be rejected");
+        let err = format!("{:#}", result.unwrap_err());
+        assert!(
+            err.contains("orphaned verification file"),
+            "Error should mention orphaned file: {err}"
+        );
     }
 
     #[test]
@@ -2001,40 +2154,26 @@ mod test {
 
     #[test]
     fn test_one_ddl_multi_op_allowed() {
-        // A single ALTER TABLE with multiple operations in a post-
-        // LAST_MULTI_DDL_VERSION migration should be accepted (not
-        // rejected), and all changes stored for verification.
-        let tempdir = Utf8TempDir::new().unwrap();
-        let path = tempdir.path().join("up.sql");
-        std::fs::write(
-            &path,
-            "ALTER TABLE omicron.public.t \
-             DROP CONSTRAINT IF EXISTS old_check, \
-             ADD CONSTRAINT new_check CHECK (x > 0);",
-        )
-        .unwrap();
-
-        let result = SchemaVersion::load_from_directory(
-            Version::new(LAST_MULTI_DDL_VERSION + 1, 0, 0),
-            tempdir.path(),
-        );
-        assert!(
-            result.is_ok(),
-            "Single ALTER TABLE with multiple ops should be allowed: {:#}",
-            result.unwrap_err()
-        );
-        let version = result.unwrap();
-        let step = version.upgrade_steps().next().unwrap();
-        // Both operations should be stored for verification.
+        // A single ALTER TABLE with multiple operations should produce
+        // statement_count == 1 (allowed even for new versions), and all
+        // changes should be classified for verification.
+        let sql = "ALTER TABLE omicron.public.t \
+                    DROP CONSTRAINT IF EXISTS old_check, \
+                    ADD CONSTRAINT new_check CHECK (x > 0);";
+        let classified = classify_sql_statements(sql, "test").unwrap();
         assert_eq!(
-            step.schema_changes().len(),
+            classified.statement_count, 1,
+            "A single ALTER TABLE is one DDL statement"
+        );
+        assert_eq!(
+            classified.changes.len(),
             2,
-            "Both operations should be stored"
+            "Both operations should be classified"
         );
         // DROP CONSTRAINT is now OtherDdl.
-        assert_eq!(step.schema_changes()[0], SchemaChangeInfo::OtherDdl);
+        assert_eq!(classified.changes[0], SchemaChangeInfo::OtherDdl);
         assert_eq!(
-            step.schema_changes()[1],
+            classified.changes[1],
             SchemaChangeInfo::AlterTableAddConstraint {
                 table_name: SqlIdentifier::new("t").unwrap(),
                 constraint_name: SqlIdentifier::new("new_check").unwrap(),

@@ -173,6 +173,27 @@ async fn apply_update(
                 break;
             }
         }
+
+        // After applying the step, run its verification SQL (if any) in a
+        // separate transaction — just like the real Nexus startup path does.
+        // This confirms that async backfill operations (CREATE INDEX,
+        // ALTER COLUMN SET NOT NULL, ADD CONSTRAINT, ADD COLUMN with
+        // backfill) actually completed.
+        if let Some(verify_sql) = step.verification_sql() {
+            info!(
+                log,
+                "Verifying schema change";
+                "file" => step.label()
+            );
+            client.batch_execute(verify_sql).await.unwrap_or_else(|e| {
+                panic!(
+                    "Verification failed for {} in version {}: {}",
+                    step.label(),
+                    version.semver(),
+                    e
+                )
+            });
+        }
     }
 
     // Normally, Nexus actually bumps the version number.
