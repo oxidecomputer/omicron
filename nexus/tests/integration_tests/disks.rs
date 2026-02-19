@@ -3144,6 +3144,48 @@ async fn test_read_only_disk_different_vcr(
 
     // Gather the unique IDs present in the volumes, and ensure there is no
     // overlap.
+    fn gather_ids(ids: &mut HashSet<Uuid>, vcr: &VolumeConstructionRequest) {
+        let mut parts: VecDeque<&VolumeConstructionRequest> = VecDeque::new();
+        parts.push_back(&vcr);
+
+        while let Some(vcr_part) = parts.pop_front() {
+            match vcr_part {
+                VolumeConstructionRequest::Volume {
+                    sub_volumes,
+                    read_only_parent,
+                    ..
+                } => {
+                    // Do not insert the volume's ID as that will not be used
+                    // when constructing upstairs, and this test is specifically
+                    // trying to catch when upstairs IDs are reused.
+
+                    for sub_volume in sub_volumes {
+                        parts.push_back(sub_volume);
+                    }
+
+                    if let Some(read_only_parent) = read_only_parent {
+                        parts.push_back(read_only_parent);
+                    }
+                }
+
+                VolumeConstructionRequest::Region { opts, .. } => {
+                    if !ids.insert(opts.id) {
+                        // Panic if there is ID reuse in different region sets
+                        // in the same VCR
+                        panic!(
+                            "ID {} used in more than one region set!",
+                            opts.id
+                        );
+                    }
+                }
+
+                VolumeConstructionRequest::Url { .. }
+                | VolumeConstructionRequest::File { .. } => {
+                    panic!("should not be constructing these anymore");
+                }
+            }
+        }
+    }
 
     let mut volume_1_ids = HashSet::new();
     gather_ids(&mut volume_1_ids, &vcr_1);
@@ -3152,41 +3194,6 @@ async fn test_read_only_disk_different_vcr(
     gather_ids(&mut volume_2_ids, &vcr_2);
 
     assert_eq!(volume_1_ids.intersection(&volume_2_ids).count(), 0);
-}
-
-fn gather_ids(ids: &mut HashSet<Uuid>, vcr: &VolumeConstructionRequest) {
-    let mut parts: VecDeque<&VolumeConstructionRequest> = VecDeque::new();
-    parts.push_back(&vcr);
-
-    while let Some(vcr_part) = parts.pop_front() {
-        match vcr_part {
-            VolumeConstructionRequest::Volume {
-                id,
-                sub_volumes,
-                read_only_parent,
-                ..
-            } => {
-                ids.insert(*id);
-
-                for sub_volume in sub_volumes {
-                    parts.push_back(sub_volume);
-                }
-
-                if let Some(read_only_parent) = read_only_parent {
-                    parts.push_back(read_only_parent);
-                }
-            }
-
-            VolumeConstructionRequest::Region { opts, .. } => {
-                ids.insert(opts.id);
-            }
-
-            VolumeConstructionRequest::Url { .. }
-            | VolumeConstructionRequest::File { .. } => {
-                panic!("should not be constructing these anymore");
-            }
-        }
-    }
 }
 
 async fn disk_get(client: &ClientTestContext, disk_url: &str) -> Disk {
