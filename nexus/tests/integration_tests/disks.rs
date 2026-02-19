@@ -3037,6 +3037,9 @@ async fn test_cannot_snapshot_read_only_disk(
     .await;
 }
 
+/// Tests that multiple read-only disks created from the same underlying
+/// snapshot (or image) receive VCRs with unique UUIDs, so that the Crucible
+/// upstairs instances for the two read-only disks can co-exist peacefully.
 #[nexus_test]
 async fn test_read_only_disk_different_vcr(
     cptestctx: &ControlPlaneTestContext,
