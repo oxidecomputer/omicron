@@ -1121,4 +1121,23 @@ impl NexusLockstepApi for NexusLockstepApiImpl {
             .instrument_dropshot_handler(&rqctx, handler)
             .await
     }
+
+    async fn trust_quorum_remove_sled(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<SledSelector>,
+    ) -> Result<HttpResponseOk<Epoch>, HttpError> {
+        let apictx = &rqctx.context().context;
+        let nexus = &apictx.nexus;
+        let sled_id = path_params.into_inner().sled;
+        let handler = async {
+            let opctx =
+                crate::context::op_context_for_internal_api(&rqctx).await;
+            let epoch = nexus.tq_remove_sled(&opctx, sled_id).await?;
+            Ok(HttpResponseOk(epoch))
+        };
+        apictx
+            .internal_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
 }

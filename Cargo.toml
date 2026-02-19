@@ -8,6 +8,7 @@ members = [
     "clickhouse-admin/test-utils",
     "clickhouse-admin/types/versions",
     "clients/bootstrap-agent-client",
+    "clients/bootstrap-agent-lockstep-client",
     "clients/clickhouse-admin-keeper-client",
     "clients/clickhouse-admin-server-client",
     "clients/clickhouse-admin-single-client",
@@ -74,6 +75,7 @@ members = [
     "internal-dns/types/versions",
     "ipcc",
     "key-manager",
+    "key-manager/types",
     "live-tests",
     "live-tests/macros",
     "nexus",
@@ -134,6 +136,7 @@ members = [
     "sled-agent",
     "sled-agent/api",
     "sled-agent/bootstrap-agent-api",
+    "sled-agent/bootstrap-agent-lockstep-api",
     "sled-agent/config-reconciler",
     "sled-agent/health-monitor",
     "sled-agent/measurements",
@@ -179,6 +182,7 @@ default-members = [
     "clickhouse-admin/types/versions",
     "clickhouse-admin/test-utils",
     "clients/bootstrap-agent-client",
+    "clients/bootstrap-agent-lockstep-client",
     "clients/clickhouse-admin-keeper-client",
     "clients/clickhouse-admin-server-client",
     "clients/clickhouse-admin-single-client",
@@ -247,6 +251,7 @@ default-members = [
     "internal-dns/types/versions",
     "ipcc",
     "key-manager",
+    "key-manager/types",
     "live-tests",
     "live-tests/macros",
     "nexus",
@@ -307,6 +312,7 @@ default-members = [
     "sled-agent",
     "sled-agent/api",
     "sled-agent/bootstrap-agent-api",
+    "sled-agent/bootstrap-agent-lockstep-api",
     "sled-agent/config-reconciler",
     "sled-agent/health-monitor",
     "sled-agent/measurements",
@@ -405,7 +411,9 @@ bcs = "0.1.6"
 bincode = "1.3.3"
 bootstore = { path = "bootstore" }
 bootstrap-agent-api = { path = "sled-agent/bootstrap-agent-api" }
+bootstrap-agent-lockstep-api = { path = "sled-agent/bootstrap-agent-lockstep-api" }
 bootstrap-agent-client = { path = "clients/bootstrap-agent-client" }
+bootstrap-agent-lockstep-client = { path = "clients/bootstrap-agent-lockstep-client" }
 buf-list = { version = "1.0.3", features = ["tokio1"] }
 byteorder = "1.5.0"
 bytes = "1.10.1"
@@ -466,10 +474,10 @@ digest = "0.10.7"
 dns-server = { path = "dns-server" }
 dns-server-api = { path = "dns-server-api" }
 dns-service-client = { path = "clients/dns-service-client" }
-dpd-client = { git = "https://github.com/oxidecomputer/dendrite", rev = "7a66c1b2415122b821611fd51012032a03e14ada" }
+dpd-client = { git = "https://github.com/oxidecomputer/dendrite", rev = "37992295b5dc708d8f120cee805d67418741b556" }
 dropshot = { version = "0.16.6", features = [ "usdt-probes" ] }
-dropshot-api-manager = "0.2.4"
-dropshot-api-manager-types = "0.2.4"
+dropshot-api-manager = "0.3.0"
+dropshot-api-manager-types = "0.3.0"
 dyn-clone = "1.0.20"
 either = "1.15.0"
 ereport-types = { path = "ereport/types" }
@@ -554,6 +562,7 @@ ipnetwork = { version = "0.21", features = ["schemars", "serde"] }
 ispf = { git = "https://github.com/oxidecomputer/ispf" }
 jiff = "0.2.15"
 key-manager = { path = "key-manager" }
+key-manager-types = { path = "key-manager/types" }
 kstat-rs = "0.2.4"
 libc = "0.2.174"
 libipcc = { git = "https://github.com/oxidecomputer/ipcc-rs", rev = "524eb8f125003dff50b9703900c6b323f00f9e1b" }
@@ -570,8 +579,8 @@ ntp-admin-api = { path = "ntp-admin/api" }
 ntp-admin-client = { path = "clients/ntp-admin-client" }
 ntp-admin-types = { path = "ntp-admin/types" }
 ntp-admin-types-versions = { path = "ntp-admin/types/versions" }
-mg-admin-client = { git = "https://github.com/oxidecomputer/maghemite", rev = "3abfb8eb7f6d4ca4658981b4a7a76759a0a3f8ec" }
-ddm-admin-client = { git = "https://github.com/oxidecomputer/maghemite", rev = "3abfb8eb7f6d4ca4658981b4a7a76759a0a3f8ec" }
+mg-admin-client = { git = "https://github.com/oxidecomputer/maghemite", rev = "8f5527da3c53398c95c50b1af088637e7b6c5718" }
+ddm-admin-client = { git = "https://github.com/oxidecomputer/maghemite", rev = "8f5527da3c53398c95c50b1af088637e7b6c5718" }
 multimap = "0.10.1"
 nexus-auth = { path = "nexus/auth" }
 nexus-background-task-interface = { path = "nexus/background-task-interface" }
@@ -681,10 +690,10 @@ progenitor-client = "0.10.0"
 # NOTE: if you change the pinned revision of the `bhyve_api` and propolis
 # dependencies, you must also update the references in package-manifest.toml to
 # match the new revision.
-bhyve_api = { git = "https://github.com/oxidecomputer/propolis", rev = "8ccddb47a4c93b7e3480919495dae851afc83782" }
-propolis_api_types = { git = "https://github.com/oxidecomputer/propolis", rev = "8ccddb47a4c93b7e3480919495dae851afc83782" }
-propolis-client = { git = "https://github.com/oxidecomputer/propolis", rev = "8ccddb47a4c93b7e3480919495dae851afc83782" }
-propolis-mock-server = { git = "https://github.com/oxidecomputer/propolis", rev = "8ccddb47a4c93b7e3480919495dae851afc83782" }
+bhyve_api = { git = "https://github.com/oxidecomputer/propolis", rev = "bc121ef55741656ce118b02ceeda949b9261f49f" }
+propolis_api_types = { git = "https://github.com/oxidecomputer/propolis", rev = "bc121ef55741656ce118b02ceeda949b9261f49f" }
+propolis-client = { git = "https://github.com/oxidecomputer/propolis", rev = "bc121ef55741656ce118b02ceeda949b9261f49f" }
+propolis-mock-server = { git = "https://github.com/oxidecomputer/propolis", rev = "bc121ef55741656ce118b02ceeda949b9261f49f" }
 # NOTE: see above!
 proptest = "1.7.0"
 qorb = "0.4.1"
@@ -701,7 +710,7 @@ rats-corim = { git = "https://github.com/oxidecomputer/rats-corim.git", rev = "f
 raw-cpuid = { git = "https://github.com/oxidecomputer/rust-cpuid.git", rev = "a4cf01df76f35430ff5d39dc2fe470bcb953503b" }
 rayon = "1.10"
 rcgen = "0.12.1"
-rdb-types = { git = "https://github.com/oxidecomputer/maghemite", rev = "3abfb8eb7f6d4ca4658981b4a7a76759a0a3f8ec" }
+rdb-types = { git = "https://github.com/oxidecomputer/maghemite", rev = "8f5527da3c53398c95c50b1af088637e7b6c5718" }
 reconfigurator-cli = { path = "dev-tools/reconfigurator-cli" }
 reedline = "0.40.0"
 ref-cast = "1.0"

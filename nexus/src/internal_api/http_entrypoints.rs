@@ -409,8 +409,6 @@ impl NexusInternalApi for NexusInternalApiImpl {
             .await
     }
 
-    // NAT RPW internal APIs
-
     async fn ipv4_nat_changeset(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<RpwNatPathParam>,

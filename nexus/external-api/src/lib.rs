@@ -47,6 +47,7 @@ mod v2026012200;
 mod v2026012300;
 mod v2026013000;
 mod v2026013001;
+pub mod v2026020600;
 
 #[cfg(test)]
 mod test_utils;
@@ -79,7 +80,9 @@ api_versions!([
     // |  date-based version should be at the top of the list.
     // v
     // (next_yyyymmddnn, IDENT),
-    (2026021100, REMOVE_SLED_ADD),
+    (2026021900, REMOVE_SLED_ADD),
+    (2026021301, BGP_UNNUMBERED_PEERS),
+    (2026021300, STALE_DOCS_AND_PUNCTUATION),
     (2026020901, UPDATE_EXTERNAL_SUBNET_DOCS),
     (2026020900, RENAME_POOL_ENDPOINTS),
     (2026020600, ADD_SILO_SUBNET_POOLS),
@@ -1153,8 +1156,6 @@ pub trait NexusExternalApi {
     ) -> Result<HttpResponseOk<ResultsPage<views::IpPool>>, HttpError>;
 
     /// Create IP pool
-    ///
-    /// IPv6 is not yet supported for unicast pools.
     #[endpoint {
         operation_id = "ip_pool_create",
         method = POST,
@@ -1170,8 +1171,6 @@ pub trait NexusExternalApi {
     }
 
     /// Create IP pool
-    ///
-    /// IPv6 is not yet supported for unicast pools.
     #[endpoint {
         method = POST,
         path = "/v1/system/ip-pools",
@@ -1503,8 +1502,6 @@ pub trait NexusExternalApi {
 
     /// Add range to IP pool
     ///
-    /// IPv6 ranges are not allowed yet for unicast pools.
-    ///
     /// For multicast pools, all ranges must be either Any-Source Multicast (ASM)
     /// or Source-Specific Multicast (SSM), but not both. Mixing ASM and SSM
     /// ranges in the same pool is not allowed.
@@ -1527,8 +1524,6 @@ pub trait NexusExternalApi {
     }
 
     /// Add range to IP pool
-    ///
-    /// IPv6 ranges are not allowed yet for unicast pools.
     ///
     /// For multicast pools, all ranges must be either Any-Source Multicast (ASM)
     /// or Source-Specific Multicast (SSM), but not both. Mixing ASM and SSM
@@ -3960,11 +3955,37 @@ pub trait NexusExternalApi {
         query_params: Query<PaginatedById>,
     ) -> Result<HttpResponseOk<ResultsPage<LoopbackAddress>>, HttpError>;
 
+    /// Create switch port settings (old version with required BgpPeer.addr)
+    #[endpoint {
+        method = POST,
+        path = "/v1/system/networking/switch-port-settings",
+        tags = ["system/networking"],
+        versions = ..VERSION_BGP_UNNUMBERED_PEERS,
+    }]
+    async fn v2026010300_networking_switch_port_settings_create(
+        rqctx: RequestContext<Self::Context>,
+        new_settings: TypedBody<v2026020600::SwitchPortSettingsCreate>,
+    ) -> Result<HttpResponseCreated<v2026020600::SwitchPortSettings>, HttpError>
+    {
+        match Self::networking_switch_port_settings_create(
+            rqctx,
+            new_settings.map(Into::into),
+        )
+        .await
+        {
+            Ok(HttpResponseCreated(result)) => {
+                Ok(HttpResponseCreated(result.try_into()?))
+            }
+            Err(e) => Err(e),
+        }
+    }
+
     /// Create switch port settings
     #[endpoint {
         method = POST,
         path = "/v1/system/networking/switch-port-settings",
         tags = ["system/networking"],
+        versions = VERSION_BGP_UNNUMBERED_PEERS..,
     }]
     async fn networking_switch_port_settings_create(
         rqctx: RequestContext<Self::Context>,
@@ -3998,11 +4019,34 @@ pub trait NexusExternalApi {
         HttpError,
     >;
 
+    /// Get information about switch port (old version with required BgpPeer.addr)
+    #[endpoint {
+        method = GET,
+        path = "/v1/system/networking/switch-port-settings/{port}",
+        tags = ["system/networking"],
+        versions = ..VERSION_BGP_UNNUMBERED_PEERS,
+    }]
+    async fn v2026010300_networking_switch_port_settings_view(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::SwitchPortSettingsInfoSelector>,
+    ) -> Result<HttpResponseOk<v2026020600::SwitchPortSettings>, HttpError>
+    {
+        match Self::networking_switch_port_settings_view(rqctx, path_params)
+            .await
+        {
+            Ok(HttpResponseOk(result)) => {
+                Ok(HttpResponseOk(result.try_into()?))
+            }
+            Err(e) => Err(e),
+        }
+    }
+
     /// Get information about switch port
     #[endpoint {
         method = GET,
         path = "/v1/system/networking/switch-port-settings/{port}",
         tags = ["system/networking"],
+        versions = VERSION_BGP_UNNUMBERED_PEERS..,
     }]
     async fn networking_switch_port_settings_view(
         rqctx: RequestContext<Self::Context>,
@@ -4099,6 +4143,19 @@ pub trait NexusExternalApi {
         method = POST,
         path = "/v1/system/networking/bgp",
         tags = ["system/networking"],
+        versions = ..VERSION_BGP_UNNUMBERED_PEERS,
+    }]
+    async fn v2026010300_networking_bgp_config_create(
+        rqctx: RequestContext<Self::Context>,
+        config: TypedBody<v2026020600::BgpConfigCreate>,
+    ) -> Result<HttpResponseCreated<v2026020600::BgpConfig>, HttpError>;
+
+    /// Create new BGP configuration
+    #[endpoint {
+        method = POST,
+        path = "/v1/system/networking/bgp",
+        tags = ["system/networking"],
+        versions = VERSION_BGP_UNNUMBERED_PEERS..,
     }]
     async fn networking_bgp_config_create(
         rqctx: RequestContext<Self::Context>,
@@ -4110,6 +4167,19 @@ pub trait NexusExternalApi {
         method = GET,
         path = "/v1/system/networking/bgp",
         tags = ["system/networking"],
+        versions = ..VERSION_BGP_UNNUMBERED_PEERS,
+    }]
+    async fn v2026010300_networking_bgp_config_list(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<PaginatedByNameOrId>,
+    ) -> Result<HttpResponseOk<ResultsPage<v2026020600::BgpConfig>>, HttpError>;
+
+    /// List BGP configurations
+    #[endpoint {
+        method = GET,
+        path = "/v1/system/networking/bgp",
+        tags = ["system/networking"],
+        versions = VERSION_BGP_UNNUMBERED_PEERS..,
     }]
     async fn networking_bgp_config_list(
         rqctx: RequestContext<Self::Context>,
@@ -4170,7 +4240,28 @@ pub trait NexusExternalApi {
         method = GET,
         path = "/v1/system/networking/bgp-status",
         tags = ["system/networking"],
-        versions = VERSION_BGP_PEER_COLLISION_STATE..,
+        versions = VERSION_BGP_PEER_COLLISION_STATE..VERSION_BGP_UNNUMBERED_PEERS,
+    }]
+    async fn networking_bgp_status_v2026020600(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<Vec<v2026020600::BgpPeerStatus>>, HttpError>
+    {
+        Ok(HttpResponseOk(
+            Self::networking_bgp_status(rqctx)
+                .await?
+                .0
+                .into_iter()
+                .map(v2026020600::BgpPeerStatus::from)
+                .collect(),
+        ))
+    }
+
+    /// Get BGP peer status
+    #[endpoint {
+        method = GET,
+        path = "/v1/system/networking/bgp-status",
+        tags = ["system/networking"],
+        versions = VERSION_BGP_UNNUMBERED_PEERS..,
     }]
     async fn networking_bgp_status(
         rqctx: RequestContext<Self::Context>,
@@ -4182,10 +4273,22 @@ pub trait NexusExternalApi {
         method = GET,
         path = "/v1/system/networking/bgp-exported",
         tags = ["system/networking"],
+        versions = ..VERSION_BGP_UNNUMBERED_PEERS,
+    }]
+    async fn v2026020600_networking_bgp_exported(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<v2026020600::BgpExported>, HttpError>;
+
+    /// List BGP exported routes
+    #[endpoint {
+        method = GET,
+        path = "/v1/system/networking/bgp-exported",
+        tags = ["system/networking"],
+        versions = VERSION_BGP_UNNUMBERED_PEERS..,
     }]
     async fn networking_bgp_exported(
         rqctx: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseOk<BgpExported>, HttpError>;
+    ) -> Result<HttpResponseOk<Vec<BgpExported>>, HttpError>;
 
     /// Get BGP router message history
     #[endpoint {
@@ -4204,11 +4307,24 @@ pub trait NexusExternalApi {
         method = GET,
         path = "/v1/system/networking/bgp-routes-ipv4",
         tags = ["system/networking"],
+        versions = ..VERSION_BGP_UNNUMBERED_PEERS,
     }]
     async fn networking_bgp_imported_routes_ipv4(
         rqctx: RequestContext<Self::Context>,
         query_params: Query<params::BgpRouteSelector>,
-    ) -> Result<HttpResponseOk<Vec<BgpImportedRouteIpv4>>, HttpError>;
+    ) -> Result<HttpResponseOk<Vec<v2026020600::BgpImportedRouteIpv4>>, HttpError>;
+
+    /// Get imported IPv4 BGP routes
+    #[endpoint {
+        method = GET,
+        path = "/v1/system/networking/bgp-imported",
+        tags = ["system/networking"],
+        versions = VERSION_BGP_UNNUMBERED_PEERS..,
+    }]
+    async fn networking_bgp_imported(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<params::BgpRouteSelector>,
+    ) -> Result<HttpResponseOk<Vec<BgpImported>>, HttpError>;
 
     /// Delete BGP configuration
     #[endpoint {

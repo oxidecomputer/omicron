@@ -44,13 +44,13 @@ pub struct ServerContext {
 }
 
 impl ServerContext {
-    pub(crate) fn bootstrap_agent_addr(&self) -> Result<SocketAddrV6> {
-        // Port on which the bootstrap agent dropshot server within sled-agent
-        // is listening.
-        const BOOTSTRAP_AGENT_HTTP_PORT: u16 = 80;
+    pub(crate) fn bootstrap_agent_lockstep_addr(&self) -> Result<SocketAddrV6> {
+        // Port on which the bootstrap agent lockstep API dropshot server within
+        // sled-agent is listening.
+        const BOOTSTRAP_AGENT_LOCKSTEP_PORT: u16 = 8080;
 
         let ip = self.bootstrap_agent_ip()?;
-        Ok(SocketAddrV6::new(ip, BOOTSTRAP_AGENT_HTTP_PORT, 0, 0))
+        Ok(SocketAddrV6::new(ip, BOOTSTRAP_AGENT_LOCKSTEP_PORT, 0, 0))
     }
 
     fn bootstrap_agent_ip(&self) -> Result<Ipv6Addr> {

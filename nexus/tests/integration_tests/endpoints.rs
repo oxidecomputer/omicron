@@ -959,6 +959,7 @@ pub static DEMO_BGP_CONFIG: LazyLock<params::BgpConfigCreate> =
         vrf: None,
         checker: None,
         shaper: None,
+        max_paths: Default::default(),
     });
 pub const DEMO_BGP_ANNOUNCE_SET_URL: &'static str =
     "/v1/system/networking/bgp-announce-set";
@@ -982,7 +983,7 @@ pub const DEMO_BGP_STATUS_URL: &'static str =
 pub const DEMO_BGP_EXPORTED_URL: &'static str =
     "/v1/system/networking/bgp-exported";
 pub const DEMO_BGP_ROUTES_IPV4_URL: &'static str =
-    "/v1/system/networking/bgp-routes-ipv4?asn=47";
+    "/v1/system/networking/bgp-imported?asn=47";
 pub const DEMO_BGP_MESSAGE_HISTORY_URL: &'static str =
     "/v1/system/networking/bgp-message-history?asn=47";
 

@@ -57,6 +57,19 @@ impl slog::KV for FileKv {
     }
 }
 
+/// Returns the current time, truncated to the previous microsecond.
+///
+/// This exists because the database doesn't store nanosecond-precision, so if
+/// we store nanosecond-precision timestamps, then DateTime conversion is lossy
+/// when round-tripping through the database.  That's rather inconvenient.
+pub fn now_db_precision() -> chrono::DateTime<chrono::Utc> {
+    let ts = chrono::Utc::now();
+    let nanosecs = ts.timestamp_subsec_nanos();
+    let micros = ts.timestamp_subsec_micros();
+    let only_nanos = nanosecs - micros * 1000;
+    ts - std::time::Duration::from_nanos(u64::from(only_nanos))
+}
+
 pub const OMICRON_DPD_TAG: &str = "omicron";
 
 /// A wrapper struct that does nothing other than elide the inner value from

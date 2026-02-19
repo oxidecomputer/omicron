@@ -572,6 +572,21 @@ pub trait NexusLockstepApi {
     async fn trust_quorum_lrtq_upgrade(
         rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<Epoch>, HttpError>;
+
+    /// Remove a sled from the trust quorum
+    ///
+    /// This is a required first step towards expunging a sled
+    ///
+    /// Return the epoch of the proposed configuration so it can be polled
+    /// asynchronously.
+    #[endpoint {
+        method = POST,
+        path = "/trust-quorum/remove/{sled}"
+    }]
+    async fn trust_quorum_remove_sled(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::SledSelector>,
+    ) -> Result<HttpResponseOk<Epoch>, HttpError>;
 }
 
 /// Path parameters for Rack requests.

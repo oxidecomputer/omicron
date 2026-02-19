@@ -8,5 +8,6 @@ mod disk;
 mod early_networking;
 mod instance;
 pub(crate) mod inventory;
+pub(crate) mod rack_init;
 mod sled;
 mod zone_bundle;
