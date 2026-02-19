@@ -29,10 +29,12 @@ oxql-types.workspace = true
 schemars.workspace = true
 scim2-rs.workspace = true
 serde.workspace = true
+serde_json.workspace = true
 trust-quorum-types.workspace = true
 tufaceous-artifact.workspace = true
 uuid.workspace = true
 
 [dev-dependencies]
 proptest.workspace = true
+serde_json.workspace = true
 test-strategy.workspace = true

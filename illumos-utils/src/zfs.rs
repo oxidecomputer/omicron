@@ -4,6 +4,9 @@
 
 //! Utilities for poking at ZFS.
 
+use crate::dkio::DKIOCRAWVOLSTATUS;
+use crate::dkio::DKIOCRAWVOLSTOP;
+use crate::dkio::dk_rawvol_status;
 use crate::{PFEXEC, execute_async};
 use anyhow::Context;
 use anyhow::anyhow;
@@ -16,6 +19,7 @@ use omicron_common::disk::CompressionAlgorithm;
 use omicron_common::disk::DiskIdentity;
 use omicron_common::disk::SharedDatasetConfig;
 use omicron_uuid_kinds::DatasetUuid;
+use rustix::fd::AsRawFd;
 use std::collections::BTreeMap;
 use std::fmt;
 
@@ -202,6 +206,42 @@ pub struct GetValueError {
 #[error("Failed to list snapshots: {0}")]
 pub struct ListSnapshotsError(#[from] crate::ExecutionError);
 
+/// Error returned by [`Zfs::change_key`].
+#[derive(thiserror::Error, Debug)]
+#[error("Failed to change encryption key for dataset '{name}'")]
+pub struct ChangeKeyError {
+    pub name: String,
+    #[source]
+    pub err: anyhow::Error,
+}
+
+/// Error returned by [`Zfs::load_key`].
+#[derive(thiserror::Error, Debug)]
+#[error("Failed to load encryption key for dataset '{name}'")]
+pub struct LoadKeyError {
+    pub name: String,
+    #[source]
+    pub err: crate::ExecutionError,
+}
+
+/// Error returned by [`Zfs::dataset_exists`].
+#[derive(thiserror::Error, Debug)]
+#[error("Failed to check if dataset '{name}' exists")]
+pub struct DatasetExistsError {
+    pub name: String,
+    #[source]
+    pub err: crate::ExecutionError,
+}
+
+/// Error returned by [`Zfs::unload_key`].
+#[derive(thiserror::Error, Debug)]
+#[error("Failed to unload encryption key for dataset '{name}'")]
+pub struct UnloadKeyError {
+    pub name: String,
+    #[source]
+    pub err: crate::ExecutionError,
+}
+
 #[derive(Debug, thiserror::Error)]
 #[error(
     "Failed to create snapshot '{snap_name}' from filesystem '{filesystem}': {err}"
@@ -233,6 +273,27 @@ pub enum EnsureDatasetVolumeErrorInner {
 
     #[error("expected {value_name} to be {expected}, but saw {actual}")]
     ValueMismatch { value_name: String, expected: u64, actual: u64 },
+
+    #[error(transparent)]
+    RustixErrno(#[from] rustix::io::Errno),
+
+    #[error("created but not ready yet: {reason}")]
+    NotReady { reason: String },
+
+    #[error("not a raw zvol")]
+    NotARawZvol,
+
+    #[error("cannot get raw volume status, ioctl returned {err}")]
+    GettingStatus { err: i32 },
+
+    #[error("allocation failed, pool too fragmented")]
+    TooFragmented,
+
+    #[error("allocation error failed with status {err}")]
+    AllocationError { err: i32 },
+
+    #[error("allocation interrupted")]
+    AllocationInterrupted,
 }
 
 /// Error returned by [`Zfs::ensure_dataset_volume`].
@@ -245,6 +306,10 @@ pub struct EnsureDatasetVolumeError {
 }
 
 impl EnsureDatasetVolumeError {
+    pub fn is_not_ready(&self) -> bool {
+        matches!(&self.err, EnsureDatasetVolumeErrorInner::NotReady { .. })
+    }
+
     pub fn execution(name: String, err: crate::ExecutionError) -> Self {
         EnsureDatasetVolumeError {
             name,
@@ -286,6 +351,123 @@ impl EnsureDatasetVolumeError {
                 expected,
                 actual,
             },
+        }
+    }
+
+    pub fn from_rustix_errno(name: String, e: rustix::io::Errno) -> Self {
+        EnsureDatasetVolumeError {
+            name,
+            err: EnsureDatasetVolumeErrorInner::RustixErrno(e),
+        }
+    }
+
+    pub fn not_a_raw_zvol(name: String) -> Self {
+        EnsureDatasetVolumeError {
+            name,
+            err: EnsureDatasetVolumeErrorInner::NotARawZvol,
+        }
+    }
+
+    pub fn getting_status(name: String, err: i32) -> Self {
+        EnsureDatasetVolumeError {
+            name,
+            err: EnsureDatasetVolumeErrorInner::GettingStatus { err },
+        }
+    }
+
+    pub fn still_initializing(name: String) -> Self {
+        EnsureDatasetVolumeError {
+            name,
+            err: EnsureDatasetVolumeErrorInner::NotReady {
+                reason: String::from("still zero initializing"),
+            },
+        }
+    }
+
+    pub fn too_fragmented(name: String) -> Self {
+        EnsureDatasetVolumeError {
+            name,
+            err: EnsureDatasetVolumeErrorInner::TooFragmented,
+        }
+    }
+
+    pub fn allocation_error(name: String, err: i32) -> Self {
+        EnsureDatasetVolumeError {
+            name,
+            err: EnsureDatasetVolumeErrorInner::AllocationError { err },
+        }
+    }
+
+    pub fn allocation_interrupted(name: String) -> Self {
+        EnsureDatasetVolumeError {
+            name,
+            err: EnsureDatasetVolumeErrorInner::AllocationInterrupted,
+        }
+    }
+}
+
+#[derive(thiserror::Error, Debug)]
+pub enum DeleteDatasetVolumeErrorInner {
+    #[error(transparent)]
+    Execution(#[from] crate::ExecutionError),
+
+    #[error(transparent)]
+    RustixErrno(#[from] rustix::io::Errno),
+
+    #[error("cannot cancel raw volume initialization, ioctl returned {err}")]
+    CancellingInitialization { err: i32 },
+
+    #[error("not a raw zvol")]
+    NotARawZvol,
+
+    #[error("cannot get raw volume status, ioctl returned {err}")]
+    GettingStatus { err: i32 },
+}
+
+/// Error returned by [`Zfs::delete_dataset_volume`].
+#[derive(thiserror::Error, Debug)]
+#[error("Failed to delete volume '{name}': {err}")]
+pub struct DeleteDatasetVolumeError {
+    name: String,
+    #[source]
+    err: DeleteDatasetVolumeErrorInner,
+}
+
+impl DeleteDatasetVolumeError {
+    pub fn execution(name: String, err: crate::ExecutionError) -> Self {
+        DeleteDatasetVolumeError {
+            name,
+            err: DeleteDatasetVolumeErrorInner::Execution(err),
+        }
+    }
+
+    pub fn from_raw_zvol_open(name: String, e: rustix::io::Errno) -> Self {
+        DeleteDatasetVolumeError {
+            name,
+            err: DeleteDatasetVolumeErrorInner::RustixErrno(e),
+        }
+    }
+
+    pub fn cancelling_initialization(name: String, err: i32) -> Self {
+        DeleteDatasetVolumeError {
+            name,
+            err: DeleteDatasetVolumeErrorInner::CancellingInitialization {
+                err,
+            },
+        }
+    }
+
+    pub fn not_a_raw_zvol(name: String) -> Self {
+        DeleteDatasetVolumeError {
+            name,
+            err: DeleteDatasetVolumeErrorInner::NotARawZvol,
+        }
+    }
+
+    pub fn getting_status(name: String, err: i32) -> Self {
+        DeleteDatasetVolumeError {
+            name,
+            err: DeleteDatasetVolumeErrorInner::GettingStatus { err },
         }
     }
 }
@@ -377,11 +559,19 @@ pub struct DatasetProperties {
     /// string so that unexpected compression formats don't prevent inventory
     /// from being collected.
     pub compression: String,
+    /// The encryption key epoch for this dataset.
+    ///
+    /// Only present on encrypted datasets that directly hold a key (e.g.,
+    /// crypt datasets on U.2s). Not present on datasets that inherit
+    /// encryption from a parent.
+    pub epoch: Option<u64>,
 }
 
 impl DatasetProperties {
-    const ZFS_GET_PROPS: &'static str =
-        "oxide:uuid,name,mounted,avail,used,quota,reservation,compression";
+    const ZFS_GET_PROPS: &'static str = concat!(
+        "oxide:uuid,oxide:epoch,",
+        "name,mounted,avail,used,quota,reservation,compression",
+    );
 }
 
 impl TryFrom<&DatasetProperties> for SharedDatasetConfig {
@@ -502,6 +692,18 @@ impl DatasetProperties {
                     .get("compression")
                     .map(|(prop, _source)| prop.to_string())
                     .ok_or_else(|| anyhow!("Missing 'compression'"))?;
+                // The epoch property is only present on encrypted datasets.
+                // Like oxide:uuid, we ignore inherited values.
+                let epoch = props
+                    .get("oxide:epoch")
+                    .filter(|(prop, source)| {
+                        !source.starts_with("inherited") && *prop != "-"
+                    })
+                    .map(|(prop, _source)| {
+                        prop.parse::<u64>()
+                            .context("Failed to parse 'oxide:epoch'")
+                    })
+                    .transpose()?;
 
                 Ok(DatasetProperties {
                     id,
@@ -512,6 +714,7 @@ impl DatasetProperties {
                     quota,
                     reservation,
                     compression,
+                    epoch,
                 })
             })
             .collect::<Result<Vec<_>, _>>()
@@ -899,6 +1102,29 @@ impl DatasetMountInfo {
     }
 }
 
+/// Arguments to [Zfs::ensure_dataset_volume]
+pub struct DatasetVolumeEnsureArgs<'a> {
+    /// The full path of the volume
+    pub name: &'a str,
+
+    pub size: ByteCount,
+
+    /// Create a raw zvol instead of a regular one
+    pub raw: bool,
+
+    /// Optionally set the volblocksize
+    pub volblocksize: Option<u32>,
+}
+
+/// Arguments to [Zfs::delete_dataset_volume]
+pub struct DatasetVolumeDeleteArgs<'a> {
+    /// The full path of the volume
+    pub name: &'a str,
+
+    /// Additional actions are required when deleting a raw zvol.
+    pub raw: bool,
+}
+
 impl Zfs {
     /// Lists all datasets within a pool or existing dataset.
     ///
@@ -1028,7 +1254,7 @@ impl Zfs {
         name: &str,
         mountpoint: &Mountpoint,
     ) -> Result<(), EnsureDatasetErrorRaw> {
-        let mount_info = Self::dataset_exists(name, mountpoint).await?;
+        let mount_info = Self::dataset_mount_info(name, mountpoint).await?;
         if !mount_info.exists {
             return Err(EnsureDatasetErrorRaw::DoesNotExist);
         }
@@ -1077,7 +1303,7 @@ impl Zfs {
             additional_options,
         }: DatasetEnsureArgs<'_>,
     ) -> Result<(), EnsureDatasetErrorRaw> {
-        let dataset_info = Self::dataset_exists(name, &mountpoint).await?;
+        let dataset_info = Self::dataset_mount_info(name, &mountpoint).await?;
 
         // Non-zoned datasets with an explicit mountpoint and the
         // "canmount=on" property should be mounted within the global zone.
@@ -1196,9 +1422,29 @@ impl Zfs {
         Ok(())
     }
 
-    // Return (true, mounted) if the dataset exists, (false, false) otherwise,
-    // where mounted is if the dataset is mounted.
-    async fn dataset_exists(
+    /// Check if a ZFS dataset exists.
+    pub async fn dataset_exists(
+        name: &str,
+    ) -> Result<bool, DatasetExistsError> {
+        let mut cmd = Command::new(ZFS);
+        cmd.args(&["list", "-H", name]);
+        match execute_async(&mut cmd).await {
+            Ok(_) => Ok(true),
+            Err(crate::ExecutionError::CommandFailure(ref info))
+                if info.stderr.contains("does not exist") =>
+            {
+                Ok(false)
+            }
+            Err(err) => Err(DatasetExistsError { name: name.to_string(), err }),
+        }
+    }
+
+    /// Get mount info for a dataset, validating its mountpoint.
+    ///
+    /// Returns (exists=true, mounted) if the dataset exists with the expected
+    /// mountpoint, (exists=false, mounted=false) if it doesn't exist.
+    /// Returns an error if the dataset exists but has an unexpected mountpoint.
+    async fn dataset_mount_info(
         name: &str,
         mountpoint: &Mountpoint,
     ) -> Result<DatasetMountInfo, EnsureDatasetErrorRaw> {
@@ -1354,6 +1600,52 @@ impl Zfs {
         })
     }
 
+    /// Change the encryption key and set the oxide:epoch property.
+    ///
+    /// This operation is used for ZFS key rotation when a new Trust Quorum
+    /// epoch is committed. The caller is responsible for writing the new key
+    /// to the dataset's keylocation before calling this, and zeroing the
+    /// keyfile afterward.
+    pub async fn change_key(
+        dataset: &str,
+        epoch: u64,
+    ) -> Result<(), ChangeKeyError> {
+        let epoch_prop = format!("oxide:epoch={epoch}");
+        let mut cmd = Command::new(PFEXEC);
+        cmd.args(&[ZFS, "change-key", "-o", &epoch_prop, dataset]);
+        execute_async(&mut cmd).await.map_err(|e| ChangeKeyError {
+            name: dataset.to_string(),
+            err: e.into(),
+        })?;
+        Ok(())
+    }
+
+    /// Load the encryption key for an encrypted ZFS dataset.
+    ///
+    /// This makes the dataset accessible for mounting. The key must have
+    /// previously been written to the dataset's keylocation.
+    pub async fn load_key(name: &str) -> Result<(), LoadKeyError> {
+        let mut cmd = Command::new(PFEXEC);
+        cmd.args(&[ZFS, "load-key", name]);
+        execute_async(&mut cmd)
+            .await
+            .map(|_| ())
+            .map_err(|err| LoadKeyError { name: name.to_string(), err })
+    }
+
+    /// Unload the encryption key for an encrypted ZFS dataset.
+    ///
+    /// This is used for cleanup after failed key operations or during
+    /// trial decryption recovery. The dataset must not be mounted.
+    pub async fn unload_key(name: &str) -> Result<(), UnloadKeyError> {
+        let mut cmd = Command::new(PFEXEC);
+        cmd.args(&[ZFS, "unload-key", name]);
+        execute_async(&mut cmd)
+            .await
+            .map(|_| ())
+            .map_err(|err| UnloadKeyError { name: name.to_string(), err })
+    }
+
     /// Calls "zfs get" to acquire multiple values
     ///
     /// - `names`: The properties being acquired
@@ -1411,27 +1703,36 @@ impl Zfs {
     }
 
     pub async fn ensure_dataset_volume(
-        name: String,
-        size: ByteCount,
-        block_size: u32,
+        params: DatasetVolumeEnsureArgs<'_>,
     ) -> Result<(), EnsureDatasetVolumeError> {
         let mut command = Command::new(PFEXEC);
         let cmd = command.args(&[ZFS, "create"]);
 
-        cmd.args(&[
-            "-V",
-            &size.to_bytes().to_string(),
-            "-o",
-            &format!("volblocksize={}", block_size),
-            &name,
-        ]);
+        let mut args: Vec<String> =
+            vec!["-V".to_string(), params.size.to_bytes().to_string()];
+
+        if params.raw {
+            args.push("-o".to_string());
+            args.push("rawvol=on".to_string());
+        }
+
+        if let Some(volblocksize) = &params.volblocksize {
+            args.push("-o".to_string());
+            args.push(format!("volblocksize={}", volblocksize));
+        }
+
+        args.push(params.name.to_string());
+
+        cmd.args(&args);
 
         // The command to create a dataset is not idempotent and will fail with
         // "dataset already exists" if the volume is created already. Eat this
         // and return Ok instead.
 
         match execute_async(cmd).await {
-            Ok(_) => Ok(()),
+            Ok(_) => {
+                // Nothing to do
+            }
 
             Err(crate::ExecutionError::CommandFailure(info))
                 if info.stderr.contains("dataset already exists") =>
@@ -1440,55 +1741,389 @@ impl Zfs {
                 // being requested: these cannot be changed once the volume is
                 // created.
 
-                let [actual_size, actual_block_size] =
-                    Self::get_values(&name, &["volsize", "volblocksize"], None)
-                        .await
-                        .map_err(|err| {
-                            EnsureDatasetVolumeError::get_value(
-                                name.clone(),
-                                err,
-                            )
-                        })?;
+                let [actual_size, actual_volblocksize] = Self::get_values(
+                    params.name,
+                    &["volsize", "volblocksize"],
+                    None,
+                )
+                .await
+                .map_err(|err| {
+                    EnsureDatasetVolumeError::get_value(
+                        params.name.to_string(),
+                        err,
+                    )
+                })?;
 
                 let actual_size: u64 = actual_size.parse().map_err(|_| {
                     EnsureDatasetVolumeError::value_parse(
-                        name.clone(),
+                        params.name.to_string(),
                         String::from("volsize"),
                         actual_size,
                     )
                 })?;
 
-                let actual_block_size: u32 =
-                    actual_block_size.parse().map_err(|_| {
+                let actual_volblocksize: u32 =
+                    actual_volblocksize.parse().map_err(|_| {
                         EnsureDatasetVolumeError::value_parse(
-                            name.clone(),
+                            params.name.to_string(),
                             String::from("volblocksize"),
-                            actual_block_size,
+                            actual_volblocksize,
                         )
                     })?;
 
-                if actual_size != size.to_bytes() {
+                if actual_size != params.size.to_bytes() {
                     return Err(EnsureDatasetVolumeError::value_mismatch(
-                        name.clone(),
+                        params.name.to_string(),
                         String::from("volsize"),
-                        size.to_bytes(),
+                        params.size.to_bytes(),
                         actual_size,
                     ));
                 }
 
-                if actual_block_size != block_size {
-                    return Err(EnsureDatasetVolumeError::value_mismatch(
-                        name.clone(),
-                        String::from("volblocksize"),
-                        u64::from(block_size),
-                        u64::from(actual_block_size),
+                if let Some(volblocksize) = &params.volblocksize {
+                    if actual_volblocksize != *volblocksize {
+                        return Err(EnsureDatasetVolumeError::value_mismatch(
+                            params.name.to_string(),
+                            String::from("volblocksize"),
+                            u64::from(*volblocksize),
+                            u64::from(actual_volblocksize),
+                        ));
+                    }
+                }
+            }
+
+            Err(err) => {
+                return Err(EnsureDatasetVolumeError::execution(
+                    params.name.to_string(),
+                    err,
+                ));
+            }
+        }
+
+        if params.raw {
+            let path = format!("/dev/zvol/rdsk/{}", params.name);
+
+            let fd = rustix::fs::open(
+                path,
+                rustix::fs::OFlags::RDONLY,
+                rustix::fs::Mode::empty(),
+            )
+            .map_err(|e| {
+                EnsureDatasetVolumeError::from_rustix_errno(
+                    params.name.to_string(),
+                    e,
+                )
+            })?;
+
+            // Raw zvols error for arbitrarily sized reads, so read the first 4k
+            let mut buf = [0u8; 4096];
+            match rustix::io::read(&fd, &mut buf) {
+                Ok(_) => {
+                    // Done initializing
+                    return Ok(());
+                }
+
+                Err(rustix::io::Errno::INPROGRESS) => {
+                    // The zero initialization thread is still running, fall
+                    // through to check the status ioctl.
+                }
+
+                Err(e) => {
+                    // Any other error should be bubbled up
+                    return Err(EnsureDatasetVolumeError::from_rustix_errno(
+                        params.name.to_string(),
+                        e,
+                    ));
+                }
+            }
+
+            // Check the values from the status ioctl. We have to wait until the
+            // zero initialization thread is complete before the vol can be
+            // used.
+            let mut status = dk_rawvol_status::default();
+
+            // Retry if EINTR is seen
+            for i in 0..2 {
+                // Safety: We are issuing the `DKIOCRAWVOLSTATUS` ioctl which is
+                // documented to take a struct of type `dk_rawvol_status`. Assuming
+                // our type definitions are correct, this call is safe.
+                if unsafe {
+                    libc::ioctl(
+                        fd.as_raw_fd(),
+                        DKIOCRAWVOLSTATUS as _,
+                        &mut status,
+                    )
+                } == -1
+                {
+                    let err = std::io::Error::last_os_error();
+                    match err.raw_os_error().unwrap() {
+                        libc::ENOTSUP => {
+                            // ENOTSUP is returned when this ioctl is issued against
+                            // a non-raw zvol
+                            return Err(
+                                EnsureDatasetVolumeError::not_a_raw_zvol(
+                                    params.name.to_string(),
+                                ),
+                            );
+                        }
+
+                        libc::EINTR if i == 0 => {
+                            // Retry once if EINTR is seen
+                            continue;
+                        }
+
+                        e => {
+                            // Unexpected error, return up the stack
+                            return Err(
+                                EnsureDatasetVolumeError::getting_status(
+                                    params.name.to_string(),
+                                    e,
+                                ),
+                            );
+                        }
+                    }
+                }
+            }
+
+            match status.drs_status {
+                0 => {
+                    // The zero init thread was not running - because we saw
+                    // EINPROGRESS before from the read, and now see 0, that
+                    // means it finished in the time between the read and that
+                    // ioctl.
+                    return Ok(());
+                }
+
+                libc::EINTR => {
+                    // The zero init thread was running but was interrupted.
+                    return Err(
+                        EnsureDatasetVolumeError::allocation_interrupted(
+                            params.name.to_string(),
+                        ),
+                    );
+                }
+
+                libc::EINPROGRESS => {
+                    // The zero init thread is currently running
+                    return Err(EnsureDatasetVolumeError::still_initializing(
+                        params.name.to_string(),
                     ));
                 }
 
-                Ok(())
+                // usr/src/uts/common/fs/zfs/sys/zio.h defines EFRAGS == EBADR
+                #[cfg(target_os = "illumos")]
+                libc::EBADR => {
+                    // EFRAGS means the zero init thread encountered an error
+                    // allocating a record. This is fatal! The pool is too
+                    // fragmented to continue.
+                    return Err(EnsureDatasetVolumeError::too_fragmented(
+                        params.name.to_string(),
+                    ));
+                }
+
+                e => {
+                    // Any other error should be bubbled up
+                    return Err(EnsureDatasetVolumeError::allocation_error(
+                        params.name.to_string(),
+                        e,
+                    ));
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Returns Ok when a raw volume is ok to delete, and an error otherwise.
+    ///
+    /// Note this function will wait the small amount of time it takes to stop
+    /// the zero init thread.
+    pub async fn wait_for_raw_volume_ok_to_delete(
+        params: &DatasetVolumeDeleteArgs<'_>,
+    ) -> Result<(), DeleteDatasetVolumeError> {
+        let rdsk_path = format!("/dev/zvol/rdsk/{}", params.name);
+
+        // If the /dev/zvol/rdsk/... path is missing then skip additional checks
+        // as the zvol is probably gone.
+        if !Utf8Path::new(&rdsk_path).exists() {
+            return Ok(());
+        }
+
+        let fd = rustix::fs::open(
+            rdsk_path,
+            rustix::fs::OFlags::WRONLY,
+            rustix::fs::Mode::empty(),
+        )
+        .map_err(|e| {
+            DeleteDatasetVolumeError::from_raw_zvol_open(
+                params.name.to_string(),
+                e,
+            )
+        })?;
+
+        // Check if it is still initializing. We can't delete it if it is, so
+        // we'll have to stop the initialization before deleting.
+        let mut status = dk_rawvol_status::default();
+
+        // Retry if EINTR is seen
+        for i in 0..2 {
+            // Safety: We are issuing the `DKIOCRAWVOLSTATUS` ioctl which is
+            // documented to take a struct of type `dk_rawvol_status`. Assuming
+            // our type definitions are correct, this call is safe.
+            if unsafe {
+                libc::ioctl(fd.as_raw_fd(), DKIOCRAWVOLSTATUS as _, &mut status)
+            } == -1
+            {
+                let err = std::io::Error::last_os_error();
+                match err.raw_os_error().unwrap() {
+                    libc::ENOTSUP => {
+                        // ENOTSUP is returned when this ioctl is issued against
+                        // a non-raw zvol
+                        return Err(DeleteDatasetVolumeError::not_a_raw_zvol(
+                            params.name.to_string(),
+                        ));
+                    }
+
+                    libc::EINTR if i == 0 => {
+                        // Retry once if EINTR is seen
+                        continue;
+                    }
+
+                    e => {
+                        // Unexpected error, return up the stack
+                        return Err(DeleteDatasetVolumeError::getting_status(
+                            params.name.to_string(),
+                            e,
+                        ));
+                    }
+                }
+            }
+        }
+
+        let zero_init_thread_needs_stopping = match status.drs_status {
+            0 => {
+                // The zero init thread was not running - it's either not been
+                // started or has finished.
+                false
             }
 
-            Err(err) => Err(EnsureDatasetVolumeError::execution(name, err)),
+            libc::EINTR => {
+                // The zero init thread was running but was stopped.
+                false
+            }
+
+            libc::EINPROGRESS => {
+                // The zero init thread is currently running
+                true
+            }
+
+            _ => {
+                // The zero init thread encountered an error, we can proceed
+                // with deleting the raw vol
+                false
+            }
+        };
+
+        if !zero_init_thread_needs_stopping {
+            return Ok(());
+        }
+
+        // Retry if EINTR is seen
+        for i in 0..2 {
+            // DKIOCRAWVOLSTOP will stop the initialization and block waiting
+            // for the initialization thread to exit. If this returns 0, the
+            // initialization thread has stopped and exited ok, proceed with
+            // deletion.
+            if unsafe { libc::ioctl(fd.as_raw_fd(), DKIOCRAWVOLSTOP as _) }
+                == -1
+            {
+                let err = std::io::Error::last_os_error();
+                match err.raw_os_error().unwrap() {
+                    libc::ENOTSUP => {
+                        // ENOTSUP is returned when this ioctl is issued against
+                        // a non-raw zvol
+                        return Err(DeleteDatasetVolumeError::not_a_raw_zvol(
+                            params.name.to_string(),
+                        ));
+                    }
+
+                    libc::EINTR if i == 0 => {
+                        // Retry once if EINTR is seen
+                        continue;
+                    }
+
+                    e => {
+                        // Unexpected error, return up the stack
+                        return Err(
+                            DeleteDatasetVolumeError::cancelling_initialization(
+                                params.name.to_string(),
+                                e,
+                            ),
+                        );
+                    }
+                }
+            }
+        }
+
+        // The zero init thread has been stopped
+        Ok(())
+    }
+
+    pub async fn delete_dataset_volume(
+        params: DatasetVolumeDeleteArgs<'_>,
+    ) -> Result<(), DeleteDatasetVolumeError> {
+        // If we're deleting a raw zvol, there are additional steps
+        if params.raw {
+            Self::wait_for_raw_volume_ok_to_delete(&params).await?;
+        }
+
+        let mut command = Command::new(PFEXEC);
+        let cmd = command.args(&[ZFS, "destroy", params.name]);
+
+        // Retry twice in the face of "dataset is busy", another part of
+        // sled-agent may be accessing the list of datasets and volumes, or
+        // properties of the volume.
+        let mut i = 0;
+
+        // This looks like some nonsense, but it ensures that the mutable ref is
+        // captured by the closure below, and not i by value, which would add 1
+        // to 0 every time the closure is called.
+        let j = &mut i;
+
+        let mut retryable = || {
+            let res = *j < 2;
+            *j += 1;
+            res
+        };
+
+        loop {
+            match execute_async(cmd).await {
+                Ok(_) => {
+                    return Ok(());
+                }
+
+                Err(crate::ExecutionError::CommandFailure(info))
+                    if info.stderr.contains("dataset does not exist") =>
+                {
+                    return Ok(());
+                }
+
+                Err(crate::ExecutionError::CommandFailure(info))
+                    if info.stderr.contains("dataset is busy")
+                        && retryable() =>
+                {
+                    tokio::time::sleep(tokio::time::Duration::from_secs(1))
+                        .await;
+                    continue;
+                }
+
+                Err(err) => {
+                    return Err(DeleteDatasetVolumeError::execution(
+                        params.name.to_string(),
+                        err,
+                    ));
+                }
+            }
         }
     }
 }

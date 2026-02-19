@@ -42,7 +42,6 @@ ALTER DEFAULT PRIVILEGES GRANT INSERT, SELECT, UPDATE, DELETE ON TABLES to omicr
  */
 ALTER RANGE default CONFIGURE ZONE USING num_replicas = 5;
 
-
 /*
  * The deployment strategy for clickhouse
  */
@@ -639,7 +638,8 @@ CREATE TYPE IF NOT EXISTS omicron.public.dataset_kind AS ENUM (
   'zone',
   'debug',
   'update',
-  'local_storage'
+  'local_storage',
+  'local_storage_unencrypted'
 );
 
 /*
@@ -1542,7 +1542,9 @@ CREATE TABLE IF NOT EXISTS omicron.public.disk_type_crucible (
     origin_snapshot UUID,
     origin_image UUID,
 
-    pantry_address TEXT
+    pantry_address TEXT,
+
+    read_only BOOL NOT NULL
 );
 
 /* Multiple disks cannot share volumes */
@@ -2370,6 +2372,26 @@ CREATE UNIQUE INDEX IF NOT EXISTS lookup_pool_range_by_last_address ON omicron.p
 STORING (first_address)
 WHERE time_deleted IS NULL;
 
+/*
+ * Index to support efficient lookups of ip_pool_range rows by ip_pool_id.
+ *
+ * This index benefits several important queries:
+ * - ip_pool_fetch_containing_address: finds pools containing a specific IP
+ * - ip_pool_delete: checks for remaining ranges before pool deletion
+ * - ip_pool_list_ranges_batched_on_connection: lists all ranges in a pool
+ * - ip_pools_fetch_ssm_multicast_pool / ip_pools_fetch_asm_multicast_pool:
+ *   joins ip_pool_range to ip_pool for multicast pool lookups
+ *
+ * The STORING clause includes first_address and last_address because these
+ * columns are commonly filtered or selected alongside ip_pool_id, allowing
+ * the query to be satisfied entirely from the index without an additional
+ * lookup to the primary table.
+ */
+CREATE INDEX IF NOT EXISTS ip_pool_range_by_pool_id ON omicron.public.ip_pool_range (
+    ip_pool_id
+) STORING (first_address, last_address)
+WHERE time_deleted IS NULL;
+
 /* The kind of external IP address. */
 CREATE TYPE IF NOT EXISTS omicron.public.ip_kind AS ENUM (
     /*
@@ -2529,9 +2551,11 @@ CREATE UNIQUE INDEX IF NOT EXISTS lookup_external_ip_by_parent ON omicron.public
 )
     WHERE parent_id IS NOT NULL AND time_deleted IS NULL;
 
-/* Enforce a limit of one Ephemeral IP per instance */
-CREATE UNIQUE INDEX IF NOT EXISTS one_ephemeral_ip_per_instance ON omicron.public.external_ip (
-    parent_id
+/* Enforce a limit of one Ephemeral IP per IP version per instance.
+   This allows dual-stack configurations with one IPv4 and one IPv6 ephemeral IP. */
+CREATE UNIQUE INDEX IF NOT EXISTS one_ephemeral_ip_per_instance_per_version ON omicron.public.external_ip (
+    parent_id,
+    (family(ip::INET))
 )
     WHERE kind = 'ephemeral' AND parent_id IS NOT NULL AND time_deleted IS NULL;
 
@@ -2571,6 +2595,230 @@ FROM
 WHERE
     omicron.public.external_ip.kind = 'floating' AND
     project_id IS NOT NULL;
+
+/*******************************************************************/
+
+/*
+ * Subnet pools, members, and external subnets.
+ */
+
+CREATE TABLE IF NOT EXISTS omicron.public.subnet_pool (
+    /* Resource identity metadata */
+    id UUID PRIMARY KEY,
+    name STRING(63) NOT NULL,
+    description STRING(512) NOT NULL,
+    time_created TIMESTAMPTZ NOT NULL,
+    time_modified TIMESTAMPTZ NOT NULL,
+    time_deleted TIMESTAMPTZ,
+
+    /* The collection's child-resource generation number */
+    rcgen INT8 NOT NULL,
+
+    /* The IP version of the subnets contained in this pool. */
+    ip_version omicron.public.ip_version NOT NULL
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS subnet_pool_name_key
+ON omicron.public.subnet_pool (name)
+WHERE
+    time_deleted IS NULL;
+
+CREATE TABLE IF NOT EXISTS omicron.public.subnet_pool_member (
+    id UUID PRIMARY KEY,
+    time_created TIMESTAMPTZ NOT NULL,
+    time_modified TIMESTAMPTZ NOT NULL,
+    time_deleted TIMESTAMPTZ,
+
+    /* FK into the `subnet_pool` table. */
+    subnet_pool_id UUID NOT NULL,
+
+    /* The actual IP subnet. */
+    subnet INET NOT NULL,
+
+    /*
+     * Virtual computed columns with the first / last address in the subnet.
+     *
+     * These columns cannot be directly inserted, and we don't read them from
+     * the database. They are only used in the secondary index below that helps
+     * enforce that we have non-overlapping subnets in this table. That cannot
+     * be done with an index just on the subnet column, since the check we need
+     * isn't equality or ordering.
+     */
+    first_address INET AS (subnet & netmask(subnet)) VIRTUAL,
+    last_address INET AS (
+        /*
+         * This bit-masking is performing the `network()` function, which
+         * CockroachDB unfortunat lacks. We're or-ing the netmask and the
+         * hostmask, which together results in an all-1s bit pattern of either
+         * 32- or 128-bits.
+         */
+        broadcast(subnet) & (netmask(subnet) | hostmask(subnet))
+    ) VIRTUAL,
+
+    /* The minimum and maximum prefix of allocated subnets out of this external
+     * subnet.
+     *
+     * NOTE: These are the _prefix_ lengths, so /24, /64 etc, not sizes. The
+     * `min_prefix_length` is the smallest prefix length that can be sliced out
+     * of this subnet, i.e., the largest subnet. The `max_prefix_length` is the
+     * _largest_ prefix length, i.e., the smallest subnet.
+     */
+    min_prefix_length INT2 NOT NULL,
+    max_prefix_length INT2 NOT NULL,
+
+    /* Tracks child resources, subnets allocated out of this subnet. */
+    rcgen INT8 NOT NULL,
+
+    -- Ensures the prefixes are within the limits of the IP subnet.
+    CONSTRAINT valid_prefix_sizes CHECK (
+        -- Both min / max are non-negative
+        min_prefix_length >= 0 AND
+        max_prefix_length >= 0 AND
+        -- min and max are less than the subnet prefix, which depends on the
+        -- IP family.
+        (
+            (family(subnet) = 4 AND min_prefix_length <= 32) OR
+            (family(subnet) = 6 AND min_prefix_length <= 128)
+        ) AND
+        (
+            (family(subnet) = 4 AND max_prefix_length <= 32) OR
+            (family(subnet) = 6 AND max_prefix_length <= 128)
+        )
+    ),
+
+    -- Ensures that the minimum and maximum prefix lengths are valid. Again,
+    -- these refer to the bit-length of the subnet prefix, so the minimum prefix
+    -- implies the maximum-sized subnet. The min length must be no larger than
+    -- the max length.
+    CONSTRAINT min_prefix_no_larger_than_max_prefix CHECK (
+        min_prefix_length <= max_prefix_length
+    )
+);
+
+CREATE INDEX IF NOT EXISTS lookup_subnet_pool_member_by_subnet_pool_id
+ON omicron.public.subnet_pool_member (subnet_pool_id);
+
+/*
+ * Indexes for quickly looking up overlapping subnets.
+ */
+CREATE UNIQUE INDEX IF NOT EXISTS lookup_subnet_pool_member_by_subnet
+ON omicron.public.subnet_pool_member (subnet)
+WHERE
+    time_deleted IS NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS lookup_subnet_pool_member_by_first_and_last_address
+ON omicron.public.subnet_pool_member (first_address, last_address)
+WHERE
+    time_deleted IS NULL;
+
+/*
+ * Links between Silos and Subnet Pools.
+ */
+CREATE TABLE IF NOT EXISTS omicron.public.subnet_pool_silo_link (
+    subnet_pool_id UUID NOT NULL,
+    silo_id UUID NOT NULL,
+    ip_version omicron.public.ip_version NOT NULL,
+    is_default BOOL NOT NULL,
+    PRIMARY KEY (subnet_pool_id, silo_id)
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS single_default_per_silo
+ON omicron.public.subnet_pool_silo_link (silo_id, ip_version)
+WHERE
+    is_default = TRUE;
+
+CREATE INDEX IF NOT EXISTS lookup_subnet_pool_silo_link_by_silo_id
+ON omicron.public.subnet_pool_silo_link (silo_id);
+
+/*
+ * An external subnet is a Project-scoped portion of an external subnet pool
+ * member.
+ */
+CREATE TABLE IF NOT EXISTS omicron.public.external_subnet (
+    /* Resource identity metadata */
+    id UUID PRIMARY KEY,
+    name STRING(63) NOT NULL,
+    description STRING(512) NOT NULL,
+    time_created TIMESTAMPTZ NOT NULL,
+    time_modified TIMESTAMPTZ NOT NULL,
+    time_deleted TIMESTAMPTZ,
+
+    /* FK into parent subnet_pool table. */
+    subnet_pool_id UUID NOT NULL,
+
+    /* FK into parent subnet_pool_member table. */
+    subnet_pool_member_id UUID NOT NULL,
+
+    /* FK into the project table. */
+    project_id UUID NOT NULL,
+
+    /* The actual IP subnet. */
+    subnet INET NOT NULL,
+    /*
+     * Virtual computed columns with the first / last address in the subnet.
+     *
+     * These columns cannot be directly inserted, and we don't read them from
+     * the database. They are only used in the secondary index below that helps
+     * enforce that we have non-overlapping subnets in this table. That cannot
+     * be done with an index just on the subnet column, since the check we need
+     * isn't equality or ordering.
+     *
+     * Note that it's important that these become true addresses, i.e., /32s or
+     * /128s. CRDB sorts INET types just using the prefix, so we have to ensure
+     * we're using the full address width to get the actual first and last
+     * address. This works for IPv4 and IPv6 addresses.
+     */
+    first_address INET AS (subnet & netmask(subnet)) VIRTUAL,
+    last_address INET AS (
+        /*
+         * This bit-masking is performing the `network()` function, which
+         * CockroachDB unfortunat lacks. We're or-ing the netmask and the
+         * hostmask, which together results in an all-1s bit pattern of either
+         * 32- or 128-bits.
+         */
+        broadcast(subnet) & (netmask(subnet) | hostmask(subnet))
+    ) VIRTUAL,
+
+    /* The state of the subnet, while attaching to an instance. */
+    attach_state omicron.public.ip_attach_state NOT NULL,
+
+    /* The instance to which the subnet is attached, if any */
+    instance_id UUID
+);
+
+/*
+ * External subnets have unique names within a project.
+ */
+CREATE UNIQUE INDEX IF NOT EXISTS external_subnet_project_id_name_key
+ON omicron.public.external_subnet (
+    project_id,
+    name
+)
+WHERE
+    time_deleted IS NULL;
+
+CREATE INDEX IF NOT EXISTS lookup_external_subnet_by_subnet_pool_member_id
+ON omicron.public.external_subnet (subnet_pool_member_id)
+WHERE
+    time_deleted IS NULL;
+
+CREATE INDEX IF NOT EXISTS lookup_external_subnet_by_instance_id
+ON omicron.public.external_subnet (instance_id)
+WHERE
+    instance_id IS NOT NULL AND
+    time_deleted IS NULL;
+
+/*
+ * Indexes for quickly looking up overlapping subnets.
+ */
+CREATE UNIQUE INDEX IF NOT EXISTS lookup_external_subnet_by_subnet
+ON omicron.public.external_subnet (subnet)
+WHERE
+    time_deleted IS NULL;
+
+CREATE UNIQUE INDEX IF NOT EXISTS lookup_external_subnet_by_first_and_last_address
+ON omicron.public.external_subnet (first_address, last_address)
+WHERE
+    time_deleted IS NULL;
 
 /*******************************************************************/
 
@@ -3438,14 +3686,31 @@ CREATE TABLE IF NOT EXISTS omicron.public.switch_port_settings_bgp_peer_config (
     allow_import_list_active BOOLEAN NOT NULL DEFAULT false,
     allow_export_list_active BOOLEAN NOT NULL DEFAULT false,
     vlan_id INT4,
+    id UUID NOT NULL,
+    router_lifetime INT4 NOT NULL DEFAULT 0,
 
-    /* TODO https://github.com/oxidecomputer/omicron/issues/3013 */
-    PRIMARY KEY (port_settings_id, interface_name, addr)
+    PRIMARY KEY (id)
 );
+
+-- Unique constraint for numbered BGP peers (those with an address)
+CREATE UNIQUE INDEX IF NOT EXISTS switch_port_settings_bgp_peer_config_numbered_unique
+    ON omicron.public.switch_port_settings_bgp_peer_config (port_settings_id, interface_name, addr)
+    WHERE addr IS NOT NULL;
+
+-- Unique constraint for unnumbered BGP peers (one per interface)
+CREATE UNIQUE INDEX IF NOT EXISTS switch_port_settings_bgp_peer_config_unnumbered_unique
+    ON omicron.public.switch_port_settings_bgp_peer_config (port_settings_id, interface_name)
+    WHERE addr IS NULL;
 
 CREATE INDEX IF NOT EXISTS lookup_sps_bgp_peer_config_by_bgp_config_id on omicron.public.switch_port_settings_bgp_peer_config(
     bgp_config_id
 );
+
+-- Index for looking up BGP peers by port_settings_id.
+-- This is needed because the partial indexes (for numbered and unnumbered peers)
+-- don't cover all rows when filtering only by port_settings_id.
+CREATE INDEX IF NOT EXISTS lookup_sps_bgp_peer_config_by_port_settings_id
+    ON omicron.public.switch_port_settings_bgp_peer_config (port_settings_id);
 
 CREATE TABLE IF NOT EXISTS omicron.public.switch_port_settings_bgp_peer_config_communities (
     port_settings_id UUID NOT NULL,
@@ -3485,7 +3750,8 @@ CREATE TABLE IF NOT EXISTS omicron.public.bgp_config (
     vrf TEXT,
     bgp_announce_set_id UUID NOT NULL,
     shaper TEXT,
-    checker TEXT
+    checker TEXT,
+    max_paths INT2 NOT NULL CHECK (max_paths > 0 AND max_paths <= 32)
 );
 
 CREATE UNIQUE INDEX IF NOT EXISTS lookup_bgp_config_by_name ON omicron.public.bgp_config (
@@ -3970,7 +4236,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_sled_agent (
     -- similar to `usable_hardware_threads` and friends above.
     cpu_family omicron.public.sled_cpu_family NOT NULL,
 
-    -- Columns making up the resolver's measurement manifest description 
+    -- Columns making up the resolver's measurement manifest description
     --
     -- The path to the boot disk file
     measurement_manifest_boot_disk_path TEXT NOT NULL,
@@ -4292,24 +4558,21 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_omicron_sled_config (
     -- NULL is translated to `HostPhase2DesiredContents::CurrentContents`
     host_phase_2_desired_slot_a STRING(64),
     host_phase_2_desired_slot_b STRING(64),
-    
+
     -- the set of artifact hashes used with trust quorum, can be empty
     measurements STRING(64)[],
 
     PRIMARY KEY (inv_collection_id, id)
 );
 
-CREATE TABLE IF NOT EXISTS omicron.public.inv_last_reconciliation_measurements (
+CREATE TABLE IF NOT EXISTS omicron.public.inv_single_measurements (
     -- where this observation came from
     -- (foreign key into `inv_collection` table)
     inv_collection_id UUID NOT NULL,
- 
+
     -- unique id for this sled (should be foreign keys into `sled` table, though
     -- it's conceivable a sled will report an id that we don't know about)
     sled_id UUID NOT NULL,
-
-    -- file name of the measurement file
-    file_name TEXT NOT NULL,
 
     -- full path to the measurement file
     path TEXT NOT NULL,
@@ -4317,7 +4580,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_last_reconciliation_measurements (
     -- error message; if NULL, an "ok" result
     error_message TEXT,
 
-    PRIMARY KEY (inv_collection_id, sled_id, file_name)
+    PRIMARY KEY (inv_collection_id, sled_id, path)
 );
 
 
@@ -4429,10 +4692,10 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_zone_manifest_measurement (
 
     -- The full path to the file.
     path TEXT NOT NULL,
-    
+
     -- The expected file size.
     expected_size INT8 NOT NULL,
-    
+
     -- The expected hash.
     expected_sha256 STRING(64) NOT NULL,
 
@@ -5871,6 +6134,7 @@ SELECT
  bpc.local_pref,
  bpc.enforce_first_as,
  bpc.vlan_id,
+ bpc.router_lifetime,
  bc.asn
 FROM omicron.public.switch_port sp
 JOIN omicron.public.switch_port_settings_bgp_peer_config bpc
@@ -7090,8 +7354,8 @@ CREATE INDEX IF NOT EXISTS
 ON omicron.public.fm_ereport_in_case (sitrep_id, case_id);
 
 /*
- * List of datasets available to be sliced up and passed to VMMs for instance
- * local storage.
+ * List of datasets available to be sliced up and passed to VMMs for encrypted
+ * instance local storage.
  *
  * This is a Reconfigurator rendezvous table: it reflects resources that
  * Reconfigurator has ensured exist. It is always possible that a resource
@@ -7176,6 +7440,95 @@ CREATE INDEX IF NOT EXISTS lookup_local_storage_dataset_by_size_used ON
 /* Create an index on the zpool id */
 CREATE INDEX IF NOT EXISTS lookup_local_storage_dataset_by_zpool ON
     omicron.public.rendezvous_local_storage_dataset (pool_id, id)
+  WHERE time_tombstoned IS NULL;
+
+/*
+ * List of datasets available to be sliced up and passed to VMMs for
+ * unencrypted instance local storage.
+ *
+ * This is a Reconfigurator rendezvous table: it reflects resources that
+ * Reconfigurator has ensured exist. It is always possible that a resource
+ * chosen from this table could be deleted after it's selected, but any
+ * non-deleted row in this table is guaranteed to have been created.
+ */
+CREATE TABLE IF NOT EXISTS omicron.public.rendezvous_local_storage_unencrypted_dataset (
+    /* ID of dataset */
+    id UUID PRIMARY KEY,
+
+    /* Time this dataset was added to the table */
+    time_created TIMESTAMPTZ NOT NULL,
+
+    /*
+     * If not NULL, indicates this dataset has been expunged in a blueprint.
+     * Multiple Nexus instances operate concurrently, and it's possible any
+     * given Nexus is operating on an old blueprint. We need to avoid a Nexus
+     * operating on an old blueprint from inserting a dataset that has already
+     * been expunged and removed from this table by a later blueprint, so
+     * instead of hard deleting, we tombstone rows via this column.
+     *
+     * Hard deletion of tombstoned datasets will require some care with respect
+     * to the problem above. For now we keep tombstoned datasets around forever.
+     */
+    time_tombstoned TIMESTAMPTZ,
+
+    /*
+     * ID of the target blueprint the Reconfigurator reconciliation RPW was
+     * acting on when this row was created.
+     *
+     * In practice, this will often be the same blueprint ID in which this
+     * dataset was added, but it's not guaranteed to be (it could be any
+     * descendent blueprint in which this dataset is still in service).
+     */
+    blueprint_id_when_created UUID NOT NULL,
+
+    /*
+     * ID of the target blueprint the Reconfigurator reconciliation RPW was
+     * acting on when this row was tombstoned.
+     *
+     * In practice, this will often be the same blueprint ID in which this
+     * dataset was expunged, but it's not guaranteed to be (it could be any
+     * descendent blueprint in which this dataset is expunged and not yet
+     * pruned).
+     */
+    blueprint_id_when_tombstoned UUID,
+
+    /* ID of the zpool on which this dataset is placed */
+    pool_id UUID NOT NULL,
+
+    /*
+     * An upper bound on the amount of space that might be in-use
+     *
+     * This field is owned by Nexus. When a new row is inserted during the
+     * Reconfigurator rendezvous process, this field is set to 0. Reconfigurator
+     * otherwise ignores this field. It's updated by Nexus as vmm allocations
+     * and deletions are performed using this dataset.
+     */
+    size_used INT NOT NULL,
+
+    /* Do not consider this dataset during local storage allocation */
+    no_provision BOOL NOT NULL,
+
+    /*
+     * Either both `*_tombstoned` columns should be set (if this row has been
+     * tombstoned) or neither should (if it has not).
+     */
+    CONSTRAINT tombstoned_consistency CHECK (
+        (time_tombstoned IS NULL
+            AND blueprint_id_when_tombstoned IS NULL)
+        OR
+        (time_tombstoned IS NOT NULL
+            AND blueprint_id_when_tombstoned IS NOT NULL)
+    )
+);
+
+/* Create an index on the size usage for any local storage dataset */
+CREATE INDEX IF NOT EXISTS lookup_local_storage_unencrypted_dataset_by_size_used ON
+    omicron.public.rendezvous_local_storage_unencrypted_dataset (size_used)
+  WHERE time_tombstoned IS NULL;
+
+/* Create an index on the zpool id */
+CREATE INDEX IF NOT EXISTS lookup_local_storage_unencrypted_dataset_by_zpool ON
+    omicron.public.rendezvous_local_storage_unencrypted_dataset (pool_id, id)
   WHERE time_tombstoned IS NULL;
 
 -- Metadata for the schema itself.
@@ -7615,7 +7968,9 @@ CREATE TABLE IF NOT EXISTS omicron.public.disk_type_local_storage (
 
     required_dataset_overhead INT8 NOT NULL,
 
-    local_storage_dataset_allocation_id UUID
+    local_storage_dataset_allocation_id UUID,
+
+    local_storage_unencrypted_dataset_allocation_id UUID
 );
 
 CREATE TABLE IF NOT EXISTS omicron.public.local_storage_dataset_allocation (
@@ -7635,6 +7990,26 @@ CREATE INDEX IF NOT EXISTS
   lookup_local_storage_dataset_allocation_by_dataset
 ON
   omicron.public.local_storage_dataset_allocation (local_storage_dataset_id)
+WHERE
+  time_deleted IS NULL;
+
+CREATE TABLE IF NOT EXISTS omicron.public.local_storage_unencrypted_dataset_allocation (
+    id UUID PRIMARY KEY,
+
+    time_created TIMESTAMPTZ NOT NULL,
+    time_deleted TIMESTAMPTZ,
+
+    local_storage_unencrypted_dataset_id UUID NOT NULL,
+    pool_id UUID NOT NULL,
+    sled_id UUID NOT NULL,
+
+    dataset_size INT8 NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS
+  lookup_local_storage_unencrypted_dataset_allocation_by_dataset
+ON
+  omicron.public.local_storage_unencrypted_dataset_allocation (local_storage_unencrypted_dataset_id)
 WHERE
   time_deleted IS NULL;
 
@@ -7808,7 +8183,6 @@ CREATE TABLE IF NOT EXISTS omicron.public.trust_quorum_member (
     PRIMARY KEY (rack_id, epoch DESC, hw_baseboard_id)
 );
 
-
 -- Keep this at the end of file so that the database does not contain a version
 -- until it is fully populated.
 INSERT INTO omicron.public.db_metadata (
@@ -7818,7 +8192,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '222.0.0', NULL)
+    (TRUE, NOW(), NOW(), '231.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

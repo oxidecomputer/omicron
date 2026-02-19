@@ -141,13 +141,18 @@ impl TrustQuorumConfig {
         coordinator: BaseboardId,
     ) -> Self {
         let num_members = u8::try_from(proposed.members.len()).unwrap();
+        let state = if proposed.is_lrtq_upgrade == IsLrtqUpgrade::Yes {
+            TrustQuorumConfigState::PreparingLrtqUpgrade
+        } else {
+            TrustQuorumConfigState::Preparing
+        };
         assert!(num_members >= 3);
         assert!(num_members <= 32);
         TrustQuorumConfig {
             rack_id: proposed.rack_id,
             epoch: proposed.epoch,
             last_committed_epoch: proposed.last_committed_epoch(),
-            state: TrustQuorumConfigState::Preparing,
+            state,
             threshold: Self::threshold(num_members),
             commit_crash_tolerance: Self::commit_crash_tolerance(num_members),
             coordinator,
@@ -229,9 +234,10 @@ impl TrustQuorumConfig {
     pub fn commit_crash_tolerance(num_members: u8) -> u8 {
         match num_members {
             0..=3 => 0,
-            4..=8 => 1,
-            9..=16 => 2,
-            _ => 3,
+            4..=7 => 1,
+            8..=15 => 2,
+            16..=23 => 3,
+            _ => 4,
         }
     }
 }

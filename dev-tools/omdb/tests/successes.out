@@ -25,7 +25,7 @@ EXECUTING COMMAND: omdb ["db", "disks", "list"]
 termination: Exited(0)
 ---------------------------------------------
 stdout:
-ID SIZE STATE NAME ATTACHED_TO 
+ID SIZE TYPE STATE NAME ATTACHED_TO 
 ---------------------------------------------
 stderr:
 note: using database URL postgresql://root@[::1]:REDACTED_PORT/omicron?sslmode=disable
@@ -267,6 +267,10 @@ task: "abandoned_vmm_reaper"
 
 task: "alert_dispatcher"
     dispatches queued alerts to receivers
+
+
+task: "attached_subnet_manager"
+    distributes attached subnets to sleds and switch
 
 
 task: "bfd_manager"
@@ -573,6 +577,13 @@ task: "alert_dispatcher"
     alerts dispatched:                            0
     alerts with no receivers subscribed:          0
 
+task: "attached_subnet_manager"
+  configured period: every <REDACTED_DURATION>m
+  last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+   no dendrite instances found
+   no sleds found
+
 task: "bfd_manager"
   configured period: every <REDACTED_DURATION>s
   last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
@@ -602,6 +613,12 @@ task: "blueprint_rendezvous"
         num_already_exist:    0
         num_not_in_inventory: 0
     local_storage_dataset rendezvous counts:
+        num_inserted:           0
+        num_already_exist:      0
+        num_not_in_inventory:   0
+        num_tombstoned:         0
+        num_already_tombstoned: 0
+    local_storage_unencrypted_dataset rendezvous counts:
         num_inserted:           0
         num_already_exist:      0
         num_not_in_inventory:   0
@@ -1147,6 +1164,13 @@ task: "alert_dispatcher"
     alerts dispatched:                            0
     alerts with no receivers subscribed:          0
 
+task: "attached_subnet_manager"
+  configured period: every <REDACTED_DURATION>m
+  last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+   no dendrite instances found
+   no sleds found
+
 task: "bfd_manager"
   configured period: every <REDACTED_DURATION>s
   last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
@@ -1176,6 +1200,12 @@ task: "blueprint_rendezvous"
         num_already_exist:    0
         num_not_in_inventory: 0
     local_storage_dataset rendezvous counts:
+        num_inserted:           0
+        num_already_exist:      0
+        num_not_in_inventory:   0
+        num_tombstoned:         0
+        num_already_tombstoned: 0
+    local_storage_unencrypted_dataset rendezvous counts:
         num_inserted:           0
         num_already_exist:      0
         num_not_in_inventory:   0

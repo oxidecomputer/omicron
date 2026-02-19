@@ -2980,12 +2980,17 @@ pub mod test {
                         removed: 0
                     }
                 );
-                // Each disk addition should also result in a debug + zone root
-                // + local storage dataset addition.
+                // Each disk addition should also result in adding the following
+                // datasets:
+                //
+                // - debug
+                // - zone root
+                // - encrypted local storage dataset
+                // - unencrypted local storage dataset
                 assert_eq!(
                     edits.datasets,
                     EditCounts {
-                        added: 3 * usize::from(SledBuilder::DEFAULT_NPOOLS),
+                        added: 4 * usize::from(SledBuilder::DEFAULT_NPOOLS),
                         updated: 0,
                         expunged: 0,
                         removed: 0

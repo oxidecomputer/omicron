@@ -13,19 +13,20 @@ use crate::contract;
 use crate::dladm::Etherstub;
 use crate::link::{Link, VnicAllocator};
 use crate::opte::{Port, PortTicket};
-use crate::zone::AddressRequest;
 use crate::zone::Zones;
+use crate::zone::{AddressRequest, ROUTE};
 use crate::zpool::{PathInPool, ZpoolOrRamdisk};
 use camino::{Utf8Path, Utf8PathBuf};
 use camino_tempfile::Utf8TempDir;
 use debug_ignore::DebugIgnore;
 use ipnetwork::IpNetwork;
+use omicron_common::address::{AZ_PREFIX, Ipv6Subnet};
 use omicron_common::backoff;
 use omicron_common::resolvable_files::ResolvableFileSource;
 use omicron_uuid_kinds::OmicronZoneUuid;
 pub use oxlog::is_oxide_smf_log_file;
 use slog::{Logger, error, info, o, warn};
-use std::net::{Ipv4Addr, Ipv6Addr};
+use std::net::Ipv6Addr;
 use std::sync::Arc;
 #[cfg(target_os = "illumos")]
 use std::sync::OnceLock;
@@ -353,30 +354,30 @@ impl RunningZone {
         Ok(network)
     }
 
-    // TODO-completeness: Handle dual-stack OPTE ports here. This works for
-    // either IPv4 or IPv6 addresses, but not both.
-    // See https://github.com/oxidecomputer/omicron/issues/9247.
     pub async fn ensure_address_for_port(
         &self,
         name: &str,
         port_idx: usize,
-    ) -> Result<IpNetwork, EnsureAddressError> {
+    ) -> Result<(), EnsureAddressError> {
         info!(self.inner.log, "Ensuring address for OPTE port");
+
         let port = self.opte_ports().nth(port_idx).ok_or_else(|| {
             EnsureAddressError::MissingOptePort {
                 zone: self.inner.name.clone(),
                 port_idx,
             }
         })?;
-        let addrobj = AddrObject::new(port.name(), name).map_err(|err| {
-            EnsureAddressError::AddrObject {
-                request: AddressRequest::Dhcp,
-                zone: self.inner.name.clone(),
-                err,
-            }
-        })?;
         let zone = Some(self.inner.name.as_ref());
         if let Some(gateway) = port.gateway().ipv4_addr() {
+            let v4_name = format!("{}4", name);
+            let addrobj =
+                AddrObject::new(port.name(), &v4_name).map_err(|err| {
+                    EnsureAddressError::AddrObject {
+                        request: AddressRequest::Dhcp,
+                        zone: self.inner.name.clone(),
+                        err,
+                    }
+                })?;
             let addr =
                 Zones::ensure_address(zone, &addrobj, AddressRequest::Dhcp)
                     .await?;
@@ -387,7 +388,7 @@ impl RunningZone {
             let gateway_ip = gateway.to_string();
             let private_ip = addr.ip();
             self.run_cmd(&[
-                "/usr/sbin/route",
+                ROUTE,
                 "add",
                 "-host",
                 &gateway_ip,
@@ -396,15 +397,18 @@ impl RunningZone {
                 "-ifp",
                 port.name(),
             ])?;
-            self.run_cmd(&[
-                "/usr/sbin/route",
-                "add",
-                "-inet",
-                "default",
-                &gateway_ip,
-            ])?;
-            Ok(addr)
-        } else {
+            self.run_cmd(&[ROUTE, "add", "-inet", "default", &gateway_ip])?;
+        }
+        if port.gateway().ipv6_addr().is_some() {
+            let v6_name = format!("{}6", name);
+            let addrobj =
+                AddrObject::new(port.name(), &v6_name).map_err(|err| {
+                    EnsureAddressError::AddrObject {
+                        request: AddressRequest::Dhcp,
+                        zone: self.inner.name.clone(),
+                        err,
+                    }
+                })?;
             // If the port is using IPv6 addressing we still want it to use
             // DHCP(v6) which requires first creating a link-local address.
             Zones::ensure_has_link_local_v6_address(zone, &addrobj)
@@ -430,15 +434,13 @@ impl RunningZone {
                             )
                         })?;
 
-                    // Ipv6Addr::is_unicast_link_local is sadly not stable
-                    let is_ll =
-                        |ip: Ipv6Addr| (ip.segments()[0] & 0xffc0) == 0xfe80;
-
                     // Look for a non link-local addr
                     addrs
                         .into_iter()
                         .find(|addr| match addr {
-                            IpNetwork::V6(ip) => !is_ll(ip.ip()),
+                            IpNetwork::V6(ip) => {
+                                !ip.ip().is_unicast_link_local()
+                            }
                             _ => false,
                         })
                         .ok_or_else(|| {
@@ -458,54 +460,27 @@ impl RunningZone {
                     );
                 },
             )
-            .await
+            .await?;
         }
+        Ok(())
     }
 
-    pub fn add_default_route(
+    pub fn add_underlay_route(
         &self,
         gateway: Ipv6Addr,
     ) -> Result<(), RunCommandError> {
+        // Route to the underlay AZ's /48 by deriving it from the gateway IP.
+        let underlay_az: Ipv6Subnet<AZ_PREFIX> = Ipv6Subnet::new(gateway);
         self.run_cmd([
-            "/usr/sbin/route",
+            ROUTE,
             "add",
             "-inet6",
-            "default",
+            &underlay_az.to_string(),
             "-inet6",
             &gateway.to_string(),
-        ])?;
-        Ok(())
-    }
-
-    pub fn add_default_route4(
-        &self,
-        gateway: Ipv4Addr,
-    ) -> Result<(), RunCommandError> {
-        self.run_cmd([
-            "/usr/sbin/route",
-            "add",
-            "default",
-            &gateway.to_string(),
-        ])?;
-        Ok(())
-    }
-
-    pub fn add_bootstrap_route(
-        &self,
-        bootstrap_prefix: u16,
-        gz_bootstrap_addr: Ipv6Addr,
-        zone_vnic_name: &str,
-    ) -> Result<(), RunCommandError> {
-        let args = [
-            "/usr/sbin/route",
-            "add",
-            "-inet6",
-            &format!("{bootstrap_prefix:x}::/16"),
-            &gz_bootstrap_addr.to_string(),
             "-ifp",
-            zone_vnic_name,
-        ];
-        self.run_cmd(args)?;
+            self.inner.control_vnic.name(),
+        ])?;
         Ok(())
     }
 

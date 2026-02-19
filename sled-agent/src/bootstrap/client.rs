@@ -10,6 +10,7 @@ use super::params::version;
 use super::views::SledAgentResponse;
 use crate::bootstrap::views::Response;
 use crate::bootstrap::views::ResponseEnvelope;
+use sled_agent_measurements::{MeasurementError, MeasurementsHandle};
 use sled_agent_types::sled::StartSledAgentRequest;
 use slog::Logger;
 use slog_error_chain::SlogInlineError;
@@ -18,6 +19,7 @@ use sprockets_tls::keys::SprocketsConfig;
 use std::borrow::Cow;
 use std::io;
 use std::net::SocketAddrV6;
+use std::sync::Arc;
 use thiserror::Error;
 use tokio::io::AsyncReadExt;
 use tokio::io::AsyncWriteExt;
@@ -65,6 +67,8 @@ pub enum Error {
         "Bogus response from server (expected {expected} but received {received})"
     )]
     InvalidResponse { expected: &'static str, received: &'static str },
+    #[error("Reference measurements error")]
+    MeasurementError(#[source] MeasurementError),
 }
 
 /// A TCP client used to connect to bootstrap agents for rack initialization
@@ -77,15 +81,17 @@ pub(crate) struct Client {
     addr: SocketAddrV6,
     log: Logger,
     sprockets_conf: SprocketsConfig,
+    measurements: Arc<MeasurementsHandle>,
 }
 
 impl Client {
     pub(crate) fn new(
         addr: SocketAddrV6,
         sprockets_conf: SprocketsConfig,
+        measurements: Arc<MeasurementsHandle>,
         log: Logger,
     ) -> Self {
-        Self { addr, sprockets_conf, log }
+        Self { addr, sprockets_conf, log, measurements }
     }
 
     /// Start sled agent by sending an initialization request determined from
@@ -117,8 +123,11 @@ impl Client {
         // Establish connection and sprockets connection (if possible).
         // The sprockets client loads the associated root certificates at this point.
         //
-        // TODO: Use a real corpus
-        let corpus = vec![];
+        let corpus = self
+            .measurements
+            .current_measurements()
+            .map_err(Error::MeasurementError)?;
+
         let stream = SprocketsClient::connect(
             self.sprockets_conf.clone(),
             self.addr,

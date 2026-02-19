@@ -15,6 +15,7 @@ use dropshot::Path;
 use dropshot::RequestContext;
 use dropshot::ServerBuilder;
 use dropshot::endpoint;
+use either::Either;
 use internal_dns_resolver::ResolveError;
 use internal_dns_resolver::Resolver;
 use internal_dns_types::names::ServiceName;
@@ -35,6 +36,7 @@ use slog::error;
 use slog::info;
 use slog::o;
 use slog::warn;
+use slog_error_chain::InlineErrorChain;
 use std::net::IpAddr;
 use std::net::SocketAddr;
 use std::time::Duration;
@@ -346,12 +348,16 @@ async fn resolve_nexus_and_register(
 ) -> Duration {
     let resolve_nexus_and_register_once = || async {
         // Resolve Nexus, or use the provided address directly.
+        //
+        // We wrap errors in `Either` because we have two distinct types, but
+        // both implement `std::error::Error`. This allows the `Either` to
+        // _also_ implement `std::error::Error`, so we can log it as such below.
         let address = match find_nexus {
             FindNexus::ByAddr(addr) => *addr,
             FindNexus::WithResolver(resolver) => resolver
                 .lookup_socket_v6(ServiceName::Nexus)
                 .await
-                .map_err(|e| BackoffError::transient(e.to_string()))
+                .map_err(|e| BackoffError::transient(Either::Left(e)))
                 .map(Into::into)?,
         };
         debug!(log, "will register with Nexus at {}", address);
@@ -365,7 +371,7 @@ async fn resolve_nexus_and_register(
             .cpapi_producers_post(&endpoint.into())
             .await
             .map(|response| response.into_inner().lease_duration.into())
-            .map_err(|e| BackoffError::transient(e.to_string()))
+            .map_err(|e| BackoffError::transient(Either::Right(e)))
     };
     let log_failure = |error, count, delay| {
         warn!(
@@ -373,7 +379,7 @@ async fn resolve_nexus_and_register(
             "failed to register with Nexus, will retry";
             "count" => %count,
             "delay" => ?delay,
-            "error" => ?error,
+            InlineErrorChain::new(&error),
         );
     };
     backoff::retry_notify_ext(

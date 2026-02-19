@@ -10,6 +10,7 @@ use crate::{
     output_to_exec_error,
 };
 use libc::ESRCH;
+use omicron_common::address::{AZ_PREFIX, BOOTSTRAP_SUBNET_PREFIX, Ipv6Subnet};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use tokio::process::Command;
 
@@ -26,6 +27,29 @@ impl Route {
     pub async fn ensure_default_route_with_gateway(
         gateway: Gateway,
     ) -> Result<(), ExecutionError> {
+        Self::ensure_route_with_gateway("default", gateway, None).await
+    }
+
+    pub async fn ensure_underlay_route_with_gateway(
+        gateway: Ipv6Addr,
+        datalink: &str,
+    ) -> Result<(), ExecutionError> {
+        // Route to the underlay AZ's /48 by deriving it from the gateway IP.
+        let underlay_az: Ipv6Subnet<AZ_PREFIX> = Ipv6Subnet::new(gateway);
+        let gateway = Gateway::Ipv6(gateway);
+        Self::ensure_route_with_gateway(
+            &underlay_az.to_string(),
+            gateway,
+            Some(datalink),
+        )
+        .await
+    }
+
+    async fn ensure_route_with_gateway(
+        destination: &str,
+        gateway: Gateway,
+        datalink: Option<&str>,
+    ) -> Result<(), ExecutionError> {
         let inet;
         let gw;
         match gateway {
@@ -39,9 +63,12 @@ impl Route {
             }
         }
         // Add the desired route if it doesn't already exist
-        let destination = "default";
         let mut cmd = Command::new(PFEXEC);
-        let cmd = cmd.args(&[ROUTE, "-n", "get", inet, destination, inet, &gw]);
+        let mut cmd =
+            cmd.args(&[ROUTE, "-n", "get", inet, destination, inet, &gw]);
+        if let Some(datalink) = datalink {
+            cmd = cmd.args(&["-ifp", datalink]);
+        }
 
         let out = cmd.output().await.map_err(|err| {
             ExecutionError::ExecutionStart {
@@ -56,8 +83,11 @@ impl Route {
             // When that is the case, we'll add the route.
             Some(ESRCH) => {
                 let mut cmd = Command::new(PFEXEC);
-                let cmd =
+                let mut cmd =
                     cmd.args(&[ROUTE, "add", inet, destination, inet, &gw]);
+                if let Some(datalink) = datalink {
+                    cmd = cmd.args(&["-ifp", datalink]);
+                }
                 execute_async(cmd).await?;
             }
             Some(_) | None => {
@@ -119,7 +149,7 @@ impl Route {
     }
 
     pub async fn add_bootstrap_route(
-        bootstrap_prefix: u16,
+        bootstrap_prefix: Ipv6Subnet<BOOTSTRAP_SUBNET_PREFIX>,
         gz_bootstrap_addr: Ipv6Addr,
         zone_vnic_name: &str,
     ) -> Result<(), ExecutionError> {
@@ -128,7 +158,7 @@ impl Route {
             ROUTE,
             "add",
             "-inet6",
-            &format!("{bootstrap_prefix:x}::/16"),
+            &bootstrap_prefix.to_string(),
             &gz_bootstrap_addr.to_string(),
             "-ifp",
             zone_vnic_name,

@@ -18,8 +18,8 @@ use omicron_common::api::external::{
     AddressLotKind, AffinityPolicy, AllowedSourceIps, BfdMode, BgpPeer,
     ByteCount, FailureDomain, Hostname, IdentityMetadataCreateParams,
     IdentityMetadataUpdateParams, InstanceAutoRestartPolicy, InstanceCpuCount,
-    InstanceCpuPlatform, IpVersion, LinkFec, LinkSpeed, Name, NameOrId,
-    Nullable, PaginationOrder, RouteDestination, RouteTarget, UserId,
+    InstanceCpuPlatform, IpVersion, LinkFec, LinkSpeed, MaxPathConfig, Name,
+    NameOrId, Nullable, PaginationOrder, RouteDestination, RouteTarget, UserId,
 };
 use omicron_common::disk::DiskVariant;
 use omicron_common::vlan::VlanID;
@@ -242,7 +242,7 @@ pub struct SamlIdentityProviderSelector {
 
 // The shape of this selector is slightly different than the others given that
 // silos users can only be specified via ID and are automatically provided by
-// the environment the user is authetnicated in
+// the environment the user is authenticated in
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq)]
 pub struct SshKeySelector {
     /// ID of the silo user
@@ -262,6 +262,18 @@ pub struct ProjectSelector {
 pub struct OptionalProjectSelector {
     /// Name or ID of the project
     pub project: Option<NameOrId>,
+}
+
+/// Query parameters for ephemeral IP detach endpoint
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
+pub struct EphemeralIpDetachSelector {
+    /// Name or ID of the project
+    pub project: Option<NameOrId>,
+    /// The IP version of the ephemeral IP to detach.
+    ///
+    /// Required when the instance has both IPv4 and IPv6 ephemeral IPs.
+    /// If only one ephemeral IP is attached, this field may be omitted.
+    pub ip_version: Option<IpVersion>,
 }
 
 #[derive(Deserialize, JsonSchema, Clone)]
@@ -681,9 +693,9 @@ pub struct SiloAuthSettingsUpdate {
 /// Create-time parameters for a `User`
 #[derive(Clone, Deserialize, JsonSchema)]
 pub struct UserCreate {
-    /// username used to log in
+    /// Username used to log in
     pub external_id: UserId,
-    /// how to set the user's login password
+    /// How to set the user's login password
     pub password: UserPassword,
 }
 
@@ -780,11 +792,12 @@ pub struct UsernamePasswordCredentials {
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct DerEncodedKeyPair {
-    /// request signing public certificate (base64 encoded der file)
+    /// Request signing public certificate (base64 encoded DER file)
     #[serde(deserialize_with = "x509_cert_from_base64_encoded_der")]
     pub public_cert: String,
 
-    /// request signing RSA private key in PKCS#1 format (base64 encoded der file)
+    /// Request signing RSA private key in PKCS#1 format
+    /// (base64 encoded DER file)
     #[serde(deserialize_with = "key_from_base64_encoded_der")]
     pub private_key: String,
 }
@@ -904,25 +917,25 @@ pub struct SamlIdentityProviderCreate {
     #[serde(flatten)]
     pub identity: IdentityMetadataCreateParams,
 
-    /// the source of an identity provider metadata descriptor
+    /// The source of an identity provider metadata descriptor
     pub idp_metadata_source: IdpMetadataSource,
 
-    /// idp's entity id
+    /// IdP's entity ID
     pub idp_entity_id: String,
 
-    /// sp's client id
+    /// SP's client ID
     pub sp_client_id: String,
 
-    /// service provider endpoint where the response will be sent
+    /// Service provider endpoint where the response will be sent
     pub acs_url: String,
 
-    /// service provider endpoint where the idp should send log out requests
+    /// Service provider endpoint where the IdP should send log out requests
     pub slo_url: String,
 
-    /// customer's technical contact for saml configuration
+    /// Customer's technical contact for SAML configuration
     pub technical_contact_email: String,
 
-    /// request signing key pair
+    /// Request signing key pair
     #[serde(default)]
     #[serde(deserialize_with = "validate_key_pair")]
     pub signing_keypair: Option<DerEncodedKeyPair>,
@@ -1386,7 +1399,7 @@ impl PrivateIpStackCreate {
 /// Create-time parameters for a `Certificate`
 #[derive(Clone, Deserialize, Serialize, JsonSchema)]
 pub struct CertificateCreate {
-    /// common identifying metadata
+    /// Common identifying metadata
     #[serde(flatten)]
     pub identity: IdentityMetadataCreateParams,
     /// PEM-formatted string containing public certificate chain
@@ -1508,27 +1521,6 @@ pub struct SubnetPoolCreate {
     /// The IP version for this pool (IPv4 or IPv6). All subnets in the pool
     /// must match this version.
     pub ip_version: IpVersion,
-    /// Type of subnet pool (defaults to Unicast)
-    #[serde(default)]
-    pub pool_type: shared::IpPoolType,
-}
-
-impl SubnetPoolCreate {
-    /// Create parameters for a unicast subnet pool (the default)
-    pub fn new(
-        identity: IdentityMetadataCreateParams,
-        ip_version: IpVersion,
-    ) -> Self {
-        Self { identity, ip_version, pool_type: shared::IpPoolType::Unicast }
-    }
-
-    /// Create parameters for a multicast subnet pool
-    pub fn new_multicast(
-        identity: IdentityMetadataCreateParams,
-        ip_version: IpVersion,
-    ) -> Self {
-        Self { identity, ip_version, pool_type: shared::IpPoolType::Multicast }
-    }
 }
 
 /// Update a subnet pool
@@ -1541,8 +1533,6 @@ pub struct SubnetPoolUpdate {
 /// Add a member (subnet) to a subnet pool
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct SubnetPoolMemberAdd {
-    #[serde(flatten)]
-    pub identity: IdentityMetadataCreateParams,
     /// The subnet to add to the pool
     pub subnet: IpNet,
     /// Minimum prefix length for allocations from this subnet; a smaller prefix
@@ -1606,9 +1596,6 @@ pub enum ExternalSubnetAllocator {
     Explicit {
         /// The subnet CIDR to reserve. Must be available in the pool.
         subnet: IpNet,
-        /// The pool containing this subnet. If not specified, the default
-        /// subnet pool for the subnet's IP version is used.
-        pool: Option<NameOrId>,
     },
     /// Automatically allocate a subnet with the specified prefix length.
     Auto {
@@ -1654,21 +1641,19 @@ pub struct ExternalSubnetAttach {
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum AddressAllocator {
-    /// Reserve a specific IP address.
+    /// Reserve a specific IP address. The pool is inferred from the address
+    /// since IP pools cannot have overlapping ranges.
     Explicit {
-        /// The IP address to reserve. Must be available in the pool.
+        /// The IP address to reserve.
         ip: IpAddr,
-        /// The pool containing this address. If not specified, the default
-        /// pool for the address's IP version is used.
-        pool: Option<NameOrId>,
     },
-    /// Automatically allocate an IP address from a specified pool.
+    /// Automatically allocate an IP address from a pool.
     Auto {
         /// Pool selection.
         ///
-        /// If omitted, this field uses the silo's default pool. If the
-        /// silo has default pools for both IPv4 and IPv6, the request will
-        /// fail unless `ip_version` is specified in the pool selector.
+        /// If omitted, the silo's default pool is used. If the silo has
+        /// default pools for both IPv4 and IPv6, the request will fail
+        /// unless `ip_version` is specified.
         #[serde(default)]
         pool_selector: PoolSelector,
     },
@@ -1846,8 +1831,17 @@ pub struct EphemeralIpCreate {
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ExternalIpDetach {
-    Ephemeral,
-    Floating { floating_ip: NameOrId },
+    Ephemeral {
+        /// The IP version of the ephemeral IP to detach.
+        ///
+        /// Required when the instance has both IPv4 and IPv6 ephemeral IPs.
+        /// If only one ephemeral IP is attached, this field may be omitted.
+        #[serde(default)]
+        ip_version: Option<IpVersion>,
+    },
+    Floating {
+        floating_ip: NameOrId,
+    },
 }
 
 /// Create-time parameters for an `Instance`
@@ -1953,7 +1947,7 @@ pub struct InstanceCreate {
     #[serde(default)]
     pub auto_restart_policy: Option<InstanceAutoRestartPolicy>,
 
-    /// Anti-Affinity groups which this instance should be added.
+    /// Anti-affinity groups to which this instance should be added.
     #[serde(default)]
     pub anti_affinity_groups: Vec<NameOrId>,
 
@@ -2324,7 +2318,7 @@ impl JsonSchema for BlockSize {
         schemars::schema::Schema::Object(schemars::schema::SchemaObject {
             metadata: Some(Box::new(schemars::schema::Metadata {
                 id: None,
-                title: Some("disk block size in bytes".to_string()),
+                title: Some("Disk block size in bytes".to_string()),
                 ..Default::default()
             })),
             instance_type: Some(schemars::schema::InstanceType::Integer.into()),
@@ -2363,15 +2357,25 @@ impl From<DiskVariant> for PhysicalDiskKind {
 pub enum DiskSource {
     /// Create a blank disk
     Blank {
-        /// size of blocks for this Disk. valid values are: 512, 2048, or 4096
+        /// Size of blocks for this disk. Valid values are: 512, 2048, or 4096.
         block_size: BlockSize,
     },
 
     /// Create a disk from a disk snapshot
-    Snapshot { snapshot_id: Uuid },
+    Snapshot {
+        snapshot_id: Uuid,
+        /// If `true`, the disk created from this snapshot will be read-only.
+        #[serde(default)]
+        read_only: bool,
+    },
 
     /// Create a disk from an image
-    Image { image_id: Uuid },
+    Image {
+        image_id: Uuid,
+        /// If `true`, the disk created from this image will be read-only.
+        #[serde(default)]
+        read_only: bool,
+    },
 
     /// Create a blank disk that will accept bulk writes or pull blocks from an
     /// external source.
@@ -2447,7 +2451,7 @@ pub struct AddressLotCreate {
     pub blocks: Vec<AddressLotBlockCreate>,
 }
 
-/// Parameters for creating an address lot block. Fist and last addresses are
+/// Parameters for creating an address lot block. First and last addresses are
 /// inclusive.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct AddressLotBlockCreate {
@@ -2455,6 +2459,21 @@ pub struct AddressLotBlockCreate {
     pub first_address: IpAddr,
     /// The last address in the lot (inclusive).
     pub last_address: IpAddr,
+}
+
+impl From<IpNet> for AddressLotBlockCreate {
+    fn from(ipnet: IpNet) -> AddressLotBlockCreate {
+        match ipnet {
+            IpNet::V4(ipv4_net) => AddressLotBlockCreate {
+                first_address: ipv4_net.first_addr().into(),
+                last_address: ipv4_net.last_addr().into(),
+            },
+            IpNet::V6(ipv6_net) => AddressLotBlockCreate {
+                first_address: ipv6_net.first_addr().into(),
+                last_address: ipv6_net.last_addr().into(),
+            },
+        }
+    }
 }
 
 /// Parameters for creating a loopback address on a particular rack switch.
@@ -2479,6 +2498,7 @@ pub struct LoopbackAddressCreate {
     pub mask: u8,
 
     /// Address is an anycast address.
+    ///
     /// This allows the address to be assigned to multiple locations simultaneously.
     pub anycast: bool,
 }
@@ -2828,7 +2848,7 @@ pub struct BgpAnnouncementCreate {
     pub network: IpNet,
 }
 
-/// Parameters for creating a BGP configuration. This includes and autonomous
+/// Parameters for creating a BGP configuration. This includes an autonomous
 /// system number (ASN) and a virtual routing and forwarding (VRF) identifier.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct BgpConfigCreate {
@@ -2851,6 +2871,10 @@ pub struct BgpConfigCreate {
     /// A checker program to apply to incoming open and update messages.
     #[serde(skip)]
     pub checker: Option<String>,
+
+    /// Maximum number of paths to use when multiple "best paths" exist
+    #[serde(default)]
+    pub max_paths: MaxPathConfig,
 }
 
 /// Select a BGP status information by BGP config id.
@@ -3008,7 +3032,7 @@ pub struct Distribution {
 /// Create-time parameters for an `Image`
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct ImageCreate {
-    /// common identifying metadata
+    /// Common identifying metadata
     #[serde(flatten)]
     pub identity: IdentityMetadataCreateParams,
 
@@ -3027,7 +3051,7 @@ pub struct ImageCreate {
 /// Create-time parameters for a `Snapshot`
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct SnapshotCreate {
-    /// common identifying metadata
+    /// Common identifying metadata
     #[serde(flatten)]
     pub identity: IdentityMetadataCreateParams,
 
@@ -4272,5 +4296,69 @@ mod tests {
         let result: Result<MulticastGroupUpdate, _> =
             serde_json::from_str(json);
         assert!(result.is_err(), "Should reject reserved VLAN ID 1");
+    }
+
+    #[test]
+    fn test_address_allocator_explicit_requires_ip() {
+        // Explicit requires an IP address - pool-only is not valid
+        let json = r#"{"type": "explicit", "pool": "my-pool"}"#;
+        let result: Result<AddressAllocator, _> = serde_json::from_str(json);
+        assert!(result.is_err(), "explicit without ip should fail");
+    }
+
+    #[test]
+    fn test_address_allocator_explicit_with_ip() {
+        let json = r#"{"type": "explicit", "ip": "10.0.0.1"}"#;
+        let result: Result<AddressAllocator, _> = serde_json::from_str(json);
+        assert!(result.is_ok(), "explicit with ip should be valid");
+        match result.unwrap() {
+            AddressAllocator::Explicit { ip } => {
+                assert_eq!(ip, "10.0.0.1".parse::<std::net::IpAddr>().unwrap());
+            }
+            _ => panic!("Expected Explicit variant"),
+        }
+    }
+
+    #[test]
+    fn test_address_allocator_explicit_missing_ip() {
+        let json = r#"{"type": "explicit"}"#;
+        let result: Result<AddressAllocator, _> = serde_json::from_str(json);
+        assert!(result.is_err(), "explicit without ip should fail");
+    }
+
+    #[test]
+    fn test_address_allocator_auto_with_explicit_pool() {
+        // To allocate from a specific pool, use Auto with explicit pool_selector
+        let json = r#"{"type": "auto", "pool_selector": {"type": "explicit", "pool": "my-pool"}}"#;
+        let result: Result<AddressAllocator, _> = serde_json::from_str(json);
+        assert!(
+            result.is_ok(),
+            "auto with explicit pool_selector should be valid"
+        );
+        match result.unwrap() {
+            AddressAllocator::Auto { pool_selector } => {
+                assert!(matches!(pool_selector, PoolSelector::Explicit { .. }));
+            }
+            _ => panic!("Expected Auto variant"),
+        }
+    }
+
+    #[test]
+    fn test_address_allocator_auto_with_auto_pool() {
+        // Auto-allocate from default pool
+        let json = r#"{"type": "auto", "pool_selector": {"type": "auto"}}"#;
+        let result: Result<AddressAllocator, _> = serde_json::from_str(json);
+        assert!(result.is_ok(), "auto with auto pool_selector should be valid");
+    }
+
+    #[test]
+    fn test_address_allocator_auto_default() {
+        // Default pool_selector when omitted
+        let json = r#"{"type": "auto"}"#;
+        let result: Result<AddressAllocator, _> = serde_json::from_str(json);
+        assert!(
+            result.is_ok(),
+            "auto without pool_selector should use default"
+        );
     }
 }

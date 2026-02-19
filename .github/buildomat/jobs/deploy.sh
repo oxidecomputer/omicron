@@ -2,7 +2,7 @@
 #:
 #: name = "helios / deploy"
 #: variety = "basic"
-#: target = "lab-2.0-opte-0.38"
+#: target = "lab-2.0-opte-0.39"
 #: output_rules = [
 #:  "%/var/svc/log/oxide-*.log*",
 #:  "%/zone/oxz_*/root/var/svc/log/oxide-*.log*",
@@ -359,10 +359,10 @@ OMICRON_NO_UNINSTALL=1 \
 
 # Wait for switch zone to come up
 retry=0
-until curl --head --silent -o /dev/null "http://[fd00:1122:3344:101::2]:12224/"
+until curl --max-time 1 --head --silent --show-error -o /dev/null "http://[fd00:1122:3344:101::2]:12224/"
 do
 	if [[ $retry -gt 30 ]]; then
-		echo "Failed to reach switch zone after 30 seconds"
+		echo "Failed to reach switch zone after 30 attempts"
 		exit 1
 	fi
 	sleep 1

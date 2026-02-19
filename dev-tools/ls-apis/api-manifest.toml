@@ -178,6 +178,16 @@ versioned_how = "client"
 versioned_how_reason = "depends on itself (i.e., instances call each other)"
 
 [[apis]]
+client_package_name = "bootstrap-agent-lockstep-client"
+label = "Bootstrap Agent Lockstep API"
+server_package_name = "bootstrap-agent-lockstep-api"
+versioned_how = "server"
+notes = """
+Lockstep API for rack initialization. Only used by wicketd, which is in the \
+same deployment unit (Host OS) as the sled-agent that exposes this API.
+"""
+
+[[apis]]
 client_package_name = "clickhouse-admin-keeper-client"
 label = "Clickhouse Cluster Admin for Keepers"
 server_package_name = "clickhouse-admin-api"

@@ -400,36 +400,32 @@ async fn test_audit_log_create_delete_ops(ctx: &ControlPlaneTestContext) {
 /// As audit logging is added to endpoints, they should be removed from the file.
 #[nexus_test]
 async fn test_audit_log_coverage(ctx: &ControlPlaneTestContext) {
+    use super::endpoint_coverage::ApiOperations;
     use super::endpoints::{AllowedMethod, VERIFY_ENDPOINTS};
-    use expectorate::assert_contents;
     use nexus_test_utils::http_testing::{AuthnMode, NexusRequest};
-    use openapiv3::OpenAPI;
     use std::collections::BTreeMap;
 
     let client = &ctx.external_client;
 
-    // Load the OpenAPI schema to get operation IDs
-    let schema_path = "../openapi/nexus/nexus-latest.json";
-    let schema_contents = std::fs::read_to_string(schema_path)
-        .expect("failed to read Nexus OpenAPI spec");
-    let spec: OpenAPI = serde_json::from_str(&schema_contents)
-        .expect("Nexus OpenAPI spec was not valid OpenAPI");
+    let api_operations = ApiOperations::new();
 
-    // Build a map from (method, url_regex) to (operation_id, path_template)
-    let spec_operations: BTreeMap<(String, String), (String, String)> = spec
-        .operations()
-        .map(|(path, method, op)| {
-            // Convert path template to regex pattern
-            let re = regex::Regex::new("/\\{[^}]+\\}").unwrap();
-            let regex_path = re.replace_all(path, "/[^/]+");
-            let regex = format!("^{}$", regex_path);
-            let label = op
-                .operation_id
-                .clone()
-                .unwrap_or_else(|| String::from("unknown"));
-            ((method.to_uppercase(), regex), (label, path.to_string()))
-        })
-        .collect();
+    // Track mutating endpoints we haven't tested yet (not in VERIFY_ENDPOINTS).
+    let mut untested_mutating: BTreeMap<String, (String, String)> =
+        api_operations
+            .iter()
+            .filter(|op| {
+                matches!(
+                    op.method.as_str(),
+                    "POST" | "PUT" | "PATCH" | "DELETE"
+                )
+            })
+            .map(|op| {
+                (
+                    op.operation_id.clone(),
+                    (op.method.to_lowercase(), op.path.clone()),
+                )
+            })
+            .collect();
 
     // Set up resources needed by many endpoints
     DiskTest::new(&ctx).await;
@@ -439,23 +435,24 @@ async fn test_audit_log_coverage(ctx: &ControlPlaneTestContext) {
     let t_start = Utc::now();
 
     let mut missing_audit: BTreeMap<String, (String, String)> = BTreeMap::new();
+    let mut unexpected_get_audit: BTreeMap<String, (String, String)> =
+        BTreeMap::new();
 
     for endpoint in &*VERIFY_ENDPOINTS {
         for method in &endpoint.allowed_methods {
-            // Only test mutating methods
             let is_mutating = match method {
                 AllowedMethod::Post(_)
                 | AllowedMethod::Put(_)
+                | AllowedMethod::Patch(_)
                 | AllowedMethod::Delete => true,
                 AllowedMethod::Get
                 | AllowedMethod::GetNonexistent
                 | AllowedMethod::GetUnimplemented
                 | AllowedMethod::GetVolatile
-                | AllowedMethod::GetWebsocket => false,
+                | AllowedMethod::GetWebsocket
+                | AllowedMethod::Head
+                | AllowedMethod::HeadNonexistent => false,
             };
-            if !is_mutating {
-                continue;
-            }
 
             let before = fetch_log(client, t_start, None).await.items.len();
 
@@ -490,26 +487,36 @@ async fn test_audit_log_coverage(ctx: &ControlPlaneTestContext) {
 
             let after = fetch_log(client, t_start, None).await.items.len();
 
-            if after <= before {
-                // Find the operation info from the OpenAPI spec
-                let method_str = http_method.to_string().to_uppercase();
-                let url_path = endpoint.url.split('?').next().unwrap();
+            // Find the operation info from the API description
+            let method_str = http_method.to_string();
 
-                let (op_id, path_template) = spec_operations
-                    .iter()
-                    .find(|((m, regex), _)| {
-                        *m == method_str
-                            && regex::Regex::new(regex)
-                                .unwrap()
-                                .is_match(url_path)
-                    })
-                    .map(|(_, (op_id, path))| (op_id.clone(), path.clone()))
-                    .unwrap_or_else(|| {
-                        (String::from("unknown"), url_path.to_string())
-                    });
+            let (op_id, path_template) = api_operations
+                .find(&method_str, endpoint.url)
+                .map(|op| (op.operation_id.clone(), op.path.clone()))
+                .unwrap_or_else(|| {
+                    let url_path = endpoint.url.split('?').next().unwrap();
+                    (String::from("unknown"), url_path.to_string())
+                });
 
-                missing_audit
-                    .insert(op_id, (method_str.to_lowercase(), path_template));
+            // Mark this endpoint as tested
+            untested_mutating.remove(&op_id);
+
+            if is_mutating {
+                // Mutating endpoints SHOULD have audit logging
+                if after <= before {
+                    missing_audit.insert(
+                        op_id,
+                        (method_str.to_lowercase(), path_template),
+                    );
+                }
+            } else {
+                // GET endpoints should NOT have audit logging
+                if after > before {
+                    unexpected_get_audit.insert(
+                        op_id,
+                        (method_str.to_lowercase(), path_template),
+                    );
+                }
             }
         }
     }
@@ -517,6 +524,13 @@ async fn test_audit_log_coverage(ctx: &ControlPlaneTestContext) {
     let mut output =
         String::from("Mutating endpoints without audit logging:\n");
     for (op_id, (method, path)) in &missing_audit {
+        output.push_str(&format!("{:44} ({:6} {:?})\n", op_id, method, path));
+    }
+
+    output.push_str(
+        "\nMutating endpoints not tested (not in VERIFY_ENDPOINTS):\n",
+    );
+    for (op_id, (method, path)) in &untested_mutating {
         output.push_str(&format!("{:44} ({:6} {:?})\n", op_id, method, path));
     }
 
@@ -553,16 +567,73 @@ async fn test_audit_log_coverage(ctx: &ControlPlaneTestContext) {
             "If the endpoint is read-only despite using POST (like the timeseries"
         );
         eprintln!(
-            "query endpoints), rerun the test with EXPECTORATE=overwrite to update"
+            "query endpoints), add it to uncovered-audit-log-endpoints.txt."
         );
-        eprintln!("the list of uncovered endpoints.");
         eprintln!(
             "======================================================================="
         );
         eprintln!();
     }
 
-    assert_contents(expected_path, &output);
+    // NOTE: We intentionally do NOT use expectorate's assert_contents here
+    // because we don't want EXPECTORATE=overwrite to allow people to
+    // accidentally add uncovered endpoints to the allowlist.
+    similar_asserts::assert_eq!(
+        expected,
+        output,
+        "left: uncovered-audit-log-endpoints.txt, right: actual"
+    );
+
+    // Check for GET endpoints that unexpectedly have audit logging
+    let mut get_output = String::from("GET endpoints with audit logging:\n");
+    for (op_id, (method, path)) in &unexpected_get_audit {
+        get_output
+            .push_str(&format!("{:44} ({:6} {:?})\n", op_id, method, path));
+    }
+
+    let get_expected_path = "tests/output/audited-get-endpoints.txt";
+    let get_expected =
+        std::fs::read_to_string(get_expected_path).unwrap_or_default();
+    let get_expected_ops: std::collections::HashSet<&str> = get_expected
+        .lines()
+        .skip(1) // skip the header line
+        .filter_map(|line| line.split_whitespace().next())
+        .collect();
+    let unexpected_audited: Vec<_> = unexpected_get_audit
+        .keys()
+        .filter(|op| !get_expected_ops.contains(op.as_str()))
+        .collect();
+    if !unexpected_audited.is_empty() {
+        eprintln!();
+        eprintln!(
+            "======================================================================="
+        );
+        eprintln!("GET ENDPOINTS WITH UNEXPECTED AUDIT LOGGING:");
+        for op in &unexpected_audited {
+            eprintln!("  - {}", op);
+        }
+        eprintln!();
+        eprintln!(
+            "GET endpoints should not have audit logging because they don't"
+        );
+        eprintln!(
+            "modify state. If this endpoint was intentionally audited (rare),"
+        );
+        eprintln!("add it to audited-get-endpoints.txt.");
+        eprintln!(
+            "======================================================================="
+        );
+        eprintln!();
+    }
+
+    // NOTE: We intentionally do NOT use expectorate's assert_contents here
+    // because we don't want EXPECTORATE=overwrite to allow people to
+    // accidentally add audited GET endpoints to the list.
+    similar_asserts::assert_eq!(
+        get_expected,
+        get_output,
+        "left: audited-get-endpoints.txt, right: actual"
+    );
 }
 
 fn verify_entry(
@@ -678,17 +749,20 @@ async fn test_audit_log_scim_token_auth(ctx: &ControlPlaneTestContext) {
 
     let t1 = Utc::now();
 
-    // Make an audited SCIM request using the token
-    RequestBuilder::new(client, Method::GET, "/scim/v2/Users")
+    // Make an audited SCIM request using the token (must be mutating for audit)
+    RequestBuilder::new(client, Method::POST, "/scim/v2/Users")
         .header(
             header::AUTHORIZATION,
             format!("Bearer {}", created_token.bearer_token),
         )
+        .body(Some(&serde_json::json!({
+            "userName": "test-user@example.com",
+        })))
         .allow_non_dropshot_errors()
-        .expect_status(Some(StatusCode::OK))
+        .expect_status(Some(StatusCode::CREATED))
         .execute()
         .await
-        .expect("failed to list SCIM users");
+        .expect("failed to create SCIM user");
 
     let t2 = Utc::now();
 
@@ -697,7 +771,7 @@ async fn test_audit_log_scim_token_auth(ctx: &ControlPlaneTestContext) {
     assert_eq!(audit_log.items.len(), 1);
 
     let entry = &audit_log.items[0];
-    assert_eq!(entry.operation_id, "scim_v2_list_users");
+    assert_eq!(entry.operation_id, "scim_v2_create_user");
     assert_eq!(entry.request_uri, "/scim/v2/Users");
     assert_eq!(entry.auth_method, Some(views::AuthMethod::ScimToken));
     assert_eq!(entry.credential_id, Some(created_token.id));
@@ -707,6 +781,6 @@ async fn test_audit_log_scim_token_auth(ctx: &ControlPlaneTestContext) {
     );
     assert_eq!(
         entry.result,
-        views::AuditLogEntryResult::Success { http_status_code: 200 }
+        views::AuditLogEntryResult::Success { http_status_code: 201 }
     );
 }

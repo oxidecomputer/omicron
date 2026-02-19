@@ -16,6 +16,7 @@
 //! [`InstanceCreate`]: self::InstanceCreate
 //! [`MulticastGroupJoinSpec`]: nexus_types::external_api::params::MulticastGroupJoinSpec
 
+use crate::v2026013000;
 use nexus_types::external_api::params;
 use omicron_common::api::external::{
     ByteCount, Hostname, IdentityMetadataCreateParams,
@@ -69,11 +70,11 @@ pub struct InstanceCreate {
 
     /// A list of disks to be attached to the instance.
     #[serde(default)]
-    pub disks: Vec<params::InstanceDiskAttachment>,
+    pub disks: Vec<v2026013000::InstanceDiskAttachment>,
 
     /// The disk the instance is configured to boot from.
     #[serde(default)]
-    pub boot_disk: Option<params::InstanceDiskAttachment>,
+    pub boot_disk: Option<v2026013000::InstanceDiskAttachment>,
 
     /// An allowlist of SSH public keys to be transferred to the instance via
     /// cloud-init during instance creation.
@@ -115,8 +116,8 @@ impl From<InstanceCreate> for params::InstanceCreate {
                     ip_version: None,
                 })
                 .collect(),
-            disks: value.disks,
-            boot_disk: value.boot_disk,
+            disks: value.disks.into_iter().map(Into::into).collect(),
+            boot_disk: value.boot_disk.map(Into::into),
             ssh_public_keys: value.ssh_public_keys,
             start: value.start,
             auto_restart_policy: value.auto_restart_policy,

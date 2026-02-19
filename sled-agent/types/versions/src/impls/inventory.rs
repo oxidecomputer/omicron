@@ -25,7 +25,7 @@ use crate::latest::inventory::{
     OmicronFileSourceResolverInventory, OmicronSledConfig, OmicronZoneConfig,
     OmicronZoneImageSource, OmicronZoneType, OmicronZonesConfig,
     RemoveMupdateOverrideBootSuccessInventory, RemoveMupdateOverrideInventory,
-    ZoneArtifactInventory, ZoneKind,
+    SingleMeasurementInventory, ZoneArtifactInventory, ZoneKind,
 };
 
 impl ZoneKind {
@@ -417,7 +417,6 @@ impl ConfigReconcilerInventory {
             zones: BTreeMap::new(),
             remove_mupdate_override: None,
             boot_partitions: BootPartitionContents::debug_assume_success(),
-            measurements: IdOrdMap::new(),
         };
         ret.debug_update_assume_success(config);
         ret
@@ -875,5 +874,32 @@ impl Default for OmicronSledConfig {
             host_phase_2: HostPhase2DesiredSlots::current_contents(),
             measurements: BTreeSet::new(),
         }
+    }
+}
+
+impl SingleMeasurementInventory {
+    pub fn display(&self) -> SingleMeasurementInventoryDisplay<'_> {
+        SingleMeasurementInventoryDisplay { inner: self }
+    }
+}
+
+/// a displayer for [`SingleMeasurementInventory`]
+pub struct SingleMeasurementInventoryDisplay<'a> {
+    inner: &'a SingleMeasurementInventory,
+}
+
+impl fmt::Display for SingleMeasurementInventoryDisplay<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let SingleMeasurementInventory { path, result } = self.inner;
+
+        match result {
+            ConfigReconcilerInventoryResult::Ok => {
+                writeln!(f, "entry {path} ok")?
+            }
+            ConfigReconcilerInventoryResult::Err { message } => {
+                writeln!(f, "entry error : {message}")?
+            }
+        }
+        Ok(())
     }
 }

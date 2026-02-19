@@ -3515,4 +3515,82 @@ mod tests {
         }
         context.success().await;
     }
+
+    // Regression: ignore rows where item column is null. After adding
+    // ipv6 support, the `ip` and `ipv6` columns became nullable: only
+    // one should be set. But the logic for choosing the next ipv6
+    // address didn't expect nulls on the item column: the min_item
+    // query sees that the subnet isn't empty (because ipv4 addresses
+    // already exist), and the gap queries don't produce candidate
+    // addresses because the existing rows have null ipv6 addresses.
+    // So creating a dual-stack instance using a subnet with only ipv4
+    // addresses actually produced an ipv4-only instance. This
+    // regression test creates an instance with an ipv4 instance in
+    // an empty subnet, then a dual-stack instance, then asserts that
+    // the dual-stack instance has both addresses.
+    #[tokio::test]
+    async fn test_dual_stack_after_ipv4_only() {
+        let context =
+            TestContext::new("test_dual_stack_after_ipv4_only", 2).await;
+        let subnet = &context.net1.subnets[0];
+
+        // Create an instance with an IPv4-only NIC using the empty subnet.
+        let instance1 = context.create_stopped_instance().await;
+        let instance1_id = InstanceUuid::from_untyped_uuid(instance1.id());
+        let nic1 = IncompleteNetworkInterface::new_instance(
+            Uuid::new_v4(),
+            instance1_id,
+            subnet.clone(),
+            IdentityMetadataCreateParams {
+                name: "nic-v4-only".parse().unwrap(),
+                description: String::from("IPv4-only NIC"),
+            },
+            PrivateIpStackCreate::auto_ipv4(),
+        )
+        .unwrap();
+        let inserted1 = context
+            .datastore()
+            .instance_create_network_interface_raw(context.opctx(), nic1)
+            .await
+            .expect("Failed to insert IPv4-only NIC");
+        assert!(
+            inserted1.ipv4.is_some(),
+            "IPv4-only NIC should have an IPv4 address"
+        );
+        assert!(
+            inserted1.ipv6.is_none(),
+            "IPv4-only NIC should not have an IPv6 address"
+        );
+
+        // Now create a second instance with a dual-stack NIC on the same
+        // subnet. This should succeed and allocate both IPv4 and IPv6.
+        let instance2 = context.create_stopped_instance().await;
+        let instance2_id = InstanceUuid::from_untyped_uuid(instance2.id());
+        let nic2 = IncompleteNetworkInterface::new_instance(
+            Uuid::new_v4(),
+            instance2_id,
+            subnet.clone(),
+            IdentityMetadataCreateParams {
+                name: "nic-dual-stack".parse().unwrap(),
+                description: String::from("dual-stack NIC"),
+            },
+            PrivateIpStackCreate::auto_dual_stack(),
+        )
+        .unwrap();
+        let inserted2 = context
+            .datastore()
+            .instance_create_network_interface_raw(context.opctx(), nic2)
+            .await
+            .expect("Failed to insert dual-stack NIC");
+        assert!(
+            inserted2.ipv4.is_some(),
+            "Dual-stack NIC should have an IPv4 address"
+        );
+        assert!(
+            inserted2.ipv6.is_some(),
+            "Dual-stack NIC should have an IPv6 address"
+        );
+
+        context.success().await;
+    }
 }

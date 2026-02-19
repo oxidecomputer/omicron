@@ -13,29 +13,30 @@ use crate::ledgers::PersistentStateLedger;
 use crate::proxy;
 use camino::Utf8PathBuf;
 use omicron_uuid_kinds::RackUuid;
+use sled_agent_measurements::MeasurementsHandle;
 use sled_hardware_types::BaseboardId;
 use slog::{Logger, debug, error, info, o, warn};
 use slog_error_chain::SlogInlineError;
 use sprockets_tls::keys::SprocketsConfig;
 use std::collections::BTreeSet;
 use std::net::SocketAddrV6;
+use std::sync::Arc;
 use thiserror::Error;
 use tokio::sync::mpsc::error::SendError;
 use tokio::sync::oneshot::error::RecvError;
-use tokio::sync::{mpsc, oneshot};
+use tokio::sync::{mpsc, oneshot, watch};
 use trust_quorum_protocol::{
     CommitError, LoadRackSecretError, LrtqUpgradeError, Node,
-    NodeCallerCtx as _, NodeCommonCtx as _, NodeCtx, PrepareAndCommitError,
-    ReconfigurationError, ReconstructedRackSecret,
+    NodeCallerCtx as _, NodeCommonCtx as _, NodeCtx, PersistentState,
+    PrepareAndCommitError, ReconfigurationError, ReconstructedRackSecret,
 };
 use trust_quorum_types::configuration::Configuration;
 use trust_quorum_types::messages::{LrtqUpgradeMsg, ReconfigureMsg};
 use trust_quorum_types::status::{CommitStatus, CoordinatorStatus, NodeStatus};
 use trust_quorum_types::types::Epoch;
-
 // TODO: Move to this crate
 // https://github.com/oxidecomputer/omicron/issues/9311
-use bootstore::schemes::v0::NetworkConfig;
+use bootstore::schemes::v0::{NetworkConfig, PersistentFsmState};
 
 /// We only expect a handful of messages at a time.
 const API_CHANNEL_BOUND: usize = 32;
@@ -55,6 +56,7 @@ pub struct Config {
     pub listen_addr: SocketAddrV6,
     pub tq_ledger_paths: Vec<Utf8PathBuf>,
     pub network_config_ledger_paths: Vec<Utf8PathBuf>,
+    pub lrtq_ledger_paths: Vec<Utf8PathBuf>,
     pub sprockets: SprocketsConfig,
 }
 
@@ -201,6 +203,7 @@ pub struct NodeTaskHandle {
     baseboard_id: BaseboardId,
     tx: mpsc::Sender<NodeApiRequest>,
     listen_addr: SocketAddrV6,
+    committed_epoch_rx: watch::Receiver<Option<Epoch>>,
 }
 
 impl NodeTaskHandle {
@@ -390,6 +393,14 @@ impl NodeTaskHandle {
         let res = rx.await?;
         Ok(res)
     }
+
+    /// Get a receiver for committed epoch notifications.
+    ///
+    /// The channel sends notifications when a new epoch is committed.
+    /// This is used by the config reconciler to trigger ZFS key rotation.
+    pub fn committed_epoch_rx(&self) -> watch::Receiver<Option<Epoch>> {
+        self.committed_epoch_rx.clone()
+    }
 }
 
 pub struct NodeTask {
@@ -412,12 +423,21 @@ pub struct NodeTask {
 
     /// A tracker for API requests proxied to other nodes
     proxy_tracker: proxy::Tracker,
+    /// Handle to receive updates to new reference measurements
+    measurements: Arc<MeasurementsHandle>,
+
+    /// Sender for committed epoch notifications.
+    ///
+    /// Used to notify subscribers (e.g., config reconciler) when a new epoch
+    /// is committed, triggering ZFS key rotation.
+    committed_epoch_tx: watch::Sender<Option<Epoch>>,
 }
 
 impl NodeTask {
     pub async fn new(
         config: Config,
         log: &Logger,
+        measurements: Arc<MeasurementsHandle>,
     ) -> (NodeTask, NodeTaskHandle) {
         let log = log.new(o!(
             "component" => "trust-quorum",
@@ -442,6 +462,21 @@ impl NodeTask {
                 ),
                 ps_ledger.generation,
             )
+        } else if let Some(lrtq_share_data) =
+            PersistentFsmState::load_for_trust_quorum_upgrade(
+                &log,
+                config.lrtq_ledger_paths.clone(),
+            )
+            .await
+        {
+            let ps = PersistentState::new_lrtq_only(lrtq_share_data);
+            (
+                NodeCtx::new_with_persistent_state(
+                    config.baseboard_id.clone(),
+                    ps,
+                ),
+                0,
+            )
         } else {
             (NodeCtx::new(config.baseboard_id.clone()), 0)
         };
@@ -451,6 +486,12 @@ impl NodeTask {
             config.network_config_ledger_paths.clone(),
         )
         .await;
+
+        // Create watch channel for committed epoch notifications.
+        // Initialize with the current committed epoch (if any).
+        let initial_epoch = ctx.persistent_state().latest_committed_epoch();
+        let (committed_epoch_tx, committed_epoch_rx) =
+            watch::channel(initial_epoch);
 
         let node = Node::new(&log, &mut ctx);
         let conn_mgr = ConnMgr::new(
@@ -474,8 +515,15 @@ impl NodeTask {
                 rx,
                 network_config,
                 proxy_tracker: proxy::Tracker::new(),
+                measurements,
+                committed_epoch_tx,
             },
-            NodeTaskHandle { baseboard_id, tx, listen_addr },
+            NodeTaskHandle {
+                baseboard_id,
+                tx,
+                listen_addr,
+                committed_epoch_rx,
+            },
         )
     }
 
@@ -484,8 +532,13 @@ impl NodeTask {
     /// This should be spawned into its own tokio task
     pub async fn run(&mut self) {
         while !self.shutdown {
-            // TODO: Real corpus
-            let corpus = vec![];
+            let corpus = match self.measurements.current_measurements() {
+                Ok(c) => c,
+                Err(e) => {
+                    error!(self.log, "measurement error"; e);
+                    vec![]
+                }
+            };
             tokio::select! {
                 Some(request) = self.rx.recv() => {
                     self.on_api_request(request).await;
@@ -631,8 +684,13 @@ impl NodeTask {
         match request {
             NodeApiRequest::BootstrapAddresses(addrs) => {
                 info!(self.log, "Updated Peer Addresses: {addrs:?}");
-                // TODO: real corpus
-                let corpus = vec![];
+                let corpus = match self.measurements.current_measurements() {
+                    Ok(c) => c,
+                    Err(e) => {
+                        error!(self.log, "measurement error"; e);
+                        vec![]
+                    }
+                };
                 let disconnected = self
                     .conn_mgr
                     .update_bootstrap_connections(addrs, corpus)
@@ -799,6 +857,20 @@ impl NodeTask {
                 self.ctx.persistent_state().clone(),
             )
             .await;
+
+            // Notify subscribers if latest committed epoch changed
+            let new_epoch =
+                self.ctx.persistent_state().latest_committed_epoch();
+            let log = &self.log;
+            self.committed_epoch_tx.send_if_modified(|current| {
+                if *current != new_epoch {
+                    info!(log, "Committed epoch changed"; "epoch" => ?new_epoch);
+                    *current = new_epoch;
+                    true
+                } else {
+                    false
+                }
+            });
         }
     }
 
@@ -968,6 +1040,7 @@ mod tests {
                     sprockets,
                     tq_ledger_paths,
                     network_config_ledger_paths,
+                    lrtq_ledger_paths: vec![],
                 }
             })
             .collect()
@@ -1048,8 +1121,9 @@ mod tests {
             let mut node_handles = vec![];
             let mut join_handles = vec![];
             for config in configs.clone() {
+                let measurements = Arc::new(MeasurementsHandle::new_fake());
                 let (mut task, handle) =
-                    NodeTask::new(config, &logctx.log).await;
+                    NodeTask::new(config, &logctx.log, measurements).await;
                 node_handles.push(handle);
                 join_handles
                     .push(tokio::spawn(async move { task.run().await }));
@@ -1109,8 +1183,9 @@ mod tests {
             for (config, share_pkg) in
                 configs.clone().into_iter().zip(share_pkgs)
             {
+                let measurements = Arc::new(MeasurementsHandle::new_fake());
                 let (mut task, handle) =
-                    NodeTask::new(config, &logctx.log).await;
+                    NodeTask::new(config, &logctx.log, measurements).await;
                 task.ctx.update_persistent_state(|ps| {
                     ps.lrtq = Some(share_pkg);
                     // We are modifying the persistent state, but not in a way
@@ -1146,9 +1221,11 @@ mod tests {
         }
 
         pub async fn simulate_restart_of_last_node(&mut self) {
+            let measurements = Arc::new(MeasurementsHandle::new_fake());
             let (mut task, handle) = NodeTask::new(
                 self.configs.last().unwrap().clone(),
                 &self.logctx.log,
+                measurements,
             )
             .await;
             let listen_addr = handle.listen_addr();
@@ -1306,10 +1383,12 @@ mod tests {
 
         debug!(logctx.log, "AFTER poll for conns with node down");
 
+        let measurements = Arc::new(MeasurementsHandle::new_fake());
         // Now let's bring back up the old node and ensure full connectivity again
         let (mut task, handle) = NodeTask::new(
             setup.configs.last().unwrap().clone(),
             &setup.logctx.log,
+            measurements,
         )
         .await;
         setup.node_handles.push(handle.clone());

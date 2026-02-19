@@ -158,9 +158,8 @@ async fn test_unauthorized() {
         .await
         .unwrap();
 
-    // Insert a SCIM client bearer token with a known UUID - normally these are
-    // completely random.
-
+    // Insert a SCIM client bearer token for the default silo. This is needed
+    // for testing the SCIM token management endpoints.
     {
         use nexus_db_model::ScimClientBearerToken;
         use nexus_types::silo::DEFAULT_SILO_ID;
@@ -171,9 +170,9 @@ async fn test_unauthorized() {
             id: "7885144e-9c75-47f7-a97d-7dfc58e1186c".parse().unwrap(),
             time_created: now,
             time_deleted: None,
-            time_expires: Some(now),
+            time_expires: None,
             silo_id: DEFAULT_SILO_ID,
-            bearer_token: String::from("testpost"),
+            bearer_token: String::from("test-scim-token"),
         };
 
         let nexus = &cptestctx.server.server_context().nexus;
@@ -306,6 +305,18 @@ static SETUP_REQUESTS: LazyLock<Vec<SetupReq>> = LazyLock::new(|| {
                 &*DEMO_SILO_USER_LOGOUT_URL,
             ],
         },
+        // Create the demo subnet pool
+        SetupReq::Post {
+            url: &DEMO_SUBNET_POOLS_URL,
+            body: serde_json::to_value(&*DEMO_SUBNET_POOL_CREATE).unwrap(),
+            id_routes: vec!["/v1/system/subnet-pools/{id}"],
+        },
+        // Create the demo member in the pool
+        SetupReq::Post {
+            url: &DEMO_SUBNET_POOL_MEMBERS_ADD_URL,
+            body: serde_json::to_value(&*DEMO_SUBNET_POOL_MEMBER_ADD).unwrap(),
+            id_routes: vec![],
+        },
         // Create the default IP pool
         SetupReq::Post {
             url: &DEMO_IP_POOLS_URL,
@@ -377,6 +388,18 @@ static SETUP_REQUESTS: LazyLock<Vec<SetupReq>> = LazyLock::new(|| {
             url: &DEMO_PROJECT_URL_INSTANCES,
             body: serde_json::to_value(&*DEMO_STOPPED_INSTANCE_CREATE).unwrap(),
             id_routes: vec!["/v1/instances/{id}"],
+        },
+        // Link the subnet pool to the current Silo
+        SetupReq::Post {
+            url: &DEMO_SUBNET_POOL_SILOS_URL,
+            body: serde_json::to_value(&*DEMO_SUBNET_POOL_LINK_SILO).unwrap(),
+            id_routes: vec![],
+        },
+        // Create a External Subnet in the Project
+        SetupReq::Post {
+            url: &DEMO_EXTERNAL_SUBNETS_URL,
+            body: serde_json::to_value(&*DEMO_EXTERNAL_SUBNET_CREATE).unwrap(),
+            id_routes: vec![],
         },
         // Create a multicast IP pool
         SetupReq::Post {
@@ -479,7 +502,12 @@ static SETUP_REQUESTS: LazyLock<Vec<SetupReq>> = LazyLock::new(|| {
                 },
             )
             .unwrap(),
-            id_routes: vec!["/experimental/v1/system/support-bundles/{id}"],
+            id_routes: vec![
+                "/experimental/v1/system/support-bundles/{id}",
+                "/experimental/v1/system/support-bundles/{id}/download",
+                "/experimental/v1/system/support-bundles/{id}/download/some-file.txt",
+                "/experimental/v1/system/support-bundles/{id}/index",
+            ],
         },
         // Create a trusted root for updates
         SetupReq::Post {
@@ -574,11 +602,23 @@ async fn verify_endpoint(
     // "401 Unauthorized" status code.
     let unauthn_status = StatusCode::UNAUTHORIZED;
 
-    // Determine the expected status code for authenticated, unauthorized
-    // requests, based on the endpoint's visibility.
-    let unauthz_status = match endpoint.visibility {
-        Visibility::Public => StatusCode::FORBIDDEN,
-        Visibility::Protected => StatusCode::NOT_FOUND,
+    // SCIM endpoints use bearer token auth instead of session auth, so
+    // privileged requests use SCIM token instead of PrivilegedUser, and
+    // session-authenticated users always get 401.
+    let is_scim = endpoint.url.starts_with("/scim/");
+    let (privileged_authn, unauthz_status) = if is_scim {
+        (
+            AuthnMode::ScimToken("test-scim-token".to_string()),
+            StatusCode::UNAUTHORIZED,
+        )
+    } else {
+        (
+            AuthnMode::PrivilegedUser,
+            match endpoint.visibility {
+                Visibility::Public => StatusCode::FORBIDDEN,
+                Visibility::Protected => StatusCode::NOT_FOUND,
+            },
+        )
     };
 
     // For routes with an id param, replace the id param with the setup response
@@ -616,9 +656,13 @@ async fn verify_endpoint(
             record_operation(WhichTest::PrivilegedGet(Some(
                 &http::StatusCode::OK,
             )));
+            let mut request = NexusRequest::object_get(client, uri.as_str())
+                .authn_as(privileged_authn.clone());
+            if is_scim {
+                request = request.allow_non_dropshot_errors();
+            }
             Some(
-                NexusRequest::object_get(client, uri.as_str())
-                    .authn_as(AuthnMode::PrivilegedUser)
+                request
                     .execute()
                     .await
                     .unwrap_or_else(|e| panic!("Failed to GET: {uri}: {e}"))
@@ -636,7 +680,7 @@ async fn verify_endpoint(
                 http::Method::GET,
                 uri.as_str(),
             )
-            .authn_as(AuthnMode::PrivilegedUser)
+            .authn_as(privileged_authn.clone())
             .execute()
             .await
             .unwrap();
@@ -649,8 +693,12 @@ async fn verify_endpoint(
             record_operation(WhichTest::PrivilegedGet(Some(
                 &http::StatusCode::OK,
             )));
-            NexusRequest::object_get(client, uri.as_str())
-                .authn_as(AuthnMode::PrivilegedUser)
+            let mut request = NexusRequest::object_get(client, uri.as_str())
+                .authn_as(privileged_authn.clone());
+            if is_scim {
+                request = request.allow_non_dropshot_errors();
+            }
+            request
                 .execute()
                 .await
                 .unwrap_or_else(|e| panic!("Failed to GET: {uri}: {e}"))
@@ -664,7 +712,7 @@ async fn verify_endpoint(
                 &http::StatusCode::SWITCHING_PROTOCOLS,
             )));
             NexusRequest::object_get(client, uri.as_str())
-                .authn_as(AuthnMode::PrivilegedUser)
+                .authn_as(privileged_authn.clone())
                 .websocket_handshake()
                 .execute()
                 .await
@@ -683,8 +731,14 @@ async fn verify_endpoint(
 
     // For each of the HTTP methods we use in the API as well as TRACE, we'll
     // make several requests to this URL and verify the results.
-    let methods =
-        [Method::GET, Method::PUT, Method::POST, Method::DELETE, Method::TRACE];
+    let methods = [
+        Method::GET,
+        Method::PUT,
+        Method::POST,
+        Method::DELETE,
+        Method::HEAD,
+        Method::TRACE,
+    ];
     for method in methods {
         let allowed = endpoint
             .allowed_methods
@@ -712,19 +766,21 @@ async fn verify_endpoint(
                 Some(_) => unauthz_status,
                 None => StatusCode::METHOD_NOT_ALLOWED,
             };
-            let mut request = NexusRequest::new(
-                RequestBuilder::new(client, method.clone(), &uri)
-                    .body(body.as_ref())
-                    .expect_status(Some(expected_status)),
-            )
-            .authn_as(AuthnMode::UnprivilegedUser);
+            let mut builder = RequestBuilder::new(client, method.clone(), &uri)
+                .body(body.as_ref())
+                .expect_status(Some(expected_status));
+            if is_scim {
+                builder = builder.allow_non_dropshot_errors();
+            }
+            let mut request = NexusRequest::new(builder)
+                .authn_as(AuthnMode::UnprivilegedUser);
             if let Some(&AllowedMethod::GetWebsocket) = allowed {
                 request = request.websocket_handshake();
             }
             let response = request.execute().await.unwrap_or_else(|e| {
                 panic!("Failed making {method} request to {uri}: {e}")
             });
-            verify_response(&response);
+            verify_response(&response, &method);
             record_operation(WhichTest::Unprivileged(&expected_status));
         } else {
             // "This door is opened elsewhere."
@@ -741,11 +797,14 @@ async fn verify_endpoint(
             RequestBuilder::new(client, method.clone(), uri.as_str())
                 .body(body.as_ref())
                 .expect_status(Some(expected_status));
+        if is_scim {
+            request = request.allow_non_dropshot_errors();
+        }
         if let Some(&AllowedMethod::GetWebsocket) = allowed {
             request = request.expect_websocket_handshake();
         }
         let response = request.execute().await.unwrap();
-        verify_response(&response);
+        verify_response(&response, &method);
         record_operation(WhichTest::Unauthenticated(&expected_status));
 
         // Now try a few requests with bogus credentials.  We should get the
@@ -778,7 +837,7 @@ async fn verify_endpoint(
             request = request.expect_websocket_handshake();
         }
         let response = request.execute().await.unwrap();
-        verify_response(&response);
+        verify_response(&response, &method);
         record_operation(WhichTest::UnknownUser(&expected_status));
 
         // Now try a syntactically invalid authn header.
@@ -796,7 +855,7 @@ async fn verify_endpoint(
             request = request.expect_websocket_handshake();
         }
         let response = request.execute().await.unwrap();
-        verify_response(&response);
+        verify_response(&response, &method);
         record_operation(WhichTest::InvalidHeader(&expected_status));
 
         print!(" ");
@@ -839,9 +898,13 @@ async fn verify_endpoint(
 }
 
 /// Verifies the body of an HTTP response for status codes 401, 403, 404, or 405
-fn verify_response(response: &TestResponse) {
+fn verify_response(response: &TestResponse, method: &Method) {
     if response.status == StatusCode::SWITCHING_PROTOCOLS {
         // websocket handshake. avoid trying to parse absent body as json.
+        return;
+    }
+    if *method == Method::HEAD {
+        // HEAD requests have no body to parse.
         return;
     }
     let error: HttpErrorResponseBody = response.parsed_body().unwrap();
