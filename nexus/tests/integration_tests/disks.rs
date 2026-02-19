@@ -3154,7 +3154,7 @@ async fn test_read_only_disk_different_vcr(
     assert_eq!(volume_1_ids.intersection(&volume_2_ids).count(), 0);
 }
 
-pub fn gather_ids(ids: &mut HashSet<Uuid>, vcr: &VolumeConstructionRequest) {
+fn gather_ids(ids: &mut HashSet<Uuid>, vcr: &VolumeConstructionRequest) {
     let mut parts: VecDeque<&VolumeConstructionRequest> = VecDeque::new();
     parts.push_back(&vcr);
 
