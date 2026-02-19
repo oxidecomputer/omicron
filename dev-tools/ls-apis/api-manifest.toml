@@ -181,10 +181,18 @@ versioned_how_reason = "depends on itself (i.e., instances call each other)"
 client_package_name = "bootstrap-agent-lockstep-client"
 label = "Bootstrap Agent Lockstep API"
 server_package_name = "bootstrap-agent-lockstep-api"
-versioned_how = "server"
+versioned_how = "client"
+versioned_how_reason = "wicketd can wind up calling into sled agent on different sleds"
 notes = """
-Lockstep API for rack initialization. Only used by wicketd, which is in the \
-same deployment unit (Host OS) as the sled-agent that exposes this API.
+Lockstep API for rack initialization.  Only used by wicketd.  Generally
+speaking, Wicketd only talks to the sled agent on the same sled, which is in the
+same deployment unit as Wicketd itself (host OS).  However, it may pick a
+different one if for some reason the local baseboard information is not
+available.
+
+Either way, none of this matters for API versioning or software update because
+we expect that during rack initialization, all components are running the same
+system release.
 """
 
 [[apis]]
