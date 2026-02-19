@@ -16,9 +16,10 @@ use nexus_test_utils::resource_helpers::DiskTest;
 use nexus_test_utils::resource_helpers::create_project;
 use nexus_test_utils::resource_helpers::grant_iam;
 use nexus_test_utils_macros::nexus_test;
-use nexus_types::external_api::shared::ProjectRole;
-use nexus_types::external_api::shared::SiloRole;
-use nexus_types::external_api::{params, views};
+use nexus_types::external_api::disk;
+use nexus_types::external_api::image;
+use nexus_types::external_api::policy::{ProjectRole, SiloRole};
+use nexus_types::external_api::snapshot;
 use nexus_types::identity::Asset;
 use nexus_types::identity::Resource;
 use omicron_common::api::external::Disk;
@@ -33,8 +34,8 @@ fn get_project_images_url(project_name: &str) -> String {
     format!("/v1/images?project={}", project_name)
 }
 
-fn get_image_create(source: params::ImageSource) -> params::ImageCreate {
-    params::ImageCreate {
+fn get_image_create(source: image::ImageSource) -> image::ImageCreate {
+    image::ImageCreate {
         identity: IdentityMetadataCreateParams {
             name: "alpine-edge".parse().unwrap(),
             description: String::from(
@@ -71,7 +72,7 @@ async fn test_image_create(cptestctx: &ControlPlaneTestContext) {
 
     let images = NexusRequest::object_get(client, &images_url)
         .authn_as(AuthnMode::PrivilegedUser)
-        .execute_and_parse_unwrap::<ResultsPage<views::Image>>()
+        .execute_and_parse_unwrap::<ResultsPage<image::Image>>()
         .await
         .items;
 
@@ -79,18 +80,18 @@ async fn test_image_create(cptestctx: &ControlPlaneTestContext) {
 
     // Create an image in the project
     let image_create_params = get_image_create(
-        params::ImageSource::YouCanBootAnythingAsLongAsItsAlpine,
+        image::ImageSource::YouCanBootAnythingAsLongAsItsAlpine,
     );
 
     NexusRequest::objects_post(client, &images_url, &image_create_params)
         .authn_as(AuthnMode::PrivilegedUser)
-        .execute_and_parse_unwrap::<views::Image>()
+        .execute_and_parse_unwrap::<image::Image>()
         .await;
 
     // one image in the project
     let images = NexusRequest::object_get(client, &images_url)
         .authn_as(AuthnMode::PrivilegedUser)
-        .execute_and_parse_unwrap::<ResultsPage<views::Image>>()
+        .execute_and_parse_unwrap::<ResultsPage<image::Image>>()
         .await
         .items;
 
@@ -108,7 +109,7 @@ async fn test_silo_image_create(cptestctx: &ControlPlaneTestContext) {
     // Expect no images in the silo
     let images = NexusRequest::object_get(client, &silo_images_url)
         .authn_as(AuthnMode::PrivilegedUser)
-        .execute_and_parse_unwrap::<ResultsPage<views::Image>>()
+        .execute_and_parse_unwrap::<ResultsPage<image::Image>>()
         .await
         .items;
 
@@ -116,18 +117,18 @@ async fn test_silo_image_create(cptestctx: &ControlPlaneTestContext) {
 
     // Create an image in the project
     let image_create_params = get_image_create(
-        params::ImageSource::YouCanBootAnythingAsLongAsItsAlpine,
+        image::ImageSource::YouCanBootAnythingAsLongAsItsAlpine,
     );
 
     // Create image
     NexusRequest::objects_post(client, &silo_images_url, &image_create_params)
         .authn_as(AuthnMode::PrivilegedUser)
-        .execute_and_parse_unwrap::<views::Image>()
+        .execute_and_parse_unwrap::<image::Image>()
         .await;
 
     let images = NexusRequest::object_get(client, &silo_images_url)
         .authn_as(AuthnMode::PrivilegedUser)
-        .execute_and_parse_unwrap::<ResultsPage<views::Image>>()
+        .execute_and_parse_unwrap::<ResultsPage<image::Image>>()
         .await
         .items;
 
@@ -145,7 +146,7 @@ async fn test_make_disk_from_image(cptestctx: &ControlPlaneTestContext) {
 
     // Create an image in the project
     let image_create_params = get_image_create(
-        params::ImageSource::YouCanBootAnythingAsLongAsItsAlpine,
+        image::ImageSource::YouCanBootAnythingAsLongAsItsAlpine,
     );
 
     let images_url = get_project_images_url(PROJECT_NAME);
@@ -153,16 +154,16 @@ async fn test_make_disk_from_image(cptestctx: &ControlPlaneTestContext) {
     let alpine_image =
         NexusRequest::objects_post(client, &images_url, &image_create_params)
             .authn_as(AuthnMode::PrivilegedUser)
-            .execute_and_parse_unwrap::<views::Image>()
+            .execute_and_parse_unwrap::<image::Image>()
             .await;
 
-    let new_disk = params::DiskCreate {
+    let new_disk = disk::DiskCreate {
         identity: IdentityMetadataCreateParams {
             name: "disk".parse().unwrap(),
             description: String::from("sells rainsticks"),
         },
-        disk_backend: params::DiskBackend::Distributed {
-            disk_source: params::DiskSource::Image {
+        disk_backend: disk::DiskBackend::Distributed {
+            disk_source: disk::DiskSource::Image {
                 image_id: alpine_image.identity.id,
                 read_only: false,
             },
@@ -190,21 +191,21 @@ async fn test_make_disk_from_other_project_image_fails(
 
     let images_url = get_project_images_url(PROJECT_NAME);
     let image_create_params = get_image_create(
-        params::ImageSource::YouCanBootAnythingAsLongAsItsAlpine,
+        image::ImageSource::YouCanBootAnythingAsLongAsItsAlpine,
     );
     let image =
         NexusRequest::objects_post(client, &images_url, &image_create_params)
             .authn_as(AuthnMode::PrivilegedUser)
-            .execute_and_parse_unwrap::<views::Image>()
+            .execute_and_parse_unwrap::<image::Image>()
             .await;
 
-    let new_disk = params::DiskCreate {
+    let new_disk = disk::DiskCreate {
         identity: IdentityMetadataCreateParams {
             name: "stolen-disk".parse().unwrap(),
             description: String::from("yoink"),
         },
-        disk_backend: params::DiskBackend::Distributed {
-            disk_source: params::DiskSource::Image {
+        disk_backend: disk::DiskBackend::Distributed {
+            disk_source: disk::DiskSource::Image {
                 image_id: image.identity.id,
                 read_only: false,
             },
@@ -241,7 +242,7 @@ async fn test_make_disk_from_image_too_small(
 
     // Create an image in the project
     let image_create_params = get_image_create(
-        params::ImageSource::YouCanBootAnythingAsLongAsItsAlpine,
+        image::ImageSource::YouCanBootAnythingAsLongAsItsAlpine,
     );
 
     let images_url = get_project_images_url(PROJECT_NAME);
@@ -249,16 +250,16 @@ async fn test_make_disk_from_image_too_small(
     let alpine_image =
         NexusRequest::objects_post(client, &images_url, &image_create_params)
             .authn_as(AuthnMode::PrivilegedUser)
-            .execute_and_parse_unwrap::<views::Image>()
+            .execute_and_parse_unwrap::<image::Image>()
             .await;
 
-    let new_disk = params::DiskCreate {
+    let new_disk = disk::DiskCreate {
         identity: IdentityMetadataCreateParams {
             name: "disk".parse().unwrap(),
             description: String::from("sells rainsticks"),
         },
-        disk_backend: params::DiskBackend::Distributed {
-            disk_source: params::DiskSource::Image {
+        disk_backend: disk::DiskBackend::Distributed {
+            disk_source: disk::DiskSource::Image {
                 image_id: alpine_image.identity.id,
                 read_only: false,
             },
@@ -300,24 +301,24 @@ async fn test_image_promotion(cptestctx: &ControlPlaneTestContext) {
 
     let images = NexusRequest::object_get(client, &images_url)
         .authn_as(AuthnMode::PrivilegedUser)
-        .execute_and_parse_unwrap::<ResultsPage<views::Image>>()
+        .execute_and_parse_unwrap::<ResultsPage<image::Image>>()
         .await
         .items;
 
     assert_eq!(images.len(), 0);
 
     let image_create_params = get_image_create(
-        params::ImageSource::YouCanBootAnythingAsLongAsItsAlpine,
+        image::ImageSource::YouCanBootAnythingAsLongAsItsAlpine,
     );
 
     NexusRequest::objects_post(client, &images_url, &image_create_params)
         .authn_as(AuthnMode::PrivilegedUser)
-        .execute_and_parse_unwrap::<views::Image>()
+        .execute_and_parse_unwrap::<image::Image>()
         .await;
 
     let project_images = NexusRequest::object_get(client, &images_url)
         .authn_as(AuthnMode::PrivilegedUser)
-        .execute_and_parse_unwrap::<ResultsPage<views::Image>>()
+        .execute_and_parse_unwrap::<ResultsPage<image::Image>>()
         .await
         .items;
 
@@ -329,7 +330,7 @@ async fn test_image_promotion(cptestctx: &ControlPlaneTestContext) {
 
     let project_image = NexusRequest::object_get(client, &project_image_url)
         .authn_as(AuthnMode::PrivilegedUser)
-        .execute_and_parse_unwrap::<views::Image>()
+        .execute_and_parse_unwrap::<image::Image>()
         .await;
 
     assert_eq!(project_image.identity.id, image_id);
@@ -341,12 +342,12 @@ async fn test_image_promotion(cptestctx: &ControlPlaneTestContext) {
             .expect_status(Some(http::StatusCode::ACCEPTED)),
     )
     .authn_as(AuthnMode::PrivilegedUser)
-    .execute_and_parse_unwrap::<views::Image>()
+    .execute_and_parse_unwrap::<image::Image>()
     .await;
 
     let silo_images = NexusRequest::object_get(client, &silo_images_url)
         .authn_as(AuthnMode::PrivilegedUser)
-        .execute_and_parse_unwrap::<ResultsPage<views::Image>>()
+        .execute_and_parse_unwrap::<ResultsPage<image::Image>>()
         .await
         .items;
 
@@ -356,7 +357,7 @@ async fn test_image_promotion(cptestctx: &ControlPlaneTestContext) {
     // Ensure there are no more project images
     let project_images = NexusRequest::object_get(client, &images_url)
         .authn_as(AuthnMode::PrivilegedUser)
-        .execute_and_parse_unwrap::<ResultsPage<views::Image>>()
+        .execute_and_parse_unwrap::<ResultsPage<image::Image>>()
         .await
         .items;
 
@@ -365,7 +366,7 @@ async fn test_image_promotion(cptestctx: &ControlPlaneTestContext) {
     let silo_image_url = format!("/v1/images/{}", image_id);
     let silo_image = NexusRequest::object_get(client, &silo_image_url)
         .authn_as(AuthnMode::PrivilegedUser)
-        .execute_and_parse_unwrap::<views::Image>()
+        .execute_and_parse_unwrap::<image::Image>()
         .await;
 
     assert_eq!(silo_image.identity.id, image_id);
@@ -373,13 +374,13 @@ async fn test_image_promotion(cptestctx: &ControlPlaneTestContext) {
     // Create another project image with the same name
     NexusRequest::objects_post(client, &images_url, &image_create_params)
         .authn_as(AuthnMode::PrivilegedUser)
-        .execute_and_parse_unwrap::<views::Image>()
+        .execute_and_parse_unwrap::<image::Image>()
         .await;
 
     // Ensure project image was created
     let project_images = NexusRequest::object_get(client, &images_url)
         .authn_as(AuthnMode::PrivilegedUser)
-        .execute_and_parse_unwrap::<ResultsPage<views::Image>>()
+        .execute_and_parse_unwrap::<ResultsPage<image::Image>>()
         .await
         .items;
 
@@ -415,21 +416,21 @@ async fn test_image_from_other_project_snapshot_fails(
 
     // Create an image
     let image_create_params = get_image_create(
-        params::ImageSource::YouCanBootAnythingAsLongAsItsAlpine,
+        image::ImageSource::YouCanBootAnythingAsLongAsItsAlpine,
     );
-    let image: views::Image =
+    let image: image::Image =
         NexusRequest::objects_post(client, &images_url, &image_create_params)
             .authn_as(AuthnMode::PrivilegedUser)
             .execute_and_parse_unwrap()
             .await;
     // Create a disk from this image
-    let disk_create_params = params::DiskCreate {
+    let disk_create_params = disk::DiskCreate {
         identity: IdentityMetadataCreateParams {
             name: "disk".parse().unwrap(),
             description: "meow".into(),
         },
-        disk_backend: params::DiskBackend::Distributed {
-            disk_source: params::DiskSource::Image {
+        disk_backend: disk::DiskBackend::Distributed {
+            disk_source: disk::DiskSource::Image {
                 image_id: image.identity.id,
                 read_only: false,
             },
@@ -445,14 +446,14 @@ async fn test_image_from_other_project_snapshot_fails(
             .parsed_body()
             .unwrap();
     // Create a snapshot from this disk
-    let snapshot_create_params = params::SnapshotCreate {
+    let snapshot_create_params = snapshot::SnapshotCreate {
         identity: IdentityMetadataCreateParams {
             name: "snapshot".parse().unwrap(),
             description: "meow".into(),
         },
         disk: disk.identity.id.into(),
     };
-    let snapshot: views::Snapshot = NexusRequest::objects_post(
+    let snapshot: snapshot::Snapshot = NexusRequest::objects_post(
         client,
         &snapshots_url,
         &snapshot_create_params,
@@ -468,7 +469,7 @@ async fn test_image_from_other_project_snapshot_fails(
     let another_project = create_project(client, "another-proj").await;
     let images_url =
         get_project_images_url(another_project.identity.name.as_str());
-    let image_create_params = get_image_create(params::ImageSource::Snapshot {
+    let image_create_params = get_image_create(image::ImageSource::Snapshot {
         id: snapshot.identity.id,
     });
     let error = NexusRequest::new(
@@ -522,13 +523,13 @@ async fn test_image_deletion_permissions(cptestctx: &ControlPlaneTestContext) {
     let images_url = get_project_images_url(PROJECT_NAME);
 
     let image_create_params = get_image_create(
-        params::ImageSource::YouCanBootAnythingAsLongAsItsAlpine,
+        image::ImageSource::YouCanBootAnythingAsLongAsItsAlpine,
     );
 
     let image =
         NexusRequest::objects_post(client, &images_url, &image_create_params)
             .authn_as(AuthnMode::PrivilegedUser)
-            .execute_and_parse_unwrap::<views::Image>()
+            .execute_and_parse_unwrap::<image::Image>()
             .await;
 
     let image_id = image.identity.id;
@@ -541,12 +542,12 @@ async fn test_image_deletion_permissions(cptestctx: &ControlPlaneTestContext) {
             .expect_status(Some(http::StatusCode::ACCEPTED)),
     )
     .authn_as(AuthnMode::PrivilegedUser)
-    .execute_and_parse_unwrap::<views::Image>()
+    .execute_and_parse_unwrap::<image::Image>()
     .await;
 
     let silo_images = NexusRequest::object_get(client, &silo_images_url)
         .authn_as(AuthnMode::PrivilegedUser)
-        .execute_and_parse_unwrap::<ResultsPage<views::Image>>()
+        .execute_and_parse_unwrap::<ResultsPage<image::Image>>()
         .await
         .items;
 
@@ -574,7 +575,7 @@ async fn test_image_deletion_permissions(cptestctx: &ControlPlaneTestContext) {
             .expect_status(Some(http::StatusCode::ACCEPTED)),
     )
     .authn_as(AuthnMode::PrivilegedUser)
-    .execute_and_parse_unwrap::<views::Image>()
+    .execute_and_parse_unwrap::<image::Image>()
     .await;
 
     // now the unpriviledged user should be able to delete that image

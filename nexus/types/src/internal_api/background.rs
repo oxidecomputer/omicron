@@ -3,7 +3,7 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use crate::deployment::PlanningReport;
-use crate::external_api::views;
+use crate::external_api::alert;
 use chrono::DateTime;
 use chrono::Utc;
 use gateway_types::component::SpType;
@@ -833,7 +833,7 @@ pub struct WebhookDeliveryFailure {
     pub delivery_id: WebhookDeliveryUuid,
     pub alert_id: AlertUuid,
     pub attempt: usize,
-    pub result: views::WebhookDeliveryAttemptResult,
+    pub result: alert::WebhookDeliveryAttemptResult,
     pub response_status: Option<u16>,
     pub response_duration: Option<chrono::TimeDelta>,
 }

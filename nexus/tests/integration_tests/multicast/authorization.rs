@@ -20,15 +20,17 @@ use nexus_test_utils::resource_helpers::{
     create_project, grant_iam, link_ip_pool, object_get,
 };
 use nexus_test_utils_macros::nexus_test;
-use nexus_types::external_api::params::{
-    InstanceCreate, InstanceMulticastGroupJoin,
-    InstanceNetworkInterfaceAttachment, ProjectCreate, SiloCreate,
-    SiloQuotasCreate,
+use nexus_types::external_api::instance::{
+    InstanceCreate, InstanceNetworkInterfaceAttachment,
 };
-use nexus_types::external_api::shared::{
-    ProjectRole, SiloIdentityMode, SiloRole,
+use nexus_types::external_api::multicast::{
+    InstanceMulticastGroupJoin, MulticastGroup, MulticastGroupMember,
 };
-use nexus_types::external_api::views::{MulticastGroup, Silo};
+use nexus_types::external_api::policy::{ProjectRole, SiloRole};
+use nexus_types::external_api::project::ProjectCreate;
+use nexus_types::external_api::silo::{
+    Silo, SiloCreate, SiloIdentityMode, SiloQuotasCreate,
+};
 use omicron_common::api::external::{
     ByteCount, Hostname, IdentityMetadataCreateParams, Instance,
     InstanceCpuCount,

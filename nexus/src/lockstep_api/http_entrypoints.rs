@@ -32,17 +32,15 @@ use nexus_types::deployment::ClickhousePolicy;
 use nexus_types::deployment::OximeterReadPolicy;
 use nexus_types::deployment::ReconfiguratorConfigParam;
 use nexus_types::deployment::ReconfiguratorConfigView;
-use nexus_types::external_api::headers::RangeRequest;
-use nexus_types::external_api::params::PhysicalDiskPath;
-use nexus_types::external_api::params::RackMembershipConfigPathParams;
-use nexus_types::external_api::params::SledSelector;
-use nexus_types::external_api::params::SupportBundleFilePath;
-use nexus_types::external_api::params::SupportBundlePath;
-use nexus_types::external_api::params::SupportBundleUpdate;
-use nexus_types::external_api::params::UninitializedSledId;
-use nexus_types::external_api::shared;
-use nexus_types::external_api::shared::UninitializedSled;
-use nexus_types::external_api::views::SledPolicy;
+use nexus_types::external_api::hardware::{
+    UninitializedSled, UninitializedSledId,
+};
+use nexus_types::external_api::path_params::{BlueprintPath, PhysicalDiskPath};
+use nexus_types::external_api::rack::RackMembershipConfigPathParams;
+use nexus_types::external_api::sled::{SledPolicy, SledSelector};
+use nexus_types::external_api::support_bundle::{
+    self, SupportBundleFilePath, SupportBundlePath, SupportBundleUpdate,
+};
 use nexus_types::internal_api::params::InstanceMigrateRequest;
 use nexus_types::internal_api::params::RackInitializationRequest;
 use nexus_types::internal_api::views::BackgroundTask;
@@ -53,6 +51,7 @@ use nexus_types::internal_api::views::Saga;
 use nexus_types::internal_api::views::UpdateStatus;
 use nexus_types::internal_api::views::to_list;
 use nexus_types::trust_quorum::TrustQuorumConfig;
+use nexus_types_versions::latest::headers::RangeRequest;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::Instance;
 use omicron_common::api::external::http_pagination::PaginatedById;
@@ -346,7 +345,7 @@ impl NexusLockstepApi for NexusLockstepApiImpl {
     /// Fetches one blueprint
     async fn blueprint_view(
         rqctx: RequestContext<Self::Context>,
-        path_params: Path<nexus_types::external_api::params::BlueprintPath>,
+        path_params: Path<BlueprintPath>,
     ) -> Result<HttpResponseOk<Blueprint>, HttpError> {
         let apictx = &rqctx.context().context;
         let handler = async {
@@ -367,7 +366,7 @@ impl NexusLockstepApi for NexusLockstepApiImpl {
     /// Deletes one blueprint
     async fn blueprint_delete(
         rqctx: RequestContext<Self::Context>,
-        path_params: Path<nexus_types::external_api::params::BlueprintPath>,
+        path_params: Path<BlueprintPath>,
     ) -> Result<HttpResponseDeleted, HttpError> {
         let apictx = &rqctx.context().context;
         let handler = async {
@@ -638,8 +637,10 @@ impl NexusLockstepApi for NexusLockstepApiImpl {
     async fn support_bundle_list(
         rqctx: RequestContext<ApiContext>,
         query_params: Query<PaginatedByTimeAndId>,
-    ) -> Result<HttpResponseOk<ResultsPage<shared::SupportBundleInfo>>, HttpError>
-    {
+    ) -> Result<
+        HttpResponseOk<ResultsPage<support_bundle::SupportBundleInfo>>,
+        HttpError,
+    > {
         let apictx = rqctx.context();
         let handler = async {
             let nexus = &apictx.context.nexus;
@@ -660,7 +661,7 @@ impl NexusLockstepApi for NexusLockstepApiImpl {
             Ok(HttpResponseOk(ScanByTimeAndId::results_page(
                 &query,
                 bundles,
-                &|_, bundle: &shared::SupportBundleInfo| {
+                &|_, bundle: &support_bundle::SupportBundleInfo| {
                     (bundle.time_created, bundle.id.into_untyped_uuid())
                 },
             )?))
@@ -675,7 +676,8 @@ impl NexusLockstepApi for NexusLockstepApiImpl {
     async fn support_bundle_view(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<SupportBundlePath>,
-    ) -> Result<HttpResponseOk<shared::SupportBundleInfo>, HttpError> {
+    ) -> Result<HttpResponseOk<support_bundle::SupportBundleInfo>, HttpError>
+    {
         let apictx = rqctx.context();
         let handler = async {
             let nexus = &apictx.context.nexus;
@@ -879,8 +881,9 @@ impl NexusLockstepApi for NexusLockstepApiImpl {
 
     async fn support_bundle_create(
         rqctx: RequestContext<Self::Context>,
-        body: TypedBody<nexus_types::external_api::params::SupportBundleCreate>,
-    ) -> Result<HttpResponseCreated<shared::SupportBundleInfo>, HttpError> {
+        body: TypedBody<support_bundle::SupportBundleCreate>,
+    ) -> Result<HttpResponseCreated<support_bundle::SupportBundleInfo>, HttpError>
+    {
         let apictx = rqctx.context();
         let handler = async {
             let nexus = &apictx.context.nexus;
@@ -937,7 +940,8 @@ impl NexusLockstepApi for NexusLockstepApiImpl {
         rqctx: RequestContext<Self::Context>,
         path_params: Path<SupportBundlePath>,
         body: TypedBody<SupportBundleUpdate>,
-    ) -> Result<HttpResponseOk<shared::SupportBundleInfo>, HttpError> {
+    ) -> Result<HttpResponseOk<support_bundle::SupportBundleInfo>, HttpError>
+    {
         let apictx = rqctx.context();
         let handler = async {
             let nexus = &apictx.context.nexus;

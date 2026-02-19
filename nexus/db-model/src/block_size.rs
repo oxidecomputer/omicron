@@ -3,7 +3,7 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use super::impl_enum_type;
-use nexus_types::external_api::params;
+use nexus_types::external_api::disk;
 use omicron_common::api::external;
 use serde::{Deserialize, Serialize};
 
@@ -35,9 +35,9 @@ impl Into<external::ByteCount> for BlockSize {
     }
 }
 
-impl TryFrom<params::BlockSize> for BlockSize {
+impl TryFrom<disk::BlockSize> for BlockSize {
     type Error = anyhow::Error;
-    fn try_from(block_size: params::BlockSize) -> Result<Self, Self::Error> {
+    fn try_from(block_size: disk::BlockSize) -> Result<Self, Self::Error> {
         match block_size.0 {
             512 => Ok(BlockSize::Traditional),
             2048 => Ok(BlockSize::Iso),

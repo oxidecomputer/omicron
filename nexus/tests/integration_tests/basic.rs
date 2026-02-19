@@ -10,8 +10,9 @@
 use dropshot::HttpErrorResponseBody;
 use http::StatusCode;
 use http::method::Method;
-use nexus_types::external_api::params;
-use nexus_types::external_api::views::{self, Project};
+use nexus_types::external_api::project;
+use nexus_types::external_api::project::Project;
+use nexus_types::external_api::system;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::IdentityMetadataUpdateParams;
 use omicron_common::api::external::Name;
@@ -159,7 +160,7 @@ async fn test_projects_basic(cptestctx: &ControlPlaneTestContext) {
             let new_project: Project = NexusRequest::objects_post(
                 client,
                 projects_url,
-                &params::ProjectCreate {
+                &project::ProjectCreate {
                     identity: IdentityMetadataCreateParams {
                         name: project_name.parse().unwrap(),
                         description: String::from(
@@ -258,7 +259,7 @@ async fn test_projects_basic(cptestctx: &ControlPlaneTestContext) {
     }
     NexusRequest::new(
         RequestBuilder::new(client, Method::PUT, "/v1/projects/simproject2")
-            .body(Some(&params::ProjectUpdate {
+            .body(Some(&project::ProjectUpdate {
                 identity: IdentityMetadataUpdateParams {
                     name: None,
                     description: None,
@@ -299,7 +300,7 @@ async fn test_projects_basic(cptestctx: &ControlPlaneTestContext) {
 
     // Update "simproject3".  We'll make sure that's reflected in the other
     // requests.
-    let project_update = params::ProjectUpdate {
+    let project_update = project::ProjectUpdate {
         identity: IdentityMetadataUpdateParams {
             name: None,
             description: Some("Li'l lightnin'".to_string()),
@@ -329,7 +330,7 @@ async fn test_projects_basic(cptestctx: &ControlPlaneTestContext) {
     // Update "simproject3" in a way that changes its name.  This is a deeper
     // operation under the hood.  This case also exercises changes to multiple
     // fields in one request.
-    let project_update = params::ProjectUpdate {
+    let project_update = project::ProjectUpdate {
         identity: IdentityMetadataUpdateParams {
             name: Some("lil-lightnin".parse().unwrap()),
             description: Some("little lightning".to_string()),
@@ -362,7 +363,7 @@ async fn test_projects_basic(cptestctx: &ControlPlaneTestContext) {
     .expect("expected success");
 
     // Try to create a project with a name that conflicts with an existing one.
-    let project_create = params::ProjectCreate {
+    let project_create = project::ProjectCreate {
         identity: IdentityMetadataCreateParams {
             name: "simproject1".parse().unwrap(),
             description: "a duplicate of simproject1".to_string(),
@@ -410,7 +411,7 @@ async fn test_projects_basic(cptestctx: &ControlPlaneTestContext) {
     ));
 
     // Now, really do create another project.
-    let project_create = params::ProjectCreate {
+    let project_create = project::ProjectCreate {
         identity: IdentityMetadataCreateParams {
             name: "honor-roller".parse().unwrap(),
             description: "a soapbox racer".to_string(),
@@ -552,7 +553,7 @@ async fn test_ping(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
 
     let health = NexusRequest::object_get(client, "/v1/ping")
-        .execute_and_parse_unwrap::<views::Ping>()
+        .execute_and_parse_unwrap::<system::Ping>()
         .await;
-    assert_eq!(health.status, views::PingStatus::Ok);
+    assert_eq!(health.status, system::PingStatus::Ok);
 }

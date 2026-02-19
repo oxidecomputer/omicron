@@ -59,7 +59,7 @@ use nexus_db_model::Name;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::datastore::multicast::ExternalMulticastGroupWithSources;
 use nexus_db_queries::{authz, db};
-use nexus_types::external_api::{params, views};
+use nexus_types::external_api::multicast;
 use nexus_types::multicast::MulticastGroupCreate;
 use omicron_common::address::is_ssm_address;
 use omicron_common::api::external::{
@@ -119,23 +119,23 @@ impl super::Nexus {
     pub(crate) async fn multicast_group_lookup<'a>(
         &'a self,
         opctx: &'a OpContext,
-        multicast_group_selector: &'a params::MulticastGroupSelector,
+        multicast_group_selector: &'a multicast::MulticastGroupSelector,
     ) -> LookupResult<lookup::MulticastGroup<'a>> {
         // Multicast groups are fleet-scoped (like IP pools)
         match &multicast_group_selector.multicast_group {
-            params::MulticastGroupIdentifier::Id(id) => {
+            multicast::MulticastGroupIdentifier::Id(id) => {
                 let multicast_group =
                     LookupPath::new(opctx, &self.db_datastore)
                         .multicast_group_id(*id);
                 Ok(multicast_group)
             }
-            params::MulticastGroupIdentifier::Name(name) => {
+            multicast::MulticastGroupIdentifier::Name(name) => {
                 let multicast_group =
                     LookupPath::new(opctx, &self.db_datastore)
                         .multicast_group_name(Name::ref_cast(name));
                 Ok(multicast_group)
             }
-            params::MulticastGroupIdentifier::Ip(ip) => {
+            multicast::MulticastGroupIdentifier::Ip(ip) => {
                 // IP lookup requires fetching first to resolve the ID
                 let group = self
                     .db_datastore
@@ -184,10 +184,10 @@ impl super::Nexus {
     pub(crate) async fn multicast_group_view(
         &self,
         opctx: &OpContext,
-        selector: &params::MulticastGroupSelector,
-    ) -> Result<views::MulticastGroup, external::Error> {
+        selector: &multicast::MulticastGroupSelector,
+    ) -> Result<multicast::MulticastGroup, external::Error> {
         let group = match &selector.multicast_group {
-            params::MulticastGroupIdentifier::Ip(ip) => {
+            multicast::MulticastGroupIdentifier::Ip(ip) => {
                 // IP lookup -> fetch once and authorize
                 let group = self
                     .db_datastore
@@ -225,7 +225,7 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
         group: db::model::ExternalMulticastGroup,
-    ) -> Result<views::MulticastGroup, external::Error> {
+    ) -> Result<multicast::MulticastGroup, external::Error> {
         let group_id = MulticastGroupUuid::from_untyped_uuid(group.identity.id);
 
         let filter_state_map = self
@@ -245,7 +245,7 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
         pagparams: &PaginatedBy<'_>,
-    ) -> Result<Vec<views::MulticastGroup>, external::Error> {
+    ) -> Result<Vec<multicast::MulticastGroup>, external::Error> {
         opctx
             .authorize(
                 authz::Action::ListChildren,
@@ -297,7 +297,7 @@ impl super::Nexus {
     pub(crate) async fn instance_join_multicast_group(
         self: &Arc<Self>,
         opctx: &OpContext,
-        group_identifier: &params::MulticastGroupIdentifier,
+        group_identifier: &multicast::MulticastGroupIdentifier,
         instance_lookup: &lookup::Instance<'_>,
         source_ips: Option<&[IpAddr]>,
         ip_version: Option<external::IpVersion>,
@@ -337,11 +337,11 @@ impl super::Nexus {
         // Find or create the group based on identifier type.
         // SSM validation happens inside resolve functions.
         let group_id = match group_identifier {
-            params::MulticastGroupIdentifier::Ip(ip) => {
+            multicast::MulticastGroupIdentifier::Ip(ip) => {
                 self.resolve_or_create_group_by_ip(opctx, *ip, source_ips)
                     .await?
             }
-            params::MulticastGroupIdentifier::Name(name) => {
+            multicast::MulticastGroupIdentifier::Name(name) => {
                 self.resolve_or_create_group_by_name(
                     opctx,
                     name.clone().into(),
@@ -350,7 +350,7 @@ impl super::Nexus {
                 )
                 .await?
             }
-            params::MulticastGroupIdentifier::Id(id) => {
+            multicast::MulticastGroupIdentifier::Id(id) => {
                 self.resolve_group_by_id(opctx, *id, source_ips).await?
             }
         };
@@ -468,8 +468,8 @@ impl super::Nexus {
         source_ips: Option<&[IpAddr]>,
         ip_version: Option<external::IpVersion>,
     ) -> Result<MulticastGroupUuid, external::Error> {
-        let selector = params::MulticastGroupSelector {
-            multicast_group: params::MulticastGroupIdentifier::Name(
+        let selector = multicast::MulticastGroupSelector {
+            multicast_group: multicast::MulticastGroupIdentifier::Name(
                 name.clone().into(),
             ),
         };
@@ -562,8 +562,8 @@ impl super::Nexus {
         id: uuid::Uuid,
         source_ips: Option<&[IpAddr]>,
     ) -> Result<MulticastGroupUuid, external::Error> {
-        let selector = params::MulticastGroupSelector {
-            multicast_group: params::MulticastGroupIdentifier::Id(id),
+        let selector = multicast::MulticastGroupSelector {
+            multicast_group: multicast::MulticastGroupIdentifier::Id(id),
         };
         let group_lookup =
             self.multicast_group_lookup(opctx, &selector).await?;
@@ -591,9 +591,9 @@ impl super::Nexus {
     pub(crate) async fn resolve_multicast_group_identifier(
         &self,
         opctx: &OpContext,
-        identifier: &params::MulticastGroupIdentifier,
+        identifier: &multicast::MulticastGroupIdentifier,
     ) -> Result<MulticastGroupUuid, external::Error> {
-        let selector = params::MulticastGroupSelector {
+        let selector = multicast::MulticastGroupSelector {
             multicast_group: identifier.clone(),
         };
         let group_lookup =
@@ -635,15 +635,15 @@ impl super::Nexus {
     pub(crate) async fn resolve_multicast_group_identifier_with_sources(
         &self,
         opctx: &OpContext,
-        identifier: &params::MulticastGroupIdentifier,
+        identifier: &multicast::MulticastGroupIdentifier,
         source_ips: Option<&[IpAddr]>,
         ip_version: Option<external::IpVersion>,
     ) -> Result<MulticastGroupUuid, external::Error> {
         match identifier {
-            params::MulticastGroupIdentifier::Ip(ip) => {
+            multicast::MulticastGroupIdentifier::Ip(ip) => {
                 self.resolve_or_create_group_by_ip(opctx, *ip, source_ips).await
             }
-            params::MulticastGroupIdentifier::Name(name) => {
+            multicast::MulticastGroupIdentifier::Name(name) => {
                 // Name-based: implicit auto-create if default pool exists.
                 self.resolve_or_create_group_by_name(
                     opctx,
@@ -653,7 +653,7 @@ impl super::Nexus {
                 )
                 .await
             }
-            params::MulticastGroupIdentifier::Id(id) => {
+            multicast::MulticastGroupIdentifier::Id(id) => {
                 // ID-based: lookup only (UUID implies existing resource).
                 self.resolve_group_by_id(opctx, *id, source_ips).await
             }

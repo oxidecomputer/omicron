@@ -4,7 +4,7 @@
 
 use crate::project::SERVICES_DB_NAME;
 use nexus_db_model as model;
-use nexus_types::external_api::params;
+use nexus_types::external_api::vpc;
 use omicron_common::address::SERVICE_VPC_IPV6_PREFIX;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use std::sync::LazyLock;
@@ -53,7 +53,7 @@ pub static SERVICES_VPC: LazyLock<model::IncompleteVpc> = LazyLock::new(|| {
         *SERVICES_VPC_ID,
         *super::project::SERVICES_PROJECT_ID,
         *SERVICES_VPC_ROUTER_ID,
-        params::VpcCreate {
+        vpc::VpcCreate {
             identity: IdentityMetadataCreateParams {
                 name: SERVICES_DB_NAME.parse().unwrap(),
                 description: "Built-in VPC for Oxide Services".to_string(),

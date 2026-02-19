@@ -12,8 +12,8 @@ use http::method::Method;
 use nexus_test_utils::http_testing::AuthnMode;
 use nexus_test_utils::http_testing::{NexusRequest, RequestBuilder};
 use nexus_test_utils::resource_helpers::object_get;
-use nexus_types::external_api::params::SetTargetReleaseParams;
-use nexus_types::external_api::views;
+use nexus_types::external_api::update;
+use nexus_types::external_api::update::SetTargetReleaseParams;
 use semver::Version;
 use tufaceous_artifact::{ArtifactVersion, KnownArtifactKind};
 use tufaceous_lib::assemble::ManifestTweak;
@@ -30,7 +30,7 @@ async fn get_set_target_release() -> Result<()> {
     let logctx = &ctx.logctx;
 
     // There is no target release before one has ever been specified
-    let status: views::UpdateStatus =
+    let status: update::UpdateStatus =
         object_get(client, "/v1/system/update/status").await;
     assert_eq!(status.target_release.0, None);
 
@@ -54,7 +54,7 @@ async fn get_set_target_release() -> Result<()> {
     {
         let before = Utc::now();
         let system_version = Version::new(1, 0, 0);
-        let response: views::TufRepoUpload = trust_root
+        let response: update::TufRepoUpload = trust_root
             .assemble_repo(&logctx.log, &[])
             .await?
             .into_upload_request(client, StatusCode::OK)
@@ -65,7 +65,7 @@ async fn get_set_target_release() -> Result<()> {
 
         set_target_release(client, &system_version).await?;
 
-        let status: views::UpdateStatus =
+        let status: update::UpdateStatus =
             object_get(client, "/v1/system/update/status").await;
 
         let target_release = status.target_release.0.unwrap();
@@ -86,7 +86,7 @@ async fn get_set_target_release() -> Result<()> {
                 version: ArtifactVersion::new("non-semver-2").unwrap(),
             },
         ];
-        let response: views::TufRepoUpload = trust_root
+        let response: update::TufRepoUpload = trust_root
             .assemble_repo(&logctx.log, tweaks)
             .await?
             .into_upload_request(client, StatusCode::OK)
@@ -97,7 +97,7 @@ async fn get_set_target_release() -> Result<()> {
 
         set_target_release(client, &system_version).await?;
 
-        let status: views::UpdateStatus =
+        let status: update::UpdateStatus =
             object_get(client, "/v1/system/update/status").await;
 
         let target_release = status.target_release.0.unwrap();

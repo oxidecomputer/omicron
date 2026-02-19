@@ -10,8 +10,8 @@ use nexus_db_model::AffinityGroup;
 use nexus_db_model::AntiAffinityGroup;
 use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
-use nexus_types::external_api::params;
-use nexus_types::external_api::views;
+use nexus_types::external_api::affinity;
+use nexus_types::external_api::project;
 use nexus_types::identity::Resource;
 use omicron_common::api::external;
 use omicron_common::api::external::CreateResult;
@@ -29,10 +29,10 @@ impl super::Nexus {
     pub fn affinity_group_lookup<'a>(
         &'a self,
         opctx: &'a OpContext,
-        affinity_group_selector: params::AffinityGroupSelector,
+        affinity_group_selector: affinity::AffinityGroupSelector,
     ) -> LookupResult<lookup::AffinityGroup<'a>> {
         match affinity_group_selector {
-            params::AffinityGroupSelector {
+            affinity::AffinityGroupSelector {
                 affinity_group: NameOrId::Id(id),
                 project: None,
             } => {
@@ -40,16 +40,19 @@ impl super::Nexus {
                     .affinity_group_id(id);
                 Ok(affinity_group)
             }
-            params::AffinityGroupSelector {
+            affinity::AffinityGroupSelector {
                 affinity_group: NameOrId::Name(name),
                 project: Some(project),
             } => {
                 let affinity_group = self
-                    .project_lookup(opctx, params::ProjectSelector { project })?
+                    .project_lookup(
+                        opctx,
+                        project::ProjectSelector { project },
+                    )?
                     .affinity_group_name_owned(name.into());
                 Ok(affinity_group)
             }
-            params::AffinityGroupSelector {
+            affinity::AffinityGroupSelector {
                 affinity_group: NameOrId::Id(_),
                 ..
             } => Err(Error::invalid_request(
@@ -64,10 +67,10 @@ impl super::Nexus {
     pub fn anti_affinity_group_lookup<'a>(
         &'a self,
         opctx: &'a OpContext,
-        anti_affinity_group_selector: params::AntiAffinityGroupSelector,
+        anti_affinity_group_selector: affinity::AntiAffinityGroupSelector,
     ) -> LookupResult<lookup::AntiAffinityGroup<'a>> {
         match anti_affinity_group_selector {
-            params::AntiAffinityGroupSelector {
+            affinity::AntiAffinityGroupSelector {
                 anti_affinity_group: NameOrId::Id(id),
                 project: None,
             } => {
@@ -76,16 +79,19 @@ impl super::Nexus {
                         .anti_affinity_group_id(id);
                 Ok(anti_affinity_group)
             }
-            params::AntiAffinityGroupSelector {
+            affinity::AntiAffinityGroupSelector {
                 anti_affinity_group: NameOrId::Name(name),
                 project: Some(project),
             } => {
                 let anti_affinity_group = self
-                    .project_lookup(opctx, params::ProjectSelector { project })?
+                    .project_lookup(
+                        opctx,
+                        project::ProjectSelector { project },
+                    )?
                     .anti_affinity_group_name_owned(name.into());
                 Ok(anti_affinity_group)
             }
-            params::AntiAffinityGroupSelector {
+            affinity::AntiAffinityGroupSelector {
                 anti_affinity_group: NameOrId::Id(_),
                 ..
             } => Err(Error::invalid_request(
@@ -102,7 +108,7 @@ impl super::Nexus {
         opctx: &OpContext,
         project_lookup: &lookup::Project<'_>,
         pagparams: &PaginatedBy<'_>,
-    ) -> ListResultVec<views::AffinityGroup> {
+    ) -> ListResultVec<affinity::AffinityGroup> {
         let (.., authz_project) =
             project_lookup.lookup_for(authz::Action::ListChildren).await?;
 
@@ -120,7 +126,7 @@ impl super::Nexus {
         opctx: &OpContext,
         project_lookup: &lookup::Project<'_>,
         pagparams: &PaginatedBy<'_>,
-    ) -> ListResultVec<views::AntiAffinityGroup> {
+    ) -> ListResultVec<affinity::AntiAffinityGroup> {
         let (.., authz_project) =
             project_lookup.lookup_for(authz::Action::ListChildren).await?;
 
@@ -137,8 +143,8 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
         project_lookup: &lookup::Project<'_>,
-        affinity_group_params: params::AffinityGroupCreate,
-    ) -> CreateResult<views::AffinityGroup> {
+        affinity_group_params: affinity::AffinityGroupCreate,
+    ) -> CreateResult<affinity::AffinityGroup> {
         let (.., authz_project) =
             project_lookup.lookup_for(authz::Action::CreateChild).await?;
 
@@ -154,8 +160,8 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
         project_lookup: &lookup::Project<'_>,
-        anti_affinity_group_params: params::AntiAffinityGroupCreate,
-    ) -> CreateResult<views::AntiAffinityGroup> {
+        anti_affinity_group_params: affinity::AntiAffinityGroupCreate,
+    ) -> CreateResult<affinity::AntiAffinityGroup> {
         let (.., authz_project) =
             project_lookup.lookup_for(authz::Action::CreateChild).await?;
 
@@ -177,8 +183,8 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
         group_lookup: &lookup::AffinityGroup<'_>,
-        updates: &params::AffinityGroupUpdate,
-    ) -> UpdateResult<views::AffinityGroup> {
+        updates: &affinity::AffinityGroupUpdate,
+    ) -> UpdateResult<affinity::AffinityGroup> {
         let (.., authz_group) =
             group_lookup.lookup_for(authz::Action::Modify).await?;
         self.db_datastore
@@ -191,8 +197,8 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
         group_lookup: &lookup::AntiAffinityGroup<'_>,
-        updates: &params::AntiAffinityGroupUpdate,
-    ) -> UpdateResult<views::AntiAffinityGroup> {
+        updates: &affinity::AntiAffinityGroupUpdate,
+    ) -> UpdateResult<affinity::AntiAffinityGroup> {
         let (.., authz_group) =
             group_lookup.lookup_for(authz::Action::Modify).await?;
         self.db_datastore

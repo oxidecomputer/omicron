@@ -6,11 +6,12 @@
 
 use dropshot::test_util::ClientTestContext;
 use nexus_test_interface::NexusServer;
+use nexus_test_utils::SLED_AGENT_UUID;
 use nexus_test_utils::resource_helpers::objects_list_page_authz;
 use nexus_test_utils::start_sled_agent;
-use nexus_test_utils::SLED_AGENT_UUID;
 use nexus_test_utils_macros::nexus_test;
-use nexus_types::external_api::views::Sled;
+use nexus_types::external_api::sled::Sled;
+use nexus_types::external_api::switch::Switch;
 use nexus_types::internal_api::params as internal_params;
 use omicron_sled_agent::sim;
 use std::str::FromStr;

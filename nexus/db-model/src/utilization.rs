@@ -1,7 +1,8 @@
 use crate::ByteCount;
 use crate::Name;
 use nexus_db_schema::schema::silo_utilization;
-use nexus_types::external_api::views;
+use nexus_types::external_api::ip_pool;
+use nexus_types::external_api::silo;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -21,17 +22,17 @@ pub struct SiloUtilization {
     pub storage_provisioned: ByteCount,
 }
 
-impl From<SiloUtilization> for views::SiloUtilization {
+impl From<SiloUtilization> for silo::SiloUtilization {
     fn from(silo_utilization: SiloUtilization) -> Self {
         Self {
             silo_id: silo_utilization.silo_id,
             silo_name: silo_utilization.silo_name.into(),
-            provisioned: views::VirtualResourceCounts {
+            provisioned: silo::VirtualResourceCounts {
                 cpus: silo_utilization.cpus_provisioned,
                 memory: silo_utilization.memory_provisioned.into(),
                 storage: silo_utilization.storage_provisioned.into(),
             },
-            allocated: views::VirtualResourceCounts {
+            allocated: silo::VirtualResourceCounts {
                 cpus: silo_utilization.cpus_allocated,
                 memory: silo_utilization.memory_allocated.into(),
                 storage: silo_utilization.storage_allocated.into(),
@@ -40,15 +41,15 @@ impl From<SiloUtilization> for views::SiloUtilization {
     }
 }
 
-impl From<SiloUtilization> for views::Utilization {
+impl From<SiloUtilization> for silo::Utilization {
     fn from(silo_utilization: SiloUtilization) -> Self {
         Self {
-            provisioned: views::VirtualResourceCounts {
+            provisioned: silo::VirtualResourceCounts {
                 cpus: silo_utilization.cpus_provisioned,
                 memory: silo_utilization.memory_provisioned.into(),
                 storage: silo_utilization.storage_provisioned.into(),
             },
-            capacity: views::VirtualResourceCounts {
+            capacity: silo::VirtualResourceCounts {
                 cpus: silo_utilization.cpus_allocated,
                 memory: silo_utilization.memory_allocated.into(),
                 storage: silo_utilization.storage_allocated.into(),
@@ -64,7 +65,7 @@ pub struct IpPoolUtilization {
     pub capacity: f64,
 }
 
-impl From<IpPoolUtilization> for views::IpPoolUtilization {
+impl From<IpPoolUtilization> for ip_pool::IpPoolUtilization {
     fn from(util: IpPoolUtilization) -> Self {
         Self { remaining: util.remaining, capacity: util.capacity }
     }

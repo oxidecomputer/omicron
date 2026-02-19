@@ -38,7 +38,7 @@ use nexus_types::deployment::OmicronZoneNic;
 use nexus_types::deployment::PlanningInput;
 use nexus_types::deployment::SledFilter;
 use nexus_types::deployment::TargetReleaseDescription;
-use nexus_types::external_api::views::SledPolicy;
+use nexus_types::external_api::sled::SledPolicy;
 use nexus_types::inventory::Collection;
 use omicron_common::address::Ipv4Range;
 use omicron_common::api::external::TufRepoDescription;
@@ -684,8 +684,8 @@ impl ExampleSystemBuilder {
             if self.create_zones {
                 // Add NTP zones. On the first N discretionary sleds, we'll add
                 // BoundaryNtp zones. On all other sleds, add InternalNtp zones.
-                let is_discretionary =
-                    sled_details.policy.matches(SledFilter::Discretionary);
+                let is_discretionary = SledFilter::Discretionary
+                    .matches_policy(sled_details.policy);
                 let will_get_boundary_ntp = is_discretionary
                     && discretionary_ix < self.boundary_ntp_count.0;
 

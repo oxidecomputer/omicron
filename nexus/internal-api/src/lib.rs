@@ -12,8 +12,8 @@ use dropshot::{
 use dropshot_api_manager_types::api_versions;
 use nexus_types::{
     external_api::{
-        shared::ProbeExternalIp,
-        views::{Ping, PingStatus},
+        probe::ProbeExternalIp,
+        system::{Ping, PingStatus},
     },
     internal_api::{
         params::{

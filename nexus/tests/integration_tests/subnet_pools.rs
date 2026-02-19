@@ -24,18 +24,18 @@ use nexus_test_utils::resource_helpers::grant_iam;
 use nexus_test_utils::resource_helpers::link_subnet_pool;
 use nexus_test_utils::resource_helpers::test_params;
 use nexus_test_utils_macros::nexus_test;
-use nexus_types::external_api::params;
-use nexus_types::external_api::params::SubnetPoolMemberAdd;
-use nexus_types::external_api::params::SubnetPoolMemberRemove;
-use nexus_types::external_api::params::SubnetPoolUpdate;
-use nexus_types::external_api::shared::SiloIdentityMode;
-use nexus_types::external_api::shared::SiloRole;
-use nexus_types::external_api::views::IpVersion;
-use nexus_types::external_api::views::SiloSubnetPool;
-use nexus_types::external_api::views::SubnetPool;
-use nexus_types::external_api::views::SubnetPoolMember;
-use nexus_types::external_api::views::SubnetPoolSiloLink;
+use nexus_types::external_api::policy::SiloRole;
+use nexus_types::external_api::silo::SiloIdentityMode;
+use nexus_types::external_api::subnet_pool;
+use nexus_types::external_api::subnet_pool::SiloSubnetPool;
+use nexus_types::external_api::subnet_pool::SubnetPool;
+use nexus_types::external_api::subnet_pool::SubnetPoolMember;
+use nexus_types::external_api::subnet_pool::SubnetPoolMemberAdd;
+use nexus_types::external_api::subnet_pool::SubnetPoolMemberRemove;
+use nexus_types::external_api::subnet_pool::SubnetPoolSiloLink;
+use nexus_types::external_api::subnet_pool::SubnetPoolUpdate;
 use nexus_types::silo::DEFAULT_SILO_ID;
+use omicron_common::address::IpVersion;
 use omicron_common::api::external::IdentityMetadataUpdateParams;
 use omicron_common::api::external::Name;
 use omicron_common::api::external::SimpleIdentityOrName as _;
@@ -316,7 +316,7 @@ async fn test_subnet_pool_silo_list(cptestctx: &ControlPlaneTestContext) {
     let n_to_link = 10;
     let mut linked_silos = Vec::with_capacity(n_to_link);
     for silo in silos.iter().take(n_to_link) {
-        let link_params = params::SubnetPoolLinkSilo {
+        let link_params = subnet_pool::SubnetPoolLinkSilo {
             silo: omicron_common::api::external::NameOrId::Id(silo.identity.id),
             is_default: false,
         };
@@ -428,7 +428,7 @@ async fn test_silo_subnet_pool_list(cptestctx: &ControlPlaneTestContext) {
     // Link the first few pools.
     let n_to_link = 10;
     let mut linked_pools = Vec::with_capacity(n_to_link);
-    let link_params = params::SubnetPoolLinkSilo {
+    let link_params = subnet_pool::SubnetPoolLinkSilo {
         silo: omicron_common::api::external::NameOrId::Id(silo.identity.id),
         is_default: false,
     };
@@ -538,7 +538,7 @@ async fn test_current_silo_subnet_pool_list(
     create_subnet_pool(client, unlinked_name, IpVersion::V6).await;
 
     // Link two of the pools to the silo.
-    let link_params = params::SubnetPoolLinkSilo {
+    let link_params = subnet_pool::SubnetPoolLinkSilo {
         silo: omicron_common::api::external::NameOrId::Id(silo.identity.id),
         is_default: true,
     };
@@ -551,7 +551,7 @@ async fn test_current_silo_subnet_pool_list(
     .execute_and_parse_unwrap::<SubnetPoolSiloLink>()
     .await;
 
-    let link_params = params::SubnetPoolLinkSilo {
+    let link_params = subnet_pool::SubnetPoolLinkSilo {
         silo: omicron_common::api::external::NameOrId::Id(silo.identity.id),
         is_default: false,
     };
@@ -674,7 +674,7 @@ async fn test_subnet_pool_silo_link(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
     let pool =
         create_subnet_pool(client, SUBNET_POOL_NAME, IpVersion::V6).await;
-    let link_params = params::SubnetPoolLinkSilo {
+    let link_params = subnet_pool::SubnetPoolLinkSilo {
         silo: omicron_common::api::external::NameOrId::Id(DEFAULT_SILO_ID),
         is_default: false,
     };
@@ -693,7 +693,7 @@ async fn test_subnet_pool_silo_link(cptestctx: &ControlPlaneTestContext) {
     assert!(!link.is_default);
 
     // We can make it the default now.
-    let params = params::SubnetPoolSiloUpdate { is_default: true };
+    let params = subnet_pool::SubnetPoolSiloUpdate { is_default: true };
     let link = NexusRequest::object_put(
         client,
         &format!(
@@ -713,7 +713,7 @@ async fn test_subnet_pool_silo_link(cptestctx: &ControlPlaneTestContext) {
     let new_silo =
         create_silo(client, "new-guy", false, SiloIdentityMode::LocalOnly)
             .await;
-    let link_params = params::SubnetPoolLinkSilo {
+    let link_params = subnet_pool::SubnetPoolLinkSilo {
         silo: omicron_common::api::external::NameOrId::Id(new_silo.identity.id),
         is_default: true,
     };
@@ -732,7 +732,7 @@ async fn test_subnet_pool_silo_link(cptestctx: &ControlPlaneTestContext) {
     // We should be able to link another pool to the same silo.
     let new_pool =
         create_subnet_pool(client, "new-pool-guy", IpVersion::V6).await;
-    let link_params = params::SubnetPoolLinkSilo {
+    let link_params = subnet_pool::SubnetPoolLinkSilo {
         silo: omicron_common::api::external::NameOrId::Id(new_silo.identity.id),
         is_default: false,
     };
@@ -750,7 +750,7 @@ async fn test_subnet_pool_silo_link(cptestctx: &ControlPlaneTestContext) {
 
     // But we should not be able to make that the default, since we already have
     // one of this IP version.
-    let params = params::SubnetPoolSiloUpdate { is_default: true };
+    let params = subnet_pool::SubnetPoolSiloUpdate { is_default: true };
     NexusRequest::expect_failure_with_body(
         client,
         StatusCode::BAD_REQUEST,
@@ -827,7 +827,7 @@ async fn cannot_link_multiple_times(cptestctx: &ControlPlaneTestContext) {
         create_subnet_pool(client, SUBNET_POOL_NAME, IpVersion::V6).await;
 
     // Now link it to the default silo.
-    let link_params = params::SubnetPoolLinkSilo {
+    let link_params = subnet_pool::SubnetPoolLinkSilo {
         silo: omicron_common::api::external::NameOrId::Id(DEFAULT_SILO_ID),
         is_default: false,
     };

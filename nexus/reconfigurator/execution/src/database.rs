@@ -83,7 +83,7 @@ mod test {
     use nexus_types::deployment::OximeterReadMode;
     use nexus_types::deployment::PendingMgsUpdates;
     use nexus_types::deployment::blueprint_zone_type;
-    use nexus_types::external_api::views::SledState;
+    use nexus_types::external_api::sled::SledState;
     use nexus_types::inventory::NetworkInterface;
     use nexus_types::inventory::NetworkInterfaceKind;
     use omicron_common::address::Ipv6Subnet;

@@ -7,10 +7,10 @@ use super::ActionRegistry;
 use super::NexusActionContext;
 use super::NexusSaga;
 use crate::app::sagas::declare_saga_actions;
-use crate::external_api::params;
 use nexus_db_lookup::LookupPath;
 use nexus_db_queries::db::queries::vpc_subnet::InsertVpcSubnetError;
 use nexus_db_queries::{authn, authz, db};
+use nexus_types::external_api::vpc;
 use omicron_common::api::external;
 use oxnet::IpNet;
 use oxnet::Ipv6Net;
@@ -25,7 +25,7 @@ use uuid::Uuid;
 #[derive(Debug, Deserialize, Serialize)]
 pub(crate) struct Params {
     pub serialized_authn: authn::saga::Serialized,
-    pub subnet_create: params::VpcSubnetCreate,
+    pub subnet_create: vpc::VpcSubnetCreate,
     /// We create at most one IPv6 block in the subnet, but have a retry loop
     /// in case of collisions when randomly generating a block. Our random
     /// choices are fixed ahead of saga start for idempotency.
@@ -345,7 +345,6 @@ pub(crate) mod test {
     use crate::{
         app::sagas::vpc_subnet_create::Params,
         app::sagas::vpc_subnet_create::SagaVpcSubnetCreate,
-        external_api::params,
     };
     use async_bb8_diesel::AsyncRunQueryDsl;
     use diesel::{ExpressionMethods, QueryDsl, SelectableHelper};
@@ -360,7 +359,8 @@ pub(crate) mod test {
     use nexus_test_utils::resource_helpers::create_default_ip_pools;
     use nexus_test_utils::resource_helpers::create_project;
     use nexus_test_utils_macros::nexus_test;
-    use nexus_types::external_api::params::VpcSelector;
+    use nexus_types::external_api::vpc as vpc_types;
+    use nexus_types::external_api::vpc::VpcSelector;
     use omicron_common::api::external::NameOrId;
     use omicron_common::api::external::{
         self, IdentityMetadataCreateParams, Ipv6NetExt,
@@ -393,7 +393,7 @@ pub(crate) mod test {
 
         Params {
             serialized_authn: Serialized::for_opctx(opctx),
-            subnet_create: params::VpcSubnetCreate {
+            subnet_create: vpc_types::VpcSubnetCreate {
                 identity: IdentityMetadataCreateParams {
                     name: "my-subnet".parse().unwrap(),
                     description: "My New Subnet.".to_string(),
