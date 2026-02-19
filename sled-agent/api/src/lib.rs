@@ -20,7 +20,7 @@ use omicron_common::api::internal::{
     },
 };
 use sled_agent_types_versions::{
-    latest, v1, v4, v6, v7, v9, v10, v11, v12, v14,
+    latest, v1, v4, v6, v7, v9, v10, v11, v12, v14, v17,
 };
 use sled_diagnostics::SledDiagnosticsQueryOutput;
 
@@ -36,6 +36,9 @@ api_versions!([
     // |  example for the next person.
     // v
     // (next_int, IDENT),
+    (20, BGP_V6),
+    (19, ADD_ROT_ATTESTATION),
+    (18, ADD_ATTACHED_SUBNETS),
     (17, TWO_TYPES_OF_DELEGATED_ZVOL),
     (16, MEASUREMENT_PROPER_INVENTORY),
     (15, ADD_TRUST_QUORUM_STATUS),
@@ -419,13 +422,28 @@ pub trait SledAgentApi {
         operation_id = "vmm_register",
         method = PUT,
         path = "/vmms/{propolis_id}",
-        versions = VERSION_TWO_TYPES_OF_DELEGATED_ZVOL..
+        versions = VERSION_ADD_ATTACHED_SUBNETS..
     }]
     async fn vmm_register(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<latest::instance::VmmPathParam>,
         body: TypedBody<latest::instance::InstanceEnsureBody>,
     ) -> Result<HttpResponseOk<SledVmmState>, HttpError>;
+
+    #[endpoint {
+        operation_id = "vmm_register",
+        method = PUT,
+        path = "/vmms/{propolis_id}",
+        versions =
+            VERSION_TWO_TYPES_OF_DELEGATED_ZVOL..VERSION_ADD_ATTACHED_SUBNETS
+    }]
+    async fn vmm_register_v17(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::instance::VmmPathParam>,
+        body: TypedBody<v17::instance::InstanceEnsureBody>,
+    ) -> Result<HttpResponseOk<SledVmmState>, HttpError> {
+        Self::vmm_register(rqctx, path_params, body.map(Into::into)).await
+    }
 
     #[endpoint {
         operation_id = "vmm_register",
@@ -438,7 +456,7 @@ pub trait SledAgentApi {
         path_params: Path<latest::instance::VmmPathParam>,
         body: TypedBody<v11::instance::InstanceEnsureBody>,
     ) -> Result<HttpResponseOk<SledVmmState>, HttpError> {
-        Self::vmm_register(rqctx, path_params, body.map(Into::into)).await
+        Self::vmm_register_v17(rqctx, path_params, body.map(Into::into)).await
     }
 
     #[endpoint {
@@ -454,7 +472,7 @@ pub trait SledAgentApi {
         body: TypedBody<v10::instance::InstanceEnsureBody>,
     ) -> Result<HttpResponseOk<SledVmmState>, HttpError> {
         let body = body.try_map(v11::instance::InstanceEnsureBody::try_from)?;
-        Self::vmm_register(rqctx, path_params, body.map(Into::into)).await
+        Self::vmm_register_v11(rqctx, path_params, body).await
     }
 
     #[endpoint {
@@ -716,11 +734,24 @@ pub trait SledAgentApi {
     #[endpoint {
         method = POST,
         path = "/switch-ports",
+        versions = VERSION_BGP_V6..,
     }]
     async fn uplink_ensure(
         rqctx: RequestContext<Self::Context>,
         body: TypedBody<SwitchPorts>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
+
+    #[endpoint {
+        method = POST,
+        path = "/switch-ports",
+        versions = ..VERSION_BGP_V6,
+    }]
+    async fn uplink_ensure_v1(
+        rqctx: RequestContext<Self::Context>,
+        body: TypedBody<v1::rack_init::SwitchPorts>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        Self::uplink_ensure(rqctx, body.map(From::from)).await
+    }
 
     /// This API endpoint is only reading the local sled agent's view of the
     /// bootstore. The boostore is a distributed data store that is eventually
@@ -728,6 +759,7 @@ pub trait SledAgentApi {
     #[endpoint {
         method = GET,
         path = "/network-bootstore-config",
+        versions = VERSION_BGP_V6..,
     }]
     async fn read_network_bootstore_config_cache(
         rqctx: RequestContext<Self::Context>,
@@ -736,14 +768,57 @@ pub trait SledAgentApi {
         HttpError,
     >;
 
+    /// This API endpoint is only reading the local sled agent's view of the
+    /// bootstore. The boostore is a distributed data store that is eventually
+    /// consistent. Reads from individual nodes may not represent the latest state.
+    #[endpoint {
+        method = GET,
+        path = "/network-bootstore-config",
+        versions = ..VERSION_BGP_V6,
+    }]
+    async fn read_network_bootstore_config_cache_v1(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<
+        HttpResponseOk<v1::early_networking::EarlyNetworkConfig>,
+        HttpError,
+    > {
+        let result: v1::early_networking::EarlyNetworkConfig =
+            Self::read_network_bootstore_config_cache(rqctx)
+                .await?
+                .0
+                .try_into()
+                .map_err(|e| {
+                    HttpError::for_bad_request(
+                        None,
+                        format!("error getting v1 config: {e}"),
+                    )
+                })?;
+
+        Ok(HttpResponseOk(result))
+    }
+
     #[endpoint {
         method = PUT,
         path = "/network-bootstore-config",
+        versions = VERSION_BGP_V6..,
     }]
     async fn write_network_bootstore_config(
         rqctx: RequestContext<Self::Context>,
         body: TypedBody<latest::early_networking::EarlyNetworkConfig>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
+
+    #[endpoint {
+        method = PUT,
+        path = "/network-bootstore-config",
+        versions = ..VERSION_BGP_V6,
+    }]
+    async fn write_network_bootstore_config_v1(
+        rqctx: RequestContext<Self::Context>,
+        body: TypedBody<v1::early_networking::EarlyNetworkConfig>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        Self::write_network_bootstore_config(rqctx, body.map(|x| x.into()))
+            .await
+    }
 
     /// Add a sled to a rack that was already initialized via RSS
     #[endpoint {
@@ -1312,4 +1387,84 @@ pub trait SledAgentApi {
         request_context: RequestContext<Self::Context>,
         body: TypedBody<latest::trust_quorum::TrustQuorumNetworkConfig>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
+
+    /// Update the subnets attached to an instance.
+    #[endpoint {
+        method = PUT,
+        path = "/vmms/{propolis_id}/attached-subnets",
+        versions = VERSION_ADD_ATTACHED_SUBNETS..,
+    }]
+    async fn vmm_put_attached_subnets(
+        request_context: RequestContext<Self::Context>,
+        path_params: Path<latest::instance::VmmPathParam>,
+        body: TypedBody<latest::attached_subnet::AttachedSubnets>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
+
+    /// Delete all subnets attached to an instance.
+    #[endpoint {
+        method = DELETE,
+        path = "/vmms/{propolis_id}/attached-subnets",
+        versions = VERSION_ADD_ATTACHED_SUBNETS..,
+    }]
+    async fn vmm_delete_attached_subnets(
+        request_context: RequestContext<Self::Context>,
+        path_params: Path<latest::instance::VmmPathParam>,
+    ) -> Result<HttpResponseDeleted, HttpError>;
+
+    /// Attach a subnet to an instance.
+    #[endpoint {
+        method = POST,
+        path = "/vmms/{propolis_id}/attached-subnets",
+        versions = VERSION_ADD_ATTACHED_SUBNETS..,
+    }]
+    async fn vmm_post_attached_subnet(
+        request_context: RequestContext<Self::Context>,
+        path_params: Path<latest::instance::VmmPathParam>,
+        body: TypedBody<latest::attached_subnet::AttachedSubnet>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
+
+    /// Detach a subnet from an instance.
+    #[endpoint {
+        method = DELETE,
+        path = "/vmms/{propolis_id}/attached-subnets/{subnet}",
+        versions = VERSION_ADD_ATTACHED_SUBNETS..,
+    }]
+    async fn vmm_delete_attached_subnet(
+        request_context: RequestContext<Self::Context>,
+        path_params: Path<latest::attached_subnet::VmmSubnetPathParam>,
+    ) -> Result<HttpResponseDeleted, HttpError>;
+
+    /// Return the set of measurments recorded by the RoT.
+    #[endpoint {
+        method = GET,
+        path = "/rot/{rot}/measurement-log",
+        versions = VERSION_ADD_ROT_ATTESTATION..,
+    }]
+    async fn rot_measurement_log(
+        request_context: RequestContext<Self::Context>,
+        path_params: Path<latest::rot::RotPathParams>,
+    ) -> Result<HttpResponseOk<latest::rot::MeasurementLog>, HttpError>;
+
+    /// Return the certificate chain for the attestation signer from the RoT.
+    #[endpoint {
+        method = GET,
+        path = "/rot/{rot}/certificate-chain",
+        versions = VERSION_ADD_ROT_ATTESTATION..,
+    }]
+    async fn rot_certificate_chain(
+        request_context: RequestContext<Self::Context>,
+        path_params: Path<latest::rot::RotPathParams>,
+    ) -> Result<HttpResponseOk<latest::rot::CertificateChain>, HttpError>;
+
+    /// Return attestation over recorded measurments and nonce from the RoT.
+    #[endpoint {
+        method = POST,
+        path = "/rot/{rot}/attest",
+        versions = VERSION_ADD_ROT_ATTESTATION..,
+    }]
+    async fn rot_attest(
+        request_context: RequestContext<Self::Context>,
+        path_params: Path<latest::rot::RotPathParams>,
+        body: TypedBody<latest::rot::Nonce>,
+    ) -> Result<HttpResponseOk<latest::rot::Attestation>, HttpError>;
 }

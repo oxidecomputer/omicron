@@ -16,6 +16,7 @@ use crate::nexus::{
     NexusClient, NexusNotifierHandle, NexusNotifierInput, NexusNotifierTask,
 };
 use crate::probe_manager::ProbeManager;
+use crate::rot::{RotAttestationHandle, RotAttestationTask};
 use crate::services::{self, ServiceManager, UnderlayInfo};
 use crate::support_bundle::logs::SupportBundleLogs;
 use crate::support_bundle::storage::SupportBundleManager;
@@ -62,6 +63,7 @@ use omicron_ddm_admin_client::Client as DdmAdminClient;
 use omicron_uuid_kinds::{
     GenericUuid, MupdateOverrideUuid, PropolisUuid, SledUuid,
 };
+use oxnet::IpNet;
 use sled_agent_config_reconciler::{
     ConfigReconcilerHandle, ConfigReconcilerSpawnToken, InternalDisks,
     InternalDisksReceiver, LedgerNewConfigError, LedgerTaskError,
@@ -69,6 +71,8 @@ use sled_agent_config_reconciler::{
 };
 use sled_agent_health_monitor::handle::HealthMonitorHandle;
 use sled_agent_measurements::MeasurementsHandle;
+use sled_agent_types::attached_subnet::AttachedSubnet;
+use sled_agent_types::attached_subnet::AttachedSubnets;
 use sled_agent_types::dataset::LocalStorageDatasetDeleteRequest;
 use sled_agent_types::dataset::LocalStorageDatasetEnsureRequest;
 use sled_agent_types::disk::DiskStateRequested;
@@ -82,6 +86,7 @@ use sled_agent_types::probes::ProbeCreate;
 use sled_agent_types::resolvable_files::{
     PreparedOmicronZone, RemoveMupdateOverrideResult, ResolverStatus,
 };
+use sled_agent_types::rot::Rot;
 use sled_agent_types::sled::StartSledAgentRequest;
 use sled_agent_types::zone_bundle::{
     BundleUtilization, CleanupContext, CleanupCount, CleanupPeriod,
@@ -184,6 +189,9 @@ pub enum Error {
 
     #[error("Time not yet synchronized")]
     TimeNotSynchronized,
+
+    #[error(transparent)]
+    Rot(#[from] crate::rot::RotError),
 }
 
 impl From<Error> for omicron_common::api::external::Error {
@@ -206,6 +214,7 @@ impl From<Error> for dropshot::HttpError {
 
         const NO_SUCH_INSTANCE: &str = "NO_SUCH_INSTANCE";
         const INSTANCE_CHANNEL_FULL: &str = "INSTANCE_CHANNEL_FULL";
+        const SUBNET_ALREADY_ATTACHED: &str = "SUBNET_ALREADY_ATTACHED";
         match err {
             Error::Instance(crate::instance_manager::Error::Instance(
                 instance_error,
@@ -259,6 +268,13 @@ impl From<Error> for dropshot::HttpError {
                             Some(NO_SUCH_INSTANCE.to_string()),
                             ClientErrorStatusCode::GONE,
                             instance_error.to_string(),
+                        )
+                    }
+                    err @ crate::instance::Error::SubnetAlreadyAttached(_) => {
+                        HttpError::for_client_error(
+                            Some(SUBNET_ALREADY_ATTACHED.to_string()),
+                            ClientErrorStatusCode::CONFLICT,
+                            err.to_string(),
                         )
                     }
                     e => HttpError::for_internal_error(e.to_string()),
@@ -364,6 +380,9 @@ struct SledAgentInner {
 
     // A mechanism for notifiying nexus about sled-agent updates
     nexus_notifier: NexusNotifierHandle,
+
+    // A handle to the RoT for attestation requests.
+    rot_attestor: RotAttestationHandle,
 
     // The rack network config provided at RSS time.
     rack_network_config: Option<RackNetworkConfig>,
@@ -626,6 +645,7 @@ impl SledAgent {
             SledAgentArtifactStoreWrapper(Arc::clone(
                 &long_running_task_handles.artifact_store,
             )),
+            long_running_task_handles.trust_quorum.committed_epoch_rx(),
             config_reconciler_spawn_token,
         );
 
@@ -662,6 +682,10 @@ impl SledAgent {
             nexus_notifier_task.run().await;
         });
 
+        // Spawn a background task for handling RoT attestation operations
+        let rot_attest_handle =
+            RotAttestationTask::launch(&log, &config.sprockets.attest)?;
+
         let currently_managed_zpools_rx =
             config_reconciler.currently_managed_zpools_rx().clone();
         let probes = ProbeManager::new(
@@ -685,6 +709,7 @@ impl SledAgent {
                 port_manager,
                 services,
                 nexus_notifier: nexus_notifier_handle,
+                rot_attestor: rot_attest_handle,
                 rack_network_config,
                 zone_bundler: long_running_task_handles.zone_bundler.clone(),
                 bootstore: long_running_task_handles.bootstore.clone(),
@@ -750,6 +775,12 @@ impl SledAgent {
 
     pub(crate) fn hardware_monitor(&self) -> &HardwareMonitorHandle {
         &self.inner.hardware_monitor
+    }
+
+    pub(crate) fn rot_attestor(&self, rot: Rot) -> &RotAttestationHandle {
+        // We currently only support the LPC55 RoT
+        let Rot::Oxide = rot;
+        &self.inner.rot_attestor
     }
 
     /// Trigger a request to Nexus informing it that the current sled exists,
@@ -1423,6 +1454,57 @@ impl SledAgent {
                 }
             },
         }
+    }
+
+    /// Update the set of subnets attached to an instance.
+    pub(crate) async fn instance_put_attached_subnets(
+        &self,
+        propolis_id: PropolisUuid,
+        subnets: AttachedSubnets,
+    ) -> Result<(), Error> {
+        self.inner
+            .instances
+            .set_attached_subnets(propolis_id, subnets)
+            .await
+            .map_err(|e| Error::Instance(e))
+    }
+
+    /// Delete the set of subnets attached to an instance.
+    pub(crate) async fn instance_delete_attached_subnets(
+        &self,
+        propolis_id: PropolisUuid,
+    ) -> Result<(), Error> {
+        self.inner
+            .instances
+            .clear_attached_subnets(propolis_id)
+            .await
+            .map_err(|e| Error::Instance(e))
+    }
+
+    /// Attach a subnet to an instance.
+    pub(crate) async fn instance_attach_subnet(
+        &self,
+        propolis_id: PropolisUuid,
+        subnet: AttachedSubnet,
+    ) -> Result<(), Error> {
+        self.inner
+            .instances
+            .attach_subnet(propolis_id, subnet)
+            .await
+            .map_err(|e| Error::Instance(e))
+    }
+
+    /// Detach a subnet from an instance
+    pub(crate) async fn instance_detach_subnet(
+        &self,
+        propolis_id: PropolisUuid,
+        subnet: IpNet,
+    ) -> Result<(), Error> {
+        self.inner
+            .instances
+            .detach_subnet(propolis_id, subnet)
+            .await
+            .map_err(|e| Error::Instance(e))
     }
 }
 

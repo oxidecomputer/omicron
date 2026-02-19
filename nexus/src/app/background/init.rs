@@ -91,6 +91,7 @@ use super::Driver;
 use super::driver::TaskDefinition;
 use super::tasks::abandoned_vmm_reaper;
 use super::tasks::alert_dispatcher::AlertDispatcher;
+use super::tasks::attached_subnets;
 use super::tasks::bfd;
 use super::tasks::blueprint_execution;
 use super::tasks::blueprint_load;
@@ -264,6 +265,7 @@ impl BackgroundTasksInitializer {
             task_probe_distributor: Activator::new(),
             task_multicast_reconciler: Activator::new(),
             task_trust_quorum_manager: Activator::new(),
+            task_attached_subnet_manager: Activator::new(),
 
             // Handles to activate background tasks that do not get used by Nexus
             // at-large.  These background tasks are implementation details as far as
@@ -353,6 +355,7 @@ impl BackgroundTasksInitializer {
             task_probe_distributor,
             task_multicast_reconciler,
             task_trust_quorum_manager,
+            task_attached_subnet_manager,
             // Add new background tasks here.  Be sure to use this binding in a
             // call to `Driver::register()` below.  That's what actually wires
             // up the Activator to the corresponding background task.
@@ -1091,7 +1094,7 @@ impl BackgroundTasksInitializer {
             period: config.sp_ereport_ingester.period_secs,
             task_impl: Box::new(ereport_ingester::SpEreportIngester::new(
                 datastore.clone(),
-                resolver,
+                resolver.clone(),
                 nexus_id,
                 config.sp_ereport_ingester.disable,
             )),
@@ -1145,11 +1148,23 @@ impl BackgroundTasksInitializer {
             description: "Drive trust quorum reconfigurations to completion",
             period: config.trust_quorum.period_secs,
             task_impl: Box::new(trust_quorum::TrustQuorumManager::new(
-                datastore,
+                datastore.clone(),
             )),
             opctx: opctx.child(BTreeMap::new()),
             watchers: vec![],
             activator: task_trust_quorum_manager,
+        });
+
+        driver.register(TaskDefinition {
+            name: "attached_subnet_manager",
+            description: "distributes attached subnets to sleds and switch",
+            period: config.attached_subnet_manager.period_secs,
+            task_impl: Box::new(attached_subnets::Manager::new(
+                resolver, datastore,
+            )),
+            opctx: opctx.child(BTreeMap::new()),
+            watchers: vec![],
+            activator: task_attached_subnet_manager,
         });
 
         driver

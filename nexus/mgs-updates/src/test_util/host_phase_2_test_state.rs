@@ -1053,5 +1053,68 @@ mod api_impl {
         ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
             unimplemented!()
         }
+
+        async fn vmm_put_attached_subnets(
+            _request_context: RequestContext<Self::Context>,
+            _path_params: Path<sled_agent_types::instance::VmmPathParam>,
+            _body: TypedBody<
+                sled_agent_types::attached_subnet::AttachedSubnets,
+            >,
+        ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+            unimplemented!()
+        }
+
+        async fn vmm_delete_attached_subnets(
+            _request_context: RequestContext<Self::Context>,
+            _path_params: Path<sled_agent_types::instance::VmmPathParam>,
+        ) -> Result<HttpResponseDeleted, HttpError> {
+            unimplemented!()
+        }
+
+        async fn vmm_post_attached_subnet(
+            _request_context: RequestContext<Self::Context>,
+            _path_params: Path<sled_agent_types::instance::VmmPathParam>,
+            _body: TypedBody<sled_agent_types::attached_subnet::AttachedSubnet>,
+        ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+            unimplemented!()
+        }
+
+        async fn vmm_delete_attached_subnet(
+            _request_context: RequestContext<Self::Context>,
+            _path_params: Path<
+                sled_agent_types::attached_subnet::VmmSubnetPathParam,
+            >,
+        ) -> Result<HttpResponseDeleted, HttpError> {
+            unimplemented!()
+        }
+
+        async fn rot_measurement_log(
+            _request_context: RequestContext<Self::Context>,
+            _path_params: Path<sled_agent_types::rot::RotPathParams>,
+        ) -> Result<
+            HttpResponseOk<sled_agent_types::rot::MeasurementLog>,
+            HttpError,
+        > {
+            unimplemented!()
+        }
+
+        async fn rot_certificate_chain(
+            _request_context: RequestContext<Self::Context>,
+            _path_params: Path<sled_agent_types::rot::RotPathParams>,
+        ) -> Result<
+            HttpResponseOk<sled_agent_types::rot::CertificateChain>,
+            HttpError,
+        > {
+            unimplemented!()
+        }
+
+        async fn rot_attest(
+            _request_context: RequestContext<Self::Context>,
+            _path_params: Path<sled_agent_types::rot::RotPathParams>,
+            _body: TypedBody<sled_agent_types::rot::Nonce>,
+        ) -> Result<HttpResponseOk<sled_agent_types::rot::Attestation>, HttpError>
+        {
+            unimplemented!()
+        }
     }
 }

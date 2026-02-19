@@ -51,6 +51,14 @@ pub mod v15;
 pub mod v16;
 #[path = "two_types_of_delegated_zvol/mod.rs"]
 pub mod v17;
+#[path = "add_attached_subnets/mod.rs"]
+pub mod v18;
+#[path = "add_rot_attestation/mod.rs"]
+pub mod v19;
+#[path = "lockstep_rack_init/mod.rs"]
+pub mod v20;
+#[path = "bgp_v6/mod.rs"]
+pub mod v21;
 #[path = "add_switch_zone_operator_policy/mod.rs"]
 pub mod v3;
 #[path = "add_nexus_lockstep_port_to_inventory/mod.rs"]

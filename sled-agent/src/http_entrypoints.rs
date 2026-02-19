@@ -29,6 +29,9 @@ use sled_agent_types::artifact::{
     ArtifactListResponse, ArtifactPathParam, ArtifactPutResponse,
     ArtifactQueryParam,
 };
+use sled_agent_types::attached_subnet::{
+    AttachedSubnet, AttachedSubnets, VmmSubnetPathParam,
+};
 use sled_agent_types::bootstore::BootstoreStatus;
 use sled_agent_types::dataset::{
     LocalStorageDatasetDeleteRequest, LocalStorageDatasetEnsureRequest,
@@ -48,6 +51,9 @@ use sled_agent_types::instance::{
 };
 use sled_agent_types::inventory::{Inventory, OmicronSledConfig};
 use sled_agent_types::probes::ProbeSet;
+use sled_agent_types::rot::{
+    Attestation, CertificateChain, MeasurementLog, Nonce, RotPathParams,
+};
 use sled_agent_types::sled::AddSledRequest;
 use sled_agent_types::support_bundle::{
     RangeRequestHeaders, SupportBundleFilePathParam,
@@ -830,17 +836,6 @@ impl SledAgentApi for SledAgentImpl {
         let sa = rqctx.context();
         let request = body.into_inner();
 
-        // Perform some minimal validation
-        if request.start_request.body.use_trust_quorum
-            && !request.start_request.body.is_lrtq_learner
-        {
-            return Err(HttpError::for_bad_request(
-                None,
-                "New sleds must be LRTQ learners if trust quorum is in use"
-                    .to_string(),
-            ));
-        }
-
         crate::sled_agent::sled_add(
             sa.logger().clone(),
             sa.sprockets().clone(),
@@ -1382,5 +1377,89 @@ impl SledAgentApi for SledAgentImpl {
         )?;
 
         Ok(HttpResponseUpdatedNoContent())
+    }
+
+    async fn vmm_put_attached_subnets(
+        request_context: RequestContext<Self::Context>,
+        path_params: Path<VmmPathParam>,
+        body: TypedBody<AttachedSubnets>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        let sa = request_context.context();
+        let propolis_id = path_params.into_inner().propolis_id;
+        sa.instance_put_attached_subnets(propolis_id, body.into_inner())
+            .await
+            .map(|_| HttpResponseUpdatedNoContent())
+            .map_err(HttpError::from)
+    }
+
+    async fn vmm_delete_attached_subnets(
+        request_context: RequestContext<Self::Context>,
+        path_params: Path<VmmPathParam>,
+    ) -> Result<HttpResponseDeleted, HttpError> {
+        let sa = request_context.context();
+        let propolis_id = path_params.into_inner().propolis_id;
+        sa.instance_delete_attached_subnets(propolis_id)
+            .await
+            .map(|_| HttpResponseDeleted())
+            .map_err(HttpError::from)
+    }
+
+    async fn vmm_post_attached_subnet(
+        request_context: RequestContext<Self::Context>,
+        path_params: Path<VmmPathParam>,
+        body: TypedBody<AttachedSubnet>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        let sa = request_context.context();
+        let propolis_id = path_params.into_inner().propolis_id;
+        let subnet = body.into_inner();
+        sa.instance_attach_subnet(propolis_id, subnet)
+            .await
+            .map(|_| HttpResponseUpdatedNoContent())
+            .map_err(HttpError::from)
+    }
+
+    async fn vmm_delete_attached_subnet(
+        request_context: RequestContext<Self::Context>,
+        path_params: Path<VmmSubnetPathParam>,
+    ) -> Result<HttpResponseDeleted, HttpError> {
+        let sa = request_context.context();
+        let VmmSubnetPathParam { propolis_id, subnet } =
+            path_params.into_inner();
+        sa.instance_detach_subnet(propolis_id, subnet)
+            .await
+            .map(|_| HttpResponseDeleted())
+            .map_err(HttpError::from)
+    }
+
+    async fn rot_measurement_log(
+        request_context: RequestContext<Self::Context>,
+        path_params: Path<RotPathParams>,
+    ) -> Result<HttpResponseOk<MeasurementLog>, HttpError> {
+        let sa = request_context.context();
+        let rot = sa.rot_attestor(path_params.into_inner().rot);
+        let log = rot.get_measurement_log().await?;
+        Ok(HttpResponseOk(log.into()))
+    }
+
+    async fn rot_certificate_chain(
+        request_context: RequestContext<Self::Context>,
+        path_params: Path<RotPathParams>,
+    ) -> Result<HttpResponseOk<CertificateChain>, HttpError> {
+        let sa = request_context.context();
+        let rot = sa.rot_attestor(path_params.into_inner().rot);
+        let chain = rot.get_certificate_chain().await?;
+        Ok(HttpResponseOk(chain.into()))
+    }
+
+    async fn rot_attest(
+        request_context: RequestContext<Self::Context>,
+        path_params: Path<RotPathParams>,
+        body: TypedBody<Nonce>,
+    ) -> Result<HttpResponseOk<Attestation>, HttpError> {
+        let sa = request_context.context();
+        let rot = sa.rot_attestor(path_params.into_inner().rot);
+        let nonce = body.into_inner();
+        let attestation = rot.attest(nonce.into()).await?;
+        Ok(HttpResponseOk(attestation.into()))
     }
 }

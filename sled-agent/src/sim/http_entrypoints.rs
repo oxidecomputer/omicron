@@ -41,6 +41,9 @@ use sled_agent_types::artifact::{
     ArtifactListResponse, ArtifactPathParam, ArtifactPutResponse,
     ArtifactQueryParam,
 };
+use sled_agent_types::attached_subnet::AttachedSubnet;
+use sled_agent_types::attached_subnet::AttachedSubnets;
+use sled_agent_types::attached_subnet::VmmSubnetPathParam;
 use sled_agent_types::bootstore::BootstoreStatus;
 use sled_agent_types::dataset::{
     LocalStorageDatasetDeleteRequest, LocalStorageDatasetEnsureRequest,
@@ -60,6 +63,9 @@ use sled_agent_types::instance::{
 };
 use sled_agent_types::inventory::{Inventory, OmicronSledConfig};
 use sled_agent_types::probes::ProbeSet;
+use sled_agent_types::rot::{
+    Attestation, CertificateChain, MeasurementLog, Nonce, RotPathParams,
+};
 use sled_agent_types::sled::AddSledRequest;
 use sled_agent_types::support_bundle::{
     RangeRequestHeaders, SupportBundleFilePathParam,
@@ -1002,6 +1008,81 @@ impl SledAgentApi for SledAgentSimImpl {
         _request_context: RequestContext<Self::Context>,
         _body: TypedBody<TrustQuorumNetworkConfig>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        method_unimplemented()
+    }
+
+    async fn vmm_put_attached_subnets(
+        request_context: RequestContext<Self::Context>,
+        path_params: Path<VmmPathParam>,
+        body: TypedBody<AttachedSubnets>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        let sa = request_context.context();
+        let id = path_params.into_inner().propolis_id;
+        let subnets = body.into_inner();
+        sa.instance_put_attached_subnets(id, subnets)
+            .await
+            .map(|_| HttpResponseUpdatedNoContent())
+            .map_err(HttpError::from)
+    }
+
+    async fn vmm_delete_attached_subnets(
+        request_context: RequestContext<Self::Context>,
+        path_params: Path<VmmPathParam>,
+    ) -> Result<HttpResponseDeleted, HttpError> {
+        let sa = request_context.context();
+        let propolis_id = path_params.into_inner().propolis_id;
+        sa.instance_delete_attached_subnets(propolis_id)
+            .await
+            .map(|_| HttpResponseDeleted())
+            .map_err(HttpError::from)
+    }
+
+    async fn vmm_post_attached_subnet(
+        request_context: RequestContext<Self::Context>,
+        path_params: Path<VmmPathParam>,
+        body: TypedBody<AttachedSubnet>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        let sa = request_context.context();
+        let id = path_params.into_inner().propolis_id;
+        let subnet = body.into_inner();
+        sa.instance_post_attached_subnet(id, subnet)
+            .await
+            .map(|_| HttpResponseUpdatedNoContent())
+            .map_err(HttpError::from)
+    }
+
+    async fn vmm_delete_attached_subnet(
+        request_context: RequestContext<Self::Context>,
+        path_params: Path<VmmSubnetPathParam>,
+    ) -> Result<HttpResponseDeleted, HttpError> {
+        let sa = request_context.context();
+        let VmmSubnetPathParam { propolis_id, subnet } =
+            path_params.into_inner();
+        sa.instance_delete_attached_subnet(propolis_id, subnet)
+            .await
+            .map(|_| HttpResponseDeleted())
+            .map_err(HttpError::from)
+    }
+
+    async fn rot_measurement_log(
+        _request_context: RequestContext<Self::Context>,
+        _path_params: Path<RotPathParams>,
+    ) -> Result<HttpResponseOk<MeasurementLog>, HttpError> {
+        method_unimplemented()
+    }
+
+    async fn rot_certificate_chain(
+        _request_context: RequestContext<Self::Context>,
+        _path_params: Path<RotPathParams>,
+    ) -> Result<HttpResponseOk<CertificateChain>, HttpError> {
+        method_unimplemented()
+    }
+
+    async fn rot_attest(
+        _request_context: RequestContext<Self::Context>,
+        _path_params: Path<RotPathParams>,
+        _body: TypedBody<Nonce>,
+    ) -> Result<HttpResponseOk<Attestation>, HttpError> {
         method_unimplemented()
     }
 }

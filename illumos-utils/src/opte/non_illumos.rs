@@ -9,6 +9,7 @@ use omicron_common::api::internal::shared::NetworkInterfaceKind;
 use oxide_vpc::api::AddRouterEntryReq;
 use oxide_vpc::api::ClearVirt2PhysReq;
 use oxide_vpc::api::DelRouterEntryReq;
+use oxide_vpc::api::DetachSubnetResp;
 use oxide_vpc::api::Direction;
 use oxide_vpc::api::DumpVirt2PhysResp;
 use oxide_vpc::api::IpCfg;
@@ -29,15 +30,27 @@ use std::net::IpAddr;
 use std::sync::Mutex;
 use std::sync::OnceLock;
 
-type OpteError = anyhow::Error;
+// The real OPTE error type comes from `opte_ioctl` and is only defined on
+// illumos; define our own for non-illumos systems (dev / test).
+#[derive(thiserror::Error, Debug)]
+pub enum OpteError {
+    #[error("underlay is not initialized")]
+    UnderlayUninitialized,
+    #[error("underlay is already initialized")]
+    UnderlayAlreadyInitialized,
+    #[error("duplicate OPTE port: '{0}'")]
+    DuplicatePort(String),
+    #[error("no such port '{0}'")]
+    NoPort(String),
+}
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
     #[error("Failure interacting with the dummy OPTE implementation")]
     Opte(#[from] OpteError),
 
-    #[error("Invalid IP configuration for port")]
-    InvalidPortIpConfig,
+    #[error("Invalid IP configuration for port: {0}")]
+    InvalidPortIpConfig(String),
 
     #[error("Tried to release non-existent port ({0}, {1:?})")]
     ReleaseMissingPort(uuid::Uuid, NetworkInterfaceKind),
@@ -58,6 +71,11 @@ pub enum Error {
 
     #[error("No matching NIC found for port {0} at slot {1}.")]
     NoNicforPort(String, u32),
+
+    #[error(
+        "Tried to update attached subnets on non-existent port ({0}, {1:?})"
+    )]
+    AttachedSubnetUpdateMissingPort(uuid::Uuid, NetworkInterfaceKind),
 }
 
 pub fn initialize_xde_driver(
@@ -211,13 +229,12 @@ impl Handle {
             state: "created".to_string(),
         };
         let mut state = opte_state().lock().unwrap();
-        anyhow::ensure!(
-            state.underlay_initialized,
-            "Underlay is not initialized"
-        );
+        if !state.underlay_initialized {
+            return Err(OpteError::UnderlayUninitialized);
+        }
         match state.ports.entry(name) {
             Entry::Occupied(entry) => {
-                anyhow::bail!("Duplicate OPTE port: '{}'", entry.key());
+                return Err(OpteError::DuplicatePort(entry.key().to_string()));
             }
             Entry::Vacant(entry) => {
                 entry.insert(PortData { port, routes: Vec::new() });
@@ -247,7 +264,7 @@ impl Handle {
         let mut inner = opte_state().lock().unwrap();
         let Some(PortData { routes, .. }) = inner.ports.get_mut(&req.port_name)
         else {
-            anyhow::bail!("No such port '{}'", req.port_name);
+            return Err(OpteError::NoPort(req.port_name.clone()));
         };
         routes.push(req.into());
         Ok(NO_RESPONSE)
@@ -271,7 +288,7 @@ impl Handle {
         let mut inner = opte_state().lock().unwrap();
         let Some(PortData { routes, .. }) = inner.ports.get_mut(&req.port_name)
         else {
-            anyhow::bail!("No such port '{}'", req.port_name);
+            return Err(OpteError::NoPort(req.port_name.clone()));
         };
         let req = RouteInfo::from(req);
         if let Some(index) = routes.iter().position(|rt| rt == &req) {
@@ -340,11 +357,29 @@ impl Handle {
         _: &str,
     ) -> Result<NoResp, OpteError> {
         let mut state = opte_state().lock().unwrap();
-        anyhow::ensure!(
-            !state.underlay_initialized,
-            "Underlay is already initialized"
-        );
+        if state.underlay_initialized {
+            return Err(OpteError::UnderlayAlreadyInitialized);
+        }
         state.underlay_initialized = true;
         Ok(NO_RESPONSE)
+    }
+
+    /// Attach a subnet.
+    pub(crate) fn attach_subnet(
+        &self,
+        _name: &str,
+        _subnet: IpCidr,
+        _is_external: bool,
+    ) -> Result<NoResp, OpteError> {
+        unimplemented!("Not yet used in tests");
+    }
+
+    /// Detach a subnet.
+    pub(crate) fn detach_subnet(
+        &self,
+        _name: &str,
+        _subnet: IpCidr,
+    ) -> Result<DetachSubnetResp, OpteError> {
+        unimplemented!("Not yet used in tests");
     }
 }

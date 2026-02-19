@@ -964,6 +964,7 @@ pub static DEMO_BGP_CONFIG: LazyLock<params::BgpConfigCreate> =
         vrf: None,
         checker: None,
         shaper: None,
+        max_paths: Default::default(),
     });
 pub const DEMO_BGP_ANNOUNCE_SET_URL: &'static str =
     "/v1/system/networking/bgp-announce-set";
@@ -987,7 +988,7 @@ pub const DEMO_BGP_STATUS_URL: &'static str =
 pub const DEMO_BGP_EXPORTED_URL: &'static str =
     "/v1/system/networking/bgp-exported";
 pub const DEMO_BGP_ROUTES_IPV4_URL: &'static str =
-    "/v1/system/networking/bgp-routes-ipv4?asn=47";
+    "/v1/system/networking/bgp-imported?asn=47";
 pub const DEMO_BGP_MESSAGE_HISTORY_URL: &'static str =
     "/v1/system/networking/bgp-message-history?asn=47";
 
@@ -1202,6 +1203,8 @@ pub static DEMO_SUBNET_POOL_MEMBER_REMOVE: LazyLock<
 });
 pub static DEMO_SUBNET_POOL_SILOS_URL: LazyLock<String> =
     LazyLock::new(|| format!("{}/silos", *DEMO_SUBNET_POOL_URL));
+pub static DEMO_SILO_SUBNET_POOLS_URL: LazyLock<String> =
+    LazyLock::new(|| format!("{}/subnet-pools", *DEMO_SILO_URL));
 pub static DEMO_SUBNET_POOL_LINK_SILO: LazyLock<params::SubnetPoolLinkSilo> =
     LazyLock::new(|| params::SubnetPoolLinkSilo {
         silo: NameOrId::Id(DEFAULT_SILO.identity().id),
@@ -1215,6 +1218,9 @@ pub static DEMO_SUBNET_POOL_SILO_UPDATE: LazyLock<
 > = LazyLock::new(|| params::SubnetPoolSiloUpdate { is_default: true });
 pub static DEMO_SUBNET_POOL_UTILIZATION_URL: LazyLock<String> =
     LazyLock::new(|| format!("{}/utilization", *DEMO_SUBNET_POOL_URL));
+pub static DEMO_CURRENT_SILO_SUBNET_POOLS_URL: &str = "/v1/subnet-pools";
+pub static DEMO_CURRENT_SILO_SUBNET_POOL_URL: LazyLock<String> =
+    LazyLock::new(|| format!("/v1/subnet-pools/{}", *DEMO_SUBNET_POOL_NAME));
 
 // External Subnets (project-scoped)
 pub static DEMO_EXTERNAL_SUBNETS_URL: LazyLock<String> = LazyLock::new(|| {
@@ -1562,6 +1568,14 @@ pub static SCIM_TOKEN_URL: LazyLock<String> = LazyLock::new(|| {
     )
 });
 
+// SCIM v2 endpoints (bearer token auth, not session auth)
+pub const SCIM_V2_USERS_URL: &str = "/scim/v2/Users";
+pub const SCIM_V2_USER_URL: &str =
+    "/scim/v2/Users/00000000-0000-0000-0000-000000000000";
+pub const SCIM_V2_GROUPS_URL: &str = "/scim/v2/Groups";
+pub const SCIM_V2_GROUP_URL: &str =
+    "/scim/v2/Groups/00000000-0000-0000-0000-000000000000";
+
 /// Describes an API endpoint to be verified by the "unauthorized" test
 ///
 /// These structs are also used to check whether we're covering all endpoints in
@@ -1678,6 +1692,9 @@ pub enum AllowedMethod {
     /// HTTP "PUT" method, with sample input (which should be valid input for
     /// this endpoint)
     Put(serde_json::Value),
+    /// HTTP "PATCH" method, with sample input (which should be valid input for
+    /// this endpoint)
+    Patch(serde_json::Value),
 }
 
 impl AllowedMethod {
@@ -1695,6 +1712,7 @@ impl AllowedMethod {
             }
             AllowedMethod::Post(_) => &Method::POST,
             AllowedMethod::Put(_) => &Method::PUT,
+            AllowedMethod::Patch(_) => &Method::PATCH,
         }
     }
 
@@ -1714,6 +1732,7 @@ impl AllowedMethod {
             | AllowedMethod::HeadNonexistent => None,
             AllowedMethod::Post(body) => Some(&body),
             AllowedMethod::Put(body) => Some(&body),
+            AllowedMethod::Patch(body) => Some(&body),
         }
     }
 }
@@ -1935,6 +1954,14 @@ pub static VERIFY_ENDPOINTS: LazyLock<Vec<VerifyEndpoint>> = LazyLock::new(
                 ],
             },
             VerifyEndpoint {
+                url: &DEMO_SILO_SUBNET_POOLS_URL,
+                visibility: Visibility::Protected,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![
+                    AllowedMethod::Get,
+                ],
+            },
+            VerifyEndpoint {
                 url: &DEMO_SUBNET_POOL_SILO_URL,
                 visibility: Visibility::Protected,
                 unprivileged_access: UnprivilegedAccess::None,
@@ -1951,6 +1978,20 @@ pub static VERIFY_ENDPOINTS: LazyLock<Vec<VerifyEndpoint>> = LazyLock::new(
                 visibility: Visibility::Protected,
                 unprivileged_access: UnprivilegedAccess::None,
                 allowed_methods: vec![AllowedMethod::GetUnimplemented],
+            },
+            VerifyEndpoint {
+                url: &DEMO_CURRENT_SILO_SUBNET_POOLS_URL,
+                visibility: Visibility::Protected,
+                unprivileged_access: UnprivilegedAccess::ReadOnly,
+                allowed_methods: vec![
+                    AllowedMethod::Get,
+                ],
+            },
+            VerifyEndpoint {
+                url: &DEMO_CURRENT_SILO_SUBNET_POOL_URL,
+                visibility: Visibility::Protected,
+                unprivileged_access: UnprivilegedAccess::ReadOnly,
+                allowed_methods: vec![AllowedMethod::Get],
             },
             /* External Subnets (project-scoped) */
             VerifyEndpoint {
@@ -3580,6 +3621,63 @@ pub static VERIFY_ENDPOINTS: LazyLock<Vec<VerifyEndpoint>> = LazyLock::new(
                 unprivileged_access: UnprivilegedAccess::None,
                 allowed_methods: vec![
                     AllowedMethod::Get,
+                    AllowedMethod::Delete,
+                ],
+            },
+            // SCIM v2 endpoints (bearer token auth). These use GetNonexistent
+            // because the default silo is LocalOnly, not SamlScim, so we can't
+            // actually authenticate with a SCIM token in this test.
+            VerifyEndpoint {
+                url: SCIM_V2_USERS_URL,
+                visibility: Visibility::Public,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![
+                    AllowedMethod::GetNonexistent,
+                    AllowedMethod::Post(serde_json::json!({
+                        "userName": "test@example.com",
+                    })),
+                ],
+            },
+            VerifyEndpoint {
+                url: SCIM_V2_USER_URL,
+                visibility: Visibility::Protected,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![
+                    AllowedMethod::GetNonexistent,
+                    AllowedMethod::Put(serde_json::json!({
+                        "userName": "test@example.com",
+                    })),
+                    AllowedMethod::Patch(serde_json::json!({
+                        "schemas": ["urn:ietf:params:scim:api:messages:2.0:PatchOp"],
+                        "Operations": [],
+                    })),
+                    AllowedMethod::Delete,
+                ],
+            },
+            VerifyEndpoint {
+                url: SCIM_V2_GROUPS_URL,
+                visibility: Visibility::Public,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![
+                    AllowedMethod::GetNonexistent,
+                    AllowedMethod::Post(serde_json::json!({
+                        "displayName": "test-group",
+                    })),
+                ],
+            },
+            VerifyEndpoint {
+                url: SCIM_V2_GROUP_URL,
+                visibility: Visibility::Protected,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![
+                    AllowedMethod::GetNonexistent,
+                    AllowedMethod::Put(serde_json::json!({
+                        "displayName": "test-group",
+                    })),
+                    AllowedMethod::Patch(serde_json::json!({
+                        "schemas": ["urn:ietf:params:scim:api:messages:2.0:PatchOp"],
+                        "Operations": [],
+                    })),
                     AllowedMethod::Delete,
                 ],
             },

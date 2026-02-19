@@ -5,6 +5,3 @@
 //! Types for network setup required to bring up the control plane.
 
 pub use sled_agent_types_versions::latest::early_networking::*;
-
-// Re-export back_compat module for bootstore serialization
-pub use sled_agent_types_versions::v1::early_networking::back_compat;
