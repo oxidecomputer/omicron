@@ -21,7 +21,7 @@ use nexus_db_errors::TransactionError;
 use nexus_db_errors::public_error_from_diesel;
 use nexus_db_fixed_data::role_assignment::BUILTIN_ROLE_ASSIGNMENTS;
 use nexus_db_lookup::DbConnection;
-use nexus_types::external_api::shared;
+use nexus_types::external_api::policy;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::bail_unless;
@@ -124,7 +124,7 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         authz_resource: &T,
-        new_assignments: &[shared::RoleAssignment<T::AllowedRoles>],
+        new_assignments: &[policy::RoleAssignment<T::AllowedRoles>],
     ) -> ListResultVec<db::model::RoleAssignment>
     where
         T: authz::ApiResourceWithRolesType + AuthorizedResource + Clone,
@@ -172,7 +172,7 @@ impl DataStore {
     pub async fn role_assignment_replace_visible_queries<T>(
         opctx: &OpContext,
         authz_resource: &T,
-        new_assignments: &[shared::RoleAssignment<T::AllowedRoles>],
+        new_assignments: &[policy::RoleAssignment<T::AllowedRoles>],
     ) -> Result<
         (
             impl RunnableQueryNoReturn + use<T>,
@@ -186,7 +186,7 @@ impl DataStore {
         opctx.authorize(authz::Action::ModifyPolicy, authz_resource).await?;
 
         bail_unless!(
-            new_assignments.len() <= shared::MAX_ROLE_ASSIGNMENTS_PER_RESOURCE
+            new_assignments.len() <= policy::MAX_ROLE_ASSIGNMENTS_PER_RESOURCE
         );
 
         let resource_type = authz_resource.resource_type();

@@ -22,8 +22,9 @@ use nexus_test_utils::resource_helpers::create_subnet_pool;
 use nexus_test_utils::resource_helpers::create_subnet_pool_member;
 use nexus_test_utils::resource_helpers::objects_list_page_authz;
 use nexus_test_utils_macros::nexus_test;
-use nexus_types::external_api::params;
-use nexus_types::external_api::views::ExternalSubnet;
+use nexus_types::external_api::external_subnet as external_subnet_types;
+use nexus_types::external_api::external_subnet::ExternalSubnet;
+use nexus_types::external_api::ip_pool;
 use omicron_common::address::IpVersion;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::IdentityMetadataUpdateParams;
@@ -84,14 +85,14 @@ async fn external_subnet_basic_crud(cptestctx: &ControlPlaneTestContext) {
     let _project = create_project(client, PROJECT_NAME).await;
 
     // Sanity check, can we CRUD a single subnet.
-    let create_params = params::ExternalSubnetCreate {
+    let create_params = external_subnet_types::ExternalSubnetCreate {
         identity: IdentityMetadataCreateParams {
             name: EXTERNAL_SUBNET_NAME.parse().unwrap(),
             description: String::from("A test external subnet"),
         },
-        allocator: params::ExternalSubnetAllocator::Auto {
+        allocator: external_subnet_types::ExternalSubnetAllocator::Auto {
             prefix_len: 28,
-            pool_selector: params::PoolSelector::Explicit {
+            pool_selector: ip_pool::PoolSelector::Explicit {
                 pool: NameOrId::Name(SUBNET_POOL_NAME.parse().unwrap()),
             },
         },
@@ -131,7 +132,7 @@ async fn external_subnet_basic_crud(cptestctx: &ControlPlaneTestContext) {
 
     // Update the metadata
     let new_name = "quartzite".parse::<Name>().unwrap();
-    let updates = params::ExternalSubnetUpdate {
+    let updates = external_subnet_types::ExternalSubnetUpdate {
         identity: IdentityMetadataUpdateParams {
             name: Some(new_name.clone()),
             description: None,
@@ -191,14 +192,14 @@ async fn external_subnet_pagination(cptestctx: &ControlPlaneTestContext) {
     let n_subnets = 10;
     let mut subnets = Vec::with_capacity(n_subnets);
     for i in 0..n_subnets {
-        let create_params = params::ExternalSubnetCreate {
+        let create_params = external_subnet_types::ExternalSubnetCreate {
             identity: IdentityMetadataCreateParams {
                 name: format!("{EXTERNAL_SUBNET_NAME}-{i}").parse().unwrap(),
                 description: String::from("A test external subnet"),
             },
-            allocator: params::ExternalSubnetAllocator::Auto {
+            allocator: external_subnet_types::ExternalSubnetAllocator::Auto {
                 prefix_len: 28,
-                pool_selector: params::PoolSelector::Explicit {
+                pool_selector: ip_pool::PoolSelector::Explicit {
                     pool: NameOrId::Name(SUBNET_POOL_NAME.parse().unwrap()),
                 },
             },
@@ -290,14 +291,14 @@ async fn attach_test_impl(
     let _ = create_project(client, PROJECT_NAME).await;
 
     // Then create a subnet in the pool.
-    let create_params = params::ExternalSubnetCreate {
+    let create_params = external_subnet_types::ExternalSubnetCreate {
         identity: IdentityMetadataCreateParams {
             name: EXTERNAL_SUBNET_NAME.parse().unwrap(),
             description: String::from("A test external subnet"),
         },
-        allocator: params::ExternalSubnetAllocator::Auto {
+        allocator: external_subnet_types::ExternalSubnetAllocator::Auto {
             prefix_len: 28,
-            pool_selector: params::PoolSelector::Explicit {
+            pool_selector: ip_pool::PoolSelector::Explicit {
                 pool: NameOrId::Name(SUBNET_POOL_NAME.parse().unwrap()),
             },
         },
@@ -408,14 +409,14 @@ async fn cannot_attach_subnet_in_another_project(
     let _ = create_project(client, PROJECT_NAME).await;
 
     // Then create a subnet in the pool.
-    let create_params = params::ExternalSubnetCreate {
+    let create_params = external_subnet_types::ExternalSubnetCreate {
         identity: IdentityMetadataCreateParams {
             name: EXTERNAL_SUBNET_NAME.parse().unwrap(),
             description: String::from("A test external subnet"),
         },
-        allocator: params::ExternalSubnetAllocator::Auto {
+        allocator: external_subnet_types::ExternalSubnetAllocator::Auto {
             prefix_len: 28,
-            pool_selector: params::PoolSelector::Explicit {
+            pool_selector: ip_pool::PoolSelector::Explicit {
                 pool: NameOrId::Name(SUBNET_POOL_NAME.parse().unwrap()),
             },
         },
@@ -442,7 +443,7 @@ async fn cannot_attach_subnet_in_another_project(
     instance_wait_for_state(client, instance_id, InstanceState::Running).await;
 
     // We should not be able to attach the subnet to it.
-    let params = params::ExternalSubnetAttach {
+    let params = external_subnet_types::ExternalSubnetAttach {
         instance: NameOrId::Id(instance.identity.id),
     };
     NexusRequest::expect_failure_with_body(
@@ -475,14 +476,14 @@ async fn cannot_attach_subnet_attached_to_another_instance(
     let _ = create_project(client, PROJECT_NAME).await;
 
     // Then create a subnet in the pool.
-    let create_params = params::ExternalSubnetCreate {
+    let create_params = external_subnet_types::ExternalSubnetCreate {
         identity: IdentityMetadataCreateParams {
             name: EXTERNAL_SUBNET_NAME.parse().unwrap(),
             description: String::from("A test external subnet"),
         },
-        allocator: params::ExternalSubnetAllocator::Auto {
+        allocator: external_subnet_types::ExternalSubnetAllocator::Auto {
             prefix_len: 28,
-            pool_selector: params::PoolSelector::Explicit {
+            pool_selector: ip_pool::PoolSelector::Explicit {
                 pool: NameOrId::Name(SUBNET_POOL_NAME.parse().unwrap()),
             },
         },
@@ -526,7 +527,7 @@ async fn cannot_attach_subnet_attached_to_another_instance(
     instance_wait_for_state(client, instance_id, InstanceState::Running).await;
 
     // We should not be able to attach the subnet to it.
-    let params = params::ExternalSubnetAttach {
+    let params = external_subnet_types::ExternalSubnetAttach {
         instance: NameOrId::Id(instance2.identity.id),
     };
     NexusRequest::expect_failure_with_body(
@@ -559,14 +560,14 @@ async fn cannot_detach_subnet_that_is_not_attached(
     let _ = create_project(client, PROJECT_NAME).await;
 
     // Then create a subnet in the pool.
-    let create_params = params::ExternalSubnetCreate {
+    let create_params = external_subnet_types::ExternalSubnetCreate {
         identity: IdentityMetadataCreateParams {
             name: EXTERNAL_SUBNET_NAME.parse().unwrap(),
             description: String::from("A test external subnet"),
         },
-        allocator: params::ExternalSubnetAllocator::Auto {
+        allocator: external_subnet_types::ExternalSubnetAllocator::Auto {
             prefix_len: 28,
-            pool_selector: params::PoolSelector::Explicit {
+            pool_selector: ip_pool::PoolSelector::Explicit {
                 pool: NameOrId::Name(SUBNET_POOL_NAME.parse().unwrap()),
             },
         },
@@ -629,14 +630,14 @@ async fn cannot_attach_too_many_subnets(cptestctx: &ControlPlaneTestContext) {
     );
     for i in 0..MAX_ATTACHED_SUBNETS_PER_INSTANCE {
         let name = format!("{EXTERNAL_SUBNET_NAME}-{i}");
-        let create_params = params::ExternalSubnetCreate {
+        let create_params = external_subnet_types::ExternalSubnetCreate {
             identity: IdentityMetadataCreateParams {
                 name: name.parse().unwrap(),
                 description: String::from("A test external subnet"),
             },
-            allocator: params::ExternalSubnetAllocator::Auto {
+            allocator: external_subnet_types::ExternalSubnetAllocator::Auto {
                 prefix_len: 30,
-                pool_selector: params::PoolSelector::Explicit {
+                pool_selector: ip_pool::PoolSelector::Explicit {
                     pool: NameOrId::Name(SUBNET_POOL_NAME.parse().unwrap()),
                 },
             },
@@ -655,14 +656,14 @@ async fn cannot_attach_too_many_subnets(cptestctx: &ControlPlaneTestContext) {
     }
 
     // Create one more external subnet.
-    let create_params = params::ExternalSubnetCreate {
+    let create_params = external_subnet_types::ExternalSubnetCreate {
         identity: IdentityMetadataCreateParams {
             name: SECOND_EXTERNAL_SUBNET_NAME.parse().unwrap(),
             description: String::from("A test external subnet"),
         },
-        allocator: params::ExternalSubnetAllocator::Auto {
+        allocator: external_subnet_types::ExternalSubnetAllocator::Auto {
             prefix_len: 30,
-            pool_selector: params::PoolSelector::Explicit {
+            pool_selector: ip_pool::PoolSelector::Explicit {
                 pool: NameOrId::Name(SUBNET_POOL_NAME.parse().unwrap()),
             },
         },
@@ -683,7 +684,7 @@ async fn cannot_attach_too_many_subnets(cptestctx: &ControlPlaneTestContext) {
         StatusCode::BAD_REQUEST,
         Method::POST,
         &external_subnet_attach_url(SECOND_EXTERNAL_SUBNET_NAME, PROJECT_NAME),
-        &params::ExternalSubnetAttach {
+        &external_subnet_types::ExternalSubnetAttach {
             instance: INSTANCE_NAME.parse::<Name>().unwrap().into(),
         },
     )
@@ -710,14 +711,14 @@ async fn cannot_delete_attached_external_subnet(
     let _ = create_project(client, PROJECT_NAME).await;
 
     // Then create a subnet in the pool.
-    let create_params = params::ExternalSubnetCreate {
+    let create_params = external_subnet_types::ExternalSubnetCreate {
         identity: IdentityMetadataCreateParams {
             name: EXTERNAL_SUBNET_NAME.parse().unwrap(),
             description: String::from("A test external subnet"),
         },
-        allocator: params::ExternalSubnetAllocator::Auto {
+        allocator: external_subnet_types::ExternalSubnetAllocator::Auto {
             prefix_len: 28,
-            pool_selector: params::PoolSelector::Explicit {
+            pool_selector: ip_pool::PoolSelector::Explicit {
                 pool: NameOrId::Name(SUBNET_POOL_NAME.parse().unwrap()),
             },
         },
@@ -772,7 +773,7 @@ async fn attach_external_subnet(
     let url = external_subnet_attach_url(subnet_name, PROJECT_NAME);
     NexusRequest::new(
         RequestBuilder::new(client, Method::POST, &url)
-            .body(Some(&params::ExternalSubnetAttach {
+            .body(Some(&external_subnet_types::ExternalSubnetAttach {
                 instance: instance_name.parse::<Name>().unwrap().into(),
             }))
             .expect_status(Some(StatusCode::ACCEPTED)),

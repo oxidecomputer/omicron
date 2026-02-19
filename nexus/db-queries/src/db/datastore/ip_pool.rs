@@ -51,8 +51,8 @@ use nexus_db_model::Project;
 use nexus_db_model::Vpc;
 use nexus_db_schema::enums::IpKindEnum;
 use nexus_db_schema::enums::IpPoolReservationTypeEnum;
-use nexus_types::external_api::shared::IpRange;
 use nexus_types::silo::INTERNAL_SILO_ID;
+use omicron_common::address::IpRange;
 use omicron_common::address::{IPV4_SSM_SUBNET, IPV6_SSM_SUBNET};
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DataPageParams;
@@ -2514,8 +2514,9 @@ mod test {
     use nexus_types::deployment::{
         OmicronZoneExternalFloatingIp, OmicronZoneExternalIp,
     };
-    use nexus_types::external_api::params::{
-        self, SubnetPoolCreate, SubnetPoolMemberAdd,
+    use nexus_types::external_api::project;
+    use nexus_types::external_api::subnet_pool::{
+        SubnetPoolCreate, SubnetPoolMemberAdd,
     };
     use nexus_types::identity::Resource;
     use nexus_types::silo::INTERNAL_SILO_ID;
@@ -2824,7 +2825,7 @@ mod test {
         let authz_silo = opctx.authn.silo_required().unwrap();
         let project = Project::new(
             authz_silo.id(),
-            params::ProjectCreate {
+            project::ProjectCreate {
                 identity: IdentityMetadataCreateParams {
                     name: "my-project".parse().unwrap(),
                     description: "".to_string(),
@@ -2941,7 +2942,7 @@ mod test {
         let authz_silo = opctx.authn.silo_required().unwrap();
         let project = Project::new(
             authz_silo.id(),
-            params::ProjectCreate {
+            project::ProjectCreate {
                 identity: IdentityMetadataCreateParams {
                     name: "my-project".parse().unwrap(),
                     description: "".to_string(),

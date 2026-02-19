@@ -12,7 +12,7 @@ use nexus_test_utils::assert_same_items;
 use nexus_test_utils::http_testing::{AuthnMode, NexusRequest};
 use nexus_test_utils::resource_helpers::objects_list_page_authz;
 use nexus_test_utils_macros::nexus_test;
-use nexus_types::external_api::views;
+use nexus_types::external_api::user;
 use nexus_types::identity::Asset;
 use nexus_types::silo::DEFAULT_SILO_ID;
 use omicron_common::api::external::LookupType;
@@ -36,14 +36,14 @@ async fn test_silo_group_users(cptestctx: &ControlPlaneTestContext) {
 
     // we start out with the two default users
     let users =
-        objects_list_page_authz::<views::User>(client, &"/v1/users").await;
+        objects_list_page_authz::<user::User>(client, &"/v1/users").await;
     let user_names: Vec<&str> =
         users.items.iter().map(|u| u.display_name.as_str()).collect();
     assert_same_items(user_names, vec!["privileged", "unprivileged"]);
 
     // no groups to start with
     let groups =
-        objects_list_page_authz::<views::User>(client, &"/v1/groups").await;
+        objects_list_page_authz::<user::User>(client, &"/v1/groups").await;
     assert_eq!(groups.items.len(), 0);
 
     let authz_silo = authz::Silo::new(
@@ -71,7 +71,7 @@ async fn test_silo_group_users(cptestctx: &ControlPlaneTestContext) {
 
     // now we have a group
     let groups =
-        objects_list_page_authz::<views::User>(client, &"/v1/groups").await;
+        objects_list_page_authz::<user::User>(client, &"/v1/groups").await;
     assert_eq!(groups.items.len(), 1);
 
     let group = groups.items.get(0).unwrap();
@@ -81,7 +81,7 @@ async fn test_silo_group_users(cptestctx: &ControlPlaneTestContext) {
     let group_url = format!("/v1/groups/{}", group.id);
     let group = NexusRequest::object_get(&client, &group_url)
         .authn_as(AuthnMode::PrivilegedUser)
-        .execute_and_parse_unwrap::<views::Group>()
+        .execute_and_parse_unwrap::<user::Group>()
         .await;
     assert_eq!(group.display_name, group_name);
 
@@ -89,7 +89,7 @@ async fn test_silo_group_users(cptestctx: &ControlPlaneTestContext) {
 
     // we can now fetch the group's user list and get an empty list of users
     let group_users =
-        objects_list_page_authz::<views::User>(client, &group_users_url).await;
+        objects_list_page_authz::<user::User>(client, &group_users_url).await;
 
     assert_eq!(group_users.items.len(), 0);
 
@@ -112,7 +112,7 @@ async fn test_silo_group_users(cptestctx: &ControlPlaneTestContext) {
         .expect("Failed to set user group memberships");
 
     let group_users =
-        objects_list_page_authz::<views::User>(client, &group_users_url).await;
+        objects_list_page_authz::<user::User>(client, &group_users_url).await;
     let user_ids = group_users.items.iter().map(|g| g.id).collect();
 
     assert_same_items(user_ids, vec![USER_TEST_UNPRIVILEGED.id()]);

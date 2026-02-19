@@ -10,7 +10,8 @@ use crate::collection::DatastoreCollectionConfig;
 use chrono::{DateTime, Utc};
 use db_macros::Asset;
 use nexus_db_schema::schema::{physical_disk, zpool};
-use nexus_types::{external_api::views, identity::Asset};
+use nexus_types::external_api::physical_disk as physical_disk_types;
+use nexus_types::identity::Asset;
 use omicron_uuid_kinds::PhysicalDiskKind as PhysicalDiskUuidKind;
 use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::SledKind;
@@ -73,7 +74,7 @@ impl PhysicalDisk {
     }
 }
 
-impl From<PhysicalDisk> for views::PhysicalDisk {
+impl From<PhysicalDisk> for physical_disk_types::PhysicalDisk {
     fn from(disk: PhysicalDisk) -> Self {
         Self {
             identity: disk.identity(),
@@ -101,10 +102,7 @@ mod diesel_util {
         prelude::*,
         query_dsl::methods::FilterDsl,
     };
-    use nexus_types::{
-        deployment::DiskFilter,
-        external_api::views::{PhysicalDiskPolicy, PhysicalDiskState},
-    };
+    use nexus_types::deployment::DiskFilter;
 
     /// An extension trait to apply a [`DiskFilter`] to a Diesel expression.
     ///
@@ -132,13 +130,9 @@ mod diesel_util {
             // These are only boxed for ease of reference above.
             let all_matching_policies: BoxedIterator<
                 crate::PhysicalDiskPolicy,
-            > = Box::new(
-                PhysicalDiskPolicy::all_matching(filter).map(Into::into),
-            );
+            > = Box::new(filter.all_matching_policies().map(Into::into));
             let all_matching_states: BoxedIterator<crate::PhysicalDiskState> =
-                Box::new(
-                    PhysicalDiskState::all_matching(filter).map(Into::into),
-                );
+                Box::new(filter.all_matching_states().map(Into::into));
 
             FilterDsl::filter(
                 self,

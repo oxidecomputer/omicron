@@ -1,4 +1,3 @@
-use crate::external_api::params;
 use nexus_db_lookup::LookupPath;
 use nexus_db_lookup::lookup;
 use nexus_db_queries::authz;
@@ -6,6 +5,7 @@ use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db;
 use nexus_db_queries::db::model::Name;
 use nexus_db_queries::db::model::SshKey;
+use nexus_types::external_api::ssh_key;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DeleteResult;
 use omicron_common::api::external::ListResultVec;
@@ -20,25 +20,25 @@ impl super::Nexus {
     pub fn ssh_key_lookup<'a>(
         &'a self,
         opctx: &'a OpContext,
-        ssh_key_selector: &'a params::SshKeySelector,
+        ssh_key_selector: &'a ssh_key::SshKeySelector,
     ) -> LookupResult<lookup::SshKey<'a>> {
         match ssh_key_selector {
-            params::SshKeySelector {
+            ssh_key::SshKeySelector {
                 silo_user_id: _,
                 ssh_key: NameOrId::Id(id),
             } => {
-                let ssh_key =
+                let key =
                     LookupPath::new(opctx, &self.db_datastore).ssh_key_id(*id);
-                Ok(ssh_key)
+                Ok(key)
             }
-            params::SshKeySelector {
+            ssh_key::SshKeySelector {
                 silo_user_id,
                 ssh_key: NameOrId::Name(name),
             } => {
-                let ssh_key = LookupPath::new(opctx, &self.db_datastore)
+                let key = LookupPath::new(opctx, &self.db_datastore)
                     .silo_user_id(*silo_user_id)
                     .ssh_key_name(Name::ref_cast(name));
-                Ok(ssh_key)
+                Ok(key)
             }
         }
     }
@@ -47,7 +47,7 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
         silo_user_id: SiloUserUuid,
-        params: params::SshKeyCreate,
+        params: ssh_key::SshKeyCreate,
     ) -> CreateResult<db::model::SshKey> {
         let ssh_key = db::model::SshKey::new(silo_user_id, params);
         let (.., authz_user) = LookupPath::new(opctx, self.datastore())

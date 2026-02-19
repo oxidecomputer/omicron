@@ -4,7 +4,6 @@
 
 //! Sleds, and the hardware and services within them.
 
-use crate::external_api::params;
 use crate::internal_api::params::{
     PhysicalDiskPutRequest, SledAgentInfo, ZpoolPutRequest,
 };
@@ -15,9 +14,9 @@ use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db;
 use nexus_types::deployment::DiskFilter;
 use nexus_types::deployment::SledFilter;
-use nexus_types::external_api::views::PhysicalDiskPolicy;
-use nexus_types::external_api::views::SledPolicy;
-use nexus_types::external_api::views::SledProvisionPolicy;
+use nexus_types::external_api::path_params;
+use nexus_types::external_api::physical_disk::PhysicalDiskPolicy;
+use nexus_types::external_api::sled::{SledPolicy, SledProvisionPolicy};
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
@@ -214,7 +213,7 @@ impl super::Nexus {
     pub fn physical_disk_lookup<'a>(
         &'a self,
         opctx: &'a OpContext,
-        disk_selector: &params::PhysicalDiskPath,
+        disk_selector: &path_params::PhysicalDiskPath,
     ) -> Result<lookup::PhysicalDisk<'a>, Error> {
         // XXX how to do typed UUID as part of dropshot path?
         Ok(LookupPath::new(&opctx, &self.db_datastore).physical_disk(
@@ -302,7 +301,7 @@ impl super::Nexus {
     pub(crate) async fn physical_disk_expunge(
         &self,
         opctx: &OpContext,
-        disk: params::PhysicalDiskPath,
+        disk: path_params::PhysicalDiskPath,
     ) -> Result<(), Error> {
         let physical_disk_lookup = self.physical_disk_lookup(opctx, &disk)?;
         let (authz_disk,) =

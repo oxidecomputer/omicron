@@ -22,7 +22,7 @@ use nexus_db_model::IpNet;
 use nexus_db_model::IpVersion;
 use nexus_db_queries::db::datastore::ExternalSubnetBeginOpResult;
 use nexus_db_queries::db::datastore::ExternalSubnetCompleteOpResult;
-use nexus_types::external_api::views;
+use nexus_types::external_api::external_subnet;
 use nexus_types::identity::Resource;
 use serde::Deserialize;
 use serde::Serialize;
@@ -195,7 +195,7 @@ async fn ssa_update_opte_undo(
 
 async fn ssa_complete_attach(
     sagactx: NexusActionContext,
-) -> Result<views::ExternalSubnet, ActionError> {
+) -> Result<external_subnet::ExternalSubnet, ActionError> {
     let osagactx = sagactx.user_data();
     let log = osagactx.log();
     let datastore = osagactx.datastore();
@@ -269,11 +269,11 @@ pub(crate) mod test {
     use nexus_test_utils::resource_helpers::create_subnet_pool;
     use nexus_test_utils::resource_helpers::create_subnet_pool_member;
     use nexus_test_utils_macros::nexus_test;
-    use nexus_types::external_api::params;
-    use nexus_types::external_api::views::ExternalSubnet;
-    use nexus_types::external_api::views::Project;
-    use nexus_types::external_api::views::SubnetPool;
-    use nexus_types::external_api::views::SubnetPoolMember;
+    use nexus_types::external_api::external_subnet;
+    use nexus_types::external_api::external_subnet::ExternalSubnet;
+    use nexus_types::external_api::project::Project;
+    use nexus_types::external_api::subnet_pool::SubnetPool;
+    use nexus_types::external_api::subnet_pool::SubnetPoolMember;
     use omicron_common::address::IpVersion;
     use omicron_common::api::external::NameOrId;
     use omicron_common::api::external::SimpleIdentityOrName;
@@ -590,7 +590,7 @@ pub(crate) mod test {
         let (.., db_subnet) = nexus
             .external_subnet_lookup(
                 &opctx,
-                params::ExternalSubnetSelector {
+                external_subnet::ExternalSubnetSelector {
                     project: None,
                     external_subnet: NameOrId::Id(subnet_id),
                 },

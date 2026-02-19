@@ -4,7 +4,7 @@
 
 use chrono::{DateTime, Utc};
 use nexus_db_schema::schema::console_session;
-use nexus_types::external_api::views;
+use nexus_types::external_api::device;
 use omicron_uuid_kinds::SiloUserKind;
 use omicron_uuid_kinds::SiloUserUuid;
 use omicron_uuid_kinds::{ConsoleSessionKind, ConsoleSessionUuid, GenericUuid};
@@ -54,7 +54,7 @@ impl ConsoleSession {
     }
 }
 
-impl From<ConsoleSession> for views::ConsoleSession {
+impl From<ConsoleSession> for device::ConsoleSession {
     fn from(session: ConsoleSession) -> Self {
         Self {
             id: session.id.into_untyped_uuid(),

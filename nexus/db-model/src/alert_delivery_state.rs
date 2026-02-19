@@ -3,7 +3,7 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use super::impl_enum_type;
-use nexus_types::external_api::views;
+use nexus_types::external_api::alert;
 use serde::Deserialize;
 use serde::Serialize;
 use std::fmt;
@@ -35,11 +35,11 @@ impl_enum_type!(
 impl fmt::Display for AlertDeliveryState {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         // Forward to the canonical implementation in nexus-types.
-        views::AlertDeliveryState::from(*self).fmt(f)
+        alert::AlertDeliveryState::from(*self).fmt(f)
     }
 }
 
-impl From<AlertDeliveryState> for views::AlertDeliveryState {
+impl From<AlertDeliveryState> for alert::AlertDeliveryState {
     fn from(trigger: AlertDeliveryState) -> Self {
         match trigger {
             AlertDeliveryState::Pending => Self::Pending,
@@ -49,12 +49,12 @@ impl From<AlertDeliveryState> for views::AlertDeliveryState {
     }
 }
 
-impl From<views::AlertDeliveryState> for AlertDeliveryState {
-    fn from(trigger: views::AlertDeliveryState) -> Self {
+impl From<alert::AlertDeliveryState> for AlertDeliveryState {
+    fn from(trigger: alert::AlertDeliveryState) -> Self {
         match trigger {
-            views::AlertDeliveryState::Pending => Self::Pending,
-            views::AlertDeliveryState::Failed => Self::Failed,
-            views::AlertDeliveryState::Delivered => Self::Delivered,
+            alert::AlertDeliveryState::Pending => Self::Pending,
+            alert::AlertDeliveryState::Failed => Self::Failed,
+            alert::AlertDeliveryState::Delivered => Self::Delivered,
         }
     }
 }
@@ -62,6 +62,6 @@ impl From<views::AlertDeliveryState> for AlertDeliveryState {
 impl FromStr for AlertDeliveryState {
     type Err = omicron_common::api::external::Error;
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        views::AlertDeliveryState::from_str(s).map(Into::into)
+        alert::AlertDeliveryState::from_str(s).map(Into::into)
     }
 }

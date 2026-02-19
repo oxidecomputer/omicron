@@ -10,16 +10,17 @@ use super::subsaga_append;
 use crate::app::MAX_DISKS_PER_INSTANCE;
 use crate::app::sagas::declare_saga_actions;
 use crate::app::sagas::disk_create::{self, SagaDiskCreate};
-use crate::external_api::params;
 use nexus_db_lookup::LookupPath;
 use nexus_db_model::NetworkInterfaceKind;
 use nexus_db_model::{ExternalIp, IpVersion};
 use nexus_db_queries::db::queries::network_interface::InsertError as InsertNicError;
 use nexus_db_queries::{authn, authz, db};
 use nexus_defaults::DEFAULT_PRIMARY_NIC_NAME;
-use nexus_types::external_api::params::{
-    InstanceDiskAttachment, PrivateIpStackCreate,
+use nexus_types::external_api::instance::{
+    InstanceDiskAttachment, InstanceNetworkInterfaceAttachment,
+    PrivateIpStackCreate,
 };
+use nexus_types::external_api::{instance, ip_pool, multicast};
 use nexus_types::identity::Resource;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::Name;
@@ -47,7 +48,7 @@ use uuid::Uuid;
 pub(crate) struct Params {
     pub serialized_authn: authn::saga::Serialized,
     pub project_id: Uuid,
-    pub create_params: params::InstanceCreate,
+    pub create_params: instance::InstanceCreate,
     pub boundary_switches: HashSet<SwitchLocation>,
 }
 
@@ -76,7 +77,7 @@ enum DefaultNicKind {
 #[derive(Clone, Debug, Deserialize, Serialize)]
 enum InstanceNicSpec {
     Default(DefaultNicKind),
-    Custom(params::InstanceNetworkInterfaceCreate),
+    Custom(instance::InstanceNetworkInterfaceCreate),
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -95,7 +96,7 @@ struct ExternalIpParams {
     instance_id: InstanceUuid,
     project_id: Uuid,
     new_eip_id: Uuid,
-    eip_spec: params::ExternalIpCreate,
+    eip_spec: instance::ExternalIpCreate,
     ip_index: usize,
 }
 
@@ -103,7 +104,7 @@ struct ExternalIpParams {
 struct MulticastParams {
     serialized_authn: authn::saga::Serialized,
     instance_id: InstanceUuid,
-    join_spec: params::MulticastGroupJoinSpec,
+    join_spec: multicast::MulticastGroupJoinSpec,
 }
 
 // instance create saga: actions
@@ -239,22 +240,20 @@ impl NexusSaga for SagaInstanceCreate {
         // above) handles much of the details.
         let mut nic_specs = vec![];
         match &params.create_params.network_interfaces {
-            params::InstanceNetworkInterfaceAttachment::DefaultIpv4 => {
+            InstanceNetworkInterfaceAttachment::DefaultIpv4 => {
                 nic_specs.push(InstanceNicSpec::Default(DefaultNicKind::Ipv4))
             }
-            params::InstanceNetworkInterfaceAttachment::DefaultIpv6 => {
+            InstanceNetworkInterfaceAttachment::DefaultIpv6 => {
                 nic_specs.push(InstanceNicSpec::Default(DefaultNicKind::Ipv6))
             }
-            params::InstanceNetworkInterfaceAttachment::DefaultDualStack => {
-                nic_specs
-                    .push(InstanceNicSpec::Default(DefaultNicKind::DualStack))
-            }
-            params::InstanceNetworkInterfaceAttachment::Create(creates) => {
+            InstanceNetworkInterfaceAttachment::DefaultDualStack => nic_specs
+                .push(InstanceNicSpec::Default(DefaultNicKind::DualStack)),
+            InstanceNetworkInterfaceAttachment::Create(creates) => {
                 nic_specs.extend(
                     creates.into_iter().cloned().map(InstanceNicSpec::Custom),
                 );
             }
-            params::InstanceNetworkInterfaceAttachment::None => {}
+            InstanceNetworkInterfaceAttachment::None => {}
         }
 
         for (i, nic_spec) in nic_specs.into_iter().enumerate() {
@@ -302,7 +301,7 @@ impl NexusSaga for SagaInstanceCreate {
         // https://github.com/oxidecomputer/omicron/issues/9683, but as noted
         // above, fixing #4317 is the right long-term solution.
         match &params.create_params.network_interfaces {
-            params::InstanceNetworkInterfaceAttachment::Create(nics) => {
+            InstanceNetworkInterfaceAttachment::Create(nics) => {
                 if let Some(primary) = nics.first() {
                     if primary.ip_config.has_ipv4_stack() {
                         builder.append(Node::action(
@@ -314,7 +313,7 @@ impl NexusSaga for SagaInstanceCreate {
                     }
                 }
             }
-            params::InstanceNetworkInterfaceAttachment::DefaultIpv4 => {
+            InstanceNetworkInterfaceAttachment::DefaultIpv4 => {
                 builder.append(Node::action(
                     "snat_ipv4_id",
                     "CreateSnatIpv4Id",
@@ -322,8 +321,8 @@ impl NexusSaga for SagaInstanceCreate {
                 ));
                 builder.append(create_snat_ipv4_action());
             }
-            params::InstanceNetworkInterfaceAttachment::DefaultIpv6 => {}
-            params::InstanceNetworkInterfaceAttachment::DefaultDualStack => {
+            InstanceNetworkInterfaceAttachment::DefaultIpv6 => {}
+            InstanceNetworkInterfaceAttachment::DefaultDualStack => {
                 builder.append(Node::action(
                     "snat_ipv4_id",
                     "CreateSnatIpv4Id",
@@ -331,7 +330,7 @@ impl NexusSaga for SagaInstanceCreate {
                 ));
                 builder.append(create_snat_ipv4_action());
             }
-            params::InstanceNetworkInterfaceAttachment::None => {}
+            InstanceNetworkInterfaceAttachment::None => {}
         }
 
         // See the comment above where we add nodes for creating NICs.  We use
@@ -637,7 +636,7 @@ async fn sic_create_network_interface_undo(
 async fn create_custom_network_interface(
     sagactx: &NexusActionContext,
     saga_params: &NicParams,
-    interface_params: &params::InstanceNetworkInterfaceCreate,
+    interface_params: &instance::InstanceNetworkInterfaceCreate,
 ) -> Result<(), ActionError> {
     let NicParams { serialized_authn, instance_id, interface_id, .. } =
         saga_params;
@@ -747,7 +746,7 @@ async fn create_default_primary_network_interface(
     let iface_name =
         Name::try_from(DEFAULT_PRIMARY_NIC_NAME.to_string()).unwrap();
 
-    let interface_params = params::InstanceNetworkInterfaceCreate {
+    let interface_params = instance::InstanceNetworkInterfaceCreate {
         identity: IdentityMetadataCreateParams {
             name: iface_name.clone(),
             description: format!(
@@ -905,12 +904,14 @@ async fn sic_allocate_instance_external_ip(
     // Runtime state should never be able to make 'complete_op' fallible.
     let ip = match eip_spec {
         // Allocate a new IP address from the target, possibly default, pool
-        params::ExternalIpCreate::Ephemeral { pool_selector } => {
+        instance::ExternalIpCreate::Ephemeral { pool_selector } => {
             let (pool, ip_version) = match pool_selector {
-                params::PoolSelector::Explicit { pool } => {
+                ip_pool::PoolSelector::Explicit { pool } => {
                     (Some(pool.clone()), None)
                 }
-                params::PoolSelector::Auto { ip_version } => (None, ip_version),
+                ip_pool::PoolSelector::Auto { ip_version } => {
+                    (None, ip_version)
+                }
             };
             let pool = if let Some(name_or_id) = pool {
                 Some(
@@ -941,7 +942,7 @@ async fn sic_allocate_instance_external_ip(
                 .0
         }
         // Set the parent of an existing floating IP to the new instance's ID.
-        params::ExternalIpCreate::Floating { floating_ip } => {
+        instance::ExternalIpCreate::Floating { floating_ip } => {
             let (.., authz_project, authz_fip, db_fip) = match &floating_ip {
                 NameOrId::Name(name) => LookupPath::new(&opctx, datastore)
                     .project_id(project_id)
@@ -1027,10 +1028,10 @@ async fn sic_allocate_instance_external_ip_undo(
     };
 
     match eip_spec {
-        params::ExternalIpCreate::Ephemeral { .. } => {
+        instance::ExternalIpCreate::Ephemeral { .. } => {
             datastore.deallocate_external_ip(&opctx, ip.id).await?;
         }
-        params::ExternalIpCreate::Floating { .. } => {
+        instance::ExternalIpCreate::Floating { .. } => {
             let (.., authz_fip) = LookupPath::new(&opctx, datastore)
                 .floating_ip_id(ip.id)
                 .lookup_for(authz::Action::Modify)
@@ -1165,7 +1166,7 @@ async fn sic_join_instance_multicast_group_undo(
     let instance_id = sagactx.lookup::<InstanceUuid>("instance_id")?;
 
     // Look up the multicast group by identifier using the existing nexus method
-    let multicast_group_selector = params::MulticastGroupSelector {
+    let multicast_group_selector = multicast::MulticastGroupSelector {
         multicast_group: join_spec.group.clone(),
     };
     let multicast_group_lookup = osagactx
@@ -1473,7 +1474,7 @@ pub mod test {
     use crate::{
         app::saga::create_saga_dag, app::sagas::instance_create::Params,
         app::sagas::instance_create::SagaInstanceCreate,
-        app::sagas::test_helpers, external_api::params,
+        app::sagas::test_helpers,
     };
     use async_bb8_diesel::AsyncRunQueryDsl;
     use diesel::{
@@ -1488,6 +1489,8 @@ pub mod test {
     use nexus_test_utils::resource_helpers::create_disk;
     use nexus_test_utils::resource_helpers::create_project;
     use nexus_test_utils_macros::nexus_test;
+    use nexus_types::external_api::instance as instance_types;
+    use nexus_types::external_api::ip_pool::PoolSelector;
     use omicron_common::address::IpVersion;
     use omicron_common::api::external::{
         ByteCount, IdentityMetadataCreateParams, InstanceCpuCount,
@@ -1516,7 +1519,7 @@ pub mod test {
         Params {
             serialized_authn: Serialized::for_opctx(opctx),
             project_id,
-            create_params: params::InstanceCreate {
+            create_params: instance_types::InstanceCreate {
                 identity: IdentityMetadataCreateParams {
                     name: INSTANCE_NAME.parse().unwrap(),
                     description: "My instance".to_string(),
@@ -1527,17 +1530,19 @@ pub mod test {
                 user_data: vec![],
                 ssh_public_keys: None,
                 network_interfaces:
-                    params::InstanceNetworkInterfaceAttachment::DefaultDualStack,
-                external_ips: vec![params::ExternalIpCreate::Ephemeral {
-                    pool_selector: params::PoolSelector::Auto {
+                    instance_types::InstanceNetworkInterfaceAttachment::DefaultDualStack,
+                external_ips: vec![instance_types::ExternalIpCreate::Ephemeral {
+                    pool_selector: PoolSelector::Auto {
                         ip_version: Some(IpVersion::V4),
                     },
                 }],
-                boot_disk: Some(params::InstanceDiskAttachment::Attach(
-                    params::InstanceDiskAttach {
-                        name: DISK_NAME.parse().unwrap(),
-                    },
-                )),
+                boot_disk: Some(
+                    instance_types::InstanceDiskAttachment::Attach(
+                        instance_types::InstanceDiskAttach {
+                            name: DISK_NAME.parse().unwrap(),
+                        },
+                    ),
+                ),
                 cpu_platform: None,
                 disks: Vec::new(),
                 start: false,

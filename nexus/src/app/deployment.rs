@@ -20,7 +20,7 @@ use nexus_types::deployment::BlueprintZoneImageSource;
 use nexus_types::deployment::PlannerConfig;
 use nexus_types::deployment::PlanningInput;
 use nexus_types::deployment::SledFilter;
-use nexus_types::external_api::params;
+use nexus_types::external_api::update;
 use nexus_types::internal_api::views::UpdateStatus;
 use nexus_types::inventory::Collection;
 use omicron_common::api::external::CreateResult;
@@ -273,7 +273,7 @@ impl super::Nexus {
     pub(crate) async fn target_release_update(
         &self,
         opctx: &OpContext,
-        params: params::SetTargetReleaseParams,
+        params: update::SetTargetReleaseParams,
         intent: SetTargetReleaseIntent,
     ) -> Result<(), Error> {
         let new_system_version = params.system_version;

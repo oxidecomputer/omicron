@@ -24,8 +24,11 @@ use nexus_test_utils::resource_helpers::object_create_no_body;
 use nexus_test_utils::resource_helpers::object_delete;
 use nexus_test_utils::resource_helpers::object_get;
 use nexus_test_utils_macros::nexus_test;
-use nexus_types::external_api::views::{self, Silo};
-use nexus_types::external_api::{params, shared};
+use nexus_types::external_api::identity_provider;
+use nexus_types::external_api::policy;
+use nexus_types::external_api::scim;
+use nexus_types::external_api::silo;
+use nexus_types::external_api::user;
 use nexus_types::identity::Asset;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_nexus::TestInterfaces;
@@ -44,9 +47,9 @@ async fn test_create_a_saml_scim_silo(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
 
     const SILO_NAME: &str = "saml-scim-silo";
-    create_silo(&client, SILO_NAME, true, shared::SiloIdentityMode::SamlScim)
+    create_silo(&client, SILO_NAME, true, silo::SiloIdentityMode::SamlScim)
         .await;
-    let silo: Silo = NexusRequest::object_get(
+    let silo: silo::Silo = NexusRequest::object_get(
         &client,
         &format!("/v1/system/silos/{SILO_NAME}"),
     )
@@ -59,10 +62,10 @@ async fn test_create_a_saml_scim_silo(cptestctx: &ControlPlaneTestContext) {
 
     // Assert we can create a SAML IDP for this identity type
 
-    let silo_saml_idp: views::SamlIdentityProvider = object_create(
+    let silo_saml_idp: identity_provider::SamlIdentityProvider = object_create(
         client,
         &format!("/v1/system/identity-providers/saml?silo={SILO_NAME}"),
-        &params::SamlIdentityProviderCreate {
+        &identity_provider::SamlIdentityProviderCreate {
             identity: IdentityMetadataCreateParams {
                 name: "some-totally-real-saml-provider"
                     .to_string()
@@ -71,10 +74,11 @@ async fn test_create_a_saml_scim_silo(cptestctx: &ControlPlaneTestContext) {
                 description: "a demo provider".to_string(),
             },
 
-            idp_metadata_source: params::IdpMetadataSource::Base64EncodedXml {
-                data: base64::engine::general_purpose::STANDARD
-                    .encode(SAML_IDP_DESCRIPTOR),
-            },
+            idp_metadata_source:
+                identity_provider::IdpMetadataSource::Base64EncodedXml {
+                    data: base64::engine::general_purpose::STANDARD
+                        .encode(SAML_IDP_DESCRIPTOR),
+                },
 
             idp_entity_id: "entity_id".to_string(),
             sp_client_id: "client_id".to_string(),
@@ -158,38 +162,40 @@ async fn test_no_jit_for_saml_scim_silos(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
 
     const SILO_NAME: &str = "saml-scim-silo";
-    create_silo(&client, SILO_NAME, true, shared::SiloIdentityMode::SamlScim)
+    create_silo(&client, SILO_NAME, true, silo::SiloIdentityMode::SamlScim)
         .await;
 
-    let _silo_saml_idp: views::SamlIdentityProvider = object_create(
-        client,
-        &format!("/v1/system/identity-providers/saml?silo={SILO_NAME}"),
-        &params::SamlIdentityProviderCreate {
-            identity: IdentityMetadataCreateParams {
-                name: "some-totally-real-saml-provider"
-                    .to_string()
-                    .parse()
-                    .unwrap(),
-                description: "a demo provider".to_string(),
+    let _silo_saml_idp: identity_provider::SamlIdentityProvider =
+        object_create(
+            client,
+            &format!("/v1/system/identity-providers/saml?silo={SILO_NAME}"),
+            &identity_provider::SamlIdentityProviderCreate {
+                identity: IdentityMetadataCreateParams {
+                    name: "some-totally-real-saml-provider"
+                        .to_string()
+                        .parse()
+                        .unwrap(),
+                    description: "a demo provider".to_string(),
+                },
+
+                idp_metadata_source:
+                    identity_provider::IdpMetadataSource::Base64EncodedXml {
+                        data: base64::engine::general_purpose::STANDARD
+                            .encode(SAML_RESPONSE_IDP_DESCRIPTOR),
+                    },
+
+                idp_entity_id: "https://some.idp.test/oxide_rack/".to_string(),
+                sp_client_id: "client_id".to_string(),
+                acs_url: "https://customer.site/oxide_rack/saml".to_string(),
+                slo_url: "https://customer.site/oxide_rack/saml".to_string(),
+                technical_contact_email: "technical@fake".to_string(),
+
+                signing_keypair: None,
+
+                group_attribute_name: Some("groups".into()),
             },
-
-            idp_metadata_source: params::IdpMetadataSource::Base64EncodedXml {
-                data: base64::engine::general_purpose::STANDARD
-                    .encode(SAML_RESPONSE_IDP_DESCRIPTOR),
-            },
-
-            idp_entity_id: "https://some.idp.test/oxide_rack/".to_string(),
-            sp_client_id: "client_id".to_string(),
-            acs_url: "https://customer.site/oxide_rack/saml".to_string(),
-            slo_url: "https://customer.site/oxide_rack/saml".to_string(),
-            technical_contact_email: "technical@fake".to_string(),
-
-            signing_keypair: None,
-
-            group_attribute_name: Some("groups".into()),
-        },
-    )
-    .await;
+        )
+        .await;
 
     let nexus = &cptestctx.server.server_context().nexus;
     nexus.set_samael_max_issue_delay(
@@ -228,13 +234,13 @@ async fn test_scim_client_token_crud(cptestctx: &ControlPlaneTestContext) {
     // Create a Silo, then grant the PrivilegedUser the Admin role on it
 
     const SILO_NAME: &str = "saml-scim-silo";
-    create_silo(&client, SILO_NAME, true, shared::SiloIdentityMode::SamlScim)
+    create_silo(&client, SILO_NAME, true, silo::SiloIdentityMode::SamlScim)
         .await;
 
     grant_iam(
         client,
         &format!("/v1/system/silos/{SILO_NAME}"),
-        shared::SiloRole::Admin,
+        policy::SiloRole::Admin,
         USER_TEST_PRIVILEGED.id(),
         AuthnMode::PrivilegedUser,
     )
@@ -242,7 +248,7 @@ async fn test_scim_client_token_crud(cptestctx: &ControlPlaneTestContext) {
 
     // Initially, there should be no tokens created during silo create.
 
-    let tokens: Vec<views::ScimClientBearerToken> =
+    let tokens: Vec<scim::ScimClientBearerToken> =
         object_get(client, &format!("/v1/system/scim/tokens?silo={SILO_NAME}"))
             .await;
 
@@ -250,7 +256,7 @@ async fn test_scim_client_token_crud(cptestctx: &ControlPlaneTestContext) {
 
     // Fleet admins can create SCIM client tokens
 
-    let created_token_1: views::ScimClientBearerTokenValue =
+    let created_token_1: scim::ScimClientBearerTokenValue =
         object_create_no_body(
             client,
             &format!("/v1/system/scim/tokens?silo={SILO_NAME}"),
@@ -259,7 +265,7 @@ async fn test_scim_client_token_crud(cptestctx: &ControlPlaneTestContext) {
 
     // Now there's one!
 
-    let tokens: Vec<views::ScimClientBearerToken> =
+    let tokens: Vec<scim::ScimClientBearerToken> =
         object_get(client, &format!("/v1/system/scim/tokens?silo={SILO_NAME}"))
             .await;
 
@@ -268,7 +274,7 @@ async fn test_scim_client_token_crud(cptestctx: &ControlPlaneTestContext) {
 
     // Get that specific token
 
-    let token: views::ScimClientBearerToken = object_get(
+    let token: scim::ScimClientBearerToken = object_get(
         client,
         &format!(
             "/v1/system/scim/tokens/{}?silo={SILO_NAME}",
@@ -281,7 +287,7 @@ async fn test_scim_client_token_crud(cptestctx: &ControlPlaneTestContext) {
 
     // Create a new token
 
-    let created_token_2: views::ScimClientBearerTokenValue =
+    let created_token_2: scim::ScimClientBearerTokenValue =
         object_create_no_body(
             client,
             &format!("/v1/system/scim/tokens?silo={SILO_NAME}"),
@@ -290,7 +296,7 @@ async fn test_scim_client_token_crud(cptestctx: &ControlPlaneTestContext) {
 
     // Now there's two!
 
-    let tokens: Vec<views::ScimClientBearerToken> =
+    let tokens: Vec<scim::ScimClientBearerToken> =
         object_get(client, &format!("/v1/system/scim/tokens?silo={SILO_NAME}"))
             .await;
 
@@ -300,14 +306,14 @@ async fn test_scim_client_token_crud(cptestctx: &ControlPlaneTestContext) {
 
     // Create one more
 
-    let created_token_3: views::ScimClientBearerTokenValue =
+    let created_token_3: scim::ScimClientBearerTokenValue =
         object_create_no_body(
             client,
             &format!("/v1/system/scim/tokens?silo={SILO_NAME}"),
         )
         .await;
 
-    let tokens: Vec<views::ScimClientBearerToken> =
+    let tokens: Vec<scim::ScimClientBearerToken> =
         object_get(client, &format!("/v1/system/scim/tokens?silo={SILO_NAME}"))
             .await;
 
@@ -329,7 +335,7 @@ async fn test_scim_client_token_crud(cptestctx: &ControlPlaneTestContext) {
 
     // Check there's two
 
-    let tokens: Vec<views::ScimClientBearerToken> =
+    let tokens: Vec<scim::ScimClientBearerToken> =
         object_get(client, &format!("/v1/system/scim/tokens?silo={SILO_NAME}"))
             .await;
 
@@ -347,16 +353,16 @@ async fn test_scim_client_token_tenancy(cptestctx: &ControlPlaneTestContext) {
     const SILO_1_NAME: &str = "saml-scim-silo-1";
     const SILO_2_NAME: &str = "saml-scim-silo-2";
 
-    create_silo(&client, SILO_1_NAME, true, shared::SiloIdentityMode::SamlScim)
+    create_silo(&client, SILO_1_NAME, true, silo::SiloIdentityMode::SamlScim)
         .await;
 
-    create_silo(&client, SILO_2_NAME, true, shared::SiloIdentityMode::SamlScim)
+    create_silo(&client, SILO_2_NAME, true, silo::SiloIdentityMode::SamlScim)
         .await;
 
     grant_iam(
         client,
         &format!("/v1/system/silos/{SILO_1_NAME}"),
-        shared::SiloRole::Admin,
+        policy::SiloRole::Admin,
         USER_TEST_PRIVILEGED.id(),
         AuthnMode::PrivilegedUser,
     )
@@ -365,7 +371,7 @@ async fn test_scim_client_token_tenancy(cptestctx: &ControlPlaneTestContext) {
     grant_iam(
         client,
         &format!("/v1/system/silos/{SILO_2_NAME}"),
-        shared::SiloRole::Admin,
+        policy::SiloRole::Admin,
         USER_TEST_PRIVILEGED.id(),
         AuthnMode::PrivilegedUser,
     )
@@ -373,7 +379,7 @@ async fn test_scim_client_token_tenancy(cptestctx: &ControlPlaneTestContext) {
 
     // Initially, there should be no tokens created during silo create.
 
-    let tokens: Vec<views::ScimClientBearerToken> = object_get(
+    let tokens: Vec<scim::ScimClientBearerToken> = object_get(
         client,
         &format!("/v1/system/scim/tokens?silo={SILO_1_NAME}"),
     )
@@ -381,7 +387,7 @@ async fn test_scim_client_token_tenancy(cptestctx: &ControlPlaneTestContext) {
 
     assert!(tokens.is_empty());
 
-    let tokens: Vec<views::ScimClientBearerToken> = object_get(
+    let tokens: Vec<scim::ScimClientBearerToken> = object_get(
         client,
         &format!("/v1/system/scim/tokens?silo={SILO_2_NAME}"),
     )
@@ -391,7 +397,7 @@ async fn test_scim_client_token_tenancy(cptestctx: &ControlPlaneTestContext) {
 
     // Create a token in one of the Silos
 
-    let _created_token_1: views::ScimClientBearerTokenValue =
+    let _created_token_1: scim::ScimClientBearerTokenValue =
         object_create_no_body(
             client,
             &format!("/v1/system/scim/tokens?silo={SILO_1_NAME}"),
@@ -400,7 +406,7 @@ async fn test_scim_client_token_tenancy(cptestctx: &ControlPlaneTestContext) {
 
     // Now there's one but only in the first Silo
 
-    let tokens: Vec<views::ScimClientBearerToken> = object_get(
+    let tokens: Vec<scim::ScimClientBearerToken> = object_get(
         client,
         &format!("/v1/system/scim/tokens?silo={SILO_1_NAME}"),
     )
@@ -408,7 +414,7 @@ async fn test_scim_client_token_tenancy(cptestctx: &ControlPlaneTestContext) {
 
     assert!(!tokens.is_empty());
 
-    let tokens: Vec<views::ScimClientBearerToken> = object_get(
+    let tokens: Vec<scim::ScimClientBearerToken> = object_get(
         client,
         &format!("/v1/system/scim/tokens?silo={SILO_2_NAME}"),
     )
@@ -426,13 +432,13 @@ async fn test_scim_client_token_bearer_auth(
     // Create a Silo, then grant the PrivilegedUser the Admin role on it
 
     const SILO_NAME: &str = "saml-scim-silo";
-    create_silo(&client, SILO_NAME, true, shared::SiloIdentityMode::SamlScim)
+    create_silo(&client, SILO_NAME, true, silo::SiloIdentityMode::SamlScim)
         .await;
 
     grant_iam(
         client,
         &format!("/v1/system/silos/{SILO_NAME}"),
-        shared::SiloRole::Admin,
+        policy::SiloRole::Admin,
         USER_TEST_PRIVILEGED.id(),
         AuthnMode::PrivilegedUser,
     )
@@ -440,7 +446,7 @@ async fn test_scim_client_token_bearer_auth(
 
     // Create a token
 
-    let created_token: views::ScimClientBearerTokenValue =
+    let created_token: scim::ScimClientBearerTokenValue =
         object_create_no_body(
             client,
             &format!("/v1/system/scim/tokens?silo={SILO_NAME}"),
@@ -472,13 +478,9 @@ async fn test_scim_client_no_auth_with_expired_token(
 
     const SILO_NAME: &str = "saml-scim-silo";
 
-    let silo = create_silo(
-        &client,
-        SILO_NAME,
-        true,
-        shared::SiloIdentityMode::SamlScim,
-    )
-    .await;
+    let silo =
+        create_silo(&client, SILO_NAME, true, silo::SiloIdentityMode::SamlScim)
+            .await;
 
     // Manually create an expired token
 
@@ -527,13 +529,13 @@ async fn test_scim2_crate_self_test(cptestctx: &ControlPlaneTestContext) {
     // Create a Silo, then grant the PrivilegedUser the Admin role on it
 
     const SILO_NAME: &str = "saml-scim-silo";
-    create_silo(&client, SILO_NAME, true, shared::SiloIdentityMode::SamlScim)
+    create_silo(&client, SILO_NAME, true, silo::SiloIdentityMode::SamlScim)
         .await;
 
     grant_iam(
         client,
         &format!("/v1/system/silos/{SILO_NAME}"),
-        shared::SiloRole::Admin,
+        policy::SiloRole::Admin,
         opctx.authn.actor().unwrap().silo_user_id().unwrap(),
         AuthnMode::PrivilegedUser,
     )
@@ -541,7 +543,7 @@ async fn test_scim2_crate_self_test(cptestctx: &ControlPlaneTestContext) {
 
     // Create a token
 
-    let created_token: views::ScimClientBearerTokenValue =
+    let created_token: scim::ScimClientBearerTokenValue =
         object_create_no_body(
             client,
             &format!("/v1/system/scim/tokens?silo={}", SILO_NAME,),
@@ -573,40 +575,42 @@ async fn test_disabling_scim_user(cptestctx: &ControlPlaneTestContext) {
     // Create the Silo
 
     const SILO_NAME: &str = "saml-scim-silo";
-    create_silo(&client, SILO_NAME, true, shared::SiloIdentityMode::SamlScim)
+    create_silo(&client, SILO_NAME, true, silo::SiloIdentityMode::SamlScim)
         .await;
 
     // Create a SAML IDP
 
-    let _silo_saml_idp: views::SamlIdentityProvider = object_create(
-        client,
-        &format!("/v1/system/identity-providers/saml?silo={}", SILO_NAME),
-        &params::SamlIdentityProviderCreate {
-            identity: IdentityMetadataCreateParams {
-                name: "some-totally-real-saml-provider"
-                    .to_string()
-                    .parse()
-                    .unwrap(),
-                description: "a demo provider".to_string(),
+    let _silo_saml_idp: identity_provider::SamlIdentityProvider =
+        object_create(
+            client,
+            &format!("/v1/system/identity-providers/saml?silo={}", SILO_NAME),
+            &identity_provider::SamlIdentityProviderCreate {
+                identity: IdentityMetadataCreateParams {
+                    name: "some-totally-real-saml-provider"
+                        .to_string()
+                        .parse()
+                        .unwrap(),
+                    description: "a demo provider".to_string(),
+                },
+
+                idp_metadata_source:
+                    identity_provider::IdpMetadataSource::Base64EncodedXml {
+                        data: base64::engine::general_purpose::STANDARD
+                            .encode(SAML_RESPONSE_IDP_DESCRIPTOR),
+                    },
+
+                idp_entity_id: "https://some.idp.test/oxide_rack/".to_string(),
+                sp_client_id: "client_id".to_string(),
+                acs_url: "https://customer.site/oxide_rack/saml".to_string(),
+                slo_url: "https://customer.site/oxide_rack/saml".to_string(),
+                technical_contact_email: "technical@fake".to_string(),
+
+                signing_keypair: None,
+
+                group_attribute_name: Some("groups".into()),
             },
-
-            idp_metadata_source: params::IdpMetadataSource::Base64EncodedXml {
-                data: base64::engine::general_purpose::STANDARD
-                    .encode(SAML_RESPONSE_IDP_DESCRIPTOR),
-            },
-
-            idp_entity_id: "https://some.idp.test/oxide_rack/".to_string(),
-            sp_client_id: "client_id".to_string(),
-            acs_url: "https://customer.site/oxide_rack/saml".to_string(),
-            slo_url: "https://customer.site/oxide_rack/saml".to_string(),
-            technical_contact_email: "technical@fake".to_string(),
-
-            signing_keypair: None,
-
-            group_attribute_name: Some("groups".into()),
-        },
-    )
-    .await;
+        )
+        .await;
 
     nexus.set_samael_max_issue_delay(
         chrono::Utc::now()
@@ -646,7 +650,7 @@ async fn test_disabling_scim_user(cptestctx: &ControlPlaneTestContext) {
     grant_iam(
         client,
         &format!("/v1/system/silos/{SILO_NAME}"),
-        shared::SiloRole::Admin,
+        policy::SiloRole::Admin,
         opctx.authn.actor().unwrap().silo_user_id().unwrap(),
         AuthnMode::PrivilegedUser,
     )
@@ -654,7 +658,7 @@ async fn test_disabling_scim_user(cptestctx: &ControlPlaneTestContext) {
 
     // Create a token
 
-    let created_token: views::ScimClientBearerTokenValue =
+    let created_token: scim::ScimClientBearerTokenValue =
         object_create_no_body(
             client,
             &format!("/v1/system/scim/tokens?silo={}", SILO_NAME,),
@@ -715,7 +719,7 @@ async fn test_disabling_scim_user(cptestctx: &ControlPlaneTestContext) {
     let session_cookie_value =
         result.headers["Set-Cookie"].to_str().unwrap().to_string();
 
-    let me: views::CurrentUser = NexusRequest::new(
+    let me: user::CurrentUser = NexusRequest::new(
         RequestBuilder::new(client, Method::GET, "/v1/me")
             .header(http::header::COOKIE, session_cookie_value.clone())
             .expect_status(Some(StatusCode::OK)),
@@ -816,7 +820,7 @@ async fn test_scim_user_search(cptestctx: &ControlPlaneTestContext) {
     // Create the Silo
 
     const SILO_NAME: &str = "saml-scim-silo";
-    create_silo(&client, SILO_NAME, true, shared::SiloIdentityMode::SamlScim)
+    create_silo(&client, SILO_NAME, true, silo::SiloIdentityMode::SamlScim)
         .await;
 
     // Grant permissions on this silo for the PrivilegedUser
@@ -824,7 +828,7 @@ async fn test_scim_user_search(cptestctx: &ControlPlaneTestContext) {
     grant_iam(
         client,
         &format!("/v1/system/silos/{SILO_NAME}"),
-        shared::SiloRole::Admin,
+        policy::SiloRole::Admin,
         opctx.authn.actor().unwrap().silo_user_id().unwrap(),
         AuthnMode::PrivilegedUser,
     )
@@ -832,7 +836,7 @@ async fn test_scim_user_search(cptestctx: &ControlPlaneTestContext) {
 
     // Create a token
 
-    let created_token: views::ScimClientBearerTokenValue =
+    let created_token: scim::ScimClientBearerTokenValue =
         object_create_no_body(
             client,
             &format!("/v1/system/scim/tokens?silo={}", SILO_NAME,),
@@ -994,7 +998,7 @@ async fn test_scim_group_search(cptestctx: &ControlPlaneTestContext) {
     // Create the Silo
 
     const SILO_NAME: &str = "saml-scim-silo";
-    create_silo(&client, SILO_NAME, true, shared::SiloIdentityMode::SamlScim)
+    create_silo(&client, SILO_NAME, true, silo::SiloIdentityMode::SamlScim)
         .await;
 
     // Grant permissions on this silo for the PrivilegedUser
@@ -1002,7 +1006,7 @@ async fn test_scim_group_search(cptestctx: &ControlPlaneTestContext) {
     grant_iam(
         client,
         &format!("/v1/system/silos/{SILO_NAME}"),
-        shared::SiloRole::Admin,
+        policy::SiloRole::Admin,
         opctx.authn.actor().unwrap().silo_user_id().unwrap(),
         AuthnMode::PrivilegedUser,
     )
@@ -1010,7 +1014,7 @@ async fn test_scim_group_search(cptestctx: &ControlPlaneTestContext) {
 
     // Create a token
 
-    let created_token: views::ScimClientBearerTokenValue =
+    let created_token: scim::ScimClientBearerTokenValue =
         object_create_no_body(
             client,
             &format!("/v1/system/scim/tokens?silo={}", SILO_NAME,),
@@ -1181,7 +1185,7 @@ async fn test_scim_user_unique(cptestctx: &ControlPlaneTestContext) {
     // Create the Silo
 
     const SILO_NAME: &str = "saml-scim-silo";
-    create_silo(&client, SILO_NAME, true, shared::SiloIdentityMode::SamlScim)
+    create_silo(&client, SILO_NAME, true, silo::SiloIdentityMode::SamlScim)
         .await;
 
     // Grant permissions on this silo for the PrivilegedUser
@@ -1189,7 +1193,7 @@ async fn test_scim_user_unique(cptestctx: &ControlPlaneTestContext) {
     grant_iam(
         client,
         &format!("/v1/system/silos/{SILO_NAME}"),
-        shared::SiloRole::Admin,
+        policy::SiloRole::Admin,
         opctx.authn.actor().unwrap().silo_user_id().unwrap(),
         AuthnMode::PrivilegedUser,
     )
@@ -1197,7 +1201,7 @@ async fn test_scim_user_unique(cptestctx: &ControlPlaneTestContext) {
 
     // Create a token
 
-    let created_token: views::ScimClientBearerTokenValue =
+    let created_token: scim::ScimClientBearerTokenValue =
         object_create_no_body(
             client,
             &format!("/v1/system/scim/tokens?silo={}", SILO_NAME,),
@@ -1323,7 +1327,7 @@ async fn test_scim_group_unique(cptestctx: &ControlPlaneTestContext) {
     // Create the Silo
 
     const SILO_NAME: &str = "saml-scim-silo";
-    create_silo(&client, SILO_NAME, true, shared::SiloIdentityMode::SamlScim)
+    create_silo(&client, SILO_NAME, true, silo::SiloIdentityMode::SamlScim)
         .await;
 
     // Grant permissions on this silo for the PrivilegedUser
@@ -1331,7 +1335,7 @@ async fn test_scim_group_unique(cptestctx: &ControlPlaneTestContext) {
     grant_iam(
         client,
         &format!("/v1/system/silos/{SILO_NAME}"),
-        shared::SiloRole::Admin,
+        policy::SiloRole::Admin,
         opctx.authn.actor().unwrap().silo_user_id().unwrap(),
         AuthnMode::PrivilegedUser,
     )
@@ -1339,7 +1343,7 @@ async fn test_scim_group_unique(cptestctx: &ControlPlaneTestContext) {
 
     // Create a token
 
-    let created_token: views::ScimClientBearerTokenValue =
+    let created_token: scim::ScimClientBearerTokenValue =
         object_create_no_body(
             client,
             &format!("/v1/system/scim/tokens?silo={}", SILO_NAME,),
@@ -1469,42 +1473,44 @@ async fn test_scim_user_admin_group_priv(cptestctx: &ControlPlaneTestContext) {
         &client,
         SILO_NAME,
         true,
-        shared::SiloIdentityMode::SamlScim,
+        silo::SiloIdentityMode::SamlScim,
         Some(String::from("scranton_admins")),
     )
     .await;
 
     // Create a SAML IDP
 
-    let _silo_saml_idp: views::SamlIdentityProvider = object_create(
-        client,
-        &format!("/v1/system/identity-providers/saml?silo={}", SILO_NAME),
-        &params::SamlIdentityProviderCreate {
-            identity: IdentityMetadataCreateParams {
-                name: "some-totally-real-saml-provider"
-                    .to_string()
-                    .parse()
-                    .unwrap(),
-                description: "a demo provider".to_string(),
+    let _silo_saml_idp: identity_provider::SamlIdentityProvider =
+        object_create(
+            client,
+            &format!("/v1/system/identity-providers/saml?silo={}", SILO_NAME),
+            &identity_provider::SamlIdentityProviderCreate {
+                identity: IdentityMetadataCreateParams {
+                    name: "some-totally-real-saml-provider"
+                        .to_string()
+                        .parse()
+                        .unwrap(),
+                    description: "a demo provider".to_string(),
+                },
+
+                idp_metadata_source:
+                    identity_provider::IdpMetadataSource::Base64EncodedXml {
+                        data: base64::engine::general_purpose::STANDARD
+                            .encode(SAML_RESPONSE_IDP_DESCRIPTOR),
+                    },
+
+                idp_entity_id: "https://some.idp.test/oxide_rack/".to_string(),
+                sp_client_id: "client_id".to_string(),
+                acs_url: "https://customer.site/oxide_rack/saml".to_string(),
+                slo_url: "https://customer.site/oxide_rack/saml".to_string(),
+                technical_contact_email: "technical@fake".to_string(),
+
+                signing_keypair: None,
+
+                group_attribute_name: Some("groups".into()),
             },
-
-            idp_metadata_source: params::IdpMetadataSource::Base64EncodedXml {
-                data: base64::engine::general_purpose::STANDARD
-                    .encode(SAML_RESPONSE_IDP_DESCRIPTOR),
-            },
-
-            idp_entity_id: "https://some.idp.test/oxide_rack/".to_string(),
-            sp_client_id: "client_id".to_string(),
-            acs_url: "https://customer.site/oxide_rack/saml".to_string(),
-            slo_url: "https://customer.site/oxide_rack/saml".to_string(),
-            technical_contact_email: "technical@fake".to_string(),
-
-            signing_keypair: None,
-
-            group_attribute_name: Some("groups".into()),
-        },
-    )
-    .await;
+        )
+        .await;
 
     nexus.set_samael_max_issue_delay(
         chrono::Utc::now()
@@ -1519,7 +1525,7 @@ async fn test_scim_user_admin_group_priv(cptestctx: &ControlPlaneTestContext) {
     grant_iam(
         client,
         &format!("/v1/system/silos/{SILO_NAME}"),
-        shared::SiloRole::Admin,
+        policy::SiloRole::Admin,
         opctx.authn.actor().unwrap().silo_user_id().unwrap(),
         AuthnMode::PrivilegedUser,
     )
@@ -1527,7 +1533,7 @@ async fn test_scim_user_admin_group_priv(cptestctx: &ControlPlaneTestContext) {
 
     // Create a token
 
-    let created_token: views::ScimClientBearerTokenValue =
+    let created_token: scim::ScimClientBearerTokenValue =
         object_create_no_body(
             client,
             &format!("/v1/system/scim/tokens?silo={}", SILO_NAME,),
@@ -1593,7 +1599,7 @@ async fn test_scim_user_admin_group_priv(cptestctx: &ControlPlaneTestContext) {
     // Initially this user should _not_ have the silo admin role, they are not
     // part of any group.
 
-    let me: views::CurrentUser = NexusRequest::new(
+    let me: user::CurrentUser = NexusRequest::new(
         RequestBuilder::new(client, Method::GET, "/v1/me")
             .header(http::header::COOKIE, session_cookie_value.clone())
             .expect_status(Some(StatusCode::OK)),
@@ -1635,7 +1641,7 @@ async fn test_scim_user_admin_group_priv(cptestctx: &ControlPlaneTestContext) {
     .parsed_body()
     .expect("created group");
 
-    let me: views::CurrentUser = NexusRequest::new(
+    let me: user::CurrentUser = NexusRequest::new(
         RequestBuilder::new(client, Method::GET, "/v1/me")
             .header(http::header::COOKIE, session_cookie_value.clone())
             .expect_status(Some(StatusCode::OK)),
@@ -1690,7 +1696,7 @@ async fn test_scim_user_admin_group_priv(cptestctx: &ControlPlaneTestContext) {
     .await
     .expect("expected 200");
 
-    let me: views::CurrentUser = NexusRequest::new(
+    let me: user::CurrentUser = NexusRequest::new(
         RequestBuilder::new(client, Method::GET, "/v1/me")
             .header(http::header::COOKIE, session_cookie_value.clone())
             .expect_status(Some(StatusCode::OK)),
@@ -1743,7 +1749,7 @@ async fn test_scim_user_admin_group_priv(cptestctx: &ControlPlaneTestContext) {
     .await
     .expect("expected 200");
 
-    let me: views::CurrentUser = NexusRequest::new(
+    let me: user::CurrentUser = NexusRequest::new(
         RequestBuilder::new(client, Method::GET, "/v1/me")
             .header(http::header::COOKIE, session_cookie_value.clone())
             .expect_status(Some(StatusCode::OK)),
@@ -1796,7 +1802,7 @@ async fn test_scim_user_admin_group_priv(cptestctx: &ControlPlaneTestContext) {
     .await
     .expect("expected 200");
 
-    let me: views::CurrentUser = NexusRequest::new(
+    let me: user::CurrentUser = NexusRequest::new(
         RequestBuilder::new(client, Method::GET, "/v1/me")
             .header(http::header::COOKIE, session_cookie_value.clone())
             .expect_status(Some(StatusCode::OK)),
@@ -1850,7 +1856,7 @@ async fn test_scim_user_admin_group_priv(cptestctx: &ControlPlaneTestContext) {
     .await
     .expect("expected 200");
 
-    let me: views::CurrentUser = NexusRequest::new(
+    let me: user::CurrentUser = NexusRequest::new(
         RequestBuilder::new(client, Method::GET, "/v1/me")
             .header(http::header::COOKIE, session_cookie_value.clone())
             .expect_status(Some(StatusCode::OK)),
@@ -1884,7 +1890,7 @@ async fn test_scim_user_admin_group_priv_conflict(
         &client,
         SILO_NAME,
         true,
-        shared::SiloIdentityMode::SamlScim,
+        silo::SiloIdentityMode::SamlScim,
         Some(String::from("assistant_to_assistant_to_regional_manager")),
     )
     .await;
@@ -1894,7 +1900,7 @@ async fn test_scim_user_admin_group_priv_conflict(
     grant_iam(
         client,
         &format!("/v1/system/silos/{SILO_NAME}"),
-        shared::SiloRole::Admin,
+        policy::SiloRole::Admin,
         opctx.authn.actor().unwrap().silo_user_id().unwrap(),
         AuthnMode::PrivilegedUser,
     )
@@ -1902,7 +1908,7 @@ async fn test_scim_user_admin_group_priv_conflict(
 
     // Create a token
 
-    let created_token: views::ScimClientBearerTokenValue =
+    let created_token: scim::ScimClientBearerTokenValue =
         object_create_no_body(
             client,
             &format!("/v1/system/scim/tokens?silo={}", SILO_NAME,),
@@ -1943,7 +1949,7 @@ async fn test_scim_user_admin_group_priv_conflict(
     grant_iam_for_group(
         client,
         &format!("/v1/system/silos/{SILO_NAME}"),
-        shared::SiloRole::Admin,
+        policy::SiloRole::Admin,
         SiloGroupUuid::from_untyped_uuid(group.id.parse().unwrap()),
         AuthnMode::PrivilegedUser,
     )

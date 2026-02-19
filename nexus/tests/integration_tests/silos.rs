@@ -23,11 +23,12 @@ use nexus_test_utils::resource_helpers::{
     projects_list, test_params,
 };
 use nexus_test_utils_macros::nexus_test;
-use nexus_types::external_api::views::Certificate;
-use nexus_types::external_api::views::{
-    self, IdentityProvider, Project, SamlIdentityProvider, Silo,
-};
-use nexus_types::external_api::{params, shared};
+use nexus_types::external_api::certificate;
+use nexus_types::external_api::identity_provider;
+use nexus_types::external_api::ip_pool;
+use nexus_types::external_api::project;
+use nexus_types::external_api::silo;
+use nexus_types::external_api::user;
 use nexus_types::silo::DEFAULT_SILO_ID;
 use omicron_common::address::{IpRange, Ipv4Range};
 use omicron_common::api::external::{
@@ -48,7 +49,7 @@ use hickory_resolver::proto::ProtoErrorKind;
 use http::StatusCode;
 use http::method::Method;
 use httptest::{Expectation, Server, matchers::*, responders::*};
-use nexus_types::external_api::shared::{FleetRole, SiloRole};
+use nexus_types::external_api::policy::{FleetRole, SiloRole};
 use std::convert::Infallible;
 use std::net::Ipv4Addr;
 use std::time::Duration;
@@ -69,14 +70,14 @@ async fn test_silos(cptestctx: &ControlPlaneTestContext) {
             StatusCode::BAD_REQUEST,
             Method::POST,
             "/v1/system/silos",
-            &params::SiloCreate {
+            &silo::SiloCreate {
                 identity: IdentityMetadataCreateParams {
                     name: cptestctx.silo_name.clone(),
                     description: "a silo".to_string(),
                 },
-                quotas: params::SiloQuotasCreate::empty(),
+                quotas: silo::SiloQuotasCreate::empty(),
                 discoverable: false,
-                identity_mode: shared::SiloIdentityMode::LocalOnly,
+                identity_mode: silo::SiloIdentityMode::LocalOnly,
                 admin_group_name: None,
                 tls_certificates: vec![],
                 mapped_fleet_roles: Default::default(),
@@ -95,10 +96,10 @@ async fn test_silos(cptestctx: &ControlPlaneTestContext) {
         &client,
         "discoverable",
         true,
-        shared::SiloIdentityMode::LocalOnly,
+        silo::SiloIdentityMode::LocalOnly,
     )
     .await;
-    create_silo(&client, "hidden", false, shared::SiloIdentityMode::LocalOnly)
+    create_silo(&client, "hidden", false, silo::SiloIdentityMode::LocalOnly)
         .await;
 
     // Verify that an external DNS name was propagated for these Silos.
@@ -109,7 +110,7 @@ async fn test_silos(cptestctx: &ControlPlaneTestContext) {
     let discoverable_url = "/v1/system/silos/discoverable";
     let hidden_url = "/v1/system/silos/hidden";
 
-    let silo: Silo = NexusRequest::object_get(&client, &discoverable_url)
+    let silo: silo::Silo = NexusRequest::object_get(&client, &discoverable_url)
         .authn_as(AuthnMode::PrivilegedUser)
         .execute()
         .await
@@ -118,7 +119,7 @@ async fn test_silos(cptestctx: &ControlPlaneTestContext) {
         .unwrap();
     assert_eq!(silo.identity.name, "discoverable");
 
-    let silo: Silo = NexusRequest::object_get(&client, &hidden_url)
+    let silo: silo::Silo = NexusRequest::object_get(&client, &hidden_url)
         .authn_as(AuthnMode::PrivilegedUser)
         .execute()
         .await
@@ -141,7 +142,9 @@ async fn test_silos(cptestctx: &ControlPlaneTestContext) {
 
     // Verify GET /v1/system/silos only returns discoverable silos
     let silos =
-        objects_list_page_authz::<Silo>(client, "/v1/system/silos").await.items;
+        objects_list_page_authz::<silo::Silo>(client, "/v1/system/silos")
+            .await
+            .items;
     assert_eq!(silos.len(), 1);
     assert_eq!(silos[0].identity.name, "discoverable");
 
@@ -183,7 +186,7 @@ async fn test_silos(cptestctx: &ControlPlaneTestContext) {
     // default silo project does not show up in our silo
     let projects_in_our_silo = NexusRequest::object_get(client, "/v1/projects")
         .authn_as(AuthnMode::SiloUser(new_silo_user_id))
-        .execute_and_parse_unwrap::<dropshot::ResultsPage<Project>>()
+        .execute_and_parse_unwrap::<dropshot::ResultsPage<project::Project>>()
         .await;
     assert_eq!(projects_in_our_silo.items.len(), 0);
 
@@ -192,7 +195,7 @@ async fn test_silos(cptestctx: &ControlPlaneTestContext) {
     let new_proj_in_our_silo = NexusRequest::objects_post(
         client,
         "/v1/projects",
-        &params::ProjectCreate {
+        &project::ProjectCreate {
             identity: IdentityMetadataCreateParams {
                 name: project_name.parse().unwrap(),
                 description: String::new(),
@@ -203,7 +206,7 @@ async fn test_silos(cptestctx: &ControlPlaneTestContext) {
     .execute()
     .await
     .expect("failed to create same-named Project in a different Silo")
-    .parsed_body::<views::Project>()
+    .parsed_body::<project::Project>()
     .expect("failed to parse new Project");
     assert_eq!(
         new_proj_in_default_silo.identity.name,
@@ -283,17 +286,17 @@ async fn test_silo_admin_group(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
     let nexus = &cptestctx.server.server_context().nexus;
 
-    let silo: Silo = object_create(
+    let silo: silo::Silo = object_create(
         client,
         "/v1/system/silos",
-        &params::SiloCreate {
+        &silo::SiloCreate {
             identity: IdentityMetadataCreateParams {
                 name: "silo-name".parse().unwrap(),
                 description: "a silo".to_string(),
             },
-            quotas: params::SiloQuotasCreate::empty(),
+            quotas: silo::SiloQuotasCreate::empty(),
             discoverable: false,
-            identity_mode: shared::SiloIdentityMode::SamlJit,
+            identity_mode: silo::SiloIdentityMode::SamlJit,
             admin_group_name: Some("administrator".into()),
             tls_certificates: vec![],
             mapped_fleet_roles: Default::default(),
@@ -353,7 +356,7 @@ async fn test_silo_admin_group(cptestctx: &ControlPlaneTestContext) {
     let _org = NexusRequest::objects_post(
         client,
         "/v1/projects",
-        &params::ProjectCreate {
+        &project::ProjectCreate {
             identity: IdentityMetadataCreateParams {
                 name: "myproj".parse().unwrap(),
                 description: "some proj".into(),
@@ -364,7 +367,7 @@ async fn test_silo_admin_group(cptestctx: &ControlPlaneTestContext) {
     .execute()
     .await
     .expect("failed to create Project")
-    .parsed_body::<views::Project>()
+    .parsed_body::<project::Project>()
     .expect("failed to parse as Project");
 }
 
@@ -372,13 +375,14 @@ async fn test_silo_admin_group(cptestctx: &ControlPlaneTestContext) {
 #[nexus_test]
 async fn test_listing_identity_providers(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
-    create_silo(&client, "test-silo", true, shared::SiloIdentityMode::SamlJit)
+    create_silo(&client, "test-silo", true, silo::SiloIdentityMode::SamlJit)
         .await;
 
     // List providers - should be none
-    let providers = objects_list_page_authz::<IdentityProvider>(
-        client,
-        "/v1/system/identity-providers?silo=test-silo",
+    let providers = objects_list_page_authz::<
+        identity_provider::IdentityProvider,
+    >(
+        client, "/v1/system/identity-providers?silo=test-silo"
     )
     .await
     .items;
@@ -395,68 +399,73 @@ async fn test_listing_identity_providers(cptestctx: &ControlPlaneTestContext) {
             .respond_with(status_code(200).body(saml_idp_descriptor)),
     );
 
-    let silo_saml_idp_1: SamlIdentityProvider = object_create(
-        client,
-        &"/v1/system/identity-providers/saml?silo=test-silo",
-        &params::SamlIdentityProviderCreate {
-            identity: IdentityMetadataCreateParams {
-                name: "some-totally-real-saml-provider"
-                    .to_string()
-                    .parse()
-                    .unwrap(),
-                description: "a demo provider".to_string(),
+    let silo_saml_idp_1: identity_provider::SamlIdentityProvider =
+        object_create(
+            client,
+            &"/v1/system/identity-providers/saml?silo=test-silo",
+            &identity_provider::SamlIdentityProviderCreate {
+                identity: IdentityMetadataCreateParams {
+                    name: "some-totally-real-saml-provider"
+                        .to_string()
+                        .parse()
+                        .unwrap(),
+                    description: "a demo provider".to_string(),
+                },
+
+                idp_metadata_source:
+                    identity_provider::IdpMetadataSource::Url {
+                        url: server.url("/descriptor").to_string(),
+                    },
+
+                idp_entity_id: "entity_id".to_string(),
+                sp_client_id: "client_id".to_string(),
+                acs_url: "http://acs".to_string(),
+                slo_url: "http://slo".to_string(),
+                technical_contact_email: "technical@fake".to_string(),
+
+                signing_keypair: None,
+
+                group_attribute_name: None,
             },
+        )
+        .await;
 
-            idp_metadata_source: params::IdpMetadataSource::Url {
-                url: server.url("/descriptor").to_string(),
+    let silo_saml_idp_2: identity_provider::SamlIdentityProvider =
+        object_create(
+            client,
+            &"/v1/system/identity-providers/saml?silo=test-silo",
+            &identity_provider::SamlIdentityProviderCreate {
+                identity: IdentityMetadataCreateParams {
+                    name: "another-totally-real-saml-provider"
+                        .to_string()
+                        .parse()
+                        .unwrap(),
+                    description: "a demo provider".to_string(),
+                },
+
+                idp_metadata_source:
+                    identity_provider::IdpMetadataSource::Url {
+                        url: server.url("/descriptor").to_string(),
+                    },
+
+                idp_entity_id: "entity_id".to_string(),
+                sp_client_id: "client_id".to_string(),
+                acs_url: "http://acs".to_string(),
+                slo_url: "http://slo".to_string(),
+                technical_contact_email: "technical@fake".to_string(),
+
+                signing_keypair: None,
+
+                group_attribute_name: None,
             },
-
-            idp_entity_id: "entity_id".to_string(),
-            sp_client_id: "client_id".to_string(),
-            acs_url: "http://acs".to_string(),
-            slo_url: "http://slo".to_string(),
-            technical_contact_email: "technical@fake".to_string(),
-
-            signing_keypair: None,
-
-            group_attribute_name: None,
-        },
-    )
-    .await;
-
-    let silo_saml_idp_2: SamlIdentityProvider = object_create(
-        client,
-        &"/v1/system/identity-providers/saml?silo=test-silo",
-        &params::SamlIdentityProviderCreate {
-            identity: IdentityMetadataCreateParams {
-                name: "another-totally-real-saml-provider"
-                    .to_string()
-                    .parse()
-                    .unwrap(),
-                description: "a demo provider".to_string(),
-            },
-
-            idp_metadata_source: params::IdpMetadataSource::Url {
-                url: server.url("/descriptor").to_string(),
-            },
-
-            idp_entity_id: "entity_id".to_string(),
-            sp_client_id: "client_id".to_string(),
-            acs_url: "http://acs".to_string(),
-            slo_url: "http://slo".to_string(),
-            technical_contact_email: "technical@fake".to_string(),
-
-            signing_keypair: None,
-
-            group_attribute_name: None,
-        },
-    )
-    .await;
+        )
+        .await;
 
     // List providers again - expect 2
-    let providers = objects_list_page_authz::<IdentityProvider>(
-        client,
-        "/v1/system/identity-providers?silo=test-silo",
+    let providers = objects_list_page_authz::<
+        identity_provider::IdentityProvider,
+    >(
+        client, "/v1/system/identity-providers?silo=test-silo"
     )
     .await
     .items;
@@ -477,7 +486,7 @@ async fn test_deleting_a_silo_deletes_the_idp(
     let client = &cptestctx.external_client;
 
     const SILO_NAME: &str = "test-silo";
-    create_silo(&client, SILO_NAME, true, shared::SiloIdentityMode::SamlJit)
+    create_silo(&client, SILO_NAME, true, silo::SiloIdentityMode::SamlJit)
         .await;
 
     let saml_idp_descriptor = SAML_IDP_DESCRIPTOR;
@@ -488,10 +497,10 @@ async fn test_deleting_a_silo_deletes_the_idp(
             .respond_with(status_code(200).body(saml_idp_descriptor)),
     );
 
-    let silo_saml_idp: SamlIdentityProvider = object_create(
+    let silo_saml_idp: identity_provider::SamlIdentityProvider = object_create(
         client,
         &format!("/v1/system/identity-providers/saml?silo={}", SILO_NAME),
-        &params::SamlIdentityProviderCreate {
+        &identity_provider::SamlIdentityProviderCreate {
             identity: IdentityMetadataCreateParams {
                 name: "some-totally-real-saml-provider"
                     .to_string()
@@ -500,7 +509,7 @@ async fn test_deleting_a_silo_deletes_the_idp(
                 description: "a demo provider".to_string(),
             },
 
-            idp_metadata_source: params::IdpMetadataSource::Url {
+            idp_metadata_source: identity_provider::IdpMetadataSource::Url {
                 url: server.url("/descriptor").to_string(),
             },
 
@@ -588,13 +597,13 @@ async fn test_saml_idp_metadata_data_valid(
 ) {
     let client = &cptestctx.external_client;
 
-    create_silo(&client, "blahblah", true, shared::SiloIdentityMode::SamlJit)
+    create_silo(&client, "blahblah", true, silo::SiloIdentityMode::SamlJit)
         .await;
 
-    let silo_saml_idp: SamlIdentityProvider = object_create(
+    let silo_saml_idp: identity_provider::SamlIdentityProvider = object_create(
         client,
         "/v1/system/identity-providers/saml?silo=blahblah",
-        &params::SamlIdentityProviderCreate {
+        &identity_provider::SamlIdentityProviderCreate {
             identity: IdentityMetadataCreateParams {
                 name: "some-totally-real-saml-provider"
                     .to_string()
@@ -603,10 +612,11 @@ async fn test_saml_idp_metadata_data_valid(
                 description: "a demo provider".to_string(),
             },
 
-            idp_metadata_source: params::IdpMetadataSource::Base64EncodedXml {
-                data: base64::engine::general_purpose::STANDARD
-                    .encode(SAML_IDP_DESCRIPTOR),
-            },
+            idp_metadata_source:
+                identity_provider::IdpMetadataSource::Base64EncodedXml {
+                    data: base64::engine::general_purpose::STANDARD
+                        .encode(SAML_IDP_DESCRIPTOR),
+                },
 
             idp_entity_id: "entity_id".to_string(),
             sp_client_id: "client_id".to_string(),
@@ -651,7 +661,7 @@ async fn test_saml_idp_metadata_data_truncated(
 ) {
     let client = &cptestctx.external_client;
 
-    create_silo(&client, "blahblah", true, shared::SiloIdentityMode::SamlJit)
+    create_silo(&client, "blahblah", true, silo::SiloIdentityMode::SamlJit)
         .await;
 
     NexusRequest::new(
@@ -660,7 +670,7 @@ async fn test_saml_idp_metadata_data_truncated(
             Method::POST,
             "/v1/system/identity-providers/saml?silo=blahblah",
         )
-        .body(Some(&params::SamlIdentityProviderCreate {
+        .body(Some(&identity_provider::SamlIdentityProviderCreate {
             identity: IdentityMetadataCreateParams {
                 name: "some-totally-real-saml-provider"
                     .to_string()
@@ -669,14 +679,15 @@ async fn test_saml_idp_metadata_data_truncated(
                 description: "a demo provider".to_string(),
             },
 
-            idp_metadata_source: params::IdpMetadataSource::Base64EncodedXml {
-                data: base64::engine::general_purpose::STANDARD.encode({
-                    let mut saml_idp_descriptor =
-                        SAML_IDP_DESCRIPTOR.to_string();
-                    saml_idp_descriptor.truncate(100);
-                    saml_idp_descriptor
-                }),
-            },
+            idp_metadata_source:
+                identity_provider::IdpMetadataSource::Base64EncodedXml {
+                    data: base64::engine::general_purpose::STANDARD.encode({
+                        let mut saml_idp_descriptor =
+                            SAML_IDP_DESCRIPTOR.to_string();
+                        saml_idp_descriptor.truncate(100);
+                        saml_idp_descriptor
+                    }),
+                },
 
             idp_entity_id: "entity_id".to_string(),
             sp_client_id: "client_id".to_string(),
@@ -704,7 +715,7 @@ async fn test_saml_idp_metadata_data_invalid(
     let client = &cptestctx.external_client;
 
     const SILO_NAME: &str = "saml-silo";
-    create_silo(&client, SILO_NAME, true, shared::SiloIdentityMode::SamlJit)
+    create_silo(&client, SILO_NAME, true, silo::SiloIdentityMode::SamlJit)
         .await;
 
     NexusRequest::new(
@@ -713,7 +724,7 @@ async fn test_saml_idp_metadata_data_invalid(
             Method::POST,
             &format!("/v1/system/identity-providers/saml?silo={}", SILO_NAME),
         )
-        .body(Some(&params::SamlIdentityProviderCreate {
+        .body(Some(&identity_provider::SamlIdentityProviderCreate {
             identity: IdentityMetadataCreateParams {
                 name: "some-totally-real-saml-provider"
                     .to_string()
@@ -722,9 +733,10 @@ async fn test_saml_idp_metadata_data_invalid(
                 description: "a demo provider".to_string(),
             },
 
-            idp_metadata_source: params::IdpMetadataSource::Base64EncodedXml {
-                data: "bad data".to_string(),
-            },
+            idp_metadata_source:
+                identity_provider::IdpMetadataSource::Base64EncodedXml {
+                    data: "bad data".to_string(),
+                },
 
             idp_entity_id: "entity_id".to_string(),
             sp_client_id: "client_id".to_string(),
@@ -745,7 +757,7 @@ async fn test_saml_idp_metadata_data_invalid(
 }
 
 struct TestSiloUserProvisionTypes {
-    identity_mode: shared::SiloIdentityMode,
+    identity_mode: silo::SiloIdentityMode,
     existing_silo_user: bool,
     expect_user: bool,
 }
@@ -760,42 +772,42 @@ async fn test_silo_user_provision_types(cptestctx: &ControlPlaneTestContext) {
         // A silo configured with a "ApiOnly" user provision type should fetch a
         // user if it exists already.
         TestSiloUserProvisionTypes {
-            identity_mode: shared::SiloIdentityMode::LocalOnly,
+            identity_mode: silo::SiloIdentityMode::LocalOnly,
             existing_silo_user: true,
             expect_user: true,
         },
         // A silo configured with a "ApiOnly" user provision type should not
         // create a user if one does not exist already.
         TestSiloUserProvisionTypes {
-            identity_mode: shared::SiloIdentityMode::LocalOnly,
+            identity_mode: silo::SiloIdentityMode::LocalOnly,
             existing_silo_user: false,
             expect_user: false,
         },
         // A silo configured with a "JIT" user provision type should fetch a
         // user if it exists already.
         TestSiloUserProvisionTypes {
-            identity_mode: shared::SiloIdentityMode::SamlJit,
+            identity_mode: silo::SiloIdentityMode::SamlJit,
             existing_silo_user: true,
             expect_user: true,
         },
         // A silo configured with a "JIT" user provision type should create a
         // user if one does not exist already.
         TestSiloUserProvisionTypes {
-            identity_mode: shared::SiloIdentityMode::SamlJit,
+            identity_mode: silo::SiloIdentityMode::SamlJit,
             existing_silo_user: false,
             expect_user: true,
         },
         // A silo configured with a "SCIM" user provision type should fetch a
         // user if it exists already.
         TestSiloUserProvisionTypes {
-            identity_mode: shared::SiloIdentityMode::SamlScim,
+            identity_mode: silo::SiloIdentityMode::SamlScim,
             existing_silo_user: true,
             expect_user: true,
         },
         // A silo configured with a "SCIM" user provision type should not do any
         // user management except via the SCIM provisioning client.
         TestSiloUserProvisionTypes {
-            identity_mode: shared::SiloIdentityMode::SamlScim,
+            identity_mode: silo::SiloIdentityMode::SamlScim,
             existing_silo_user: false,
             expect_user: false,
         },
@@ -808,11 +820,11 @@ async fn test_silo_user_provision_types(cptestctx: &ControlPlaneTestContext) {
 
         if test_case.existing_silo_user {
             match test_case.identity_mode {
-                shared::SiloIdentityMode::SamlJit => {
+                silo::SiloIdentityMode::SamlJit => {
                     create_jit_user(datastore, &silo, "external-id-com").await;
                 }
 
-                shared::SiloIdentityMode::LocalOnly => {
+                silo::SiloIdentityMode::LocalOnly => {
                     create_local_user(
                         client,
                         &silo,
@@ -822,7 +834,7 @@ async fn test_silo_user_provision_types(cptestctx: &ControlPlaneTestContext) {
                     .await;
                 }
 
-                shared::SiloIdentityMode::SamlScim => {
+                silo::SiloIdentityMode::SamlScim => {
                     create_scim_user(datastore, &silo, "external-id-com").await;
                 }
             };
@@ -874,7 +886,7 @@ async fn test_silo_user_fetch_by_external_id(
         &client,
         "test-silo",
         true,
-        shared::SiloIdentityMode::LocalOnly,
+        silo::SiloIdentityMode::LocalOnly,
     )
     .await;
 
@@ -930,7 +942,7 @@ async fn test_silo_user_fetch_by_external_id(
 async fn test_silo_users_list(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
 
-    let initial_silo_users: Vec<views::User> =
+    let initial_silo_users: Vec<user::User> =
         NexusRequest::iter_collection_authn(client, "/v1/users", "", None)
             .await
             .expect("failed to list silo users (1)")
@@ -941,12 +953,12 @@ async fn test_silo_users_list(cptestctx: &ControlPlaneTestContext) {
     assert_eq!(
         initial_silo_users,
         vec![
-            views::User {
+            user::User {
                 id: USER_TEST_PRIVILEGED.id(),
                 display_name: USER_TEST_PRIVILEGED.external_id.clone().unwrap(),
                 silo_id: DEFAULT_SILO_ID,
             },
-            views::User {
+            user::User {
                 id: USER_TEST_UNPRIVILEGED.id(),
                 display_name: USER_TEST_UNPRIVILEGED
                     .external_id
@@ -962,14 +974,14 @@ async fn test_silo_users_list(cptestctx: &ControlPlaneTestContext) {
     let new_silo_user_external_id = "can-we-see-them";
     let new_silo_user_id = create_local_user(
         client,
-        &views::Silo::try_from(DEFAULT_SILO.clone()).unwrap(),
+        &silo::Silo::try_from(DEFAULT_SILO.clone()).unwrap(),
         &new_silo_user_external_id.parse().unwrap(),
         test_params::UserPassword::LoginDisallowed,
     )
     .await
     .id;
 
-    let mut silo_users: Vec<views::User> =
+    let mut silo_users: Vec<user::User> =
         NexusRequest::iter_collection_authn(client, "/v1/users", "", Some(1))
             .await
             .expect("failed to list silo users (2)")
@@ -978,17 +990,17 @@ async fn test_silo_users_list(cptestctx: &ControlPlaneTestContext) {
     assert_eq!(
         silo_users,
         vec![
-            views::User {
+            user::User {
                 id: new_silo_user_id,
                 display_name: new_silo_user_external_id.into(),
                 silo_id: DEFAULT_SILO_ID,
             },
-            views::User {
+            user::User {
                 id: USER_TEST_PRIVILEGED.id(),
                 display_name: USER_TEST_PRIVILEGED.external_id.clone().unwrap(),
                 silo_id: DEFAULT_SILO_ID,
             },
-            views::User {
+            user::User {
                 id: USER_TEST_UNPRIVILEGED.id(),
                 display_name: USER_TEST_UNPRIVILEGED
                     .external_id
@@ -1003,7 +1015,7 @@ async fn test_silo_users_list(cptestctx: &ControlPlaneTestContext) {
     // able to see the users in the first Silo.
 
     let silo =
-        create_silo(client, "silo2", true, shared::SiloIdentityMode::LocalOnly)
+        create_silo(client, "silo2", true, silo::SiloIdentityMode::LocalOnly)
             .await;
 
     let new_silo_user_name = String::from("some-silo-user");
@@ -1024,7 +1036,7 @@ async fn test_silo_users_list(cptestctx: &ControlPlaneTestContext) {
     )
     .await;
 
-    let silo2_users: dropshot::ResultsPage<views::User> =
+    let silo2_users: dropshot::ResultsPage<user::User> =
         NexusRequest::object_get(client, "/v1/users")
             .authn_as(AuthnMode::SiloUser(new_silo_user_id))
             .execute()
@@ -1034,7 +1046,7 @@ async fn test_silo_users_list(cptestctx: &ControlPlaneTestContext) {
             .unwrap();
     assert_eq!(
         silo2_users.items,
-        vec![views::User {
+        vec![user::User {
             id: new_silo_user_id,
             display_name: new_silo_user_name,
             silo_id: silo.identity.id,
@@ -1043,7 +1055,7 @@ async fn test_silo_users_list(cptestctx: &ControlPlaneTestContext) {
 
     // The "test-privileged" user also shouldn't see the user in this other
     // Silo.
-    let mut new_silo_users: Vec<views::User> =
+    let mut new_silo_users: Vec<user::User> =
         NexusRequest::iter_collection_authn(client, "/v1/users", "", Some(1))
             .await
             .expect("failed to list silo users (2)")
@@ -1065,7 +1077,7 @@ async fn test_silo_groups_jit(cptestctx: &ControlPlaneTestContext) {
         &client,
         "test-silo",
         true,
-        shared::SiloIdentityMode::SamlJit,
+        silo::SiloIdentityMode::SamlJit,
     )
     .await;
 
@@ -1133,7 +1145,7 @@ async fn test_silo_groups_fixed(cptestctx: &ControlPlaneTestContext) {
         &client,
         "test-silo",
         true,
-        shared::SiloIdentityMode::LocalOnly,
+        silo::SiloIdentityMode::LocalOnly,
     )
     .await;
 
@@ -1194,7 +1206,7 @@ async fn test_silo_groups_remove_from_one_group(
         &client,
         "test-silo",
         true,
-        shared::SiloIdentityMode::SamlJit,
+        silo::SiloIdentityMode::SamlJit,
     )
     .await;
 
@@ -1307,7 +1319,7 @@ async fn test_silo_groups_remove_from_both_groups(
         &client,
         "test-silo",
         true,
-        shared::SiloIdentityMode::SamlJit,
+        silo::SiloIdentityMode::SamlJit,
     )
     .await;
 
@@ -1419,7 +1431,7 @@ async fn test_silo_delete_clean_up_groups(cptestctx: &ControlPlaneTestContext) {
         &client,
         "test-silo",
         true,
-        shared::SiloIdentityMode::SamlJit,
+        silo::SiloIdentityMode::SamlJit,
     )
     .await;
 
@@ -1502,7 +1514,7 @@ async fn test_ensure_same_silo_group(cptestctx: &ControlPlaneTestContext) {
         &client,
         "test-silo",
         true,
-        shared::SiloIdentityMode::SamlJit,
+        silo::SiloIdentityMode::SamlJit,
     )
     .await;
 
@@ -1605,15 +1617,11 @@ async fn test_silo_user_views(cptestctx: &ControlPlaneTestContext) {
 
     // Create the two Silos.
     let silo1 =
-        create_silo(client, "silo1", false, shared::SiloIdentityMode::SamlJit)
+        create_silo(client, "silo1", false, silo::SiloIdentityMode::SamlJit)
             .await;
-    let silo2 = create_silo(
-        client,
-        "silo2",
-        false,
-        shared::SiloIdentityMode::LocalOnly,
-    )
-    .await;
+    let silo2 =
+        create_silo(client, "silo2", false, silo::SiloIdentityMode::LocalOnly)
+            .await;
 
     // Create two users in each Silo.  We need two so that we can verify that an
     // ordinary user can see a user other than themselves in each Silo.
@@ -1644,7 +1652,7 @@ async fn test_silo_user_views(cptestctx: &ControlPlaneTestContext) {
     silo2_expected_users.sort_by_key(|u| u.id);
 
     let users_by_id = {
-        let mut users_by_id: BTreeMap<SiloUserUuid, &views::User> =
+        let mut users_by_id: BTreeMap<SiloUserUuid, &user::User> =
             BTreeMap::new();
         assert_eq!(users_by_id.insert(silo1_user1_id, &silo1_user1), None);
         assert_eq!(users_by_id.insert(silo1_user2_id, &silo1_user2), None);
@@ -1685,8 +1693,8 @@ async fn test_silo_user_views(cptestctx: &ControlPlaneTestContext) {
     };
 
     struct TestSilo<'a> {
-        silo: &'a views::Silo,
-        expected_users: [views::User; 2],
+        silo: &'a silo::Silo,
+        expected_users: [user::User; 2],
     }
 
     let test_silo1 =
@@ -1732,7 +1740,7 @@ async fn test_silo_user_views(cptestctx: &ControlPlaneTestContext) {
             // this Silo.
             if test_response.status == http::StatusCode::OK {
                 let found_users = test_response
-                    .parsed_body::<dropshot::ResultsPage<views::User>>()
+                    .parsed_body::<dropshot::ResultsPage<user::User>>()
                     .unwrap()
                     .items;
                 assert_eq!(found_users, test_silo.expected_users);
@@ -1765,7 +1773,7 @@ async fn test_silo_user_views(cptestctx: &ControlPlaneTestContext) {
                 // If this succeeded, it must have returned the right user back.
                 if test_response.status == http::StatusCode::OK {
                     let found_user =
-                        test_response.parsed_body::<views::User>().unwrap();
+                        test_response.parsed_body::<user::User>().unwrap();
                     assert_eq!(
                         found_user.silo_id,
                         test_silo.silo.identity().id
@@ -1797,10 +1805,10 @@ async fn test_silo_user_views(cptestctx: &ControlPlaneTestContext) {
 /// For local-only Silos, use the real API (via `create_local_user()`).
 async fn create_jit_user(
     datastore: &db::DataStore,
-    silo: &views::Silo,
+    silo: &silo::Silo,
     external_id: &str,
-) -> views::User {
-    assert_eq!(silo.identity_mode, shared::SiloIdentityMode::SamlJit);
+) -> user::User {
+    assert_eq!(silo.identity_mode, silo::SiloIdentityMode::SamlJit);
     let silo_id = silo.identity.id;
     let silo_user_id = SiloUserUuid::new_v4();
     let authz_silo =
@@ -1818,10 +1826,10 @@ async fn create_jit_user(
 /// Create a user in a SamlScim Silo for testing
 async fn create_scim_user(
     datastore: &db::DataStore,
-    silo: &views::Silo,
+    silo: &silo::Silo,
     user_name: &str,
-) -> views::User {
-    assert_eq!(silo.identity_mode, shared::SiloIdentityMode::SamlScim);
+) -> user::User {
+    assert_eq!(silo.identity_mode, silo::SiloIdentityMode::SamlScim);
     let silo_id = silo.identity.id;
     let silo_user_id = SiloUserUuid::new_v4();
     let authz_silo =
@@ -1848,7 +1856,7 @@ async fn test_jit_silo_constraints(cptestctx: &ControlPlaneTestContext) {
     let nexus = &cptestctx.server.server_context().nexus;
     let datastore = nexus.datastore();
     let silo =
-        create_silo(&client, "jit", true, shared::SiloIdentityMode::SamlJit)
+        create_silo(&client, "jit", true, silo::SiloIdentityMode::SamlJit)
             .await;
 
     // We need one initial user that would in principle have privileges to
@@ -1978,13 +1986,9 @@ async fn test_local_silo_constraints(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
 
     // Create a "LocalOnly" Silo with its own admin user.
-    let silo = create_silo(
-        &client,
-        "fixed",
-        true,
-        shared::SiloIdentityMode::LocalOnly,
-    )
-    .await;
+    let silo =
+        create_silo(&client, "fixed", true, silo::SiloIdentityMode::LocalOnly)
+            .await;
     let new_silo_user_id = create_local_user(
         client,
         &silo,
@@ -2009,7 +2013,7 @@ async fn test_local_silo_constraints(cptestctx: &ControlPlaneTestContext) {
             StatusCode::BAD_REQUEST,
             Method::POST,
             "/v1/system/identity-providers/saml?silo=fixed",
-            &params::SamlIdentityProviderCreate {
+            &identity_provider::SamlIdentityProviderCreate {
                 identity: IdentityMetadataCreateParams {
                     name: "some-totally-real-saml-provider"
                         .to_string()
@@ -2019,7 +2023,7 @@ async fn test_local_silo_constraints(cptestctx: &ControlPlaneTestContext) {
                 },
 
                 idp_metadata_source:
-                    params::IdpMetadataSource::Base64EncodedXml {
+                    identity_provider::IdpMetadataSource::Base64EncodedXml {
                         data: base64::engine::general_purpose::STANDARD
                             .encode(SAML_IDP_DESCRIPTOR),
                     },
@@ -2079,13 +2083,9 @@ async fn test_local_silo_users(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
 
     // Create a "LocalOnly" Silo for testing.
-    let silo1 = create_silo(
-        &client,
-        "silo1",
-        true,
-        shared::SiloIdentityMode::LocalOnly,
-    )
-    .await;
+    let silo1 =
+        create_silo(&client, "silo1", true, silo::SiloIdentityMode::LocalOnly)
+            .await;
 
     // We'll run through a battery of tests as each of two different users: the
     // usual "test-privileged" user (which should have full access because
@@ -2121,9 +2121,9 @@ async fn test_local_silo_users(cptestctx: &ControlPlaneTestContext) {
 /// Runs a sequence of tests for create, read, and delete of API-managed users
 async fn run_user_tests(
     client: &dropshot::test_util::ClientTestContext,
-    silo: &views::Silo,
+    silo: &silo::Silo,
     authn_mode: &AuthnMode,
-    existing_users: &[views::User],
+    existing_users: &[user::User],
 ) {
     let url_all_users = format!("/v1/system/users?silo={}", silo.identity.name);
     let url_local_idp_users = format!(
@@ -2139,7 +2139,7 @@ async fn run_user_tests(
         .execute()
         .await
         .expect("failed to list users")
-        .parsed_body::<dropshot::ResultsPage<views::User>>()
+        .parsed_body::<dropshot::ResultsPage<user::User>>()
         .unwrap()
         .items;
     println!("users: {:?}", users);
@@ -2158,7 +2158,7 @@ async fn run_user_tests(
     .execute()
     .await
     .expect("failed to create user")
-    .parsed_body::<views::User>()
+    .parsed_body::<user::User>()
     .unwrap();
     assert_eq!(user_created.display_name, "a-test-user");
     println!("created user: {:?}", user_created);
@@ -2173,7 +2173,7 @@ async fn run_user_tests(
         .execute()
         .await
         .expect("failed to fetch user we just created")
-        .parsed_body::<views::User>()
+        .parsed_body::<user::User>()
         .unwrap();
     assert_eq!(user_created, user_found);
 
@@ -2183,7 +2183,7 @@ async fn run_user_tests(
         .execute()
         .await
         .expect("failed to list users")
-        .parsed_body::<dropshot::ResultsPage<views::User>>()
+        .parsed_body::<dropshot::ResultsPage<user::User>>()
         .unwrap()
         .items;
     println!("new_users: {:?}", new_users);
@@ -2234,7 +2234,7 @@ async fn run_user_tests(
         .execute()
         .await
         .expect("failed to list users")
-        .parsed_body::<dropshot::ResultsPage<views::User>>()
+        .parsed_body::<dropshot::ResultsPage<user::User>>()
         .unwrap()
         .items;
     println!("last_users: {:?}", last_users);
@@ -2366,14 +2366,14 @@ async fn test_silo_authn_policy(cptestctx: &ControlPlaneTestContext) {
         let silo = NexusRequest::objects_post(
             client,
             "/v1/system/silos",
-            &params::SiloCreate {
+            &silo::SiloCreate {
                 identity: IdentityMetadataCreateParams {
                     name: silo_name,
                     description: String::new(),
                 },
-                quotas: params::SiloQuotasCreate::empty(),
+                quotas: silo::SiloQuotasCreate::empty(),
                 discoverable: false,
-                identity_mode: shared::SiloIdentityMode::LocalOnly,
+                identity_mode: silo::SiloIdentityMode::LocalOnly,
                 admin_group_name: None,
                 tls_certificates: vec![],
                 mapped_fleet_roles: policy,
@@ -2383,7 +2383,7 @@ async fn test_silo_authn_policy(cptestctx: &ControlPlaneTestContext) {
         .execute()
         .await
         .unwrap()
-        .parsed_body::<views::Silo>()
+        .parsed_body::<silo::Silo>()
         .unwrap();
 
         // Create an administrator in this Silo.
@@ -2443,14 +2443,14 @@ async fn check_fleet_privileges(
     // confers no Fleet-level roles).
     const URL_SILOS: &'static str = "/v1/system/silos";
     const SILO_NAME: &'static str = "probe-silo";
-    let body = params::SiloCreate {
+    let body = silo::SiloCreate {
         identity: IdentityMetadataCreateParams {
             name: SILO_NAME.parse().unwrap(),
             description: String::new(),
         },
-        quotas: params::SiloQuotasCreate::empty(),
+        quotas: silo::SiloQuotasCreate::empty(),
         discoverable: false,
-        identity_mode: shared::SiloIdentityMode::LocalOnly,
+        identity_mode: silo::SiloIdentityMode::LocalOnly,
         admin_group_name: None,
         tls_certificates: vec![],
         mapped_fleet_roles: BTreeMap::new(),
@@ -2472,14 +2472,14 @@ async fn check_fleet_privileges(
             NexusRequest::objects_post(
                 client,
                 URL_SILOS,
-                &params::SiloCreate {
+                &silo::SiloCreate {
                     identity: IdentityMetadataCreateParams {
                         name: SILO_NAME.parse().unwrap(),
                         description: String::new(),
                     },
-                    quotas: params::SiloQuotasCreate::empty(),
+                    quotas: silo::SiloQuotasCreate::empty(),
                     discoverable: false,
-                    identity_mode: shared::SiloIdentityMode::LocalOnly,
+                    identity_mode: silo::SiloIdentityMode::LocalOnly,
                     admin_group_name: None,
                     tls_certificates: vec![],
                     mapped_fleet_roles: BTreeMap::new(),
@@ -2500,14 +2500,14 @@ async fn check_fleet_privileges(
     }
 
     // Last, see if the user can create a privileged Silo.
-    let body = params::SiloCreate {
+    let body = silo::SiloCreate {
         identity: IdentityMetadataCreateParams {
             name: SILO_NAME.parse().unwrap(),
             description: String::new(),
         },
-        quotas: params::SiloQuotasCreate::empty(),
+        quotas: silo::SiloQuotasCreate::empty(),
         discoverable: false,
-        identity_mode: shared::SiloIdentityMode::LocalOnly,
+        identity_mode: silo::SiloIdentityMode::LocalOnly,
         admin_group_name: None,
         tls_certificates: vec![],
         mapped_fleet_roles: BTreeMap::from([(
@@ -2533,14 +2533,14 @@ async fn check_fleet_privileges(
             NexusRequest::objects_post(
                 client,
                 URL_SILOS,
-                &params::SiloCreate {
+                &silo::SiloCreate {
                     identity: IdentityMetadataCreateParams {
                         name: SILO_NAME.parse().unwrap(),
                         description: String::new(),
                     },
-                    quotas: params::SiloQuotasCreate::empty(),
+                    quotas: silo::SiloQuotasCreate::empty(),
                     discoverable: false,
-                    identity_mode: shared::SiloIdentityMode::LocalOnly,
+                    identity_mode: silo::SiloIdentityMode::LocalOnly,
                     admin_group_name: None,
                     tls_certificates: vec![],
                     mapped_fleet_roles: BTreeMap::new(),
@@ -2578,7 +2578,7 @@ async fn test_silo_admin_can_create_certs(cptestctx: &ControlPlaneTestContext) {
         client,
         "silo-name",
         true,
-        shared::SiloIdentityMode::LocalOnly,
+        silo::SiloIdentityMode::LocalOnly,
     )
     .await;
 
@@ -2605,17 +2605,17 @@ async fn test_silo_admin_can_create_certs(cptestctx: &ControlPlaneTestContext) {
     let (cert, key) =
         (chain.cert_chain_as_pem(), chain.end_cert_private_key_as_pem());
 
-    let cert: Certificate = NexusRequest::objects_post(
+    let cert: certificate::Certificate = NexusRequest::objects_post(
         client,
         certs_url,
-        &params::CertificateCreate {
+        &certificate::CertificateCreate {
             identity: IdentityMetadataCreateParams {
                 name: "test-cert".parse().unwrap(),
                 description: "the test cert".to_string(),
             },
             cert,
             key,
-            service: shared::ServiceUsingCertificate::ExternalApi,
+            service: certificate::ServiceUsingCertificate::ExternalApi,
         },
     )
     .authn_as(AuthnMode::SiloUser(new_silo_user_id))
@@ -2632,8 +2632,10 @@ async fn test_silo_admin_can_create_certs(cptestctx: &ControlPlaneTestContext) {
             .execute()
             .await
             .expect("failed to list certificates")
-            .parsed_body::<ResultsPage<Certificate>>()
-            .expect("failed to parse body as ResultsPage<Certificate>")
+            .parsed_body::<ResultsPage<certificate::Certificate>>()
+            .expect(
+                "failed to parse body as ResultsPage<certificate::Certificate>",
+            )
             .items;
 
     assert_eq!(silo_certs.len(), 1);
@@ -2649,10 +2651,10 @@ async fn test_silo_delete_cleans_up_ip_pool_links(
 
     // Create a silo
     let silo1 =
-        create_silo(&client, "silo1", true, shared::SiloIdentityMode::SamlJit)
+        create_silo(&client, "silo1", true, silo::SiloIdentityMode::SamlJit)
             .await;
     let silo2 =
-        create_silo(&client, "silo2", true, shared::SiloIdentityMode::SamlJit)
+        create_silo(&client, "silo2", true, silo::SiloIdentityMode::SamlJit)
             .await;
 
     // link pool1 to both, link pool2 to silo1 only
@@ -2680,12 +2682,12 @@ async fn test_silo_delete_cleans_up_ip_pool_links(
     // we want to make sure the links are there before we make sure they're gone
     let url = "/v1/system/ip-pools/pool1/silos";
     let links =
-        objects_list_page_authz::<views::IpPoolSiloLink>(client, &url).await;
+        objects_list_page_authz::<ip_pool::IpPoolSiloLink>(client, &url).await;
     assert_eq!(links.items.len(), 2);
 
     let url = "/v1/system/ip-pools/pool2/silos";
     let links =
-        objects_list_page_authz::<views::IpPoolSiloLink>(client, &url).await;
+        objects_list_page_authz::<ip_pool::IpPoolSiloLink>(client, &url).await;
     assert_eq!(links.items.len(), 1);
 
     // Delete the silo
@@ -2695,17 +2697,17 @@ async fn test_silo_delete_cleans_up_ip_pool_links(
     // Now make sure the links are gone
     let url = "/v1/system/ip-pools/pool1/silos";
     let links =
-        objects_list_page_authz::<views::IpPoolSiloLink>(client, &url).await;
+        objects_list_page_authz::<ip_pool::IpPoolSiloLink>(client, &url).await;
     assert_eq!(links.items.len(), 1);
 
     let url = "/v1/system/ip-pools/pool2/silos";
     let links =
-        objects_list_page_authz::<views::IpPoolSiloLink>(client, &url).await;
+        objects_list_page_authz::<ip_pool::IpPoolSiloLink>(client, &url).await;
     assert_eq!(links.items.len(), 0);
 
     // but the pools are of course still there
     let url = "/v1/system/ip-pools";
-    let pools = objects_list_page_authz::<views::IpPool>(client, &url).await;
+    let pools = objects_list_page_authz::<ip_pool::IpPool>(client, &url).await;
     assert_eq!(pools.items.len(), 2);
     assert_eq!(pools.items[0].identity.name, "pool1");
     assert_eq!(pools.items[1].identity.name, "pool2");

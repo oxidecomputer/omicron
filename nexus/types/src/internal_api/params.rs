@@ -5,9 +5,9 @@
 //! Params define the request bodies of API endpoints for creating or updating resources.
 
 use crate::deployment::Blueprint;
-use crate::external_api::params::PhysicalDiskKind;
-use crate::external_api::shared::Baseboard;
-use crate::external_api::shared::IpRange;
+use crate::external_api::hardware::Baseboard;
+use crate::external_api::physical_disk::PhysicalDiskKind;
+use omicron_common::address::IpRange;
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::Generation;
 use omicron_common::api::external::MacAddr;

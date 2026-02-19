@@ -5,7 +5,7 @@
 use super::DbTypedUuid;
 use db_macros::Resource;
 use nexus_db_schema::schema::probe;
-use nexus_types::external_api::params;
+use nexus_types::external_api::probe as probe_types;
 use nexus_types::identity::Resource;
 use omicron_common::api::external;
 use omicron_common::api::external::IdentityMetadataCreateParams;
@@ -35,7 +35,7 @@ pub struct Probe {
 }
 
 impl Probe {
-    pub fn from_create(p: &params::ProbeCreate, project_id: Uuid) -> Self {
+    pub fn from_create(p: &probe_types::ProbeCreate, project_id: Uuid) -> Self {
         Self {
             identity: ProbeIdentity::new(
                 Uuid::new_v4(),

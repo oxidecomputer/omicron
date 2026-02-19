@@ -5281,6 +5281,7 @@ dependencies = [
  "iddqd",
  "ipnetwork",
  "itertools 0.14.0",
+ "key-manager-types",
  "libc",
  "macaddr",
  "nix 0.30.1",
@@ -5870,6 +5871,7 @@ version = "0.1.0"
 dependencies = [
  "async-trait",
  "hkdf",
+ "key-manager-types",
  "omicron-common",
  "omicron-workspace-hack",
  "secrecy 0.10.3",
@@ -5878,6 +5880,14 @@ dependencies = [
  "thiserror 2.0.18",
  "tokio",
  "zeroize",
+]
+
+[[package]]
+name = "key-manager-types"
+version = "0.1.0"
+dependencies = [
+ "omicron-workspace-hack",
+ "secrecy 0.10.3",
 ]
 
 [[package]]
@@ -7090,6 +7100,7 @@ dependencies = [
  "ipnetwork",
  "itertools 0.14.0",
  "nexus-types",
+ "nexus-types-versions",
  "omicron-common",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
@@ -7097,12 +7108,10 @@ dependencies = [
  "oximeter-types 0.1.0",
  "oxnet",
  "oxql-types",
- "proptest",
  "schemars 0.8.22",
  "scim2-rs",
  "serde",
  "serde_json",
- "test-strategy",
  "trust-quorum-types",
  "tufaceous-artifact",
  "uuid",
@@ -7181,6 +7190,7 @@ dependencies = [
  "dropshot",
  "http",
  "nexus-types",
+ "nexus-types-versions",
  "omicron-common",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
@@ -7705,6 +7715,7 @@ dependencies = [
  "itertools 0.14.0",
  "newtype-uuid",
  "newtype_derive",
+ "nexus-types-versions",
  "omicron-common",
  "omicron-passwords",
  "omicron-test-utils",
@@ -7741,6 +7752,39 @@ dependencies = [
  "tufaceous-artifact",
  "unicode-width 0.1.14",
  "update-engine",
+ "url",
+ "uuid",
+]
+
+[[package]]
+name = "nexus-types-versions"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "api_identity",
+ "base64 0.22.1",
+ "chrono",
+ "daft",
+ "dropshot",
+ "http",
+ "omicron-common",
+ "omicron-passwords",
+ "omicron-uuid-kinds",
+ "omicron-workspace-hack",
+ "openssl",
+ "oxnet",
+ "oxql-types",
+ "parse-display",
+ "regex",
+ "schemars 0.8.22",
+ "semver 1.0.27",
+ "serde",
+ "serde_json",
+ "sled-hardware-types",
+ "slog-error-chain",
+ "strum 0.27.2",
+ "tough",
+ "tufaceous-artifact",
  "url",
  "uuid",
 ]
@@ -8566,6 +8610,7 @@ dependencies = [
  "nexus-test-utils",
  "nexus-test-utils-macros",
  "nexus-types",
+ "nexus-types-versions",
  "ntp-admin-client",
  "num-integer",
  "omicron-cockroach-metrics",
@@ -13219,6 +13264,7 @@ dependencies = [
  "illumos-utils",
  "installinator-common",
  "key-manager",
+ "key-manager-types",
  "ntp-admin-client",
  "omicron-common",
  "omicron-test-utils",
@@ -13229,6 +13275,7 @@ dependencies = [
  "regex",
  "schemars 0.8.22",
  "scopeguard",
+ "secrecy 0.10.3",
  "serde",
  "serde_json",
  "sha2",
@@ -13244,6 +13291,7 @@ dependencies = [
  "test-strategy",
  "thiserror 2.0.18",
  "tokio",
+ "trust-quorum-types",
  "tufaceous-artifact",
  "xshell",
  "zone 0.3.1",
