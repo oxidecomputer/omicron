@@ -3593,4 +3593,95 @@ mod tests {
 
         context.success().await;
     }
+
+    // Regression test: when all IPv4 addresses in a subnet are
+    // exhausted by IPv4-only NICs, requesting a dual-stack NIC
+    // should fail with an error about missing IPv4 addresses,
+    // not silently create a NIC without an IPv4 address.
+    #[tokio::test]
+    async fn test_dual_stack_ipv4_exhaustion() {
+        let context =
+            TestContext::new("test_dual_stack_ipv4_exhaustion", 2).await;
+
+        // Create a small subnet so that we can exhaust its IPv4 addresses.
+        let ipv4_block: oxnet::Ipv4Net = "10.1.0.0/28".parse().unwrap();
+        let ipv6_block: oxnet::Ipv6Net = "fd12:3456:7890::/64".parse().unwrap();
+        let subnet = VpcSubnet::new(
+            Uuid::new_v4(),
+            Uuid::new_v4(),
+            IdentityMetadataCreateParams {
+                name: "subnet-exhaustion".parse().unwrap(),
+                description: String::from("subnet for IPv4 exhaustion test"),
+            },
+            ipv4_block,
+            ipv6_block,
+        );
+        {
+            use nexus_db_schema::schema::vpc_subnet::dsl::vpc_subnet;
+            let conn = context
+                .datastore()
+                .pool_connection_authorized(context.opctx())
+                .await
+                .unwrap();
+            diesel::insert_into(vpc_subnet)
+                .values(subnet.clone())
+                .execute_async(&*conn)
+                .await
+                .unwrap();
+        }
+
+        // Exhaust all usable IPv4 addresses.
+        let n_usable = ipv4_block.size().unwrap() as usize
+            - 1
+            - NUM_INITIAL_RESERVED_IP_ADDRESSES;
+        for i in 0..n_usable {
+            let instance = context.create_stopped_instance().await;
+            let instance_id = InstanceUuid::from_untyped_uuid(instance.id());
+            let nic = IncompleteNetworkInterface::new_instance(
+                Uuid::new_v4(),
+                instance_id,
+                subnet.clone(),
+                IdentityMetadataCreateParams {
+                    name: format!("nic-v4-{}", i).parse().unwrap(),
+                    description: String::from("IPv4-only NIC"),
+                },
+                PrivateIpStackCreate::auto_ipv4(),
+            )
+            .unwrap();
+            context
+                .datastore()
+                .instance_create_network_interface_raw(context.opctx(), nic)
+                .await
+                .expect("Failed to insert IPv4-only NIC");
+        }
+
+        // Now request a dual-stack NIC. This should fail because
+        // there are no IPv4 addresses left.
+        let instance = context.create_stopped_instance().await;
+        let instance_id = InstanceUuid::from_untyped_uuid(instance.id());
+        let nic = IncompleteNetworkInterface::new_instance(
+            Uuid::new_v4(),
+            instance_id,
+            subnet.clone(),
+            IdentityMetadataCreateParams {
+                name: "nic-dual-stack".parse().unwrap(),
+                description: String::from("dual-stack NIC"),
+            },
+            PrivateIpStackCreate::auto_dual_stack(),
+        )
+        .unwrap();
+        let result = context
+            .datastore()
+            .instance_create_network_interface_raw(context.opctx(), nic)
+            .await;
+        let err = result
+            .expect_err("Dual-stack NIC should fail when IPv4 is exhausted");
+        assert!(
+            matches!(err, InsertError::NoAvailableIpAddresses { .. }),
+            "Expected NoAvailableIpAddresses, found {:?}",
+            err,
+        );
+
+        context.success().await;
+    }
 }
