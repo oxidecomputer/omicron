@@ -3042,35 +3042,18 @@ mod test {
             }
         }
 
-        let ddl_result = ddl_handle.await.expect("DDL task panicked");
+        let _ddl_result = ddl_handle.await.expect("DDL task panicked");
 
-        // If we managed to get the concurrent rejection, great.
-        // If the first DDL completed too fast, we at least confirm
-        // both attempts didn't silently succeed while the backfill
-        // was in progress.
-        if second_errored {
-            eprintln!(
-                "test_add_column_concurrent_rejected: \
-                 Confirmed: CRDB rejects concurrent ADD COLUMN \
-                 IF NOT EXISTS during backfill."
-            );
-        } else {
-            // The first DDL completed before our second attempt
-            // could catch it mid-backfill. This is acceptable —
-            // the important thing is that no silent false-Ok
-            // happened during the backfill.
-            assert!(
-                ddl_result.is_ok(),
-                "First DDL should have succeeded if we couldn't \
-                 catch it mid-backfill"
-            );
-            eprintln!(
-                "test_add_column_concurrent_rejected: \
-                 Backfill completed before concurrent attempt. \
-                 Cannot reproduce mid-backfill rejection, but \
-                 no silent false-Ok observed."
-            );
-        }
+        assert!(
+            second_errored,
+            "Failed to catch concurrent ADD COLUMN rejection \
+             during backfill (DDL completed too fast)"
+        );
+        eprintln!(
+            "test_add_column_concurrent_rejected: \
+             Confirmed: CRDB rejects concurrent ADD COLUMN \
+             IF NOT EXISTS during backfill."
+        );
 
         let _ = client.cleanup().await;
         instance.cleanup().await.expect("Failed to clean up CRDB");
