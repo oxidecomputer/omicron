@@ -893,6 +893,54 @@ mod test {
         name.map(|i| SqlIdentifier::new(i.value.clone()))
     }
 
+    // -- Lazily compiled regexes used by the classification helpers. --
+
+    /// Strip STORING(...) clauses from CREATE INDEX.
+    static RE_STORING: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r"(?is)\bSTORING\s*\([^)]*\)").unwrap());
+
+    /// Replace `<type> ARRAY` with `<type>[]` in column definitions.
+    static RE_TYPE_ARRAY: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r"(?i)(\w+)\s+ARRAY\s*([,)\n])").unwrap());
+
+    /// Strip IF NOT EXISTS from ADD CONSTRAINT (CRDB-specific).
+    static RE_ADD_CONSTRAINT_INE: LazyLock<Regex> = LazyLock::new(|| {
+        Regex::new(r"(?i)(ADD\s+CONSTRAINT)\s+IF\s+NOT\s+EXISTS").unwrap()
+    });
+
+    /// Strip line comments (`-- ...`).
+    static RE_LINE_COMMENT: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r"--[^\n]*").unwrap());
+
+    /// Strip block comments (`/* ... */`).
+    static RE_BLOCK_COMMENT: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r"(?s)/\*.*?\*/").unwrap());
+
+    /// Detect DML / non-DDL statement starts.
+    static RE_DML_START: LazyLock<Regex> = LazyLock::new(|| {
+        Regex::new(
+            r"(?is)^\s*(?:INSERT|UPDATE|DELETE|SELECT|SET|WITH|EXPLAIN|SHOW|USE|BEGIN|COMMIT|ROLLBACK|GRANT|REVOKE)\b",
+        )
+        .unwrap()
+    });
+
+    /// Detect CockroachDB-specific ALTER PRIMARY KEY USING COLUMNS.
+    static RE_ALTER_TABLE_PK: LazyLock<Regex> = LazyLock::new(|| {
+        Regex::new(
+            r"(?is)^\s*ALTER\s+TABLE\s+\S+\s+ALTER\s+PRIMARY\s+KEY\s+USING\s+COLUMNS",
+        )
+        .unwrap()
+    });
+
+    /// Detect CREATE [UNIQUE] INDEX statements.
+    static RE_CREATE_INDEX: LazyLock<Regex> = LazyLock::new(|| {
+        Regex::new(r"(?is)^\s*CREATE\s+(?:UNIQUE\s+)?INDEX\b").unwrap()
+    });
+
+    /// Detect ALTER TABLE statements.
+    static RE_ALTER_TABLE: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r"(?is)^\s*ALTER\s+TABLE\b").unwrap());
+
     /// Pre-process a single DDL statement so that `sqlparser` (PostgreSQL
     /// dialect) can parse it.
     ///
@@ -902,37 +950,67 @@ mod test {
     fn preprocess_for_sqlparser(stmt: &str) -> String {
         let mut result = stmt.to_string();
 
-        // Strip STORING(...) clauses from CREATE INDEX.
-        let storing_re = Regex::new(r"(?is)\bSTORING\s*\([^)]*\)").unwrap();
-        result = storing_re.replace_all(&result, "").to_string();
-
-        // Replace `<type> ARRAY` with `<type>[]` in column definitions.
-        // Both are valid PostgreSQL, but sqlparser only handles the
-        // bracket notation.  We match `ARRAY` followed by `,` or
-        // end-of-definition (not `ARRAY[` which is the array literal
-        // syntax).
-        let type_array_re =
-            Regex::new(r"(?i)(\w+)\s+ARRAY\s*([,)\n])").unwrap();
-        result = type_array_re.replace_all(&result, "$1[] $2").to_string();
-
-        // Strip IF NOT EXISTS from ADD CONSTRAINT.
-        // CockroachDB supports this but standard PostgreSQL / sqlparser
-        // does not.
-        let add_constraint_ine_re =
-            Regex::new(r"(?i)(ADD\s+CONSTRAINT)\s+IF\s+NOT\s+EXISTS").unwrap();
-        result = add_constraint_ine_re.replace_all(&result, "$1").to_string();
+        result = RE_STORING.replace_all(&result, "").to_string();
+        result = RE_TYPE_ARRAY.replace_all(&result, "$1[] $2").to_string();
+        result = RE_ADD_CONSTRAINT_INE.replace_all(&result, "$1").to_string();
 
         result
     }
 
     /// Strip SQL comments (`-- ...` and `/* ... */`) from the input.
     fn strip_sql_comments(sql: &str) -> String {
-        // Strip line comments.
-        let line_comment_re = Regex::new(r"--[^\n]*").unwrap();
-        let result = line_comment_re.replace_all(sql, "");
-        // Strip block comments.
-        let block_comment_re = Regex::new(r"(?s)/\*.*?\*/").unwrap();
-        block_comment_re.replace_all(&result, "").to_string()
+        let result = RE_LINE_COMMENT.replace_all(sql, "");
+        RE_BLOCK_COMMENT.replace_all(&result, "").to_string()
+    }
+
+    /// Split SQL text on semicolons, respecting single-quoted string
+    /// literals.
+    ///
+    /// A naive `split(';')` would break on semicolons that appear inside
+    /// string literals (e.g., `DEFAULT ';'`).  This function walks the
+    /// input character-by-character, tracking whether we're inside a
+    /// single-quoted string, and only splits on `;` outside of strings.
+    /// Escaped quotes (`''`) inside strings are handled correctly.
+    ///
+    /// Returns trimmed, non-empty fragments.
+    fn split_sql_statements(sql: &str) -> Vec<&str> {
+        let mut results = Vec::new();
+        let mut in_string = false;
+        let mut start = 0;
+        let bytes = sql.as_bytes();
+        let mut i = 0;
+
+        while i < bytes.len() {
+            if in_string {
+                if bytes[i] == b'\'' {
+                    // Check for escaped quote ('')
+                    if i + 1 < bytes.len() && bytes[i + 1] == b'\'' {
+                        i += 2; // skip both quotes
+                        continue;
+                    }
+                    in_string = false;
+                }
+            } else {
+                if bytes[i] == b'\'' {
+                    in_string = true;
+                } else if bytes[i] == b';' {
+                    let fragment = sql[start..i].trim();
+                    if !fragment.is_empty() {
+                        results.push(fragment);
+                    }
+                    start = i + 1;
+                }
+            }
+            i += 1;
+        }
+
+        // Handle the last fragment (after the final `;` or if there was none)
+        let fragment = sql[start..].trim();
+        if !fragment.is_empty() {
+            results.push(fragment);
+        }
+
+        results
     }
 
     /// Parse a SQL migration file and classify all schema-changing (DDL)
@@ -951,41 +1029,19 @@ mod test {
     ) -> Result<ClassifiedDdl, anyhow::Error> {
         let without_comments = strip_sql_comments(sql);
 
-        // Skip DML, session settings, and other non-DDL statements.
-        let dml_start = Regex::new(
-            r"(?is)^\s*(?:INSERT|UPDATE|DELETE|SELECT|SET|WITH|EXPLAIN|SHOW|USE|BEGIN|COMMIT|ROLLBACK|GRANT|REVOKE)\b",
-        )
-        .unwrap();
-
-        // Detect unparseable CockroachDB-specific ALTER PRIMARY KEY.
-        let alter_table_pk_re = Regex::new(
-            r"(?is)^\s*ALTER\s+TABLE\s+\S+\s+ALTER\s+PRIMARY\s+KEY\s+USING\s+COLUMNS",
-        )
-        .unwrap();
-
-        // Detect statements that need sqlparser for verification extraction.
-        let create_index_re =
-            Regex::new(r"(?is)^\s*CREATE\s+(?:UNIQUE\s+)?INDEX\b").unwrap();
-        let alter_table_re = Regex::new(r"(?is)^\s*ALTER\s+TABLE\b").unwrap();
-
         let mut changes = Vec::new();
         let mut statement_count = 0;
 
-        for raw_stmt in without_comments.split(';') {
-            let trimmed = raw_stmt.trim();
-            if trimmed.is_empty() {
-                continue;
-            }
-
+        for trimmed in split_sql_statements(&without_comments) {
             // Skip DML, session settings, and other non-DDL statements.
-            if dml_start.is_match(trimmed) {
+            if RE_DML_START.is_match(trimmed) {
                 continue;
             }
 
             statement_count += 1;
 
-            let might_have_async_backfill = create_index_re.is_match(trimmed)
-                || alter_table_re.is_match(trimmed);
+            let might_have_async_backfill = RE_CREATE_INDEX.is_match(trimmed)
+                || RE_ALTER_TABLE.is_match(trimmed);
 
             if !might_have_async_backfill {
                 changes.push(SchemaChangeInfo::OtherDdl);
@@ -994,7 +1050,7 @@ mod test {
 
             // CockroachDB-specific ALTER PRIMARY KEY USING COLUMNS
             // can't be parsed by sqlparser; just mark as OtherDdl.
-            if alter_table_pk_re.is_match(trimmed) {
+            if RE_ALTER_TABLE_PK.is_match(trimmed) {
                 changes.push(SchemaChangeInfo::OtherDdl);
                 continue;
             }
@@ -2268,5 +2324,134 @@ mod test {
         assert!(query.contains("max_paths"));
         // This query checks column existence, not nullability
         assert!(!query.contains("is_nullable"));
+    }
+
+    // ---------------------------------------------------------------
+    // Tests for split_sql_statements
+    // ---------------------------------------------------------------
+
+    #[test]
+    fn test_split_sql_basic() {
+        let stmts = split_sql_statements(
+            "CREATE TABLE t (id INT); CREATE INDEX i ON t (id)",
+        );
+        assert_eq!(stmts.len(), 2);
+        assert_eq!(stmts[0], "CREATE TABLE t (id INT)");
+        assert_eq!(stmts[1], "CREATE INDEX i ON t (id)");
+    }
+
+    #[test]
+    fn test_split_sql_semicolon_in_string() {
+        let stmts = split_sql_statements("INSERT INTO t VALUES (';')");
+        assert_eq!(stmts.len(), 1);
+        assert_eq!(stmts[0], "INSERT INTO t VALUES (';')");
+    }
+
+    #[test]
+    fn test_split_sql_escaped_quote_in_string() {
+        let stmts = split_sql_statements("INSERT INTO t VALUES ('it''s;here')");
+        assert_eq!(stmts.len(), 1);
+        assert_eq!(stmts[0], "INSERT INTO t VALUES ('it''s;here')");
+    }
+
+    #[test]
+    fn test_split_sql_multiple_strings_with_semicolons() {
+        let stmts = split_sql_statements("INSERT INTO t VALUES (';', ';')");
+        assert_eq!(stmts.len(), 1);
+    }
+
+    #[test]
+    fn test_split_sql_trailing_semicolons() {
+        let stmts = split_sql_statements("SELECT 1;  ;  ");
+        assert_eq!(stmts.len(), 1);
+        assert_eq!(stmts[0], "SELECT 1");
+    }
+
+    #[test]
+    fn test_split_sql_empty_input() {
+        let stmts = split_sql_statements("");
+        assert_eq!(stmts.len(), 0);
+    }
+
+    #[test]
+    fn test_split_sql_no_semicolons() {
+        let stmts = split_sql_statements("SELECT 1");
+        assert_eq!(stmts.len(), 1);
+        assert_eq!(stmts[0], "SELECT 1");
+    }
+
+    #[test]
+    fn test_split_sql_semicolons_only() {
+        let stmts = split_sql_statements(";;;");
+        assert_eq!(stmts.len(), 0);
+    }
+
+    #[test]
+    fn test_split_sql_string_at_end() {
+        let stmts = split_sql_statements("SELECT 'foo'");
+        assert_eq!(stmts.len(), 1);
+        assert_eq!(stmts[0], "SELECT 'foo'");
+    }
+
+    #[test]
+    fn test_split_sql_mixed_real_split_and_string_semicolon() {
+        let stmts = split_sql_statements("SELECT ';'; CREATE TABLE t (id INT)");
+        assert_eq!(stmts.len(), 2);
+        assert_eq!(stmts[0], "SELECT ';'");
+        assert_eq!(stmts[1], "CREATE TABLE t (id INT)");
+    }
+
+    #[test]
+    fn test_split_sql_default_value_with_semicolon() {
+        let stmts = split_sql_statements(
+            "ALTER TABLE t ADD COLUMN foo TEXT DEFAULT ';'",
+        );
+        assert_eq!(stmts.len(), 1);
+    }
+
+    #[test]
+    fn test_split_sql_multiline_statement() {
+        let stmts = split_sql_statements(
+            "CREATE INDEX foo\n    ON bar (col1)\n    STORING (col2)",
+        );
+        assert_eq!(stmts.len(), 1);
+    }
+
+    #[test]
+    fn test_split_sql_newline_inside_string() {
+        let stmts =
+            split_sql_statements("INSERT INTO t VALUES ('line1\nline2')");
+        assert_eq!(stmts.len(), 1);
+    }
+
+    #[test]
+    fn test_split_sql_multiline_with_split() {
+        let stmts = split_sql_statements(
+            "CREATE TABLE t (\n  id INT\n);\nCREATE INDEX i ON t (id)",
+        );
+        assert_eq!(stmts.len(), 2);
+    }
+
+    // ---------------------------------------------------------------
+    // Integration test: classify with semicolons inside strings
+    // ---------------------------------------------------------------
+
+    #[test]
+    fn test_classify_semicolon_in_string_literal() {
+        // A semicolon inside a string literal should NOT cause a mis-split.
+        let sql = "ALTER TABLE omicron.public.t \
+                    ADD COLUMN foo TEXT DEFAULT ';';";
+        let classified = classify_sql_statements(sql, "test").unwrap();
+        assert_eq!(
+            classified.statement_count, 1,
+            "Should be a single DDL statement, not split on the ';' inside the string"
+        );
+        assert_eq!(
+            classified.changes,
+            vec![SchemaChangeInfo::AddColumnNeedsBackfill {
+                table_name: SqlIdentifier::new("t").unwrap(),
+                column_name: SqlIdentifier::new("foo").unwrap(),
+            }]
+        );
     }
 }
