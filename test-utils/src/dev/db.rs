@@ -121,7 +121,10 @@ impl CockroachStarterBuilder {
         builder
             .arg("start-single-node")
             .arg("--insecure")
-            .arg("--http-addr=:0");
+            .arg("--http-addr=:0")
+            // See https://github.com/oxidecomputer/omicron-9874-findings for
+            // why we set the max SQL memory to be 256MiB.
+            .arg("--max-sql-memory=256MiB");
         builder
     }
 
