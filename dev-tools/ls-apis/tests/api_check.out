@@ -2,7 +2,6 @@
 
 Server-managed APIs:
 
-    Bootstrap Agent Lockstep API (bootstrap-agent-lockstep-client, exposed by omicron-sled-agent)
     Clickhouse Cluster Admin for Keepers (clickhouse-admin-keeper-client, exposed by omicron-clickhouse-admin)
     Clickhouse Cluster Admin for Servers (clickhouse-admin-server-client, exposed by omicron-clickhouse-admin)
     Clickhouse Single-Node Cluster Admin (clickhouse-admin-single-client, exposed by omicron-clickhouse-admin)
@@ -28,6 +27,8 @@ Client-managed API:
 
     Bootstrap Agent (bootstrap-agent-client, exposed by omicron-sled-agent)
         reason: depends on itself (i.e., instances call each other)
+    Bootstrap Agent Lockstep API (bootstrap-agent-lockstep-client, exposed by omicron-sled-agent)
+        reason: wicketd can wind up calling into sled agent on different sleds
     Wicketd Installinator (installinator-client, exposed by wicketd)
         reason: client is provided implicitly by the operator
     Nexus Internal API (nexus-client, exposed by omicron-nexus)
