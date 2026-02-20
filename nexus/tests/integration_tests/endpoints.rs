@@ -25,7 +25,6 @@ use nexus_types::external_api::certificate;
 use nexus_types::external_api::disk;
 use nexus_types::external_api::external_subnet;
 use nexus_types::external_api::floating_ip;
-use nexus_types::external_api::hardware;
 use nexus_types::external_api::identity_provider;
 use nexus_types::external_api::image;
 use nexus_types::external_api::instance;

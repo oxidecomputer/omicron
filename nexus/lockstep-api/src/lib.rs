@@ -587,7 +587,7 @@ pub trait NexusLockstepApi {
     }]
     async fn trust_quorum_remove_sled(
         rqctx: RequestContext<Self::Context>,
-        path_params: Path<params::SledSelector>,
+        path_params: Path<SledSelector>,
     ) -> Result<HttpResponseOk<Epoch>, HttpError>;
 }
 

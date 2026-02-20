@@ -11,7 +11,6 @@ use nexus_test_utils::http_testing::NexusRequest;
 use nexus_test_utils::http_testing::RequestBuilder;
 use nexus_test_utils::resource_helpers::test_params;
 use nexus_test_utils_macros::nexus_test;
-use nexus_types::external_api::hardware;
 use nexus_types::external_api::hardware::UninitializedSled;
 use nexus_types::external_api::rack::Rack;
 use omicron_common::api::external::ByteCount;
