@@ -9,6 +9,7 @@ use super::{
         call_pantry_attach_for_disk, call_pantry_detach, get_pantry_address,
     },
 };
+use crate::app::db::datastore::volume::VolumeCheckoutReason;
 use crate::app::sagas::declare_saga_actions;
 use crate::app::{authn, authz, db};
 use nexus_db_lookup::LookupPath;
@@ -563,7 +564,7 @@ async fn sdc_regions_ensure(
                     .datastore()
                     .volume_checkout(
                         db_snapshot.volume_id(),
-                        db::datastore::VolumeCheckoutReason::ReadOnlyCopy,
+                        VolumeCheckoutReason::ReadOnlyCopy,
                     )
                     .await
                     .map_err(saga_action_failed)?;
@@ -606,7 +607,7 @@ async fn sdc_regions_ensure(
                     .datastore()
                     .volume_checkout(
                         image.volume_id(),
-                        db::datastore::VolumeCheckoutReason::ReadOnlyCopy,
+                        VolumeCheckoutReason::ReadOnlyCopy,
                     )
                     .await
                     .map_err(saga_action_failed)?;

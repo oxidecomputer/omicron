@@ -1446,7 +1446,10 @@ async fn execute_pantry_drive_action(
     );
 
     let disk_volume = datastore
-        .volume_checkout(volume_id, db::datastore::VolumeCheckoutReason::Pantry)
+        .volume_checkout(
+            volume_id,
+            db::datastore::volume::VolumeCheckoutReason::Pantry,
+        )
         .await
         .map_err(saga_action_failed)?;
 

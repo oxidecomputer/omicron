@@ -50,7 +50,7 @@ use super::{
     SagaInitError,
 };
 use crate::app::RegionAllocationStrategy;
-use crate::app::db::datastore::VolumeReplaceResult;
+use crate::app::db::datastore::volume::VolumeReplaceResult;
 use crate::app::sagas::common_storage::find_only_new_region;
 use crate::app::sagas::declare_saga_actions;
 use crate::app::{authn, db};
@@ -538,13 +538,13 @@ async fn srrs_replace_region_in_volume(
         .datastore()
         .volume_replace_region(
             /* target */
-            db::datastore::VolumeReplacementParams {
+            db::datastore::volume::VolumeReplacementParams {
                 volume_id: old_volume_id,
                 region_id: db_region.id(),
                 region_addr: old_region_address,
             },
             /* replacement */
-            db::datastore::VolumeReplacementParams {
+            db::datastore::volume::VolumeReplacementParams {
                 volume_id: new_volume_id,
                 region_id: ensured_region.id.0.parse().unwrap(),
                 region_addr: new_region_address,
@@ -637,13 +637,13 @@ async fn srrs_replace_region_in_volume_undo(
         .datastore()
         .volume_replace_region(
             /* target */
-            db::datastore::VolumeReplacementParams {
+            db::datastore::volume::VolumeReplacementParams {
                 volume_id: old_volume_id,
                 region_id: ensured_region.id.0.parse().unwrap(),
                 region_addr: new_region_address,
             },
             /* replacement */
-            db::datastore::VolumeReplacementParams {
+            db::datastore::volume::VolumeReplacementParams {
                 volume_id: new_volume_id,
                 region_id: db_region.id(),
                 region_addr: old_region_address,

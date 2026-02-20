@@ -496,7 +496,7 @@ impl super::Nexus {
                     // backends' volume construction requests. Calling
                     // `volume_checkout` bumps the volumes' generation numbers.
 
-                    use db::datastore::VolumeCheckoutReason;
+                    use db::datastore::volume::VolumeCheckoutReason;
 
                     let volume = self
                         .db_datastore

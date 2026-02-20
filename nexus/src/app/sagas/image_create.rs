@@ -153,9 +153,11 @@ async fn simc_get_source_volume(
             osagactx
                 .datastore()
                 .volume_checkout_randomize_ids(
-                    db::datastore::SourceVolume(db_snapshot.volume_id()),
-                    db::datastore::DestVolume(dest_volume_id),
-                    db::datastore::VolumeCheckoutReason::ReadOnlyCopy,
+                    db::datastore::volume::SourceVolume(
+                        db_snapshot.volume_id(),
+                    ),
+                    db::datastore::volume::DestVolume(dest_volume_id),
+                    db::datastore::volume::VolumeCheckoutReason::ReadOnlyCopy,
                 )
                 .await
                 .map_err(saga_action_failed)?;

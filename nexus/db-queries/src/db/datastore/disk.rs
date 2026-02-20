@@ -1886,9 +1886,9 @@ impl DataStore {
         params: &disk_types::DiskCreate,
         src: &ReadOnlyDiskSource,
     ) -> Result<db::datastore::Disk, diesel::result::Error> {
-        use crate::db::datastore::CrucibleTargets;
-        use crate::db::datastore::VolumeCheckoutReason;
-        use crate::db::datastore::read_only_resources_associated_with_volume;
+        use crate::db::datastore::volume::CrucibleTargets;
+        use crate::db::datastore::volume::VolumeCheckoutReason;
+        use crate::db::datastore::volume::read_only_resources_associated_with_volume;
         use sled_agent_client::VolumeConstructionRequest;
 
         // For idempotency, first check if the disk already exists, and if it

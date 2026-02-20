@@ -47,11 +47,11 @@ use super::{
     ACTION_GENERATE_ID, ActionRegistry, NexusActionContext, NexusSaga,
     SagaInitError,
 };
-use crate::app::db::datastore::ExistingTarget;
-use crate::app::db::datastore::ReplacementTarget;
-use crate::app::db::datastore::VolumeReplaceResult;
-use crate::app::db::datastore::VolumeToDelete;
-use crate::app::db::datastore::VolumeWithTarget;
+use crate::app::db::datastore::volume::ExistingTarget;
+use crate::app::db::datastore::volume::ReplacementTarget;
+use crate::app::db::datastore::volume::VolumeReplaceResult;
+use crate::app::db::datastore::volume::VolumeToDelete;
+use crate::app::db::datastore::volume::VolumeWithTarget;
 use crate::app::sagas::declare_saga_actions;
 use crate::app::{authn, authz, db};
 use nexus_db_lookup::LookupPath;

@@ -1521,7 +1521,7 @@ async fn ssc_create_volume_record(
         .datastore()
         .volume_checkout(
             params.disk.volume_id(),
-            db::datastore::VolumeCheckoutReason::CopyAndModify,
+            db::datastore::volume::VolumeCheckoutReason::CopyAndModify,
         )
         .await
         .map_err(saga_action_failed)?;

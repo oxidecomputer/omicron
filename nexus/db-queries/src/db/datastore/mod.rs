@@ -147,7 +147,7 @@ mod utilization;
 mod v2p_mapping;
 mod virtual_provisioning_collection;
 mod vmm;
-mod volume;
+pub mod volume;
 mod volume_repair;
 mod vpc;
 pub mod webhook_delivery;
@@ -197,7 +197,6 @@ pub use switch_port::SwitchPortSettingsCombinedResult;
 pub use user_data_export::*;
 pub use virtual_provisioning_collection::StorageType;
 pub use vmm::VmmStateUpdateResult;
-pub use volume::*;
 
 // Number of unique datasets required to back a region.
 // TODO: This should likely turn into a configuration option.

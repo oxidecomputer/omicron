@@ -27,18 +27,18 @@ use nexus_db_model::to_db_typed_uuid;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db;
 use nexus_db_queries::db::DataStore;
-use nexus_db_queries::db::datastore::CrucibleResources;
-use nexus_db_queries::db::datastore::DestVolume;
 use nexus_db_queries::db::datastore::Disk;
-use nexus_db_queries::db::datastore::ExistingTarget;
 use nexus_db_queries::db::datastore::RegionAllocationFor;
 use nexus_db_queries::db::datastore::RegionAllocationParameters;
-use nexus_db_queries::db::datastore::ReplacementTarget;
 use nexus_db_queries::db::datastore::SQL_BATCH_SIZE;
-use nexus_db_queries::db::datastore::SourceVolume;
-use nexus_db_queries::db::datastore::VolumeReplaceResult;
-use nexus_db_queries::db::datastore::VolumeToDelete;
-use nexus_db_queries::db::datastore::VolumeWithTarget;
+use nexus_db_queries::db::datastore::volume::CrucibleResources;
+use nexus_db_queries::db::datastore::volume::DestVolume;
+use nexus_db_queries::db::datastore::volume::ExistingTarget;
+use nexus_db_queries::db::datastore::volume::ReplacementTarget;
+use nexus_db_queries::db::datastore::volume::SourceVolume;
+use nexus_db_queries::db::datastore::volume::VolumeReplaceResult;
+use nexus_db_queries::db::datastore::volume::VolumeToDelete;
+use nexus_db_queries::db::datastore::volume::VolumeWithTarget;
 use nexus_db_queries::db::pagination::Paginator;
 use nexus_db_queries::db::pagination::paginated;
 use nexus_test_utils::http_testing::AuthnMode;
@@ -1445,7 +1445,7 @@ async fn test_volume_remove_read_only_parent_base(
     let new_vol = datastore
         .volume_checkout(
             volume_id,
-            db::datastore::VolumeCheckoutReason::CopyAndModify,
+            db::datastore::volume::VolumeCheckoutReason::CopyAndModify,
         )
         .await
         .unwrap();
@@ -1470,7 +1470,7 @@ async fn test_volume_remove_read_only_parent_base(
     let new_vol = datastore
         .volume_checkout(
             t_vid,
-            db::datastore::VolumeCheckoutReason::CopyAndModify,
+            db::datastore::volume::VolumeCheckoutReason::CopyAndModify,
         )
         .await
         .unwrap();
@@ -1503,7 +1503,7 @@ async fn test_volume_remove_read_only_parent_base(
     let new_vol = datastore
         .volume_checkout(
             t_vid,
-            db::datastore::VolumeCheckoutReason::CopyAndModify,
+            db::datastore::volume::VolumeCheckoutReason::CopyAndModify,
         )
         .await
         .unwrap();
@@ -1645,7 +1645,7 @@ async fn test_volume_remove_rop_saga(cptestctx: &ControlPlaneTestContext) {
     let new_vol = datastore
         .volume_checkout(
             volume_id,
-            db::datastore::VolumeCheckoutReason::CopyAndModify,
+            db::datastore::volume::VolumeCheckoutReason::CopyAndModify,
         )
         .await
         .unwrap();
@@ -1703,7 +1703,7 @@ async fn test_volume_remove_rop_saga_twice(
     let new_vol = datastore
         .volume_checkout(
             volume_id,
-            db::datastore::VolumeCheckoutReason::CopyAndModify,
+            db::datastore::volume::VolumeCheckoutReason::CopyAndModify,
         )
         .await
         .unwrap();
@@ -1806,7 +1806,7 @@ async fn test_volume_remove_rop_saga_deleted_volume(
     let new_vol = datastore
         .volume_checkout(
             volume_id,
-            db::datastore::VolumeCheckoutReason::CopyAndModify,
+            db::datastore::volume::VolumeCheckoutReason::CopyAndModify,
         )
         .await
         .unwrap();
@@ -1858,7 +1858,7 @@ async fn test_volume_checkout(cptestctx: &ControlPlaneTestContext) {
     let new_vol = datastore
         .volume_checkout(
             volume_id,
-            db::datastore::VolumeCheckoutReason::CopyAndModify,
+            db::datastore::volume::VolumeCheckoutReason::CopyAndModify,
         )
         .await
         .unwrap();
@@ -1868,7 +1868,7 @@ async fn test_volume_checkout(cptestctx: &ControlPlaneTestContext) {
     let new_vol = datastore
         .volume_checkout(
             volume_id,
-            db::datastore::VolumeCheckoutReason::CopyAndModify,
+            db::datastore::volume::VolumeCheckoutReason::CopyAndModify,
         )
         .await
         .unwrap();
@@ -1909,7 +1909,7 @@ async fn test_volume_checkout_updates_nothing(
     let new_vol = datastore
         .volume_checkout(
             volume_id,
-            db::datastore::VolumeCheckoutReason::CopyAndModify,
+            db::datastore::volume::VolumeCheckoutReason::CopyAndModify,
         )
         .await
         .unwrap();
@@ -1917,7 +1917,7 @@ async fn test_volume_checkout_updates_nothing(
     let new_vol = datastore
         .volume_checkout(
             volume_id,
-            db::datastore::VolumeCheckoutReason::CopyAndModify,
+            db::datastore::volume::VolumeCheckoutReason::CopyAndModify,
         )
         .await
         .unwrap();
@@ -1959,7 +1959,7 @@ async fn test_volume_checkout_updates_multiple_gen(
     let new_vol = datastore
         .volume_checkout(
             volume_id,
-            db::datastore::VolumeCheckoutReason::CopyAndModify,
+            db::datastore::volume::VolumeCheckoutReason::CopyAndModify,
         )
         .await
         .unwrap();
@@ -1969,7 +1969,7 @@ async fn test_volume_checkout_updates_multiple_gen(
     let new_vol = datastore
         .volume_checkout(
             volume_id,
-            db::datastore::VolumeCheckoutReason::CopyAndModify,
+            db::datastore::volume::VolumeCheckoutReason::CopyAndModify,
         )
         .await
         .unwrap();
@@ -1979,7 +1979,7 @@ async fn test_volume_checkout_updates_multiple_gen(
     let new_vol = datastore
         .volume_checkout(
             volume_id,
-            db::datastore::VolumeCheckoutReason::CopyAndModify,
+            db::datastore::volume::VolumeCheckoutReason::CopyAndModify,
         )
         .await
         .unwrap();
@@ -2027,7 +2027,7 @@ async fn test_volume_checkout_updates_sparse_multiple_gen(
     let new_vol = datastore
         .volume_checkout(
             volume_id,
-            db::datastore::VolumeCheckoutReason::CopyAndModify,
+            db::datastore::volume::VolumeCheckoutReason::CopyAndModify,
         )
         .await
         .unwrap();
@@ -2037,7 +2037,7 @@ async fn test_volume_checkout_updates_sparse_multiple_gen(
     let new_vol = datastore
         .volume_checkout(
             volume_id,
-            db::datastore::VolumeCheckoutReason::CopyAndModify,
+            db::datastore::volume::VolumeCheckoutReason::CopyAndModify,
         )
         .await
         .unwrap();
@@ -2085,7 +2085,7 @@ async fn test_volume_checkout_updates_sparse_mid_multiple_gen(
     let new_vol = datastore
         .volume_checkout(
             volume_id,
-            db::datastore::VolumeCheckoutReason::CopyAndModify,
+            db::datastore::volume::VolumeCheckoutReason::CopyAndModify,
         )
         .await
         .unwrap();
@@ -2095,7 +2095,7 @@ async fn test_volume_checkout_updates_sparse_mid_multiple_gen(
     let new_vol = datastore
         .volume_checkout(
             volume_id,
-            db::datastore::VolumeCheckoutReason::CopyAndModify,
+            db::datastore::volume::VolumeCheckoutReason::CopyAndModify,
         )
         .await
         .unwrap();
@@ -2137,7 +2137,7 @@ async fn test_volume_checkout_randomize_ids_only_read_only(
         .volume_checkout_randomize_ids(
             SourceVolume(volume_id),
             DestVolume(VolumeUuid::new_v4()),
-            db::datastore::VolumeCheckoutReason::CopyAndModify,
+            db::datastore::volume::VolumeCheckoutReason::CopyAndModify,
         )
         .await;
     assert!(r.is_err());
@@ -6400,7 +6400,7 @@ async fn test_volume_create_wont_use_deleted_region_snapshots(
     let volume_copy = datastore
         .volume_checkout(
             db_snapshot.volume_id(),
-            db::datastore::VolumeCheckoutReason::ReadOnlyCopy,
+            db::datastore::volume::VolumeCheckoutReason::ReadOnlyCopy,
         )
         .await
         .unwrap();
