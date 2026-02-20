@@ -145,7 +145,7 @@ function install_packages {
     fi
   elif [[ "${HOST_OS}" == "SunOS" ]]; then
     CLANGVER=15
-    PGVER=13
+    PGVER=18
     packages=(
       "pkg:/package/pkg"
       "build-essential"
@@ -239,12 +239,12 @@ function show_hint
   case "$1" in
     "pg_config")
       if [[ "${HOST_OS}" == "SunOS" ]]; then
-        echo "On illumos, $1 is typically found in '/opt/ooce/bin'"
+        echo "On helios, $1 is typically found in '/opt/ooce/bin'"
       fi
       ;;
     "pkg-config")
       if [[ "${HOST_OS}" == "SunOS" ]]; then
-        echo "On illumos, $1 is typically found in '/usr/bin'"
+        echo "On helios, $1 is typically found in '/usr/bin'"
       fi
       ;;
     "cockroach")
