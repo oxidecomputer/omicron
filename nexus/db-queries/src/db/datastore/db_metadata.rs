@@ -2934,16 +2934,13 @@ mod test {
 
     #[tokio::test]
     async fn test_add_column_concurrent_rejected() {
-        let logctx =
-            dev::test_setup_log("test_add_column_concurrent_rejected");
+        let logctx = dev::test_setup_log("test_add_column_concurrent_rejected");
 
         let mut builder =
             omicron_test_utils::dev::db::CockroachStarterBuilder::new();
         builder.arg("--max-sql-memory=32MiB");
-        let starter =
-            builder.build().expect("Failed to build CRDB starter");
-        let mut instance =
-            starter.start().await.expect("Failed to start CRDB");
+        let starter = builder.build().expect("Failed to build CRDB starter");
+        let mut instance = starter.start().await.expect("Failed to start CRDB");
         instance
             .disable_synchronization()
             .await
@@ -2978,10 +2975,8 @@ mod test {
             .expect("Failed to insert rows");
 
         // Start the ADD COLUMN in a spawned task.
-        let ddl_client = instance
-            .connect()
-            .await
-            .expect("Failed to create DDL connection");
+        let ddl_client =
+            instance.connect().await.expect("Failed to create DDL connection");
 
         let ddl_handle = tokio::spawn(async move {
             let result = ddl_client
@@ -3005,10 +3000,7 @@ mod test {
         // the second attempt even with IF NOT EXISTS.
         let mut second_errored = false;
         for attempt in 0..200 {
-            tokio::time::sleep(
-                std::time::Duration::from_millis(50),
-            )
-            .await;
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
 
             if ddl_handle.is_finished() {
                 eprintln!(
@@ -3050,8 +3042,7 @@ mod test {
             }
         }
 
-        let ddl_result =
-            ddl_handle.await.expect("DDL task panicked");
+        let ddl_result = ddl_handle.await.expect("DDL task panicked");
 
         // If we managed to get the concurrent rejection, great.
         // If the first DDL completed too fast, we at least confirm
@@ -3101,16 +3092,13 @@ mod test {
 
     #[tokio::test]
     async fn test_add_constraint_backfill_race() {
-        let logctx =
-            dev::test_setup_log("test_add_constraint_backfill_race");
+        let logctx = dev::test_setup_log("test_add_constraint_backfill_race");
 
         let mut builder =
             omicron_test_utils::dev::db::CockroachStarterBuilder::new();
         builder.arg("--max-sql-memory=32MiB");
-        let starter =
-            builder.build().expect("Failed to build CRDB starter");
-        let mut instance =
-            starter.start().await.expect("Failed to start CRDB");
+        let starter = builder.build().expect("Failed to build CRDB starter");
+        let mut instance = starter.start().await.expect("Failed to start CRDB");
         instance
             .disable_synchronization()
             .await
@@ -3159,11 +3147,9 @@ mod test {
         // task initiates validation, the others see the in-progress
         // constraint via IF NOT EXISTS and return Ok.
         let task_clients: Vec<_> =
-            futures::future::try_join_all(
-                (0..3).map(|_| instance.connect()),
-            )
-            .await
-            .expect("Failed to create task connections");
+            futures::future::try_join_all((0..3).map(|_| instance.connect()))
+                .await
+                .expect("Failed to create task connections");
 
         let handles: Vec<_> = task_clients
             .into_iter()
@@ -3212,10 +3198,8 @@ mod test {
         // via IF NOT EXISTS.
         let change =
             nexus_db_model::SchemaChangeInfo::AlterTableAddConstraint {
-                table_name: nexus_db_model::SqlIdentifier::new(
-                    "test_race",
-                )
-                .unwrap(),
+                table_name: nexus_db_model::SqlIdentifier::new("test_race")
+                    .unwrap(),
                 constraint_name: nexus_db_model::SqlIdentifier::new(
                     "val_positive",
                 )
@@ -3223,8 +3207,7 @@ mod test {
             };
         let verify_sql = change.verification_query().unwrap();
 
-        let verification_result =
-            client.batch_execute(&verify_sql).await;
+        let verification_result = client.batch_execute(&verify_sql).await;
         let err = verification_result.unwrap_err();
         let err_msg = err.to_string();
         assert!(
@@ -3246,17 +3229,12 @@ mod test {
                  );",
             )
             .await
-            .expect(
-                "Failed to recreate table with inline constraint",
-            );
+            .expect("Failed to recreate table with inline constraint");
 
-        client
-            .batch_execute(&verify_sql)
-            .await
-            .expect(
-                "Verification should pass when the constraint \
+        client.batch_execute(&verify_sql).await.expect(
+            "Verification should pass when the constraint \
                  actually exists",
-            );
+        );
 
         let _ = client.cleanup().await;
         instance.cleanup().await.expect("Failed to clean up CRDB");
@@ -3272,10 +3250,8 @@ mod test {
         let mut builder =
             omicron_test_utils::dev::db::CockroachStarterBuilder::new();
         builder.arg("--max-sql-memory=32MiB");
-        let starter =
-            builder.build().expect("Failed to build CRDB starter");
-        let mut instance =
-            starter.start().await.expect("Failed to start CRDB");
+        let starter = builder.build().expect("Failed to build CRDB starter");
+        let mut instance = starter.start().await.expect("Failed to start CRDB");
         instance
             .disable_synchronization()
             .await
@@ -3319,10 +3295,8 @@ mod test {
 
         let change =
             nexus_db_model::SchemaChangeInfo::AlterTableAddConstraint {
-                table_name: nexus_db_model::SqlIdentifier::new(
-                    "test_race",
-                )
-                .unwrap(),
+                table_name: nexus_db_model::SqlIdentifier::new("test_race")
+                    .unwrap(),
                 constraint_name: nexus_db_model::SqlIdentifier::new(
                     "val_positive",
                 )
@@ -3331,11 +3305,9 @@ mod test {
         let verify_sql = change.verification_query().unwrap();
 
         let task_clients: Vec<_> =
-            futures::future::try_join_all(
-                (0..3).map(|_| instance.connect()),
-            )
-            .await
-            .expect("Failed to create task connections");
+            futures::future::try_join_all((0..3).map(|_| instance.connect()))
+                .await
+                .expect("Failed to create task connections");
 
         let handles: Vec<_> = task_clients
             .into_iter()
@@ -3376,8 +3348,7 @@ mod test {
         // (IF NOT EXISTS no-op while validation was in progress),
         // verification must fail to prevent that Nexus from
         // proceeding.
-        for (task_id, (ddl_result, verify_result)) in
-            results.iter().enumerate()
+        for (task_id, (ddl_result, verify_result)) in results.iter().enumerate()
         {
             let ddl_ok = ddl_result.is_ok();
             let verify_ok = verify_result.is_ok();
@@ -3423,10 +3394,8 @@ mod test {
         let mut builder =
             omicron_test_utils::dev::db::CockroachStarterBuilder::new();
         builder.arg("--max-sql-memory=32MiB");
-        let starter =
-            builder.build().expect("Failed to build CRDB starter");
-        let mut instance =
-            starter.start().await.expect("Failed to start CRDB");
+        let starter = builder.build().expect("Failed to build CRDB starter");
+        let mut instance = starter.start().await.expect("Failed to start CRDB");
         instance
             .disable_synchronization()
             .await
@@ -3474,11 +3443,9 @@ mod test {
         // validation, and other connections get "constraint in the
         // middle of being added".
         let task_clients: Vec<_> =
-            futures::future::try_join_all(
-                (0..3).map(|_| instance.connect()),
-            )
-            .await
-            .expect("Failed to create task connections");
+            futures::future::try_join_all((0..3).map(|_| instance.connect()))
+                .await
+                .expect("Failed to create task connections");
 
         let handles: Vec<_> = task_clients
             .into_iter()
