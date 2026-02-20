@@ -7,7 +7,7 @@
       "url": "https://oxide.computer",
       "email": "api@oxide.computer"
     },
-    "version": "2026021800.0.0"
+    "version": "2026021900.0.0"
   },
   "paths": {
     "/device/auth": {
