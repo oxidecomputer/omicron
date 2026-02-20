@@ -99,6 +99,18 @@ Process:
   one of these steps wrong, these tests should be able to tell you, whereas
   other tests might fail in much worse ways (e.g., they can hang if you've
   updated `SCHEMA_VERSION` but not the database schema version).
+* Generate verification files by running
+  `EXPECTORATE=overwrite cargo nextest run -p nexus-db-model 'test_migration_verification_files'`.
+  This auto-generates `.verify.sql` files for any migration steps that contain
+  DDL with async backfill operations (`CREATE INDEX`, `ADD CONSTRAINT`,
+  `ALTER COLUMN SET NOT NULL`, or `ADD COLUMN` with `NOT NULL` / non-null
+  `DEFAULT` / `STORED` computed columns).  Check these files in alongside the
+  migration.  If your migration doesn't contain backfill-prone DDL, no
+  `.verify.sql` file is generated and nothing changes.
++
+At runtime, after applying each migration step, Nexus runs the verification
+queries from the corresponding `.verify.sql` file (if one exists) in a
+separate transaction to confirm the async backfill actually completed.
 
 There are automated tests to validate many of these steps:
 
@@ -114,6 +126,10 @@ There are automated tests to validate many of these steps:
   the update.)
 * All `up*.sql` files can be applied twice without error.  (This catches
   non-idempotent update steps.)
+* All `.verify.sql` files match the expected auto-generated output for their
+  corresponding `up*.sql` files.  (This catches missing or stale verification
+  files.  Run `EXPECTORATE=overwrite cargo nextest run -p nexus-db-model 'test_migration_verification_files'`
+  to regenerate them.)
 
 **If you've finished all this and another PR lands on "main" that chose the
 same `NEW_VERSION`:**, then your `OLD_VERSION` has changed and so _your_
