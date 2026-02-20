@@ -63,6 +63,10 @@ use std::collections::BTreeSet;
 use std::net::IpAddr;
 use std::sync::Arc;
 
+mod pruneable_zones;
+
+use pruneable_zones::PruneableZones;
+
 /// Given various pieces of database state that go into the blueprint planning
 /// process, produce a `PlanningInput` object encapsulating what the planner
 /// needs to generate a blueprint
@@ -92,6 +96,7 @@ pub struct PlanningInputFromDb<'a> {
     pub planner_config: PlannerConfig,
     pub active_nexus_zones: BTreeSet<OmicronZoneUuid>,
     pub not_yet_nexus_zones: BTreeSet<OmicronZoneUuid>,
+    pub pruneable_zones: BTreeSet<OmicronZoneUuid>,
     pub log: &'a Logger,
 }
 
@@ -269,6 +274,15 @@ impl PlanningInputFromDb<'_> {
             active_nexus_zones.into_iter().map(|n| n.nexus_id()).collect();
         let not_yet_nexus_zones =
             not_yet_nexus_zones.into_iter().map(|n| n.nexus_id()).collect();
+        let pruneable_zones = PruneableZones::assemble(
+            opctx,
+            datastore,
+            &parent_blueprint,
+            &external_ip_rows,
+            &service_nic_rows,
+        )
+        .await?
+        .into_pruneable_zones();
 
         let planning_input = PlanningInputFromDb {
             parent_blueprint,
@@ -297,6 +311,7 @@ impl PlanningInputFromDb<'_> {
             planner_config,
             active_nexus_zones,
             not_yet_nexus_zones,
+            pruneable_zones,
         }
         .build()
         .internal_context("assembling planning_input")?;
@@ -452,6 +467,16 @@ impl PlanningInputFromDb<'_> {
                 Error::internal_error(&format!(
                     "unexpectedly failed to add Omicron zone NIC \
                      to planning input: {e}"
+                ))
+            })?;
+        }
+
+        for &zone_id in &self.pruneable_zones {
+            builder.insert_pruneable_zone(zone_id).map_err(|e| {
+                Error::internal_error(&format!(
+                    "unexpectedly failed to pruneable zone ID {zone_id} \
+                     to planning input: {}",
+                    InlineErrorChain::new(&e),
                 ))
             })?;
         }

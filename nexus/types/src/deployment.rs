@@ -763,7 +763,7 @@ pub enum ZoneRunningStatus {
 /// 1. Add a new variant to this enum.
 /// 2. Update the planner to account for it, to prevent the planner from pruning
 ///    the zone before whatever your use of it is completed.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, EnumIter)]
 pub enum BlueprintExpungedZoneAccessReason {
     // --------------------------------------------------------------------
     // Zone-kind-specific variants. Keep this sorted alphabetically, prefix
@@ -818,8 +818,9 @@ pub enum BlueprintExpungedZoneAccessReason {
     /// Carrying forward the external Nexus configuration provided by the
     /// operator during rack setup; see [`Blueprint::operator_nexus_config()`].
     ///
-    /// The planner must not prune a Nexus zone if it's the last zone
-    /// remaining with the set of configuration.
+    /// The planner does not need to account for this when pruning Nexus zones.
+    /// The system will never _not_ have a running Nexus zone, barring some
+    /// other catastrophic bug or support error.
     NexusExternalConfig,
 
     /// Nexus needs to whether it itself should be quiescing. If the
@@ -857,6 +858,21 @@ pub enum BlueprintExpungedZoneAccessReason {
     /// The planner does not need to account for this when pruning zones.
     /// (Moving them to "ready for cleanup" is a _prerequisite_ for pruning.)
     PlannerCheckReadyForCleanup,
+
+    /// When constructing a [`PlanningInput`], it needs to loop over the
+    /// blueprint's expunged zones in order to know which zones may be
+    /// pruneable.
+    ///
+    /// The planner does not need to account for this when pruning zones.
+    PlanningInputFindPruneable,
+
+    /// When constructing a [`PlanningInput`], its builder has a guard that any
+    /// supposedly-pruneable zone ID actually is expunged.
+    ///
+    /// This guard is implemented by asking the parent blueprint for its list of
+    /// expunged zones. The planner does not need to account for this when
+    /// pruning zones.
+    PlanningInputExpungedZoneGuard,
 
     // --------------------------------------------------------------------
     // Catch-all variants for non-production callers. The planner does not need
