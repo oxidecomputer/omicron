@@ -317,32 +317,6 @@ impl std::fmt::Display for SqlIdentifier {
 /// by an expectorate test and read at runtime.
 #[derive(Debug, Clone, PartialEq)]
 pub enum SchemaChangeInfo {
-    /// `ALTER TABLE ... ADD COLUMN` where CockroachDB's
-    /// `ColumnNeedsBackfill` returns true.
-    ///
-    /// This covers:
-    /// - NOT NULL columns (with or without a default)
-    /// - Nullable columns with a non-NULL default expression
-    /// - Stored computed columns (`GENERATED ALWAYS AS (expr) STORED`)
-    ///
-    /// CockroachDB runs an async column backfill job to write the
-    /// default/computed value (or validate the NOT NULL constraint)
-    /// for all existing rows.
-    AddColumnNeedsBackfill {
-        table_name: SqlIdentifier,
-        column_name: SqlIdentifier,
-    },
-
-    /// `ALTER TABLE ... ALTER COLUMN ... SET NOT NULL`
-    ///
-    /// CockroachDB adds a NOT-NULL check constraint in `Validating`
-    /// state, then runs an async validation job that scans the table
-    /// to verify no NULL values exist.
-    AlterColumnSetNotNull {
-        table_name: SqlIdentifier,
-        column_name: SqlIdentifier,
-    },
-
     /// `ALTER TABLE ... ADD CONSTRAINT ...` (CHECK, UNIQUE, FK)
     ///
     /// CockroachDB adds the constraint in `Validating` state, then
@@ -396,65 +370,24 @@ impl SchemaChangeInfo {
                     );"
                 ))
             }
-            SchemaChangeInfo::AlterColumnSetNotNull {
-                table_name,
-                column_name,
-            } => Some(format!(
-                "SELECT CAST(\
-                    IF(\
-                        (\
-                            SELECT true WHERE EXISTS (\
-                                SELECT column_name \
-                                FROM information_schema.columns \
-                                WHERE table_schema = 'public' \
-                                AND table_name = '{table_name}' \
-                                AND column_name = '{column_name}' \
-                                AND is_nullable = 'NO'\
-                            )\
-                        ),\
-                        'true',\
-                        'Schema change verification failed: \
-                        column {column_name} on table {table_name} \
-                        is still nullable'\
-                    ) AS BOOL\
-                );"
-            )),
-            SchemaChangeInfo::AddColumnNeedsBackfill {
-                table_name,
-                column_name,
-            } => Some(format!(
-                "SELECT CAST(\
-                    IF(\
-                        (\
-                            SELECT true WHERE EXISTS (\
-                                SELECT column_name \
-                                FROM information_schema.columns \
-                                WHERE table_schema = 'public' \
-                                AND table_name = '{table_name}' \
-                                AND column_name = '{column_name}'\
-                            )\
-                        ),\
-                        'true',\
-                        'Schema change verification failed: \
-                        column {column_name} on table {table_name} \
-                        does not exist \
-                        (backfill may not have completed)'\
-                    ) AS BOOL\
-                );"
-            )),
             SchemaChangeInfo::AlterTableAddConstraint {
                 table_name,
                 constraint_name,
             } => Some(format!(
+                // Use [SHOW CONSTRAINTS FROM ...] instead of
+                // information_schema.table_constraints because the
+                // latter shows constraints in ALL states including
+                // "Validating" (async validation still in progress).
+                // SHOW CONSTRAINTS provides a `validated` column
+                // that is only true when validation has completed.
                 "SELECT CAST(\
                     IF(\
                         (\
                             SELECT true WHERE EXISTS (\
-                                SELECT constraint_name \
-                                FROM information_schema.table_constraints \
-                                WHERE table_schema = 'public' \
-                                AND table_name = '{table_name}' \
-                                AND constraint_name = '{constraint_name}'\
+                                SELECT 1 \
+                                FROM [SHOW CONSTRAINTS FROM {table_name}] \
+                                WHERE constraint_name = '{constraint_name}' \
+                                AND validated = true\
                             )\
                         ),\
                         'true',\
@@ -799,9 +732,8 @@ pub struct SchemaUpgradeStep {
     /// Pre-computed verification SQL read from a sibling `.verify.sql` file.
     ///
     /// Generated at test time by an expectorate test that parses each
-    /// migration, detects backfill-prone DDL (CREATE INDEX, ALTER COLUMN
-    /// SET NOT NULL, ADD CONSTRAINT, ADD COLUMN with backfill), and
-    /// produces verification queries.  At runtime we just read the file.
+    /// migration, detects backfill-prone DDL (CREATE INDEX, ADD CONSTRAINT),
+    /// and produces verification queries.  At runtime we just read the file.
     verification_sql: Option<String>,
 }
 
@@ -832,9 +764,7 @@ mod test {
     use camino_tempfile::Utf8TempDir;
     use regex::Regex;
     use sqlparser::ast::{
-        AlterColumnOperation, AlterTableOperation, ColumnOption, Expr,
-        GeneratedExpressionMode, Statement, TableConstraint, Value,
-        ValueWithSpan,
+        AlterColumnOperation, AlterTableOperation, Statement, TableConstraint,
     };
     use sqlparser::dialect::PostgreSqlDialect;
     use sqlparser::parser::Parser;
@@ -1082,17 +1012,10 @@ mod test {
                         for op in &at.operations {
                             match op {
                                 AlterTableOperation::AlterColumn {
-                                    column_name,
+                                    column_name: _,
                                     op: AlterColumnOperation::SetNotNull,
                                 } => {
-                                    changes.push(
-                                        SchemaChangeInfo::AlterColumnSetNotNull {
-                                            table_name: tbl.clone(),
-                                            column_name: SqlIdentifier::new(
-                                                column_name.value.clone(),
-                                            )?,
-                                        },
-                                    );
+                                    changes.push(SchemaChangeInfo::OtherDdl);
                                 }
                                 AlterTableOperation::AddConstraint {
                                     constraint: tc,
@@ -1113,63 +1036,8 @@ mod test {
                                         },
                                     );
                                 }
-                                AlterTableOperation::AddColumn {
-                                    column_def,
-                                    ..
-                                } => {
-                                    let is_not_null =
-                                        column_def.options.iter().any(|opt| {
-                                            matches!(
-                                                opt.option,
-                                                ColumnOption::NotNull
-                                            )
-                                        });
-                                    let has_non_null_default =
-                                        column_def.options.iter().any(|opt| {
-                                            matches!(
-                                                &opt.option,
-                                                ColumnOption::Default(expr)
-                                                    if !matches!(
-                                                        expr,
-                                                        Expr::Value(ValueWithSpan {
-                                                            value: Value::Null,
-                                                            ..
-                                                        })
-                                                    )
-                                            )
-                                        });
-                                    let is_stored_computed =
-                                        column_def.options.iter().any(|opt| {
-                                            matches!(
-                                                &opt.option,
-                                                ColumnOption::Generated {
-                                                    generation_expr: Some(_),
-                                                    generation_expr_mode: Some(
-                                                        GeneratedExpressionMode::Stored
-                                                    ),
-                                                    ..
-                                                }
-                                            )
-                                        });
-                                    if is_not_null
-                                        || has_non_null_default
-                                        || is_stored_computed
-                                    {
-                                        changes.push(
-                                            SchemaChangeInfo::AddColumnNeedsBackfill {
-                                                table_name: tbl.clone(),
-                                                column_name: SqlIdentifier::new(
-                                                    column_def
-                                                        .name
-                                                        .value
-                                                        .clone(),
-                                                )?,
-                                            },
-                                        );
-                                    } else {
-                                        changes
-                                            .push(SchemaChangeInfo::OtherDdl);
-                                    }
+                                AlterTableOperation::AddColumn { .. } => {
+                                    changes.push(SchemaChangeInfo::OtherDdl);
                                 }
                                 _ => {
                                     changes.push(SchemaChangeInfo::OtherDdl);
@@ -1631,16 +1499,6 @@ mod test {
     }
 
     #[test]
-    fn test_classify_create_table() {
-        let sql = "CREATE TABLE IF NOT EXISTS omicron.public.widget (\
-                        id UUID PRIMARY KEY\
-                    );";
-        let classified = classify_sql_statements(sql, "test").unwrap();
-        assert_eq!(classified.statement_count, 1);
-        assert_eq!(classified.changes, vec![SchemaChangeInfo::OtherDdl]);
-    }
-
-    #[test]
     fn test_classify_dml_ignored() {
         // DML (INSERT, SELECT, SET, UPDATE) should not produce any
         // SchemaChangeInfo entries.
@@ -1653,39 +1511,6 @@ mod test {
         assert!(
             changes.is_empty(),
             "DML should not be classified as DDL: {changes:?}"
-        );
-    }
-
-    #[test]
-    fn test_classify_alter_table_add_column() {
-        let sql = "ALTER TABLE omicron.public.sled \
-                    ADD COLUMN IF NOT EXISTS cpu_family TEXT;";
-        let classified = classify_sql_statements(sql, "test").unwrap();
-        assert_eq!(classified.statement_count, 1);
-        assert_eq!(classified.changes, vec![SchemaChangeInfo::OtherDdl]);
-    }
-
-    #[test]
-    fn test_classify_alter_table_drop_column() {
-        let sql = "ALTER TABLE omicron.public.instance \
-                    DROP COLUMN IF EXISTS active_sled_id;";
-        let classified = classify_sql_statements(sql, "test").unwrap();
-        assert_eq!(classified.statement_count, 1);
-        assert_eq!(classified.changes, vec![SchemaChangeInfo::OtherDdl]);
-    }
-
-    #[test]
-    fn test_classify_alter_column_set_not_null() {
-        let sql = "ALTER TABLE omicron.public.metric_producer \
-                    ALTER COLUMN kind SET NOT NULL;";
-        let classified = classify_sql_statements(sql, "test").unwrap();
-        let changes = classified.changes;
-        assert_eq!(
-            changes,
-            vec![SchemaChangeInfo::AlterColumnSetNotNull {
-                table_name: SqlIdentifier::new("metric_producer").unwrap(),
-                column_name: SqlIdentifier::new("kind").unwrap(),
-            }]
         );
     }
 
@@ -1716,83 +1541,6 @@ mod test {
         assert!(
             format!("{err:#}").contains("ADD CONSTRAINT without a name"),
             "unexpected error: {err:#}"
-        );
-    }
-
-    #[test]
-    fn test_classify_alter_table_drop_constraint() {
-        let sql = "ALTER TABLE omicron.public.external_ip \
-                    DROP CONSTRAINT IF EXISTS null_non_fip_parent_id;";
-        let classified = classify_sql_statements(sql, "test").unwrap();
-        assert_eq!(classified.statement_count, 1);
-        assert_eq!(classified.changes, vec![SchemaChangeInfo::OtherDdl]);
-    }
-
-    #[test]
-    fn test_classify_alter_index_rename() {
-        // ALTER INDEX is DDL but doesn't need verification — OtherDdl.
-        let sql = "ALTER INDEX omicron.public.old_idx RENAME TO new_idx;";
-        let classified = classify_sql_statements(sql, "test").unwrap();
-        assert_eq!(classified.statement_count, 1);
-        assert_eq!(classified.changes, vec![SchemaChangeInfo::OtherDdl]);
-    }
-
-    #[test]
-    fn test_classify_create_type_enum() {
-        let sql = "CREATE TYPE IF NOT EXISTS omicron.public.sled_policy \
-                    AS ENUM ('in_service', 'no_provision', 'expunged');";
-        let classified = classify_sql_statements(sql, "test").unwrap();
-        assert_eq!(classified.statement_count, 1);
-        assert_eq!(classified.changes, vec![SchemaChangeInfo::OtherDdl]);
-    }
-
-    #[test]
-    fn test_classify_alter_type_add_value() {
-        let sql = "ALTER TYPE omicron.public.dataset_kind \
-                    ADD VALUE IF NOT EXISTS 'clickhouse_keeper2' \
-                    AFTER 'clickhouse';";
-        let classified = classify_sql_statements(sql, "test").unwrap();
-        assert_eq!(classified.statement_count, 1);
-        assert_eq!(classified.changes, vec![SchemaChangeInfo::OtherDdl]);
-    }
-
-    #[test]
-    fn test_classify_drop_index() {
-        let sql = "DROP INDEX IF EXISTS my_idx;";
-        let classified = classify_sql_statements(sql, "test").unwrap();
-        assert_eq!(classified.statement_count, 1);
-        assert_eq!(classified.changes, vec![SchemaChangeInfo::OtherDdl]);
-    }
-
-    #[test]
-    fn test_classify_drop_index_table_at_notation() {
-        // CRDB table@index notation — DROP INDEX is now OtherDdl
-        // (no parsing needed).
-        let sql = "DROP INDEX IF EXISTS \
-                    omicron.public.sw_caboose@caboose_properties;";
-        let classified = classify_sql_statements(sql, "test").unwrap();
-        assert_eq!(classified.statement_count, 1);
-        assert_eq!(classified.changes, vec![SchemaChangeInfo::OtherDdl]);
-    }
-
-    #[test]
-    fn test_classify_drop_table() {
-        let sql = "DROP TABLE IF EXISTS omicron.public.widget;";
-        let classified = classify_sql_statements(sql, "test").unwrap();
-        assert_eq!(classified.statement_count, 1);
-        assert_eq!(classified.changes, vec![SchemaChangeInfo::OtherDdl]);
-    }
-
-    #[test]
-    fn test_classify_create_drop_view() {
-        let sql = "CREATE VIEW IF NOT EXISTS omicron.public.my_view \
-                    AS SELECT 1;\n\
-                    DROP VIEW IF EXISTS omicron.public.my_view;";
-        let classified = classify_sql_statements(sql, "test").unwrap();
-        assert_eq!(classified.statement_count, 2);
-        assert_eq!(
-            classified.changes,
-            vec![SchemaChangeInfo::OtherDdl, SchemaChangeInfo::OtherDdl]
         );
     }
 
@@ -1829,17 +1577,6 @@ mod test {
             "IF NOT EXISTS should be stripped: {output}"
         );
         assert!(output.contains("ADD CONSTRAINT my_ck"));
-    }
-
-    #[test]
-    fn test_classify_alter_primary_key() {
-        // CockroachDB-specific ALTER PRIMARY KEY USING COLUMNS can't
-        // be parsed by sqlparser, but should still count as DDL.
-        let sql = "ALTER TABLE omicron.public.t \
-                    ALTER PRIMARY KEY USING COLUMNS (a, b);";
-        let classified = classify_sql_statements(sql, "test").unwrap();
-        assert_eq!(classified.statement_count, 1);
-        assert_eq!(classified.changes, vec![SchemaChangeInfo::OtherDdl]);
     }
 
     #[test]
@@ -1880,6 +1617,50 @@ mod test {
                  DROP TABLE IF EXISTS t2;",
                 2,
             ),
+            // ADD COLUMN (nullable)
+            ("ALTER TABLE t ADD COLUMN IF NOT EXISTS cpu_family TEXT;", 1),
+            // ADD COLUMN NOT NULL DEFAULT
+            (
+                "ALTER TABLE t ADD COLUMN IF NOT EXISTS max_paths INT NOT NULL DEFAULT 1;",
+                1,
+            ),
+            // ADD COLUMN NOT NULL no default
+            ("ALTER TABLE t ADD COLUMN my_col INT NOT NULL;", 1),
+            // ADD COLUMN nullable non-null default
+            ("ALTER TABLE t ADD COLUMN foo INT DEFAULT 42;", 1),
+            // ADD COLUMN DEFAULT NULL
+            ("ALTER TABLE t ADD COLUMN foo INT DEFAULT NULL;", 1),
+            // ADD COLUMN stored computed
+            (
+                "ALTER TABLE t ADD COLUMN foo INT GENERATED ALWAYS AS (bar + 1) STORED;",
+                1,
+            ),
+            // DROP COLUMN
+            ("ALTER TABLE t DROP COLUMN IF EXISTS active_sled_id;", 1),
+            // ALTER COLUMN SET NOT NULL
+            ("ALTER TABLE t ALTER COLUMN kind SET NOT NULL;", 1),
+            // DROP CONSTRAINT
+            (
+                "ALTER TABLE t DROP CONSTRAINT IF EXISTS null_non_fip_parent_id;",
+                1,
+            ),
+            // ALTER INDEX RENAME
+            ("ALTER INDEX omicron.public.old_idx RENAME TO new_idx;", 1),
+            // ALTER PRIMARY KEY USING COLUMNS
+            ("ALTER TABLE t ALTER PRIMARY KEY USING COLUMNS (a, b);", 1),
+            // CREATE/DROP VIEW (two statements)
+            (
+                "CREATE VIEW IF NOT EXISTS v AS SELECT 1;\n\
+                 DROP VIEW IF EXISTS v;",
+                2,
+            ),
+            // DROP INDEX with CRDB table@index notation
+            (
+                "DROP INDEX IF EXISTS omicron.public.sw_caboose@caboose_properties;",
+                1,
+            ),
+            // ADD COLUMN with semicolon in string literal default
+            ("ALTER TABLE t ADD COLUMN foo TEXT DEFAULT ';';", 1),
         ] {
             let classified = classify_sql_statements(sql, "test").unwrap();
             assert_eq!(
@@ -1942,21 +1723,6 @@ mod test {
     }
 
     #[test]
-    fn test_verification_query_set_not_null() {
-        let change = SchemaChangeInfo::AlterColumnSetNotNull {
-            table_name: SqlIdentifier::new("metric_producer").unwrap(),
-            column_name: SqlIdentifier::new("kind").unwrap(),
-        };
-        let query = change.verification_query();
-        assert!(query.is_some());
-        let query = query.unwrap();
-        assert!(query.contains("information_schema.columns"));
-        assert!(query.contains("metric_producer"));
-        assert!(query.contains("kind"));
-        assert!(query.contains("is_nullable = 'NO'"));
-    }
-
-    #[test]
     fn test_verification_query_add_constraint() {
         let change = SchemaChangeInfo::AlterTableAddConstraint {
             table_name: SqlIdentifier::new("external_ip").unwrap(),
@@ -1965,7 +1731,7 @@ mod test {
         let query = change.verification_query();
         assert!(query.is_some());
         let query = query.unwrap();
-        assert!(query.contains("information_schema.table_constraints"));
+        assert!(query.contains("SHOW CONSTRAINTS FROM"));
         assert!(query.contains("external_ip"));
         assert!(query.contains("null_project_id"));
     }
@@ -2237,94 +2003,6 @@ mod test {
         );
     }
 
-    #[test]
-    fn test_classify_add_column_needs_backfill_not_null_default() {
-        let sql = "ALTER TABLE omicron.public.bgp_config \
-                    ADD COLUMN IF NOT EXISTS max_paths INT NOT NULL DEFAULT 1;";
-        let classified = classify_sql_statements(sql, "test").unwrap();
-        assert_eq!(classified.statement_count, 1);
-        assert_eq!(
-            classified.changes,
-            vec![SchemaChangeInfo::AddColumnNeedsBackfill {
-                table_name: SqlIdentifier::new("bgp_config").unwrap(),
-                column_name: SqlIdentifier::new("max_paths").unwrap(),
-            }]
-        );
-    }
-
-    #[test]
-    fn test_classify_add_column_needs_backfill_not_null_no_default() {
-        let sql = "ALTER TABLE omicron.public.my_table \
-                    ADD COLUMN my_col INT NOT NULL;";
-        let classified = classify_sql_statements(sql, "test").unwrap();
-        assert_eq!(classified.statement_count, 1);
-        assert_eq!(
-            classified.changes,
-            vec![SchemaChangeInfo::AddColumnNeedsBackfill {
-                table_name: SqlIdentifier::new("my_table").unwrap(),
-                column_name: SqlIdentifier::new("my_col").unwrap(),
-            }]
-        );
-    }
-
-    #[test]
-    fn test_classify_add_column_needs_backfill_nullable_non_null_default() {
-        // Nullable column with a non-NULL default triggers backfill
-        // (CockroachDB's ColumnNeedsBackfill: HasDefault && !HasNullDefault)
-        let sql = "ALTER TABLE omicron.public.my_table \
-                    ADD COLUMN foo INT DEFAULT 42;";
-        let classified = classify_sql_statements(sql, "test").unwrap();
-        assert_eq!(classified.statement_count, 1);
-        assert_eq!(
-            classified.changes,
-            vec![SchemaChangeInfo::AddColumnNeedsBackfill {
-                table_name: SqlIdentifier::new("my_table").unwrap(),
-                column_name: SqlIdentifier::new("foo").unwrap(),
-            }]
-        );
-    }
-
-    #[test]
-    fn test_classify_add_column_nullable_default_null() {
-        // Nullable column with DEFAULT NULL does NOT trigger backfill
-        let sql = "ALTER TABLE omicron.public.my_table \
-                    ADD COLUMN foo INT DEFAULT NULL;";
-        let classified = classify_sql_statements(sql, "test").unwrap();
-        assert_eq!(classified.statement_count, 1);
-        assert_eq!(classified.changes, vec![SchemaChangeInfo::OtherDdl]);
-    }
-
-    #[test]
-    fn test_classify_add_column_needs_backfill_stored_computed() {
-        // Stored computed column triggers backfill
-        let sql = "ALTER TABLE omicron.public.my_table \
-                    ADD COLUMN foo INT GENERATED ALWAYS AS (bar + 1) STORED;";
-        let classified = classify_sql_statements(sql, "test").unwrap();
-        assert_eq!(classified.statement_count, 1);
-        assert_eq!(
-            classified.changes,
-            vec![SchemaChangeInfo::AddColumnNeedsBackfill {
-                table_name: SqlIdentifier::new("my_table").unwrap(),
-                column_name: SqlIdentifier::new("foo").unwrap(),
-            }]
-        );
-    }
-
-    #[test]
-    fn test_verification_query_add_column_needs_backfill() {
-        let change = SchemaChangeInfo::AddColumnNeedsBackfill {
-            table_name: SqlIdentifier::new("bgp_config").unwrap(),
-            column_name: SqlIdentifier::new("max_paths").unwrap(),
-        };
-        let query = change.verification_query();
-        assert!(query.is_some());
-        let query = query.unwrap();
-        assert!(query.contains("information_schema.columns"));
-        assert!(query.contains("bgp_config"));
-        assert!(query.contains("max_paths"));
-        // This query checks column existence, not nullability
-        assert!(!query.contains("is_nullable"));
-    }
 
     // ---------------------------------------------------------------
     // Tests for split_sql_statements
@@ -2432,26 +2110,4 @@ mod test {
         assert_eq!(stmts.len(), 2);
     }
 
-    // ---------------------------------------------------------------
-    // Integration test: classify with semicolons inside strings
-    // ---------------------------------------------------------------
-
-    #[test]
-    fn test_classify_semicolon_in_string_literal() {
-        // A semicolon inside a string literal should NOT cause a mis-split.
-        let sql = "ALTER TABLE omicron.public.t \
-                    ADD COLUMN foo TEXT DEFAULT ';';";
-        let classified = classify_sql_statements(sql, "test").unwrap();
-        assert_eq!(
-            classified.statement_count, 1,
-            "Should be a single DDL statement, not split on the ';' inside the string"
-        );
-        assert_eq!(
-            classified.changes,
-            vec![SchemaChangeInfo::AddColumnNeedsBackfill {
-                table_name: SqlIdentifier::new("t").unwrap(),
-                column_name: SqlIdentifier::new("foo").unwrap(),
-            }]
-        );
-    }
 }

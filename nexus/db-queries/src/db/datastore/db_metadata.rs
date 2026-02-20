@@ -2482,13 +2482,6 @@ mod test {
             .await
             .expect("Verification query should pass for existing index");
 
-        // Clean up.
-        conn.batch_execute_async(
-            "DROP TABLE IF EXISTS omicron.public.test_verify_idx CASCADE;",
-        )
-        .await
-        .expect("Failed to drop test table");
-
         db.terminate().await;
         logctx.cleanup_successful();
     }
@@ -2521,90 +2514,6 @@ mod test {
         let verify_sql = change.verification_query().unwrap();
         let result = conn.batch_execute_async(&verify_sql).await;
         assert!(result.is_err(), "Verification should fail for missing index");
-
-        // Clean up.
-        conn.batch_execute_async(
-            "DROP TABLE IF EXISTS omicron.public.test_verify_no_idx CASCADE;",
-        )
-        .await
-        .expect("Failed to drop test table");
-
-        db.terminate().await;
-        logctx.cleanup_successful();
-    }
-
-    // Test that verification passes for a NOT NULL column.
-    #[tokio::test]
-    async fn test_verify_set_not_null() {
-        let logctx = dev::test_setup_log("test_verify_set_not_null");
-        let db = TestDatabase::new_with_pool(&logctx.log).await;
-        let pool = db.pool();
-        let conn = pool.claim().await.unwrap();
-
-        conn.batch_execute_async(
-            "CREATE TABLE IF NOT EXISTS omicron.public.test_verify_nn \
-             (id INT PRIMARY KEY, name TEXT NOT NULL);",
-        )
-        .await
-        .expect("Failed to create test table");
-
-        // "name" is NOT NULL — verification should pass.
-        let change = nexus_db_model::SchemaChangeInfo::AlterColumnSetNotNull {
-            table_name: nexus_db_model::SqlIdentifier::new("test_verify_nn")
-                .unwrap(),
-            column_name: nexus_db_model::SqlIdentifier::new("name").unwrap(),
-        };
-        let verify_sql = change.verification_query().unwrap();
-        conn.batch_execute_async(&verify_sql)
-            .await
-            .expect("Verification should pass for NOT NULL column");
-
-        conn.batch_execute_async(
-            "DROP TABLE IF EXISTS omicron.public.test_verify_nn CASCADE;",
-        )
-        .await
-        .expect("Failed to drop test table");
-
-        db.terminate().await;
-        logctx.cleanup_successful();
-    }
-
-    // Test that verification fails for a nullable column.
-    #[tokio::test]
-    async fn test_verify_fails_for_nullable_column() {
-        let logctx =
-            dev::test_setup_log("test_verify_fails_for_nullable_column");
-        let db = TestDatabase::new_with_pool(&logctx.log).await;
-        let pool = db.pool();
-        let conn = pool.claim().await.unwrap();
-
-        conn.batch_execute_async(
-            "CREATE TABLE IF NOT EXISTS omicron.public.test_verify_nullable \
-             (id INT PRIMARY KEY, name TEXT);",
-        )
-        .await
-        .expect("Failed to create test table");
-
-        // "name" is nullable — verification should fail.
-        let change = nexus_db_model::SchemaChangeInfo::AlterColumnSetNotNull {
-            table_name: nexus_db_model::SqlIdentifier::new(
-                "test_verify_nullable",
-            )
-            .unwrap(),
-            column_name: nexus_db_model::SqlIdentifier::new("name").unwrap(),
-        };
-        let verify_sql = change.verification_query().unwrap();
-        let result = conn.batch_execute_async(&verify_sql).await;
-        assert!(
-            result.is_err(),
-            "Verification should fail for nullable column"
-        );
-
-        conn.batch_execute_async(
-            "DROP TABLE IF EXISTS omicron.public.test_verify_nullable CASCADE;",
-        )
-        .await
-        .expect("Failed to drop test table");
 
         db.terminate().await;
         logctx.cleanup_successful();
@@ -2641,12 +2550,6 @@ mod test {
         conn.batch_execute_async(&verify_sql)
             .await
             .expect("Verification should pass for existing constraint");
-
-        conn.batch_execute_async(
-            "DROP TABLE IF EXISTS omicron.public.test_verify_ck CASCADE;",
-        )
-        .await
-        .expect("Failed to drop test table");
 
         db.terminate().await;
         logctx.cleanup_successful();
@@ -2685,88 +2588,6 @@ mod test {
             result.is_err(),
             "Verification should fail for missing constraint"
         );
-
-        conn.batch_execute_async(
-            "DROP TABLE IF EXISTS omicron.public.test_verify_no_ck CASCADE;",
-        )
-        .await
-        .expect("Failed to drop test table");
-
-        db.terminate().await;
-        logctx.cleanup_successful();
-    }
-
-    // Test that verification passes for a column that exists.
-    #[tokio::test]
-    async fn test_verify_add_column_needs_backfill() {
-        let logctx =
-            dev::test_setup_log("test_verify_add_column_needs_backfill");
-        let db = TestDatabase::new_with_pool(&logctx.log).await;
-        let pool = db.pool();
-        let conn = pool.claim().await.unwrap();
-
-        conn.batch_execute_async(
-            "CREATE TABLE IF NOT EXISTS omicron.public.test_verify_col \
-             (id INT PRIMARY KEY, name TEXT NOT NULL DEFAULT 'hello');",
-        )
-        .await
-        .expect("Failed to create test table");
-
-        // "name" exists — verification should pass.
-        let change = nexus_db_model::SchemaChangeInfo::AddColumnNeedsBackfill {
-            table_name: nexus_db_model::SqlIdentifier::new("test_verify_col")
-                .unwrap(),
-            column_name: nexus_db_model::SqlIdentifier::new("name").unwrap(),
-        };
-        let verify_sql = change.verification_query().unwrap();
-        conn.batch_execute_async(&verify_sql)
-            .await
-            .expect("Verification should pass for existing column");
-
-        conn.batch_execute_async(
-            "DROP TABLE IF EXISTS omicron.public.test_verify_col CASCADE;",
-        )
-        .await
-        .expect("Failed to drop test table");
-
-        db.terminate().await;
-        logctx.cleanup_successful();
-    }
-
-    // Test that verification fails for a column that does not exist.
-    #[tokio::test]
-    async fn test_verify_fails_for_missing_column() {
-        let logctx =
-            dev::test_setup_log("test_verify_fails_for_missing_column");
-        let db = TestDatabase::new_with_pool(&logctx.log).await;
-        let pool = db.pool();
-        let conn = pool.claim().await.unwrap();
-
-        conn.batch_execute_async(
-            "CREATE TABLE IF NOT EXISTS omicron.public.test_verify_no_col \
-             (id INT PRIMARY KEY);",
-        )
-        .await
-        .expect("Failed to create test table");
-
-        // "nonexistent_col" does not exist — verification should fail.
-        let change = nexus_db_model::SchemaChangeInfo::AddColumnNeedsBackfill {
-            table_name: nexus_db_model::SqlIdentifier::new(
-                "test_verify_no_col",
-            )
-            .unwrap(),
-            column_name: nexus_db_model::SqlIdentifier::new("nonexistent_col")
-                .unwrap(),
-        };
-        let verify_sql = change.verification_query().unwrap();
-        let result = conn.batch_execute_async(&verify_sql).await;
-        assert!(result.is_err(), "Verification should fail for missing column");
-
-        conn.batch_execute_async(
-            "DROP TABLE IF EXISTS omicron.public.test_verify_no_col CASCADE;",
-        )
-        .await
-        .expect("Failed to drop test table");
 
         db.terminate().await;
         logctx.cleanup_successful();
@@ -2946,13 +2767,6 @@ mod test {
             .await
             .expect("Verification should pass when the index actually exists");
 
-        // Clean up
-        client
-            .batch_execute(
-                "DROP TABLE IF EXISTS omicron.public.test_race CASCADE;",
-            )
-            .await
-            .expect("Failed to drop test table");
         let _ = client.cleanup().await;
         instance.cleanup().await.expect("Failed to clean up CRDB");
         logctx.cleanup_successful();
@@ -3104,13 +2918,607 @@ mod test {
              (via IF NOT EXISTS no-op). Results: {results:?}"
         );
 
-        // Clean up
+        let _ = client.cleanup().await;
+        instance.cleanup().await.expect("Failed to clean up CRDB");
+        logctx.cleanup_successful();
+    }
+
+    // ---- ADD COLUMN IF NOT EXISTS ... NOT NULL DEFAULT ----
+    //
+    // CRDB's `checkColumnDoesNotExist` only suppresses via IF NOT
+    // EXISTS when the column is fully PUBLIC. Mid-backfill columns
+    // (in Adding mutation state) always error with "column in the
+    // middle of being added, not yet public". This test confirms
+    // that CRDB rejects concurrent ADD COLUMN attempts, so no
+    // verification query is needed.
+
+    #[tokio::test]
+    async fn test_add_column_concurrent_rejected() {
+        let logctx =
+            dev::test_setup_log("test_add_column_concurrent_rejected");
+
+        let mut builder =
+            omicron_test_utils::dev::db::CockroachStarterBuilder::new();
+        builder.arg("--max-sql-memory=32MiB");
+        let starter =
+            builder.build().expect("Failed to build CRDB starter");
+        let mut instance =
+            starter.start().await.expect("Failed to start CRDB");
+        instance
+            .disable_synchronization()
+            .await
+            .expect("Failed to disable synchronization");
+
+        let client =
+            instance.connect().await.expect("Failed to connect to CRDB");
+
+        client
+            .batch_execute("CREATE DATABASE IF NOT EXISTS omicron;")
+            .await
+            .expect("Failed to create database");
+
         client
             .batch_execute(
-                "DROP TABLE IF EXISTS omicron.public.test_race CASCADE;",
+                "CREATE TABLE omicron.public.test_race ( \
+                     id UUID PRIMARY KEY DEFAULT gen_random_uuid(), \
+                     name TEXT NOT NULL \
+                 );",
             )
             .await
-            .expect("Failed to drop test table");
+            .expect("Failed to create test table");
+
+        // Insert many rows so the column backfill takes measurable
+        // time, giving us a window for a concurrent attempt.
+        client
+            .batch_execute(
+                "INSERT INTO omicron.public.test_race (name) \
+                 SELECT 'row_' || generate_series(1, 100000);",
+            )
+            .await
+            .expect("Failed to insert rows");
+
+        // Start the ADD COLUMN in a spawned task.
+        let ddl_client = instance
+            .connect()
+            .await
+            .expect("Failed to create DDL connection");
+
+        let ddl_handle = tokio::spawn(async move {
+            let result = ddl_client
+                .batch_execute(
+                    "ALTER TABLE omicron.public.test_race \
+                     ADD COLUMN IF NOT EXISTS new_col \
+                     INT NOT NULL DEFAULT 42;",
+                )
+                .await;
+            eprintln!(
+                "test_add_column_concurrent_rejected: \
+                 DDL task result: {result:?}"
+            );
+            let _ = ddl_client.cleanup().await;
+            result
+        });
+
+        // Wait briefly, then try a concurrent ADD COLUMN from a
+        // second connection. While the backfill is running, the
+        // column is in Adding mutation state and CRDB should reject
+        // the second attempt even with IF NOT EXISTS.
+        let mut second_errored = false;
+        for attempt in 0..200 {
+            tokio::time::sleep(
+                std::time::Duration::from_millis(50),
+            )
+            .await;
+
+            if ddl_handle.is_finished() {
+                eprintln!(
+                    "test_add_column_concurrent_rejected: \
+                     DDL completed before second attempt \
+                     (attempt {attempt})"
+                );
+                break;
+            }
+
+            let second_result = client
+                .batch_execute(
+                    "ALTER TABLE omicron.public.test_race \
+                     ADD COLUMN IF NOT EXISTS new_col \
+                     INT NOT NULL DEFAULT 42;",
+                )
+                .await;
+
+            if second_result.is_err() {
+                eprintln!(
+                    "test_add_column_concurrent_rejected: \
+                     second connection correctly rejected \
+                     (attempt {attempt}): {:?}",
+                    second_result.unwrap_err()
+                );
+                second_errored = true;
+                break;
+            }
+
+            // If the second attempt got Ok, the first DDL must have
+            // already completed (column is PUBLIC). Break out.
+            if ddl_handle.is_finished() {
+                eprintln!(
+                    "test_add_column_concurrent_rejected: \
+                     second attempt returned Ok because first \
+                     DDL completed (attempt {attempt})"
+                );
+                break;
+            }
+        }
+
+        let ddl_result =
+            ddl_handle.await.expect("DDL task panicked");
+
+        // If we managed to get the concurrent rejection, great.
+        // If the first DDL completed too fast, we at least confirm
+        // both attempts didn't silently succeed while the backfill
+        // was in progress.
+        if second_errored {
+            eprintln!(
+                "test_add_column_concurrent_rejected: \
+                 Confirmed: CRDB rejects concurrent ADD COLUMN \
+                 IF NOT EXISTS during backfill."
+            );
+        } else {
+            // The first DDL completed before our second attempt
+            // could catch it mid-backfill. This is acceptable —
+            // the important thing is that no silent false-Ok
+            // happened during the backfill.
+            assert!(
+                ddl_result.is_ok(),
+                "First DDL should have succeeded if we couldn't \
+                 catch it mid-backfill"
+            );
+            eprintln!(
+                "test_add_column_concurrent_rejected: \
+                 Backfill completed before concurrent attempt. \
+                 Cannot reproduce mid-backfill rejection, but \
+                 no silent false-Ok observed."
+            );
+        }
+
+        let _ = client.cleanup().await;
+        instance.cleanup().await.expect("Failed to clean up CRDB");
+        logctx.cleanup_successful();
+    }
+
+    // ---- ADD CONSTRAINT IF NOT EXISTS ... CHECK ----
+    //
+    // Unlike CREATE INDEX (which OOMs via BulkAdder at 32MiB),
+    // CHECK constraint validation uses lightweight streaming scans
+    // (~800 rows/chunk). To force the validation to fail, we
+    // pre-populate the table with a row that violates the constraint.
+    // When concurrent tasks run ADD CONSTRAINT IF NOT EXISTS:
+    //   - One task initiates validation
+    //   - Other tasks see the in-progress constraint descriptor
+    //     via IF NOT EXISTS and return Ok (the race)
+    //   - Validation fails (violating data) → constraint rolled back
+    //   - The tasks that got Ok are wrong → verification catches it
+
+    #[tokio::test]
+    async fn test_add_constraint_backfill_race() {
+        let logctx =
+            dev::test_setup_log("test_add_constraint_backfill_race");
+
+        let mut builder =
+            omicron_test_utils::dev::db::CockroachStarterBuilder::new();
+        builder.arg("--max-sql-memory=32MiB");
+        let starter =
+            builder.build().expect("Failed to build CRDB starter");
+        let mut instance =
+            starter.start().await.expect("Failed to start CRDB");
+        instance
+            .disable_synchronization()
+            .await
+            .expect("Failed to disable synchronization");
+
+        let client =
+            instance.connect().await.expect("Failed to connect to CRDB");
+
+        client
+            .batch_execute("CREATE DATABASE IF NOT EXISTS omicron;")
+            .await
+            .expect("Failed to create database");
+
+        client
+            .batch_execute(
+                "CREATE TABLE omicron.public.test_race ( \
+                     id UUID PRIMARY KEY DEFAULT gen_random_uuid(), \
+                     val INT NOT NULL \
+                 );",
+            )
+            .await
+            .expect("Failed to create test table");
+
+        // Insert many valid rows so validation scans for a while
+        // before hitting the violating rows.
+        client
+            .batch_execute(
+                "INSERT INTO omicron.public.test_race (val) \
+                 SELECT generate_series(1, 10000);",
+            )
+            .await
+            .expect("Failed to insert valid rows");
+
+        // Insert a row that violates CHECK (val > 0). When the
+        // validation scan reaches it, it will fail and the
+        // constraint will be rolled back.
+        client
+            .batch_execute(
+                "INSERT INTO omicron.public.test_race (val) \
+                 VALUES (-1);",
+            )
+            .await
+            .expect("Failed to insert violating row");
+
+        // Phase 2: Run 3 concurrent ADD CONSTRAINT operations. One
+        // task initiates validation, the others see the in-progress
+        // constraint via IF NOT EXISTS and return Ok.
+        let task_clients: Vec<_> =
+            futures::future::try_join_all(
+                (0..3).map(|_| instance.connect()),
+            )
+            .await
+            .expect("Failed to create task connections");
+
+        let handles: Vec<_> = task_clients
+            .into_iter()
+            .enumerate()
+            .map(|(task_id, task_client)| {
+                tokio::spawn(async move {
+                    let result = task_client
+                        .batch_execute(
+                            "ALTER TABLE omicron.public.test_race \
+                             ADD CONSTRAINT IF NOT EXISTS val_positive \
+                             CHECK (val > 0);",
+                        )
+                        .await;
+                    eprintln!(
+                        "test_add_constraint_backfill_race: \
+                         task {task_id} ADD CONSTRAINT result: \
+                         {result:?}"
+                    );
+                    let _ = task_client.cleanup().await;
+                    result
+                })
+            })
+            .collect();
+
+        let results: Vec<_> = futures::future::join_all(handles)
+            .await
+            .into_iter()
+            .map(|r| r.expect("Task panicked"))
+            .collect();
+        eprintln!(
+            "test_add_constraint_backfill_race: \
+             concurrent ADD CONSTRAINT results: {results:?}"
+        );
+
+        assert!(
+            results.iter().any(|r| r.is_ok()),
+            "Bug not reproduced: all ADD CONSTRAINT tasks failed. \
+             The race requires at least one task to return Ok \
+             (via IF NOT EXISTS no-op) while validation is in \
+             progress. Results: {results:?}"
+        );
+
+        // Phase 3: Verify that our verification query catches the
+        // missing constraint. Validation failed (violating data),
+        // so the constraint was rolled back, but some tasks got Ok
+        // via IF NOT EXISTS.
+        let change =
+            nexus_db_model::SchemaChangeInfo::AlterTableAddConstraint {
+                table_name: nexus_db_model::SqlIdentifier::new(
+                    "test_race",
+                )
+                .unwrap(),
+                constraint_name: nexus_db_model::SqlIdentifier::new(
+                    "val_positive",
+                )
+                .unwrap(),
+            };
+        let verify_sql = change.verification_query().unwrap();
+
+        let verification_result =
+            client.batch_execute(&verify_sql).await;
+        let err = verification_result.unwrap_err();
+        let err_msg = err.to_string();
+        assert!(
+            err_msg.contains("Schema change verification failed"),
+            "Verification error should be our expected barrier \
+             message. Got: {err_msg}"
+        );
+
+        // Phase 4: Show that when the constraint actually exists,
+        // the verification query passes. Recreate the table with
+        // the constraint defined inline (only valid data).
+        client
+            .batch_execute(
+                "DROP TABLE omicron.public.test_race CASCADE; \
+                 CREATE TABLE omicron.public.test_race ( \
+                     id UUID PRIMARY KEY DEFAULT gen_random_uuid(), \
+                     val INT NOT NULL, \
+                     CONSTRAINT val_positive CHECK (val > 0) \
+                 );",
+            )
+            .await
+            .expect(
+                "Failed to recreate table with inline constraint",
+            );
+
+        client
+            .batch_execute(&verify_sql)
+            .await
+            .expect(
+                "Verification should pass when the constraint \
+                 actually exists",
+            );
+
+        let _ = client.cleanup().await;
+        instance.cleanup().await.expect("Failed to clean up CRDB");
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_add_constraint_backfill_race_with_verification() {
+        let logctx = dev::test_setup_log(
+            "test_add_constraint_backfill_race_with_verification",
+        );
+
+        let mut builder =
+            omicron_test_utils::dev::db::CockroachStarterBuilder::new();
+        builder.arg("--max-sql-memory=32MiB");
+        let starter =
+            builder.build().expect("Failed to build CRDB starter");
+        let mut instance =
+            starter.start().await.expect("Failed to start CRDB");
+        instance
+            .disable_synchronization()
+            .await
+            .expect("Failed to disable synchronization");
+
+        let client =
+            instance.connect().await.expect("Failed to connect to CRDB");
+
+        client
+            .batch_execute("CREATE DATABASE IF NOT EXISTS omicron;")
+            .await
+            .expect("Failed to create database");
+
+        client
+            .batch_execute(
+                "CREATE TABLE omicron.public.test_race ( \
+                     id UUID PRIMARY KEY DEFAULT gen_random_uuid(), \
+                     val INT NOT NULL \
+                 );",
+            )
+            .await
+            .expect("Failed to create test table");
+
+        client
+            .batch_execute(
+                "INSERT INTO omicron.public.test_race (val) \
+                 SELECT generate_series(1, 10000);",
+            )
+            .await
+            .expect("Failed to insert valid rows");
+
+        // Insert a constraint-violating row to force validation
+        // failure.
+        client
+            .batch_execute(
+                "INSERT INTO omicron.public.test_race (val) \
+                 VALUES (-1);",
+            )
+            .await
+            .expect("Failed to insert violating row");
+
+        let change =
+            nexus_db_model::SchemaChangeInfo::AlterTableAddConstraint {
+                table_name: nexus_db_model::SqlIdentifier::new(
+                    "test_race",
+                )
+                .unwrap(),
+                constraint_name: nexus_db_model::SqlIdentifier::new(
+                    "val_positive",
+                )
+                .unwrap(),
+            };
+        let verify_sql = change.verification_query().unwrap();
+
+        let task_clients: Vec<_> =
+            futures::future::try_join_all(
+                (0..3).map(|_| instance.connect()),
+            )
+            .await
+            .expect("Failed to create task connections");
+
+        let handles: Vec<_> = task_clients
+            .into_iter()
+            .enumerate()
+            .map(|(task_id, task_client)| {
+                let verify_sql = verify_sql.clone();
+                tokio::spawn(async move {
+                    let ddl_result = task_client
+                        .batch_execute(
+                            "ALTER TABLE omicron.public.test_race \
+                             ADD CONSTRAINT IF NOT EXISTS val_positive \
+                             CHECK (val > 0);",
+                        )
+                        .await;
+
+                    let verify_result =
+                        task_client.batch_execute(&verify_sql).await;
+
+                    eprintln!(
+                        "test_add_constraint_backfill_race_with_verification: \
+                         task {task_id}: DDL={ddl_result:?}, \
+                         verify={verify_result:?}"
+                    );
+                    let _ = task_client.cleanup().await;
+                    (ddl_result, verify_result)
+                })
+            })
+            .collect();
+
+        let results: Vec<_> = futures::future::join_all(handles)
+            .await
+            .into_iter()
+            .map(|r| r.expect("Task panicked"))
+            .collect();
+
+        // The critical invariant: no task should get Ok from BOTH
+        // the DDL and the verification query. If DDL returned Ok
+        // (IF NOT EXISTS no-op while validation was in progress),
+        // verification must fail to prevent that Nexus from
+        // proceeding.
+        for (task_id, (ddl_result, verify_result)) in
+            results.iter().enumerate()
+        {
+            let ddl_ok = ddl_result.is_ok();
+            let verify_ok = verify_result.is_ok();
+
+            if ddl_ok && verify_ok {
+                panic!(
+                    "Task {task_id}: DDL and verification both \
+                     succeeded! This means a Nexus would proceed \
+                     past the migration step without the constraint \
+                     actually being present. The verification \
+                     barrier failed to catch the race."
+                );
+            }
+        }
+
+        // Also verify at least one task got Ok from the DDL — this
+        // confirms the IF NOT EXISTS race actually happened (a task
+        // saw the in-progress constraint and returned early).
+        assert!(
+            results.iter().any(|(ddl, _)| ddl.is_ok()),
+            "Bug not reproduced: all ADD CONSTRAINT tasks failed. \
+             The race requires at least one task to return Ok \
+             (via IF NOT EXISTS no-op). Results: {results:?}"
+        );
+
+        let _ = client.cleanup().await;
+        instance.cleanup().await.expect("Failed to clean up CRDB");
+        logctx.cleanup_successful();
+    }
+
+    // ---- ALTER COLUMN ... SET NOT NULL ----
+    //
+    // SET NOT NULL has no IF NOT EXISTS clause. CRDB reliably rejects
+    // concurrent attempts, so no verification query is needed. This
+    // test confirms that behavior so a future CRDB upgrade would
+    // catch any change.
+
+    #[tokio::test]
+    async fn test_set_not_null_concurrent_rejected() {
+        let logctx =
+            dev::test_setup_log("test_set_not_null_concurrent_rejected");
+
+        let mut builder =
+            omicron_test_utils::dev::db::CockroachStarterBuilder::new();
+        builder.arg("--max-sql-memory=32MiB");
+        let starter =
+            builder.build().expect("Failed to build CRDB starter");
+        let mut instance =
+            starter.start().await.expect("Failed to start CRDB");
+        instance
+            .disable_synchronization()
+            .await
+            .expect("Failed to disable synchronization");
+
+        let client =
+            instance.connect().await.expect("Failed to connect to CRDB");
+
+        client
+            .batch_execute("CREATE DATABASE IF NOT EXISTS omicron;")
+            .await
+            .expect("Failed to create database");
+
+        // Create a table with a nullable column and insert NULL data so
+        // the SET NOT NULL validation scan will fail.
+        client
+            .batch_execute(
+                "CREATE TABLE omicron.public.test_race ( \
+                     id UUID PRIMARY KEY DEFAULT gen_random_uuid(), \
+                     name TEXT \
+                 );",
+            )
+            .await
+            .expect("Failed to create test table");
+
+        client
+            .batch_execute(
+                "INSERT INTO omicron.public.test_race (name) \
+                 SELECT 'row_' || generate_series(1, 10000);",
+            )
+            .await
+            .expect("Failed to insert valid rows");
+
+        client
+            .batch_execute(
+                "INSERT INTO omicron.public.test_race (name) \
+                 VALUES (NULL);",
+            )
+            .await
+            .expect("Failed to insert NULL row");
+
+        // Run 3 concurrent SET NOT NULL operations. Since there is no
+        // IF NOT EXISTS clause for SET NOT NULL, all concurrent
+        // attempts should error: the initiator hits NULLs during
+        // validation, and other connections get "constraint in the
+        // middle of being added".
+        let task_clients: Vec<_> =
+            futures::future::try_join_all(
+                (0..3).map(|_| instance.connect()),
+            )
+            .await
+            .expect("Failed to create task connections");
+
+        let handles: Vec<_> = task_clients
+            .into_iter()
+            .enumerate()
+            .map(|(task_id, task_client)| {
+                tokio::spawn(async move {
+                    let result = task_client
+                        .batch_execute(
+                            "ALTER TABLE omicron.public.test_race \
+                             ALTER COLUMN name SET NOT NULL;",
+                        )
+                        .await;
+                    eprintln!(
+                        "test_set_not_null_concurrent_rejected: \
+                         task {task_id} result: {result:?}"
+                    );
+                    let _ = task_client.cleanup().await;
+                    result
+                })
+            })
+            .collect();
+
+        let results: Vec<_> = futures::future::join_all(handles)
+            .await
+            .into_iter()
+            .map(|r| r.expect("Task panicked"))
+            .collect();
+
+        // No task should succeed: validation fails on NULLs for
+        // the initiator; concurrent attempts get rejected.
+        for (task_id, result) in results.iter().enumerate() {
+            assert!(
+                result.is_err(),
+                "Task {task_id}: SET NOT NULL should have been \
+                 rejected (NULLs present or concurrent rejection), \
+                 but it succeeded. If CRDB changes this behavior, \
+                 we may need to add verification queries back."
+            );
+        }
+
         let _ = client.cleanup().await;
         instance.cleanup().await.expect("Failed to clean up CRDB");
         logctx.cleanup_successful();
