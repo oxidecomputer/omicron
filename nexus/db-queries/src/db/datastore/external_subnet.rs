@@ -648,6 +648,7 @@ impl DataStore {
     ) -> CreateResult<ExternalSubnet> {
         opctx.authorize(authz::Action::CreateChild, authz_project).await?;
         let ExternalSubnetCreate { identity, allocator } = params;
+        let subnet_name = identity.name.to_string();
         let identity =
             ExternalSubnetIdentity::new(ExternalSubnetUuid::new_v4(), identity);
         insert_external_subnet_query(
@@ -664,6 +665,7 @@ impl DataStore {
                 silo_id,
                 authz_project,
                 &allocator,
+                &subnet_name,
             )
         })
     }
