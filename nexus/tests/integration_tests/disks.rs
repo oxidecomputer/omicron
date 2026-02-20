@@ -54,7 +54,9 @@ use omicron_uuid_kinds::InstanceUuid;
 use omicron_uuid_kinds::VolumeUuid;
 use omicron_uuid_kinds::ZpoolUuid;
 use sled_agent_client::TestInterfaces as _;
+use sled_agent_client::VolumeConstructionRequest;
 use std::collections::HashSet;
+use std::collections::VecDeque;
 use std::sync::Arc;
 use tokio::sync::oneshot;
 use uuid::Uuid;
@@ -3034,6 +3036,165 @@ async fn test_cannot_snapshot_read_only_disk(
         http::StatusCode::BAD_REQUEST,
     )
     .await;
+}
+
+/// Tests that multiple read-only disks created from the same underlying
+/// snapshot (or image) receive VCRs with unique UUIDs, so that the Crucible
+/// upstairs instances for the two read-only disks can co-exist peacefully.
+#[nexus_test]
+async fn test_read_only_disk_different_vcr(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+    DiskTest::new(&cptestctx).await;
+    create_project_and_pool(client).await;
+    let disks_url = get_disks_url();
+
+    // Create a base blank disk, which we will then create a snapshot from in
+    // order to create our read-only disk from that snapshot.
+
+    let disk_size = ByteCount::from_gibibytes_u32(2);
+    let base_disk_name = "base-disk";
+    let base_disk = params::DiskCreate {
+        identity: IdentityMetadataCreateParams {
+            name: base_disk_name.parse().unwrap(),
+            description: String::from("sells rainsticks"),
+        },
+        disk_backend: params::DiskBackend::Distributed {
+            disk_source: params::DiskSource::Blank {
+                block_size: params::BlockSize::try_from(512).unwrap(),
+            },
+        },
+        size: disk_size,
+    };
+
+    let base_disk = NexusRequest::new(
+        RequestBuilder::new(client, Method::POST, &disks_url)
+            .body(Some(&base_disk))
+            .expect_status(Some(StatusCode::CREATED)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute_and_parse_unwrap::<Disk>()
+    .await;
+
+    // Create a snapshot of the base disk.
+    let snapshot = resource_helpers::create_snapshot(
+        client,
+        PROJECT_NAME,
+        base_disk_name,
+        "ro-snapshot",
+    )
+    .await;
+    assert_eq!(snapshot.disk_id, base_disk.identity.id);
+    assert_eq!(snapshot.size, base_disk.size);
+
+    // Okay, now make two read-only disks out of that snapshot.
+    let ro_disk_1 = resource_helpers::create_disk_from_snapshot(
+        client,
+        PROJECT_NAME,
+        "ro-disk-from-snap-1",
+        &snapshot,
+        true,
+    )
+    .await;
+
+    let ro_disk_2 = resource_helpers::create_disk_from_snapshot(
+        client,
+        PROJECT_NAME,
+        "ro-disk-from-snap-2",
+        &snapshot,
+        true,
+    )
+    .await;
+
+    assert!(ro_disk_1.read_only);
+    assert!(ro_disk_2.read_only);
+
+    assert_eq!(ro_disk_1.snapshot_id, Some(snapshot.identity.id));
+    assert_eq!(ro_disk_2.snapshot_id, Some(snapshot.identity.id));
+
+    // Ensure the VCRs for each read-only disk are different
+
+    let nexus = &cptestctx.server.server_context().nexus;
+    let datastore = nexus.datastore();
+    let opctx =
+        OpContext::for_tests(cptestctx.logctx.log.new(o!()), datastore.clone());
+
+    let ro_db_disk_1 =
+        get_crucible_disk(datastore, &opctx, ro_disk_1.identity.id).await;
+    let ro_db_disk_2 =
+        get_crucible_disk(datastore, &opctx, ro_disk_2.identity.id).await;
+
+    let ro_db_volume_1 = datastore
+        .volume_get(ro_db_disk_1.volume_id())
+        .await
+        .expect("volume_get without error")
+        .expect("volume exists");
+
+    let vcr_1: VolumeConstructionRequest =
+        serde_json::from_str(ro_db_volume_1.data()).expect("valid VCR");
+
+    let ro_db_volume_2 = datastore
+        .volume_get(ro_db_disk_2.volume_id())
+        .await
+        .expect("volume_get without error")
+        .expect("volume exists");
+
+    let vcr_2: VolumeConstructionRequest =
+        serde_json::from_str(ro_db_volume_2.data()).expect("valid VCR");
+
+    // Gather the unique IDs present in the volumes, and ensure there is no
+    // overlap.
+    fn gather_ids(ids: &mut HashSet<Uuid>, vcr: &VolumeConstructionRequest) {
+        let mut parts: VecDeque<&VolumeConstructionRequest> = VecDeque::new();
+        parts.push_back(&vcr);
+
+        while let Some(vcr_part) = parts.pop_front() {
+            match vcr_part {
+                VolumeConstructionRequest::Volume {
+                    sub_volumes,
+                    read_only_parent,
+                    ..
+                } => {
+                    // Do not insert the volume's ID as that will not be used
+                    // when constructing upstairs, and this test is specifically
+                    // trying to catch when upstairs IDs are reused.
+
+                    for sub_volume in sub_volumes {
+                        parts.push_back(sub_volume);
+                    }
+
+                    if let Some(read_only_parent) = read_only_parent {
+                        parts.push_back(read_only_parent);
+                    }
+                }
+
+                VolumeConstructionRequest::Region { opts, .. } => {
+                    if !ids.insert(opts.id) {
+                        // Panic if there is ID reuse in different region sets
+                        // in the same VCR
+                        panic!(
+                            "ID {} used in more than one region set!",
+                            opts.id
+                        );
+                    }
+                }
+
+                VolumeConstructionRequest::Url { .. }
+                | VolumeConstructionRequest::File { .. } => {
+                    panic!("should not be constructing these anymore");
+                }
+            }
+        }
+    }
+
+    let mut volume_1_ids = HashSet::new();
+    gather_ids(&mut volume_1_ids, &vcr_1);
+
+    let mut volume_2_ids = HashSet::new();
+    gather_ids(&mut volume_2_ids, &vcr_2);
+
+    assert_eq!(volume_1_ids.intersection(&volume_2_ids).count(), 0);
 }
 
 async fn disk_get(client: &ClientTestContext, disk_url: &str) -> Disk {
