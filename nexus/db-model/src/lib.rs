@@ -465,9 +465,7 @@ pub trait DatabaseString: Sized {
 }
 
 use anyhow::anyhow;
-use nexus_types::external_api::shared::FleetRole;
-use nexus_types::external_api::shared::ProjectRole;
-use nexus_types::external_api::shared::SiloRole;
+use nexus_types::external_api::policy::{FleetRole, ProjectRole, SiloRole};
 use std::borrow::Cow;
 
 impl DatabaseString for FleetRole {

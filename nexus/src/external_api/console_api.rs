@@ -15,7 +15,8 @@ use dropshot::{HttpError, Path, RequestContext};
 use futures::TryStreamExt;
 use http::{HeaderName, HeaderValue, Response, StatusCode};
 use nexus_db_model::AuthenticationMode;
-use nexus_types::external_api::params::{self, RelativeUri};
+use nexus_types::external_api::console;
+use nexus_types::external_api::saml::RelativeUri;
 use nexus_types::identity::Resource;
 use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::{DataPageParams, Error, NameOrId};
@@ -219,7 +220,7 @@ pub(crate) async fn get_login_url(
 
     // Stick redirect_url into the state param and URL encode it so it can be
     // used as a query string. We assume it's not already encoded.
-    let query_data = params::LoginUrlQuery { redirect_uri };
+    let query_data = console::LoginUrlQuery { redirect_uri };
 
     Ok(match serde_urlencoded::to_string(query_data) {
         // only put the ? in front if there's something there
@@ -404,7 +405,7 @@ async fn serve_static(
 /// integration tests
 pub(crate) async fn asset(
     rqctx: &RequestContext<ApiContext>,
-    path_params: Path<params::RestPathParam>,
+    path_params: Path<console::RestPathParam>,
 ) -> Result<Response<Body>, HttpError> {
     // asset URLs contain hashes, so cache for 1 year
     const CACHE_CONTROL: HeaderValue =

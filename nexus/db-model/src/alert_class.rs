@@ -3,7 +3,7 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use super::impl_enum_type;
-use nexus_types::external_api::views;
+use nexus_types::external_api::alert;
 use serde::de::{self, Deserialize, Deserializer};
 use serde::ser::{Serialize, Serializer};
 use std::fmt;
@@ -123,7 +123,7 @@ impl std::str::FromStr for AlertClass {
     }
 }
 
-impl From<AlertClass> for views::AlertClass {
+impl From<AlertClass> for alert::AlertClass {
     fn from(class: AlertClass) -> Self {
         Self {
             name: class.to_string(),

@@ -11,7 +11,7 @@ use nexus_db_model::{Sled, SledState, Vni};
 use nexus_db_queries::{context::OpContext, db::DataStore};
 use nexus_networking::sled_client_from_address;
 use nexus_types::{
-    deployment::SledFilter, external_api::views::SledPolicy, identity::Asset,
+    deployment::SledFilter, external_api::sled::SledPolicy, identity::Asset,
     identity::Resource,
 };
 use omicron_common::api::internal::shared::{

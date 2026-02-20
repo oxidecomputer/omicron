@@ -50,14 +50,13 @@ use nexus_types::deployment::BlueprintZoneConfig;
 use nexus_types::deployment::BlueprintZoneType;
 use nexus_types::deployment::OmicronZoneExternalIp;
 use nexus_types::deployment::blueprint_zone_type;
-use nexus_types::external_api::params as external_params;
-use nexus_types::external_api::params::PrivateIpStackCreate;
-use nexus_types::external_api::shared;
-use nexus_types::external_api::shared::IpRange;
-use nexus_types::external_api::shared::SiloRole;
+use nexus_types::external_api::instance::PrivateIpStackCreate;
+use nexus_types::external_api::policy::{RoleAssignment, SiloRole};
+use nexus_types::external_api::silo as silo_types;
 use nexus_types::identity::Resource;
 use nexus_types::internal_api::params::InitialTrustQuorumConfig;
 use nexus_types::inventory::NetworkInterface;
+use omicron_common::address::IpRange;
 use omicron_common::api::external::AllowedSourceIps;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
@@ -91,7 +90,7 @@ pub struct RackInit {
     pub service_ip_pool_ranges: Vec<IpRange>,
     pub internal_dns: InitialDnsGroup,
     pub external_dns: InitialDnsGroup,
-    pub recovery_silo: external_params::SiloCreate,
+    pub recovery_silo: silo_types::SiloCreate,
     pub recovery_silo_fq_dns_name: String,
     pub recovery_user_id: UserId,
     pub recovery_user_password_hash: omicron_passwords::PasswordHashString,
@@ -434,7 +433,7 @@ impl DataStore {
         opctx: &OpContext,
         conn: &async_bb8_diesel::Connection<DbConnection>,
         log: &slog::Logger,
-        recovery_silo: external_params::SiloCreate,
+        recovery_silo: silo_types::SiloCreate,
         recovery_silo_fq_dns_name: String,
         recovery_user_id: UserId,
         recovery_user_password_hash: omicron_passwords::PasswordHashString,
@@ -442,7 +441,7 @@ impl DataStore {
     ) -> Result<(), RackInitError> {
         if !matches!(
             &recovery_silo.identity_mode,
-            shared::SiloIdentityMode::LocalOnly
+            silo_types::SiloIdentityMode::LocalOnly
         ) {
             return Err(RackInitError::Silo(Error::invalid_request(
                 "recovery silo should only use identity mode LocalOnly",
@@ -516,10 +515,7 @@ impl DataStore {
         let (q1, q2) = Self::role_assignment_replace_visible_queries(
             opctx,
             &authz_silo,
-            &[shared::RoleAssignment::for_silo_user(
-                silo_user_id,
-                SiloRole::Admin,
-            )],
+            &[RoleAssignment::for_silo_user(silo_user_id, SiloRole::Admin)],
         )
         .await
         .map_err(RackInitError::RoleAssignment)?;
@@ -1089,7 +1085,7 @@ mod test {
     use nexus_types::deployment::PendingMgsUpdates;
     use nexus_types::deployment::SledFilter;
     use nexus_types::deployment::{BlueprintZoneImageSource, OximeterReadMode};
-    use nexus_types::external_api::shared::SiloIdentityMode;
+    use nexus_types::external_api::silo::SiloIdentityMode;
     use nexus_types::identity::Asset;
     use nexus_types::internal_api::params::DnsRecord;
     use omicron_common::address::NEXUS_OPTE_IPV4_SUBNET;
@@ -1155,13 +1151,14 @@ mod test {
                     "test suite",
                     HashMap::new(),
                 ),
-                recovery_silo: external_params::SiloCreate {
+                recovery_silo: silo_types::SiloCreate {
                     identity: IdentityMetadataCreateParams {
                         name: "test-silo".parse().unwrap(),
                         description: String::new(),
                     },
                     // Set a default quota of a half rack's worth of resources
-                    quotas: external_params::SiloQuotasCreate::arbitrarily_high_default(),
+                    quotas:
+                        silo_types::SiloQuotasCreate::arbitrarily_high_default(),
                     discoverable: false,
                     identity_mode: SiloIdentityMode::LocalOnly,
                     admin_group_name: None,
@@ -1185,7 +1182,7 @@ mod test {
                     "test suite".to_string(),
                 ),
                 allowed_source_ips: AllowedSourceIps::Any,
-                initial_trust_quorum_configuration: None
+                initial_trust_quorum_configuration: None,
             }
         }
     }

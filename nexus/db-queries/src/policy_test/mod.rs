@@ -26,10 +26,10 @@ use nexus_auth::authn::SiloAuthnPolicy;
 use nexus_auth::authn::USER_TEST_PRIVILEGED;
 use nexus_auth::authz;
 use nexus_auth::context::OpContext;
-use nexus_types::external_api::params;
-use nexus_types::external_api::shared;
-use nexus_types::external_api::shared::FleetRole;
-use nexus_types::external_api::shared::SiloRole;
+use nexus_types::external_api::policy;
+use nexus_types::external_api::policy::FleetRole;
+use nexus_types::external_api::policy::SiloRole;
+use nexus_types::external_api::silo as silo_types;
 use nexus_types::identity::Asset;
 use nexus_types::identity::Resource;
 use omicron_common::api::external::Error;
@@ -81,14 +81,14 @@ async fn test_iam_prep(
         .silo_create(
             &opctx,
             &opctx,
-            params::SiloCreate {
+            silo_types::SiloCreate {
                 identity: IdentityMetadataCreateParams {
                     name: "main-silo".parse().unwrap(),
                     description: "".into(),
                 },
-                quotas: params::SiloQuotasCreate::empty(),
+                quotas: silo_types::SiloQuotasCreate::empty(),
                 discoverable: true,
-                identity_mode: shared::SiloIdentityMode::LocalOnly,
+                identity_mode: silo_types::SiloIdentityMode::LocalOnly,
                 admin_group_name: None,
                 tls_certificates: vec![],
                 mapped_fleet_roles: Default::default(),
@@ -115,7 +115,7 @@ async fn test_iam_prep(
         .role_assignment_replace_visible(
             &opctx,
             &main_silo,
-            &[shared::RoleAssignment::for_silo_user(
+            &[policy::RoleAssignment::for_silo_user(
                 USER_TEST_PRIVILEGED.id(),
                 SiloRole::Admin,
             )],

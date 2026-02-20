@@ -8,7 +8,7 @@ use ipnetwork::IpNetwork;
 use nexus_db_schema::schema::{
     bgp_announce_set, bgp_announcement, bgp_config, bgp_peer_view,
 };
-use nexus_types::external_api::params;
+use nexus_types::external_api::networking;
 use nexus_types::identity::Resource;
 use omicron_common::api::external::Error;
 use omicron_common::api::{
@@ -64,7 +64,7 @@ impl TryFrom<BgpConfig> for external::BgpConfig {
 
 impl BgpConfig {
     pub fn from_config_create(
-        c: &params::BgpConfigCreate,
+        c: &networking::BgpConfigCreate,
         bgp_announce_set_id: Uuid,
     ) -> BgpConfig {
         BgpConfig {
@@ -101,8 +101,8 @@ pub struct BgpAnnounceSet {
     pub identity: BgpAnnounceSetIdentity,
 }
 
-impl From<params::BgpAnnounceSetCreate> for BgpAnnounceSet {
-    fn from(x: params::BgpAnnounceSetCreate) -> BgpAnnounceSet {
+impl From<networking::BgpAnnounceSetCreate> for BgpAnnounceSet {
+    fn from(x: networking::BgpAnnounceSetCreate) -> BgpAnnounceSet {
         BgpAnnounceSet {
             identity: BgpAnnounceSetIdentity::new(
                 Uuid::new_v4(),

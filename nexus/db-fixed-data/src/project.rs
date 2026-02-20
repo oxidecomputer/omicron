@@ -3,7 +3,7 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use nexus_db_model as model;
-use nexus_types::{external_api::params, silo::INTERNAL_SILO_ID};
+use nexus_types::{external_api::project, silo::INTERNAL_SILO_ID};
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use std::sync::LazyLock;
 
@@ -22,7 +22,7 @@ pub static SERVICES_PROJECT: LazyLock<model::Project> = LazyLock::new(|| {
     model::Project::new_with_id(
         *SERVICES_PROJECT_ID,
         INTERNAL_SILO_ID,
-        params::ProjectCreate {
+        project::ProjectCreate {
             identity: IdentityMetadataCreateParams {
                 name: SERVICES_DB_NAME.parse().unwrap(),
                 description: "Built-in project for Oxide Services".to_string(),

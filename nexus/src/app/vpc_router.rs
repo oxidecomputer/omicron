@@ -4,7 +4,6 @@
 
 //! VPC routers and routes
 
-use crate::external_api::params;
 use nexus_db_lookup::LookupPath;
 use nexus_db_lookup::lookup;
 use nexus_db_queries::authz;
@@ -13,6 +12,7 @@ use nexus_db_queries::db;
 use nexus_db_queries::db::model::RouterRoute;
 use nexus_db_queries::db::model::VpcRouter;
 use nexus_db_queries::db::model::VpcRouterKind;
+use nexus_types::external_api::vpc;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DeleteResult;
 use omicron_common::api::external::Error;
@@ -33,10 +33,10 @@ impl super::Nexus {
     pub fn vpc_router_lookup<'a>(
         &'a self,
         opctx: &'a OpContext,
-        router_selector: params::RouterSelector,
+        router_selector: vpc::RouterSelector,
     ) -> LookupResult<lookup::VpcRouter<'a>> {
         match router_selector {
-            params::RouterSelector {
+            vpc::RouterSelector {
                 router: NameOrId::Id(id),
                 vpc: None,
                 project: None,
@@ -45,17 +45,17 @@ impl super::Nexus {
                     .vpc_router_id(id);
                 Ok(router)
             }
-            params::RouterSelector {
+            vpc::RouterSelector {
                 router: NameOrId::Name(name),
                 vpc: Some(vpc),
                 project,
             } => {
                 let router = self
-                    .vpc_lookup(opctx, params::VpcSelector { project, vpc })?
+                    .vpc_lookup(opctx, vpc::VpcSelector { project, vpc })?
                     .vpc_router_name_owned(name.into());
                 Ok(router)
             }
-            params::RouterSelector { router: NameOrId::Id(_), .. } => {
+            vpc::RouterSelector { router: NameOrId::Id(_), .. } => {
                 Err(Error::invalid_request(
                     "when providing router as an ID vpc and project should not be specified",
                 ))
@@ -77,7 +77,7 @@ impl super::Nexus {
         let (.., vpc, rtr) = (match router {
             key @ NameOrId::Name(_) => self.vpc_router_lookup(
                 opctx,
-                params::RouterSelector {
+                vpc::RouterSelector {
                     project: None,
                     vpc: Some(NameOrId::Id(authz_vpc.id())),
                     router: key.clone(),
@@ -85,7 +85,7 @@ impl super::Nexus {
             )?,
             key @ NameOrId::Id(_) => self.vpc_router_lookup(
                 opctx,
-                params::RouterSelector {
+                vpc::RouterSelector {
                     project: None,
                     vpc: None,
                     router: key.clone(),
@@ -110,7 +110,7 @@ impl super::Nexus {
         opctx: &OpContext,
         vpc_lookup: &lookup::Vpc<'_>,
         kind: &VpcRouterKind,
-        params: &params::VpcRouterCreate,
+        params: &vpc::VpcRouterCreate,
     ) -> CreateResult<db::model::VpcRouter> {
         let (.., authz_vpc) =
             vpc_lookup.lookup_for(authz::Action::CreateChild).await?;
@@ -151,7 +151,7 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
         vpc_router_lookup: &lookup::VpcRouter<'_>,
-        params: &params::VpcRouterUpdate,
+        params: &vpc::VpcRouterUpdate,
     ) -> UpdateResult<VpcRouter> {
         let (.., authz_router) =
             vpc_router_lookup.lookup_for(authz::Action::Modify).await?;
@@ -187,10 +187,10 @@ impl super::Nexus {
     pub fn vpc_router_route_lookup<'a>(
         &'a self,
         opctx: &'a OpContext,
-        route_selector: params::RouteSelector,
+        route_selector: vpc::RouteSelector,
     ) -> LookupResult<lookup::RouterRoute<'a>> {
         match route_selector {
-            params::RouteSelector {
+            vpc::RouteSelector {
                 route: NameOrId::Id(id),
                 router: None,
                 vpc: None,
@@ -200,7 +200,7 @@ impl super::Nexus {
                     .router_route_id(id);
                 Ok(route)
             }
-            params::RouteSelector {
+            vpc::RouteSelector {
                 route: NameOrId::Name(name),
                 router: Some(router),
                 vpc,
@@ -209,12 +209,12 @@ impl super::Nexus {
                 let route = self
                     .vpc_router_lookup(
                         opctx,
-                        params::RouterSelector { project, vpc, router },
+                        vpc::RouterSelector { project, vpc, router },
                     )?
                     .router_route_name_owned(name.into());
                 Ok(route)
             }
-            params::RouteSelector { route: NameOrId::Id(_), .. } => {
+            vpc::RouteSelector { route: NameOrId::Id(_), .. } => {
                 Err(Error::invalid_request(
                     "when providing route as an ID router, subnet, vpc, and project should not be specified",
                 ))
@@ -230,7 +230,7 @@ impl super::Nexus {
         opctx: &OpContext,
         router_lookup: &lookup::VpcRouter<'_>,
         kind: &RouterRouteKind,
-        params: &params::RouterRouteCreate,
+        params: &vpc::RouterRouteCreate,
     ) -> CreateResult<db::model::RouterRoute> {
         let (.., authz_router, db_router) =
             router_lookup.fetch_for(authz::Action::CreateChild).await?;
@@ -281,7 +281,7 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
         route_lookup: &lookup::RouterRoute<'_>,
-        params: &params::RouterRouteUpdate,
+        params: &vpc::RouterRouteUpdate,
     ) -> UpdateResult<RouterRoute> {
         let (.., authz_router, authz_route, db_route) =
             route_lookup.fetch_for(authz::Action::Modify).await?;

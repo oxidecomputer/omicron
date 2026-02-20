@@ -12,7 +12,7 @@ use nexus_db_errors::ErrorHandler;
 use nexus_db_errors::public_error_from_diesel;
 use nexus_db_model::BfdSession;
 use nexus_db_model::SqlU32;
-use nexus_types::external_api::params;
+use nexus_types::external_api::networking;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::{
     CreateResult, DeleteResult, ListResultVec,
@@ -38,7 +38,7 @@ impl DataStore {
     pub async fn bfd_session_create(
         &self,
         opctx: &OpContext,
-        config: &params::BfdSessionEnable,
+        config: &networking::BfdSessionEnable,
     ) -> CreateResult<BfdSession> {
         use nexus_db_schema::schema::bfd_session::dsl;
         let conn = self.pool_connection_authorized(opctx).await?;
@@ -69,7 +69,7 @@ impl DataStore {
     pub async fn bfd_session_delete(
         &self,
         opctx: &OpContext,
-        config: &params::BfdSessionDisable,
+        config: &networking::BfdSessionDisable,
     ) -> DeleteResult {
         use nexus_db_schema::schema::bfd_session::dsl;
         let conn = self.pool_connection_authorized(opctx).await?;

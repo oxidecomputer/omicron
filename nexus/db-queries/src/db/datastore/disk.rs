@@ -46,7 +46,7 @@ use nexus_db_errors::ErrorHandler;
 use nexus_db_errors::OptionalError;
 use nexus_db_errors::public_error_from_diesel;
 use nexus_db_lookup::LookupPath;
-use nexus_types::external_api::params;
+use nexus_types::external_api::disk as disk_types;
 use nexus_types::identity::Asset;
 use omicron_common::api;
 use omicron_common::api::external;
@@ -1798,11 +1798,11 @@ impl DataStore {
         opctx: &OpContext,
         authz_project: &authz::Project,
         disk_id: &Uuid,
-        params: &params::DiskCreate,
+        params: &disk_types::DiskCreate,
     ) -> CreateResult<db::datastore::Disk> {
         opctx.authorize(authz::Action::CreateChild, authz_project).await?;
 
-        let params::DiskBackend::Distributed { ref disk_source } =
+        let disk_types::DiskBackend::Distributed { ref disk_source } =
             params.disk_backend
         else {
             // This is an internal error rather than an invalid argument or
@@ -1818,14 +1818,17 @@ impl DataStore {
         // authz resource into the transaction so that it can refresh the lookup
         // to insure the transaction still exists once the transaction executes.
         let src = match disk_source {
-            &params::DiskSource::Image { image_id, read_only: true } => {
+            &disk_types::DiskSource::Image { image_id, read_only: true } => {
                 let (_, authz_image, _) = LookupPath::new(opctx, self)
                     .image_id(image_id)
                     .fetch()
                     .await?;
                 ReadOnlyDiskSource::Image(authz_image)
             }
-            &params::DiskSource::Snapshot { snapshot_id, read_only: true } => {
+            &disk_types::DiskSource::Snapshot {
+                snapshot_id,
+                read_only: true,
+            } => {
                 let (_, _, authz_snapshot, _) = LookupPath::new(opctx, self)
                     .snapshot_id(snapshot_id)
                     .fetch()
@@ -1883,7 +1886,7 @@ impl DataStore {
         err: OptionalError<Error>,
         authz_project: &authz::Project,
         disk_id: &Uuid,
-        params: &params::DiskCreate,
+        params: &disk_types::DiskCreate,
         src: &ReadOnlyDiskSource,
     ) -> Result<db::datastore::Disk, diesel::result::Error> {
         use crate::db::datastore::CrucibleTargets;
@@ -1993,6 +1996,15 @@ impl DataStore {
                 })
             })?;
 
+        // Randomize the IDs in the copied VCR: even read-only downstairs will
+        // still be sad if multiple connections share upstairs UUIDs and try to
+        // connect.
+        let copy_of_vcr = Self::randomize_ids(&copy_of_vcr).map_err(|e| {
+            err.bail(Error::InternalError {
+                internal_message: format!("failed to randomize VCR IDs: {e}"),
+            })
+        })?;
+
         let crucible_targets = {
             let mut crucible_targets = CrucibleTargets::default();
             read_only_resources_associated_with_volume(
@@ -2036,7 +2048,7 @@ impl DataStore {
             runtime_initial,
             db::model::DiskType::Crucible,
         );
-        let params::DiskBackend::Distributed { ref disk_source } =
+        let disk_types::DiskBackend::Distributed { ref disk_source } =
             params.disk_backend
         else {
             return Err(err.bail(Error::internal_error(
@@ -2070,7 +2082,8 @@ mod tests {
     use super::*;
 
     use crate::db::pub_test_utils::TestDatabase;
-    use nexus_types::external_api::params;
+    use nexus_types::external_api::disk as disk_types;
+    use nexus_types::external_api::project;
     use omicron_test_utils::dev;
 
     #[tokio::test]
@@ -2088,7 +2101,7 @@ mod tests {
                 &opctx,
                 Project::new(
                     silo_id,
-                    params::ProjectCreate {
+                    project::ProjectCreate {
                         identity: external::IdentityMetadataCreateParams {
                             name: "testpost".parse().unwrap(),
                             description: "please ignore".to_string(),
@@ -2101,16 +2114,16 @@ mod tests {
 
         let disk_id = Uuid::new_v4();
 
-        let disk_source = params::DiskSource::Blank {
-            block_size: params::BlockSize::try_from(512).unwrap(),
+        let disk_source = disk_types::DiskSource::Blank {
+            block_size: disk_types::BlockSize::try_from(512).unwrap(),
         };
 
-        let create_params = params::DiskCreate {
+        let create_params = disk_types::DiskCreate {
             identity: external::IdentityMetadataCreateParams {
                 name: "first-post".parse().unwrap(),
                 description: "just trying things out".to_string(),
             },
-            disk_backend: params::DiskBackend::Distributed {
+            disk_backend: disk_types::DiskBackend::Distributed {
                 disk_source: disk_source.clone(),
             },
             size: external::ByteCount::from(2147483648),

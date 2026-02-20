@@ -31,7 +31,7 @@ use nexus_db_model::SqlU8;
 use nexus_db_model::{MAX_NICS_PER_INSTANCE, NetworkInterfaceKind};
 use nexus_db_schema::enums::NetworkInterfaceKindEnum;
 use nexus_db_schema::schema::network_interface::dsl;
-use nexus_types::external_api::params::IpAssignment;
+use nexus_types::external_api::instance::IpAssignment;
 use omicron_common::address::ConcreteIp;
 use omicron_common::api::external::MacAddr;
 use omicron_common::api::external::{self, Error};
@@ -1964,12 +1964,12 @@ mod tests {
     use model::NetworkInterfaceKind;
     use nexus_db_lookup::LookupPath;
     use nexus_db_model::IpVersion;
-    use nexus_types::external_api::params;
-    use nexus_types::external_api::params::InstanceCreate;
-    use nexus_types::external_api::params::InstanceNetworkInterfaceAttachment;
-    use nexus_types::external_api::params::Ipv4Assignment;
-    use nexus_types::external_api::params::PrivateIpStackCreate;
-    use nexus_types::external_api::params::PrivateIpv4StackCreate;
+    use nexus_types::external_api::instance::InstanceCreate;
+    use nexus_types::external_api::instance::InstanceNetworkInterfaceAttachment;
+    use nexus_types::external_api::instance::Ipv4Assignment;
+    use nexus_types::external_api::instance::PrivateIpStackCreate;
+    use nexus_types::external_api::instance::PrivateIpv4StackCreate;
+    use nexus_types::external_api::project;
     use omicron_common::api::external;
     use omicron_common::api::external::ByteCount;
     use omicron_common::api::external::Error;
@@ -2138,7 +2138,7 @@ mod tests {
             // Create a project
             let project = Project::new(
                 authz_silo.id(),
-                params::ProjectCreate {
+                project::ProjectCreate {
                     identity: IdentityMetadataCreateParams {
                         name: "project".parse().unwrap(),
                         description: "desc".to_string(),
