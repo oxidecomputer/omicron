@@ -832,6 +832,7 @@ mod tests {
         FetchedArtifact::loop_fetch_from_peers(
             cx,
             log,
+            None,
             || match attempts.next() {
                 Some(Ok(peers)) => future::ok(FetchArtifactBackend::new(
                     &log,

@@ -16,7 +16,7 @@ use tufaceous_artifact::{
     ArtifactHash, ArtifactHashId, ArtifactKind, KnownArtifactKind,
 };
 
-use crate::{errors::HttpError, fetch::FetchReceiver};
+use crate::{errors::HttpError, fetch::FetchReceiver, peers::PeerAddress};
 
 #[derive(Clone, Debug, Eq, PartialEq, Args)]
 pub(crate) struct ArtifactIdOpts {
@@ -100,6 +100,7 @@ pub(crate) struct ArtifactsToDownload {
     pub(crate) host_phase_2: ArtifactHash,
     pub(crate) control_plane: ArtifactHash,
     pub(crate) measurement_corpus: Vec<MeasurementArtifact>,
+    pub(crate) peer: PeerAddress,
 }
 
 impl ArtifactsToDownload {

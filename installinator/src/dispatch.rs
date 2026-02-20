@@ -27,7 +27,7 @@ use crate::{
     ArtifactWriter, MeasurementToWrite, WriteDestination,
     artifact::{ArtifactIdOpts, ArtifactsToDownload, MeasurementArtifact},
     fetch::{FetchArtifactBackend, FetchedArtifact, HttpFetchBackend},
-    peers::DiscoveryMechanism,
+    peers::{DiscoveryMechanism, PeerAddress},
     reporter::{HttpProgressBackend, ProgressReporter, ReportProgressBackend},
 };
 
@@ -223,6 +223,7 @@ impl InstallOpts {
                         &cx,
                         &installinator_doc_id,
                         discovery,
+                        None,
                         log,
                     )
                     .await?;
@@ -257,10 +258,7 @@ impl InstallOpts {
                     let json: InstallinatorDocument = serde_json::from_reader(
                         buf_list::Cursor::new(&installinator_doc.artifact),
                     )
-                    .context(
-                        "error deserializing \
-                                     installinator document",
-                    )?;
+                    .context("error deserializing installinator document")?;
 
                     // Every valid installinator document must have the
                     // host phase 2 and control plane hashes.
@@ -296,7 +294,7 @@ impl InstallOpts {
                     if !missing.is_empty() {
                         bail!(
                             "installinator document missing \
-                                     required artifacts: {:?}",
+                             required artifacts: {:?}",
                             missing
                         );
                     }
@@ -307,6 +305,7 @@ impl InstallOpts {
                         control_plane: control_plane_hash
                             .expect("control plane is Some, checked above"),
                         measurement_corpus,
+                        peer: installinator_doc.peer,
                     })
                     .into()
                 },
@@ -326,9 +325,14 @@ impl InstallOpts {
                     let to_download = to_download.into_value(cx.token()).await;
                     let host_phase_2_id = to_download.host_phase_2_id();
 
-                    let host_phase_2_artifact =
-                        fetch_artifact(&cx, &host_phase_2_id, discovery, log)
-                            .await?;
+                    let host_phase_2_artifact = fetch_artifact(
+                        &cx,
+                        &host_phase_2_id,
+                        discovery,
+                        Some(to_download.peer),
+                        log,
+                    )
+                    .await?;
 
                     // Check that the sha256 of the data we got from wicket
                     // matches the data we asked for. We do not retry this for
@@ -364,9 +368,14 @@ impl InstallOpts {
                         to_download_2.into_value(cx.token()).await;
                     let control_plane_id = to_download.control_plane_id();
 
-                    let control_plane_artifact =
-                        fetch_artifact(&cx, &control_plane_id, discovery, log)
-                            .await?;
+                    let control_plane_artifact = fetch_artifact(
+                        &cx,
+                        &control_plane_id,
+                        discovery,
+                        Some(to_download.peer),
+                        log,
+                    )
+                    .await?;
 
                     // Check that the sha256 of the data we got from wicket
                     // matches the data we asked for. We do not retry this for
@@ -420,13 +429,18 @@ impl InstallOpts {
                                 async move |cx2| {
                                     let measurement_artifact =
                                         fetch_artifact(
-                                            &cx2, &c.hash, discovery, log,
+                                            &cx2,
+                                            &c.hash,
+                                            discovery,
+                                            Some(to_download.peer),
+                                            log,
                                         )
                                         .await?;
 
-                                    // Check that the sha256 of the data we got from wicket
-                                    // matches the data we asked for. We do not retry this for
-                                    // the same reasons described above when checking the
+                                    // Check that the sha256 of the data we got
+                                    // from wicket matches the data we asked
+                                    // for. We do not retry this for the same
+                                    // reasons described above when checking the
                                     // downloaded host phase 2 artifact.
                                     check_downloaded_artifact_hash(
                                         "measurement corpus",
@@ -675,6 +689,7 @@ async fn fetch_artifact(
     cx: &StepContext,
     id: &ArtifactHashId,
     discovery: &DiscoveryMechanism,
+    priority_peer: Option<PeerAddress>,
     log: &slog::Logger,
 ) -> Result<FetchedArtifact> {
     // TODO: Not sure why slog::o!("artifact" => ?id) isn't working, figure it
@@ -683,6 +698,7 @@ async fn fetch_artifact(
     let artifact = FetchedArtifact::loop_fetch_from_peers(
         cx,
         &log,
+        priority_peer,
         || async {
             Ok(FetchArtifactBackend::new(
                 &log,

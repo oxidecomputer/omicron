@@ -35,11 +35,13 @@ pub(crate) struct FetchedArtifact {
 impl FetchedArtifact {
     /// In a loop, discover peers, and fetch from them.
     ///
-    /// If `discover_fn` returns [`DiscoverPeersError::Retry`], this function will retry. If it
-    /// returns `DiscoverPeersError::Abort`, this function will exit with the underlying error.
+    /// If `discover_fn` returns [`DiscoverPeersError::Retry`], this function
+    /// will retry. If it returns `DiscoverPeersError::Abort`, this function
+    /// will exit with the underlying error.
     pub(crate) async fn loop_fetch_from_peers<F, Fut>(
         cx: &StepContext,
         log: &slog::Logger,
+        priority_peer: Option<PeerAddress>,
         mut discover_fn: F,
         artifact_hash_id: &ArtifactHashId,
     ) -> Result<Self>
@@ -84,7 +86,10 @@ impl FetchedArtifact {
                 peers.len(),
                 peers.display(),
             );
-            match fetch_backend.fetch_artifact(&cx, artifact_hash_id).await {
+            match fetch_backend
+                .fetch_artifact(&cx, priority_peer, artifact_hash_id)
+                .await
+            {
                 Some((peer, artifact)) => {
                     return Ok(Self { attempt, peer, artifact });
                 }
@@ -142,6 +147,7 @@ impl FetchArtifactBackend {
     pub(crate) async fn fetch_artifact(
         &self,
         cx: &StepContext,
+        priority_peer: Option<PeerAddress>,
         artifact_hash_id: &ArtifactHashId,
     ) -> Option<(PeerAddress, BufList)> {
         // TODO: do we want a check phase that happens before the download?
@@ -152,14 +158,23 @@ impl FetchArtifactBackend {
             slog::o!("artifact_hash_id" => format!("{artifact_hash_id:?}")),
         );
 
-        slog::debug!(log, "start fetch from peers"; "remaining_peers" => remaining_peers);
+        slog::debug!(
+            log, "start fetch from peers";
+            "remaining_peers" => remaining_peers,
+        );
 
-        for &peer in peers.peers() {
+        // If we have a priority peer, try it before any others.
+        let peer_ordering = priority_peer
+            .iter()
+            .chain(peers.peers().iter().filter(|p| priority_peer != Some(**p)));
+
+        for &peer in peer_ordering {
             remaining_peers -= 1;
 
             slog::debug!(
-                log,
-                "start fetch from peer {peer:?}"; "remaining_peers" => remaining_peers,
+                log, "start fetch from peer";
+                "peer" => %peer,
+                "remaining_peers" => remaining_peers,
             );
 
             // Attempt to download data from this peer.
