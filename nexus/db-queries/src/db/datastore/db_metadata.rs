@@ -2545,6 +2545,7 @@ mod test {
                     "val_positive",
                 )
                 .unwrap(),
+                not_valid: false,
             };
         let verify_sql = change.verification_query().unwrap();
         conn.batch_execute_async(&verify_sql)
@@ -2581,6 +2582,7 @@ mod test {
                     "nonexistent_constraint",
                 )
                 .unwrap(),
+                not_valid: false,
             };
         let verify_sql = change.verification_query().unwrap();
         let result = conn.batch_execute_async(&verify_sql).await;
@@ -3187,6 +3189,7 @@ mod test {
                     "val_positive",
                 )
                 .unwrap(),
+                not_valid: false,
             };
         let verify_sql = change.verification_query().unwrap();
 
@@ -3284,6 +3287,7 @@ mod test {
                     "val_positive",
                 )
                 .unwrap(),
+                not_valid: false,
             };
         let verify_sql = change.verification_query().unwrap();
 

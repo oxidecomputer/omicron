@@ -325,6 +325,7 @@ pub enum SchemaChangeInfo {
     AlterTableAddConstraint {
         table_name: SqlIdentifier,
         constraint_name: SqlIdentifier,
+        not_valid: bool,
     },
 
     /// `CREATE [UNIQUE] INDEX ...`
@@ -373,30 +374,39 @@ impl SchemaChangeInfo {
             SchemaChangeInfo::AlterTableAddConstraint {
                 table_name,
                 constraint_name,
-            } => Some(format!(
+                not_valid,
+            } => {
+                // NOT VALID constraints are synchronous — no async
+                // validation job runs, so there is no race to guard
+                // against and no verification query is needed.
+                if *not_valid {
+                    return None;
+                }
                 // Use [SHOW CONSTRAINTS FROM ...] instead of
                 // information_schema.table_constraints because the
                 // latter shows constraints in ALL states including
                 // "Validating" (async validation still in progress).
                 // SHOW CONSTRAINTS provides a `validated` column
                 // that is only true when validation has completed.
-                "SELECT CAST(\
-                    IF(\
-                        (\
-                            SELECT true WHERE EXISTS (\
-                                SELECT 1 \
-                                FROM [SHOW CONSTRAINTS FROM {table_name}] \
-                                WHERE constraint_name = '{constraint_name}' \
-                                AND validated = true\
-                            )\
-                        ),\
-                        'true',\
-                        'Schema change verification failed: \
-                        constraint {constraint_name} not found \
-                        on table {table_name}'\
-                    ) AS BOOL\
-                );"
-            )),
+                Some(format!(
+                    "SELECT CAST(\
+                        IF(\
+                            (\
+                                SELECT true WHERE EXISTS (\
+                                    SELECT 1 \
+                                    FROM [SHOW CONSTRAINTS FROM {table_name}] \
+                                    WHERE constraint_name = '{constraint_name}' \
+                                    AND validated = true\
+                                )\
+                            ),\
+                            'true',\
+                            'Schema change verification failed: \
+                            constraint {constraint_name} not found \
+                            on table {table_name}'\
+                        ) AS BOOL\
+                    );"
+                ))
+            }
             // OtherDdl operations are metadata-only or synchronous.
             SchemaChangeInfo::OtherDdl => None,
         }
@@ -1019,6 +1029,7 @@ mod test {
                                 }
                                 AlterTableOperation::AddConstraint {
                                     constraint: tc,
+                                    not_valid,
                                     ..
                                 } => {
                                     let cname = constraint_name(tc)
@@ -1033,6 +1044,7 @@ mod test {
                                         SchemaChangeInfo::AlterTableAddConstraint {
                                             table_name: tbl.clone(),
                                             constraint_name: cname,
+                                            not_valid: *not_valid,
                                         },
                                     );
                                 }
@@ -1527,6 +1539,7 @@ mod test {
             vec![SchemaChangeInfo::AlterTableAddConstraint {
                 table_name: SqlIdentifier::new("external_ip").unwrap(),
                 constraint_name: SqlIdentifier::new("null_project_id").unwrap(),
+                not_valid: false,
             }]
         );
     }
@@ -1727,6 +1740,7 @@ mod test {
         let change = SchemaChangeInfo::AlterTableAddConstraint {
             table_name: SqlIdentifier::new("external_ip").unwrap(),
             constraint_name: SqlIdentifier::new("null_project_id").unwrap(),
+            not_valid: false,
         };
         let query = change.verification_query();
         assert!(query.is_some());
@@ -1734,6 +1748,19 @@ mod test {
         assert!(query.contains("SHOW CONSTRAINTS FROM"));
         assert!(query.contains("external_ip"));
         assert!(query.contains("null_project_id"));
+        assert!(query.contains("validated = true"));
+    }
+
+    #[test]
+    fn test_verification_query_add_constraint_not_valid() {
+        let change = SchemaChangeInfo::AlterTableAddConstraint {
+            table_name: SqlIdentifier::new("audit_log").unwrap(),
+            constraint_name: SqlIdentifier::new("my_check").unwrap(),
+            not_valid: true,
+        };
+        // NOT VALID constraints are synchronous (no async validation
+        // job), so no verification query is needed.
+        assert!(change.verification_query().is_none());
     }
 
     #[test]
@@ -1970,6 +1997,7 @@ mod test {
                     "bgp_peer_config_addr_unique"
                 )
                 .unwrap(),
+                not_valid: false,
             }
         );
     }
@@ -1999,6 +2027,7 @@ mod test {
             SchemaChangeInfo::AlterTableAddConstraint {
                 table_name: SqlIdentifier::new("t").unwrap(),
                 constraint_name: SqlIdentifier::new("new_check").unwrap(),
+                not_valid: false,
             }
         );
     }
