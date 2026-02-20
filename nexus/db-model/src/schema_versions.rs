@@ -16,7 +16,7 @@ use std::{collections::BTreeMap, sync::LazyLock};
 ///
 /// This must be updated when you change the database schema.  Refer to
 /// schema/crdb/README.adoc in the root of this repository for details.
-pub const SCHEMA_VERSION: Version = Version::new(231, 0, 0);
+pub const SCHEMA_VERSION: Version = Version::new(232, 0, 0);
 
 /// List of all past database schema versions, in *reverse* order
 ///
@@ -28,6 +28,7 @@ static KNOWN_VERSIONS: LazyLock<Vec<KnownVersion>> = LazyLock::new(|| {
         // |  leaving the first copy as an example for the next person.
         // v
         // KnownVersion::new(next_int, "unique-dirname-with-the-sql-files"),
+        KnownVersion::new(232, "index-backfill-batch-size"),
         KnownVersion::new(231, "bgp-config-max-paths-not-null"),
         KnownVersion::new(230, "bgp-unnumbered-peers"),
         KnownVersion::new(229, "fix-session-token-column-order"),
@@ -526,6 +527,10 @@ impl SchemaVersion {
         for (_, path) in up_sqls.into_iter() {
             let sql = std::fs::read_to_string(&path)
                 .with_context(|| format!("Cannot read {path}"))?;
+            let non_transactional = sql
+                .lines()
+                .next()
+                .is_some_and(|line| line.trim() == NON_TRANSACTIONAL_PRAGMA);
             // unwrap: `file_name()` is documented to return `None` only when
             // the path is `..`.  But we got this path from reading the
             // directory, and that process explicitly documents that it skips
@@ -533,6 +538,7 @@ impl SchemaVersion {
             steps.push(SchemaUpgradeStep {
                 label: path.file_name().unwrap().to_string(),
                 sql,
+                non_transactional,
             });
         }
 
@@ -566,11 +572,15 @@ impl std::fmt::Display for SchemaVersion {
     }
 }
 
+/// Pragma comment that marks a migration step as non-transactional.
+const NON_TRANSACTIONAL_PRAGMA: &str = "-- NON-TRANSACTIONAL";
+
 /// Describes a single file containing a schema change, as SQL.
 #[derive(Debug, Clone)]
 pub struct SchemaUpgradeStep {
     label: String,
     sql: String,
+    non_transactional: bool,
 }
 
 impl SchemaUpgradeStep {
@@ -583,6 +593,16 @@ impl SchemaUpgradeStep {
     /// Returns the actual SQL to execute for this step
     pub fn sql(&self) -> &str {
         self.sql.as_ref()
+    }
+
+    /// Returns whether this step must be executed outside a transaction.
+    ///
+    /// CockroachDB statements like `SET CLUSTER SETTING` cannot be executed
+    /// inside a multi-statement transaction. Steps marked with the `--
+    /// NON-TRANSACTIONAL` pragma at the top of their SQL file will return
+    /// `true` here.
+    pub fn is_non_transactional(&self) -> bool {
+        self.non_transactional
     }
 }
 
@@ -944,6 +964,80 @@ mod test {
                     );
                 }
             }
+        }
+    }
+
+    // Confirm that `SchemaVersion::load_from_directory()` correctly detects
+    // the NON-TRANSACTIONAL pragma on the first line of a SQL file.
+    #[tokio::test]
+    async fn test_non_transactional_pragma_detection() {
+        async fn load_single_step(content: &str) -> SchemaUpgradeStep {
+            let tempdir = Utf8TempDir::new().unwrap();
+            tokio::fs::write(tempdir.path().join("up.sql"), content)
+                .await
+                .unwrap();
+            let version = SchemaVersion::load_from_directory(
+                Version::new(99, 0, 0),
+                tempdir.path(),
+            )
+            .unwrap();
+            version.upgrade_from_previous.into_iter().next().unwrap()
+        }
+
+        let detected: &[(&str, &str)] = &[
+            (
+                "exact pragma on line 1",
+                "-- NON-TRANSACTIONAL\nSET CLUSTER SETTING x = 1;",
+            ),
+            (
+                "leading/trailing whitespace on pragma line",
+                "  -- NON-TRANSACTIONAL  \nSET CLUSTER SETTING x = 1;",
+            ),
+            (
+                "pragma with trailing content on later lines",
+                "-- NON-TRANSACTIONAL\n--\n-- Comment.\nSET CLUSTER SETTING x = 1;",
+            ),
+        ];
+
+        for (label, content) in detected {
+            let step = load_single_step(content).await;
+            assert!(
+                step.is_non_transactional(),
+                "expected non-transactional for {label:?}",
+            );
+        }
+
+        let not_detected: &[(&str, &str)] = &[
+            (
+                "pragma on line 2, not line 1",
+                "-- some comment\n-- NON-TRANSACTIONAL\nSET CLUSTER SETTING x = 1;",
+            ),
+            (
+                "regular SQL without pragma",
+                "CREATE TABLE foo (id INT PRIMARY KEY);",
+            ),
+            ("empty file", ""),
+            (
+                "misspelled: underscore instead of hyphen",
+                "-- NON_TRANSACTIONAL\nSET CLUSTER SETTING x = 1;",
+            ),
+            (
+                "pragma as substring of longer comment",
+                "-- NON-TRANSACTIONAL-EXTENDED\nSET CLUSTER SETTING x = 1;",
+            ),
+            ("wrong case", "-- non-transactional\nSET CLUSTER SETTING x = 1;"),
+            (
+                "missing space after --",
+                "--NON-TRANSACTIONAL\nSET CLUSTER SETTING x = 1;",
+            ),
+        ];
+
+        for (label, content) in not_detected {
+            let step = load_single_step(content).await;
+            assert!(
+                !step.is_non_transactional(),
+                "expected transactional for {label:?}",
+            );
         }
     }
 

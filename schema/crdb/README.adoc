@@ -9,7 +9,7 @@ We use the following conventions:
 
 * `schema/crdb/VERSION/up*.sql`: Files containing the necessary idempotent
   statements to transition from the previous version of the database schema to
-  this version.  All of the statements in a given file will be executed
+  this version.  By default, all of the statements in a given file will be executed
   together in one transaction; however, usually only one statement should
   appear in each file.  More on this below.
 ** If there's only one statement required, we put it into `up.sql`.
@@ -82,10 +82,10 @@ Process:
     statements.  But you should not mix schema-modifying statements and
     data-modifying statements in one file.  And you should not include multiple
     schema-modifying statements in one file.
-*** Beware that the entire file will be run in one transaction.  Expensive data-
-    modifying operations leading to long-running transactions are generally
-    to-be-avoided; however, there's no better way to do this today if you really
-    do need to update thousands of rows as part of the update.
+*** Beware that by default, the entire file will be run in one transaction.
+    Expensive data-modifying operations leading to long-running transactions are
+    generally to-be-avoided; however, there's no better way to do this today if
+    you really do need to update thousands of rows as part of the update.
 * Update `schema/crdb/dbinit.sql`:
 ** Update the SQL statements to match what the database should look like
    after your up*.sql files are applied.
@@ -210,6 +210,37 @@ giving its corresponding struct field a different, more meaningful name.
 
 Note that this constraint does not apply to renaming tables: the statement
 `ALTER TABLE IF EXISTS ... RENAME TO ...` is valid and idempotent.
+
+==== Non-transactional schema updates
+
+By default, each `up.sql` file is run in a transaction. However, in some
+rare cases, schema updates may need to be done outside a transaction context.
+To opt into this, add a `-- NON-TRANSACTIONAL` comment on its own as
+the first line of the file.
+
+Non-transactional updates are a last-resort feature, and should only be used when
+strictly necessary.
+
+Currently, the only non-transactional schema update is a `SET CLUSTER SETTING`.
+
+===== Idempotence of non-transactional updates
+
+Transactional schema updates are required to be idempotent, but only with regard
+to other instances of Nexus applying the same `up.sql` file. On the other hand,
+non-transactional schema updates are susceptible to version TOCTOU issues, and
+must be idempotent across _other_ schema updates.
+
+What does this mean? Consider this (admittedly contrived) example: within a
+schema migration, `up1.sql` adds a column and `up2.sql` removes that column.
+With transactional schema updates, it is guaranteed that after both migrations
+have been applied, the column is not present. But if `up1.sql` is marked
+non-transactional, in the middle of one copy of Nexus applying it, a different
+copy of Nexus might apply it, move on to `up2.sql`, and apply that as well. So
+whether the column exists or not is indeterminate. This means that typical
+schema update statements cannot be marked non-transactional.
+
+In practice, the only non-transactional schema updates are likely to be special
+situations like cluster-wide settings.
 
 === Fixing broken Schema Updates
 
