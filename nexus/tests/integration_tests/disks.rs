@@ -3055,14 +3055,14 @@ async fn test_read_only_disk_different_vcr(
 
     let disk_size = ByteCount::from_gibibytes_u32(2);
     let base_disk_name = "base-disk";
-    let base_disk = params::DiskCreate {
+    let base_disk = disk::DiskCreate {
         identity: IdentityMetadataCreateParams {
             name: base_disk_name.parse().unwrap(),
             description: String::from("sells rainsticks"),
         },
-        disk_backend: params::DiskBackend::Distributed {
-            disk_source: params::DiskSource::Blank {
-                block_size: params::BlockSize::try_from(512).unwrap(),
+        disk_backend: disk::DiskBackend::Distributed {
+            disk_source: disk::DiskSource::Blank {
+                block_size: disk::BlockSize::try_from(512).unwrap(),
             },
         },
         size: disk_size,
