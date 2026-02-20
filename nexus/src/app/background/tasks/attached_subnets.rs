@@ -445,10 +445,10 @@ mod test {
     use nexus_db_model::IpAttachState;
     use nexus_db_schema::schema::external_subnet::dsl;
     use nexus_test_utils::resource_helpers::create_default_ip_pools;
+    use nexus_test_utils::resource_helpers::create_default_subnet_pool;
     use nexus_test_utils::resource_helpers::create_external_subnet_in_pool;
     use nexus_test_utils::resource_helpers::create_instance;
     use nexus_test_utils::resource_helpers::create_project;
-    use nexus_test_utils::resource_helpers::create_subnet_pool;
     use nexus_test_utils::resource_helpers::create_subnet_pool_member;
     use nexus_test_utils_macros::nexus_test;
     use omicron_common::address::IpVersion;
@@ -567,7 +567,7 @@ mod test {
 
         // Create a resource hierarchy.
         let _subnet_pool =
-            create_subnet_pool(client, "apple", IpVersion::V6).await;
+            create_default_subnet_pool(client, "apple", IpVersion::V6).await;
         let _member = create_subnet_pool_member(
             client,
             "apple",
