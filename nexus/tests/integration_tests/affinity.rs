@@ -955,3 +955,62 @@ async fn test_group_project_selector<T: AffinityGroupish>(
         .await;
     no_project_api.group_delete(&group_id).await;
 }
+
+// Regression test: adding an instance from a different project to an
+// affinity group should fail. The affinity group member-add endpoint
+// checks authz on both the group and the instance independently, but
+// was missing a check that they share the same project. This allowed a
+// user with read access to an instance in project B to add it to an
+// affinity group in project A (by referencing both via UUID), which
+// affects the instance's scheduling without the project B owner's
+// knowledge.
+//
+// This mirrors the same-project checks already present in
+// instance_attach_disk and instance_attach_floating_ip.
+#[nexus_test]
+async fn test_affinity_group_cross_project_member_rejected(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+    create_default_ip_pools(&client).await;
+
+    let api = ApiHelper::new(client);
+    api.create_project("project-a").await;
+    api.create_project("project-b").await;
+
+    let project_a_api = api.use_project::<AffinityType>("project-a");
+    let project_b_api = api.use_project::<AffinityType>("project-b");
+
+    // Create a group in project A and an instance in project B.
+    let group = project_a_api.group_create("group").await;
+    let instance = project_b_api.create_stopped_instance("inst-b").await;
+
+    let group_id = group.identity.id.to_string();
+    let instance_id = instance.identity.id.to_string();
+
+    // Try to add the instance from project B to the group in project A
+    // using UUIDs (bypassing the name-based project scoping). This should
+    // be rejected because the resources are in different projects.
+    let no_project_api = api.no_project::<AffinityType>();
+    no_project_api
+        .group_member_add_expect_error(
+            &group_id,
+            &instance_id,
+            StatusCode::BAD_REQUEST,
+        )
+        .await;
+
+    // Also test the anti-affinity variant.
+    let project_a_anti = api.use_project::<AntiAffinityType>("project-a");
+    let anti_group = project_a_anti.group_create("anti-group").await;
+    let anti_group_id = anti_group.identity.id.to_string();
+
+    let no_project_anti = api.no_project::<AntiAffinityType>();
+    no_project_anti
+        .group_member_add_expect_error(
+            &anti_group_id,
+            &instance_id,
+            StatusCode::BAD_REQUEST,
+        )
+        .await;
+}
