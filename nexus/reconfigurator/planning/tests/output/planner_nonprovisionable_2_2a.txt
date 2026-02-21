@@ -5,6 +5,13 @@ to:   blueprint 86df79ea-8652-477a-960e-32c21f46d255
 
   sled 68d24ac5-f341-49ea-a92a-0381b52ab387 (was decommissioned, config generation 3):
 
+    measurements:
+    ------------------------------
+    hash              version     
+    ------------------------------
+-   install dataset   (no version)
+
+
     host phase 2 contents:
     ------------------------
     slot   boot image source
@@ -124,6 +131,13 @@ to:   blueprint 86df79ea-8652-477a-960e-32c21f46d255
 
   sled 2d1cb4f2-cf44-40fc-b118-85036eb732a9 (active, config generation 2):
 
+    measurements:
+    ------------------------------
+    hash              version     
+    ------------------------------
+    install dataset   (no version)
+
+
     host phase 2 contents:
     ------------------------
     slot   boot image source
@@ -242,6 +256,13 @@ to:   blueprint 86df79ea-8652-477a-960e-32c21f46d255
 
 
   sled 48d95fef-bc9f-4f50-9a53-1e075836291d (decommissioned, config generation 3 -> 4):
+
+    measurements:
+    ------------------------------
+    hash              version     
+    ------------------------------
+    install dataset   (no version)
+
 
     host phase 2 contents:
     ------------------------

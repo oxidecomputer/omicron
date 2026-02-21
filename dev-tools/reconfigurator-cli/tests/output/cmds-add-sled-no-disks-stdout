@@ -50,6 +50,8 @@ planning report:
 * no zpools in service for NTP zones on sleds: 00320471-945d-413c-85e7-03e091a70b3c
 * discretionary zone placement waiting for NTP zones on sleds: 00320471-945d-413c-85e7-03e091a70b3c
 * zone updates waiting on zone add blockers
+Measurement updates:
+Blocked on add/updates
 
 
 
@@ -69,6 +71,13 @@ parent:    dbcbd3d6-41ff-48ae-ac0b-1becc9b2fd21
     ------------------------
     A      current contents 
     B      current contents 
+
+
+    measurements:
+    ------------------------------
+    hash              version     
+    ------------------------------
+    install dataset   (no version)
 
 
     physical disks:
@@ -102,6 +111,13 @@ parent:    dbcbd3d6-41ff-48ae-ac0b-1becc9b2fd21
     ------------------------
     A      current contents 
     B      current contents 
+
+
+    measurements:
+    ------------------------------
+    hash              version     
+    ------------------------------
+    install dataset   (no version)
 
 
     physical disks:
@@ -176,6 +192,13 @@ parent:    dbcbd3d6-41ff-48ae-ac0b-1becc9b2fd21
     B      current contents 
 
 
+    measurements:
+    ------------------------------
+    hash              version     
+    ------------------------------
+    install dataset   (no version)
+
+
     physical disks:
     ------------------------------------------------------------------------------------
     vendor        model        serial                                        disposition
@@ -243,6 +266,13 @@ parent:    dbcbd3d6-41ff-48ae-ac0b-1becc9b2fd21
     ------------------------
     A      current contents 
     B      current contents 
+
+
+    measurements:
+    ------------------------------
+    hash              version     
+    ------------------------------
+    install dataset   (no version)
 
 
     physical disks:
@@ -330,6 +360,8 @@ planning report:
 * no zpools in service for NTP zones on sleds: 00320471-945d-413c-85e7-03e091a70b3c
 * discretionary zone placement waiting for NTP zones on sleds: 00320471-945d-413c-85e7-03e091a70b3c
 * zone updates waiting on zone add blockers
+Measurement updates:
+Blocked on add/updates
 
 
 

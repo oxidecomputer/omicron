@@ -58,6 +58,7 @@ use nexus_db_model::BpPendingMgsUpdateHostPhase1;
 use nexus_db_model::BpPendingMgsUpdateRot;
 use nexus_db_model::BpPendingMgsUpdateRotBootloader;
 use nexus_db_model::BpPendingMgsUpdateSp;
+use nexus_db_model::BpSingleMeasurement;
 use nexus_db_model::BpSledMetadata;
 use nexus_db_model::BpTarget;
 use nexus_db_model::DbArtifactVersion;
@@ -77,7 +78,9 @@ use nexus_db_schema::enums::HwRotSlotEnum;
 use nexus_db_schema::enums::SpTypeEnum;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::BlueprintExpungedZoneAccessReason;
+use nexus_types::deployment::BlueprintMeasurements;
 use nexus_types::deployment::BlueprintMetadata;
+use nexus_types::deployment::BlueprintSingleMeasurement;
 use nexus_types::deployment::BlueprintSledConfig;
 use nexus_types::deployment::BlueprintSource;
 use nexus_types::deployment::BlueprintTarget;
@@ -270,6 +273,20 @@ impl DataStore {
             })
             .collect::<Vec<_>>();
 
+        let measurements = blueprint
+            .sleds
+            .iter()
+            .flat_map(|(sled_id, sled)| {
+                sled.measurements.iter().map(move |measurement| {
+                    BpSingleMeasurement::new(
+                        blueprint_id,
+                        *sled_id,
+                        measurement,
+                    )
+                })
+            })
+            .collect::<Vec<_>>();
+
         let omicron_physical_disks = blueprint
             .sleds
             .iter()
@@ -398,6 +415,21 @@ impl DataStore {
                             .execute_async(&conn)
                             .await?;
                 }
+
+                // Insert all measurements for this blueprint.
+                {
+                    // Skip formatting this line to prevent rustfmt bailing out.
+                    #[rustfmt::skip]
+                    use nexus_db_schema::schema::bp_single_measurements::dsl
+                        as single_measurement;
+                    let _ = diesel::insert_into(
+                        single_measurement::bp_single_measurements,
+                    )
+                    .values(measurements)
+                    .execute_async(&conn)
+                    .await?;
+                }
+
 
                 // Insert all physical disks for this blueprint.
                 {
@@ -1159,6 +1191,49 @@ impl DataStore {
             bbs
         };
 
+        let raw_measurements: Vec<(BpSingleMeasurement, Option<TufArtifact>)> = {
+            use nexus_db_schema::schema::bp_single_measurements::dsl;
+            use nexus_db_schema::schema::tuf_artifact::dsl as tuf_artifact_dsl;
+
+            let mut rows = Vec::new();
+            let mut paginator = Paginator::new(
+                SQL_BATCH_SIZE,
+                dropshot::PaginationOrder::Ascending,
+            );
+            while let Some(p) = paginator.next() {
+                let batch = paginated(
+                    dsl::bp_single_measurements,
+                    dsl::id,
+                    &p.current_pagparams(),
+                )
+                .filter(dsl::blueprint_id.eq(to_db_typed_uuid(blueprint_id)))
+                // Left join in case the artifact is missing from the
+                // tuf_artifact table, which is non-fatal.
+                .left_join(
+                    tuf_artifact_dsl::tuf_artifact.on(tuf_artifact_dsl::kind
+                        .eq(ArtifactKind::MEASUREMENT_CORPUS.to_string())
+                        .and(
+                            tuf_artifact_dsl::sha256
+                                .eq(dsl::image_artifact_sha256),
+                        )),
+                )
+                .select((
+                    BpSingleMeasurement::as_select(),
+                    Option::<TufArtifact>::as_select(),
+                ))
+                .load_async::<(BpSingleMeasurement, Option<TufArtifact>)>(
+                    &*conn,
+                )
+                .await
+                .map_err(|e| {
+                    public_error_from_diesel(e, ErrorHandler::Server)
+                })?;
+                paginator = p.found_batch(&batch, &|(z, _)| z.id);
+                rows.extend(batch);
+            }
+            rows
+        };
+
         // ================================================================
         // STAGE 2: Check if blueprint exists
         //
@@ -1220,6 +1295,9 @@ impl DataStore {
                     .remove_mupdate_override
                     .map(|id| id.into()),
                 host_phase_2: s.host_phase_2(slot_a_version, slot_b_version),
+                // We start with measurements from the install dataset, if
+                // there's anything in the database this will get overwritten
+                measurements: BlueprintMeasurements::InstallDataset,
             };
             let old = sled_configs.insert(s.sled_id.into(), config);
             bail_unless!(
@@ -1227,6 +1305,31 @@ impl DataStore {
                 "found duplicate sled ID in bp_sled_metadata: {}",
                 s.sled_id
             );
+        }
+
+        let mut omicron_measurements: BTreeMap<
+            SledUuid,
+            BTreeSet<BlueprintSingleMeasurement>,
+        > = BTreeMap::new();
+        for (m, artifact) in raw_measurements {
+            omicron_measurements
+                .entry(m.sled_id.into())
+                .or_default()
+                .insert(m.to_measurement(artifact));
+        }
+
+        for (id, artifacts) in omicron_measurements {
+            let sled_config = sled_configs.get_mut(&id).ok_or_else(|| {
+                // This means we found a measurement without
+                // the associated sled
+                Error::internal_error(&format!(
+                    "unknown sled: {} for inserting measurements",
+                    id
+                ))
+            })?;
+
+            sled_config.measurements =
+                BlueprintMeasurements::Artifacts { artifacts };
         }
 
         // Assemble a mutable map of all the NICs found, by NIC id.  As we
@@ -3312,6 +3415,158 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_measurement_blueprint() {
+        const TEST_NAME: &str = "test_measurement_blueprint";
+        // Setup
+        let logctx = dev::test_setup_log(TEST_NAME);
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        // Create a cohesive representative collection/policy/blueprint
+        let (_, planning_input, blueprint1) =
+            representative(&logctx.log, TEST_NAME);
+        let authz_blueprint1 = authz_blueprint_from_id(blueprint1.id);
+
+        // Write it to the database and read it back.
+        datastore
+            .blueprint_insert(&opctx, &blueprint1)
+            .await
+            .expect("failed to insert blueprint");
+        let blueprint_read = datastore
+            .blueprint_read(&opctx, &authz_blueprint1)
+            .await
+            .expect("failed to read collection back");
+
+        for (_, s) in blueprint_read.sleds {
+            assert!(s.measurements == BlueprintMeasurements::InstallDataset);
+        }
+
+        const ARTIFACT_VERSION_1: ArtifactVersion =
+            ArtifactVersion::new_const("1.0.0");
+        const ARTIFACT_VERSION_2: ArtifactVersion =
+            ArtifactVersion::new_const("2.0.0");
+        const MEASUREMENT_ARTIFACT_HASH_1: ArtifactHash = ArtifactHash([3; 32]);
+        const MEASUREMENT_ARTIFACT_HASH_2: ArtifactHash = ArtifactHash([4; 32]);
+        const MEASUREMENT_ARTIFACT_HASH_3: ArtifactHash = ArtifactHash([5; 32]);
+
+        const SYSTEM_VERSION: semver::Version = semver::Version::new(0, 0, 1);
+        const SYSTEM_HASH: ArtifactHash = ArtifactHash([3; 32]);
+
+        let tuf_repo = TufRepoDescription {
+            repo: TufRepoMeta {
+                hash: SYSTEM_HASH,
+                targets_role_version: 0,
+                valid_until: Utc::now(),
+                system_version: SYSTEM_VERSION,
+                file_name: String::new(),
+            },
+            artifacts: vec![
+                TufArtifactMeta {
+                    id: ArtifactId {
+                        name: "measurment1".into(),
+                        version: ARTIFACT_VERSION_1,
+                        kind: ArtifactKind::MEASUREMENT_CORPUS,
+                    },
+                    hash: MEASUREMENT_ARTIFACT_HASH_1,
+                    size: 0,
+                    board: None,
+                    sign: None,
+                },
+                TufArtifactMeta {
+                    id: ArtifactId {
+                        name: "measurement2".into(),
+                        version: ARTIFACT_VERSION_1,
+                        kind: ArtifactKind::MEASUREMENT_CORPUS,
+                    },
+                    hash: MEASUREMENT_ARTIFACT_HASH_2,
+                    size: 0,
+                    board: None,
+                    sign: None,
+                },
+                TufArtifactMeta {
+                    id: ArtifactId {
+                        name: "measurement3".into(),
+                        version: ARTIFACT_VERSION_2,
+                        kind: ArtifactKind::MEASUREMENT_CORPUS,
+                    },
+                    hash: MEASUREMENT_ARTIFACT_HASH_3,
+                    size: 0,
+                    board: None,
+                    sign: None,
+                },
+            ],
+        };
+
+        // Add rows to the tuf_artifact table to test version lookups.
+        {
+            // Add a zone artifact and two host phase 2 artifacts.
+            datastore
+                .tuf_repo_insert(opctx, &tuf_repo)
+                .await
+                .expect("inserted TUF repo");
+        }
+
+        let mut builder = BlueprintBuilder::new_based_on(
+            &logctx.log,
+            &blueprint1,
+            "test2",
+            PlannerRng::from_entropy(),
+        )
+        .expect("failed to create builder");
+
+        let mut measurements = BTreeSet::new();
+
+        for artifact in &tuf_repo.artifacts {
+            if artifact.id.kind == ArtifactKind::MEASUREMENT_CORPUS {
+                measurements.insert(BlueprintSingleMeasurement {
+                    version: BlueprintArtifactVersion::Available {
+                        version: artifact.id.version.clone(),
+                    },
+                    hash: artifact.hash,
+                });
+            }
+        }
+
+        assert!(measurements.len() == 3);
+
+        for (s, _) in planning_input.all_sleds(SledFilter::InService) {
+            builder
+                .sled_set_measurements(
+                    s,
+                    BlueprintMeasurements::Artifacts {
+                        artifacts: measurements.clone(),
+                    },
+                )
+                .expect("set measurements");
+        }
+
+        let blueprint2 = builder.build(BlueprintSource::Test);
+        let authz_blueprint2 = authz_blueprint_from_id(blueprint2.id);
+        // Write it to the database and read it back.
+        datastore
+            .blueprint_insert(&opctx, &blueprint2)
+            .await
+            .expect("failed to insert blueprint");
+        let blueprint_read = datastore
+            .blueprint_read(&opctx, &authz_blueprint2)
+            .await
+            .expect("failed to read collection back");
+
+        for (_, s) in blueprint_read.sleds {
+            match s.measurements {
+                BlueprintMeasurements::InstallDataset => {
+                    panic!("failed to pick up measurements")
+                }
+                BlueprintMeasurements::Artifacts { artifacts } => {
+                    if artifacts.len() != 3 {
+                        panic!("expected 3 got {}", artifacts.len());
+                    }
+                }
+            }
+        }
+    }
+
+    #[tokio::test]
     async fn test_representative_blueprint() {
         const TEST_NAME: &str = "test_representative_blueprint";
         // Setup
@@ -4616,6 +4871,7 @@ mod tests {
                     blueprint_id
                 ),
                 query_count!(bp_pending_mgs_update_host_phase_1, blueprint_id),
+                query_count!(bp_single_measurements, blueprint_id),
                 query_count!(debug_log_blueprint_planning, blueprint_id),
             ] {
                 let count: i64 = result.unwrap();
@@ -4735,6 +4991,7 @@ mod tests {
             "bp_clickhouse_keeper_zone_id_to_node_id",
             "bp_clickhouse_server_zone_id_to_node_id",
             "debug_log_blueprint_planning",
+            "bp_single_measurements",
         ];
 
         // Check that all non-exception tables have at least one row

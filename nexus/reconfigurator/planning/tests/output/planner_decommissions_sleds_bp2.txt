@@ -15,6 +15,13 @@ parent:    516e80a3-b362-4fac-bd3c-4559717120dd
     B      current contents 
 
 
+    measurements:
+    ------------------------------
+    hash              version     
+    ------------------------------
+    install dataset   (no version)
+
+
     physical disks:
     -------------------------------------------------------------------------------------
     vendor        model        serial                                        disposition 
@@ -138,6 +145,13 @@ parent:    516e80a3-b362-4fac-bd3c-4559717120dd
     ------------------------
     A      current contents 
     B      current contents 
+
+
+    measurements:
+    ------------------------------
+    hash              version     
+    ------------------------------
+    install dataset   (no version)
 
 
     physical disks:
@@ -264,6 +278,13 @@ parent:    516e80a3-b362-4fac-bd3c-4559717120dd
     ------------------------
     A      current contents 
     B      current contents 
+
+
+    measurements:
+    ------------------------------
+    hash              version     
+    ------------------------------
+    install dataset   (no version)
 
 
     physical disks:
@@ -412,5 +433,7 @@ planning report:
   * clickhouse zone on sled fefcf4cf-f7e7-46b3-b629-058526ce440e from source install dataset
   * internal_dns zone on sled fefcf4cf-f7e7-46b3-b629-058526ce440e from source install dataset
 * zone updates waiting on discretionary zones
+Measurement updates:
+Blocked on add/updates
 
 
