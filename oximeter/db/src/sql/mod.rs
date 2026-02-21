@@ -46,9 +46,14 @@ use sqlparser::ast::Join;
 use sqlparser::ast::JoinConstraint;
 use sqlparser::ast::JoinOperator;
 use sqlparser::ast::ObjectName;
+use sqlparser::ast::ObjectNamePart;
+use sqlparser::ast::OrderBy;
 use sqlparser::ast::OrderByExpr;
+use sqlparser::ast::OrderByKind;
+use sqlparser::ast::OrderByOptions;
 use sqlparser::ast::Query;
 use sqlparser::ast::Select;
+use sqlparser::ast::SelectFlavor;
 use sqlparser::ast::SelectItem;
 use sqlparser::ast::SetExpr;
 use sqlparser::ast::Statement;
@@ -57,6 +62,7 @@ use sqlparser::ast::TableFactor;
 use sqlparser::ast::TableWithJoins;
 use sqlparser::ast::Value;
 use sqlparser::ast::With;
+use sqlparser::ast::helpers::attached_token::AttachedToken;
 use sqlparser::dialect::AnsiDialect;
 use sqlparser::dialect::Dialect;
 use sqlparser::parser::Parser;
@@ -241,12 +247,14 @@ impl RestrictedQuery {
         let maybe_denied_function =
             sqlparser::ast::visit_expressions(&query, |expr| {
                 if let Expr::Function(func) = expr {
-                    if let Some(name) = func.name.0.first() {
+                    if let Some(ident) =
+                        func.name.0.first().and_then(|p| p.as_ident())
+                    {
                         if !function_allow_list()
                             .iter()
-                            .any(|f| f.name == name.value.as_str())
+                            .any(|f| f.name == ident.value.as_str())
                         {
-                            return ControlFlow::Break(name.value.clone());
+                            return ControlFlow::Break(ident.value.clone());
                         }
                     }
                 }
@@ -277,7 +285,11 @@ impl RestrictedQuery {
                 // SQL, which may have `ASOF JOIN`s in it.
                 format!(
                     "{} {}",
-                    With { recursive: false, cte_tables },
+                    With {
+                        with_token: AttachedToken::empty(),
+                        recursive: false,
+                        cte_tables,
+                    },
                     self.safe_sql.original,
                 )
             }
@@ -431,9 +443,11 @@ impl RestrictedQuery {
                 lateral: false,
                 subquery: Self::select_to_query(field_queries[0].1.clone()),
                 alias: Some(TableAlias {
+                    explicit: false,
                     name: Self::field_subquery_alias(field_queries[0].0),
                     columns: vec![],
                 }),
+                sample: None,
             },
             joins: Vec::with_capacity(field_queries.len()),
         };
@@ -467,9 +481,11 @@ impl RestrictedQuery {
                 lateral: false,
                 subquery: Self::select_to_query(query.clone()),
                 alias: Some(TableAlias {
+                    explicit: false,
                     name: Self::field_subquery_alias(field_name),
                     columns: vec![],
                 }),
+                sample: None,
             };
 
             // The join is always INNER, and is on the timeseries_key only.
@@ -492,7 +508,11 @@ impl RestrictedQuery {
             };
             let join_operator =
                 JoinOperator::Inner(JoinConstraint::On(constraints));
-            cte_from.joins.push(Join { relation, join_operator });
+            cte_from.joins.push(Join {
+                relation,
+                global: false,
+                join_operator,
+            });
         }
 
         // Finally, we need to project and join in the measurements table.
@@ -511,9 +531,11 @@ impl RestrictedQuery {
             lateral: false,
             subquery: Self::select_to_query(measurement_query),
             alias: Some(TableAlias {
+                explicit: false,
                 name: Self::str_to_ident("measurements"),
                 columns: vec![],
             }),
+            sample: None,
         };
         let constraints = Expr::BinaryOp {
             left: Box::new(Expr::CompoundIdentifier(vec![
@@ -530,7 +552,7 @@ impl RestrictedQuery {
         };
         let join_operator =
             JoinOperator::Inner(JoinConstraint::On(constraints));
-        cte_from.joins.push(Join { relation, join_operator });
+        cte_from.joins.push(Join { relation, global: false, join_operator });
 
         // To build the real virtual table for all the timeseries, we really
         // need to sort the samples as if they were inserted into the table
@@ -541,7 +563,7 @@ impl RestrictedQuery {
         // We'll impose a consistent sorting order here. If one does not include
         // this, results are inconsistent, since the different data parts of the
         // measurements tables are not read in order every time.
-        let order_by = top_level_projections
+        let order_by_exprs: Vec<OrderByExpr> = top_level_projections
             .iter()
             .filter_map(|proj| {
                 let SelectItem::ExprWithAlias { alias, .. } = &proj else {
@@ -553,8 +575,8 @@ impl RestrictedQuery {
                 {
                     Some(OrderByExpr {
                         expr: Expr::Identifier(alias.clone()),
-                        asc: None,
-                        nulls_first: None,
+                        options: OrderByOptions::default(),
+                        with_fill: None,
                     })
                 } else {
                     None
@@ -566,37 +588,57 @@ impl RestrictedQuery {
         // we're projecting from that join result. We need to build the final
         // CTE that represents the full virtual timeseries table.
         let alias = TableAlias {
-            name: Ident {
-                value: schema.timeseries_name.to_string(),
-                quote_style: Some('"'),
-            },
+            explicit: false,
+            name: Ident::with_quote('"', schema.timeseries_name.to_string()),
             columns: vec![],
         };
         let top_level_select = Select {
+            select_token: AttachedToken::empty(),
+            optimizer_hint: None,
             distinct: None,
+            select_modifiers: None,
             top: None,
+            top_before_distinct: false,
             projection: top_level_projections,
+            exclude: None,
             into: None,
             from: vec![cte_from],
             lateral_views: vec![],
+            prewhere: None,
             selection: None,
-            group_by: GroupByExpr::Expressions(vec![]),
+            connect_by: vec![],
+            group_by: GroupByExpr::Expressions(vec![], vec![]),
             cluster_by: vec![],
             distribute_by: vec![],
             sort_by: vec![],
             having: None,
             named_window: vec![],
             qualify: None,
+            window_before_qualify: false,
             value_table_mode: None,
+            flavor: SelectFlavor::Standard,
         };
         let mut query = Self::select_to_query(top_level_select);
-        query.order_by = order_by;
-        Cte { alias, query, from: None, materialized: None }
+        query.order_by = if order_by_exprs.is_empty() {
+            None
+        } else {
+            Some(OrderBy {
+                kind: OrderByKind::Expressions(order_by_exprs),
+                interpolate: None,
+            })
+        };
+        Cte {
+            alias,
+            query,
+            from: None,
+            materialized: None,
+            closing_paren_token: AttachedToken::empty(),
+        }
     }
 
     // Create a SQL parser `Ident` with a the given name.
     fn str_to_ident(s: &str) -> Ident {
-        Ident { value: s.to_string(), quote_style: None }
+        Ident::new(s)
     }
 
     // Return an `Ident` alias for a subquery of a specific field table.
@@ -645,13 +687,14 @@ impl RestrictedQuery {
         Box::new(Query {
             with: None,
             body: Box::new(SetExpr::Select(Box::new(select))),
-            order_by: vec![],
-            limit: None,
-            limit_by: vec![],
-            offset: None,
+            order_by: None,
+            limit_clause: None,
             fetch: None,
             locks: vec![],
             for_clause: None,
+            settings: None,
+            format_clause: None,
+            pipe_operators: vec![],
         })
     }
 
@@ -675,7 +718,7 @@ impl RestrictedQuery {
         // FROM oximeter.fields_{field_type}
         let from = TableWithJoins {
             relation: TableFactor::Table {
-                name: ObjectName(vec![Self::str_to_ident(&format!(
+                name: ObjectName::from(vec![Self::str_to_ident(&format!(
                     "oximeter.{}",
                     field_table_name(*field_type)
                 ))]),
@@ -683,7 +726,11 @@ impl RestrictedQuery {
                 args: None,
                 with_hints: vec![],
                 version: None,
+                with_ordinality: false,
                 partitions: vec![],
+                json_path: None,
+                sample: None,
+                index_hints: vec![],
             },
             joins: vec![],
         };
@@ -705,9 +752,10 @@ impl RestrictedQuery {
                     "timeseries_name",
                 ))),
                 op: BinaryOperator::Eq,
-                right: Box::new(Expr::Value(Value::SingleQuotedString(
-                    timeseries_name.to_string(),
-                ))),
+                right: Box::new(Expr::Value(
+                    Value::SingleQuotedString(timeseries_name.to_string())
+                        .into(),
+                )),
             }),
             op: BinaryOperator::And,
             right: Box::new(Expr::BinaryOp {
@@ -715,28 +763,37 @@ impl RestrictedQuery {
                     "field_name",
                 ))),
                 op: BinaryOperator::Eq,
-                right: Box::new(Expr::Value(Value::SingleQuotedString(
-                    field_name.to_string(),
-                ))),
+                right: Box::new(Expr::Value(
+                    Value::SingleQuotedString(field_name.to_string()).into(),
+                )),
             }),
         });
 
         Select {
+            select_token: AttachedToken::empty(),
+            optimizer_hint: None,
             distinct: Some(Distinct::Distinct),
+            select_modifiers: None,
             top: None,
+            top_before_distinct: false,
             projection,
+            exclude: None,
             into: None,
             from: vec![from],
             lateral_views: vec![],
+            prewhere: None,
             selection,
-            group_by: GroupByExpr::Expressions(vec![]),
+            connect_by: vec![],
+            group_by: GroupByExpr::Expressions(vec![], vec![]),
             cluster_by: vec![],
             distribute_by: vec![],
             sort_by: vec![],
             having: None,
             named_window: vec![],
             qualify: None,
+            window_before_qualify: false,
             value_table_mode: None,
+            flavor: SelectFlavor::Standard,
         }
     }
 
@@ -760,7 +817,7 @@ impl RestrictedQuery {
         // FROM measurements_{datum_type}
         let from = TableWithJoins {
             relation: TableFactor::Table {
-                name: ObjectName(vec![Self::str_to_ident(&format!(
+                name: ObjectName::from(vec![Self::str_to_ident(&format!(
                     "oximeter.{}",
                     measurement_table_name(*datum_type)
                 ))]),
@@ -768,7 +825,11 @@ impl RestrictedQuery {
                 args: None,
                 with_hints: vec![],
                 version: None,
+                with_ordinality: false,
                 partitions: vec![],
+                json_path: None,
+                sample: None,
+                index_hints: vec![],
             },
             joins: vec![],
         };
@@ -788,33 +849,42 @@ impl RestrictedQuery {
                 "timeseries_name",
             ))),
             op: BinaryOperator::Eq,
-            right: Box::new(Expr::Value(Value::SingleQuotedString(
-                timeseries_name.to_string(),
-            ))),
+            right: Box::new(Expr::Value(
+                Value::SingleQuotedString(timeseries_name.to_string()).into(),
+            )),
         });
 
         Select {
+            select_token: AttachedToken::empty(),
+            optimizer_hint: None,
             distinct: None,
+            select_modifiers: None,
             top: None,
+            top_before_distinct: false,
             projection,
+            exclude: None,
             into: None,
             from: vec![from],
             lateral_views: vec![],
+            prewhere: None,
             selection,
-            group_by: GroupByExpr::Expressions(vec![]),
+            connect_by: vec![],
+            group_by: GroupByExpr::Expressions(vec![], vec![]),
             cluster_by: vec![],
             distribute_by: vec![],
             sort_by: vec![],
             having: None,
             named_window: vec![],
             qualify: None,
+            window_before_qualify: false,
             value_table_mode: None,
+            flavor: SelectFlavor::Standard,
         }
     }
 
     // Verify that the identifier is a single, concrete timeseries name.
     fn extract_timeseries_name(
-        from: &[Ident],
+        from: &[ObjectNamePart],
     ) -> Result<IndexSet<TimeseriesName>, OxdbError> {
         if from.len() != 1 {
             return unsupported!(
@@ -822,7 +892,13 @@ impl RestrictedQuery {
                 timeseries, with no database"
             );
         }
-        from[0]
+        let Some(ident) = from[0].as_ident() else {
+            return unsupported!(
+                "Query must select from single named \
+                timeseries, with no database"
+            );
+        };
+        ident
             .value
             .parse()
             .map(|n| indexmap::indexset! { n })
@@ -847,7 +923,11 @@ impl RestrictedQuery {
                 // Rewrite the quote style to be backticks, so that the
                 // resulting actual query translates into a valid identifier for
                 // ClickHouse, naming the CTE's well generate later.
-                name.0[0].quote_style = Some('"');
+                if let Some(ObjectNamePart::Identifier(ident)) =
+                    name.0.first_mut()
+                {
+                    ident.quote_style = Some('"');
+                }
                 Ok(timeseries_name)
             }
             TableFactor::Derived { lateral: false, subquery, .. } => {
@@ -898,11 +978,14 @@ impl RestrictedQuery {
         if let Some(from) = select.from.iter_mut().next() {
             timeseries.extend(Self::process_table_factor(&mut from.relation)?);
             for join in from.joins.iter_mut() {
-                let JoinOperator::Inner(op) = &join.join_operator else {
-                    return unsupported!(
-                        "Only INNER JOINs are supported, using \
-                        explicit constraints"
-                    );
+                let op = match &join.join_operator {
+                    JoinOperator::Inner(op) | JoinOperator::Join(op) => op,
+                    _ => {
+                        return unsupported!(
+                            "Only INNER JOINs are supported, using \
+                            explicit constraints"
+                        );
+                    }
                 };
                 if matches!(op, JoinConstraint::Natural) {
                     return unsupported!(
