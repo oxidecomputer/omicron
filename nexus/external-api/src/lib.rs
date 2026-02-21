@@ -78,6 +78,7 @@ api_versions!([
     // |  date-based version should be at the top of the list.
     // v
     // (next_yyyy_mm_dd_nn, IDENT),
+    (2026_02_19_00, SET_TARGET_RELEASE_UPDATE_RECOVERY),
     (2026_02_13_01, BGP_UNNUMBERED_PEERS),
     (2026_02_13_00, STALE_DOCS_AND_PUNCTUATION),
     (2026_02_09_01, UPDATE_EXTERNAL_SUBNET_DOCS),
@@ -6424,6 +6425,24 @@ pub trait NexusExternalApi {
         tags = ["system/update"],
     }]
     async fn target_release_update(
+        rqctx: RequestContext<Self::Context>,
+        params: TypedBody<latest::update::SetTargetReleaseParams>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
+
+    /// Recover from an Oxide-support-driven system update
+    ///
+    /// Inform the control plane of the release of the rack's system software it
+    /// is now running due to a recovery operation ("mupdate") performed by
+    /// Oxide support.
+    ///
+    /// This endpoint should only be called at the direction of Oxide support.
+    #[endpoint {
+        method = PUT,
+        path = "/v1/system/update/target-release/recovery",
+        tags = ["system/update"],
+        versions = VERSION_SET_TARGET_RELEASE_UPDATE_RECOVERY..
+    }]
+    async fn target_release_update_recovery(
         rqctx: RequestContext<Self::Context>,
         params: TypedBody<latest::update::SetTargetReleaseParams>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;

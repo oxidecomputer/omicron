@@ -39,6 +39,7 @@ progenitor::generate_api!(
         // (e.g., diff'ing) that's implemented on our local type.
         Blueprint = nexus_types::deployment::Blueprint,
         BlueprintDatasetConfig = nexus_types::deployment::BlueprintDatasetConfig,
+        BlueprintHostPhase2DesiredContents = nexus_types::deployment::BlueprintHostPhase2DesiredContents,
         BlueprintPhysicalDiskConfig = nexus_types::deployment::BlueprintPhysicalDiskConfig,
         BlueprintPhysicalDiskDisposition = nexus_types::deployment::BlueprintPhysicalDiskDisposition,
         BlueprintZoneConfig = nexus_types::deployment::BlueprintZoneConfig,
