@@ -1029,6 +1029,8 @@ mod tests {
                         test_corpus: vec![dir.join("corim.cbor")],
                     },
                     roots: vec![cert_path(dir.clone(), &root_prefix())],
+                    // Hard mode
+                    enforce: true,
                 };
                 let tq_ledger_paths =
                     vec![dir.join(format!("test-tq-ledger-[{i}]"))];
