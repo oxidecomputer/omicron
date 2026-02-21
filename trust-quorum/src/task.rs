@@ -988,7 +988,7 @@ mod tests {
     use omicron_uuid_kinds::GenericUuid;
     use secrecy::ExposeSecretMut;
     use sled_hardware_types::Baseboard;
-    use sprockets_tls::keys::ResolveSetting;
+    use sprockets_tls::keys::{MeasurementConnectionPolicy, ResolveSetting};
     use sprockets_tls_test_utils::{
         alias_prefix, cert_path, certlist_path, private_key_path, root_prefix,
         sprockets_auth_prefix,
@@ -1030,7 +1030,7 @@ mod tests {
                     },
                     roots: vec![cert_path(dir.clone(), &root_prefix())],
                     // Hard mode
-                    enforce: true,
+                    enforce: MeasurementConnectionPolicy::Enforced,
                 };
                 let tq_ledger_paths =
                     vec![dir.join(format!("test-tq-ledger-[{i}]"))];
