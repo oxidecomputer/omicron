@@ -127,14 +127,12 @@ impl PeerAddresses {
         preferred: Option<PeerAddress>,
     ) -> impl Iterator<Item = &PeerAddress> {
         // Look up the preferred peer in the set to get a reference with the
-        // right lifetime. If it's not in the set, skip it.
+        // right lifetime. (If it's not in the set, the correct behavior is to
+        // skip it.)
         let preferred_ref = preferred.and_then(|p| self.peers.get(&p));
-        let skip_preferred = preferred_ref.is_some();
-        preferred_ref.into_iter().chain(
-            self.peers.iter().filter(move |p| {
-                !(skip_preferred && Some(*p) == preferred_ref)
-            }),
-        )
+        preferred_ref
+            .into_iter()
+            .chain(self.peers.iter().filter(move |&p| Some(p) != preferred_ref))
     }
 }
 
