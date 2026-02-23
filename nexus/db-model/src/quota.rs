@@ -1,7 +1,7 @@
 use super::ByteCount;
 use chrono::{DateTime, Utc};
 use nexus_db_schema::schema::silo_quotas;
-use nexus_types::external_api::{params, views};
+use nexus_types::external_api::silo;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -57,7 +57,7 @@ impl SiloQuotas {
     }
 
     pub fn arbitrarily_high_default(silo_id: Uuid) -> Self {
-        let count = params::SiloQuotasCreate::arbitrarily_high_default();
+        let count = silo::SiloQuotasCreate::arbitrarily_high_default();
         Self::new(
             silo_id,
             count.cpus,
@@ -68,11 +68,11 @@ impl SiloQuotas {
     }
 }
 
-impl From<SiloQuotas> for views::SiloQuotas {
+impl From<SiloQuotas> for silo::SiloQuotas {
     fn from(silo_quotas: SiloQuotas) -> Self {
         Self {
             silo_id: silo_quotas.silo_id,
-            limits: views::VirtualResourceCounts {
+            limits: silo::VirtualResourceCounts {
                 cpus: silo_quotas.cpus,
                 memory: silo_quotas.memory.into(),
                 storage: silo_quotas.storage.into(),
@@ -95,8 +95,8 @@ pub struct SiloQuotasUpdate {
     pub time_modified: DateTime<Utc>,
 }
 
-impl From<params::SiloQuotasUpdate> for SiloQuotasUpdate {
-    fn from(params: params::SiloQuotasUpdate) -> Self {
+impl From<silo::SiloQuotasUpdate> for SiloQuotasUpdate {
+    fn from(params: silo::SiloQuotasUpdate) -> Self {
         Self {
             cpus: params.cpus,
             memory: params.memory.map(|f| f.into()),

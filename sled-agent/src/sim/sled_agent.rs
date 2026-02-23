@@ -151,8 +151,8 @@ impl SledAgent {
                 rack_network_config: Some(RackNetworkConfig {
                     rack_subnet: Ipv6Net::new(Ipv6Addr::UNSPECIFIED, 56)
                         .unwrap(),
-                    infra_ip_first: Ipv4Addr::UNSPECIFIED,
-                    infra_ip_last: Ipv4Addr::UNSPECIFIED,
+                    infra_ip_first: IpAddr::V4(Ipv4Addr::UNSPECIFIED),
+                    infra_ip_last: IpAddr::V4(Ipv4Addr::UNSPECIFIED),
                     ports: Vec::new(),
                     bgp: Vec::new(),
                     bfd: Vec::new(),
@@ -541,16 +541,13 @@ impl SledAgent {
         *self.instance_ensure_state_error.lock().unwrap() = error;
     }
 
-    /// Idempotently ensures that the given API Disk (described by `api_disk`)
-    /// is attached (or not) as specified.  This simulates disk attach and
-    /// detach, similar to instance boot and halt.
     pub async fn disk_ensure(
         self: &Arc<Self>,
-        disk_id: Uuid,
-        initial_state: DiskRuntimeState,
-        target: DiskStateRequested,
+        _disk_id: Uuid,
+        _initial_state: DiskRuntimeState,
+        _target: DiskStateRequested,
     ) -> Result<DiskRuntimeState, Error> {
-        self.disks.sim_ensure(&disk_id, initial_state, Some(target)).await
+        unimplemented!("Disk attachment not yet implemented");
     }
 
     pub fn updates(&self) -> &UpdateManager {

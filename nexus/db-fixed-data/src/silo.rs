@@ -4,7 +4,7 @@
 
 use nexus_db_model as model;
 use nexus_types::{
-    external_api::{params, shared},
+    external_api::silo::{SiloCreate, SiloIdentityMode, SiloQuotasCreate},
     silo::{
         DEFAULT_SILO_ID, INTERNAL_SILO_ID, default_silo_name,
         internal_silo_name,
@@ -20,16 +20,16 @@ use std::sync::LazyLock;
 pub static DEFAULT_SILO: LazyLock<model::Silo> = LazyLock::new(|| {
     model::Silo::new_with_id(
         DEFAULT_SILO_ID,
-        params::SiloCreate {
+        SiloCreate {
             identity: IdentityMetadataCreateParams {
                 name: default_silo_name().clone(),
                 description: "default silo".to_string(),
             },
             // This quota is actually _unused_ because the default silo
             // isn't constructed in the same way a normal silo would be.
-            quotas: params::SiloQuotasCreate::empty(),
+            quotas: SiloQuotasCreate::empty(),
             discoverable: false,
-            identity_mode: shared::SiloIdentityMode::LocalOnly,
+            identity_mode: SiloIdentityMode::LocalOnly,
             admin_group_name: None,
             tls_certificates: vec![],
             mapped_fleet_roles: Default::default(),
@@ -43,15 +43,15 @@ pub static DEFAULT_SILO: LazyLock<model::Silo> = LazyLock::new(|| {
 pub static INTERNAL_SILO: LazyLock<model::Silo> = LazyLock::new(|| {
     model::Silo::new_with_id(
         INTERNAL_SILO_ID,
-        params::SiloCreate {
+        SiloCreate {
             identity: IdentityMetadataCreateParams {
                 name: internal_silo_name().clone(),
                 description: "Built-in internal Silo.".to_string(),
             },
             // The internal silo contains no virtual resources, so it has no allotted capacity.
-            quotas: params::SiloQuotasCreate::empty(),
+            quotas: SiloQuotasCreate::empty(),
             discoverable: false,
-            identity_mode: shared::SiloIdentityMode::LocalOnly,
+            identity_mode: SiloIdentityMode::LocalOnly,
             admin_group_name: None,
             tls_certificates: vec![],
             mapped_fleet_roles: Default::default(),

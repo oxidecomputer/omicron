@@ -58,6 +58,7 @@ trust-quorum-types.workspace = true
 tufaceous-artifact.workspace = true
 
 newtype-uuid.workspace = true
+nexus-types-versions.workspace = true
 update-engine.workspace = true
 unicode-width.workspace = true
 uuid.workspace = true

@@ -8,8 +8,8 @@ use super::{
 };
 use crate::app::sagas::declare_saga_actions;
 use crate::app::{authn, authz, db};
-use crate::external_api::params;
 use nexus_db_lookup::LookupPath;
+use nexus_types::external_api::image;
 use omicron_common::api::external;
 use omicron_common::api::external::Error;
 use omicron_uuid_kinds::GenericUuid;
@@ -52,7 +52,7 @@ impl ImageType {
 pub(crate) struct Params {
     pub serialized_authn: authn::saga::Serialized,
     pub image_type: ImageType,
-    pub create_params: params::ImageCreate,
+    pub create_params: image::ImageCreate,
 }
 
 // image create saga: actions
@@ -98,9 +98,9 @@ impl NexusSaga for SagaImageCreate {
         ));
 
         match &params.create_params.source {
-            params::ImageSource::Snapshot { .. } => {}
+            image::ImageSource::Snapshot { .. } => {}
 
-            params::ImageSource::YouCanBootAnythingAsLongAsItsAlpine => {
+            image::ImageSource::YouCanBootAnythingAsLongAsItsAlpine => {
                 builder.append(Node::action(
                     "alpine_volume_id",
                     "GenerateAlpineVolumeId",
@@ -137,7 +137,7 @@ async fn simc_get_source_volume(
     );
 
     match &params.create_params.source {
-        params::ImageSource::Snapshot { id } => {
+        image::ImageSource::Snapshot { id } => {
             let (.., db_snapshot) =
                 LookupPath::new(&opctx, osagactx.datastore())
                     .snapshot_id(*id)
@@ -181,7 +181,7 @@ async fn simc_get_source_volume(
             })
         }
 
-        params::ImageSource::YouCanBootAnythingAsLongAsItsAlpine => {
+        image::ImageSource::YouCanBootAnythingAsLongAsItsAlpine => {
             let alpine_volume_id =
                 sagactx.lookup::<VolumeUuid>("alpine_volume_id")?;
 
@@ -250,7 +250,7 @@ async fn simc_create_image_record_and_account(
     let source_volume = sagactx.lookup::<SourceVolume>("source_volume")?;
 
     let record = match &params.create_params.source {
-        params::ImageSource::Snapshot { .. } => {
+        image::ImageSource::Snapshot { .. } => {
             db::model::Image {
                 identity: db::model::ImageIdentity::new(
                     image_id,
@@ -268,7 +268,7 @@ async fn simc_create_image_record_and_account(
             }
         }
 
-        params::ImageSource::YouCanBootAnythingAsLongAsItsAlpine => {
+        image::ImageSource::YouCanBootAnythingAsLongAsItsAlpine => {
             db::model::Image {
                 identity: db::model::ImageIdentity::new(
                     image_id,
@@ -380,7 +380,7 @@ async fn simc_create_image_record_and_account_undo(
 #[cfg(test)]
 pub(crate) mod test {
     use super::*;
-    use crate::{app::saga::create_saga_dag, external_api::params};
+    use crate::app::saga::create_saga_dag;
     use async_bb8_diesel::AsyncRunQueryDsl;
     use diesel::{
         ExpressionMethods, OptionalExtension, QueryDsl, SelectableHelper,
@@ -420,13 +420,12 @@ pub(crate) mod test {
         Params {
             serialized_authn: Serialized::for_opctx(&opctx),
             image_type: ImageType::Silo { authz_silo },
-            create_params: params::ImageCreate {
+            create_params: image::ImageCreate {
                 identity: IdentityMetadataCreateParams {
                     name: "image".parse().unwrap(),
                     description: String::from("description"),
                 },
-                source:
-                    params::ImageSource::YouCanBootAnythingAsLongAsItsAlpine,
+                source: image::ImageSource::YouCanBootAnythingAsLongAsItsAlpine,
                 os: "debian".to_string(),
                 version: "12".to_string(),
             },
@@ -471,12 +470,12 @@ pub(crate) mod test {
         let params = Params {
             serialized_authn: Serialized::for_opctx(&opctx),
             image_type: ImageType::Project { authz_silo, authz_project },
-            create_params: params::ImageCreate {
+            create_params: image::ImageCreate {
                 identity: IdentityMetadataCreateParams {
                     name: "image".parse().unwrap(),
                     description: String::from("description"),
                 },
-                source: params::ImageSource::Snapshot {
+                source: image::ImageSource::Snapshot {
                     id: snapshot.identity.id,
                 },
                 os: "debian".to_string(),
@@ -628,7 +627,7 @@ pub(crate) mod test {
 
         // Delete the (silo) image, and verify clean slate
 
-        let image_selector = params::ImageSelector {
+        let image_selector = image::ImageSelector {
             project: None,
             image: Name::try_from("image".to_string()).unwrap().into(),
         };

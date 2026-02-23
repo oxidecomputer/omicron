@@ -53,8 +53,8 @@ pub mod disk {
 }
 
 pub mod early_networking {
-    pub use crate::v1::early_networking::EarlyNetworkConfig;
-    pub use crate::v1::early_networking::EarlyNetworkConfigBody;
+    pub use crate::v21::early_networking::EarlyNetworkConfig;
+    pub use crate::v21::early_networking::EarlyNetworkConfigBody;
 }
 
 pub mod firewall_rules {
@@ -147,6 +147,13 @@ pub mod probes {
 
 pub mod rack_init {
     pub use crate::bootstrap_v1::rack_init::RecoverySiloConfig;
+
+    pub use crate::v20::rack_init::BootstrapAddressDiscovery;
+    pub use crate::v20::rack_init::RackInitializeRequest;
+    pub use crate::v20::rack_init::RackInitializeRequestParams;
+    pub use crate::v20::rack_init::RackInitializeRequestParseError;
+
+    pub use omicron_common::api::internal::shared::SwitchPorts;
 }
 
 pub mod rot {

@@ -1409,7 +1409,7 @@ fn at_current_101_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
             use async_bb8_diesel::AsyncRunQueryDsl;
             use nexus_db_model::Instance;
             use nexus_db_schema::schema::instance::dsl;
-            use nexus_types::external_api::params;
+            use nexus_types::external_api::instance;
             use omicron_common::api::external::IdentityMetadataCreateParams;
             use omicron_uuid_kinds::InstanceUuid;
 
@@ -1417,7 +1417,7 @@ fn at_current_101_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
                 .values(Instance::new(
                     InstanceUuid::new_v4(),
                     Uuid::new_v4(),
-                    &params::InstanceCreate {
+                    &instance::InstanceCreate {
                         identity: IdentityMetadataCreateParams {
                             name: "hello".parse().unwrap(),
                             description: "hello".to_string(),
@@ -1428,7 +1428,7 @@ fn at_current_101_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
                         user_data: vec![],
                         ssh_public_keys: None,
                         network_interfaces:
-                            params::InstanceNetworkInterfaceAttachment::DefaultIpv4,
+                            instance::InstanceNetworkInterfaceAttachment::DefaultIpv4,
                         external_ips: vec![],
                         boot_disk: None,
                         cpu_platform: None,
@@ -4129,11 +4129,18 @@ fn after_222_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
 // Migration 229 fixes column ordering in console_session and device_access_token.
 // The "id" column was added via ALTER TABLE in migration 145, placing it at the
 // end. This migration recreates the tables with "id" as the first column.
+// It also drops console sessions created more than 24 hours ago.
 const SESSION_229_ID: Uuid =
     Uuid::from_u128(0x22900001_0000_0000_0000_000000000001);
 const SESSION_229_TOKEN: &str = "tok-console-229-migration-test";
 const SESSION_229_SILO_USER: Uuid =
     Uuid::from_u128(0x22900001_0000_0000_0000_000000000002);
+
+const SESSION_229_OLD_ID: Uuid =
+    Uuid::from_u128(0x22900001_0000_0000_0000_000000000003);
+const SESSION_229_OLD_TOKEN: &str = "tok-console-229-old-session";
+const SESSION_229_OLD_SILO_USER: Uuid =
+    Uuid::from_u128(0x22900001_0000_0000_0000_000000000004);
 
 const DEVICE_229_ID: Uuid =
     Uuid::from_u128(0x22900002_0000_0000_0000_000000000001);
@@ -4148,6 +4155,8 @@ fn before_229_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
     Box::pin(async move {
         // Insert test data into console_session and device_access_token.
         // These tables currently have "id" as the last column (from migration 145).
+        // We insert two console sessions: one recent (should be kept) and one
+        // created over 24 hours ago (should be dropped).
         ctx.client
             .batch_execute(&format!(
                 "
@@ -4155,6 +4164,13 @@ fn before_229_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
                     (id, token, time_created, time_last_used, silo_user_id)
                 VALUES
                     ('{SESSION_229_ID}', '{SESSION_229_TOKEN}', now(), now(), '{SESSION_229_SILO_USER}');
+
+                INSERT INTO omicron.public.console_session
+                    (id, token, time_created, time_last_used, silo_user_id)
+                VALUES
+                    ('{SESSION_229_OLD_ID}', '{SESSION_229_OLD_TOKEN}',
+                     now() - INTERVAL '48 hours', now() - INTERVAL '48 hours',
+                     '{SESSION_229_OLD_SILO_USER}');
 
                 INSERT INTO omicron.public.device_access_token
                     (id, token, client_id, device_code, silo_user_id, time_requested, time_created)
@@ -4172,7 +4188,7 @@ fn after_229_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
     Box::pin(async move {
         // Verify data was preserved after the column reordering migration.
 
-        // Check console_session
+        // Check that the recent console_session was kept
         let rows = ctx
             .client
             .query(
@@ -4184,7 +4200,11 @@ fn after_229_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
             )
             .await
             .expect("failed to query post-migration console_session");
-        assert_eq!(rows.len(), 1, "console_session row should still exist");
+        assert_eq!(
+            rows.len(),
+            1,
+            "recent console_session row should still exist"
+        );
 
         let id: Uuid = rows[0].get("id");
         assert_eq!(id, SESSION_229_ID);
@@ -4192,6 +4212,26 @@ fn after_229_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
         assert_eq!(token, SESSION_229_TOKEN);
         let silo_user_id: Uuid = rows[0].get("silo_user_id");
         assert_eq!(silo_user_id, SESSION_229_SILO_USER);
+
+        // Check that the old (>24h) console_session was dropped
+        let rows = ctx
+            .client
+            .query(
+                &format!(
+                    "SELECT id FROM omicron.public.console_session
+                     WHERE id = '{SESSION_229_OLD_ID}'"
+                ),
+                &[],
+            )
+            .await
+            .expect(
+                "failed to query post-migration console_session for old row",
+            );
+        assert_eq!(
+            rows.len(),
+            0,
+            "console_session row older than 24h should have been dropped"
+        );
 
         // Check device_access_token
         let rows = ctx
@@ -4229,6 +4269,148 @@ fn after_229_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
             ))
             .await
             .expect("failed to clean up migration 229 test data");
+    })
+}
+
+// Migration 230 added bgp_config.max_paths as a nullable column.
+// Migration 231 backfills NULL rows with 1 and sets NOT NULL.
+// We test both: a row that existed before the column was added (pre-230),
+// and rows inserted after the column exists but before the NOT NULL fix (pre-231).
+const BGP_ANNOUNCE_SET_230: Uuid =
+    Uuid::from_u128(0x23000001_0000_0000_0000_000000000001);
+// Row inserted before migration 230 (no max_paths column yet).
+const BGP_CONFIG_230_PRE: Uuid =
+    Uuid::from_u128(0x23000002_0000_0000_0000_000000000001);
+// Row inserted after migration 230 with an explicit max_paths value.
+const BGP_CONFIG_231_EXPLICIT: Uuid =
+    Uuid::from_u128(0x23100002_0000_0000_0000_000000000001);
+// Row inserted after migration 230 with NULL max_paths.
+const BGP_CONFIG_231_NULL: Uuid =
+    Uuid::from_u128(0x23100002_0000_0000_0000_000000000002);
+
+fn before_230_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
+    Box::pin(async move {
+        // Insert a bgp_announce_set (required FK) and a bgp_config row
+        // BEFORE migration 230 adds the max_paths column.
+        ctx.client
+            .batch_execute(&format!(
+                "
+                INSERT INTO omicron.public.bgp_announce_set
+                    (id, name, description, time_created, time_modified)
+                VALUES
+                    ('{BGP_ANNOUNCE_SET_230}', 'test-announce-set-230',
+                     'test', now(), now());
+
+                INSERT INTO omicron.public.bgp_config
+                    (id, name, description, time_created, time_modified,
+                     asn, bgp_announce_set_id)
+                VALUES
+                    ('{BGP_CONFIG_230_PRE}', 'bgp-pre-max-paths-230',
+                     'inserted before max_paths column exists', now(), now(),
+                     64500, '{BGP_ANNOUNCE_SET_230}');
+                "
+            ))
+            .await
+            .expect("failed to insert pre-migration rows for 230");
+    })
+}
+
+fn before_231_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
+    Box::pin(async move {
+        // Now max_paths column exists (added by migration 230) but is nullable.
+        // Insert one row with an explicit value and one with NULL.
+        ctx.client
+            .batch_execute(&format!(
+                "
+                INSERT INTO omicron.public.bgp_config
+                    (id, name, description, time_created, time_modified,
+                     asn, bgp_announce_set_id, max_paths)
+                VALUES
+                    ('{BGP_CONFIG_231_EXPLICIT}', 'bgp-explicit-max-paths-231',
+                     'has explicit max_paths', now(), now(),
+                     64501, '{BGP_ANNOUNCE_SET_230}', 4);
+
+                INSERT INTO omicron.public.bgp_config
+                    (id, name, description, time_created, time_modified,
+                     asn, bgp_announce_set_id)
+                VALUES
+                    ('{BGP_CONFIG_231_NULL}', 'bgp-null-max-paths-231',
+                     'has NULL max_paths', now(), now(),
+                     64502, '{BGP_ANNOUNCE_SET_230}');
+                "
+            ))
+            .await
+            .expect("failed to insert pre-migration rows for 231");
+    })
+}
+
+fn after_231_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
+    Box::pin(async move {
+        // The pre-230 row (no max_paths column when inserted) should now be 1.
+        let rows = ctx
+            .client
+            .query(
+                &format!(
+                    "SELECT max_paths FROM omicron.public.bgp_config
+                     WHERE id = '{BGP_CONFIG_230_PRE}'"
+                ),
+                &[],
+            )
+            .await
+            .expect("failed to query bgp_config for pre-230 row");
+        assert_eq!(rows.len(), 1);
+        let max_paths: i16 = rows[0].get("max_paths");
+        assert_eq!(
+            max_paths, 1,
+            "pre-230 row should have max_paths backfilled to 1"
+        );
+
+        // The row with explicit max_paths = 4 should be preserved.
+        let rows = ctx
+            .client
+            .query(
+                &format!(
+                    "SELECT max_paths FROM omicron.public.bgp_config
+                     WHERE id = '{BGP_CONFIG_231_EXPLICIT}'"
+                ),
+                &[],
+            )
+            .await
+            .expect("failed to query bgp_config for explicit row");
+        assert_eq!(rows.len(), 1);
+        let max_paths: i16 = rows[0].get("max_paths");
+        assert_eq!(max_paths, 4, "explicit max_paths should be preserved");
+
+        // The row with NULL max_paths should now be 1.
+        let rows = ctx
+            .client
+            .query(
+                &format!(
+                    "SELECT max_paths FROM omicron.public.bgp_config
+                     WHERE id = '{BGP_CONFIG_231_NULL}'"
+                ),
+                &[],
+            )
+            .await
+            .expect("failed to query bgp_config for NULL row");
+        assert_eq!(rows.len(), 1);
+        let max_paths: i16 = rows[0].get("max_paths");
+        assert_eq!(max_paths, 1, "NULL max_paths should be backfilled to 1");
+
+        // Clean up test data
+        ctx.client
+            .batch_execute(&format!(
+                "
+                DELETE FROM omicron.public.bgp_config
+                    WHERE id IN ('{BGP_CONFIG_230_PRE}',
+                                 '{BGP_CONFIG_231_EXPLICIT}',
+                                 '{BGP_CONFIG_231_NULL}');
+                DELETE FROM omicron.public.bgp_announce_set
+                    WHERE id = '{BGP_ANNOUNCE_SET_230}';
+                "
+            ))
+            .await
+            .expect("failed to clean up migration 231 test data");
     })
 }
 
@@ -4365,6 +4547,14 @@ fn get_migration_checks() -> BTreeMap<Version, DataMigrationFns> {
     map.insert(
         Version::new(229, 0, 0),
         DataMigrationFns::new().before(before_229_0_0).after(after_229_0_0),
+    );
+    map.insert(
+        Version::new(230, 0, 0),
+        DataMigrationFns::new().before(before_230_0_0),
+    );
+    map.insert(
+        Version::new(231, 0, 0),
+        DataMigrationFns::new().before(before_231_0_0).after(after_231_0_0),
     );
     map
 }

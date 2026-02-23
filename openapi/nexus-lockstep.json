@@ -1462,6 +1462,46 @@
         }
       }
     },
+    "/trust-quorum/remove/{sled}": {
+      "post": {
+        "summary": "Remove a sled from the trust quorum",
+        "description": "This is a required first step towards expunging a sled\n\nReturn the epoch of the proposed configuration so it can be polled asynchronously.",
+        "operationId": "trust_quorum_remove_sled",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "sled",
+            "description": "ID of the sled",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "uint64",
+                  "type": "integer",
+                  "format": "uint64",
+                  "minimum": 0
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/v1/ping": {
       "get": {
         "summary": "Ping API",
@@ -1707,11 +1747,20 @@
             "default": null,
             "type": "string"
           },
+          "max_paths": {
+            "description": "Maximum number of paths to use when multiple \"best paths\" exist",
+            "default": 1,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/MaxPathConfig"
+              }
+            ]
+          },
           "originate": {
             "description": "The set of prefixes for the BGP router to originate.",
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/Ipv4Net"
+              "$ref": "#/components/schemas/IpNet"
             }
           },
           "shaper": {
@@ -1730,9 +1779,9 @@
         "type": "object",
         "properties": {
           "addr": {
-            "description": "Address of the peer.",
+            "description": "Address of the peer. Use `UNSPECIFIED` to indicate an unnumbered BGP session established over the interface specified by `port`.",
             "type": "string",
-            "format": "ipv4"
+            "format": "ip"
           },
           "allowed_export": {
             "description": "Define export policy for a peer.",
@@ -1853,6 +1902,15 @@
             "type": "integer",
             "format": "uint32",
             "minimum": 0
+          },
+          "router_lifetime": {
+            "description": "Router lifetime in seconds for unnumbered BGP peers.",
+            "default": 0,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/RouterLifetimeConfig"
+              }
+            ]
           },
           "vlan_id": {
             "nullable": true,
@@ -5638,6 +5696,12 @@
         "minLength": 5,
         "maxLength": 17
       },
+      "MaxPathConfig": {
+        "type": "integer",
+        "format": "uint8",
+        "minimum": 1,
+        "maximum": 32
+      },
       "MgsDrivenUpdateStatus": {
         "type": "object",
         "properties": {
@@ -7401,7 +7465,7 @@
           "waiting_zones"
         ]
       },
-      "PortConfigV2": {
+      "PortConfig": {
         "type": "object",
         "properties": {
           "addresses": {
@@ -7963,7 +8027,7 @@
             "description": "Initial rack network configuration",
             "allOf": [
               {
-                "$ref": "#/components/schemas/RackNetworkConfigV2"
+                "$ref": "#/components/schemas/RackNetworkConfig"
               }
             ]
           },
@@ -7998,7 +8062,7 @@
           "zpools"
         ]
       },
-      "RackNetworkConfigV2": {
+      "RackNetworkConfig": {
         "description": "Initial network configuration",
         "type": "object",
         "properties": {
@@ -8020,18 +8084,18 @@
           "infra_ip_first": {
             "description": "First ip address to be used for configuring network infrastructure",
             "type": "string",
-            "format": "ipv4"
+            "format": "ip"
           },
           "infra_ip_last": {
             "description": "Last ip address to be used for configuring network infrastructure",
             "type": "string",
-            "format": "ipv4"
+            "format": "ip"
           },
           "ports": {
             "description": "Uplinks for connecting the rack to external networks",
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/PortConfigV2"
+              "$ref": "#/components/schemas/PortConfig"
             }
           },
           "rack_subnet": {
@@ -8240,6 +8304,13 @@
           "destination",
           "nexthop"
         ]
+      },
+      "RouterLifetimeConfig": {
+        "description": "Router lifetime in seconds for unnumbered BGP peers",
+        "type": "integer",
+        "format": "uint16",
+        "minimum": 0,
+        "maximum": 9000
       },
       "Saga": {
         "description": "Sagas\n\nThese are currently only intended for observability by developers.  We will eventually want to flesh this out into something more observable for end users.",
@@ -9303,7 +9374,13 @@
         "type": "object",
         "properties": {
           "address": {
-            "$ref": "#/components/schemas/IpNet"
+            "nullable": true,
+            "description": "The address to be used on the uplink. Set to `None` for an Ipv6 Link Local address.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/IpNet"
+              }
+            ]
           },
           "vlan_id": {
             "nullable": true,
@@ -9313,10 +9390,7 @@
             "format": "uint16",
             "minimum": 0
           }
-        },
-        "required": [
-          "address"
-        ]
+        }
       },
       "UserId": {
         "title": "A username for a local-only user",

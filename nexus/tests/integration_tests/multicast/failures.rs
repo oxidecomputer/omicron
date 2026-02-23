@@ -37,12 +37,17 @@ use nexus_test_utils::resource_helpers::{
     create_project, object_get, objects_list_page_authz,
 };
 use nexus_test_utils_macros::nexus_test;
-use nexus_types::external_api::params::{
-    ExternalIpCreate, InstanceDiskAttachment, InstanceMulticastGroupJoin,
-    InstanceNetworkInterfaceAttachment, MulticastGroupJoinSpec,
+use nexus_types::external_api::instance::{
+    ExternalIpCreate, InstanceDiskAttachment,
+    InstanceNetworkInterfaceAttachment,
 };
-use nexus_types::external_api::views::{MulticastGroup, MulticastGroupMember};
-use omicron_common::api::external::{InstanceState, SwitchLocation};
+use nexus_types::external_api::multicast::{
+    InstanceMulticastGroupJoin, MulticastGroup, MulticastGroupJoinSpec,
+    MulticastGroupMember,
+};
+use omicron_common::api::external::{
+    IdentityMetadataCreateParams, InstanceState, NameOrId, SwitchLocation,
+};
 use omicron_uuid_kinds::{InstanceUuid, MulticastGroupUuid};
 
 use super::*;
@@ -629,7 +634,7 @@ async fn test_implicit_deletion_race_with_instance_join(
                     {
                         Some(
                             response
-                                .parsed_body::<nexus_types::external_api::views::MulticastGroupMember>()
+                                .parsed_body::<nexus_types::external_api::multicast::MulticastGroupMember>()
                                 .unwrap(),
                         )
                     }

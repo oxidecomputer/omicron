@@ -55,6 +55,10 @@ pub mod v17;
 pub mod v18;
 #[path = "add_rot_attestation/mod.rs"]
 pub mod v19;
+#[path = "lockstep_rack_init/mod.rs"]
+pub mod v20;
+#[path = "bgp_v6/mod.rs"]
+pub mod v21;
 #[path = "add_switch_zone_operator_policy/mod.rs"]
 pub mod v3;
 #[path = "add_nexus_lockstep_port_to_inventory/mod.rs"]

@@ -137,11 +137,11 @@ use nexus_types::deployment::BlueprintZoneDisposition;
 use nexus_types::deployment::BlueprintZoneType;
 use nexus_types::deployment::DiskFilter;
 use nexus_types::deployment::SledFilter;
-use nexus_types::external_api::params;
-use nexus_types::external_api::views::PhysicalDiskPolicy;
-use nexus_types::external_api::views::PhysicalDiskState;
-use nexus_types::external_api::views::SledPolicy;
-use nexus_types::external_api::views::SledState;
+use nexus_types::external_api::disk::BlockSize;
+use nexus_types::external_api::physical_disk::{
+    PhysicalDiskPolicy, PhysicalDiskState,
+};
+use nexus_types::external_api::sled::{SledPolicy, SledState};
 use nexus_types::identity::Resource;
 use nexus_types::internal_api::params::DnsRecord;
 use nexus_types::internal_api::params::Srv;
@@ -4086,7 +4086,7 @@ async fn cmd_db_dry_run_region_allocation(
     };
 
     let size: external::ByteCount = args.size.try_into()?;
-    let block_size: params::BlockSize = args.block_size.try_into()?;
+    let block_size: BlockSize = args.block_size.try_into()?;
 
     let (blocks_per_extent, extent_count) = DataStore::get_crucible_allocation(
         &block_size.try_into().unwrap(),

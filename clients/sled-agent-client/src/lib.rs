@@ -32,11 +32,13 @@ progenitor::generate_api!(
         BfdPeerConfig = { derives = [Eq, Hash] },
         BgpConfig = { derives = [Eq, Hash] },
         BgpPeerConfig = { derives = [Eq, Hash] },
+        MaxPathConfig = { derives = [Eq, Hash] },
         LldpPortConfig = { derives = [Eq, Hash, PartialOrd, Ord] },
         TxEqConfig = { derives = [Eq, Hash] },
         OmicronPhysicalDiskConfig = { derives = [Eq, Hash, PartialOrd, Ord] },
-        PortConfigV2 = { derives = [Eq, Hash] },
+        PortConfig = { derives = [Eq, Hash] },
         RouteConfig = { derives = [Eq, Hash] },
+        RouterLifetimeConfig = { derives = [Eq, Hash] },
         UplinkAddressConfig = { derives = [Eq, Hash] },
         VirtualNetworkInterfaceHost = { derives = [Eq, Hash] },
     },
@@ -195,70 +197,6 @@ impl From<types::MigrationState>
             types::MigrationState::InProgress => Output::InProgress,
             types::MigrationState::Failed => Output::Failed,
             types::MigrationState::Completed => Output::Completed,
-        }
-    }
-}
-
-impl From<omicron_common::api::internal::nexus::DiskRuntimeState>
-    for types::DiskRuntimeState
-{
-    fn from(s: omicron_common::api::internal::nexus::DiskRuntimeState) -> Self {
-        Self {
-            disk_state: s.disk_state.into(),
-            r#gen: s.generation,
-            time_updated: s.time_updated,
-        }
-    }
-}
-
-impl From<omicron_common::api::external::DiskState> for types::DiskState {
-    fn from(s: omicron_common::api::external::DiskState) -> Self {
-        use omicron_common::api::external::DiskState::*;
-        match s {
-            Creating => Self::Creating,
-            Detached => Self::Detached,
-            ImportReady => Self::ImportReady,
-            ImportingFromUrl => Self::ImportingFromUrl,
-            ImportingFromBulkWrites => Self::ImportingFromBulkWrites,
-            Finalizing => Self::Finalizing,
-            Maintenance => Self::Maintenance,
-            Attaching(u) => Self::Attaching(u),
-            Attached(u) => Self::Attached(u),
-            Detaching(u) => Self::Detaching(u),
-            Destroyed => Self::Destroyed,
-            Faulted => Self::Faulted,
-        }
-    }
-}
-
-impl From<types::DiskRuntimeState>
-    for omicron_common::api::internal::nexus::DiskRuntimeState
-{
-    fn from(s: types::DiskRuntimeState) -> Self {
-        Self {
-            disk_state: s.disk_state.into(),
-            generation: s.r#gen,
-            time_updated: s.time_updated,
-        }
-    }
-}
-
-impl From<types::DiskState> for omicron_common::api::external::DiskState {
-    fn from(s: types::DiskState) -> Self {
-        use types::DiskState::*;
-        match s {
-            Creating => Self::Creating,
-            Detached => Self::Detached,
-            ImportReady => Self::ImportReady,
-            ImportingFromUrl => Self::ImportingFromUrl,
-            ImportingFromBulkWrites => Self::ImportingFromBulkWrites,
-            Finalizing => Self::Finalizing,
-            Maintenance => Self::Maintenance,
-            Attaching(u) => Self::Attaching(u),
-            Attached(u) => Self::Attached(u),
-            Detaching(u) => Self::Detaching(u),
-            Destroyed => Self::Destroyed,
-            Faulted => Self::Faulted,
         }
     }
 }

@@ -33,9 +33,9 @@ use nexus_db_model::Certificate;
 use nexus_db_model::ServiceKind;
 use nexus_db_model::SiloAuthSettings;
 use nexus_db_model::SiloQuotas;
-use nexus_types::external_api::params;
-use nexus_types::external_api::shared;
-use nexus_types::external_api::shared::SiloRole;
+use nexus_types::external_api::policy;
+use nexus_types::external_api::policy::SiloRole;
+use nexus_types::external_api::silo as silo_types;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::DeleteResult;
@@ -160,7 +160,7 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         nexus_opctx: &OpContext,
-        new_silo_params: params::SiloCreate,
+        new_silo_params: silo_types::SiloCreate,
         new_silo_dns_names: &[String],
         dns_update: DnsVersionUpdateBuilder,
     ) -> CreateResult<Silo> {
@@ -184,7 +184,7 @@ impl DataStore {
         conn: &async_bb8_diesel::Connection<DbConnection>,
         opctx: &OpContext,
         nexus_opctx: &OpContext,
-        new_silo_params: params::SiloCreate,
+        new_silo_params: silo_types::SiloCreate,
         new_silo_dns_names: &[String],
         dns_update: DnsVersionUpdateBuilder,
     ) -> Result<Silo, TransactionError<Error>> {
@@ -205,7 +205,7 @@ impl DataStore {
         {
             let maybe_silo_admin_group =
                 match new_silo_params.identity_mode.user_provision_type() {
-                    shared::UserProvisionType::ApiOnly => {
+                    silo_types::UserProvisionType::ApiOnly => {
                         Some(db::model::SiloGroup::new_api_only(
                             silo_group_id,
                             silo_id,
@@ -213,7 +213,7 @@ impl DataStore {
                         ))
                     }
 
-                    shared::UserProvisionType::Jit => {
+                    silo_types::UserProvisionType::Jit => {
                         Some(db::model::SiloGroup::new_jit(
                             silo_group_id,
                             silo_id,
@@ -221,7 +221,7 @@ impl DataStore {
                         ))
                     }
 
-                    shared::UserProvisionType::Scim => {
+                    silo_types::UserProvisionType::Scim => {
                         // Do not create any group automatically, the SCIM
                         // provisioning client is responsible for all user and
                         // group CRUD.
@@ -249,9 +249,9 @@ impl DataStore {
         let silo_admin_group_role_assignment_queries =
             if silo_admin_group_ensure_query.is_some() {
                 // Grant silo admin role for members of the admin group.
-                let policy = shared::Policy {
+                let policy = policy::Policy {
                     role_assignments: vec![
-                        shared::RoleAssignment::for_silo_group(
+                        policy::RoleAssignment::for_silo_group(
                             silo_group_id,
                             SiloRole::Admin,
                         ),

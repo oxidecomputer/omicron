@@ -28,7 +28,7 @@ use nexus_db_errors::OptionalError;
 use nexus_db_lookup::DbConnection;
 use nexus_db_model::DatabaseString;
 use nexus_db_model::IdentityType;
-use nexus_types::external_api::shared::SiloRole;
+use nexus_types::external_api::policy::SiloRole;
 use omicron_common::api::external::LookupType;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::SiloGroupUuid;

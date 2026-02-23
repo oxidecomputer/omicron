@@ -3,23 +3,22 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use crate::app::authz;
-use crate::external_api::params;
 use mg_admin_client::types::MessageHistoryRequest;
 use nexus_db_model::{BgpAnnounceSet, BgpAnnouncement, BgpConfig};
 use nexus_db_queries::context::OpContext;
+use nexus_types::external_api::networking;
 use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::{
-    self, BgpExported, BgpImportedRouteIpv4, BgpMessageHistory, BgpPeerStatus,
+    self, BgpExported, BgpImported, BgpMessageHistory, BgpPeerStatus,
     CreateResult, DeleteResult, ListResultVec, LookupResult, NameOrId,
     SwitchBgpHistory,
 };
-use std::net::IpAddr;
 
 impl super::Nexus {
     pub async fn bgp_config_create(
         &self,
         opctx: &OpContext,
-        config: &params::BgpConfigCreate,
+        config: &networking::BgpConfigCreate,
     ) -> CreateResult<BgpConfig> {
         opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
         let result = self.db_datastore.bgp_config_create(opctx, config).await?;
@@ -47,7 +46,7 @@ impl super::Nexus {
     pub async fn bgp_config_delete(
         &self,
         opctx: &OpContext,
-        sel: &params::BgpConfigSelector,
+        sel: &networking::BgpConfigSelector,
     ) -> DeleteResult {
         opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
         let result = self.db_datastore.bgp_config_delete(opctx, sel).await?;
@@ -57,7 +56,7 @@ impl super::Nexus {
     pub async fn bgp_update_announce_set(
         &self,
         opctx: &OpContext,
-        announce: &params::BgpAnnounceSetCreate,
+        announce: &networking::BgpAnnounceSetCreate,
     ) -> CreateResult<(BgpAnnounceSet, Vec<BgpAnnouncement>)> {
         opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
         let result =
@@ -81,7 +80,7 @@ impl super::Nexus {
     pub async fn bgp_delete_announce_set(
         &self,
         opctx: &OpContext,
-        sel: &params::BgpAnnounceSetSelector,
+        sel: &networking::BgpAnnounceSetSelector,
     ) -> DeleteResult {
         opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
         let result =
@@ -92,7 +91,7 @@ impl super::Nexus {
     pub async fn bgp_announcement_list(
         &self,
         opctx: &OpContext,
-        sel: &params::BgpAnnounceSetSelector,
+        sel: &networking::BgpAnnounceSetSelector,
     ) -> ListResultVec<BgpAnnouncement> {
         opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
         self.db_datastore.bgp_announcement_list(opctx, sel).await
@@ -122,8 +121,7 @@ impl super::Nexus {
 
             for r in &router_info {
                 let asn = r.asn;
-
-                let peers = match client.get_neighbors_v2(asn).await {
+                let peers = match client.get_neighbors_v4(asn).await {
                     Ok(result) => result.into_inner(),
                     Err(e) => {
                         error!(
@@ -133,21 +131,18 @@ impl super::Nexus {
                         continue;
                     }
                 };
-                for (host, info) in peers {
-                    let Ok(host) = host.parse() else {
-                        error!(
-                            self.log,
-                            "failed to parse peer host address {host}",
-                        );
-                        continue;
-                    };
+                for (peer_id, info) in peers {
                     result.push(BgpPeerStatus {
                         switch: *switch,
-                        addr: host,
+                        peer_id: peer_id.clone(),
+                        addr: info.remote_ip,
                         local_asn: r.asn,
                         remote_asn: info.asn.unwrap_or(0),
-                        state: info.state.into(),
-                        state_duration_millis: info.duration_millis,
+                        state: info.fsm_state.into(),
+                        state_duration_millis: u64::try_from(
+                            info.fsm_state_duration.as_millis(),
+                        )
+                        .unwrap_or(u64::MAX),
                     });
                 }
             }
@@ -158,9 +153,9 @@ impl super::Nexus {
     pub async fn bgp_exported(
         &self,
         opctx: &OpContext,
-    ) -> LookupResult<BgpExported> {
+    ) -> LookupResult<Vec<BgpExported>> {
         opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
-        let mut result = BgpExported::default();
+        let mut result = vec![];
         for (switch, client) in &self.mg_clients().await.map_err(|e| {
             external::Error::internal_error(&format!(
                 "failed to get mg clients: {e}"
@@ -176,13 +171,16 @@ impl super::Nexus {
                     continue;
                 }
             };
+
             for r in &router_info {
                 let asn = r.asn;
+                let selector = mg_admin_client::types::ExportedSelector {
+                    afi: None,
+                    asn,
+                    peer: None,
+                };
 
-                let exported = match client
-                    .get_exported(&mg_admin_client::types::AsnSelector { asn })
-                    .await
-                {
+                let exported = match client.get_exported_v3(&selector).await {
                     Ok(result) => result.into_inner(),
                     Err(e) => {
                         error!(
@@ -192,31 +190,28 @@ impl super::Nexus {
                         continue;
                     }
                 };
-                for (addr, exports) in exported {
-                    let mut xps = Vec::new();
+
+                for (peer_id, exports) in exported {
                     for ex in exports.iter() {
-                        let net = match ex {
+                        let prefix = match ex {
                             rdb_types::Prefix::V4(v4) => {
-                                oxnet::Ipv4Net::new_unchecked(
+                                oxnet::IpNet::V4(oxnet::Ipv4Net::new_unchecked(
                                     v4.value, v4.length,
-                                )
+                                ))
                             }
                             rdb_types::Prefix::V6(v6) => {
-                                let v6 = oxnet::IpNet::V6(
-                                    oxnet::Ipv6Net::new_unchecked(
-                                        v6.value, v6.length,
-                                    ),
-                                );
-                                warn!(
-                                    self.log,
-                                    "{v6}: ipv6 exports not supported yet"
-                                );
-                                continue;
+                                oxnet::IpNet::V6(oxnet::Ipv6Net::new_unchecked(
+                                    v6.value, v6.length,
+                                ))
                             }
                         };
-                        xps.push(net);
+                        let export = BgpExported {
+                            peer_id: peer_id.clone(),
+                            switch: *switch,
+                            prefix,
+                        };
+                        result.push(export);
                     }
-                    result.exports.insert(addr.to_string(), xps);
                 }
             }
         }
@@ -226,7 +221,7 @@ impl super::Nexus {
     pub async fn bgp_message_history(
         &self,
         opctx: &OpContext,
-        sel: &params::BgpRouteSelector,
+        sel: &networking::BgpRouteSelector,
     ) -> ListResultVec<SwitchBgpHistory> {
         opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
 
@@ -237,7 +232,7 @@ impl super::Nexus {
             ))
         })? {
             let history = match client
-                .message_history_v2(&MessageHistoryRequest {
+                .message_history_v3(&MessageHistoryRequest {
                     asn: sel.asn,
                     direction: None,
                     peer: None,
@@ -266,11 +261,11 @@ impl super::Nexus {
         Ok(result)
     }
 
-    pub async fn bgp_imported_routes_ipv4(
+    pub async fn bgp_imported_routes(
         &self,
         opctx: &OpContext,
-        _sel: &params::BgpRouteSelector,
-    ) -> ListResultVec<BgpImportedRouteIpv4> {
+        _sel: &networking::BgpRouteSelector,
+    ) -> ListResultVec<BgpImported> {
         opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
         let mut result = Vec::new();
         for (switch, client) in &self.mg_clients().await.map_err(|e| {
@@ -278,11 +273,8 @@ impl super::Nexus {
                 "failed to get mg clients: {e}"
             ))
         })? {
-            let mut imported: Vec<BgpImportedRouteIpv4> = Vec::new();
-            match client
-                .get_rib_imported(Some(&rdb_types::AddressFamily::Ipv4), None)
-                .await
-            {
+            let mut imported: Vec<BgpImported> = Vec::new();
+            match client.get_rib_imported_v2(None, None).await {
                 Ok(result) => {
                     for (prefix, paths) in result.into_inner().iter() {
                         let ipnet = match prefix.parse() {
@@ -296,11 +288,7 @@ impl super::Nexus {
                             }
                         };
                         for p in paths.iter() {
-                            let nexthop = match p.nexthop {
-                                IpAddr::V4(addr) => addr,
-                                IpAddr::V6(_) => continue,
-                            };
-                            let x = BgpImportedRouteIpv4 {
+                            let x = BgpImported {
                                 switch: *switch,
                                 prefix: ipnet,
                                 id: p
@@ -308,7 +296,7 @@ impl super::Nexus {
                                     .as_ref()
                                     .map(|bgp| bgp.id)
                                     .unwrap_or(0),
-                                nexthop,
+                                nexthop: p.nexthop,
                             };
                             imported.push(x);
                         }

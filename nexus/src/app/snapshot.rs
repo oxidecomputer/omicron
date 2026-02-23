@@ -13,8 +13,9 @@ use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db;
 use nexus_db_queries::db::datastore;
-use nexus_types::external_api::params;
-use nexus_types::external_api::params::DiskSelector;
+use nexus_types::external_api::disk::DiskSelector;
+use nexus_types::external_api::project;
+use nexus_types::external_api::snapshot;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DeleteResult;
 use omicron_common::api::external::Error;
@@ -31,10 +32,10 @@ impl super::Nexus {
     pub fn snapshot_lookup<'a>(
         &'a self,
         opctx: &'a OpContext,
-        snapshot_selector: params::SnapshotSelector,
+        snapshot_selector: snapshot::SnapshotSelector,
     ) -> LookupResult<lookup::Snapshot<'a>> {
         match snapshot_selector {
-            params::SnapshotSelector {
+            snapshot::SnapshotSelector {
                 snapshot: NameOrId::Id(id),
                 project: None,
             } => {
@@ -42,21 +43,24 @@ impl super::Nexus {
                     LookupPath::new(opctx, &self.db_datastore).snapshot_id(id);
                 Ok(snapshot)
             }
-            params::SnapshotSelector {
+            snapshot::SnapshotSelector {
                 snapshot: NameOrId::Name(name),
-                project: Some(project),
+                project: Some(proj),
             } => {
                 let snapshot = self
-                    .project_lookup(opctx, params::ProjectSelector { project })?
+                    .project_lookup(
+                        opctx,
+                        project::ProjectSelector { project: proj },
+                    )?
                     .snapshot_name_owned(name.into());
                 Ok(snapshot)
             }
-            params::SnapshotSelector { snapshot: NameOrId::Id(_), .. } => {
-                Err(Error::invalid_request(
-                    "when providing snapshot as an ID, project should not \
+            snapshot::SnapshotSelector {
+                snapshot: NameOrId::Id(_), ..
+            } => Err(Error::invalid_request(
+                "when providing snapshot as an ID, project should not \
               be specified",
-                ))
-            }
+            )),
             _ => Err(Error::invalid_request(
                 "snapshot should either be an ID or project should be specified",
             )),
@@ -68,7 +72,7 @@ impl super::Nexus {
         opctx: &OpContext,
         // Is passed by value due to `disk_name` taking ownership of `self` below
         project_lookup: lookup::Project<'_>,
-        params: &params::SnapshotCreate,
+        params: &snapshot::SnapshotCreate,
     ) -> CreateResult<db::model::Snapshot> {
         let authz_silo: authz::Silo;
         let authz_disk_project: authz::Project;
@@ -107,6 +111,15 @@ impl super::Nexus {
                     ));
                 }
             };
+
+        // Do not allow snapshots of read-only disks. (Note that the snapshot
+        // create saga will also not allow this, but will bubble up to the user
+        // as a 500 level error, whereas this is a 400 level error).
+        if disk.is_read_only() {
+            return Err(Error::invalid_request(
+                "can't create a snapshot of a read-only disk",
+            ));
+        }
 
         // If there isn't a running propolis, Nexus needs to use the Crucible
         // Pantry to make this snapshot

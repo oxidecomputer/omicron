@@ -13,7 +13,10 @@ use nexus_test_utils::http_testing::RequestBuilder;
 use nexus_test_utils::resource_helpers::create_default_ip_pools;
 use nexus_test_utils::resource_helpers::create_project;
 use nexus_test_utils_macros::nexus_test;
-use nexus_types::external_api::{params, views};
+use nexus_types::external_api::{
+    disk::{DiskBackend, DiskCreate},
+    project::Project,
+};
 use omicron_common::api::external;
 use omicron_nexus::app::MAX_DISK_SIZE_BYTES;
 use omicron_nexus::app::MIN_DISK_SIZE_BYTES;
@@ -35,9 +38,7 @@ fn get_disks_url() -> String {
     format!("/v1/disks?{}", get_project_selector())
 }
 
-pub async fn create_project_and_pool(
-    client: &ClientTestContext,
-) -> views::Project {
+pub async fn create_project_and_pool(client: &ClientTestContext) -> Project {
     create_default_ip_pools(client).await;
     create_project(client, PROJECT_NAME).await
 }
@@ -60,7 +61,7 @@ async fn test_reject_creating_local_storage_disk(
     // local storage disks have a block size of 4096)
     let error = NexusRequest::new(
         RequestBuilder::new(client, Method::POST, &disks_url)
-            .body(Some(&params::DiskCreate {
+            .body(Some(&DiskCreate {
                 identity: external::IdentityMetadataCreateParams {
                     name: "bad-disk".parse().unwrap(),
                     description: String::from("bad disk"),
@@ -71,7 +72,7 @@ async fn test_reject_creating_local_storage_disk(
                 )
                 .unwrap(),
 
-                disk_backend: params::DiskBackend::Local {},
+                disk_backend: DiskBackend::Local {},
             }))
             .expect_status(Some(StatusCode::BAD_REQUEST)),
     )
@@ -91,7 +92,7 @@ async fn test_reject_creating_local_storage_disk(
     // the size
     let error = NexusRequest::new(
         RequestBuilder::new(client, Method::POST, &disks_url)
-            .body(Some(&params::DiskCreate {
+            .body(Some(&DiskCreate {
                 identity: external::IdentityMetadataCreateParams {
                     name: "bad-disk".parse().unwrap(),
                     description: String::from("bad disk"),
@@ -102,7 +103,7 @@ async fn test_reject_creating_local_storage_disk(
                 )
                 .unwrap(),
 
-                disk_backend: params::DiskBackend::Local {},
+                disk_backend: DiskBackend::Local {},
             }))
             .expect_status(Some(StatusCode::BAD_REQUEST)),
     )
@@ -152,7 +153,7 @@ async fn test_create_large_local_storage_disk(
 
     NexusRequest::new(
         RequestBuilder::new(client, Method::POST, &disks_url)
-            .body(Some(&params::DiskCreate {
+            .body(Some(&DiskCreate {
                 identity: external::IdentityMetadataCreateParams {
                     name: "chonk-disk".parse().unwrap(),
                     description: String::from("chonk"),
@@ -160,7 +161,7 @@ async fn test_create_large_local_storage_disk(
 
                 size: large_disk_size,
 
-                disk_backend: params::DiskBackend::Local {},
+                disk_backend: DiskBackend::Local {},
             }))
             .expect_status(Some(StatusCode::CREATED)),
     )

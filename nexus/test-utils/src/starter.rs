@@ -55,7 +55,7 @@ use nexus_types::deployment::PendingMgsUpdates;
 use nexus_types::deployment::PlannerConfig;
 use nexus_types::deployment::ReconfiguratorConfig;
 use nexus_types::deployment::blueprint_zone_type;
-use nexus_types::external_api::views::SledState;
+use nexus_types::external_api::sled::SledState;
 use nexus_types::internal_api::params::DnsConfigParams;
 use omicron_common::address::DNS_OPTE_IPV4_SUBNET;
 use omicron_common::address::DNS_OPTE_IPV6_SUBNET;
@@ -94,7 +94,7 @@ use oximeter_producer::LogConfig;
 use oximeter_producer::Server as ProducerServer;
 use sled_agent_client::types::EarlyNetworkConfig;
 use sled_agent_client::types::EarlyNetworkConfigBody;
-use sled_agent_client::types::RackNetworkConfigV2;
+use sled_agent_client::types::RackNetworkConfig;
 use sled_agent_types::inventory::HostPhase2DesiredSlots;
 use sled_agent_types::inventory::OmicronSledConfig;
 use sled_agent_types::inventory::OmicronZoneDataset;
@@ -918,7 +918,7 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
         let early_network_config = EarlyNetworkConfig {
             body: EarlyNetworkConfigBody {
                 ntp_servers: Vec::new(),
-                rack_network_config: Some(RackNetworkConfigV2 {
+                rack_network_config: Some(RackNetworkConfig {
                     bfd: Vec::new(),
                     bgp: Vec::new(),
                     infra_ip_first: "192.0.2.10".parse().unwrap(),

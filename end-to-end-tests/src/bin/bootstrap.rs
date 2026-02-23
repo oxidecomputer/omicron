@@ -120,7 +120,6 @@ async fn run_test() -> Result<()> {
             cpus: Some(16),
             memory: Some(ByteCount(1024 * 1024 * 1024 * 10)),
             storage: Some(ByteCount(1024 * 1024 * 1024 * 1024)),
-            physical_storage: None,
         })
         .send()
         .await?;

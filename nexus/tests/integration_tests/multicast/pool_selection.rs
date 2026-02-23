@@ -11,8 +11,10 @@
 use http::StatusCode;
 use nexus_test_utils::http_testing::{AuthnMode, NexusRequest, RequestBuilder};
 use nexus_test_utils_macros::nexus_test;
-use nexus_types::external_api::params::InstanceMulticastGroupJoin;
-use nexus_types::external_api::views::{IpVersion, MulticastGroupMember};
+use nexus_types::external_api::ip_pool::IpVersion;
+use nexus_types::external_api::multicast::{
+    InstanceMulticastGroupJoin, MulticastGroupMember,
+};
 use std::net::IpAddr;
 
 use nexus_test_utils::resource_helpers::{

@@ -7,8 +7,7 @@ use crate::typed_uuid::DbTypedUuid;
 use nexus_db_schema::schema::support_bundle;
 
 use chrono::{DateTime, Utc};
-use nexus_types::external_api::shared::SupportBundleInfo as SupportBundleView;
-use nexus_types::external_api::shared::SupportBundleState as SupportBundleStateView;
+use nexus_types::external_api::support_bundle as support_bundle_types;
 use omicron_uuid_kinds::DatasetKind;
 use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::OmicronZoneKind;
@@ -53,14 +52,14 @@ impl SupportBundleState {
     }
 }
 
-impl From<SupportBundleState> for SupportBundleStateView {
+impl From<SupportBundleState> for support_bundle_types::SupportBundleState {
     fn from(state: SupportBundleState) -> Self {
         use SupportBundleState::*;
 
         match state {
-            Collecting => SupportBundleStateView::Collecting,
-            Active => SupportBundleStateView::Active,
-            Destroying => SupportBundleStateView::Destroying,
+            Collecting => support_bundle_types::SupportBundleState::Collecting,
+            Active => support_bundle_types::SupportBundleState::Active,
+            Destroying => support_bundle_types::SupportBundleState::Destroying,
             // The distinction between "failing" and "failed" should not be
             // visible to end-users. This is internal book-keeping to decide
             // whether or not the bundle record can be safely deleted.
@@ -69,8 +68,8 @@ impl From<SupportBundleState> for SupportBundleStateView {
             // If a user requests that we delete a bundle in these states:
             // - "Failing" bundles will become "Destroying"
             // - "Failed" bundles can be deleted immediately
-            Failing => SupportBundleStateView::Failed,
-            Failed => SupportBundleStateView::Failed,
+            Failing => support_bundle_types::SupportBundleState::Failed,
+            Failed => support_bundle_types::SupportBundleState::Failed,
         }
     }
 }
@@ -124,7 +123,7 @@ impl SupportBundle {
     }
 }
 
-impl From<SupportBundle> for SupportBundleView {
+impl From<SupportBundle> for support_bundle_types::SupportBundleInfo {
     fn from(bundle: SupportBundle) -> Self {
         Self {
             id: bundle.id.into(),

@@ -860,10 +860,14 @@ fn rss_config_text<'a>(
                 });
 
             let addresses = addresses.iter().map(|a| {
-                let mut items = vec![
-                    Span::styled("  • Address       : ", label_style),
-                    Span::styled(a.address.to_string(), ok_style),
-                ];
+                let mut items =
+                    vec![Span::styled("  • Address       : ", label_style)];
+                if let Some(address) = a.address {
+                    items.push(Span::styled(address.to_string(), ok_style));
+                } else {
+                    items
+                        .push(Span::styled("link-local".to_string(), ok_style));
+                }
                 if let Some(vlan_id) = a.vlan_id {
                     items.extend([
                         Span::styled(" (vlan_id=", label_style),
@@ -899,12 +903,18 @@ fn rss_config_text<'a>(
                     allowed_import,
                     allowed_export,
                     vlan_id,
+                    router_lifetime,
                 } = p;
+
+                let addr_string = match addr {
+                    Some(a) => a.to_string(),
+                    None => "unnumbered".to_string(),
+                };
 
                 let mut lines = vec![
                     vec![
                         Span::styled("  • BGP peer      : ", label_style),
-                        Span::styled(addr.to_string(), ok_style),
+                        Span::styled(addr_string, ok_style),
                         Span::styled(" asn=", label_style),
                         Span::styled(asn.to_string(), ok_style),
                         Span::styled(" port=", label_style),
@@ -983,6 +993,15 @@ fn rss_config_text<'a>(
                         settings.extend([
                             Span::styled(" vlan_id=", label_style),
                             Span::styled(vlan_id.to_string(), ok_style),
+                        ]);
+                    }
+                    if *router_lifetime != 0 {
+                        settings.extend([
+                            Span::styled(" router_lifetime=", label_style),
+                            Span::styled(
+                                format!("{}s", router_lifetime),
+                                ok_style,
+                            ),
                         ]);
                     }
 
@@ -1211,11 +1230,14 @@ fn rss_config_text<'a>(
                 // The shaper and checker are not currently used.
                 shaper: _,
                 checker: _,
+                max_paths,
             } = cfg;
             let mut items = vec![
                 Span::styled("  • BGP config    :", label_style),
                 Span::styled(" asn=", label_style),
                 Span::styled(asn.to_string(), ok_style),
+                Span::styled(" max_paths=", label_style),
+                Span::styled(max_paths.to_string(), ok_style),
                 Span::styled(" originate=", label_style),
             ];
             if originate.is_empty() {

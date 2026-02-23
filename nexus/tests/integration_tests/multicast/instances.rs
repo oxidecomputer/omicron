@@ -32,12 +32,13 @@ use nexus_test_utils::resource_helpers::{
     object_delete, object_get,
 };
 use nexus_test_utils_macros::nexus_test;
-use nexus_types::external_api::params::{
-    InstanceCreate, InstanceMulticastGroupJoin,
-    InstanceNetworkInterfaceAttachment, InstanceUpdate, MulticastGroupJoinSpec,
+use nexus_types::external_api::instance::{
+    InstanceCreate, InstanceNetworkInterfaceAttachment, InstanceUpdate,
 };
-
-use nexus_types::external_api::views::{MulticastGroup, MulticastGroupMember};
+use nexus_types::external_api::multicast::{
+    InstanceMulticastGroupJoin, MulticastGroup, MulticastGroupJoinSpec,
+    MulticastGroupMember,
+};
 use nexus_types::internal_api::params::InstanceMigrateRequest;
 
 use omicron_common::api::external::{
@@ -1385,7 +1386,7 @@ async fn test_source_ips_preserved_on_instance_reconfigure(
 async fn test_instance_create_with_ssm_multicast_groups(
     cptestctx: &ControlPlaneTestContext,
 ) {
-    use nexus_types::external_api::params::MulticastGroupJoinSpec;
+    use nexus_types::external_api::multicast::MulticastGroupJoinSpec;
 
     let client = &cptestctx.external_client;
     let project_name = "ssm-create-project";
@@ -1739,7 +1740,7 @@ async fn test_multicast_ipv6_lifecycle(cptestctx: &ControlPlaneTestContext) {
     let member: MulticastGroupMember = put_upsert(
         client,
         &join_url,
-        &nexus_types::external_api::params::InstanceMulticastGroupJoin {
+        &nexus_types::external_api::multicast::InstanceMulticastGroupJoin {
             source_ips: None,
             ip_version: None, // Only one pool, no ambiguity
         },

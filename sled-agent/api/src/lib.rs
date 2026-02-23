@@ -36,6 +36,8 @@ api_versions!([
     // |  example for the next person.
     // v
     // (next_int, IDENT),
+    (21, REMOVE_DISK_PUT),
+    (20, BGP_V6),
     (19, ADD_ROT_ATTESTATION),
     (18, ADD_ATTACHED_SUBNETS),
     (17, TWO_TYPES_OF_DELEGATED_ZVOL),
@@ -594,6 +596,7 @@ pub trait SledAgentApi {
     #[endpoint {
         method = PUT,
         path = "/disks/{disk_id}",
+        versions = ..VERSION_REMOVE_DISK_PUT,
     }]
     async fn disk_put(
         rqctx: RequestContext<Self::Context>,
@@ -733,11 +736,24 @@ pub trait SledAgentApi {
     #[endpoint {
         method = POST,
         path = "/switch-ports",
+        versions = VERSION_BGP_V6..,
     }]
     async fn uplink_ensure(
         rqctx: RequestContext<Self::Context>,
         body: TypedBody<SwitchPorts>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
+
+    #[endpoint {
+        method = POST,
+        path = "/switch-ports",
+        versions = ..VERSION_BGP_V6,
+    }]
+    async fn uplink_ensure_v1(
+        rqctx: RequestContext<Self::Context>,
+        body: TypedBody<v1::rack_init::SwitchPorts>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        Self::uplink_ensure(rqctx, body.map(From::from)).await
+    }
 
     /// This API endpoint is only reading the local sled agent's view of the
     /// bootstore. The boostore is a distributed data store that is eventually
@@ -745,6 +761,7 @@ pub trait SledAgentApi {
     #[endpoint {
         method = GET,
         path = "/network-bootstore-config",
+        versions = VERSION_BGP_V6..,
     }]
     async fn read_network_bootstore_config_cache(
         rqctx: RequestContext<Self::Context>,
@@ -753,14 +770,57 @@ pub trait SledAgentApi {
         HttpError,
     >;
 
+    /// This API endpoint is only reading the local sled agent's view of the
+    /// bootstore. The boostore is a distributed data store that is eventually
+    /// consistent. Reads from individual nodes may not represent the latest state.
+    #[endpoint {
+        method = GET,
+        path = "/network-bootstore-config",
+        versions = ..VERSION_BGP_V6,
+    }]
+    async fn read_network_bootstore_config_cache_v1(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<
+        HttpResponseOk<v1::early_networking::EarlyNetworkConfig>,
+        HttpError,
+    > {
+        let result: v1::early_networking::EarlyNetworkConfig =
+            Self::read_network_bootstore_config_cache(rqctx)
+                .await?
+                .0
+                .try_into()
+                .map_err(|e| {
+                    HttpError::for_bad_request(
+                        None,
+                        format!("error getting v1 config: {e}"),
+                    )
+                })?;
+
+        Ok(HttpResponseOk(result))
+    }
+
     #[endpoint {
         method = PUT,
         path = "/network-bootstore-config",
+        versions = VERSION_BGP_V6..,
     }]
     async fn write_network_bootstore_config(
         rqctx: RequestContext<Self::Context>,
         body: TypedBody<latest::early_networking::EarlyNetworkConfig>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
+
+    #[endpoint {
+        method = PUT,
+        path = "/network-bootstore-config",
+        versions = ..VERSION_BGP_V6,
+    }]
+    async fn write_network_bootstore_config_v1(
+        rqctx: RequestContext<Self::Context>,
+        body: TypedBody<v1::early_networking::EarlyNetworkConfig>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        Self::write_network_bootstore_config(rqctx, body.map(|x| x.into()))
+            .await
+    }
 
     /// Add a sled to a rack that was already initialized via RSS
     #[endpoint {

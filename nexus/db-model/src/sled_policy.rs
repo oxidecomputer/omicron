@@ -14,7 +14,7 @@
 //! as gone.
 
 use super::impl_enum_type;
-use nexus_types::external_api::views::{SledPolicy, SledProvisionPolicy};
+use nexus_types::external_api::sled::{SledPolicy, SledProvisionPolicy};
 use serde::{Deserialize, Serialize};
 
 impl_enum_type!(

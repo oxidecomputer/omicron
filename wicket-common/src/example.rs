@@ -14,7 +14,7 @@ use omicron_common::{
         external::AllowedSourceIps,
         internal::shared::{
             BgpConfig, BgpPeerConfig, LldpAdminStatus, LldpPortConfig, PortFec,
-            PortSpeed, RouteConfig, TxEqConfig,
+            PortSpeed, RouteConfig, TxEqConfig, rack_init::MaxPathConfig,
         },
     },
 };
@@ -100,7 +100,7 @@ impl ExampleRackSetupData {
         let switch0_port0_bgp_peers = vec![
             UserSpecifiedBgpPeerConfig {
                 asn: 47,
-                addr: "10.2.3.4".parse().unwrap(),
+                addr: Some("10.2.3.4".parse().unwrap()),
                 port: "port0".into(),
                 hold_time: Some(BgpPeerConfig::DEFAULT_HOLD_TIME),
                 idle_hold_time: Some(BgpPeerConfig::DEFAULT_IDLE_HOLD_TIME),
@@ -119,10 +119,11 @@ impl ExampleRackSetupData {
                     "127.0.0.1/8".parse().unwrap(),
                 ]),
                 vlan_id: None,
+                router_lifetime: 0,
             },
             UserSpecifiedBgpPeerConfig {
                 asn: 28,
-                addr: "10.2.3.5".parse().unwrap(),
+                addr: Some("10.2.3.5".parse().unwrap()),
                 port: "port0".into(),
                 remote_asn: Some(200),
                 hold_time: Some(10),
@@ -142,12 +143,13 @@ impl ExampleRackSetupData {
                 ]),
                 allowed_export: UserSpecifiedImportExportPolicy::Allow(vec![]),
                 vlan_id: None,
+                router_lifetime: 0,
             },
         ];
 
         let switch1_port0_bgp_peers = vec![UserSpecifiedBgpPeerConfig {
             asn: 47,
-            addr: "10.2.3.4".parse().unwrap(),
+            addr: Some("10.2.3.4".parse().unwrap()),
             port: "port0".into(),
             hold_time: Some(BgpPeerConfig::DEFAULT_HOLD_TIME),
             idle_hold_time: Some(BgpPeerConfig::DEFAULT_IDLE_HOLD_TIME),
@@ -166,6 +168,7 @@ impl ExampleRackSetupData {
             ]),
             allowed_export: UserSpecifiedImportExportPolicy::NoFiltering,
             vlan_id: None,
+            router_lifetime: 0,
         }];
 
         let switch0_port0_lldp = Some(LldpPortConfig {
@@ -246,6 +249,7 @@ impl ExampleRackSetupData {
                 originate: vec!["10.0.0.0/16".parse().unwrap()],
                 shaper: None,
                 checker: None,
+                max_paths: MaxPathConfig::default(),
             }],
         };
 
