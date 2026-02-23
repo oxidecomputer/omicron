@@ -5,4 +5,3 @@
 //! BFD (Bidirectional Forwarding Detection) types.
 
 pub use nexus_types_versions::latest::bfd::*;
-pub use omicron_common::api::external::BfdMode;

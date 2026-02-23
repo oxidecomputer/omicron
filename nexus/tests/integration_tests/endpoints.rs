@@ -21,6 +21,7 @@ use nexus_test_utils::SWITCH_UUID;
 use nexus_test_utils::resource_helpers::test_params;
 use nexus_types::external_api::affinity;
 use nexus_types::external_api::alert;
+use nexus_types::external_api::bfd;
 use nexus_types::external_api::certificate;
 use nexus_types::external_api::disk;
 use nexus_types::external_api::external_subnet;
@@ -1030,7 +1031,7 @@ pub static DEMO_BFD_ENABLE: LazyLock<networking::BfdSessionEnable> =
         detection_threshold: 3,
         required_rx: 1000000,
         switch: "switch0".parse().unwrap(),
-        mode: omicron_common::api::external::BfdMode::MultiHop,
+        mode: bfd::ExternalBfdMode::MultiHop,
     });
 
 pub static DEMO_BFD_DISABLE: LazyLock<networking::BfdSessionDisable> =

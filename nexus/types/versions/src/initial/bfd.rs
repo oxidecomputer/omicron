@@ -6,7 +6,6 @@
 
 use std::net::IpAddr;
 
-use omicron_common::api::external::BfdMode;
 use omicron_common::api::external::Name;
 use schemars::JsonSchema;
 use serde::Deserialize;
@@ -57,5 +56,25 @@ pub struct BfdStatus {
     pub local: Option<IpAddr>,
     pub detection_threshold: u8,
     pub required_rx: u64,
-    pub mode: BfdMode,
+    pub mode: ExternalBfdMode,
+}
+
+/// BFD connection mode.
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    Deserialize,
+    Serialize,
+    JsonSchema,
+    PartialEq,
+    Eq,
+    Ord,
+    PartialOrd,
+)]
+#[serde(rename_all = "snake_case")]
+#[schemars(rename = "BfdMode")] // don't include "External..." in OpenAPI spec
+pub enum ExternalBfdMode {
+    SingleHop,
+    MultiHop,
 }

@@ -66,6 +66,7 @@ pub mod audit {
 pub mod bfd {
     pub use crate::v2025_11_20_00::bfd::BfdState;
     pub use crate::v2025_11_20_00::bfd::BfdStatus;
+    pub use crate::v2025_11_20_00::bfd::ExternalBfdMode;
 }
 
 pub mod device {

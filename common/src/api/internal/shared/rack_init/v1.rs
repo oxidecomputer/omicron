@@ -4,7 +4,7 @@
 
 //! Version 1 of rack init types.
 
-use crate::api::external::{BfdMode, ImportExportPolicy};
+use crate::api::external::ImportExportPolicy;
 use oxnet::{IpNet, Ipv4Net, Ipv6Net};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -105,6 +105,25 @@ pub struct BfdPeerConfig {
     pub required_rx: u64,
     pub mode: BfdMode,
     pub switch: SwitchLocation,
+}
+
+/// BFD connection mode.
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    Deserialize,
+    Serialize,
+    JsonSchema,
+    PartialEq,
+    Eq,
+    Ord,
+    PartialOrd,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum BfdMode {
+    SingleHop,
+    MultiHop,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq, JsonSchema)]

@@ -50,6 +50,7 @@ pub use external_ip::SourceNatConfigV4;
 pub use external_ip::SourceNatConfigV6;
 
 // Re-export latest version of rack_init types.
+pub use rack_init::BfdMode;
 pub use rack_init::BfdPeerConfig;
 pub use rack_init::BgpConfig;
 pub use rack_init::BgpPeerConfig;

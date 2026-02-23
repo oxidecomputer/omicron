@@ -985,22 +985,13 @@ impl ServiceInner {
                 bfd: config
                     .bfd
                     .iter()
-                    .map(|spec| {
-                        NexusTypes::BfdPeerConfig {
-                    detection_threshold: spec.detection_threshold,
-                    local: spec.local,
-                    mode: match spec.mode {
-                        omicron_common::api::external::BfdMode::SingleHop => {
-                            NexusTypes::BfdMode::SingleHop
-                        }
-                        omicron_common::api::external::BfdMode::MultiHop => {
-                            NexusTypes::BfdMode::MultiHop
-                        }
-                    },
-                    remote: spec.remote,
-                    required_rx: spec.required_rx,
-                    switch: spec.switch.into(),
-                }
+                    .map(|spec| NexusTypes::BfdPeerConfig {
+                        detection_threshold: spec.detection_threshold,
+                        local: spec.local,
+                        mode: spec.mode,
+                        remote: spec.remote,
+                        required_rx: spec.required_rx,
+                        switch: spec.switch.into(),
                     })
                     .collect(),
             }
