@@ -35,12 +35,12 @@ use nexus_db_model::{
     SwitchPortBgpPeerConfigCommunity,
 };
 use nexus_types::external_api::networking;
+use nexus_types::external_api::networking::ExternalImportExportPolicy;
 use nexus_types::identity::Resource;
 use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::{
-    self, CreateResult, DataPageParams, DeleteResult, Error,
-    ImportExportPolicy, ListResultVec, LookupResult, NameOrId, ResourceType,
-    SwitchPortAddressView, UpdateResult,
+    self, CreateResult, DataPageParams, DeleteResult, Error, ListResultVec,
+    LookupResult, NameOrId, ResourceType, SwitchPortAddressView, UpdateResult,
 };
 use ref_cast::RefCast;
 use serde::{Deserialize, Serialize};
@@ -63,8 +63,8 @@ pub struct BgpPeerConfig {
     pub multi_exit_discriminator: Option<SqlU32>,
     pub local_pref: Option<SqlU32>,
     pub enforce_first_as: bool,
-    pub allowed_import: ImportExportPolicy,
-    pub allowed_export: ImportExportPolicy,
+    pub allowed_import: ExternalImportExportPolicy,
+    pub allowed_export: ExternalImportExportPolicy,
     pub communities: Vec<u32>,
     pub vlan_id: Option<SqlU16>,
     pub router_lifetime: SqlU16,
@@ -614,7 +614,7 @@ impl DataStore {
                         IpNetwork::from(IpAddr::V4(Ipv4Addr::UNSPECIFIED))
                     });
 
-                    let allowed_import: ImportExportPolicy = if p.allow_import_list_active {
+                    let allowed_import = if p.allow_import_list_active {
                         let db_list: Vec<SwitchPortBgpPeerConfigAllowImport> =
                             allow_import_dsl::switch_port_settings_bgp_peer_config_allow_import
                                 .filter(allow_import_dsl::port_settings_id.eq(id))
@@ -624,16 +624,16 @@ impl DataStore {
                                 .load_async::<SwitchPortBgpPeerConfigAllowImport>(&conn)
                                 .await?;
 
-                        ImportExportPolicy::Allow(db_list
+                        ExternalImportExportPolicy::Allow(db_list
                             .into_iter()
                             .map(|x| x.prefix.into())
                             .collect()
                         )
                     } else {
-                        ImportExportPolicy::NoFiltering
+                        ExternalImportExportPolicy::NoFiltering
                     };
 
-                    let allowed_export: ImportExportPolicy = if p.allow_export_list_active {
+                    let allowed_export = if p.allow_export_list_active {
                         let db_list: Vec<SwitchPortBgpPeerConfigAllowExport> =
                             allow_export_dsl::switch_port_settings_bgp_peer_config_allow_export
                                 .filter(allow_export_dsl::port_settings_id.eq(id))
@@ -643,13 +643,13 @@ impl DataStore {
                                 .load_async::<SwitchPortBgpPeerConfigAllowExport>(&conn)
                                 .await?;
 
-                        ImportExportPolicy::Allow(db_list
+                        ExternalImportExportPolicy::Allow(db_list
                             .into_iter()
                             .map(|x| x.prefix.into())
                             .collect()
                         )
                     } else {
-                        ImportExportPolicy::NoFiltering
+                        ExternalImportExportPolicy::NoFiltering
                     };
 
                     let communities: Vec<SwitchPortBgpPeerConfigCommunity> =
@@ -1448,7 +1448,7 @@ async fn do_switch_port_settings_create(
             let db_addr: IpNetwork =
                 p.addr.unwrap_or(IpAddr::V4(Ipv4Addr::UNSPECIFIED)).into();
 
-            if let ImportExportPolicy::Allow(list) = &p.allowed_import {
+            if let ExternalImportExportPolicy::Allow(list) = &p.allowed_import {
                 let id = port_settings.identity.id;
                 let to_insert: Vec<SwitchPortBgpPeerConfigAllowImport> = list
                     .clone()
@@ -1467,7 +1467,7 @@ async fn do_switch_port_settings_create(
                     .await?;
             }
 
-            if let ImportExportPolicy::Allow(list) = &p.allowed_export {
+            if let ExternalImportExportPolicy::Allow(list) = &p.allowed_export {
                 let id = port_settings.identity.id;
                 let to_insert: Vec<SwitchPortBgpPeerConfigAllowExport> = list
                     .clone()
@@ -1531,11 +1531,11 @@ async fn do_switch_port_settings_create(
             peer_by_addr
                 .get(&lookup_addr)
                 .map(|x| x.allowed_import.clone())
-                .unwrap_or(ImportExportPolicy::NoFiltering),
+                .unwrap_or(ExternalImportExportPolicy::NoFiltering),
             peer_by_addr
                 .get(&lookup_addr)
                 .map(|x| x.allowed_export.clone())
-                .unwrap_or(ImportExportPolicy::NoFiltering),
+                .unwrap_or(ExternalImportExportPolicy::NoFiltering),
             peer_by_addr
                 .get(&lookup_addr)
                 .map(|x| x.communities.clone())
@@ -1870,10 +1870,11 @@ mod test {
     use crate::db::pub_test_utils::TestDatabase;
     use nexus_types::external_api::networking::{
         BgpAnnounceSetCreate, BgpConfigCreate, BgpPeer, BgpPeerConfig,
-        SwitchPortConfigCreate, SwitchPortGeometry, SwitchPortSettingsCreate,
+        ExternalImportExportPolicy, SwitchPortConfigCreate, SwitchPortGeometry,
+        SwitchPortSettingsCreate,
     };
     use omicron_common::api::external::{
-        IdentityMetadataCreateParams, ImportExportPolicy, Name, NameOrId,
+        IdentityMetadataCreateParams, Name, NameOrId,
     };
     use omicron_test_utils::dev;
     use std::{collections::HashMap, str::FromStr};
@@ -1957,8 +1958,8 @@ mod test {
                     communities: Vec::new(),
                     local_pref: None,
                     enforce_first_as: false,
-                    allowed_export: ImportExportPolicy::NoFiltering,
-                    allowed_import: ImportExportPolicy::NoFiltering,
+                    allowed_export: ExternalImportExportPolicy::NoFiltering,
+                    allowed_import: ExternalImportExportPolicy::NoFiltering,
                     vlan_id: None,
                     router_lifetime: 0,
                 }],

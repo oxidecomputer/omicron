@@ -5,12 +5,12 @@
 // Copyright 2024 Oxide Computer Company
 
 use omicron_common::address;
-use omicron_common::api::external::ImportExportPolicy;
 use omicron_common::api::external::Name;
 use omicron_common::api::external::SwitchLocation;
 use omicron_common::api::internal::shared::AllowedSourceIps;
 use omicron_common::api::internal::shared::BgpConfig;
 use omicron_common::api::internal::shared::BgpPeerConfig;
+use omicron_common::api::internal::shared::ImportExportPolicy;
 use omicron_common::api::internal::shared::LldpPortConfig;
 use omicron_common::api::internal::shared::PortFec;
 use omicron_common::api::internal::shared::PortSpeed;

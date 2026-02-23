@@ -69,7 +69,7 @@ progenitor::generate_api!(
         ExternalIpv6Config = omicron_common::api::internal::shared::ExternalIpv6Config,
         Generation = omicron_common::api::external::Generation,
         Hostname = omicron_common::api::external::Hostname,
-        ImportExportPolicy = omicron_common::api::external::ImportExportPolicy,
+        ImportExportPolicy = omicron_common::api::internal::shared::ImportExportPolicy,
         Inventory = sled_agent_types_versions::latest::inventory::Inventory,
         InventoryDisk = sled_agent_types_versions::latest::inventory::InventoryDisk,
         InventoryZpool = sled_agent_types_versions::latest::inventory::InventoryZpool,

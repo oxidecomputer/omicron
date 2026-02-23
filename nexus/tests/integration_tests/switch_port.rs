@@ -13,16 +13,17 @@ use nexus_test_utils_macros::nexus_test;
 use nexus_types::external_api::networking::{
     Address, AddressConfig, AddressLotBlockCreate, AddressLotCreate,
     BgpAnnounceSetCreate, BgpAnnouncementCreate, BgpConfigCreate, BgpPeer,
-    BgpPeerConfig, LinkConfigCreate, LldpLinkConfigCreate, Route, RouteConfig,
-    SwitchInterfaceConfigCreate, SwitchInterfaceKind, SwitchPortApplySettings,
-    SwitchPortSettings, SwitchPortSettingsCreate,
+    BgpPeerConfig, ExternalImportExportPolicy, LinkConfigCreate,
+    LldpLinkConfigCreate, Route, RouteConfig, SwitchInterfaceConfigCreate,
+    SwitchInterfaceKind, SwitchPortApplySettings, SwitchPortSettings,
+    SwitchPortSettingsCreate,
 };
 use nexus_types::external_api::rack::Rack;
+use omicron_common::api::external::Name;
 use omicron_common::api::external::{
     self, AddressLotKind, IdentityMetadataCreateParams, LinkFec, LinkSpeed,
     NameOrId, SwitchLocation, SwitchPort,
 };
-use omicron_common::api::external::{ImportExportPolicy, Name};
 use oxnet::IpNet;
 
 type ControlPlaneTestContext =
@@ -327,8 +328,8 @@ async fn test_port_settings_basic_crud(ctx: &ControlPlaneTestContext) {
                 communities: Vec::new(),
                 local_pref: None,
                 enforce_first_as: false,
-                allowed_export: ImportExportPolicy::NoFiltering,
-                allowed_import: ImportExportPolicy::NoFiltering,
+                allowed_export: ExternalImportExportPolicy::NoFiltering,
+                allowed_import: ExternalImportExportPolicy::NoFiltering,
                 vlan_id: None,
                 router_lifetime: 0,
             },
@@ -349,10 +350,10 @@ async fn test_port_settings_basic_crud(ctx: &ControlPlaneTestContext) {
                 communities: vec![65000],
                 local_pref: Some(100),
                 enforce_first_as: false,
-                allowed_export: ImportExportPolicy::Allow(vec![
+                allowed_export: ExternalImportExportPolicy::Allow(vec![
                     "10.0.0.0/8".parse().unwrap(),
                 ]),
-                allowed_import: ImportExportPolicy::Allow(vec![
+                allowed_import: ExternalImportExportPolicy::Allow(vec![
                     "192.168.0.0/16".parse().unwrap(),
                 ]),
                 vlan_id: None,
@@ -415,14 +416,14 @@ async fn test_port_settings_basic_crud(ctx: &ControlPlaneTestContext) {
     assert!(
         matches!(
             &unnumbered_peer.allowed_export,
-            ImportExportPolicy::Allow(prefixes) if prefixes.len() == 1
+            ExternalImportExportPolicy::Allow(prefixes) if prefixes.len() == 1
         ),
         "Unnumbered peer should have 1 allowed export prefix"
     );
     assert!(
         matches!(
             &unnumbered_peer.allowed_import,
-            ImportExportPolicy::Allow(prefixes) if prefixes.len() == 1
+            ExternalImportExportPolicy::Allow(prefixes) if prefixes.len() == 1
         ),
         "Unnumbered peer should have 1 allowed import prefix"
     );

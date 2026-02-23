@@ -3553,27 +3553,6 @@ pub struct Probe {
     pub sled: SledUuid,
 }
 
-/// Define policy relating to the import and export of prefixes from a BGP
-/// peer.
-#[derive(
-    Default,
-    Debug,
-    Serialize,
-    Deserialize,
-    Clone,
-    JsonSchema,
-    Eq,
-    PartialEq,
-    Hash,
-)]
-#[serde(rename_all = "snake_case", tag = "type", content = "value")]
-pub enum ImportExportPolicy {
-    /// Do not perform any filtering.
-    #[default]
-    NoFiltering,
-    Allow(Vec<oxnet::IpNet>),
-}
-
 /// Use instead of Option in API request body structs to get a field that can
 /// be null (parsed as `None`) but is not optional. Unlike Option, Nullable
 /// will fail to parse if the key is not present. The JSON Schema in the

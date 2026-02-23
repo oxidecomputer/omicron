@@ -13,6 +13,7 @@ mod impls;
 // Note: New versions of these types will be added to the top-level module.
 pub use v1::BfdMode;
 pub use v1::BfdPeerConfig;
+pub use v1::ImportExportPolicy;
 pub use v1::LldpAdminStatus;
 pub use v1::LldpPortConfig;
 pub use v1::ParseLldpAdminStatusError;

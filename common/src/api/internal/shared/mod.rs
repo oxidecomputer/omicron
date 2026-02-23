@@ -54,6 +54,7 @@ pub use rack_init::BfdMode;
 pub use rack_init::BfdPeerConfig;
 pub use rack_init::BgpConfig;
 pub use rack_init::BgpPeerConfig;
+pub use rack_init::ImportExportPolicy;
 pub use rack_init::LldpAdminStatus;
 pub use rack_init::LldpPortConfig;
 pub use rack_init::ParseLldpAdminStatusError;

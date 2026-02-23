@@ -256,6 +256,7 @@ pub mod networking {
     pub use crate::v2025_11_20_00::networking::BgpConfigSelector;
     pub use crate::v2025_11_20_00::networking::BgpRouteSelector;
     pub use crate::v2025_11_20_00::networking::BgpStatusSelector;
+    pub use crate::v2025_11_20_00::networking::ExternalImportExportPolicy;
     pub use crate::v2025_11_20_00::networking::LinkConfigCreate;
     pub use crate::v2025_11_20_00::networking::LldpLinkConfigCreate;
     pub use crate::v2025_11_20_00::networking::LldpPortPathSelector;

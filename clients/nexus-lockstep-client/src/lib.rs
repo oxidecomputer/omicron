@@ -51,7 +51,7 @@ progenitor::generate_api!(
         DnsRecord = nexus_types::internal_api::params::DnsRecord,
         ExternalPortDiscovery = nexus_types::internal_api::params::ExternalPortDiscovery,
         Generation = omicron_common::api::external::Generation,
-        ImportExportPolicy = omicron_common::api::external::ImportExportPolicy,
+        ImportExportPolicy = omicron_common::api::internal::shared::ImportExportPolicy,
         MacAddr = omicron_common::api::external::MacAddr,
         MgsUpdateDriverStatus = nexus_types::internal_api::views::MgsUpdateDriverStatus,
         Name = omicron_common::api::external::Name,
