@@ -644,7 +644,7 @@ impl SchemaUpgradeStep {
     ///
     /// CockroachDB statements like `SET CLUSTER SETTING` cannot be executed
     /// inside a multi-statement transaction. Steps whose filename carries the
-    /// [`NON_TRANSACTIONAL_SUFFIX`] (e.g. `up-danger-non-transactional.sql`)
+    /// `NON_TRANSACTIONAL_SUFFIX` (e.g. `up-danger-non-transactional.sql`)
     /// will return `true` here.
     pub fn is_non_transactional(&self) -> bool {
         self.non_transactional
