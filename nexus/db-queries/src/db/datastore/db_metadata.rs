@@ -1214,8 +1214,8 @@ impl DataStore {
     // transaction first, then the SQL is executed directly.
     //
     // Non-transactional schema updates have significant TOCTOU implications.
-    // For more, see schema/crdb/README.adoc, Idempotence of non-transactional
-    // updates.
+    // For more, see the doc comment on `NON_TRANSACTIONAL_SUFFIX` in
+    // `nexus/db-model/src/schema_versions.rs`.
     async fn apply_schema_update(
         &self,
         current: &Version,
