@@ -31,7 +31,6 @@ use nexus_types::inventory::SpType;
 use nexus_types::silo::silo_dns_name;
 use omicron_common::address::{Ipv6Subnet, RACK_PREFIX, get_64_subnet};
 use omicron_common::api::external::AddressLotKind;
-use omicron_common::api::external::BgpPeer;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::IdentityMetadataCreateParams;
@@ -595,10 +594,10 @@ impl super::Nexus {
                 routes,
             });
 
-            let peers: Vec<BgpPeer> = uplink_config
+            let peers: Vec<networking::BgpPeer> = uplink_config
                 .bgp_peers
                 .iter()
-                .map(|r| BgpPeer {
+                .map(|r| networking::BgpPeer {
                     bgp_config: NameOrId::Name(
                         format!("as{}", r.asn).parse().unwrap(),
                     ),

@@ -277,7 +277,9 @@ pub mod networking {
     pub use crate::v2025_11_20_00::networking::TxEqConfig;
 
     pub use crate::v2026_02_13_01::networking::BgpConfigCreate;
+    pub use crate::v2026_02_13_01::networking::BgpPeer;
     pub use crate::v2026_02_13_01::networking::BgpPeerConfig;
+    pub use crate::v2026_02_13_01::networking::SwitchPortSettings;
     pub use crate::v2026_02_13_01::networking::SwitchPortSettingsCreate;
 }
 

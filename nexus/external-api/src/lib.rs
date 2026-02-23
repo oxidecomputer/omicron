@@ -4325,7 +4325,10 @@ pub trait NexusExternalApi {
     async fn networking_switch_port_settings_create(
         rqctx: RequestContext<Self::Context>,
         new_settings: TypedBody<latest::networking::SwitchPortSettingsCreate>,
-    ) -> Result<HttpResponseCreated<SwitchPortSettings>, HttpError>;
+    ) -> Result<
+        HttpResponseCreated<latest::networking::SwitchPortSettings>,
+        HttpError,
+    >;
 
     /// Create switch port settings (old version with required BgpPeer.addr)
     #[endpoint {
@@ -4394,7 +4397,7 @@ pub trait NexusExternalApi {
     async fn networking_switch_port_settings_view(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<latest::networking::SwitchPortSettingsInfoSelector>,
-    ) -> Result<HttpResponseOk<SwitchPortSettings>, HttpError>;
+    ) -> Result<HttpResponseOk<latest::networking::SwitchPortSettings>, HttpError>;
 
     /// Get information about switch port (old version with required BgpPeer.addr)
     #[endpoint {
