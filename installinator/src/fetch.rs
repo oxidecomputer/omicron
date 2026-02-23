@@ -7,14 +7,16 @@
 use std::{fmt, future::Future, time::Duration};
 
 use anyhow::Result;
-use async_trait::async_trait;
 use buf_list::BufList;
 use bytes::Bytes;
 use display_error_chain::DisplayErrorChain;
+use futures::{FutureExt, future::BoxFuture};
 use installinator_client::ClientError;
 use installinator_common::{
     InstallinatorProgressMetadata, StepContext, StepProgress,
 };
+use parallel_task_set::ParallelTaskSet;
+use slog_error_chain::InlineErrorChain;
 use tokio::{sync::mpsc, time::Instant};
 use tufaceous_artifact::ArtifactHashId;
 use update_engine::events::ProgressUnits;
@@ -156,6 +158,20 @@ impl FetchArtifactBackend {
 
         slog::debug!(log, "start fetch from peers"; "remaining_peers" => remaining_peers);
 
+        // We'll attempt to contact up to `MAX_CONCURRENT_PEERS` peers in
+        // parallel using spawned tasks (inside a `ParallelTaskSet`). We _only_
+        // spawn the `fetch_from_peer_impl` future. In production code, this is
+        // a single progenitor-client GET request, which is cancel-safe and
+        // returns the file size and a receiver to read the full artifact.
+        //
+        // If we get a successful response from any peer, we'll attempt to read
+        // the full artifact from that peer. On success, we return and drop the
+        // task set (cancelling any outstanding requests); on failure, we'll go
+        // back to trying the rest of the peers.
+        const MAX_CONCURRENT_PEERS: usize = 64;
+        let mut tasks =
+            ParallelTaskSet::new_with_parallelism(MAX_CONCURRENT_PEERS);
+
         for &peer in peers.iter_with_preferred(self.preferred_peer) {
             remaining_peers -= 1;
 
@@ -164,26 +180,33 @@ impl FetchArtifactBackend {
                 "start fetch from peer {peer:?}"; "remaining_peers" => remaining_peers,
             );
 
-            // Attempt to download data from this peer.
-            let start = Instant::now();
-            match self.fetch_from_peer(cx, peer, artifact_hash_id).await {
-                Ok(artifact_bytes) => {
-                    let elapsed = start.elapsed();
-                    slog::info!(
-                        log,
-                        "fetched artifact from peer {peer} in {elapsed:?}"
-                    );
+            let previous_result = tasks
+                .spawn({
+                    let start = Instant::now();
+                    self.imp
+                        .fetch_from_peer_impl(peer, artifact_hash_id.clone())
+                        .map(move |result| (start, peer, result))
+                })
+                .await;
+
+            if let Some((start, peer, result)) = previous_result {
+                if let Some(artifact_bytes) = self
+                    .handle_fetch_result_from_peer(
+                        cx, peer, start, result, &log,
+                    )
+                    .await
+                {
                     return Some((peer, artifact_bytes));
                 }
-                Err(error) => {
-                    let elapsed = start.elapsed();
-                    slog::warn!(
-                        log,
-                        "error after {elapsed:?}: {}",
-                        DisplayErrorChain::new(&error);
-                        "remaining_peers" => remaining_peers,
-                    );
-                }
+            }
+        }
+
+        while let Some((start, peer, result)) = tasks.join_next().await {
+            if let Some(artifact_bytes) = self
+                .handle_fetch_result_from_peer(cx, peer, start, result, &log)
+                .await
+            {
+                return Some((peer, artifact_bytes));
             }
         }
 
@@ -194,21 +217,50 @@ impl FetchArtifactBackend {
         self.imp.peers()
     }
 
-    async fn fetch_from_peer(
+    async fn handle_fetch_result_from_peer(
         &self,
         cx: &StepContext,
         peer: PeerAddress,
-        artifact_hash_id: &ArtifactHashId,
-    ) -> Result<BufList, ArtifactFetchError> {
-        let log = self.log.new(slog::o!("peer" => peer.to_string()));
-
-        let (total_bytes, mut receiver) = match self
-            .imp
-            .fetch_from_peer_impl(peer, artifact_hash_id.clone())
-            .await
-        {
-            Ok(x) => x,
+        start: Instant,
+        result: Result<(u64, FetchReceiver), HttpError>,
+        log: &slog::Logger,
+    ) -> Option<BufList> {
+        match result {
+            Ok((total_bytes, receiver)) => {
+                match self
+                    .fetch_full_artifact_from_peer(
+                        cx,
+                        peer,
+                        total_bytes,
+                        receiver,
+                    )
+                    .await
+                {
+                    Ok(artifact_bytes) => {
+                        let elapsed = start.elapsed();
+                        slog::info!(
+                            log,
+                            "successfully fetched artifact";
+                            "peer" => %peer,
+                            "elapsed" => ?elapsed,
+                        );
+                        Some(artifact_bytes)
+                    }
+                    Err(error) => {
+                        let elapsed = start.elapsed();
+                        slog::warn!(
+                            log,
+                            "error fetching full artifact";
+                            InlineErrorChain::new(&error),
+                            "peer" => %peer,
+                            "elapsed" => ?elapsed,
+                        );
+                        None
+                    }
+                }
+            }
             Err(error) => {
+                let elapsed = start.elapsed();
                 cx.send_progress(StepProgress::Reset {
                     metadata: InstallinatorProgressMetadata::Download {
                         peer: peer.address(),
@@ -216,12 +268,26 @@ impl FetchArtifactBackend {
                     message: error.to_string().into(),
                 })
                 .await;
-                return Err(ArtifactFetchError::HttpError {
-                    peer: peer.address(),
-                    error,
-                });
+                slog::warn!(
+                    log,
+                    "error attempting to fetch artifact";
+                    InlineErrorChain::new(&error),
+                    "peer" => %peer,
+                    "elapsed" => ?elapsed,
+                );
+                None
             }
-        };
+        }
+    }
+
+    async fn fetch_full_artifact_from_peer(
+        &self,
+        cx: &StepContext,
+        peer: PeerAddress,
+        total_bytes: u64,
+        mut receiver: FetchReceiver,
+    ) -> Result<BufList, ArtifactFetchError> {
+        let log = self.log.new(slog::o!("peer" => peer.to_string()));
 
         let mut artifact_bytes = BufList::new();
         let mut downloaded_bytes = 0u64;
@@ -311,16 +377,15 @@ impl FetchArtifactBackend {
 /// discovery occurs. We should align this with `ReportProgressImpl` in the
 /// future, though we'd need some way of looking up delay information in
 /// `mock_peers`.
-#[async_trait]
 pub(crate) trait FetchArtifactImpl: fmt::Debug + Send + Sync {
     fn peers(&self) -> &PeerAddresses;
 
     /// Returns (size, receiver) on success, and an error on failure.
-    async fn fetch_from_peer_impl(
+    fn fetch_from_peer_impl(
         &self,
         peer: PeerAddress,
         artifact_hash_id: ArtifactHashId,
-    ) -> Result<(u64, FetchReceiver), HttpError>;
+    ) -> BoxFuture<'static, Result<(u64, FetchReceiver), HttpError>>;
 }
 
 /// The send side of the channel over which data is sent.
@@ -342,19 +407,18 @@ impl HttpFetchBackend {
     }
 }
 
-#[async_trait]
 impl FetchArtifactImpl for HttpFetchBackend {
     fn peers(&self) -> &PeerAddresses {
         &self.peers
     }
 
-    async fn fetch_from_peer_impl(
+    fn fetch_from_peer_impl(
         &self,
         peer: PeerAddress,
         artifact_hash_id: ArtifactHashId,
-    ) -> Result<(u64, FetchReceiver), HttpError> {
+    ) -> BoxFuture<'static, Result<(u64, FetchReceiver), HttpError>> {
         // TODO: be able to fetch from sled-agent clients as well
         let artifact_client = ArtifactClient::new(peer.address(), &self.log);
-        artifact_client.fetch(artifact_hash_id).await
+        async move { artifact_client.fetch(artifact_hash_id).await }.boxed()
     }
 }
