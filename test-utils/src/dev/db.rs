@@ -80,6 +80,8 @@ pub struct CockroachStarterBuilder {
     listen_port: u16,
     /// environment variables, mirrored here for reporting
     env: BTreeMap<String, String>,
+    /// the maximum SQL memory, in MiB
+    max_sql_memory_mib: u16,
     /// command-line arguments, mirrored here for reporting
     args: Vec<String>,
     /// describes the command line that we're going to execute
@@ -89,6 +91,14 @@ pub struct CockroachStarterBuilder {
 }
 
 impl CockroachStarterBuilder {
+    /// The default maximum SQL memory, in MiB.
+    ///
+    /// This matches the value set in smf/cockroachdb/method_script.sh.
+    ///
+    /// See <https://github.com/oxidecomputer/omicron-9874-findings> for
+    // why we set the max SQL memory to be 256MiB by default.
+    pub const DEFAULT_MAX_SQL_MEMORY_MIB: u16 = 256;
+
     pub fn new() -> CockroachStarterBuilder {
         let mut builder = CockroachStarterBuilder::new_raw(COCKROACHDB_BIN);
 
@@ -121,10 +131,7 @@ impl CockroachStarterBuilder {
         builder
             .arg("start-single-node")
             .arg("--insecure")
-            .arg("--http-addr=:0")
-            // See https://github.com/oxidecomputer/omicron-9874-findings for
-            // why we set the max SQL memory to be 256MiB.
-            .arg("--max-sql-memory=256MiB");
+            .arg("--http-addr=:0");
         builder
     }
 
@@ -139,6 +146,7 @@ impl CockroachStarterBuilder {
             store_dir: None,
             listen_port: COCKROACHDB_DEFAULT_LISTEN_PORT,
             env: BTreeMap::new(),
+            max_sql_memory_mib: Self::DEFAULT_MAX_SQL_MEMORY_MIB,
             args: vec![String::from(cmd)],
             cmd_builder: tokio::process::Command::new(cmd),
             start_timeout: COCKROACHDB_START_TIMEOUT_DEFAULT,
@@ -166,6 +174,15 @@ impl CockroachStarterBuilder {
     /// We always listen only on `[::1]`.
     pub fn listen_port(mut self, listen_port: u16) -> Self {
         self.listen_port = listen_port;
+        self
+    }
+
+    /// Overrides the maximum SQL memory for CockroachDB
+    ///
+    /// The default is [`Self::DEFAULT_MAX_SQL_MEMORY_MIB`]. There's no need to
+    /// set this unless you're testing memory-constrained operations.
+    pub fn max_sql_memory_mib(mut self, max_sql_memory_mib: u16) -> Self {
+        self.max_sql_memory_mib = max_sql_memory_mib;
         self
     }
 
@@ -222,11 +239,14 @@ impl CockroachStarterBuilder {
         let listen_url_file =
             CockroachStarterBuilder::temp_path(&temp_dir, "listen-url");
         let listen_arg = format!("[::1]:{}", self.listen_port);
+        let max_sql_memory_arg = format!("{}MiB", self.max_sql_memory_mib);
         self.arg(&store_arg)
             .arg("--listen-addr")
             .arg(&listen_arg)
             .arg("--listening-url-file")
-            .arg(listen_url_file.as_os_str());
+            .arg(listen_url_file.as_os_str())
+            .arg("--max-sql-memory")
+            .arg(max_sql_memory_arg);
 
         let temp_dir_path = temp_dir.path();
         self.cmd_builder.stdout(Stdio::from(

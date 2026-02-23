@@ -28,6 +28,9 @@ args=(
   '--http-addr' '127.0.0.1:8080'
   '--store' "$DATASTORE"
   '--join' "$JOIN_ADDRS"
+  # The value of --max-sql-memory matches
+  # CockroachStarterBuilder::DEFAULT_MAX_SQL_MEMORY_MIB in
+  # test-utils/src/dev/db.rs.
   '--max-sql-memory' '256MiB'
 )
 

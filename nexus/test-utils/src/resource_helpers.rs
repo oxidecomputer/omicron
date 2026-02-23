@@ -434,6 +434,23 @@ pub async fn create_subnet_pool(
     .await
 }
 
+/// Create a subnet pool and link it to the default silo.
+pub async fn create_default_subnet_pool(
+    client: &ClientTestContext,
+    pool_name: &str,
+    ip_version: IpVersion,
+) -> SubnetPool {
+    let pool = create_subnet_pool(client, pool_name, ip_version).await;
+    link_subnet_pool(
+        client,
+        pool_name,
+        &nexus_types::silo::DEFAULT_SILO_ID,
+        true,
+    )
+    .await;
+    pool
+}
+
 /// Create a subnet pool member, with the min / max prefix lengths taken from
 /// the subnet itself.
 pub async fn create_subnet_pool_member(
