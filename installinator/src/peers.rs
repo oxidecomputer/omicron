@@ -7,6 +7,7 @@ use std::{
     fmt,
     net::{AddrParseError, IpAddr, SocketAddr},
     str::FromStr,
+    sync::Mutex,
 };
 
 use anyhow::{Result, bail};
@@ -118,6 +119,23 @@ impl PeerAddresses {
     pub(crate) fn display(&self) -> impl fmt::Display + use<> {
         self.peers().iter().join(", ")
     }
+
+    /// Returns an iterator that yields the preferred peer first (if present in
+    /// the set), then the remaining peers in BTreeSet order.
+    pub(crate) fn iter_with_preferred(
+        &self,
+        preferred: Option<PeerAddress>,
+    ) -> impl Iterator<Item = &PeerAddress> {
+        // Look up the preferred peer in the set to get a reference with the
+        // right lifetime. If it's not in the set, skip it.
+        let preferred_ref = preferred.and_then(|p| self.peers.get(&p));
+        let skip_preferred = preferred_ref.is_some();
+        preferred_ref.into_iter().chain(
+            self.peers.iter().filter(move |p| {
+                !(skip_preferred && Some(*p) == preferred_ref)
+            }),
+        )
+    }
 }
 
 impl FromIterator<PeerAddress> for PeerAddresses {
@@ -155,5 +173,29 @@ impl FromStr for PeerAddress {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         let address = s.parse()?;
         Ok(Self { address })
+    }
+}
+
+/// Tracks the last peer that successfully delivered an artifact.
+///
+/// Created once per install session and shared across all artifact fetches, so
+/// that a peer discovered while fetching an earlier artifact is tried first for
+/// subsequent artifacts.
+#[derive(Debug)]
+pub(crate) struct LastKnownPeer {
+    inner: Mutex<Option<PeerAddress>>,
+}
+
+impl LastKnownPeer {
+    pub(crate) fn new() -> Self {
+        Self { inner: Mutex::new(None) }
+    }
+
+    pub(crate) fn get(&self) -> Option<PeerAddress> {
+        *self.inner.lock().expect("last known peer lock poisoned")
+    }
+
+    pub(crate) fn set(&self, peer: PeerAddress) {
+        *self.inner.lock().expect("last known peer lock poisoned") = Some(peer);
     }
 }
