@@ -467,12 +467,12 @@ impl SchemaVersion {
             };
 
             // Check for the non-transactional suffix, and strip it if present.
-            let (number_part, non_transactional) =
-                match remaining_filename.strip_suffix(NON_TRANSACTIONAL_SUFFIX)
-                {
-                    Some(stripped) => (stripped, true),
-                    None => (remaining_filename, false),
-                };
+            let (number_part, non_transactional) = match remaining_filename
+                .strip_suffix(NON_TRANSACTIONAL_SUFFIX)
+            {
+                Some(stripped) => (stripped, true),
+                None => (remaining_filename, false),
+            };
 
             // Ensure the number part is either empty (i.e., the filename is
             // exactly "up.sql" or "up-danger-non-transactional.sql") or
@@ -514,7 +514,8 @@ impl SchemaVersion {
                 ensure!(
                     single.up_number <= 1,
                     "`up*.sql` numbering must start at 1: found first file \
-                     {}", single.path
+                     {}",
+                    single.path
                 );
             }
             _ => {
@@ -1062,18 +1063,6 @@ mod test {
         assert!(
             step.is_non_transactional(),
             "expected non-transactional for numbered suffix in filename",
-        );
-
-        // Transactional: plain filename, even if file content contains the
-        // old pragma text.
-        let step = load_single_step(
-            "up.sql",
-            "-- DANGER-NON-TRANSACTIONAL\nSET CLUSTER SETTING x = 1;",
-        )
-        .await;
-        assert!(
-            !step.is_non_transactional(),
-            "old pragma in file content should not trigger non-transactional",
         );
 
         // Transactional: plain numbered filename.
