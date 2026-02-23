@@ -457,71 +457,6 @@ pub struct BgpPeer {
     pub vlan_id: Option<u16>,
 }
 
-// TODO: per RFD 619, these conversion impls between initial types and
-// `omicron_common::api::external` types should live in the later version
-// module that introduced the shape change (e.g. `bgp_unnumbered_peers`).
-// They currently live here because `omicron-common-versions` does not yet
-// exist; once it does, move these conversions out of the initial module.
-impl From<BgpPeer> for external::BgpPeer {
-    fn from(old: BgpPeer) -> external::BgpPeer {
-        external::BgpPeer {
-            bgp_config: old.bgp_config,
-            interface_name: old.interface_name,
-            addr: Some(old.addr),
-            hold_time: old.hold_time,
-            idle_hold_time: old.idle_hold_time,
-            delay_open: old.delay_open,
-            connect_retry: old.connect_retry,
-            keepalive: old.keepalive,
-            remote_asn: old.remote_asn,
-            min_ttl: old.min_ttl,
-            md5_auth_key: old.md5_auth_key,
-            multi_exit_discriminator: old.multi_exit_discriminator,
-            communities: old.communities,
-            local_pref: old.local_pref,
-            enforce_first_as: old.enforce_first_as,
-            allowed_import: old.allowed_import,
-            allowed_export: old.allowed_export,
-            vlan_id: old.vlan_id,
-            router_lifetime: 0,
-        }
-    }
-}
-
-impl TryFrom<external::BgpPeer> for BgpPeer {
-    type Error = external::Error;
-
-    fn try_from(new: external::BgpPeer) -> Result<Self, Self::Error> {
-        let addr = new.addr.ok_or_else(|| {
-            external::Error::invalid_request(
-                "BGP peer has no address configured, but the API version \
-                 in use requires an address. Update your client to use \
-                 BGP unnumbered peers.",
-            )
-        })?;
-        Ok(BgpPeer {
-            bgp_config: new.bgp_config,
-            interface_name: new.interface_name,
-            addr,
-            hold_time: new.hold_time,
-            idle_hold_time: new.idle_hold_time,
-            delay_open: new.delay_open,
-            connect_retry: new.connect_retry,
-            keepalive: new.keepalive,
-            remote_asn: new.remote_asn,
-            min_ttl: new.min_ttl,
-            md5_auth_key: new.md5_auth_key,
-            multi_exit_discriminator: new.multi_exit_discriminator,
-            communities: new.communities,
-            local_pref: new.local_pref,
-            enforce_first_as: new.enforce_first_as,
-            allowed_import: new.allowed_import,
-            allowed_export: new.allowed_export,
-            vlan_id: new.vlan_id,
-        })
-    }
-}
-
 /// Parameters for creating a named set of BGP announcements.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct BgpAnnounceSetCreate {
@@ -924,30 +859,4 @@ pub struct SwitchPortSettings {
 
     /// Layer 3 IP address settings.
     pub addresses: Vec<external::SwitchPortAddressView>,
-}
-
-// TODO: this conversion impl should move out of the initial module once
-// `omicron-common-versions` exists. See comment on `BgpPeer` above.
-impl TryFrom<external::SwitchPortSettings> for SwitchPortSettings {
-    type Error = external::Error;
-
-    fn try_from(
-        new: external::SwitchPortSettings,
-    ) -> Result<Self, Self::Error> {
-        Ok(SwitchPortSettings {
-            identity: new.identity,
-            groups: new.groups,
-            port: new.port,
-            links: new.links,
-            interfaces: new.interfaces,
-            vlan_interfaces: new.vlan_interfaces,
-            routes: new.routes,
-            bgp_peers: new
-                .bgp_peers
-                .into_iter()
-                .map(BgpPeer::try_from)
-                .collect::<Result<Vec<_>, _>>()?,
-            addresses: new.addresses,
-        })
-    }
 }

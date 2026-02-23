@@ -12,15 +12,15 @@ use nexus_test_utils::http_testing::{AuthnMode, NexusRequest, RequestBuilder};
 use nexus_test_utils_macros::nexus_test;
 use nexus_types::external_api::networking::{
     Address, AddressConfig, AddressLotBlockCreate, AddressLotCreate,
-    BgpAnnounceSetCreate, BgpAnnouncementCreate, BgpConfigCreate,
+    BgpAnnounceSetCreate, BgpAnnouncementCreate, BgpConfigCreate, BgpPeer,
     BgpPeerConfig, LinkConfigCreate, LldpLinkConfigCreate, Route, RouteConfig,
     SwitchInterfaceConfigCreate, SwitchInterfaceKind, SwitchPortApplySettings,
-    SwitchPortSettingsCreate,
+    SwitchPortSettings, SwitchPortSettingsCreate,
 };
 use nexus_types::external_api::rack::Rack;
 use omicron_common::api::external::{
-    self, AddressLotKind, BgpPeer, IdentityMetadataCreateParams, LinkFec,
-    LinkSpeed, NameOrId, SwitchLocation, SwitchPort, SwitchPortSettings,
+    self, AddressLotKind, IdentityMetadataCreateParams, LinkFec, LinkSpeed,
+    NameOrId, SwitchLocation, SwitchPort,
 };
 use omicron_common::api::external::{ImportExportPolicy, Name};
 use oxnet::IpNet;
