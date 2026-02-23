@@ -474,7 +474,8 @@ pub trait NexusExternalApi {
     }]
     async fn v2026020200_utilization_view(
         rqctx: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseOk<v2025_11_20_00::silo::Utilization>, HttpError> {
+    ) -> Result<HttpResponseOk<v2025_11_20_00::silo::Utilization>, HttpError>
+    {
         Self::utilization_view(rqctx)
             .await
             .map(|HttpResponseOk(u)| HttpResponseOk(u.into()))
@@ -502,7 +503,8 @@ pub trait NexusExternalApi {
     async fn v2026020200_silo_utilization_view(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<latest::path_params::SiloPath>,
-    ) -> Result<HttpResponseOk<v2025_11_20_00::silo::SiloUtilization>, HttpError> {
+    ) -> Result<HttpResponseOk<v2025_11_20_00::silo::SiloUtilization>, HttpError>
+    {
         Self::silo_utilization_view(rqctx, path_params)
             .await
             .map(|HttpResponseOk(u)| HttpResponseOk(u.into()))
@@ -570,8 +572,10 @@ pub trait NexusExternalApi {
     async fn v2026020200_system_quotas_list(
         rqctx: RequestContext<Self::Context>,
         query_params: Query<PaginatedById>,
-    ) -> Result<HttpResponseOk<ResultsPage<v2025_11_20_00::silo::SiloQuotas>>, HttpError>
-    {
+    ) -> Result<
+        HttpResponseOk<ResultsPage<v2025_11_20_00::silo::SiloQuotas>>,
+        HttpError,
+    > {
         Self::system_quotas_list(rqctx, query_params).await.map(
             |HttpResponseOk(page)| {
                 let items: Vec<_> =
@@ -604,7 +608,8 @@ pub trait NexusExternalApi {
     async fn v2026020200_silo_quotas_view(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<latest::path_params::SiloPath>,
-    ) -> Result<HttpResponseOk<v2025_11_20_00::silo::SiloQuotas>, HttpError> {
+    ) -> Result<HttpResponseOk<v2025_11_20_00::silo::SiloQuotas>, HttpError>
+    {
         Self::silo_quotas_view(rqctx, path_params)
             .await
             .map(|HttpResponseOk(q)| HttpResponseOk(q.into()))
@@ -636,7 +641,8 @@ pub trait NexusExternalApi {
         rqctx: RequestContext<Self::Context>,
         path_params: Path<latest::path_params::SiloPath>,
         new_quota: TypedBody<v2025_11_20_00::silo::SiloQuotasUpdate>,
-    ) -> Result<HttpResponseOk<v2025_11_20_00::silo::SiloQuotas>, HttpError> {
+    ) -> Result<HttpResponseOk<v2025_11_20_00::silo::SiloQuotas>, HttpError>
+    {
         Self::silo_quotas_update(rqctx, path_params, new_quota.map(Into::into))
             .await
             .map(|HttpResponseOk(q)| HttpResponseOk(q.into()))

@@ -7,7 +7,7 @@
       "url": "https://oxide.computer",
       "email": "api@oxide.computer"
     },
-    "version": "2026021100.0.0"
+    "version": "2026022300.0.0"
   },
   "paths": {
     "/device/auth": {
@@ -9301,7 +9301,6 @@
           "system/ip-pools"
         ],
         "summary": "Create IP pool",
-        "description": "IPv6 is not yet supported for unicast pools.",
         "operationId": "system_ip_pool_create",
         "requestBody": {
           "content": {
@@ -9514,7 +9513,7 @@
           "system/ip-pools"
         ],
         "summary": "Add range to IP pool",
-        "description": "IPv6 ranges are not allowed yet for unicast pools.\n\nFor multicast pools, all ranges must be either Any-Source Multicast (ASM) or Source-Specific Multicast (SSM), but not both. Mixing ASM and SSM ranges in the same pool is not allowed.\n\nASM: IPv4 addresses outside 232.0.0.0/8, IPv6 addresses with flag field != 3 SSM: IPv4 addresses in 232.0.0.0/8, IPv6 addresses with flag field = 3",
+        "description": "For multicast pools, all ranges must be either Any-Source Multicast (ASM) or Source-Specific Multicast (SSM), but not both. Mixing ASM and SSM ranges in the same pool is not allowed.\n\nASM: IPv4 addresses outside 232.0.0.0/8, IPv6 addresses with flag field != 3 SSM: IPv4 addresses in 232.0.0.0/8, IPv6 addresses with flag field = 3",
         "operationId": "system_ip_pool_range_add",
         "parameters": [
           {
@@ -10772,7 +10771,7 @@
         "tags": [
           "system/networking"
         ],
-        "summary": "Get BGP exported routes",
+        "summary": "List BGP exported routes",
         "operationId": "networking_bgp_exported",
         "responses": {
           "200": {
@@ -10780,7 +10779,55 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/BgpExported"
+                  "title": "Array_of_BgpExported",
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/BgpExported"
+                  }
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/system/networking/bgp-imported": {
+      "get": {
+        "tags": [
+          "system/networking"
+        ],
+        "summary": "Get imported IPv4 BGP routes",
+        "operationId": "networking_bgp_imported",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "asn",
+            "description": "The ASN to filter on. Required.",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Array_of_BgpImported",
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/BgpImported"
+                  }
                 }
               }
             }
@@ -10821,50 +10868,6 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/AggregateBgpMessageHistory"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      }
-    },
-    "/v1/system/networking/bgp-routes-ipv4": {
-      "get": {
-        "tags": [
-          "system/networking"
-        ],
-        "summary": "Get imported IPv4 BGP routes",
-        "operationId": "networking_bgp_imported_routes_ipv4",
-        "parameters": [
-          {
-            "in": "query",
-            "name": "asn",
-            "description": "The ASN to filter on. Required.",
-            "required": true,
-            "schema": {
-              "type": "integer",
-              "format": "uint32",
-              "minimum": 0
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "title": "Array_of_BgpImportedRouteIpv4",
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/BgpImportedRouteIpv4"
-                  }
                 }
               }
             }
@@ -15512,7 +15515,7 @@
         ]
       },
       "AddressLotBlockCreate": {
-        "description": "Parameters for creating an address lot block. Fist and last addresses are inclusive.",
+        "description": "Parameters for creating an address lot block. First and last addresses are inclusive.",
         "type": "object",
         "properties": {
           "first_address": {
@@ -16197,6 +16200,7 @@
                 ]
               },
               "secrets": {
+                "description": "A list containing the IDs of the secret keys used to sign payloads sent to this receiver.",
                 "type": "array",
                 "items": {
                   "$ref": "#/components/schemas/WebhookSecret"
@@ -17182,6 +17186,14 @@
             "type": "string",
             "format": "uuid"
           },
+          "max_paths": {
+            "description": "Maximum number of paths to use when multiple \"best paths\" exist",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/MaxPathConfig"
+              }
+            ]
+          },
           "name": {
             "description": "unique, mutable, user-controlled identifier for each resource",
             "allOf": [
@@ -17210,13 +17222,14 @@
           "asn",
           "description",
           "id",
+          "max_paths",
           "name",
           "time_created",
           "time_modified"
         ]
       },
       "BgpConfigCreate": {
-        "description": "Parameters for creating a BGP configuration. This includes and autonomous system number (ASN) and a virtual routing and forwarding (VRF) identifier.",
+        "description": "Parameters for creating a BGP configuration. This includes an autonomous system number (ASN) and a virtual routing and forwarding (VRF) identifier.",
         "type": "object",
         "properties": {
           "asn": {
@@ -17230,6 +17243,15 @@
           },
           "description": {
             "type": "string"
+          },
+          "max_paths": {
+            "description": "Maximum number of paths to use when multiple \"best paths\" exist",
+            "default": 1,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/MaxPathConfig"
+              }
+            ]
           },
           "name": {
             "$ref": "#/components/schemas/Name"
@@ -17273,25 +17295,37 @@
         ]
       },
       "BgpExported": {
-        "description": "The current status of a BGP peer.",
+        "description": "Route exported to a peer.",
         "type": "object",
         "properties": {
-          "exports": {
-            "description": "Exported routes indexed by peer address.",
-            "type": "object",
-            "additionalProperties": {
-              "type": "array",
-              "items": {
-                "$ref": "#/components/schemas/Ipv4Net"
+          "peer_id": {
+            "description": "Identifier for the BGP peer.",
+            "type": "string"
+          },
+          "prefix": {
+            "description": "The destination network prefix.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/IpNet"
               }
-            }
+            ]
+          },
+          "switch": {
+            "description": "Switch the route is exported from.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SwitchLocation"
+              }
+            ]
           }
         },
         "required": [
-          "exports"
+          "peer_id",
+          "prefix",
+          "switch"
         ]
       },
-      "BgpImportedRouteIpv4": {
+      "BgpImported": {
         "description": "A route imported from a BGP peer.",
         "type": "object",
         "properties": {
@@ -17304,13 +17338,13 @@
           "nexthop": {
             "description": "The nexthop the prefix is reachable through.",
             "type": "string",
-            "format": "ipv4"
+            "format": "ip"
           },
           "prefix": {
             "description": "The destination network prefix.",
             "allOf": [
               {
-                "$ref": "#/components/schemas/Ipv4Net"
+                "$ref": "#/components/schemas/IpNet"
               }
             ]
           },
@@ -17336,7 +17370,8 @@
         "type": "object",
         "properties": {
           "addr": {
-            "description": "The address of the host to peer with.",
+            "nullable": true,
+            "description": "The address of the host to peer with. If not provided, this is an unnumbered BGP session that will be established over the interface specified by `interface_name`.",
             "type": "string",
             "format": "ip"
           },
@@ -17448,6 +17483,12 @@
             "format": "uint32",
             "minimum": 0
           },
+          "router_lifetime": {
+            "description": "Router lifetime in seconds for unnumbered BGP peers.",
+            "type": "integer",
+            "format": "uint16",
+            "minimum": 0
+          },
           "vlan_id": {
             "nullable": true,
             "description": "Associate a VLAN ID with a peer.",
@@ -17457,7 +17498,6 @@
           }
         },
         "required": [
-          "addr",
           "allowed_export",
           "allowed_import",
           "bgp_config",
@@ -17468,7 +17508,8 @@
           "hold_time",
           "idle_hold_time",
           "interface_name",
-          "keepalive"
+          "keepalive",
+          "router_lifetime"
         ]
       },
       "BgpPeerConfig": {
@@ -17570,6 +17611,10 @@
             "format": "uint32",
             "minimum": 0
           },
+          "peer_id": {
+            "description": "Interface name",
+            "type": "string"
+          },
           "remote_asn": {
             "description": "Remote autonomous system number.",
             "type": "integer",
@@ -17602,6 +17647,7 @@
         "required": [
           "addr",
           "local_asn",
+          "peer_id",
           "remote_asn",
           "state",
           "state_duration_millis",
@@ -18565,7 +18611,7 @@
         ]
       },
       "BlockSize": {
-        "title": "disk block size in bytes",
+        "title": "Disk block size in bytes",
         "type": "integer",
         "enum": [
           512,
@@ -19415,11 +19461,11 @@
         "type": "object",
         "properties": {
           "private_key": {
-            "description": "request signing RSA private key in PKCS#1 format (base64 encoded der file)",
+            "description": "Request signing RSA private key in PKCS#1 format (base64 encoded DER file)",
             "type": "string"
           },
           "public_cert": {
-            "description": "request signing public certificate (base64 encoded der file)",
+            "description": "Request signing public certificate (base64 encoded DER file)",
             "type": "string"
           }
         },
@@ -19433,7 +19479,7 @@
         "type": "object",
         "properties": {
           "id": {
-            "description": "A unique, immutable, system-controlled identifier for the token. Note that this ID is not the bearer token itself, which starts with \"oxide-token-\"",
+            "description": "A unique, immutable, system-controlled identifier for the token.\n\nNote that this ID is not the bearer token itself, which starts with \"oxide-token-\".",
             "type": "string",
             "format": "uuid"
           },
@@ -19749,7 +19795,7 @@
             "type": "object",
             "properties": {
               "block_size": {
-                "description": "size of blocks for this Disk. valid values are: 512, 2048, or 4096",
+                "description": "Size of blocks for this disk. Valid values are: 512, 2048, or 4096.",
                 "allOf": [
                   {
                     "$ref": "#/components/schemas/BlockSize"
@@ -22160,7 +22206,7 @@
         "type": "object",
         "properties": {
           "block_size": {
-            "description": "size of blocks in bytes",
+            "description": "Size of blocks in bytes",
             "allOf": [
               {
                 "$ref": "#/components/schemas/ByteCount"
@@ -22204,7 +22250,7 @@
             "format": "uuid"
           },
           "size": {
-            "description": "total size in bytes",
+            "description": "Total size in bytes",
             "allOf": [
               {
                 "$ref": "#/components/schemas/ByteCount"
@@ -22545,7 +22591,7 @@
         "type": "object",
         "properties": {
           "anti_affinity_groups": {
-            "description": "Anti-Affinity groups which this instance should be added.",
+            "description": "Anti-affinity groups to which this instance should be added.",
             "default": [],
             "type": "array",
             "items": {
@@ -23349,7 +23395,7 @@
         "type": "object",
         "properties": {
           "address": {
-            "description": "The associated IP address,",
+            "description": "The associated IP address",
             "type": "string",
             "format": "ip"
           },
@@ -23363,7 +23409,7 @@
             "format": "uuid"
           },
           "internet_gateway_id": {
-            "description": "The associated internet gateway.",
+            "description": "The associated internet gateway",
             "type": "string",
             "format": "uuid"
           },
@@ -23578,7 +23624,7 @@
         ]
       },
       "IpPool": {
-        "description": "A collection of IP ranges. If a pool is linked to a silo, IP addresses from the pool can be allocated within that silo",
+        "description": "A collection of IP ranges. If a pool is linked to a silo, IP addresses from the pool can be allocated within that silo.",
         "type": "object",
         "properties": {
           "description": {
@@ -24433,7 +24479,7 @@
             ]
           },
           "anycast": {
-            "description": "Address is an anycast address. This allows the address to be assigned to multiple locations simultaneously.",
+            "description": "Address is an anycast address.\n\nThis allows the address to be assigned to multiple locations simultaneously.",
             "type": "boolean"
           },
           "mask": {
@@ -24518,6 +24564,12 @@
           "addr",
           "interface_num"
         ]
+      },
+      "MaxPathConfig": {
+        "type": "integer",
+        "format": "uint8",
+        "minimum": 1,
+        "maximum": 32
       },
       "Measurement": {
         "description": "A `Measurement` is a timestamped datum from a single metric",
@@ -26043,7 +26095,7 @@
         ]
       },
       "Rack": {
-        "description": "View of an Rack",
+        "description": "View of a Rack",
         "type": "object",
         "properties": {
           "id": {
@@ -26716,7 +26768,7 @@
         "type": "object",
         "properties": {
           "acs_url": {
-            "description": "service provider endpoint where the response will be sent",
+            "description": "Service provider endpoint where the response will be sent",
             "type": "string"
           },
           "description": {
@@ -26728,11 +26780,11 @@
             "type": "string"
           },
           "idp_entity_id": {
-            "description": "idp's entity id",
+            "description": "IdP's entity ID",
             "type": "string"
           },
           "idp_metadata_source": {
-            "description": "the source of an identity provider metadata descriptor",
+            "description": "The source of an identity provider metadata descriptor",
             "allOf": [
               {
                 "$ref": "#/components/schemas/IdpMetadataSource"
@@ -26744,7 +26796,7 @@
           },
           "signing_keypair": {
             "nullable": true,
-            "description": "request signing key pair",
+            "description": "Request signing key pair",
             "default": null,
             "allOf": [
               {
@@ -26753,15 +26805,15 @@
             ]
           },
           "slo_url": {
-            "description": "service provider endpoint where the idp should send log out requests",
+            "description": "Service provider endpoint where the IdP should send log out requests",
             "type": "string"
           },
           "sp_client_id": {
-            "description": "sp's client id",
+            "description": "SP's client ID",
             "type": "string"
           },
           "technical_contact_email": {
-            "description": "customer's technical contact for saml configuration",
+            "description": "Customer's technical contact for SAML configuration",
             "type": "string"
           }
         },
@@ -27426,7 +27478,7 @@
         "type": "object",
         "properties": {
           "allocated": {
-            "description": "Accounts for the total amount of resources reserved for silos via their quotas",
+            "description": "Accounts for the total amount of resources reserved for silos via their quotas.",
             "allOf": [
               {
                 "$ref": "#/components/schemas/VirtualResourceCounts"
@@ -27445,7 +27497,7 @@
             "format": "int64"
           },
           "provisioned": {
-            "description": "Accounts for resources allocated by in silos like CPU or memory for running instances and storage for disks and snapshots Note that CPU and memory resources associated with a stopped instances are not counted here",
+            "description": "Accounts for the total resources allocated by the silo, including CPU and memory for running instances and storage for disks and snapshots.\n\nNote that CPU and memory resources associated with stopped instances are not counted here.",
             "allOf": [
               {
                 "$ref": "#/components/schemas/VirtualResourceCounts"
@@ -29893,7 +29945,7 @@
         "type": "object",
         "properties": {
           "external_id": {
-            "description": "username used to log in",
+            "description": "Username used to log in",
             "allOf": [
               {
                 "$ref": "#/components/schemas/UserId"
@@ -29901,7 +29953,7 @@
             ]
           },
           "password": {
-            "description": "how to set the user's login password",
+            "description": "How to set the user's login password",
             "allOf": [
               {
                 "$ref": "#/components/schemas/UserPassword"
@@ -30003,7 +30055,7 @@
         "type": "object",
         "properties": {
           "capacity": {
-            "description": "The total amount of resources that can be provisioned in this silo Actions that would exceed this limit will fail",
+            "description": "The total amount of resources that can be provisioned in this silo. Actions that would exceed this limit will fail.",
             "allOf": [
               {
                 "$ref": "#/components/schemas/VirtualResourceCounts"
@@ -30022,7 +30074,7 @@
             "format": "int64"
           },
           "provisioned": {
-            "description": "Accounts for resources allocated to running instances or storage allocated via disks or snapshots Note that CPU and memory resources associated with a stopped instances are not counted here whereas associated disks will still be counted",
+            "description": "Accounts for resources allocated to running instances or storage allocated via disks or snapshots.\n\nNote that CPU and memory resources associated with stopped instances are not counted here, whereas associated disks will still be counted.",
             "allOf": [
               {
                 "$ref": "#/components/schemas/VirtualResourceCounts"
@@ -30285,12 +30337,12 @@
             ]
           },
           "project_id": {
-            "description": "id for the project containing this VPC",
+            "description": "ID for the project containing this VPC",
             "type": "string",
             "format": "uuid"
           },
           "system_router_id": {
-            "description": "id for the system router where subnet default routes are registered",
+            "description": "ID for the system router where subnet default routes are registered",
             "type": "string",
             "format": "uuid"
           },
@@ -31013,7 +31065,7 @@
         }
       },
       "VpcSubnet": {
-        "description": "A VPC subnet represents a logical grouping for instances that allows network traffic between them, within a IPv4 subnetwork or optionally an IPv6 subnetwork.",
+        "description": "A VPC subnet represents a logical grouping for instances that allows network traffic between them, within an IPv4 subnetwork or optionally an IPv6 subnetwork.",
         "type": "object",
         "properties": {
           "custom_router_id": {
@@ -31356,6 +31408,7 @@
             ]
           },
           "secrets": {
+            "description": "A list containing the IDs of the secret keys used to sign payloads sent to this receiver.",
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/WebhookSecret"

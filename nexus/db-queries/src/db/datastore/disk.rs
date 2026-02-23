@@ -905,7 +905,7 @@ impl DataStore {
         let project_id = disk.project_id();
         let create_params = create_params.clone();
 
-        let disk = self
+        let (disk, provisions) = self
             .transaction_retry_wrapper("project_create_disk_and_provision")
             .transaction(&conn, |conn| {
                 let disk = disk.clone();
@@ -923,7 +923,7 @@ impl DataStore {
 
                     // Step 2: Virtual provisioning.
                     use crate::db::queries::virtual_provisioning_collection_update::VirtualProvisioningCollectionUpdate;
-                    VirtualProvisioningCollectionUpdate::new_insert_storage(
+                    let provisions = VirtualProvisioningCollectionUpdate::new_insert_storage(
                         disk_id,
                         crate::db::model::ByteCount::from(create_params.size),
                         project_id,
@@ -945,7 +945,7 @@ impl DataStore {
                     )
                     .await?;
 
-                    Ok(created_disk)
+                    Ok((created_disk, provisions))
                 }
             })
             .await
@@ -956,6 +956,9 @@ impl DataStore {
                     public_error_from_diesel(e, ErrorHandler::Server)
                 }
             })?;
+
+        self.virtual_provisioning_collection_producer
+            .append_disk_metrics(&provisions)?;
 
         Ok(disk)
     }
@@ -979,7 +982,8 @@ impl DataStore {
 
         match &create_params.disk_backend {
             disk_types::DiskBackend::Distributed {
-                disk_source: disk_types::DiskSource::Image { image_id, read_only },
+                disk_source:
+                    disk_types::DiskSource::Image { image_id, read_only },
             } => {
                 let physical = nexus_db_model::distributed_disk_physical_bytes(
                     virtual_bytes,
@@ -2129,7 +2133,10 @@ impl DataStore {
                     .await?;
                 ReadOnlyDiskSource::Image(authz_image)
             }
-            &disk_types::DiskSource::Snapshot { snapshot_id, read_only: true } => {
+            &disk_types::DiskSource::Snapshot {
+                snapshot_id,
+                read_only: true,
+            } => {
                 let (_, _, authz_snapshot, _) = LookupPath::new(opctx, self)
                     .snapshot_id(snapshot_id)
                     .fetch()

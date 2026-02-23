@@ -2029,6 +2029,7 @@ EXECUTING COMMAND: omdb ["db", "whatis", "..........<REDACTED_UUID>...........",
 termination: Exited(0)
 ---------------------------------------------
 stdout:
+..........<REDACTED_UUID>........... found in physical_provisioning_collection.id
 ..........<REDACTED_UUID>........... found in silo.id
 ..........<REDACTED_UUID>........... found in silo_auth_settings.silo_id
 ..........<REDACTED_UUID>........... found in silo_quotas.silo_id
