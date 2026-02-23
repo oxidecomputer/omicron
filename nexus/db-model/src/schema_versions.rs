@@ -283,6 +283,7 @@ pub const DB_METADATA_NEXUS_SCHEMA_VERSION: Version = Version::new(185, 0, 0);
 ///
 /// Permits only `[a-zA-Z0-9_]` characters, which covers all valid
 /// SQL identifiers and our enum variant values.
+#[doc(hidden)]
 #[derive(Debug, Clone, PartialEq)]
 pub struct SqlIdentifier(String);
 
@@ -315,6 +316,7 @@ impl std::fmt::Display for SqlIdentifier {
 /// involve async backfill in CockroachDB (e.g., CREATE INDEX, ADD
 /// CONSTRAINT). The generated queries are written to `.verify.sql` files
 /// by an expectorate test and read at runtime.
+#[doc(hidden)]
 #[derive(Debug, Clone, PartialEq)]
 pub enum SchemaChangeInfo {
     /// `ALTER TABLE ... ADD CONSTRAINT ...` (CHECK, UNIQUE, FK)
@@ -848,14 +850,6 @@ mod test {
         Regex::new(r"(?i)(ADD\s+CONSTRAINT)\s+IF\s+NOT\s+EXISTS").unwrap()
     });
 
-    /// Strip line comments (`-- ...`).
-    static RE_LINE_COMMENT: LazyLock<Regex> =
-        LazyLock::new(|| Regex::new(r"--[^\n]*").unwrap());
-
-    /// Strip block comments (`/* ... */`).
-    static RE_BLOCK_COMMENT: LazyLock<Regex> =
-        LazyLock::new(|| Regex::new(r"(?s)/\*.*?\*/").unwrap());
-
     /// Detect DML / non-DDL statement starts.
     static RE_DML_START: LazyLock<Regex> = LazyLock::new(|| {
         Regex::new(
@@ -897,57 +891,101 @@ mod test {
         result
     }
 
-    /// Strip SQL comments (`-- ...` and `/* ... */`) from the input.
-    fn strip_sql_comments(sql: &str) -> String {
-        let result = RE_LINE_COMMENT.replace_all(sql, "");
-        RE_BLOCK_COMMENT.replace_all(&result, "").to_string()
-    }
-
-    /// Split SQL text on semicolons, respecting single-quoted string
-    /// literals.
+    /// Strip SQL comments and split on semicolons in a single pass,
+    /// respecting single-quoted string literals.
     ///
-    /// A naive `split(';')` would break on semicolons that appear inside
-    /// string literals (e.g., `DEFAULT ';'`).  This function walks the
-    /// input character-by-character, tracking whether we're inside a
-    /// single-quoted string, and only splits on `;` outside of strings.
-    /// Escaped quotes (`''`) inside strings are handled correctly.
+    /// Comments (`-- ...` and `/* ... */`) are removed from the output.
+    /// Semicolons inside string literals or comments are not treated as
+    /// statement separators.  Escaped quotes (`''`) inside strings are
+    /// handled correctly.
     ///
-    /// Returns trimmed, non-empty fragments.
-    fn split_sql_statements(sql: &str) -> Vec<&str> {
+    /// Returns trimmed, non-empty statement fragments with comments
+    /// stripped.
+    fn split_and_strip_sql(sql: &str) -> Vec<String> {
         let mut results = Vec::new();
-        let mut in_string = false;
-        let mut start = 0;
+        let mut current = String::new();
         let bytes = sql.as_bytes();
+        let len = bytes.len();
         let mut i = 0;
 
-        while i < bytes.len() {
+        // States (mutually exclusive)
+        let mut in_string = false;
+        let mut in_line_comment = false;
+        let mut in_block_comment = false;
+
+        while i < len {
+            if in_line_comment {
+                if bytes[i] == b'\n' {
+                    in_line_comment = false;
+                    current.push('\n');
+                }
+                // else: skip comment character
+                i += 1;
+                continue;
+            }
+
+            if in_block_comment {
+                if bytes[i] == b'*'
+                    && i + 1 < len
+                    && bytes[i + 1] == b'/'
+                {
+                    in_block_comment = false;
+                    i += 2; // skip */
+                } else {
+                    i += 1;
+                }
+                continue;
+            }
+
             if in_string {
                 if bytes[i] == b'\'' {
-                    // Check for escaped quote ('')
-                    if i + 1 < bytes.len() && bytes[i + 1] == b'\'' {
-                        i += 2; // skip both quotes
+                    if i + 1 < len && bytes[i + 1] == b'\'' {
+                        // Escaped quote ('') — keep both
+                        current.push('\'');
+                        current.push('\'');
+                        i += 2;
                         continue;
                     }
                     in_string = false;
                 }
-            } else {
-                if bytes[i] == b'\'' {
-                    in_string = true;
-                } else if bytes[i] == b';' {
-                    let fragment = sql[start..i].trim();
-                    if !fragment.is_empty() {
-                        results.push(fragment);
-                    }
-                    start = i + 1;
-                }
+                current.push(bytes[i] as char);
+                i += 1;
+                continue;
             }
-            i += 1;
+
+            // Outside any special state
+            if bytes[i] == b'\'' {
+                in_string = true;
+                current.push('\'');
+                i += 1;
+            } else if bytes[i] == b'-'
+                && i + 1 < len
+                && bytes[i + 1] == b'-'
+            {
+                in_line_comment = true;
+                i += 2; // skip --
+            } else if bytes[i] == b'/'
+                && i + 1 < len
+                && bytes[i + 1] == b'*'
+            {
+                in_block_comment = true;
+                i += 2; // skip /*
+            } else if bytes[i] == b';' {
+                let trimmed = current.trim().to_string();
+                if !trimmed.is_empty() {
+                    results.push(trimmed);
+                }
+                current.clear();
+                i += 1;
+            } else {
+                current.push(bytes[i] as char);
+                i += 1;
+            }
         }
 
-        // Handle the last fragment (after the final `;` or if there was none)
-        let fragment = sql[start..].trim();
-        if !fragment.is_empty() {
-            results.push(fragment);
+        let trimmed = current.trim().to_string();
+        if !trimmed.is_empty() {
+            results.push(trimmed);
         }
 
         results
@@ -967,21 +1005,20 @@ mod test {
         sql: &str,
         label: &str,
     ) -> Result<ClassifiedDdl, anyhow::Error> {
-        let without_comments = strip_sql_comments(sql);
-
         let mut changes = Vec::new();
         let mut statement_count = 0;
 
-        for trimmed in split_sql_statements(&without_comments) {
+        for trimmed in split_and_strip_sql(sql) {
             // Skip DML, session settings, and other non-DDL statements.
-            if RE_DML_START.is_match(trimmed) {
+            if RE_DML_START.is_match(&trimmed) {
                 continue;
             }
 
             statement_count += 1;
 
-            let might_have_async_backfill = RE_CREATE_INDEX.is_match(trimmed)
-                || RE_ALTER_TABLE.is_match(trimmed);
+            let might_have_async_backfill =
+                RE_CREATE_INDEX.is_match(&trimmed)
+                    || RE_ALTER_TABLE.is_match(&trimmed);
 
             if !might_have_async_backfill {
                 changes.push(SchemaChangeInfo::OtherDdl);
@@ -990,14 +1027,14 @@ mod test {
 
             // CockroachDB-specific ALTER PRIMARY KEY USING COLUMNS
             // can't be parsed by sqlparser; just mark as OtherDdl.
-            if RE_ALTER_TABLE_PK.is_match(trimmed) {
+            if RE_ALTER_TABLE_PK.is_match(&trimmed) {
                 changes.push(SchemaChangeInfo::OtherDdl);
                 continue;
             }
 
             // CREATE INDEX and ALTER TABLE may produce verification
             // queries, so we parse them with sqlparser.
-            let preprocessed = preprocess_for_sqlparser(trimmed);
+            let preprocessed = preprocess_for_sqlparser(&trimmed);
             let stmts = Parser::parse_sql(&PostgreSqlDialect {}, &preprocessed)
                 .with_context(|| format!("failed to parse SQL in {label}"))?;
 
@@ -2033,12 +2070,12 @@ mod test {
     }
 
     // ---------------------------------------------------------------
-    // Tests for split_sql_statements
+    // Tests for split_and_strip_sql
     // ---------------------------------------------------------------
 
     #[test]
-    fn test_split_sql_basic() {
-        let stmts = split_sql_statements(
+    fn test_split_and_strip_sql_basic() {
+        let stmts = split_and_strip_sql(
             "CREATE TABLE t (id INT); CREATE INDEX i ON t (id)",
         );
         assert_eq!(stmts.len(), 2);
@@ -2047,94 +2084,382 @@ mod test {
     }
 
     #[test]
-    fn test_split_sql_semicolon_in_string() {
-        let stmts = split_sql_statements("INSERT INTO t VALUES (';')");
+    fn test_split_and_strip_sql_semicolon_in_string() {
+        let stmts = split_and_strip_sql("INSERT INTO t VALUES (';')");
         assert_eq!(stmts.len(), 1);
         assert_eq!(stmts[0], "INSERT INTO t VALUES (';')");
     }
 
     #[test]
-    fn test_split_sql_escaped_quote_in_string() {
-        let stmts = split_sql_statements("INSERT INTO t VALUES ('it''s;here')");
+    fn test_split_and_strip_sql_escaped_quote_in_string() {
+        let stmts =
+            split_and_strip_sql("INSERT INTO t VALUES ('it''s;here')");
         assert_eq!(stmts.len(), 1);
         assert_eq!(stmts[0], "INSERT INTO t VALUES ('it''s;here')");
     }
 
     #[test]
-    fn test_split_sql_multiple_strings_with_semicolons() {
-        let stmts = split_sql_statements("INSERT INTO t VALUES (';', ';')");
+    fn test_split_and_strip_sql_multiple_strings_with_semicolons() {
+        let stmts =
+            split_and_strip_sql("INSERT INTO t VALUES (';', ';')");
         assert_eq!(stmts.len(), 1);
     }
 
     #[test]
-    fn test_split_sql_trailing_semicolons() {
-        let stmts = split_sql_statements("SELECT 1;  ;  ");
-        assert_eq!(stmts.len(), 1);
-        assert_eq!(stmts[0], "SELECT 1");
-    }
-
-    #[test]
-    fn test_split_sql_empty_input() {
-        let stmts = split_sql_statements("");
-        assert_eq!(stmts.len(), 0);
-    }
-
-    #[test]
-    fn test_split_sql_no_semicolons() {
-        let stmts = split_sql_statements("SELECT 1");
+    fn test_split_and_strip_sql_trailing_semicolons() {
+        let stmts = split_and_strip_sql("SELECT 1;  ;  ");
         assert_eq!(stmts.len(), 1);
         assert_eq!(stmts[0], "SELECT 1");
     }
 
     #[test]
-    fn test_split_sql_semicolons_only() {
-        let stmts = split_sql_statements(";;;");
+    fn test_split_and_strip_sql_empty_input() {
+        let stmts = split_and_strip_sql("");
         assert_eq!(stmts.len(), 0);
     }
 
     #[test]
-    fn test_split_sql_string_at_end() {
-        let stmts = split_sql_statements("SELECT 'foo'");
+    fn test_split_and_strip_sql_no_semicolons() {
+        let stmts = split_and_strip_sql("SELECT 1");
+        assert_eq!(stmts.len(), 1);
+        assert_eq!(stmts[0], "SELECT 1");
+    }
+
+    #[test]
+    fn test_split_and_strip_sql_semicolons_only() {
+        let stmts = split_and_strip_sql(";;;");
+        assert_eq!(stmts.len(), 0);
+    }
+
+    #[test]
+    fn test_split_and_strip_sql_string_at_end() {
+        let stmts = split_and_strip_sql("SELECT 'foo'");
         assert_eq!(stmts.len(), 1);
         assert_eq!(stmts[0], "SELECT 'foo'");
     }
 
     #[test]
-    fn test_split_sql_mixed_real_split_and_string_semicolon() {
-        let stmts = split_sql_statements("SELECT ';'; CREATE TABLE t (id INT)");
+    fn test_split_and_strip_sql_mixed_real_split_and_string_semicolon() {
+        let stmts =
+            split_and_strip_sql("SELECT ';'; CREATE TABLE t (id INT)");
         assert_eq!(stmts.len(), 2);
         assert_eq!(stmts[0], "SELECT ';'");
         assert_eq!(stmts[1], "CREATE TABLE t (id INT)");
     }
 
     #[test]
-    fn test_split_sql_default_value_with_semicolon() {
-        let stmts = split_sql_statements(
+    fn test_split_and_strip_sql_default_value_with_semicolon() {
+        let stmts = split_and_strip_sql(
             "ALTER TABLE t ADD COLUMN foo TEXT DEFAULT ';'",
         );
         assert_eq!(stmts.len(), 1);
     }
 
     #[test]
-    fn test_split_sql_multiline_statement() {
-        let stmts = split_sql_statements(
+    fn test_split_and_strip_sql_multiline_statement() {
+        let stmts = split_and_strip_sql(
             "CREATE INDEX foo\n    ON bar (col1)\n    STORING (col2)",
         );
         assert_eq!(stmts.len(), 1);
     }
 
     #[test]
-    fn test_split_sql_newline_inside_string() {
+    fn test_split_and_strip_sql_newline_inside_string() {
         let stmts =
-            split_sql_statements("INSERT INTO t VALUES ('line1\nline2')");
+            split_and_strip_sql("INSERT INTO t VALUES ('line1\nline2')");
         assert_eq!(stmts.len(), 1);
     }
 
     #[test]
-    fn test_split_sql_multiline_with_split() {
-        let stmts = split_sql_statements(
+    fn test_split_and_strip_sql_multiline_with_split() {
+        let stmts = split_and_strip_sql(
             "CREATE TABLE t (\n  id INT\n);\nCREATE INDEX i ON t (id)",
         );
         assert_eq!(stmts.len(), 2);
+    }
+
+    // --- Comment stripping tests ---
+
+    #[test]
+    fn test_split_and_strip_sql_line_comment_stripped() {
+        let stmts = split_and_strip_sql(
+            "SELECT 1; -- this is a comment\nSELECT 2",
+        );
+        assert_eq!(stmts.len(), 2);
+        assert_eq!(stmts[0], "SELECT 1");
+        assert_eq!(stmts[1], "SELECT 2");
+    }
+
+    #[test]
+    fn test_split_and_strip_sql_block_comment_stripped() {
+        let stmts =
+            split_and_strip_sql("SELECT /* a comment */ 1; SELECT 2");
+        assert_eq!(stmts.len(), 2);
+        assert_eq!(stmts[0], "SELECT  1");
+        assert_eq!(stmts[1], "SELECT 2");
+    }
+
+    #[test]
+    fn test_split_and_strip_sql_line_comment_in_string_preserved() {
+        // `--` inside a string literal must NOT be treated as a comment
+        let stmts =
+            split_and_strip_sql("INSERT INTO t VALUES ('hello -- world')");
+        assert_eq!(stmts.len(), 1);
+        assert_eq!(stmts[0], "INSERT INTO t VALUES ('hello -- world')");
+    }
+
+    #[test]
+    fn test_split_and_strip_sql_block_comment_in_string_preserved() {
+        // `/* */` inside a string literal must NOT be treated as a comment
+        let stmts =
+            split_and_strip_sql("INSERT INTO t VALUES ('a /* b */ c')");
+        assert_eq!(stmts.len(), 1);
+        assert_eq!(stmts[0], "INSERT INTO t VALUES ('a /* b */ c')");
+    }
+
+    #[test]
+    fn test_split_and_strip_sql_semicolon_in_line_comment() {
+        // `;` inside a line comment must NOT split
+        let stmts = split_and_strip_sql(
+            "SELECT 1 -- semicolon; here\n; SELECT 2",
+        );
+        assert_eq!(stmts.len(), 2);
+        assert_eq!(stmts[0], "SELECT 1");
+        assert_eq!(stmts[1], "SELECT 2");
+    }
+
+    #[test]
+    fn test_split_and_strip_sql_semicolon_in_block_comment() {
+        // `;` inside a block comment must NOT split
+        let stmts =
+            split_and_strip_sql("SELECT 1 /* ; */ ; SELECT 2");
+        assert_eq!(stmts.len(), 2);
+        assert_eq!(stmts[0], "SELECT 1");
+        assert_eq!(stmts[1], "SELECT 2");
+    }
+
+    #[test]
+    fn test_split_and_strip_sql_escaped_quotes_with_comment_chars() {
+        // Escaped quotes followed by comment-like characters
+        let stmts = split_and_strip_sql(
+            "INSERT INTO t VALUES ('it''s -- tricky')",
+        );
+        assert_eq!(stmts.len(), 1);
+        assert_eq!(stmts[0], "INSERT INTO t VALUES ('it''s -- tricky')");
+    }
+
+    // ---------------------------------------------------------------
+    // Proptest for split_and_strip_sql
+    // ---------------------------------------------------------------
+
+    /// Fragment types that can appear in SQL input.
+    #[derive(Debug, Clone)]
+    enum SqlFragment {
+        /// Plain identifier-like text (letters, digits, underscores, spaces)
+        Text(String),
+        /// A SQL string literal: '...' with internal ' escaped to ''
+        StringLiteral(String),
+        /// A line comment: -- ...\n
+        LineComment(String),
+        /// A block comment: /* ... */
+        BlockComment(String),
+        /// A bare semicolon
+        Semicolon,
+        /// Whitespace (spaces and newlines)
+        Whitespace(String),
+    }
+
+    impl SqlFragment {
+        /// Render the fragment to its SQL text representation.
+        fn to_sql(&self) -> String {
+            match self {
+                SqlFragment::Text(t) => t.clone(),
+                SqlFragment::StringLiteral(s) => {
+                    // Escape internal single-quotes by doubling them
+                    format!("'{}'", s.replace('\'', "''"))
+                }
+                SqlFragment::LineComment(c) => format!("--{}\n", c),
+                SqlFragment::BlockComment(c) => format!("/*{}*/", c),
+                SqlFragment::Semicolon => ";".to_string(),
+                SqlFragment::Whitespace(w) => w.clone(),
+            }
+        }
+    }
+
+    /// Build a proptest strategy that generates a Vec of SqlFragments.
+    fn sql_fragment_strategy(
+    ) -> impl proptest::strategy::Strategy<Value = Vec<SqlFragment>> {
+        use proptest::prelude::*;
+
+        // Sub-strategies for each fragment variant
+        let text_strategy =
+            "[a-zA-Z0-9_ ]{1,20}".prop_map(SqlFragment::Text);
+
+        // String literal contents: arbitrary printable ASCII that avoids
+        // producing control chars. We allow ;  --  /*  */ inside to
+        // stress the parser.
+        let string_literal_strategy = "[a-zA-Z0-9 ;\\-\\*/!@#$]{0,30}"
+            .prop_map(SqlFragment::StringLiteral);
+
+        // Line comment body: no newlines (the fragment adds the trailing \n)
+        let line_comment_strategy =
+            "[a-zA-Z0-9 ;']{0,20}".prop_map(SqlFragment::LineComment);
+
+        // Block comment body: must not contain */ (we filter it out)
+        let block_comment_strategy = "[a-zA-Z0-9 ;'\\-]{0,20}"
+            .prop_filter("block comment body must not contain */", |s| {
+                !s.contains("*/")
+            })
+            .prop_map(SqlFragment::BlockComment);
+
+        let semicolon_strategy = Just(SqlFragment::Semicolon);
+
+        let whitespace_strategy = proptest::sample::select(vec![
+            " ".to_string(),
+            "  ".to_string(),
+            "\n".to_string(),
+            " \n ".to_string(),
+        ])
+        .prop_map(SqlFragment::Whitespace);
+
+        // Combine all variants with roughly equal weight
+        let fragment = prop_oneof![
+            2 => text_strategy,
+            2 => string_literal_strategy,
+            1 => line_comment_strategy,
+            1 => block_comment_strategy,
+            2 => semicolon_strategy,
+            1 => whitespace_strategy,
+        ];
+
+        proptest::collection::vec(fragment, 1..=15)
+    }
+
+    proptest::proptest! {
+        #[test]
+        fn proptest_split_and_strip_sql(
+            fragments in sql_fragment_strategy()
+        ) {
+            // Build the input string from fragments
+            let input: String =
+                fragments.iter().map(|f| f.to_sql()).collect();
+
+            let results = split_and_strip_sql(&input);
+
+            // Property 1: never panics (implicit)
+
+            // Property 2: all outputs are non-empty and trimmed
+            for stmt in &results {
+                proptest::prop_assert!(
+                    !stmt.is_empty(),
+                    "output statement must not be empty"
+                );
+                proptest::prop_assert_eq!(
+                    stmt.as_str(),
+                    stmt.trim(),
+                    "output statement must be trimmed"
+                );
+            }
+
+            // Property 3: idempotency — re-parsing any single output
+            // statement should yield exactly itself, since outputs
+            // contain no top-level semicolons or comments.
+            for stmt in &results {
+                let reparsed = split_and_strip_sql(stmt);
+                proptest::prop_assert_eq!(
+                    reparsed.len(),
+                    1,
+                    "re-parsing '{}' should yield exactly 1 statement, got {}",
+                    stmt,
+                    reparsed.len()
+                );
+                proptest::prop_assert_eq!(
+                    &reparsed[0],
+                    stmt,
+                    "re-parsing should be idempotent"
+                );
+            }
+
+            // Property 4: statement count is bounded by semicolons + 1
+            let semicolon_count = fragments
+                .iter()
+                .filter(|f| matches!(f, SqlFragment::Semicolon))
+                .count();
+            proptest::prop_assert!(
+                results.len() <= semicolon_count + 1,
+                "got {} statements but only {} semicolons",
+                results.len(),
+                semicolon_count
+            );
+
+            // Property 5: string literals outside of comments are
+            // preserved verbatim in the correct output statement.
+            //
+            // Walk fragments to determine which "logical statement"
+            // (delimited by Semicolon fragments) each StringLiteral
+            // lands in, then map logical indices to output indices
+            // (skipping empty logical statements that produce no
+            // output).
+            {
+                let mut logical_idx = 0usize;
+                let mut logical_has_content = vec![false];
+                let mut literal_placements: Vec<(usize, String)> = Vec::new();
+
+                for frag in &fragments {
+                    match frag {
+                        SqlFragment::Semicolon => {
+                            logical_idx += 1;
+                            if logical_has_content.len() <= logical_idx {
+                                logical_has_content.push(false);
+                            }
+                        }
+                        SqlFragment::Text(t) => {
+                            if !t.trim().is_empty() {
+                                logical_has_content[logical_idx] = true;
+                            }
+                        }
+                        SqlFragment::StringLiteral(_) => {
+                            logical_has_content[logical_idx] = true;
+                            literal_placements
+                                .push((logical_idx, frag.to_sql()));
+                        }
+                        SqlFragment::Whitespace(_)
+                        | SqlFragment::LineComment(_)
+                        | SqlFragment::BlockComment(_) => {}
+                    }
+                }
+
+                // Map logical statement index → output index,
+                // skipping logical statements with no content.
+                let logical_to_output: Vec<Option<usize>> = {
+                    let mut out_idx = 0usize;
+                    logical_has_content
+                        .iter()
+                        .map(|has| {
+                            if *has {
+                                let idx = out_idx;
+                                out_idx += 1;
+                                Some(idx)
+                            } else {
+                                None
+                            }
+                        })
+                        .collect()
+                };
+
+                for (li, rendered) in &literal_placements {
+                    if let Some(oi) = logical_to_output[*li] {
+                        proptest::prop_assert!(
+                            results[oi].contains(rendered.as_str()),
+                            "string literal {} should appear in output \
+                             statement {}: '{}'",
+                            rendered,
+                            oi,
+                            results[oi]
+                        );
+                    }
+                }
+            }
+        }
     }
 }
