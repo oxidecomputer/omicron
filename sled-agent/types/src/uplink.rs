@@ -2,8 +2,6 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! Version `BGP_v6` of the Sled Agent API.
+//! Uplink types for sled-agent.
 
-pub mod early_networking;
-pub mod rack_init;
-pub mod uplink;
+pub use sled_agent_types_versions::latest::uplink::*;

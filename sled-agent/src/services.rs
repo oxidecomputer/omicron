@@ -81,8 +81,8 @@ use omicron_common::address::{
 use omicron_common::address::{Ipv6Subnet, NEXUS_TECHPORT_EXTERNAL_PORT};
 use omicron_common::api::external::Generation;
 use omicron_common::api::internal::shared::{
-    ExternalIpConfig, ExternalIpConfigBuilder, ExternalIps, HostPortConfig,
-    PrivateIpConfig, RackNetworkConfig, SledIdentifiers,
+    ExternalIpConfig, ExternalIpConfigBuilder, ExternalIps, PrivateIpConfig,
+    RackNetworkConfig, SledIdentifiers,
 };
 use omicron_common::backoff::{
     BackoffError, retry_notify, retry_policy_internal_service_aggressive,
@@ -100,6 +100,7 @@ use sled_agent_types::resolvable_files::{
     MupdateOverrideReadError, PreparedOmicronZone,
 };
 use sled_agent_types::sled::SWITCH_ZONE_BASEBOARD_FILE;
+use sled_agent_types::uplink::HostPortConfig;
 use sled_hardware::DendriteAsic;
 use sled_hardware::SledMode;
 use sled_hardware::is_oxide_sled;

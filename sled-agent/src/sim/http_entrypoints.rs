@@ -30,7 +30,7 @@ use omicron_common::api::internal::shared::ExternalIpGatewayMap;
 use omicron_common::api::internal::shared::SledIdentifiers;
 use omicron_common::api::internal::shared::VirtualNetworkInterfaceHost;
 use omicron_common::api::internal::shared::{
-    ResolvedVpcRouteSet, ResolvedVpcRouteState, SwitchPorts,
+    ResolvedVpcRouteSet, ResolvedVpcRouteState,
 };
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::ZpoolUuid;
@@ -76,6 +76,7 @@ use sled_agent_types::support_bundle::{
 use sled_agent_types::trust_quorum::{
     ProxyCommitRequest, ProxyPrepareAndCommitRequest, TrustQuorumNetworkConfig,
 };
+use sled_agent_types::uplink::SwitchPorts;
 use sled_agent_types::zone_bundle::{
     BundleUtilization, CleanupContext, CleanupContextUpdate, CleanupCount,
     ZoneBundleFilter, ZoneBundleId, ZoneBundleMetadata, ZonePathParam,
