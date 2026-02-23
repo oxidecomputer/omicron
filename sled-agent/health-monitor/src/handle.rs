@@ -10,6 +10,8 @@ use slog::Logger;
 use slog::info;
 use tokio::sync::watch;
 
+// TODO-K: Remove all of this and make the call in-line during inventory
+// collection?
 #[derive(Debug, Clone)]
 pub struct HealthMonitorHandle {
     // Return a String instead of a custom error type as inventory requires

@@ -174,7 +174,10 @@ impl SledAgent {
                 .await
                 .start(&log, &config.dropshot);
 
-        let health_monitor = HealthMonitorHandle::stub();
+        // TODO-K: Uncomment and remove
+        // let health_monitor = HealthMonitorHandle::stub();
+        let health_monitor =
+            crate::long_running_tasks::spawn_health_monitor_tasks(&log).await;
 
         Arc::new(SledAgent {
             id,
@@ -895,7 +898,8 @@ impl SledAgent {
         let datasets_config =
             storage.datasets_config_list().unwrap_or_default();
         let zones_config = self.fake_zones.lock().unwrap().clone();
-        let health_monitor = self.health_monitor.to_inventory();
+        let smf_services_in_maintenance =
+            self.health_monitor.to_inventory().smf_services_in_maintenance;
 
         let sled_config = OmicronSledConfig {
             generation: zones_config.generation,
@@ -995,7 +999,7 @@ impl SledAgent {
             // TODO: simulate the file source resolver with greater fidelity
             file_source_resolver: OmicronFileSourceResolverInventory::new_fake(
             ),
-            health_monitor,
+            smf_services_in_maintenance,
             reference_measurements,
         })
     }

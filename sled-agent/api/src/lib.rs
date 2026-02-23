@@ -20,7 +20,7 @@ use omicron_common::api::internal::{
     },
 };
 use sled_agent_types_versions::{
-    latest, v1, v4, v6, v7, v9, v10, v11, v12, v14, v17,
+    latest, v1, v4, v6, v7, v9, v10, v11, v12, v14, v16, v17,
 };
 use sled_diagnostics::SledDiagnosticsQueryOutput;
 
@@ -36,6 +36,7 @@ api_versions!([
     // |  example for the next person.
     // v
     // (next_int, IDENT),
+    (22, REMOVE_HEALTH_MONITOR_KEEP_CHECKS),
     (20, BGP_V6),
     (19, ADD_ROT_ATTESTATION),
     (18, ADD_ATTACHED_SUBNETS),
@@ -834,11 +835,26 @@ pub trait SledAgentApi {
     #[endpoint {
         method = GET,
         path = "/inventory",
-        versions = VERSION_MEASUREMENT_PROPER_INVENTORY..,
+        versions = VERSION_REMOVE_HEALTH_MONITOR_KEEP_CHECKS..,
     }]
     async fn inventory(
         rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<latest::inventory::Inventory>, HttpError>;
+
+    /// Fetch basic information about this sled
+    #[endpoint {
+        operation_id = "inventory",
+        method = GET,
+        path = "/inventory",
+        versions = VERSION_MEASUREMENT_PROPER_INVENTORY..VERSION_REMOVE_HEALTH_MONITOR_KEEP_CHECKS,
+    }]
+    async fn inventory_v16(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<v16::inventory::Inventory>, HttpError> {
+        Self::inventory(rqctx).await.map(|HttpResponseOk(inv)| {
+            HttpResponseOk(v16::inventory::Inventory::from(inv))
+        })
+    }
 
     /// Fetch basic information about this sled
     #[endpoint {
@@ -850,7 +866,7 @@ pub trait SledAgentApi {
     async fn inventory_v14(
         rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<v14::inventory::Inventory>, HttpError> {
-        let HttpResponseOk(inventory) = Self::inventory(rqctx).await?;
+        let HttpResponseOk(inventory) = Self::inventory_v16(rqctx).await?;
         inventory.try_into().map_err(HttpError::from).map(HttpResponseOk)
     }
 

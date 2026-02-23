@@ -1756,6 +1756,7 @@ mod test {
     use super::*;
     use crate::rack_setup::plan::service::{Plan as ServicePlan, SledInfo};
     use iddqd::IdOrdMap;
+    use illumos_utils::svcs::SvcsInMaintenanceResult;
     use nexus_reconfigurator_blippy::{Blippy, BlippyReportSortKey};
     use omicron_common::{
         address::{Ipv6Subnet, SLED_PREFIX, get_sled_address},
@@ -1764,9 +1765,9 @@ mod test {
     };
     use omicron_uuid_kinds::SledUuid;
     use sled_agent_types::inventory::{
-        Baseboard, ConfigReconcilerInventoryStatus, HealthMonitorInventory,
-        Inventory, InventoryDisk, OmicronFileSourceResolverInventory,
-        OmicronZoneType, SledCpuFamily, SledRole,
+        Baseboard, ConfigReconcilerInventoryStatus, Inventory, InventoryDisk,
+        OmicronFileSourceResolverInventory, OmicronZoneType, SledCpuFamily,
+        SledRole,
     };
     use sled_agent_types::rack_init::rack_initialize_request_test_config;
 
@@ -1812,7 +1813,7 @@ mod test {
                 last_reconciliation: None,
                 file_source_resolver:
                     OmicronFileSourceResolverInventory::new_fake(),
-                health_monitor: HealthMonitorInventory::new(),
+                smf_services_in_maintenance: Ok(SvcsInMaintenanceResult::new()),
                 reference_measurements: IdOrdMap::new(),
             },
             true,
