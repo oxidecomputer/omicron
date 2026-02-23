@@ -36,6 +36,7 @@ api_versions!([
     // |  example for the next person.
     // v
     // (next_int, IDENT),
+    (21, REMOVE_DISK_PUT),
     (20, BGP_V6),
     (19, ADD_ROT_ATTESTATION),
     (18, ADD_ATTACHED_SUBNETS),
@@ -595,6 +596,7 @@ pub trait SledAgentApi {
     #[endpoint {
         method = PUT,
         path = "/disks/{disk_id}",
+        versions = ..VERSION_REMOVE_DISK_PUT,
     }]
     async fn disk_put(
         rqctx: RequestContext<Self::Context>,
