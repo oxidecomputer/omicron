@@ -762,7 +762,7 @@ dependencies = [
 [[package]]
 name = "bhyve_api"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=bc121ef55741656ce118b02ceeda949b9261f49f#bc121ef55741656ce118b02ceeda949b9261f49f"
+source = "git+https://github.com/oxidecomputer/propolis?rev=36f20be9bb4c3b362029237f5feb6377c982395f#36f20be9bb4c3b362029237f5feb6377c982395f"
 dependencies = [
  "bhyve_api_sys",
  "libc",
@@ -772,7 +772,7 @@ dependencies = [
 [[package]]
 name = "bhyve_api_sys"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=bc121ef55741656ce118b02ceeda949b9261f49f#bc121ef55741656ce118b02ceeda949b9261f49f"
+source = "git+https://github.com/oxidecomputer/propolis?rev=36f20be9bb4c3b362029237f5feb6377c982395f#36f20be9bb4c3b362029237f5feb6377c982395f"
 dependencies = [
  "libc",
  "strum 0.26.3",
@@ -5297,6 +5297,7 @@ dependencies = [
  "iddqd",
  "ipnetwork",
  "itertools 0.14.0",
+ "key-manager-types",
  "libc",
  "macaddr",
  "nix 0.30.1",
@@ -5886,6 +5887,7 @@ version = "0.1.0"
 dependencies = [
  "async-trait",
  "hkdf",
+ "key-manager-types",
  "omicron-common",
  "omicron-workspace-hack",
  "secrecy 0.10.3",
@@ -5894,6 +5896,14 @@ dependencies = [
  "thiserror 2.0.18",
  "tokio",
  "zeroize",
+]
+
+[[package]]
+name = "key-manager-types"
+version = "0.1.0"
+dependencies = [
+ "omicron-workspace-hack",
+ "secrecy 0.10.3",
 ]
 
 [[package]]
@@ -7107,6 +7117,7 @@ dependencies = [
  "ipnetwork",
  "itertools 0.14.0",
  "nexus-types",
+ "nexus-types-versions",
  "omicron-common",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
@@ -7114,12 +7125,10 @@ dependencies = [
  "oximeter-types 0.1.0",
  "oxnet",
  "oxql-types",
- "proptest",
  "schemars 0.8.22",
  "scim2-rs",
  "serde",
  "serde_json",
- "test-strategy",
  "trust-quorum-types",
  "tufaceous-artifact",
  "uuid",
@@ -7198,11 +7207,13 @@ dependencies = [
  "dropshot",
  "http",
  "nexus-types",
+ "nexus-types-versions",
  "omicron-common",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
  "schemars 0.8.22",
  "serde",
+ "sled-hardware-types",
  "trust-quorum-types",
  "uuid",
 ]
@@ -7722,6 +7733,7 @@ dependencies = [
  "itertools 0.14.0",
  "newtype-uuid",
  "newtype_derive",
+ "nexus-types-versions",
  "omicron-common",
  "omicron-passwords",
  "omicron-test-utils",
@@ -7758,6 +7770,39 @@ dependencies = [
  "tufaceous-artifact",
  "unicode-width 0.1.14",
  "update-engine",
+ "url",
+ "uuid",
+]
+
+[[package]]
+name = "nexus-types-versions"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "api_identity",
+ "base64 0.22.1",
+ "chrono",
+ "daft",
+ "dropshot",
+ "http",
+ "omicron-common",
+ "omicron-passwords",
+ "omicron-uuid-kinds",
+ "omicron-workspace-hack",
+ "openssl",
+ "oxnet",
+ "oxql-types",
+ "parse-display",
+ "regex",
+ "schemars 0.8.22",
+ "semver 1.0.27",
+ "serde",
+ "serde_json",
+ "sled-hardware-types",
+ "slog-error-chain",
+ "strum 0.27.2",
+ "tough",
+ "tufaceous-artifact",
  "url",
  "uuid",
 ]
@@ -8592,6 +8637,7 @@ dependencies = [
  "nexus-test-utils",
  "nexus-test-utils-macros",
  "nexus-types",
+ "nexus-types-versions",
  "ntp-admin-client",
  "num-integer",
  "omicron-cockroach-metrics",
@@ -8623,7 +8669,7 @@ dependencies = [
  "pq-sys",
  "pretty_assertions",
  "progenitor-client 0.10.0",
- "propolis-client 0.1.0 (git+https://github.com/oxidecomputer/propolis?rev=bc121ef55741656ce118b02ceeda949b9261f49f)",
+ "propolis-client 0.1.0 (git+https://github.com/oxidecomputer/propolis?rev=36f20be9bb4c3b362029237f5feb6377c982395f)",
  "qorb",
  "rand 0.9.2",
  "range-requests",
@@ -9066,7 +9112,7 @@ dependencies = [
  "oxnet",
  "pretty_assertions",
  "progenitor 0.10.0",
- "propolis-client 0.1.0 (git+https://github.com/oxidecomputer/propolis?rev=bc121ef55741656ce118b02ceeda949b9261f49f)",
+ "propolis-client 0.1.0 (git+https://github.com/oxidecomputer/propolis?rev=36f20be9bb4c3b362029237f5feb6377c982395f)",
  "propolis-mock-server",
  "propolis_api_types",
  "rand 0.9.2",
@@ -11160,7 +11206,7 @@ dependencies = [
 [[package]]
 name = "propolis-client"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=bc121ef55741656ce118b02ceeda949b9261f49f#bc121ef55741656ce118b02ceeda949b9261f49f"
+source = "git+https://github.com/oxidecomputer/propolis?rev=36f20be9bb4c3b362029237f5feb6377c982395f#36f20be9bb4c3b362029237f5feb6377c982395f"
 dependencies = [
  "async-trait",
  "base64 0.21.7",
@@ -11205,7 +11251,7 @@ dependencies = [
 [[package]]
 name = "propolis-mock-server"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=bc121ef55741656ce118b02ceeda949b9261f49f#bc121ef55741656ce118b02ceeda949b9261f49f"
+source = "git+https://github.com/oxidecomputer/propolis?rev=36f20be9bb4c3b362029237f5feb6377c982395f#36f20be9bb4c3b362029237f5feb6377c982395f"
 dependencies = [
  "anyhow",
  "atty",
@@ -11249,7 +11295,7 @@ dependencies = [
 [[package]]
 name = "propolis_api_types"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=bc121ef55741656ce118b02ceeda949b9261f49f#bc121ef55741656ce118b02ceeda949b9261f49f"
+source = "git+https://github.com/oxidecomputer/propolis?rev=36f20be9bb4c3b362029237f5feb6377c982395f#36f20be9bb4c3b362029237f5feb6377c982395f"
 dependencies = [
  "crucible-client-types",
  "propolis_types",
@@ -11262,7 +11308,7 @@ dependencies = [
 [[package]]
 name = "propolis_types"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=bc121ef55741656ce118b02ceeda949b9261f49f#bc121ef55741656ce118b02ceeda949b9261f49f"
+source = "git+https://github.com/oxidecomputer/propolis?rev=36f20be9bb4c3b362029237f5feb6377c982395f#36f20be9bb4c3b362029237f5feb6377c982395f"
 dependencies = [
  "schemars 0.8.22",
  "serde",
@@ -13237,7 +13283,7 @@ dependencies = [
  "omicron-workspace-hack",
  "oxnet",
  "progenitor 0.10.0",
- "propolis-client 0.1.0 (git+https://github.com/oxidecomputer/propolis?rev=bc121ef55741656ce118b02ceeda949b9261f49f)",
+ "propolis-client 0.1.0 (git+https://github.com/oxidecomputer/propolis?rev=36f20be9bb4c3b362029237f5feb6377c982395f)",
  "regress",
  "reqwest",
  "schemars 0.8.22",
@@ -13275,6 +13321,7 @@ dependencies = [
  "illumos-utils",
  "installinator-common",
  "key-manager",
+ "key-manager-types",
  "ntp-admin-client",
  "omicron-common",
  "omicron-test-utils",
@@ -13285,6 +13332,7 @@ dependencies = [
  "regex",
  "schemars 0.8.22",
  "scopeguard",
+ "secrecy 0.10.3",
  "serde",
  "serde_json",
  "sha2",
@@ -13300,6 +13348,7 @@ dependencies = [
  "test-strategy",
  "thiserror 2.0.18",
  "tokio",
+ "trust-quorum-types",
  "tufaceous-artifact",
  "xshell",
  "zone 0.3.1",
@@ -13878,7 +13927,7 @@ dependencies = [
 [[package]]
 name = "sprockets-tls"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/sprockets.git?rev=8ba93f6e785e11175059b3303bfd7e8b52ad12f8#8ba93f6e785e11175059b3303bfd7e8b52ad12f8"
+source = "git+https://github.com/oxidecomputer/sprockets.git?rev=d2b68e4f47e3c22bce0455aeb4cfb2e61ad229ba#d2b68e4f47e3c22bce0455aeb4cfb2e61ad229ba"
 dependencies = [
  "anyhow",
  "attest-data 0.5.0 (git+https://github.com/oxidecomputer/dice-util?rev=6e0ef48f72ff85ba50fc8286c8e89dc5f9c822dd)",
@@ -13911,7 +13960,7 @@ dependencies = [
 [[package]]
 name = "sprockets-tls-test-utils"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/sprockets.git?rev=8ba93f6e785e11175059b3303bfd7e8b52ad12f8#8ba93f6e785e11175059b3303bfd7e8b52ad12f8"
+source = "git+https://github.com/oxidecomputer/sprockets.git?rev=d2b68e4f47e3c22bce0455aeb4cfb2e61ad229ba#d2b68e4f47e3c22bce0455aeb4cfb2e61ad229ba"
 dependencies = [
  "camino",
  "pki-playground",

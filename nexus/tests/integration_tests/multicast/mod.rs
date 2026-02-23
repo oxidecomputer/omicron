@@ -31,14 +31,15 @@ use nexus_test_utils::resource_helpers::{
     link_ip_pool, object_create, object_delete, object_get,
 };
 use nexus_types::deployment::SledFilter;
-use nexus_types::external_api::params::{
-    InstanceCreate, InstanceMulticastGroupJoin,
-    InstanceNetworkInterfaceAttachment, IpPoolCreate, MulticastGroupIdentifier,
-    MulticastGroupJoinSpec,
+use nexus_types::external_api::instance::{
+    InstanceCreate, InstanceNetworkInterfaceAttachment,
 };
-use nexus_types::external_api::shared::{IpRange, Ipv4Range};
-use nexus_types::external_api::views::{
-    IpPool, IpPoolRange, IpVersion, MulticastGroup, MulticastGroupMember,
+use nexus_types::external_api::ip_pool::{
+    IpPool, IpPoolCreate, IpPoolRange, IpRange, IpVersion, Ipv4Range,
+};
+use nexus_types::external_api::multicast::{
+    InstanceMulticastGroupJoin, MulticastGroup, MulticastGroupIdentifier,
+    MulticastGroupJoinSpec, MulticastGroupMember,
 };
 use nexus_types::identity::{Asset, Resource};
 use omicron_common::api::external::{
@@ -178,7 +179,7 @@ pub(crate) async fn create_multicast_ip_pool_v6(
     client: &ClientTestContext,
     pool_name: &str,
 ) -> IpPool {
-    use nexus_types::external_api::shared::Ipv6Range;
+    use nexus_types::external_api::ip_pool::Ipv6Range;
     use std::net::Ipv6Addr;
 
     let pool_params = IpPoolCreate::new_multicast(

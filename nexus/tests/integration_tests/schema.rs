@@ -1430,7 +1430,7 @@ fn at_current_101_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
             use async_bb8_diesel::AsyncRunQueryDsl;
             use nexus_db_model::Instance;
             use nexus_db_schema::schema::instance::dsl;
-            use nexus_types::external_api::params;
+            use nexus_types::external_api::instance;
             use omicron_common::api::external::IdentityMetadataCreateParams;
             use omicron_uuid_kinds::InstanceUuid;
 
@@ -1438,7 +1438,7 @@ fn at_current_101_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
                 .values(Instance::new(
                     InstanceUuid::new_v4(),
                     Uuid::new_v4(),
-                    &params::InstanceCreate {
+                    &instance::InstanceCreate {
                         identity: IdentityMetadataCreateParams {
                             name: "hello".parse().unwrap(),
                             description: "hello".to_string(),
@@ -1449,7 +1449,7 @@ fn at_current_101_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
                         user_data: vec![],
                         ssh_public_keys: None,
                         network_interfaces:
-                            params::InstanceNetworkInterfaceAttachment::DefaultIpv4,
+                            instance::InstanceNetworkInterfaceAttachment::DefaultIpv4,
                         external_ips: vec![],
                         boot_disk: None,
                         cpu_platform: None,

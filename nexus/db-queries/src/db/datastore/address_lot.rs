@@ -20,7 +20,7 @@ use nexus_db_errors::ErrorHandler;
 use nexus_db_errors::OptionalError;
 use nexus_db_errors::TransactionError;
 use nexus_db_errors::public_error_from_diesel;
-use nexus_types::external_api::params;
+use nexus_types::external_api::networking;
 use nexus_types::identity::Resource;
 use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::{
@@ -41,7 +41,7 @@ impl DataStore {
     pub async fn address_lot_create(
         &self,
         opctx: &OpContext,
-        params: &params::AddressLotCreate,
+        params: &networking::AddressLotCreate,
     ) -> CreateResult<AddressLotCreateResult> {
         use nexus_db_schema::schema::address_lot::dsl as lot_dsl;
         use nexus_db_schema::schema::address_lot_block::dsl as block_dsl;

@@ -925,10 +925,7 @@ mod test {
             }
 
             if in_block_comment {
-                if bytes[i] == b'*'
-                    && i + 1 < len
-                    && bytes[i + 1] == b'/'
-                {
+                if bytes[i] == b'*' && i + 1 < len && bytes[i + 1] == b'/' {
                     in_block_comment = false;
                     i += 2; // skip */
                 } else {
@@ -958,16 +955,10 @@ mod test {
                 in_string = true;
                 current.push('\'');
                 i += 1;
-            } else if bytes[i] == b'-'
-                && i + 1 < len
-                && bytes[i + 1] == b'-'
-            {
+            } else if bytes[i] == b'-' && i + 1 < len && bytes[i + 1] == b'-' {
                 in_line_comment = true;
                 i += 2; // skip --
-            } else if bytes[i] == b'/'
-                && i + 1 < len
-                && bytes[i + 1] == b'*'
-            {
+            } else if bytes[i] == b'/' && i + 1 < len && bytes[i + 1] == b'*' {
                 in_block_comment = true;
                 i += 2; // skip /*
             } else if bytes[i] == b';' {
@@ -1016,9 +1007,8 @@ mod test {
 
             statement_count += 1;
 
-            let might_have_async_backfill =
-                RE_CREATE_INDEX.is_match(&trimmed)
-                    || RE_ALTER_TABLE.is_match(&trimmed);
+            let might_have_async_backfill = RE_CREATE_INDEX.is_match(&trimmed)
+                || RE_ALTER_TABLE.is_match(&trimmed);
 
             if !might_have_async_backfill {
                 changes.push(SchemaChangeInfo::OtherDdl);
@@ -2092,16 +2082,14 @@ mod test {
 
     #[test]
     fn test_split_and_strip_sql_escaped_quote_in_string() {
-        let stmts =
-            split_and_strip_sql("INSERT INTO t VALUES ('it''s;here')");
+        let stmts = split_and_strip_sql("INSERT INTO t VALUES ('it''s;here')");
         assert_eq!(stmts.len(), 1);
         assert_eq!(stmts[0], "INSERT INTO t VALUES ('it''s;here')");
     }
 
     #[test]
     fn test_split_and_strip_sql_multiple_strings_with_semicolons() {
-        let stmts =
-            split_and_strip_sql("INSERT INTO t VALUES (';', ';')");
+        let stmts = split_and_strip_sql("INSERT INTO t VALUES (';', ';')");
         assert_eq!(stmts.len(), 1);
     }
 
@@ -2140,8 +2128,7 @@ mod test {
 
     #[test]
     fn test_split_and_strip_sql_mixed_real_split_and_string_semicolon() {
-        let stmts =
-            split_and_strip_sql("SELECT ';'; CREATE TABLE t (id INT)");
+        let stmts = split_and_strip_sql("SELECT ';'; CREATE TABLE t (id INT)");
         assert_eq!(stmts.len(), 2);
         assert_eq!(stmts[0], "SELECT ';'");
         assert_eq!(stmts[1], "CREATE TABLE t (id INT)");
@@ -2182,9 +2169,8 @@ mod test {
 
     #[test]
     fn test_split_and_strip_sql_line_comment_stripped() {
-        let stmts = split_and_strip_sql(
-            "SELECT 1; -- this is a comment\nSELECT 2",
-        );
+        let stmts =
+            split_and_strip_sql("SELECT 1; -- this is a comment\nSELECT 2");
         assert_eq!(stmts.len(), 2);
         assert_eq!(stmts[0], "SELECT 1");
         assert_eq!(stmts[1], "SELECT 2");
@@ -2192,8 +2178,7 @@ mod test {
 
     #[test]
     fn test_split_and_strip_sql_block_comment_stripped() {
-        let stmts =
-            split_and_strip_sql("SELECT /* a comment */ 1; SELECT 2");
+        let stmts = split_and_strip_sql("SELECT /* a comment */ 1; SELECT 2");
         assert_eq!(stmts.len(), 2);
         assert_eq!(stmts[0], "SELECT  1");
         assert_eq!(stmts[1], "SELECT 2");
@@ -2211,8 +2196,7 @@ mod test {
     #[test]
     fn test_split_and_strip_sql_block_comment_in_string_preserved() {
         // `/* */` inside a string literal must NOT be treated as a comment
-        let stmts =
-            split_and_strip_sql("INSERT INTO t VALUES ('a /* b */ c')");
+        let stmts = split_and_strip_sql("INSERT INTO t VALUES ('a /* b */ c')");
         assert_eq!(stmts.len(), 1);
         assert_eq!(stmts[0], "INSERT INTO t VALUES ('a /* b */ c')");
     }
@@ -2220,9 +2204,8 @@ mod test {
     #[test]
     fn test_split_and_strip_sql_semicolon_in_line_comment() {
         // `;` inside a line comment must NOT split
-        let stmts = split_and_strip_sql(
-            "SELECT 1 -- semicolon; here\n; SELECT 2",
-        );
+        let stmts =
+            split_and_strip_sql("SELECT 1 -- semicolon; here\n; SELECT 2");
         assert_eq!(stmts.len(), 2);
         assert_eq!(stmts[0], "SELECT 1");
         assert_eq!(stmts[1], "SELECT 2");
@@ -2231,8 +2214,7 @@ mod test {
     #[test]
     fn test_split_and_strip_sql_semicolon_in_block_comment() {
         // `;` inside a block comment must NOT split
-        let stmts =
-            split_and_strip_sql("SELECT 1 /* ; */ ; SELECT 2");
+        let stmts = split_and_strip_sql("SELECT 1 /* ; */ ; SELECT 2");
         assert_eq!(stmts.len(), 2);
         assert_eq!(stmts[0], "SELECT 1");
         assert_eq!(stmts[1], "SELECT 2");
@@ -2241,9 +2223,8 @@ mod test {
     #[test]
     fn test_split_and_strip_sql_escaped_quotes_with_comment_chars() {
         // Escaped quotes followed by comment-like characters
-        let stmts = split_and_strip_sql(
-            "INSERT INTO t VALUES ('it''s -- tricky')",
-        );
+        let stmts =
+            split_and_strip_sql("INSERT INTO t VALUES ('it''s -- tricky')");
         assert_eq!(stmts.len(), 1);
         assert_eq!(stmts[0], "INSERT INTO t VALUES ('it''s -- tricky')");
     }
@@ -2287,13 +2268,12 @@ mod test {
     }
 
     /// Build a proptest strategy that generates a Vec of SqlFragments.
-    fn sql_fragment_strategy(
-    ) -> impl proptest::strategy::Strategy<Value = Vec<SqlFragment>> {
+    fn sql_fragment_strategy()
+    -> impl proptest::strategy::Strategy<Value = Vec<SqlFragment>> {
         use proptest::prelude::*;
 
         // Sub-strategies for each fragment variant
-        let text_strategy =
-            "[a-zA-Z0-9_ ]{1,20}".prop_map(SqlFragment::Text);
+        let text_strategy = "[a-zA-Z0-9_ ]{1,20}".prop_map(SqlFragment::Text);
 
         // String literal contents: arbitrary printable ASCII that avoids
         // producing control chars. We allow ;  --  /*  */ inside to

@@ -19,8 +19,9 @@ use nexus_test_utils::http_testing::AuthnMode;
 use nexus_test_utils::http_testing::NexusRequest;
 use nexus_test_utils::resource_helpers::create_project;
 use nexus_test_utils_macros::nexus_test;
-use nexus_types::external_api::shared;
-use nexus_types::external_api::views;
+use nexus_types::external_api::policy;
+use nexus_types::external_api::project;
+use nexus_types::external_api::sled;
 use omicron_common::api::external::ObjectIdentity;
 
 type ControlPlaneTestContext =
@@ -74,7 +75,7 @@ trait RoleAssignmentTest {
     fn verify_initial<'a, 'b, 'c, 'd>(
         &'a self,
         client: &'b ClientTestContext,
-        current_policy: &'c shared::Policy<Self::RoleType>,
+        current_policy: &'c policy::Policy<Self::RoleType>,
     ) -> BoxFuture<'d, ()>
     where
         'a: 'd,
@@ -104,8 +105,8 @@ async fn test_role_assignments_fleet(cptestctx: &ControlPlaneTestContext) {
 
     struct FleetRoleAssignmentTest;
     impl RoleAssignmentTest for FleetRoleAssignmentTest {
-        type RoleType = shared::FleetRole;
-        const ROLE: Self::RoleType = shared::FleetRole::Admin;
+        type RoleType = policy::FleetRole;
+        const ROLE: Self::RoleType = policy::FleetRole::Admin;
         const VISIBLE_TO_UNPRIVILEGED: bool = true;
         fn policy_url(&self) -> String {
             String::from("/v1/system/policy")
@@ -114,7 +115,7 @@ async fn test_role_assignments_fleet(cptestctx: &ControlPlaneTestContext) {
         fn verify_initial<'a, 'b, 'c, 'd>(
             &'a self,
             client: &'b ClientTestContext,
-            _current_policy: &'c shared::Policy<Self::RoleType>,
+            _current_policy: &'c policy::Policy<Self::RoleType>,
         ) -> BoxFuture<'d, ()>
         where
             'a: 'd,
@@ -148,7 +149,7 @@ async fn test_role_assignments_fleet(cptestctx: &ControlPlaneTestContext) {
             'b: 'c,
         {
             async {
-                let _: dropshot::ResultsPage<views::Sled> =
+                let _: dropshot::ResultsPage<sled::Sled> =
                     NexusRequest::object_get(client, RESOURCE_URL)
                         .authn_as(AuthnMode::UnprivilegedUser)
                         .execute()
@@ -169,8 +170,8 @@ async fn test_role_assignments_fleet(cptestctx: &ControlPlaneTestContext) {
 async fn test_role_assignments_silo(cptestctx: &ControlPlaneTestContext) {
     struct SiloRoleAssignmentTest;
     impl RoleAssignmentTest for SiloRoleAssignmentTest {
-        type RoleType = shared::SiloRole;
-        const ROLE: Self::RoleType = shared::SiloRole::Admin;
+        type RoleType = policy::SiloRole;
+        const ROLE: Self::RoleType = policy::SiloRole::Admin;
         const VISIBLE_TO_UNPRIVILEGED: bool = true;
         fn policy_url(&self) -> String {
             format!(
@@ -182,7 +183,7 @@ async fn test_role_assignments_silo(cptestctx: &ControlPlaneTestContext) {
         fn verify_initial<'a, 'b, 'c, 'd>(
             &'a self,
             _: &'b ClientTestContext,
-            _current_policy: &'c shared::Policy<Self::RoleType>,
+            _current_policy: &'c policy::Policy<Self::RoleType>,
         ) -> BoxFuture<'d, ()>
         where
             'a: 'd,
@@ -225,8 +226,8 @@ async fn test_role_assignments_silo_implicit(
 ) {
     struct SiloRoleAssignmentTest;
     impl RoleAssignmentTest for SiloRoleAssignmentTest {
-        type RoleType = shared::SiloRole;
-        const ROLE: Self::RoleType = shared::SiloRole::Admin;
+        type RoleType = policy::SiloRole;
+        const ROLE: Self::RoleType = policy::SiloRole::Admin;
         const VISIBLE_TO_UNPRIVILEGED: bool = true;
         fn policy_url(&self) -> String {
             "/v1/policy".to_string()
@@ -235,7 +236,7 @@ async fn test_role_assignments_silo_implicit(
         fn verify_initial<'a, 'b, 'c, 'd>(
             &'a self,
             _: &'b ClientTestContext,
-            _current_policy: &'c shared::Policy<Self::RoleType>,
+            _current_policy: &'c policy::Policy<Self::RoleType>,
         ) -> BoxFuture<'d, ()>
         where
             'a: 'd,
@@ -289,8 +290,8 @@ async fn test_role_assignments_project(cptestctx: &ControlPlaneTestContext) {
         policy_url: format!("/v1/projects/{}/policy", project_name),
     };
     impl RoleAssignmentTest for ProjectRoleAssignmentTest {
-        type RoleType = shared::ProjectRole;
-        const ROLE: Self::RoleType = shared::ProjectRole::Admin;
+        type RoleType = policy::ProjectRole;
+        const ROLE: Self::RoleType = policy::ProjectRole::Admin;
         const VISIBLE_TO_UNPRIVILEGED: bool = false;
         fn policy_url(&self) -> String {
             self.policy_url.clone()
@@ -299,7 +300,7 @@ async fn test_role_assignments_project(cptestctx: &ControlPlaneTestContext) {
         fn verify_initial<'a, 'b, 'c, 'd>(
             &'a self,
             client: &'b ClientTestContext,
-            current_policy: &'c shared::Policy<Self::RoleType>,
+            current_policy: &'c policy::Policy<Self::RoleType>,
         ) -> BoxFuture<'d, ()>
         where
             'a: 'd,
@@ -322,7 +323,7 @@ async fn test_role_assignments_project(cptestctx: &ControlPlaneTestContext) {
             'a: 'c,
             'b: 'c,
         {
-            resource_privileged_conditions::<views::Project>(
+            resource_privileged_conditions::<project::Project>(
                 client,
                 &self.project_url,
                 &self.project_name,
@@ -343,7 +344,7 @@ async fn test_role_assignments_project(cptestctx: &ControlPlaneTestContext) {
 fn resource_initial_conditions<'a, 'b, 'c, 'd, T>(
     client: &'a ClientTestContext,
     resource_url: &'b str,
-    current_policy: &'c shared::Policy<T>,
+    current_policy: &'c policy::Policy<T>,
 ) -> impl Future<Output = ()> + 'd
 where
     'a: 'd,
@@ -424,7 +425,7 @@ async fn run_test<T: RoleAssignmentTest>(
     // resource.  This is a little ugly, but we don't have a way of creating
     // silo users yet and it's worth testing this.
     let mut new_policy = initial_policy.clone();
-    let role_assignment = shared::RoleAssignment::for_silo_user(
+    let role_assignment = policy::RoleAssignment::for_silo_user(
         USER_TEST_UNPRIVILEGED.id(),
         T::ROLE,
     );
@@ -457,7 +458,7 @@ async fn run_test<T: RoleAssignmentTest>(
     test_case.verify_initial(client, &current_policy).await;
 
     // Okay, really grant them access.
-    let mut updated_policy: shared::Policy<T::RoleType> =
+    let mut updated_policy: policy::Policy<T::RoleType> =
         NexusRequest::object_put(client, &policy_url, Some(&new_policy))
             .authn_as(AuthnMode::PrivilegedUser)
             .execute()
@@ -493,7 +494,7 @@ async fn run_test<T: RoleAssignmentTest>(
 
     // The way we've defined things, the unprivileged user ought to be able to
     // revoke their own access.
-    let updated_policy: shared::Policy<T::RoleType> =
+    let updated_policy: policy::Policy<T::RoleType> =
         NexusRequest::object_put(client, &policy_url, Some(&initial_policy))
             .authn_as(AuthnMode::UnprivilegedUser)
             .execute()
@@ -514,7 +515,7 @@ async fn run_test<T: RoleAssignmentTest>(
 async fn policy_fetch<T: serde::de::DeserializeOwned>(
     client: &ClientTestContext,
     policy_url: &str,
-) -> shared::Policy<T> {
+) -> policy::Policy<T> {
     NexusRequest::object_get(client, policy_url)
         .authn_as(AuthnMode::PrivilegedUser)
         .execute()

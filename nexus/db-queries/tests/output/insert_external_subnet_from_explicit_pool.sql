@@ -1,7 +1,7 @@
 WITH
   pool_id AS (SELECT id FROM subnet_pool WHERE id = $1 AND time_deleted IS NULL),
   ensure_silo_is_linked_to_pool
-    AS (
+    AS MATERIALIZED (
       SELECT
         CAST(
           IF(
@@ -16,7 +16,7 @@ WITH
               )
             ),
             'true',
-            '$3'
+            'pool-not-linked'
           )
             AS BOOL
         )
@@ -39,7 +39,7 @@ WITH
       WHERE
         m.subnet_pool_id = (SELECT id FROM pool_id)
         AND m.time_deleted IS NULL
-        AND $4 BETWEEN m.min_prefix_length AND m.max_prefix_length
+        AND $3 BETWEEN m.min_prefix_length AND m.max_prefix_length
     ),
   gaps_between_subnets
     AS (
@@ -81,7 +81,7 @@ WITH
       WHERE
         m.subnet_pool_id = (SELECT id FROM pool_id)
         AND m.time_deleted IS NULL
-        AND $5 BETWEEN m.min_prefix_length AND m.max_prefix_length
+        AND $4 BETWEEN m.min_prefix_length AND m.max_prefix_length
       ORDER BY
         m.id, e.first_address
     ),
@@ -94,9 +94,9 @@ WITH
         gap_start,
         gap_end,
         CASE
-        WHEN set_masklen(gap_start, $6) & netmask(set_masklen(gap_start, $7)) = gap_start
-        THEN set_masklen(gap_start, $8)
-        ELSE set_masklen(broadcast(set_masklen(gap_start, $9)) + 1, $10)
+        WHEN set_masklen(gap_start, $5) & netmask(set_masklen(gap_start, $6)) = gap_start
+        THEN set_masklen(gap_start, $7)
+        ELSE set_masklen(broadcast(set_masklen(gap_start, $8)) + 1, $9)
         END
           AS candidate_subnet
       FROM
@@ -124,7 +124,7 @@ WITH
       SELECT
         CAST(
           IF(
-            EXISTS(SELECT 1 FROM project WHERE id = $11 AND time_deleted IS NULL LIMIT 1),
+            EXISTS(SELECT 1 FROM project WHERE id = $10 AND time_deleted IS NULL LIMIT 1),
             'true',
             'project-deleted'
           )
@@ -136,7 +136,7 @@ WITH
       SELECT
         CAST(
           IF(
-            EXISTS(SELECT 1 FROM silo WHERE id = $12 AND time_deleted IS NULL LIMIT 1),
+            EXISTS(SELECT 1 FROM silo WHERE id = $11 AND time_deleted IS NULL LIMIT 1),
             'true',
             'silo-deleted'
           )
@@ -185,15 +185,15 @@ WITH
             instance_id
           )
       SELECT
-        $13 AS id,
-        $14 AS name,
-        $15 AS description,
-        $16 AS time_created,
-        $17 AS time_modified,
+        $12 AS id,
+        $13 AS name,
+        $14 AS description,
+        $15 AS time_created,
+        $16 AS time_modified,
         NULL::TIMESTAMPTZ AS time_deleted,
         subnet_pool_id,
         subnet_pool_member_id,
-        $18 AS project_id,
+        $17 AS project_id,
         subnet AS subnet,
         'detached' AS attach_state,
         NULL AS instance_id

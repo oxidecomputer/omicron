@@ -17,8 +17,8 @@ use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::{datastore::SQL_BATCH_SIZE, pagination::Paginator};
 use nexus_types::deployment::SledFilter;
 use nexus_types::deployment::TargetReleaseDescription;
-use nexus_types::external_api::shared::TufSignedRootRole;
-use nexus_types::external_api::views;
+use nexus_types::external_api::update;
+use nexus_types::external_api::update::TufSignedRootRole;
 use nexus_types::identity::Asset;
 use nexus_types::internal_api::views as internal_views;
 use omicron_common::api::external::InternalContext;
@@ -188,7 +188,7 @@ impl super::Nexus {
     pub async fn update_status_external(
         &self,
         opctx: &OpContext,
-    ) -> Result<views::UpdateStatus, Error> {
+    ) -> Result<update::UpdateStatus, Error> {
         let db_target_release =
             self.datastore().target_release_get_current(opctx).await?;
 
@@ -202,7 +202,7 @@ impl super::Nexus {
         };
 
         let target_release =
-            current_tuf_repo.as_ref().map(|repo| views::TargetRelease {
+            current_tuf_repo.as_ref().map(|repo| update::TargetRelease {
                 time_requested: db_target_release.time_requested,
                 version: repo.repo.system_version.0.clone(),
             });
@@ -234,7 +234,7 @@ impl super::Nexus {
         let suspended = *db_target_release.generation
             < blueprint_target.blueprint.target_release_minimum_generation;
 
-        Ok(views::UpdateStatus {
+        Ok(update::UpdateStatus {
             target_release: Nullable(target_release),
             components_by_release_version,
             time_last_step_planned,

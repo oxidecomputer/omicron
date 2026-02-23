@@ -347,10 +347,11 @@ mod test {
         create_default_ip_pools, link_ip_pool, object_create,
     };
     use nexus_test_utils_macros::nexus_test;
-    use nexus_types::external_api::params::IpPoolCreate;
-    use nexus_types::external_api::shared::{IpRange, Ipv4Range};
-    use nexus_types::external_api::views::{IpPool, IpPoolRange, IpVersion};
+    use nexus_types::external_api::ip_pool::{
+        IpPool, IpPoolCreate, IpPoolRange,
+    };
     use nexus_types::multicast::MulticastGroupCreate;
+    use omicron_common::address::{IpRange, IpVersion, Ipv4Range};
     use omicron_common::api::external::IdentityMetadataCreateParams;
 
     use crate::app::saga::create_saga_dag;

@@ -1120,13 +1120,13 @@ mod test {
     use std::net::SocketAddrV6;
 
     use crate::app::{saga::create_saga_dag, sagas::test_helpers};
-    use crate::external_api::params;
     use dropshot::test_util::ClientTestContext;
     use nexus_db_queries::authn;
     use nexus_test_utils::resource_helpers::{
         create_default_ip_pools, create_project, object_create,
     };
     use nexus_test_utils_macros::nexus_test;
+    use nexus_types::external_api::{instance as instance_types, networking};
     use nexus_types::identity::Resource;
     use omicron_common::api::external::{
         ByteCount, IdentityMetadataCreateParams, InstanceCpuCount, Name,
@@ -1156,7 +1156,7 @@ mod test {
         object_create(
             client,
             &instances_url,
-            &params::InstanceCreate {
+            &instance_types::InstanceCreate {
                 identity: IdentityMetadataCreateParams {
                     name: INSTANCE_NAME.parse().unwrap(),
                     description: format!("instance {:?}", INSTANCE_NAME),
@@ -1167,7 +1167,7 @@ mod test {
                 user_data: b"#cloud-config".to_vec(),
                 ssh_public_keys: Some(Vec::new()),
                 network_interfaces:
-                    params::InstanceNetworkInterfaceAttachment::DefaultIpv4,
+                    instance_types::InstanceNetworkInterfaceAttachment::DefaultIpv4,
                 external_ips: vec![],
                 disks: vec![],
                 boot_disk: None,
@@ -1247,16 +1247,16 @@ mod test {
         // We only eagerly populate NAT entries on switches that have
         // uplinks configured, so we need to do some switch configuration
         // before starting the instance in order to test that section of logic
-        let mut uplink0_params = params::SwitchPortSettingsCreate::new(
+        let mut uplink0_params = networking::SwitchPortSettingsCreate::new(
             IdentityMetadataCreateParams {
                 name: "test-uplink0".parse().unwrap(),
                 description: "test uplink".into(),
             },
         );
 
-        uplink0_params.routes = vec![params::RouteConfig {
+        uplink0_params.routes = vec![networking::RouteConfig {
             link_name: "phy0".parse().unwrap(),
-            routes: vec![params::Route {
+            routes: vec![networking::Route {
                 dst: "0.0.0.0/0".parse().unwrap(),
                 gw: "1.1.1.1".parse().unwrap(),
                 vid: None,
@@ -1264,16 +1264,16 @@ mod test {
             }],
         }];
 
-        let mut uplink1_params = params::SwitchPortSettingsCreate::new(
+        let mut uplink1_params = networking::SwitchPortSettingsCreate::new(
             IdentityMetadataCreateParams {
                 name: "test-uplink1".parse().unwrap(),
                 description: "test uplink".into(),
             },
         );
 
-        uplink1_params.routes = vec![params::RouteConfig {
+        uplink1_params.routes = vec![networking::RouteConfig {
             link_name: "phy0".parse().unwrap(),
-            routes: vec![params::Route {
+            routes: vec![networking::Route {
                 dst: "0.0.0.0/0".parse().unwrap(),
                 gw: "2.2.2.2".parse().unwrap(),
                 vid: None,

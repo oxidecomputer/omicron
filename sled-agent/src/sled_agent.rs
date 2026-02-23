@@ -394,7 +394,8 @@ struct SledAgentInner {
     bootstore: bootstore::NodeHandle,
 
     // A handle to the trust quorum.
-    /*trust_quorum: trust_quorum::NodeTaskHandle, */
+    trust_quorum: trust_quorum::NodeTaskHandle,
+
     // A handle to the hardware monitor.
     hardware_monitor: HardwareMonitorHandle,
 
@@ -644,6 +645,7 @@ impl SledAgent {
             SledAgentArtifactStoreWrapper(Arc::clone(
                 &long_running_task_handles.artifact_store,
             )),
+            long_running_task_handles.trust_quorum.committed_epoch_rx(),
             config_reconciler_spawn_token,
         );
 
@@ -711,7 +713,7 @@ impl SledAgent {
                 rack_network_config,
                 zone_bundler: long_running_task_handles.zone_bundler.clone(),
                 bootstore: long_running_task_handles.bootstore.clone(),
-                /* trust_quorum: long_running_task_handles.trust_quorum.clone(), */
+                trust_quorum: long_running_task_handles.trust_quorum.clone(),
                 hardware_monitor: long_running_task_handles
                     .hardware_monitor
                     .clone(),
@@ -1084,11 +1086,9 @@ impl SledAgent {
         self.inner.bootstore.clone()
     }
 
-    /*
     pub fn trust_quorum(&self) -> trust_quorum::NodeTaskHandle {
         self.inner.trust_quorum.clone()
     }
-    */
 
     pub fn list_vpc_routes(&self) -> Vec<ResolvedVpcRouteState> {
         self.inner.port_manager.vpc_routes_list()

@@ -18,12 +18,17 @@ use nexus_test_utils::resource_helpers::{
     create_default_ip_pools, create_project, object_create, object_delete,
 };
 use nexus_test_utils_macros::nexus_test;
-use nexus_types::external_api::params::{
-    self, EphemeralIpCreate, ExternalIpCreate, FloatingIpAttach,
-    InstanceCreate, InstanceNetworkInterfaceAttachment, PoolSelector,
+use nexus_types::external_api::floating_ip::{
+    AddressAllocator, FloatingIp, FloatingIpAttach,
 };
-use nexus_types::external_api::views::FloatingIp;
-use omicron_common::api::external::IpVersion;
+use nexus_types::external_api::instance::{
+    EphemeralIpCreate, ExternalIpCreate, InstanceCreate,
+    InstanceNetworkInterfaceAttachment,
+};
+use nexus_types::external_api::ip_pool::{IpVersion, PoolSelector};
+use nexus_types::external_api::multicast::{
+    MulticastGroup, MulticastGroupMember,
+};
 use omicron_common::api::external::{
     ByteCount, IdentityMetadataCreateParams, Instance, InstanceCpuCount,
     NameOrId,
@@ -499,8 +504,8 @@ async fn test_multicast_with_floating_ip_basic(
         client,
         floating_ip_name,
         project_name,
-        params::AddressAllocator::Auto {
-            pool_selector: params::PoolSelector::Explicit {
+        AddressAllocator::Auto {
+            pool_selector: PoolSelector::Explicit {
                 pool: v4_pool.identity.name.clone().into(),
             },
         },
@@ -586,7 +591,7 @@ async fn test_multicast_with_floating_ip_basic(
         "/v1/floating-ips/{floating_ip_name}/attach?project={project_name}"
     );
     let attach_params = FloatingIpAttach {
-        kind: nexus_types::external_api::params::FloatingIpParentKind::Instance,
+        kind: nexus_types::external_api::floating_ip::FloatingIpParentKind::Instance,
         parent: NameOrId::Name(instance_name.parse().unwrap()),
     };
 

@@ -497,7 +497,7 @@ static SETUP_REQUESTS: LazyLock<Vec<SetupReq>> = LazyLock::new(|| {
         SetupReq::Post {
             url: &SUPPORT_BUNDLES_URL,
             body: serde_json::to_value(
-                &nexus_types::external_api::params::SupportBundleCreate {
+                &nexus_types::external_api::support_bundle::SupportBundleCreate {
                     user_comment: None,
                 },
             )
