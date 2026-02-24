@@ -154,19 +154,23 @@ impl ArtifactClient {
             slog::o!("component" => "ArtifactClient", "peer" => addr.to_string()),
         );
 
-        // Set a connect timeout of 15 seconds (the progenitor default), and a
-        // total timeout of 5 minutes. The progenitor default for the total
-        // timeout is 15 seconds, which can easily be exceeded for large
-        // downloads. (Don't set the total timeout to be too long, though,
-        // because we're fetching ~2GiB artifacts over a LAN which really should
-        // take less than 5 minutes.)
+        // Set a connect timeout of 5 seconds and a total timeout of 5 minutes.
+        // The progenitor default for the total timeout is 15 seconds, which can
+        // easily be exceeded for large downloads. (Don't set the total timeout
+        // to be too long, though, because we're fetching ~2GiB artifacts over a
+        // LAN which really should take less than 5 minutes.)
+        //
+        // The connect timeout is deliberately short: these are LAN connections
+        // on the bootstrap network, and peers are tried serially. A long
+        // connect timeout (the progenitor default of 15s) means unresponsive
+        // peers block progress for a long time before the next peer is tried.
         //
         // Do not set a read timeout here -- instead, read timeouts are handled
         // by the fetch loop. (Why is the read timeout handled by the fetch
         // loop? So that it can also apply to the mock peer backend, and logic
         // shared across both.)
         let client = reqwest::ClientBuilder::new()
-            .connect_timeout(Duration::from_secs(15))
+            .connect_timeout(Duration::from_secs(5))
             .timeout(Duration::from_secs(5 * 60))
             .build()
             .expect("installinator artifact client created");

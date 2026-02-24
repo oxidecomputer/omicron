@@ -55,10 +55,8 @@ pub mod v17;
 pub mod v18;
 #[path = "add_rot_attestation/mod.rs"]
 pub mod v19;
-#[path = "lockstep_rack_init/mod.rs"]
-pub mod v20;
 #[path = "bgp_v6/mod.rs"]
-pub mod v21;
+pub mod v20;
 #[path = "remove_health_monitor_keep_checks/mod.rs"]
 pub mod v22;
 #[path = "add_switch_zone_operator_policy/mod.rs"]
