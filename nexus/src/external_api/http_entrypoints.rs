@@ -81,7 +81,6 @@ use omicron_common::api::external::AntiAffinityGroupMember;
 use omicron_common::api::external::BgpConfig;
 use omicron_common::api::external::BgpExported;
 use omicron_common::api::external::BgpImported;
-use omicron_common::api::external::BgpPeerStatus;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Disk;
 use omicron_common::api::external::Error;
@@ -4369,7 +4368,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
     //TODO pagination? the normal by-name/by-id stuff does not work here
     async fn networking_bgp_status(
         rqctx: RequestContext<ApiContext>,
-    ) -> Result<HttpResponseOk<Vec<BgpPeerStatus>>, HttpError> {
+    ) -> Result<HttpResponseOk<Vec<networking::BgpPeerStatus>>, HttpError> {
         let apictx = rqctx.context();
         let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
         let handler = async {

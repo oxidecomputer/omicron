@@ -9,9 +9,8 @@ use nexus_db_queries::context::OpContext;
 use nexus_types::external_api::networking;
 use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::{
-    self, BgpExported, BgpImported, BgpMessageHistory, BgpPeerStatus,
-    CreateResult, DeleteResult, ListResultVec, LookupResult, NameOrId,
-    SwitchBgpHistory,
+    self, BgpExported, BgpImported, BgpMessageHistory, CreateResult,
+    DeleteResult, ListResultVec, LookupResult, NameOrId, SwitchBgpHistory,
 };
 
 impl super::Nexus {
@@ -100,7 +99,7 @@ impl super::Nexus {
     pub async fn bgp_peer_status(
         &self,
         opctx: &OpContext,
-    ) -> ListResultVec<BgpPeerStatus> {
+    ) -> ListResultVec<networking::BgpPeerStatus> {
         opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
         let mut result = Vec::new();
         for (switch, client) in &self.mg_clients().await.map_err(|e| {
@@ -132,7 +131,7 @@ impl super::Nexus {
                     }
                 };
                 for (peer_id, info) in peers {
-                    result.push(BgpPeerStatus {
+                    result.push(networking::BgpPeerStatus {
                         switch: *switch,
                         peer_id: peer_id.clone(),
                         addr: info.remote_ip,

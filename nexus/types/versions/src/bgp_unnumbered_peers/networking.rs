@@ -6,13 +6,14 @@
 //!
 //! This version:
 //! - Adds `max_paths` to `BgpConfigCreate`.
+//! - Adds `peer_id` to `BgpPeerStatus`.
 //! - `BgpPeer`: makes `addr` optional; adds `router_lifetime`
 //! - Updates `SwitchPortSettings` to use the new `BgpPeer`
 //! - Updates `SwitchPortSettingsCreate` to use the new `BgpPeerConfig`.
 
 use omicron_common::api::external::{
     self, IdentityMetadata, IdentityMetadataCreateParams, MaxPathConfig, Name,
-    NameOrId,
+    NameOrId, SwitchLocation,
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -211,6 +212,44 @@ impl From<crate::v2025_11_20_00::networking::BgpPeerConfig> for BgpPeerConfig {
         BgpPeerConfig {
             link_name: old.link_name,
             peers: old.peers.into_iter().map(Into::into).collect(),
+        }
+    }
+}
+
+/// The current status of a BGP peer.
+#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq)]
+pub struct BgpPeerStatus {
+    /// IP address of the peer.
+    pub addr: IpAddr,
+
+    /// Interface name
+    pub peer_id: String,
+
+    /// Local autonomous system number.
+    pub local_asn: u32,
+
+    /// Remote autonomous system number.
+    pub remote_asn: u32,
+
+    /// State of the peer.
+    pub state: crate::v2025_12_12_00::networking::BgpPeerState,
+
+    /// Time of last state change.
+    pub state_duration_millis: u64,
+
+    /// Switch with the peer session.
+    pub switch: SwitchLocation,
+}
+
+impl From<BgpPeerStatus> for crate::v2025_12_12_00::networking::BgpPeerStatus {
+    fn from(new: BgpPeerStatus) -> Self {
+        Self {
+            addr: new.addr,
+            local_asn: new.local_asn,
+            remote_asn: new.remote_asn,
+            state: new.state,
+            state_duration_millis: new.state_duration_millis,
+            switch: new.switch,
         }
     }
 }

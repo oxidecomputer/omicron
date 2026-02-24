@@ -7784,6 +7784,7 @@ dependencies = [
  "daft",
  "dropshot",
  "http",
+ "mg-admin-client",
  "omicron-common",
  "omicron-passwords",
  "omicron-uuid-kinds",

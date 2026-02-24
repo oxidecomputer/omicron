@@ -4592,7 +4592,7 @@ pub trait NexusExternalApi {
     }]
     async fn networking_bgp_status(
         rqctx: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseOk<Vec<BgpPeerStatus>>, HttpError>;
+    ) -> Result<HttpResponseOk<Vec<latest::networking::BgpPeerStatus>>, HttpError>;
 
     //TODO pagination? the normal by-name/by-id stuff does not work here
     /// Get BGP peer status
@@ -4633,41 +4633,11 @@ pub trait NexusExternalApi {
         HttpResponseOk<Vec<v2025_11_20_00::networking::BgpPeerStatus>>,
         HttpError,
     > {
-        let result = Self::networking_bgp_status(rqctx).await?.0;
+        let result = Self::networking_bgp_status_v2025_12_12_00(rqctx).await?.0;
         Ok(HttpResponseOk(
             result
                 .into_iter()
-                .map(|x| v2025_11_20_00::networking::BgpPeerStatus {
-                    addr: x.addr,
-                    local_asn: x.local_asn,
-                    remote_asn: x.remote_asn,
-                    state: match x.state {
-                        BgpPeerState::Idle => {
-                            v2025_11_20_00::networking::BgpPeerState::Idle
-                        }
-                        BgpPeerState::Connect => {
-                            v2025_11_20_00::networking::BgpPeerState::Connect
-                        }
-                        BgpPeerState::Active => {
-                            v2025_11_20_00::networking::BgpPeerState::Active
-                        }
-                        BgpPeerState::OpenSent => {
-                            v2025_11_20_00::networking::BgpPeerState::OpenSent
-                        }
-                        BgpPeerState::OpenConfirm => {
-                            v2025_11_20_00::networking::BgpPeerState::OpenConfirm
-                        }
-                        BgpPeerState::ConnectionCollision
-                        | BgpPeerState::SessionSetup => {
-                            v2025_11_20_00::networking::BgpPeerState::SessionSetup
-                        }
-                        BgpPeerState::Established => {
-                            v2025_11_20_00::networking::BgpPeerState::Established
-                        }
-                    },
-                    state_duration_millis: x.state_duration_millis,
-                    switch: x.switch,
-                })
+                .map(v2025_11_20_00::networking::BgpPeerStatus::from)
                 .collect(),
         ))
     }
