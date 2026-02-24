@@ -478,6 +478,17 @@ pub enum ExternalImportExportPolicy {
     Allow(Vec<oxnet::IpNet>),
 }
 
+impl From<ExternalImportExportPolicy>
+    for omicron_common::api::internal::shared::ImportExportPolicy
+{
+    fn from(value: ExternalImportExportPolicy) -> Self {
+        match value {
+            ExternalImportExportPolicy::NoFiltering => Self::NoFiltering,
+            ExternalImportExportPolicy::Allow(ip_nets) => Self::Allow(ip_nets),
+        }
+    }
+}
+
 impl From<omicron_common::api::internal::shared::ImportExportPolicy>
     for ExternalImportExportPolicy
 {

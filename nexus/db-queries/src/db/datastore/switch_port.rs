@@ -42,6 +42,7 @@ use omicron_common::api::external::{
     self, CreateResult, DataPageParams, DeleteResult, Error, ListResultVec,
     LookupResult, NameOrId, ResourceType, SwitchPortAddressView, UpdateResult,
 };
+use omicron_common::api::internal::shared::ImportExportPolicy;
 use ref_cast::RefCast;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -63,8 +64,8 @@ pub struct BgpPeerConfig {
     pub multi_exit_discriminator: Option<SqlU32>,
     pub local_pref: Option<SqlU32>,
     pub enforce_first_as: bool,
-    pub allowed_import: ExternalImportExportPolicy,
-    pub allowed_export: ExternalImportExportPolicy,
+    pub allowed_import: ImportExportPolicy,
+    pub allowed_export: ImportExportPolicy,
     pub communities: Vec<u32>,
     pub vlan_id: Option<SqlU16>,
     pub router_lifetime: SqlU16,
@@ -90,8 +91,8 @@ impl Into<networking::BgpPeer> for BgpPeerConfig {
             communities: self.communities,
             local_pref: self.local_pref.map(Into::into),
             enforce_first_as: self.enforce_first_as,
-            allowed_import: self.allowed_import,
-            allowed_export: self.allowed_export,
+            allowed_import: self.allowed_import.into(),
+            allowed_export: self.allowed_export.into(),
             vlan_id: self.vlan_id.map(Into::into),
             router_lifetime: self.router_lifetime.into(),
         }
@@ -624,13 +625,13 @@ impl DataStore {
                                 .load_async::<SwitchPortBgpPeerConfigAllowImport>(&conn)
                                 .await?;
 
-                        ExternalImportExportPolicy::Allow(db_list
+                        ImportExportPolicy::Allow(db_list
                             .into_iter()
                             .map(|x| x.prefix.into())
                             .collect()
                         )
                     } else {
-                        ExternalImportExportPolicy::NoFiltering
+                        ImportExportPolicy::NoFiltering
                     };
 
                     let allowed_export = if p.allow_export_list_active {
@@ -643,13 +644,13 @@ impl DataStore {
                                 .load_async::<SwitchPortBgpPeerConfigAllowExport>(&conn)
                                 .await?;
 
-                        ExternalImportExportPolicy::Allow(db_list
+                        ImportExportPolicy::Allow(db_list
                             .into_iter()
                             .map(|x| x.prefix.into())
                             .collect()
                         )
                     } else {
-                        ExternalImportExportPolicy::NoFiltering
+                        ImportExportPolicy::NoFiltering
                     };
 
                     let communities: Vec<SwitchPortBgpPeerConfigCommunity> =
@@ -1530,12 +1531,12 @@ async fn do_switch_port_settings_create(
         let (allowed_import, allowed_export, communities) = (
             peer_by_addr
                 .get(&lookup_addr)
-                .map(|x| x.allowed_import.clone())
-                .unwrap_or(ExternalImportExportPolicy::NoFiltering),
+                .map(|x| x.allowed_import.clone().into())
+                .unwrap_or(ImportExportPolicy::NoFiltering),
             peer_by_addr
                 .get(&lookup_addr)
-                .map(|x| x.allowed_export.clone())
-                .unwrap_or(ExternalImportExportPolicy::NoFiltering),
+                .map(|x| x.allowed_export.clone().into())
+                .unwrap_or(ImportExportPolicy::NoFiltering),
             peer_by_addr
                 .get(&lookup_addr)
                 .map(|x| x.communities.clone())
@@ -2196,8 +2197,18 @@ mod test {
                 assert_eq!(db_peer.communities, peer.communities);
                 assert_eq!(db_peer.local_pref.map(|lp| *lp), peer.local_pref);
                 assert_eq!(db_peer.enforce_first_as, peer.enforce_first_as);
-                assert_eq!(db_peer.allowed_export, peer.allowed_export);
-                assert_eq!(db_peer.allowed_import, peer.allowed_import);
+                assert_eq!(
+                    ExternalImportExportPolicy::from(
+                        db_peer.allowed_export.clone()
+                    ),
+                    peer.allowed_export
+                );
+                assert_eq!(
+                    ExternalImportExportPolicy::from(
+                        db_peer.allowed_import.clone()
+                    ),
+                    peer.allowed_import
+                );
                 assert_eq!(db_peer.vlan_id.map(|vid| *vid), peer.vlan_id);
             }
         }
