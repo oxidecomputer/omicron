@@ -173,6 +173,7 @@ pub async fn test_setup_database_seed(
         super::StorageSource::PopulateLatest {
             output_dir: tmp_seed_dir.path().to_owned(),
         },
+        None,
     )
     .await
     .context("failed to setup database")?;
