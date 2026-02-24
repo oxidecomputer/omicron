@@ -254,6 +254,9 @@ pub struct TimeseriesDbConfig {
     /// The native TCP address of the ClickHouse server.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub address: Option<SocketAddr>,
+    /// The max size of the connection pool.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_slots: Option<usize>,
 }
 
 /// Configuration for the `Dendrite` dataplane daemon.
