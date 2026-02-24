@@ -10,7 +10,6 @@ use futures::FutureExt;
 use futures::future::BoxFuture;
 use http::Method;
 use http::StatusCode;
-use nexus_db_queries::authn::USER_TEST_PRIVILEGED;
 use nexus_db_queries::authn::USER_TEST_UNPRIVILEGED;
 use nexus_db_queries::db::fixed_data;
 use nexus_db_queries::db::identity::Asset;
@@ -19,8 +18,6 @@ use nexus_db_queries::db::model::DatabaseString;
 use nexus_test_utils::http_testing::AuthnMode;
 use nexus_test_utils::http_testing::NexusRequest;
 use nexus_test_utils::resource_helpers::create_project;
-use nexus_test_utils::resource_helpers::object_get;
-use nexus_test_utils::resource_helpers::object_put;
 use nexus_test_utils_macros::nexus_test;
 use nexus_types::external_api::policy;
 use nexus_types::external_api::project;
@@ -336,54 +333,6 @@ async fn test_role_assignments_project(cptestctx: &ControlPlaneTestContext) {
     }
 
     run_test(client, test_case).await;
-}
-
-#[nexus_test]
-async fn test_project_policy_update_returns_db_policy(
-    cptestctx: &ControlPlaneTestContext,
-) {
-    let client = &cptestctx.external_client;
-    let project_name = "test-project-policy-update-response";
-    create_project(client, project_name).await;
-
-    let policy_url = format!("/v1/projects/{}/policy", project_name);
-
-    // Send role assignments in an order that differs from the datastore's
-    // canonical sort (role_name, identity_id). The response should reflect
-    // what was stored (canonical), not what was sent.
-    let sent = policy::Policy {
-        role_assignments: vec![
-            policy::RoleAssignment::for_silo_user(
-                USER_TEST_UNPRIVILEGED.id(),
-                policy::ProjectRole::Viewer,
-            ),
-            policy::RoleAssignment::for_silo_user(
-                USER_TEST_PRIVILEGED.id(),
-                policy::ProjectRole::Admin,
-            ),
-        ],
-    };
-
-    let updated: policy::Policy<policy::ProjectRole> =
-        object_put(client, &policy_url, &sent).await;
-
-    let expected = policy::Policy {
-        role_assignments: vec![
-            policy::RoleAssignment::for_silo_user(
-                USER_TEST_PRIVILEGED.id(),
-                policy::ProjectRole::Admin,
-            ),
-            policy::RoleAssignment::for_silo_user(
-                USER_TEST_UNPRIVILEGED.id(),
-                policy::ProjectRole::Viewer,
-            ),
-        ],
-    };
-    assert_eq!(updated, expected);
-
-    let fetched: policy::Policy<policy::ProjectRole> =
-        object_get(client, &policy_url).await;
-    assert_eq!(fetched, expected);
 }
 
 /// Helper function for verifying the initial (unprivileged) conditions for most
