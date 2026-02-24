@@ -34,7 +34,7 @@ use nexus_db_queries::context::OpContext;
 use nexus_test_utils::http_testing::{AuthnMode, NexusRequest, RequestBuilder};
 use nexus_test_utils::resource_helpers::{
     create_default_ip_pools, create_instance, create_instance_with,
-    create_project, object_get, objects_list_page_authz,
+    create_project, object_get, object_put_upsert, objects_list_page_authz,
 };
 use nexus_test_utils_macros::nexus_test;
 use nexus_types::external_api::instance::{
@@ -986,8 +986,12 @@ async fn test_left_member_waits_for_group_active(
     );
     let join_params =
         InstanceMulticastGroupJoin { source_ips: None, ip_version: None };
-    put_upsert::<_, MulticastGroupMember>(client, &join_url, &join_params)
-        .await;
+    object_put_upsert::<_, MulticastGroupMember>(
+        client,
+        &join_url,
+        &join_params,
+    )
+    .await;
 
     // Verify group is stuck in "Creating" (DPD is down)
     wait_for_multicast_reconciler(&cptestctx.lockstep_client).await;

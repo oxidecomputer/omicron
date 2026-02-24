@@ -187,6 +187,7 @@ mod alert;
 mod blueprints;
 mod db_metadata;
 mod ereport;
+mod multicast;
 mod saga;
 mod sitrep;
 mod user_data_export;
@@ -411,6 +412,8 @@ enum DbCommands {
     /// Print information about migrations
     #[clap(alias = "migration")]
     Migrations(MigrationsArgs),
+    /// Print information about multicast groups
+    Multicast(multicast::MulticastArgs),
     /// Print information about snapshots
     Snapshots(SnapshotArgs),
     /// Validate the contents of the database
@@ -1419,6 +1422,33 @@ impl DbArgs {
                         command: MigrationsCommands::List(args),
                     }) => {
                         cmd_db_migrations_list(&datastore, &fetch_opts, args).await
+                    }
+                    DbCommands::Multicast(multicast::MulticastArgs {
+                        command: multicast::MulticastCommands::Groups(args),
+                    }) => {
+                        multicast::cmd_db_multicast_groups(
+                            &datastore, &fetch_opts, &args,
+                        )
+                        .await
+                    }
+                    DbCommands::Multicast(multicast::MulticastArgs {
+                        command: multicast::MulticastCommands::Members(args),
+                    }) => {
+                        multicast::cmd_db_multicast_members(&datastore, &fetch_opts, &args)
+                            .await
+                    }
+                    DbCommands::Multicast(multicast::MulticastArgs {
+                        command: multicast::MulticastCommands::Pools,
+                    }) => {
+                        multicast::cmd_db_multicast_pools(&datastore, &fetch_opts).await
+                    }
+                    DbCommands::Multicast(multicast::MulticastArgs {
+                        command: multicast::MulticastCommands::Info(args),
+                    }) => {
+                        multicast::cmd_db_multicast_info(
+                            &datastore, &fetch_opts, &args,
+                        )
+                        .await
                     }
                     DbCommands::Snapshots(SnapshotArgs {
                         command: SnapshotCommands::Info(uuid),
