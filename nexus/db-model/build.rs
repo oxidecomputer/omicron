@@ -2,8 +2,8 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use vergen_gitcl::Emitter;
-use vergen_gitcl::GitclBuilder;
+use vergen_git2::Emitter;
+use vergen_git2::Git2Builder;
 
 fn main() {
     // See omicron-rpaths for documentation. NOTE: This file MUST be kept in
@@ -17,13 +17,13 @@ fn main() {
     // We embed our git SHA in the JSON blobs for blueprint planner debug logs,
     // so `omdb` can report if it's out of sync with the Nexus that created the
     // debug log.
-    let gitcl = GitclBuilder::default()
+    let git2 = Git2Builder::default()
         .sha(/* short= */ false)
         .dirty(/* include_untracked= */ false)
         .build()
-        .expect("valid GitclBuilder configuration");
+        .expect("valid Git2Builder configuration");
     Emitter::default()
-        .add_instructions(&gitcl)
+        .add_instructions(&git2)
         .expect("valid instructions")
         .emit()
         .expect("emitted version information");
