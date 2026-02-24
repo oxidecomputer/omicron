@@ -14,8 +14,6 @@ use crate::authn;
 use crate::context::OpContext;
 use anyhow::Context;
 use anyhow::ensure;
-use futures::FutureExt;
-use futures::future::BoxFuture;
 use omicron_common::api::external::Error;
 use oso::Oso;
 use oso::PolarClass;
@@ -291,12 +289,12 @@ impl oso::PolarClass for Database {
 }
 
 impl AuthorizedResource for Database {
-    fn load_roles<'fut>(
-        &'fut self,
-        _: &'fut OpContext,
-        _: &'fut authn::Context,
-        _: &'fut mut RoleSet,
-    ) -> BoxFuture<'fut, Result<(), Error>> {
+    async fn load_roles(
+        &self,
+        _opctx: &OpContext,
+        _authn: &authn::Context,
+        _roleset: &mut RoleSet,
+    ) -> Result<(), Error> {
         // We don't use (database) roles to grant access to the database.  The
         // role assignment is hardcoded for all authenticated users.  See the
         // "has_role" Polar method above.
@@ -306,7 +304,7 @@ impl AuthorizedResource for Database {
         // the type signature of roles supported by RoleSet.  RoleSet is really
         // for roles on database objects -- it assumes they have a ResourceType
         // and id, neither of which is true for `Database`.
-        futures::future::ready(Ok(())).boxed()
+        Ok(())
     }
 
     fn on_unauthorized(

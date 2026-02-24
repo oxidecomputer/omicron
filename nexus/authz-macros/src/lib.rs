@@ -606,10 +606,6 @@ fn do_authz_resource(
         }
 
         impl ApiResource for #resource_name {
-            fn parent(&self) -> Option<&dyn AuthorizedResource> {
-                Some(&self.parent)
-            }
-
             fn resource_type(&self) -> ResourceType {
                 ResourceType::#resource_name
             }
@@ -622,6 +618,14 @@ fn do_authz_resource(
                 &self,
             ) -> Option<&dyn ApiResourceWithRoles> {
                 #as_roles_body
+            }
+        }
+
+        impl ApiResourceWithParent for #resource_name {
+            type Parent = #parent_resource_name;
+
+            fn parent(&self) -> Option<&#parent_resource_name> {
+                Some(&self.parent)
             }
         }
 
