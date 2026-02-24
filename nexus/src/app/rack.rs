@@ -619,8 +619,8 @@ impl super::Nexus {
                     local_pref: r.local_pref,
                     enforce_first_as: r.enforce_first_as,
                     communities: r.communities.clone(),
-                    allowed_import: r.allowed_import.clone(),
-                    allowed_export: r.allowed_export.clone(),
+                    allowed_import: r.allowed_import.clone().into(),
+                    allowed_export: r.allowed_export.clone().into(),
                     vlan_id: r.vlan_id,
                     router_lifetime: r.router_lifetime.as_u16(),
                 })

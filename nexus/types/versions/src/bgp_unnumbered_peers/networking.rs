@@ -123,10 +123,12 @@ pub struct BgpPeer {
     pub enforce_first_as: bool,
 
     /// Define import policy for a peer.
-    pub allowed_import: external::ImportExportPolicy,
+    pub allowed_import:
+        crate::v2025_11_20_00::networking::ExternalImportExportPolicy,
 
     /// Define export policy for a peer.
-    pub allowed_export: external::ImportExportPolicy,
+    pub allowed_export:
+        crate::v2025_11_20_00::networking::ExternalImportExportPolicy,
 
     /// Associate a VLAN ID with a peer.
     pub vlan_id: Option<u16>,

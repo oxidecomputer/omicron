@@ -31,10 +31,9 @@ use mg_admin_client::types::{
 use omicron_common::OMICRON_DPD_TAG;
 use omicron_common::address::DENDRITE_PORT;
 use omicron_common::address::{MGD_PORT, MGS_PORT};
-use omicron_common::api::external::ImportExportPolicy;
 use omicron_common::api::internal::shared::{
-    BfdMode, BgpConfig, BgpPeerConfig, PortConfig, PortFec, PortSpeed,
-    RackNetworkConfig, SwitchLocation,
+    BfdMode, BgpConfig, BgpPeerConfig, ImportExportPolicy, PortConfig, PortFec,
+    PortSpeed, RackNetworkConfig, SwitchLocation,
 };
 use omicron_common::backoff::{
     BackoffError, ExponentialBackoff, ExponentialBackoffBuilder, retry_notify,

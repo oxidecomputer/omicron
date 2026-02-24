@@ -11,9 +11,8 @@ use super::bfd::ExternalBfdMode;
 use api_identity::ObjectIdentity;
 use omicron_common::api::external;
 use omicron_common::api::external::{
-    AddressLotKind, IdentityMetadata, IdentityMetadataCreateParams,
-    ImportExportPolicy, LinkFec, LinkSpeed, Name, NameOrId, ObjectIdentity,
-    SwitchLocation,
+    AddressLotKind, IdentityMetadata, IdentityMetadataCreateParams, LinkFec,
+    LinkSpeed, Name, NameOrId, ObjectIdentity, SwitchLocation,
 };
 use oxnet::IpNet;
 use schemars::JsonSchema;
@@ -448,13 +447,60 @@ pub struct BgpPeer {
     pub enforce_first_as: bool,
 
     /// Define import policy for a peer.
-    pub allowed_import: ImportExportPolicy,
+    pub allowed_import: ExternalImportExportPolicy,
 
     /// Define export policy for a peer.
-    pub allowed_export: ImportExportPolicy,
+    pub allowed_export: ExternalImportExportPolicy,
 
     /// Associate a VLAN ID with a peer.
     pub vlan_id: Option<u16>,
+}
+
+/// Define policy relating to the import and export of prefixes from a BGP
+/// peer.
+#[derive(
+    Default,
+    Debug,
+    Serialize,
+    Deserialize,
+    Clone,
+    JsonSchema,
+    Eq,
+    PartialEq,
+    Hash,
+)]
+#[serde(rename_all = "snake_case", tag = "type", content = "value")]
+#[schemars(rename = "ImportExportPolicy")]
+pub enum ExternalImportExportPolicy {
+    /// Do not perform any filtering.
+    #[default]
+    NoFiltering,
+    Allow(Vec<oxnet::IpNet>),
+}
+
+impl From<ExternalImportExportPolicy>
+    for omicron_common::api::internal::shared::ImportExportPolicy
+{
+    fn from(value: ExternalImportExportPolicy) -> Self {
+        match value {
+            ExternalImportExportPolicy::NoFiltering => Self::NoFiltering,
+            ExternalImportExportPolicy::Allow(ip_nets) => Self::Allow(ip_nets),
+        }
+    }
+}
+
+impl From<omicron_common::api::internal::shared::ImportExportPolicy>
+    for ExternalImportExportPolicy
+{
+    fn from(
+        value: omicron_common::api::internal::shared::ImportExportPolicy,
+    ) -> Self {
+        use omicron_common::api::internal::shared::ImportExportPolicy;
+        match value {
+            ImportExportPolicy::NoFiltering => Self::NoFiltering,
+            ImportExportPolicy::Allow(ip_nets) => Self::Allow(ip_nets),
+        }
+    }
 }
 
 /// Parameters for creating a named set of BGP announcements.

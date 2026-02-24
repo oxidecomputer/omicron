@@ -22,7 +22,6 @@ use nexus_db_schema::schema::{
 use nexus_types::external_api::networking as networking_types;
 use nexus_types::identity::Resource;
 use omicron_common::api::external;
-use omicron_common::api::external::ImportExportPolicy;
 use omicron_common::api::internal::shared::{PortFec, PortSpeed};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -763,11 +762,15 @@ impl SwitchPortBgpPeerConfig {
             local_pref: p.local_pref.map(|x| x.into()),
             enforce_first_as: p.enforce_first_as,
             allow_import_list_active: match &p.allowed_import {
-                ImportExportPolicy::NoFiltering => false,
+                networking_types::ExternalImportExportPolicy::NoFiltering => {
+                    false
+                }
                 _ => true,
             },
             allow_export_list_active: match &p.allowed_export {
-                ImportExportPolicy::NoFiltering => false,
+                networking_types::ExternalImportExportPolicy::NoFiltering => {
+                    false
+                }
                 _ => true,
             },
             vlan_id: p.vlan_id.map(|x| x.into()),

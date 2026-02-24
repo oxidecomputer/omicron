@@ -11,13 +11,13 @@
 // <https://github.com/oxidecomputer/omicron/issues/9801>.
 
 use super::v1::BfdPeerConfig;
+use super::v1::ImportExportPolicy;
 use super::v1::LldpPortConfig;
 use super::v1::PortFec;
 use super::v1::PortSpeed;
 use super::v1::RouteConfig;
 use super::v1::SwitchLocation;
 use super::v1::TxEqConfig;
-use crate::api::external::ImportExportPolicy;
 use oxnet::{IpNet, Ipv6Net};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};

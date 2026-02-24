@@ -46,8 +46,8 @@ use omicron_common::OMICRON_DPD_TAG;
 use omicron_common::{
     address::{Ipv6Subnet, get_sled_address},
     api::{
-        external::{DataPageParams, ImportExportPolicy, SwitchLocation},
-        internal::shared::ParseSwitchLocationError,
+        external::{DataPageParams, SwitchLocation},
+        internal::shared::{ImportExportPolicy, ParseSwitchLocationError},
     },
 };
 use rdb_types::{Prefix, Prefix4, Prefix6};
