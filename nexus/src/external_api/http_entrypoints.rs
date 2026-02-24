@@ -4490,7 +4490,8 @@ impl NexusExternalApi for NexusExternalApiImpl {
     async fn networking_bgp_announce_set_list(
         rqctx: RequestContext<ApiContext>,
         query_params: Query<PaginatedByNameOrId>,
-    ) -> Result<HttpResponseOk<Vec<networking::BgpAnnounceSet>>, HttpError> {
+    ) -> Result<HttpResponseOk<Vec<networking::BgpAnnounceSet>>, HttpError>
+    {
         let apictx = rqctx.context();
         let handler = async {
             let nexus = &apictx.context.nexus;
@@ -4530,7 +4531,8 @@ impl NexusExternalApi for NexusExternalApiImpl {
     async fn networking_bgp_announcement_list(
         rqctx: RequestContext<ApiContext>,
         path_params: Path<networking::BgpAnnounceSetSelector>,
-    ) -> Result<HttpResponseOk<Vec<networking::BgpAnnouncement>>, HttpError> {
+    ) -> Result<HttpResponseOk<Vec<networking::BgpAnnouncement>>, HttpError>
+    {
         let apictx = rqctx.context();
         let handler = async {
             let nexus = &apictx.context.nexus;
