@@ -6,10 +6,10 @@ to:   blueprint 51701dfe-f3b0-4c65-a26c-64ad929b4e24
   sled c52410de-5fea-4e77-b162-756d103523b3 (active, config generation 2 -> 3):
 
     measurements:
-    ------------------------------
-    hash              version     
-    ------------------------------
-    install dataset   (no version)
+    ----------------------
+    hash      version     
+    ----------------------
+    unknown   (no version)
 
 
     host phase 2 contents:
