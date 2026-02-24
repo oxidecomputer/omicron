@@ -1845,7 +1845,7 @@ struct SwitchStaticRouteV4 {
     nexthop: Ipv4Addr,
     prefix: Prefix4,
     vlan: Option<u16>,
-    priority: Option<u8>,
+    priority: u8,
 }
 
 #[derive(PartialEq, Eq, Hash, Debug)]
@@ -1853,7 +1853,7 @@ struct SwitchStaticRouteV6 {
     nexthop: Ipv6Addr,
     prefix: Prefix6,
     vlan: Option<u16>,
-    priority: Option<u8>,
+    priority: u8,
 }
 
 #[derive(PartialEq, Eq, Hash, Debug)]
@@ -1885,9 +1885,7 @@ fn static_routes_to_del(
                             nexthop: x.nexthop,
                             prefix: x.prefix,
                             vlan_id: x.vlan,
-                            rib_priority: x
-                                .priority
-                                .unwrap_or(DEFAULT_RIB_PRIORITY_STATIC),
+                            rib_priority: x.priority,
                         })
                     }
                     SwitchStaticRoute::V6(x) => {
@@ -1895,9 +1893,7 @@ fn static_routes_to_del(
                             nexthop: x.nexthop,
                             prefix: x.prefix,
                             vlan_id: x.vlan,
-                            rib_priority: x
-                                .priority
-                                .unwrap_or(DEFAULT_RIB_PRIORITY_STATIC),
+                            rib_priority: x.priority,
                         })
                     }
                 }
@@ -1913,9 +1909,7 @@ fn static_routes_to_del(
                             nexthop: x.nexthop,
                             prefix: x.prefix,
                             vlan_id: x.vlan,
-                            rib_priority: x
-                                .priority
-                                .unwrap_or(DEFAULT_RIB_PRIORITY_STATIC),
+                            rib_priority: x.priority,
                         })
                     }
                     SwitchStaticRoute::V6(x) => {
@@ -1923,9 +1917,7 @@ fn static_routes_to_del(
                             nexthop: x.nexthop,
                             prefix: x.prefix,
                             vlan_id: x.vlan,
-                            rib_priority: x
-                                .priority
-                                .unwrap_or(DEFAULT_RIB_PRIORITY_STATIC),
+                            rib_priority: x.priority,
                         })
                     }
                 }
@@ -1978,9 +1970,7 @@ fn static_routes_to_add(
                         nexthop: x.nexthop,
                         prefix: x.prefix,
                         vlan_id: x.vlan,
-                        rib_priority: x
-                            .priority
-                            .unwrap_or(DEFAULT_RIB_PRIORITY_STATIC),
+                        rib_priority: x.priority,
                     })
                 }
                 SwitchStaticRoute::V6(x) => {
@@ -1988,9 +1978,7 @@ fn static_routes_to_add(
                         nexthop: x.nexthop,
                         prefix: x.prefix,
                         vlan_id: x.vlan,
-                        rib_priority: x
-                            .priority
-                            .unwrap_or(DEFAULT_RIB_PRIORITY_STATIC),
+                        rib_priority: x.priority,
                     })
                 }
             }
@@ -2039,8 +2027,8 @@ fn static_routes_in_db(
                     // and instead want to use an enum to more accurately represent what
                     // is happening.
                     let priority = match route.rib_priority {
-                        Some(v) => Some(v.0),
-                        None => Some(DEFAULT_RIB_PRIORITY_STATIC),
+                        Some(v) => v.0,
+                        None => DEFAULT_RIB_PRIORITY_STATIC,
                     };
                     routes.insert(SwitchStaticRoute::V4(SwitchStaticRouteV4 {
                         nexthop,
@@ -2059,8 +2047,8 @@ fn static_routes_in_db(
                     // and instead want to use an enum to more accurately represent what
                     // is happening.
                     let priority = match route.rib_priority {
-                        Some(v) => Some(v.0),
-                        None => Some(DEFAULT_RIB_PRIORITY_STATIC),
+                        Some(v) => v.0,
+                        None => DEFAULT_RIB_PRIORITY_STATIC,
                     };
                     routes.insert(SwitchStaticRoute::V6(SwitchStaticRouteV6 {
                         nexthop,
@@ -2310,7 +2298,7 @@ async fn static_routes_on_switch(
                                 nexthop: addr,
                                 prefix: dst,
                                 vlan: p.vlan_id,
-                                priority: Some(p.rib_priority),
+                                priority: p.rib_priority,
                             },
                         ));
                     }
@@ -2328,7 +2316,7 @@ async fn static_routes_on_switch(
                                 nexthop: addr,
                                 prefix: dst,
                                 vlan: p.vlan_id,
-                                priority: Some(p.rib_priority),
+                                priority: p.rib_priority,
                             },
                         ));
                     }
