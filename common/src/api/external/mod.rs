@@ -2894,39 +2894,6 @@ pub struct SwitchPortSettingsIdentity {
     pub identity: IdentityMetadata,
 }
 
-/// This structure contains all port settings information in one place. It's a
-/// convenience data structure for getting a complete view of a particular
-/// port's settings.
-#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq)]
-pub struct SwitchPortSettings {
-    #[serde(flatten)]
-    pub identity: IdentityMetadata,
-
-    /// Switch port settings included from other switch port settings groups.
-    pub groups: Vec<SwitchPortSettingsGroups>,
-
-    /// Layer 1 physical port settings.
-    pub port: SwitchPortConfig,
-
-    /// Layer 2 link settings.
-    pub links: Vec<SwitchPortLinkConfig>,
-
-    /// Layer 3 interface settings.
-    pub interfaces: Vec<SwitchInterfaceConfig>,
-
-    /// Vlan interface settings.
-    pub vlan_interfaces: Vec<SwitchVlanInterfaceConfig>,
-
-    /// IP route settings.
-    pub routes: Vec<SwitchPortRouteConfig>,
-
-    /// BGP peer settings.
-    pub bgp_peers: Vec<BgpPeer>,
-
-    /// Layer 3 IP address settings.
-    pub addresses: Vec<SwitchPortAddressView>,
-}
-
 /// This structure maps a port settings object to a port settings groups. Port
 /// settings objects may inherit settings from groups. This mapping defines the
 /// relationship between settings objects and the groups they reference.
@@ -3234,78 +3201,6 @@ pub struct SwitchPortRouteConfig {
     /// Route RIB priority. Higher priority indicates precedence within and across
     /// protocols.
     pub rib_priority: Option<u8>,
-}
-
-/// A BGP peer configuration for an interface. Includes the set of announcements
-/// that will be advertised to the peer identified by `addr`. The `bgp_config`
-/// parameter is a reference to global BGP parameters. The `interface_name`
-/// indicates what interface the peer should be contacted on.
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
-pub struct BgpPeer {
-    /// The global BGP configuration used for establishing a session with this
-    /// peer.
-    pub bgp_config: NameOrId,
-
-    /// The name of interface to peer on. This is relative to the port
-    /// configuration this BGP peer configuration is a part of. For example this
-    /// value could be phy0 to refer to a primary physical interface. Or it
-    /// could be vlan47 to refer to a VLAN interface.
-    pub interface_name: Name,
-
-    /// The address of the host to peer with. If not provided, this is an
-    /// unnumbered BGP session that will be established over the interface
-    /// specified by `interface_name`.
-    pub addr: Option<IpAddr>,
-
-    /// How long to hold peer connections between keepalives (seconds).
-    pub hold_time: u32,
-
-    /// How long to hold a peer in idle before attempting a new session
-    /// (seconds).
-    pub idle_hold_time: u32,
-
-    /// How long to delay sending an open request after establishing a TCP
-    /// session (seconds).
-    pub delay_open: u32,
-
-    /// How long to to wait between TCP connection retries (seconds).
-    pub connect_retry: u32,
-
-    /// How often to send keepalive requests (seconds).
-    pub keepalive: u32,
-
-    /// Require that a peer has a specified ASN.
-    pub remote_asn: Option<u32>,
-
-    /// Require messages from a peer have a minimum IP time to live field.
-    pub min_ttl: Option<u8>,
-
-    /// Use the given key for TCP-MD5 authentication with the peer.
-    pub md5_auth_key: Option<String>,
-
-    /// Apply the provided multi-exit discriminator (MED) updates sent to the peer.
-    pub multi_exit_discriminator: Option<u32>,
-
-    /// Include the provided communities in updates sent to the peer.
-    pub communities: Vec<u32>,
-
-    /// Apply a local preference to routes received from this peer.
-    pub local_pref: Option<u32>,
-
-    /// Enforce that the first AS in paths received from this peer is the peer's AS.
-    pub enforce_first_as: bool,
-
-    /// Define import policy for a peer.
-    pub allowed_import: ImportExportPolicy,
-
-    /// Define export policy for a peer.
-    pub allowed_export: ImportExportPolicy,
-
-    /// Associate a VLAN ID with a peer.
-    pub vlan_id: Option<u16>,
-
-    /// Router lifetime in seconds for unnumbered BGP peers.
-    pub router_lifetime: u16,
 }
 
 /// A base BGP configuration.

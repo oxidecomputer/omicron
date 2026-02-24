@@ -99,7 +99,6 @@ use omicron_common::api::external::RouterRoute;
 use omicron_common::api::external::RouterRouteKind;
 use omicron_common::api::external::ServiceIcmpConfig;
 use omicron_common::api::external::SwitchPort;
-use omicron_common::api::external::SwitchPortSettings;
 use omicron_common::api::external::SwitchPortSettingsIdentity;
 use omicron_common::api::external::VpcFirewallRuleUpdateParams;
 use omicron_common::api::external::VpcFirewallRules;
@@ -4056,12 +4055,13 @@ impl NexusExternalApi for NexusExternalApiImpl {
     async fn networking_switch_port_settings_create(
         rqctx: RequestContext<ApiContext>,
         new_settings: TypedBody<networking::SwitchPortSettingsCreate>,
-    ) -> Result<HttpResponseCreated<SwitchPortSettings>, HttpError> {
+    ) -> Result<HttpResponseCreated<networking::SwitchPortSettings>, HttpError>
+    {
         audit_and_time(&rqctx, |opctx, nexus| async move {
             let params = new_settings.into_inner();
             let result =
                 nexus.switch_port_settings_post(&opctx, params).await?;
-            let settings: SwitchPortSettings = result.into();
+            let settings: networking::SwitchPortSettings = result.into();
             Ok(HttpResponseCreated(settings))
         })
         .await
@@ -4120,7 +4120,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
     async fn networking_switch_port_settings_view(
         rqctx: RequestContext<ApiContext>,
         path_params: Path<networking::SwitchPortSettingsInfoSelector>,
-    ) -> Result<HttpResponseOk<SwitchPortSettings>, HttpError> {
+    ) -> Result<HttpResponseOk<networking::SwitchPortSettings>, HttpError> {
         let apictx = rqctx.context();
         let handler = async {
             let nexus = &apictx.context.nexus;

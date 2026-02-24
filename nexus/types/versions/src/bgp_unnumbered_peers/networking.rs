@@ -6,15 +6,17 @@
 //!
 //! This version:
 //! - Adds `max_paths` to `BgpConfigCreate`.
-//! - Uses `external::BgpPeer` (optional `addr`, `router_lifetime`) in
-//!   `BgpPeerConfig`.
+//! - `BgpPeer`: makes `addr` optional; adds `router_lifetime`
+//! - Updates `SwitchPortSettings` to use the new `BgpPeer`
 //! - Updates `SwitchPortSettingsCreate` to use the new `BgpPeerConfig`.
 
 use omicron_common::api::external::{
-    self, IdentityMetadataCreateParams, MaxPathConfig, Name, NameOrId,
+    self, IdentityMetadata, IdentityMetadataCreateParams, MaxPathConfig, Name,
+    NameOrId,
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use std::net::IpAddr;
 
 /// Parameters for creating a BGP configuration. This includes an autonomous
 /// system number (ASN) and a virtual routing and forwarding (VRF) identifier.
@@ -61,6 +63,138 @@ impl From<crate::v2025_11_20_00::networking::BgpConfigCreate>
     }
 }
 
+/// A BGP peer configuration for an interface. Includes the set of announcements
+/// that will be advertised to the peer identified by `addr`. The `bgp_config`
+/// parameter is a reference to global BGP parameters. The `interface_name`
+/// indicates what interface the peer should be contacted on.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
+pub struct BgpPeer {
+    /// The global BGP configuration used for establishing a session with this
+    /// peer.
+    pub bgp_config: NameOrId,
+
+    /// The name of interface to peer on. This is relative to the port
+    /// configuration this BGP peer configuration is a part of. For example this
+    /// value could be phy0 to refer to a primary physical interface. Or it
+    /// could be vlan47 to refer to a VLAN interface.
+    pub interface_name: Name,
+
+    /// The address of the host to peer with. If not provided, this is an
+    /// unnumbered BGP session that will be established over the interface
+    /// specified by `interface_name`.
+    pub addr: Option<IpAddr>,
+
+    /// How long to hold peer connections between keepalives (seconds).
+    pub hold_time: u32,
+
+    /// How long to hold a peer in idle before attempting a new session
+    /// (seconds).
+    pub idle_hold_time: u32,
+
+    /// How long to delay sending an open request after establishing a TCP
+    /// session (seconds).
+    pub delay_open: u32,
+
+    /// How long to to wait between TCP connection retries (seconds).
+    pub connect_retry: u32,
+
+    /// How often to send keepalive requests (seconds).
+    pub keepalive: u32,
+
+    /// Require that a peer has a specified ASN.
+    pub remote_asn: Option<u32>,
+
+    /// Require messages from a peer have a minimum IP time to live field.
+    pub min_ttl: Option<u8>,
+
+    /// Use the given key for TCP-MD5 authentication with the peer.
+    pub md5_auth_key: Option<String>,
+
+    /// Apply the provided multi-exit discriminator (MED) updates sent to the peer.
+    pub multi_exit_discriminator: Option<u32>,
+
+    /// Include the provided communities in updates sent to the peer.
+    pub communities: Vec<u32>,
+
+    /// Apply a local preference to routes received from this peer.
+    pub local_pref: Option<u32>,
+
+    /// Enforce that the first AS in paths received from this peer is the peer's AS.
+    pub enforce_first_as: bool,
+
+    /// Define import policy for a peer.
+    pub allowed_import: external::ImportExportPolicy,
+
+    /// Define export policy for a peer.
+    pub allowed_export: external::ImportExportPolicy,
+
+    /// Associate a VLAN ID with a peer.
+    pub vlan_id: Option<u16>,
+
+    /// Router lifetime in seconds for unnumbered BGP peers.
+    pub router_lifetime: u16,
+}
+
+impl From<crate::v2025_11_20_00::networking::BgpPeer> for BgpPeer {
+    fn from(old: crate::v2025_11_20_00::networking::BgpPeer) -> Self {
+        BgpPeer {
+            bgp_config: old.bgp_config,
+            interface_name: old.interface_name,
+            addr: Some(old.addr),
+            hold_time: old.hold_time,
+            idle_hold_time: old.idle_hold_time,
+            delay_open: old.delay_open,
+            connect_retry: old.connect_retry,
+            keepalive: old.keepalive,
+            remote_asn: old.remote_asn,
+            min_ttl: old.min_ttl,
+            md5_auth_key: old.md5_auth_key,
+            multi_exit_discriminator: old.multi_exit_discriminator,
+            communities: old.communities,
+            local_pref: old.local_pref,
+            enforce_first_as: old.enforce_first_as,
+            allowed_import: old.allowed_import,
+            allowed_export: old.allowed_export,
+            vlan_id: old.vlan_id,
+            router_lifetime: 0,
+        }
+    }
+}
+
+impl TryFrom<BgpPeer> for crate::v2025_11_20_00::networking::BgpPeer {
+    type Error = external::Error;
+
+    fn try_from(new: BgpPeer) -> Result<Self, Self::Error> {
+        let addr = new.addr.ok_or_else(|| {
+            external::Error::invalid_request(
+                "BGP peer has no address configured, but the API version \
+                 in use requires an address. Update your client to use \
+                 BGP unnumbered peers.",
+            )
+        })?;
+        Ok(Self {
+            bgp_config: new.bgp_config,
+            interface_name: new.interface_name,
+            addr,
+            hold_time: new.hold_time,
+            idle_hold_time: new.idle_hold_time,
+            delay_open: new.delay_open,
+            connect_retry: new.connect_retry,
+            keepalive: new.keepalive,
+            remote_asn: new.remote_asn,
+            min_ttl: new.min_ttl,
+            md5_auth_key: new.md5_auth_key,
+            multi_exit_discriminator: new.multi_exit_discriminator,
+            communities: new.communities,
+            local_pref: new.local_pref,
+            enforce_first_as: new.enforce_first_as,
+            allowed_import: new.allowed_import,
+            allowed_export: new.allowed_export,
+            vlan_id: new.vlan_id,
+        })
+    }
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct BgpPeerConfig {
     /// Link that the peer is reachable on.
@@ -69,7 +203,7 @@ pub struct BgpPeerConfig {
     /// phy0-phy3, etc.
     pub link_name: Name,
 
-    pub peers: Vec<external::BgpPeer>,
+    pub peers: Vec<BgpPeer>,
 }
 
 impl From<crate::v2025_11_20_00::networking::BgpPeerConfig> for BgpPeerConfig {
@@ -78,6 +212,68 @@ impl From<crate::v2025_11_20_00::networking::BgpPeerConfig> for BgpPeerConfig {
             link_name: old.link_name,
             peers: old.peers.into_iter().map(Into::into).collect(),
         }
+    }
+}
+
+/// This structure contains all port settings information in one place. It's a
+/// convenience data structure for getting a complete view of a particular
+/// port's settings.
+// TODO: several fields below embed `external::*` types directly from
+// `omicron-common`, which means their serialized shape is not truly frozen.
+// Once `omicron-common-versions` exists, replace these with version-local
+// copies of the types to ensure the initial version's wire format is
+// immutable.
+#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq)]
+pub struct SwitchPortSettings {
+    #[serde(flatten)]
+    pub identity: IdentityMetadata,
+
+    /// Switch port settings included from other switch port settings groups.
+    pub groups: Vec<external::SwitchPortSettingsGroups>,
+
+    /// Layer 1 physical port settings.
+    pub port: external::SwitchPortConfig,
+
+    /// Layer 2 link settings.
+    pub links: Vec<external::SwitchPortLinkConfig>,
+
+    /// Layer 3 interface settings.
+    pub interfaces: Vec<external::SwitchInterfaceConfig>,
+
+    /// Vlan interface settings.
+    pub vlan_interfaces: Vec<external::SwitchVlanInterfaceConfig>,
+
+    /// IP route settings.
+    pub routes: Vec<external::SwitchPortRouteConfig>,
+
+    /// BGP peer settings.
+    pub bgp_peers: Vec<BgpPeer>,
+
+    /// Layer 3 IP address settings.
+    pub addresses: Vec<external::SwitchPortAddressView>,
+}
+
+impl TryFrom<SwitchPortSettings>
+    for crate::v2025_11_20_00::networking::SwitchPortSettings
+{
+    type Error = external::Error;
+
+    fn try_from(new: SwitchPortSettings) -> Result<Self, Self::Error> {
+        Ok(Self {
+            identity: new.identity,
+            groups: new.groups,
+            port: new.port,
+            links: new.links,
+            interfaces: new.interfaces,
+            vlan_interfaces: new.vlan_interfaces,
+            routes: new.routes,
+            bgp_peers: new
+                .bgp_peers
+                .into_iter()
+                .map(crate::v2025_11_20_00::networking::BgpPeer::try_from)
+                .collect::<Result<Vec<_>, _>>()?,
+            addresses: new.addresses,
+        })
     }
 }
 
