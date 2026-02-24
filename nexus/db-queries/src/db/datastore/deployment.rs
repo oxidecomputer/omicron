@@ -3339,8 +3339,9 @@ mod tests {
             [blueprint1.id]
         );
 
-        // Ensure every bp_* table received at least one row for this blueprint (issue #8455).
-        ensure_blueprint_fully_populated(&datastore, blueprint1.id).await;
+        // Start tracking cumulative blueprint table coverage.
+        let mut cumulative_counts =
+            BlueprintTableCounts::new(&datastore, blueprint1.id).await;
 
         // Check the number of blueprint elements against our collection.
         assert_eq!(
@@ -3709,6 +3710,10 @@ mod tests {
         assert_eq!(blueprint2, blueprint_read);
         assert_eq!(blueprint2.internal_dns_version, new_internal_dns_version);
         assert_eq!(blueprint2.external_dns_version, new_external_dns_version);
+
+        let blueprint2_counts =
+            BlueprintTableCounts::new(&datastore, blueprint2.id).await;
+        cumulative_counts.add(&blueprint2_counts);
         {
             let mut expected_ids = [blueprint1.id, blueprint2.id];
             expected_ids.sort();
@@ -3798,6 +3803,10 @@ mod tests {
                 .await
                 .expect("failed to read collection back")
         );
+
+        let blueprint3_counts =
+            BlueprintTableCounts::new(&datastore, blueprint3.id).await;
+        cumulative_counts.add(&blueprint3_counts);
         let bp3_target = BlueprintTarget {
             target_id: blueprint3.id,
             enabled: true,
@@ -3850,6 +3859,10 @@ mod tests {
                 .await
                 .expect("failed to read collection back")
         );
+
+        let blueprint4_counts =
+            BlueprintTableCounts::new(&datastore, blueprint4.id).await;
+        cumulative_counts.add(&blueprint4_counts);
         let bp4_target = BlueprintTarget {
             target_id: blueprint4.id,
             enabled: true,
@@ -3906,6 +3919,10 @@ mod tests {
                 .await
                 .expect("failed to read collection back")
         );
+
+        let blueprint5_counts =
+            BlueprintTableCounts::new(&datastore, blueprint5.id).await;
+        cumulative_counts.add(&blueprint5_counts);
         let bp5_target = BlueprintTarget {
             target_id: blueprint5.id,
             enabled: true,
@@ -3920,7 +3937,7 @@ mod tests {
 
         // Now make a new blueprint (with no meaningful changes) to ensure we
         // can delete the last test blueprint we generated above.
-        let blueprint6 = BlueprintBuilder::new_based_on(
+        let mut blueprint6 = BlueprintBuilder::new_based_on(
             &logctx.log,
             &blueprint5,
             "dummy",
@@ -3928,10 +3945,31 @@ mod tests {
         )
         .expect("failed to create builder")
         .build(BlueprintSource::Test);
+
+        // Add ClickHouse configuration to exercise those tables
+        if let Some((_, sled_config)) = blueprint6.sleds.iter().next() {
+            if let Some(zone_config) = sled_config.zones.iter().next() {
+                let zone_id = zone_config.id;
+                let mut cfg = ClickhouseClusterConfig::new(
+                    format!("cluster-{TEST_NAME}"),
+                    "test-secret".into(),
+                );
+                cfg.max_used_keeper_id = KeeperId::from(1u64);
+                cfg.max_used_server_id = ServerId::from(1u64);
+                cfg.keepers.insert(zone_id, KeeperId::from(1u64));
+                cfg.servers.insert(zone_id, ServerId::from(1u64));
+                blueprint6.clickhouse_cluster_config = Some(cfg);
+            }
+        }
+
         datastore
             .blueprint_insert(&opctx, &blueprint6)
             .await
             .expect("failed to insert blueprint");
+
+        let blueprint6_counts =
+            BlueprintTableCounts::new(&datastore, blueprint6.id).await;
+        cumulative_counts.add(&blueprint6_counts);
         let bp6_target = BlueprintTarget {
             target_id: blueprint6.id,
             enabled: true,
@@ -3943,6 +3981,8 @@ mod tests {
             .unwrap();
         datastore.blueprint_delete(&opctx, &authz_blueprint5).await.unwrap();
         ensure_blueprint_fully_deleted(&datastore, blueprint5.id).await;
+
+        cumulative_counts.ensure_fully_populated();
 
         // Clean up.
         db.terminate().await;
@@ -4562,10 +4602,11 @@ mod tests {
         );
     }
 
-    /// Counts rows in blueprint-related tables for a specific blueprint ID.
+    /// Counts rows in blueprint-related tables.
     /// Used by both `ensure_blueprint_fully_populated` and `ensure_blueprint_fully_deleted`.
     struct BlueprintTableCounts {
         counts: BTreeMap<String, i64>,
+        num_blueprints: usize,
     }
 
     impl BlueprintTableCounts {
@@ -4622,7 +4663,8 @@ mod tests {
                 counts.insert(table_name.to_string(), count);
             }
 
-            let table_counts = BlueprintTableCounts { counts };
+            let table_counts =
+                BlueprintTableCounts { counts, num_blueprints: 1 };
 
             // Verify no new blueprint tables were added without updating this function
             if let Err(msg) =
@@ -4637,6 +4679,14 @@ mod tests {
         /// Returns true if all tables are empty (0 rows).
         fn all_empty(&self) -> bool {
             self.counts.values().all(|&count| count == 0)
+        }
+
+        /// Add counts from another BlueprintTableCounts to this one.
+        fn add(&mut self, other: &BlueprintTableCounts) {
+            for (table, &count) in &other.counts {
+                *self.counts.entry(table.clone()).or_insert(0) += count;
+            }
+            self.num_blueprints += other.num_blueprints;
         }
 
         /// Returns a list of table names that are empty.
@@ -4709,50 +4759,32 @@ mod tests {
                 Ok(())
             }
         }
-    }
 
-    // Verify that every blueprint-related table contains ≥1 row for `blueprint_id`.
-    // Complements `ensure_blueprint_fully_deleted`.
-    async fn ensure_blueprint_fully_populated(
-        datastore: &DataStore,
-        blueprint_id: BlueprintUuid,
-    ) {
-        let counts = BlueprintTableCounts::new(datastore, blueprint_id).await;
+        /// Verify that every blueprint-related table contains ≥1 row across test blueprints.
+        /// Complements `ensure_blueprint_fully_deleted`.
+        fn ensure_fully_populated(&self) {
+            // Exception tables that may be empty in the test blueprints:
+            // - debug log for planner reports: only populated when the blueprint
+            //   was produced by the planner (test blueprints generally aren't)
+            let exception_tables = ["debug_log_blueprint_planning"];
 
-        // Exception tables that may be empty in the representative blueprint:
-        // - MGS update tables: only populated when blueprint includes firmware
-        //   updates
-        // - ClickHouse tables: only populated when blueprint includes
-        //   ClickHouse configuration
-        // - debug log for planner reports: only populated when the blueprint
-        //   was produced by the planner (test blueprints generally aren't)
-        let exception_tables = [
-            "bp_pending_mgs_update_sp",
-            "bp_pending_mgs_update_rot",
-            "bp_pending_mgs_update_rot_bootloader",
-            "bp_pending_mgs_update_host_phase_1",
-            "bp_clickhouse_cluster_config",
-            "bp_clickhouse_keeper_zone_id_to_node_id",
-            "bp_clickhouse_server_zone_id_to_node_id",
-            "debug_log_blueprint_planning",
-        ];
+            // Check that all non-exception tables have at least one row
+            let empty_tables = self.empty_tables();
+            let problematic_tables: Vec<_> = empty_tables
+                .into_iter()
+                .filter(|table| !exception_tables.contains(&table.as_str()))
+                .collect();
 
-        // Check that all non-exception tables have at least one row
-        let empty_tables = counts.empty_tables();
-        let problematic_tables: Vec<_> = empty_tables
-            .into_iter()
-            .filter(|table| !exception_tables.contains(&table.as_str()))
-            .collect();
-
-        if !problematic_tables.is_empty() {
-            panic!(
-                "Expected tables to be populated for blueprint {blueprint_id}: {:?}\n\n\
-                If every blueprint should be expected to have a value in this table, then this is a bug. \
-                Otherwise, you may need to add a table to the exception list in `ensure_blueprint_fully_populated()`. \
-                If you do this, please ensure that you add a test to `test_representative_blueprint()` that creates a \
-                blueprint that _does_ populate this table and verifies it.",
-                problematic_tables
-            );
+            if !problematic_tables.is_empty() {
+                panic!(
+                    "Expected these table  to be populated by one of the test blueprints, \
+                    but they weren't: {:?}\n\n\
+                    If you're adding a new table that's only populated for some blueprints, \
+                    you may need to add a new test blueprint that uses that table to make \
+                    sure that it gets covered.",
+                    problematic_tables
+                );
+            }
         }
     }
 
