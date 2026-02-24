@@ -541,16 +541,13 @@ impl SledAgent {
         *self.instance_ensure_state_error.lock().unwrap() = error;
     }
 
-    /// Idempotently ensures that the given API Disk (described by `api_disk`)
-    /// is attached (or not) as specified.  This simulates disk attach and
-    /// detach, similar to instance boot and halt.
     pub async fn disk_ensure(
         self: &Arc<Self>,
-        disk_id: Uuid,
-        initial_state: DiskRuntimeState,
-        target: DiskStateRequested,
+        _disk_id: Uuid,
+        _initial_state: DiskRuntimeState,
+        _target: DiskStateRequested,
     ) -> Result<DiskRuntimeState, Error> {
-        self.disks.sim_ensure(&disk_id, initial_state, Some(target)).await
+        unimplemented!("Disk attachment not yet implemented");
     }
 
     pub fn updates(&self) -> &UpdateManager {
