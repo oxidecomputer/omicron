@@ -1135,6 +1135,39 @@ async fn siu_release_virtual_provisioning(
         Err(err) => return Err(ActionError::action_failed(err)),
     };
 
+    let result = osagactx
+        .datastore()
+        .physical_provisioning_collection_delete_instance(
+            &opctx,
+            instance_id,
+            project_id,
+            cpus_diff,
+            ram_diff,
+        )
+        .await;
+    match result {
+        Ok(deleted) => {
+            info!(
+                log,
+                "instance update (no VMM): deallocated physical provisioning \
+                 resources";
+                "instance_id" => %instance_id,
+                "records_deleted" => ?deleted,
+            );
+        }
+        // Necessary for idempotency --- the physical provisioning resources
+        // may have been deleted already, that's fine.
+        Err(Error::ObjectNotFound { .. }) => {
+            info!(
+                log,
+                "instance update (no VMM): physical provisioning record not \
+                 found; perhaps it has already been deleted?";
+                "instance_id" => %instance_id,
+            );
+        }
+        Err(err) => return Err(ActionError::action_failed(err)),
+    };
+
     Ok(())
 }
 

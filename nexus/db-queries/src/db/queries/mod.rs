@@ -14,6 +14,7 @@ pub mod ip_pool;
 mod next_item;
 pub mod network_interface;
 pub mod oximeter;
+pub mod physical_provisioning_collection_update;
 pub mod region_allocation;
 pub mod regions_hard_delete;
 pub mod sled_reservation;

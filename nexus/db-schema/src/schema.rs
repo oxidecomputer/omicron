@@ -560,6 +560,7 @@ table! {
         cpus -> Int8,
         memory_bytes -> Int8,
         storage_bytes -> Int8,
+        physical_storage_bytes -> Nullable<Int8>,
     }
 }
 
@@ -574,6 +575,8 @@ table! {
         cpus_allocated -> Int8,
         memory_allocated -> Int8,
         storage_allocated -> Int8,
+        physical_disk_bytes_provisioned -> Int8,
+        physical_storage_allocated -> Nullable<Int8>,
     }
 }
 
@@ -1162,11 +1165,7 @@ table! {
 table! {
     virtual_provisioning_collection {
         id -> Uuid,
-        // This type isn't actually "Nullable" - it's just handy to use the
-        // same type for insertion and querying, and doing so requires this
-        // field to appear optional so we can let this (default) field appear
-        // optional.
-        time_modified -> Nullable<Timestamptz>,
+        time_modified -> Timestamptz,
         collection_type -> Text,
         virtual_disk_bytes_provisioned -> Int8,
         cpus_provisioned -> Int8,
@@ -1177,11 +1176,7 @@ table! {
 table! {
     virtual_provisioning_resource {
         id -> Uuid,
-        // This type isn't actually "Nullable" - it's just handy to use the
-        // same type for insertion and querying, and doing so requires this
-        // field to appear optional so we can let this (default) field appear
-        // optional.
-        time_modified -> Nullable<Timestamptz>,
+        time_modified -> Timestamptz,
         resource_type -> Text,
         virtual_disk_bytes_provisioned -> Int8,
         cpus_provisioned -> Int8,
@@ -1193,6 +1188,49 @@ allow_tables_to_appear_in_same_query! {
     virtual_provisioning_resource,
     instance
 }
+
+table! {
+    physical_provisioning_collection {
+        id -> Uuid,
+        time_modified -> Timestamptz,
+        collection_type -> Text,
+        physical_writable_disk_bytes -> Int8,
+        physical_zfs_snapshot_bytes -> Int8,
+        physical_read_only_disk_bytes -> Int8,
+        cpus_provisioned -> Int8,
+        ram_provisioned -> Int8,
+    }
+}
+
+table! {
+    physical_provisioning_resource {
+        id -> Uuid,
+        time_modified -> Timestamptz,
+        resource_type -> Text,
+        physical_writable_disk_bytes -> Int8,
+        physical_zfs_snapshot_bytes -> Int8,
+        physical_read_only_disk_bytes -> Int8,
+        cpus_provisioned -> Int8,
+        ram_provisioned -> Int8,
+    }
+}
+
+allow_tables_to_appear_in_same_query! {
+    physical_provisioning_resource,
+    instance
+}
+
+allow_tables_to_appear_in_same_query!(
+    disk_type_crucible,
+    physical_provisioning_resource
+);
+
+allow_tables_to_appear_in_same_query!(disk, physical_provisioning_resource);
+allow_tables_to_appear_in_same_query!(volume, physical_provisioning_resource);
+
+// Used by the physical provisioning dedup CTE which joins disk_type_crucible
+// with project via disk to check for existing references.
+allow_tables_to_appear_in_same_query!(disk_type_crucible, project);
 
 table! {
     zpool (id) {

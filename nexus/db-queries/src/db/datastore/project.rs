@@ -14,10 +14,11 @@ use crate::db::collection_insert::DatastoreCollection;
 use crate::db::identity::Resource;
 use crate::db::model::CollectionTypeProvisioned;
 use crate::db::model::Name;
+use crate::db::model::PhysicalProvisioningCollectionNew;
 use crate::db::model::Project;
 use crate::db::model::ProjectUpdate;
 use crate::db::model::Silo;
-use crate::db::model::VirtualProvisioningCollection;
+use crate::db::model::VirtualProvisioningCollectionNew;
 use crate::db::pagination::paginated;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::Utc;
@@ -192,7 +193,15 @@ impl DataStore {
                     // Create resource provisioning for the project.
                     self.virtual_provisioning_collection_create_on_connection(
                         &conn,
-                        VirtualProvisioningCollection::new(
+                        VirtualProvisioningCollectionNew::new(
+                            project.id(),
+                            CollectionTypeProvisioned::Project,
+                        ),
+                    )
+                    .await?;
+                    self.physical_provisioning_collection_create_on_connection(
+                        &conn,
+                        PhysicalProvisioningCollectionNew::new(
                             project.id(),
                             CollectionTypeProvisioned::Project,
                         ),
@@ -284,6 +293,12 @@ impl DataStore {
                     }
 
                     self.virtual_provisioning_collection_delete_on_connection(
+                        &opctx.log,
+                        &conn,
+                        db_project.id(),
+                    )
+                    .await?;
+                    self.physical_provisioning_collection_delete_on_connection(
                         &opctx.log,
                         &conn,
                         db_project.id(),

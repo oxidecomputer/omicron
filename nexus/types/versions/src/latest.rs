@@ -333,17 +333,19 @@ pub mod silo {
     pub use crate::v2025_11_20_00::silo::OptionalSiloSelector;
     pub use crate::v2025_11_20_00::silo::Silo;
     pub use crate::v2025_11_20_00::silo::SiloAuthSettings;
-    pub use crate::v2025_11_20_00::silo::SiloAuthSettingsUpdate;
-    pub use crate::v2025_11_20_00::silo::SiloCreate;
     pub use crate::v2025_11_20_00::silo::SiloIdentityMode;
-    pub use crate::v2025_11_20_00::silo::SiloQuotas;
-    pub use crate::v2025_11_20_00::silo::SiloQuotasCreate;
-    pub use crate::v2025_11_20_00::silo::SiloQuotasUpdate;
     pub use crate::v2025_11_20_00::silo::SiloSelector;
-    pub use crate::v2025_11_20_00::silo::SiloUtilization;
     pub use crate::v2025_11_20_00::silo::UserProvisionType;
-    pub use crate::v2025_11_20_00::silo::Utilization;
     pub use crate::v2025_11_20_00::silo::VirtualResourceCounts;
+
+    // Types updated in PHYSICAL_STORAGE_QUOTAS.
+    pub use crate::v2026_02_23_00::silo::SiloAuthSettingsUpdate;
+    pub use crate::v2026_02_23_00::silo::SiloCreate;
+    pub use crate::v2026_02_23_00::silo::SiloQuotas;
+    pub use crate::v2026_02_23_00::silo::SiloQuotasCreate;
+    pub use crate::v2026_02_23_00::silo::SiloQuotasUpdate;
+    pub use crate::v2026_02_23_00::silo::SiloUtilization;
+    pub use crate::v2026_02_23_00::silo::Utilization;
 }
 
 pub mod snapshot {

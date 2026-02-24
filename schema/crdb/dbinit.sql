@@ -592,6 +592,74 @@ CREATE TABLE IF NOT EXISTS omicron.public.virtual_provisioning_resource (
     ram_provisioned INT8 NOT NULL
 );
 
+-- A table describing the physical provisioning of a collection.
+-- Physical provisioning tracks actual physical bytes consumed, including
+-- replication overhead, unlike virtual provisioning which tracks user-visible
+-- (virtual) sizes.
+--
+-- Collections exist for:
+-- - Projects
+-- - Silos
+-- - Fleet
+CREATE TABLE IF NOT EXISTS omicron.public.physical_provisioning_collection (
+    -- Should match the UUID of the corresponding collection.
+    id UUID PRIMARY KEY,
+    time_modified TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+
+    -- Identifies the type of the collection.
+    collection_type STRING(63) NOT NULL,
+
+    -- Physical bytes consumed by writable disk regions (R/W).
+    physical_writable_disk_bytes INT8 NOT NULL DEFAULT 0,
+
+    -- Physical bytes consumed by ZFS snapshots (pre-scrub).
+    physical_zfs_snapshot_bytes INT8 NOT NULL DEFAULT 0,
+
+    -- Physical bytes consumed by read-only regions (post-scrub or
+    -- pre-accounted).
+    physical_read_only_disk_bytes INT8 NOT NULL DEFAULT 0,
+
+    -- The number of CPUs provisioned by VMs.
+    cpus_provisioned INT8 NOT NULL DEFAULT 0,
+
+    -- The amount of RAM provisioned by VMs.
+    ram_provisioned INT8 NOT NULL DEFAULT 0
+);
+
+-- A table describing a single physical resource which has been provisioned.
+-- This may include:
+-- - Disks
+-- - Instances
+-- - Snapshots
+--
+-- NOTE: This table must be separate from physical_provisioning_collection
+-- because CockroachDB does not allow CTEs to modify the same table in
+-- multiple subqueries.
+CREATE TABLE IF NOT EXISTS omicron.public.physical_provisioning_resource (
+    -- Should match the UUID of the corresponding resource.
+    id UUID PRIMARY KEY,
+    time_modified TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+
+    -- Identifies the type of the resource.
+    resource_type STRING(63) NOT NULL,
+
+    -- Physical bytes consumed by writable disk regions (R/W).
+    physical_writable_disk_bytes INT8 NOT NULL DEFAULT 0,
+
+    -- Physical bytes consumed by ZFS snapshots (pre-scrub).
+    physical_zfs_snapshot_bytes INT8 NOT NULL DEFAULT 0,
+
+    -- Physical bytes consumed by read-only regions (post-scrub or
+    -- pre-accounted).
+    physical_read_only_disk_bytes INT8 NOT NULL DEFAULT 0,
+
+    -- The number of CPUs provisioned.
+    cpus_provisioned INT8 NOT NULL DEFAULT 0,
+
+    -- The amount of RAM provisioned.
+    ram_provisioned INT8 NOT NULL DEFAULT 0
+);
+
 -- ZPools of Storage, attached to Sleds.
 -- These are backed by a single physical disk.
 --
@@ -1152,6 +1220,12 @@ CREATE TABLE IF NOT EXISTS omicron.public.silo_quotas (
     memory_bytes INT8 NOT NULL,
     storage_bytes INT8 NOT NULL,
 
+    -- Optional physical storage quota in bytes.
+    -- NULL = no limit (default for existing silos)
+    -- 0 = zero physical storage usage allowed
+    -- >0 = byte limit for total physical storage
+    physical_storage_bytes INT8,
+
     CONSTRAINT cpus_not_negative CHECK (cpus >= 0),
     CONSTRAINT memory_not_negative CHECK (memory_bytes >= 0),
     CONSTRAINT storage_not_negative CHECK (storage_bytes >= 0)
@@ -1159,27 +1233,31 @@ CREATE TABLE IF NOT EXISTS omicron.public.silo_quotas (
 
 /**
  * A view of the amount of provisioned and allocated (set by quotas) resources
- * on a given silo.
+ * on a given silo, including physical provisioning.
  */
 CREATE VIEW IF NOT EXISTS omicron.public.silo_utilization
 AS SELECT
-    c.id AS silo_id,
+    vc.id AS silo_id,
     s.name AS silo_name,
-    c.cpus_provisioned AS cpus_provisioned,
-    c.ram_provisioned AS memory_provisioned,
-    c.virtual_disk_bytes_provisioned AS storage_provisioned,
+    vc.cpus_provisioned AS cpus_provisioned,
+    vc.ram_provisioned AS memory_provisioned,
+    vc.virtual_disk_bytes_provisioned AS storage_provisioned,
     q.cpus AS cpus_allocated,
     q.memory_bytes AS memory_allocated,
     q.storage_bytes AS storage_allocated,
-    s.discoverable as silo_discoverable
+    s.discoverable AS silo_discoverable,
+    COALESCE(pc.physical_writable_disk_bytes
+           + pc.physical_zfs_snapshot_bytes
+           + pc.physical_read_only_disk_bytes, 0)
+        AS physical_disk_bytes_provisioned,
+    q.physical_storage_bytes AS physical_storage_allocated
 FROM
-    omicron.public.virtual_provisioning_collection AS c
-    RIGHT JOIN omicron.public.silo_quotas AS q
-    ON c.id = q.silo_id
-    INNER JOIN omicron.public.silo AS s
-    ON c.id = s.id
+    omicron.public.virtual_provisioning_collection AS vc
+    RIGHT JOIN omicron.public.silo_quotas AS q ON vc.id = q.silo_id
+    INNER JOIN omicron.public.silo AS s ON vc.id = s.id
+    LEFT JOIN omicron.public.physical_provisioning_collection AS pc ON vc.id = pc.id
 WHERE
-    c.collection_type = 'Silo'
+    vc.collection_type = 'Silo'
 AND
     s.time_deleted IS NULL;
 
@@ -8192,7 +8270,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '231.0.0', NULL)
+    (TRUE, NOW(), NOW(), '232.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

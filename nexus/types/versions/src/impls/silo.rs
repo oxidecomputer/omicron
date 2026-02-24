@@ -49,6 +49,7 @@ impl SiloQuotasCreate {
             cpus: 0,
             memory: ByteCount::from(0),
             storage: ByteCount::from(0),
+            physical_storage: None,
         }
     }
 
@@ -63,6 +64,7 @@ impl SiloQuotasCreate {
             cpus: 9999999999,
             memory: ByteCount::try_from(999999999999999999_u64).unwrap(),
             storage: ByteCount::try_from(999999999999999999_u64).unwrap(),
+            physical_storage: None,
         }
     }
 }

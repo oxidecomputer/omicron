@@ -8,7 +8,7 @@ use crate::db::column_walker::AllColumnsOf;
 use crate::db::model::ByteCount;
 use crate::db::model::ResourceTypeProvisioned;
 use crate::db::model::VirtualProvisioningCollection;
-use crate::db::model::VirtualProvisioningResource;
+use crate::db::model::VirtualProvisioningResourceNew;
 use crate::db::raw_query_builder::{QueryBuilder, TypedSqlQuery};
 use crate::db::true_or_cast_error::matches_sentinel;
 use const_format::concatcp;
@@ -81,9 +81,9 @@ pub fn from_diesel(e: DieselError) -> external::Error {
 /// create or destroy the resource, which helps make the operation idempotent.
 #[derive(Clone)]
 enum UpdateKind {
-    InsertStorage(VirtualProvisioningResource),
+    InsertStorage(VirtualProvisioningResourceNew),
     DeleteStorage { id: uuid::Uuid, disk_byte_diff: ByteCount },
-    InsertInstance(VirtualProvisioningResource),
+    InsertInstance(VirtualProvisioningResourceNew),
     DeleteInstance { id: uuid::Uuid, cpus_diff: i64, ram_diff: ByteCount },
 }
 
@@ -430,7 +430,7 @@ FROM
         storage_type: crate::db::datastore::StorageType,
     ) -> TypedSqlQuery<SelectableSql<VirtualProvisioningCollection>> {
         let mut provision =
-            VirtualProvisioningResource::new(id, storage_type.into());
+            VirtualProvisioningResourceNew::new(id, storage_type.into());
         provision.virtual_disk_bytes_provisioned = disk_byte_diff;
 
         Self::apply_update(UpdateKind::InsertStorage(provision), project_id)
@@ -453,7 +453,7 @@ FROM
         ram_diff: ByteCount,
         project_id: uuid::Uuid,
     ) -> TypedSqlQuery<SelectableSql<VirtualProvisioningCollection>> {
-        let mut provision = VirtualProvisioningResource::new(
+        let mut provision = VirtualProvisioningResourceNew::new(
             id.into_untyped_uuid(),
             ResourceTypeProvisioned::Instance,
         );

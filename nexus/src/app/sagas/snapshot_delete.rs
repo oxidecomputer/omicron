@@ -154,6 +154,39 @@ async fn ssd_account_space(
         )
         .await
         .map_err(ActionError::action_failed)?;
+
+    let physical = nexus_db_model::distributed_disk_physical_bytes(
+        nexus_db_model::VirtualDiskBytes(*params.snapshot.size),
+    );
+    let phys_bytes =
+        nexus_db_model::ByteCount::from(physical.into_byte_count());
+    let zero = nexus_db_model::ByteCount::from(
+        omicron_common::api::external::ByteCount::from(0u32),
+    );
+    // Snapshot charges both zfs_snapshot AND read_only (2x pre-accounting).
+    // Delete with dedup: if surviving disks still reference this snapshot,
+    // the read_only charge is preserved.
+    let snapshot_bytes =
+        nexus_db_queries::db::queries::physical_provisioning_collection_update::PhysicalDiskBytes {
+            writable: zero,
+            zfs_snapshot: phys_bytes,
+            read_only: phys_bytes,
+        };
+    osagactx
+        .datastore()
+        .physical_provisioning_collection_delete_snapshot(
+            &opctx,
+            params.authz_snapshot.id(),
+            params.snapshot.project_id,
+            snapshot_bytes,
+            snapshot_bytes,
+            Some(nexus_db_queries::db::queries::physical_provisioning_collection_update::DedupInfo::SnapshotDelete {
+                snapshot_id: params.authz_snapshot.id(),
+            }),
+        )
+        .await
+        .map_err(ActionError::action_failed)?;
+
     Ok(())
 }
 

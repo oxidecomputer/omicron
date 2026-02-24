@@ -34,13 +34,9 @@ pub(crate) struct Params {
 
 declare_saga_actions! {
     disk_delete;
-    DELETE_DISK_RECORD -> "deleted_disk" {
-        + sdd_delete_disk_record
-        - sdd_delete_disk_record_undo
-    }
-    SPACE_ACCOUNT -> "no_result1" {
-        + sdd_account_space
-        - sdd_account_space_undo
+    DELETE_DISK_RECORD_AND_ACCOUNT -> "deleted_disk" {
+        + sdd_delete_disk_record_and_account
+        - sdd_delete_disk_record_and_account_undo
     }
     DELETE_LOCAL_STORAGE -> "delete_local_storage" {
         + sdd_delete_local_storage
@@ -66,8 +62,11 @@ impl NexusSaga for SagaDiskDelete {
         params: &Self::Params,
         mut builder: steno::DagBuilder,
     ) -> Result<steno::Dag, super::SagaInitError> {
-        builder.append(delete_disk_record_action());
-        builder.append(space_account_action());
+        // Atomically soft-delete the disk record AND remove virtual +
+        // physical provisioning in a single step. This eliminates race
+        // windows where the disk is invisible to dedup but provisioning
+        // still exists (or vice versa).
+        builder.append(delete_disk_record_and_account_action());
 
         match &params.disk {
             datastore::Disk::Crucible(disk) => {
@@ -120,13 +119,27 @@ impl NexusSaga for SagaDiskDelete {
 
 // disk delete saga: action implementations
 
-async fn sdd_delete_disk_record(
+/// Combined action: atomically soft-deletes the disk record AND removes
+/// virtual + physical provisioning. This eliminates the race window where
+/// the disk is invisible to dedup but provisioning still exists.
+async fn sdd_delete_disk_record_and_account(
     sagactx: NexusActionContext,
 ) -> Result<db::model::Disk, ActionError> {
     let osagactx = sagactx.user_data();
     let params = sagactx.saga_params::<Params>()?;
 
-    let disk = osagactx
+    let opctx = crate::context::op_context_for_saga_action(
+        &sagactx,
+        &params.serialized_authn,
+    );
+
+    // Look up origin info from disk_type_crucible BEFORE soft-deleting
+    // the disk, so we can determine dedup behavior.
+    let dtc = sdd_lookup_disk_type_crucible(osagactx, &opctx, params.disk.id())
+        .await?;
+
+    // Soft-delete the disk record.
+    let deleted_disk = osagactx
         .datastore()
         .project_delete_disk_no_auth(
             &params.disk.id(),
@@ -135,35 +148,7 @@ async fn sdd_delete_disk_record(
         .await
         .map_err(ActionError::action_failed)?;
 
-    Ok(disk)
-}
-
-async fn sdd_delete_disk_record_undo(
-    sagactx: NexusActionContext,
-) -> Result<(), anyhow::Error> {
-    let osagactx = sagactx.user_data();
-    let params = sagactx.saga_params::<Params>()?;
-
-    osagactx
-        .datastore()
-        .project_undelete_disk_set_faulted_no_auth(&params.disk.id())
-        .await
-        .map_err(ActionError::action_failed)?;
-
-    Ok(())
-}
-
-async fn sdd_account_space(
-    sagactx: NexusActionContext,
-) -> Result<(), ActionError> {
-    let osagactx = sagactx.user_data();
-    let params = sagactx.saga_params::<Params>()?;
-
-    let deleted_disk = sagactx.lookup::<db::model::Disk>("deleted_disk")?;
-    let opctx = crate::context::op_context_for_saga_action(
-        &sagactx,
-        &params.serialized_authn,
-    );
+    // Remove virtual provisioning.
     osagactx
         .datastore()
         .virtual_provisioning_collection_delete_disk(
@@ -174,10 +159,98 @@ async fn sdd_account_space(
         )
         .await
         .map_err(ActionError::action_failed)?;
-    Ok(())
+
+    // Remove physical provisioning.
+    let virtual_bytes = nexus_db_model::VirtualDiskBytes(*deleted_disk.size);
+    let zero = nexus_db_model::ByteCount::from(
+        omicron_common::api::external::ByteCount::from(0u32),
+    );
+
+    use nexus_db_queries::db::queries::physical_provisioning_collection_update::{
+        DedupInfo, DedupOriginColumn,
+    };
+
+    match dtc {
+        Some(ref dtc) if dtc.create_image_id.is_some() => {
+            let physical =
+                nexus_db_model::distributed_disk_physical_bytes(virtual_bytes);
+            let phys_bytes =
+                nexus_db_model::ByteCount::from(physical.into_byte_count());
+            let writable = if dtc.read_only { zero } else { phys_bytes };
+            osagactx
+                .datastore()
+                .physical_provisioning_collection_delete_disk(
+                    &opctx,
+                    deleted_disk.id(),
+                    params.project_id,
+                    writable,
+                    phys_bytes,
+                    Some(DedupInfo::Disk {
+                        origin_column: DedupOriginColumn::Image,
+                        origin_id: dtc.create_image_id.unwrap(),
+                        disk_id: deleted_disk.id(),
+                    }),
+                )
+                .await
+                .map_err(ActionError::action_failed)?;
+        }
+        Some(ref dtc) if dtc.create_snapshot_id.is_some() => {
+            let physical =
+                nexus_db_model::distributed_disk_physical_bytes(virtual_bytes);
+            let phys_bytes =
+                nexus_db_model::ByteCount::from(physical.into_byte_count());
+            let writable = if dtc.read_only { zero } else { phys_bytes };
+            osagactx
+                .datastore()
+                .physical_provisioning_collection_delete_disk(
+                    &opctx,
+                    deleted_disk.id(),
+                    params.project_id,
+                    writable,
+                    phys_bytes,
+                    Some(DedupInfo::Disk {
+                        origin_column: DedupOriginColumn::Snapshot,
+                        origin_id: dtc.create_snapshot_id.unwrap(),
+                        disk_id: deleted_disk.id(),
+                    }),
+                )
+                .await
+                .map_err(ActionError::action_failed)?;
+        }
+        _ => {
+            // Blank/importing disk or local disk: writable only
+            let physical = match &params.disk {
+                datastore::Disk::LocalStorage(_) => {
+                    nexus_db_model::local_disk_physical_bytes(virtual_bytes)
+                }
+                datastore::Disk::Crucible(_) => {
+                    nexus_db_model::distributed_disk_physical_bytes(
+                        virtual_bytes,
+                    )
+                }
+            };
+            let phys_bytes =
+                nexus_db_model::ByteCount::from(physical.into_byte_count());
+            osagactx
+                .datastore()
+                .physical_provisioning_collection_delete_disk(
+                    &opctx,
+                    deleted_disk.id(),
+                    params.project_id,
+                    phys_bytes,
+                    zero,
+                    None,
+                )
+                .await
+                .map_err(ActionError::action_failed)?;
+        }
+    }
+
+    Ok(deleted_disk)
 }
 
-async fn sdd_account_space_undo(
+/// Combined undo: restores provisioning AND undeletes the disk record.
+async fn sdd_delete_disk_record_and_account_undo(
     sagactx: NexusActionContext,
 ) -> Result<(), anyhow::Error> {
     let osagactx = sagactx.user_data();
@@ -188,6 +261,8 @@ async fn sdd_account_space_undo(
         &sagactx,
         &params.serialized_authn,
     );
+
+    // Re-insert virtual provisioning.
     osagactx
         .datastore()
         .virtual_provisioning_collection_insert_disk(
@@ -198,7 +273,119 @@ async fn sdd_account_space_undo(
         )
         .await
         .map_err(ActionError::action_failed)?;
+
+    // Re-insert physical provisioning.
+    let virtual_bytes = nexus_db_model::VirtualDiskBytes(*deleted_disk.size);
+    let zero = nexus_db_model::ByteCount::from(
+        omicron_common::api::external::ByteCount::from(0u32),
+    );
+
+    use nexus_db_queries::db::queries::physical_provisioning_collection_update::{
+        DedupInfo, DedupOriginColumn,
+    };
+
+    let dtc =
+        sdd_lookup_disk_type_crucible(osagactx, &opctx, deleted_disk.id())
+            .await
+            .map_err(ActionError::action_failed)?;
+
+    match dtc {
+        Some(ref dtc) if dtc.create_image_id.is_some() => {
+            let physical =
+                nexus_db_model::distributed_disk_physical_bytes(virtual_bytes);
+            let phys_bytes =
+                nexus_db_model::ByteCount::from(physical.into_byte_count());
+            let writable = if dtc.read_only { zero } else { phys_bytes };
+            osagactx
+                .datastore()
+                .physical_provisioning_collection_insert_disk(
+                    &opctx,
+                    deleted_disk.id(),
+                    params.project_id,
+                    writable,
+                    phys_bytes,
+                    Some(DedupInfo::Disk {
+                        origin_column: DedupOriginColumn::Image,
+                        origin_id: dtc.create_image_id.unwrap(),
+                        disk_id: deleted_disk.id(),
+                    }),
+                )
+                .await
+                .map_err(ActionError::action_failed)?;
+        }
+        Some(ref dtc) if dtc.create_snapshot_id.is_some() => {
+            let physical =
+                nexus_db_model::distributed_disk_physical_bytes(virtual_bytes);
+            let phys_bytes =
+                nexus_db_model::ByteCount::from(physical.into_byte_count());
+            let writable = if dtc.read_only { zero } else { phys_bytes };
+            osagactx
+                .datastore()
+                .physical_provisioning_collection_insert_disk(
+                    &opctx,
+                    deleted_disk.id(),
+                    params.project_id,
+                    writable,
+                    phys_bytes,
+                    Some(DedupInfo::Disk {
+                        origin_column: DedupOriginColumn::Snapshot,
+                        origin_id: dtc.create_snapshot_id.unwrap(),
+                        disk_id: deleted_disk.id(),
+                    }),
+                )
+                .await
+                .map_err(ActionError::action_failed)?;
+        }
+        _ => {
+            let physical = match &params.disk {
+                datastore::Disk::LocalStorage(_) => {
+                    nexus_db_model::local_disk_physical_bytes(virtual_bytes)
+                }
+                datastore::Disk::Crucible(_) => {
+                    nexus_db_model::distributed_disk_physical_bytes(
+                        virtual_bytes,
+                    )
+                }
+            };
+            let phys_bytes =
+                nexus_db_model::ByteCount::from(physical.into_byte_count());
+            osagactx
+                .datastore()
+                .physical_provisioning_collection_insert_disk(
+                    &opctx,
+                    deleted_disk.id(),
+                    params.project_id,
+                    phys_bytes,
+                    zero,
+                    None,
+                )
+                .await
+                .map_err(ActionError::action_failed)?;
+        }
+    }
+
+    // Undelete the disk record.
+    osagactx
+        .datastore()
+        .project_undelete_disk_set_faulted_no_auth(&params.disk.id())
+        .await
+        .map_err(ActionError::action_failed)?;
+
     Ok(())
+}
+
+/// Look up the DiskTypeCrucible record for the given disk.
+/// Returns `None` for non-Crucible (local storage) disks.
+async fn sdd_lookup_disk_type_crucible(
+    osagactx: &std::sync::Arc<super::SagaContext>,
+    opctx: &nexus_db_queries::context::OpContext,
+    disk_id: Uuid,
+) -> Result<Option<db::model::DiskTypeCrucible>, ActionError> {
+    osagactx
+        .datastore()
+        .disk_type_crucible_lookup_optional(opctx, disk_id)
+        .await
+        .map_err(ActionError::action_failed)
 }
 
 async fn sdd_delete_local_storage(
