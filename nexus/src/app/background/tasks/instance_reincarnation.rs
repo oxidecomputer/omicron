@@ -322,7 +322,6 @@ impl InstanceReincarnation {
 mod test {
     use super::*;
     use crate::app::sagas::test_helpers;
-    use crate::external_api::params;
     use chrono::Utc;
     use nexus_db_lookup::LookupPath;
     use nexus_db_model::Generation;
@@ -338,6 +337,7 @@ mod test {
         create_default_ip_pools, create_project, object_create,
     };
     use nexus_test_utils_macros::nexus_test;
+    use nexus_types::external_api::instance;
     use omicron_common::api::external::ByteCount;
     use omicron_common::api::external::IdentityMetadataCreateParams;
     use omicron_common::api::external::InstanceAutoRestartPolicy;
@@ -385,7 +385,7 @@ mod test {
             object_create::<_, omicron_common::api::external::Instance>(
                 &cptestctx.external_client,
                 &instances_url,
-                &params::InstanceCreate {
+                &instance::InstanceCreate {
                     identity: IdentityMetadataCreateParams {
                         name,
                         description: "It's an instance".into(),
@@ -401,7 +401,7 @@ mod test {
                     hostname: "myhostname".try_into().unwrap(),
                     user_data: Vec::new(),
                     network_interfaces:
-                        params::InstanceNetworkInterfaceAttachment::None,
+                        instance::InstanceNetworkInterfaceAttachment::None,
                     external_ips: Vec::new(),
                     disks: Vec::new(),
                     boot_disk: None,

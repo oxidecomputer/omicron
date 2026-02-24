@@ -81,8 +81,8 @@ use omicron_common::address::{
 use omicron_common::address::{Ipv6Subnet, NEXUS_TECHPORT_EXTERNAL_PORT};
 use omicron_common::api::external::Generation;
 use omicron_common::api::internal::shared::{
-    ExternalIpConfig, ExternalIpConfigBuilder, ExternalIps, HostPortConfig,
-    PrivateIpConfig, RackNetworkConfig, SledIdentifiers,
+    ExternalIpConfig, ExternalIpConfigBuilder, ExternalIps, PrivateIpConfig,
+    RackNetworkConfig, SledIdentifiers,
 };
 use omicron_common::backoff::{
     BackoffError, retry_notify, retry_policy_internal_service_aggressive,
@@ -100,6 +100,7 @@ use sled_agent_types::resolvable_files::{
     MupdateOverrideReadError, PreparedOmicronZone,
 };
 use sled_agent_types::sled::SWITCH_ZONE_BASEBOARD_FILE;
+use sled_agent_types::uplink::HostPortConfig;
 use sled_hardware::DendriteAsic;
 use sled_hardware::SledMode;
 use sled_hardware::is_oxide_sled;
@@ -1050,7 +1051,35 @@ impl ServiceManager {
         &self,
         zone_args: &ZoneArgs<'_>,
     ) -> Result<Vec<(Port, PortTicket)>, Error> {
-        // Only some services currently need OPTE ports
+        // As a part of setting up OPTE ports, we notify dendrite on all
+        // switches that have an uplink about the new required NAT entries. This
+        // requires finding the switch zone IP addresses. We currently block
+        // until either:
+        //
+        // 1. We find all switch zone IPs.
+        // 2. We find at least one switch zone IP and this timeout elapses.
+        //
+        // If Nexus is up, we don't really need to do any of this work; it has a
+        // background task that will sync NAT entries periodically. However,
+        // it's critical that we set up NAT entries for boundary NTP in
+        // particular during cold boot; otherwise, we won't be able to timesync
+        // and bring the rack up.
+        //
+        // The choice of timeout here is a tension between wanting to wait for
+        // both switches and not wanting to block zone startup indefinitely if
+        // one of the scrimlets or switches is unavailable for an extended
+        // period of time. We should probably revist this entirely - maybe
+        // sled-agent should have its own NAT config reconciler for cold boot
+        // (although it's unclear how something like that wout interact with
+        // Nexus)?
+        //
+        // We'll pick 5 minutes, which has historically been the timeout here
+        // and should hopefully give enough time for a "just rebooted" scrimlet
+        // to bring its switch zone up, if we get unlucky in coincidental
+        // timings.
+        const WAIT_FOR_ALL_SWITCH_ZONES_TIMEOUT: Duration =
+            Duration::from_secs(5 * 60);
+
         if !matches!(
             zone_args.omicron_type(),
             Some(OmicronZoneType::ExternalDns { .. })
@@ -1084,11 +1113,12 @@ impl ServiceManager {
                 .lookup_uplinked_switch_zone_underlay_addrs(
                     resolver,
                     rack_network_config,
+                    WAIT_FOR_ALL_SWITCH_ZONES_TIMEOUT,
                 )
                 .await;
 
         let dpd_clients: Vec<DpdClient> = uplinked_switch_zone_addrs
-            .iter()
+            .values()
             .map(|addr| {
                 DpdClient::new(
                     &format!("http://[{}]:{}", addr, DENDRITE_PORT),
@@ -1181,6 +1211,8 @@ impl ServiceManager {
                 external_ips: &external_ips,
                 firewall_rules: &[],
                 dhcp_config: DhcpCfg::default(),
+                // Services do not use attached subnets, only instances.
+                attached_subnets: vec![],
             })
             .map_err(|err| Error::ServicePortCreation {
                 service: zone_kind,
@@ -3688,21 +3720,21 @@ impl ServiceManager {
                 if let Some(info) = self.inner.sled_info.get() {
                     info!(
                         self.inner.log,
-                        "Ensuring there is a default route";
+                        "Ensuring there is an underlay route";
                         "gateway" => ?info.underlay_address,
                     );
-                    match zone.add_default_route(info.underlay_address).map_err(
-                        |err| Error::ZoneCommand {
+                    match zone
+                        .add_underlay_route(info.underlay_address)
+                        .map_err(|err| Error::ZoneCommand {
                             intent: "Adding Route".to_string(),
                             err,
-                        },
-                    ) {
+                        }) {
                         Ok(_) => (),
                         Err(e) => {
                             if e.to_string().contains("entry exists") {
                                 info!(
                                     self.inner.log,
-                                    "Default route already exists";
+                                    "Underlay route already exists";
                                     "gateway" => ?info.underlay_address,
                                 )
                             } else {

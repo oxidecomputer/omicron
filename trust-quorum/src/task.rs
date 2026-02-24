@@ -24,11 +24,11 @@ use std::sync::Arc;
 use thiserror::Error;
 use tokio::sync::mpsc::error::SendError;
 use tokio::sync::oneshot::error::RecvError;
-use tokio::sync::{mpsc, oneshot};
+use tokio::sync::{mpsc, oneshot, watch};
 use trust_quorum_protocol::{
     CommitError, LoadRackSecretError, LrtqUpgradeError, Node,
-    NodeCallerCtx as _, NodeCommonCtx as _, NodeCtx, PrepareAndCommitError,
-    ReconfigurationError, ReconstructedRackSecret,
+    NodeCallerCtx as _, NodeCommonCtx as _, NodeCtx, PersistentState,
+    PrepareAndCommitError, ReconfigurationError, ReconstructedRackSecret,
 };
 use trust_quorum_types::configuration::Configuration;
 use trust_quorum_types::messages::{LrtqUpgradeMsg, ReconfigureMsg};
@@ -36,7 +36,7 @@ use trust_quorum_types::status::{CommitStatus, CoordinatorStatus, NodeStatus};
 use trust_quorum_types::types::Epoch;
 // TODO: Move to this crate
 // https://github.com/oxidecomputer/omicron/issues/9311
-use bootstore::schemes::v0::NetworkConfig;
+use bootstore::schemes::v0::{NetworkConfig, PersistentFsmState};
 
 /// We only expect a handful of messages at a time.
 const API_CHANNEL_BOUND: usize = 32;
@@ -56,6 +56,7 @@ pub struct Config {
     pub listen_addr: SocketAddrV6,
     pub tq_ledger_paths: Vec<Utf8PathBuf>,
     pub network_config_ledger_paths: Vec<Utf8PathBuf>,
+    pub lrtq_ledger_paths: Vec<Utf8PathBuf>,
     pub sprockets: SprocketsConfig,
 }
 
@@ -202,6 +203,7 @@ pub struct NodeTaskHandle {
     baseboard_id: BaseboardId,
     tx: mpsc::Sender<NodeApiRequest>,
     listen_addr: SocketAddrV6,
+    committed_epoch_rx: watch::Receiver<Option<Epoch>>,
 }
 
 impl NodeTaskHandle {
@@ -391,6 +393,14 @@ impl NodeTaskHandle {
         let res = rx.await?;
         Ok(res)
     }
+
+    /// Get a receiver for committed epoch notifications.
+    ///
+    /// The channel sends notifications when a new epoch is committed.
+    /// This is used by the config reconciler to trigger ZFS key rotation.
+    pub fn committed_epoch_rx(&self) -> watch::Receiver<Option<Epoch>> {
+        self.committed_epoch_rx.clone()
+    }
 }
 
 pub struct NodeTask {
@@ -415,6 +425,12 @@ pub struct NodeTask {
     proxy_tracker: proxy::Tracker,
     /// Handle to receive updates to new reference measurements
     measurements: Arc<MeasurementsHandle>,
+
+    /// Sender for committed epoch notifications.
+    ///
+    /// Used to notify subscribers (e.g., config reconciler) when a new epoch
+    /// is committed, triggering ZFS key rotation.
+    committed_epoch_tx: watch::Sender<Option<Epoch>>,
 }
 
 impl NodeTask {
@@ -446,6 +462,21 @@ impl NodeTask {
                 ),
                 ps_ledger.generation,
             )
+        } else if let Some(lrtq_share_data) =
+            PersistentFsmState::load_for_trust_quorum_upgrade(
+                &log,
+                config.lrtq_ledger_paths.clone(),
+            )
+            .await
+        {
+            let ps = PersistentState::new_lrtq_only(lrtq_share_data);
+            (
+                NodeCtx::new_with_persistent_state(
+                    config.baseboard_id.clone(),
+                    ps,
+                ),
+                0,
+            )
         } else {
             (NodeCtx::new(config.baseboard_id.clone()), 0)
         };
@@ -455,6 +486,12 @@ impl NodeTask {
             config.network_config_ledger_paths.clone(),
         )
         .await;
+
+        // Create watch channel for committed epoch notifications.
+        // Initialize with the current committed epoch (if any).
+        let initial_epoch = ctx.persistent_state().latest_committed_epoch();
+        let (committed_epoch_tx, committed_epoch_rx) =
+            watch::channel(initial_epoch);
 
         let node = Node::new(&log, &mut ctx);
         let conn_mgr = ConnMgr::new(
@@ -479,8 +516,14 @@ impl NodeTask {
                 network_config,
                 proxy_tracker: proxy::Tracker::new(),
                 measurements,
+                committed_epoch_tx,
             },
-            NodeTaskHandle { baseboard_id, tx, listen_addr },
+            NodeTaskHandle {
+                baseboard_id,
+                tx,
+                listen_addr,
+                committed_epoch_rx,
+            },
         )
     }
 
@@ -814,6 +857,20 @@ impl NodeTask {
                 self.ctx.persistent_state().clone(),
             )
             .await;
+
+            // Notify subscribers if latest committed epoch changed
+            let new_epoch =
+                self.ctx.persistent_state().latest_committed_epoch();
+            let log = &self.log;
+            self.committed_epoch_tx.send_if_modified(|current| {
+                if *current != new_epoch {
+                    info!(log, "Committed epoch changed"; "epoch" => ?new_epoch);
+                    *current = new_epoch;
+                    true
+                } else {
+                    false
+                }
+            });
         }
     }
 
@@ -931,7 +988,7 @@ mod tests {
     use omicron_uuid_kinds::GenericUuid;
     use secrecy::ExposeSecretMut;
     use sled_hardware_types::Baseboard;
-    use sprockets_tls::keys::ResolveSetting;
+    use sprockets_tls::keys::{MeasurementConnectionPolicy, ResolveSetting};
     use sprockets_tls_test_utils::{
         alias_prefix, cert_path, certlist_path, private_key_path, root_prefix,
         sprockets_auth_prefix,
@@ -972,6 +1029,8 @@ mod tests {
                         test_corpus: vec![dir.join("corim.cbor")],
                     },
                     roots: vec![cert_path(dir.clone(), &root_prefix())],
+                    // Hard mode
+                    enforce: MeasurementConnectionPolicy::Enforced,
                 };
                 let tq_ledger_paths =
                     vec![dir.join(format!("test-tq-ledger-[{i}]"))];
@@ -983,6 +1042,7 @@ mod tests {
                     sprockets,
                     tq_ledger_paths,
                     network_config_ledger_paths,
+                    lrtq_ledger_paths: vec![],
                 }
             })
             .collect()

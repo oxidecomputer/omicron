@@ -14,8 +14,7 @@ use nexus_db_schema::schema::{
     affinity_group, anti_affinity_group, disk, image, instance, project,
     snapshot, vpc,
 };
-use nexus_types::external_api::params;
-use nexus_types::external_api::views;
+use nexus_types::external_api::project as project_types;
 use nexus_types::identity::Resource;
 use serde::Deserialize;
 use serde::Serialize;
@@ -44,7 +43,7 @@ pub struct Project {
 
 impl Project {
     /// Creates a new database Project object.
-    pub fn new(silo_id: Uuid, params: params::ProjectCreate) -> Self {
+    pub fn new(silo_id: Uuid, params: project_types::ProjectCreate) -> Self {
         Self::new_with_id(Uuid::new_v4(), silo_id, params)
     }
 
@@ -52,7 +51,7 @@ impl Project {
     pub fn new_with_id(
         id: Uuid,
         silo_id: Uuid,
-        params: params::ProjectCreate,
+        params: project_types::ProjectCreate,
     ) -> Self {
         Self {
             identity: ProjectIdentity::new(id, params.identity),
@@ -62,7 +61,7 @@ impl Project {
     }
 }
 
-impl From<Project> for views::Project {
+impl From<Project> for project_types::Project {
     fn from(project: Project) -> Self {
         Self { identity: project.identity() }
     }
@@ -126,8 +125,8 @@ pub struct ProjectUpdate {
     pub time_modified: DateTime<Utc>,
 }
 
-impl From<params::ProjectUpdate> for ProjectUpdate {
-    fn from(params: params::ProjectUpdate) -> Self {
+impl From<project_types::ProjectUpdate> for ProjectUpdate {
+    fn from(params: project_types::ProjectUpdate) -> Self {
         Self {
             name: params.identity.name.map(Name),
             description: params.identity.description,

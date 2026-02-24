@@ -19,6 +19,7 @@ use std::{
     sync::LazyLock,
 };
 
+pub const BOOTSTRAP_SUBNET_PREFIX: u8 = 40;
 pub const AZ_PREFIX: u8 = 48;
 pub const RACK_PREFIX: u8 = 56;
 pub const SLED_PREFIX: u8 = 64;

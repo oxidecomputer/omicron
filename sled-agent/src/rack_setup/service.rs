@@ -86,12 +86,12 @@ use nexus_lockstep_client::{
     Client as NexusClient, Error as NexusError, types as NexusTypes,
 };
 use nexus_types::deployment::{BlueprintZoneType, blueprint_zone_type};
+use nexus_types::internal_api::params::ExternalPortDiscovery;
 use ntp_admin_client::{
     Client as NtpAdminClient, Error as NtpAdminError, types::TimeSync,
 };
 use omicron_common::address::{COCKROACH_ADMIN_PORT, NTP_ADMIN_PORT};
 use omicron_common::api::external::Generation;
-use omicron_common::api::internal::shared::ExternalPortDiscovery;
 use omicron_common::api::internal::shared::LldpAdminStatus;
 use omicron_common::backoff::{
     BackoffError, retry_notify, retry_policy_internal_service_aggressive,
@@ -870,14 +870,14 @@ impl ServiceInner {
 
         let rack_network_config = {
             let config = &config.rack_network_config;
-            NexusTypes::RackNetworkConfigV2 {
+            NexusTypes::RackNetworkConfig {
                 rack_subnet: config.rack_subnet,
                 infra_ip_first: config.infra_ip_first,
                 infra_ip_last: config.infra_ip_last,
                 ports: config
                     .ports
                     .iter()
-                    .map(|config| NexusTypes::PortConfigV2 {
+                    .map(|config| NexusTypes::PortConfig {
                         port: config.port.clone(),
                         routes: config
                             .routes
@@ -926,6 +926,10 @@ impl ServiceInner {
                                 allowed_export: b.allowed_export.clone(),
                                 allowed_import: b.allowed_import.clone(),
                                 vlan_id: b.vlan_id,
+                                router_lifetime:
+                                    NexusTypes::RouterLifetimeConfig(
+                                        b.router_lifetime.as_u16(),
+                                    ),
                             })
                             .collect(),
                         lldp: config.lldp.as_ref().map(|lp| {
@@ -973,6 +977,9 @@ impl ServiceInner {
                         originate: config.originate.to_vec(),
                         shaper: config.shaper.clone(),
                         checker: config.checker.clone(),
+                        max_paths: NexusTypes::MaxPathConfig(
+                            config.max_paths.as_nonzero_u8(),
+                        ),
                     })
                     .collect(),
                 bfd: config
@@ -1051,7 +1058,7 @@ impl ServiceInner {
             external_dns_zone_name: config.external_dns_zone_name.clone(),
             recovery_silo: config.recovery_silo.clone(),
             rack_network_config,
-            external_port_count: port_discovery_mode.into(),
+            external_port_count: port_discovery_mode,
             allowed_source_ips,
             initial_trust_quorum_configuration,
         };
@@ -1382,7 +1389,17 @@ impl ServiceInner {
 
         // Ask MGS in each switch zone which switch it is.
         let switch_mgmt_addrs = EarlyNetworkSetup::new(&self.log)
-            .lookup_switch_zone_underlay_addrs(&resolver)
+            .lookup_uplinked_switch_zone_underlay_addrs(
+                &resolver,
+                &config.rack_network_config,
+                // We willing to wait forever to find all the switches that have
+                // configured uplinks; if we attempt to proceed without doing
+                // so, we'll fail handing off to Nexus later. (Ideally we could
+                // complete RSS with only one switch up and then configure the
+                // second later, but that currently doesn't work.)
+                // <https://github.com/oxidecomputer/omicron/issues/9678>
+                Duration::MAX,
+            )
             .await;
 
         rss_step.update(RssStep::InitNtp);
@@ -1738,6 +1755,7 @@ impl<'a> OmicronZonesConfigGenerator<'a> {
 mod test {
     use super::*;
     use crate::rack_setup::plan::service::{Plan as ServicePlan, SledInfo};
+    use iddqd::IdOrdMap;
     use nexus_reconfigurator_blippy::{Blippy, BlippyReportSortKey};
     use omicron_common::{
         address::{Ipv6Subnet, SLED_PREFIX, get_sled_address},
@@ -1750,6 +1768,7 @@ mod test {
         Inventory, InventoryDisk, OmicronFileSourceResolverInventory,
         OmicronZoneType, SledCpuFamily, SledRole,
     };
+    use sled_agent_types::rack_init::rack_initialize_request_test_config;
 
     fn make_sled_info(
         sled_id: SledUuid,
@@ -1794,6 +1813,7 @@ mod test {
                 file_source_resolver:
                     OmicronFileSourceResolverInventory::new_fake(),
                 health_monitor: HealthMonitorInventory::new(),
+                reference_measurements: IdOrdMap::new(),
             },
             true,
         )
@@ -1826,7 +1846,7 @@ mod test {
     }
 
     fn make_test_service_plan() -> ServicePlan {
-        let rss_config = Config::test_config();
+        let rss_config = rack_initialize_request_test_config();
         let fake_sleds = make_fake_sleds();
         let service_plan =
             ServicePlan::create_transient(&rss_config, fake_sleds)
@@ -1957,7 +1977,7 @@ mod test {
 
         let fake_sleds = make_fake_sleds();
 
-        let rss_config = Config::test_config();
+        let rss_config = rack_initialize_request_test_config();
         let service_plan =
             ServicePlan::create_transient(&rss_config, fake_sleds)
                 .expect("created service plan");

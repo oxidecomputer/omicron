@@ -8,6 +8,7 @@ use super::MAX_DISKS_PER_INSTANCE;
 use super::MAX_EPHEMERAL_IPS_PER_INSTANCE;
 use super::MAX_EXTERNAL_IPS_PER_INSTANCE;
 use super::MAX_MEMORY_BYTES_PER_INSTANCE;
+use super::MAX_MULTICAST_GROUPS_PER_INSTANCE;
 use super::MAX_NICS_PER_INSTANCE;
 use super::MAX_SSH_KEYS_PER_INSTANCE;
 use super::MAX_VCPU_PER_INSTANCE;
@@ -15,7 +16,7 @@ use super::MIN_MEMORY_BYTES_PER_INSTANCE;
 use crate::app::sagas;
 use crate::app::sagas::NexusSaga;
 use crate::db::datastore::Disk;
-use crate::external_api::params;
+use crate::db::datastore::LocalStorageAllocation;
 use cancel_safe_futures::prelude::*;
 use futures::future::Fuse;
 use futures::{FutureExt, SinkExt, StreamExt};
@@ -39,7 +40,12 @@ use nexus_db_queries::db::DataStore;
 use nexus_db_queries::db::datastore::InstanceAndActiveVmm;
 use nexus_db_queries::db::datastore::InstanceStateComputer;
 use nexus_db_queries::db::identity::Resource;
-use nexus_types::external_api::views;
+use nexus_types::external_api::disk;
+use nexus_types::external_api::external_ip;
+use nexus_types::external_api::instance;
+use nexus_types::external_api::ip_pool;
+use nexus_types::external_api::multicast;
+use nexus_types::external_api::project;
 use omicron_common::address::ConcreteIp;
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::CreateResult;
@@ -334,10 +340,10 @@ impl super::Nexus {
     pub fn instance_lookup<'a>(
         &'a self,
         opctx: &'a OpContext,
-        instance_selector: params::InstanceSelector,
+        instance_selector: instance::InstanceSelector,
     ) -> LookupResult<lookup::Instance<'a>> {
         match instance_selector {
-            params::InstanceSelector {
+            instance::InstanceSelector {
                 instance: NameOrId::Id(id),
                 project: None,
             } => {
@@ -345,20 +351,23 @@ impl super::Nexus {
                     LookupPath::new(opctx, &self.db_datastore).instance_id(id);
                 Ok(instance)
             }
-            params::InstanceSelector {
+            instance::InstanceSelector {
                 instance: NameOrId::Name(name),
                 project: Some(project),
             } => {
                 let instance = self
-                    .project_lookup(opctx, params::ProjectSelector { project })?
+                    .project_lookup(
+                        opctx,
+                        project::ProjectSelector { project },
+                    )?
                     .instance_name_owned(name.into());
                 Ok(instance)
             }
-            params::InstanceSelector { instance: NameOrId::Id(_), .. } => {
-                Err(Error::invalid_request(
-                    "when providing instance as an ID project should not be specified",
-                ))
-            }
+            instance::InstanceSelector {
+                instance: NameOrId::Id(_), ..
+            } => Err(Error::invalid_request(
+                "when providing instance as an ID project should not be specified",
+            )),
             _ => Err(Error::invalid_request(
                 "instance should either be UUID or project should be specified",
             )),
@@ -374,7 +383,7 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
         authz_instance: &authz::Instance,
-        multicast_groups: &[params::MulticastGroupJoinSpec],
+        multicast_groups: &[multicast::MulticastGroupJoinSpec],
     ) -> Result<(), Error> {
         let instance_id = authz_instance.id();
 
@@ -535,12 +544,12 @@ impl super::Nexus {
         self: &Arc<Self>,
         opctx: &OpContext,
         instance_lookup: &lookup::Instance<'_>,
-        params: &params::InstanceUpdate,
+        params: &instance::InstanceUpdate,
     ) -> UpdateResult<InstanceAndActiveVmm> {
         let (.., authz_project, authz_instance) =
             instance_lookup.lookup_for(authz::Action::Modify).await?;
 
-        let params::InstanceUpdate {
+        let instance::InstanceUpdate {
             ncpus,
             memory,
             auto_restart_policy,
@@ -553,7 +562,7 @@ impl super::Nexus {
 
         let boot_disk_id = match boot_disk.as_ref() {
             Some(disk) => {
-                let selector = params::DiskSelector {
+                let selector = disk::DiskSelector {
                     project: match &disk {
                         NameOrId::Name(_) => Some(authz_project.id().into()),
                         NameOrId::Id(_) => None,
@@ -614,14 +623,14 @@ impl super::Nexus {
         self: &Arc<Self>,
         opctx: &OpContext,
         project_lookup: &lookup::Project<'_>,
-        params: &params::InstanceCreate,
+        params: &instance::InstanceCreate,
     ) -> CreateResult<InstanceAndActiveVmm> {
         let (.., authz_project) =
             project_lookup.lookup_for(authz::Action::CreateChild).await?;
 
         check_instance_cpu_memory_sizes(params.ncpus, params.memory)?;
 
-        let all_disks: Vec<&params::InstanceDiskAttachment> =
+        let all_disks: Vec<&instance::InstanceDiskAttachment> =
             params.boot_disk.iter().chain(params.disks.iter()).collect();
 
         // Validate parameters
@@ -633,7 +642,7 @@ impl super::Nexus {
         }
 
         for disk in all_disks.iter() {
-            if let params::InstanceDiskAttachment::Create(create) = disk {
+            if let instance::InstanceDiskAttachment::Create(create) = disk {
                 self.validate_disk_create_params(opctx, &authz_project, create)
                     .await?;
             }
@@ -646,12 +655,19 @@ impl super::Nexus {
             )));
         }
 
+        if params.multicast_groups.len() > MAX_MULTICAST_GROUPS_PER_INSTANCE {
+            return Err(Error::invalid_request(&format!(
+                "An instance may not join more than {} multicast groups",
+                MAX_MULTICAST_GROUPS_PER_INSTANCE,
+            )));
+        }
+
         // Collect ephemeral IP selectors for validation
         let ephemeral_selectors: Vec<_> = params
             .external_ips
             .iter()
             .filter_map(|v| match v {
-                params::ExternalIpCreate::Ephemeral { pool_selector } => {
+                instance::ExternalIpCreate::Ephemeral { pool_selector } => {
                     Some(pool_selector)
                 }
                 _ => None,
@@ -675,8 +691,9 @@ impl super::Nexus {
             .await?;
         }
 
-        if let params::InstanceNetworkInterfaceAttachment::Create(ref ifaces) =
-            params.network_interfaces
+        if let instance::InstanceNetworkInterfaceAttachment::Create(
+            ref ifaces,
+        ) = params.network_interfaces
         {
             if ifaces.len() > MAX_NICS_PER_INSTANCE {
                 return Err(Error::invalid_request(&format!(
@@ -737,7 +754,7 @@ impl super::Nexus {
         let saga_params = sagas::instance_create::Params {
             serialized_authn: authn::saga::Serialized::for_opctx(opctx),
             project_id: authz_project.id(),
-            create_params: params::InstanceCreate {
+            create_params: instance::InstanceCreate {
                 ssh_public_keys: ssh_keys,
                 anti_affinity_groups,
                 ..params.clone()
@@ -1462,10 +1479,22 @@ impl super::Nexus {
                 .into());
             };
 
-            delegated_zvols.push(DelegatedZvol::LocalStorage {
-                zpool_id: local_storage_dataset_allocation.pool_id(),
-                dataset_id: local_storage_dataset_allocation.id(),
-            });
+            match local_storage_dataset_allocation {
+                LocalStorageAllocation::Unencrypted(allocation) => {
+                    delegated_zvols.push(
+                        DelegatedZvol::LocalStorageUnencrypted {
+                            zpool_id: allocation.pool_id(),
+                            dataset_id: allocation.id(),
+                        },
+                    );
+                }
+
+                LocalStorageAllocation::Encrypted(_) => {
+                    let msg = "disks backed by encrypted local storage are \
+                        currently not supported";
+                    return Err(Error::invalid_request(msg).into());
+                }
+            }
         }
 
         let nics = self
@@ -1584,6 +1613,19 @@ impl super::Nexus {
             }
         }
 
+        // TODO-completeness: We need to handle VPC subnets too, see
+        // https://github.com/oxidecomputer/omicron/issues/9580.
+        let attached_subnets = self
+            .datastore()
+            .instance_lookup_external_subnets(opctx, authz_instance)
+            .await?
+            .into_iter()
+            .map(|ext| sled_agent_client::types::AttachedSubnet {
+                subnet: ext.subnet.into(),
+                kind: sled_agent_client::types::AttachedSubnetKind::External,
+            })
+            .collect();
+
         let local_config = sled_agent_client::types::InstanceSledLocalConfig {
             hostname,
             nics,
@@ -1597,6 +1639,7 @@ impl super::Nexus {
                 search_domains: Vec::new(),
             },
             delegated_zvols,
+            attached_subnets,
         };
 
         let instance_id = InstanceUuid::from_untyped_uuid(db_instance.id());
@@ -1768,7 +1811,7 @@ impl super::Nexus {
         let (.., authz_project_disk, authz_disk) = self
             .disk_lookup(
                 opctx,
-                params::DiskSelector {
+                disk::DiskSelector {
                     project: match disk {
                         NameOrId::Name(_) => Some(authz_project.id().into()),
                         NameOrId::Id(_) => None,
@@ -1829,7 +1872,7 @@ impl super::Nexus {
         let (.., authz_disk) = self
             .disk_lookup(
                 opctx,
-                params::DiskSelector {
+                disk::DiskSelector {
                     project: match disk {
                         NameOrId::Name(_) => Some(authz_project.id().into()),
                         NameOrId::Id(_) => None,
@@ -1933,8 +1976,8 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
         instance_lookup: &lookup::Instance<'_>,
-        params: &params::InstanceSerialConsoleRequest,
-    ) -> Result<params::InstanceSerialConsoleData, Error> {
+        params: &instance::InstanceSerialConsoleRequest,
+    ) -> Result<instance::InstanceSerialConsoleData, Error> {
         let (_, client) = self
             .propolis_client_for_instance(
                 opctx,
@@ -1963,7 +2006,7 @@ impl super::Nexus {
                 ))
             })?
             .into_inner();
-        Ok(params::InstanceSerialConsoleData {
+        Ok(instance::InstanceSerialConsoleData {
             data: data.data,
             last_byte_offset: data.last_byte_offset,
         })
@@ -1974,7 +2017,7 @@ impl super::Nexus {
         opctx: &OpContext,
         mut client_stream: WebSocketStream<impl AsyncRead + AsyncWrite + Unpin>,
         instance_lookup: &lookup::Instance<'_>,
-        params: &params::InstanceSerialConsoleStreamRequest,
+        params: &instance::InstanceSerialConsoleStreamRequest,
     ) -> Result<(), Error> {
         let (_, client_addr) = match self
             .propolis_addr_for_instance(
@@ -2260,7 +2303,7 @@ impl super::Nexus {
         instance_lookup: &lookup::Instance<'_>,
         pool: Option<NameOrId>,
         ip_version: Option<IpVersion>,
-    ) -> UpdateResult<views::ExternalIp> {
+    ) -> UpdateResult<external_ip::ExternalIp> {
         // Validate pool/ip_version compatibility upfront for clear error
         // communication.
         //
@@ -2301,10 +2344,10 @@ impl super::Nexus {
     async fn validate_ephemeral_ip_pair(
         &self,
         opctx: &OpContext,
-        first: &params::PoolSelector,
-        second: &params::PoolSelector,
+        first: &ip_pool::PoolSelector,
+        second: &ip_pool::PoolSelector,
     ) -> Result<(), Error> {
-        use params::PoolSelector;
+        use ip_pool::PoolSelector;
 
         match (first, second) {
             // Reject any case where ip_version is not specified. This keeps
@@ -2403,7 +2446,7 @@ impl super::Nexus {
         authz_fip: authz::FloatingIp,
         ip_version: IpVersion,
         authz_fip_project: authz::Project,
-    ) -> UpdateResult<views::ExternalIp> {
+    ) -> UpdateResult<external_ip::ExternalIp> {
         let (.., authz_project, authz_instance) =
             instance_lookup.lookup_for(authz::Action::Modify).await?;
 
@@ -2429,7 +2472,7 @@ impl super::Nexus {
         authz_instance: authz::Instance,
         project_id: Uuid,
         ext_ip: ExternalIpAttach,
-    ) -> UpdateResult<views::ExternalIp> {
+    ) -> UpdateResult<external_ip::ExternalIp> {
         let saga_params = sagas::instance_ip_attach::Params {
             create_params: ext_ip.clone(),
             authz_instance,
@@ -2445,7 +2488,7 @@ impl super::Nexus {
             .await?;
 
         let out = saga_outputs
-            .lookup_node_output::<views::ExternalIp>("output")
+            .lookup_node_output::<external_ip::ExternalIp>("output")
             .map_err(|e| Error::internal_error(&format!("{:#}", &e)))
             .internal_context("looking up output from ip attach saga");
 
@@ -2463,8 +2506,8 @@ impl super::Nexus {
         self: &Arc<Self>,
         opctx: &OpContext,
         instance_lookup: &lookup::Instance<'_>,
-        ext_ip: &params::ExternalIpDetach,
-    ) -> UpdateResult<views::ExternalIp> {
+        ext_ip: &instance::ExternalIpDetach,
+    ) -> UpdateResult<external_ip::ExternalIp> {
         let (.., authz_project, authz_instance) =
             instance_lookup.lookup_for(authz::Action::Modify).await?;
 
@@ -2483,7 +2526,7 @@ impl super::Nexus {
             .await?;
 
         saga_outputs
-            .lookup_node_output::<Option<views::ExternalIp>>("output")
+            .lookup_node_output::<Option<external_ip::ExternalIp>>("output")
             .map_err(|e| Error::internal_error(&format!("{:#}", &e)))
             .internal_context("looking up output from ip detach saga")
             .and_then(|eip| {
@@ -2904,6 +2947,7 @@ mod tests {
     use super::*;
     use core::time::Duration;
     use futures::{SinkExt, StreamExt};
+    use instance::InstanceNetworkInterfaceAttachment;
     use nexus_db_model::{
         Instance as DbInstance, InstanceState as DbInstanceState,
         VmmCpuPlatform, VmmState as DbVmmState,
@@ -2912,7 +2956,6 @@ mod tests {
         Hostname, IdentityMetadataCreateParams, InstanceCpuCount, Name,
     };
     use omicron_test_utils::dev::test_setup_log;
-    use params::InstanceNetworkInterfaceAttachment;
     use propolis_client::support::tungstenite::protocol::Role;
     use propolis_client::support::{
         InstanceSerialConsoleHelper, WSClientOffset,
@@ -3015,7 +3058,7 @@ mod tests {
     /// that the VMM is *not* installed in the instance's `active_propolis_id`
     /// field.
     fn make_instance_and_vmm() -> (DbInstance, DbVmm) {
-        let params = params::InstanceCreate {
+        let params = instance::InstanceCreate {
             identity: IdentityMetadataCreateParams {
                 name: Name::try_from("elysium".to_owned()).unwrap(),
                 description: "this instance is disco".to_owned(),

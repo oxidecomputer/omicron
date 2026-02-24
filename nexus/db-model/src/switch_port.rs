@@ -19,10 +19,10 @@ use nexus_db_schema::schema::{
     switch_port_settings_port_config, switch_port_settings_route_config,
     tx_eq_config,
 };
-use nexus_types::external_api::params;
+use nexus_types::external_api::networking as networking_types;
 use nexus_types::identity::Resource;
 use omicron_common::api::external;
-use omicron_common::api::external::{BgpPeer, ImportExportPolicy};
+use omicron_common::api::external::ImportExportPolicy;
 use omicron_common::api::internal::shared::{PortFec, PortSpeed};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -47,23 +47,23 @@ impl_enum_type!(
     Sfp28x4 => b"Sfp28x4"
 );
 
-impl PartialEq<params::SwitchPortGeometry> for SwitchPortGeometry {
-    fn eq(&self, other: &params::SwitchPortGeometry) -> bool {
+impl PartialEq<networking_types::SwitchPortGeometry> for SwitchPortGeometry {
+    fn eq(&self, other: &networking_types::SwitchPortGeometry) -> bool {
         match self {
             Self::Qsfp28x1 => {
-                return matches!(other, params::SwitchPortGeometry::Qsfp28x1);
+                matches!(other, networking_types::SwitchPortGeometry::Qsfp28x1)
             }
             Self::Qsfp28x2 => {
-                return matches!(other, params::SwitchPortGeometry::Qsfp28x2);
+                matches!(other, networking_types::SwitchPortGeometry::Qsfp28x2)
             }
             Self::Sfp28x4 => {
-                return matches!(other, params::SwitchPortGeometry::Sfp28x4);
+                matches!(other, networking_types::SwitchPortGeometry::Sfp28x4)
             }
         }
     }
 }
 
-impl PartialEq<SwitchPortGeometry> for params::SwitchPortGeometry {
+impl PartialEq<SwitchPortGeometry> for networking_types::SwitchPortGeometry {
     fn eq(&self, other: &SwitchPortGeometry) -> bool {
         other.eq(self)
     }
@@ -193,16 +193,18 @@ impl From<SwitchLinkSpeed> for external::LinkSpeed {
     }
 }
 
-impl From<params::SwitchPortGeometry> for SwitchPortGeometry {
-    fn from(g: params::SwitchPortGeometry) -> Self {
+impl From<networking_types::SwitchPortGeometry> for SwitchPortGeometry {
+    fn from(g: networking_types::SwitchPortGeometry) -> Self {
         match g {
-            params::SwitchPortGeometry::Qsfp28x1 => {
+            networking_types::SwitchPortGeometry::Qsfp28x1 => {
                 SwitchPortGeometry::Qsfp28x1
             }
-            params::SwitchPortGeometry::Qsfp28x2 => {
+            networking_types::SwitchPortGeometry::Qsfp28x2 => {
                 SwitchPortGeometry::Qsfp28x2
             }
-            params::SwitchPortGeometry::Sfp28x4 => SwitchPortGeometry::Sfp28x4,
+            networking_types::SwitchPortGeometry::Sfp28x4 => {
+                SwitchPortGeometry::Sfp28x4
+            }
         }
     }
 }
@@ -653,7 +655,7 @@ pub struct SwitchPortBgpPeerConfig {
     pub port_settings_id: Uuid,
     pub bgp_config_id: Uuid,
     pub interface_name: Name,
-    pub addr: IpNetwork,
+    pub addr: Option<IpNetwork>,
     pub hold_time: SqlU32,
     pub idle_hold_time: SqlU32,
     pub delay_open: SqlU32,
@@ -668,6 +670,8 @@ pub struct SwitchPortBgpPeerConfig {
     pub allow_import_list_active: bool,
     pub allow_export_list_active: bool,
     pub vlan_id: Option<SqlU16>,
+    pub id: Uuid,
+    pub router_lifetime: SqlU16,
 }
 
 #[derive(
@@ -737,13 +741,14 @@ impl SwitchPortBgpPeerConfig {
         port_settings_id: Uuid,
         bgp_config_id: Uuid,
         interface_name: Name,
-        p: &BgpPeer,
+        p: &networking_types::BgpPeer,
     ) -> Self {
         Self {
+            id: Uuid::new_v4(),
             port_settings_id,
             bgp_config_id,
             interface_name,
-            addr: p.addr.into(),
+            addr: p.addr.map(|a| a.into()),
             hold_time: p.hold_time.into(),
             idle_hold_time: p.idle_hold_time.into(),
             delay_open: p.delay_open.into(),
@@ -766,6 +771,7 @@ impl SwitchPortBgpPeerConfig {
                 _ => true,
             },
             vlan_id: p.vlan_id.map(|x| x.into()),
+            router_lifetime: p.router_lifetime.into(),
         }
     }
 }

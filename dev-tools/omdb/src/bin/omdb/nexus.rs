@@ -53,7 +53,9 @@ use nexus_types::deployment::OximeterReadMode;
 use nexus_types::deployment::OximeterReadPolicy;
 use nexus_types::fm;
 use nexus_types::internal_api::background::AbandonedVmmReaperStatus;
+use nexus_types::internal_api::background::AttachedSubnetManagerStatus;
 use nexus_types::internal_api::background::BlueprintPlannerStatus;
+use nexus_types::internal_api::background::BlueprintRendezvousStats;
 use nexus_types::internal_api::background::BlueprintRendezvousStatus;
 use nexus_types::internal_api::background::DatasetsRendezvousStats;
 use nexus_types::internal_api::background::EreporterStatus;
@@ -87,6 +89,7 @@ use omicron_uuid_kinds::DemoSagaUuid;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::ParseError;
 use omicron_uuid_kinds::PhysicalDiskUuid;
+use omicron_uuid_kinds::RackUuid;
 use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::SupportBundleUuid;
 use quiesce::QuiesceArgs;
@@ -99,6 +102,7 @@ use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::fs::OpenOptions;
+use std::num::ParseIntError;
 use std::os::unix::fs::PermissionsExt;
 use std::str::FromStr;
 use std::sync::Arc;
@@ -112,6 +116,7 @@ use tabled::settings::Padding;
 use tabled::settings::object::Columns;
 use tokio::io::AsyncWriteExt;
 use tokio::sync::OnceCell;
+use trust_quorum_types::types::Epoch;
 use update_engine::EventBuffer;
 use update_engine::ExecutionStatus;
 use update_engine::ExecutionTerminalInfo;
@@ -171,6 +176,8 @@ enum NexusCommands {
     /// interact with support bundles
     #[command(visible_alias = "sb")]
     SupportBundles(SupportBundleArgs),
+    /// interact with the trust quorum
+    TrustQuorum(TrustQuorumArgs),
     /// show running artifact versions
     UpdateStatus(UpdateStatusArgs),
 }
@@ -573,6 +580,54 @@ enum SupportBundleCommands {
 }
 
 #[derive(Debug, Args)]
+struct TrustQuorumArgs {
+    #[command(subcommand)]
+    command: TrustQuorumCommands,
+}
+
+#[derive(Debug, Subcommand)]
+#[allow(clippy::large_enum_variant)]
+enum TrustQuorumCommands {
+    GetConfig(TrustQuorumConfigArgs),
+    LrtqUpgrade,
+    RemoveSled(TrustQuorumRemoveSledArgs),
+}
+
+#[derive(Debug, Clone, Copy, Args)]
+struct TrustQuorumConfigArgs {
+    rack_id: RackUuid,
+    epoch: TrustQuorumEpochOrLatest,
+}
+
+#[derive(Debug, Args)]
+struct TrustQuorumRemoveSledArgs {
+    // remove is _extremely_ dangerous, so we also require a database
+    // connection to perform some safety checks
+    #[clap(flatten)]
+    db_url_opts: DbUrlOptions,
+    sled_id: SledUuid,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum TrustQuorumEpochOrLatest {
+    Latest,
+    Epoch(Epoch),
+}
+
+impl FromStr for TrustQuorumEpochOrLatest {
+    type Err = ParseIntError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        if matches!(s, "latest" | "current") {
+            Ok(Self::Latest)
+        } else {
+            let i: u64 = s.parse()?;
+            Ok(Self::Epoch(Epoch(i)))
+        }
+    }
+}
+
+#[derive(Debug, Args)]
 struct SupportBundleDeleteArgs {
     id: SupportBundleUuid,
 }
@@ -870,6 +925,24 @@ impl NexusArgs {
             NexusCommands::SupportBundles(SupportBundleArgs {
                 command: SupportBundleCommands::Inspect(args),
             }) => cmd_nexus_support_bundles_inspect(&client, args).await,
+            NexusCommands::TrustQuorum(TrustQuorumArgs {
+                command: TrustQuorumCommands::GetConfig(args),
+            }) => cmd_nexus_trust_quorum_get_config(&client, args).await,
+            NexusCommands::TrustQuorum(TrustQuorumArgs {
+                command: TrustQuorumCommands::LrtqUpgrade,
+            }) => {
+                let token = omdb.check_allow_destructive()?;
+                cmd_nexus_trust_quorum_lrtq_upgrade(&client, token).await
+            }
+            NexusCommands::TrustQuorum(TrustQuorumArgs {
+                command: TrustQuorumCommands::RemoveSled(args),
+            }) => {
+                let token = omdb.check_allow_destructive()?;
+                cmd_nexus_trust_quorum_remove_sled(
+                    &client, args, omdb, log, token,
+                )
+                .await
+            }
             NexusCommands::UpdateStatus(args) => {
                 cmd_nexus_update_status(&client, args).await
             }
@@ -1161,6 +1234,9 @@ fn print_task_details(bgtask: &BackgroundTask, details: &serde_json::Value) {
     match name.as_str() {
         "abandoned_vmm_reaper" => {
             print_task_abandoned_vmm_reaper(details);
+        }
+        "attached_subnet_manager" => {
+            print_task_attached_subnet_manager_status(details);
         }
         "blueprint_planner" => {
             print_task_blueprint_planner(details);
@@ -1540,29 +1616,38 @@ fn print_task_blueprint_rendezvous(details: &serde_json::Value) {
                 status.inventory_collection_id
             );
 
-            print_datasets_rendezvous_stats(
-                &status.stats.debug_dataset,
-                "debug_dataset",
-            );
+            let BlueprintRendezvousStats {
+                debug_dataset,
+                crucible_dataset,
+                local_storage_dataset,
+                local_storage_unencrypted_dataset,
+            } = status.stats;
+
+            print_datasets_rendezvous_stats(&debug_dataset, "debug_dataset");
 
             // crucible datasets have a different number of rendezvous stats
             println!("    crucible_dataset rendezvous counts:");
             println!(
                 "        num_inserted:         {}",
-                status.stats.crucible_dataset.num_inserted
+                crucible_dataset.num_inserted
             );
             println!(
                 "        num_already_exist:    {}",
-                status.stats.crucible_dataset.num_already_exist
+                crucible_dataset.num_already_exist
             );
             println!(
                 "        num_not_in_inventory: {}",
-                status.stats.crucible_dataset.num_not_in_inventory
+                crucible_dataset.num_not_in_inventory
             );
 
             print_datasets_rendezvous_stats(
-                &status.stats.local_storage_dataset,
+                &local_storage_dataset,
                 "local_storage_dataset",
+            );
+
+            print_datasets_rendezvous_stats(
+                &local_storage_unencrypted_dataset,
+                "local_storage_unencrypted_dataset",
             );
         }
     }
@@ -2172,6 +2257,51 @@ fn print_task_probe_distributor(details: &serde_json::Value) {
                     "      sled_id={} sled_ip={} error={}",
                     err.sled_id, err.sled_ip, err.error,
                 );
+            }
+        }
+    };
+}
+
+fn print_task_attached_subnet_manager_status(details: &serde_json::Value) {
+    match serde_json::from_value::<AttachedSubnetManagerStatus>(details.clone())
+    {
+        Err(error) => eprintln!(
+            "warning: failed to interpret task details: {:?}: {:?}",
+            error, details
+        ),
+        Ok(AttachedSubnetManagerStatus { db_error, dendrite, sled }) => {
+            if let Some(err) = db_error {
+                println!(
+                    "  error accessing database to list attached subnets:"
+                );
+                println!("    {err}");
+            }
+            if dendrite.is_empty() {
+                println!("   no dendrite instances found");
+            } else {
+                for (loc, details) in dendrite.iter() {
+                    println!("   dendrite instance on switch {loc}");
+                    println!(
+                        "     n_subnets_removed={}",
+                        details.n_subnets_removed
+                    );
+                    println!(
+                        "     n_subnets_added={}",
+                        details.n_subnets_added
+                    );
+                    println!(
+                        "     n_subnets_total={}",
+                        details.n_total_subnets
+                    );
+                }
+            }
+            if sled.is_empty() {
+                println!("   no sleds found");
+            } else {
+                for (sled_id, details) in sled.iter() {
+                    println!("   sled {sled_id}");
+                    println!("     n_subnets={}", details.n_subnets);
+                }
             }
         }
     };
@@ -2935,7 +3065,7 @@ fn print_task_alert_dispatcher(details: &serde_json::Value) {
     }
 }
 fn print_task_webhook_deliverator(details: &serde_json::Value) {
-    use nexus_types::external_api::views::WebhookDeliveryAttemptResult;
+    use nexus_types::external_api::alert::WebhookDeliveryAttemptResult;
     use nexus_types::internal_api::background::WebhookDeliveratorStatus;
     use nexus_types::internal_api::background::WebhookDeliveryFailure;
     use nexus_types::internal_api::background::WebhookRxDeliveryStatus;
@@ -4296,6 +4426,13 @@ async fn cmd_nexus_sled_expunge_with_datastore(
     }
 
     eprintln!(
+        "WARNING: Are you sure that you have removed this sled from the latest \
+        trust quorum configuration for rack {}?. Please double check with: \
+        `omdb nexus trust-quorum get-config <RACK_ID> latest`\n",
+        sled.rack_id
+    );
+
+    eprintln!(
         "WARNING: This operation will PERMANENTLY and IRRECOVABLY mark sled \
         {} ({}) expunged. To proceed, type the sled's serial number.",
         args.sled_id,
@@ -4485,6 +4622,157 @@ async fn cmd_nexus_support_bundles_list(
         .with(tabled::settings::Padding::new(0, 1, 0, 0))
         .to_string();
     println!("{}", table);
+    Ok(())
+}
+
+async fn cmd_nexus_trust_quorum_get_config(
+    client: &nexus_lockstep_client::Client,
+    args: &TrustQuorumConfigArgs,
+) -> Result<(), anyhow::Error> {
+    let config = match args.epoch {
+        TrustQuorumEpochOrLatest::Latest => client
+            .trust_quorum_get_config(&args.rack_id.as_untyped_uuid(), None)
+            .await
+            .with_context(|| {
+                format!(
+                    "getting latest trust quorum config for rack {}",
+                    args.rack_id
+                )
+            })?,
+        TrustQuorumEpochOrLatest::Epoch(epoch) => client
+            .trust_quorum_get_config(
+                &args.rack_id.as_untyped_uuid(),
+                Some(epoch.0),
+            )
+            .await
+            .with_context(|| {
+                format!(
+                    "getting trust quorum config for rack {}, epoch {}",
+                    args.rack_id, epoch
+                )
+            })?,
+    }
+    .into_inner();
+
+    println!("{config:#?}");
+
+    Ok(())
+}
+
+async fn cmd_nexus_trust_quorum_lrtq_upgrade(
+    client: &nexus_lockstep_client::Client,
+    _destruction_token: DestructiveOperationToken,
+) -> Result<(), anyhow::Error> {
+    let epoch = client
+        .trust_quorum_lrtq_upgrade()
+        .await
+        .context("lrtq upgrade")?
+        .into_inner();
+
+    println!("Started LRTQ upgrade at epoch {epoch}");
+
+    Ok(())
+}
+
+async fn cmd_nexus_trust_quorum_remove_sled(
+    client: &nexus_lockstep_client::Client,
+    args: &TrustQuorumRemoveSledArgs,
+    omdb: &Omdb,
+    log: &slog::Logger,
+    destruction_token: DestructiveOperationToken,
+) -> Result<(), anyhow::Error> {
+    let datastore = args.db_url_opts.connect(omdb, log).await?;
+    let result = cmd_nexus_trust_quorum_remove_sled_with_datastore(
+        &datastore,
+        client,
+        args,
+        log,
+        destruction_token,
+    )
+    .await;
+    datastore.terminate().await;
+    result
+}
+
+// `omdb nexus trust-quorum remove-sled`, but borrowing a datastore
+async fn cmd_nexus_trust_quorum_remove_sled_with_datastore(
+    datastore: &Arc<DataStore>,
+    client: &nexus_lockstep_client::Client,
+    args: &TrustQuorumRemoveSledArgs,
+    log: &slog::Logger,
+    _destruction_token: DestructiveOperationToken,
+) -> Result<(), anyhow::Error> {
+    use nexus_db_queries::context::OpContext;
+    let opctx = OpContext::for_tests(log.clone(), datastore.clone());
+    let opctx = &opctx;
+
+    // First, we need to look up the sled so we know its serial number.
+    let (_authz_sled, sled) = LookupPath::new(opctx, datastore)
+        .sled_id(args.sled_id)
+        .fetch()
+        .await
+        .with_context(|| format!("failed to find sled {}", args.sled_id))?;
+
+    // Helper to get confirmation messages from the user.
+    let mut prompt = ConfirmationPrompt::new();
+
+    println!(
+        "WARNING: This is step 1 of the process to expunge a sled. If you \
+        remove a sled from the trust quorum and reboot it, it will not be able \
+        to unlock its storage and participate in the control plane. However, \
+        the Reconfigurator will not yet know the sled is expunged and may \
+        still try to use it."
+    );
+
+    println!(
+        "Therefore, you must treat this action in conjunction with a reboot as \
+        the software equivalent of physically removing the sled from the rack \
+        before expungement."
+    );
+
+    println!(
+        "After this sled is removed from the trust quorum, you must reboot it \
+        and expunge it to complete the process."
+    );
+
+    println!(
+        "WARNING: This operation will PERMANENTLY and IRRECOVABLY remove sled \
+        {} ({}) from the trust-quorum for rack {}. To proceed, type the \
+        sled's serial number.",
+        args.sled_id,
+        sled.serial_number(),
+        sled.rack_id
+    );
+    prompt.read_and_validate("sled serial number", sled.serial_number())?;
+
+    println!(
+        "About to start the trust quorum reconfiguration to remove the sled."
+    );
+
+    println!(
+        "If this operation fails with a timeout, please check the latest trust \
+        quorum configuration to see whether or not to proceed with rack reboot \
+        and expungement."
+    );
+
+    println!(
+        "You can poll the trust quorum reconfiguration with \
+        `omdb nexus trust-quorum get-config <RACK_ID> <EPOCH | latest>`\n"
+    );
+
+    println!(
+        "Once the trust quorum configuration is committed, please reboot \
+        the sled and proceed to call `omdb nexus sled expunge`.\n"
+    );
+
+    let epoch = client
+        .trust_quorum_remove_sled(&args.sled_id.into_untyped_uuid())
+        .await
+        .context("trust quorum remove sled")?
+        .into_inner();
+
+    println!("Started trust quorum reconfiguration at epoch {epoch}\n");
+
     Ok(())
 }
 

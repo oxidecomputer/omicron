@@ -16,10 +16,12 @@ use crate::app::instance::{
     InstanceEnsureRegisteredApiResources, InstanceRegisterReason,
     InstanceStateChangeError,
 };
+use crate::app::instance_network::InstanceNetworkFilters;
 use crate::app::sagas::declare_saga_actions;
 use chrono::Utc;
 use nexus_db_lookup::LookupPath;
 use nexus_db_queries::db::datastore::Disk;
+use nexus_db_queries::db::datastore::LocalStorageAllocation;
 use nexus_db_queries::db::datastore::LocalStorageDisk;
 use nexus_db_queries::db::identity::Resource;
 use nexus_db_queries::{authn, authz, db};
@@ -173,8 +175,14 @@ impl NexusSaga for SagaInstanceStart {
 
         // Changing MAX_DISKS_PER_INSTANCE requires changing this saga
         static_assertions::const_assert!(MAX_DISKS_PER_INSTANCE == 12);
+
+        // In parallel, ensure all local storage related to this instance.
         seq!(N in 0..12 {
-            builder.append(paste!([<ensure_local_storage_ N _action>]()));
+            builder.append_parallel(vec![
+                #(
+                paste!([<ensure_local_storage_ N _action>]()),
+                )*
+            ]);
         });
 
         builder.append(dpd_ensure_action());
@@ -625,16 +633,6 @@ async fn sis_ensure_local_storage(
         local_storage_dataset_allocation,
     } = &local_storage_records[which];
 
-    // Make sure this was a complete allocation.
-
-    let Some(local_storage_dataset_allocation) =
-        local_storage_dataset_allocation
-    else {
-        return Err(ActionError::action_failed(format!(
-            "local storage record {which} has a None allocation!",
-        )));
-    };
-
     // All local storage volumes will be created with 4k blocks. Double check
     // here.
 
@@ -646,13 +644,40 @@ async fn sis_ensure_local_storage(
         )));
     }
 
-    let dataset_id = local_storage_dataset_allocation.id();
-    let pool_id = local_storage_dataset_allocation.pool_id();
-    let sled_id = local_storage_dataset_allocation.sled_id();
-    let dataset_size = local_storage_dataset_allocation.dataset_size.into();
-    let volume_size = disk.size.into();
+    // Make sure this was a complete allocation.
 
-    // Get a sled agent client
+    let Some(allocation) = local_storage_dataset_allocation else {
+        return Err(ActionError::action_failed(format!(
+            "local storage record {which} has a None unencrypted allocation!",
+        )));
+    };
+
+    // Ensure that the local storage is created
+
+    let (sled_id, ensure_request) = match allocation {
+        LocalStorageAllocation::Unencrypted(allocation) => {
+            let sled_id = allocation.sled_id();
+
+            let ensure_request = LocalStorageDatasetEnsureRequest {
+                zpool_id: allocation.pool_id(),
+                dataset_id: allocation.id(),
+                dataset_size: allocation.dataset_size.into(),
+                volume_size: disk.size.into(),
+                encrypted_at_rest: false,
+            };
+
+            (sled_id, ensure_request)
+        }
+
+        LocalStorageAllocation::Encrypted(_) => {
+            // This enum variant has been left in pending an investigation of
+            // how we're going to support encryption at rest, but right now we
+            // don't support this yet.
+            return Err(ActionError::action_failed(format!(
+                "local storage record {which} has a encrypted allocation!",
+            )));
+        }
+    };
 
     let sled_agent_client = osagactx
         .nexus()
@@ -660,16 +685,8 @@ async fn sis_ensure_local_storage(
         .await
         .map_err(ActionError::action_failed)?;
 
-    // Ensure that the local storage is created
-
     let ensure_operation = || async {
-        sled_agent_client
-            .local_storage_dataset_ensure(
-                &pool_id,
-                &dataset_id,
-                &LocalStorageDatasetEnsureRequest { dataset_size, volume_size },
-            )
-            .await
+        sled_agent_client.local_storage_dataset_ensure(&ensure_request).await
     };
 
     let gone_check = || async {
@@ -731,7 +748,12 @@ async fn sis_dpd_ensure(
 
     osagactx
         .nexus()
-        .instance_ensure_dpd_config(&opctx, instance_id, &sled.address(), None)
+        .instance_ensure_dpd_config(
+            &opctx,
+            instance_id,
+            &sled.address(),
+            InstanceNetworkFilters::all(),
+        )
         .await
         .map_err(ActionError::action_failed)?;
 
@@ -1098,13 +1120,13 @@ mod test {
     use std::net::SocketAddrV6;
 
     use crate::app::{saga::create_saga_dag, sagas::test_helpers};
-    use crate::external_api::params;
     use dropshot::test_util::ClientTestContext;
     use nexus_db_queries::authn;
     use nexus_test_utils::resource_helpers::{
         create_default_ip_pools, create_project, object_create,
     };
     use nexus_test_utils_macros::nexus_test;
+    use nexus_types::external_api::{instance as instance_types, networking};
     use nexus_types::identity::Resource;
     use omicron_common::api::external::{
         ByteCount, IdentityMetadataCreateParams, InstanceCpuCount, Name,
@@ -1134,7 +1156,7 @@ mod test {
         object_create(
             client,
             &instances_url,
-            &params::InstanceCreate {
+            &instance_types::InstanceCreate {
                 identity: IdentityMetadataCreateParams {
                     name: INSTANCE_NAME.parse().unwrap(),
                     description: format!("instance {:?}", INSTANCE_NAME),
@@ -1145,7 +1167,7 @@ mod test {
                 user_data: b"#cloud-config".to_vec(),
                 ssh_public_keys: Some(Vec::new()),
                 network_interfaces:
-                    params::InstanceNetworkInterfaceAttachment::DefaultIpv4,
+                    instance_types::InstanceNetworkInterfaceAttachment::DefaultIpv4,
                 external_ips: vec![],
                 disks: vec![],
                 boot_disk: None,
@@ -1225,16 +1247,16 @@ mod test {
         // We only eagerly populate NAT entries on switches that have
         // uplinks configured, so we need to do some switch configuration
         // before starting the instance in order to test that section of logic
-        let mut uplink0_params = params::SwitchPortSettingsCreate::new(
+        let mut uplink0_params = networking::SwitchPortSettingsCreate::new(
             IdentityMetadataCreateParams {
                 name: "test-uplink0".parse().unwrap(),
                 description: "test uplink".into(),
             },
         );
 
-        uplink0_params.routes = vec![params::RouteConfig {
+        uplink0_params.routes = vec![networking::RouteConfig {
             link_name: "phy0".parse().unwrap(),
-            routes: vec![params::Route {
+            routes: vec![networking::Route {
                 dst: "0.0.0.0/0".parse().unwrap(),
                 gw: "1.1.1.1".parse().unwrap(),
                 vid: None,
@@ -1242,16 +1264,16 @@ mod test {
             }],
         }];
 
-        let mut uplink1_params = params::SwitchPortSettingsCreate::new(
+        let mut uplink1_params = networking::SwitchPortSettingsCreate::new(
             IdentityMetadataCreateParams {
                 name: "test-uplink1".parse().unwrap(),
                 description: "test uplink".into(),
             },
         );
 
-        uplink1_params.routes = vec![params::RouteConfig {
+        uplink1_params.routes = vec![networking::RouteConfig {
             link_name: "phy0".parse().unwrap(),
-            routes: vec![params::Route {
+            routes: vec![networking::Route {
                 dst: "0.0.0.0/0".parse().unwrap(),
                 gw: "2.2.2.2".parse().unwrap(),
                 vid: None,

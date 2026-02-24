@@ -9,6 +9,7 @@ use super::SQL_BATCH_SIZE;
 use crate::authz;
 use crate::context::OpContext;
 use crate::db;
+use crate::db::datastore;
 use crate::db::datastore::LocalStorageDisk;
 use crate::db::datastore::ValidateTransition;
 use crate::db::datastore::zpool::ZpoolGetForSledReservationResult;
@@ -38,8 +39,7 @@ use nexus_db_lookup::DbConnection;
 use nexus_db_model::ApplySledFilterExt;
 use nexus_db_model::DbTypedUuid;
 use nexus_types::deployment::SledFilter;
-use nexus_types::external_api::views::SledPolicy;
-use nexus_types::external_api::views::SledProvisionPolicy;
+use nexus_types::external_api::sled::{SledPolicy, SledProvisionPolicy};
 use nexus_types::identity::Asset;
 use nonempty::NonEmpty;
 use omicron_common::api::external;
@@ -295,7 +295,7 @@ fn pick_sled_reservation_target(
 /// A candidate dataset for a local storage allocation
 #[derive(Clone, Debug, Hash, PartialEq, Eq)]
 struct CandidateDataset {
-    rendezvous_local_storage_dataset_id: DatasetUuid,
+    rendezvous_local_storage_unencrypted_dataset_id: DatasetUuid,
     pool_id: ZpoolUuid,
     sled_id: SledUuid,
 }
@@ -380,9 +380,10 @@ impl<'a> CompleteLocalStorageAllocationLists<'a> {
         // number of zpools on the sled. Find this list of candidate zpools for
         // each required local storage allocation.
 
-        // If there's an existing local storage allocation on a zpool, remove
-        // that from the list of candidates. Local storage for the same Instance
-        // should not share any zpools.
+        // If there's an existing local storage allocation on a zpool
+        // (regardless of whether or not it's an encrypted or unencrypted
+        // allocation), remove that pool from the list of candidates. Local
+        // storage for the same Instance should not share any zpools.
         let local_storage_zpools_used: HashSet<ZpoolUuid> = local_storage_disks
             .iter()
             .filter_map(|disk| {
@@ -431,7 +432,7 @@ impl<'a> CompleteLocalStorageAllocationLists<'a> {
                     let ZpoolGetForSledReservationResult {
                         pool,
                         last_inv_total_size,
-                        rendezvous_local_storage_dataset_id: _,
+                        rendezvous_local_storage_unencrypted_dataset_id: _,
                         crucible_dataset_usage,
                         local_storage_usage,
                     } = zpool_get_result;
@@ -456,8 +457,9 @@ impl<'a> CompleteLocalStorageAllocationLists<'a> {
                     new_size_used < adjusted_total
                 })
                 .map(|zpool_get_result| CandidateDataset {
-                    rendezvous_local_storage_dataset_id: zpool_get_result
-                        .rendezvous_local_storage_dataset_id,
+                    rendezvous_local_storage_unencrypted_dataset_id:
+                        zpool_get_result
+                            .rendezvous_local_storage_unencrypted_dataset_id,
                     pool_id: zpool_get_result.pool.id(),
                     sled_id: zpool_get_result.pool.sled_id(),
                 })
@@ -496,8 +498,9 @@ impl<'a> CompleteLocalStorageAllocationLists<'a> {
             candidates_left: zpools_for_sled
                 .iter()
                 .map(|zpool_get_result| CandidateDataset {
-                    rendezvous_local_storage_dataset_id: zpool_get_result
-                        .rendezvous_local_storage_dataset_id,
+                    rendezvous_local_storage_unencrypted_dataset_id:
+                        zpool_get_result
+                            .rendezvous_local_storage_unencrypted_dataset_id,
                     pool_id: zpool_get_result.pool.id(),
                     sled_id: zpool_get_result.pool.sled_id(),
                 })
@@ -574,7 +577,7 @@ impl<'a> Iterator for CompleteLocalStorageAllocationLists<'a> {
                     set_allocations.push(LocalStorageAllocation {
                         disk_id: request.request.id(),
 
-                        local_storage_dataset_allocation_id:
+                        local_storage_unencrypted_dataset_allocation_id:
                             DatasetUuid::new_v4(),
 
                         required_dataset_size: {
@@ -588,8 +591,8 @@ impl<'a> Iterator for CompleteLocalStorageAllocationLists<'a> {
                             request_size
                         },
 
-                        local_storage_dataset_id: candidate_dataset
-                            .rendezvous_local_storage_dataset_id,
+                        local_storage_unencrypted_dataset_id: candidate_dataset
+                            .rendezvous_local_storage_unencrypted_dataset_id,
 
                         pool_id: candidate_dataset.pool_id,
 
@@ -911,8 +914,8 @@ impl DataStore {
         // constrains VMM placement and where other unallocated local storage
         // must be.
         let maybe_must_use_sleds = if !local_storage_disks.is_empty() {
-            // Any local storage disk that was allocated already will have a
-            // sled_id.
+            // Any local storage disk that was allocated already (encrypted or
+            // unencrypted) will have a sled_id.
             let local_storage_allocation_sleds: HashSet<SledUuid> =
                 local_storage_disks
                     .iter()
@@ -1071,6 +1074,36 @@ impl DataStore {
                     AffinityPolicy::Fail => banned.insert(sled_id),
                     AffinityPolicy::Allow => unpreferred.insert(sled_id),
                 };
+            }
+        }
+
+        // Prior to R18, all Disks using the encrypted local storage dataset
+        // should have been deleted, and we will be revisiting how to do
+        // encryption at rest. For now, bail out here if we're going to be
+        // allocating an instance with a disk that is using the encrypted local
+        // storage dataset.
+        for local_storage_disk in &local_storage_disks {
+            let Some(allocation) =
+                &local_storage_disk.local_storage_dataset_allocation
+            else {
+                continue;
+            };
+
+            match allocation {
+                datastore::LocalStorageAllocation::Unencrypted(_) => {
+                    // ok, nothing to do here
+                }
+
+                datastore::LocalStorageAllocation::Encrypted(_) => {
+                    error!(
+                        &log,
+                        "disk has an unsupported encrypted dataset allocation"
+                    );
+
+                    return Err(SledReservationTransactionError::Reservation(
+                        SledReservationError::NotFound,
+                    ));
+                }
             }
         }
 
@@ -1762,7 +1795,7 @@ pub(in crate::db::datastore) mod test {
     use nexus_db_model::PhysicalDiskState;
     use nexus_db_model::{Generation, SledCpuFamily};
     use nexus_db_model::{InstanceCpuPlatform, PhysicalDisk};
-    use nexus_types::external_api::params;
+    use nexus_types::external_api::{disk, instance};
     use nexus_types::identity::Asset;
     use nexus_types::identity::Resource;
     use omicron_common::api::external;
@@ -3513,9 +3546,9 @@ pub(in crate::db::datastore) mod test {
             (
                 // In-service and active sleds can be marked as expunged.
                 Before::new(
-                    predicate::in_iter(SledPolicy::all_matching(
-                        SledFilter::InService,
-                    )),
+                    predicate::in_iter(
+                        SledFilter::InService.all_matching_policies(),
+                    ),
                     predicate::eq(SledState::Active),
                 ),
                 SledTransition::Policy(SledPolicy::Expunged),
@@ -3524,9 +3557,9 @@ pub(in crate::db::datastore) mod test {
                 // The provision policy of in-service sleds can be changed, or
                 // kept the same (1 of 2).
                 Before::new(
-                    predicate::in_iter(SledPolicy::all_matching(
-                        SledFilter::InService,
-                    )),
+                    predicate::in_iter(
+                        SledFilter::InService.all_matching_policies(),
+                    ),
                     predicate::eq(SledState::Active),
                 ),
                 SledTransition::Policy(SledPolicy::InService {
@@ -3536,9 +3569,9 @@ pub(in crate::db::datastore) mod test {
             (
                 // (2 of 2)
                 Before::new(
-                    predicate::in_iter(SledPolicy::all_matching(
-                        SledFilter::InService,
-                    )),
+                    predicate::in_iter(
+                        SledFilter::InService.all_matching_policies(),
+                    ),
                     predicate::eq(SledState::Active),
                 ),
                 SledTransition::Policy(SledPolicy::InService {
@@ -3798,7 +3831,7 @@ pub(in crate::db::datastore) mod test {
         crucible_dataset_id: DatasetUuid,
         crucible_dataset_addr: SocketAddrV6,
 
-        local_storage_dataset_id: DatasetUuid,
+        local_storage_unencrypted_dataset_id: DatasetUuid,
     }
 
     struct LocalStorageAffinityGroup {
@@ -3899,10 +3932,10 @@ pub(in crate::db::datastore) mod test {
                 )
                 .await;
 
-                add_local_storage_dataset(
+                add_local_storage_unencrypted_dataset(
                     opctx,
                     datastore,
-                    u2.local_storage_dataset_id,
+                    u2.local_storage_unencrypted_dataset_id,
                     u2.zpool_id,
                 )
                 .await;
@@ -3990,16 +4023,16 @@ pub(in crate::db::datastore) mod test {
                 }
             }
 
-            for disk in &instance.disks {
-                let params = params::DiskCreate {
+            for d in &instance.disks {
+                let params = disk::DiskCreate {
                     identity: external::IdentityMetadataCreateParams {
-                        name: disk.name.clone(),
+                        name: d.name.clone(),
                         description: String::from("desc"),
                     },
 
-                    disk_backend: params::DiskBackend::Local {},
+                    disk_backend: disk::DiskBackend::Local {},
 
-                    size: disk.size,
+                    size: d.size,
                 };
 
                 datastore
@@ -4009,7 +4042,7 @@ pub(in crate::db::datastore) mod test {
                         db::datastore::Disk::LocalStorage(
                             db::datastore::LocalStorageDisk::new(
                                 db::model::Disk::new(
-                                    disk.id,
+                                    d.id,
                                     authz_project.id(),
                                     &params,
                                     db::model::BlockSize::AdvancedFormat,
@@ -4017,7 +4050,7 @@ pub(in crate::db::datastore) mod test {
                                     db::model::DiskType::LocalStorage,
                                 ),
                                 db::model::DiskTypeLocalStorage::new(
-                                    disk.id, disk.size,
+                                    d.id, d.size,
                                 )
                                 .unwrap(),
                             ),
@@ -4027,7 +4060,7 @@ pub(in crate::db::datastore) mod test {
                     .unwrap();
 
                 let (.., authz_disk) = LookupPath::new(&opctx, datastore)
-                    .disk_id(disk.id)
+                    .disk_id(d.id)
                     .lookup_for(authz::Action::Read)
                     .await
                     .unwrap();
@@ -4103,46 +4136,51 @@ pub(in crate::db::datastore) mod test {
             .unwrap();
     }
 
-    async fn add_local_storage_dataset(
+    async fn add_local_storage_unencrypted_dataset(
         opctx: &OpContext,
         datastore: &DataStore,
         dataset_id: DatasetUuid,
         pool_id: ZpoolUuid,
     ) -> DatasetUuid {
-        let dataset = db::model::RendezvousLocalStorageDataset::new(
+        let dataset = db::model::RendezvousLocalStorageUnencryptedDataset::new(
             dataset_id,
             pool_id,
             BlueprintUuid::new_v4(),
         );
 
         datastore
-            .local_storage_dataset_insert_if_not_exists(opctx, dataset)
+            .local_storage_unencrypted_dataset_insert_if_not_exists(
+                opctx, dataset,
+            )
             .await
             .unwrap();
 
         dataset_id
     }
 
-    async fn set_local_storage_dataset_no_provision(
+    async fn set_local_storage_unencrypted_dataset_no_provision(
         datastore: &DataStore,
-        local_storage_dataset_id: DatasetUuid,
+        local_storage_unencrypted_dataset_id: DatasetUuid,
     ) {
-        use nexus_db_schema::schema::rendezvous_local_storage_dataset::dsl;
+        use nexus_db_schema::schema::rendezvous_local_storage_unencrypted_dataset::dsl;
 
         let conn = datastore.pool_connection_for_tests().await.unwrap();
 
-        diesel::update(dsl::rendezvous_local_storage_dataset)
-            .filter(dsl::id.eq(to_db_typed_uuid(local_storage_dataset_id)))
+        diesel::update(dsl::rendezvous_local_storage_unencrypted_dataset)
+            .filter(
+                dsl::id
+                    .eq(to_db_typed_uuid(local_storage_unencrypted_dataset_id)),
+            )
             .set(dsl::no_provision.eq(true))
             .execute_async(&*conn)
             .await
             .unwrap();
     }
 
-    async fn set_local_storage_allocation(
+    async fn set_local_storage_unencrypted_allocation(
         datastore: &DataStore,
         disk_id: Uuid,
-        local_storage_dataset_id: DatasetUuid,
+        local_storage_unencrypted_dataset_id: DatasetUuid,
         pool_id: ExternalZpoolUuid,
         sled_id: SledUuid,
         dataset_size: ByteCount,
@@ -4150,10 +4188,10 @@ pub(in crate::db::datastore) mod test {
         let allocation_id = DatasetUuid::new_v4();
 
         let allocation =
-            db::model::LocalStorageDatasetAllocation::new_for_tests_only(
+            db::model::LocalStorageUnencryptedDatasetAllocation::new_for_tests_only(
                 allocation_id,
                 Utc::now(),
-                local_storage_dataset_id,
+                local_storage_unencrypted_dataset_id,
                 pool_id,
                 sled_id,
                 dataset_size,
@@ -4162,12 +4200,14 @@ pub(in crate::db::datastore) mod test {
         let conn = datastore.pool_connection_for_tests().await.unwrap();
 
         {
-            use nexus_db_schema::schema::local_storage_dataset_allocation::dsl;
-            diesel::insert_into(dsl::local_storage_dataset_allocation)
-                .values(allocation)
-                .execute_async(&*conn)
-                .await
-                .unwrap();
+            use nexus_db_schema::schema::local_storage_unencrypted_dataset_allocation::dsl;
+            diesel::insert_into(
+                dsl::local_storage_unencrypted_dataset_allocation,
+            )
+            .values(allocation)
+            .execute_async(&*conn)
+            .await
+            .unwrap();
         }
 
         {
@@ -4176,7 +4216,7 @@ pub(in crate::db::datastore) mod test {
             let rows_updated = diesel::update(dsl::disk_type_local_storage)
                 .filter(dsl::disk_id.eq(disk_id))
                 .set(
-                    dsl::local_storage_dataset_allocation_id
+                    dsl::local_storage_unencrypted_dataset_allocation_id
                         .eq(to_db_typed_uuid(allocation_id)),
                 )
                 .execute_async(&*conn)
@@ -4189,19 +4229,17 @@ pub(in crate::db::datastore) mod test {
         // Make sure the accounting is correct
 
         {
-            use nexus_db_schema::schema::rendezvous_local_storage_dataset::dsl;
+            use nexus_db_schema::schema::rendezvous_local_storage_unencrypted_dataset::dsl;
 
-            let rows_updated =
-                diesel::update(dsl::rendezvous_local_storage_dataset)
-                    .filter(dsl::pool_id.eq(to_db_typed_uuid(pool_id)))
-                    .filter(dsl::time_tombstoned.is_null())
-                    .set(
-                        dsl::size_used
-                            .eq(dsl::size_used + i64::from(dataset_size)),
-                    )
-                    .execute_async(&*conn)
-                    .await
-                    .unwrap();
+            let rows_updated = diesel::update(
+                dsl::rendezvous_local_storage_unencrypted_dataset,
+            )
+            .filter(dsl::pool_id.eq(to_db_typed_uuid(pool_id)))
+            .filter(dsl::time_tombstoned.is_null())
+            .set(dsl::size_used.eq(dsl::size_used + i64::from(dataset_size)))
+            .execute_async(&*conn)
+            .await
+            .unwrap();
 
             assert_eq!(rows_updated, 1);
         }
@@ -4221,7 +4259,7 @@ pub(in crate::db::datastore) mod test {
                 db::model::Instance::new(
                     instance_id,
                     authz_project.id(),
-                    &params::InstanceCreate {
+                    &instance::InstanceCreate {
                         identity: external::IdentityMetadataCreateParams {
                             name: name.parse().unwrap(),
                             description: "It's an instance".into(),
@@ -4231,7 +4269,7 @@ pub(in crate::db::datastore) mod test {
                         hostname: "myhostname".try_into().unwrap(),
                         user_data: Vec::new(),
                         network_interfaces:
-                            params::InstanceNetworkInterfaceAttachment::None,
+                            instance::InstanceNetworkInterfaceAttachment::None,
                         external_ips: Vec::new(),
                         disks: Vec::new(),
                         boot_disk: None,
@@ -4284,11 +4322,11 @@ pub(in crate::db::datastore) mod test {
         let conn = datastore.pool_connection_for_tests().await.unwrap();
 
         let allocation_records: Vec<_> = {
-            use nexus_db_schema::schema::local_storage_dataset_allocation::dsl;
+            use nexus_db_schema::schema::local_storage_unencrypted_dataset_allocation::dsl;
 
-            dsl::local_storage_dataset_allocation
+            dsl::local_storage_unencrypted_dataset_allocation
                 .filter(dsl::time_deleted.is_null())
-                .select(db::model::LocalStorageDatasetAllocation::as_select())
+                .select(db::model::LocalStorageUnencryptedDatasetAllocation::as_select())
                 .load_async(&*conn)
                 .await
                 .unwrap()
@@ -4296,7 +4334,7 @@ pub(in crate::db::datastore) mod test {
 
         for allocation_record in &allocation_records {
             assert!(disks.iter().any(|disk| {
-                disk.local_storage_dataset_allocation_id()
+                disk.local_storage_unencrypted_dataset_allocation_id()
                     == Some(allocation_record.id())
             }));
         }
@@ -4307,22 +4345,22 @@ pub(in crate::db::datastore) mod test {
         let conn = datastore.pool_connection_for_tests().await.unwrap();
 
         let rendezvous_datasets: Vec<_> = {
-            use nexus_db_schema::schema::rendezvous_local_storage_dataset::dsl;
+            use nexus_db_schema::schema::rendezvous_local_storage_unencrypted_dataset::dsl;
 
-            dsl::rendezvous_local_storage_dataset
+            dsl::rendezvous_local_storage_unencrypted_dataset
                 .filter(dsl::time_tombstoned.is_null())
-                .select(db::model::RendezvousLocalStorageDataset::as_select())
+                .select(db::model::RendezvousLocalStorageUnencryptedDataset::as_select())
                 .load_async(&*conn)
                 .await
                 .unwrap()
         };
 
         let allocation_records: Vec<_> = {
-            use nexus_db_schema::schema::local_storage_dataset_allocation::dsl;
+            use nexus_db_schema::schema::local_storage_unencrypted_dataset_allocation::dsl;
 
-            dsl::local_storage_dataset_allocation
+            dsl::local_storage_unencrypted_dataset_allocation
                 .filter(dsl::time_deleted.is_null())
-                .select(db::model::LocalStorageDatasetAllocation::as_select())
+                .select(db::model::LocalStorageUnencryptedDatasetAllocation::as_select())
                 .load_async(&*conn)
                 .await
                 .unwrap()
@@ -4376,7 +4414,7 @@ pub(in crate::db::datastore) mod test {
                         .parse()
                         .unwrap(),
 
-                    local_storage_dataset_id: DatasetUuid::new_v4(),
+                    local_storage_unencrypted_dataset_id: DatasetUuid::new_v4(),
                 }],
             }],
             affinity_groups: vec![],
@@ -4456,7 +4494,8 @@ pub(in crate::db::datastore) mod test {
                             .parse()
                             .unwrap(),
 
-                        local_storage_dataset_id: DatasetUuid::new_v4(),
+                        local_storage_unencrypted_dataset_id:
+                            DatasetUuid::new_v4(),
                     }],
                 },
                 LocalStorageTestSled {
@@ -4478,7 +4517,8 @@ pub(in crate::db::datastore) mod test {
                             .parse()
                             .unwrap(),
 
-                        local_storage_dataset_id: DatasetUuid::new_v4(),
+                        local_storage_unencrypted_dataset_id:
+                            DatasetUuid::new_v4(),
                     }],
                 },
             ],
@@ -4502,10 +4542,10 @@ pub(in crate::db::datastore) mod test {
         let instance = Instance::new_with_id(config.instances[0].id);
 
         // Add an allocation for this disk to the first sled's zpool
-        set_local_storage_allocation(
+        set_local_storage_unencrypted_allocation(
             datastore,
             config.instances[0].disks[0].id,
-            config.sleds[0].u2s[0].local_storage_dataset_id,
+            config.sleds[0].u2s[0].local_storage_unencrypted_dataset_id,
             ExternalZpoolUuid::from_untyped_uuid(
                 config.sleds[0].u2s[0].zpool_id.into_untyped_uuid(),
             ),
@@ -4571,7 +4611,7 @@ pub(in crate::db::datastore) mod test {
                         .parse()
                         .unwrap(),
 
-                    local_storage_dataset_id: DatasetUuid::new_v4(),
+                    local_storage_unencrypted_dataset_id: DatasetUuid::new_v4(),
                 }],
             }],
             affinity_groups: vec![],
@@ -4593,9 +4633,9 @@ pub(in crate::db::datastore) mod test {
         setup_local_storage_allocation_test(&opctx, datastore, &config).await;
         let instance = Instance::new_with_id(config.instances[0].id);
 
-        set_local_storage_dataset_no_provision(
+        set_local_storage_unencrypted_dataset_no_provision(
             datastore,
-            config.sleds[0].u2s[0].local_storage_dataset_id,
+            config.sleds[0].u2s[0].local_storage_unencrypted_dataset_id,
         )
         .await;
 
@@ -4654,7 +4694,7 @@ pub(in crate::db::datastore) mod test {
                         .parse()
                         .unwrap(),
 
-                    local_storage_dataset_id: DatasetUuid::new_v4(),
+                    local_storage_unencrypted_dataset_id: DatasetUuid::new_v4(),
                 }],
             }],
             affinity_groups: vec![],
@@ -4767,7 +4807,7 @@ pub(in crate::db::datastore) mod test {
                         .parse()
                         .unwrap(),
 
-                    local_storage_dataset_id: DatasetUuid::new_v4(),
+                    local_storage_unencrypted_dataset_id: DatasetUuid::new_v4(),
                 }],
             }],
             affinity_groups: vec![],
@@ -4853,7 +4893,8 @@ pub(in crate::db::datastore) mod test {
                             .parse()
                             .unwrap(),
 
-                        local_storage_dataset_id: DatasetUuid::new_v4(),
+                        local_storage_unencrypted_dataset_id:
+                            DatasetUuid::new_v4(),
                     },
                     LocalStorageTestSledU2 {
                         physical_disk_id: PhysicalDiskUuid::new_v4(),
@@ -4871,7 +4912,8 @@ pub(in crate::db::datastore) mod test {
                             .parse()
                             .unwrap(),
 
-                        local_storage_dataset_id: DatasetUuid::new_v4(),
+                        local_storage_unencrypted_dataset_id:
+                            DatasetUuid::new_v4(),
                     },
                 ],
             }],
@@ -4962,7 +5004,8 @@ pub(in crate::db::datastore) mod test {
                             .parse()
                             .unwrap(),
 
-                        local_storage_dataset_id: DatasetUuid::new_v4(),
+                        local_storage_unencrypted_dataset_id:
+                            DatasetUuid::new_v4(),
                     },
                     LocalStorageTestSledU2 {
                         physical_disk_id: PhysicalDiskUuid::new_v4(),
@@ -4980,7 +5023,8 @@ pub(in crate::db::datastore) mod test {
                             .parse()
                             .unwrap(),
 
-                        local_storage_dataset_id: DatasetUuid::new_v4(),
+                        local_storage_unencrypted_dataset_id:
+                            DatasetUuid::new_v4(),
                     },
                 ],
             }],
@@ -5138,7 +5182,8 @@ pub(in crate::db::datastore) mod test {
                             .parse()
                             .unwrap(),
 
-                        local_storage_dataset_id: DatasetUuid::new_v4(),
+                        local_storage_unencrypted_dataset_id:
+                            DatasetUuid::new_v4(),
                     },
                     LocalStorageTestSledU2 {
                         physical_disk_id: PhysicalDiskUuid::new_v4(),
@@ -5156,7 +5201,8 @@ pub(in crate::db::datastore) mod test {
                             .parse()
                             .unwrap(),
 
-                        local_storage_dataset_id: DatasetUuid::new_v4(),
+                        local_storage_unencrypted_dataset_id:
+                            DatasetUuid::new_v4(),
                     },
                 ],
             }],
@@ -5189,10 +5235,10 @@ pub(in crate::db::datastore) mod test {
 
         // One of the local storage have been allocated already.
 
-        set_local_storage_allocation(
+        set_local_storage_unencrypted_allocation(
             datastore,
             config.instances[0].disks[0].id,
-            config.sleds[0].u2s[0].local_storage_dataset_id,
+            config.sleds[0].u2s[0].local_storage_unencrypted_dataset_id,
             ExternalZpoolUuid::from_untyped_uuid(
                 config.sleds[0].u2s[0].zpool_id.into_untyped_uuid(),
             ),
@@ -5260,7 +5306,8 @@ pub(in crate::db::datastore) mod test {
                             .parse()
                             .unwrap(),
 
-                        local_storage_dataset_id: DatasetUuid::new_v4(),
+                        local_storage_unencrypted_dataset_id:
+                            DatasetUuid::new_v4(),
                     },
                     LocalStorageTestSledU2 {
                         physical_disk_id: PhysicalDiskUuid::new_v4(),
@@ -5278,7 +5325,8 @@ pub(in crate::db::datastore) mod test {
                             .parse()
                             .unwrap(),
 
-                        local_storage_dataset_id: DatasetUuid::new_v4(),
+                        local_storage_unencrypted_dataset_id:
+                            DatasetUuid::new_v4(),
                     },
                 ],
             }],
@@ -5401,7 +5449,8 @@ pub(in crate::db::datastore) mod test {
                             .parse()
                             .unwrap(),
 
-                        local_storage_dataset_id: DatasetUuid::new_v4(),
+                        local_storage_unencrypted_dataset_id:
+                            DatasetUuid::new_v4(),
                     },
                     LocalStorageTestSledU2 {
                         physical_disk_id: PhysicalDiskUuid::new_v4(),
@@ -5419,7 +5468,8 @@ pub(in crate::db::datastore) mod test {
                             .parse()
                             .unwrap(),
 
-                        local_storage_dataset_id: DatasetUuid::new_v4(),
+                        local_storage_unencrypted_dataset_id:
+                            DatasetUuid::new_v4(),
                     },
                 ],
             }],
@@ -5452,10 +5502,10 @@ pub(in crate::db::datastore) mod test {
 
         // One of the local storage have been allocated already to the first U2
 
-        set_local_storage_allocation(
+        set_local_storage_unencrypted_allocation(
             datastore,
             config.instances[0].disks[0].id,
-            config.sleds[0].u2s[0].local_storage_dataset_id,
+            config.sleds[0].u2s[0].local_storage_unencrypted_dataset_id,
             ExternalZpoolUuid::from_untyped_uuid(
                 config.sleds[0].u2s[0].zpool_id.into_untyped_uuid(),
             ),
@@ -5538,7 +5588,7 @@ pub(in crate::db::datastore) mod test {
                     .parse()
                     .unwrap(),
 
-                    local_storage_dataset_id: DatasetUuid::new_v4(),
+                    local_storage_unencrypted_dataset_id: DatasetUuid::new_v4(),
                 });
             }
 
@@ -5639,7 +5689,8 @@ pub(in crate::db::datastore) mod test {
                             .parse()
                             .unwrap(),
 
-                        local_storage_dataset_id: DatasetUuid::new_v4(),
+                        local_storage_unencrypted_dataset_id:
+                            DatasetUuid::new_v4(),
                     }],
                 },
                 LocalStorageTestSled {
@@ -5661,7 +5712,8 @@ pub(in crate::db::datastore) mod test {
                             .parse()
                             .unwrap(),
 
-                        local_storage_dataset_id: DatasetUuid::new_v4(),
+                        local_storage_unencrypted_dataset_id:
+                            DatasetUuid::new_v4(),
                     }],
                 },
             ],
@@ -5789,7 +5841,7 @@ pub(in crate::db::datastore) mod test {
                         .parse()
                         .unwrap(),
 
-                    local_storage_dataset_id: DatasetUuid::new_v4(),
+                    local_storage_unencrypted_dataset_id: DatasetUuid::new_v4(),
                 }],
             }],
             affinity_groups: vec![],
@@ -5917,7 +5969,8 @@ pub(in crate::db::datastore) mod test {
                             .parse()
                             .unwrap(),
 
-                        local_storage_dataset_id: DatasetUuid::new_v4(),
+                        local_storage_unencrypted_dataset_id:
+                            DatasetUuid::new_v4(),
                     }],
                 },
                 LocalStorageTestSled {
@@ -5939,7 +5992,8 @@ pub(in crate::db::datastore) mod test {
                             crucible_dataset_addr:
                                 "[fd00:1122:3344:201::1]:12345".parse().unwrap(),
 
-                            local_storage_dataset_id: DatasetUuid::new_v4(),
+                            local_storage_unencrypted_dataset_id:
+                                DatasetUuid::new_v4(),
                         },
                         LocalStorageTestSledU2 {
                             physical_disk_id: PhysicalDiskUuid::new_v4(),
@@ -5956,7 +6010,8 @@ pub(in crate::db::datastore) mod test {
                             crucible_dataset_addr:
                                 "[fd00:1122:3344:202::1]:12345".parse().unwrap(),
 
-                            local_storage_dataset_id: DatasetUuid::new_v4(),
+                            local_storage_unencrypted_dataset_id:
+                                DatasetUuid::new_v4(),
                         },
                     ],
                 },
@@ -6055,7 +6110,8 @@ pub(in crate::db::datastore) mod test {
                             .parse()
                             .unwrap(),
 
-                        local_storage_dataset_id: DatasetUuid::new_v4(),
+                        local_storage_unencrypted_dataset_id:
+                            DatasetUuid::new_v4(),
                     },
                     LocalStorageTestSledU2 {
                         physical_disk_id: PhysicalDiskUuid::new_v4(),
@@ -6073,7 +6129,8 @@ pub(in crate::db::datastore) mod test {
                             .parse()
                             .unwrap(),
 
-                        local_storage_dataset_id: DatasetUuid::new_v4(),
+                        local_storage_unencrypted_dataset_id:
+                            DatasetUuid::new_v4(),
                     },
                 ],
             }],
@@ -6206,7 +6263,7 @@ pub(in crate::db::datastore) mod test {
                         .parse()
                         .unwrap(),
 
-                    local_storage_dataset_id: DatasetUuid::new_v4(),
+                    local_storage_unencrypted_dataset_id: DatasetUuid::new_v4(),
                 }],
             }],
             affinity_groups: vec![],
@@ -6315,11 +6372,11 @@ pub(in crate::db::datastore) mod test {
         let allocation_records: Vec<_> = {
             let conn = datastore.pool_connection_for_tests().await.unwrap();
 
-            use nexus_db_schema::schema::local_storage_dataset_allocation::dsl;
+            use nexus_db_schema::schema::local_storage_unencrypted_dataset_allocation::dsl;
 
-            dsl::local_storage_dataset_allocation
+            dsl::local_storage_unencrypted_dataset_allocation
                 .filter(dsl::time_deleted.is_null())
-                .select(db::model::LocalStorageDatasetAllocation::as_select())
+                .select(db::model::LocalStorageUnencryptedDatasetAllocation::as_select())
                 .load_async(&*conn)
                 .await
                 .unwrap()

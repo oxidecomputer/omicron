@@ -130,7 +130,6 @@
 use std::collections::{BTreeMap, HashMap};
 use std::net::{IpAddr, Ipv6Addr};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 use futures::FutureExt;
@@ -139,13 +138,16 @@ use internal_dns_resolver::Resolver;
 use serde_json::json;
 use slog::{error, info};
 use tokio::sync::RwLock;
+use tokio::sync::watch::Receiver;
 
 use nexus_db_model::MulticastGroup;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
 use nexus_types::internal_api::background::MulticastGroupReconcilerStatus;
+use nexus_types::inventory::{Collection, SpType};
 use omicron_common::address::UNDERLAY_MULTICAST_SUBNET;
 use omicron_uuid_kinds::SledUuid;
+use sled_hardware_types::BaseboardId;
 
 use crate::app::background::BackgroundTask;
 use crate::app::multicast::dataplane::MulticastDataplaneClient;
@@ -201,6 +203,8 @@ pub(crate) struct MulticastGroupReconciler {
     datastore: Arc<DataStore>,
     resolver: Resolver,
     sagas: Arc<dyn StartSaga>,
+    /// Receiver for inventory updates from the inventory loader background task.
+    rx_inventory: Receiver<Option<Arc<Collection>>>,
     /// Cache for sled-to-backplane-port mappings.
     /// Maps sled_id → rear backplane ports for multicast traffic routing.
     sled_mapping_cache: SledMappingCache,
@@ -215,11 +219,12 @@ pub(crate) struct MulticastGroupReconciler {
     group_concurrency_limit: usize,
     /// Whether multicast functionality is enabled (or not).
     enabled: bool,
-    /// Flag to signal cache invalidation on next activation.
+    /// Last seen sled baseboard→sp_slot mappings for cache invalidation.
     ///
-    /// Set to `true` when topology changes occur (sled add/remove, inventory updates).
-    /// Checked and cleared at the start of each reconciliation pass.
-    invalidate_cache_on_next_run: Arc<AtomicBool>,
+    /// We track sled locations (keyed by baseboard identity), as sled
+    /// physical locations rarely change. Caches are only invalidated
+    /// when `sp_slot` values differ.
+    last_seen_sled_slots: HashMap<Arc<BaseboardId>, u16>,
 }
 
 impl MulticastGroupReconciler {
@@ -227,15 +232,16 @@ impl MulticastGroupReconciler {
         datastore: Arc<DataStore>,
         resolver: Resolver,
         sagas: Arc<dyn StartSaga>,
+        rx_inventory: Receiver<Option<Arc<Collection>>>,
         enabled: bool,
         sled_cache_ttl: Duration,
         backplane_cache_ttl: Duration,
-        invalidate_cache_flag: Arc<AtomicBool>,
     ) -> Self {
         Self {
             datastore,
             resolver,
             sagas,
+            rx_inventory,
             sled_mapping_cache: Arc::new(RwLock::new((
                 Instant::now(),
                 HashMap::new(),
@@ -246,7 +252,7 @@ impl MulticastGroupReconciler {
             member_concurrency_limit: 100,
             group_concurrency_limit: 100,
             enabled,
-            invalidate_cache_on_next_run: invalidate_cache_flag,
+            last_seen_sled_slots: HashMap::new(),
         }
     }
 
@@ -277,6 +283,50 @@ impl MulticastGroupReconciler {
         let mut cache = self.sled_mapping_cache.write().await;
         // Set timestamp to past to force refresh on next check
         *cache = (Instant::now() - self.sled_cache_ttl, cache.1.clone());
+    }
+
+    /// Check if sled locations changed and invalidate caches if so.
+    ///
+    /// Compares actual serial→sp_slot mappings since sled locations rarely
+    /// change. Uses the inventory watch channel for cheap access to latest
+    /// inventory.
+    async fn check_sled_locations_for_cache_invalidation(
+        &mut self,
+        opctx: &OpContext,
+    ) {
+        // Get inventory from watch channel (cheap Arc::clone, no DB query)
+        let Some(inventory) =
+            self.rx_inventory.borrow_and_update().as_ref().map(Arc::clone)
+        else {
+            debug!(
+                opctx.log,
+                "skipping cache invalidation check: no inventory available"
+            );
+            return;
+        };
+
+        // Build current baseboard→sp_slot mapping for sleds only
+        let current_sled_slots: HashMap<Arc<BaseboardId>, u16> = inventory
+            .sps
+            .iter()
+            .filter(|(_, sp)| sp.sp_type == SpType::Sled)
+            .map(|(baseboard, sp)| (Arc::clone(baseboard), sp.sp_slot))
+            .collect();
+
+        if current_sled_slots != self.last_seen_sled_slots {
+            // Skip invalidation on first run (just initializing)
+            if !self.last_seen_sled_slots.is_empty() {
+                info!(
+                    opctx.log,
+                    "invalidating multicast caches due to sled location change";
+                    "previous_sled_count" => self.last_seen_sled_slots.len(),
+                    "current_sled_count" => current_sled_slots.len()
+                );
+                self.invalidate_backplane_cache().await;
+                self.invalidate_sled_mapping_cache().await;
+            }
+            self.last_seen_sled_slots = current_sled_slots;
+        }
     }
 }
 
@@ -463,19 +513,7 @@ impl MulticastGroupReconciler {
 
         trace!(opctx.log, "starting multicast reconciliation pass");
 
-        // Check if cache invalidation was requested
-        if self
-            .invalidate_cache_on_next_run
-            .compare_exchange(true, false, Ordering::SeqCst, Ordering::SeqCst)
-            .is_ok()
-        {
-            info!(
-                opctx.log,
-                "invalidating multicast caches due to topology change"
-            );
-            self.invalidate_backplane_cache().await;
-            self.invalidate_sled_mapping_cache().await;
-        }
+        self.check_sled_locations_for_cache_invalidation(opctx).await;
 
         // Create dataplane client (across switches) once for the entire
         // reconciliation pass (in case anything has changed)

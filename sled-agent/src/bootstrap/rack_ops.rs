@@ -44,6 +44,7 @@ pub enum RssAccessError {
     AlreadyReset,
 }
 
+#[derive(Clone)]
 pub(crate) struct RssAccess {
     // Note: The `Mutex` here is a std mutex, not a tokio mutex, and thus not
     // subject to async cancellation issues (and also cannot be held across an

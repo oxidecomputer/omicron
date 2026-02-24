@@ -20,11 +20,9 @@ use nexus_db_schema::schema::floating_ip;
 use nexus_types::deployment::OmicronZoneExternalFloatingIp;
 use nexus_types::deployment::OmicronZoneExternalIp;
 use nexus_types::deployment::OmicronZoneExternalSnatIp;
-use nexus_types::external_api::params;
-use nexus_types::external_api::shared;
-use nexus_types::external_api::shared::ProbeExternalIp;
-use nexus_types::external_api::shared::ProbeExternalIpKind;
-use nexus_types::external_api::views;
+use nexus_types::external_api::external_ip as external_ip_types;
+use nexus_types::external_api::floating_ip as floating_ip_types;
+use nexus_types::external_api::probe::{ProbeExternalIp, ProbeExternalIpKind};
 use nexus_types::inventory::SourceNatConfigGeneric;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::IdentityMetadata;
@@ -504,13 +502,13 @@ impl IpKind {
     }
 }
 
-impl TryFrom<IpKind> for shared::IpKind {
+impl TryFrom<IpKind> for external_ip_types::IpKind {
     type Error = Error;
 
     fn try_from(kind: IpKind) -> Result<Self, Self::Error> {
         match kind {
-            IpKind::Ephemeral => Ok(shared::IpKind::Ephemeral),
-            IpKind::Floating => Ok(shared::IpKind::Floating),
+            IpKind::Ephemeral => Ok(external_ip_types::IpKind::Ephemeral),
+            IpKind::Floating => Ok(external_ip_types::IpKind::Floating),
             _ => Err(Error::internal_error(
                 "SNAT IP addresses should not be exposed in the API",
             )),
@@ -518,7 +516,7 @@ impl TryFrom<IpKind> for shared::IpKind {
     }
 }
 
-impl TryFrom<ExternalIp> for views::ExternalIp {
+impl TryFrom<ExternalIp> for external_ip_types::ExternalIp {
     type Error = Error;
 
     fn try_from(ip: ExternalIp) -> Result<Self, Self::Error> {
@@ -528,17 +526,21 @@ impl TryFrom<ExternalIp> for views::ExternalIp {
             ));
         }
         match ip.kind {
-            IpKind::Floating => Ok(views::ExternalIp::Floating(ip.try_into()?)),
-            IpKind::Ephemeral => Ok(views::ExternalIp::Ephemeral {
+            IpKind::Floating => {
+                Ok(external_ip_types::ExternalIp::Floating(ip.try_into()?))
+            }
+            IpKind::Ephemeral => Ok(external_ip_types::ExternalIp::Ephemeral {
                 ip: ip.ip.ip(),
                 ip_pool_id: ip.ip_pool_id,
             }),
-            IpKind::SNat => Ok(views::ExternalIp::SNat(views::SNatIp {
-                ip: ip.ip.ip(),
-                first_port: u16::from(ip.first_port),
-                last_port: u16::from(ip.last_port),
-                ip_pool_id: ip.ip_pool_id,
-            })),
+            IpKind::SNat => Ok(external_ip_types::ExternalIp::SNat(
+                external_ip_types::SNatIp {
+                    ip: ip.ip.ip(),
+                    first_port: u16::from(ip.first_port),
+                    last_port: u16::from(ip.last_port),
+                    ip_pool_id: ip.ip_pool_id,
+                },
+            )),
         }
     }
 }
@@ -591,7 +593,7 @@ impl TryFrom<ExternalIp> for FloatingIp {
     }
 }
 
-impl TryFrom<ExternalIp> for views::FloatingIp {
+impl TryFrom<ExternalIp> for floating_ip_types::FloatingIp {
     type Error = Error;
 
     fn try_from(ip: ExternalIp) -> Result<Self, Self::Error> {
@@ -599,7 +601,7 @@ impl TryFrom<ExternalIp> for views::FloatingIp {
     }
 }
 
-impl From<FloatingIp> for views::FloatingIp {
+impl From<FloatingIp> for floating_ip_types::FloatingIp {
     fn from(ip: FloatingIp) -> Self {
         let identity = IdentityMetadata {
             id: ip.identity.id,
@@ -609,7 +611,7 @@ impl From<FloatingIp> for views::FloatingIp {
             time_modified: ip.identity.time_modified,
         };
 
-        views::FloatingIp {
+        floating_ip_types::FloatingIp {
             ip: ip.ip.ip(),
             ip_pool_id: ip.ip_pool_id,
             identity,
@@ -627,8 +629,8 @@ pub struct FloatingIpUpdate {
     pub time_modified: DateTime<Utc>,
 }
 
-impl From<params::FloatingIpUpdate> for FloatingIpUpdate {
-    fn from(params: params::FloatingIpUpdate) -> Self {
+impl From<floating_ip_types::FloatingIpUpdate> for FloatingIpUpdate {
+    fn from(params: floating_ip_types::FloatingIpUpdate) -> Self {
         Self {
             name: params.identity.name.map(Name),
             description: params.identity.description,

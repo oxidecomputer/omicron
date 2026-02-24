@@ -18,7 +18,7 @@ target_os=$1
 # NOTE: This version should be in sync with the recommended version in
 # .config/nextest.toml. (Maybe build an automated way to pull the recommended
 # version in the future.)
-NEXTEST_VERSION='0.9.118'
+NEXTEST_VERSION='0.9.125'
 
 cargo --version
 rustc --version
@@ -132,9 +132,38 @@ ptime -m cargo build -Z unstable-options --timings=json \
 # 2 less (negative 2) than the default.  This avoids many test flakes where
 # the test would have worked but the system was too overloaded and tests
 # take longer than their default timeouts.
+
+# Create a user config file that enables test recording.
+RECORDING_CONFIG_DIR="/tmp/nextest-recording-config"
+RECORDING_CONFIG="$RECORDING_CONFIG_DIR/config.toml"
+NEXTEST_STATE_DIR="$(mktemp -d /tmp/nextest-state.XXXXXX)"
+ARCHIVE_PATH="/tmp/nextest-run-archive.zip"
+
+mkdir -p "$RECORDING_CONFIG_DIR"
+printf '[experimental]\nrecord = true\n\n[record]\nenabled = true\n' \
+    > "$RECORDING_CONFIG"
+
+export NEXTEST_STATE_DIR
+
 banner test
+
+# Export an archive even on test failure.
+NEXTEST_EXIT=0
 ptime -m timeout 2h cargo nextest run --profile ci --locked \
-    --test-threads -2
+    --test-threads -2 \
+    --user-config-file "$RECORDING_CONFIG" \
+    || NEXTEST_EXIT=$?
+
+if ! ptime -m cargo nextest store export latest \
+    --user-config-file "$RECORDING_CONFIG" \
+    --archive-file "$ARCHIVE_PATH"; then
+    echo "warning: failed to export recording archive" >&2
+fi
+
+if [[ "$NEXTEST_EXIT" -ne 0 ]]; then
+    echo "error: cargo nextest run failed with exit code $NEXTEST_EXIT" >&2
+    exit "$NEXTEST_EXIT"
+fi
 
 #
 # https://github.com/nextest-rs/nextest/issues/16

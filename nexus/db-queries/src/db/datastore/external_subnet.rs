@@ -5,22 +5,36 @@
 //! [`DataStore`] methods on Subnet Pools and External Subnets.
 
 use crate::db::DataStore;
+use crate::db::collection_attach::AttachError;
+use crate::db::collection_attach::DatastoreAttachTarget as _;
+use crate::db::collection_detach::DatastoreDetachTarget as _;
+use crate::db::collection_detach::DetachError;
+use crate::db::datastore::SQL_BATCH_SIZE;
+use crate::db::pagination::Paginator;
 use crate::db::pagination::paginated;
+use crate::db::queries::external_ip::SAFE_TO_ATTACH_INSTANCE_STATES;
+use crate::db::queries::external_subnet::MAX_ATTACHED_SUBNETS_PER_INSTANCE;
 use crate::db::queries::external_subnet::decode_delete_external_subnet_error;
 use crate::db::queries::external_subnet::decode_insert_external_subnet_error;
+use crate::db::queries::external_subnet::decode_unlink_subnet_pool_from_silo_result;
 use crate::db::queries::external_subnet::delete_external_subnet_query;
 use crate::db::queries::external_subnet::insert_external_subnet_query;
 use crate::db::queries::external_subnet::insert_subnet_pool_member_query;
 use crate::db::queries::external_subnet::link_subnet_pool_to_silo_query;
 use crate::db::queries::external_subnet::unlink_subnet_pool_from_silo_query;
+use crate::db::update_and_check::UpdateAndCheck as _;
+use crate::db::update_and_check::UpdateStatus;
 use async_bb8_diesel::AsyncRunQueryDsl as _;
 use chrono::Utc;
+use diesel::BoolExpressionMethods as _;
 use diesel::ExpressionMethods as _;
 use diesel::JoinOnDsl as _;
+use diesel::NullableExpressionMethods as _;
 use diesel::QueryDsl as _;
 use diesel::SelectableHelper as _;
 use diesel::result::DatabaseErrorKind;
 use diesel::result::Error as DieselError;
+use dropshot::PaginationOrder;
 use nexus_auth::authz;
 use nexus_auth::authz::SUBNET_POOL_LIST;
 use nexus_auth::context::OpContext;
@@ -31,29 +45,86 @@ use nexus_db_lookup::lookup;
 use nexus_db_model::ExternalSubnet;
 use nexus_db_model::ExternalSubnetIdentity;
 use nexus_db_model::ExternalSubnetUpdate;
+use nexus_db_model::Instance;
+use nexus_db_model::IpAttachState;
 use nexus_db_model::IpNet;
+use nexus_db_model::IpVersion;
+use nexus_db_model::Ipv6Addr;
+use nexus_db_model::MacAddr;
 use nexus_db_model::Name;
+use nexus_db_model::NetworkInterfaceKind;
 use nexus_db_model::SubnetPool;
 use nexus_db_model::SubnetPoolMember;
 use nexus_db_model::SubnetPoolSiloLink;
 use nexus_db_model::SubnetPoolUpdate;
+use nexus_db_model::Vni;
 use nexus_db_model::to_db_typed_uuid;
-use nexus_types::external_api::params;
-use nexus_types::external_api::params::ExternalSubnetCreate;
+use nexus_types::external_api::external_subnet::ExternalSubnetCreate;
+use nexus_types::external_api::subnet_pool as subnet_pool_types;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::DeleteResult;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::ListResultVec;
+use omicron_common::api::external::LookupResult;
+use omicron_common::api::external::LookupType;
 use omicron_common::api::external::NameOrId;
 use omicron_common::api::external::ResourceType;
 use omicron_common::api::external::UpdateResult;
 use omicron_common::api::external::http_pagination::PaginatedBy;
+use omicron_common::api::internal::shared::AttachedSubnet;
+use omicron_common::api::internal::shared::AttachedSubnetId;
 use omicron_uuid_kinds::ExternalSubnetUuid;
-use omicron_uuid_kinds::GenericUuid as _;
+use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::InstanceUuid;
+use omicron_uuid_kinds::PropolisUuid;
+use omicron_uuid_kinds::RackUuid;
+use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::SubnetPoolUuid;
 use ref_cast::RefCast as _;
 use uuid::Uuid;
+
+// Helper containing database records across the several tables we need to join
+// for all the attached subnet details.
+#[derive(diesel::Queryable, diesel::Selectable)]
+struct AttachedSubnetDetails {
+    #[diesel(select_expression = nexus_db_schema::schema::external_subnet::id)]
+    subnet_id: Uuid,
+    #[diesel(select_expression = nexus_db_schema::schema::instance::id)]
+    instance_id: Uuid,
+    #[diesel(select_expression = nexus_db_schema::schema::sled::rack_id)]
+    rack_id: Uuid,
+    #[diesel(select_expression = nexus_db_schema::schema::sled::id)]
+    sled_id: Uuid,
+    #[diesel(select_expression = nexus_db_schema::schema::sled::ip)]
+    sled_ip: Ipv6Addr,
+    #[diesel(select_expression = nexus_db_schema::schema::vmm::id)]
+    vmm_id: Uuid,
+    #[diesel(select_expression = nexus_db_schema::schema::external_subnet::subnet)]
+    ip_subnet: IpNet,
+    #[diesel(select_expression = nexus_db_schema::schema::network_interface::mac)]
+    mac: MacAddr,
+    #[diesel(select_expression = nexus_db_schema::schema::vpc::vni)]
+    vni: Vni,
+}
+
+impl From<AttachedSubnetDetails> for AttachedSubnet {
+    fn from(value: AttachedSubnetDetails) -> Self {
+        Self {
+            rack_id: RackUuid::from_untyped_uuid(value.rack_id),
+            sled_id: SledUuid::from_untyped_uuid(value.sled_id),
+            sled_ip: value.sled_ip.into(),
+            vmm_id: PropolisUuid::from_untyped_uuid(value.vmm_id),
+            instance_id: InstanceUuid::from_untyped_uuid(value.instance_id),
+            subnet_id: AttachedSubnetId::External(
+                ExternalSubnetUuid::from_untyped_uuid(value.subnet_id),
+            ),
+            subnet: value.ip_subnet.into(),
+            mac: value.mac.0,
+            vni: value.vni.0,
+        }
+    }
+}
 
 impl DataStore {
     /// Lookup a Subnet Pool by name or ID.
@@ -101,10 +172,13 @@ impl DataStore {
     pub async fn create_subnet_pool(
         &self,
         opctx: &OpContext,
-        params: params::SubnetPoolCreate,
+        params: subnet_pool_types::SubnetPoolCreate,
     ) -> CreateResult<SubnetPool> {
-        opctx.authorize(authz::Action::CreateChild, &authz::FLEET).await?;
+        opctx
+            .authorize(authz::Action::CreateChild, &authz::SUBNET_POOL_LIST)
+            .await?;
         use nexus_db_schema::schema::subnet_pool::dsl;
+        let name = params.identity.name.to_string();
         let pool = SubnetPool::new(params.identity, params.ip_version.into());
         diesel::insert_into(dsl::subnet_pool)
             .values(pool)
@@ -114,7 +188,12 @@ impl DataStore {
             .returning(SubnetPool::as_returning())
             .get_result_async(&*self.pool_connection_authorized(opctx).await?)
             .await
-            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+            .map_err(|e| {
+                public_error_from_diesel(
+                    e,
+                    ErrorHandler::Conflict(ResourceType::SubnetPool, &name),
+                )
+            })
     }
 
     /// Delete a Subnet Pool.
@@ -174,7 +253,7 @@ impl DataStore {
         opctx: &OpContext,
         authz_pool: &authz::SubnetPool,
         updates: SubnetPoolUpdate,
-    ) -> UpdateResult<()> {
+    ) -> UpdateResult<SubnetPool> {
         use nexus_db_schema::schema::subnet_pool::dsl;
         opctx.authorize(authz::Action::Modify, authz_pool).await?;
         let conn = self.pool_connection_authorized(opctx).await?;
@@ -184,10 +263,10 @@ impl DataStore {
                 .filter(dsl::time_deleted.is_null()),
         )
         .set(updates)
-        .execute_async(&*conn)
+        .returning(SubnetPool::as_returning())
+        .get_result_async(&*conn)
         .await
         .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
-        .map(|_| ())
     }
 
     /// Link a Subnet Pool to a Silo.
@@ -223,7 +302,7 @@ impl DataStore {
             ) if info.constraint_name()
                 == Some("subnet_pool_silo_link_pkey") =>
             {
-                Error::invalid_request("Subnet Pool is already linked to Silo")
+                Error::conflict("Subnet Pool is already linked to Silo")
             }
             DieselError::DatabaseError(
                 DatabaseErrorKind::NotNullViolation,
@@ -282,24 +361,154 @@ impl DataStore {
                 subnets first, and try again.",
             ));
         }
-        unlink_subnet_pool_from_silo_query(
+        let result = unlink_subnet_pool_from_silo_query(
             authz_pool.id(),
             authz_silo.id(),
             db_pool.rcgen,
         )
         .execute_async(&*self.pool_connection_authorized(opctx).await?)
-        .await
-        .and_then(
-            |count| {
-                if count == 0 { Err(DieselError::NotFound) } else { Ok(()) }
-            },
+        .await;
+        decode_unlink_subnet_pool_from_silo_result(
+            result, authz_pool, authz_silo,
         )
+    }
+
+    /// Update the link between a Subnet Pool and Silo.
+    pub async fn update_subnet_pool_silo_link(
+        &self,
+        opctx: &OpContext,
+        authz_pool: &authz::SubnetPool,
+        authz_silo: &authz::Silo,
+        is_default: bool,
+    ) -> UpdateResult<SubnetPoolSiloLink> {
+        opctx.authorize(authz::Action::Modify, authz_pool).await?;
+        opctx.authorize(authz::Action::Modify, authz_silo).await?;
+        use nexus_db_schema::schema::subnet_pool_silo_link::dsl;
+        diesel::update(
+            dsl::subnet_pool_silo_link
+                .filter(
+                    dsl::subnet_pool_id.eq(to_db_typed_uuid(authz_pool.id())),
+                )
+                .filter(dsl::silo_id.eq(authz_silo.id())),
+        )
+        .set(dsl::is_default.eq(is_default))
+        .returning(SubnetPoolSiloLink::as_returning())
+        .get_result_async(&*self.pool_connection_authorized(opctx).await?)
+        .await
         .map_err(|e| match e {
-            DieselError::NotFound => Error::invalid_request(
-                "deletion failed due to concurrent modification",
-            ),
-            _ => public_error_from_diesel(e, ErrorHandler::Server),
+            DieselError::NotFound => LookupType::ByCompositeId(format!(
+                "subnet_pool_id: {}, silo_id: {}",
+                authz_pool.id(),
+                authz_silo.id(),
+            ))
+            .into_not_found(ResourceType::SubnetPoolSiloLink),
+            DieselError::DatabaseError(
+                DatabaseErrorKind::UniqueViolation,
+                ref info,
+            ) if info.constraint_name() == Some("single_default_per_silo") => {
+                Error::invalid_request(
+                    "Can only have a single default Subnet Pool for a \
+                    Silo for each IP version.",
+                )
+            }
+            e => public_error_from_diesel(e, ErrorHandler::Server),
         })
+    }
+
+    /// List silos linked to a subnet pool.
+    pub async fn list_silos_linked_to_subnet_pool(
+        &self,
+        opctx: &OpContext,
+        authz_pool: &authz::SubnetPool,
+        pagparams: &DataPageParams<'_, Uuid>,
+    ) -> ListResultVec<SubnetPoolSiloLink> {
+        opctx.authorize(authz::Action::ListChildren, authz_pool).await?;
+        use nexus_db_schema::schema::subnet_pool_silo_link::dsl;
+        paginated(dsl::subnet_pool_silo_link, dsl::silo_id, &pagparams)
+            .filter(dsl::subnet_pool_id.eq(to_db_typed_uuid(authz_pool.id())))
+            .select(SubnetPoolSiloLink::as_select())
+            .get_results_async(&*self.pool_connection_authorized(opctx).await?)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+    }
+
+    /// List Subnet Pools linked to the given Silo.
+    ///
+    /// Returns (SubnetPool, SubnetPoolSiloLink) so we can know in the calling
+    /// code whether the pool is default for the silo.
+    pub async fn silo_subnet_pool_list(
+        &self,
+        opctx: &OpContext,
+        authz_silo: &authz::Silo,
+        pagparams: &PaginatedBy<'_>,
+    ) -> ListResultVec<(SubnetPool, SubnetPoolSiloLink)> {
+        use nexus_db_schema::schema::subnet_pool;
+        use nexus_db_schema::schema::subnet_pool_silo_link;
+
+        match pagparams {
+            PaginatedBy::Id(pagparams) => {
+                paginated(subnet_pool::table, subnet_pool::id, pagparams)
+            }
+            PaginatedBy::Name(pagparams) => paginated(
+                subnet_pool::table,
+                subnet_pool::name,
+                &pagparams.map_name(|n| Name::ref_cast(n)),
+            ),
+        }
+        .inner_join(subnet_pool_silo_link::table)
+        .filter(subnet_pool_silo_link::silo_id.eq(authz_silo.id()))
+        .filter(subnet_pool::time_deleted.is_null())
+        .select(<(SubnetPool, SubnetPoolSiloLink)>::as_select())
+        .load_async(&*self.pool_connection_authorized(opctx).await?)
+        .await
+        .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+    }
+
+    /// Fetch a single Subnet Pool linked to the given Silo by name or ID.
+    ///
+    /// Returns 404 if the pool doesn't exist or isn't linked to the silo.
+    pub async fn silo_subnet_pool_fetch(
+        &self,
+        opctx: &OpContext,
+        authz_silo: &authz::Silo,
+        pool: &NameOrId,
+    ) -> LookupResult<(SubnetPool, SubnetPoolSiloLink)> {
+        use nexus_db_schema::schema::subnet_pool;
+        use nexus_db_schema::schema::subnet_pool_silo_link;
+
+        let mut query = subnet_pool::table
+            .inner_join(subnet_pool_silo_link::table)
+            .filter(subnet_pool_silo_link::silo_id.eq(authz_silo.id()))
+            .filter(subnet_pool::time_deleted.is_null())
+            .select(<(SubnetPool, SubnetPoolSiloLink)>::as_select())
+            .into_boxed();
+
+        match pool {
+            NameOrId::Name(name) => {
+                query = query.filter(subnet_pool::name.eq(name.to_string()));
+            }
+            NameOrId::Id(id) => {
+                query = query.filter(subnet_pool::id.eq(*id));
+            }
+        }
+
+        let lookup_type = match pool {
+            NameOrId::Name(name) => LookupType::ByName(name.to_string()),
+            NameOrId::Id(id) => LookupType::ById(*id),
+        };
+
+        query
+            .first_async(&*self.pool_connection_authorized(opctx).await?)
+            .await
+            .map_err(|e| {
+                public_error_from_diesel(
+                    e,
+                    ErrorHandler::NotFoundByLookup(
+                        ResourceType::SubnetPool,
+                        lookup_type,
+                    ),
+                )
+            })
     }
 
     /// Add a new Subnet Pool Member.
@@ -310,9 +519,24 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         authz_pool: &authz::SubnetPool,
-        params: &params::SubnetPoolMemberAdd,
+        db_pool: &SubnetPool,
+        params: &subnet_pool_types::SubnetPoolMemberAdd,
     ) -> CreateResult<SubnetPoolMember> {
         opctx.authorize(authz::Action::CreateChild, authz_pool).await?;
+
+        // First check we're adding members of the same IP version.
+        let pool_version = db_pool.ip_version;
+        let member_version = match params.subnet {
+            oxnet::IpNet::V4(_) => IpVersion::V4,
+            oxnet::IpNet::V6(_) => IpVersion::V6,
+        };
+        if pool_version != member_version {
+            return Err(Error::invalid_request(&format!(
+                "Cannot add IP{} members to IP{} Subnet Pool",
+                member_version, pool_version,
+            )));
+        }
+
         let member = SubnetPoolMember::new(params, authz_pool.id())?;
         insert_subnet_pool_member_query(&member)
             .get_result_async(&*self.pool_connection_authorized(opctx).await?)
@@ -338,6 +562,7 @@ impl DataStore {
         opctx.authorize(authz::Action::ListChildren, pool).await?;
         paginated(dsl::subnet_pool_member, dsl::subnet, pagparams)
             .filter(dsl::subnet_pool_id.eq(to_db_typed_uuid(pool.id())))
+            .filter(dsl::time_deleted.is_null())
             .select(SubnetPoolMember::as_select())
             .get_results_async(&*self.pool_connection_authorized(opctx).await?)
             .await
@@ -419,10 +644,11 @@ impl DataStore {
         opctx: &OpContext,
         silo_id: &Uuid,
         authz_project: &authz::Project,
-        params: params::ExternalSubnetCreate,
+        params: ExternalSubnetCreate,
     ) -> CreateResult<ExternalSubnet> {
         opctx.authorize(authz::Action::CreateChild, authz_project).await?;
         let ExternalSubnetCreate { identity, allocator } = params;
+        let subnet_name = identity.name.to_string();
         let identity =
             ExternalSubnetIdentity::new(ExternalSubnetUuid::new_v4(), identity);
         insert_external_subnet_query(
@@ -439,6 +665,7 @@ impl DataStore {
                 silo_id,
                 authz_project,
                 &allocator,
+                &subnet_name,
             )
         })
     }
@@ -449,7 +676,7 @@ impl DataStore {
         opctx: &OpContext,
         authz_subnet: &authz::ExternalSubnet,
         updates: ExternalSubnetUpdate,
-    ) -> UpdateResult<()> {
+    ) -> UpdateResult<ExternalSubnet> {
         use nexus_db_schema::schema::external_subnet::dsl;
         opctx.authorize(authz::Action::Modify, authz_subnet).await?;
         diesel::update(
@@ -458,10 +685,10 @@ impl DataStore {
                 .filter(dsl::time_deleted.is_null()),
         )
         .set(updates)
-        .execute_async(&*self.pool_connection_authorized(opctx).await?)
+        .returning(ExternalSubnet::as_returning())
+        .get_result_async(&*self.pool_connection_authorized(opctx).await?)
         .await
         .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
-        .map(|_| ())
     }
 
     /// Delete an External Subnet.
@@ -490,6 +717,670 @@ impl DataStore {
                 }
             })
     }
+
+    /// Fetch all external subnets attached to the provided instance.
+    pub async fn instance_lookup_external_subnets(
+        &self,
+        opctx: &OpContext,
+        authz_instance: &authz::Instance,
+    ) -> ListResultVec<ExternalSubnet> {
+        opctx.authorize(authz::Action::Read, authz_instance).await?;
+        use nexus_db_schema::schema::external_subnet::dsl;
+        dsl::external_subnet
+            .filter(dsl::instance_id.eq(authz_instance.id()))
+            .filter(dsl::time_deleted.is_null())
+            .filter(dsl::attach_state.eq(IpAttachState::Attached))
+            .order_by(dsl::id)
+            .select(ExternalSubnet::as_select())
+            .get_results_async(&*self.pool_connection_authorized(opctx).await?)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+    }
+
+    /// Detach all external subnets from an instance.
+    ///
+    /// IMPORTANT: This method should only be called from the instance_delete
+    /// saga. It ignores the current state of the external subnet, and simply
+    /// force-detaches it.
+    pub async fn instance_detach_external_subnets(
+        &self,
+        opctx: &OpContext,
+        instance_id: Uuid,
+    ) -> Result<usize, Error> {
+        use nexus_db_schema::schema::external_subnet::dsl;
+        diesel::update(
+            dsl::external_subnet
+                .filter(dsl::instance_id.eq(instance_id))
+                .filter(dsl::time_deleted.is_null())
+                .filter(dsl::attach_state.eq(IpAttachState::Attached)),
+        )
+        .set((
+            dsl::instance_id.eq(Option::<Uuid>::None),
+            dsl::attach_state.eq(IpAttachState::Detached),
+        ))
+        .execute_async(&*self.pool_connection_authorized(opctx).await?)
+        .await
+        .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+    }
+
+    /// List external subnets.
+    pub async fn list_external_subnets(
+        &self,
+        opctx: &OpContext,
+        authz_project: &authz::Project,
+        pagparams: &PaginatedBy<'_>,
+    ) -> ListResultVec<ExternalSubnet> {
+        opctx.authorize(authz::Action::ListChildren, authz_project).await?;
+        use nexus_db_schema::schema::external_subnet::dsl;
+        match pagparams {
+            PaginatedBy::Id(by_id) => {
+                paginated(dsl::external_subnet, dsl::id, by_id)
+            }
+            PaginatedBy::Name(by_name) => paginated(
+                dsl::external_subnet,
+                dsl::name,
+                &by_name.map_name(|n| Name::ref_cast(n)),
+            ),
+        }
+        .filter(dsl::project_id.eq(authz_project.id()))
+        .filter(dsl::time_deleted.is_null())
+        .select(ExternalSubnet::as_select())
+        .get_results_async(&*self.pool_connection_authorized(opctx).await?)
+        .await
+        .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+    }
+
+    /// Fetch the attached subnets, internal or external, to an instance.
+    pub async fn instance_lookup_attached_subnets(
+        &self,
+        opctx: &OpContext,
+        instance_id: InstanceUuid,
+    ) -> ListResultVec<AttachedSubnet> {
+        use nexus_db_schema::schema::external_subnet;
+        use nexus_db_schema::schema::instance;
+        use nexus_db_schema::schema::network_interface;
+        use nexus_db_schema::schema::sled;
+        use nexus_db_schema::schema::vmm;
+        use nexus_db_schema::schema::vpc;
+        use nexus_db_schema::schema::vpc_subnet;
+
+        external_subnet::dsl::external_subnet
+            .inner_join(
+                instance::dsl::instance.on(instance::dsl::id
+                    .nullable()
+                    .eq(external_subnet::dsl::instance_id)),
+            )
+            .inner_join(vmm::dsl::vmm.on(
+                vmm::dsl::id.nullable().eq(instance::dsl::active_propolis_id),
+            ))
+            .inner_join(sled::dsl::sled.on(vmm::dsl::sled_id.eq(sled::dsl::id)))
+            .inner_join(
+                network_interface::dsl::network_interface.on(
+                    network_interface::dsl::kind
+                        .eq(NetworkInterfaceKind::Instance)
+                        .and(
+                            network_interface::dsl::parent_id
+                                .eq(instance::dsl::id),
+                        )
+                        .and(network_interface::dsl::is_primary.eq(true)),
+                ),
+            )
+            .inner_join(
+                vpc_subnet::dsl::vpc_subnet
+                    .on(vpc_subnet::dsl::id
+                        .eq(network_interface::dsl::subnet_id)),
+            )
+            .inner_join(
+                vpc::dsl::vpc.on(vpc::dsl::id.eq(vpc_subnet::dsl::vpc_id)),
+            )
+            .filter(
+                external_subnet::dsl::instance_id
+                    .eq(to_db_typed_uuid(instance_id)),
+            )
+            .filter(external_subnet::dsl::time_deleted.is_null())
+            .filter(
+                external_subnet::dsl::attach_state.eq(IpAttachState::Attached),
+            )
+            .filter(instance::dsl::time_deleted.is_null())
+            .filter(instance::dsl::id.eq(to_db_typed_uuid(instance_id)))
+            .filter(network_interface::dsl::time_deleted.is_null())
+            .filter(vpc_subnet::dsl::time_deleted.is_null())
+            .filter(vpc::dsl::time_deleted.is_null())
+            .select(AttachedSubnetDetails::as_select())
+            .get_results_async::<AttachedSubnetDetails>(
+                &*self.pool_connection_authorized(opctx).await?,
+            )
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+            .map(|rows| rows.into_iter().map(Into::into).collect())
+    }
+
+    /// List all subnets attached to any Instance.
+    ///
+    /// In contrast to `instance_lookup_external_subnets`, this fetches all
+    /// attached subnets (external or VPC), and joins it with the data needed to
+    /// actually send those attachment details to other components, mostly
+    /// Dendrite and, through the sled-agent, OPTE.
+    ///
+    /// This makes as many requests as needed, in pages, to get all the results.
+    /// It can be useful in latency-insensitive contexts like background tasks.
+    pub async fn list_all_attached_subnets_batched(
+        &self,
+        opctx: &OpContext,
+    ) -> ListResultVec<AttachedSubnet> {
+        let mut paginator =
+            Paginator::new(SQL_BATCH_SIZE, PaginationOrder::Ascending);
+        let mut results = Vec::new();
+        while let Some(page) = paginator.next() {
+            let mut attachments = self
+                .list_attached_external_subnets(
+                    opctx,
+                    &page.current_pagparams(),
+                )
+                .await?;
+            paginator = page.found_batch(&attachments, &|a| {
+                let AttachedSubnetId::External(id) = a.subnet_id else {
+                    unreachable!();
+                };
+                id
+            });
+            results.append(&mut attachments);
+        }
+
+        // TODO-completeness: We need to fetch the attached VPC Subnets here
+        // too. See https://github.com/oxidecomputer/omicron/issues/9580.
+        Ok(results)
+    }
+
+    /// List a page of External Subnets that are attached to an instance.
+    pub async fn list_attached_external_subnets(
+        &self,
+        opctx: &OpContext,
+        pagparams: &DataPageParams<'_, ExternalSubnetUuid>,
+    ) -> ListResultVec<AttachedSubnet> {
+        // This query JOINs a mass of tables together, since the external subnet
+        // attachment information is quite scattered today.
+        //
+        // Specifically, we start with `external_subnet` and join
+        //
+        // - `instance`, to get the VMM record ...
+        // - `vmm`, to get the sled ID ...
+        // - `sled`, to get the sled underlay IP and rack ID ...
+        // - `network_interface` to get the VPC Subnet ID ...
+        // - `vpc_subnet` to get the VPC ID ...
+        // - and `vpc` to get the VNI.
+        use nexus_db_schema::schema::external_subnet;
+        use nexus_db_schema::schema::instance;
+        use nexus_db_schema::schema::network_interface;
+        use nexus_db_schema::schema::sled;
+        use nexus_db_schema::schema::vmm;
+        use nexus_db_schema::schema::vpc;
+        use nexus_db_schema::schema::vpc_subnet;
+
+        paginated(
+            external_subnet::dsl::external_subnet,
+            external_subnet::dsl::id,
+            &pagparams.map_name(|id| id.as_untyped_uuid()),
+        )
+        .inner_join(instance::dsl::instance.on(
+            instance::dsl::id.nullable().eq(external_subnet::dsl::instance_id),
+        ))
+        .inner_join(
+            vmm::dsl::vmm.on(vmm::dsl::id
+                .nullable()
+                .eq(instance::dsl::active_propolis_id)),
+        )
+        .inner_join(sled::dsl::sled.on(vmm::dsl::sled_id.eq(sled::dsl::id)))
+        .inner_join(
+            network_interface::dsl::network_interface.on(
+                network_interface::dsl::kind
+                    .eq(NetworkInterfaceKind::Instance)
+                    .and(
+                        network_interface::dsl::parent_id.eq(instance::dsl::id),
+                    )
+                    .and(network_interface::dsl::is_primary.eq(true)),
+            ),
+        )
+        .inner_join(
+            vpc_subnet::dsl::vpc_subnet
+                .on(vpc_subnet::dsl::id.eq(network_interface::dsl::subnet_id)),
+        )
+        .inner_join(vpc::dsl::vpc.on(vpc::dsl::id.eq(vpc_subnet::dsl::vpc_id)))
+        .filter(external_subnet::dsl::time_deleted.is_null())
+        .filter(external_subnet::dsl::attach_state.eq(IpAttachState::Attached))
+        .filter(instance::dsl::time_deleted.is_null())
+        .filter(network_interface::dsl::time_deleted.is_null())
+        .filter(vpc_subnet::dsl::time_deleted.is_null())
+        .filter(vpc::dsl::time_deleted.is_null())
+        .select(AttachedSubnetDetails::as_select())
+        .get_results_async::<AttachedSubnetDetails>(
+            &*self.pool_connection_authorized(opctx).await?,
+        )
+        .await
+        .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+        .map(|rows| rows.into_iter().map(Into::into).collect())
+    }
+
+    /// Start attaching an external subnet to an instance.
+    ///
+    /// This marks the subnet as in the "attaching" state and sets the parent to
+    /// the instance.
+    ///
+    /// If the attachment could not start, such as if the subnet was already
+    /// attached to another instance, or the instance was in an invalid state,
+    /// this returns an `Error`.
+    pub async fn begin_attach_subnet(
+        &self,
+        opctx: &OpContext,
+        authz_instance: &authz::Instance,
+        authz_subnet: &authz::ExternalSubnet,
+        ip_version: IpVersion,
+    ) -> Result<ExternalSubnetBeginOpResult, Error> {
+        use nexus_db_schema::schema::external_subnet::dsl;
+        use nexus_db_schema::schema::instance::dsl as instance_dsl;
+        use nexus_db_schema::schema::network_interface::dsl as nic_dsl;
+
+        opctx.authorize(authz::Action::Modify, authz_instance).await?;
+        opctx.authorize(authz::Action::Modify, authz_subnet).await?;
+
+        // Only allow attachment if the instance has a primary NIC with the same
+        // IP stack as the subnet being attached.
+        let base_nic_query = nic_dsl::network_interface
+            .into_boxed()
+            .filter(nic_dsl::parent_id.eq(authz_instance.id()))
+            .filter(nic_dsl::time_deleted.is_null())
+            .filter(nic_dsl::is_primary.eq(true))
+            .filter(nic_dsl::kind.eq(NetworkInterfaceKind::Instance));
+        let has_matching_ip_stack = match ip_version {
+            IpVersion::V4 => base_nic_query.select(nic_dsl::ip.is_not_null()),
+            IpVersion::V6 => base_nic_query.select(nic_dsl::ipv6.is_not_null()),
+        };
+
+        // NOTE: We only allow attaching to instances that are fully stopped or
+        // running. This is in contrast to Floating IPs, which can be attached
+        // to a `starting` instance, because FIPs can be created at the time the
+        // instance is created. We don't allow that today, but we should expand
+        // this set of allowed states in the future if we add support.
+        let query = Instance::attach_resource_with_update_condition(
+            authz_instance.id(),
+            authz_subnet.id().into_untyped_uuid(),
+            instance_dsl::instance
+                .into_boxed()
+                .filter(
+                    instance_dsl::state.eq_any(SAFE_TO_ATTACH_INSTANCE_STATES),
+                )
+                .filter(instance_dsl::migration_id.is_null()),
+            dsl::external_subnet
+                .into_boxed()
+                .filter(dsl::attach_state.eq(IpAttachState::Detached))
+                .filter(dsl::instance_id.is_null()),
+            MAX_ATTACHED_SUBNETS_PER_INSTANCE,
+            diesel::update(dsl::external_subnet).set((
+                dsl::time_modified.eq(Utc::now()),
+                dsl::instance_id.eq(Some(authz_instance.id())),
+                dsl::attach_state.eq(IpAttachState::Attaching),
+            )),
+            has_matching_ip_stack,
+        );
+        query
+            .attach_and_get_result_async(&*self.pool_connection_authorized(opctx).await?)
+            .await
+            .map(|(_instance, subnet)| ExternalSubnetBeginOpResult { subnet, do_saga: true })
+            .or_else(|e| match e {
+                AttachError::CollectionNotFound => {
+                    Err(Error::not_found_by_id(
+                        ResourceType::Instance,
+                        &authz_instance.id(),
+                    ))
+                }
+                AttachError::ResourceNotFound => {
+                    Err(Error::not_found_by_id(
+                        ResourceType::ExternalSubnet,
+                        &authz_subnet.id().into_untyped_uuid(),
+                    ))
+                }
+                AttachError::NoUpdate {
+                    attached_count,
+                    update_condition_satisfied,
+                    resource,
+                    collection
+                } => {
+                    let resource_instance_id = resource.instance_id.map(GenericUuid::into_untyped_uuid);
+                    let instance_id = Some(authz_instance.id());
+                    match resource.attach_state {
+                        IpAttachState::Detached => {
+                            // Subnet was detached which means some other error
+                            // occurred. Fall through to detect it.
+                        }
+                        IpAttachState::Attached => {
+                            if resource_instance_id == instance_id {
+                                // We're already attached to this instance.
+                                // Return the record, but we are already done
+                                // with the attach saga here.
+                                return Ok(ExternalSubnetBeginOpResult {
+                                    subnet: resource,
+                                    do_saga: false,
+                                });
+                            }
+                            // We're attached to some _other_ instance.
+                            return Err(Error::invalid_request(
+                                "External subnets cannot be attached to \
+                                one instance while still attached to another"
+                            ));
+                        }
+                        IpAttachState::Attaching if resource_instance_id == instance_id => {
+                            // The subnet is still being attached, e.g., the
+                            // saga node for doing the attachment is running
+                            // again. We need to continue the saga.
+                            return Ok(ExternalSubnetBeginOpResult {
+                                subnet: resource,
+                                do_saga: true,
+                            });
+                        }
+                        IpAttachState::Detaching | IpAttachState::Attaching => {
+                            // This one is transient, and could be retried
+                            // safely in the future, in either direction.
+                            return Err(Error::unavail(
+                                "The external subnet is in the process of \
+                                attaching to or detaching from another \
+                                instance."
+                            ));
+                        }
+                    }
+
+                    // Attempt during a migration.
+                    if collection.runtime_state.migration_id.is_some() {
+                        return Err(Error::unavail(
+                            "Cannot attach a subnet while instance is migrating"
+                        ));
+                    }
+
+                    // Instance is in a transitory state, e.g., starting.
+                    if !SAFE_TO_ATTACH_INSTANCE_STATES
+                        .contains(&collection.runtime_state.nexus_state)
+                    {
+                        return Err(Error::invalid_request(&format!(
+                            "Cannot attach subnet to instance in {} state",
+                            collection.runtime_state.nexus_state,
+                        )));
+                    }
+
+                    // Too many subnets attached.
+                    if attached_count >= i64::from(MAX_ATTACHED_SUBNETS_PER_INSTANCE) {
+                        return Err(Error::invalid_request(&format!(
+                            "An instance may not have more than \
+                            {MAX_ATTACHED_SUBNETS_PER_INSTANCE} attached subnets"
+                        )));
+                    }
+
+                    // Mismatched IP stack.
+                    if !update_condition_satisfied {
+                        return Err(Error::invalid_request(&format!(
+                            "Cannot attach an IP{} external subnet to \
+                            an instance that does not have a \
+                            matching IP stack",
+                            ip_version,
+                        )));
+                    }
+
+                    Err(Error::internal_error("failed to attach subnet"))
+                }
+                AttachError::DatabaseError(e) => Err(public_error_from_diesel(e, ErrorHandler::Server))
+            })
+    }
+
+    /// Start detaching a subnet from an instance.
+    pub async fn begin_detach_subnet(
+        &self,
+        opctx: &OpContext,
+        authz_instance: &authz::Instance,
+        authz_subnet: &authz::ExternalSubnet,
+    ) -> Result<ExternalSubnetBeginOpResult, Error> {
+        use nexus_db_schema::schema::external_subnet::dsl;
+        use nexus_db_schema::schema::instance::dsl as instance_dsl;
+
+        opctx.authorize(authz::Action::Modify, authz_instance).await?;
+        opctx.authorize(authz::Action::Modify, authz_subnet).await?;
+
+        // NOTE: We only allow attaching to instances that are fully stopped or
+        // running. This is in contrast to Floating IPs, which can be attached
+        // to a `starting` instance, because FIPs can be created at the time the
+        // instance is created. We don't allow that today, but we should expand
+        // this set of allowed states in the future if we add support.
+        let query = Instance::detach_resource(
+            authz_instance.id(),
+            authz_subnet.id().into_untyped_uuid(),
+            instance_dsl::instance
+                .into_boxed()
+                .filter(
+                    instance_dsl::state.eq_any(SAFE_TO_ATTACH_INSTANCE_STATES),
+                )
+                .filter(instance_dsl::migration_id.is_null()),
+            dsl::external_subnet
+                .into_boxed()
+                .filter(dsl::attach_state.eq(IpAttachState::Attached))
+                .filter(dsl::instance_id.eq(authz_instance.id())),
+            diesel::update(dsl::external_subnet).set((
+                dsl::time_modified.eq(Utc::now()),
+                dsl::attach_state.eq(IpAttachState::Detaching),
+            )),
+        );
+        query
+            .detach_and_get_result_async(&*self.pool_connection_authorized(opctx).await?)
+            .await
+            .map(|subnet| ExternalSubnetBeginOpResult { subnet, do_saga: true })
+            .or_else(|e| match e {
+                DetachError::CollectionNotFound => {
+                    Err(Error::not_found_by_id(
+                        ResourceType::Instance,
+                        &authz_instance.id(),
+                    ))
+                }
+                DetachError::ResourceNotFound => {
+                    Err(Error::not_found_by_id(
+                        ResourceType::ExternalSubnet,
+                        &authz_subnet.id().into_untyped_uuid(),
+                    ))
+                }
+                DetachError::NoUpdate {
+                    resource,
+                    collection,
+                } => {
+                    let resource_instance_id = resource.instance_id.map(GenericUuid::into_untyped_uuid);
+                    let instance_id = Some(authz_instance.id());
+                    match resource.attach_state {
+                        IpAttachState::Detached => {
+                            // Subnet was already detached. Return success, but
+                            // we don't need to run the saga.
+                            return Ok(ExternalSubnetBeginOpResult {
+                                subnet: resource,
+                                do_saga: false,
+                            });
+                        }
+                        IpAttachState::Detaching if resource_instance_id == instance_id => {
+                            // Re-running the detach saga node again.
+                            return Ok(ExternalSubnetBeginOpResult {
+                                subnet: resource,
+                                do_saga: true,
+                            });
+                        }
+                        IpAttachState::Attached if resource_instance_id != instance_id => {
+                            // Subnet is attached to some other instance.
+                            return Err(Error::invalid_request(
+                                "External subnet is not attached to the target instance"
+                            ));
+                        }
+                        IpAttachState::Attached => {
+                            // We're attached to this instance, which means some
+                            // other precondition was violated. Fall through to
+                            // detect it.
+                        }
+                        IpAttachState::Detaching | IpAttachState::Attaching => {
+                            // This one is transient, and could be retried
+                            // safely in the future, in either direction.
+                            return Err(Error::unavail(
+                                "The external subnet is in the process of \
+                                attaching to or detaching from another \
+                                instance."
+                            ));
+                        }
+                    }
+
+                    // Attempt during a migration.
+                    if collection.runtime_state.migration_id.is_some() {
+                        return Err(Error::unavail(
+                            "Cannot detach a subnet while instance is migrating"
+                        ));
+                    }
+
+                    // Instance is in a transitory state, e.g., starting.
+                    if !SAFE_TO_ATTACH_INSTANCE_STATES
+                        .contains(&collection.runtime_state.nexus_state)
+                    {
+                        return Err(Error::invalid_request(&format!(
+                            "Cannot detach subnet from instance in {} state",
+                            collection.runtime_state.nexus_state,
+                        )));
+                    }
+
+                    Err(Error::internal_error("failed to detach subnet"))
+                }
+                DetachError::DatabaseError(e) => Err(public_error_from_diesel(e, ErrorHandler::Server))
+            })
+    }
+
+    /// Move an external subnet from a transitional to final state.
+    pub async fn external_subnet_complete_op(
+        &self,
+        opctx: &OpContext,
+        id: ExternalSubnetUuid,
+        from: IpAttachState,
+        to: IpAttachState,
+    ) -> Result<ExternalSubnetCompleteOpResult, Error> {
+        use nexus_db_schema::schema::external_subnet::dsl;
+        if !matches!(from, IpAttachState::Attaching | IpAttachState::Detaching)
+        {
+            return Err(Error::internal_error(&format!(
+                "external subnet must be in a transitory state, not {from}"
+            )));
+        }
+        if !matches!(to, IpAttachState::Attached | IpAttachState::Detached) {
+            return Err(Error::internal_error(&format!(
+                "external subnet must move to a final state, not {to}"
+            )));
+        }
+        let initial_update = diesel::update(dsl::external_subnet)
+            .filter(dsl::id.eq(to_db_typed_uuid(id)))
+            .filter(dsl::time_deleted.is_null())
+            .filter(dsl::attach_state.eq(from));
+
+        let now = Utc::now();
+        let conn = self.pool_connection_authorized(opctx).await?;
+        match (from, to) {
+            // We're either:
+            //
+            // - Finalizing a detach operation, or
+            // - undoing a later step in a failed attach saga.
+            //
+            // In either case, we can just set the values we need.
+            (_, IpAttachState::Detached) => {
+                let mut rows = initial_update
+                    .set((
+                        dsl::instance_id.eq(Option::<Uuid>::None),
+                        dsl::time_modified.eq(now),
+                        dsl::attach_state.eq(to),
+                    ))
+                    .returning(ExternalSubnet::as_returning())
+                    .get_results_async(&*conn)
+                    .await
+                    .map_err(|e| {
+                        public_error_from_diesel(e, ErrorHandler::Server)
+                    })?;
+                match rows.len() {
+                    0 => Ok(ExternalSubnetCompleteOpResult::NoChanges),
+                    1 => Ok(ExternalSubnetCompleteOpResult::Modified(
+                        rows.pop().expect("just checked it has 1 element"),
+                    )),
+                    n => Err(Error::internal_error(&format!(
+                        "In `external_subnet_complete_op` expected 0 or 1 \
+                        rows to be modified, found {n}",
+                    ))),
+                }
+            }
+            // Finalizing the attachment.
+            //
+            // Subnets can't be deleted while they're still attached or
+            // partially-attached to an instance. But the _instance_ can be
+            // deleted in any state. Catch that edge case here, and fail with a
+            // 500.
+            (IpAttachState::Attaching, IpAttachState::Attached) => {
+                initial_update
+                    .set((dsl::time_modified.eq(now), dsl::attach_state.eq(to)))
+                    .check_if_exists::<ExternalSubnet>(id.into_untyped_uuid())
+                    .execute_and_check(&conn)
+                    .await
+                    .map_err(|e| {
+                        public_error_from_diesel(e, ErrorHandler::Server)
+                    })
+                    .and_then(|r| match r.status {
+                        UpdateStatus::Updated => Ok(
+                            ExternalSubnetCompleteOpResult::Modified(r.found),
+                        ),
+                        UpdateStatus::NotUpdatedButExists
+                            if r.found.attach_state
+                                == IpAttachState::Detached
+                                || r.found.instance_id.is_none() =>
+                        {
+                            Err(Error::internal_error(
+                                "unwinding due to concurrent instance delete",
+                            ))
+                        }
+                        UpdateStatus::NotUpdatedButExists => {
+                            Ok(ExternalSubnetCompleteOpResult::NoChanges)
+                        }
+                    })
+            }
+            // Undoing a failed detach saga.
+            (IpAttachState::Detaching, IpAttachState::Attached) => {
+                let mut rows = initial_update
+                    .set((dsl::time_modified.eq(now), dsl::attach_state.eq(to)))
+                    .returning(ExternalSubnet::as_returning())
+                    .get_results_async(&*conn)
+                    .await
+                    .map_err(|e| {
+                        public_error_from_diesel(e, ErrorHandler::Server)
+                    })?;
+                match rows.len() {
+                    0 => Ok(ExternalSubnetCompleteOpResult::NoChanges),
+                    1 => Ok(ExternalSubnetCompleteOpResult::Modified(
+                        rows.pop().expect("just checked it has 1 element"),
+                    )),
+                    n => Err(Error::internal_error(&format!(
+                        "In `external_subnet_complete_op` expected 0 or 1 \
+                        rows to be modified, found {n}",
+                    ))),
+                }
+            }
+            (_, _) => {
+                return Err(Error::internal_error(&format!(
+                    "Invalid set of states in external_subnet_complete_op: \
+                from={from:#?}, to={to:#?}"
+                )));
+            }
+        }
+    }
+}
+
+#[derive(Debug, serde::Deserialize, serde::Serialize)]
+pub struct ExternalSubnetBeginOpResult {
+    pub subnet: ExternalSubnet,
+    pub do_saga: bool,
+}
+
+#[derive(Debug, serde::Deserialize, serde::Serialize)]
+pub enum ExternalSubnetCompleteOpResult {
+    Modified(ExternalSubnet),
+    NoChanges,
 }
 
 #[cfg(test)]
@@ -515,12 +1406,12 @@ mod tests {
     use nexus_db_model::SubnetPoolMember;
     use nexus_db_model::SubnetPoolUpdate;
     use nexus_db_model::to_db_typed_uuid;
-    use nexus_types::external_api::params::ExternalSubnetAllocator;
-    use nexus_types::external_api::params::ExternalSubnetCreate;
-    use nexus_types::external_api::params::PoolSelector;
-    use nexus_types::external_api::params::ProjectCreate;
-    use nexus_types::external_api::params::SubnetPoolCreate;
-    use nexus_types::external_api::params::SubnetPoolMemberAdd;
+    use nexus_types::external_api::external_subnet::ExternalSubnetAllocator;
+    use nexus_types::external_api::external_subnet::ExternalSubnetCreate;
+    use nexus_types::external_api::ip_pool::PoolSelector;
+    use nexus_types::external_api::project::ProjectCreate;
+    use nexus_types::external_api::subnet_pool::SubnetPoolCreate;
+    use nexus_types::external_api::subnet_pool::SubnetPoolMemberAdd;
     use nexus_types::identity::Resource;
     use nexus_types::silo::DEFAULT_SILO_ID;
     use omicron_common::address::IpRange;
@@ -588,6 +1479,29 @@ mod tests {
         assert_eq!(pool.identity.time_created, pool.identity.time_modified);
         assert!(pool.identity.time_deleted.is_none());
         assert_eq!(pool.ip_version, IpVersion::V4.into());
+
+        // Creating a duplicate pool should fail with ObjectAlreadyExists.
+        let duplicate_params = SubnetPoolCreate {
+            identity: IdentityMetadataCreateParams {
+                name: "my-pool".parse().unwrap(),
+                description: String::new(),
+            },
+            ip_version: IpVersion::V4,
+        };
+        let err = datastore
+            .create_subnet_pool(opctx, duplicate_params)
+            .await
+            .expect_err("creating a duplicate subnet pool should fail");
+        assert!(
+            matches!(
+                &err,
+                Error::ObjectAlreadyExists {
+                    type_name: ResourceType::SubnetPool,
+                    ..
+                }
+            ),
+            "expected ObjectAlreadyExists, got: {err:?}"
+        );
 
         let by_id = NameOrId::Id(pool.identity.id.into_untyped_uuid());
         let (authz_pool, db_pool) = datastore
@@ -680,7 +1594,7 @@ mod tests {
             max_prefix_length: Some(24),
         };
         let member = datastore
-            .add_subnet_pool_member(opctx, &authz_pool, &params)
+            .add_subnet_pool_member(opctx, &authz_pool, &db_pool, &params)
             .await
             .expect("able to create subnet pool member");
 
@@ -742,7 +1656,7 @@ mod tests {
         let pool_id = NameOrId::Id(pool.identity.id.into_untyped_uuid());
 
         // Re-fetch to get the authz object
-        let (authz_pool, _db_pool) = datastore
+        let (authz_pool, db_pool) = datastore
             .lookup_subnet_pool(opctx, &pool_id)
             .fetch()
             .await
@@ -755,7 +1669,7 @@ mod tests {
             max_prefix_length: Some(24),
         };
         let _member = datastore
-            .add_subnet_pool_member(opctx, &authz_pool, &params)
+            .add_subnet_pool_member(opctx, &authz_pool, &db_pool, &params)
             .await
             .expect("able to create subnet pool member");
 
@@ -767,7 +1681,7 @@ mod tests {
             max_prefix_length: Some(26),
         };
         let err = datastore
-            .add_subnet_pool_member(opctx, &authz_pool, &params)
+            .add_subnet_pool_member(opctx, &authz_pool, &db_pool, &params)
             .await
             .expect_err("failure to create overlapping subnet member");
         let Error::InvalidRequest { message } = &err else {
@@ -825,7 +1739,7 @@ mod tests {
             .link_subnet_pool_to_silo(opctx, &authz_pool, &authz_silo, true)
             .await
             .expect_err("able to link pool to silo");
-        let Error::InvalidRequest { message } = &err else {
+        let Error::Conflict { message } = &err else {
             panic!("Expected invalid request, found: {err:#?}");
         };
         assert_eq!(
@@ -1071,6 +1985,7 @@ mod tests {
                 .add_subnet_pool_member(
                     opctx,
                     &authz_pool,
+                    &db_pool,
                     &SubnetPoolMemberAdd {
                         subnet,
                         min_prefix_length: Some(48),
@@ -2698,6 +3613,7 @@ mod tests {
             .add_subnet_pool_member(
                 opctx,
                 &authz_pool,
+                &db_pool,
                 &SubnetPoolMemberAdd {
                     subnet: "255.255.255.0/24".parse().unwrap(),
                     min_prefix_length: Some(24),
@@ -2841,6 +3757,7 @@ mod tests {
             .add_subnet_pool_member(
                 opctx,
                 &authz_pool,
+                &db_pool,
                 &SubnetPoolMemberAdd {
                     subnet: "fd00::/48".parse().unwrap(),
                     min_prefix_length: None,
@@ -2857,6 +3774,160 @@ mod tests {
             "The IP subnet fd00::/48 overlaps with an existing Subnet Pool \
             member or IP Pool range",
         );
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn updating_nonexistent_pool_silo_link_fails() {
+        let logctx =
+            dev::test_setup_log("updating_nonexistent_pool_silo_link_fails");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        // Create a pool, don't link it.
+        let params = SubnetPoolCreate {
+            identity: IdentityMetadataCreateParams {
+                name: "my-pool".parse().unwrap(),
+                description: String::new(),
+            },
+            ip_version: IpVersion::V4,
+        };
+        let db_pool = datastore
+            .create_subnet_pool(opctx, params)
+            .await
+            .expect("able to create external subnet pool");
+        let authz_pool = authz::SubnetPool::new(
+            authz::FLEET,
+            db_pool.identity.id.into(),
+            LookupType::ById(db_pool.identity.id.into_untyped_uuid()),
+        );
+
+        let authz_silo = authz::Silo::new(
+            authz::FLEET,
+            DEFAULT_SILO_ID,
+            LookupType::ById(DEFAULT_SILO_ID),
+        );
+
+        // Try to update it.
+        let err = datastore
+            .update_subnet_pool_silo_link(opctx, &authz_pool, &authz_silo, true)
+            .await
+            .expect_err("should fail to update link that doesn't exist");
+        let Error::ObjectNotFound { type_name, lookup_type } = &err else {
+            panic!("Expected ObjectNotFound, found: {err:#?}");
+        };
+        assert!(matches!(type_name, ResourceType::SubnetPoolSiloLink));
+        let LookupType::ByCompositeId(id) = &lookup_type else {
+            panic!("Expected composite id lookup, found {lookup_type:#?}");
+        };
+        assert!(id.contains(&authz_silo.id().to_string()));
+        assert!(id.contains(&authz_pool.id().to_string()));
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn deleting_nonexistent_pool_silo_link_fails() {
+        let logctx =
+            dev::test_setup_log("deleting_nonexistent_pool_silo_link_fails");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        // Create a pool, don't link it.
+        let params = SubnetPoolCreate {
+            identity: IdentityMetadataCreateParams {
+                name: "my-pool".parse().unwrap(),
+                description: String::new(),
+            },
+            ip_version: IpVersion::V4,
+        };
+        let db_pool = datastore
+            .create_subnet_pool(opctx, params)
+            .await
+            .expect("able to create external subnet pool");
+        let authz_pool = authz::SubnetPool::new(
+            authz::FLEET,
+            db_pool.identity.id.into(),
+            LookupType::ById(db_pool.identity.id.into_untyped_uuid()),
+        );
+
+        let authz_silo = authz::Silo::new(
+            authz::FLEET,
+            DEFAULT_SILO_ID,
+            LookupType::ById(DEFAULT_SILO_ID),
+        );
+
+        // Try to unlink it.
+        let err = datastore
+            .unlink_subnet_pool_from_silo(
+                opctx,
+                &authz_pool,
+                &db_pool,
+                &authz_silo,
+            )
+            .await
+            .expect_err("should fail to delete link that doesn't exist");
+        let Error::ObjectNotFound { type_name, lookup_type } = &err else {
+            panic!("Expected ObjectNotFound, found: {err:#?}");
+        };
+        assert!(matches!(type_name, ResourceType::SubnetPoolSiloLink));
+        let LookupType::ByCompositeId(id) = &lookup_type else {
+            panic!("Expected composite id lookup, found {lookup_type:#?}");
+        };
+        assert!(id.contains(&authz_silo.id().to_string()));
+        assert!(id.contains(&authz_pool.id().to_string()));
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn linking_subnet_pool_and_silo_multiple_times_fails() {
+        let logctx = dev::test_setup_log(
+            "linking_subnet_pool_and_silo_multiple_times_fails",
+        );
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        // Create a pool, link it once.
+        let params = SubnetPoolCreate {
+            identity: IdentityMetadataCreateParams {
+                name: "my-pool".parse().unwrap(),
+                description: String::new(),
+            },
+            ip_version: IpVersion::V4,
+        };
+        let db_pool = datastore
+            .create_subnet_pool(opctx, params)
+            .await
+            .expect("able to create external subnet pool");
+        let authz_pool = authz::SubnetPool::new(
+            authz::FLEET,
+            db_pool.identity.id.into(),
+            LookupType::ById(db_pool.identity.id.into_untyped_uuid()),
+        );
+
+        let authz_silo = authz::Silo::new(
+            authz::FLEET,
+            DEFAULT_SILO_ID,
+            LookupType::ById(DEFAULT_SILO_ID),
+        );
+        let _link = datastore
+            .link_subnet_pool_to_silo(opctx, &authz_pool, &authz_silo, true)
+            .await
+            .expect("Should succeed linking the first time");
+
+        // Linking it again should fail.
+        let err = datastore
+            .link_subnet_pool_to_silo(opctx, &authz_pool, &authz_silo, true)
+            .await
+            .expect_err("Should fail linking the second time");
+        let Error::Conflict { .. } = &err else {
+            panic!("Expected Conflict, found {err:#?}");
+        };
 
         db.terminate().await;
         logctx.cleanup_successful();

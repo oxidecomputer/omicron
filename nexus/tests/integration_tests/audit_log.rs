@@ -14,7 +14,19 @@ use nexus_test_utils::resource_helpers::{
     object_delete, objects_list_page_authz, test_params,
 };
 use nexus_test_utils_macros::nexus_test;
-use nexus_types::external_api::{params, shared, views};
+use nexus_types::external_api::audit::{
+    self, AuditLogEntry, AuditLogEntryActor, AuditLogEntryResult,
+};
+use nexus_types::external_api::device;
+use nexus_types::external_api::instance::{
+    ExternalIpCreate, InstanceDiskAttachment,
+    InstanceNetworkInterfaceAttachment,
+};
+use nexus_types::external_api::policy;
+use nexus_types::external_api::project::ProjectCreate;
+use nexus_types::external_api::scim;
+use nexus_types::external_api::silo::{self, SiloIdentityMode};
+use nexus_types::external_api::user::CurrentUser;
 use nexus_types::{identity::Asset, silo::DEFAULT_SILO_ID};
 use omicron_common::api::external::{
     IdentityMetadataCreateParams, InstanceAutoRestartPolicy,
@@ -33,7 +45,7 @@ async fn fetch_log(
     client: &ClientTestContext,
     start: DateTime<Utc>,
     end: Option<DateTime<Utc>>,
-) -> ResultsPage<views::AuditLogEntry> {
+) -> ResultsPage<AuditLogEntry> {
     // Use a large limit to avoid pagination hiding results
     let mut qs =
         vec![format!("start_time={}", to_q(start)), "limit=1000".to_string()];
@@ -41,7 +53,7 @@ async fn fetch_log(
         qs.push(format!("end_time={}", to_q(end)));
     }
     let url = format!("/v1/system/audit-log?{}", qs.join("&"));
-    objects_list_page_authz::<views::AuditLogEntry>(client, &url).await
+    objects_list_page_authz::<AuditLogEntry>(client, &url).await
 }
 
 #[nexus_test]
@@ -72,7 +84,7 @@ async fn test_audit_log_list(ctx: &ControlPlaneTestContext) {
     // we have to do this rigmarole instead of using create_project in order to
     // get the user agent header in there and to use a session cookie to test
     // the auth_method field
-    let body = &params::ProjectCreate {
+    let body = &ProjectCreate {
         identity: IdentityMetadataCreateParams {
             name: "test-proj2".parse().unwrap(),
             description: "a pier".to_string(),
@@ -104,13 +116,13 @@ async fn test_audit_log_list(ctx: &ControlPlaneTestContext) {
     assert_eq!(e1.operation_id, "project_create");
     assert_eq!(e1.source_ip.to_string(), "127.0.0.1");
     assert_eq!(e1.user_agent, None); // no user agent passed by default
-    assert_eq!(e1.auth_method, Some(views::AuthMethod::Spoof));
+    assert_eq!(e1.auth_method, Some(audit::AuthMethod::Spoof));
     assert_eq!(e1.credential_id, None); // spoof auth has no credential
     assert!(e1.time_started >= t1 && e1.time_started <= t2);
     assert!(e1.time_completed > e1.time_started);
     assert_eq!(
         e1.actor,
-        views::AuditLogEntryActor::SiloUser {
+        AuditLogEntryActor::SiloUser {
             silo_user_id: USER_TEST_PRIVILEGED.id(),
             silo_id: DEFAULT_SILO_ID,
         }
@@ -127,20 +139,20 @@ async fn test_audit_log_list(ctx: &ControlPlaneTestContext) {
     assert!(e2.time_completed > e2.time_started);
 
     // login attempts are unauthenticated (until the user is authenticated)
-    assert_eq!(e2.actor, views::AuditLogEntryActor::Unauthenticated);
+    assert_eq!(e2.actor, AuditLogEntryActor::Unauthenticated);
 
     // session create was the test suite user in the test suite silo, which
     // is different from the privileged user, so we need to fetch the user
     // and silo ID using the session to check them against the audit log
     let session_authn = AuthnMode::Session(session_token);
-    let me: views::CurrentUser = NexusRequest::object_get(client, "/v1/me")
+    let me: CurrentUser = NexusRequest::object_get(client, "/v1/me")
         .authn_as(session_authn.clone())
         .execute_and_parse_unwrap()
         .await;
 
     // get the session ID to verify credential_id
     let sessions_url = format!("/v1/users/{}/sessions", me.user.id);
-    let sessions: ResultsPage<views::ConsoleSession> =
+    let sessions: ResultsPage<device::ConsoleSession> =
         NexusRequest::object_get(client, &sessions_url)
             .authn_as(session_authn)
             .execute_and_parse_unwrap()
@@ -156,13 +168,13 @@ async fn test_audit_log_list(ctx: &ControlPlaneTestContext) {
     assert_eq!(e3.operation_id, "project_create");
     assert_eq!(e3.source_ip.to_string(), "127.0.0.1");
     assert_eq!(e3.user_agent.clone().unwrap(), "A".repeat(256));
-    assert_eq!(e3.auth_method, Some(views::AuthMethod::SessionCookie));
+    assert_eq!(e3.auth_method, Some(audit::AuthMethod::SessionCookie));
     assert_eq!(e3.credential_id, Some(session_id));
     assert!(e3.time_started >= t3 && e3.time_started <= t4);
     assert!(e3.time_completed > e3.time_started);
     assert_eq!(
         e3.actor,
-        views::AuditLogEntryActor::SiloUser {
+        AuditLogEntryActor::SiloUser {
             silo_user_id: me.user.id,
             silo_id: me.user.silo_id,
         }
@@ -184,7 +196,7 @@ async fn test_audit_log_list(ctx: &ControlPlaneTestContext) {
         to_q(t1)
     );
     let reverse_log =
-        objects_list_page_authz::<views::AuditLogEntry>(client, &url).await;
+        objects_list_page_authz::<AuditLogEntry>(client, &url).await;
     assert_eq!(reverse_log.items.len(), 3);
     assert_eq!(e1.id, reverse_log.items[2].id);
     assert_eq!(e2.id, reverse_log.items[1].id);
@@ -192,8 +204,7 @@ async fn test_audit_log_list(ctx: &ControlPlaneTestContext) {
 
     // test pagination cursor. with limit 1, we only get one item, and it's e1
     let url = format!("/v1/system/audit-log?start_time={}&limit=1", to_q(t1));
-    let log =
-        objects_list_page_authz::<views::AuditLogEntry>(client, &url).await;
+    let log = objects_list_page_authz::<AuditLogEntry>(client, &url).await;
     assert_eq!(log.items.len(), 1);
     assert_eq!(e1.id, log.items[0].id);
 
@@ -202,8 +213,7 @@ async fn test_audit_log_list(ctx: &ControlPlaneTestContext) {
         "/v1/system/audit-log?page_token={}&limit=1",
         log.next_page.clone().unwrap()
     );
-    let log =
-        objects_list_page_authz::<views::AuditLogEntry>(client, &url).await;
+    let log = objects_list_page_authz::<AuditLogEntry>(client, &url).await;
     assert_eq!(log.items.len(), 1);
     assert_eq!(e2.id, log.items[0].id);
 }
@@ -218,7 +228,7 @@ async fn test_audit_log_login_local(ctx: &ControlPlaneTestContext) {
 
     // Create test silo and user first
     let silo_name = Name::from_str("test-silo").unwrap();
-    let local = shared::SiloIdentityMode::LocalOnly;
+    let local = SiloIdentityMode::LocalOnly;
     let silo = create_silo(client, silo_name.as_str(), true, local).await;
 
     let test_user = UserId::from_str("test-user").unwrap();
@@ -252,7 +262,7 @@ async fn test_audit_log_login_local(ctx: &ControlPlaneTestContext) {
     assert_eq!(e1.source_ip.to_string(), "127.0.0.1");
     assert_eq!(
         e1.result,
-        views::AuditLogEntryResult::Error {
+        AuditLogEntryResult::Error {
             http_status_code: 401,
             error_code: Some("Unauthorized".to_string()),
             error_message: "credentials missing or invalid".to_string(),
@@ -267,7 +277,7 @@ async fn test_audit_log_login_local(ctx: &ControlPlaneTestContext) {
     assert_eq!(e2.source_ip.to_string(), "127.0.0.1");
     assert_eq!(
         e2.result,
-        views::AuditLogEntryResult::Success { http_status_code: 204 }
+        AuditLogEntryResult::Success { http_status_code: 204 }
     );
     assert!(e2.time_started >= t2 && e2.time_started <= t3);
     assert!(e2.time_completed > e2.time_started);
@@ -336,9 +346,9 @@ async fn test_audit_log_create_delete_ops(ctx: &ControlPlaneTestContext) {
         client,
         "test-project",
         "test-instance",
-        &params::InstanceNetworkInterfaceAttachment::DefaultIpv4,
-        Vec::<params::InstanceDiskAttachment>::new(),
-        Vec::<params::ExternalIpCreate>::new(),
+        &InstanceNetworkInterfaceAttachment::DefaultIpv4,
+        Vec::<InstanceDiskAttachment>::new(),
+        Vec::<ExternalIpCreate>::new(),
         false, // start=false, so instance is created in stopped state
         None::<InstanceAutoRestartPolicy>,
         None::<InstanceCpuPlatform>,
@@ -400,36 +410,32 @@ async fn test_audit_log_create_delete_ops(ctx: &ControlPlaneTestContext) {
 /// As audit logging is added to endpoints, they should be removed from the file.
 #[nexus_test]
 async fn test_audit_log_coverage(ctx: &ControlPlaneTestContext) {
+    use super::endpoint_coverage::ApiOperations;
     use super::endpoints::{AllowedMethod, VERIFY_ENDPOINTS};
-    use expectorate::assert_contents;
     use nexus_test_utils::http_testing::{AuthnMode, NexusRequest};
-    use openapiv3::OpenAPI;
     use std::collections::BTreeMap;
 
     let client = &ctx.external_client;
 
-    // Load the OpenAPI schema to get operation IDs
-    let schema_path = "../openapi/nexus/nexus-latest.json";
-    let schema_contents = std::fs::read_to_string(schema_path)
-        .expect("failed to read Nexus OpenAPI spec");
-    let spec: OpenAPI = serde_json::from_str(&schema_contents)
-        .expect("Nexus OpenAPI spec was not valid OpenAPI");
+    let api_operations = ApiOperations::new();
 
-    // Build a map from (method, url_regex) to (operation_id, path_template)
-    let spec_operations: BTreeMap<(String, String), (String, String)> = spec
-        .operations()
-        .map(|(path, method, op)| {
-            // Convert path template to regex pattern
-            let re = regex::Regex::new("/\\{[^}]+\\}").unwrap();
-            let regex_path = re.replace_all(path, "/[^/]+");
-            let regex = format!("^{}$", regex_path);
-            let label = op
-                .operation_id
-                .clone()
-                .unwrap_or_else(|| String::from("unknown"));
-            ((method.to_uppercase(), regex), (label, path.to_string()))
-        })
-        .collect();
+    // Track mutating endpoints we haven't tested yet (not in VERIFY_ENDPOINTS).
+    let mut untested_mutating: BTreeMap<String, (String, String)> =
+        api_operations
+            .iter()
+            .filter(|op| {
+                matches!(
+                    op.method.as_str(),
+                    "POST" | "PUT" | "PATCH" | "DELETE"
+                )
+            })
+            .map(|op| {
+                (
+                    op.operation_id.clone(),
+                    (op.method.to_lowercase(), op.path.clone()),
+                )
+            })
+            .collect();
 
     // Set up resources needed by many endpoints
     DiskTest::new(&ctx).await;
@@ -447,12 +453,15 @@ async fn test_audit_log_coverage(ctx: &ControlPlaneTestContext) {
             let is_mutating = match method {
                 AllowedMethod::Post(_)
                 | AllowedMethod::Put(_)
+                | AllowedMethod::Patch(_)
                 | AllowedMethod::Delete => true,
                 AllowedMethod::Get
                 | AllowedMethod::GetNonexistent
                 | AllowedMethod::GetUnimplemented
                 | AllowedMethod::GetVolatile
-                | AllowedMethod::GetWebsocket => false,
+                | AllowedMethod::GetWebsocket
+                | AllowedMethod::Head
+                | AllowedMethod::HeadNonexistent => false,
             };
 
             let before = fetch_log(client, t_start, None).await.items.len();
@@ -488,20 +497,19 @@ async fn test_audit_log_coverage(ctx: &ControlPlaneTestContext) {
 
             let after = fetch_log(client, t_start, None).await.items.len();
 
-            // Find the operation info from the OpenAPI spec
-            let method_str = http_method.to_string().to_uppercase();
-            let url_path = endpoint.url.split('?').next().unwrap();
+            // Find the operation info from the API description
+            let method_str = http_method.to_string();
 
-            let (op_id, path_template) = spec_operations
-                .iter()
-                .find(|((m, regex), _)| {
-                    *m == method_str
-                        && regex::Regex::new(regex).unwrap().is_match(url_path)
-                })
-                .map(|(_, (op_id, path))| (op_id.clone(), path.clone()))
+            let (op_id, path_template) = api_operations
+                .find(&method_str, endpoint.url)
+                .map(|op| (op.operation_id.clone(), op.path.clone()))
                 .unwrap_or_else(|| {
+                    let url_path = endpoint.url.split('?').next().unwrap();
                     (String::from("unknown"), url_path.to_string())
                 });
+
+            // Mark this endpoint as tested
+            untested_mutating.remove(&op_id);
 
             if is_mutating {
                 // Mutating endpoints SHOULD have audit logging
@@ -526,6 +534,13 @@ async fn test_audit_log_coverage(ctx: &ControlPlaneTestContext) {
     let mut output =
         String::from("Mutating endpoints without audit logging:\n");
     for (op_id, (method, path)) in &missing_audit {
+        output.push_str(&format!("{:44} ({:6} {:?})\n", op_id, method, path));
+    }
+
+    output.push_str(
+        "\nMutating endpoints not tested (not in VERIFY_ENDPOINTS):\n",
+    );
+    for (op_id, (method, path)) in &untested_mutating {
         output.push_str(&format!("{:44} ({:6} {:?})\n", op_id, method, path));
     }
 
@@ -562,16 +577,22 @@ async fn test_audit_log_coverage(ctx: &ControlPlaneTestContext) {
             "If the endpoint is read-only despite using POST (like the timeseries"
         );
         eprintln!(
-            "query endpoints), rerun the test with EXPECTORATE=overwrite to update"
+            "query endpoints), add it to uncovered-audit-log-endpoints.txt."
         );
-        eprintln!("the list of uncovered endpoints.");
         eprintln!(
             "======================================================================="
         );
         eprintln!();
     }
 
-    assert_contents(expected_path, &output);
+    // NOTE: We intentionally do NOT use expectorate's assert_contents here
+    // because we don't want EXPECTORATE=overwrite to allow people to
+    // accidentally add uncovered endpoints to the allowlist.
+    similar_asserts::assert_eq!(
+        expected,
+        output,
+        "left: uncovered-audit-log-endpoints.txt, right: actual"
+    );
 
     // Check for GET endpoints that unexpectedly have audit logging
     let mut get_output = String::from("GET endpoints with audit logging:\n");
@@ -608,20 +629,25 @@ async fn test_audit_log_coverage(ctx: &ControlPlaneTestContext) {
         eprintln!(
             "modify state. If this endpoint was intentionally audited (rare),"
         );
-        eprintln!(
-            "rerun the test with EXPECTORATE=overwrite to update the list."
-        );
+        eprintln!("add it to audited-get-endpoints.txt.");
         eprintln!(
             "======================================================================="
         );
         eprintln!();
     }
 
-    assert_contents(get_expected_path, &get_output);
+    // NOTE: We intentionally do NOT use expectorate's assert_contents here
+    // because we don't want EXPECTORATE=overwrite to allow people to
+    // accidentally add audited GET endpoints to the list.
+    similar_asserts::assert_eq!(
+        get_expected,
+        get_output,
+        "left: audited-get-endpoints.txt, right: actual"
+    );
 }
 
 fn verify_entry(
-    entry: &views::AuditLogEntry,
+    entry: &AuditLogEntry,
     operation_id: &str,
     request_uri: &str,
     http_status_code: u16,
@@ -631,22 +657,19 @@ fn verify_entry(
     // Verify operation-specific fields
     assert_eq!(entry.operation_id, operation_id);
     assert_eq!(entry.request_uri, request_uri);
-    assert_eq!(
-        entry.result,
-        views::AuditLogEntryResult::Success { http_status_code }
-    );
+    assert_eq!(entry.result, AuditLogEntryResult::Success { http_status_code });
     assert!(entry.time_started >= start_time && entry.time_started <= end_time);
 
     // Verify fields common to all test-generated entries
     assert_eq!(
         entry.actor,
-        views::AuditLogEntryActor::SiloUser {
+        AuditLogEntryActor::SiloUser {
             silo_user_id: USER_TEST_PRIVILEGED.id(),
             silo_id: DEFAULT_SILO_ID,
         }
     );
     assert_eq!(entry.source_ip.to_string(), "127.0.0.1");
-    assert_eq!(entry.auth_method, Some(views::AuthMethod::Spoof));
+    assert_eq!(entry.auth_method, Some(audit::AuthMethod::Spoof));
     assert!(entry.time_completed > entry.time_started);
 }
 
@@ -660,7 +683,7 @@ async fn test_audit_log_access_token_auth(ctx: &ControlPlaneTestContext) {
     let t1 = Utc::now();
 
     // Make an audited request using the access token
-    let body = &params::ProjectCreate {
+    let body = &ProjectCreate {
         identity: IdentityMetadataCreateParams {
             name: "token-project".parse().unwrap(),
             description: "created with access token".to_string(),
@@ -686,18 +709,18 @@ async fn test_audit_log_access_token_auth(ctx: &ControlPlaneTestContext) {
     let entry = &audit_log.items[0];
     assert_eq!(entry.operation_id, "project_create");
     assert_eq!(entry.request_uri, "/v1/projects");
-    assert_eq!(entry.auth_method, Some(views::AuthMethod::AccessToken));
+    assert_eq!(entry.auth_method, Some(audit::AuthMethod::AccessToken));
     assert_eq!(entry.credential_id, Some(token_grant.token_id));
     assert_eq!(
         entry.actor,
-        views::AuditLogEntryActor::SiloUser {
+        AuditLogEntryActor::SiloUser {
             silo_user_id: USER_TEST_PRIVILEGED.id(),
             silo_id: DEFAULT_SILO_ID,
         }
     );
     assert_eq!(
         entry.result,
-        views::AuditLogEntryResult::Success { http_status_code: 201 }
+        AuditLogEntryResult::Success { http_status_code: 201 }
     );
 }
 
@@ -708,19 +731,15 @@ async fn test_audit_log_scim_token_auth(ctx: &ControlPlaneTestContext) {
 
     // Create a SAML+SCIM silo (required for SCIM tokens)
     const SILO_NAME: &str = "scim-audit-test-silo";
-    let silo = create_silo(
-        client,
-        SILO_NAME,
-        true,
-        shared::SiloIdentityMode::SamlScim,
-    )
-    .await;
+    let silo =
+        create_silo(client, SILO_NAME, true, silo::SiloIdentityMode::SamlScim)
+            .await;
 
     // Grant the privileged user admin role on this silo so they can create tokens
     grant_iam(
         client,
         &format!("/v1/system/silos/{SILO_NAME}"),
-        shared::SiloRole::Admin,
+        policy::SiloRole::Admin,
         USER_TEST_PRIVILEGED.id(),
         AuthnMode::PrivilegedUser,
     )
@@ -728,22 +747,25 @@ async fn test_audit_log_scim_token_auth(ctx: &ControlPlaneTestContext) {
 
     // Create a SCIM token
     let url = format!("/v1/system/scim/tokens?silo={SILO_NAME}");
-    let created_token: views::ScimClientBearerTokenValue =
+    let created_token: scim::ScimClientBearerTokenValue =
         object_create_no_body(client, &url).await;
 
     let t1 = Utc::now();
 
-    // Make an audited SCIM request using the token
-    RequestBuilder::new(client, Method::GET, "/scim/v2/Users")
+    // Make an audited SCIM request using the token (must be mutating for audit)
+    RequestBuilder::new(client, Method::POST, "/scim/v2/Users")
         .header(
             header::AUTHORIZATION,
             format!("Bearer {}", created_token.bearer_token),
         )
+        .body(Some(&serde_json::json!({
+            "userName": "test-user@example.com",
+        })))
         .allow_non_dropshot_errors()
-        .expect_status(Some(StatusCode::OK))
+        .expect_status(Some(StatusCode::CREATED))
         .execute()
         .await
-        .expect("failed to list SCIM users");
+        .expect("failed to create SCIM user");
 
     let t2 = Utc::now();
 
@@ -752,16 +774,16 @@ async fn test_audit_log_scim_token_auth(ctx: &ControlPlaneTestContext) {
     assert_eq!(audit_log.items.len(), 1);
 
     let entry = &audit_log.items[0];
-    assert_eq!(entry.operation_id, "scim_v2_list_users");
+    assert_eq!(entry.operation_id, "scim_v2_create_user");
     assert_eq!(entry.request_uri, "/scim/v2/Users");
-    assert_eq!(entry.auth_method, Some(views::AuthMethod::ScimToken));
+    assert_eq!(entry.auth_method, Some(audit::AuthMethod::ScimToken));
     assert_eq!(entry.credential_id, Some(created_token.id));
     assert_eq!(
         entry.actor,
-        views::AuditLogEntryActor::Scim { silo_id: silo.identity.id }
+        AuditLogEntryActor::Scim { silo_id: silo.identity.id }
     );
     assert_eq!(
         entry.result,
-        views::AuditLogEntryResult::Success { http_status_code: 200 }
+        AuditLogEntryResult::Success { http_status_code: 201 }
     );
 }

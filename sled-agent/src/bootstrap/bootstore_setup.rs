@@ -47,7 +47,7 @@ pub fn new_bootstore_config(
     })
 }
 
-fn bootstore_fsm_state_paths(
+pub fn bootstore_fsm_state_paths(
     cluster_dataset_paths: &[Utf8PathBuf],
 ) -> Result<Vec<Utf8PathBuf>, StartError> {
     let paths: Vec<_> = cluster_dataset_paths
