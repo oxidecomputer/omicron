@@ -3185,7 +3185,9 @@ CREATE INDEX IF NOT EXISTS lookup_bundle_by_creation ON omicron.public.support_b
     time_created
 );
 
-CREATE INDEX IF NOT EXISTS lookup_bundle_by_state_and_creation ON omicron.public.support_bundle (
+CREATE INDEX IF NOT EXISTS
+    lookup_bundle_by_state_and_creation
+ON omicron.public.support_bundle (
     state,
     time_created
 );
@@ -3216,7 +3218,12 @@ CREATE TABLE IF NOT EXISTS omicron.public.support_bundle_config (
 );
 
 -- Default: 10% free datasets, keep at least 10% worth of bundles
-INSERT INTO omicron.public.support_bundle_config (singleton, target_free_percent, min_keep_percent, time_modified)
+INSERT INTO omicron.public.support_bundle_config (
+    singleton,
+    target_free_percent,
+    min_keep_percent,
+    time_modified
+)
 VALUES (TRUE, 10, 10, NOW())
 ON CONFLICT (singleton) DO NOTHING;
 

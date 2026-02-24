@@ -942,9 +942,10 @@ async fn test_support_bundle_delete_failed_bundle(
 // 2. The oldest bundles are marked for deletion first
 // 3. min_keep percentage is respected
 //
-// Configuration: 20% target_free (CEIL(5*20/100)=1), 20% min_keep (CEIL(5*20/100)=1), 5 datasets
-// Create 5 bundles (filling all datasets), and verify auto-deletion happens
-// when we run out of free datasets.
+// Configuration: 20% target_free (CEIL(5*20/100)=1),
+// 20% min_keep (CEIL(5*20/100)=1), 5 datasets.
+// Create 5 bundles (filling all datasets), and verify
+// auto-deletion happens when we run out of free datasets.
 #[tokio::test]
 async fn test_support_bundle_auto_deletion() {
     let cptestctx = nexus_test_utils::ControlPlaneBuilder::new(
@@ -977,7 +978,8 @@ async fn test_support_bundle_auto_deletion() {
     // - When creating bundle 5:
     //   - Before collection: 4 Active + 1 Collecting = 5 bundles, free = 0
     //   - Auto-delete triggers: want 1 free, have 0, delete 1 oldest
-    //   - 20% min_keep (CEIL(5*20/100)=1), active=4, max_deletable=3, so we CAN delete
+    //   - 20% min_keep (CEIL(5*20/100)=1), active=4,
+    //     max_deletable=3, so we CAN delete
     //   - Result: oldest bundle deleted, then bundle 5 gets collected
     let mut bundle_ids = Vec::new();
     for i in 0..5 {

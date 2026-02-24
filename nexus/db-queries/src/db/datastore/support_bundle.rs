@@ -566,17 +566,20 @@ impl DataStore {
 
         let query = support_bundle_auto_delete_query();
 
-        // Return type: (total_datasets, used_datasets, active_bundles, deleted_ids)
-        let result: (i64, i64, i64, Vec<Uuid>) = query
+        let (total_datasets, used_datasets, active_bundles, deleted_ids): (
+            i64,
+            i64,
+            i64,
+            Vec<Uuid>,
+        ) = query
             .get_result_async(&*conn)
             .await
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
 
-        let total_datasets = result.0 as usize;
-        let used_datasets = result.1 as usize;
-        let active_bundles = result.2 as usize;
-        let deleted_ids: Vec<SupportBundleUuid> = result
-            .3
+        let total_datasets = total_datasets as usize;
+        let used_datasets = used_datasets as usize;
+        let active_bundles = active_bundles as usize;
+        let deleted_ids: Vec<SupportBundleUuid> = deleted_ids
             .into_iter()
             .map(SupportBundleUuid::from_untyped_uuid)
             .collect();
@@ -620,7 +623,9 @@ impl DataStore {
 
         opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
 
-        // Validate percentages are in range
+        // Validate percentages are in range. The DB has CHECK constraints
+        // as a safety net, but we validate here to return a more descriptive
+        // error message.
         if target_free_percent > 100 {
             return Err(Error::invalid_request(
                 "target_free_percent must be between 0 and 100",
@@ -669,87 +674,84 @@ pub fn support_bundle_auto_delete_query() -> TypedSqlQuery<(
 
     let mut query = QueryBuilder::new();
 
-    // Build the CTE query
-    query.sql(
-        "
-WITH
-  -- Read config from database
-  config AS (
-    SELECT target_free_percent, min_keep_percent
-    FROM support_bundle_config
-    WHERE singleton = true
-  ),
-  -- Count non-tombstoned datasets
-  dataset_count AS (
-    SELECT COUNT(*) as total
-    FROM rendezvous_debug_dataset
-    WHERE time_tombstoned IS NULL
-  ),
-  -- Count bundles occupying datasets (stable states: Collecting, Active).
-  -- Bundles in other states (Destroying, Failing, Failed) either do not use
-  -- datasets, or will transition to not using datasets imminently.
-  used_count AS (
-    SELECT COUNT(*) as used
-    FROM support_bundle
-    WHERE state IN ('collecting', 'active')
-  ),
-  -- Count only Active bundles (which could be deleted).
-  -- We don't want to auto-delete bundles which are still being collected, so
-  -- this is effectively a count of 'viable targets to be deleted'.
-  active_count AS (
-    SELECT COUNT(*) as active
-    FROM support_bundle
-    WHERE state = 'active'
-  ),
-  -- Calculate how many bundles we want to delete AND are allowed to delete.
-  -- Uses CROSS JOIN to combine single-row CTEs, making all columns accessible.
-  -- CEIL ensures we always round up, so 10% of 5 datasets = 1, not 0.
-  deletion_calc AS (
-    SELECT
-      d.total as total_datasets,
-      u.used as used_datasets,
-      a.active as active_bundles,
-      -- 'Count we want free' - 'Count actually free'
-      GREATEST(0,
-        CEIL(d.total * c.target_free_percent / 100.0)::INT8 - (d.total - u.used)
-      ) as autodeletion_count,
-      -- 'Count we can delete' - 'Count we must keep'
-      GREATEST(0,
-        a.active - CEIL(d.total * c.min_keep_percent / 100.0)::INT8
-      ) as max_deletable
-    FROM dataset_count d
-    CROSS JOIN used_count u
-    CROSS JOIN active_count a
-    CROSS JOIN config c
-  ),
-  -- Find the N oldest active bundles we're allowed to delete.
-  -- Uses lookup_bundle_by_state_and_creation index for ordering.
-  candidates AS (
-    SELECT id
-    FROM support_bundle
-    WHERE state = 'active'
-    -- Secondary sort on id ensures deterministic selection when timestamps match,
-    -- which helps with test determinism if the timestamps don't have sufficient
-    -- granularity between bundle creation times.
-    ORDER BY time_created ASC, id ASC
-    LIMIT (SELECT LEAST(autodeletion_count, max_deletable) FROM deletion_calc)
-  ),
-  -- Atomically transition to Destroying (only if still Active).
-  -- The state='active' check handles concurrent user deletions.
-  deleted AS (
-    UPDATE support_bundle
-    SET state = 'destroying'
-    WHERE id IN (SELECT id FROM candidates)
-      AND state = 'active'
-    RETURNING id
-  )
-SELECT
-  (SELECT total_datasets FROM deletion_calc),
-  (SELECT used_datasets FROM deletion_calc),
-  (SELECT active_bundles FROM deletion_calc),
-  ARRAY(SELECT id FROM deleted) as deleted_ids
-",
-    );
+    query.sql("
+        WITH
+          -- Read config from database
+          config AS (
+            SELECT target_free_percent, min_keep_percent
+            FROM support_bundle_config
+            WHERE singleton = true
+          ),
+          -- Count non-tombstoned datasets
+          dataset_count AS (
+            SELECT COUNT(*) as total
+            FROM rendezvous_debug_dataset
+            WHERE time_tombstoned IS NULL
+          ),
+          -- Count bundles occupying datasets (stable states: Collecting, Active).
+          -- Bundles in other states (Destroying, Failing, Failed) either do not use
+          -- datasets, or will transition to not using datasets imminently.
+          used_count AS (
+            SELECT COUNT(*) as used
+            FROM support_bundle
+            WHERE state IN ('collecting', 'active')
+          ),
+          -- Count only Active bundles (which could be deleted).
+          -- We don't want to auto-delete bundles which are still being collected, so
+          -- this is effectively a count of 'viable targets to be deleted'.
+          active_count AS (
+            SELECT COUNT(*) as active
+            FROM support_bundle
+            WHERE state = 'active'
+          ),
+          -- Calculate how many bundles we want to delete AND are allowed to delete.
+          -- Uses CROSS JOIN to combine single-row CTEs, making all columns accessible.
+          -- CEIL ensures we always round up, so 10% of 5 datasets = 1, not 0.
+          deletion_calc AS (
+            SELECT
+              d.total as total_datasets,
+              u.used as used_datasets,
+              a.active as active_bundles,
+              -- 'Count we want free' - 'Count actually free'
+              GREATEST(0,
+                CEIL(d.total * c.target_free_percent / 100.0)::INT8 - (d.total - u.used)
+              ) as autodeletion_count,
+              -- 'Count we can delete' - 'Count we must keep'
+              GREATEST(0,
+                a.active - CEIL(d.total * c.min_keep_percent / 100.0)::INT8
+              ) as max_deletable
+            FROM dataset_count d
+            CROSS JOIN used_count u
+            CROSS JOIN active_count a
+            CROSS JOIN config c
+          ),
+          -- Find the N oldest active bundles we're allowed to delete.
+          -- Uses lookup_bundle_by_state_and_creation index for ordering.
+          candidates AS (
+            SELECT id
+            FROM support_bundle
+            WHERE state = 'active'
+            -- Secondary sort on id ensures deterministic selection when timestamps match,
+            -- which helps with test determinism if the timestamps don't have sufficient
+            -- granularity between bundle creation times.
+            ORDER BY time_created ASC, id ASC
+            LIMIT (SELECT LEAST(autodeletion_count, max_deletable) FROM deletion_calc)
+          ),
+          -- Atomically transition to Destroying (only if still Active).
+          -- The state='active' check handles concurrent user deletions.
+          deleted AS (
+            UPDATE support_bundle
+            SET state = 'destroying'
+            WHERE id IN (SELECT id FROM candidates)
+              AND state = 'active'
+            RETURNING id
+          )
+        SELECT
+          (SELECT total_datasets FROM deletion_calc),
+          (SELECT used_datasets FROM deletion_calc),
+          (SELECT active_bundles FROM deletion_calc),
+          ARRAY(SELECT id FROM deleted) as deleted_ids
+    ");
 
     query.query()
 }
@@ -1911,9 +1913,14 @@ mod test {
         assert_eq!(result.free_datasets, 0);
         assert_eq!(result.deleted_ids.len(), 2);
 
-        // Verify the oldest bundles are selected (first two created)
-        assert!(result.deleted_ids.contains(&bundle_ids[0].into()));
-        assert!(result.deleted_ids.contains(&bundle_ids[1].into()));
+        assert!(
+            result.deleted_ids.contains(&bundle_ids[0].into()),
+            "oldest bundles should be selected (first two created)"
+        );
+        assert!(
+            result.deleted_ids.contains(&bundle_ids[1].into()),
+            "oldest bundles should be selected (first two created)"
+        );
 
         db.terminate().await;
         logctx.cleanup_successful();
@@ -1950,7 +1957,8 @@ mod test {
                 .expect("Should update state");
         }
 
-        // Set config: 60% target_free (CEIL(5*60/100)=3), 80% min_keep (CEIL(5*80/100)=4)
+        // Set config: 60% target_free (CEIL(5*60/100)=3),
+        // 80% min_keep (CEIL(5*80/100)=4)
         // With free=0, we'd want to delete 3 bundles
         // But min_keep=4 means we can only delete 1 (5-4=1)
         datastore
@@ -1966,8 +1974,11 @@ mod test {
         assert_eq!(result.total_datasets, 5);
         assert_eq!(result.active_bundles, 5);
         assert_eq!(result.free_datasets, 0);
-        // Can only delete 1 bundle due to min_bundles_to_keep constraint
-        assert_eq!(result.deleted_ids.len(), 1);
+        assert_eq!(
+            result.deleted_ids.len(),
+            1,
+            "can only delete 1 bundle due to min_bundles_to_keep constraint"
+        );
 
         db.terminate().await;
         logctx.cleanup_successful();
@@ -2004,7 +2015,8 @@ mod test {
                 .expect("Should update state");
         }
 
-        // Set config: 100% target_free (CEIL(5*100/100)=5), 100% min_keep (CEIL(5*100/100)=5)
+        // Set config: 100% target_free (CEIL(5*100/100)=5),
+        // 100% min_keep (CEIL(5*100/100)=5)
         // With free=2, we'd want to delete 3 bundles, but min_keep=5 > active=3
         // So we can't delete any
         datastore
@@ -2020,8 +2032,10 @@ mod test {
         assert_eq!(result.total_datasets, 5);
         assert_eq!(result.active_bundles, 3);
         assert_eq!(result.free_datasets, 2);
-        // min_keep (5) > active_bundles (3), so no deletion
-        assert!(result.deleted_ids.is_empty());
+        assert!(
+            result.deleted_ids.is_empty(),
+            "min_keep (5) > active_bundles (3), so no deletion"
+        );
 
         db.terminate().await;
         logctx.cleanup_successful();
@@ -2077,7 +2091,8 @@ mod test {
 
         // Set config: 100% target_free (CEIL(5*100/100)=5), 0% min_keep
         // With 3 bundles (1 Active, 1 Collecting, 1 Destroying):
-        // - used_count = 2 (Active + Collecting; Destroying not counted for deletion calc)
+        // - used_count = 2 (Active + Collecting; Destroying not
+        //   counted for deletion calc)
         // - free_datasets = 5 - 2 = 3
         // We should only delete Active bundles though
         datastore
@@ -2091,14 +2106,21 @@ mod test {
             .expect("Should succeed");
 
         assert_eq!(result.total_datasets, 5);
-        // Only 1 bundle is Active (candidates for deletion)
-        assert_eq!(result.active_bundles, 1);
-        // Free datasets: 5 total - 2 used (Active + Collecting) = 3
-        // (Destroying bundles are not counted as they're already being freed)
-        assert_eq!(result.free_datasets, 3);
-        // We want 5 free but only have 3, so we want to delete 2
-        // But we only have 1 Active bundle to delete
-        assert_eq!(result.deleted_ids.len(), 1);
+        assert_eq!(
+            result.active_bundles, 1,
+            "only 1 bundle is Active (candidates for deletion)"
+        );
+        assert_eq!(
+            result.free_datasets, 3,
+            "free datasets: 5 total - 2 used (Active + Collecting) = 3 \
+            (Destroying bundles are not counted as they're already being freed)"
+        );
+        assert_eq!(
+            result.deleted_ids.len(),
+            1,
+            "we want 5 free but only have 3, want to delete 2, \
+            but only 1 Active bundle"
+        );
         assert_eq!(result.deleted_ids[0], bundle1.id.into());
 
         db.terminate().await;
@@ -2269,12 +2291,15 @@ mod test {
             .await
             .expect("Should succeed");
 
-        // Free should be 2 now:
-        // - Failed bundle doesn't count (dataset was expunged)
-        // - Destroying bundle doesn't count (already being freed)
-        assert_eq!(result.free_datasets, 2);
-        // Since free=2 >= target=1, no deletion needed
-        assert!(result.deleted_ids.is_empty());
+        assert_eq!(
+            result.free_datasets, 2,
+            "free should be 2: Failed bundle doesn't count (dataset was \
+            expunged), Destroying bundle doesn't count (already being freed)"
+        );
+        assert!(
+            result.deleted_ids.is_empty(),
+            "since free=2 >= target=1, no deletion needed"
+        );
 
         db.terminate().await;
         logctx.cleanup_successful();
@@ -2434,15 +2459,10 @@ mod test {
         // 101% should be rejected
         let result = datastore.support_bundle_config_set(&opctx, 101, 10).await;
 
-        assert!(
-            result.is_err(),
-            "Setting target_free_percent > 100 should fail"
-        );
         let err = result.unwrap_err();
-        assert!(
-            err.to_string().contains("target_free_percent"),
-            "Error message should mention target_free_percent: {}",
-            err
+        assert_eq!(
+            err.to_string(),
+            "Invalid Request: target_free_percent must be between 0 and 100",
         );
 
         // Verify valid values still work
@@ -2471,12 +2491,10 @@ mod test {
         // 101% should be rejected
         let result = datastore.support_bundle_config_set(&opctx, 10, 101).await;
 
-        assert!(result.is_err(), "Setting min_keep_percent > 100 should fail");
         let err = result.unwrap_err();
-        assert!(
-            err.to_string().contains("min_keep_percent"),
-            "Error message should mention min_keep_percent: {}",
-            err
+        assert_eq!(
+            err.to_string(),
+            "Invalid Request: min_keep_percent must be between 0 and 100",
         );
 
         // Verify valid values still work

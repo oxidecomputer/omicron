@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! omdb commands for support bundle auto-deletion configuration
+//! omdb commands for support bundle configuration
 
 use crate::Omdb;
 use crate::check_allow_destructive::DestructiveOperationToken;
@@ -100,7 +100,9 @@ async fn support_bundle_config_set(
         .await
         .context("failed to get current support bundle config")?;
 
-    // Apply changes, using current values as defaults
+    // Apply changes, using current values as defaults.
+    // Note: 0-100 range validation is handled by the datastore method
+    // and enforced by DB CHECK constraints.
     let new_target_free =
         args.target_free_percent.unwrap_or(current.target_free_percent as u8);
     let new_min_keep =

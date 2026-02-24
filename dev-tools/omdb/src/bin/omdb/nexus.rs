@@ -2732,11 +2732,17 @@ fn print_task_support_bundle_collector(details: &serde_json::Value) {
             }) = auto_deletion_report
             {
                 println!("    Support Bundle Auto-Deletion Report:");
-                println!("      Total debug datasets: {total_datasets}");
-                println!("      Active bundles: {active_bundles}");
-                println!("      Free datasets: {free_datasets}");
                 println!(
-                    "      Bundles marked for deletion: {bundles_marked_for_deletion}"
+                    "      Total debug datasets:          {total_datasets}"
+                );
+                println!(
+                    "        Free datasets:               {free_datasets}"
+                );
+                println!(
+                    "      Active bundles:                {active_bundles}"
+                );
+                println!(
+                    "        Bundles marked for deletion: {bundles_marked_for_deletion}"
                 );
                 if !errors.is_empty() {
                     println!("      Errors:");

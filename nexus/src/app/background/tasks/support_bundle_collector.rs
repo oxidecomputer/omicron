@@ -319,7 +319,7 @@ impl SupportBundleCollector {
     /// The operation is atomic: finding candidates and transitioning them
     /// to Destroying state happens in a single database query. This prevents
     /// over-deletion when multiple Nexuses run concurrently.
-    async fn auto_delete_bundles(
+    async fn auto_mark_bundles_for_deletion(
         &self,
         opctx: &OpContext,
     ) -> SupportBundleAutoDeletionReport {
@@ -334,12 +334,10 @@ impl SupportBundleCollector {
             Err(err) => {
                 warn!(
                     &opctx.log,
-                    "SupportBundleCollector: Failed to auto-delete bundles";
+                    "Failed to auto-mark bundles for deletion";
                     "err" => %err
                 );
-                report
-                    .errors
-                    .push(format!("Failed to auto-delete bundles: {}", err));
+                report.errors.push(err.to_string());
                 return report;
             }
         };
@@ -354,7 +352,7 @@ impl SupportBundleCollector {
         for id in &auto_deleted.deleted_ids {
             info!(
                 &opctx.log,
-                "SupportBundleCollector: Auto-deleted bundle to free dataset capacity";
+                "Auto-marked bundle for deletion to free dataset capacity";
                 "id" => %id,
                 "free_datasets" => auto_deleted.free_datasets,
             );
@@ -465,7 +463,7 @@ impl BackgroundTask for SupportBundleCollector {
             let mut collection_err = None;
 
             // Phase 1: Auto-delete eligible bundles to maintain free dataset buffer
-            auto_deletion_report = self.auto_delete_bundles(&opctx).await;
+            auto_deletion_report = self.auto_mark_bundles_for_deletion(&opctx).await;
 
             // Phase 2: Cleanup destroyed/failing bundles
             match self.cleanup_destroyed_bundles(&opctx).await {
