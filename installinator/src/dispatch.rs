@@ -27,7 +27,7 @@ use crate::{
     ArtifactWriter, MeasurementToWrite, WriteDestination,
     artifact::{ArtifactIdOpts, ArtifactsToDownload, MeasurementArtifact},
     fetch::{FetchArtifactBackend, FetchedArtifact, HttpFetchBackend},
-    peers::DiscoveryMechanism,
+    peers::{DiscoveryMechanism, LastKnownPeer},
     reporter::{HttpProgressBackend, ProgressReporter, ReportProgressBackend},
 };
 
@@ -99,6 +99,7 @@ impl DebugDiscoverOpts {
                 self.opts.mechanism.discover_peers(&log).await?,
             )),
             Duration::from_secs(10),
+            None,
         );
         println!("discovered peers: {}", backend.peers().display());
         Ok(())
@@ -206,6 +207,8 @@ impl InstallOpts {
         );
         let progress_handle = progress_reporter.start();
         let discovery = &self.discover_opts.mechanism;
+        let last_known_peer = LastKnownPeer::new();
+        let last_known_peer = &last_known_peer;
 
         let engine = UpdateEngine::new(log, event_sender);
 
@@ -223,6 +226,7 @@ impl InstallOpts {
                         &cx,
                         &installinator_doc_id,
                         discovery,
+                        &last_known_peer,
                         log,
                     )
                     .await?;
@@ -326,9 +330,14 @@ impl InstallOpts {
                     let to_download = to_download.into_value(cx.token()).await;
                     let host_phase_2_id = to_download.host_phase_2_id();
 
-                    let host_phase_2_artifact =
-                        fetch_artifact(&cx, &host_phase_2_id, discovery, log)
-                            .await?;
+                    let host_phase_2_artifact = fetch_artifact(
+                        &cx,
+                        &host_phase_2_id,
+                        discovery,
+                        last_known_peer,
+                        log,
+                    )
+                    .await?;
 
                     // Check that the sha256 of the data we got from wicket
                     // matches the data we asked for. We do not retry this for
@@ -364,9 +373,14 @@ impl InstallOpts {
                         to_download_2.into_value(cx.token()).await;
                     let control_plane_id = to_download.control_plane_id();
 
-                    let control_plane_artifact =
-                        fetch_artifact(&cx, &control_plane_id, discovery, log)
-                            .await?;
+                    let control_plane_artifact = fetch_artifact(
+                        &cx,
+                        &control_plane_id,
+                        discovery,
+                        last_known_peer,
+                        log,
+                    )
+                    .await?;
 
                     // Check that the sha256 of the data we got from wicket
                     // matches the data we asked for. We do not retry this for
@@ -420,7 +434,7 @@ impl InstallOpts {
                                 async move |cx2| {
                                     let measurement_artifact =
                                         fetch_artifact(
-                                            &cx2, &c.hash, discovery, log,
+                                            &cx2, &c.hash, discovery, last_known_peer, log,
                                         )
                                         .await?;
 
@@ -675,6 +689,7 @@ async fn fetch_artifact(
     cx: &StepContext,
     id: &ArtifactHashId,
     discovery: &DiscoveryMechanism,
+    last_known_peer: &LastKnownPeer,
     log: &slog::Logger,
 ) -> Result<FetchedArtifact> {
     // TODO: Not sure why slog::o!("artifact" => ?id) isn't working, figure it
@@ -684,6 +699,7 @@ async fn fetch_artifact(
         cx,
         &log,
         || async {
+            let preferred = last_known_peer.get();
             Ok(FetchArtifactBackend::new(
                 &log,
                 Box::new(HttpFetchBackend::new(
@@ -691,12 +707,15 @@ async fn fetch_artifact(
                     discovery.discover_peers(&log).await?,
                 )),
                 Duration::from_secs(10),
+                preferred,
             ))
         },
         id,
     )
     .await
     .with_context(|| format!("error fetching image with id {id:?}"))?;
+
+    last_known_peer.set(artifact.peer);
 
     slog::info!(
         log,
