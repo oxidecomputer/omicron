@@ -137,7 +137,10 @@ impl NexusInternalApi for NexusInternalApiImpl {
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
         // TODO: remove from the nexus-internal api trait when we can make new
         // versions of it
-        unimplemented!("removed due to incorrect abstraction")
+        Err(HttpError::for_bad_request(
+            None,
+            String::from("removed due to incorrect abstraction"),
+        ))
     }
 
     async fn cpapi_volume_remove_read_only_parent(
