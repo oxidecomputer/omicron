@@ -4,13 +4,13 @@
 
 use semver::Version;
 use slog::Logger;
+use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::sync::Mutex;
-use tufaceous_artifact::ArtifactHashId;
-use update_common::artifacts::ArtifactsWithPlan;
-use update_common::artifacts::ExtractedArtifactDataHandle;
-use update_common::artifacts::UpdatePlan;
-use wicketd_api::InstallableArtifacts;
+use tufaceous::ArtifactHandle;
+use tufaceous::Repository;
+use tufaceous_artifact::ArtifactHash;
+use tufaceous_artifact::ArtifactId;
 
 /// The artifact store for wicketd.
 ///
@@ -21,77 +21,71 @@ pub struct WicketdArtifactStore {
     log: Logger,
     // NOTE: this is a `std::sync::Mutex` rather than a `tokio::sync::Mutex`
     // because the critical sections are extremely small.
-    artifacts_with_plan: Arc<Mutex<Option<ArtifactsWithPlan>>>,
+    inner: Arc<Mutex<Option<Inner>>>,
+}
+
+#[derive(Debug)]
+struct Inner {
+    repo: Arc<Repository>,
+    by_hash: BTreeMap<ArtifactHash, ArtifactHandle>,
 }
 
 impl WicketdArtifactStore {
     pub(crate) fn new(log: &Logger) -> Self {
         let log = log.new(slog::o!("component" => "wicketd artifact store"));
-        Self { log, artifacts_with_plan: Default::default() }
+        Self { log, inner: Default::default() }
     }
 
-    pub(crate) fn set_artifacts_with_plan(
-        &self,
-        artifacts_with_plan: ArtifactsWithPlan,
-    ) {
-        slog::debug!(self.log, "setting artifacts_with_plan");
-        self.replace(artifacts_with_plan);
+    pub(crate) fn set_repository(&self, repo: Arc<Repository>) {
+        slog::debug!(self.log, "setting repository");
+        let by_hash = repo
+            .handles()
+            .map(|handle| (handle.artifact().hash, handle))
+            .collect();
+        self.replace(Inner { by_hash, repo });
     }
 
     pub(crate) fn system_version_and_artifact_ids(
         &self,
-    ) -> Option<(Version, Vec<InstallableArtifacts>)> {
-        let artifacts = self.artifacts_with_plan.lock().unwrap();
-        let artifacts = artifacts.as_ref()?;
-        let system_version = artifacts.plan().system_version.clone();
-
-        let artifact_ids = artifacts
-            .by_id()
+    ) -> Option<(Version, Vec<ArtifactId>)> {
+        let guard = self.inner.lock().unwrap();
+        let inner = guard.as_ref()?;
+        let system_version = inner.repo.system_version().clone();
+        let artifact_ids = inner
+            .repo
+            .artifacts()
             .iter()
-            .map(|(k, v)| InstallableArtifacts {
-                artifact_id: k.clone(),
-                installable: v.clone(),
-                sign: artifacts.rot_by_sign().get(&k).cloned(),
-            })
+            .map(|artifact| artifact.id())
             .collect();
         Some((system_version, artifact_ids))
     }
 
-    /// Obtain the current plan.
+    /// Obtain the current repository.
     ///
-    /// Exposed for testing.
-    pub fn current_plan(&self) -> Option<UpdatePlan> {
-        // We expect this hashmap to be relatively small (order ~10), and
-        // cloning both ArtifactIds and ExtractedArtifactDataHandles are cheap.
-        self.artifacts_with_plan
-            .lock()
-            .unwrap()
-            .as_ref()
-            .map(|artifacts| artifacts.plan().clone())
+    /// Exposed as `pub` for testing.
+    pub fn current_repository(&self) -> Option<Arc<Repository>> {
+        Some(Arc::clone(&self.inner.lock().unwrap().as_ref()?.repo))
     }
 
     // ---
     // Helper methods
     // ---
 
-    pub(super) fn get_by_hash(
+    pub(super) fn get_installinator_artifact(
         &self,
-        id: &ArtifactHashId,
-    ) -> Option<ExtractedArtifactDataHandle> {
-        self.artifacts_with_plan.lock().unwrap().as_ref()?.get_by_hash(id)
+        hash: ArtifactHash,
+    ) -> Option<ArtifactHandle> {
+        self.inner.lock().unwrap().as_ref()?.by_hash.get(&hash).cloned()
     }
 
     // `pub` to allow use in integration tests.
-    pub fn contains_by_hash(&self, id: &ArtifactHashId) -> bool {
-        self.get_by_hash(id).is_some()
+    pub fn contains_installinator_artifact(&self, hash: ArtifactHash) -> bool {
+        self.get_installinator_artifact(hash).is_some()
     }
 
-    /// Replaces the artifact hash map, returning the previous map.
-    fn replace(
-        &self,
-        new_artifacts: ArtifactsWithPlan,
-    ) -> Option<ArtifactsWithPlan> {
-        let mut artifacts = self.artifacts_with_plan.lock().unwrap();
-        std::mem::replace(&mut *artifacts, Some(new_artifacts))
+    /// Replaces the inner value.
+    fn replace(&self, inner: Inner) {
+        let mut guard = self.inner.lock().unwrap();
+        *guard = Some(inner);
     }
 }

@@ -15,12 +15,14 @@ use nexus_types::deployment::PendingMgsUpdateRotBootloaderDetails;
 use nexus_types::deployment::planning_report::FailedRotBootloaderUpdateReason;
 use nexus_types::inventory::CabooseWhich;
 use nexus_types::inventory::Collection;
-use omicron_common::api::external::TufRepoDescription;
+use omicron_common::update::TufRepoDescription;
 use sled_hardware_types::BaseboardId;
-use slog::{debug, warn};
+use slog::debug;
 use std::sync::Arc;
 use tufaceous_artifact::ArtifactVersion;
-use tufaceous_artifact::KnownArtifactKind;
+use tufaceous_artifact::GetError;
+use tufaceous_artifact::KnownArtifactTags;
+use tufaceous_artifact::RotBootloaderTags;
 
 /// Compares a configured RoT bootloader update with information from inventory
 /// and determines the current status of the update.  See `MgsUpdateStatus`.
@@ -86,82 +88,37 @@ pub(super) fn try_make_update(
         }
     };
 
-    let board = &stage0_caboose.caboose.board;
-    let Some(rkth) = &stage0_caboose.caboose.sign else {
+    let rot_board = stage0_caboose.caboose.board.clone();
+    let Some(rkth) = stage0_caboose.caboose.sign.clone() else {
         return Err(FailedRotBootloaderUpdateReason::CabooseMissingSign(
             CabooseWhich::Stage0,
         ));
     };
 
-    let matching_artifacts: Vec<_> = current_artifacts
-        .artifacts
-        .iter()
-        .filter(|a| {
-            // A matching RoT bootloader artifact will have:
-            //
-            // - "board" matching the board name (found above from caboose)
-            // - "kind" matching one of the known SP kinds
-            // - "sign" matching the rkth (found above from caboose)
-
-            if a.board.as_ref() != Some(board) {
-                return false;
+    let tags = KnownArtifactTags::RotBootloader(RotBootloaderTags {
+        rot_board,
+        rot_sign: rkth.into(),
+    });
+    let artifact =
+        current_artifacts.artifacts.get(tags.clone()).map_err(|err| {
+            let tags = tags.display().to_string();
+            match err {
+                GetError::NotFound => {
+                    FailedRotBootloaderUpdateReason::NoMatchingArtifactFound(
+                        tags,
+                    )
+                }
+                GetError::TooMany => {
+                    FailedRotBootloaderUpdateReason::TooManyMatchingArtifacts(
+                        tags,
+                    )
+                }
             }
-
-            let Some(artifact_sign) = &a.sign else {
-                return false;
-            };
-            let Ok(artifact_sign) = String::from_utf8(artifact_sign.to_vec())
-            else {
-                return false;
-            };
-            if artifact_sign != *rkth {
-                return false;
-            }
-
-            match a.id.kind.to_known() {
-                None => false,
-                Some(
-                    KnownArtifactKind::GimletRotBootloader
-                    | KnownArtifactKind::PscRotBootloader
-                    | KnownArtifactKind::SwitchRotBootloader,
-                ) => true,
-                Some(
-                    KnownArtifactKind::GimletRot
-                    | KnownArtifactKind::Host
-                    | KnownArtifactKind::InstallinatorDocument
-                    | KnownArtifactKind::Trampoline
-                    | KnownArtifactKind::ControlPlane
-                    | KnownArtifactKind::Zone
-                    | KnownArtifactKind::PscRot
-                    | KnownArtifactKind::SwitchRot
-                    | KnownArtifactKind::GimletSp
-                    | KnownArtifactKind::PscSp
-                    | KnownArtifactKind::SwitchSp
-                    | KnownArtifactKind::MeasurementCorpus,
-                ) => false,
-            }
-        })
-        .collect();
-    if matching_artifacts.is_empty() {
-        return Err(FailedRotBootloaderUpdateReason::NoMatchingArtifactFound);
-    }
-
-    if matching_artifacts.len() > 1 {
-        // This should be impossible unless we shipped a TUF repo with multiple
-        // artifacts for the same board and with the same signature. But it
-        // doesn't prevent us from picking one and proceeding.
-        // Make a note and proceed.
-        warn!(
-            log,
-            "found more than one matching artifact for RoT bootloader update"
-        );
-    }
-
-    let artifact = matching_artifacts[0];
+        })?;
 
     // If the artifact's version matches what's deployed, then no update is
     // needed.
-    if artifact.id.version == expected_stage0_version {
+    if artifact.version == expected_stage0_version {
         debug!(log, "no RoT bootloader update needed for board"; baseboard_id);
         return Ok(MgsUpdateOutcome::NoUpdateNeeded);
     }
@@ -193,7 +150,7 @@ pub(super) fn try_make_update(
             },
         ),
         artifact_hash: artifact.hash,
-        artifact_version: artifact.id.version.clone(),
+        artifact_version: artifact.version.clone(),
     }))
 }
 

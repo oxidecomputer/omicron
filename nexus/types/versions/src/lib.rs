@@ -67,3 +67,5 @@ pub mod v2026_01_30_01;
 pub mod v2026_01_31_00;
 #[path = "bgp_unnumbered_peers/mod.rs"]
 pub mod v2026_02_13_01;
+#[path = "tuf_repo_optional_metadata/mod.rs"]
+pub mod v2026_02_99_99;

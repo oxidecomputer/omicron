@@ -9,7 +9,7 @@ show
 # is running out of as its working directory.)
 #
 # This is used to simulate the initial version of the system.
-tuf-assemble ../../update-common/manifests/fake-0.0.1.toml
+generate-fake-repo 0.0.1
 
 # Load the target release from the assembled TUF repository.
 set target-release repo-0.0.1.zip
@@ -43,7 +43,7 @@ inventory-show latest
 
 # Setup is now done -- create another TUF repository which will act as the
 # target release being updated to.
-tuf-assemble ../../update-common/manifests/fake.toml
+generate-fake-repo 1.0.0
 
 # Load the target release from the assembled TUF repository.
 set target-release repo-1.0.0.zip
@@ -108,7 +108,7 @@ blueprint-diff latest
 
 # Update only the simulated host phase 2; this is a prerequisite for updating
 # the phase 1, and must be done first.
-sled-update-host-phase2 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 --slot-b d944ae205b61ccf4322448f7d0311a819c53d9844769de066c5307c1682abb47
+sled-update-host-phase2 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 --slot-b 2a95f405f6991e651f12be7c7aa988a8f18618890b1d213356f767b274a0a30a
 inventory-generate
 
 # Planning after only phase 2 has changed should make no changes. We're still
@@ -117,7 +117,7 @@ blueprint-plan latest latest
 blueprint-diff latest
 
 # Now update the simulated SP to reflect that the phase 1 update is done.
-sled-update-host-phase1 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 --active B --slot-b b99d5273ba1418bebb19d74b701d716896409566d41de76ada71bded4c9b166b
+sled-update-host-phase1 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 --active B --slot-b a6a3785a28fe58beeb8a308be16f08a311b2a4e20e975d4df68d2a3a2fd72d86
 inventory-generate
 
 # Planning _still_ shouldn't make any new changes; the OS update as a whole
@@ -194,8 +194,8 @@ blueprint-plan latest latest
 blueprint-diff latest
 
 # Now simulate the update completing successfully.
-sled-update-host-phase2 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c --boot-disk B --slot-b d944ae205b61ccf4322448f7d0311a819c53d9844769de066c5307c1682abb47
-sled-update-host-phase1 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c --active B --slot-b b99d5273ba1418bebb19d74b701d716896409566d41de76ada71bded4c9b166b
+sled-update-host-phase2 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c --boot-disk B --slot-b 2a95f405f6991e651f12be7c7aa988a8f18618890b1d213356f767b274a0a30a
+sled-update-host-phase1 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c --active B --slot-b a6a3785a28fe58beeb8a308be16f08a311b2a4e20e975d4df68d2a3a2fd72d86
 inventory-generate
 
 # Another planning step should try to update the last sled, starting with the
@@ -254,8 +254,8 @@ blueprint-plan latest latest
 blueprint-diff latest
 
 # Finish updating the last sled's host OS.
-sled-update-host-phase2 d81c6a84-79b8-4958-ae41-ea46c9b19763 --boot-disk B --slot-b d944ae205b61ccf4322448f7d0311a819c53d9844769de066c5307c1682abb47
-sled-update-host-phase1 d81c6a84-79b8-4958-ae41-ea46c9b19763 --active B --slot-b b99d5273ba1418bebb19d74b701d716896409566d41de76ada71bded4c9b166b
+sled-update-host-phase2 d81c6a84-79b8-4958-ae41-ea46c9b19763 --boot-disk B --slot-b 2a95f405f6991e651f12be7c7aa988a8f18618890b1d213356f767b274a0a30a
+sled-update-host-phase1 d81c6a84-79b8-4958-ae41-ea46c9b19763 --active B --slot-b a6a3785a28fe58beeb8a308be16f08a311b2a4e20e975d4df68d2a3a2fd72d86
 inventory-generate
 
 # Do another planning run. This should start updating zones (one at a time).

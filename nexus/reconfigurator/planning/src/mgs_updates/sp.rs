@@ -17,10 +17,12 @@ use nexus_types::deployment::PendingMgsUpdateSpDetails;
 use nexus_types::deployment::planning_report::FailedSpUpdateReason;
 use nexus_types::inventory::CabooseWhich;
 use nexus_types::inventory::Collection;
-use omicron_common::api::external::TufRepoDescription;
-use slog::{debug, warn};
+use omicron_common::update::TufRepoDescription;
+use slog::debug;
 use tufaceous_artifact::ArtifactVersion;
-use tufaceous_artifact::KnownArtifactKind;
+use tufaceous_artifact::GetError;
+use tufaceous_artifact::KnownArtifactTags;
+use tufaceous_artifact::SpTags;
 
 /// Compares a configured SP update with information from inventory and
 /// determines the current status of the update.  See `MgsUpdateStatus`.
@@ -88,60 +90,24 @@ pub(super) fn try_make_update(
         }
     };
 
-    let board = &active_caboose.caboose.board;
-    let matching_artifacts: Vec<_> = current_artifacts
-        .artifacts
-        .iter()
-        .filter(|a| {
-            // A matching SP artifact will have:
-            //
-            // - "board" matching the board name (found above from caboose)
-            // - "kind" matching one of the known SP kinds
-
-            if a.board.as_ref() != Some(board) {
-                return false;
+    let sp_board = active_caboose.caboose.board.clone();
+    let tags = KnownArtifactTags::Sp(SpTags { sp_board });
+    let artifact =
+        current_artifacts.artifacts.get(tags.clone()).map_err(|err| {
+            let tags = tags.display().to_string();
+            match err {
+                GetError::NotFound => {
+                    FailedSpUpdateReason::NoMatchingArtifactFound(tags)
+                }
+                GetError::TooMany => {
+                    FailedSpUpdateReason::TooManyMatchingArtifacts(tags)
+                }
             }
-
-            match a.id.kind.to_known() {
-                None => false,
-                Some(
-                    KnownArtifactKind::GimletSp
-                    | KnownArtifactKind::PscSp
-                    | KnownArtifactKind::SwitchSp,
-                ) => true,
-                Some(
-                    KnownArtifactKind::GimletRot
-                    | KnownArtifactKind::Host
-                    | KnownArtifactKind::Trampoline
-                    | KnownArtifactKind::InstallinatorDocument
-                    | KnownArtifactKind::ControlPlane
-                    | KnownArtifactKind::Zone
-                    | KnownArtifactKind::PscRot
-                    | KnownArtifactKind::SwitchRot
-                    | KnownArtifactKind::GimletRotBootloader
-                    | KnownArtifactKind::PscRotBootloader
-                    | KnownArtifactKind::SwitchRotBootloader
-                    | KnownArtifactKind::MeasurementCorpus,
-                ) => false,
-            }
-        })
-        .collect();
-    if matching_artifacts.is_empty() {
-        return Err(FailedSpUpdateReason::NoMatchingArtifactFound);
-    }
-
-    if matching_artifacts.len() > 1 {
-        // This should be impossible unless we shipped a TUF repo with multiple
-        // artifacts for the same board.  But it doesn't prevent us from picking
-        // one and proceeding.  Make a note and proceed.
-        warn!(log, "found more than one matching artifact for SP update");
-    }
-
-    let artifact = matching_artifacts[0];
+        })?;
 
     // If the artifact's version matches what's deployed, then no update is
     // needed.
-    if artifact.id.version == expected_active_version {
+    if artifact.version == expected_active_version {
         debug!(log, "no SP update needed for board"; baseboard_id);
         return Ok(MgsUpdateOutcome::NoUpdateNeeded);
     }
@@ -181,7 +147,7 @@ pub(super) fn try_make_update(
             expected_inactive_version,
         }),
         artifact_hash: artifact.hash,
-        artifact_version: artifact.id.version.clone(),
+        artifact_version: artifact.version.clone(),
     }))
 }
 
