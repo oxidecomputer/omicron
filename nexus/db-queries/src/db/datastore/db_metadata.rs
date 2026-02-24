@@ -2693,9 +2693,9 @@ mod test {
         // Start a fresh CRDB with tightly constrained SQL memory to make
         // the backfill OOM-susceptible. We bypass the normal test database
         // setup since we don't need the Omicron schema.
-        let mut builder =
-            omicron_test_utils::dev::db::CockroachStarterBuilder::new();
-        builder.arg("--max-sql-memory=32MiB");
+        let builder =
+            omicron_test_utils::dev::db::CockroachStarterBuilder::new()
+                .max_sql_memory_mib(32);
         let starter = builder.build().expect("Failed to build CRDB starter");
         let mut instance = starter.start().await.expect("Failed to start CRDB");
         instance
@@ -2873,9 +2873,9 @@ mod test {
             "test_create_index_backfill_race_with_verification",
         );
 
-        let mut builder =
-            omicron_test_utils::dev::db::CockroachStarterBuilder::new();
-        builder.arg("--max-sql-memory=32MiB");
+        let builder =
+            omicron_test_utils::dev::db::CockroachStarterBuilder::new()
+                .max_sql_memory_mib(32);
         let starter = builder.build().expect("Failed to build CRDB starter");
         let mut instance = starter.start().await.expect("Failed to start CRDB");
         instance
@@ -3017,9 +3017,9 @@ mod test {
     async fn test_add_column_concurrent_rejected() {
         let logctx = dev::test_setup_log("test_add_column_concurrent_rejected");
 
-        let mut builder =
-            omicron_test_utils::dev::db::CockroachStarterBuilder::new();
-        builder.arg("--max-sql-memory=32MiB");
+        let builder =
+            omicron_test_utils::dev::db::CockroachStarterBuilder::new()
+                .max_sql_memory_mib(32);
         let starter = builder.build().expect("Failed to build CRDB starter");
         let mut instance = starter.start().await.expect("Failed to start CRDB");
         instance
@@ -3158,9 +3158,9 @@ mod test {
     async fn test_add_constraint_backfill_race() {
         let logctx = dev::test_setup_log("test_add_constraint_backfill_race");
 
-        let mut builder =
-            omicron_test_utils::dev::db::CockroachStarterBuilder::new();
-        builder.arg("--max-sql-memory=32MiB");
+        let builder =
+            omicron_test_utils::dev::db::CockroachStarterBuilder::new()
+                .max_sql_memory_mib(32);
         let starter = builder.build().expect("Failed to build CRDB starter");
         let mut instance = starter.start().await.expect("Failed to start CRDB");
         instance
@@ -3312,9 +3312,9 @@ mod test {
             "test_add_constraint_backfill_race_with_verification",
         );
 
-        let mut builder =
-            omicron_test_utils::dev::db::CockroachStarterBuilder::new();
-        builder.arg("--max-sql-memory=32MiB");
+        let builder =
+            omicron_test_utils::dev::db::CockroachStarterBuilder::new()
+                .max_sql_memory_mib(32);
         let starter = builder.build().expect("Failed to build CRDB starter");
         let mut instance = starter.start().await.expect("Failed to start CRDB");
         instance
@@ -3457,9 +3457,9 @@ mod test {
         let logctx =
             dev::test_setup_log("test_set_not_null_concurrent_rejected");
 
-        let mut builder =
-            omicron_test_utils::dev::db::CockroachStarterBuilder::new();
-        builder.arg("--max-sql-memory=32MiB");
+        let builder =
+            omicron_test_utils::dev::db::CockroachStarterBuilder::new()
+                .max_sql_memory_mib(32);
         let starter = builder.build().expect("Failed to build CRDB starter");
         let mut instance = starter.start().await.expect("Failed to start CRDB");
         instance

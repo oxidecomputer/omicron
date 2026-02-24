@@ -269,7 +269,7 @@ impl CockroachStarterBuilder {
 
     /// Convenience wrapper for self.cmd_builder.arg() that records the arguments
     /// so that we can print out the command line before we run it
-    pub fn arg<S: AsRef<OsStr>>(&mut self, arg: S) -> &mut Self {
+    fn arg<S: AsRef<OsStr>>(&mut self, arg: S) -> &mut Self {
         let arg = arg.as_ref();
         self.args.push(arg.to_string_lossy().to_string());
         self.cmd_builder.arg(arg);

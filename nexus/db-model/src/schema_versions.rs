@@ -726,7 +726,6 @@ impl SchemaVersion {
                 "orphaned verification file {orphan} has no corresponding \
                  up*.sql file in {directory}"
             );
-
         }
 
         Ok(SchemaVersion { semver, upgrade_from_previous: steps })
