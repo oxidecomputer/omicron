@@ -434,7 +434,7 @@ impl From<v1::UplinkAddressConfig> for UplinkAddressConfig {
 }
 
 #[derive(Debug, PartialEq, Eq, Deserialize, Serialize)]
-pub struct UplinkAddressConfigError(pub(super) String);
+pub struct UplinkAddressConfigError(pub(crate) String);
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq, JsonSchema)]
 pub struct BgpConfig {

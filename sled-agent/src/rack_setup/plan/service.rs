@@ -1329,8 +1329,8 @@ mod tests {
     use omicron_common::address::IpRange;
     use omicron_common::api::external::ByteCount;
     use omicron_common::api::internal::shared::AllowedSourceIps;
-    use omicron_common::api::internal::shared::RackNetworkConfig;
     use oxnet::Ipv6Net;
+    use sled_agent_types::early_networking::RackNetworkConfig;
     use sled_agent_types::inventory::ConfigReconcilerInventoryStatus;
     use sled_agent_types::inventory::OmicronFileSourceResolverInventory;
     use sled_agent_types::inventory::SledCpuFamily;

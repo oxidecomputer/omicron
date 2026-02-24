@@ -92,7 +92,6 @@ use ntp_admin_client::{
 };
 use omicron_common::address::{COCKROACH_ADMIN_PORT, NTP_ADMIN_PORT};
 use omicron_common::api::external::Generation;
-use omicron_common::api::internal::shared::LldpAdminStatus;
 use omicron_common::backoff::{
     BackoffError, retry_notify, retry_policy_internal_service_aggressive,
 };
@@ -108,7 +107,7 @@ use sled_agent_client::{
 };
 use sled_agent_config_reconciler::InternalDisksReceiver;
 use sled_agent_types::early_networking::{
-    EarlyNetworkConfig, EarlyNetworkConfigBody,
+    EarlyNetworkConfig, EarlyNetworkConfigBody, LldpAdminStatus,
 };
 use sled_agent_types::inventory::{
     ConfigReconcilerInventoryResult, HostPhase2DesiredSlots, OmicronSledConfig,
@@ -985,22 +984,13 @@ impl ServiceInner {
                 bfd: config
                     .bfd
                     .iter()
-                    .map(|spec| {
-                        NexusTypes::BfdPeerConfig {
-                    detection_threshold: spec.detection_threshold,
-                    local: spec.local,
-                    mode: match spec.mode {
-                        omicron_common::api::external::BfdMode::SingleHop => {
-                            NexusTypes::BfdMode::SingleHop
-                        }
-                        omicron_common::api::external::BfdMode::MultiHop => {
-                            NexusTypes::BfdMode::MultiHop
-                        }
-                    },
-                    remote: spec.remote,
-                    required_rx: spec.required_rx,
-                    switch: spec.switch.into(),
-                }
+                    .map(|spec| NexusTypes::BfdPeerConfig {
+                        detection_threshold: spec.detection_threshold,
+                        local: spec.local,
+                        mode: spec.mode,
+                        remote: spec.remote,
+                        required_rx: spec.required_rx,
+                        switch: spec.switch.into(),
                     })
                     .collect(),
             }

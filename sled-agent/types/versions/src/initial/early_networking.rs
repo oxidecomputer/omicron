@@ -182,7 +182,7 @@ pub struct UplinkAddressConfig {
 }
 
 #[derive(Debug, PartialEq, Eq, Deserialize, Serialize)]
-pub struct UplinkAddressConfigError(pub(super) String);
+pub struct UplinkAddressConfigError(pub(crate) String);
 
 #[derive(
     Clone, Debug, Default, Deserialize, Serialize, PartialEq, Eq, JsonSchema,
@@ -198,7 +198,7 @@ pub enum LldpAdminStatus {
 }
 
 #[derive(Debug, PartialEq, Eq, Deserialize, Serialize)]
-pub struct ParseLldpAdminStatusError(pub(super) String);
+pub struct ParseLldpAdminStatusError(pub(crate) String);
 
 /// Per-port LLDP configuration settings.  Only the "status" setting is
 /// mandatory.  All other fields have natural defaults or may be inherited from
@@ -295,7 +295,7 @@ pub enum SwitchLocation {
 }
 
 #[derive(Debug, PartialEq, Eq, Deserialize, Serialize)]
-pub struct ParseSwitchLocationError(pub(super) String);
+pub struct ParseSwitchLocationError(pub(crate) String);
 
 /// Switchport Speed options
 #[derive(

@@ -99,7 +99,7 @@ pub fn overridables_for_test(
         omicron_nexus::Server,
     >,
 ) -> Overridables {
-    use omicron_common::api::external::SwitchLocation;
+    use sled_agent_types::early_networking::SwitchLocation;
 
     let mut overrides = Overridables::default();
     let scrimlets = [

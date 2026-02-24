@@ -31,17 +31,16 @@ use mg_admin_client::types::{
 use omicron_common::OMICRON_DPD_TAG;
 use omicron_common::address::DENDRITE_PORT;
 use omicron_common::address::{MGD_PORT, MGS_PORT};
-use omicron_common::api::external::{BfdMode, ImportExportPolicy};
-use omicron_common::api::internal::shared::{
-    BgpConfig, BgpPeerConfig, PortConfig, PortFec, PortSpeed,
-    RackNetworkConfig, SwitchLocation,
-};
 use omicron_common::backoff::{
     BackoffError, ExponentialBackoff, ExponentialBackoffBuilder, retry_notify,
 };
 use omicron_ddm_admin_client::DdmError;
 use oxnet::IpNet;
 use rdb_types::{Prefix, Prefix4, Prefix6};
+use sled_agent_types::early_networking::{
+    BfdMode, BgpConfig, BgpPeerConfig, ImportExportPolicy, PortConfig, PortFec,
+    PortSpeed, RackNetworkConfig, SwitchLocation,
+};
 use slog::Logger;
 use slog_error_chain::InlineErrorChain;
 use std::collections::{HashMap, HashSet};
@@ -442,92 +441,86 @@ impl<'a> EarlyNetworkSetup<'a> {
             HashMap::<String, Vec<MgUnnumberedBgpPeerConfig>>::new();
 
         // Helper function to build IPv4 unicast import/export policies
-        let build_ipv4_unicast =
-            |peer: &omicron_common::api::internal::shared::BgpPeerConfig| {
-                Ipv4UnicastConfig {
-                    nexthop: None,
-                    import_policy: match &peer.allowed_import {
-                        ImportExportPolicy::NoFiltering => {
-                            MgImportExportPolicy4::NoFiltering
-                        }
-                        ImportExportPolicy::Allow(list) => {
-                            MgImportExportPolicy4::Allow(
-                                list.iter()
-                                    .filter_map(|x| match x {
-                                        IpNet::V4(p) => Some(Prefix4 {
-                                            length: p.width(),
-                                            value: p.addr(),
-                                        }),
-                                        IpNet::V6(_) => None,
-                                    })
-                                    .collect(),
-                            )
-                        }
-                    },
-                    export_policy: match &peer.allowed_export {
-                        ImportExportPolicy::NoFiltering => {
-                            MgImportExportPolicy4::NoFiltering
-                        }
-                        ImportExportPolicy::Allow(list) => {
-                            MgImportExportPolicy4::Allow(
-                                list.iter()
-                                    .filter_map(|x| match x {
-                                        IpNet::V4(p) => Some(Prefix4 {
-                                            length: p.width(),
-                                            value: p.addr(),
-                                        }),
-                                        IpNet::V6(_) => None,
-                                    })
-                                    .collect(),
-                            )
-                        }
-                    },
+        let build_ipv4_unicast = |peer: &BgpPeerConfig| Ipv4UnicastConfig {
+            nexthop: None,
+            import_policy: match &peer.allowed_import {
+                ImportExportPolicy::NoFiltering => {
+                    MgImportExportPolicy4::NoFiltering
                 }
-            };
+                ImportExportPolicy::Allow(list) => {
+                    MgImportExportPolicy4::Allow(
+                        list.iter()
+                            .filter_map(|x| match x {
+                                IpNet::V4(p) => Some(Prefix4 {
+                                    length: p.width(),
+                                    value: p.addr(),
+                                }),
+                                IpNet::V6(_) => None,
+                            })
+                            .collect(),
+                    )
+                }
+            },
+            export_policy: match &peer.allowed_export {
+                ImportExportPolicy::NoFiltering => {
+                    MgImportExportPolicy4::NoFiltering
+                }
+                ImportExportPolicy::Allow(list) => {
+                    MgImportExportPolicy4::Allow(
+                        list.iter()
+                            .filter_map(|x| match x {
+                                IpNet::V4(p) => Some(Prefix4 {
+                                    length: p.width(),
+                                    value: p.addr(),
+                                }),
+                                IpNet::V6(_) => None,
+                            })
+                            .collect(),
+                    )
+                }
+            },
+        };
 
         // Helper function to build IPv6 unicast import/export policies
-        let build_ipv6_unicast =
-            |peer: &omicron_common::api::internal::shared::BgpPeerConfig| {
-                Ipv6UnicastConfig {
-                    nexthop: None,
-                    import_policy: match &peer.allowed_import {
-                        ImportExportPolicy::NoFiltering => {
-                            MgImportExportPolicy6::NoFiltering
-                        }
-                        ImportExportPolicy::Allow(list) => {
-                            MgImportExportPolicy6::Allow(
-                                list.iter()
-                                    .filter_map(|x| match x {
-                                        IpNet::V6(p) => Some(Prefix6 {
-                                            length: p.width(),
-                                            value: p.addr(),
-                                        }),
-                                        IpNet::V4(_) => None,
-                                    })
-                                    .collect(),
-                            )
-                        }
-                    },
-                    export_policy: match &peer.allowed_export {
-                        ImportExportPolicy::NoFiltering => {
-                            MgImportExportPolicy6::NoFiltering
-                        }
-                        ImportExportPolicy::Allow(list) => {
-                            MgImportExportPolicy6::Allow(
-                                list.iter()
-                                    .filter_map(|x| match x {
-                                        IpNet::V6(p) => Some(Prefix6 {
-                                            length: p.width(),
-                                            value: p.addr(),
-                                        }),
-                                        IpNet::V4(_) => None,
-                                    })
-                                    .collect(),
-                            )
-                        }
-                    },
+        let build_ipv6_unicast = |peer: &BgpPeerConfig| Ipv6UnicastConfig {
+            nexthop: None,
+            import_policy: match &peer.allowed_import {
+                ImportExportPolicy::NoFiltering => {
+                    MgImportExportPolicy6::NoFiltering
                 }
-            };
+                ImportExportPolicy::Allow(list) => {
+                    MgImportExportPolicy6::Allow(
+                        list.iter()
+                            .filter_map(|x| match x {
+                                IpNet::V6(p) => Some(Prefix6 {
+                                    length: p.width(),
+                                    value: p.addr(),
+                                }),
+                                IpNet::V4(_) => None,
+                            })
+                            .collect(),
+                    )
+                }
+            },
+            export_policy: match &peer.allowed_export {
+                ImportExportPolicy::NoFiltering => {
+                    MgImportExportPolicy6::NoFiltering
+                }
+                ImportExportPolicy::Allow(list) => {
+                    MgImportExportPolicy6::Allow(
+                        list.iter()
+                            .filter_map(|x| match x {
+                                IpNet::V6(p) => Some(Prefix6 {
+                                    length: p.width(),
+                                    value: p.addr(),
+                                }),
+                                IpNet::V4(_) => None,
+                            })
+                            .collect(),
+                    )
+                }
+            },
+        };
 
         // Iterate through ports and apply BGP config.
         for port in &our_ports {

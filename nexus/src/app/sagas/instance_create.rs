@@ -26,13 +26,13 @@ use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::Name;
 use omicron_common::api::external::NameOrId;
 use omicron_common::api::external::{Error, InternalContext};
-use omicron_common::api::internal::shared::SwitchLocation;
 use omicron_uuid_kinds::{
     AntiAffinityGroupUuid, GenericUuid, InstanceUuid, MulticastGroupUuid,
 };
 use ref_cast::RefCast;
 use serde::Deserialize;
 use serde::Serialize;
+use sled_agent_types::early_networking::SwitchLocation;
 use slog::{info, warn};
 use std::collections::HashSet;
 use std::convert::TryFrom;
@@ -1495,8 +1495,8 @@ pub mod test {
     use omicron_common::api::external::{
         ByteCount, IdentityMetadataCreateParams, InstanceCpuCount,
     };
-    use omicron_common::api::internal::shared::SwitchLocation;
     use omicron_sled_agent::sim::SledAgent;
+    use sled_agent_types::early_networking::SwitchLocation;
     use std::collections::HashSet;
     use uuid::Uuid;
 

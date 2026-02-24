@@ -1146,8 +1146,8 @@ mod test {
     use omicron_common::api::external::{
         ByteCount, IdentityMetadataCreateParams, InstanceCpuCount, Name,
     };
-    use omicron_common::api::internal::shared::SwitchLocation;
     use omicron_test_utils::dev::poll;
+    use sled_agent_types::early_networking::SwitchLocation;
     use uuid::Uuid;
 
     use super::*;
