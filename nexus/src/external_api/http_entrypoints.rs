@@ -1221,10 +1221,10 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 project::ProjectSelector { project: path.project };
             let project_lookup =
                 nexus.project_lookup(&opctx, project_selector)?;
-            nexus
+            let policy = nexus
                 .project_update_policy(&opctx, &project_lookup, &new_policy)
                 .await?;
-            Ok(HttpResponseOk(new_policy))
+            Ok(HttpResponseOk(policy))
         })
         .await
     }
