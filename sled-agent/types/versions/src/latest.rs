@@ -95,7 +95,6 @@ pub mod inventory {
     pub use crate::v1::inventory::HostPhase2DesiredSlots;
     pub use crate::v1::inventory::InventoryDataset;
     pub use crate::v1::inventory::InventoryDisk;
-    pub use crate::v1::inventory::InventoryZpool;
     pub use crate::v1::inventory::ManifestBootInventory;
     pub use crate::v1::inventory::ManifestInventory;
     pub use crate::v1::inventory::ManifestNonBootInventory;
@@ -127,6 +126,8 @@ pub mod inventory {
     pub use crate::v16::inventory::ConfigReconcilerInventory;
     pub use crate::v16::inventory::Inventory;
     pub use crate::v16::inventory::SingleMeasurementInventory;
+
+    pub use crate::v23::inventory::InventoryZpool;
 
     pub use crate::impls::inventory::ManifestBootInventoryDisplay;
     pub use crate::impls::inventory::ManifestInventoryDisplay;

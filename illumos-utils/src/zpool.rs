@@ -6,6 +6,8 @@
 
 use crate::{ExecutionError, PFEXEC, execute_async};
 use camino::{Utf8Path, Utf8PathBuf};
+use schemars::JsonSchema;
+use serde::{Deserialize, Serialize};
 use std::str::FromStr;
 use tokio::process::Command;
 
@@ -60,7 +62,10 @@ pub struct GetInfoError {
     err: Error,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(
+    Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema,
+)]
+#[serde(rename_all = "snake_case")]
 pub enum ZpoolHealth {
     /// The device is online and functioning.
     Online,
