@@ -9,45 +9,10 @@ loaded example system with:
 
 > # Create a TUF repository from a fake manifest. We're going to use this
 > # repository to test out the minimum release generation flow.
-> tuf-assemble ../../update-common/manifests/fake.toml
-INFO assembling repository in <ASSEMBLING_REPOSITORY_IN_REDACTED>
-INFO artifacts assembled and archived to `repo-1.0.0.zip`, component: OmicronRepoAssembler
+> generate-fake-repo 1.0.0
 created repo-1.0.0.zip for system version 1.0.0
 
 > set target-release repo-1.0.0.zip
-INFO extracting uploaded archive to <EXTRACTING_UPLOADED_ARCHIVE_TO_REDACTED>
-INFO created directory to store extracted artifacts, path: <CREATED_DIRECTORY_TO_STORE_EXTRACTED_ARTIFACTS_PATH_REDACTED>
-INFO added artifact, name: fake-gimlet-sp, kind: gimlet_sp, version: 1.0.0, hash: 68465b8e3f808f475510b525cfd62086d37ddd57688bd854184fdafb2b2198a4, length: 732
-INFO added artifact, name: fake-rot, kind: gimlet_rot_image_a, version: 1.0.0, hash: d11e65f934bf0de51df2e5b484f61ee72072417b43ac87f33e958008428e7b02, length: 783
-INFO added artifact, name: fake-rot, kind: gimlet_rot_image_b, version: 1.0.0, hash: d11e65f934bf0de51df2e5b484f61ee72072417b43ac87f33e958008428e7b02, length: 783
-INFO added artifact, name: fake-rot-bootloader, kind: gimlet_rot_bootloader, version: 1.0.0, hash: 5b0f601b1fbb8674db9c751a02f8b14f8e6d4e8470f4f7b686fecb2c49ec11f9, length: 797
-INFO added artifact, name: fake-host, kind: gimlet_host_phase_1, version: 1.0.0, hash: b99d5273ba1418bebb19d74b701d716896409566d41de76ada71bded4c9b166b, length: 524288
-INFO added artifact, name: fake-host, kind: cosmo_host_phase_1, version: 1.0.0, hash: 9525f567106549a3fc32df870a74803d77e51dcc44190b218e227a2c5d444f58, length: 524288
-INFO added artifact, name: fake-host, kind: host_phase_2, version: 1.0.0, hash: d944ae205b61ccf4322448f7d0311a819c53d9844769de066c5307c1682abb47, length: 1048576
-INFO added artifact, name: fake-trampoline, kind: gimlet_trampoline_phase_1, version: 1.0.0, hash: bcb27520ee5a56e19f6df9662c66d69ac681fbd873a97547be5f6a5ae3d250c4, length: 524288
-INFO added artifact, name: fake-trampoline, kind: cosmo_trampoline_phase_1, version: 1.0.0, hash: e235b8afb58ee69d966853bd5efe7c7e904da84b9035a332b3e691dc1d5cdbd0, length: 524288
-INFO added artifact, name: fake-trampoline, kind: trampoline_phase_2, version: 1.0.0, hash: a5dfcc4bc69b791f1c509df499e9e72cce844cb2b53a56d8bb357b264bdf13b6, length: 1048576
-INFO added artifact, name: clickhouse, kind: zone, version: 1.0.0, hash: 52b1eb4daff6f9140491d547b11248392920230db3db0eef5f5fa5333fe9e659, length: 1686
-INFO added artifact, name: clickhouse_keeper, kind: zone, version: 1.0.0, hash: cda702919449d86663be97295043aeca0ead69ae5db3bbdb20053972254a27a3, length: 1690
-INFO added artifact, name: clickhouse_server, kind: zone, version: 1.0.0, hash: 5f9ae6a9821bbe8ff0bf60feddf8b167902fe5f3e2c98bd21edd1ec9d969a001, length: 1690
-INFO added artifact, name: cockroachdb, kind: zone, version: 1.0.0, hash: f3a1a3c0b3469367b005ee78665d982059d5e14e93a479412426bf941c4ed291, length: 1689
-INFO added artifact, name: crucible-zone, kind: zone, version: 1.0.0, hash: 6f17cf65fb5a5bec5542dd07c03cd0acc01e59130f02c532c8d848ecae810047, length: 1690
-INFO added artifact, name: crucible-pantry-zone, kind: zone, version: 1.0.0, hash: 21f0ada306859c23917361f2e0b9235806c32607ec689c7e8cf16bb898bc5a02, length: 1695
-INFO added artifact, name: external-dns, kind: zone, version: 1.0.0, hash: ccca13ed19b8731f9adaf0d6203b02ea3b9ede4fa426b9fac0a07ce95440046d, length: 1689
-INFO added artifact, name: internal-dns, kind: zone, version: 1.0.0, hash: ffbf1373f7ee08dddd74c53ed2a94e7c4c572a982d3a9bc94000c6956b700c6a, length: 1689
-INFO added artifact, name: ntp, kind: zone, version: 1.0.0, hash: 67593d686ed04a1709f93972b71f4ebc148a9362120f65d239943e814a9a7439, length: 1681
-INFO added artifact, name: nexus, kind: zone, version: 1.0.0, hash: 0e32b4a3e5d3668bb1d6a16fb06b74dc60b973fa479dcee0aae3adbb52bf1388, length: 1682
-INFO added artifact, name: oximeter, kind: zone, version: 1.0.0, hash: 048d8fe8cdef5b175aad714d0f148aa80ce36c9114ac15ce9d02ed3d37877a77, length: 1682
-INFO added artifact, name: fake-corpus, kind: measurement_corpus, version: 1.0.0, hash: 8a0e23157bae655fceec7376926c9758efee6511c7b7ff8355bbb49545a2257f, length: 1048576
-INFO added artifact, name: fake-psc-sp, kind: psc_sp, version: 1.0.0, hash: 89245fe2ac7e6a2ac8dfa4e7d6891a6e6df95e4141395c07c64026778f6d76d7, length: 721
-INFO added artifact, name: fake-psc-rot, kind: psc_rot_image_a, version: 1.0.0, hash: 5d8ea834dd6d42d386f1eb8a2c5f6e99b697c9958bb4ab8edf63e56003e25d8d, length: 775
-INFO added artifact, name: fake-psc-rot, kind: psc_rot_image_b, version: 1.0.0, hash: 5d8ea834dd6d42d386f1eb8a2c5f6e99b697c9958bb4ab8edf63e56003e25d8d, length: 775
-INFO added artifact, name: fake-psc-rot-bootloader, kind: psc_rot_bootloader, version: 1.0.0, hash: 18c9c774bfe4bb086e869509dcccacee8476fd87670692b765aee216f2c7f003, length: 805
-INFO added artifact, name: fake-switch-sp, kind: switch_sp, version: 1.0.0, hash: bf1bc1da5059f76182c3007c3049941f8898abede2f3765b106c6e7f7c42d44c, length: 740
-INFO added artifact, name: fake-switch-rot, kind: switch_rot_image_a, version: 1.0.0, hash: 32307d6d75c9707e8499ba4a4d379f99c0358237b6e190ff6a8024b470f62342, length: 774
-INFO added artifact, name: fake-switch-rot, kind: switch_rot_image_b, version: 1.0.0, hash: 32307d6d75c9707e8499ba4a4d379f99c0358237b6e190ff6a8024b470f62342, length: 774
-INFO added artifact, name: fake-switch-rot-bootloader, kind: switch_rot_bootloader, version: 1.0.0, hash: 70836d170abd5621f95bb4225987b27b3d3dd6168e73cd60e44309bdfeb94e98, length: 804
-INFO added artifact, name: installinator_document, kind: installinator_document, version: 1.0.0, hash: 16717c0caa420c7811666e720936c7ca913cd59a4d376331cc79a90544e5e2e8, length: 526
 set target release based on repo-1.0.0.zip
 
 
@@ -133,10 +98,10 @@ Sled serial0
         A    0101010101010101010101010101010101010101010101010101010101010101 
         B    0202020202020202020202020202020202020202020202020202020202020202 
     cabooses:
-        SLOT     BOARD       NAME        VERSION GIT_COMMIT SIGN        
-        SpSlot0  SimGimletSp SimGimletSp 0.0.1   unknown    n/a         
-        RotSlotA SimRot      SimRot      0.0.2   unknown    sign-gimlet 
-        Stage0   SimRot      SimRot      0.0.1   unknown    sign-gimlet 
+        SLOT     BOARD       NAME        VERSION GIT_COMMIT SIGN                                                             
+        SpSlot0  SimGimletSp SimGimletSp 0.0.1   unknown    n/a                                                              
+        RotSlotA SimRot      SimRot      0.0.2   unknown    0000000000000000000000000000000000000000000000000000000000000000 
+        Stage0   SimRot      SimRot      0.0.1   unknown    0000000000000000000000000000000000000000000000000000000000000000 
     RoT pages:
         SLOT DATA_BASE64 
     RoT: active slot: slot A
@@ -158,10 +123,10 @@ Sled serial1
         A    0101010101010101010101010101010101010101010101010101010101010101 
         B    0202020202020202020202020202020202020202020202020202020202020202 
     cabooses:
-        SLOT     BOARD       NAME        VERSION GIT_COMMIT SIGN        
-        SpSlot0  SimGimletSp SimGimletSp 0.0.1   unknown    n/a         
-        RotSlotA SimRot      SimRot      0.0.2   unknown    sign-gimlet 
-        Stage0   SimRot      SimRot      0.0.1   unknown    sign-gimlet 
+        SLOT     BOARD       NAME        VERSION GIT_COMMIT SIGN                                                             
+        SpSlot0  SimGimletSp SimGimletSp 0.0.1   unknown    n/a                                                              
+        RotSlotA SimRot      SimRot      0.0.2   unknown    0000000000000000000000000000000000000000000000000000000000000000 
+        Stage0   SimRot      SimRot      0.0.1   unknown    0000000000000000000000000000000000000000000000000000000000000000 
     RoT pages:
         SLOT DATA_BASE64 
     RoT: active slot: slot A
@@ -183,10 +148,10 @@ Sled serial2
         A    0101010101010101010101010101010101010101010101010101010101010101 
         B    0202020202020202020202020202020202020202020202020202020202020202 
     cabooses:
-        SLOT     BOARD       NAME        VERSION GIT_COMMIT SIGN        
-        SpSlot0  SimGimletSp SimGimletSp 0.0.1   unknown    n/a         
-        RotSlotA SimRot      SimRot      0.0.2   unknown    sign-gimlet 
-        Stage0   SimRot      SimRot      0.0.1   unknown    sign-gimlet 
+        SLOT     BOARD       NAME        VERSION GIT_COMMIT SIGN                                                             
+        SpSlot0  SimGimletSp SimGimletSp 0.0.1   unknown    n/a                                                              
+        RotSlotA SimRot      SimRot      0.0.2   unknown    0000000000000000000000000000000000000000000000000000000000000000 
+        Stage0   SimRot      SimRot      0.0.1   unknown    0000000000000000000000000000000000000000000000000000000000000000 
     RoT pages:
         SLOT DATA_BASE64 
     RoT: active slot: slot A
@@ -417,24 +382,25 @@ LEDGERED SLED CONFIG
             boot disk inventory:
                 manifest generated by sled-agent
                 artifacts in install dataset:
-                  - clickhouse.tar.gz (expected 1686 bytes with hash 52b1eb4daff6f9140491d547b11248392920230db3db0eef5f5fa5333fe9e659): ok
-                  - clickhouse_keeper.tar.gz (expected 1690 bytes with hash cda702919449d86663be97295043aeca0ead69ae5db3bbdb20053972254a27a3): ok
-                  - clickhouse_server.tar.gz (expected 1690 bytes with hash 5f9ae6a9821bbe8ff0bf60feddf8b167902fe5f3e2c98bd21edd1ec9d969a001): ok
-                  - cockroachdb.tar.gz (expected 1689 bytes with hash f3a1a3c0b3469367b005ee78665d982059d5e14e93a479412426bf941c4ed291): ok
-                  - crucible.tar.gz (expected 1690 bytes with hash 6f17cf65fb5a5bec5542dd07c03cd0acc01e59130f02c532c8d848ecae810047): ok
-                  - crucible_pantry.tar.gz (expected 1695 bytes with hash 21f0ada306859c23917361f2e0b9235806c32607ec689c7e8cf16bb898bc5a02): ok
-                  - external_dns.tar.gz (expected 1689 bytes with hash ccca13ed19b8731f9adaf0d6203b02ea3b9ede4fa426b9fac0a07ce95440046d): ok
-                  - internal_dns.tar.gz (expected 1689 bytes with hash ffbf1373f7ee08dddd74c53ed2a94e7c4c572a982d3a9bc94000c6956b700c6a): ok
-                  - nexus.tar.gz (expected 1682 bytes with hash 0e32b4a3e5d3668bb1d6a16fb06b74dc60b973fa479dcee0aae3adbb52bf1388): ok
-                  - ntp.tar.gz (expected 1681 bytes with hash 67593d686ed04a1709f93972b71f4ebc148a9362120f65d239943e814a9a7439): ok
-                  - oximeter.tar.gz (expected 1682 bytes with hash 048d8fe8cdef5b175aad714d0f148aa80ce36c9114ac15ce9d02ed3d37877a77): ok
+                  - clickhouse.tar.gz (expected 142 bytes with hash 789283e5083ac3ed9ca24f33a6cad81793798298cd5c536c93981829abab9d15): ok
+                  - clickhouse_keeper.tar.gz (expected 147 bytes with hash 2ce04cd4cb5aa9a525637b9f30c2f93f365048221808d95aae16e5c1127d6492): ok
+                  - clickhouse_server.tar.gz (expected 145 bytes with hash 7245b29a4f07273fb8b7a4860f8847babf2b130fe437d30c3ab47b4f274a704e): ok
+                  - cockroachdb.tar.gz (expected 143 bytes with hash 25d7b7f1aa8420f54bf09243ec3206a9bb50eba2cd252cf2279356cdfbbfa101): ok
+                  - crucible.tar.gz (expected 145 bytes with hash 1d071b06c9e0739af8797557d81c84a7dc6d0bf00081ca1ef5c5a40672e11139): ok
+                  - crucible_pantry.tar.gz (expected 150 bytes with hash c537a3ec3f4600cdf0d0d3e279005b54910c87d5ef1b99b8fd85016b79fdedd1): ok
+                  - external_dns.tar.gz (expected 142 bytes with hash 263973cc7d40b6bbe6b33020a903ad0a13e72eff92fa19af51888219588e6cf4): ok
+                  - internal_dns.tar.gz (expected 142 bytes with hash 4ff68308ffa11980380de9036697cd11f94dace9e1d0afae95116541f7f5ffd2): ok
+                  - nexus.tar.gz (expected 135 bytes with hash 7033ac7186a9e1f01a1a9e46d4e8756f3c953cf3cc30e333ceaa0a6bc0d55961): ok
+                  - ntp.tar.gz (expected 135 bytes with hash 2c7a661d288567335a1cabbbb96ec43c648bdfa1323b9c7c4e8de7ff23edeed0): ok
+                  - oximeter.tar.gz (expected 137 bytes with hash cb41cb81f67ffabf0f832927162245fbd79fa2be82430ad6dd03132a34bafefb): ok
             no non-boot disks
         measurement manifest:
             path on boot disk: /fake/path/install/zones.json
             boot disk inventory:
                 manifest generated by sled-agent
                 artifacts in install dataset:
-                  - fake-corpus (expected 1048576 bytes with hash 8a0e23157bae655fceec7376926c9758efee6511c7b7ff8355bbb49545a2257f): ok
+                  - measurements/fake-measurement-id-9830767c45f2a02210a177fabafafe2c84501039289483f72cec299b0c78dbcb.cbor (expected 865 bytes with hash 9830767c45f2a02210a177fabafafe2c84501039289483f72cec299b0c78dbcb): ok
+                  - measurements/fake-measurement-id-ae9279e9135de75e4e137c6da7f939b5a2eae6d931a7f2205df930e37cd58096.cbor (expected 270 bytes with hash ae9279e9135de75e4e137c6da7f939b5a2eae6d931a7f2205df930e37cd58096): ok
             no non-boot disks
         mupdate override:
             path on boot disk: /fake/path/install/mupdate_override.json
@@ -867,39 +833,6 @@ set sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 inventory visibility: visible -> h
 > # Set the target release to a new repo, causing a generation number bump
 > # to 3.
 > set target-release repo-1.0.0.zip
-INFO extracting uploaded archive to <EXTRACTING_UPLOADED_ARCHIVE_TO_REDACTED>
-INFO created directory to store extracted artifacts, path: <CREATED_DIRECTORY_TO_STORE_EXTRACTED_ARTIFACTS_PATH_REDACTED>
-INFO added artifact, name: fake-gimlet-sp, kind: gimlet_sp, version: 1.0.0, hash: 68465b8e3f808f475510b525cfd62086d37ddd57688bd854184fdafb2b2198a4, length: 732
-INFO added artifact, name: fake-rot, kind: gimlet_rot_image_a, version: 1.0.0, hash: d11e65f934bf0de51df2e5b484f61ee72072417b43ac87f33e958008428e7b02, length: 783
-INFO added artifact, name: fake-rot, kind: gimlet_rot_image_b, version: 1.0.0, hash: d11e65f934bf0de51df2e5b484f61ee72072417b43ac87f33e958008428e7b02, length: 783
-INFO added artifact, name: fake-rot-bootloader, kind: gimlet_rot_bootloader, version: 1.0.0, hash: 5b0f601b1fbb8674db9c751a02f8b14f8e6d4e8470f4f7b686fecb2c49ec11f9, length: 797
-INFO added artifact, name: fake-host, kind: gimlet_host_phase_1, version: 1.0.0, hash: b99d5273ba1418bebb19d74b701d716896409566d41de76ada71bded4c9b166b, length: 524288
-INFO added artifact, name: fake-host, kind: cosmo_host_phase_1, version: 1.0.0, hash: 9525f567106549a3fc32df870a74803d77e51dcc44190b218e227a2c5d444f58, length: 524288
-INFO added artifact, name: fake-host, kind: host_phase_2, version: 1.0.0, hash: d944ae205b61ccf4322448f7d0311a819c53d9844769de066c5307c1682abb47, length: 1048576
-INFO added artifact, name: fake-trampoline, kind: gimlet_trampoline_phase_1, version: 1.0.0, hash: bcb27520ee5a56e19f6df9662c66d69ac681fbd873a97547be5f6a5ae3d250c4, length: 524288
-INFO added artifact, name: fake-trampoline, kind: cosmo_trampoline_phase_1, version: 1.0.0, hash: e235b8afb58ee69d966853bd5efe7c7e904da84b9035a332b3e691dc1d5cdbd0, length: 524288
-INFO added artifact, name: fake-trampoline, kind: trampoline_phase_2, version: 1.0.0, hash: a5dfcc4bc69b791f1c509df499e9e72cce844cb2b53a56d8bb357b264bdf13b6, length: 1048576
-INFO added artifact, name: clickhouse, kind: zone, version: 1.0.0, hash: 52b1eb4daff6f9140491d547b11248392920230db3db0eef5f5fa5333fe9e659, length: 1686
-INFO added artifact, name: clickhouse_keeper, kind: zone, version: 1.0.0, hash: cda702919449d86663be97295043aeca0ead69ae5db3bbdb20053972254a27a3, length: 1690
-INFO added artifact, name: clickhouse_server, kind: zone, version: 1.0.0, hash: 5f9ae6a9821bbe8ff0bf60feddf8b167902fe5f3e2c98bd21edd1ec9d969a001, length: 1690
-INFO added artifact, name: cockroachdb, kind: zone, version: 1.0.0, hash: f3a1a3c0b3469367b005ee78665d982059d5e14e93a479412426bf941c4ed291, length: 1689
-INFO added artifact, name: crucible-zone, kind: zone, version: 1.0.0, hash: 6f17cf65fb5a5bec5542dd07c03cd0acc01e59130f02c532c8d848ecae810047, length: 1690
-INFO added artifact, name: crucible-pantry-zone, kind: zone, version: 1.0.0, hash: 21f0ada306859c23917361f2e0b9235806c32607ec689c7e8cf16bb898bc5a02, length: 1695
-INFO added artifact, name: external-dns, kind: zone, version: 1.0.0, hash: ccca13ed19b8731f9adaf0d6203b02ea3b9ede4fa426b9fac0a07ce95440046d, length: 1689
-INFO added artifact, name: internal-dns, kind: zone, version: 1.0.0, hash: ffbf1373f7ee08dddd74c53ed2a94e7c4c572a982d3a9bc94000c6956b700c6a, length: 1689
-INFO added artifact, name: ntp, kind: zone, version: 1.0.0, hash: 67593d686ed04a1709f93972b71f4ebc148a9362120f65d239943e814a9a7439, length: 1681
-INFO added artifact, name: nexus, kind: zone, version: 1.0.0, hash: 0e32b4a3e5d3668bb1d6a16fb06b74dc60b973fa479dcee0aae3adbb52bf1388, length: 1682
-INFO added artifact, name: oximeter, kind: zone, version: 1.0.0, hash: 048d8fe8cdef5b175aad714d0f148aa80ce36c9114ac15ce9d02ed3d37877a77, length: 1682
-INFO added artifact, name: fake-corpus, kind: measurement_corpus, version: 1.0.0, hash: 8a0e23157bae655fceec7376926c9758efee6511c7b7ff8355bbb49545a2257f, length: 1048576
-INFO added artifact, name: fake-psc-sp, kind: psc_sp, version: 1.0.0, hash: 89245fe2ac7e6a2ac8dfa4e7d6891a6e6df95e4141395c07c64026778f6d76d7, length: 721
-INFO added artifact, name: fake-psc-rot, kind: psc_rot_image_a, version: 1.0.0, hash: 5d8ea834dd6d42d386f1eb8a2c5f6e99b697c9958bb4ab8edf63e56003e25d8d, length: 775
-INFO added artifact, name: fake-psc-rot, kind: psc_rot_image_b, version: 1.0.0, hash: 5d8ea834dd6d42d386f1eb8a2c5f6e99b697c9958bb4ab8edf63e56003e25d8d, length: 775
-INFO added artifact, name: fake-psc-rot-bootloader, kind: psc_rot_bootloader, version: 1.0.0, hash: 18c9c774bfe4bb086e869509dcccacee8476fd87670692b765aee216f2c7f003, length: 805
-INFO added artifact, name: fake-switch-sp, kind: switch_sp, version: 1.0.0, hash: bf1bc1da5059f76182c3007c3049941f8898abede2f3765b106c6e7f7c42d44c, length: 740
-INFO added artifact, name: fake-switch-rot, kind: switch_rot_image_a, version: 1.0.0, hash: 32307d6d75c9707e8499ba4a4d379f99c0358237b6e190ff6a8024b470f62342, length: 774
-INFO added artifact, name: fake-switch-rot, kind: switch_rot_image_b, version: 1.0.0, hash: 32307d6d75c9707e8499ba4a4d379f99c0358237b6e190ff6a8024b470f62342, length: 774
-INFO added artifact, name: fake-switch-rot-bootloader, kind: switch_rot_bootloader, version: 1.0.0, hash: 70836d170abd5621f95bb4225987b27b3d3dd6168e73cd60e44309bdfeb94e98, length: 804
-INFO added artifact, name: installinator_document, kind: installinator_document, version: 1.0.0, hash: 16717c0caa420c7811666e720936c7ca913cd59a4d376331cc79a90544e5e2e8, length: 526
 set target release based on repo-1.0.0.zip
 
 
@@ -978,45 +911,10 @@ set sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 inventory visibility: hidden -> vi
 > # But simulate a second mupdate on sled 2. This should invalidate the existing
 > # mupdate override on sled 2 and cause another target release minimum
 > # generation bump.
-> tuf-assemble ../../update-common/manifests/fake-non-semver.toml --allow-non-semver
-INFO assembling repository in <ASSEMBLING_REPOSITORY_IN_REDACTED>
-INFO artifacts assembled and archived to `repo-2.0.0.zip`, component: OmicronRepoAssembler
+> generate-fake-repo 2.0.0
 created repo-2.0.0.zip for system version 2.0.0
 
 > sled-update-install-dataset serial2 --from-repo repo-2.0.0.zip
-INFO extracting uploaded archive to <EXTRACTING_UPLOADED_ARCHIVE_TO_REDACTED>
-INFO created directory to store extracted artifacts, path: <CREATED_DIRECTORY_TO_STORE_EXTRACTED_ARTIFACTS_PATH_REDACTED>
-INFO added artifact, name: fake-gimlet-sp, kind: gimlet_sp, version: 2.0.0, hash: ac329e461b20cfdeaeb225456226b1dc3042e7254d238cc2ccf2903b18a69991, length: 731
-INFO added artifact, name: fake-gimlet-rot, kind: gimlet_rot_image_a, version: 2.0.0, hash: 3ab29e804bcbf382370f9f071b2f0ed71e5bb6af8b01474fcc2a414caccfc9be, length: 782
-INFO added artifact, name: fake-gimlet-rot, kind: gimlet_rot_image_b, version: 2.0.0, hash: 3ab29e804bcbf382370f9f071b2f0ed71e5bb6af8b01474fcc2a414caccfc9be, length: 782
-INFO added artifact, name: fake-gimlet-rot-bootloader, kind: gimlet_rot_bootloader, version: 2.0.0, hash: 8f89bf8bc5f3271650ad72a26fc0d116c910161ca143731473a2b20fb82653cc, length: 800
-INFO added artifact, name: fake-host, kind: gimlet_host_phase_1, version: 2.0.0, hash: 1eba0d79ea9d34558fb3f923a06614bd740649eeb0ca6e5086529dc60cd6f729, length: 524288
-INFO added artifact, name: fake-host, kind: cosmo_host_phase_1, version: 2.0.0, hash: acde77f1a4ee5cf719841b21bb04fd652ddf61387bdbc95a67cc1006009ad611, length: 524288
-INFO added artifact, name: fake-host, kind: host_phase_2, version: 2.0.0, hash: 9ff631b5b7229604ab7c5aae2ee4a34a64772736b332540d38077b3aea6952df, length: 1048576
-INFO added artifact, name: fake-trampoline, kind: gimlet_trampoline_phase_1, version: non-semver, hash: 4c854917481a7bcb7b7c1e63833296b3ac1f8687aae5b950ece75a08cf27f35f, length: 524288
-INFO added artifact, name: fake-trampoline, kind: cosmo_trampoline_phase_1, version: non-semver, hash: 6b4ace7210d67fa3a63b14e007d99fbcad1b4e27e78025c8e467c2341f67c2ba, length: 524288
-INFO added artifact, name: fake-trampoline, kind: trampoline_phase_2, version: non-semver, hash: d7cdc8e1bfd15a830cfdc67868a7c05828090aefc42c8af44aa1104900d09fe5, length: 1048576
-INFO added artifact, name: clickhouse, kind: zone, version: 2.0.0, hash: bb2d1ff02d11f72bc9049ae57f27536207519a1859d29f8d7a90ab3b44d56b08, length: 1687
-INFO added artifact, name: clickhouse_keeper, kind: zone, version: 2.0.0, hash: 1eb9f24be68f13c274aa0ac9b863cec520dbfe762620c328431728d75bfd2198, length: 1691
-INFO added artifact, name: clickhouse_server, kind: zone, version: 2.0.0, hash: 50fe271948672a9af1ba5f96c9d87ff2736fa72d78dfef598a79fa0cc8a00474, length: 1691
-INFO added artifact, name: cockroachdb, kind: zone, version: 2.0.0, hash: ebc82bf181db864b78cb7e3ddedf7ab1dd8fe7b377b02846f3c27cf0387bb387, length: 1690
-INFO added artifact, name: crucible-zone, kind: zone, version: 2.0.0, hash: 866f6a7c2e51c056fb722b5113e80181cc9cd8b712a0d3dbf1edc4ce29e5229e, length: 1691
-INFO added artifact, name: crucible-pantry-zone, kind: zone, version: 2.0.0, hash: 3ff26dad96faa8f67251f5de40458b4f809d536bfe8572134da0e42c2fa12674, length: 1696
-INFO added artifact, name: external-dns, kind: zone, version: 2.0.0, hash: f282c45771429f7bebf71f0cc668521066db57c6bb07fcfccdfb44825d3d930f, length: 1690
-INFO added artifact, name: internal-dns, kind: zone, version: 2.0.0, hash: de30657a72b066b8ef1f56351a0a5d4d7000da0a62c4be9b2e949a107ca8a389, length: 1690
-INFO added artifact, name: ntp, kind: zone, version: 2.0.0, hash: d76e26198daed69cdae04490d7477f8c842e0dbe37d463eac0d0a8d3fb803095, length: 1682
-INFO added artifact, name: nexus, kind: zone, version: 2.0.0, hash: e9b7035f41848a987a798c15ac424cc91dd662b1af0920d58d8aa1ebad7467b6, length: 1683
-INFO added artifact, name: oximeter, kind: zone, version: 2.0.0, hash: 9f4bc56a15d5fd943fdac94309994b8fd73aa2be1ec61faf44bfcf2356c9dc23, length: 1683
-INFO added artifact, name: fake-corpus, kind: measurement_corpus, version: 2.0.0, hash: a1a34c0ca4776c27d67a2a50b231acc96ccbc2645f5e8dd8c2bc27f0eab49855, length: 1048576
-INFO added artifact, name: fake-psc-sp, kind: psc_sp, version: 2.0.0, hash: fe18e9b745f899f71dc9a718311d97c33f79eb579de09990b0cd2032574d9430, length: 729
-INFO added artifact, name: fake-psc-rot, kind: psc_rot_image_a, version: 2.0.0, hash: be3fa620485936ebd70160b79d74f8f5709d9388c1add9b7e0fa7d283943e6a8, length: 776
-INFO added artifact, name: fake-psc-rot, kind: psc_rot_image_b, version: 2.0.0, hash: be3fa620485936ebd70160b79d74f8f5709d9388c1add9b7e0fa7d283943e6a8, length: 776
-INFO added artifact, name: fake-psc-rot-bootloader, kind: psc_rot_bootloader, version: 2.0.0, hash: ca4d5642e1be0acb535ca63804eec2f19e783c33e3a3ebffa843916accaafeb9, length: 799
-INFO added artifact, name: fake-switch-sp, kind: switch_sp, version: 2.0.0, hash: f6c2b7e7b2fc19b17d3d604dbc16da1adcd6966db80fbbd2127f4a7fe123e71b, length: 746
-INFO added artifact, name: fake-switch-rot, kind: switch_rot_image_a, version: 2.0.0, hash: ad32d98232043a39d076b5b90b506fad406767e0ce1298507e1733bc4e576740, length: 791
-INFO added artifact, name: fake-switch-rot, kind: switch_rot_image_b, version: 2.0.0, hash: ad32d98232043a39d076b5b90b506fad406767e0ce1298507e1733bc4e576740, length: 791
-INFO added artifact, name: fake-switch-rot-bootloader, kind: switch_rot_bootloader, version: non-semver-2, hash: ceae102fa428d81aa6c5d9e1c742fb9ca1091ce5b2797ed0bb14615cf678d342, length: 811
-INFO added artifact, name: installinator_document, kind: installinator_document, version: 2.0.0, hash: c380bd9a56dba4c9d4d4ae4c728ea7aadbe61a3ed495b367bfa4e07ff08a423c, length: 526
 sled d81c6a84-79b8-4958-ae41-ea46c9b19763: install dataset updated: from repo at repo-2.0.0.zip (system version 2.0.0)
 
 > sled-set serial2 mupdate-override 1c0ce176-6dc8-4a90-adea-d4a8000751da
@@ -1238,12 +1136,12 @@ INFO performed noop zone image source checks on sled, sled_id: 98e6b7c2-2efa-41c
 INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, slot: a, expected_hash: 0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a
 INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, slot: b, expected_hash: 0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b
 INFO performed noop zone image source checks on sled, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, num_total: 6, num_already_artifact: 0, num_eligible: 0, num_ineligible: 6
-INFO install dataset artifact hash not found in TUF repo, ignoring for noop checks, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, zone_id: 3eeb8d49-eb1a-43f8-bb64-c2338421c2c6, kind: nexus, file_name: nexus.tar.gz, expected_hash: e9b7035f41848a987a798c15ac424cc91dd662b1af0920d58d8aa1ebad7467b6
-INFO install dataset artifact hash not found in TUF repo, ignoring for noop checks, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, zone_id: 75b220ba-a0f4-4872-8202-dc7c87f062d0, kind: crucible_pantry, file_name: crucible_pantry.tar.gz, expected_hash: 3ff26dad96faa8f67251f5de40458b4f809d536bfe8572134da0e42c2fa12674
-INFO install dataset artifact hash not found in TUF repo, ignoring for noop checks, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, zone_id: ea5b4030-b52f-44b2-8d70-45f15f987d01, kind: internal_dns, file_name: internal_dns.tar.gz, expected_hash: de30657a72b066b8ef1f56351a0a5d4d7000da0a62c4be9b2e949a107ca8a389
-INFO install dataset artifact hash not found in TUF repo, ignoring for noop checks, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, zone_id: f10a4fb9-759f-4a65-b25e-5794ad2d07d8, kind: internal_ntp, file_name: ntp.tar.gz, expected_hash: d76e26198daed69cdae04490d7477f8c842e0dbe37d463eac0d0a8d3fb803095
-INFO install dataset artifact hash not found in TUF repo, ignoring for noop checks, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, zone_id: f55647d4-5500-4ad3-893a-df45bd50d622, kind: crucible, file_name: crucible.tar.gz, expected_hash: 866f6a7c2e51c056fb722b5113e80181cc9cd8b712a0d3dbf1edc4ce29e5229e
-INFO install dataset artifact hash not found in TUF repo, ignoring for noop checks, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, zone_id: f6ec9c67-946a-4da3-98d5-581f72ce8bf0, kind: external_dns, file_name: external_dns.tar.gz, expected_hash: f282c45771429f7bebf71f0cc668521066db57c6bb07fcfccdfb44825d3d930f
+INFO install dataset artifact hash not found in TUF repo, ignoring for noop checks, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, zone_id: 3eeb8d49-eb1a-43f8-bb64-c2338421c2c6, kind: nexus, file_name: nexus.tar.gz, expected_hash: 984ae2cf5cc36fad121ab59416a2ae0101e9d06cbf76f056c3fcc2cd925a504b
+INFO install dataset artifact hash not found in TUF repo, ignoring for noop checks, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, zone_id: 75b220ba-a0f4-4872-8202-dc7c87f062d0, kind: crucible_pantry, file_name: crucible_pantry.tar.gz, expected_hash: addc4ed18936fcdae28bb14ec868930765bce4948be459599d7e9991ed24ee87
+INFO install dataset artifact hash not found in TUF repo, ignoring for noop checks, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, zone_id: ea5b4030-b52f-44b2-8d70-45f15f987d01, kind: internal_dns, file_name: internal_dns.tar.gz, expected_hash: 33e4710c8652ceb7be7f51f45c23fd040321ac4eb7bc28eeae6aba1ee8be55f3
+INFO install dataset artifact hash not found in TUF repo, ignoring for noop checks, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, zone_id: f10a4fb9-759f-4a65-b25e-5794ad2d07d8, kind: internal_ntp, file_name: ntp.tar.gz, expected_hash: 8f0613ee91aac7c8c25fb0abfd94f7b768e44e1bdb683663d3eb6222b5318b8e
+INFO install dataset artifact hash not found in TUF repo, ignoring for noop checks, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, zone_id: f55647d4-5500-4ad3-893a-df45bd50d622, kind: crucible, file_name: crucible.tar.gz, expected_hash: e7de2c66e29bebe8288deda473918e827b4755abe82bb7859630eba9ef8a5736
+INFO install dataset artifact hash not found in TUF repo, ignoring for noop checks, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, zone_id: f6ec9c67-946a-4da3-98d5-581f72ce8bf0, kind: external_dns, file_name: external_dns.tar.gz, expected_hash: 6f93ba47f58e2dc9f8d977905b2da6689177151d6350173d02fa174b8118cf5b
 INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, slot: a, expected_hash: 0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a
 INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, slot: b, expected_hash: 0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b
 generated blueprint afb09faf-a586-4483-9289-04d4f1d8ba23 based on parent blueprint c1a0d242-9160-40f4-96ae-61f8f40a0b1b
@@ -1546,39 +1444,6 @@ external DNS:
 > # Now set the target release -- at this point, we're still waiting on the
 > # sled with the mupdate override error to be cleared.
 > set target-release repo-2.0.0.zip
-INFO extracting uploaded archive to <EXTRACTING_UPLOADED_ARCHIVE_TO_REDACTED>
-INFO created directory to store extracted artifacts, path: <CREATED_DIRECTORY_TO_STORE_EXTRACTED_ARTIFACTS_PATH_REDACTED>
-INFO added artifact, name: fake-gimlet-sp, kind: gimlet_sp, version: 2.0.0, hash: ac329e461b20cfdeaeb225456226b1dc3042e7254d238cc2ccf2903b18a69991, length: 731
-INFO added artifact, name: fake-gimlet-rot, kind: gimlet_rot_image_a, version: 2.0.0, hash: 3ab29e804bcbf382370f9f071b2f0ed71e5bb6af8b01474fcc2a414caccfc9be, length: 782
-INFO added artifact, name: fake-gimlet-rot, kind: gimlet_rot_image_b, version: 2.0.0, hash: 3ab29e804bcbf382370f9f071b2f0ed71e5bb6af8b01474fcc2a414caccfc9be, length: 782
-INFO added artifact, name: fake-gimlet-rot-bootloader, kind: gimlet_rot_bootloader, version: 2.0.0, hash: 8f89bf8bc5f3271650ad72a26fc0d116c910161ca143731473a2b20fb82653cc, length: 800
-INFO added artifact, name: fake-host, kind: gimlet_host_phase_1, version: 2.0.0, hash: 1eba0d79ea9d34558fb3f923a06614bd740649eeb0ca6e5086529dc60cd6f729, length: 524288
-INFO added artifact, name: fake-host, kind: cosmo_host_phase_1, version: 2.0.0, hash: acde77f1a4ee5cf719841b21bb04fd652ddf61387bdbc95a67cc1006009ad611, length: 524288
-INFO added artifact, name: fake-host, kind: host_phase_2, version: 2.0.0, hash: 9ff631b5b7229604ab7c5aae2ee4a34a64772736b332540d38077b3aea6952df, length: 1048576
-INFO added artifact, name: fake-trampoline, kind: gimlet_trampoline_phase_1, version: non-semver, hash: 4c854917481a7bcb7b7c1e63833296b3ac1f8687aae5b950ece75a08cf27f35f, length: 524288
-INFO added artifact, name: fake-trampoline, kind: cosmo_trampoline_phase_1, version: non-semver, hash: 6b4ace7210d67fa3a63b14e007d99fbcad1b4e27e78025c8e467c2341f67c2ba, length: 524288
-INFO added artifact, name: fake-trampoline, kind: trampoline_phase_2, version: non-semver, hash: d7cdc8e1bfd15a830cfdc67868a7c05828090aefc42c8af44aa1104900d09fe5, length: 1048576
-INFO added artifact, name: clickhouse, kind: zone, version: 2.0.0, hash: bb2d1ff02d11f72bc9049ae57f27536207519a1859d29f8d7a90ab3b44d56b08, length: 1687
-INFO added artifact, name: clickhouse_keeper, kind: zone, version: 2.0.0, hash: 1eb9f24be68f13c274aa0ac9b863cec520dbfe762620c328431728d75bfd2198, length: 1691
-INFO added artifact, name: clickhouse_server, kind: zone, version: 2.0.0, hash: 50fe271948672a9af1ba5f96c9d87ff2736fa72d78dfef598a79fa0cc8a00474, length: 1691
-INFO added artifact, name: cockroachdb, kind: zone, version: 2.0.0, hash: ebc82bf181db864b78cb7e3ddedf7ab1dd8fe7b377b02846f3c27cf0387bb387, length: 1690
-INFO added artifact, name: crucible-zone, kind: zone, version: 2.0.0, hash: 866f6a7c2e51c056fb722b5113e80181cc9cd8b712a0d3dbf1edc4ce29e5229e, length: 1691
-INFO added artifact, name: crucible-pantry-zone, kind: zone, version: 2.0.0, hash: 3ff26dad96faa8f67251f5de40458b4f809d536bfe8572134da0e42c2fa12674, length: 1696
-INFO added artifact, name: external-dns, kind: zone, version: 2.0.0, hash: f282c45771429f7bebf71f0cc668521066db57c6bb07fcfccdfb44825d3d930f, length: 1690
-INFO added artifact, name: internal-dns, kind: zone, version: 2.0.0, hash: de30657a72b066b8ef1f56351a0a5d4d7000da0a62c4be9b2e949a107ca8a389, length: 1690
-INFO added artifact, name: ntp, kind: zone, version: 2.0.0, hash: d76e26198daed69cdae04490d7477f8c842e0dbe37d463eac0d0a8d3fb803095, length: 1682
-INFO added artifact, name: nexus, kind: zone, version: 2.0.0, hash: e9b7035f41848a987a798c15ac424cc91dd662b1af0920d58d8aa1ebad7467b6, length: 1683
-INFO added artifact, name: oximeter, kind: zone, version: 2.0.0, hash: 9f4bc56a15d5fd943fdac94309994b8fd73aa2be1ec61faf44bfcf2356c9dc23, length: 1683
-INFO added artifact, name: fake-corpus, kind: measurement_corpus, version: 2.0.0, hash: a1a34c0ca4776c27d67a2a50b231acc96ccbc2645f5e8dd8c2bc27f0eab49855, length: 1048576
-INFO added artifact, name: fake-psc-sp, kind: psc_sp, version: 2.0.0, hash: fe18e9b745f899f71dc9a718311d97c33f79eb579de09990b0cd2032574d9430, length: 729
-INFO added artifact, name: fake-psc-rot, kind: psc_rot_image_a, version: 2.0.0, hash: be3fa620485936ebd70160b79d74f8f5709d9388c1add9b7e0fa7d283943e6a8, length: 776
-INFO added artifact, name: fake-psc-rot, kind: psc_rot_image_b, version: 2.0.0, hash: be3fa620485936ebd70160b79d74f8f5709d9388c1add9b7e0fa7d283943e6a8, length: 776
-INFO added artifact, name: fake-psc-rot-bootloader, kind: psc_rot_bootloader, version: 2.0.0, hash: ca4d5642e1be0acb535ca63804eec2f19e783c33e3a3ebffa843916accaafeb9, length: 799
-INFO added artifact, name: fake-switch-sp, kind: switch_sp, version: 2.0.0, hash: f6c2b7e7b2fc19b17d3d604dbc16da1adcd6966db80fbbd2127f4a7fe123e71b, length: 746
-INFO added artifact, name: fake-switch-rot, kind: switch_rot_image_a, version: 2.0.0, hash: ad32d98232043a39d076b5b90b506fad406767e0ce1298507e1733bc4e576740, length: 791
-INFO added artifact, name: fake-switch-rot, kind: switch_rot_image_b, version: 2.0.0, hash: ad32d98232043a39d076b5b90b506fad406767e0ce1298507e1733bc4e576740, length: 791
-INFO added artifact, name: fake-switch-rot-bootloader, kind: switch_rot_bootloader, version: non-semver-2, hash: ceae102fa428d81aa6c5d9e1c742fb9ca1091ce5b2797ed0bb14615cf678d342, length: 811
-INFO added artifact, name: installinator_document, kind: installinator_document, version: 2.0.0, hash: c380bd9a56dba4c9d4d4ae4c728ea7aadbe61a3ed495b367bfa4e07ff08a423c, length: 526
 set target release based on repo-2.0.0.zip
 
 > blueprint-plan latest latest
@@ -1977,7 +1842,7 @@ INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noo
 INFO performed noop zone image source checks on sled, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, num_total: 6, num_already_artifact: 6, num_eligible: 0, num_ineligible: 0
 INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, slot: a, expected_hash: 0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a
 INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, slot: b, expected_hash: 0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b
-INFO configuring MGS-driven update, artifact_version: 2.0.0, artifact_hash: 8f89bf8bc5f3271650ad72a26fc0d116c910161ca143731473a2b20fb82653cc, expected_stage0_next_version: NoValidVersion, expected_stage0_version: 0.0.1, component: rot_bootloader, sp_slot: 0, sp_type: Sled, serial_number: serial0, part_number: 913-0000019
+INFO configuring MGS-driven update, artifact_version: 2.0.0, artifact_hash: 59783814db2b48b58ce5d914fd27222f856da05fd661164a4ccfec6ecfa45e6d, expected_stage0_next_version: NoValidVersion, expected_stage0_version: 0.0.1, component: rot_bootloader, sp_slot: 0, sp_type: Sled, serial_number: serial0, part_number: 913-0000019
 INFO reached maximum number of pending MGS-driven updates, max: 1
 generated blueprint 12d602a6-5ab4-487a-b94e-eb30cdf30300 based on parent blueprint 8f2d1f39-7c88-4701-aa43-56bf281b28c1
 blueprint source: planner with report:
@@ -2178,7 +2043,7 @@ parent:    8f2d1f39-7c88-4701-aa43-56bf281b28c1
     --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
     sp_type   slot   part_number   serial_number   artifact_hash                                                      artifact_version   details                                                                                                                                                
     --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-    sled      0      913-0000019   serial0         8f89bf8bc5f3271650ad72a26fc0d116c910161ca143731473a2b20fb82653cc   2.0.0              RotBootloader(PendingMgsUpdateRotBootloaderDetails { expected_stage0_version: ArtifactVersion("0.0.1"), expected_stage0_next_version: NoValidVersion })
+    sled      0      913-0000019   serial0         59783814db2b48b58ce5d914fd27222f856da05fd661164a4ccfec6ecfa45e6d   2.0.0              RotBootloader(PendingMgsUpdateRotBootloaderDetails { expected_stage0_version: ArtifactVersion("0.0.1"), expected_stage0_next_version: NoValidVersion })
 
 
 blueprint source: planner with report:
@@ -2277,7 +2142,7 @@ to:   blueprint 12d602a6-5ab4-487a-b94e-eb30cdf30300
     --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
     sp_type   slot   part_number   serial_number   artifact_hash                                                      artifact_version   details                                                                                                                                                
     --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-+   sled      0      913-0000019   serial0         8f89bf8bc5f3271650ad72a26fc0d116c910161ca143731473a2b20fb82653cc   2.0.0              RotBootloader(PendingMgsUpdateRotBootloaderDetails { expected_stage0_version: ArtifactVersion("0.0.1"), expected_stage0_next_version: NoValidVersion })
++   sled      0      913-0000019   serial0         59783814db2b48b58ce5d914fd27222f856da05fd661164a4ccfec6ecfa45e6d   2.0.0              RotBootloader(PendingMgsUpdateRotBootloaderDetails { expected_stage0_version: ArtifactVersion("0.0.1"), expected_stage0_next_version: NoValidVersion })
 
 
 internal DNS:
@@ -2309,11 +2174,11 @@ set sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 RoT settings: slot a -> 2.0.0
 > sled-update-sp serial0 --active 2.0.0
 set sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 SP versions: active -> 2.0.0
 
-> sled-update-host-phase2 serial0 --boot-disk B --slot-b 9ff631b5b7229604ab7c5aae2ee4a34a64772736b332540d38077b3aea6952df
-set sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 host phase 2 details: boot_disk -> B, B -> 9ff631b5b7229604ab7c5aae2ee4a34a64772736b332540d38077b3aea6952df
+> sled-update-host-phase2 serial0 --boot-disk B --slot-b 3243cf430459c07a057df649a21a2412a9804497b25850eb0f6362eceaaca3ec
+set sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 host phase 2 details: boot_disk -> B, B -> 3243cf430459c07a057df649a21a2412a9804497b25850eb0f6362eceaaca3ec
 
-> sled-update-host-phase1 serial0 --active B --slot-b 1eba0d79ea9d34558fb3f923a06614bd740649eeb0ca6e5086529dc60cd6f729
-set sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 host phase 1 details: active -> B, B -> 1eba0d79ea9d34558fb3f923a06614bd740649eeb0ca6e5086529dc60cd6f729
+> sled-update-host-phase1 serial0 --active B --slot-b e35cde7a481d8d17e0e8d4d7e68ee1d19c8e77bb7164129f3f7957150cf9a8fc
+set sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 host phase 1 details: active -> B, B -> e35cde7a481d8d17e0e8d4d7e68ee1d19c8e77bb7164129f3f7957150cf9a8fc
 
 
 > # All the MGS-based updates on sled 1.
@@ -2326,11 +2191,11 @@ set sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c RoT settings: slot a -> 2.0.0
 > sled-update-sp serial1 --active 2.0.0
 set sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c SP versions: active -> 2.0.0
 
-> sled-update-host-phase2 serial1 --boot-disk B --slot-b 9ff631b5b7229604ab7c5aae2ee4a34a64772736b332540d38077b3aea6952df
-set sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c host phase 2 details: boot_disk -> B, B -> 9ff631b5b7229604ab7c5aae2ee4a34a64772736b332540d38077b3aea6952df
+> sled-update-host-phase2 serial1 --boot-disk B --slot-b 3243cf430459c07a057df649a21a2412a9804497b25850eb0f6362eceaaca3ec
+set sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c host phase 2 details: boot_disk -> B, B -> 3243cf430459c07a057df649a21a2412a9804497b25850eb0f6362eceaaca3ec
 
-> sled-update-host-phase1 serial1 --active B --slot-b 1eba0d79ea9d34558fb3f923a06614bd740649eeb0ca6e5086529dc60cd6f729
-set sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c host phase 1 details: active -> B, B -> 1eba0d79ea9d34558fb3f923a06614bd740649eeb0ca6e5086529dc60cd6f729
+> sled-update-host-phase1 serial1 --active B --slot-b e35cde7a481d8d17e0e8d4d7e68ee1d19c8e77bb7164129f3f7957150cf9a8fc
+set sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c host phase 1 details: active -> B, B -> e35cde7a481d8d17e0e8d4d7e68ee1d19c8e77bb7164129f3f7957150cf9a8fc
 
 
 > # All the MGS-based updates on sled 2.
@@ -2343,11 +2208,11 @@ set sled d81c6a84-79b8-4958-ae41-ea46c9b19763 RoT settings: slot a -> 2.0.0
 > sled-update-sp serial2 --active 2.0.0
 set sled d81c6a84-79b8-4958-ae41-ea46c9b19763 SP versions: active -> 2.0.0
 
-> sled-update-host-phase2 serial2 --boot-disk B --slot-b 9ff631b5b7229604ab7c5aae2ee4a34a64772736b332540d38077b3aea6952df
-set sled d81c6a84-79b8-4958-ae41-ea46c9b19763 host phase 2 details: boot_disk -> B, B -> 9ff631b5b7229604ab7c5aae2ee4a34a64772736b332540d38077b3aea6952df
+> sled-update-host-phase2 serial2 --boot-disk B --slot-b 3243cf430459c07a057df649a21a2412a9804497b25850eb0f6362eceaaca3ec
+set sled d81c6a84-79b8-4958-ae41-ea46c9b19763 host phase 2 details: boot_disk -> B, B -> 3243cf430459c07a057df649a21a2412a9804497b25850eb0f6362eceaaca3ec
 
-> sled-update-host-phase1 serial2 --active B --slot-b 1eba0d79ea9d34558fb3f923a06614bd740649eeb0ca6e5086529dc60cd6f729
-set sled d81c6a84-79b8-4958-ae41-ea46c9b19763 host phase 1 details: active -> B, B -> 1eba0d79ea9d34558fb3f923a06614bd740649eeb0ca6e5086529dc60cd6f729
+> sled-update-host-phase1 serial2 --active B --slot-b e35cde7a481d8d17e0e8d4d7e68ee1d19c8e77bb7164129f3f7957150cf9a8fc
+set sled d81c6a84-79b8-4958-ae41-ea46c9b19763 host phase 1 details: active -> B, B -> e35cde7a481d8d17e0e8d4d7e68ee1d19c8e77bb7164129f3f7957150cf9a8fc
 
 
 > # All MGS-based updates complete.
@@ -2361,12 +2226,12 @@ INFO performed noop zone image source checks on sled, sled_id: 98e6b7c2-2efa-41c
 INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, slot: a, expected_hash: 0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a
 INFO performed noop zone image source checks on sled, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, num_total: 6, num_already_artifact: 6, num_eligible: 0, num_ineligible: 0
 INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, slot: a, expected_hash: 0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a
-INFO MGS-driven update completed (will remove it and re-evaluate board), artifact_version: 2.0.0, artifact_hash: 8f89bf8bc5f3271650ad72a26fc0d116c910161ca143731473a2b20fb82653cc, expected_stage0_next_version: NoValidVersion, expected_stage0_version: 0.0.1, component: rot_bootloader, sp_slot: 0, sp_type: Sled, serial_number: serial0, part_number: 913-0000019
+INFO MGS-driven update completed (will remove it and re-evaluate board), artifact_version: 2.0.0, artifact_hash: 59783814db2b48b58ce5d914fd27222f856da05fd661164a4ccfec6ecfa45e6d, expected_stage0_next_version: NoValidVersion, expected_stage0_version: 0.0.1, component: rot_bootloader, sp_slot: 0, sp_type: Sled, serial_number: serial0, part_number: 913-0000019
 INFO skipping board for MGS-driven update (no update necessary), serial_number: serial0, part_number: 913-0000019
 INFO skipping board for MGS-driven update (no update necessary), serial_number: serial1, part_number: 913-0000019
 INFO skipping board for MGS-driven update (no update necessary), serial_number: serial2, part_number: 913-0000019
 INFO ran out of boards for MGS-driven update
-INFO some zones not yet up-to-date, zones_currently_updating: [ZonePropagationIncomplete { zone_id: 353b3b65-20f7-48c3-88f7-495bd5d31545 (omicron_zone), zone_kind: Clickhouse, reason: ImageSourceMismatch { bp_image_source: Artifact { version: Available { version: ArtifactVersion("2.0.0") }, hash: ArtifactHash("bb2d1ff02d11f72bc9049ae57f27536207519a1859d29f8d7a90ab3b44d56b08") }, inv_image_source: InstallDataset } }, ZonePropagationIncomplete { zone_id: 466a9f29-62bf-4e63-924a-b9efdb86afec (omicron_zone), zone_kind: Nexus, reason: ImageSourceMismatch { bp_image_source: Artifact { version: Available { version: ArtifactVersion("2.0.0") }, hash: ArtifactHash("e9b7035f41848a987a798c15ac424cc91dd662b1af0920d58d8aa1ebad7467b6") }, inv_image_source: InstallDataset } }, ZonePropagationIncomplete { zone_id: 62620961-fc4a-481e-968b-f5acbac0dc63 (omicron_zone), zone_kind: InternalNtp, reason: ImageSourceMismatch { bp_image_source: Artifact { version: Available { version: ArtifactVersion("2.0.0") }, hash: ArtifactHash("d76e26198daed69cdae04490d7477f8c842e0dbe37d463eac0d0a8d3fb803095") }, inv_image_source: InstallDataset } }, ZonePropagationIncomplete { zone_id: 6c3ae381-04f7-41ea-b0ac-74db387dbc3a (omicron_zone), zone_kind: ExternalDns, reason: ImageSourceMismatch { bp_image_source: Artifact { version: Available { version: ArtifactVersion("2.0.0") }, hash: ArtifactHash("f282c45771429f7bebf71f0cc668521066db57c6bb07fcfccdfb44825d3d930f") }, inv_image_source: InstallDataset } }, ZonePropagationIncomplete { zone_id: 99e2f30b-3174-40bf-a78a-90da8abba8ca (omicron_zone), zone_kind: InternalDns, reason: ImageSourceMismatch { bp_image_source: Artifact { version: Available { version: ArtifactVersion("2.0.0") }, hash: ArtifactHash("de30657a72b066b8ef1f56351a0a5d4d7000da0a62c4be9b2e949a107ca8a389") }, inv_image_source: InstallDataset } }, ZonePropagationIncomplete { zone_id: ad6a3a03-8d0f-4504-99a4-cbf73d69b973 (omicron_zone), zone_kind: CruciblePantry, reason: ImageSourceMismatch { bp_image_source: Artifact { version: Available { version: ArtifactVersion("2.0.0") }, hash: ArtifactHash("3ff26dad96faa8f67251f5de40458b4f809d536bfe8572134da0e42c2fa12674") }, inv_image_source: InstallDataset } }, ZonePropagationIncomplete { zone_id: bd354eef-d8a6-4165-9124-283fb5e46d77 (omicron_zone), zone_kind: Crucible, reason: ImageSourceMismatch { bp_image_source: Artifact { version: Available { version: ArtifactVersion("2.0.0") }, hash: ArtifactHash("866f6a7c2e51c056fb722b5113e80181cc9cd8b712a0d3dbf1edc4ce29e5229e") }, inv_image_source: InstallDataset } }, ZonePropagationIncomplete { zone_id: 0c71b3b2-6ceb-4e8f-b020-b08675e83038 (omicron_zone), zone_kind: Nexus, reason: ImageSourceMismatch { bp_image_source: Artifact { version: Available { version: ArtifactVersion("1.0.0") }, hash: ArtifactHash("0e32b4a3e5d3668bb1d6a16fb06b74dc60b973fa479dcee0aae3adbb52bf1388") }, inv_image_source: InstallDataset } }, ZonePropagationIncomplete { zone_id: 427ec88f-f467-42fa-9bbb-66a91a36103c (omicron_zone), zone_kind: InternalDns, reason: ImageSourceMismatch { bp_image_source: Artifact { version: Available { version: ArtifactVersion("1.0.0") }, hash: ArtifactHash("ffbf1373f7ee08dddd74c53ed2a94e7c4c572a982d3a9bc94000c6956b700c6a") }, inv_image_source: InstallDataset } }, ZonePropagationIncomplete { zone_id: 5199c033-4cf9-4ab6-8ae7-566bd7606363 (omicron_zone), zone_kind: Crucible, reason: ImageSourceMismatch { bp_image_source: Artifact { version: Available { version: ArtifactVersion("1.0.0") }, hash: ArtifactHash("6f17cf65fb5a5bec5542dd07c03cd0acc01e59130f02c532c8d848ecae810047") }, inv_image_source: InstallDataset } }, ZonePropagationIncomplete { zone_id: 6444f8a5-6465-4f0b-a549-1993c113569c (omicron_zone), zone_kind: InternalNtp, reason: ImageSourceMismatch { bp_image_source: Artifact { version: Available { version: ArtifactVersion("1.0.0") }, hash: ArtifactHash("67593d686ed04a1709f93972b71f4ebc148a9362120f65d239943e814a9a7439") }, inv_image_source: InstallDataset } }, ZonePropagationIncomplete { zone_id: 803bfb63-c246-41db-b0da-d3b87ddfc63d (omicron_zone), zone_kind: ExternalDns, reason: ImageSourceMismatch { bp_image_source: Artifact { version: Available { version: ArtifactVersion("1.0.0") }, hash: ArtifactHash("ccca13ed19b8731f9adaf0d6203b02ea3b9ede4fa426b9fac0a07ce95440046d") }, inv_image_source: InstallDataset } }, ZonePropagationIncomplete { zone_id: ba4994a8-23f9-4b1a-a84f-a08d74591389 (omicron_zone), zone_kind: CruciblePantry, reason: ImageSourceMismatch { bp_image_source: Artifact { version: Available { version: ArtifactVersion("1.0.0") }, hash: ArtifactHash("21f0ada306859c23917361f2e0b9235806c32607ec689c7e8cf16bb898bc5a02") }, inv_image_source: InstallDataset } }, ZonePropagationIncomplete { zone_id: 3eeb8d49-eb1a-43f8-bb64-c2338421c2c6 (omicron_zone), zone_kind: Nexus, reason: ImageSourceMismatch { bp_image_source: Artifact { version: Available { version: ArtifactVersion("2.0.0") }, hash: ArtifactHash("e9b7035f41848a987a798c15ac424cc91dd662b1af0920d58d8aa1ebad7467b6") }, inv_image_source: InstallDataset } }, ZonePropagationIncomplete { zone_id: 75b220ba-a0f4-4872-8202-dc7c87f062d0 (omicron_zone), zone_kind: CruciblePantry, reason: ImageSourceMismatch { bp_image_source: Artifact { version: Available { version: ArtifactVersion("2.0.0") }, hash: ArtifactHash("3ff26dad96faa8f67251f5de40458b4f809d536bfe8572134da0e42c2fa12674") }, inv_image_source: InstallDataset } }, ZonePropagationIncomplete { zone_id: ea5b4030-b52f-44b2-8d70-45f15f987d01 (omicron_zone), zone_kind: InternalDns, reason: ImageSourceMismatch { bp_image_source: Artifact { version: Available { version: ArtifactVersion("2.0.0") }, hash: ArtifactHash("de30657a72b066b8ef1f56351a0a5d4d7000da0a62c4be9b2e949a107ca8a389") }, inv_image_source: InstallDataset } }, ZonePropagationIncomplete { zone_id: f10a4fb9-759f-4a65-b25e-5794ad2d07d8 (omicron_zone), zone_kind: InternalNtp, reason: ImageSourceMismatch { bp_image_source: Artifact { version: Available { version: ArtifactVersion("2.0.0") }, hash: ArtifactHash("d76e26198daed69cdae04490d7477f8c842e0dbe37d463eac0d0a8d3fb803095") }, inv_image_source: InstallDataset } }, ZonePropagationIncomplete { zone_id: f55647d4-5500-4ad3-893a-df45bd50d622 (omicron_zone), zone_kind: Crucible, reason: ImageSourceMismatch { bp_image_source: Artifact { version: Available { version: ArtifactVersion("2.0.0") }, hash: ArtifactHash("866f6a7c2e51c056fb722b5113e80181cc9cd8b712a0d3dbf1edc4ce29e5229e") }, inv_image_source: InstallDataset } }, ZonePropagationIncomplete { zone_id: f6ec9c67-946a-4da3-98d5-581f72ce8bf0 (omicron_zone), zone_kind: ExternalDns, reason: ImageSourceMismatch { bp_image_source: Artifact { version: Available { version: ArtifactVersion("2.0.0") }, hash: ArtifactHash("f282c45771429f7bebf71f0cc668521066db57c6bb07fcfccdfb44825d3d930f") }, inv_image_source: InstallDataset } }]
+INFO some zones not yet up-to-date, zones_currently_updating: [ZonePropagationIncomplete { zone_id: 353b3b65-20f7-48c3-88f7-495bd5d31545 (omicron_zone), zone_kind: Clickhouse, reason: ImageSourceMismatch { bp_image_source: Artifact { version: Available { version: ArtifactVersion("2.0.0") }, hash: ArtifactHash("fb8dfcb40fd9efc46ac02bd97fed6459b850817e0add1cc5e20f26aed4ba1ac8") }, inv_image_source: InstallDataset } }, ZonePropagationIncomplete { zone_id: 466a9f29-62bf-4e63-924a-b9efdb86afec (omicron_zone), zone_kind: Nexus, reason: ImageSourceMismatch { bp_image_source: Artifact { version: Available { version: ArtifactVersion("2.0.0") }, hash: ArtifactHash("984ae2cf5cc36fad121ab59416a2ae0101e9d06cbf76f056c3fcc2cd925a504b") }, inv_image_source: InstallDataset } }, ZonePropagationIncomplete { zone_id: 62620961-fc4a-481e-968b-f5acbac0dc63 (omicron_zone), zone_kind: InternalNtp, reason: ImageSourceMismatch { bp_image_source: Artifact { version: Available { version: ArtifactVersion("2.0.0") }, hash: ArtifactHash("8f0613ee91aac7c8c25fb0abfd94f7b768e44e1bdb683663d3eb6222b5318b8e") }, inv_image_source: InstallDataset } }, ZonePropagationIncomplete { zone_id: 6c3ae381-04f7-41ea-b0ac-74db387dbc3a (omicron_zone), zone_kind: ExternalDns, reason: ImageSourceMismatch { bp_image_source: Artifact { version: Available { version: ArtifactVersion("2.0.0") }, hash: ArtifactHash("6f93ba47f58e2dc9f8d977905b2da6689177151d6350173d02fa174b8118cf5b") }, inv_image_source: InstallDataset } }, ZonePropagationIncomplete { zone_id: 99e2f30b-3174-40bf-a78a-90da8abba8ca (omicron_zone), zone_kind: InternalDns, reason: ImageSourceMismatch { bp_image_source: Artifact { version: Available { version: ArtifactVersion("2.0.0") }, hash: ArtifactHash("33e4710c8652ceb7be7f51f45c23fd040321ac4eb7bc28eeae6aba1ee8be55f3") }, inv_image_source: InstallDataset } }, ZonePropagationIncomplete { zone_id: ad6a3a03-8d0f-4504-99a4-cbf73d69b973 (omicron_zone), zone_kind: CruciblePantry, reason: ImageSourceMismatch { bp_image_source: Artifact { version: Available { version: ArtifactVersion("2.0.0") }, hash: ArtifactHash("addc4ed18936fcdae28bb14ec868930765bce4948be459599d7e9991ed24ee87") }, inv_image_source: InstallDataset } }, ZonePropagationIncomplete { zone_id: bd354eef-d8a6-4165-9124-283fb5e46d77 (omicron_zone), zone_kind: Crucible, reason: ImageSourceMismatch { bp_image_source: Artifact { version: Available { version: ArtifactVersion("2.0.0") }, hash: ArtifactHash("e7de2c66e29bebe8288deda473918e827b4755abe82bb7859630eba9ef8a5736") }, inv_image_source: InstallDataset } }, ZonePropagationIncomplete { zone_id: 0c71b3b2-6ceb-4e8f-b020-b08675e83038 (omicron_zone), zone_kind: Nexus, reason: ImageSourceMismatch { bp_image_source: Artifact { version: Available { version: ArtifactVersion("1.0.0") }, hash: ArtifactHash("7033ac7186a9e1f01a1a9e46d4e8756f3c953cf3cc30e333ceaa0a6bc0d55961") }, inv_image_source: InstallDataset } }, ZonePropagationIncomplete { zone_id: 427ec88f-f467-42fa-9bbb-66a91a36103c (omicron_zone), zone_kind: InternalDns, reason: ImageSourceMismatch { bp_image_source: Artifact { version: Available { version: ArtifactVersion("1.0.0") }, hash: ArtifactHash("4ff68308ffa11980380de9036697cd11f94dace9e1d0afae95116541f7f5ffd2") }, inv_image_source: InstallDataset } }, ZonePropagationIncomplete { zone_id: 5199c033-4cf9-4ab6-8ae7-566bd7606363 (omicron_zone), zone_kind: Crucible, reason: ImageSourceMismatch { bp_image_source: Artifact { version: Available { version: ArtifactVersion("1.0.0") }, hash: ArtifactHash("1d071b06c9e0739af8797557d81c84a7dc6d0bf00081ca1ef5c5a40672e11139") }, inv_image_source: InstallDataset } }, ZonePropagationIncomplete { zone_id: 6444f8a5-6465-4f0b-a549-1993c113569c (omicron_zone), zone_kind: InternalNtp, reason: ImageSourceMismatch { bp_image_source: Artifact { version: Available { version: ArtifactVersion("1.0.0") }, hash: ArtifactHash("2c7a661d288567335a1cabbbb96ec43c648bdfa1323b9c7c4e8de7ff23edeed0") }, inv_image_source: InstallDataset } }, ZonePropagationIncomplete { zone_id: 803bfb63-c246-41db-b0da-d3b87ddfc63d (omicron_zone), zone_kind: ExternalDns, reason: ImageSourceMismatch { bp_image_source: Artifact { version: Available { version: ArtifactVersion("1.0.0") }, hash: ArtifactHash("263973cc7d40b6bbe6b33020a903ad0a13e72eff92fa19af51888219588e6cf4") }, inv_image_source: InstallDataset } }, ZonePropagationIncomplete { zone_id: ba4994a8-23f9-4b1a-a84f-a08d74591389 (omicron_zone), zone_kind: CruciblePantry, reason: ImageSourceMismatch { bp_image_source: Artifact { version: Available { version: ArtifactVersion("1.0.0") }, hash: ArtifactHash("c537a3ec3f4600cdf0d0d3e279005b54910c87d5ef1b99b8fd85016b79fdedd1") }, inv_image_source: InstallDataset } }, ZonePropagationIncomplete { zone_id: 3eeb8d49-eb1a-43f8-bb64-c2338421c2c6 (omicron_zone), zone_kind: Nexus, reason: ImageSourceMismatch { bp_image_source: Artifact { version: Available { version: ArtifactVersion("2.0.0") }, hash: ArtifactHash("984ae2cf5cc36fad121ab59416a2ae0101e9d06cbf76f056c3fcc2cd925a504b") }, inv_image_source: InstallDataset } }, ZonePropagationIncomplete { zone_id: 75b220ba-a0f4-4872-8202-dc7c87f062d0 (omicron_zone), zone_kind: CruciblePantry, reason: ImageSourceMismatch { bp_image_source: Artifact { version: Available { version: ArtifactVersion("2.0.0") }, hash: ArtifactHash("addc4ed18936fcdae28bb14ec868930765bce4948be459599d7e9991ed24ee87") }, inv_image_source: InstallDataset } }, ZonePropagationIncomplete { zone_id: ea5b4030-b52f-44b2-8d70-45f15f987d01 (omicron_zone), zone_kind: InternalDns, reason: ImageSourceMismatch { bp_image_source: Artifact { version: Available { version: ArtifactVersion("2.0.0") }, hash: ArtifactHash("33e4710c8652ceb7be7f51f45c23fd040321ac4eb7bc28eeae6aba1ee8be55f3") }, inv_image_source: InstallDataset } }, ZonePropagationIncomplete { zone_id: f10a4fb9-759f-4a65-b25e-5794ad2d07d8 (omicron_zone), zone_kind: InternalNtp, reason: ImageSourceMismatch { bp_image_source: Artifact { version: Available { version: ArtifactVersion("2.0.0") }, hash: ArtifactHash("8f0613ee91aac7c8c25fb0abfd94f7b768e44e1bdb683663d3eb6222b5318b8e") }, inv_image_source: InstallDataset } }, ZonePropagationIncomplete { zone_id: f55647d4-5500-4ad3-893a-df45bd50d622 (omicron_zone), zone_kind: Crucible, reason: ImageSourceMismatch { bp_image_source: Artifact { version: Available { version: ArtifactVersion("2.0.0") }, hash: ArtifactHash("e7de2c66e29bebe8288deda473918e827b4755abe82bb7859630eba9ef8a5736") }, inv_image_source: InstallDataset } }, ZonePropagationIncomplete { zone_id: f6ec9c67-946a-4da3-98d5-581f72ce8bf0 (omicron_zone), zone_kind: ExternalDns, reason: ImageSourceMismatch { bp_image_source: Artifact { version: Available { version: ArtifactVersion("2.0.0") }, hash: ArtifactHash("6f93ba47f58e2dc9f8d977905b2da6689177151d6350173d02fa174b8118cf5b") }, inv_image_source: InstallDataset } }]
 generated blueprint 61a93ea3-c872-48e0-aace-e86b0c52b839 based on parent blueprint 12d602a6-5ab4-487a-b94e-eb30cdf30300
 blueprint source: planner with report:
 planning report:
@@ -2555,7 +2420,7 @@ to:   blueprint 61a93ea3-c872-48e0-aace-e86b0c52b839
     --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
     sp_type   slot   part_number   serial_number   artifact_hash                                                      artifact_version   details                                                                                                                                                
     --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
--   sled      0      913-0000019   serial0         8f89bf8bc5f3271650ad72a26fc0d116c910161ca143731473a2b20fb82653cc   2.0.0              RotBootloader(PendingMgsUpdateRotBootloaderDetails { expected_stage0_version: ArtifactVersion("0.0.1"), expected_stage0_next_version: NoValidVersion })
+-   sled      0      913-0000019   serial0         59783814db2b48b58ce5d914fd27222f856da05fd661164a4ccfec6ecfa45e6d   2.0.0              RotBootloader(PendingMgsUpdateRotBootloaderDetails { expected_stage0_version: ArtifactVersion("0.0.1"), expected_stage0_next_version: NoValidVersion })
 
 
 internal DNS:
@@ -2599,7 +2464,7 @@ INFO blueprint mupdate override updated to match inventory, phase: do_plan_mupda
   - zone ba4994a8-23f9-4b1a-a84f-a08d74591389 (CruciblePantry) updated from artifact: version 1.0.0 to install dataset
 , host_phase_2: 
   - host phase 2 slot A: current contents (unchanged)
-  - host phase 2 slot B: updated from artifact (version version 2.0.0, hash 9ff631b5b7229604ab7c5aae2ee4a34a64772736b332540d38077b3aea6952df) to preserving current contents
+  - host phase 2 slot B: updated from artifact (version version 2.0.0, hash 3243cf430459c07a057df649a21a2412a9804497b25850eb0f6362eceaaca3ec) to preserving current contents
 
 INFO no previous MGS update found as part of updating blueprint mupdate override to match inventory, phase: do_plan_mupdate_override, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6
 INFO updating target release minimum generation based on new set-override actions, phase: do_plan_mupdate_override, current_generation: 4, new_generation: 5
@@ -2908,7 +2773,7 @@ INFO blueprint mupdate override updated to match inventory, phase: do_plan_mupda
   - zone bd354eef-d8a6-4165-9124-283fb5e46d77 (Crucible) updated from artifact: version 2.0.0 to install dataset
 , host_phase_2: 
   - host phase 2 slot A: current contents (unchanged)
-  - host phase 2 slot B: updated from artifact (version version 2.0.0, hash 9ff631b5b7229604ab7c5aae2ee4a34a64772736b332540d38077b3aea6952df) to preserving current contents
+  - host phase 2 slot B: updated from artifact (version version 2.0.0, hash 3243cf430459c07a057df649a21a2412a9804497b25850eb0f6362eceaaca3ec) to preserving current contents
 
 INFO no previous MGS update found as part of updating blueprint mupdate override to match inventory, phase: do_plan_mupdate_override, sled_id: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c
 error: generating blueprint: target release minimum generation was set to 1000, but we tried to set it to the older generation 5, indicating a possible table rollback which should not happen

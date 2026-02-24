@@ -46,8 +46,8 @@ slog-term.workspace = true
 smf.workspace = true
 thiserror.workspace = true
 tokio = { workspace = true, features = ["full"] }
+tufaceous.workspace = true
 tufaceous-artifact.workspace = true
-tufaceous-lib.workspace = true
 update-engine.workspace = true
 omicron-workspace-hack.workspace = true
 

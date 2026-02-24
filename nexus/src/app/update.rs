@@ -30,9 +30,10 @@ use sled_hardware_types::BaseboardId;
 use std::collections::BTreeMap;
 use std::iter;
 use tokio::sync::watch;
-use update_common::artifacts::{
-    ArtifactsWithPlan, ControlPlaneZonesMode, VerificationMode,
-};
+use tufaceous::ExpirationEnforcement;
+use tufaceous::RepositoryLoader;
+use update_common::ErrorExt;
+use update_common::RepositoryExt;
 use uuid::Uuid;
 
 /// Used to pull data out of the channels
@@ -56,7 +57,7 @@ impl super::Nexus {
         body: impl Stream<Item = Result<Bytes, HttpError>> + Send + Sync + 'static,
         file_name: String,
     ) -> Result<TufRepoUpload, HttpError> {
-        let mut trusted_roots = Vec::new();
+        let mut loader = RepositoryLoader::new();
         let mut paginator = Paginator::new(
             SQL_BATCH_SIZE,
             dropshot::PaginationOrder::Ascending,
@@ -68,50 +69,45 @@ impl super::Nexus {
                 .await?;
             paginator = p.found_batch(&batch, &|a| a.id.into_untyped_uuid());
             for root in batch {
-                trusted_roots.push(root.root_role.0.to_bytes());
+                loader = loader.trust_root(root.root_role.0.to_bytes());
             }
         }
 
-        let artifacts_with_plan = ArtifactsWithPlan::from_stream(
-            body,
-            Some(file_name),
-            ControlPlaneZonesMode::Split,
-            VerificationMode::TrustStore(&trusted_roots),
-            &self.log,
-        )
-        .await
-        .map_err(|error| error.to_http_error())?;
+        let repo = loader
+            .expiration_enforcement(ExpirationEnforcement::Unsafe)
+            .v1_compatibility(true)
+            .load_zip_stream(body, None, &self.log)
+            .await
+            .map_err(|err| err.to_http_error())?;
 
         // Now store the artifacts in the database.
+        let mut description = repo.to_description();
+        description.file_name = Some(file_name);
         let response = self
             .db_datastore
-            .tuf_repo_insert(opctx, artifacts_with_plan.description())
+            .tuf_repo_insert(opctx, &description)
             .await
             .map_err(HttpError::from)?;
 
-        // Move the `ArtifactsWithPlan` (which carries with it the
-        // `Utf8TempDir`s storing the artifacts) into the artifact replication
-        // background task, then immediately activate the task. (If this repo
-        // was already uploaded, the artifacts should immediately be dropped by
-        // the task.)
-        self.tuf_artifact_replication_tx
-            .send(artifacts_with_plan)
-            .await
-            .map_err(|err| {
-                // This error can only happen while Nexus's Tokio runtime is
-                // shutting down; Sender::send returns an error only if the
-                // receiver has hung up, and the receiver should live for
-                // as long as Nexus does (it belongs to the background task
-                // driver.)
-                //
-                // In the unlikely event that it does happen within this narrow
-                // window, the impact is that the database has recorded a
-                // repository for which we no longer have the artifacts. The fix
-                // would be to reupload the repository.
-                Error::internal_error(&format!(
-                    "failed to send artifacts for replication: {err}"
-                ))
-            })?;
+        // Move the `tufaceous::Repository` (which carries with it the temporary
+        // file storing the artifacts) into the artifact replication background
+        // task, then immediately activate the task. (If this repo was already
+        // uploaded, the artifacts should immediately be dropped by the task.)
+        self.tuf_artifact_replication_tx.send(repo).await.map_err(|err| {
+            // This error can only happen while Nexus's Tokio runtime is
+            // shutting down; Sender::send returns an error only if the
+            // receiver has hung up, and the receiver should live for
+            // as long as Nexus does (it belongs to the background task
+            // driver.)
+            //
+            // In the unlikely event that it does happen within this narrow
+            // window, the impact is that the database has recorded a
+            // repository for which we no longer have the artifacts. The fix
+            // would be to reupload the repository.
+            Error::internal_error(&format!(
+                "failed to send artifacts for replication: {err}"
+            ))
+        })?;
         self.background_tasks.task_tuf_artifact_replication.activate();
 
         Ok(response)
@@ -261,9 +257,7 @@ impl super::Nexus {
         // and only if target_release_source is 'unspecified', which should only
         // happen in the initial state before any target release has been set
         let curr_target_desc = match current_tuf_repo {
-            Some(repo) => {
-                TargetReleaseDescription::TufRepo(repo.into_external())
-            }
+            Some(repo) => TargetReleaseDescription::TufRepo(repo.into()),
             None => TargetReleaseDescription::Initial,
         };
 
@@ -296,7 +290,7 @@ impl super::Nexus {
                 self.datastore()
                     .tuf_repo_get_by_id(opctx, id.into())
                     .await?
-                    .into_external(),
+                    .into(),
             ),
             None => TargetReleaseDescription::Initial,
         };

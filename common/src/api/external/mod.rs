@@ -13,7 +13,6 @@ pub use crate::address::IpVersion;
 pub use crate::api::internal::shared::AllowedSourceIps;
 pub use crate::api::internal::shared::SwitchLocation;
 pub use crate::api::internal::shared::rack_init::MaxPathConfig;
-use crate::update::ArtifactId;
 use anyhow::Context;
 use api_identity::ObjectIdentity;
 use chrono::DateTime;
@@ -33,7 +32,6 @@ use parse_display::Display;
 use parse_display::FromStr;
 use rand::Rng;
 use schemars::JsonSchema;
-use semver::Version;
 use serde::Deserialize;
 use serde::Serialize;
 use serde_with::{DeserializeFromStr, SerializeDisplay};
@@ -51,7 +49,6 @@ use std::num::{NonZeroU16, NonZeroU32};
 use std::ops::Deref;
 use std::ops::RangeInclusive;
 use std::str::FromStr;
-use tufaceous_artifact::ArtifactHash;
 use uuid::Uuid;
 
 // The type aliases below exist primarily to ensure consistency among return
@@ -597,6 +594,7 @@ impl Display for ByteCount {
 // TODO-cleanup This could use the experimental std::num::IntErrorKind.
 #[derive(
     Debug,
+    Clone,
     Eq,
     thiserror::Error,
     Ord,
@@ -3481,84 +3479,6 @@ pub struct ServiceIcmpConfig {
     /// MTU discovery and better cope with fragmentation issues. Otherwise all
     /// inbound ICMP traffic will be dropped.
     pub enabled: bool,
-}
-
-// TODO: move these TUF repo structs out of this file. They're not external
-// anymore after refactors that use views::TufRepo in the external API. They are
-// still used extensively in internal services.
-
-/// A description of an uploaded TUF repository.
-#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
-pub struct TufRepoDescription {
-    /// Information about the repository.
-    pub repo: TufRepoMeta,
-
-    /// Information about the artifacts present in the repository.
-    pub artifacts: Vec<TufArtifactMeta>,
-}
-
-impl TufRepoDescription {
-    /// Sorts the artifacts so that descriptions can be compared.
-    pub fn sort_artifacts(&mut self) {
-        self.artifacts.sort_by(|a, b| a.id.cmp(&b.id));
-    }
-}
-
-/// Metadata about a TUF repository.
-///
-/// Found within a `TufRepoDescription`.
-#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
-pub struct TufRepoMeta {
-    /// The hash of the repository.
-    ///
-    /// This is a slight abuse of `ArtifactHash`, since that's the hash of
-    /// individual artifacts within the repository. However, we use it here for
-    /// convenience.
-    pub hash: ArtifactHash,
-
-    /// The version of the targets role.
-    pub targets_role_version: u64,
-
-    /// The time until which the repo is valid.
-    pub valid_until: DateTime<Utc>,
-
-    /// The system version in artifacts.json.
-    pub system_version: Version,
-
-    /// The file name of the repository.
-    ///
-    /// This is purely used for debugging and may not always be correct (e.g.
-    /// with wicket, we read the file contents from stdin so we don't know the
-    /// correct file name).
-    pub file_name: String,
-}
-
-/// Metadata about an individual TUF artifact.
-///
-/// Found within a `TufRepoDescription`.
-#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
-pub struct TufArtifactMeta {
-    /// The artifact ID.
-    pub id: ArtifactId,
-
-    /// The hash of the artifact.
-    pub hash: ArtifactHash,
-
-    /// The size of the artifact in bytes.
-    pub size: u64,
-
-    /// Contents of the `BORD` field of a Hubris archive caboose. Only
-    /// applicable to artifacts that are Hubris archives.
-    ///
-    /// This field should always be `Some(_)` if `sign` is `Some(_)`, but the
-    /// opposite is not true (SP images will have a `board` but not a `sign`).
-    pub board: Option<String>,
-
-    /// Contents of the `SIGN` field of a Hubris archive caboose, i.e.,
-    /// an identifier for the set of valid signing keys. Currently only
-    /// applicable to RoT image and bootloader artifacts, where it will
-    /// be an LPC55 Root Key Table Hash (RKTH).
-    pub sign: Option<Vec<u8>>,
 }
 
 #[derive(

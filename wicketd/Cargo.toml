@@ -45,13 +45,12 @@ slog-dtrace.workspace = true
 slog.workspace = true
 rand.workspace = true
 thiserror.workspace = true
+tufaceous.workspace = true
 tufaceous-artifact.workspace = true
-tufaceous-lib.workspace = true
 tokio = { workspace = true, features = [ "full" ] }
 tokio-stream.workspace = true
 tokio-util.workspace = true
 toml.workspace = true
-tough.workspace = true
 transceiver-controller.workspace = true
 uuid.workspace = true
 
@@ -73,6 +72,7 @@ wicketd-api.workspace = true
 wicketd-client.workspace = true
 omicron-workspace-hack.workspace = true
 semver.workspace = true
+lpc55_areas.workspace = true
 
 [[bin]]
 name = "wicketd"
@@ -101,3 +101,4 @@ tar.workspace = true
 tokio = { workspace = true, features = ["test-util"] }
 tufaceous.workspace = true
 wicket.workspace = true
+chrono.workspace = true

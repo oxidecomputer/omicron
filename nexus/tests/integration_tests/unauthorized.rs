@@ -25,7 +25,9 @@ use nexus_test_utils::resource_helpers::TestDataset;
 use omicron_common::disk::DatasetKind;
 use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::ZpoolUuid;
+use semver::Version;
 use std::sync::LazyLock;
+use tufaceous::edit::RepositoryEditor;
 
 type DiskTest<'a> =
     nexus_test_utils::resource_helpers::DiskTest<'a, omicron_nexus::Server>;
@@ -57,10 +59,7 @@ type DiskTest<'a> =
 //   endpoint with a non-existent resource to ensure that we get the same result
 //   (so that we don't leak information about existence based on, say, 401 vs.
 //   403).
-//
-// Uploading a TUF repository requires a multithreaded runtime with 2 worker
-// threads.
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[tokio::test]
 async fn test_unauthorized() {
     let cptestctx =
         nexus_test_utils::ControlPlaneBuilder::new("test_unauthorized")
@@ -149,8 +148,9 @@ async fn test_unauthorized() {
         .execute()
         .await
         .unwrap();
+    let editor = RepositoryEditor::fake(Version::new(1, 0, 0)).unwrap();
     trust_root
-        .assemble_repo(&log, &[])
+        .assemble_repo(editor)
         .await
         .unwrap()
         .into_upload_request(client, StatusCode::OK)

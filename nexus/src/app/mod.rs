@@ -50,7 +50,6 @@ use std::sync::Arc;
 use std::sync::OnceLock;
 use tokio::sync::mpsc;
 use tokio::sync::watch;
-use update_common::artifacts::ArtifactsWithPlan;
 use uuid::Uuid;
 
 // The implementation of Nexus is large, and split into a number of submodules
@@ -285,7 +284,7 @@ pub struct Nexus {
 
     /// Sender for TUF repository artifacts temporarily stored in this zone to
     /// be replicated out to sleds in the background
-    tuf_artifact_replication_tx: mpsc::Sender<ArtifactsWithPlan>,
+    tuf_artifact_replication_tx: mpsc::Sender<tufaceous::Repository>,
 
     /// reports status of pending MGS-managed updates
     mgs_update_status_rx: watch::Receiver<MgsUpdateDriverStatus>,

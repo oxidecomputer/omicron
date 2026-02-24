@@ -3,9 +3,8 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use anyhow::{Context, Result, ensure};
-use camino::Utf8Path;
 use camino_tempfile::{Builder, Utf8TempPath};
-use chrono::{DateTime, Duration, Timelike, Utc};
+use chrono::{DateTime, Duration, SubsecRound, Utc};
 use dropshot::ResultsPage;
 use dropshot::test_util::ClientTestContext;
 use http::{Method, StatusCode};
@@ -24,19 +23,13 @@ use nexus_test_utils_macros::nexus_test;
 use nexus_types::external_api::update;
 use nexus_types::external_api::update::TufRepoUpload;
 use nexus_types::external_api::update::TufRepoUploadStatus;
-use omicron_common::api::external::TufArtifactMeta;
 use pretty_assertions::assert_eq;
 use semver::Version;
 use serde::Deserialize;
 use std::collections::HashSet;
 use std::fmt::Debug;
-use tough::editor::signed::SignedRole;
-use tough::schema::Root;
-use tufaceous_artifact::ArtifactVersion;
-use tufaceous_artifact::KnownArtifactKind;
-use tufaceous_lib::Key;
-use tufaceous_lib::assemble::{ArtifactManifest, OmicronRepoAssembler};
-use tufaceous_lib::assemble::{DeserializedManifest, ManifestTweak};
+use tufaceous::edit::{Ed25519Key, RepositoryEditor, Root};
+use tufaceous_artifact::{Artifact, Artifacts, KnownArtifactTags, SpTags};
 
 use crate::integration_tests::target_release::set_target_release;
 
@@ -49,7 +42,7 @@ type ControlPlaneTestContext =
 async fn get_repo_artifacts(
     cptestctx: &ControlPlaneTestContext,
     version: &str,
-) -> Vec<TufArtifactMeta> {
+) -> Artifacts {
     let datastore = cptestctx.server.server_context().nexus.datastore();
     let opctx =
         OpContext::for_tests(cptestctx.logctx.log.new(o!()), datastore.clone());
@@ -67,31 +60,21 @@ async fn get_repo_artifacts(
         .await
         .expect("should get artifacts");
 
-    let mut result: Vec<TufArtifactMeta> = artifacts
-        .into_iter()
-        .map(|artifact| artifact.into_external())
-        .collect();
-
-    // Sort artifacts by their ID for consistent comparison
-    result.sort_by(|a, b| a.id.cmp(&b.id));
-    result
+    artifacts.into_iter().map(Artifact::from).collect()
 }
 
 pub struct TestTrustRoot {
-    pub key: Key,
+    pub key: Ed25519Key,
     pub expiry: DateTime<Utc>,
-    pub root_role: SignedRole<Root>,
+    pub root_role: Root,
 }
 
 impl TestTrustRoot {
     pub async fn generate() -> Result<TestTrustRoot> {
-        let key = Key::generate_ed25519()?;
-        let expiry = Utc::now()
-            .with_nanosecond(0)
-            .expect("0 is less than 2,000,000,000")
-            + Duration::weeks(1);
+        let key = Ed25519Key::generate()?;
+        let expiry = Utc::now().trunc_subsecs(0) + Duration::weeks(1);
         let root_role =
-            tufaceous_lib::root::new_root(vec![key.clone()], expiry).await?;
+            Root::generate(&[Box::new(key.clone())], expiry).await?;
         Ok(TestTrustRoot { key, expiry, root_role })
     }
 
@@ -102,37 +85,32 @@ impl TestTrustRoot {
     ) -> NexusRequest<'a> {
         let request =
             RequestBuilder::new(client, Method::POST, TRUST_ROOTS_URL)
-                .body(Some(self.root_role.signed()))
+                .raw_body(Some(self.root_role.to_string()))
                 .expect_status(Some(expected_status));
         NexusRequest::new(request).authn_as(AuthnMode::PrivilegedUser)
     }
 
     pub async fn assemble_repo(
         &self,
-        log: &slog::Logger,
-        tweaks: &[ManifestTweak],
+        editor: RepositoryEditor<'_>,
     ) -> Result<TestRepo> {
-        let archive_path = Builder::new()
+        let (file, archive_path) = Builder::new()
             .prefix("archive")
             .suffix(".zip")
             .tempfile()
             .context("error creating temp file for archive")?
-            .into_temp_path();
-
-        let manifest = ArtifactManifest::from_deserialized(
-            Utf8Path::new(""),
-            DeserializedManifest::tweaked_fake(tweaks),
-        )?;
-        let mut assembler = OmicronRepoAssembler::new(
-            log,
-            manifest,
-            vec![self.key.clone()],
-            self.expiry,
-            true,
-            archive_path.to_path_buf(),
-        );
-        assembler.set_root_role(self.root_role.clone());
-        assembler.build().await?;
+            .into_parts();
+        let mut signed = editor
+            .finish()
+            .await?
+            .root(self.root_role.as_str())
+            .key(self.key.clone())
+            .snapshot_expires(self.expiry)
+            .targets_expires(self.expiry)
+            .timestamp_expires(self.expiry)
+            .sign()
+            .await?;
+        signed.write_zip(file, chrono::Utc::now()).await?;
         Ok(TestRepo(archive_path))
     }
 }
@@ -173,7 +151,7 @@ impl TestRepo {
     }
 }
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[tokio::test]
 async fn test_repo_upload_unconfigured() -> Result<()> {
     let cptestctx = nexus_test_utils::ControlPlaneBuilder::new(
         "test_repo_upload_unconfigured",
@@ -181,14 +159,13 @@ async fn test_repo_upload_unconfigured() -> Result<()> {
     .start::<omicron_nexus::Server>()
     .await;
     let client = &cptestctx.external_client;
-    let logctx = &cptestctx.logctx;
 
     // Generate a trust root, but _don't_ upload it to Nexus.
     let trust_root = TestTrustRoot::generate().await?;
     // Build a fake TUF repo and attempt to upload it to Nexus. This should fail
     // with a 400 error because we did not upload a trusted root role.
     trust_root
-        .assemble_repo(&logctx.log, &[])
+        .assemble_repo(RepositoryEditor::fake(Version::new(1, 0, 0))?)
         .await?
         .into_upload_request(client, StatusCode::BAD_REQUEST)
         .execute()
@@ -216,7 +193,7 @@ async fn test_repo_upload_unconfigured() -> Result<()> {
     Ok(())
 }
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[tokio::test]
 async fn test_repo_upload() -> Result<()> {
     let cptestctx =
         nexus_test_utils::ControlPlaneBuilder::new("test_repo_upload")
@@ -238,7 +215,9 @@ async fn test_repo_upload() -> Result<()> {
     trust_root.to_upload_request(client, StatusCode::CREATED).execute().await?;
 
     // Build a fake TUF repo
-    let repo = trust_root.assemble_repo(&logctx.log, &[]).await?;
+    let repo = trust_root
+        .assemble_repo(RepositoryEditor::fake(Version::new(1, 0, 0))?)
+        .await?;
 
     // Generate a repository and upload it to Nexus.
     let initial_repo = {
@@ -261,24 +240,6 @@ async fn test_repo_upload() -> Result<()> {
         .map(|artifact| artifact.hash)
         .collect::<HashSet<_>>()
         .len();
-    // The repository description should have `Zone` artifacts instead of the
-    // composite `ControlPlane` artifact.
-    let zone_names: HashSet<&str> = initial_artifacts
-        .iter()
-        .filter_map(|artifact| {
-            if artifact.id.kind == KnownArtifactKind::Zone.into() {
-                Some(artifact.id.name.as_str())
-            } else {
-                None
-            }
-        })
-        .collect();
-    let expected_zones: HashSet<&str> =
-        ["zone-1", "zone-2"].into_iter().collect();
-    assert_eq!(zone_names, expected_zones);
-    assert!(!initial_artifacts.iter().any(|artifact| {
-        artifact.id.kind == KnownArtifactKind::ControlPlane.into()
-    }));
     // The generation number should now be 2.
     assert_eq!(
         datastore.tuf_get_generation(&opctx).await.unwrap(),
@@ -367,16 +328,14 @@ async fn test_repo_upload() -> Result<()> {
         "system version matches"
     );
 
-    // Upload a new repository with the same system version but a different
-    // version for one of the components. This will produce a different hash,
-    // which should return an error.
+    // Upload a new repository with the same system version but with an extra
+    // aritfact. This will produce a different hash, which should return an
+    // error.
     {
-        let tweaks = &[ManifestTweak::ArtifactVersion {
-            kind: KnownArtifactKind::GimletSp,
-            version: "2.0.0".parse().unwrap(),
-        }];
+        let editor = RepositoryEditor::fake(Version::new(1, 0, 0))?
+            .fake_sp_archive(SpTags { sp_board: "another-one".into() })?;
         let response = trust_root
-            .assemble_repo(&logctx.log, tweaks)
+            .assemble_repo(editor)
             .await?
             .into_upload_request(client, StatusCode::CONFLICT)
             .execute()
@@ -391,18 +350,20 @@ async fn test_repo_upload() -> Result<()> {
         )?;
     }
 
-    // Upload a new repository with a different system version and different
-    // contents (but same version) for an artifact.
+    // Upload a new repository with a different system version, but with
+    // artifacts with the same version as already-uploaded artifacts and
+    // different contents. This must fail, because two artifacts with the same
+    // contents must have the same version. This is done by setting the version
+    // field to 1.0.0 while creating the fake artifacts with an interior version
+    // of 2.0.0.
     {
-        let tweaks = &[
-            ManifestTweak::SystemVersion("2.0.0".parse().unwrap()),
-            ManifestTweak::ArtifactSize {
-                kind: KnownArtifactKind::ControlPlane,
-                size_delta: 1024,
-            },
-        ];
+        let editor = RepositoryEditor::inconsistent_fake(
+            Version::new(2, 0, 0),
+            &"1.0.0".parse().unwrap(),
+            &"2.0.0".parse().unwrap(),
+        )?;
         let response = trust_root
-            .assemble_repo(&logctx.log, tweaks)
+            .assemble_repo(editor)
             .await?
             .into_upload_request(client, StatusCode::CONFLICT)
             .execute()
@@ -422,24 +383,20 @@ async fn test_repo_upload() -> Result<()> {
         )?;
     }
 
-    // Upload a new repository with the same *hash* but a different artifact
-    // version.
+    // Upload a new repository with a different system version, but with
+    // artifacts with the same contents as already-uploaded artifacts and
+    // different versions. This must fail, because two artifacts with the same
+    // contents must have the same version. This is done by setting the version
+    // field to 2.0.0 while creating the fake artifacts with an interior version
+    // of 1.0.0.
     {
-        let tweaks = &[
-            ManifestTweak::SystemVersion("2.0.0".parse().unwrap()),
-            ManifestTweak::ArtifactVersion {
-                kind: KnownArtifactKind::GimletSp,
-                version: "2.0.0".parse().unwrap(),
-            },
-            ManifestTweak::ArtifactDataVersion {
-                kind: KnownArtifactKind::GimletSp,
-                // 1.0.0 is the original version in the fake manifest.
-                data_version: Some("1.0.0".parse().unwrap()),
-            },
-        ];
-
+        let editor = RepositoryEditor::inconsistent_fake(
+            Version::new(2, 0, 0),
+            &"2.0.0".parse().unwrap(),
+            &"1.0.0".parse().unwrap(),
+        )?;
         let response = trust_root
-            .assemble_repo(&logctx.log, tweaks)
+            .assemble_repo(editor)
             .await?
             .into_upload_request(client, StatusCode::CONFLICT)
             .execute()
@@ -464,11 +421,16 @@ async fn test_repo_upload() -> Result<()> {
     }
 
     // Upload a new repository with a different system version but no other
-    // changes. This should be accepted.
+    // changes compared to the already-uploaded repository. This should be
+    // accepted.
     let initial_installinator_doc_hash = {
-        let tweaks = &[ManifestTweak::SystemVersion("2.0.0".parse().unwrap())];
+        let editor = RepositoryEditor::inconsistent_fake(
+            Version::new(2, 0, 0),
+            &"1.0.0".parse().unwrap(),
+            &"1.0.0".parse().unwrap(),
+        )?;
         let response = trust_root
-            .assemble_repo(&logctx.log, tweaks)
+            .assemble_repo(editor)
             .await?
             .into_upload_request(client, StatusCode::OK)
             .execute()
@@ -492,8 +454,8 @@ async fn test_repo_upload() -> Result<()> {
         let filtered_artifacts_1 = initial_artifacts
             .iter()
             .filter(|artifact| {
-                if artifact.id.kind
-                    == KnownArtifactKind::InstallinatorDocument.into()
+                if artifact.known_tags()
+                    == Some(KnownArtifactTags::InstallinatorDocument)
                 {
                     installinator_doc_1 = Some(*artifact);
                     false
@@ -506,8 +468,8 @@ async fn test_repo_upload() -> Result<()> {
         let filtered_artifacts_2 = artifacts_2_0_0
             .iter()
             .filter(|artifact| {
-                if artifact.id.kind
-                    == KnownArtifactKind::InstallinatorDocument.into()
+                if artifact.known_tags()
+                    == Some(KnownArtifactTags::InstallinatorDocument)
                 {
                     installinator_doc_2 = Some(*artifact);
                     false
@@ -519,10 +481,10 @@ async fn test_repo_upload() -> Result<()> {
 
         let installinator_doc_1 = installinator_doc_1
             .expect("should have found installinator document in 1.0.0");
-        assert_eq!(installinator_doc_1.id.version, "1.0.0".parse().unwrap());
+        assert_eq!(installinator_doc_1.version, "1.0.0".parse().unwrap());
         let installinator_doc_2 = installinator_doc_2
             .expect("should have found installinator document in 2.0.0");
-        assert_eq!(installinator_doc_2.id.version, "2.0.0".parse().unwrap());
+        assert_eq!(installinator_doc_2.version, "2.0.0".parse().unwrap());
 
         assert_eq!(
             filtered_artifacts_1, filtered_artifacts_2,
@@ -712,14 +674,13 @@ async fn test_trust_root_operations(cptestctx: &ControlPlaneTestContext) {
     assert!(response.items.is_empty());
 }
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[tokio::test]
 async fn test_update_status() -> Result<()> {
     let cptestctx =
         nexus_test_utils::ControlPlaneBuilder::new("test_update_status")
             .start::<omicron_nexus::Server>()
             .await;
     let client = &cptestctx.external_client;
-    let logctx = &cptestctx.logctx;
 
     // initial status
     let status: update::UpdateStatus =
@@ -740,13 +701,13 @@ async fn test_update_status() -> Result<()> {
     // Upload a fake TUF repo and set it as the target release
     let trust_root = TestTrustRoot::generate().await?;
     trust_root.to_upload_request(client, StatusCode::CREATED).execute().await?;
+    let v1 = Version::new(1, 0, 0);
     trust_root
-        .assemble_repo(&logctx.log, &[])
+        .assemble_repo(RepositoryEditor::fake(v1.clone())?)
         .await?
         .to_upload_request(client, StatusCode::OK)
         .execute()
         .await?;
-    let v1 = Version::new(1, 0, 0);
     set_target_release(client, &v1).await?;
 
     let status: update::UpdateStatus =
@@ -763,17 +724,8 @@ async fn test_update_status() -> Result<()> {
 
     // do it again so there are two, so both versions are associated with tuf repos
     let v2 = Version::new(2, 0, 0);
-    let tweaks = &[
-        ManifestTweak::SystemVersion(v2.clone()),
-        ManifestTweak::ArtifactVersion {
-            kind: KnownArtifactKind::SwitchRotBootloader,
-            version: ArtifactVersion::new("non-semver-2").unwrap(),
-        },
-    ];
-    let trust_root = TestTrustRoot::generate().await?;
-    trust_root.to_upload_request(client, StatusCode::CREATED).execute().await?;
     trust_root
-        .assemble_repo(&logctx.log, tweaks)
+        .assemble_repo(RepositoryEditor::fake(v2.clone())?)
         .await?
         .to_upload_request(client, StatusCode::OK)
         .execute()
@@ -866,7 +818,7 @@ async fn test_repo_prune(cptestctx: &ControlPlaneTestContext) {
     assert!(repos.iter().any(|r| r.id() == repo4id));
 }
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[tokio::test]
 async fn test_repo_list() -> Result<()> {
     let cptestctx =
         nexus_test_utils::ControlPlaneBuilder::new("test_repo_list")
@@ -888,7 +840,9 @@ async fn test_repo_list() -> Result<()> {
     trust_root.to_upload_request(client, StatusCode::CREATED).execute().await?;
 
     // Upload first repository (system version 1.0.0)
-    let repo1 = trust_root.assemble_repo(&logctx.log, &[]).await?;
+    let repo1 = trust_root
+        .assemble_repo(RepositoryEditor::fake(Version::new(1, 0, 0))?)
+        .await?;
     let upload_response1 = repo1
         .into_upload_request(client, StatusCode::OK)
         .execute()
@@ -900,8 +854,9 @@ async fn test_repo_list() -> Result<()> {
     assert_eq!(response1.status, TufRepoUploadStatus::Inserted);
 
     // Upload second repository (system version 2.0.0)
-    let tweaks = &[ManifestTweak::SystemVersion("2.0.0".parse().unwrap())];
-    let repo2 = trust_root.assemble_repo(&logctx.log, tweaks).await?;
+    let repo2 = trust_root
+        .assemble_repo(RepositoryEditor::fake(Version::new(2, 0, 0))?)
+        .await?;
     let upload_response2 = repo2
         .into_upload_request(client, StatusCode::OK)
         .execute()
@@ -913,8 +868,9 @@ async fn test_repo_list() -> Result<()> {
     assert_eq!(response2.status, TufRepoUploadStatus::Inserted);
 
     // Upload third repository (system version 3.0.0)
-    let tweaks = &[ManifestTweak::SystemVersion("3.0.0".parse().unwrap())];
-    let repo3 = trust_root.assemble_repo(&logctx.log, tweaks).await?;
+    let repo3 = trust_root
+        .assemble_repo(RepositoryEditor::fake(Version::new(3, 0, 0))?)
+        .await?;
     let upload_response3 = repo3
         .into_upload_request(client, StatusCode::OK)
         .execute()

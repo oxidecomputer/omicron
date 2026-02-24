@@ -4,7 +4,6 @@
 
 //! Test-only support code for testing MGS update planning.
 
-use chrono::Utc;
 use gateway_client::types::PowerState;
 use gateway_client::types::RotState;
 use gateway_client::types::SpComponentCaboose;
@@ -27,11 +26,8 @@ use nexus_types::inventory::CabooseWhich;
 use nexus_types::inventory::Collection;
 use nexus_types::inventory::SpType;
 use omicron_common::api::external::Generation;
-use omicron_common::api::external::TufArtifactMeta;
-use omicron_common::api::external::TufRepoDescription;
-use omicron_common::api::external::TufRepoMeta;
 use omicron_common::disk::M2Slot;
-use omicron_common::update::ArtifactId;
+use omicron_common::update::TufRepoDescription;
 use omicron_uuid_kinds::SledUuid;
 use sled_agent_types::inventory::Baseboard;
 use sled_agent_types::inventory::BootImageHeader;
@@ -51,10 +47,19 @@ use sled_hardware_types::GIMLET_SLED_MODEL;
 use sled_hardware_types::OxideSled;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
+use tufaceous_artifact::Artifact;
 use tufaceous_artifact::ArtifactHash;
-use tufaceous_artifact::ArtifactKind;
 use tufaceous_artifact::ArtifactVersion;
-use tufaceous_artifact::KnownArtifactKind;
+use tufaceous_artifact::Artifacts;
+use tufaceous_artifact::KnownArtifactTags;
+use tufaceous_artifact::OsBoard;
+use tufaceous_artifact::OsPhase1Tags;
+use tufaceous_artifact::OsPhase2Tags;
+use tufaceous_artifact::OsVariant;
+use tufaceous_artifact::RotBootloaderTags;
+use tufaceous_artifact::RotTags;
+use tufaceous_artifact::SpTags;
+use tufaceous_artifact::ZoneTags;
 
 use crate::mgs_updates::PendingHostPhase2Changes;
 
@@ -155,7 +160,6 @@ pub(super) const ARTIFACT_HASH_COSMO_HOST_PHASE_1: ArtifactHash =
     ArtifactHash([38; 32]);
 
 // unused artifact hashes contained in our fake TUF repo
-const ARTIFACT_HASH_CONTROL_PLANE: ArtifactHash = ArtifactHash([33; 32]);
 const ARTIFACT_HASH_NEXUS: ArtifactHash = ArtifactHash([34; 32]);
 
 /// Hash of fake RoT signing keys
@@ -314,243 +318,184 @@ impl TestBoards {
         const SYSTEM_HASH: ArtifactHash = ArtifactHash([3; 32]);
 
         fn make_artifact(
-            name: &str,
-            kind: ArtifactKind,
+            tags: KnownArtifactTags,
             hash: ArtifactHash,
-            board: Option<&str>,
-            sign: Option<Vec<u8>>,
-        ) -> TufArtifactMeta {
-            TufArtifactMeta {
-                id: ArtifactId {
-                    name: name.to_string(),
-                    version: ARTIFACT_VERSION_2,
-                    kind,
-                },
+        ) -> Artifact {
+            Artifact {
+                target_name: String::new(), // unused here
+                version: ARTIFACT_VERSION_2,
+                tags: tags.to_tags(),
                 hash,
-                size: 0, // unused here
-                board: board.map(|s| s.to_string()),
-                sign,
+                length: 0, // unused here
             }
         }
 
         // Include a bunch of SP-related artifacts, as well as a few others just
         // to make sure those are properly ignored.
-        let artifacts = vec![
+        let artifacts = Artifacts::new([
             make_artifact(
-                "control-plane",
-                KnownArtifactKind::ControlPlane.into(),
-                ARTIFACT_HASH_CONTROL_PLANE,
-                None,
-                None,
-            ),
-            make_artifact(
-                "nexus",
-                KnownArtifactKind::Zone.into(),
+                ZoneTags { zone_name: String::from("nexus") }.into(),
                 ARTIFACT_HASH_NEXUS,
-                None,
-                None,
             ),
             make_artifact(
-                "gimlet-host-os-phase-1",
-                ArtifactKind::GIMLET_HOST_PHASE_1,
+                OsPhase1Tags {
+                    os_board: OsBoard::Gimlet,
+                    os_variant: OsVariant::Host,
+                }
+                .into(),
                 ARTIFACT_HASH_GIMLET_HOST_PHASE_1,
-                None,
-                None,
             ),
             make_artifact(
-                "cosmo-host-os-phase-1",
-                ArtifactKind::COSMO_HOST_PHASE_1,
+                OsPhase1Tags {
+                    os_board: OsBoard::Cosmo,
+                    os_variant: OsVariant::Host,
+                }
+                .into(),
                 ARTIFACT_HASH_COSMO_HOST_PHASE_1,
-                None,
-                None,
             ),
             make_artifact(
-                "host-os-phase-2",
-                ArtifactKind::HOST_PHASE_2,
+                OsPhase2Tags { os_variant: OsVariant::Host }.into(),
                 ARTIFACT_HASH_HOST_PHASE_2,
-                None,
-                None,
             ),
             make_artifact(
-                "cosmo-b",
-                KnownArtifactKind::GimletSp.into(),
+                SpTags { sp_board: String::from("cosmo-b") }.into(),
                 test_artifact_for_board("cosmo-b"),
-                Some("cosmo-b"),
-                None,
             ),
             make_artifact(
-                "gimlet-d",
-                KnownArtifactKind::GimletSp.into(),
+                SpTags { sp_board: String::from("gimlet-d") }.into(),
                 test_artifact_for_board("gimlet-d"),
-                Some("gimlet-d"),
-                None,
             ),
             make_artifact(
-                "gimlet-e",
-                KnownArtifactKind::GimletSp.into(),
+                SpTags { sp_board: String::from("gimlet-e") }.into(),
                 test_artifact_for_board("gimlet-e"),
-                Some("gimlet-e"),
-                None,
             ),
             make_artifact(
-                "sidecar-b",
-                KnownArtifactKind::SwitchSp.into(),
+                SpTags { sp_board: String::from("sidecar-b") }.into(),
                 test_artifact_for_board("sidecar-b"),
-                Some("sidecar-b"),
-                None,
             ),
             make_artifact(
-                "sidecar-c",
-                KnownArtifactKind::SwitchSp.into(),
+                SpTags { sp_board: String::from("sidecar-c") }.into(),
                 test_artifact_for_board("sidecar-c"),
-                Some("sidecar-c"),
-                None,
             ),
             make_artifact(
-                "psc-b",
-                KnownArtifactKind::PscSp.into(),
+                SpTags { sp_board: String::from("psc-b") }.into(),
                 test_artifact_for_board("psc-b"),
-                Some("psc-b"),
-                None,
             ),
             make_artifact(
-                "psc-c",
-                KnownArtifactKind::PscSp.into(),
+                SpTags { sp_board: String::from("psc-c") }.into(),
                 test_artifact_for_board("psc-c"),
-                Some("psc-c"),
-                None,
             ),
             make_artifact(
-                "oxide-rot-1-fake-key",
-                ArtifactKind::GIMLET_ROT_IMAGE_A,
-                test_artifact_for_artifact_kind(
-                    ArtifactKind::GIMLET_ROT_IMAGE_A,
-                    Some(OxideSled::Gimlet),
-                ),
-                Some("oxide-rot-1"),
-                Some(ROT_SIGN_GIMLET.into()),
+                RotTags {
+                    rot_board: String::from("oxide-rot-1"),
+                    rot_sign: Some(ROT_SIGN_GIMLET.to_owned()).into(),
+                    rot_slot: tufaceous_artifact::RotSlot::A,
+                }
+                .into(),
+                ARTIFACT_HASH_ROT_GIMLET_A,
             ),
             make_artifact(
-                "oxide-rot-1-fake-key",
-                ArtifactKind::GIMLET_ROT_IMAGE_B,
-                test_artifact_for_artifact_kind(
-                    ArtifactKind::GIMLET_ROT_IMAGE_B,
-                    Some(OxideSled::Gimlet),
-                ),
-                Some("oxide-rot-1"),
-                Some(ROT_SIGN_GIMLET.into()),
+                RotTags {
+                    rot_board: String::from("oxide-rot-1"),
+                    rot_sign: Some(ROT_SIGN_GIMLET.to_owned()).into(),
+                    rot_slot: tufaceous_artifact::RotSlot::B,
+                }
+                .into(),
+                ARTIFACT_HASH_ROT_GIMLET_B,
             ),
             make_artifact(
-                "oxide-rot-1-fake-key",
-                ArtifactKind::GIMLET_ROT_IMAGE_A,
-                test_artifact_for_artifact_kind(
-                    ArtifactKind::GIMLET_ROT_IMAGE_A,
-                    Some(OxideSled::Cosmo),
-                ),
-                Some("oxide-rot-1"),
-                Some(ROT_SIGN_COSMO.into()),
+                RotTags {
+                    rot_board: String::from("oxide-rot-1"),
+                    rot_sign: Some(ROT_SIGN_COSMO.to_owned()).into(),
+                    rot_slot: tufaceous_artifact::RotSlot::A,
+                }
+                .into(),
+                ARTIFACT_HASH_ROT_COSMO_A,
             ),
             make_artifact(
-                "oxide-rot-1-fake-key",
-                ArtifactKind::GIMLET_ROT_IMAGE_B,
-                test_artifact_for_artifact_kind(
-                    ArtifactKind::GIMLET_ROT_IMAGE_B,
-                    Some(OxideSled::Cosmo),
-                ),
-                Some("oxide-rot-1"),
-                Some(ROT_SIGN_COSMO.into()),
+                RotTags {
+                    rot_board: String::from("oxide-rot-1"),
+                    rot_sign: Some(ROT_SIGN_COSMO.to_owned()).into(),
+                    rot_slot: tufaceous_artifact::RotSlot::B,
+                }
+                .into(),
+                ARTIFACT_HASH_ROT_COSMO_B,
             ),
             make_artifact(
-                "oxide-rot-1-fake-key",
-                ArtifactKind::PSC_ROT_IMAGE_A,
-                test_artifact_for_artifact_kind(
-                    ArtifactKind::PSC_ROT_IMAGE_A,
-                    None,
-                ),
-                Some("oxide-rot-1"),
-                Some(ROT_SIGN_PSC.into()),
+                RotTags {
+                    rot_board: String::from("oxide-rot-1"),
+                    rot_sign: Some(ROT_SIGN_PSC.to_owned()).into(),
+                    rot_slot: tufaceous_artifact::RotSlot::A,
+                }
+                .into(),
+                ARTIFACT_HASH_ROT_PSC_A,
             ),
             make_artifact(
-                "oxide-rot-1-fake-key",
-                ArtifactKind::PSC_ROT_IMAGE_B,
-                test_artifact_for_artifact_kind(
-                    ArtifactKind::PSC_ROT_IMAGE_B,
-                    None,
-                ),
-                Some("oxide-rot-1"),
-                Some(ROT_SIGN_PSC.into()),
+                RotTags {
+                    rot_board: String::from("oxide-rot-1"),
+                    rot_sign: Some(ROT_SIGN_PSC.to_owned()).into(),
+                    rot_slot: tufaceous_artifact::RotSlot::B,
+                }
+                .into(),
+                ARTIFACT_HASH_ROT_PSC_B,
             ),
             make_artifact(
-                "oxide-rot-1-fake-key",
-                ArtifactKind::SWITCH_ROT_IMAGE_A,
-                test_artifact_for_artifact_kind(
-                    ArtifactKind::SWITCH_ROT_IMAGE_A,
-                    None,
-                ),
-                Some("oxide-rot-1"),
-                Some(ROT_SIGN_SWITCH.into()),
+                RotTags {
+                    rot_board: String::from("oxide-rot-1"),
+                    rot_sign: Some(ROT_SIGN_SWITCH.to_owned()).into(),
+                    rot_slot: tufaceous_artifact::RotSlot::A,
+                }
+                .into(),
+                ARTIFACT_HASH_ROT_SWITCH_A,
             ),
             make_artifact(
-                "oxide-rot-1-fake-key",
-                ArtifactKind::SWITCH_ROT_IMAGE_B,
-                test_artifact_for_artifact_kind(
-                    ArtifactKind::SWITCH_ROT_IMAGE_B,
-                    None,
-                ),
-                Some("oxide-rot-1"),
-                Some(ROT_SIGN_SWITCH.into()),
+                RotTags {
+                    rot_board: String::from("oxide-rot-1"),
+                    rot_sign: Some(ROT_SIGN_SWITCH.to_owned()).into(),
+                    rot_slot: tufaceous_artifact::RotSlot::B,
+                }
+                .into(),
+                ARTIFACT_HASH_ROT_SWITCH_B,
             ),
             make_artifact(
-                "bootloader-fake-key",
-                ArtifactKind::GIMLET_ROT_STAGE0,
-                test_artifact_for_artifact_kind(
-                    ArtifactKind::GIMLET_ROT_STAGE0,
-                    Some(OxideSled::Gimlet),
-                ),
-                Some("oxide-rot-1"),
-                Some(ROT_SIGN_GIMLET.into()),
+                RotBootloaderTags {
+                    rot_board: String::from("oxide-rot-1"),
+                    rot_sign: Some(ROT_SIGN_GIMLET.to_owned()).into(),
+                }
+                .into(),
+                ARTIFACT_HASH_ROT_BOOTLOADER_GIMLET,
             ),
             make_artifact(
-                "bootloader-fake-key",
-                ArtifactKind::GIMLET_ROT_STAGE0,
-                test_artifact_for_artifact_kind(
-                    ArtifactKind::GIMLET_ROT_STAGE0,
-                    Some(OxideSled::Cosmo),
-                ),
-                Some("oxide-rot-1"),
-                Some(ROT_SIGN_COSMO.into()),
+                RotBootloaderTags {
+                    rot_board: String::from("oxide-rot-1"),
+                    rot_sign: Some(ROT_SIGN_COSMO.to_owned()).into(),
+                }
+                .into(),
+                ARTIFACT_HASH_ROT_BOOTLOADER_COSMO,
             ),
             make_artifact(
-                "bootloader-fake-key",
-                ArtifactKind::PSC_ROT_STAGE0,
-                test_artifact_for_artifact_kind(
-                    ArtifactKind::PSC_ROT_STAGE0,
-                    None,
-                ),
-                Some("oxide-rot-1"),
-                Some(ROT_SIGN_PSC.into()),
+                RotBootloaderTags {
+                    rot_board: String::from("oxide-rot-1"),
+                    rot_sign: Some(ROT_SIGN_PSC.to_owned()).into(),
+                }
+                .into(),
+                ARTIFACT_HASH_ROT_BOOTLOADER_PSC,
             ),
             make_artifact(
-                "bootloader-fake-key",
-                ArtifactKind::SWITCH_ROT_STAGE0,
-                test_artifact_for_artifact_kind(
-                    ArtifactKind::SWITCH_ROT_STAGE0,
-                    None,
-                ),
-                Some("oxide-rot-1"),
-                Some(ROT_SIGN_SWITCH.into()),
+                RotBootloaderTags {
+                    rot_board: String::from("oxide-rot-1"),
+                    rot_sign: Some(ROT_SIGN_SWITCH.to_owned()).into(),
+                }
+                .into(),
+                ARTIFACT_HASH_ROT_BOOTLOADER_SWITCH,
             ),
-        ];
+        ]);
 
         TufRepoDescription {
-            repo: TufRepoMeta {
-                hash: SYSTEM_HASH,
-                targets_role_version: 0,
-                valid_until: Utc::now(),
-                system_version: SYSTEM_VERSION,
-                file_name: String::new(),
-            },
             artifacts,
+            system_version: SYSTEM_VERSION,
+            hash: Some(SYSTEM_HASH),
+            file_name: None,
         }
     }
 
@@ -577,14 +522,16 @@ impl TestBoards {
                     sp_slot: board.id.slot,
                     component: MgsUpdateComponent::Rot,
                     expected_serial: board.serial,
-                    expected_artifact: test_artifact_for_artifact_kind(
-                        match board.id.type_ {
-                            SpType::Sled => ArtifactKind::GIMLET_ROT_IMAGE_B,
-                            SpType::Power => ArtifactKind::PSC_ROT_IMAGE_B,
-                            SpType::Switch => ArtifactKind::SWITCH_ROT_IMAGE_B,
+                    expected_artifact: match board.id.type_ {
+                        SpType::Sled => match sled_type.expect(
+                            "test bug: did not detect sled type for sled",
+                        ) {
+                            OxideSled::Gimlet => ARTIFACT_HASH_ROT_GIMLET_B,
+                            OxideSled::Cosmo => ARTIFACT_HASH_ROT_COSMO_B,
                         },
-                        sled_type,
-                    ),
+                        SpType::Power => ARTIFACT_HASH_ROT_PSC_B,
+                        SpType::Switch => ARTIFACT_HASH_ROT_SWITCH_B,
+                    },
                 })
                 .expect("boards are unique");
             updates
@@ -593,14 +540,20 @@ impl TestBoards {
                     sp_slot: board.id.slot,
                     component: MgsUpdateComponent::RotBootloader,
                     expected_serial: board.serial,
-                    expected_artifact: test_artifact_for_artifact_kind(
-                        match board.id.type_ {
-                            SpType::Sled => ArtifactKind::GIMLET_ROT_STAGE0,
-                            SpType::Power => ArtifactKind::PSC_ROT_STAGE0,
-                            SpType::Switch => ArtifactKind::SWITCH_ROT_STAGE0,
+                    expected_artifact: match board.id.type_ {
+                        SpType::Sled => match sled_type.expect(
+                            "test bug: did not detect sled type for sled",
+                        ) {
+                            OxideSled::Gimlet => {
+                                ARTIFACT_HASH_ROT_BOOTLOADER_GIMLET
+                            }
+                            OxideSled::Cosmo => {
+                                ARTIFACT_HASH_ROT_BOOTLOADER_COSMO
+                            }
                         },
-                        sled_type,
-                    ),
+                        SpType::Power => ARTIFACT_HASH_ROT_BOOTLOADER_PSC,
+                        SpType::Switch => ARTIFACT_HASH_ROT_BOOTLOADER_SWITCH,
+                    },
                 })
                 .expect("boards are unique");
 
@@ -1407,53 +1360,5 @@ fn test_artifact_for_board(board: &str) -> ArtifactHash {
         "psc-c" => ARTIFACT_HASH_SP_PSC_C,
         "cosmo-b" => ARTIFACT_HASH_SP_COSMO_B,
         _ => panic!("test bug: no artifact for board {board:?}"),
-    }
-}
-
-// There's no difference between Gimlet and Cosmo from an RoT perspective
-// so both of them still use the same `ArtifactKind` everywhere. This is
-// why we need the extra `sled_type` argument here
-fn test_artifact_for_artifact_kind(
-    kind: ArtifactKind,
-    sled_type: Option<OxideSled>,
-) -> ArtifactHash {
-    if kind == ArtifactKind::GIMLET_ROT_IMAGE_A
-        && sled_type == Some(OxideSled::Gimlet)
-    {
-        ARTIFACT_HASH_ROT_GIMLET_A
-    } else if kind == ArtifactKind::GIMLET_ROT_IMAGE_B
-        && sled_type == Some(OxideSled::Gimlet)
-    {
-        ARTIFACT_HASH_ROT_GIMLET_B
-    } else if kind == ArtifactKind::GIMLET_ROT_IMAGE_A
-        && sled_type == Some(OxideSled::Cosmo)
-    {
-        ARTIFACT_HASH_ROT_COSMO_A
-    } else if kind == ArtifactKind::GIMLET_ROT_IMAGE_B
-        && sled_type == Some(OxideSled::Cosmo)
-    {
-        ARTIFACT_HASH_ROT_COSMO_B
-    } else if kind == ArtifactKind::PSC_ROT_IMAGE_A {
-        ARTIFACT_HASH_ROT_PSC_A
-    } else if kind == ArtifactKind::PSC_ROT_IMAGE_B {
-        ARTIFACT_HASH_ROT_PSC_B
-    } else if kind == ArtifactKind::SWITCH_ROT_IMAGE_A {
-        ARTIFACT_HASH_ROT_SWITCH_A
-    } else if kind == ArtifactKind::SWITCH_ROT_IMAGE_B {
-        ARTIFACT_HASH_ROT_SWITCH_B
-    } else if kind == ArtifactKind::GIMLET_ROT_STAGE0
-        && sled_type == Some(OxideSled::Gimlet)
-    {
-        ARTIFACT_HASH_ROT_BOOTLOADER_GIMLET
-    } else if kind == ArtifactKind::GIMLET_ROT_STAGE0
-        && sled_type == Some(OxideSled::Cosmo)
-    {
-        ARTIFACT_HASH_ROT_BOOTLOADER_COSMO
-    } else if kind == ArtifactKind::PSC_ROT_STAGE0 {
-        ARTIFACT_HASH_ROT_BOOTLOADER_PSC
-    } else if kind == ArtifactKind::SWITCH_ROT_STAGE0 {
-        ARTIFACT_HASH_ROT_BOOTLOADER_SWITCH
-    } else {
-        panic!("test bug: no artifact for artifact kind {kind:?}")
     }
 }

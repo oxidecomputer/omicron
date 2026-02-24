@@ -12,9 +12,7 @@ use installinator_common::EventReport;
 use ipcc::{InstallinatorImageId, Ipcc};
 use omicron_uuid_kinds::MupdateUuid;
 use tokio::sync::mpsc;
-use tufaceous_artifact::{
-    ArtifactHash, ArtifactHashId, ArtifactKind, KnownArtifactKind,
-};
+use tufaceous_artifact::{ArtifactHash, InstallinatorArtifactId};
 
 use crate::{errors::HttpError, fetch::FetchReceiver};
 
@@ -83,55 +81,6 @@ impl LookupId {
     }
 }
 
-#[derive(Clone, Debug)]
-pub(crate) struct MeasurementArtifact {
-    pub(crate) hash: ArtifactHash,
-    pub(crate) name: String,
-}
-
-pub(crate) struct MeasurementArtifactHashId {
-    pub(crate) hash: ArtifactHashId,
-    pub(crate) name: String,
-}
-
-/// The host phase 2 and control plane hashes to download.
-#[derive(Clone, Debug)]
-pub(crate) struct ArtifactsToDownload {
-    pub(crate) host_phase_2: ArtifactHash,
-    pub(crate) control_plane: ArtifactHash,
-    pub(crate) measurement_corpus: Vec<MeasurementArtifact>,
-}
-
-impl ArtifactsToDownload {
-    pub(crate) fn host_phase_2_id(&self) -> ArtifactHashId {
-        ArtifactHashId {
-            kind: ArtifactKind::HOST_PHASE_2,
-            hash: self.host_phase_2,
-        }
-    }
-
-    pub(crate) fn control_plane_id(&self) -> ArtifactHashId {
-        ArtifactHashId {
-            kind: KnownArtifactKind::ControlPlane.into(),
-            hash: self.control_plane,
-        }
-    }
-
-    pub(crate) fn measurement_corpus(&self) -> Vec<MeasurementArtifactHashId> {
-        self.measurement_corpus
-            .clone()
-            .into_iter()
-            .map(|x| MeasurementArtifactHashId {
-                name: x.name,
-                hash: ArtifactHashId {
-                    kind: KnownArtifactKind::MeasurementCorpus.into(),
-                    hash: x.hash,
-                },
-            })
-            .collect()
-    }
-}
-
 #[derive(Debug)]
 pub(crate) struct ArtifactClient {
     log: slog::Logger,
@@ -185,14 +134,11 @@ impl ArtifactClient {
 
     pub(crate) async fn fetch(
         &self,
-        artifact_hash_id: ArtifactHashId,
+        id: &InstallinatorArtifactId,
     ) -> Result<(u64, FetchReceiver), HttpError> {
         let artifact_bytes = self
             .client
-            .get_artifact_by_hash(
-                artifact_hash_id.kind.as_str(),
-                &artifact_hash_id.hash.to_string(),
-            )
+            .get_artifact_by_hash(id.kind.as_str(), &id.hash.to_string())
             .await?;
 
         slog::debug!(

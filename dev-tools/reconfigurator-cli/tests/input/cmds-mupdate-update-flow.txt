@@ -4,7 +4,7 @@ load-example --nsleds 3 --ndisks-per-sled 1
 
 # Create a TUF repository from a fake manifest. We're going to use this
 # repository to test out the minimum release generation flow.
-tuf-assemble ../../update-common/manifests/fake.toml
+generate-fake-repo 1.0.0
 set target-release repo-1.0.0.zip
 
 # Update the install dataset on this sled to the target release.
@@ -80,7 +80,7 @@ sled-set serial0 inventory-visible
 # But simulate a second mupdate on sled 2. This should invalidate the existing
 # mupdate override on sled 2 and cause another target release minimum
 # generation bump.
-tuf-assemble ../../update-common/manifests/fake-non-semver.toml --allow-non-semver
+generate-fake-repo 2.0.0
 sled-update-install-dataset serial2 --from-repo repo-2.0.0.zip
 sled-set serial2 mupdate-override 1c0ce176-6dc8-4a90-adea-d4a8000751da
 
@@ -147,22 +147,22 @@ sled-update-rot-bootloader serial0 --stage0 2.0.0
 # Finish the MGS-based updates on sled 0.
 sled-update-rot serial0 --slot-a 2.0.0
 sled-update-sp serial0 --active 2.0.0
-sled-update-host-phase2 serial0 --boot-disk B --slot-b 9ff631b5b7229604ab7c5aae2ee4a34a64772736b332540d38077b3aea6952df
-sled-update-host-phase1 serial0 --active B --slot-b 1eba0d79ea9d34558fb3f923a06614bd740649eeb0ca6e5086529dc60cd6f729
+sled-update-host-phase2 serial0 --boot-disk B --slot-b 3243cf430459c07a057df649a21a2412a9804497b25850eb0f6362eceaaca3ec
+sled-update-host-phase1 serial0 --active B --slot-b e35cde7a481d8d17e0e8d4d7e68ee1d19c8e77bb7164129f3f7957150cf9a8fc
 
 # All the MGS-based updates on sled 1.
 sled-update-rot-bootloader serial1 --stage0 2.0.0
 sled-update-rot serial1 --slot-a 2.0.0
 sled-update-sp serial1 --active 2.0.0
-sled-update-host-phase2 serial1 --boot-disk B --slot-b 9ff631b5b7229604ab7c5aae2ee4a34a64772736b332540d38077b3aea6952df
-sled-update-host-phase1 serial1 --active B --slot-b 1eba0d79ea9d34558fb3f923a06614bd740649eeb0ca6e5086529dc60cd6f729
+sled-update-host-phase2 serial1 --boot-disk B --slot-b 3243cf430459c07a057df649a21a2412a9804497b25850eb0f6362eceaaca3ec
+sled-update-host-phase1 serial1 --active B --slot-b e35cde7a481d8d17e0e8d4d7e68ee1d19c8e77bb7164129f3f7957150cf9a8fc
 
 # All the MGS-based updates on sled 2.
 sled-update-rot-bootloader serial2 --stage0 2.0.0
 sled-update-rot serial2 --slot-a 2.0.0
 sled-update-sp serial2 --active 2.0.0
-sled-update-host-phase2 serial2 --boot-disk B --slot-b 9ff631b5b7229604ab7c5aae2ee4a34a64772736b332540d38077b3aea6952df
-sled-update-host-phase1 serial2 --active B --slot-b 1eba0d79ea9d34558fb3f923a06614bd740649eeb0ca6e5086529dc60cd6f729
+sled-update-host-phase2 serial2 --boot-disk B --slot-b 3243cf430459c07a057df649a21a2412a9804497b25850eb0f6362eceaaca3ec
+sled-update-host-phase1 serial2 --active B --slot-b e35cde7a481d8d17e0e8d4d7e68ee1d19c8e77bb7164129f3f7957150cf9a8fc
 
 # All MGS-based updates complete.
 inventory-generate

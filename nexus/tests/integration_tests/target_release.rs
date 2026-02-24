@@ -15,19 +15,17 @@ use nexus_test_utils::resource_helpers::object_get;
 use nexus_types::external_api::update;
 use nexus_types::external_api::update::SetTargetReleaseParams;
 use semver::Version;
-use tufaceous_artifact::{ArtifactVersion, KnownArtifactKind};
-use tufaceous_lib::assemble::ManifestTweak;
+use tufaceous::edit::RepositoryEditor;
 
 use crate::integration_tests::updates::TestTrustRoot;
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[tokio::test]
 async fn get_set_target_release() -> Result<()> {
     let ctx =
         nexus_test_utils::ControlPlaneBuilder::new("get_set_target_release")
             .start::<omicron_nexus::Server>()
             .await;
     let client = &ctx.external_client;
-    let logctx = &ctx.logctx;
 
     // There is no target release before one has ever been specified
     let status: update::UpdateStatus =
@@ -55,7 +53,7 @@ async fn get_set_target_release() -> Result<()> {
         let before = Utc::now();
         let system_version = Version::new(1, 0, 0);
         let response: update::TufRepoUpload = trust_root
-            .assemble_repo(&logctx.log, &[])
+            .assemble_repo(RepositoryEditor::fake(system_version.clone())?)
             .await?
             .into_upload_request(client, StatusCode::OK)
             .execute()
@@ -75,19 +73,11 @@ async fn get_set_target_release() -> Result<()> {
         assert_eq!(target_release.version, system_version);
     }
 
-    // Adding a repo with non-semver artifact versions should be ok, too.
     {
         let before = Utc::now();
         let system_version = Version::new(2, 0, 0);
-        let tweaks = &[
-            ManifestTweak::SystemVersion(system_version.clone()),
-            ManifestTweak::ArtifactVersion {
-                kind: KnownArtifactKind::SwitchRotBootloader,
-                version: ArtifactVersion::new("non-semver-2").unwrap(),
-            },
-        ];
         let response: update::TufRepoUpload = trust_root
-            .assemble_repo(&logctx.log, tweaks)
+            .assemble_repo(RepositoryEditor::fake(system_version.clone())?)
             .await?
             .into_upload_request(client, StatusCode::OK)
             .execute()

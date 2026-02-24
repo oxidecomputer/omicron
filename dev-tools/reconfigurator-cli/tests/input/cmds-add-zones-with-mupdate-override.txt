@@ -6,7 +6,7 @@ load-example --nsleds 3 --ndisks-per-sled 3
 
 # Create a TUF repository from a fake manifest. We're going to use this
 # repository to test out the minimum release generation flow.
-tuf-assemble ../../update-common/manifests/fake.toml
+generate-fake-repo 1.0.0
 set target-release repo-1.0.0.zip
 
 # Update the install dataset on this sled to the target release.

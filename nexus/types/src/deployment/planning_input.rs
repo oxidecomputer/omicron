@@ -29,11 +29,10 @@ use omicron_common::address::Ipv6Range;
 use omicron_common::address::Ipv6Subnet;
 use omicron_common::address::SLED_PREFIX;
 use omicron_common::api::external::Generation;
-use omicron_common::api::external::TufRepoDescription;
 use omicron_common::api::internal::shared::SourceNatConfigError;
 use omicron_common::disk::DiskIdentity;
 use omicron_common::policy::SINGLE_NODE_CLICKHOUSE_REDUNDANCY;
-use omicron_common::update::ArtifactId;
+use omicron_common::update::TufRepoDescription;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::SledUuid;
@@ -52,6 +51,7 @@ use std::net::IpAddr;
 use std::sync::Arc;
 use strum::Display;
 use strum::IntoEnumIterator;
+use tufaceous_artifact::ZoneTags;
 
 /// Amount of time we're willing to let an MGS-managed update sit in an
 /// "impossible preconditions" state waiting for it to settle.
@@ -1423,23 +1423,13 @@ impl TargetReleaseDescription {
         match self {
             Self::Initial => Ok(BlueprintZoneImageSource::InstallDataset),
             Self::TufRepo(tuf_repo) => {
-                // We should have exactly one artifact for a given zone kind in
-                // every TUF repo; return an error if we have 0 or more than 1.
-                let mut matching_artifacts =
-                    tuf_repo.artifacts.iter().filter(|artifact| {
-                        zone_kind.is_control_plane_zone_artifact(&artifact.id)
-                    });
-                let artifact = matching_artifacts
-                    .next()
-                    .ok_or(TufRepoContentsError::MissingZoneKind(zone_kind))?;
-                if let Some(extra_artifact) = matching_artifacts.next() {
-                    return Err(
-                        TufRepoContentsError::MultipleArtifactsSameZoneKind {
-                            artifact1: artifact.id.clone(),
-                            artifact2: extra_artifact.id.clone(),
-                        },
-                    );
-                }
+                let tags = ZoneTags {
+                    zone_name: zone_kind.artifact_id_name().to_owned(),
+                };
+                let artifact =
+                    tuf_repo.artifacts.get(tags.into()).map_err(|source| {
+                        TufRepoContentsError { zone_kind, source }
+                    })?;
                 Ok(BlueprintZoneImageSource::from_available_artifact(artifact))
             }
         }
@@ -1447,17 +1437,12 @@ impl TargetReleaseDescription {
 }
 
 #[derive(Debug, thiserror::Error)]
-pub enum TufRepoContentsError {
-    #[error("TUF repo is missing an artifact for zone kind {0:?}")]
-    MissingZoneKind(ZoneKind),
-    #[error(
-        "TUF repo contains 2 or more artifacts for the same zone kind: \
-         {artifact1:?}, {artifact2:?}"
-    )]
-    MultipleArtifactsSameZoneKind {
-        artifact1: ArtifactId,
-        artifact2: ArtifactId,
-    },
+#[error(
+    "TUF repo does not contain exactly 1 artifact for zone kind {zone_kind:?}"
+)]
+pub struct TufRepoContentsError {
+    zone_kind: ZoneKind,
+    source: tufaceous_artifact::GetError,
 }
 
 /// Where oximeter should read from

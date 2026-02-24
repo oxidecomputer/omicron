@@ -12,9 +12,9 @@ use indent_write::fmt::IndentWriter;
 use omicron_common::api::external::Generation;
 use omicron_common::api::internal::shared::NetworkInterface;
 use omicron_common::disk::{DatasetKind, DatasetName, M2Slot};
-use omicron_common::update::{ArtifactId, OmicronInstallManifestSource};
+use omicron_common::update::OmicronInstallManifestSource;
 use omicron_uuid_kinds::MupdateUuid;
-use tufaceous_artifact::{ArtifactHash, KnownArtifactKind};
+use tufaceous_artifact::ArtifactHash;
 
 use crate::latest::inventory::{
     BootImageHeader, BootPartitionContents, BootPartitionDetails,
@@ -134,10 +134,10 @@ impl ZoneKind {
     /// Return a string used as an artifact name for control-plane zones.
     /// This is **not guaranteed** to be stable.
     ///
-    /// These strings match the `ArtifactId::name`s Nexus constructs when
-    /// unpacking the composite control-plane artifact in a TUF repo. Currently,
-    /// these are chosen by reading the `pkg` value of the `oxide.json` object
-    /// inside each zone image tarball.
+    /// These strings match the `KnownArtifactTags::Zone::name`s Tufaceous
+    /// constructs when creating a TUF repo. Currently, these are chosen by
+    /// reading the `pkg` value of the `oxide.json` object inside each zone
+    /// image tarball.
     pub fn artifact_id_name(self) -> &'static str {
         match self {
             ZoneKind::BoundaryNtp => "ntp",
@@ -153,20 +153,6 @@ impl ZoneKind {
             ZoneKind::Nexus => "nexus",
             ZoneKind::Oximeter => "oximeter",
         }
-    }
-
-    /// Return true if an artifact represents a control plane zone image
-    /// of this kind.
-    pub fn is_control_plane_zone_artifact(
-        self,
-        artifact_id: &ArtifactId,
-    ) -> bool {
-        artifact_id
-            .kind
-            .to_known()
-            .map(|kind| matches!(kind, KnownArtifactKind::Zone))
-            .unwrap_or(false)
-            && artifact_id.name == self.artifact_id_name()
     }
 
     /// Map an artifact ID name to the corresponding file name in the install

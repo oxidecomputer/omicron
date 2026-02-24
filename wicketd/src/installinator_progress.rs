@@ -369,7 +369,7 @@ mod tests {
                             )
                             .expect("serialized step ID"),
                             component: serde_json::to_value(
-                                InstallinatorComponent::Both,
+                                InstallinatorComponent::All,
                             )
                             .expect("serialized component"),
                             description: "Fake step".into(),

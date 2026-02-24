@@ -21,7 +21,6 @@ use clickhouse_admin_types::keeper::KeeperId;
 use clickhouse_admin_types::server::ServerId;
 use core::future::Future;
 use core::pin::Pin;
-use diesel::BoolExpressionMethods;
 use diesel::ExpressionMethods;
 use diesel::Insertable;
 use diesel::IntoSql;
@@ -114,8 +113,6 @@ use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::sync::Arc;
 use thiserror::Error;
-use tufaceous_artifact::ArtifactKind;
-use tufaceous_artifact::KnownArtifactKind;
 use uuid::Uuid;
 
 mod external_networking;
@@ -723,23 +720,15 @@ impl DataStore {
                 // which is non-fatal.
                 .left_join(
                     tuf1.on(tuf1
-                        .field(tuf_artifact_dsl::kind)
-                        .eq(ArtifactKind::HOST_PHASE_2.to_string())
-                        .and(
-                            tuf1.field(tuf_artifact_dsl::sha256)
-                                .nullable()
-                                .eq(dsl::host_phase_2_desired_slot_a),
-                        )),
+                        .field(tuf_artifact_dsl::sha256)
+                        .nullable()
+                        .eq(dsl::host_phase_2_desired_slot_a)),
                 )
                 .left_join(
                     tuf2.on(tuf2
-                        .field(tuf_artifact_dsl::kind)
-                        .eq(ArtifactKind::HOST_PHASE_2.to_string())
-                        .and(
-                            tuf2.field(tuf_artifact_dsl::sha256)
-                                .nullable()
-                                .eq(dsl::host_phase_2_desired_slot_b),
-                        )),
+                        .field(tuf_artifact_dsl::sha256)
+                        .nullable()
+                        .eq(dsl::host_phase_2_desired_slot_b)),
                 )
                 .select((
                     BpSledMetadata::as_select(),
@@ -813,13 +802,9 @@ impl DataStore {
                 // Left join in case the artifact is missing from the
                 // tuf_artifact table, which is non-fatal.
                 .left_join(
-                    tuf_artifact_dsl::tuf_artifact.on(tuf_artifact_dsl::kind
-                        .eq(KnownArtifactKind::Zone.to_string())
-                        .and(
-                            tuf_artifact_dsl::sha256
-                                .nullable()
-                                .eq(dsl::image_artifact_sha256),
-                        )),
+                    tuf_artifact_dsl::tuf_artifact.on(tuf_artifact_dsl::sha256
+                        .nullable()
+                        .eq(dsl::image_artifact_sha256)),
                 )
                 .select((
                     BpOmicronZone::as_select(),
@@ -3137,12 +3122,9 @@ mod tests {
     use nexus_types::inventory::Collection;
     use omicron_common::address::IpRange;
     use omicron_common::address::Ipv6Subnet;
-    use omicron_common::api::external::TufArtifactMeta;
-    use omicron_common::api::external::TufRepoDescription;
-    use omicron_common::api::external::TufRepoMeta;
     use omicron_common::disk::DiskIdentity;
     use omicron_common::disk::M2Slot;
-    use omicron_common::update::ArtifactId;
+    use omicron_common::update::TufRepoDescription;
     use omicron_test_utils::dev;
     use omicron_test_utils::dev::poll::CondCheckError;
     use omicron_test_utils::dev::poll::wait_for_condition;
@@ -3159,8 +3141,14 @@ mod tests {
     use std::sync::atomic::AtomicBool;
     use std::sync::atomic::Ordering;
     use std::time::Duration;
+    use tufaceous_artifact::Artifact;
     use tufaceous_artifact::ArtifactHash;
     use tufaceous_artifact::ArtifactVersion;
+    use tufaceous_artifact::Artifacts;
+    use tufaceous_artifact::KnownArtifactTags;
+    use tufaceous_artifact::OsPhase2Tags;
+    use tufaceous_artifact::OsVariant;
+    use tufaceous_artifact::ZoneTags;
 
     #[derive(Default)]
     pub struct NetworkResourceControlFlow {
@@ -3490,48 +3478,45 @@ mod tests {
                 .tuf_repo_insert(
                     opctx,
                     &TufRepoDescription {
-                        repo: TufRepoMeta {
-                            hash: SYSTEM_HASH,
-                            targets_role_version: 0,
-                            valid_until: Utc::now(),
-                            system_version: SYSTEM_VERSION,
-                            file_name: String::new(),
-                        },
-                        artifacts: vec![
-                            TufArtifactMeta {
-                                id: ArtifactId {
-                                    name: String::new(),
-                                    version: ARTIFACT_VERSION_1,
-                                    kind: KnownArtifactKind::Zone.into(),
-                                },
+                        artifacts: Artifacts::new([
+                            Artifact {
+                                target_name: String::new(),
+                                version: ARTIFACT_VERSION_1,
+                                tags: KnownArtifactTags::Zone(ZoneTags {
+                                    zone_name: String::new(),
+                                })
+                                .to_tags(),
                                 hash: ZONE_ARTIFACT_HASH_1,
-                                size: 0,
-                                board: None,
-                                sign: None,
+                                length: 0,
                             },
-                            TufArtifactMeta {
-                                id: ArtifactId {
-                                    name: "host-1".into(),
-                                    version: ARTIFACT_VERSION_2,
-                                    kind: ArtifactKind::HOST_PHASE_2,
-                                },
+                            Artifact {
+                                target_name: String::new(),
+                                version: ARTIFACT_VERSION_2,
+                                tags: KnownArtifactTags::OsPhase2(
+                                    OsPhase2Tags {
+                                        os_variant: OsVariant::Host,
+                                    },
+                                )
+                                .to_tags(),
                                 hash: HOST_ARTIFACT_HASH_1,
-                                size: 0,
-                                board: None,
-                                sign: None,
+                                length: 0,
                             },
-                            TufArtifactMeta {
-                                id: ArtifactId {
-                                    name: "host-2".into(),
-                                    version: ARTIFACT_VERSION_3,
-                                    kind: ArtifactKind::HOST_PHASE_2,
-                                },
+                            Artifact {
+                                target_name: String::new(),
+                                version: ARTIFACT_VERSION_3,
+                                tags: KnownArtifactTags::OsPhase2(
+                                    OsPhase2Tags {
+                                        os_variant: OsVariant::Host,
+                                    },
+                                )
+                                .to_tags(),
                                 hash: HOST_ARTIFACT_HASH_2,
-                                size: 0,
-                                board: None,
-                                sign: None,
+                                length: 0,
                             },
-                        ],
+                        ]),
+                        system_version: SYSTEM_VERSION,
+                        hash: Some(SYSTEM_HASH),
+                        file_name: None,
                     },
                 )
                 .await

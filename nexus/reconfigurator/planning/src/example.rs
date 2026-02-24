@@ -5,7 +5,6 @@
 //! Example blueprints
 
 use std::collections::BTreeSet;
-use std::collections::HashMap;
 use std::fmt;
 use std::hash::Hash;
 use std::net::IpAddr;
@@ -19,12 +18,8 @@ use crate::planner::rng::PlannerRng;
 use crate::system::RotStateOverrides;
 use crate::system::SledBuilder;
 use crate::system::SystemDescription;
-use anyhow::Context;
 use anyhow::bail;
-use camino::Utf8Path;
-use camino_tempfile::Utf8TempDir;
 use chrono::Utc;
-use clap::Parser;
 use nexus_inventory::CollectionBuilderRng;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::BlueprintArtifactVersion;
@@ -41,21 +36,22 @@ use nexus_types::deployment::TargetReleaseDescription;
 use nexus_types::external_api::sled::SledPolicy;
 use nexus_types::inventory::Collection;
 use omicron_common::address::Ipv4Range;
-use omicron_common::api::external::TufRepoDescription;
 use omicron_common::policy::CRUCIBLE_PANTRY_REDUNDANCY;
 use omicron_common::policy::INTERNAL_DNS_REDUNDANCY;
+use omicron_common::update::TufRepoDescription;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::SledKind;
 use omicron_uuid_kinds::VnicUuid;
+use semver::Version;
 use sled_agent_types::inventory::SledRole;
 use sled_agent_types::inventory::ZoneKind;
-use tufaceous_artifact::ArtifactHash;
-use tufaceous_artifact::ArtifactKind;
-use tufaceous_artifact::KnownArtifactKind;
+use tufaceous_artifact::KnownArtifactTags;
+use tufaceous_artifact::OsBoard;
+use tufaceous_artifact::OsPhase1Tags;
+use tufaceous_artifact::OsPhase2Tags;
+use tufaceous_artifact::OsVariant;
 use typed_rng::TypedUuidRng;
-use update_common::artifacts::ArtifactsWithPlan;
-use update_common::artifacts::ControlPlaneZonesMode;
-use update_common::artifacts::VerificationMode;
+use update_common::TufRepoDescriptionExt;
 
 /// Stateful PRNG for generating simulated systems.
 ///
@@ -446,41 +442,9 @@ impl ExampleSystemBuilder {
 
     /// Set the target release to an initial `0.0.1` version, and image sources to
     /// Artifact corresponding to the release.
-    pub fn with_target_release_0_0_1(self) -> anyhow::Result<Self> {
-        // Find the 0.0.1 release relative to this crate's root directory.
-        let root_dir = Utf8Path::new(env!("CARGO_MANIFEST_DIR"));
-        let manifest_path = root_dir
-            .parent()
-            .unwrap()
-            .parent()
-            .unwrap()
-            .parent()
-            .unwrap()
-            .join("update-common/manifests/fake-0.0.1.toml");
-        self.with_target_release_manifest(
-            &manifest_path,
-            // allow_non_semver is false because fake-0.0.1.toml doesn't contain
-            // non-semver artifacts.
-            false,
-        )
-    }
-
-    pub fn with_target_release_manifest(
-        mut self,
-        manifest_path: &Utf8Path,
-        allow_non_semver: bool,
-    ) -> anyhow::Result<Self> {
-        let dir = Utf8TempDir::with_prefix("reconfigurator-planning-example")
-            .context("failed to create temp dir")?;
-        let zip_path = dir.path().join("repo.zip");
-        tuf_assemble(&self.log, manifest_path, &zip_path, allow_non_semver)
-            .context("failed to assemble TUF repo")?;
-
-        let target_release = extract_tuf_repo_description(&self.log, &zip_path)
-            .context("failed to extract TUF repo description")?;
-
-        self.target_release = TargetReleaseDescription::TufRepo(target_release);
-
+    pub fn with_target_release_0_0_1(mut self) -> anyhow::Result<Self> {
+        let repo = TufRepoDescription::fake(const { Version::new(0, 0, 1) })?;
+        self.target_release = TargetReleaseDescription::TufRepo(repo);
         Ok(self)
     }
 
@@ -579,25 +543,6 @@ impl ExampleSystemBuilder {
                 (rng.sled_rng.next(), settings, role)
             })
             .collect();
-
-        let artifacts_by_kind = if let TargetReleaseDescription::TufRepo(repo) =
-            &self.target_release
-        {
-            // Build a map of artifact versions by kind. For the artifacts we
-            // care about, we currently only expect a single version, so this
-            // map is expected to be unique.
-            //
-            // TODO-correctness Need to choose gimlet vs cosmo here! Can we use
-            // update-common's UpdatePlan instead of this jank?
-            // https://github.com/oxidecomputer/omicron/issues/8777
-            let mut artifacts_by_kind = HashMap::new();
-            for artifact in &repo.artifacts {
-                artifacts_by_kind.insert(&artifact.id.kind, artifact);
-            }
-            Some(artifacts_by_kind)
-        } else {
-            None
-        };
 
         for (sled_id, settings, role) in &sled_ids_with_settings {
             let _ = system
@@ -911,11 +856,13 @@ impl ExampleSystemBuilder {
             }
             builder.sled_ensure_zone_datasets(sled_id).unwrap();
 
-            if let Some(artifacts_by_kind) = &artifacts_by_kind {
+            if let Some(repo) = self.target_release.tuf_repo() {
                 // Set the host phase 2 artifact version to Artifact to avoid a
                 // noop conversion in the first planning run.
-                let host_phase_2_artifact =
-                    artifacts_by_kind.get(&ArtifactKind::HOST_PHASE_2).unwrap();
+                let host_phase_2_artifact = repo
+                    .artifacts
+                    .get(OsPhase2Tags { os_variant: OsVariant::Host }.into())
+                    .unwrap();
 
                 builder
                     .sled_set_host_phase_2(
@@ -926,7 +873,6 @@ impl ExampleSystemBuilder {
                                     version:
                                         BlueprintArtifactVersion::Available {
                                             version: host_phase_2_artifact
-                                                .id
                                                 .version
                                                 .clone(),
                                         },
@@ -937,7 +883,6 @@ impl ExampleSystemBuilder {
                                     version:
                                         BlueprintArtifactVersion::Available {
                                             version: host_phase_2_artifact
-                                                .id
                                                 .version
                                                 .clone(),
                                         },
@@ -1028,34 +973,43 @@ impl ExampleSystemBuilder {
             }
         }
 
-        if let Some(artifacts_by_kind) = &artifacts_by_kind {
+        if let Some(repo) = self.target_release.tuf_repo() {
             // Set all MGS and host phase 2 versions out of the TUF repo to
             // ensure that the planner is quiesced at the time the initial
             // system is returned.
-            let sp_version = artifacts_by_kind
-                .get(&ArtifactKind::from(KnownArtifactKind::GimletSp))
+            let sp_version = repo
+                .artifacts
+                .filter_tags(|tags| {
+                    matches!(tags, KnownArtifactTags::Sp { .. })
+                })
+                .next()
                 .unwrap()
-                .id
                 .version
                 .clone();
-            let rot_a_version = artifacts_by_kind
-                .get(&ArtifactKind::GIMLET_ROT_IMAGE_A)
+            let rot_a_version = repo
+                .artifacts
+                .filter_tags(|tags| {
+                    matches!(tags, KnownArtifactTags::Rot { .. })
+                })
+                .next()
                 .unwrap()
-                .id
                 .version
                 .clone();
-            let rot_b_version = artifacts_by_kind
-                .get(&ArtifactKind::GIMLET_ROT_IMAGE_B)
-                .unwrap()
-                .id
-                .version
-                .clone();
-            let host_phase_1_hash = artifacts_by_kind
-                .get(&ArtifactKind::GIMLET_HOST_PHASE_1)
+            let rot_b_version = rot_a_version.clone();
+            let host_phase_1_hash = repo
+                .artifacts
+                .get(
+                    OsPhase1Tags {
+                        os_board: OsBoard::Gimlet,
+                        os_variant: OsVariant::Host,
+                    }
+                    .into(),
+                )
                 .unwrap()
                 .hash;
-            let host_phase_2_hash = artifacts_by_kind
-                .get(&ArtifactKind::HOST_PHASE_2)
+            let host_phase_2_hash = repo
+                .artifacts
+                .get(OsPhase2Tags { os_variant: OsVariant::Host }.into())
                 .unwrap()
                 .hash;
 
@@ -1161,77 +1115,6 @@ impl ZoneCount {
         let rem = self.0 % total_sleds;
         div + if sled_id < rem { 1 } else { 0 }
     }
-}
-
-/// The default key for TUF repository generation.
-///
-/// This was randomly generated through a tufaceous invocation.
-pub static DEFAULT_TUFACEOUS_KEY: &str = "ed25519:\
-MFECAQEwBQYDK2VwBCIEIJ9CnAhwk8PPt1x8icu\
-z9c12PdfCRHJpoUkuqJmIZ8GbgSEAbNGMpsHK5_w32\
-qwYdZH_BeVssmKzQlFsnPuaiHx2hy0=";
-
-/// Construct a TUF repository zip file from a manifest, writing the TUF zip
-/// file out to `output_path`.
-pub fn tuf_assemble(
-    log: &slog::Logger,
-    manifest_path: &Utf8Path,
-    output_path: &Utf8Path,
-    allow_non_semver: bool,
-) -> anyhow::Result<()> {
-    if output_path.exists() {
-        bail!("output path `{output_path}` already exists");
-    }
-
-    // Just use a fixed key for now.
-    //
-    // In the future we may want to test changing the TUF key.
-    let mut tufaceous_args = vec![
-        "tufaceous",
-        "--key",
-        DEFAULT_TUFACEOUS_KEY,
-        "assemble",
-        manifest_path.as_str(),
-        output_path.as_str(),
-    ];
-
-    if allow_non_semver {
-        tufaceous_args.push("--allow-non-semver");
-    }
-    let args = tufaceous::Args::try_parse_from(tufaceous_args)
-        .expect("args are valid so this shouldn't fail");
-    let rt =
-        tokio::runtime::Runtime::new().context("creating tokio runtime")?;
-    rt.block_on(async move { args.exec(log).await })
-        .context("error executing tufaceous assemble")?;
-
-    Ok(())
-}
-
-pub fn extract_tuf_repo_description(
-    log: &slog::Logger,
-    zip_path: &Utf8Path,
-) -> anyhow::Result<TufRepoDescription> {
-    let file = std::fs::File::open(zip_path)
-        .with_context(|| format!("open {:?}", zip_path))?;
-    let buf = std::io::BufReader::new(file);
-    let rt =
-        tokio::runtime::Runtime::new().context("creating tokio runtime")?;
-    let repo_hash = ArtifactHash([0; 32]);
-    let artifacts_with_plan = rt.block_on(async {
-        ArtifactsWithPlan::from_zip(
-            buf,
-            None,
-            repo_hash,
-            ControlPlaneZonesMode::Split,
-            VerificationMode::BlindlyTrustAnything,
-            log,
-        )
-        .await
-        .with_context(|| format!("unpacking {:?}", zip_path))
-    })?;
-    let description = artifacts_with_plan.description().clone();
-    Ok(description)
 }
 
 #[cfg(test)]

@@ -158,7 +158,6 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 use tokio::sync::mpsc;
 use tokio::sync::watch;
-use update_common::artifacts::ArtifactsWithPlan;
 use uuid::Uuid;
 
 /// Internal state for communication between Nexus and background tasks.
@@ -1194,7 +1193,7 @@ pub struct BackgroundTasksData {
     /// Helpers for saga recovery
     pub saga_recovery: saga_recovery::SagaRecoveryHelpers<Arc<Nexus>>,
     /// Channel for TUF repository artifacts to be replicated out to sleds
-    pub tuf_artifact_replication_rx: mpsc::Receiver<ArtifactsWithPlan>,
+    pub tuf_artifact_replication_rx: mpsc::Receiver<tufaceous::Repository>,
     /// Channel for exposing the latest loaded blueprint
     pub blueprint_load_tx: watch::Sender<Option<LoadedTargetBlueprint>>,
     /// `reqwest::Client` for webhook delivery requests.

@@ -5,7 +5,7 @@ load-example --nsleds 3 --ndisks-per-sled 3
 show
 
 # Create TUF repos
-tuf-assemble ../../update-common/manifests/fake.toml
+generate-fake-repo 1.0.0
 
 set target-release repo-1.0.0.zip
 
@@ -42,13 +42,13 @@ sled-update-sp serial0 --active 1.0.0
 sled-update-sp serial1 --active 1.0.0
 sled-update-sp serial2 --active 1.0.0
 
-sled-update-host-phase1 serial0 --slot-a b99d5273ba1418bebb19d74b701d716896409566d41de76ada71bded4c9b166b
-sled-update-host-phase1 serial1 --slot-a b99d5273ba1418bebb19d74b701d716896409566d41de76ada71bded4c9b166b
-sled-update-host-phase1 serial2 --slot-a b99d5273ba1418bebb19d74b701d716896409566d41de76ada71bded4c9b166b
+sled-update-host-phase1 serial0 --slot-a a6a3785a28fe58beeb8a308be16f08a311b2a4e20e975d4df68d2a3a2fd72d86
+sled-update-host-phase1 serial1 --slot-a a6a3785a28fe58beeb8a308be16f08a311b2a4e20e975d4df68d2a3a2fd72d86
+sled-update-host-phase1 serial2 --slot-a a6a3785a28fe58beeb8a308be16f08a311b2a4e20e975d4df68d2a3a2fd72d86
 
-sled-update-host-phase2 serial0 --boot-disk A --slot-a d944ae205b61ccf4322448f7d0311a819c53d9844769de066c5307c1682abb47
-sled-update-host-phase2 serial1 --boot-disk A --slot-a d944ae205b61ccf4322448f7d0311a819c53d9844769de066c5307c1682abb47
-sled-update-host-phase2 serial2 --boot-disk A --slot-a d944ae205b61ccf4322448f7d0311a819c53d9844769de066c5307c1682abb47
+sled-update-host-phase2 serial0 --boot-disk A --slot-a 2a95f405f6991e651f12be7c7aa988a8f18618890b1d213356f767b274a0a30a
+sled-update-host-phase2 serial1 --boot-disk A --slot-a 2a95f405f6991e651f12be7c7aa988a8f18618890b1d213356f767b274a0a30a
+sled-update-host-phase2 serial2 --boot-disk A --slot-a 2a95f405f6991e651f12be7c7aa988a8f18618890b1d213356f767b274a0a30a
 
 # Migrate from Install -> Artifact
 inventory-generate

@@ -23,46 +23,11 @@ planner config:
 
 
 > # Create TUF repos
-> tuf-assemble ../../update-common/manifests/fake.toml
-INFO assembling repository in <ASSEMBLING_REPOSITORY_IN_REDACTED>
-INFO artifacts assembled and archived to `repo-1.0.0.zip`, component: OmicronRepoAssembler
+> generate-fake-repo 1.0.0
 created repo-1.0.0.zip for system version 1.0.0
 
 
 > set target-release repo-1.0.0.zip
-INFO extracting uploaded archive to <EXTRACTING_UPLOADED_ARCHIVE_TO_REDACTED>
-INFO created directory to store extracted artifacts, path: <CREATED_DIRECTORY_TO_STORE_EXTRACTED_ARTIFACTS_PATH_REDACTED>
-INFO added artifact, name: fake-gimlet-sp, kind: gimlet_sp, version: 1.0.0, hash: 68465b8e3f808f475510b525cfd62086d37ddd57688bd854184fdafb2b2198a4, length: 732
-INFO added artifact, name: fake-rot, kind: gimlet_rot_image_a, version: 1.0.0, hash: d11e65f934bf0de51df2e5b484f61ee72072417b43ac87f33e958008428e7b02, length: 783
-INFO added artifact, name: fake-rot, kind: gimlet_rot_image_b, version: 1.0.0, hash: d11e65f934bf0de51df2e5b484f61ee72072417b43ac87f33e958008428e7b02, length: 783
-INFO added artifact, name: fake-rot-bootloader, kind: gimlet_rot_bootloader, version: 1.0.0, hash: 5b0f601b1fbb8674db9c751a02f8b14f8e6d4e8470f4f7b686fecb2c49ec11f9, length: 797
-INFO added artifact, name: fake-host, kind: gimlet_host_phase_1, version: 1.0.0, hash: b99d5273ba1418bebb19d74b701d716896409566d41de76ada71bded4c9b166b, length: 524288
-INFO added artifact, name: fake-host, kind: cosmo_host_phase_1, version: 1.0.0, hash: 9525f567106549a3fc32df870a74803d77e51dcc44190b218e227a2c5d444f58, length: 524288
-INFO added artifact, name: fake-host, kind: host_phase_2, version: 1.0.0, hash: d944ae205b61ccf4322448f7d0311a819c53d9844769de066c5307c1682abb47, length: 1048576
-INFO added artifact, name: fake-trampoline, kind: gimlet_trampoline_phase_1, version: 1.0.0, hash: bcb27520ee5a56e19f6df9662c66d69ac681fbd873a97547be5f6a5ae3d250c4, length: 524288
-INFO added artifact, name: fake-trampoline, kind: cosmo_trampoline_phase_1, version: 1.0.0, hash: e235b8afb58ee69d966853bd5efe7c7e904da84b9035a332b3e691dc1d5cdbd0, length: 524288
-INFO added artifact, name: fake-trampoline, kind: trampoline_phase_2, version: 1.0.0, hash: a5dfcc4bc69b791f1c509df499e9e72cce844cb2b53a56d8bb357b264bdf13b6, length: 1048576
-INFO added artifact, name: clickhouse, kind: zone, version: 1.0.0, hash: 52b1eb4daff6f9140491d547b11248392920230db3db0eef5f5fa5333fe9e659, length: 1686
-INFO added artifact, name: clickhouse_keeper, kind: zone, version: 1.0.0, hash: cda702919449d86663be97295043aeca0ead69ae5db3bbdb20053972254a27a3, length: 1690
-INFO added artifact, name: clickhouse_server, kind: zone, version: 1.0.0, hash: 5f9ae6a9821bbe8ff0bf60feddf8b167902fe5f3e2c98bd21edd1ec9d969a001, length: 1690
-INFO added artifact, name: cockroachdb, kind: zone, version: 1.0.0, hash: f3a1a3c0b3469367b005ee78665d982059d5e14e93a479412426bf941c4ed291, length: 1689
-INFO added artifact, name: crucible-zone, kind: zone, version: 1.0.0, hash: 6f17cf65fb5a5bec5542dd07c03cd0acc01e59130f02c532c8d848ecae810047, length: 1690
-INFO added artifact, name: crucible-pantry-zone, kind: zone, version: 1.0.0, hash: 21f0ada306859c23917361f2e0b9235806c32607ec689c7e8cf16bb898bc5a02, length: 1695
-INFO added artifact, name: external-dns, kind: zone, version: 1.0.0, hash: ccca13ed19b8731f9adaf0d6203b02ea3b9ede4fa426b9fac0a07ce95440046d, length: 1689
-INFO added artifact, name: internal-dns, kind: zone, version: 1.0.0, hash: ffbf1373f7ee08dddd74c53ed2a94e7c4c572a982d3a9bc94000c6956b700c6a, length: 1689
-INFO added artifact, name: ntp, kind: zone, version: 1.0.0, hash: 67593d686ed04a1709f93972b71f4ebc148a9362120f65d239943e814a9a7439, length: 1681
-INFO added artifact, name: nexus, kind: zone, version: 1.0.0, hash: 0e32b4a3e5d3668bb1d6a16fb06b74dc60b973fa479dcee0aae3adbb52bf1388, length: 1682
-INFO added artifact, name: oximeter, kind: zone, version: 1.0.0, hash: 048d8fe8cdef5b175aad714d0f148aa80ce36c9114ac15ce9d02ed3d37877a77, length: 1682
-INFO added artifact, name: fake-corpus, kind: measurement_corpus, version: 1.0.0, hash: 8a0e23157bae655fceec7376926c9758efee6511c7b7ff8355bbb49545a2257f, length: 1048576
-INFO added artifact, name: fake-psc-sp, kind: psc_sp, version: 1.0.0, hash: 89245fe2ac7e6a2ac8dfa4e7d6891a6e6df95e4141395c07c64026778f6d76d7, length: 721
-INFO added artifact, name: fake-psc-rot, kind: psc_rot_image_a, version: 1.0.0, hash: 5d8ea834dd6d42d386f1eb8a2c5f6e99b697c9958bb4ab8edf63e56003e25d8d, length: 775
-INFO added artifact, name: fake-psc-rot, kind: psc_rot_image_b, version: 1.0.0, hash: 5d8ea834dd6d42d386f1eb8a2c5f6e99b697c9958bb4ab8edf63e56003e25d8d, length: 775
-INFO added artifact, name: fake-psc-rot-bootloader, kind: psc_rot_bootloader, version: 1.0.0, hash: 18c9c774bfe4bb086e869509dcccacee8476fd87670692b765aee216f2c7f003, length: 805
-INFO added artifact, name: fake-switch-sp, kind: switch_sp, version: 1.0.0, hash: bf1bc1da5059f76182c3007c3049941f8898abede2f3765b106c6e7f7c42d44c, length: 740
-INFO added artifact, name: fake-switch-rot, kind: switch_rot_image_a, version: 1.0.0, hash: 32307d6d75c9707e8499ba4a4d379f99c0358237b6e190ff6a8024b470f62342, length: 774
-INFO added artifact, name: fake-switch-rot, kind: switch_rot_image_b, version: 1.0.0, hash: 32307d6d75c9707e8499ba4a4d379f99c0358237b6e190ff6a8024b470f62342, length: 774
-INFO added artifact, name: fake-switch-rot-bootloader, kind: switch_rot_bootloader, version: 1.0.0, hash: 70836d170abd5621f95bb4225987b27b3d3dd6168e73cd60e44309bdfeb94e98, length: 804
-INFO added artifact, name: installinator_document, kind: installinator_document, version: 1.0.0, hash: 16717c0caa420c7811666e720936c7ca913cd59a4d376331cc79a90544e5e2e8, length: 526
 set target release based on repo-1.0.0.zip
 
 
@@ -129,24 +94,24 @@ set sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c SP versions: active -> 1.0.0
 set sled d81c6a84-79b8-4958-ae41-ea46c9b19763 SP versions: active -> 1.0.0
 
 
-> sled-update-host-phase1 serial0 --slot-a b99d5273ba1418bebb19d74b701d716896409566d41de76ada71bded4c9b166b
-set sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 host phase 1 details: A -> b99d5273ba1418bebb19d74b701d716896409566d41de76ada71bded4c9b166b
+> sled-update-host-phase1 serial0 --slot-a a6a3785a28fe58beeb8a308be16f08a311b2a4e20e975d4df68d2a3a2fd72d86
+set sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 host phase 1 details: A -> a6a3785a28fe58beeb8a308be16f08a311b2a4e20e975d4df68d2a3a2fd72d86
 
-> sled-update-host-phase1 serial1 --slot-a b99d5273ba1418bebb19d74b701d716896409566d41de76ada71bded4c9b166b
-set sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c host phase 1 details: A -> b99d5273ba1418bebb19d74b701d716896409566d41de76ada71bded4c9b166b
+> sled-update-host-phase1 serial1 --slot-a a6a3785a28fe58beeb8a308be16f08a311b2a4e20e975d4df68d2a3a2fd72d86
+set sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c host phase 1 details: A -> a6a3785a28fe58beeb8a308be16f08a311b2a4e20e975d4df68d2a3a2fd72d86
 
-> sled-update-host-phase1 serial2 --slot-a b99d5273ba1418bebb19d74b701d716896409566d41de76ada71bded4c9b166b
-set sled d81c6a84-79b8-4958-ae41-ea46c9b19763 host phase 1 details: A -> b99d5273ba1418bebb19d74b701d716896409566d41de76ada71bded4c9b166b
+> sled-update-host-phase1 serial2 --slot-a a6a3785a28fe58beeb8a308be16f08a311b2a4e20e975d4df68d2a3a2fd72d86
+set sled d81c6a84-79b8-4958-ae41-ea46c9b19763 host phase 1 details: A -> a6a3785a28fe58beeb8a308be16f08a311b2a4e20e975d4df68d2a3a2fd72d86
 
 
-> sled-update-host-phase2 serial0 --boot-disk A --slot-a d944ae205b61ccf4322448f7d0311a819c53d9844769de066c5307c1682abb47
-set sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 host phase 2 details: boot_disk -> A, A -> d944ae205b61ccf4322448f7d0311a819c53d9844769de066c5307c1682abb47
+> sled-update-host-phase2 serial0 --boot-disk A --slot-a 2a95f405f6991e651f12be7c7aa988a8f18618890b1d213356f767b274a0a30a
+set sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 host phase 2 details: boot_disk -> A, A -> 2a95f405f6991e651f12be7c7aa988a8f18618890b1d213356f767b274a0a30a
 
-> sled-update-host-phase2 serial1 --boot-disk A --slot-a d944ae205b61ccf4322448f7d0311a819c53d9844769de066c5307c1682abb47
-set sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c host phase 2 details: boot_disk -> A, A -> d944ae205b61ccf4322448f7d0311a819c53d9844769de066c5307c1682abb47
+> sled-update-host-phase2 serial1 --boot-disk A --slot-a 2a95f405f6991e651f12be7c7aa988a8f18618890b1d213356f767b274a0a30a
+set sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c host phase 2 details: boot_disk -> A, A -> 2a95f405f6991e651f12be7c7aa988a8f18618890b1d213356f767b274a0a30a
 
-> sled-update-host-phase2 serial2 --boot-disk A --slot-a d944ae205b61ccf4322448f7d0311a819c53d9844769de066c5307c1682abb47
-set sled d81c6a84-79b8-4958-ae41-ea46c9b19763 host phase 2 details: boot_disk -> A, A -> d944ae205b61ccf4322448f7d0311a819c53d9844769de066c5307c1682abb47
+> sled-update-host-phase2 serial2 --boot-disk A --slot-a 2a95f405f6991e651f12be7c7aa988a8f18618890b1d213356f767b274a0a30a
+set sled d81c6a84-79b8-4958-ae41-ea46c9b19763 host phase 2 details: boot_disk -> A, A -> 2a95f405f6991e651f12be7c7aa988a8f18618890b1d213356f767b274a0a30a
 
 
 > # Migrate from Install -> Artifact
@@ -164,7 +129,7 @@ INFO skipping board for MGS-driven update (no update necessary), serial_number: 
 INFO skipping board for MGS-driven update (no update necessary), serial_number: serial1, part_number: 913-0000019
 INFO skipping board for MGS-driven update (no update necessary), serial_number: serial2, part_number: 913-0000019
 INFO ran out of boards for MGS-driven update
-INFO some zones not yet up-to-date, zones_currently_updating: [ZonePropagationIncomplete { zone_id: 353b3b65-20f7-48c3-88f7-495bd5d31545 (omicron_zone), zone_kind: Clickhouse, reason: ImageSourceMismatch { bp_image_source: Artifact { version: Available { version: ArtifactVersion("1.0.0") }, hash: ArtifactHash("52b1eb4daff6f9140491d547b11248392920230db3db0eef5f5fa5333fe9e659") }, inv_image_source: InstallDataset } }, ZonePropagationIncomplete { zone_id: 466a9f29-62bf-4e63-924a-b9efdb86afec (omicron_zone), zone_kind: Nexus, reason: ImageSourceMismatch { bp_image_source: Artifact { version: Available { version: ArtifactVersion("1.0.0") }, hash: ArtifactHash("0e32b4a3e5d3668bb1d6a16fb06b74dc60b973fa479dcee0aae3adbb52bf1388") }, inv_image_source: InstallDataset } }, ZonePropagationIncomplete { zone_id: 62620961-fc4a-481e-968b-f5acbac0dc63 (omicron_zone), zone_kind: InternalNtp, reason: ImageSourceMismatch { bp_image_source: Artifact { version: Available { version: ArtifactVersion("1.0.0") }, hash: ArtifactHash("67593d686ed04a1709f93972b71f4ebc148a9362120f65d239943e814a9a7439") }, inv_image_source: InstallDataset } }, ZonePropagationIncomplete { zone_id: 6c3ae381-04f7-41ea-b0ac-74db387dbc3a (omicron_zone), zone_kind: ExternalDns, reason: ImageSourceMismatch { bp_image_source: Artifact { version: Available { version: ArtifactVersion("1.0.0") }, hash: ArtifactHash("ccca13ed19b8731f9adaf0d6203b02ea3b9ede4fa426b9fac0a07ce95440046d") }, inv_image_source: InstallDataset } }, ZonePropagationIncomplete { zone_id: 86a22a56-0168-453d-9df1-cb2a7c64b5d3 (omicron_zone), zone_kind: Crucible, reason: ImageSourceMismatch { bp_image_source: Artifact { version: Available { version: ArtifactVersion("1.0.0") }, hash: ArtifactHash("6f17cf65fb5a5bec5542dd07c03cd0acc01e59130f02c532c8d848ecae810047") }, inv_image_source: InstallDataset } }, ZonePropagationIncomplete { zone_id: 99e2f30b-3174-40bf-a78a-90da8abba8ca (omicron_zone), zone_kind: InternalDns, reason: ImageSourceMismatch { bp_image_source: Artifact { version: Available { version: ArtifactVersion("1.0.0") }, hash: ArtifactHash("ffbf1373f7ee08dddd74c53ed2a94e7c4c572a982d3a9bc94000c6956b700c6a") }, inv_image_source: InstallDataset } }, ZonePropagationIncomplete { zone_id: ad6a3a03-8d0f-4504-99a4-cbf73d69b973 (omicron_zone), zone_kind: CruciblePantry, reason: ImageSourceMismatch { bp_image_source: Artifact { version: Available { version: ArtifactVersion("1.0.0") }, hash: ArtifactHash("21f0ada306859c23917361f2e0b9235806c32607ec689c7e8cf16bb898bc5a02") }, inv_image_source: InstallDataset } }, ZonePropagationIncomplete { zone_id: bd354eef-d8a6-4165-9124-283fb5e46d77 (omicron_zone), zone_kind: Crucible, reason: ImageSourceMismatch { bp_image_source: Artifact { version: Available { version: ArtifactVersion("1.0.0") }, hash: ArtifactHash("6f17cf65fb5a5bec5542dd07c03cd0acc01e59130f02c532c8d848ecae810047") }, inv_image_source: InstallDataset } }, ZonePropagationIncomplete { zone_id: e2fdefe7-95b2-4fd2-ae37-56929a06d58c (omicron_zone), zone_kind: Crucible, reason: ImageSourceMismatch { bp_image_source: Artifact { version: Available { version: ArtifactVersion("1.0.0") }, hash: ArtifactHash("6f17cf65fb5a5bec5542dd07c03cd0acc01e59130f02c532c8d848ecae810047") }, inv_image_source: InstallDataset } }, ZonePropagationIncomplete { zone_id: 058fd5f9-60a8-4e11-9302-15172782e17d (omicron_zone), zone_kind: Crucible, reason: ImageSourceMismatch { bp_image_source: Artifact { version: Available { version: ArtifactVersion("1.0.0") }, hash: ArtifactHash("6f17cf65fb5a5bec5542dd07c03cd0acc01e59130f02c532c8d848ecae810047") }, inv_image_source: InstallDataset } }, ZonePropagationIncomplete { zone_id: 0c71b3b2-6ceb-4e8f-b020-b08675e83038 (omicron_zone), zone_kind: Nexus, reason: ImageSourceMismatch { bp_image_source: Artifact { version: Available { version: ArtifactVersion("1.0.0") }, hash: ArtifactHash("0e32b4a3e5d3668bb1d6a16fb06b74dc60b973fa479dcee0aae3adbb52bf1388") }, inv_image_source: InstallDataset } }, ZonePropagationIncomplete { zone_id: 427ec88f-f467-42fa-9bbb-66a91a36103c (omicron_zone), zone_kind: InternalDns, reason: ImageSourceMismatch { bp_image_source: Artifact { version: Available { version: ArtifactVersion("1.0.0") }, hash: ArtifactHash("ffbf1373f7ee08dddd74c53ed2a94e7c4c572a982d3a9bc94000c6956b700c6a") }, inv_image_source: InstallDataset } }, ZonePropagationIncomplete { zone_id: 5199c033-4cf9-4ab6-8ae7-566bd7606363 (omicron_zone), zone_kind: Crucible, reason: ImageSourceMismatch { bp_image_source: Artifact { version: Available { version: ArtifactVersion("1.0.0") }, hash: ArtifactHash("6f17cf65fb5a5bec5542dd07c03cd0acc01e59130f02c532c8d848ecae810047") }, inv_image_source: InstallDataset } }, ZonePropagationIncomplete { zone_id: 6444f8a5-6465-4f0b-a549-1993c113569c (omicron_zone), zone_kind: InternalNtp, reason: ImageSourceMismatch { bp_image_source: Artifact { version: Available { version: ArtifactVersion("1.0.0") }, hash: ArtifactHash("67593d686ed04a1709f93972b71f4ebc148a9362120f65d239943e814a9a7439") }, inv_image_source: InstallDataset } }, ZonePropagationIncomplete { zone_id: 803bfb63-c246-41db-b0da-d3b87ddfc63d (omicron_zone), zone_kind: ExternalDns, reason: ImageSourceMismatch { bp_image_source: Artifact { version: Available { version: ArtifactVersion("1.0.0") }, hash: ArtifactHash("ccca13ed19b8731f9adaf0d6203b02ea3b9ede4fa426b9fac0a07ce95440046d") }, inv_image_source: InstallDataset } }, ZonePropagationIncomplete { zone_id: ba4994a8-23f9-4b1a-a84f-a08d74591389 (omicron_zone), zone_kind: CruciblePantry, reason: ImageSourceMismatch { bp_image_source: Artifact { version: Available { version: ArtifactVersion("1.0.0") }, hash: ArtifactHash("21f0ada306859c23917361f2e0b9235806c32607ec689c7e8cf16bb898bc5a02") }, inv_image_source: InstallDataset } }, ZonePropagationIncomplete { zone_id: dfac80b4-a887-430a-ae87-a4e065dba787 (omicron_zone), zone_kind: Crucible, reason: ImageSourceMismatch { bp_image_source: Artifact { version: Available { version: ArtifactVersion("1.0.0") }, hash: ArtifactHash("6f17cf65fb5a5bec5542dd07c03cd0acc01e59130f02c532c8d848ecae810047") }, inv_image_source: InstallDataset } }, ZonePropagationIncomplete { zone_id: 3eeb8d49-eb1a-43f8-bb64-c2338421c2c6 (omicron_zone), zone_kind: Nexus, reason: ImageSourceMismatch { bp_image_source: Artifact { version: Available { version: ArtifactVersion("1.0.0") }, hash: ArtifactHash("0e32b4a3e5d3668bb1d6a16fb06b74dc60b973fa479dcee0aae3adbb52bf1388") }, inv_image_source: InstallDataset } }, ZonePropagationIncomplete { zone_id: 694bd14f-cb24-4be4-bb19-876e79cda2c8 (omicron_zone), zone_kind: Crucible, reason: ImageSourceMismatch { bp_image_source: Artifact { version: Available { version: ArtifactVersion("1.0.0") }, hash: ArtifactHash("6f17cf65fb5a5bec5542dd07c03cd0acc01e59130f02c532c8d848ecae810047") }, inv_image_source: InstallDataset } }, ZonePropagationIncomplete { zone_id: 75b220ba-a0f4-4872-8202-dc7c87f062d0 (omicron_zone), zone_kind: CruciblePantry, reason: ImageSourceMismatch { bp_image_source: Artifact { version: Available { version: ArtifactVersion("1.0.0") }, hash: ArtifactHash("21f0ada306859c23917361f2e0b9235806c32607ec689c7e8cf16bb898bc5a02") }, inv_image_source: InstallDataset } }, ZonePropagationIncomplete { zone_id: 7c252b64-c5af-4ec1-989e-9a03f3b0f111 (omicron_zone), zone_kind: Crucible, reason: ImageSourceMismatch { bp_image_source: Artifact { version: Available { version: ArtifactVersion("1.0.0") }, hash: ArtifactHash("6f17cf65fb5a5bec5542dd07c03cd0acc01e59130f02c532c8d848ecae810047") }, inv_image_source: InstallDataset } }, ZonePropagationIncomplete { zone_id: ea5b4030-b52f-44b2-8d70-45f15f987d01 (omicron_zone), zone_kind: InternalDns, reason: ImageSourceMismatch { bp_image_source: Artifact { version: Available { version: ArtifactVersion("1.0.0") }, hash: ArtifactHash("ffbf1373f7ee08dddd74c53ed2a94e7c4c572a982d3a9bc94000c6956b700c6a") }, inv_image_source: InstallDataset } }, ZonePropagationIncomplete { zone_id: f10a4fb9-759f-4a65-b25e-5794ad2d07d8 (omicron_zone), zone_kind: InternalNtp, reason: ImageSourceMismatch { bp_image_source: Artifact { version: Available { version: ArtifactVersion("1.0.0") }, hash: ArtifactHash("67593d686ed04a1709f93972b71f4ebc148a9362120f65d239943e814a9a7439") }, inv_image_source: InstallDataset } }, ZonePropagationIncomplete { zone_id: f55647d4-5500-4ad3-893a-df45bd50d622 (omicron_zone), zone_kind: Crucible, reason: ImageSourceMismatch { bp_image_source: Artifact { version: Available { version: ArtifactVersion("1.0.0") }, hash: ArtifactHash("6f17cf65fb5a5bec5542dd07c03cd0acc01e59130f02c532c8d848ecae810047") }, inv_image_source: InstallDataset } }, ZonePropagationIncomplete { zone_id: f6ec9c67-946a-4da3-98d5-581f72ce8bf0 (omicron_zone), zone_kind: ExternalDns, reason: ImageSourceMismatch { bp_image_source: Artifact { version: Available { version: ArtifactVersion("1.0.0") }, hash: ArtifactHash("ccca13ed19b8731f9adaf0d6203b02ea3b9ede4fa426b9fac0a07ce95440046d") }, inv_image_source: InstallDataset } }]
+INFO some zones not yet up-to-date, zones_currently_updating: [ZonePropagationIncomplete { zone_id: 353b3b65-20f7-48c3-88f7-495bd5d31545 (omicron_zone), zone_kind: Clickhouse, reason: ImageSourceMismatch { bp_image_source: Artifact { version: Available { version: ArtifactVersion("1.0.0") }, hash: ArtifactHash("789283e5083ac3ed9ca24f33a6cad81793798298cd5c536c93981829abab9d15") }, inv_image_source: InstallDataset } }, ZonePropagationIncomplete { zone_id: 466a9f29-62bf-4e63-924a-b9efdb86afec (omicron_zone), zone_kind: Nexus, reason: ImageSourceMismatch { bp_image_source: Artifact { version: Available { version: ArtifactVersion("1.0.0") }, hash: ArtifactHash("7033ac7186a9e1f01a1a9e46d4e8756f3c953cf3cc30e333ceaa0a6bc0d55961") }, inv_image_source: InstallDataset } }, ZonePropagationIncomplete { zone_id: 62620961-fc4a-481e-968b-f5acbac0dc63 (omicron_zone), zone_kind: InternalNtp, reason: ImageSourceMismatch { bp_image_source: Artifact { version: Available { version: ArtifactVersion("1.0.0") }, hash: ArtifactHash("2c7a661d288567335a1cabbbb96ec43c648bdfa1323b9c7c4e8de7ff23edeed0") }, inv_image_source: InstallDataset } }, ZonePropagationIncomplete { zone_id: 6c3ae381-04f7-41ea-b0ac-74db387dbc3a (omicron_zone), zone_kind: ExternalDns, reason: ImageSourceMismatch { bp_image_source: Artifact { version: Available { version: ArtifactVersion("1.0.0") }, hash: ArtifactHash("263973cc7d40b6bbe6b33020a903ad0a13e72eff92fa19af51888219588e6cf4") }, inv_image_source: InstallDataset } }, ZonePropagationIncomplete { zone_id: 86a22a56-0168-453d-9df1-cb2a7c64b5d3 (omicron_zone), zone_kind: Crucible, reason: ImageSourceMismatch { bp_image_source: Artifact { version: Available { version: ArtifactVersion("1.0.0") }, hash: ArtifactHash("1d071b06c9e0739af8797557d81c84a7dc6d0bf00081ca1ef5c5a40672e11139") }, inv_image_source: InstallDataset } }, ZonePropagationIncomplete { zone_id: 99e2f30b-3174-40bf-a78a-90da8abba8ca (omicron_zone), zone_kind: InternalDns, reason: ImageSourceMismatch { bp_image_source: Artifact { version: Available { version: ArtifactVersion("1.0.0") }, hash: ArtifactHash("4ff68308ffa11980380de9036697cd11f94dace9e1d0afae95116541f7f5ffd2") }, inv_image_source: InstallDataset } }, ZonePropagationIncomplete { zone_id: ad6a3a03-8d0f-4504-99a4-cbf73d69b973 (omicron_zone), zone_kind: CruciblePantry, reason: ImageSourceMismatch { bp_image_source: Artifact { version: Available { version: ArtifactVersion("1.0.0") }, hash: ArtifactHash("c537a3ec3f4600cdf0d0d3e279005b54910c87d5ef1b99b8fd85016b79fdedd1") }, inv_image_source: InstallDataset } }, ZonePropagationIncomplete { zone_id: bd354eef-d8a6-4165-9124-283fb5e46d77 (omicron_zone), zone_kind: Crucible, reason: ImageSourceMismatch { bp_image_source: Artifact { version: Available { version: ArtifactVersion("1.0.0") }, hash: ArtifactHash("1d071b06c9e0739af8797557d81c84a7dc6d0bf00081ca1ef5c5a40672e11139") }, inv_image_source: InstallDataset } }, ZonePropagationIncomplete { zone_id: e2fdefe7-95b2-4fd2-ae37-56929a06d58c (omicron_zone), zone_kind: Crucible, reason: ImageSourceMismatch { bp_image_source: Artifact { version: Available { version: ArtifactVersion("1.0.0") }, hash: ArtifactHash("1d071b06c9e0739af8797557d81c84a7dc6d0bf00081ca1ef5c5a40672e11139") }, inv_image_source: InstallDataset } }, ZonePropagationIncomplete { zone_id: 058fd5f9-60a8-4e11-9302-15172782e17d (omicron_zone), zone_kind: Crucible, reason: ImageSourceMismatch { bp_image_source: Artifact { version: Available { version: ArtifactVersion("1.0.0") }, hash: ArtifactHash("1d071b06c9e0739af8797557d81c84a7dc6d0bf00081ca1ef5c5a40672e11139") }, inv_image_source: InstallDataset } }, ZonePropagationIncomplete { zone_id: 0c71b3b2-6ceb-4e8f-b020-b08675e83038 (omicron_zone), zone_kind: Nexus, reason: ImageSourceMismatch { bp_image_source: Artifact { version: Available { version: ArtifactVersion("1.0.0") }, hash: ArtifactHash("7033ac7186a9e1f01a1a9e46d4e8756f3c953cf3cc30e333ceaa0a6bc0d55961") }, inv_image_source: InstallDataset } }, ZonePropagationIncomplete { zone_id: 427ec88f-f467-42fa-9bbb-66a91a36103c (omicron_zone), zone_kind: InternalDns, reason: ImageSourceMismatch { bp_image_source: Artifact { version: Available { version: ArtifactVersion("1.0.0") }, hash: ArtifactHash("4ff68308ffa11980380de9036697cd11f94dace9e1d0afae95116541f7f5ffd2") }, inv_image_source: InstallDataset } }, ZonePropagationIncomplete { zone_id: 5199c033-4cf9-4ab6-8ae7-566bd7606363 (omicron_zone), zone_kind: Crucible, reason: ImageSourceMismatch { bp_image_source: Artifact { version: Available { version: ArtifactVersion("1.0.0") }, hash: ArtifactHash("1d071b06c9e0739af8797557d81c84a7dc6d0bf00081ca1ef5c5a40672e11139") }, inv_image_source: InstallDataset } }, ZonePropagationIncomplete { zone_id: 6444f8a5-6465-4f0b-a549-1993c113569c (omicron_zone), zone_kind: InternalNtp, reason: ImageSourceMismatch { bp_image_source: Artifact { version: Available { version: ArtifactVersion("1.0.0") }, hash: ArtifactHash("2c7a661d288567335a1cabbbb96ec43c648bdfa1323b9c7c4e8de7ff23edeed0") }, inv_image_source: InstallDataset } }, ZonePropagationIncomplete { zone_id: 803bfb63-c246-41db-b0da-d3b87ddfc63d (omicron_zone), zone_kind: ExternalDns, reason: ImageSourceMismatch { bp_image_source: Artifact { version: Available { version: ArtifactVersion("1.0.0") }, hash: ArtifactHash("263973cc7d40b6bbe6b33020a903ad0a13e72eff92fa19af51888219588e6cf4") }, inv_image_source: InstallDataset } }, ZonePropagationIncomplete { zone_id: ba4994a8-23f9-4b1a-a84f-a08d74591389 (omicron_zone), zone_kind: CruciblePantry, reason: ImageSourceMismatch { bp_image_source: Artifact { version: Available { version: ArtifactVersion("1.0.0") }, hash: ArtifactHash("c537a3ec3f4600cdf0d0d3e279005b54910c87d5ef1b99b8fd85016b79fdedd1") }, inv_image_source: InstallDataset } }, ZonePropagationIncomplete { zone_id: dfac80b4-a887-430a-ae87-a4e065dba787 (omicron_zone), zone_kind: Crucible, reason: ImageSourceMismatch { bp_image_source: Artifact { version: Available { version: ArtifactVersion("1.0.0") }, hash: ArtifactHash("1d071b06c9e0739af8797557d81c84a7dc6d0bf00081ca1ef5c5a40672e11139") }, inv_image_source: InstallDataset } }, ZonePropagationIncomplete { zone_id: 3eeb8d49-eb1a-43f8-bb64-c2338421c2c6 (omicron_zone), zone_kind: Nexus, reason: ImageSourceMismatch { bp_image_source: Artifact { version: Available { version: ArtifactVersion("1.0.0") }, hash: ArtifactHash("7033ac7186a9e1f01a1a9e46d4e8756f3c953cf3cc30e333ceaa0a6bc0d55961") }, inv_image_source: InstallDataset } }, ZonePropagationIncomplete { zone_id: 694bd14f-cb24-4be4-bb19-876e79cda2c8 (omicron_zone), zone_kind: Crucible, reason: ImageSourceMismatch { bp_image_source: Artifact { version: Available { version: ArtifactVersion("1.0.0") }, hash: ArtifactHash("1d071b06c9e0739af8797557d81c84a7dc6d0bf00081ca1ef5c5a40672e11139") }, inv_image_source: InstallDataset } }, ZonePropagationIncomplete { zone_id: 75b220ba-a0f4-4872-8202-dc7c87f062d0 (omicron_zone), zone_kind: CruciblePantry, reason: ImageSourceMismatch { bp_image_source: Artifact { version: Available { version: ArtifactVersion("1.0.0") }, hash: ArtifactHash("c537a3ec3f4600cdf0d0d3e279005b54910c87d5ef1b99b8fd85016b79fdedd1") }, inv_image_source: InstallDataset } }, ZonePropagationIncomplete { zone_id: 7c252b64-c5af-4ec1-989e-9a03f3b0f111 (omicron_zone), zone_kind: Crucible, reason: ImageSourceMismatch { bp_image_source: Artifact { version: Available { version: ArtifactVersion("1.0.0") }, hash: ArtifactHash("1d071b06c9e0739af8797557d81c84a7dc6d0bf00081ca1ef5c5a40672e11139") }, inv_image_source: InstallDataset } }, ZonePropagationIncomplete { zone_id: ea5b4030-b52f-44b2-8d70-45f15f987d01 (omicron_zone), zone_kind: InternalDns, reason: ImageSourceMismatch { bp_image_source: Artifact { version: Available { version: ArtifactVersion("1.0.0") }, hash: ArtifactHash("4ff68308ffa11980380de9036697cd11f94dace9e1d0afae95116541f7f5ffd2") }, inv_image_source: InstallDataset } }, ZonePropagationIncomplete { zone_id: f10a4fb9-759f-4a65-b25e-5794ad2d07d8 (omicron_zone), zone_kind: InternalNtp, reason: ImageSourceMismatch { bp_image_source: Artifact { version: Available { version: ArtifactVersion("1.0.0") }, hash: ArtifactHash("2c7a661d288567335a1cabbbb96ec43c648bdfa1323b9c7c4e8de7ff23edeed0") }, inv_image_source: InstallDataset } }, ZonePropagationIncomplete { zone_id: f55647d4-5500-4ad3-893a-df45bd50d622 (omicron_zone), zone_kind: Crucible, reason: ImageSourceMismatch { bp_image_source: Artifact { version: Available { version: ArtifactVersion("1.0.0") }, hash: ArtifactHash("1d071b06c9e0739af8797557d81c84a7dc6d0bf00081ca1ef5c5a40672e11139") }, inv_image_source: InstallDataset } }, ZonePropagationIncomplete { zone_id: f6ec9c67-946a-4da3-98d5-581f72ce8bf0 (omicron_zone), zone_kind: ExternalDns, reason: ImageSourceMismatch { bp_image_source: Artifact { version: Available { version: ArtifactVersion("1.0.0") }, hash: ArtifactHash("263973cc7d40b6bbe6b33020a903ad0a13e72eff92fa19af51888219588e6cf4") }, inv_image_source: InstallDataset } }]
 generated blueprint 8da82a8e-bf97-4fbd-8ddd-9f6462732cf1 based on parent blueprint dbcbd3d6-41ff-48ae-ac0b-1becc9b2fd21
 blueprint source: planner with report:
 planning report:
@@ -465,14 +430,14 @@ Sled serial0
     host phase 1 active slot: A
     host phase 1 hashes:
         SLOT HASH                                                             
-        A    b99d5273ba1418bebb19d74b701d716896409566d41de76ada71bded4c9b166b 
+        A    a6a3785a28fe58beeb8a308be16f08a311b2a4e20e975d4df68d2a3a2fd72d86 
         B    0202020202020202020202020202020202020202020202020202020202020202 
     cabooses:
-        SLOT     BOARD       NAME        VERSION GIT_COMMIT SIGN        
-        SpSlot0  SimGimletSp SimGimletSp 1.0.0   unknown    n/a         
-        RotSlotA SimRot      SimRot      1.0.0   unknown    sign-gimlet 
-        RotSlotB SimRot      SimRot      1.0.0   unknown    sign-gimlet 
-        Stage0   SimRot      SimRot      1.0.0   unknown    sign-gimlet 
+        SLOT     BOARD       NAME        VERSION GIT_COMMIT SIGN                                                             
+        SpSlot0  SimGimletSp SimGimletSp 1.0.0   unknown    n/a                                                              
+        RotSlotA SimRot      SimRot      1.0.0   unknown    0000000000000000000000000000000000000000000000000000000000000000 
+        RotSlotB SimRot      SimRot      1.0.0   unknown    0000000000000000000000000000000000000000000000000000000000000000 
+        Stage0   SimRot      SimRot      1.0.0   unknown    0000000000000000000000000000000000000000000000000000000000000000 
     RoT pages:
         SLOT DATA_BASE64 
     RoT: active slot: slot A
@@ -491,14 +456,14 @@ Sled serial1
     host phase 1 active slot: A
     host phase 1 hashes:
         SLOT HASH                                                             
-        A    b99d5273ba1418bebb19d74b701d716896409566d41de76ada71bded4c9b166b 
+        A    a6a3785a28fe58beeb8a308be16f08a311b2a4e20e975d4df68d2a3a2fd72d86 
         B    0202020202020202020202020202020202020202020202020202020202020202 
     cabooses:
-        SLOT     BOARD       NAME        VERSION GIT_COMMIT SIGN        
-        SpSlot0  SimGimletSp SimGimletSp 1.0.0   unknown    n/a         
-        RotSlotA SimRot      SimRot      1.0.0   unknown    sign-gimlet 
-        RotSlotB SimRot      SimRot      1.0.0   unknown    sign-gimlet 
-        Stage0   SimRot      SimRot      1.0.0   unknown    sign-gimlet 
+        SLOT     BOARD       NAME        VERSION GIT_COMMIT SIGN                                                             
+        SpSlot0  SimGimletSp SimGimletSp 1.0.0   unknown    n/a                                                              
+        RotSlotA SimRot      SimRot      1.0.0   unknown    0000000000000000000000000000000000000000000000000000000000000000 
+        RotSlotB SimRot      SimRot      1.0.0   unknown    0000000000000000000000000000000000000000000000000000000000000000 
+        Stage0   SimRot      SimRot      1.0.0   unknown    0000000000000000000000000000000000000000000000000000000000000000 
     RoT pages:
         SLOT DATA_BASE64 
     RoT: active slot: slot A
@@ -517,14 +482,14 @@ Sled serial2
     host phase 1 active slot: A
     host phase 1 hashes:
         SLOT HASH                                                             
-        A    b99d5273ba1418bebb19d74b701d716896409566d41de76ada71bded4c9b166b 
+        A    a6a3785a28fe58beeb8a308be16f08a311b2a4e20e975d4df68d2a3a2fd72d86 
         B    0202020202020202020202020202020202020202020202020202020202020202 
     cabooses:
-        SLOT     BOARD       NAME        VERSION GIT_COMMIT SIGN        
-        SpSlot0  SimGimletSp SimGimletSp 1.0.0   unknown    n/a         
-        RotSlotA SimRot      SimRot      1.0.0   unknown    sign-gimlet 
-        RotSlotB SimRot      SimRot      1.0.0   unknown    sign-gimlet 
-        Stage0   SimRot      SimRot      1.0.0   unknown    sign-gimlet 
+        SLOT     BOARD       NAME        VERSION GIT_COMMIT SIGN                                                             
+        SpSlot0  SimGimletSp SimGimletSp 1.0.0   unknown    n/a                                                              
+        RotSlotA SimRot      SimRot      1.0.0   unknown    0000000000000000000000000000000000000000000000000000000000000000 
+        RotSlotB SimRot      SimRot      1.0.0   unknown    0000000000000000000000000000000000000000000000000000000000000000 
+        Stage0   SimRot      SimRot      1.0.0   unknown    0000000000000000000000000000000000000000000000000000000000000000 
     RoT pages:
         SLOT DATA_BASE64 
     RoT: active slot: slot A
@@ -637,7 +602,7 @@ sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c (role = Gimlet, serial serial1)
 LEDGERED SLED CONFIG
     generation: 3
     remove_mupdate_override: None
-    desired host phase 2 slot a: artifact d944ae205b61ccf4322448f7d0311a819c53d9844769de066c5307c1682abb47
+    desired host phase 2 slot a: artifact 2a95f405f6991e651f12be7c7aa988a8f18618890b1d213356f767b274a0a30a
     desired host phase 2 slot b: keep current contents
     DISKS: 3
         ID                                       ZPOOL_ID                                 VENDOR          MODEL          SERIAL                                      
@@ -675,15 +640,15 @@ LEDGERED SLED CONFIG
         feecfda1-9966-43d4-aaef-440b77f0b26d     oxp_727522a7-934f-494d-b5b3-160968e74463/crucible                                                                off             none        none        
     ZONES: 9
         ID                                       KIND                IMAGE_SOURCE                                                               
-        353b3b65-20f7-48c3-88f7-495bd5d31545     clickhouse          artifact: 52b1eb4daff6f9140491d547b11248392920230db3db0eef5f5fa5333fe9e659 
-        466a9f29-62bf-4e63-924a-b9efdb86afec     nexus               artifact: 0e32b4a3e5d3668bb1d6a16fb06b74dc60b973fa479dcee0aae3adbb52bf1388 
-        62620961-fc4a-481e-968b-f5acbac0dc63     internal_ntp        artifact: 67593d686ed04a1709f93972b71f4ebc148a9362120f65d239943e814a9a7439 
-        6c3ae381-04f7-41ea-b0ac-74db387dbc3a     external_dns        artifact: ccca13ed19b8731f9adaf0d6203b02ea3b9ede4fa426b9fac0a07ce95440046d 
-        86a22a56-0168-453d-9df1-cb2a7c64b5d3     crucible            artifact: 6f17cf65fb5a5bec5542dd07c03cd0acc01e59130f02c532c8d848ecae810047 
-        99e2f30b-3174-40bf-a78a-90da8abba8ca     internal_dns        artifact: ffbf1373f7ee08dddd74c53ed2a94e7c4c572a982d3a9bc94000c6956b700c6a 
-        ad6a3a03-8d0f-4504-99a4-cbf73d69b973     crucible_pantry     artifact: 21f0ada306859c23917361f2e0b9235806c32607ec689c7e8cf16bb898bc5a02 
-        bd354eef-d8a6-4165-9124-283fb5e46d77     crucible            artifact: 6f17cf65fb5a5bec5542dd07c03cd0acc01e59130f02c532c8d848ecae810047 
-        e2fdefe7-95b2-4fd2-ae37-56929a06d58c     crucible            artifact: 6f17cf65fb5a5bec5542dd07c03cd0acc01e59130f02c532c8d848ecae810047 
+        353b3b65-20f7-48c3-88f7-495bd5d31545     clickhouse          artifact: 789283e5083ac3ed9ca24f33a6cad81793798298cd5c536c93981829abab9d15 
+        466a9f29-62bf-4e63-924a-b9efdb86afec     nexus               artifact: 7033ac7186a9e1f01a1a9e46d4e8756f3c953cf3cc30e333ceaa0a6bc0d55961 
+        62620961-fc4a-481e-968b-f5acbac0dc63     internal_ntp        artifact: 2c7a661d288567335a1cabbbb96ec43c648bdfa1323b9c7c4e8de7ff23edeed0 
+        6c3ae381-04f7-41ea-b0ac-74db387dbc3a     external_dns        artifact: 263973cc7d40b6bbe6b33020a903ad0a13e72eff92fa19af51888219588e6cf4 
+        86a22a56-0168-453d-9df1-cb2a7c64b5d3     crucible            artifact: 1d071b06c9e0739af8797557d81c84a7dc6d0bf00081ca1ef5c5a40672e11139 
+        99e2f30b-3174-40bf-a78a-90da8abba8ca     internal_dns        artifact: 4ff68308ffa11980380de9036697cd11f94dace9e1d0afae95116541f7f5ffd2 
+        ad6a3a03-8d0f-4504-99a4-cbf73d69b973     crucible_pantry     artifact: c537a3ec3f4600cdf0d0d3e279005b54910c87d5ef1b99b8fd85016b79fdedd1 
+        bd354eef-d8a6-4165-9124-283fb5e46d77     crucible            artifact: 1d071b06c9e0739af8797557d81c84a7dc6d0bf00081ca1ef5c5a40672e11139 
+        e2fdefe7-95b2-4fd2-ae37-56929a06d58c     crucible            artifact: 1d071b06c9e0739af8797557d81c84a7dc6d0bf00081ca1ef5c5a40672e11139 
     measurement empty
     zone image resolver status:
         zone manifest:
@@ -691,24 +656,25 @@ LEDGERED SLED CONFIG
             boot disk inventory:
                 manifest generated by sled-agent
                 artifacts in install dataset:
-                  - clickhouse.tar.gz (expected 1686 bytes with hash 52b1eb4daff6f9140491d547b11248392920230db3db0eef5f5fa5333fe9e659): ok
-                  - clickhouse_keeper.tar.gz (expected 1690 bytes with hash cda702919449d86663be97295043aeca0ead69ae5db3bbdb20053972254a27a3): ok
-                  - clickhouse_server.tar.gz (expected 1690 bytes with hash 5f9ae6a9821bbe8ff0bf60feddf8b167902fe5f3e2c98bd21edd1ec9d969a001): ok
-                  - cockroachdb.tar.gz (expected 1689 bytes with hash f3a1a3c0b3469367b005ee78665d982059d5e14e93a479412426bf941c4ed291): ok
-                  - crucible.tar.gz (expected 1690 bytes with hash 6f17cf65fb5a5bec5542dd07c03cd0acc01e59130f02c532c8d848ecae810047): ok
-                  - crucible_pantry.tar.gz (expected 1695 bytes with hash 21f0ada306859c23917361f2e0b9235806c32607ec689c7e8cf16bb898bc5a02): ok
-                  - external_dns.tar.gz (expected 1689 bytes with hash ccca13ed19b8731f9adaf0d6203b02ea3b9ede4fa426b9fac0a07ce95440046d): ok
-                  - internal_dns.tar.gz (expected 1689 bytes with hash ffbf1373f7ee08dddd74c53ed2a94e7c4c572a982d3a9bc94000c6956b700c6a): ok
-                  - nexus.tar.gz (expected 1682 bytes with hash 0e32b4a3e5d3668bb1d6a16fb06b74dc60b973fa479dcee0aae3adbb52bf1388): ok
-                  - ntp.tar.gz (expected 1681 bytes with hash 67593d686ed04a1709f93972b71f4ebc148a9362120f65d239943e814a9a7439): ok
-                  - oximeter.tar.gz (expected 1682 bytes with hash 048d8fe8cdef5b175aad714d0f148aa80ce36c9114ac15ce9d02ed3d37877a77): ok
+                  - clickhouse.tar.gz (expected 142 bytes with hash 789283e5083ac3ed9ca24f33a6cad81793798298cd5c536c93981829abab9d15): ok
+                  - clickhouse_keeper.tar.gz (expected 147 bytes with hash 2ce04cd4cb5aa9a525637b9f30c2f93f365048221808d95aae16e5c1127d6492): ok
+                  - clickhouse_server.tar.gz (expected 145 bytes with hash 7245b29a4f07273fb8b7a4860f8847babf2b130fe437d30c3ab47b4f274a704e): ok
+                  - cockroachdb.tar.gz (expected 143 bytes with hash 25d7b7f1aa8420f54bf09243ec3206a9bb50eba2cd252cf2279356cdfbbfa101): ok
+                  - crucible.tar.gz (expected 145 bytes with hash 1d071b06c9e0739af8797557d81c84a7dc6d0bf00081ca1ef5c5a40672e11139): ok
+                  - crucible_pantry.tar.gz (expected 150 bytes with hash c537a3ec3f4600cdf0d0d3e279005b54910c87d5ef1b99b8fd85016b79fdedd1): ok
+                  - external_dns.tar.gz (expected 142 bytes with hash 263973cc7d40b6bbe6b33020a903ad0a13e72eff92fa19af51888219588e6cf4): ok
+                  - internal_dns.tar.gz (expected 142 bytes with hash 4ff68308ffa11980380de9036697cd11f94dace9e1d0afae95116541f7f5ffd2): ok
+                  - nexus.tar.gz (expected 135 bytes with hash 7033ac7186a9e1f01a1a9e46d4e8756f3c953cf3cc30e333ceaa0a6bc0d55961): ok
+                  - ntp.tar.gz (expected 135 bytes with hash 2c7a661d288567335a1cabbbb96ec43c648bdfa1323b9c7c4e8de7ff23edeed0): ok
+                  - oximeter.tar.gz (expected 137 bytes with hash cb41cb81f67ffabf0f832927162245fbd79fa2be82430ad6dd03132a34bafefb): ok
             no non-boot disks
         measurement manifest:
             path on boot disk: /fake/path/install/zones.json
             boot disk inventory:
                 manifest generated by sled-agent
                 artifacts in install dataset:
-                  - fake-corpus (expected 1048576 bytes with hash 8a0e23157bae655fceec7376926c9758efee6511c7b7ff8355bbb49545a2257f): ok
+                  - measurements/fake-measurement-id-9830767c45f2a02210a177fabafafe2c84501039289483f72cec299b0c78dbcb.cbor (expected 865 bytes with hash 9830767c45f2a02210a177fabafafe2c84501039289483f72cec299b0c78dbcb): ok
+                  - measurements/fake-measurement-id-ae9279e9135de75e4e137c6da7f939b5a2eae6d931a7f2205df930e37cd58096.cbor (expected 270 bytes with hash ae9279e9135de75e4e137c6da7f939b5a2eae6d931a7f2205df930e37cd58096): ok
             no non-boot disks
         mupdate override:
             path on boot disk: /fake/path/install/mupdate_override.json
@@ -716,7 +682,7 @@ LEDGERED SLED CONFIG
             no non-boot disks
     boot disk slot: A
     slot A details:
-        artifact: d944ae205b61ccf4322448f7d0311a819c53d9844769de066c5307c1682abb47 (1000 bytes)
+        artifact: 2a95f405f6991e651f12be7c7aa988a8f18618890b1d213356f767b274a0a30a (1000 bytes)
         image name: fake from debug_assume_success()
         phase 2 hash: 0000000000000000000000000000000000000000000000000000000000000000
     slot B details:
@@ -828,7 +794,7 @@ sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 (role = Gimlet, serial serial0)
 LEDGERED SLED CONFIG
     generation: 3
     remove_mupdate_override: None
-    desired host phase 2 slot a: artifact d944ae205b61ccf4322448f7d0311a819c53d9844769de066c5307c1682abb47
+    desired host phase 2 slot a: artifact 2a95f405f6991e651f12be7c7aa988a8f18618890b1d213356f767b274a0a30a
     desired host phase 2 slot b: keep current contents
     DISKS: 3
         ID                                       ZPOOL_ID                                 VENDOR          MODEL          SERIAL                                      
@@ -864,14 +830,14 @@ LEDGERED SLED CONFIG
         ea8a11bf-a884-4c4f-8df0-3ef9b7aacf43     oxp_073979dd-3248-44a5-9fa1-cc72a140d682/crypt/zone/oxz_external_dns_803bfb63-c246-41db-b0da-d3b87ddfc63d        off             none        none        
     ZONES: 8
         ID                                       KIND                IMAGE_SOURCE                                                               
-        058fd5f9-60a8-4e11-9302-15172782e17d     crucible            artifact: 6f17cf65fb5a5bec5542dd07c03cd0acc01e59130f02c532c8d848ecae810047 
-        0c71b3b2-6ceb-4e8f-b020-b08675e83038     nexus               artifact: 0e32b4a3e5d3668bb1d6a16fb06b74dc60b973fa479dcee0aae3adbb52bf1388 
-        427ec88f-f467-42fa-9bbb-66a91a36103c     internal_dns        artifact: ffbf1373f7ee08dddd74c53ed2a94e7c4c572a982d3a9bc94000c6956b700c6a 
-        5199c033-4cf9-4ab6-8ae7-566bd7606363     crucible            artifact: 6f17cf65fb5a5bec5542dd07c03cd0acc01e59130f02c532c8d848ecae810047 
-        6444f8a5-6465-4f0b-a549-1993c113569c     internal_ntp        artifact: 67593d686ed04a1709f93972b71f4ebc148a9362120f65d239943e814a9a7439 
-        803bfb63-c246-41db-b0da-d3b87ddfc63d     external_dns        artifact: ccca13ed19b8731f9adaf0d6203b02ea3b9ede4fa426b9fac0a07ce95440046d 
-        ba4994a8-23f9-4b1a-a84f-a08d74591389     crucible_pantry     artifact: 21f0ada306859c23917361f2e0b9235806c32607ec689c7e8cf16bb898bc5a02 
-        dfac80b4-a887-430a-ae87-a4e065dba787     crucible            artifact: 6f17cf65fb5a5bec5542dd07c03cd0acc01e59130f02c532c8d848ecae810047 
+        058fd5f9-60a8-4e11-9302-15172782e17d     crucible            artifact: 1d071b06c9e0739af8797557d81c84a7dc6d0bf00081ca1ef5c5a40672e11139 
+        0c71b3b2-6ceb-4e8f-b020-b08675e83038     nexus               artifact: 7033ac7186a9e1f01a1a9e46d4e8756f3c953cf3cc30e333ceaa0a6bc0d55961 
+        427ec88f-f467-42fa-9bbb-66a91a36103c     internal_dns        artifact: 4ff68308ffa11980380de9036697cd11f94dace9e1d0afae95116541f7f5ffd2 
+        5199c033-4cf9-4ab6-8ae7-566bd7606363     crucible            artifact: 1d071b06c9e0739af8797557d81c84a7dc6d0bf00081ca1ef5c5a40672e11139 
+        6444f8a5-6465-4f0b-a549-1993c113569c     internal_ntp        artifact: 2c7a661d288567335a1cabbbb96ec43c648bdfa1323b9c7c4e8de7ff23edeed0 
+        803bfb63-c246-41db-b0da-d3b87ddfc63d     external_dns        artifact: 263973cc7d40b6bbe6b33020a903ad0a13e72eff92fa19af51888219588e6cf4 
+        ba4994a8-23f9-4b1a-a84f-a08d74591389     crucible_pantry     artifact: c537a3ec3f4600cdf0d0d3e279005b54910c87d5ef1b99b8fd85016b79fdedd1 
+        dfac80b4-a887-430a-ae87-a4e065dba787     crucible            artifact: 1d071b06c9e0739af8797557d81c84a7dc6d0bf00081ca1ef5c5a40672e11139 
     measurement empty
     zone image resolver status:
         zone manifest:
@@ -879,24 +845,25 @@ LEDGERED SLED CONFIG
             boot disk inventory:
                 manifest generated by sled-agent
                 artifacts in install dataset:
-                  - clickhouse.tar.gz (expected 1686 bytes with hash 52b1eb4daff6f9140491d547b11248392920230db3db0eef5f5fa5333fe9e659): ok
-                  - clickhouse_keeper.tar.gz (expected 1690 bytes with hash cda702919449d86663be97295043aeca0ead69ae5db3bbdb20053972254a27a3): ok
-                  - clickhouse_server.tar.gz (expected 1690 bytes with hash 5f9ae6a9821bbe8ff0bf60feddf8b167902fe5f3e2c98bd21edd1ec9d969a001): ok
-                  - cockroachdb.tar.gz (expected 1689 bytes with hash f3a1a3c0b3469367b005ee78665d982059d5e14e93a479412426bf941c4ed291): ok
-                  - crucible.tar.gz (expected 1690 bytes with hash 6f17cf65fb5a5bec5542dd07c03cd0acc01e59130f02c532c8d848ecae810047): ok
-                  - crucible_pantry.tar.gz (expected 1695 bytes with hash 21f0ada306859c23917361f2e0b9235806c32607ec689c7e8cf16bb898bc5a02): ok
-                  - external_dns.tar.gz (expected 1689 bytes with hash ccca13ed19b8731f9adaf0d6203b02ea3b9ede4fa426b9fac0a07ce95440046d): ok
-                  - internal_dns.tar.gz (expected 1689 bytes with hash ffbf1373f7ee08dddd74c53ed2a94e7c4c572a982d3a9bc94000c6956b700c6a): ok
-                  - nexus.tar.gz (expected 1682 bytes with hash 0e32b4a3e5d3668bb1d6a16fb06b74dc60b973fa479dcee0aae3adbb52bf1388): ok
-                  - ntp.tar.gz (expected 1681 bytes with hash 67593d686ed04a1709f93972b71f4ebc148a9362120f65d239943e814a9a7439): ok
-                  - oximeter.tar.gz (expected 1682 bytes with hash 048d8fe8cdef5b175aad714d0f148aa80ce36c9114ac15ce9d02ed3d37877a77): ok
+                  - clickhouse.tar.gz (expected 142 bytes with hash 789283e5083ac3ed9ca24f33a6cad81793798298cd5c536c93981829abab9d15): ok
+                  - clickhouse_keeper.tar.gz (expected 147 bytes with hash 2ce04cd4cb5aa9a525637b9f30c2f93f365048221808d95aae16e5c1127d6492): ok
+                  - clickhouse_server.tar.gz (expected 145 bytes with hash 7245b29a4f07273fb8b7a4860f8847babf2b130fe437d30c3ab47b4f274a704e): ok
+                  - cockroachdb.tar.gz (expected 143 bytes with hash 25d7b7f1aa8420f54bf09243ec3206a9bb50eba2cd252cf2279356cdfbbfa101): ok
+                  - crucible.tar.gz (expected 145 bytes with hash 1d071b06c9e0739af8797557d81c84a7dc6d0bf00081ca1ef5c5a40672e11139): ok
+                  - crucible_pantry.tar.gz (expected 150 bytes with hash c537a3ec3f4600cdf0d0d3e279005b54910c87d5ef1b99b8fd85016b79fdedd1): ok
+                  - external_dns.tar.gz (expected 142 bytes with hash 263973cc7d40b6bbe6b33020a903ad0a13e72eff92fa19af51888219588e6cf4): ok
+                  - internal_dns.tar.gz (expected 142 bytes with hash 4ff68308ffa11980380de9036697cd11f94dace9e1d0afae95116541f7f5ffd2): ok
+                  - nexus.tar.gz (expected 135 bytes with hash 7033ac7186a9e1f01a1a9e46d4e8756f3c953cf3cc30e333ceaa0a6bc0d55961): ok
+                  - ntp.tar.gz (expected 135 bytes with hash 2c7a661d288567335a1cabbbb96ec43c648bdfa1323b9c7c4e8de7ff23edeed0): ok
+                  - oximeter.tar.gz (expected 137 bytes with hash cb41cb81f67ffabf0f832927162245fbd79fa2be82430ad6dd03132a34bafefb): ok
             no non-boot disks
         measurement manifest:
             path on boot disk: /fake/path/install/zones.json
             boot disk inventory:
                 manifest generated by sled-agent
                 artifacts in install dataset:
-                  - fake-corpus (expected 1048576 bytes with hash 8a0e23157bae655fceec7376926c9758efee6511c7b7ff8355bbb49545a2257f): ok
+                  - measurements/fake-measurement-id-9830767c45f2a02210a177fabafafe2c84501039289483f72cec299b0c78dbcb.cbor (expected 865 bytes with hash 9830767c45f2a02210a177fabafafe2c84501039289483f72cec299b0c78dbcb): ok
+                  - measurements/fake-measurement-id-ae9279e9135de75e4e137c6da7f939b5a2eae6d931a7f2205df930e37cd58096.cbor (expected 270 bytes with hash ae9279e9135de75e4e137c6da7f939b5a2eae6d931a7f2205df930e37cd58096): ok
             no non-boot disks
         mupdate override:
             path on boot disk: /fake/path/install/mupdate_override.json
@@ -904,7 +871,7 @@ LEDGERED SLED CONFIG
             no non-boot disks
     boot disk slot: A
     slot A details:
-        artifact: d944ae205b61ccf4322448f7d0311a819c53d9844769de066c5307c1682abb47 (1000 bytes)
+        artifact: 2a95f405f6991e651f12be7c7aa988a8f18618890b1d213356f767b274a0a30a (1000 bytes)
         image name: fake from debug_assume_success()
         phase 2 hash: 0000000000000000000000000000000000000000000000000000000000000000
     slot B details:
@@ -1016,7 +983,7 @@ sled d81c6a84-79b8-4958-ae41-ea46c9b19763 (role = Gimlet, serial serial2)
 LEDGERED SLED CONFIG
     generation: 3
     remove_mupdate_override: None
-    desired host phase 2 slot a: artifact d944ae205b61ccf4322448f7d0311a819c53d9844769de066c5307c1682abb47
+    desired host phase 2 slot a: artifact 2a95f405f6991e651f12be7c7aa988a8f18618890b1d213356f767b274a0a30a
     desired host phase 2 slot b: keep current contents
     DISKS: 3
         ID                                       ZPOOL_ID                                 VENDOR          MODEL          SERIAL                                      
@@ -1052,14 +1019,14 @@ LEDGERED SLED CONFIG
         e009d8b8-4695-4322-b53f-f03f2744aef7     oxp_18b20749-0748-4105-bb10-7b13cfc776e2/local_storage_unencrypted                                               off             none        none        
     ZONES: 8
         ID                                       KIND                IMAGE_SOURCE                                                               
-        3eeb8d49-eb1a-43f8-bb64-c2338421c2c6     nexus               artifact: 0e32b4a3e5d3668bb1d6a16fb06b74dc60b973fa479dcee0aae3adbb52bf1388 
-        694bd14f-cb24-4be4-bb19-876e79cda2c8     crucible            artifact: 6f17cf65fb5a5bec5542dd07c03cd0acc01e59130f02c532c8d848ecae810047 
-        75b220ba-a0f4-4872-8202-dc7c87f062d0     crucible_pantry     artifact: 21f0ada306859c23917361f2e0b9235806c32607ec689c7e8cf16bb898bc5a02 
-        7c252b64-c5af-4ec1-989e-9a03f3b0f111     crucible            artifact: 6f17cf65fb5a5bec5542dd07c03cd0acc01e59130f02c532c8d848ecae810047 
-        ea5b4030-b52f-44b2-8d70-45f15f987d01     internal_dns        artifact: ffbf1373f7ee08dddd74c53ed2a94e7c4c572a982d3a9bc94000c6956b700c6a 
-        f10a4fb9-759f-4a65-b25e-5794ad2d07d8     internal_ntp        artifact: 67593d686ed04a1709f93972b71f4ebc148a9362120f65d239943e814a9a7439 
-        f55647d4-5500-4ad3-893a-df45bd50d622     crucible            artifact: 6f17cf65fb5a5bec5542dd07c03cd0acc01e59130f02c532c8d848ecae810047 
-        f6ec9c67-946a-4da3-98d5-581f72ce8bf0     external_dns        artifact: ccca13ed19b8731f9adaf0d6203b02ea3b9ede4fa426b9fac0a07ce95440046d 
+        3eeb8d49-eb1a-43f8-bb64-c2338421c2c6     nexus               artifact: 7033ac7186a9e1f01a1a9e46d4e8756f3c953cf3cc30e333ceaa0a6bc0d55961 
+        694bd14f-cb24-4be4-bb19-876e79cda2c8     crucible            artifact: 1d071b06c9e0739af8797557d81c84a7dc6d0bf00081ca1ef5c5a40672e11139 
+        75b220ba-a0f4-4872-8202-dc7c87f062d0     crucible_pantry     artifact: c537a3ec3f4600cdf0d0d3e279005b54910c87d5ef1b99b8fd85016b79fdedd1 
+        7c252b64-c5af-4ec1-989e-9a03f3b0f111     crucible            artifact: 1d071b06c9e0739af8797557d81c84a7dc6d0bf00081ca1ef5c5a40672e11139 
+        ea5b4030-b52f-44b2-8d70-45f15f987d01     internal_dns        artifact: 4ff68308ffa11980380de9036697cd11f94dace9e1d0afae95116541f7f5ffd2 
+        f10a4fb9-759f-4a65-b25e-5794ad2d07d8     internal_ntp        artifact: 2c7a661d288567335a1cabbbb96ec43c648bdfa1323b9c7c4e8de7ff23edeed0 
+        f55647d4-5500-4ad3-893a-df45bd50d622     crucible            artifact: 1d071b06c9e0739af8797557d81c84a7dc6d0bf00081ca1ef5c5a40672e11139 
+        f6ec9c67-946a-4da3-98d5-581f72ce8bf0     external_dns        artifact: 263973cc7d40b6bbe6b33020a903ad0a13e72eff92fa19af51888219588e6cf4 
     measurement empty
     zone image resolver status:
         zone manifest:
@@ -1067,24 +1034,25 @@ LEDGERED SLED CONFIG
             boot disk inventory:
                 manifest generated by sled-agent
                 artifacts in install dataset:
-                  - clickhouse.tar.gz (expected 1686 bytes with hash 52b1eb4daff6f9140491d547b11248392920230db3db0eef5f5fa5333fe9e659): ok
-                  - clickhouse_keeper.tar.gz (expected 1690 bytes with hash cda702919449d86663be97295043aeca0ead69ae5db3bbdb20053972254a27a3): ok
-                  - clickhouse_server.tar.gz (expected 1690 bytes with hash 5f9ae6a9821bbe8ff0bf60feddf8b167902fe5f3e2c98bd21edd1ec9d969a001): ok
-                  - cockroachdb.tar.gz (expected 1689 bytes with hash f3a1a3c0b3469367b005ee78665d982059d5e14e93a479412426bf941c4ed291): ok
-                  - crucible.tar.gz (expected 1690 bytes with hash 6f17cf65fb5a5bec5542dd07c03cd0acc01e59130f02c532c8d848ecae810047): ok
-                  - crucible_pantry.tar.gz (expected 1695 bytes with hash 21f0ada306859c23917361f2e0b9235806c32607ec689c7e8cf16bb898bc5a02): ok
-                  - external_dns.tar.gz (expected 1689 bytes with hash ccca13ed19b8731f9adaf0d6203b02ea3b9ede4fa426b9fac0a07ce95440046d): ok
-                  - internal_dns.tar.gz (expected 1689 bytes with hash ffbf1373f7ee08dddd74c53ed2a94e7c4c572a982d3a9bc94000c6956b700c6a): ok
-                  - nexus.tar.gz (expected 1682 bytes with hash 0e32b4a3e5d3668bb1d6a16fb06b74dc60b973fa479dcee0aae3adbb52bf1388): ok
-                  - ntp.tar.gz (expected 1681 bytes with hash 67593d686ed04a1709f93972b71f4ebc148a9362120f65d239943e814a9a7439): ok
-                  - oximeter.tar.gz (expected 1682 bytes with hash 048d8fe8cdef5b175aad714d0f148aa80ce36c9114ac15ce9d02ed3d37877a77): ok
+                  - clickhouse.tar.gz (expected 142 bytes with hash 789283e5083ac3ed9ca24f33a6cad81793798298cd5c536c93981829abab9d15): ok
+                  - clickhouse_keeper.tar.gz (expected 147 bytes with hash 2ce04cd4cb5aa9a525637b9f30c2f93f365048221808d95aae16e5c1127d6492): ok
+                  - clickhouse_server.tar.gz (expected 145 bytes with hash 7245b29a4f07273fb8b7a4860f8847babf2b130fe437d30c3ab47b4f274a704e): ok
+                  - cockroachdb.tar.gz (expected 143 bytes with hash 25d7b7f1aa8420f54bf09243ec3206a9bb50eba2cd252cf2279356cdfbbfa101): ok
+                  - crucible.tar.gz (expected 145 bytes with hash 1d071b06c9e0739af8797557d81c84a7dc6d0bf00081ca1ef5c5a40672e11139): ok
+                  - crucible_pantry.tar.gz (expected 150 bytes with hash c537a3ec3f4600cdf0d0d3e279005b54910c87d5ef1b99b8fd85016b79fdedd1): ok
+                  - external_dns.tar.gz (expected 142 bytes with hash 263973cc7d40b6bbe6b33020a903ad0a13e72eff92fa19af51888219588e6cf4): ok
+                  - internal_dns.tar.gz (expected 142 bytes with hash 4ff68308ffa11980380de9036697cd11f94dace9e1d0afae95116541f7f5ffd2): ok
+                  - nexus.tar.gz (expected 135 bytes with hash 7033ac7186a9e1f01a1a9e46d4e8756f3c953cf3cc30e333ceaa0a6bc0d55961): ok
+                  - ntp.tar.gz (expected 135 bytes with hash 2c7a661d288567335a1cabbbb96ec43c648bdfa1323b9c7c4e8de7ff23edeed0): ok
+                  - oximeter.tar.gz (expected 137 bytes with hash cb41cb81f67ffabf0f832927162245fbd79fa2be82430ad6dd03132a34bafefb): ok
             no non-boot disks
         measurement manifest:
             path on boot disk: /fake/path/install/zones.json
             boot disk inventory:
                 manifest generated by sled-agent
                 artifacts in install dataset:
-                  - fake-corpus (expected 1048576 bytes with hash 8a0e23157bae655fceec7376926c9758efee6511c7b7ff8355bbb49545a2257f): ok
+                  - measurements/fake-measurement-id-9830767c45f2a02210a177fabafafe2c84501039289483f72cec299b0c78dbcb.cbor (expected 865 bytes with hash 9830767c45f2a02210a177fabafafe2c84501039289483f72cec299b0c78dbcb): ok
+                  - measurements/fake-measurement-id-ae9279e9135de75e4e137c6da7f939b5a2eae6d931a7f2205df930e37cd58096.cbor (expected 270 bytes with hash ae9279e9135de75e4e137c6da7f939b5a2eae6d931a7f2205df930e37cd58096): ok
             no non-boot disks
         mupdate override:
             path on boot disk: /fake/path/install/mupdate_override.json
@@ -1092,7 +1060,7 @@ LEDGERED SLED CONFIG
             no non-boot disks
     boot disk slot: A
     slot A details:
-        artifact: d944ae205b61ccf4322448f7d0311a819c53d9844769de066c5307c1682abb47 (1000 bytes)
+        artifact: 2a95f405f6991e651f12be7c7aa988a8f18618890b1d213356f767b274a0a30a (1000 bytes)
         image name: fake from debug_assume_success()
         phase 2 hash: 0000000000000000000000000000000000000000000000000000000000000000
     slot B details:
@@ -1691,8 +1659,8 @@ INFO skipping board for MGS-driven update (no update necessary), serial_number: 
 INFO skipping board for MGS-driven update (no update necessary), serial_number: serial1, part_number: 913-0000019
 INFO skipping board for MGS-driven update (no update necessary), serial_number: serial2, part_number: 913-0000019
 INFO ran out of boards for MGS-driven update
-INFO some zones not yet up-to-date, zones_currently_updating: [ZonePropagationIncomplete { zone_id: 4c6a45f3-6754-4082-a7dd-11d59b0127b1 (omicron_zone), zone_kind: Nexus, reason: MissingInInventory { bp_image_source: Artifact { version: Available { version: ArtifactVersion("1.0.0") }, hash: ArtifactHash("0e32b4a3e5d3668bb1d6a16fb06b74dc60b973fa479dcee0aae3adbb52bf1388") } } }, ZonePropagationIncomplete { zone_id: 9882b9e4-9a10-48ef-bf78-0cc1317dadfe (omicron_zone), zone_kind: Nexus, reason: MissingInInventory { bp_image_source: Artifact { version: Available { version: ArtifactVersion("1.0.0") }, hash: ArtifactHash("0e32b4a3e5d3668bb1d6a16fb06b74dc60b973fa479dcee0aae3adbb52bf1388") } } }, ZonePropagationIncomplete { zone_id: a40e7821-3ec7-4aa9-995d-7d26ecec7d0f (omicron_zone), zone_kind: Nexus, reason: MissingInInventory { bp_image_source: Artifact { version: Available { version: ArtifactVersion("1.0.0") }, hash: ArtifactHash("0e32b4a3e5d3668bb1d6a16fb06b74dc60b973fa479dcee0aae3adbb52bf1388") } } }]
-INFO some zones not yet up-to-date, zones_currently_updating: [ZonePropagationIncomplete { zone_id: 4c6a45f3-6754-4082-a7dd-11d59b0127b1 (omicron_zone), zone_kind: Nexus, reason: MissingInInventory { bp_image_source: Artifact { version: Available { version: ArtifactVersion("1.0.0") }, hash: ArtifactHash("0e32b4a3e5d3668bb1d6a16fb06b74dc60b973fa479dcee0aae3adbb52bf1388") } } }, ZonePropagationIncomplete { zone_id: 9882b9e4-9a10-48ef-bf78-0cc1317dadfe (omicron_zone), zone_kind: Nexus, reason: MissingInInventory { bp_image_source: Artifact { version: Available { version: ArtifactVersion("1.0.0") }, hash: ArtifactHash("0e32b4a3e5d3668bb1d6a16fb06b74dc60b973fa479dcee0aae3adbb52bf1388") } } }, ZonePropagationIncomplete { zone_id: a40e7821-3ec7-4aa9-995d-7d26ecec7d0f (omicron_zone), zone_kind: Nexus, reason: MissingInInventory { bp_image_source: Artifact { version: Available { version: ArtifactVersion("1.0.0") }, hash: ArtifactHash("0e32b4a3e5d3668bb1d6a16fb06b74dc60b973fa479dcee0aae3adbb52bf1388") } } }]
+INFO some zones not yet up-to-date, zones_currently_updating: [ZonePropagationIncomplete { zone_id: 4c6a45f3-6754-4082-a7dd-11d59b0127b1 (omicron_zone), zone_kind: Nexus, reason: MissingInInventory { bp_image_source: Artifact { version: Available { version: ArtifactVersion("1.0.0") }, hash: ArtifactHash("7033ac7186a9e1f01a1a9e46d4e8756f3c953cf3cc30e333ceaa0a6bc0d55961") } } }, ZonePropagationIncomplete { zone_id: 9882b9e4-9a10-48ef-bf78-0cc1317dadfe (omicron_zone), zone_kind: Nexus, reason: MissingInInventory { bp_image_source: Artifact { version: Available { version: ArtifactVersion("1.0.0") }, hash: ArtifactHash("7033ac7186a9e1f01a1a9e46d4e8756f3c953cf3cc30e333ceaa0a6bc0d55961") } } }, ZonePropagationIncomplete { zone_id: a40e7821-3ec7-4aa9-995d-7d26ecec7d0f (omicron_zone), zone_kind: Nexus, reason: MissingInInventory { bp_image_source: Artifact { version: Available { version: ArtifactVersion("1.0.0") }, hash: ArtifactHash("7033ac7186a9e1f01a1a9e46d4e8756f3c953cf3cc30e333ceaa0a6bc0d55961") } } }]
+INFO some zones not yet up-to-date, zones_currently_updating: [ZonePropagationIncomplete { zone_id: 4c6a45f3-6754-4082-a7dd-11d59b0127b1 (omicron_zone), zone_kind: Nexus, reason: MissingInInventory { bp_image_source: Artifact { version: Available { version: ArtifactVersion("1.0.0") }, hash: ArtifactHash("7033ac7186a9e1f01a1a9e46d4e8756f3c953cf3cc30e333ceaa0a6bc0d55961") } } }, ZonePropagationIncomplete { zone_id: 9882b9e4-9a10-48ef-bf78-0cc1317dadfe (omicron_zone), zone_kind: Nexus, reason: MissingInInventory { bp_image_source: Artifact { version: Available { version: ArtifactVersion("1.0.0") }, hash: ArtifactHash("7033ac7186a9e1f01a1a9e46d4e8756f3c953cf3cc30e333ceaa0a6bc0d55961") } } }, ZonePropagationIncomplete { zone_id: a40e7821-3ec7-4aa9-995d-7d26ecec7d0f (omicron_zone), zone_kind: Nexus, reason: MissingInInventory { bp_image_source: Artifact { version: Available { version: ArtifactVersion("1.0.0") }, hash: ArtifactHash("7033ac7186a9e1f01a1a9e46d4e8756f3c953cf3cc30e333ceaa0a6bc0d55961") } } }]
 generated blueprint d60afc57-f15d-476c-bd0f-b1071e2bb976 based on parent blueprint 9034c710-3e57-45f3-99e5-4316145e87ac
 blueprint source: planner with report:
 planning report:
@@ -1742,8 +1710,8 @@ INFO skipping board for MGS-driven update (no update necessary), serial_number: 
 INFO skipping board for MGS-driven update (no update necessary), serial_number: serial1, part_number: 913-0000019
 INFO skipping board for MGS-driven update (no update necessary), serial_number: serial2, part_number: 913-0000019
 INFO ran out of boards for MGS-driven update
-INFO some zones not yet up-to-date, zones_currently_updating: [ZonePropagationIncomplete { zone_id: 4c6a45f3-6754-4082-a7dd-11d59b0127b1 (omicron_zone), zone_kind: Nexus, reason: MissingInInventory { bp_image_source: Artifact { version: Available { version: ArtifactVersion("1.0.0") }, hash: ArtifactHash("0e32b4a3e5d3668bb1d6a16fb06b74dc60b973fa479dcee0aae3adbb52bf1388") } } }, ZonePropagationIncomplete { zone_id: 9882b9e4-9a10-48ef-bf78-0cc1317dadfe (omicron_zone), zone_kind: Nexus, reason: MissingInInventory { bp_image_source: Artifact { version: Available { version: ArtifactVersion("1.0.0") }, hash: ArtifactHash("0e32b4a3e5d3668bb1d6a16fb06b74dc60b973fa479dcee0aae3adbb52bf1388") } } }, ZonePropagationIncomplete { zone_id: a40e7821-3ec7-4aa9-995d-7d26ecec7d0f (omicron_zone), zone_kind: Nexus, reason: MissingInInventory { bp_image_source: Artifact { version: Available { version: ArtifactVersion("1.0.0") }, hash: ArtifactHash("0e32b4a3e5d3668bb1d6a16fb06b74dc60b973fa479dcee0aae3adbb52bf1388") } } }]
-INFO some zones not yet up-to-date, zones_currently_updating: [ZonePropagationIncomplete { zone_id: 4c6a45f3-6754-4082-a7dd-11d59b0127b1 (omicron_zone), zone_kind: Nexus, reason: MissingInInventory { bp_image_source: Artifact { version: Available { version: ArtifactVersion("1.0.0") }, hash: ArtifactHash("0e32b4a3e5d3668bb1d6a16fb06b74dc60b973fa479dcee0aae3adbb52bf1388") } } }, ZonePropagationIncomplete { zone_id: 9882b9e4-9a10-48ef-bf78-0cc1317dadfe (omicron_zone), zone_kind: Nexus, reason: MissingInInventory { bp_image_source: Artifact { version: Available { version: ArtifactVersion("1.0.0") }, hash: ArtifactHash("0e32b4a3e5d3668bb1d6a16fb06b74dc60b973fa479dcee0aae3adbb52bf1388") } } }, ZonePropagationIncomplete { zone_id: a40e7821-3ec7-4aa9-995d-7d26ecec7d0f (omicron_zone), zone_kind: Nexus, reason: MissingInInventory { bp_image_source: Artifact { version: Available { version: ArtifactVersion("1.0.0") }, hash: ArtifactHash("0e32b4a3e5d3668bb1d6a16fb06b74dc60b973fa479dcee0aae3adbb52bf1388") } } }]
+INFO some zones not yet up-to-date, zones_currently_updating: [ZonePropagationIncomplete { zone_id: 4c6a45f3-6754-4082-a7dd-11d59b0127b1 (omicron_zone), zone_kind: Nexus, reason: MissingInInventory { bp_image_source: Artifact { version: Available { version: ArtifactVersion("1.0.0") }, hash: ArtifactHash("7033ac7186a9e1f01a1a9e46d4e8756f3c953cf3cc30e333ceaa0a6bc0d55961") } } }, ZonePropagationIncomplete { zone_id: 9882b9e4-9a10-48ef-bf78-0cc1317dadfe (omicron_zone), zone_kind: Nexus, reason: MissingInInventory { bp_image_source: Artifact { version: Available { version: ArtifactVersion("1.0.0") }, hash: ArtifactHash("7033ac7186a9e1f01a1a9e46d4e8756f3c953cf3cc30e333ceaa0a6bc0d55961") } } }, ZonePropagationIncomplete { zone_id: a40e7821-3ec7-4aa9-995d-7d26ecec7d0f (omicron_zone), zone_kind: Nexus, reason: MissingInInventory { bp_image_source: Artifact { version: Available { version: ArtifactVersion("1.0.0") }, hash: ArtifactHash("7033ac7186a9e1f01a1a9e46d4e8756f3c953cf3cc30e333ceaa0a6bc0d55961") } } }]
+INFO some zones not yet up-to-date, zones_currently_updating: [ZonePropagationIncomplete { zone_id: 4c6a45f3-6754-4082-a7dd-11d59b0127b1 (omicron_zone), zone_kind: Nexus, reason: MissingInInventory { bp_image_source: Artifact { version: Available { version: ArtifactVersion("1.0.0") }, hash: ArtifactHash("7033ac7186a9e1f01a1a9e46d4e8756f3c953cf3cc30e333ceaa0a6bc0d55961") } } }, ZonePropagationIncomplete { zone_id: 9882b9e4-9a10-48ef-bf78-0cc1317dadfe (omicron_zone), zone_kind: Nexus, reason: MissingInInventory { bp_image_source: Artifact { version: Available { version: ArtifactVersion("1.0.0") }, hash: ArtifactHash("7033ac7186a9e1f01a1a9e46d4e8756f3c953cf3cc30e333ceaa0a6bc0d55961") } } }, ZonePropagationIncomplete { zone_id: a40e7821-3ec7-4aa9-995d-7d26ecec7d0f (omicron_zone), zone_kind: Nexus, reason: MissingInInventory { bp_image_source: Artifact { version: Available { version: ArtifactVersion("1.0.0") }, hash: ArtifactHash("7033ac7186a9e1f01a1a9e46d4e8756f3c953cf3cc30e333ceaa0a6bc0d55961") } } }]
 generated blueprint a5a8f242-ffa5-473c-8efd-2acf2dc0b736 based on parent blueprint d60afc57-f15d-476c-bd0f-b1071e2bb976
 blueprint source: planner with report:
 planning report:

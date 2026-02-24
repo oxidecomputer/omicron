@@ -2187,7 +2187,6 @@ async fn cmd_db_rack_list(
     struct RackRow {
         id: String,
         initialized: bool,
-        tuf_base_url: String,
         rack_subnet: String,
     }
 
@@ -2203,7 +2202,6 @@ async fn cmd_db_rack_list(
     let rows = rack_list.into_iter().map(|rack| RackRow {
         id: rack.id().to_string(),
         initialized: rack.initialized,
-        tuf_base_url: rack.tuf_base_url.unwrap_or_else(|| "-".to_string()),
         rack_subnet: rack
             .rack_subnet
             .map(|subnet| subnet.to_string())

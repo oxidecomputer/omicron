@@ -55,6 +55,7 @@ thiserror.workspace = true
 tokio.workspace = true
 trust-quorum-protocol.workspace = true
 trust-quorum-types.workspace = true
+tufaceous.workspace = true
 tufaceous-artifact.workspace = true
 
 newtype-uuid.workspace = true
@@ -74,7 +75,6 @@ omicron-workspace-hack.workspace = true
 semver.workspace = true
 sled-agent-types-versions.workspace = true
 swrite.workspace = true
-tough.workspace = true
 
 [dev-dependencies]
 expectorate.workspace = true

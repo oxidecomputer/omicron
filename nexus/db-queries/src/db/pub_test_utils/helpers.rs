@@ -37,21 +37,21 @@ use nexus_types::external_api::instance as instance_types;
 use nexus_types::external_api::project;
 use nexus_types::identity::Resource;
 use omicron_common::api::external;
-use omicron_common::api::external::{
-    TufArtifactMeta, TufRepoDescription, TufRepoMeta,
-};
-use omicron_common::update::ArtifactId;
+use omicron_common::update::TufRepoDescription;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::InstanceUuid;
 use omicron_uuid_kinds::PropolisUuid;
 use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::TufRepoUuid;
 use omicron_uuid_kinds::VolumeUuid;
+use std::collections::BTreeMap;
 use std::net::Ipv6Addr;
 use std::net::SocketAddrV6;
 use std::str::FromStr;
+use tufaceous_artifact::Artifact;
 use tufaceous_artifact::ArtifactHash;
-use tufaceous_artifact::{ArtifactKind, ArtifactVersion};
+use tufaceous_artifact::ArtifactVersion;
+use tufaceous_artifact::Artifacts;
 use uuid::Uuid;
 
 /// Creates a project within the silo of "opctx".
@@ -618,27 +618,19 @@ fn make_test_repo(version: u32) -> TufRepoDescription {
     let version_bytes = version.to_le_bytes();
     let hash_bytes: [u8; 32] = std::array::from_fn(|i| version_bytes[i % 4]);
     let hash = ArtifactHash(hash_bytes);
-    let version = semver::Version::new(u64::from(version), 0, 0);
-    let artifact_version = ArtifactVersion::new(version.to_string())
+    let system_version = semver::Version::new(u64::from(version), 0, 0);
+    let artifact_version = ArtifactVersion::new(system_version.to_string())
         .expect("valid artifact version");
     TufRepoDescription {
-        repo: TufRepoMeta {
+        artifacts: Artifacts::new([Artifact {
+            target_name: String::new(),
+            version: artifact_version,
+            tags: BTreeMap::new(),
             hash,
-            targets_role_version: 0,
-            valid_until: chrono::Utc::now(),
-            system_version: version,
-            file_name: String::new(),
-        },
-        artifacts: vec![TufArtifactMeta {
-            id: ArtifactId {
-                name: String::new(),
-                version: artifact_version,
-                kind: ArtifactKind::from_static("empty"),
-            },
-            hash,
-            size: 0,
-            board: None,
-            sign: None,
-        }],
+            length: 0,
+        }]),
+        system_version,
+        hash: Some(hash),
+        file_name: None,
     }
 }

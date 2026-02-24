@@ -17,9 +17,8 @@ use nexus_types::deployment::PendingMgsUpdateHostPhase1Details;
 use nexus_types::deployment::planning_report::FailedHostOsUpdateReason;
 use nexus_types::inventory::Collection;
 use nexus_types::inventory::SpType;
-use omicron_common::api::external::TufArtifactMeta;
-use omicron_common::api::external::TufRepoDescription;
 use omicron_common::disk::M2Slot;
+use omicron_common::update::TufRepoDescription;
 use omicron_uuid_kinds::SledUuid;
 use sled_hardware_types::BaseboardId;
 use sled_hardware_types::OxideSled;
@@ -28,8 +27,13 @@ use slog::debug;
 use slog::error;
 use std::collections::BTreeMap;
 use std::sync::Arc;
+use tufaceous_artifact::Artifact;
 use tufaceous_artifact::ArtifactHash;
-use tufaceous_artifact::ArtifactKind;
+use tufaceous_artifact::GetError;
+use tufaceous_artifact::OsBoard;
+use tufaceous_artifact::OsPhase1Tags;
+use tufaceous_artifact::OsPhase2Tags;
+use tufaceous_artifact::OsVariant;
 
 /// Describes a set of blueprint changes to the desired host phase 2 contents
 /// for a number of sleds
@@ -46,15 +50,10 @@ impl PendingHostPhase2Changes {
         Self { by_sled: BTreeMap::new() }
     }
 
-    fn insert(
-        &mut self,
-        sled_id: SledUuid,
-        slot: M2Slot,
-        artifact: &TufArtifactMeta,
-    ) {
+    fn insert(&mut self, sled_id: SledUuid, slot: M2Slot, artifact: &Artifact) {
         let contents = BlueprintHostPhase2DesiredContents::Artifact {
             version: BlueprintArtifactVersion::Available {
-                version: artifact.id.version.clone(),
+                version: artifact.version.clone(),
             },
             hash: artifact.hash,
         };
@@ -384,35 +383,33 @@ pub(super) fn try_make_update(
         ));
     };
 
-    let mut phase_1_artifacts = Vec::with_capacity(1);
-    let mut phase_2_artifacts = Vec::with_capacity(1);
-    for artifact in &current_artifacts.artifacts {
-        if artifact.id.kind == ArtifactKind::COSMO_HOST_PHASE_1
-            && sled_type == OxideSled::Cosmo
-        {
-            phase_1_artifacts.push(artifact);
-        } else if artifact.id.kind == ArtifactKind::GIMLET_HOST_PHASE_1
-            && sled_type == OxideSled::Gimlet
-        {
-            phase_1_artifacts.push(artifact);
-        } else if artifact.id.kind == ArtifactKind::HOST_PHASE_2 {
-            phase_2_artifacts.push(artifact);
+    let phase_1_artifact = current_artifacts.artifacts.get(
+        OsPhase1Tags {
+            os_board: match sled_type {
+                OxideSled::Gimlet => OsBoard::Gimlet,
+                OxideSled::Cosmo => OsBoard::Cosmo,
+            },
+            os_variant: OsVariant::Host,
         }
-    }
+        .into(),
+    );
+    let phase_2_artifact = current_artifacts
+        .artifacts
+        .get(OsPhase2Tags { os_variant: OsVariant::Host }.into());
     let (phase_1_artifact, phase_2_artifact) =
-        match (phase_1_artifacts.as_slice(), phase_2_artifacts.as_slice()) {
+        match (phase_1_artifact, phase_2_artifact) {
             // Common case: Exactly 1 of each artifact.
-            ([p1], [p2]) => (p1, p2),
+            (Ok(p1), Ok(p2)) => (p1, p2),
             // "TUF is broken" cases: missing both, one or the other.
-            ([], []) => {
+            (Err(GetError::NotFound), Err(GetError::NotFound)) => {
                 return Err(FailedHostOsUpdateReason::NoMatchingArtifactsFound);
             }
-            ([], _) => {
+            (Err(GetError::NotFound), Ok(_)) => {
                 return Err(
                     FailedHostOsUpdateReason::NoMatchingPhase1ArtifactFound,
                 );
             }
-            (_, []) => {
+            (Ok(_), Err(GetError::NotFound)) => {
                 return Err(
                     FailedHostOsUpdateReason::NoMatchingPhase2ArtifactFound,
                 );
@@ -421,7 +418,7 @@ pub(super) fn try_make_update(
             // should be impossible unless we shipped a TUF repo with multiple
             // host OS images. We can't proceed, because we don't know how to
             // pair up which phase 1 matches which phase 2.
-            (_, _) => {
+            (Err(GetError::TooMany), _) | (_, Err(GetError::TooMany)) => {
                 return Err(FailedHostOsUpdateReason::TooManyMatchingArtifacts);
             }
         };
@@ -477,7 +474,7 @@ pub(super) fn try_make_update(
                 },
             ),
             artifact_hash: phase_1_artifact.hash,
-            artifact_version: phase_1_artifact.id.version.clone(),
+            artifact_version: phase_1_artifact.version.clone(),
         },
         pending_host_phase_2_changes,
     ))

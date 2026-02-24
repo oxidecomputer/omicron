@@ -8,7 +8,7 @@ use std::collections::BTreeSet;
 
 use omicron_uuid_kinds::MupdateOverrideUuid;
 use serde::{Deserialize, Serialize};
-use tufaceous_artifact::ArtifactHashId;
+use tufaceous_artifact::InstallinatorArtifactId;
 
 /// MUPdate override information, typically serialized as JSON (RFD 556).
 ///
@@ -23,7 +23,7 @@ pub struct MupdateOverrideInfo {
     ///
     /// Currently includes the host phase 2 and composite control plane
     /// artifacts.
-    pub hash_ids: BTreeSet<ArtifactHashId>,
+    pub hash_ids: BTreeSet<InstallinatorArtifactId>,
 }
 
 impl MupdateOverrideInfo {

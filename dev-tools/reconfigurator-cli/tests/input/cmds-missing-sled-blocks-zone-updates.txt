@@ -6,7 +6,7 @@ load-example --nsleds 2 --ndisks-per-sled 3
 # is running out of as its working directory.)
 #
 # This is used to simulate the initial version of the system.
-tuf-assemble ../../update-common/manifests/fake-0.0.1.toml
+generate-fake-repo 0.0.1
 
 # Load the target release from the assembled TUF repository.
 set target-release repo-0.0.1.zip
@@ -34,7 +34,7 @@ inventory-generate
 
 # Setup is now done -- create another TUF repository which will act as the
 # target release being updated to.
-tuf-assemble ../../update-common/manifests/fake.toml
+generate-fake-repo 1.0.0
 
 # Load the target release from the assembled TUF repository.
 set target-release repo-1.0.0.zip
@@ -59,8 +59,8 @@ inventory-generate
 blueprint-plan latest latest
 blueprint-diff latest
 
-sled-update-host-phase2 serial0 --slot-b d944ae205b61ccf4322448f7d0311a819c53d9844769de066c5307c1682abb47
-sled-update-host-phase1 serial0 --active B --slot-b b99d5273ba1418bebb19d74b701d716896409566d41de76ada71bded4c9b166b
+sled-update-host-phase2 serial0 --slot-b 2a95f405f6991e651f12be7c7aa988a8f18618890b1d213356f767b274a0a30a
+sled-update-host-phase1 serial0 --active B --slot-b a6a3785a28fe58beeb8a308be16f08a311b2a4e20e975d4df68d2a3a2fd72d86
 sled-update-host-phase2 serial0 --boot-disk B
 
 # Before generating the inventory that completes all updates on sled serial0,

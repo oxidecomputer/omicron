@@ -18,7 +18,7 @@ use installinator_api::body_to_artifact_response;
 use installinator_common::report::ReportQuery;
 use slog::Logger;
 use slog::error;
-use tufaceous_artifact::ArtifactHashId;
+use tufaceous_artifact::InstallinatorArtifactId;
 use update_engine::NestedSpec;
 use update_engine::events::EventReport;
 
@@ -54,14 +54,15 @@ impl InstallinatorApi for WicketdInstallinatorApiImpl {
 
     async fn get_artifact_by_hash(
         rqctx: RequestContext<Self::Context>,
-        path: Path<ArtifactHashId>,
+        path: Path<InstallinatorArtifactId>,
     ) -> Result<HttpResponseHeaders<HttpResponseOk<FreeformBody>>, HttpError>
     {
         let context = rqctx.context();
-        match context.store.get_by_hash(&path.into_inner()) {
-            Some(data_handle) => {
-                let size = data_handle.file_size() as u64;
-                let data_stream = match data_handle.reader_stream().await {
+        let id = path.into_inner();
+        match context.store.get_installinator_artifact(id.hash) {
+            Some(handle) => {
+                let size = handle.artifact().length;
+                let data_stream = match handle.stream().await {
                     Ok(stream) => stream,
                     Err(err) => {
                         error!(
