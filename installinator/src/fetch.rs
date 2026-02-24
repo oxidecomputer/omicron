@@ -156,7 +156,10 @@ impl FetchArtifactBackend {
             slog::o!("artifact_hash_id" => format!("{artifact_hash_id:?}")),
         );
 
-        slog::debug!(log, "start fetch from peers"; "remaining_peers" => remaining_peers);
+        slog::debug!(
+            log, "start fetch from peers";
+            "remaining_peers" => remaining_peers,
+        );
 
         // We'll attempt to contact up to `MAX_CONCURRENT_PEERS` peers in
         // parallel using spawned tasks (inside a `ParallelTaskSet`). We _only_
@@ -169,6 +172,7 @@ impl FetchArtifactBackend {
         // task set (cancelling any outstanding requests); on failure, we'll go
         // back to trying the rest of the peers.
         const MAX_CONCURRENT_PEERS: usize = 64;
+
         let mut tasks =
             ParallelTaskSet::new_with_parallelism(MAX_CONCURRENT_PEERS);
 
@@ -177,7 +181,8 @@ impl FetchArtifactBackend {
 
             slog::debug!(
                 log,
-                "start fetch from peer {peer:?}"; "remaining_peers" => remaining_peers,
+                "start fetch from peer {peer:?}";
+                "remaining_peers" => remaining_peers,
             );
 
             let previous_result = tasks
@@ -188,6 +193,21 @@ impl FetchArtifactBackend {
                         .map(move |result| (start, peer, result))
                 })
                 .await;
+
+            // In production we'll immediately loop back around and continue to
+            // spawn attempts to connect to peers, until either we hit
+            // MAX_CONCURRENT_PEERS or we successfully connect (at which point
+            // we'll pause and call `handle_fetch_result_from_peer()` below,
+            // then resume this loop if we fail to get an artifact).
+            //
+            // However, in tests, we need to disable all concurrency entirely;
+            // we have very precise proptests that assume serial peer connection
+            // ordering.
+            #[cfg(test)]
+            let previous_result = {
+                assert!(previous_result.is_none());
+                tasks.join_next().await
+            };
 
             if let Some((start, peer, result)) = previous_result {
                 if let Some(artifact_bytes) = self

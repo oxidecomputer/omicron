@@ -203,11 +203,16 @@ impl MockFetchBackend {
 
     /// Returns the peer that can return the entire dataset within the timeout.
     fn successful_peer(&self, timeout: Duration) -> Option<PeerAddress> {
-        self.selected_peers.iter()
+        self.selected_peers
+            .iter()
             .filter_map(|(addr, peer)| {
                 if peer.artifact != self.artifact {
-                    // We don't handle the case where the peer returns the wrong artifact yet.
-                    panic!("peer artifact not the same as self.artifact -- can't happen in normal use");
+                    // We don't handle the case where the peer returns the wrong
+                    // artifact yet.
+                    panic!(
+                        "peer artifact not the same as self.artifact -- \
+                         can't happen in normal use"
+                    );
                 }
 
                 match &peer.response {
@@ -216,15 +221,20 @@ impl MockFetchBackend {
                         for action in actions {
                             match action {
                                 ResponseAction::Response { after, count } => {
-                                    // Each action must finish under the timeout. Note that within Tokio,
-                                    // timers of the same duration should fire in the order that they were
-                                    // created, because that's the order they'll be added to the linked list
-                                    // for that timer wheel slot. While this is not yet guaranteed in
-                                    // Tokio's documentation, it is the only reasonable implementation so we
-                                    // rely on it here.
+                                    // Each action must finish under the
+                                    // timeout. Note that within Tokio, timers
+                                    // of the same duration should fire in the
+                                    // order that they were created, because
+                                    // that's the order they'll be added to the
+                                    // linked list for that timer wheel slot.
+                                    // While this is not yet guaranteed in
+                                    // Tokio's documentation, it is the only
+                                    // reasonable implementation so we rely on
+                                    // it here.
                                     //
-                                    // Since Peers creates the timeout BEFORE MockPeersUniverse sets its
-                                    // delay, action.after must be less than timeout.
+                                    // Since Peers creates the timeout BEFORE
+                                    // MockPeersUniverse sets its delay,
+                                    // action.after must be less than timeout.
                                     if *after >= timeout {
                                         return None;
                                     }
@@ -239,7 +249,8 @@ impl MockFetchBackend {
                         }
                         None
                     }
-                    MockResponse::Forbidden { .. } | MockResponse::NotFound { .. } => None,
+                    MockResponse::Forbidden { .. }
+                    | MockResponse::NotFound { .. } => None,
                 }
             })
             .next()
