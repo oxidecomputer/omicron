@@ -4764,7 +4764,7 @@ pub trait NexusExternalApi {
     async fn networking_bgp_announce_set_update(
         rqctx: RequestContext<Self::Context>,
         config: TypedBody<latest::networking::BgpAnnounceSetCreate>,
-    ) -> Result<HttpResponseOk<BgpAnnounceSet>, HttpError>;
+    ) -> Result<HttpResponseOk<latest::networking::BgpAnnounceSet>, HttpError>;
 
     /// List BGP announce sets
     #[endpoint {
@@ -4775,7 +4775,10 @@ pub trait NexusExternalApi {
     async fn networking_bgp_announce_set_list(
         rqctx: RequestContext<Self::Context>,
         query_params: Query<PaginatedByNameOrId>,
-    ) -> Result<HttpResponseOk<Vec<BgpAnnounceSet>>, HttpError>;
+    ) -> Result<
+        HttpResponseOk<Vec<latest::networking::BgpAnnounceSet>>,
+        HttpError,
+    >;
 
     /// Delete BGP announce set
     #[endpoint {
@@ -4799,7 +4802,10 @@ pub trait NexusExternalApi {
     async fn networking_bgp_announcement_list(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<latest::networking::BgpAnnounceSetSelector>,
-    ) -> Result<HttpResponseOk<Vec<BgpAnnouncement>>, HttpError>;
+    ) -> Result<
+        HttpResponseOk<Vec<latest::networking::BgpAnnouncement>>,
+        HttpError,
+    >;
 
     /// Enable BFD session
     #[endpoint {

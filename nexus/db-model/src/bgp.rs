@@ -115,9 +115,9 @@ impl From<networking::BgpAnnounceSetCreate> for BgpAnnounceSet {
     }
 }
 
-impl Into<external::BgpAnnounceSet> for BgpAnnounceSet {
-    fn into(self) -> external::BgpAnnounceSet {
-        external::BgpAnnounceSet { identity: self.identity() }
+impl Into<networking::BgpAnnounceSet> for BgpAnnounceSet {
+    fn into(self) -> networking::BgpAnnounceSet {
+        networking::BgpAnnounceSet { identity: self.identity() }
     }
 }
 
@@ -131,9 +131,9 @@ pub struct BgpAnnouncement {
     pub network: IpNetwork,
 }
 
-impl Into<external::BgpAnnouncement> for BgpAnnouncement {
-    fn into(self) -> external::BgpAnnouncement {
-        external::BgpAnnouncement {
+impl Into<networking::BgpAnnouncement> for BgpAnnouncement {
+    fn into(self) -> networking::BgpAnnouncement {
+        networking::BgpAnnouncement {
             announce_set_id: self.announce_set_id,
             address_lot_block_id: self.address_lot_block_id,
             network: self.network.into(),

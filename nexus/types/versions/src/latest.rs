@@ -249,8 +249,10 @@ pub mod networking {
     pub use crate::v2025_11_20_00::networking::BfdSessionDisable;
     pub use crate::v2025_11_20_00::networking::BfdSessionEnable;
     pub use crate::v2025_11_20_00::networking::BgpAnnounceListSelector;
+    pub use crate::v2025_11_20_00::networking::BgpAnnounceSet;
     pub use crate::v2025_11_20_00::networking::BgpAnnounceSetCreate;
     pub use crate::v2025_11_20_00::networking::BgpAnnounceSetSelector;
+    pub use crate::v2025_11_20_00::networking::BgpAnnouncement;
     pub use crate::v2025_11_20_00::networking::BgpAnnouncementCreate;
     pub use crate::v2025_11_20_00::networking::BgpConfigSelector;
     pub use crate::v2025_11_20_00::networking::BgpRouteSelector;

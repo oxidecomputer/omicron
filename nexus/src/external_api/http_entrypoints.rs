@@ -78,8 +78,6 @@ use omicron_common::api::external::AddressLotViewResponse;
 use omicron_common::api::external::AffinityGroupMember;
 use omicron_common::api::external::AggregateBgpMessageHistory;
 use omicron_common::api::external::AntiAffinityGroupMember;
-use omicron_common::api::external::BgpAnnounceSet;
-use omicron_common::api::external::BgpAnnouncement;
 use omicron_common::api::external::BgpConfig;
 use omicron_common::api::external::BgpExported;
 use omicron_common::api::external::BgpImported;
@@ -4481,11 +4479,11 @@ impl NexusExternalApi for NexusExternalApiImpl {
     async fn networking_bgp_announce_set_update(
         rqctx: RequestContext<ApiContext>,
         config: TypedBody<networking::BgpAnnounceSetCreate>,
-    ) -> Result<HttpResponseOk<BgpAnnounceSet>, HttpError> {
+    ) -> Result<HttpResponseOk<networking::BgpAnnounceSet>, HttpError> {
         audit_and_time(&rqctx, |opctx, nexus| async move {
             let config = config.into_inner();
             let result = nexus.bgp_update_announce_set(&opctx, &config).await?;
-            Ok(HttpResponseOk::<BgpAnnounceSet>(result.0.into()))
+            Ok(HttpResponseOk::<networking::BgpAnnounceSet>(result.0.into()))
         })
         .await
     }
@@ -4493,7 +4491,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
     async fn networking_bgp_announce_set_list(
         rqctx: RequestContext<ApiContext>,
         query_params: Query<PaginatedByNameOrId>,
-    ) -> Result<HttpResponseOk<Vec<BgpAnnounceSet>>, HttpError> {
+    ) -> Result<HttpResponseOk<Vec<networking::BgpAnnounceSet>>, HttpError> {
         let apictx = rqctx.context();
         let handler = async {
             let nexus = &apictx.context.nexus;
@@ -4533,7 +4531,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
     async fn networking_bgp_announcement_list(
         rqctx: RequestContext<ApiContext>,
         path_params: Path<networking::BgpAnnounceSetSelector>,
-    ) -> Result<HttpResponseOk<Vec<BgpAnnouncement>>, HttpError> {
+    ) -> Result<HttpResponseOk<Vec<networking::BgpAnnouncement>>, HttpError> {
         let apictx = rqctx.context();
         let handler = async {
             let nexus = &apictx.context.nexus;

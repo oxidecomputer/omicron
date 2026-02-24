@@ -3222,27 +3222,6 @@ pub struct BgpConfig {
     pub max_paths: MaxPathConfig,
 }
 
-/// Represents a BGP announce set by id. The id can be used with other API calls
-/// to view and manage the announce set.
-#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq)]
-pub struct BgpAnnounceSet {
-    #[serde(flatten)]
-    pub identity: IdentityMetadata,
-}
-
-/// A BGP announcement tied to an address lot block.
-#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq)]
-pub struct BgpAnnouncement {
-    /// The id of the set this announcement is a part of.
-    pub announce_set_id: Uuid,
-
-    /// The address block the IP network being announced is drawn from.
-    pub address_lot_block_id: Uuid,
-
-    /// The IP network being announced.
-    pub network: oxnet::IpNet,
-}
-
 /// An IP address configuration for a port settings object.
 #[derive(Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq)]
 pub struct SwitchPortAddressConfig {
