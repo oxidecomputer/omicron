@@ -10,7 +10,7 @@ typeset _hstc="$C_RED$HOSTNAME"
 case "$_hst" in
     oxz_switch)
 	# Try to determine which switch zone we are
-	_switchid=$(curl -H 'api-version: 1.0.0' -s http://localhost:12225/local/switch-id \
+	_switchid=$(gateway-cli --server "[::1]:12225" local-switch-id \
 	    | /opt/ooce/bin/jq -r .slot)
 	if (( $? == 0 )) && [[ -n "$_switchid" ]]; then
 		_hst+="$_switchid"
