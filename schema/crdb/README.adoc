@@ -9,7 +9,7 @@ We use the following conventions:
 
 * `schema/crdb/VERSION/up*.sql`: Files containing the necessary idempotent
   statements to transition from the previous version of the database schema to
-  this version.  All of the statements in a given file will be executed
+  this version.  By default, all of the statements in a given file will be executed
   together in one transaction; however, usually only one statement should
   appear in each file.  More on this below.
 ** If there's only one statement required, we put it into `up.sql`.
@@ -82,10 +82,10 @@ Process:
     statements.  But you should not mix schema-modifying statements and
     data-modifying statements in one file.  And you should not include multiple
     schema-modifying statements in one file.
-*** Beware that the entire file will be run in one transaction.  Expensive data-
-    modifying operations leading to long-running transactions are generally
-    to-be-avoided; however, there's no better way to do this today if you really
-    do need to update thousands of rows as part of the update.
+*** Beware that by default, the entire file will be run in one transaction.
+    Expensive data-modifying operations leading to long-running transactions are
+    generally to-be-avoided; however, there's no better way to do this today if
+    you really do need to update thousands of rows as part of the update.
 * Update `schema/crdb/dbinit.sql`:
 ** Update the SQL statements to match what the database should look like
    after your up*.sql files are applied.
