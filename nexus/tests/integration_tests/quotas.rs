@@ -15,10 +15,14 @@ use nexus_test_utils::resource_helpers::object_create;
 use nexus_test_utils::resource_helpers::object_create_error;
 use nexus_test_utils::resource_helpers::test_params;
 use nexus_test_utils_macros::nexus_test;
-use nexus_types::external_api::params;
-use nexus_types::external_api::shared;
-use nexus_types::external_api::shared::SiloRole;
-use nexus_types::external_api::views::{Silo, SiloQuotas};
+use nexus_types::external_api::disk;
+use nexus_types::external_api::instance;
+use nexus_types::external_api::policy::SiloRole;
+use nexus_types::external_api::project;
+use nexus_types::external_api::silo::{
+    Silo, SiloCreate, SiloIdentityMode, SiloQuotas, SiloQuotasCreate,
+    SiloQuotasUpdate,
+};
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::InstanceCpuCount;
@@ -39,7 +43,7 @@ impl ResourceAllocator {
     async fn set_quotas(
         &self,
         client: &ClientTestContext,
-        quotas: params::SiloQuotasUpdate,
+        quotas: SiloQuotasUpdate,
     ) -> Result<TestResponse, Error> {
         NexusRequest::object_put(
             client,
@@ -54,7 +58,7 @@ impl ResourceAllocator {
     async fn set_quotas_expect_error(
         &self,
         client: &ClientTestContext,
-        quotas: params::SiloQuotasUpdate,
+        quotas: SiloQuotasUpdate,
         code: http::StatusCode,
     ) -> HttpErrorResponseBody {
         NexusRequest::expect_failure_with_body(
@@ -95,7 +99,7 @@ impl ResourceAllocator {
         NexusRequest::objects_post(
             client,
             "/v1/instances?project=project",
-            &params::InstanceCreate {
+            &instance::InstanceCreate {
                 identity: IdentityMetadataCreateParams {
                     name: name.parse().unwrap(),
                     description: "".into(),
@@ -106,9 +110,9 @@ impl ResourceAllocator {
                 user_data: b"#cloud-config\nsystem_info:\n  default_user:\n    name: oxide"
                     .to_vec(),
                 ssh_public_keys:  Some(Vec::new()),
-                network_interfaces: params::InstanceNetworkInterfaceAttachment::DefaultIpv4,
-                external_ips: Vec::<params::ExternalIpCreate>::new(),
-                disks: Vec::<params::InstanceDiskAttachment>::new(),
+                network_interfaces: instance::InstanceNetworkInterfaceAttachment::DefaultIpv4,
+                external_ips: Vec::<instance::ExternalIpCreate>::new(),
+                disks: Vec::<instance::InstanceDiskAttachment>::new(),
                 boot_disk: None,
                 cpu_platform: None,
                 start: false,
@@ -177,15 +181,15 @@ impl ResourceAllocator {
                 Method::POST,
                 "/v1/disks?project=project",
             )
-            .body(Some(&params::DiskCreate {
+            .body(Some(&disk::DiskCreate {
                 identity: IdentityMetadataCreateParams {
                     name: name.parse().unwrap(),
                     description: "".into(),
                 },
                 size: ByteCount::from_gibibytes_u32(size),
-                disk_backend: params::DiskBackend::Distributed {
-                    disk_source: params::DiskSource::Blank {
-                        block_size: params::BlockSize::try_from(512).unwrap(),
+                disk_backend: disk::DiskBackend::Distributed {
+                    disk_source: disk::DiskSource::Blank {
+                        block_size: disk::BlockSize::try_from(512).unwrap(),
                     },
                 },
             })),
@@ -199,19 +203,19 @@ impl ResourceAllocator {
 async fn setup_silo_with_quota(
     client: &ClientTestContext,
     silo_name: &str,
-    quotas: params::SiloQuotasCreate,
+    quotas: SiloQuotasCreate,
 ) -> ResourceAllocator {
     let silo: Silo = object_create(
         client,
         "/v1/system/silos",
-        &params::SiloCreate {
+        &SiloCreate {
             identity: IdentityMetadataCreateParams {
                 name: silo_name.parse().unwrap(),
                 description: "".into(),
             },
             quotas,
             discoverable: true,
-            identity_mode: shared::SiloIdentityMode::LocalOnly,
+            identity_mode: SiloIdentityMode::LocalOnly,
             admin_group_name: None,
             tls_certificates: vec![],
             mapped_fleet_roles: Default::default(),
@@ -248,7 +252,7 @@ async fn setup_silo_with_quota(
     NexusRequest::objects_post(
         client,
         "/v1/projects",
-        &params::ProjectCreate {
+        &project::ProjectCreate {
             identity: IdentityMetadataCreateParams {
                 name: "project".parse().unwrap(),
                 description: "".into(),
@@ -273,7 +277,7 @@ async fn test_quotas(cptestctx: &ControlPlaneTestContext) {
     let system = setup_silo_with_quota(
         &client,
         "quota-test-silo",
-        params::SiloQuotasCreate::empty(),
+        SiloQuotasCreate::empty(),
     )
     .await;
 
@@ -295,7 +299,7 @@ async fn test_quotas(cptestctx: &ControlPlaneTestContext) {
     system
         .set_quotas(
             client,
-            params::SiloQuotasUpdate {
+            SiloQuotasUpdate {
                 cpus: Some(4),
                 memory: Some(ByteCount::from_gibibytes_u32(15)),
                 storage: Some(ByteCount::from_gibibytes_u32(2)),
@@ -354,12 +358,12 @@ async fn test_quota_limits(cptestctx: &ControlPlaneTestContext) {
     let system = setup_silo_with_quota(
         &client,
         "quota-test-silo",
-        params::SiloQuotasCreate::empty(),
+        SiloQuotasCreate::empty(),
     )
     .await;
 
     // Maximal legal limits should be allowed.
-    let quota_limit = params::SiloQuotasUpdate {
+    let quota_limit = SiloQuotasUpdate {
         cpus: Some(i64::MAX),
         memory: Some(i64::MAX.try_into().unwrap()),
         storage: Some(i64::MAX.try_into().unwrap()),
@@ -418,19 +422,19 @@ async fn test_negative_quota(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
 
     // Can't make a silo with a negative quota
-    let mut quotas = params::SiloQuotasCreate::empty();
+    let mut quotas = SiloQuotasCreate::empty();
     quotas.cpus = -1;
     let response = object_create_error(
         client,
         "/v1/system/silos",
-        &params::SiloCreate {
+        &SiloCreate {
             identity: IdentityMetadataCreateParams {
                 name: "negative-cpus-not-allowed".parse().unwrap(),
                 description: "".into(),
             },
             quotas,
             discoverable: true,
-            identity_mode: shared::SiloIdentityMode::LocalOnly,
+            identity_mode: SiloIdentityMode::LocalOnly,
             admin_group_name: None,
             tls_certificates: vec![],
             mapped_fleet_roles: Default::default(),
@@ -451,12 +455,12 @@ async fn test_negative_quota(cptestctx: &ControlPlaneTestContext) {
     let system = setup_silo_with_quota(
         &client,
         "quota-test-silo",
-        params::SiloQuotasCreate::empty(),
+        SiloQuotasCreate::empty(),
     )
     .await;
 
     // Can't update a silo with a negative quota
-    let quota_limit = params::SiloQuotasUpdate {
+    let quota_limit = SiloQuotasUpdate {
         cpus: Some(-1),
         memory: Some(0_u64.try_into().unwrap()),
         storage: Some(0_u64.try_into().unwrap()),

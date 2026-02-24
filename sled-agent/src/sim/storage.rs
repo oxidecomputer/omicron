@@ -1419,6 +1419,7 @@ impl StorageInner {
                     quota: dataset.inner.quota,
                     reservation: dataset.inner.reservation,
                     compression: dataset.inner.compression.to_string(),
+                    epoch: None,
                 });
             }
         }
@@ -1438,6 +1439,7 @@ impl StorageInner {
                     quota: config.quota,
                     reservation: config.reservation,
                     compression: config.compression.to_string(),
+                    epoch: None,
                 });
             }
         }

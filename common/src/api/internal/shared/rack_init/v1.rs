@@ -225,25 +225,6 @@ pub struct PortConfig {
     pub tx_eq: Option<TxEqConfig>,
 }
 
-/// A set of switch uplinks.
-#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
-pub struct SwitchPorts {
-    pub uplinks: Vec<HostPortConfig>,
-}
-
-#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, JsonSchema)]
-pub struct HostPortConfig {
-    /// Switchport to use for external connectivity
-    pub port: String,
-
-    /// IP Address and prefix (e.g., `192.168.0.1/16`) to apply to switchport
-    /// (must be in infra_ip pool).  May also include an optional VLAN ID.
-    pub addrs: Vec<UplinkAddressConfig>,
-
-    pub lldp: Option<LldpPortConfig>,
-    pub tx_eq: Option<TxEqConfig>,
-}
-
 /// Identifies switch physical location
 #[derive(
     Clone,

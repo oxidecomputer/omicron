@@ -7,9 +7,9 @@ use super::NexusActionContext;
 use super::NexusSaga;
 use crate::app::sagas;
 use crate::app::sagas::declare_saga_actions;
-use crate::external_api::params;
 use nexus_db_queries::{authn, authz, db};
 use nexus_defaults as defaults;
+use nexus_types::external_api::{project, vpc};
 use nexus_types::identity::Resource;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use serde::Deserialize;
@@ -21,7 +21,7 @@ use steno::ActionError;
 #[derive(Debug, Deserialize, Serialize)]
 pub(crate) struct Params {
     pub serialized_authn: authn::saga::Serialized,
-    pub project_create: params::ProjectCreate,
+    pub project_create: project::ProjectCreate,
     pub authz_silo: authz::Silo,
 }
 
@@ -132,7 +132,7 @@ async fn spc_create_vpc_params(
             .map_err(ActionError::action_failed)?,
     );
 
-    let vpc_create = params::VpcCreate {
+    let vpc_create = vpc::VpcCreate {
         identity: IdentityMetadataCreateParams {
             name: "default".parse().unwrap(),
             description: "Default VPC".to_string(),
@@ -155,7 +155,7 @@ async fn spc_create_vpc_params(
 mod test {
     use crate::{
         app::sagas::project_create::Params,
-        app::sagas::project_create::SagaProjectCreate, external_api::params,
+        app::sagas::project_create::SagaProjectCreate,
     };
     use async_bb8_diesel::{AsyncRunQueryDsl, AsyncSimpleConnection};
     use diesel::{
@@ -166,6 +166,7 @@ mod test {
         db::datastore::DataStore,
     };
     use nexus_test_utils_macros::nexus_test;
+    use nexus_types::external_api::project;
     use omicron_common::api::external::IdentityMetadataCreateParams;
 
     type ControlPlaneTestContext =
@@ -175,7 +176,7 @@ mod test {
     fn new_test_params(opctx: &OpContext, authz_silo: authz::Silo) -> Params {
         Params {
             serialized_authn: Serialized::for_opctx(opctx),
-            project_create: params::ProjectCreate {
+            project_create: project::ProjectCreate {
                 identity: IdentityMetadataCreateParams {
                     name: "my-project".parse().unwrap(),
                     description: "My Project".to_string(),

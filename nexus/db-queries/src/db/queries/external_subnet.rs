@@ -22,8 +22,8 @@ use nexus_db_model::SubnetPoolMember;
 use nexus_db_model::SubnetPoolSiloLink;
 use nexus_db_model::to_db_typed_uuid;
 use nexus_db_schema::enums::IpVersionEnum;
-use nexus_types::external_api::params::ExternalSubnetAllocator;
-use nexus_types::external_api::params::PoolSelector;
+use nexus_types::external_api::external_subnet::ExternalSubnetAllocator;
+use nexus_types::external_api::ip_pool::PoolSelector;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::LookupType;
 use omicron_common::api::external::NameOrId;
@@ -794,13 +794,21 @@ fn push_cte_to_select_pool_id(builder: &mut QueryBuilder, pool: &NameOrId) {
 
 // Push a CTE that fails with a bool-parse error if the current Pool is not
 // linked to the current Silo.
+//
+// MATERIALIZED forces CockroachDB to evaluate this CTE even though it isn't
+// referenced by downstream CTEs. Without it, the optimizer could elide the
+// check entirely.
+//
+// The sentinel string is inlined as a SQL literal rather than a bind parameter
+// so that it appears verbatim in the bool-parse error message. A bind parameter
+// would show up as `$N`, which `is_bool_parse_error` wouldn't match.
 fn push_cte_to_ensure_pool_is_linked_to_silo(
     builder: &mut QueryBuilder,
     silo_id: &Uuid,
 ) {
     builder
         .sql(
-            "ensure_silo_is_linked_to_pool AS (\
+            "ensure_silo_is_linked_to_pool AS MATERIALIZED(\
         SELECT CAST(IF(EXISTS((\
             SELECT 1 \
             FROM subnet_pool_silo_link AS l \
@@ -810,8 +818,7 @@ fn push_cte_to_ensure_pool_is_linked_to_silo(
         .param()
         .bind::<sql_types::Uuid, _>(*silo_id)
         .sql(")), 'true', '")
-        .param()
-        .bind::<sql_types::Text, _>(REQUESTED_POOL_NOT_LINKED_TO_SILO_SENTINEL)
+        .sql(REQUESTED_POOL_NOT_LINKED_TO_SILO_SENTINEL)
         .sql("') AS BOOL))");
 }
 
@@ -1078,6 +1085,7 @@ pub fn decode_insert_external_subnet_error(
     silo_id: &Uuid,
     authz_project: &authz::Project,
     subnet: &ExternalSubnetAllocator,
+    subnet_name: &str,
 ) -> Error {
     match &e {
         DieselError::DatabaseError(DatabaseErrorKind::Unknown, info) => {
@@ -1138,18 +1146,21 @@ pub fn decode_insert_external_subnet_error(
                         LookupType::ByName(name.to_string())
                     }
                 };
-                public_error_from_diesel(
-                    e,
-                    ErrorHandler::NotFoundByLookup(
-                        ResourceType::SubnetPool,
-                        lookup_type,
-                    ),
-                )
+                lookup_type.into_not_found(ResourceType::SubnetPool)
             } else if msg == "result out of range" {
                 report_exhaustion(subnet)
             } else {
                 public_error_from_diesel(e, ErrorHandler::Server)
             }
+        }
+        DieselError::DatabaseError(DatabaseErrorKind::UniqueViolation, _) => {
+            public_error_from_diesel(
+                e,
+                ErrorHandler::Conflict(
+                    ResourceType::ExternalSubnet,
+                    subnet_name,
+                ),
+            )
         }
         DieselError::NotFound => report_exhaustion(subnet),
         _ => public_error_from_diesel(e, ErrorHandler::Server),
@@ -1309,9 +1320,9 @@ mod tests {
     use chrono::Utc;
     use nexus_db_model::ExternalSubnetIdentity;
     use nexus_db_model::SubnetPoolMember;
-    use nexus_types::external_api::params::ExternalSubnetAllocator;
-    use nexus_types::external_api::params::PoolSelector;
-    use nexus_types::external_api::params::SubnetPoolMemberAdd;
+    use nexus_types::external_api::external_subnet::ExternalSubnetAllocator;
+    use nexus_types::external_api::ip_pool::PoolSelector;
+    use nexus_types::external_api::subnet_pool::SubnetPoolMemberAdd;
     use omicron_common::address::IpVersion;
     use omicron_common::api::external::IdentityMetadataCreateParams;
     use omicron_common::api::external::NameOrId;

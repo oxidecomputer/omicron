@@ -1462,6 +1462,46 @@
         }
       }
     },
+    "/trust-quorum/remove/{sled}": {
+      "post": {
+        "summary": "Remove a sled from the trust quorum",
+        "description": "This is a required first step towards expunging a sled\n\nReturn the epoch of the proposed configuration so it can be polled asynchronously.",
+        "operationId": "trust_quorum_remove_sled",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "sled",
+            "description": "ID of the sled",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "uint64",
+                  "type": "integer",
+                  "format": "uint64",
+                  "minimum": 0
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/v1/ping": {
       "get": {
         "summary": "Ping API",

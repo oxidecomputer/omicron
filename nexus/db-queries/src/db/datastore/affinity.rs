@@ -1234,7 +1234,7 @@ mod tests {
     use nexus_db_lookup::LookupPath;
     use nexus_db_model::Resources;
     use nexus_db_model::SledResourceVmm;
-    use nexus_types::external_api::params;
+    use nexus_types::external_api::affinity;
     use omicron_common::api::external::{
         self, ByteCount, DataPageParams, IdentityMetadataCreateParams,
         SimpleIdentityOrName,
@@ -1256,7 +1256,7 @@ mod tests {
     ) -> CreateResult<AffinityGroup> {
         let group = AffinityGroup::new(
             authz_project.id(),
-            params::AffinityGroupCreate {
+            affinity::AffinityGroupCreate {
                 identity: IdentityMetadataCreateParams {
                     name: name.parse().unwrap(),
                     description: "".to_string(),
@@ -1278,7 +1278,7 @@ mod tests {
     ) -> CreateResult<AntiAffinityGroup> {
         let group = AntiAffinityGroup::new(
             authz_project.id(),
-            params::AntiAffinityGroupCreate {
+            affinity::AntiAffinityGroupCreate {
                 identity: IdentityMetadataCreateParams {
                     name: name.parse().unwrap(),
                     description: "".to_string(),

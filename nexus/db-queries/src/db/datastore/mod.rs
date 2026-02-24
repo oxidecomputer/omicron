@@ -629,7 +629,9 @@ mod test {
     use nexus_db_model::to_db_typed_uuid;
     use nexus_types::deployment::Blueprint;
     use nexus_types::deployment::BlueprintTarget;
-    use nexus_types::external_api::params;
+    use nexus_types::external_api::disk as disk_types;
+    use nexus_types::external_api::project;
+    use nexus_types::external_api::ssh_key;
     use nexus_types::silo::DEFAULT_SILO_ID;
     use omicron_common::address::REPO_DEPOT_PORT;
     use omicron_common::api::external::{
@@ -694,7 +696,7 @@ mod test {
 
         let project = Project::new(
             authz_silo.id(),
-            params::ProjectCreate {
+            project::ProjectCreate {
                 identity: IdentityMetadataCreateParams {
                     name: "project".parse().unwrap(),
                     description: "desc".to_string(),
@@ -1166,8 +1168,8 @@ mod test {
         // Allocate regions from the datasets for this disk. Do it a few times
         // for good measure.
         for alloc_seed in 0..10 {
-            let disk_source = params::DiskSource::Blank {
-                block_size: params::BlockSize::try_from(4096).unwrap(),
+            let disk_source = disk_types::DiskSource::Blank {
+                block_size: disk_types::BlockSize::try_from(4096).unwrap(),
             };
             let size = ByteCount::from_mebibytes_u32(1);
             let volume_id = VolumeUuid::new_v4();
@@ -1260,8 +1262,8 @@ mod test {
         // Allocate regions from the datasets for this disk. Do it a few times
         // for good measure.
         for alloc_seed in 0..10 {
-            let disk_source = params::DiskSource::Blank {
-                block_size: params::BlockSize::try_from(4096).unwrap(),
+            let disk_source = disk_types::DiskSource::Blank {
+                block_size: disk_types::BlockSize::try_from(4096).unwrap(),
             };
             let size = ByteCount::from_mebibytes_u32(1);
             let volume_id = VolumeUuid::new_v4();
@@ -1348,8 +1350,8 @@ mod test {
         // Allocate regions from the datasets for this disk. Do it a few times
         // for good measure.
         for alloc_seed in 0..10 {
-            let disk_source = params::DiskSource::Blank {
-                block_size: params::BlockSize::try_from(4096).unwrap(),
+            let disk_source = disk_types::DiskSource::Blank {
+                block_size: disk_types::BlockSize::try_from(4096).unwrap(),
             };
             let size = ByteCount::from_mebibytes_u32(1);
             let volume_id = VolumeUuid::new_v4();
@@ -1394,8 +1396,8 @@ mod test {
         .await;
 
         // Allocate regions from the datasets for this volume.
-        let disk_source = params::DiskSource::Blank {
-            block_size: params::BlockSize::try_from(4096).unwrap(),
+        let disk_source = disk_types::DiskSource::Blank {
+            block_size: disk_types::BlockSize::try_from(4096).unwrap(),
         };
         let size = ByteCount::from_mebibytes_u32(500);
         let volume_id = VolumeUuid::new_v4();
@@ -1498,8 +1500,8 @@ mod test {
             .await;
 
         // Allocate regions from the datasets for this volume.
-        let disk_source = params::DiskSource::Blank {
-            block_size: params::BlockSize::try_from(4096).unwrap(),
+        let disk_source = disk_types::DiskSource::Blank {
+            block_size: disk_types::BlockSize::try_from(4096).unwrap(),
         };
         let size = ByteCount::from_mebibytes_u32(500);
         let volume1_id = VolumeUuid::new_v4();
@@ -1592,8 +1594,8 @@ mod test {
             .await;
 
         // Allocate regions from the datasets for this volume.
-        let disk_source = params::DiskSource::Blank {
-            block_size: params::BlockSize::try_from(4096).unwrap(),
+        let disk_source = disk_types::DiskSource::Blank {
+            block_size: disk_types::BlockSize::try_from(4096).unwrap(),
         };
         let size = ByteCount::from_mebibytes_u32(500);
         let volume1_id = VolumeUuid::new_v4();
@@ -1684,8 +1686,8 @@ mod test {
         ];
 
         let volume_id = VolumeUuid::new_v4();
-        let disk_source = params::DiskSource::Blank {
-            block_size: params::BlockSize::try_from(4096).unwrap(),
+        let disk_source = disk_types::DiskSource::Blank {
+            block_size: disk_types::BlockSize::try_from(4096).unwrap(),
         };
         let size = ByteCount::from_mebibytes_u32(500);
 
@@ -1751,8 +1753,8 @@ mod test {
         .await;
 
         let disk_size = test_zpool_size();
-        let disk_source = params::DiskSource::Blank {
-            block_size: params::BlockSize::try_from(4096).unwrap(),
+        let disk_source = disk_types::DiskSource::Blank {
+            block_size: disk_types::BlockSize::try_from(4096).unwrap(),
         };
         let alloc_size = ByteCount::try_from(disk_size.to_bytes() * 2).unwrap();
         let volume1_id = VolumeUuid::new_v4();
@@ -1902,7 +1904,7 @@ mod test {
         let public_key = "ssh-test AAAAAAAAKEY".to_string();
         let ssh_key = SshKey::new(
             silo_user_id,
-            params::SshKeyCreate {
+            ssh_key::SshKeyCreate {
                 identity: IdentityMetadataCreateParams {
                     name: key_name.clone(),
                     description: "my SSH public key".to_string(),

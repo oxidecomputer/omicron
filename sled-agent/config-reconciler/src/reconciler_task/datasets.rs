@@ -14,7 +14,10 @@
 use super::CurrentlyManagedZpools;
 use crate::dataset_serialization_task::DatasetEnsureError;
 use crate::dataset_serialization_task::DatasetEnsureResult;
+use crate::dataset_serialization_task::DatasetTaskError;
 use crate::dataset_serialization_task::DatasetTaskHandle;
+use crate::dataset_serialization_task::RekeyRequest;
+use crate::dataset_serialization_task::RekeyResult;
 use iddqd::IdOrdItem;
 use iddqd::IdOrdMap;
 use iddqd::id_upcast;
@@ -24,17 +27,31 @@ use omicron_common::disk::DatasetConfig;
 use omicron_common::disk::DatasetKind;
 use omicron_common::disk::DatasetName;
 use omicron_uuid_kinds::DatasetUuid;
+use omicron_uuid_kinds::PhysicalDiskUuid;
 use sled_agent_types::inventory::ConfigReconcilerInventoryResult;
 use sled_agent_types::inventory::OmicronZoneConfig;
 use sled_agent_types::inventory::OrphanedDataset;
 use sled_storage::config::MountConfig;
 use sled_storage::dataset::ZONE_DATASET;
+use sled_storage::disk::Disk;
 use slog::Logger;
 use slog::info;
 use slog::warn;
 use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
 use std::sync::Arc;
+use trust_quorum_types::types::Epoch;
+
+/// Information about a managed disk for rekey filtering.
+///
+/// Used by `rekey_for_epoch` to determine which disks need key rotation
+/// based on their cached epoch. Disks with `cached_epoch < target` or
+/// `cached_epoch = None` (unknown) are candidates for rekeying.
+pub(super) struct DiskRekeyInfo<'a> {
+    pub disk: &'a Disk,
+    pub disk_id: PhysicalDiskUuid,
+    pub cached_epoch: Option<Epoch>,
+}
 
 #[derive(Debug, thiserror::Error)]
 pub(super) enum ZoneDatasetDependencyError {
@@ -299,6 +316,14 @@ impl OmicronDatasets {
     pub(crate) fn orphaned_datasets(&self) -> &IdOrdMap<OrphanedDataset> {
         &self.orphaned_datasets
     }
+
+    /// Forward rekey requests to the dataset task.
+    pub(super) async fn rekey_datasets(
+        &self,
+        request: RekeyRequest,
+    ) -> Result<RekeyResult, DatasetTaskError> {
+        self.dataset_task.rekey_datasets(request).await
+    }
 }
 
 #[derive(Debug)]
@@ -321,4 +346,27 @@ impl IdOrdItem for OmicronDataset {
 enum DatasetState {
     Ensured,
     FailedToEnsure(Arc<DatasetEnsureError>),
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::dataset_serialization_task::RekeyResult;
+    use std::collections::BTreeSet;
+
+    #[test]
+    fn test_rekey_result_has_failures() {
+        let mut failed = BTreeSet::new();
+        failed.insert(PhysicalDiskUuid::new_v4());
+        let result = RekeyResult { succeeded: BTreeSet::new(), failed };
+        assert!(result.has_failures());
+
+        let mut succeeded = BTreeSet::new();
+        succeeded.insert(PhysicalDiskUuid::new_v4());
+        let result = RekeyResult { succeeded, failed: BTreeSet::new() };
+        assert!(!result.has_failures());
+
+        let result = RekeyResult::default();
+        assert!(!result.has_failures());
+    }
 }

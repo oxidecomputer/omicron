@@ -38,22 +38,23 @@ use nexus_test_utils::resource_helpers::object_put_error;
 use nexus_test_utils::resource_helpers::objects_list_page_authz;
 use nexus_test_utils::resource_helpers::test_params;
 use nexus_test_utils_macros::nexus_test;
-use nexus_types::external_api::params;
-use nexus_types::external_api::params::IpPoolCreate;
-use nexus_types::external_api::params::IpPoolLinkSilo;
-use nexus_types::external_api::params::IpPoolSiloUpdate;
-use nexus_types::external_api::params::IpPoolUpdate;
-use nexus_types::external_api::shared::IpPoolType;
-use nexus_types::external_api::shared::IpRange;
-use nexus_types::external_api::shared::Ipv4Range;
-use nexus_types::external_api::shared::SiloIdentityMode;
-use nexus_types::external_api::shared::SiloRole;
-use nexus_types::external_api::views::IpPool;
-use nexus_types::external_api::views::IpPoolRange;
-use nexus_types::external_api::views::IpPoolSiloLink;
-use nexus_types::external_api::views::IpVersion;
-use nexus_types::external_api::views::Silo;
-use nexus_types::external_api::views::SiloIpPool;
+use nexus_types::external_api::floating_ip;
+use nexus_types::external_api::ip_pool;
+use nexus_types::external_api::ip_pool::IpPool;
+use nexus_types::external_api::ip_pool::IpPoolCreate;
+use nexus_types::external_api::ip_pool::IpPoolLinkSilo;
+use nexus_types::external_api::ip_pool::IpPoolRange;
+use nexus_types::external_api::ip_pool::IpPoolSiloLink;
+use nexus_types::external_api::ip_pool::IpPoolSiloUpdate;
+use nexus_types::external_api::ip_pool::IpPoolType;
+use nexus_types::external_api::ip_pool::IpPoolUpdate;
+use nexus_types::external_api::ip_pool::IpRange;
+use nexus_types::external_api::ip_pool::IpVersion;
+use nexus_types::external_api::ip_pool::Ipv4Range;
+use nexus_types::external_api::ip_pool::SiloIpPool;
+use nexus_types::external_api::policy::SiloRole;
+use nexus_types::external_api::silo::Silo;
+use nexus_types::external_api::silo::SiloIdentityMode;
 use nexus_types::identity::Resource;
 use nexus_types::silo::INTERNAL_SILO_ID;
 use omicron_common::address::Ipv6Range;
@@ -126,7 +127,7 @@ async fn test_ip_pool_basic_crud(cptestctx: &ControlPlaneTestContext) {
     let error = object_create_error(
         client,
         ip_pools_url,
-        &params::IpPoolCreate::new(
+        &ip_pool::IpPoolCreate::new(
             IdentityMetadataCreateParams {
                 name: pool_name.parse().unwrap(),
                 description: String::new(),
@@ -378,7 +379,7 @@ async fn test_ip_pool_service_no_cud(cptestctx: &ControlPlaneTestContext) {
     assert_eq!(error.message, not_found_id);
 
     // Update not allowed
-    let put_body = params::IpPoolUpdate {
+    let put_body = ip_pool::IpPoolUpdate {
         identity: IdentityMetadataUpdateParams {
             name: Some("test".parse().unwrap()),
             description: Some("test".to_string()),
@@ -432,7 +433,7 @@ async fn test_ip_pool_service_no_cud(cptestctx: &ControlPlaneTestContext) {
     assert_eq!(error.message, not_found_name);
 
     // linking not allowed by name or ID
-    let body = params::IpPoolLinkSilo {
+    let body = ip_pool::IpPoolLinkSilo {
         silo: NameOrId::Name(cptestctx.silo_name.clone()),
         is_default: false,
     };
@@ -473,7 +474,7 @@ async fn test_ip_pool_silo_link(cptestctx: &ControlPlaneTestContext) {
 
     // expect 404 on association if the specified silo doesn't exist
     let nonexistent_silo_id = Uuid::new_v4();
-    let params = params::IpPoolLinkSilo {
+    let params = ip_pool::IpPoolLinkSilo {
         silo: NameOrId::Id(nonexistent_silo_id),
         is_default: false,
     };
@@ -495,7 +496,7 @@ async fn test_ip_pool_silo_link(cptestctx: &ControlPlaneTestContext) {
     assert_eq!(error.message, not_found);
 
     // associate by name with silo that exists
-    let params = params::IpPoolLinkSilo {
+    let params = ip_pool::IpPoolLinkSilo {
         silo: NameOrId::Name(silo.name().clone()),
         is_default: false,
     };
@@ -531,7 +532,7 @@ async fn test_ip_pool_silo_link(cptestctx: &ControlPlaneTestContext) {
     assert_eq!(silo_pools[0].is_default, false);
 
     // associate same silo to other pool by ID instead of name
-    let link_params = params::IpPoolLinkSilo {
+    let link_params = ip_pool::IpPoolLinkSilo {
         silo: NameOrId::Id(silo_id),
         is_default: true,
     };
@@ -658,8 +659,8 @@ async fn cannot_unlink_ip_pool_with_outstanding_floating_ips(
         client,
         "fip",
         proj.name().as_str(),
-        params::AddressAllocator::Auto {
-            pool_selector: params::PoolSelector::Explicit {
+        floating_ip::AddressAllocator::Auto {
+            pool_selector: ip_pool::PoolSelector::Explicit {
                 pool: NameOrId::Name(POOL_NAME.parse().unwrap()),
             },
         },
@@ -743,7 +744,7 @@ async fn test_ip_pool_update_default(cptestctx: &ControlPlaneTestContext) {
     );
 
     // associate both pools with the test silo
-    let params = params::IpPoolLinkSilo {
+    let params = ip_pool::IpPoolLinkSilo {
         silo: NameOrId::Name(silo.name().clone()),
         is_default: false,
     };

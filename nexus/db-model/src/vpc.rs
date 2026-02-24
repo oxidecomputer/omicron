@@ -10,8 +10,7 @@ use db_macros::Resource;
 use ipnetwork::IpNetwork;
 use nexus_db_schema::schema::{vpc, vpc_firewall_rule, vpc_subnet};
 use nexus_defaults as defaults;
-use nexus_types::external_api::params;
-use nexus_types::external_api::views;
+use nexus_types::external_api::vpc as vpc_types;
 use nexus_types::identity::Resource;
 use omicron_common::api::external;
 use omicron_common::api::external::Ipv6NetExt;
@@ -48,7 +47,7 @@ pub struct Vpc {
     pub subnet_gen: Generation,
 }
 
-impl From<Vpc> for views::Vpc {
+impl From<Vpc> for vpc_types::Vpc {
     fn from(vpc: Vpc) -> Self {
         Self {
             identity: vpc.identity(),
@@ -81,7 +80,7 @@ impl IncompleteVpc {
         vpc_id: Uuid,
         project_id: Uuid,
         system_router_id: Uuid,
-        params: params::VpcCreate,
+        params: vpc_types::VpcCreate,
     ) -> Result<Self, external::Error> {
         let identity = VpcIdentity::new(vpc_id, params.identity);
         let ipv6_prefix = oxnet::IpNet::from(match params.ipv6_prefix {
@@ -134,8 +133,8 @@ pub struct VpcUpdate {
     pub dns_name: Option<Name>,
 }
 
-impl From<params::VpcUpdate> for VpcUpdate {
-    fn from(params: params::VpcUpdate) -> Self {
+impl From<vpc_types::VpcUpdate> for VpcUpdate {
+    fn from(params: vpc_types::VpcUpdate) -> Self {
         Self {
             name: params.identity.name.map(Name),
             description: params.identity.description,

@@ -16,7 +16,7 @@ use omicron_common::api::internal::{
     nexus::{DiskRuntimeState, SledVmmState},
     shared::{
         ExternalIpGatewayMap, ResolvedVpcRouteSet, ResolvedVpcRouteState,
-        SledIdentifiers, SwitchPorts, VirtualNetworkInterfaceHost,
+        SledIdentifiers, VirtualNetworkInterfaceHost,
     },
 };
 use sled_agent_types_versions::{
@@ -36,6 +36,7 @@ api_versions!([
     // |  example for the next person.
     // v
     // (next_int, IDENT),
+    (21, REMOVE_DISK_PUT),
     (20, BGP_V6),
     (19, ADD_ROT_ATTESTATION),
     (18, ADD_ATTACHED_SUBNETS),
@@ -595,6 +596,7 @@ pub trait SledAgentApi {
     #[endpoint {
         method = PUT,
         path = "/disks/{disk_id}",
+        versions = ..VERSION_REMOVE_DISK_PUT,
     }]
     async fn disk_put(
         rqctx: RequestContext<Self::Context>,
@@ -738,7 +740,7 @@ pub trait SledAgentApi {
     }]
     async fn uplink_ensure(
         rqctx: RequestContext<Self::Context>,
-        body: TypedBody<SwitchPorts>,
+        body: TypedBody<latest::uplink::SwitchPorts>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
 
     #[endpoint {
@@ -748,7 +750,7 @@ pub trait SledAgentApi {
     }]
     async fn uplink_ensure_v1(
         rqctx: RequestContext<Self::Context>,
-        body: TypedBody<v1::rack_init::SwitchPorts>,
+        body: TypedBody<v1::uplink::SwitchPorts>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
         Self::uplink_ensure(rqctx, body.map(From::from)).await
     }

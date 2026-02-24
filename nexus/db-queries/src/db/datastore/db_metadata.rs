@@ -30,6 +30,7 @@ use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use semver::Version;
 use slog::{Logger, error, info, o};
+use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeSet;
 use std::ops::Bound;
 use std::str::FromStr;
@@ -747,19 +748,15 @@ impl DataStore {
         );
 
         // Perform the schema change.
-        self.apply_schema_update(
-            &current_version,
-            &target_step.version,
-            step.sql(),
-        )
-        .await
-        .with_context(|| {
-            format!(
-                "update to {}, applying step {:?}",
-                target_step.version,
-                step.label()
-            )
-        })?;
+        self.apply_schema_update(&current_version, &target_step.version, step)
+            .await
+            .with_context(|| {
+                format!(
+                    "update to {}, applying step {:?}",
+                    target_step.version,
+                    step.label()
+                )
+            })?;
 
         info!(
             log,
@@ -1208,36 +1205,101 @@ impl DataStore {
 
     // Applies a schema update, using raw SQL read from a caller-supplied
     // configuration file.
+    //
+    // By default, steps are executed within a transaction, combining a version
+    // validation query with the step's own logic. Certain CockroachDB
+    // statements like `SET CLUSTER SETTING` cannot appear inside a
+    // multi-statement transaction, so we treat those as special cases. For
+    // non-transactional steps, the version validation runs in its own
+    // transaction first, then the SQL is executed directly.
+    //
+    // Non-transactional schema updates have significant TOCTOU implications.
+    // For more, see the doc comment on `NON_TRANSACTIONAL_SUFFIX` in
+    // `nexus/db-model/src/schema_versions.rs`.
     async fn apply_schema_update(
         &self,
         current: &Version,
         target: &Version,
-        sql: &str,
+        step: &SchemaUpgradeStep,
     ) -> Result<(), Error> {
         let conn = self.pool_connection_unauthorized().await?;
+        let sql = step.sql();
+        let validate_query = version_validation_query(current, target);
 
-        let result = self.transaction_retry_wrapper("apply_schema_update")
-            .transaction(&conn, |conn| async move {
-                if *target != EARLIEST_SUPPORTED_VERSION {
-                    let validate_version_query = format!("SELECT CAST(\
-                            IF(\
-                                (\
-                                    SELECT version = '{current}' and target_version = '{target}'\
-                                    FROM omicron.public.db_metadata WHERE singleton = true\
-                                ),\
-                                'true',\
-                                'Invalid starting version for schema change'\
-                            ) AS BOOL\
-                        );");
-                    conn.batch_execute_async(&validate_version_query).await?;
+        if step.is_non_transactional() {
+            // Validate the version in its own transaction, then execute
+            // the SQL outside any transaction.
+            if *target != EARLIEST_SUPPORTED_VERSION {
+                let result = self
+                    .transaction_retry_wrapper("apply_schema_update_validate")
+                    .transaction(&conn, move |conn| {
+                        let validate_query = validate_query.clone();
+                        async move {
+                            conn.batch_execute_async(&validate_query).await?;
+                            Ok(())
+                        }
+                    })
+                    .await;
+                match result {
+                    Ok(()) => {}
+                    Err(e) => {
+                        error!(
+                            self.log,
+                            "non-transactional schema update: \
+                             version validation failed";
+                            "step" => step.label(),
+                            InlineErrorChain::new(&e),
+                        );
+                        return Err(public_error_from_diesel(
+                            e,
+                            ErrorHandler::Server,
+                        ));
+                    }
                 }
-                conn.batch_execute_async(&sql).await?;
-                Ok(())
-            }).await;
+            }
 
-        match result {
-            Ok(()) => Ok(()),
-            Err(e) => Err(public_error_from_diesel(e, ErrorHandler::Server)),
+            // It's worth noting that batch_execute_async is outside of
+            // transaction_retry_wrapper and does not benefit from retry logic.
+            // But in the case of schema migrations, that's fine because we'll
+            // bail out and perform a retry at a higher level anyway.
+            conn.batch_execute_async(sql).await.map_err(|e| {
+                error!(
+                    self.log,
+                    "non-transactional schema update: execution failed";
+                    "step" => step.label(),
+                    InlineErrorChain::new(&e),
+                );
+                public_error_from_diesel(e, ErrorHandler::Server)
+            })?;
+
+            Ok(())
+        } else {
+            let result = self
+                .transaction_retry_wrapper("apply_schema_update")
+                .transaction(&conn, |conn| {
+                    let validate_query = validate_query.clone();
+                    async move {
+                        if *target != EARLIEST_SUPPORTED_VERSION {
+                            conn.batch_execute_async(&validate_query).await?;
+                        }
+                        conn.batch_execute_async(&sql).await?;
+                        Ok(())
+                    }
+                })
+                .await;
+
+            match result {
+                Ok(()) => Ok(()),
+                Err(e) => {
+                    error!(
+                        self.log,
+                        "schema update: execution failed";
+                        "step" => step.label(),
+                        InlineErrorChain::new(&e),
+                    );
+                    Err(public_error_from_diesel(e, ErrorHandler::Server))
+                }
+            }
         }
     }
 
@@ -1276,6 +1338,23 @@ impl DataStore {
         }
         Ok(())
     }
+}
+
+/// Build a SQL query that validates the current schema version before applying
+/// a migration step.
+fn version_validation_query(current: &Version, target: &Version) -> String {
+    format!(
+        "SELECT CAST(\
+            IF(\
+                (\
+                    SELECT version = '{current}' and target_version = '{target}'\
+                    FROM omicron.public.db_metadata WHERE singleton = true\
+                ),\
+                'true',\
+                'Invalid starting version for schema change'\
+            ) AS BOOL\
+        );"
+    )
 }
 
 #[cfg(test)]

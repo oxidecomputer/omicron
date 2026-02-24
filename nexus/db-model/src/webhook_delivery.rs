@@ -13,7 +13,7 @@ use crate::serde_time_delta::optional_time_delta;
 use crate::typed_uuid::DbTypedUuid;
 use chrono::{DateTime, TimeDelta, Utc};
 use nexus_db_schema::schema::{webhook_delivery, webhook_delivery_attempt};
-use nexus_types::external_api::views;
+use nexus_types::external_api::alert;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::{
     AlertKind, AlertReceiverKind, AlertReceiverUuid, AlertUuid,
@@ -115,22 +115,22 @@ impl WebhookDelivery {
         &self,
         alert_class: AlertClass,
         attempts: &[WebhookDeliveryAttempt],
-    ) -> views::AlertDelivery {
+    ) -> alert::AlertDelivery {
         let mut attempts: Vec<_> =
-            attempts.iter().map(views::WebhookDeliveryAttempt::from).collect();
+            attempts.iter().map(alert::WebhookDeliveryAttempt::from).collect();
         // Make sure attempts are in order; each attempt entry also includes an
         // attempt number, which should be used authoritatively to determine the
         // ordering of attempts, but it seems nice to also sort the list,
         // because we can...
         attempts.sort_by_key(|a| a.attempt);
-        views::AlertDelivery {
+        alert::AlertDelivery {
             id: self.id.into_untyped_uuid(),
             receiver_id: self.rx_id.into(),
             alert_class: alert_class.as_str().to_owned(),
             alert_id: self.alert_id.into(),
             state: self.state.into(),
             trigger: self.triggered_by.into(),
-            attempts: views::AlertDeliveryAttempts::Webhook(attempts),
+            attempts: alert::AlertDeliveryAttempts::Webhook(attempts),
             time_started: self.time_created,
         }
     }
@@ -174,15 +174,15 @@ pub struct WebhookDeliveryAttempt {
 }
 
 impl WebhookDeliveryAttempt {
-    fn response_view(&self) -> Option<views::WebhookDeliveryResponse> {
-        Some(views::WebhookDeliveryResponse {
+    fn response_view(&self) -> Option<alert::WebhookDeliveryResponse> {
+        Some(alert::WebhookDeliveryResponse {
             status: self.response_status?.into(),
             duration_ms: self.response_duration?.num_milliseconds() as usize,
         })
     }
 }
 
-impl From<&'_ WebhookDeliveryAttempt> for views::WebhookDeliveryAttempt {
+impl From<&'_ WebhookDeliveryAttempt> for alert::WebhookDeliveryAttempt {
     fn from(attempt: &WebhookDeliveryAttempt) -> Self {
         let response = attempt.response_view();
         Self {

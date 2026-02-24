@@ -17,7 +17,7 @@ use nexus_db_lookup::lookup;
 use nexus_db_queries::authn::{Actor, Reason};
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::datastore::CrdbScimProviderStore;
-use nexus_types::external_api::views;
+use nexus_types::external_api::scim;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DeleteResult;
 use omicron_common::api::external::Error;
@@ -33,7 +33,7 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
         silo_lookup: &lookup::Silo<'_>,
-    ) -> ListResultVec<views::ScimClientBearerToken> {
+    ) -> ListResultVec<scim::ScimClientBearerToken> {
         let (.., authz_silo, _) = silo_lookup.fetch().await?;
 
         let tokens =
@@ -46,7 +46,7 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
         silo_lookup: &lookup::Silo<'_>,
-    ) -> CreateResult<views::ScimClientBearerTokenValue> {
+    ) -> CreateResult<scim::ScimClientBearerTokenValue> {
         let (.., authz_silo, _) = silo_lookup.fetch().await?;
 
         let token =
@@ -60,7 +60,7 @@ impl super::Nexus {
         opctx: &OpContext,
         silo_lookup: &lookup::Silo<'_>,
         token_id: Uuid,
-    ) -> LookupResult<views::ScimClientBearerToken> {
+    ) -> LookupResult<scim::ScimClientBearerToken> {
         let (.., authz_silo, _) = silo_lookup.fetch().await?;
 
         let token = self

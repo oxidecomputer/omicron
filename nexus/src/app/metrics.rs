@@ -4,13 +4,12 @@
 
 //! Metrics
 
-use crate::external_api::params::ResourceMetrics;
 use dropshot::PaginationParams;
 use nexus_db_lookup::lookup;
 use nexus_db_queries::authz;
 use nexus_db_queries::{context::OpContext, db::fixed_data::FLEET_ID};
 use nexus_external_api::TimeseriesSchemaPaginationParams;
-use nexus_types::external_api::params::SystemMetricName;
+use nexus_types::external_api::metrics::{ResourceMetrics, SystemMetricName};
 use omicron_common::api::external::{Error, InternalContext};
 use oximeter_db::{
     Measurement, OxqlResult, TimeseriesSchema, oxql::query::QueryAuthzScope,

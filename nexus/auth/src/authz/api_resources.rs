@@ -40,7 +40,7 @@ use authz_macros::authz_resource;
 use futures::FutureExt;
 use futures::future::BoxFuture;
 use nexus_db_fixed_data::FLEET_ID;
-use nexus_types::external_api::shared::{FleetRole, ProjectRole, SiloRole};
+use nexus_types::external_api::policy::{FleetRole, ProjectRole, SiloRole};
 use omicron_common::api::external::{Error, LookupType, ResourceType};
 use oso::PolarClass;
 use serde::{Deserialize, Serialize};

@@ -18,8 +18,8 @@ use nexus_test_utils::http_testing::AuthnMode;
 use nexus_test_utils::http_testing::NexusRequest;
 use nexus_test_utils::http_testing::RequestBuilder;
 use nexus_test_utils_macros::nexus_test;
-use nexus_types::external_api::shared::SupportBundleInfo;
-use nexus_types::external_api::shared::SupportBundleState;
+use nexus_types::external_api::support_bundle::SupportBundleInfo;
+use nexus_types::external_api::support_bundle::SupportBundleState;
 use nexus_types::internal_api::background::SupportBundleCleanupReport;
 use nexus_types::internal_api::background::SupportBundleCollectionReport;
 use nexus_types::internal_api::background::SupportBundleCollectionStep;
@@ -156,7 +156,7 @@ async fn bundle_create_with_comment(
     client: &ClientTestContext,
     user_comment: Option<String>,
 ) -> Result<SupportBundleInfo> {
-    use nexus_types::external_api::params::SupportBundleCreate;
+    use nexus_types::external_api::support_bundle::SupportBundleCreate;
 
     let create_params = SupportBundleCreate { user_comment };
 
@@ -178,7 +178,7 @@ async fn bundle_create_expect_fail(
     expected_status: StatusCode,
     expected_message: &str,
 ) -> Result<()> {
-    use nexus_types::external_api::params::SupportBundleCreate;
+    use nexus_types::external_api::support_bundle::SupportBundleCreate;
 
     let create_params = SupportBundleCreate { user_comment: None };
     let error = NexusRequest::new(
@@ -306,7 +306,7 @@ async fn bundle_update_comment(
     id: SupportBundleUuid,
     comment: Option<String>,
 ) -> Result<SupportBundleInfo> {
-    use nexus_types::external_api::params::SupportBundleUpdate;
+    use nexus_types::external_api::support_bundle::SupportBundleUpdate;
 
     let url = format!("{BUNDLES_URL}/{id}");
     let update = SupportBundleUpdate { user_comment: comment };
@@ -785,9 +785,10 @@ async fn test_support_bundle_update_comment(
     // Test exceeding maximum length (4097 bytes)
     let too_long_comment = "a".repeat(4097);
     let url = format!("{BUNDLES_URL}/{}", bundle.id);
-    let update = nexus_types::external_api::params::SupportBundleUpdate {
-        user_comment: Some(too_long_comment),
-    };
+    let update =
+        nexus_types::external_api::support_bundle::SupportBundleUpdate {
+            user_comment: Some(too_long_comment),
+        };
 
     let error = NexusRequest::new(
         RequestBuilder::new(client, Method::PUT, &url)
