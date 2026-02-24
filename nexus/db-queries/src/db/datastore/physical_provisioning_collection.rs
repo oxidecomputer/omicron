@@ -483,7 +483,9 @@ mod test {
     use nexus_db_model::Instance;
     use nexus_db_model::Project;
     use nexus_db_model::SiloQuotasUpdate;
-    use nexus_types::external_api::params;
+    use nexus_types::external_api::disk as disk_types;
+    use nexus_types::external_api::instance;
+    use nexus_types::external_api::project;
     use nexus_types::silo::DEFAULT_SILO_ID;
     use omicron_common::api::external::IdentityMetadataCreateParams;
     use omicron_test_utils::dev;
@@ -559,7 +561,7 @@ mod test {
                 Project::new_with_id(
                     project_id,
                     silo_id,
-                    params::ProjectCreate {
+                    project::ProjectCreate {
                         identity: IdentityMetadataCreateParams {
                             name: "myphysproject".parse().unwrap(),
                             description: "It's a project".into(),
@@ -608,7 +610,7 @@ mod test {
                 Instance::new(
                     instance_id,
                     project_id,
-                    &params::InstanceCreate {
+                    &instance::InstanceCreate {
                         identity: IdentityMetadataCreateParams {
                             name: "myphysinstance".parse().unwrap(),
                             description: "It's an instance".into(),
@@ -618,7 +620,7 @@ mod test {
                         hostname: "myhostname".try_into().unwrap(),
                         user_data: Vec::new(),
                         network_interfaces:
-                            params::InstanceNetworkInterfaceAttachment::None,
+                            instance::InstanceNetworkInterfaceAttachment::None,
                         external_ips: Vec::new(),
                         disks: Vec::new(),
                         boot_disk: None,
@@ -1081,13 +1083,13 @@ mod test {
         use omicron_uuid_kinds::VolumeUuid;
 
         let disk_source =
-            params::DiskSource::Image { image_id, read_only: true };
-        let create_params = params::DiskCreate {
+            disk_types::DiskSource::Image { image_id, read_only: true };
+        let create_params = disk_types::DiskCreate {
             identity: IdentityMetadataCreateParams {
                 name: format!("disk-{disk_id}").parse().unwrap(),
                 description: "test disk from image".into(),
             },
-            disk_backend: params::DiskBackend::Distributed {
+            disk_backend: disk_types::DiskBackend::Distributed {
                 disk_source: disk_source.clone(),
             },
             size: ExtByteCount::from(2147483648u32),
@@ -1326,7 +1328,7 @@ mod test {
                 Project::new_with_id(
                     project_id,
                     silo_id,
-                    params::ProjectCreate {
+                    project::ProjectCreate {
                         identity: IdentityMetadataCreateParams {
                             name: name.parse().unwrap(),
                             description: "second project".into(),
@@ -2517,13 +2519,13 @@ mod test {
         use omicron_uuid_kinds::VolumeUuid;
 
         let disk_source =
-            params::DiskSource::Snapshot { snapshot_id, read_only: true };
-        let create_params = params::DiskCreate {
+            disk_types::DiskSource::Snapshot { snapshot_id, read_only: true };
+        let create_params = disk_types::DiskCreate {
             identity: IdentityMetadataCreateParams {
                 name: format!("disk-{disk_id}").parse().unwrap(),
                 description: "test disk from snapshot".into(),
             },
-            disk_backend: params::DiskBackend::Distributed {
+            disk_backend: disk_types::DiskBackend::Distributed {
                 disk_source: disk_source.clone(),
             },
             size: ExtByteCount::from(2147483648u32),
