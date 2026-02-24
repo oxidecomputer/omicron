@@ -387,13 +387,29 @@ impl ExampleSystemBuilder {
 
     /// Set the number of boundary NTP zones in the example system.
     ///
+    /// The default value is 0. A value anywhere between 0 and 30, inclusive, is
+    /// permitted. (The limit of 30 is primarily to simplify the
+    /// implementation.)
+    ///
+    /// Each NTP server is assigned an external SNAT address in the 198.51.100.x
+    /// range.
+    ///
     /// This implicitly controls the number of internal NTP zones in the system.
     /// Each sled with no boundary NTP zone gets an internal NTP zone.
     ///
     /// If [`Self::create_zones`] is set to `false`, this is ignored.
-    pub fn boundary_ntp_count(mut self, boundary_ntp_count: usize) -> Self {
+    pub fn set_boundary_ntp_count(
+        mut self,
+        boundary_ntp_count: usize,
+    ) -> anyhow::Result<Self> {
+        if boundary_ntp_count > 30 {
+            anyhow::bail!(
+                "boundary_ntp_count {} is greater than 30",
+                boundary_ntp_count,
+            );
+        }
         self.boundary_ntp_count = ZoneCount(boundary_ntp_count);
-        self
+        Ok(self)
     }
 
     /// Set the Clickhouse policy for the example system.
@@ -625,16 +641,31 @@ impl ExampleSystemBuilder {
                     .unwrap(),
                 )
                 .unwrap();
-            for i in 0..self.external_dns_count.0 {
-                let lo = (i + 1)
-                    .try_into()
-                    .expect("external_dns_count is always <= 30");
+            for i in 1..=self.external_dns_count.0 {
+                let ip = format!("198.51.100.{i}");
                 builder
-                    .add_external_dns_ip(IpAddr::V4(Ipv4Addr::new(
-                        198, 51, 100, lo,
-                    )))
+                    .add_external_dns_ip(ip.parse().unwrap())
                     .expect("test IPs are valid service IPs");
             }
+            system.set_external_ip_policy(builder.build());
+        }
+
+        // Also add a 30-ip range for boundary NTP. It's very likely we'll
+        // actually allocate out of the leftover external DNS range, but if
+        // someone actually asked for 30 external DNS zones we'll shift up into
+        // this range.
+        if self.boundary_ntp_count.0 > 0 {
+            let mut builder =
+                system.external_ip_policy().clone().into_builder();
+            builder
+                .push_service_pool_ipv4_range(
+                    Ipv4Range::new(
+                        "198.51.100.31".parse::<Ipv4Addr>().unwrap(),
+                        "198.51.100.60".parse::<Ipv4Addr>().unwrap(),
+                    )
+                    .unwrap(),
+                )
+                .unwrap();
             system.set_external_ip_policy(builder.build());
         }
 
@@ -1302,7 +1333,8 @@ mod tests {
                 .unwrap()
                 .oximeter_count(4)
                 .cockroachdb_count(3)
-                .boundary_ntp_count(2)
+                .set_boundary_ntp_count(2)
+                .unwrap()
                 .clickhouse_policy(ClickhousePolicy {
                     version: 0,
                     mode: ClickhouseMode::Both {
@@ -1525,7 +1557,8 @@ mod tests {
                 .nsleds(5)
                 .oximeter_count(OXIMETER_REDUNDANCY)
                 .cockroachdb_count(COCKROACHDB_REDUNDANCY)
-                .boundary_ntp_count(2)
+                .set_boundary_ntp_count(2)
+                .unwrap()
                 .external_dns_count(1)
                 .unwrap()
                 .clickhouse_policy(ClickhousePolicy {
@@ -1572,7 +1605,8 @@ mod tests {
                 .nsleds(32)
                 .nexus_count(6)
                 .cockroachdb_count(5)
-                .boundary_ntp_count(2)
+                .set_boundary_ntp_count(2)
+                .unwrap()
                 .oximeter_count(1)
                 .external_dns_count(5)
                 .expect("expected to be able to set external_dns_count")

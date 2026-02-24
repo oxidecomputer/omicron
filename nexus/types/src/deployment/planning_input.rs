@@ -7,10 +7,12 @@
 
 use super::AddNetworkResourceError;
 use super::Blueprint;
+use super::BlueprintExpungedZoneAccessReason;
 use super::BlueprintZoneImageSource;
 use super::OmicronZoneExternalIp;
 use super::OmicronZoneNetworkResources;
 use super::OmicronZoneNic;
+use super::ZoneRunningStatus;
 use crate::deployment::PlannerConfig;
 use crate::external_api::physical_disk::PhysicalDiskPolicy;
 use crate::external_api::physical_disk::PhysicalDiskState;
@@ -145,6 +147,17 @@ pub struct PlanningInput {
     /// Generation number in the blueprint, which triggers active Nexuses to
     /// quiesce.
     not_yet_nexus_zones: BTreeSet<OmicronZoneUuid>,
+
+    /// IDs of zones that are:
+    ///
+    /// * Expunged
+    /// * Confirmed shutdown and will never restart
+    /// * No longer needed by the rest of the system (any zone-type-specific
+    ///   cleanup work is complete, any information they contain is either
+    ///   useless or captured elsewhere, etc.)
+    ///
+    /// and can therefore be pruned from the blueprint.
+    pruneable_zones: BTreeSet<OmicronZoneUuid>,
 }
 
 impl PlanningInput {
@@ -341,6 +354,10 @@ impl PlanningInput {
         self.ignore_impossible_mgs_updates_since
     }
 
+    pub fn pruneable_zones(&self) -> &BTreeSet<OmicronZoneUuid> {
+        &self.pruneable_zones
+    }
+
     /// Convert this `PlanningInput` back into a [`PlanningInputBuilder`]
     ///
     /// This is primarily useful for tests that want to mutate an existing
@@ -358,6 +375,7 @@ impl PlanningInput {
                 .ignore_impossible_mgs_updates_since,
             active_nexus_zones: self.active_nexus_zones,
             not_yet_nexus_zones: self.not_yet_nexus_zones,
+            pruneable_zones: self.pruneable_zones,
         }
     }
 }
@@ -1582,6 +1600,11 @@ pub enum PlanningInputBuildError {
     },
     #[error("sled not found: {0}")]
     SledNotFound(SledUuid),
+    #[error(
+        "attempted to mark zone as pruneable that is not expunged \
+         or may still be running: {0}"
+    )]
+    ZoneNotExpunged(OmicronZoneUuid),
 }
 
 /// Constructor for [`PlanningInput`].
@@ -1597,6 +1620,7 @@ pub struct PlanningInputBuilder {
     ignore_impossible_mgs_updates_since: DateTime<Utc>,
     active_nexus_zones: BTreeSet<OmicronZoneUuid>,
     not_yet_nexus_zones: BTreeSet<OmicronZoneUuid>,
+    pruneable_zones: BTreeSet<OmicronZoneUuid>,
 }
 
 impl PlanningInputBuilder {
@@ -1619,6 +1643,7 @@ impl PlanningInputBuilder {
                 - MGS_UPDATE_SETTLE_TIMEOUT,
             active_nexus_zones: BTreeSet::new(),
             not_yet_nexus_zones: BTreeSet::new(),
+            pruneable_zones: BTreeSet::new(),
         }
     }
 
@@ -1728,6 +1753,37 @@ impl PlanningInputBuilder {
         self.not_yet_nexus_zones = not_yet_nexus_zones;
     }
 
+    /// Insert a zone that is pruneable.
+    ///
+    /// # Errors
+    ///
+    /// Fails if this zone:
+    ///
+    /// * Does not exist in the parent blueprint.
+    /// * Exists in the parent blueprint but is not expunged and shutdown (one
+    ///   of the two conditions for "pruneable"; we don't have enough
+    ///   information to check the other one here).
+    pub fn insert_pruneable_zone(
+        &mut self,
+        zone_id: OmicronZoneUuid,
+    ) -> Result<(), PlanningInputBuildError> {
+        use BlueprintExpungedZoneAccessReason::PlanningInputExpungedZoneGuard;
+
+        if !self
+            .parent_blueprint
+            .expunged_zones(
+                ZoneRunningStatus::Shutdown,
+                PlanningInputExpungedZoneGuard,
+            )
+            .any(|(_sled_id, zone)| zone.id == zone_id)
+        {
+            return Err(PlanningInputBuildError::ZoneNotExpunged(zone_id));
+        }
+
+        self.pruneable_zones.insert(zone_id);
+        Ok(())
+    }
+
     pub fn build(self) -> PlanningInput {
         PlanningInput {
             parent_blueprint: self.parent_blueprint,
@@ -1741,6 +1797,7 @@ impl PlanningInputBuilder {
                 .ignore_impossible_mgs_updates_since,
             active_nexus_zones: self.active_nexus_zones,
             not_yet_nexus_zones: self.not_yet_nexus_zones,
+            pruneable_zones: self.pruneable_zones,
         }
     }
 }
