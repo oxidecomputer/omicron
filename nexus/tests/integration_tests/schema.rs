@@ -116,6 +116,22 @@ async fn apply_update_as_transaction(
     }
 }
 
+// Applies an update without a transaction wrapper.
+//
+// Used for non-transactional schema updates.
+async fn apply_update_without_transaction(
+    client: &omicron_test_utils::dev::db::Client,
+    step: &SchemaUpgradeStep,
+) {
+    if let Err(err) = client.batch_execute(step.sql()).await {
+        panic!(
+            "Failed to execute non-transactional update step {}: {}",
+            step.label(),
+            InlineErrorChain::new(&err)
+        );
+    }
+}
+
 async fn apply_update(
     log: &Logger,
     crdb: &CockroachInstance,
@@ -153,11 +169,16 @@ async fn apply_update(
         info!(
             log,
             "Applying sql schema upgrade step";
-            "file" => step.label()
+            "file" => step.label(),
+            "non_transactional" => step.is_non_transactional(),
         );
 
         for _ in 0..times_to_apply {
-            apply_update_as_transaction(&log, &client, step).await;
+            if step.is_non_transactional() {
+                apply_update_without_transaction(&client, step).await;
+            } else {
+                apply_update_as_transaction(&log, &client, step).await;
+            }
 
             // The following is a set of "versions exempt from being
             // re-applied" multiple times. PLEASE AVOID ADDING TO THIS LIST.
@@ -328,6 +349,43 @@ async fn crdb_column_ordering(
         result.entry(table_name).or_default().push(column_name);
     }
     result
+}
+
+/// Query explicitly persisted system settings.
+///
+/// Note this is different from SHOW CLUSTER SETTINGS, which includes all
+/// cluster settings, and only covers public settings. System settings only
+/// consists of overridden names and values, but also includes undocumented
+/// settings. (We care about one such setting,
+/// `bulkio.index_backfill.batch_size`.)
+///
+/// `system.settings` also contains CockroachDB-internal entries (like
+/// `cluster.secret` and `version`) that are set during cluster
+/// initialization and vary between instances.  We exclude those so we
+/// only compare settings that Omicron controls.
+async fn query_cluster_settings(
+    crdb: &CockroachInstance,
+) -> BTreeMap<String, String> {
+    let client = crdb.connect().await.expect("failed to connect");
+    let rows = client
+        .query(
+            "SELECT name, value FROM system.settings \
+             WHERE name NOT IN ('cluster.secret', 'version', \
+                                'diagnostics.reporting.enabled') \
+             ORDER BY name",
+            &[],
+        )
+        .await
+        .expect("failed to query cluster settings");
+    client.cleanup().await.expect("cleaning up after query");
+
+    rows.iter()
+        .map(|row| {
+            let name: String = row.get(0);
+            let value: String = row.get(1);
+            (name, value)
+        })
+        .collect()
 }
 
 fn read_all_schema_versions() -> AllSchemaVersions {
@@ -835,6 +893,7 @@ async fn dbinit_equals_sum_of_all_up() {
     // Query the newly constructed DB for information about its schema
     let observed_schema = InformationSchema::new(&crdb).await;
     let observed_data = observed_schema.query_all_tables(log, &crdb).await;
+    let observed_cluster_settings = query_cluster_settings(&crdb).await;
 
     db.terminate().await;
 
@@ -843,11 +902,23 @@ async fn dbinit_equals_sum_of_all_up() {
     let crdb = db.crdb();
     let expected_schema = InformationSchema::new(&crdb).await;
     let expected_data = expected_schema.query_all_tables(log, &crdb).await;
+    let expected_cluster_settings = query_cluster_settings(&crdb).await;
 
     // Validate that the schema is identical
     observed_schema.pretty_assert_eq(&expected_schema);
 
     assert_eq!(observed_data, expected_data);
+
+    // Validate that cluster settings match.  This catches cases where
+    // dbinit.sql sets a cluster setting but migrations don't (or vice versa).
+    similar_asserts::assert_eq!(
+        observed_cluster_settings,
+        expected_cluster_settings,
+        "Cluster settings do not match between migrations and dbinit.sql. \
+         If dbinit.sql contains a SET CLUSTER SETTING statement, there must \
+         be a corresponding migration (and vice versa)."
+    );
+
     db.terminate().await;
     logctx.cleanup_successful();
 }

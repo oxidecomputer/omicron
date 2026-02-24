@@ -33,6 +33,7 @@ use nexus_db_queries::db;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::BlueprintZoneType;
 use nexus_types::deployment::blueprint_zone_type;
+use nexus_types::internal_api::params::ExternalPortDiscovery;
 use nexus_types::internal_api::params::InitialTrustQuorumConfig;
 use nexus_types::internal_api::params::{
     PhysicalDiskPutRequest, ZpoolPutRequest,
@@ -43,7 +44,7 @@ use omicron_common::address::IpRange;
 use omicron_common::api::external::Error;
 use omicron_common::api::internal::nexus::{ProducerEndpoint, ProducerKind};
 use omicron_common::api::internal::shared::{
-    AllowedSourceIps, ExternalPortDiscovery, RackNetworkConfig, SwitchLocation,
+    AllowedSourceIps, RackNetworkConfig, SwitchLocation,
 };
 use omicron_common::disk::DatasetKind;
 use omicron_uuid_kinds::BlueprintUuid;

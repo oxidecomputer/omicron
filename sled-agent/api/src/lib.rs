@@ -16,7 +16,7 @@ use omicron_common::api::internal::{
     nexus::{DiskRuntimeState, SledVmmState},
     shared::{
         ExternalIpGatewayMap, ResolvedVpcRouteSet, ResolvedVpcRouteState,
-        SledIdentifiers, SwitchPorts, VirtualNetworkInterfaceHost,
+        SledIdentifiers, VirtualNetworkInterfaceHost,
     },
 };
 use sled_agent_types_versions::{
@@ -740,7 +740,7 @@ pub trait SledAgentApi {
     }]
     async fn uplink_ensure(
         rqctx: RequestContext<Self::Context>,
-        body: TypedBody<SwitchPorts>,
+        body: TypedBody<latest::uplink::SwitchPorts>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
 
     #[endpoint {
@@ -750,7 +750,7 @@ pub trait SledAgentApi {
     }]
     async fn uplink_ensure_v1(
         rqctx: RequestContext<Self::Context>,
-        body: TypedBody<v1::rack_init::SwitchPorts>,
+        body: TypedBody<v1::uplink::SwitchPorts>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
         Self::uplink_ensure(rqctx, body.map(From::from)).await
     }
