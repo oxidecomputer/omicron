@@ -175,7 +175,7 @@ mod test {
                 remove_mupdate_override: None,
                 host_phase_2: BlueprintHostPhase2DesiredSlots::current_contents(
                 ),
-                measurements: BlueprintMeasurements::install_dataset(),
+                measurements: BlueprintMeasurements::InstallDataset,
             },
         );
 

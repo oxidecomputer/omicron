@@ -16,10 +16,10 @@ parent:    516e80a3-b362-4fac-bd3c-4559717120dd
 
 
     measurements:
-    ------------------------------
-    hash              version     
-    ------------------------------
-    install dataset   (no version)
+    ---------------------------
+    hash      version          
+    ---------------------------
+    unknown   (unknown version)
 
 
     physical disks:
@@ -148,10 +148,10 @@ parent:    516e80a3-b362-4fac-bd3c-4559717120dd
 
 
     measurements:
-    ------------------------------
-    hash              version     
-    ------------------------------
-    install dataset   (no version)
+    ---------------------------
+    hash      version          
+    ---------------------------
+    unknown   (unknown version)
 
 
     physical disks:
@@ -281,10 +281,10 @@ parent:    516e80a3-b362-4fac-bd3c-4559717120dd
 
 
     measurements:
-    ------------------------------
-    hash              version     
-    ------------------------------
-    install dataset   (no version)
+    ---------------------------
+    hash      version          
+    ---------------------------
+    unknown   (unknown version)
 
 
     physical disks:

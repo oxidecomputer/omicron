@@ -109,10 +109,10 @@ to:   blueprint 8da82a8e-bf97-4fbd-8ddd-9f6462732cf1
 +   will remove mupdate override:   (none) -> 6123eac1-ec5b-42ba-b73f-9845105a9971
 
     measurements:
-    ----------------------
-    hash      version     
-    ----------------------
-    unknown   (no version)
+    ---------------------------
+    hash      version          
+    ---------------------------
+    unknown   (unknown version)
 
 
     host phase 2 contents:
@@ -262,10 +262,10 @@ to:   blueprint 58d5e830-0884-47d8-a7cd-b2b3751adeb4
 -   will remove mupdate override:   6123eac1-ec5b-42ba-b73f-9845105a9971 -> (none)
 
     measurements:
-    ----------------------
-    hash      version     
-    ----------------------
-    unknown   (no version)
+    ---------------------------
+    hash      version          
+    ---------------------------
+    unknown   (unknown version)
 
 
     host phase 2 contents:

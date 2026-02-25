@@ -266,7 +266,7 @@ impl SledEditor {
                     .finalize(),
                 host_phase_2: self.host_phase_2.finalize(),
                 // This will change once the reconfigurator work is moved through
-                measurements: BlueprintMeasurements::unknown(),
+                measurements: BlueprintMeasurements::Unknown,
             },
             edit_counts: SledEditCounts {
                 disks: disks_counts,

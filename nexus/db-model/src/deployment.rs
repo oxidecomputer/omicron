@@ -226,12 +226,10 @@ impl_enum_type!(
 
 impl From<&BlueprintMeasurements> for DbBpSledMeasurements {
     fn from(value: &BlueprintMeasurements) -> Self {
-        if value.is_install_dataset() {
-            Self::InstallDataset
-        } else if value.is_artifacts() {
-            Self::Artifacts
-        } else {
-            Self::Unknown
+        match value {
+            BlueprintMeasurements::InstallDataset => Self::InstallDataset,
+            BlueprintMeasurements::Unknown => Self::Unknown,
+            BlueprintMeasurements::Artifacts { .. } => Self::Artifacts,
         }
     }
 }

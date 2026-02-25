@@ -549,10 +549,10 @@ to:   blueprint afb09faf-a586-4483-9289-04d4f1d8ba23
 +   will remove mupdate override:   (none) -> ffffffff-ffff-ffff-ffff-ffffffffffff
 
     measurements:
-    ----------------------
-    hash      version     
-    ----------------------
-    unknown   (no version)
+    ---------------------------
+    hash      version          
+    ---------------------------
+    unknown   (unknown version)
 
 
     host phase 2 contents:
@@ -608,10 +608,10 @@ to:   blueprint afb09faf-a586-4483-9289-04d4f1d8ba23
     will remove mupdate override:   00000000-0000-0000-0000-000000000000 (unchanged)
 
     measurements:
-    ----------------------
-    hash      version     
-    ----------------------
-    unknown   (no version)
+    ---------------------------
+    hash      version          
+    ---------------------------
+    unknown   (unknown version)
 
 
     host phase 2 contents:
@@ -664,10 +664,10 @@ to:   blueprint afb09faf-a586-4483-9289-04d4f1d8ba23
 *   will remove mupdate override:   00000000-0000-0000-0000-000000000000 -> ffffffff-ffff-ffff-ffff-ffffffffffff
 
     measurements:
-    ----------------------
-    hash      version     
-    ----------------------
-    unknown   (no version)
+    ---------------------------
+    hash      version          
+    ---------------------------
+    unknown   (unknown version)
 
 
     host phase 2 contents:
@@ -710,10 +710,10 @@ to:   blueprint afb09faf-a586-4483-9289-04d4f1d8ba23
 -   will remove mupdate override:   00000000-0000-0000-0000-000000000000 -> (none)
 
     measurements:
-    ----------------------
-    hash      version     
-    ----------------------
-    unknown   (no version)
+    ---------------------------
+    hash      version          
+    ---------------------------
+    unknown   (unknown version)
 
 
     host phase 2 contents:

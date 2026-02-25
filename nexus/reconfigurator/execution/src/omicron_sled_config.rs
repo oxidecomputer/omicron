@@ -272,7 +272,7 @@ mod tests {
             zones,
             remove_mupdate_override: None,
             host_phase_2: BlueprintHostPhase2DesiredSlots::current_contents(),
-            measurements: BlueprintMeasurements::install_dataset(),
+            measurements: BlueprintMeasurements::InstallDataset,
         };
         let sled_configs =
             [(sim_sled_agent.id, sled_config.clone())].into_iter().collect();

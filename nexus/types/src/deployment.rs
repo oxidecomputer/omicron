@@ -981,52 +981,60 @@ impl<'a> BlueprintMeasurementsTableData<'a> {
     ) -> impl Iterator<Item = BpTableRow> + 'b + use<'b> {
         match diffs {
             BlueprintMeasurementsDiff::NoInstallChange => {
-                std::iter::once(BpTableRow::from_strings(
+                vec![BpTableRow::from_strings(
                     BpDiffState::Unchanged,
                     vec![
                         "install dataset".to_string(),
                         "(no version)".to_string(),
                     ],
-                ))
-                .collect::<Vec<_>>()
+                )]
                 .into_iter()
             }
             BlueprintMeasurementsDiff::NoUnknownChange => {
-                std::iter::once(BpTableRow::from_strings(
+                vec![BpTableRow::from_strings(
                     BpDiffState::Unchanged,
-                    vec!["unknown".to_string(), "(no version)".to_string()],
-                ))
-                .collect::<Vec<_>>()
+                    vec![
+                        "unknown".to_string(),
+                        "(unknown version)".to_string(),
+                    ],
+                )]
                 .into_iter()
             }
-            BlueprintMeasurementsDiff::UnknownToInstall => std::iter::once(
+            BlueprintMeasurementsDiff::UnknownToInstall => vec![
                 BpTableRow::from_strings(
                     BpDiffState::Removed,
-                    vec!["unknown".to_string(), "(no version)".to_string()],
+                    vec![
+                        "unknown".to_string(),
+                        "(unknown version)".to_string(),
+                    ],
                 ),
-            )
-            .chain(std::iter::once(BpTableRow::from_strings(
-                BpDiffState::Added,
-                vec!["install dataset".to_string(), "(no version)".to_string()],
-            )))
-            .collect::<Vec<_>>()
+                BpTableRow::from_strings(
+                    BpDiffState::Added,
+                    vec![
+                        "install dataset".to_string(),
+                        "(no version)".to_string(),
+                    ],
+                ),
+            ]
             .into_iter(),
 
-            BlueprintMeasurementsDiff::InstallToUnknown => {
-                std::iter::once(BpTableRow::from_strings(
+            BlueprintMeasurementsDiff::InstallToUnknown => vec![
+                BpTableRow::from_strings(
                     BpDiffState::Removed,
                     vec![
                         "install dataset".to_string(),
                         "(no version)".to_string(),
                     ],
-                ))
-                .chain(std::iter::once(BpTableRow::from_strings(
+                ),
+                BpTableRow::from_strings(
                     BpDiffState::Added,
-                    vec!["unknown".to_string(), "(no version)".to_string()],
-                )))
-                .collect::<Vec<_>>()
-                .into_iter()
-            }
+                    vec![
+                        "unknown".to_string(),
+                        "(unknown version)".to_string(),
+                    ],
+                ),
+            ]
+            .into_iter(),
             BlueprintMeasurementsDiff::InstallToArtifacts(artifacts) => {
                 std::iter::once(BpTableRow::from_strings(
                     BpDiffState::Removed,
@@ -1047,7 +1055,10 @@ impl<'a> BlueprintMeasurementsTableData<'a> {
             BlueprintMeasurementsDiff::UnknownToArtifacts(artifacts) => {
                 std::iter::once(BpTableRow::from_strings(
                     BpDiffState::Removed,
-                    vec!["unknown".to_string(), "(no version)".to_string()],
+                    vec![
+                        "unknown".to_string(),
+                        "(unknown version)".to_string(),
+                    ],
                 ))
                 .chain(artifacts.iter().map(move |d| {
                     BpTableRow::from_strings(
@@ -1088,27 +1099,30 @@ impl<'a> BlueprintMeasurementsTableData<'a> {
                     })
                     .chain(std::iter::once(BpTableRow::from_strings(
                         BpDiffState::Added,
-                        vec!["unknown".to_string(), "(no version)".to_string()],
+                        vec![
+                            "unknown".to_string(),
+                            "(unknown version)".to_string(),
+                        ],
                     )))
                     .collect::<Vec<_>>()
                     .into_iter()
             }
             BlueprintMeasurementsDiff::BothArtifacts(diff) => {
-                let removed = diff.removed.iter().map(move |d| {
+                let removed = diff.0.removed.iter().map(move |d| {
                     BpTableRow::from_strings(
                         BpDiffState::Removed,
                         vec![d.hash.to_string(), d.version.to_string()],
                     )
                 });
 
-                let common = diff.common.iter().map(move |d| {
+                let common = diff.0.common.iter().map(move |d| {
                     BpTableRow::from_strings(
                         BpDiffState::Unchanged,
                         vec![d.hash.to_string(), d.version.to_string()],
                     )
                 });
 
-                let added = diff.added.iter().map(move |d| {
+                let added = diff.0.added.iter().map(move |d| {
                     BpTableRow::from_strings(
                         BpDiffState::Added,
                         vec![d.hash.to_string(), d.version.to_string()],
@@ -1130,8 +1144,8 @@ impl<'a> BlueprintMeasurementsTableData<'a> {
 
 impl BpTableData for BlueprintMeasurementsTableData<'_> {
     fn rows(&self, state: BpDiffState) -> impl Iterator<Item = BpTableRow> {
-        match &self.measurements.inner {
-            BlueprintMeasurementsInternal::Artifacts { artifacts } => {
+        match &self.measurements {
+            BlueprintMeasurements::Artifacts { artifacts } => {
                 either::Either::Left(artifacts.iter().map(move |d| {
                     BpTableRow::from_strings(
                         state,
@@ -1139,18 +1153,16 @@ impl BpTableData for BlueprintMeasurementsTableData<'_> {
                     )
                 }))
             }
-            BlueprintMeasurementsInternal::InstallDataset => {
-                either::Either::Right(std::iter::once(
-                    BpTableRow::from_strings(
-                        state,
-                        vec![
-                            "install dataset".to_string(),
-                            "(no version)".to_string(),
-                        ],
-                    ),
-                ))
-            }
-            BlueprintMeasurementsInternal::Unknown => either::Either::Right(
+            BlueprintMeasurements::InstallDataset => either::Either::Right(
+                std::iter::once(BpTableRow::from_strings(
+                    state,
+                    vec![
+                        "install dataset".to_string(),
+                        "(no version)".to_string(),
+                    ],
+                )),
+            ),
+            BlueprintMeasurements::Unknown => either::Either::Right(
                 std::iter::once(BpTableRow::from_strings(
                     state,
                     vec![
@@ -2054,10 +2066,52 @@ impl Display for BlueprintSingleMeasurement {
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
 #[serde(tag = "type", rename_all = "snake_case")]
-pub enum BlueprintMeasurementsInternal {
+pub enum BlueprintMeasurements {
     Unknown,
     InstallDataset,
-    Artifacts { artifacts: BTreeSet<BlueprintSingleMeasurement> },
+    Artifacts { artifacts: BlueprintArtifactMeasurements },
+}
+
+/// This is a private inner type to ensure the measurment set is always non-empty
+#[derive(Clone, Debug, Serialize, JsonSchema, PartialEq, Diffable, Eq)]
+pub struct BlueprintArtifactMeasurements(BTreeSet<BlueprintSingleMeasurement>);
+
+impl<'de> Deserialize<'de> for BlueprintArtifactMeasurements {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        use serde::de::Error;
+
+        let artifacts: BTreeSet<BlueprintSingleMeasurement> =
+            BTreeSet::deserialize(deserializer)?;
+
+        if artifacts.is_empty() {
+            Err(D::Error::custom(format!("empty artifact set")))
+        } else {
+            Ok(Self(artifacts))
+        }
+    }
+}
+
+impl BlueprintArtifactMeasurements {
+    pub fn new(
+        artifacts: BTreeSet<BlueprintSingleMeasurement>,
+    ) -> Option<Self> {
+        if artifacts.is_empty() { None } else { Some(Self(artifacts)) }
+    }
+
+    pub fn len(&self) -> usize {
+        self.0.len()
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = &BlueprintSingleMeasurement> {
+        self.0.iter()
+    }
+
+    pub fn into_iter(self) -> impl Iterator<Item = BlueprintSingleMeasurement> {
+        self.0.into_iter()
+    }
 }
 
 #[derive(Debug)]
@@ -2066,11 +2120,11 @@ pub enum BlueprintMeasurementsDiff<'daft> {
     NoUnknownChange,
     UnknownToInstall,
     InstallToUnknown,
-    InstallToArtifacts(&'daft BTreeSet<BlueprintSingleMeasurement>),
-    UnknownToArtifacts(&'daft BTreeSet<BlueprintSingleMeasurement>),
-    ArtifactsToInstall(&'daft BTreeSet<BlueprintSingleMeasurement>),
-    ArtifactsToUnknown(&'daft BTreeSet<BlueprintSingleMeasurement>),
-    BothArtifacts(daft::BTreeSetDiff<'daft, BlueprintSingleMeasurement>),
+    InstallToArtifacts(&'daft BlueprintArtifactMeasurements),
+    UnknownToArtifacts(&'daft BlueprintArtifactMeasurements),
+    ArtifactsToInstall(&'daft BlueprintArtifactMeasurements),
+    ArtifactsToUnknown(&'daft BlueprintArtifactMeasurements),
+    BothArtifacts(BlueprintArtifactMeasurementsDiff<'daft>),
 }
 
 impl BlueprintMeasurementsDiff<'_> {
@@ -2084,7 +2138,7 @@ impl BlueprintMeasurementsDiff<'_> {
             Self::UnknownToArtifacts(artifacts) => artifacts.len(),
             Self::ArtifactsToInstall(_) => 0,
             Self::ArtifactsToUnknown(_) => 0,
-            Self::BothArtifacts(diff) => diff.added.len(),
+            Self::BothArtifacts(diff) => diff.0.added.len(),
         }
     }
 
@@ -2098,14 +2152,14 @@ impl BlueprintMeasurementsDiff<'_> {
             Self::UnknownToArtifacts(_) => 0,
             Self::ArtifactsToInstall(artifacts) => artifacts.len(),
             Self::ArtifactsToUnknown(artifacts) => artifacts.len(),
-            Self::BothArtifacts(diff) => diff.removed.len(),
+            Self::BothArtifacts(diff) => diff.0.removed.len(),
         }
     }
 }
 
-// Enums will get treated as a `Leaf` which doesn't product correct
+// Enums will get treated as a `Leaf` which doesn't produce correct
 // results for what we want
-impl Diffable for BlueprintMeasurementsInternal {
+impl Diffable for BlueprintMeasurements {
     type Diff<'daft> = BlueprintMeasurementsDiff<'daft>;
 
     fn diff<'daft>(&'daft self, other: &'daft Self) -> Self::Diff<'daft> {
@@ -2142,23 +2196,7 @@ impl Diffable for BlueprintMeasurementsInternal {
     }
 }
 
-impl BlueprintMeasurementsInternal {
-    pub fn iter(&self) -> impl Iterator<Item = &BlueprintSingleMeasurement> {
-        match self {
-            BlueprintMeasurementsInternal::Unknown => {
-                either::Either::Left(std::iter::empty())
-            }
-            BlueprintMeasurementsInternal::InstallDataset => {
-                either::Either::Left(std::iter::empty())
-            }
-            BlueprintMeasurementsInternal::Artifacts { artifacts } => {
-                either::Either::Right(artifacts.iter())
-            }
-        }
-    }
-}
-
-impl Display for BlueprintMeasurementsInternal {
+impl Display for BlueprintMeasurements {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Unknown => {
@@ -2168,7 +2206,7 @@ impl Display for BlueprintMeasurementsInternal {
                 writeln!(f, "(install dataset)")?;
             }
             Self::Artifacts { artifacts } => {
-                for m in artifacts {
+                for m in artifacts.iter() {
                     writeln!(f, "{m}")?;
                 }
             }
@@ -2179,10 +2217,10 @@ impl Display for BlueprintMeasurementsInternal {
 
 impl From<BlueprintMeasurements> for BTreeSet<OmicronSingleMeasurement> {
     fn from(value: BlueprintMeasurements) -> Self {
-        match value.inner {
-            BlueprintMeasurementsInternal::Unknown => BTreeSet::new(),
-            BlueprintMeasurementsInternal::InstallDataset => BTreeSet::new(),
-            BlueprintMeasurementsInternal::Artifacts { artifacts } => artifacts
+        match value {
+            BlueprintMeasurements::Unknown => BTreeSet::new(),
+            BlueprintMeasurements::InstallDataset => BTreeSet::new(),
+            BlueprintMeasurements::Artifacts { artifacts } => artifacts
                 .into_iter()
                 .map(|x| OmicronSingleMeasurement { hash: x.hash })
                 .collect(),
@@ -2190,72 +2228,26 @@ impl From<BlueprintMeasurements> for BTreeSet<OmicronSingleMeasurement> {
     }
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
-pub struct BlueprintMeasurements {
-    inner: BlueprintMeasurementsInternal,
-}
-
-impl Display for BlueprintMeasurements {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        writeln!(f, "{}", self.inner)?;
-        Ok(())
-    }
-}
-
-impl Diffable for BlueprintMeasurements {
-    type Diff<'daft> = BlueprintMeasurementsDiff<'daft>;
-
-    fn diff<'daft>(&'daft self, other: &'daft Self) -> Self::Diff<'daft> {
-        self.inner.diff(&other.inner)
-    }
-}
-
 impl BlueprintMeasurements {
-    pub fn install_dataset() -> Self {
-        Self { inner: BlueprintMeasurementsInternal::InstallDataset }
-    }
-
-    pub fn unknown() -> Self {
-        Self { inner: BlueprintMeasurementsInternal::Unknown }
-    }
-
-    pub fn artifacts(
-        artifacts: BTreeSet<BlueprintSingleMeasurement>,
-    ) -> Option<Self> {
-        if artifacts.is_empty() {
-            None
-        } else {
-            Some(Self {
-                inner: BlueprintMeasurementsInternal::Artifacts { artifacts },
-            })
-        }
-    }
-
     pub fn iter(&self) -> impl Iterator<Item = &BlueprintSingleMeasurement> {
-        self.inner.iter()
-    }
-
-    pub fn is_install_dataset(&self) -> bool {
-        match &self.inner {
-            BlueprintMeasurementsInternal::InstallDataset => true,
-            _ => false,
-        }
-    }
-
-    pub fn is_artifacts(&self) -> bool {
-        match &self.inner {
-            BlueprintMeasurementsInternal::Artifacts { .. } => true,
-            _ => false,
+        match self {
+            BlueprintMeasurements::Unknown => {
+                either::Either::Left(std::iter::empty())
+            }
+            BlueprintMeasurements::InstallDataset => {
+                either::Either::Left(std::iter::empty())
+            }
+            BlueprintMeasurements::Artifacts { artifacts } => {
+                either::Either::Right(artifacts.iter())
+            }
         }
     }
 
     pub fn len(&self) -> usize {
-        match &self.inner {
-            BlueprintMeasurementsInternal::InstallDataset
-            | BlueprintMeasurementsInternal::Unknown => 0,
-            BlueprintMeasurementsInternal::Artifacts { artifacts } => {
-                artifacts.len()
-            }
+        match self {
+            BlueprintMeasurements::InstallDataset
+            | BlueprintMeasurements::Unknown => 0,
+            BlueprintMeasurements::Artifacts { artifacts } => artifacts.len(),
         }
     }
 
@@ -2263,16 +2255,16 @@ impl BlueprintMeasurements {
         use swrite::SWrite;
 
         let mut measurements_desc = String::new();
-        match &self.inner {
-            BlueprintMeasurementsInternal::InstallDataset => {
+        match &self {
+            BlueprintMeasurements::InstallDataset => {
                 measurements_desc.push_str("(install dataset)");
             }
-            BlueprintMeasurementsInternal::Unknown => {
+            BlueprintMeasurements::Unknown => {
                 measurements_desc.push_str("(unknown)");
             }
-            BlueprintMeasurementsInternal::Artifacts { artifacts } => {
+            BlueprintMeasurements::Artifacts { artifacts } => {
                 measurements_desc.push('\n');
-                for a in artifacts {
+                for a in artifacts.iter() {
                     swrite::swriteln!(measurements_desc, "  - {}", a);
                 }
             }

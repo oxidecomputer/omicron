@@ -47,10 +47,10 @@ to:   blueprint 8da82a8e-bf97-4fbd-8ddd-9f6462732cf1
   sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 (active, config generation 2 -> 3):
 
     measurements:
-    ----------------------
-    hash      version     
-    ----------------------
-    unknown   (no version)
+    ---------------------------
+    hash      version          
+    ---------------------------
+    unknown   (unknown version)
 
 
     host phase 2 contents:

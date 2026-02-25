@@ -447,10 +447,10 @@ to:   blueprint 366b0b68-d80e-4bc1-abd3-dc69837847e0
   sled 711ac7f8-d19e-4572-bdb9-e9b50f6e362a (active, config generation 2 -> 3):
 
     measurements:
-    ----------------------
-    hash      version     
-    ----------------------
-    unknown   (no version)
+    ---------------------------
+    hash      version          
+    ---------------------------
+    unknown   (unknown version)
 
 
     host phase 2 contents:
@@ -1090,10 +1090,10 @@ to:   blueprint 9c998c1d-1a7b-440a-ae0c-40f781dea6e2
   sled 711ac7f8-d19e-4572-bdb9-e9b50f6e362a (active, config generation 3 -> 4):
 
     measurements:
-    ----------------------
-    hash      version     
-    ----------------------
-    unknown   (no version)
+    ---------------------------
+    hash      version          
+    ---------------------------
+    unknown   (unknown version)
 
 
     host phase 2 contents:
@@ -1725,10 +1725,10 @@ to:   blueprint 2ac8c740-444d-42ff-8d66-9812a7e51288
   sled 9dc50690-f9bf-4520-bf80-051d0f465c2c (active, config generation 2 -> 3):
 
     measurements:
-    ----------------------
-    hash      version     
-    ----------------------
-    unknown   (no version)
+    ---------------------------
+    hash      version          
+    ---------------------------
+    unknown   (unknown version)
 
 
     host phase 2 contents:

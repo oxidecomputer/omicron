@@ -6,10 +6,10 @@ to:   blueprint c194310c-e11f-4c2b-a38a-25d8bb350a60
   sled 6a4c45f6-e02f-490c-bbfa-b32fb89e8e86 (active, config generation 3 -> 4):
 
     measurements:
-    ----------------------
-    hash      version     
-    ----------------------
-    unknown   (no version)
+    ---------------------------
+    hash      version          
+    ---------------------------
+    unknown   (unknown version)
 
 
     host phase 2 contents:
@@ -139,10 +139,10 @@ to:   blueprint c194310c-e11f-4c2b-a38a-25d8bb350a60
   sled be531a62-9897-430d-acd2-ce14b4632627 (active, config generation 3 -> 4):
 
     measurements:
-    ----------------------
-    hash      version     
-    ----------------------
-    unknown   (no version)
+    ---------------------------
+    hash      version          
+    ---------------------------
+    unknown   (unknown version)
 
 
     host phase 2 contents:

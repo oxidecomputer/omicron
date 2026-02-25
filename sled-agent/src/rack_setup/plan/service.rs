@@ -946,7 +946,7 @@ impl Plan {
                     host_phase_2:
                         BlueprintHostPhase2DesiredSlots::current_contents(),
                     remove_mupdate_override: None,
-                    measurements: BlueprintMeasurements::install_dataset(),
+                    measurements: BlueprintMeasurements::InstallDataset,
                 },
             );
         }

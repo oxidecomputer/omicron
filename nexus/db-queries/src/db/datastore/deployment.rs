@@ -78,6 +78,7 @@ use nexus_db_schema::enums::HwM2SlotEnum;
 use nexus_db_schema::enums::HwRotSlotEnum;
 use nexus_db_schema::enums::SpTypeEnum;
 use nexus_types::deployment::Blueprint;
+use nexus_types::deployment::BlueprintArtifactMeasurements;
 use nexus_types::deployment::BlueprintExpungedZoneAccessReason;
 use nexus_types::deployment::BlueprintMeasurements;
 use nexus_types::deployment::BlueprintMetadata;
@@ -1303,19 +1304,20 @@ impl DataStore {
             ) {
                 // There were measurements in the database and we expect this
                 (Some(m), DbBpSledMeasurements::Artifacts) => {
-                    BlueprintMeasurements::artifacts(m).ok_or(
-                        Error::internal_error(&format!(
-                            "sled {} has an empty measurement set",
-                            s.sled_id
-                        )),
-                    )?
+                    BlueprintMeasurements::Artifacts {
+                        artifacts: BlueprintArtifactMeasurements::new(m)
+                            .ok_or(Error::internal_error(&format!(
+                                "sled {} has an empty measurement set",
+                                s.sled_id
+                            )))?,
+                    }
                 }
                 // There were no measurements, we expect this for both these cases
                 (None, DbBpSledMeasurements::InstallDataset) => {
-                    BlueprintMeasurements::install_dataset()
+                    BlueprintMeasurements::InstallDataset
                 }
                 (None, DbBpSledMeasurements::Unknown) => {
-                    BlueprintMeasurements::unknown()
+                    BlueprintMeasurements::Unknown
                 }
                 // The rest of these are inconsistent and we have a bug somewhere
                 (Some(_), DbBpSledMeasurements::InstallDataset)

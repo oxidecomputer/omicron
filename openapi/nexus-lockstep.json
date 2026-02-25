@@ -2097,6 +2097,14 @@
           "time_created"
         ]
       },
+      "BlueprintArtifactMeasurements": {
+        "description": "This is a private inner type to ensure the measurment set is always non-empty",
+        "type": "array",
+        "items": {
+          "$ref": "#/components/schemas/BlueprintSingleMeasurement"
+        },
+        "uniqueItems": true
+      },
       "BlueprintArtifactVersion": {
         "description": "The version of an artifact in a blueprint.\n\nThis is used for debugging output.",
         "oneOf": [
@@ -2264,17 +2272,6 @@
         ]
       },
       "BlueprintMeasurements": {
-        "type": "object",
-        "properties": {
-          "inner": {
-            "$ref": "#/components/schemas/BlueprintMeasurementsInternal"
-          }
-        },
-        "required": [
-          "inner"
-        ]
-      },
-      "BlueprintMeasurementsInternal": {
         "oneOf": [
           {
             "type": "object",
@@ -2308,11 +2305,7 @@
             "type": "object",
             "properties": {
               "artifacts": {
-                "type": "array",
-                "items": {
-                  "$ref": "#/components/schemas/BlueprintSingleMeasurement"
-                },
-                "uniqueItems": true
+                "$ref": "#/components/schemas/BlueprintArtifactMeasurements"
               },
               "type": {
                 "type": "string",
