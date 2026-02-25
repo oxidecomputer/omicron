@@ -1207,7 +1207,7 @@ impl DataStore {
             while let Some(p) = paginator.next() {
                 let batch = paginated(
                     dsl::bp_single_measurements,
-                    dsl::id,
+                    dsl::image_artifact_sha256,
                     &p.current_pagparams(),
                 )
                 .filter(dsl::blueprint_id.eq(to_db_typed_uuid(blueprint_id)))
@@ -1232,7 +1232,8 @@ impl DataStore {
                 .map_err(|e| {
                     public_error_from_diesel(e, ErrorHandler::Server)
                 })?;
-                paginator = p.found_batch(&batch, &|(z, _)| z.id);
+                paginator =
+                    p.found_batch(&batch, &|(z, _)| z.image_artifact_sha256);
                 rows.extend(batch);
             }
             rows

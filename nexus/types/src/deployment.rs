@@ -2087,7 +2087,7 @@ impl<'de> Deserialize<'de> for BlueprintArtifactMeasurements {
             BTreeSet::deserialize(deserializer)?;
 
         if artifacts.is_empty() {
-            Err(D::Error::custom(format!("empty artifact set")))
+            Err(D::Error::custom("empty artifact set".to_string()))
         } else {
             Ok(Self(artifacts))
         }
