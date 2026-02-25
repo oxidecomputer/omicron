@@ -481,7 +481,7 @@ fn validate_update_version_number_ordering(
     if proposed_new_version.major > current_version.major + 1 {
         warn!(
             log,
-            "cannot start update: attempt to update past next major version"
+            "cannot start update: attempt to update past next scheduled release"
         );
         return Err(TargetReleaseChangeError::CannotSkipScheduledRelease {
             current: current_version.major,
@@ -528,7 +528,7 @@ fn validate_update_version_number_ordering(
 //   endpoint instead)
 // * Another update is in progress
 // * The new version doesn't satisfy our requirements for upgrade ordering (no
-//   downgrades; cannot skip major releases)
+//   downgrades; cannot skip scheduled releases)
 //
 // The latter restriction is due to the implementation of the blueprint planner,
 // which means it's sufficient to look at the current target blueprint; we don't
