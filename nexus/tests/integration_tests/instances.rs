@@ -29,6 +29,7 @@ use nexus_test_utils::resource_helpers::create_disk;
 use nexus_test_utils::resource_helpers::create_floating_ip;
 use nexus_test_utils::resource_helpers::create_ip_pool;
 use nexus_test_utils::resource_helpers::create_local_user;
+use nexus_test_utils::resource_helpers::create_project_image;
 use nexus_test_utils::resource_helpers::create_silo;
 use nexus_test_utils::resource_helpers::grant_iam;
 use nexus_test_utils::resource_helpers::link_ip_pool;
@@ -47,7 +48,6 @@ use nexus_types::external_api::affinity;
 use nexus_types::external_api::disk;
 use nexus_types::external_api::external_ip::{ExternalIp, IpKind};
 use nexus_types::external_api::floating_ip;
-use nexus_types::external_api::image;
 use nexus_types::external_api::instance;
 use nexus_types::external_api::instance::ExternalIpCreate;
 use nexus_types::external_api::instance::IpAssignment;
@@ -2597,26 +2597,11 @@ async fn test_instance_using_image_from_other_project_fails(
     cptestctx: &ControlPlaneTestContext,
 ) {
     let client = &cptestctx.external_client;
+    DiskTest::new(&cptestctx).await;
     create_project_and_pool(&client).await;
 
     // Create an image in springfield-squidport.
-    let images_url = format!("/v1/images?project={}", PROJECT_NAME);
-    let image_create_params = image::ImageCreate {
-        identity: IdentityMetadataCreateParams {
-            name: "alpine-edge".parse().unwrap(),
-            description: String::from(
-                "you can boot any image, as long as it's alpine",
-            ),
-        },
-        os: "alpine".to_string(),
-        version: "edge".to_string(),
-        source: image::ImageSource::YouCanBootAnythingAsLongAsItsAlpine,
-    };
-    let image =
-        NexusRequest::objects_post(client, &images_url, &image_create_params)
-            .authn_as(AuthnMode::PrivilegedUser)
-            .execute_and_parse_unwrap::<image::Image>()
-            .await;
+    let image = create_project_image(client, PROJECT_NAME, "not-alpine").await;
 
     // Try and fail to create an instance in another project.
     let project = create_project(client, "moes-tavern").await;

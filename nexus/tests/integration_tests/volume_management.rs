@@ -48,7 +48,9 @@ use nexus_test_utils::resource_helpers::create_default_ip_pools;
 use nexus_test_utils::resource_helpers::create_disk;
 use nexus_test_utils::resource_helpers::create_disk_from_snapshot;
 use nexus_test_utils::resource_helpers::create_project;
+use nexus_test_utils::resource_helpers::create_project_image;
 use nexus_test_utils::resource_helpers::create_snapshot;
+use nexus_test_utils::resource_helpers::delete_image;
 use nexus_test_utils::resource_helpers::object_create;
 use nexus_test_utils_macros::nexus_test;
 use nexus_types::external_api::disk;
@@ -114,29 +116,7 @@ async fn create_project_and_pool(client: &ClientTestContext) -> Uuid {
 
 async fn create_image(client: &ClientTestContext) -> image::Image {
     create_project_and_pool(client).await;
-
-    // Define a global image
-
-    let image_create_params = image::ImageCreate {
-        identity: IdentityMetadataCreateParams {
-            name: "alpine-edge".parse().unwrap(),
-            description: String::from(
-                "you can boot any image, as long as it's alpine",
-            ),
-        },
-        source: image::ImageSource::YouCanBootAnythingAsLongAsItsAlpine,
-        os: "alpine".to_string(),
-        version: "edge".to_string(),
-    };
-
-    let images_url = format!("/v1/images?project={}", PROJECT_NAME);
-    NexusRequest::objects_post(client, &images_url, &image_create_params)
-        .authn_as(AuthnMode::PrivilegedUser)
-        .execute()
-        .await
-        .unwrap()
-        .parsed_body()
-        .unwrap()
+    create_project_image(client, PROJECT_NAME, "not-alpine").await
 }
 
 async fn create_base_disk(
@@ -192,6 +172,9 @@ async fn test_snapshot_then_delete_disk(cptestctx: &ControlPlaneTestContext) {
     // Create a disk from this image
     let base_disk =
         create_base_disk(&client, &image, &disks_url, &base_disk_name).await;
+    // Delete the image (as it uses Crucible resources, which we assert was
+    // cleaned up at the end of the test)
+    delete_image(client, PROJECT_NAME, "not-alpine").await;
 
     // Issue snapshot request
     let snapshot: snapshot::Snapshot = object_create(
@@ -253,6 +236,9 @@ async fn test_delete_snapshot_then_disk(cptestctx: &ControlPlaneTestContext) {
     // Create a disk from this image
     let base_disk =
         create_base_disk(&client, &image, &disks_url, &base_disk_name).await;
+    // Delete the image (as it uses Crucible resources, which we assert was
+    // cleaned up at the end of the test)
+    delete_image(client, PROJECT_NAME, "not-alpine").await;
 
     // Issue snapshot request
     let snapshot: snapshot::Snapshot = object_create(
@@ -313,6 +299,9 @@ async fn test_multiple_snapshots(cptestctx: &ControlPlaneTestContext) {
     // Create a disk from this image
     let base_disk =
         create_base_disk(&client, &image, &disks_url, &base_disk_name).await;
+    // Delete the image (as it uses Crucible resources, which we assert was
+    // cleaned up at the end of the test)
+    delete_image(client, PROJECT_NAME, "not-alpine").await;
 
     // Issue snapshot requests
     for i in 0..4 {
@@ -442,9 +431,6 @@ async fn test_snapshot_prevents_other_disk(
         .await
         .expect("failed to delete snapshot");
 
-    // All resources were deleted
-    assert!(disk_test.crucible_resources_deleted().await);
-
     // Disk allocation will work now
     let _next_disk: external::Disk = NexusRequest::new(
         RequestBuilder::new(client, Method::POST, &disks_url)
@@ -464,6 +450,9 @@ async fn test_snapshot_prevents_other_disk(
         .execute()
         .await
         .expect("failed to delete disk");
+
+    // Delete the image
+    delete_image(client, PROJECT_NAME, "not-alpine").await;
 
     // Assert everything was cleaned up
     assert!(disk_test.crucible_resources_deleted().await);
@@ -1103,6 +1092,10 @@ async fn test_create_image_from_snapshot_delete(
     // Create a disk from this image
     let _base_disk =
         create_base_disk(&client, &image, &disks_url, &base_disk_name).await;
+
+    // Delete the image (as it uses Crucible resources, which we assert was
+    // cleaned up at the end of the test)
+    delete_image(client, PROJECT_NAME, "not-alpine").await;
 
     // Issue snapshot request
     let snapshots_url = format!("/v1/snapshots?project={}", PROJECT_NAME);
