@@ -12708,6 +12708,37 @@
         }
       }
     },
+    "/v1/system/update/recovery-finish": {
+      "put": {
+        "tags": [
+          "system/update"
+        ],
+        "summary": "Instructs the system that a system recovery operation (\"mupdate\") was",
+        "description": "completed using the software in the specified release\n\nThe system recovery operation is used to bypass the control plane to deploy known-working software when the control plane itself is not functioning or otherwise unable to update itself.  When the control plane detects this, it stops making any changes to deployed software to avoid reverting the recovery itself.  This operation puts the control plane back in charge of determining what software should be deployed, instructing it that the specified software (which is also what's currently running) is what's supposed to be deployed.\n\nIf the provided version does not match what's currently running, the control plane will continue to avoid changing deployed software until this operation is invoked with the correct version.\n\nThis endpoint should only be called at the direction of Oxide support.",
+        "operationId": "target_release_update_recovery",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetTargetReleaseParams"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/v1/system/update/repositories": {
       "get": {
         "tags": [
@@ -12891,37 +12922,6 @@
         "summary": "Set target release",
         "description": "Set the current target release of the rack's system software. The rack reconfigurator will treat the software specified here as a goal state for the rack's software, and attempt to asynchronously update to that release. Use the update status endpoint to view the current target release.",
         "operationId": "target_release_update",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/SetTargetReleaseParams"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "204": {
-            "description": "resource updated"
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      }
-    },
-    "/v1/system/update/target-release/recovery": {
-      "put": {
-        "tags": [
-          "system/update"
-        ],
-        "summary": "Recover from an Oxide-support-driven system update",
-        "description": "Inform the control plane of the release of the rack's system software it is now running due to a recovery operation (\"mupdate\") performed by Oxide support.\n\nThis endpoint should only be called at the direction of Oxide support.",
-        "operationId": "target_release_update_recovery",
         "requestBody": {
           "content": {
             "application/json": {

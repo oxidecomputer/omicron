@@ -305,7 +305,7 @@ pub async fn set_target_release_for_mupdate_recovery(
         RequestBuilder::new(
             client,
             Method::PUT,
-            "/v1/system/update/target-release/recovery",
+            "/v1/system/update/recovery-finish",
         )
         .body(Some(&SetTargetReleaseParams {
             system_version: system_version.clone(),

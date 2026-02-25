@@ -3107,7 +3107,7 @@ pub static VERIFY_ENDPOINTS: LazyLock<Vec<VerifyEndpoint>> = LazyLock::new(
                 )],
             },
             VerifyEndpoint {
-                url: "/v1/system/update/target-release/recovery",
+                url: "/v1/system/update/recovery-finish",
                 visibility: Visibility::Public,
                 unprivileged_access: UnprivilegedAccess::None,
                 allowed_methods: vec![AllowedMethod::Put(

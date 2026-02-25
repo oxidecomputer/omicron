@@ -6431,16 +6431,26 @@ pub trait NexusExternalApi {
         params: TypedBody<latest::update::SetTargetReleaseParams>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
 
-    /// Recover from an Oxide-support-driven system update
+    /// Instructs the system that a system recovery operation ("mupdate") was
+    /// completed using the software in the specified release
     ///
-    /// Inform the control plane of the release of the rack's system software it
-    /// is now running due to a recovery operation ("mupdate") performed by
-    /// Oxide support.
+    /// The system recovery operation is used to bypass the control plane to
+    /// deploy known-working software when the control plane itself is not
+    /// functioning or otherwise unable to update itself.  When the control
+    /// plane detects this, it stops making any changes to deployed software to
+    /// avoid reverting the recovery itself.  This operation puts the control
+    /// plane back in charge of determining what software should be deployed,
+    /// instructing it that the specified software (which is also what's
+    /// currently running) is what's supposed to be deployed.
+    ///
+    /// If the provided version does not match what's currently running, the
+    /// control plane will continue to avoid changing deployed software until
+    /// this operation is invoked with the correct version.
     ///
     /// This endpoint should only be called at the direction of Oxide support.
     #[endpoint {
         method = PUT,
-        path = "/v1/system/update/target-release/recovery",
+        path = "/v1/system/update/recovery-finish",
         tags = ["system/update"],
         versions = VERSION_SET_TARGET_RELEASE_UPDATE_RECOVERY..
     }]
