@@ -45,9 +45,7 @@ use nexus_types::external_api::multicast::{
     InstanceMulticastGroupJoin, MulticastGroup, MulticastGroupJoinSpec,
     MulticastGroupMember,
 };
-use omicron_common::api::external::{
-    IdentityMetadataCreateParams, InstanceState, NameOrId, SwitchLocation,
-};
+use omicron_common::api::external::{InstanceState, SwitchLocation};
 use omicron_uuid_kinds::{InstanceUuid, MulticastGroupUuid};
 
 use super::*;

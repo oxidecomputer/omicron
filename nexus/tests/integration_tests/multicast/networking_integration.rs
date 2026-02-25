@@ -26,9 +26,6 @@ use nexus_types::external_api::instance::{
     InstanceNetworkInterfaceAttachment,
 };
 use nexus_types::external_api::ip_pool::{IpVersion, PoolSelector};
-use nexus_types::external_api::multicast::{
-    MulticastGroup, MulticastGroupMember,
-};
 use omicron_common::api::external::{
     ByteCount, IdentityMetadataCreateParams, Instance, InstanceCpuCount,
     NameOrId,
