@@ -708,9 +708,9 @@ async fn sis_ensure_local_storage(
         |notification| {
             slog::warn!(
                 log,
-                "failed external call ({:?}), retrying in {:?}",
-                notification.error,
-                notification.delay,
+                "failed to ensure local storage dataset, retrying in {:?}",
+                notification.delay;
+                InlineErrorChain::new(&notification.error),
             );
         },
     )

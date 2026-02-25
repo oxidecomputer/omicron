@@ -876,9 +876,9 @@ async fn ssc_send_snapshot_request_to_sled_agent(
         |notification| {
             slog::warn!(
                 notify_log,
-                "failed external call ({:?}), retrying in {:?}",
-                notification.error,
-                notification.delay,
+                "failed to issue VMM disk snapshot request, retrying in {:?}",
+                notification.delay;
+                InlineErrorChain::new(&notification.error),
             );
         },
     )
