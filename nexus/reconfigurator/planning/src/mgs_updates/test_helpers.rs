@@ -13,6 +13,7 @@ use gateway_client::types::SpState;
 use gateway_types::rot::RotSlot;
 use iddqd::IdOrdItem;
 use iddqd::IdOrdMap;
+use illumos_utils::svcs::SvcsInMaintenanceResult;
 use nexus_types::deployment::BlueprintArtifactVersion;
 use nexus_types::deployment::BlueprintHostPhase2DesiredContents;
 use nexus_types::deployment::ExpectedVersion;
@@ -39,7 +40,6 @@ use sled_agent_types::inventory::BootPartitionContents;
 use sled_agent_types::inventory::BootPartitionDetails;
 use sled_agent_types::inventory::ConfigReconcilerInventory;
 use sled_agent_types::inventory::ConfigReconcilerInventoryStatus;
-use sled_agent_types::inventory::HealthMonitorInventory;
 use sled_agent_types::inventory::HostPhase2DesiredSlots;
 use sled_agent_types::inventory::Inventory;
 use sled_agent_types::inventory::OmicronFileSourceResolverInventory;
@@ -1371,7 +1371,9 @@ impl<'a> TestBoardCollectionBuilder<'a> {
                                 ConfigReconcilerInventoryStatus::NotYetRun,
                             file_source_resolver:
                                 OmicronFileSourceResolverInventory::new_fake(),
-                            health_monitor: HealthMonitorInventory::new(),
+                            smf_services_in_maintenance: Ok(
+                                SvcsInMaintenanceResult::new(),
+                            ),
                             reference_measurements: IdOrdMap::new(),
                         },
                     )

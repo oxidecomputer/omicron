@@ -5008,12 +5008,12 @@ async fn test_disks_detached_when_instance_destroyed(
     let instance_id = InstanceUuid::from_untyped_uuid(instance.identity.id);
     let apictx = &cptestctx.server.server_context();
     let nexus = &apictx.nexus;
-    let sa = nexus
+
+    nexus
         .active_instance_info(&instance_id, None)
         .await
         .unwrap()
-        .expect("instance should be on a sled while it's running")
-        .sled_client;
+        .expect("instance should be on a sled while it's running");
 
     // Stop and delete instance
     instance_post(&client, instance_name, InstanceOp::Stop).await;
@@ -5037,9 +5037,6 @@ async fn test_disks_detached_when_instance_destroyed(
     assert_eq!(disks.len(), 8);
     for disk in &disks {
         assert_eq!(disk.state, DiskState::Detached);
-
-        // Simulate each one of the disks to move from "Detaching" to "Detached"
-        sa.disk_finish_transition(disk.identity.id).await;
     }
 
     // Ensure that the disks can be attached to another instance

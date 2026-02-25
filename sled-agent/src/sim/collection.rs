@@ -289,22 +289,6 @@ impl<S: Simulatable + 'static> SimCollection<S> {
         }
     }
 
-    pub async fn sim_ensure_producer(
-        self: &Arc<Self>,
-        id: &Uuid,
-        args: S::ProducerArgs,
-    ) -> Result<(), Error> {
-        self.objects
-            .lock()
-            .await
-            .get_mut(id)
-            .expect("Setting producer on object that does not exist")
-            .object
-            .set_producer(args)
-            .await?;
-        Ok(())
-    }
-
     /// Move the object identified by `id` from its current state to the
     /// requested state `target`.  The object does not need to exist already; if
     /// not, it will be created from `current`.  (This is the only case where
@@ -382,21 +366,16 @@ impl<S: Simulatable + Clone + 'static> SimCollection<S> {
 #[cfg(test)]
 mod test {
     use crate::sim::collection::SimObject;
-    use crate::sim::disk::SimDisk;
     use crate::sim::instance::SimInstance;
     use crate::sim::simulatable::Simulatable;
     use chrono::Utc;
     use dropshot::test_util::LogContext;
     use futures::channel::mpsc::Receiver;
-    use omicron_common::api::external::DiskState;
-    use omicron_common::api::external::Error;
     use omicron_common::api::external::Generation;
-    use omicron_common::api::internal::nexus::DiskRuntimeState;
     use omicron_common::api::internal::nexus::SledVmmState;
     use omicron_common::api::internal::nexus::VmmRuntimeState;
     use omicron_common::api::internal::nexus::VmmState;
     use omicron_test_utils::dev::test_setup_log;
-    use sled_agent_types::disk::DiskStateRequested;
     use sled_agent_types::instance::VmmStateRequested;
 
     fn make_instance(
@@ -412,21 +391,6 @@ mod test {
             SledVmmState { vmm_state, migration_in: None, migration_out: None };
 
         SimObject::new_simulated_auto(&state, logctx.log.new(o!()))
-    }
-
-    fn make_disk(
-        logctx: &LogContext,
-        initial_state: DiskState,
-    ) -> (SimObject<SimDisk>, Receiver<()>) {
-        let initial_runtime = {
-            DiskRuntimeState {
-                disk_state: initial_state,
-                generation: Generation::new(),
-                time_updated: Utc::now(),
-            }
-        };
-
-        SimObject::new_simulated_auto(&initial_runtime, logctx.log.new(o!()))
     }
 
     #[tokio::test]
@@ -639,163 +603,6 @@ mod test {
         assert!(rnext.vmm_state.generation > rprev.vmm_state.generation);
         assert!(rnext.vmm_state.time_updated > rprev.vmm_state.time_updated);
         assert_eq!(rnext.vmm_state.state, VmmState::Running);
-        logctx.cleanup_successful();
-    }
-
-    /// Tests basic usage of `SimDisk`.  This is somewhat less exhaustive than
-    /// the analogous tests for `SimInstance` because much of that functionality
-    /// is implemented in `SimObject`, common to both.  So we don't bother
-    /// verifying dropped state, messages sent to the background task, or some
-    /// sanity checks around completion of async transitions when none is
-    /// desired.
-    #[tokio::test]
-    async fn test_sim_disk_transition_to_detached_states() {
-        let logctx =
-            test_setup_log("test_sim_disk_transition_to_detached_states");
-        let (mut disk, _rx) = make_disk(&logctx, DiskState::Creating);
-        let r1 = disk.object.current();
-
-        info!(logctx.log, "new disk"; "disk_state" => ?r1.disk_state);
-        assert_eq!(r1.disk_state, DiskState::Creating);
-        assert_eq!(r1.generation, Generation::new());
-
-        // Try transitioning to every other detached state.
-        let detached_states = vec![
-            (DiskStateRequested::Detached, DiskState::Detached),
-            (DiskStateRequested::Destroyed, DiskState::Destroyed),
-            (DiskStateRequested::Faulted, DiskState::Faulted),
-        ];
-        let mut rprev = r1;
-        for (requested, next) in detached_states {
-            assert!(!rprev.disk_state.is_attached());
-            disk.transition(requested.clone()).unwrap();
-            let rnext = disk.object.current().clone();
-            assert!(rnext.generation > rprev.generation);
-            assert!(rnext.time_updated >= rprev.time_updated);
-            assert_eq!(rnext.disk_state, next);
-            rprev = rnext;
-        }
-        logctx.cleanup_successful();
-    }
-
-    #[tokio::test]
-    async fn test_sim_disk_attach_then_destroy() {
-        let logctx = test_setup_log("test_sim_disk_attach_then_destroy");
-        let (mut disk, _rx) = make_disk(&logctx, DiskState::Creating);
-        let r1 = disk.object.current();
-
-        info!(logctx.log, "new disk"; "disk_state" => ?r1.disk_state);
-        assert_eq!(r1.disk_state, DiskState::Creating);
-        assert_eq!(r1.generation, Generation::new());
-
-        let id = uuid::Uuid::new_v4();
-        let rprev = r1;
-        assert!(!rprev.disk_state.is_attached());
-        assert!(
-            disk.transition(DiskStateRequested::Attached(id))
-                .unwrap()
-                .is_none()
-        );
-        let rnext = disk.object.current();
-        assert!(rnext.generation > rprev.generation);
-        assert!(rnext.time_updated >= rprev.time_updated);
-        assert_eq!(rnext.disk_state, DiskState::Attaching(id));
-        assert!(rnext.disk_state.is_attached());
-        assert_eq!(id, *rnext.disk_state.attached_instance_id().unwrap());
-        let rprev = rnext;
-
-        disk.transition_finish();
-        let rnext = disk.object.current();
-        assert_eq!(rnext.disk_state, DiskState::Attached(id));
-        assert!(rnext.generation > rprev.generation);
-        assert!(rnext.time_updated >= rprev.time_updated);
-        let rprev = rnext;
-
-        disk.transition_finish();
-        let rnext = disk.object.current();
-        assert_eq!(rnext.generation, rprev.generation);
-        assert_eq!(rnext.disk_state, DiskState::Attached(id));
-        assert!(rnext.disk_state.is_attached());
-        let rprev = rnext;
-
-        // If we go straight to "Attached" again, there's nothing to do.
-        assert!(
-            disk.transition(DiskStateRequested::Attached(id))
-                .unwrap()
-                .is_none()
-        );
-        let rnext = disk.object.current();
-        assert_eq!(rnext.generation, rprev.generation);
-        let rprev = rnext;
-
-        // It's illegal to go straight to attached to a different instance.
-        let id2 = uuid::Uuid::new_v4();
-        assert_ne!(id, id2);
-        let error =
-            disk.transition(DiskStateRequested::Attached(id2)).unwrap_err();
-        if let Error::InvalidRequest { message } = error {
-            assert_eq!("disk is already attached", message.external_message());
-        } else {
-            panic!("unexpected error type");
-        }
-        let rnext = disk.object.current();
-        assert_eq!(rprev.generation, rnext.generation);
-        let rprev = rnext;
-
-        // If we go to a different detached state, we go through the async
-        // transition again.
-        disk.transition(DiskStateRequested::Detached).unwrap();
-        let rnext = disk.object.current();
-        assert!(rnext.generation > rprev.generation);
-        assert_eq!(rnext.disk_state, DiskState::Detaching(id));
-        assert!(rnext.disk_state.is_attached());
-        let rprev = rnext;
-
-        disk.transition_finish();
-        let rnext = disk.object.current();
-        assert_eq!(rnext.disk_state, DiskState::Detached);
-        assert!(rnext.generation > rprev.generation);
-
-        // Verify that it works fine to change directions in the middle of an
-        // async transition.
-        disk.transition(DiskStateRequested::Attached(id)).unwrap();
-        assert_eq!(disk.object.current().disk_state, DiskState::Attaching(id));
-        disk.transition(DiskStateRequested::Destroyed).unwrap();
-        assert_eq!(disk.object.current().disk_state, DiskState::Detaching(id));
-        disk.transition_finish();
-        assert_eq!(disk.object.current().disk_state, DiskState::Destroyed);
-        logctx.cleanup_successful();
-    }
-
-    #[tokio::test]
-    async fn test_sim_disk_attach_then_fault() {
-        let logctx = test_setup_log("test_sim_disk_attach_then_fault");
-        let (mut disk, _rx) = make_disk(&logctx, DiskState::Creating);
-        let r1 = disk.object.current();
-
-        info!(logctx.log, "new disk"; "disk_state" => ?r1.disk_state);
-        assert_eq!(r1.disk_state, DiskState::Creating);
-        assert_eq!(r1.generation, Generation::new());
-
-        let id = uuid::Uuid::new_v4();
-        disk.transition(DiskStateRequested::Attached(id)).unwrap();
-        disk.transition_finish();
-        assert_eq!(disk.object.current().disk_state, DiskState::Attached(id));
-        disk.transition(DiskStateRequested::Faulted).unwrap();
-        assert_eq!(disk.object.current().disk_state, DiskState::Detaching(id));
-        let error =
-            disk.transition(DiskStateRequested::Attached(id)).unwrap_err();
-        if let Error::InvalidRequest { message } = error {
-            assert_eq!(
-                "cannot attach from detaching",
-                message.external_message()
-            );
-        } else {
-            panic!("unexpected error type");
-        }
-        disk.transition_finish();
-        assert_eq!(disk.object.current().disk_state, DiskState::Faulted);
-
         logctx.cleanup_successful();
     }
 }
