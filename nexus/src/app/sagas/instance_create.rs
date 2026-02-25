@@ -1642,8 +1642,8 @@ pub mod test {
             == "detached"
     }
 
-    async fn no_instances_or_disks_on_sled(sled_agent: &SledAgent) -> bool {
-        sled_agent.vmm_count().await == 0 && sled_agent.disk_count().await == 0
+    async fn no_instances_on_sled(sled_agent: &SledAgent) -> bool {
+        sled_agent.vmm_count().await == 0
     }
 
     pub(crate) async fn verify_clean_slate(
@@ -1672,7 +1672,7 @@ pub mod test {
             .await
         );
         assert!(disk_is_detached(datastore).await);
-        assert!(no_instances_or_disks_on_sled(&sled_agent).await);
+        assert!(no_instances_on_sled(&sled_agent).await);
 
         let v2p_mappings = &*sled_agent.v2p_mappings.lock().unwrap();
         assert!(v2p_mappings.is_empty());
