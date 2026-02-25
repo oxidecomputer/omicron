@@ -7,10 +7,11 @@
 //! This includes address lot, switch port, BGP, BFD, and routing configuration
 //! types.
 
+use super::bfd::ExternalBfdMode;
 use api_identity::ObjectIdentity;
 use omicron_common::api::external;
 use omicron_common::api::external::{
-    AddressLotKind, BfdMode, IdentityMetadata, IdentityMetadataCreateParams,
+    AddressLotKind, IdentityMetadata, IdentityMetadataCreateParams,
     ImportExportPolicy, LinkFec, LinkSpeed, Name, NameOrId, ObjectIdentity,
     SwitchLocation,
 };
@@ -554,7 +555,7 @@ pub struct BfdSessionEnable {
     pub switch: Name,
 
     /// Select either single-hop (RFC 5881) or multi-hop (RFC 5883)
-    pub mode: BfdMode,
+    pub mode: ExternalBfdMode,
 }
 
 /// Information needed to disable a BFD session

@@ -3442,25 +3442,6 @@ pub struct BgpImported {
     pub switch: SwitchLocation,
 }
 
-/// BFD connection mode.
-#[derive(
-    Clone,
-    Copy,
-    Debug,
-    Deserialize,
-    Serialize,
-    JsonSchema,
-    PartialEq,
-    Eq,
-    Ord,
-    PartialOrd,
-)]
-#[serde(rename_all = "snake_case")]
-pub enum BfdMode {
-    SingleHop,
-    MultiHop,
-}
-
 /// Configuration of inbound ICMP allowed by API services.
 #[derive(
     Clone,

@@ -1,8 +1,13 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
 use crate::{SqlU32, impl_enum_type};
 use chrono::DateTime;
 use chrono::Utc;
 use ipnetwork::IpNetwork;
 use nexus_db_schema::schema::bfd_session;
+use nexus_types::external_api::bfd::ExternalBfdMode;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -42,15 +47,11 @@ pub struct BfdSession {
     pub time_deleted: Option<DateTime<Utc>>,
 }
 
-impl From<omicron_common::api::external::BfdMode> for BfdMode {
-    fn from(value: omicron_common::api::external::BfdMode) -> Self {
+impl From<ExternalBfdMode> for BfdMode {
+    fn from(value: ExternalBfdMode) -> Self {
         match value {
-            omicron_common::api::external::BfdMode::SingleHop => {
-                BfdMode::SingleHop
-            }
-            omicron_common::api::external::BfdMode::MultiHop => {
-                BfdMode::MultiHop
-            }
+            ExternalBfdMode::SingleHop => BfdMode::SingleHop,
+            ExternalBfdMode::MultiHop => BfdMode::MultiHop,
         }
     }
 }
