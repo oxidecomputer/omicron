@@ -62,7 +62,7 @@ pub enum EarlyNetworkSetupError {
     #[error("Bad configuration for setting up rack: {0}")]
     BadConfig(String),
 
-    #[error("Error contacting ddmd: {0}")]
+    #[error("Error contacting ddmd")]
     DdmError(#[from] DdmError),
 
     #[error("Error during request to MGS: {0}")]
