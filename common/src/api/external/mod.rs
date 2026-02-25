@@ -3265,35 +3265,6 @@ pub struct SwitchPortAddressView {
     pub interface_name: Name,
 }
 
-/// Route exported to a peer.
-#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq)]
-pub struct BgpExported {
-    /// Identifier for the BGP peer.
-    pub peer_id: String,
-
-    /// Switch the route is exported from.
-    pub switch: SwitchLocation,
-
-    /// The destination network prefix.
-    pub prefix: oxnet::IpNet,
-}
-
-/// A route imported from a BGP peer.
-#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq)]
-pub struct BgpImported {
-    /// The destination network prefix.
-    pub prefix: oxnet::IpNet,
-
-    /// The nexthop the prefix is reachable through.
-    pub nexthop: IpAddr,
-
-    /// BGP identifier of the originating router.
-    pub id: u32,
-
-    /// Switch the route is imported into.
-    pub switch: SwitchLocation,
-}
-
 /// BFD connection mode.
 #[derive(
     Clone,

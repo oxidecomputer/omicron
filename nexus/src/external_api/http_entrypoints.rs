@@ -78,8 +78,6 @@ use omicron_common::api::external::AddressLotViewResponse;
 use omicron_common::api::external::AffinityGroupMember;
 use omicron_common::api::external::AntiAffinityGroupMember;
 use omicron_common::api::external::BgpConfig;
-use omicron_common::api::external::BgpExported;
-use omicron_common::api::external::BgpImported;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Disk;
 use omicron_common::api::external::Error;
@@ -4384,7 +4382,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
 
     async fn networking_bgp_exported(
         rqctx: RequestContext<ApiContext>,
-    ) -> Result<HttpResponseOk<Vec<BgpExported>>, HttpError> {
+    ) -> Result<HttpResponseOk<Vec<networking::BgpExported>>, HttpError> {
         let apictx = rqctx.context();
         let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
         let handler = async {
@@ -4449,7 +4447,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
     async fn networking_bgp_imported(
         rqctx: RequestContext<ApiContext>,
         query_params: Query<networking::BgpRouteSelector>,
-    ) -> Result<HttpResponseOk<Vec<BgpImported>>, HttpError> {
+    ) -> Result<HttpResponseOk<Vec<networking::BgpImported>>, HttpError> {
         let apictx = rqctx.context();
         let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
         let handler = async {
