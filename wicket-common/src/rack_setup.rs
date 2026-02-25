@@ -93,8 +93,7 @@ pub struct BootstrapSledDescription {
     pub bootstrap_ip: Option<Ipv6Addr>,
 }
 
-/// User-specified parts of
-/// [`RackNetworkConfig`](omicron_common::api::internal::shared::RackNetworkConfig).
+/// User-specified parts of `RackNetworkConfig`.
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct UserSpecifiedRackNetworkConfig {
@@ -171,13 +170,11 @@ impl UserSpecifiedRackNetworkConfig {
     }
 }
 
-/// User-specified version of [`PortConfig`].
+/// User-specified version of `PortConfig`.
 ///
-/// All of [`PortConfig`] is user-specified. But we expect the port name to
-/// be a key, rather than a field as in [`PortConfig`]. So this has all of
+/// All of `PortConfig` is user-specified. But we expect the port name to
+/// be a key, rather than a field as in `PortConfig`. So this has all of
 /// the fields other than the port name.
-///
-/// [`PortConfig`]: omicron_common::api::internal::shared::PortConfig
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct UserSpecifiedPortConfig {
@@ -199,8 +196,6 @@ pub struct UserSpecifiedPortConfig {
 /// This is similar to [`BgpPeerConfig`], except it doesn't have the sensitive
 /// `md5_auth_key` parameter, instead requiring that the user provide the key
 /// separately.
-///
-/// [`BgpPeerConfig`]: omicron_common::api::internal::shared::BgpPeerConfig
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct UserSpecifiedBgpPeerConfig {
