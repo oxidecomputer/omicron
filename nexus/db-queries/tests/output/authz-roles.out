@@ -788,11 +788,11 @@ resource: ExternalSubnet id "762e3d39-cd8a-4c59-ae6a-6efc9b2421df"
   fleet-viewer                      ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   silo1-admin                       ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
   silo1-collaborator                ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
-  silo1-limited-collaborator        ✘  ✔  ✔  ✔  ✘  ✘  ✘  ✘
+  silo1-limited-collaborator        ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
   silo1-viewer                      ✘  ✔  ✔  ✔  ✘  ✘  ✘  ✘
   silo1-proj1-admin                 ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
   silo1-proj1-collaborator          ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
-  silo1-proj1-limited-collaborator  ✘  ✔  ✔  ✔  ✘  ✘  ✘  ✘
+  silo1-proj1-limited-collaborator  ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
   silo1-proj1-viewer                ✘  ✔  ✔  ✔  ✘  ✘  ✘  ✘
   unauthenticated                   !  !  !  !  !  !  !  !
   scim                              ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
@@ -1077,7 +1077,7 @@ resource: ExternalSubnet id "762e3d39-cd8a-4c59-ae6a-6efc9b2421df"
   fleet-viewer                      ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   silo1-admin                       ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
   silo1-collaborator                ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
-  silo1-limited-collaborator        ✘  ✔  ✔  ✔  ✘  ✘  ✘  ✘
+  silo1-limited-collaborator        ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
   silo1-viewer                      ✘  ✔  ✔  ✔  ✘  ✘  ✘  ✘
   silo1-proj1-admin                 ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   silo1-proj1-collaborator          ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
