@@ -4,14 +4,11 @@
 
 //! Version 1 of rack init types.
 
-use crate::api::external::{BfdMode, ImportExportPolicy, Name};
+use crate::api::external::{BfdMode, ImportExportPolicy};
 use oxnet::{IpNet, Ipv4Net, Ipv6Net};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use std::{
-    collections::HashMap,
-    net::{IpAddr, Ipv4Addr, Ipv6Addr},
-};
+use std::net::{IpAddr, Ipv4Addr};
 
 /// Initial network configuration
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, JsonSchema)]
@@ -225,25 +222,6 @@ pub struct PortConfig {
     pub tx_eq: Option<TxEqConfig>,
 }
 
-/// A set of switch uplinks.
-#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
-pub struct SwitchPorts {
-    pub uplinks: Vec<HostPortConfig>,
-}
-
-#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, JsonSchema)]
-pub struct HostPortConfig {
-    /// Switchport to use for external connectivity
-    pub port: String,
-
-    /// IP Address and prefix (e.g., `192.168.0.1/16`) to apply to switchport
-    /// (must be in infra_ip pool).  May also include an optional VLAN ID.
-    pub addrs: Vec<UplinkAddressConfig>,
-
-    pub lldp: Option<LldpPortConfig>,
-    pub tx_eq: Option<TxEqConfig>,
-}
-
 /// Identifies switch physical location
 #[derive(
     Clone,
@@ -268,15 +246,6 @@ pub enum SwitchLocation {
 
 #[derive(Debug, PartialEq, Eq, Deserialize, Serialize)]
 pub struct ParseSwitchLocationError(pub(super) String);
-
-#[derive(Debug, Clone, Deserialize, JsonSchema)]
-#[serde(rename_all = "snake_case")]
-pub enum ExternalPortDiscovery {
-    // Automatically discover ports via Dendrite
-    Auto(HashMap<SwitchLocation, Ipv6Addr>),
-    // Static configuration pairing switches with a collection of ports
-    Static(HashMap<SwitchLocation, Vec<Name>>),
-}
 
 /// Switchport Speed options
 #[derive(

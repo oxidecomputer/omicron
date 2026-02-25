@@ -263,10 +263,10 @@ pub(crate) mod test {
     use nexus_db_lookup::LookupPath;
     use nexus_db_queries::context::OpContext;
     use nexus_test_utils::resource_helpers::create_default_ip_pools;
+    use nexus_test_utils::resource_helpers::create_default_subnet_pool;
     use nexus_test_utils::resource_helpers::create_external_subnet_in_pool;
     use nexus_test_utils::resource_helpers::create_instance;
     use nexus_test_utils::resource_helpers::create_project;
-    use nexus_test_utils::resource_helpers::create_subnet_pool;
     use nexus_test_utils::resource_helpers::create_subnet_pool_member;
     use nexus_test_utils_macros::nexus_test;
     use nexus_types::external_api::external_subnet;
@@ -299,7 +299,8 @@ pub(crate) mod test {
 
     async fn setup_test(client: &ClientTestContext) -> Context {
         let subnet_pool =
-            create_subnet_pool(client, SUBNET_POOL_NAME, IpVersion::V4).await;
+            create_default_subnet_pool(client, SUBNET_POOL_NAME, IpVersion::V4)
+                .await;
         let member = create_subnet_pool_member(
             client,
             SUBNET_POOL_NAME,

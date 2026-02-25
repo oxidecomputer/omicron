@@ -3,13 +3,11 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use super::BgpPeerConfig;
-use super::HostPortConfig;
 use super::LldpAdminStatus;
 use super::MaxPathConfig;
 use super::MaxPathConfigError;
 use super::ParseLldpAdminStatusError;
 use super::ParseSwitchLocationError;
-use super::PortConfig;
 use super::PortFec;
 use super::PortSpeed;
 use super::RouterLifetimeConfig;
@@ -192,17 +190,6 @@ impl FromStr for LldpAdminStatus {
             _ => Err(ParseLldpAdminStatusError(format!(
                 "not a valid admin status: {s}"
             ))),
-        }
-    }
-}
-
-impl From<PortConfig> for HostPortConfig {
-    fn from(x: PortConfig) -> Self {
-        Self {
-            port: x.port,
-            addrs: x.addresses,
-            lldp: x.lldp.clone(),
-            tx_eq: x.tx_eq,
         }
     }
 }

@@ -53,8 +53,8 @@ pub mod disk {
 }
 
 pub mod early_networking {
-    pub use crate::v21::early_networking::EarlyNetworkConfig;
-    pub use crate::v21::early_networking::EarlyNetworkConfigBody;
+    pub use crate::v20::early_networking::EarlyNetworkConfig;
+    pub use crate::v20::early_networking::EarlyNetworkConfigBody;
 }
 
 pub mod firewall_rules {
@@ -125,8 +125,9 @@ pub mod inventory {
     pub use crate::v14::inventory::ReconciledSingleMeasurement;
 
     pub use crate::v16::inventory::ConfigReconcilerInventory;
-    pub use crate::v16::inventory::Inventory;
     pub use crate::v16::inventory::SingleMeasurementInventory;
+
+    pub use crate::v22::inventory::Inventory;
 
     pub use crate::impls::inventory::ManifestBootInventoryDisplay;
     pub use crate::impls::inventory::ManifestInventoryDisplay;
@@ -152,8 +153,6 @@ pub mod rack_init {
     pub use crate::v20::rack_init::RackInitializeRequest;
     pub use crate::v20::rack_init::RackInitializeRequestParams;
     pub use crate::v20::rack_init::RackInitializeRequestParseError;
-
-    pub use omicron_common::api::internal::shared::SwitchPorts;
 }
 
 pub mod rot {
@@ -193,6 +192,11 @@ pub mod trust_quorum {
     pub use crate::v13::trust_quorum::ProxyPrepareAndCommitRequest;
 
     pub use crate::v15::trust_quorum::TrustQuorumNetworkConfig;
+}
+
+pub mod uplink {
+    pub use crate::v20::uplink::HostPortConfig;
+    pub use crate::v20::uplink::SwitchPorts;
 }
 
 pub mod zone_bundle {

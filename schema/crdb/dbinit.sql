@@ -22,6 +22,17 @@
  *    sparingly."
  */
 
+/*
+ * Reduce the index backfill batch size from the default of 50,000 to 5,000.
+ * This prevents OOM failures during CREATE INDEX migrations on large tables.
+ * See https://github.com/oxidecomputer/omicron/issues/9874 and
+ * https://github.com/oxidecomputer/omicron-9874-findings for details.
+ *
+ * This must be outside the transaction because SET CLUSTER SETTING cannot be
+ * used inside a transaction.
+ */
+SET CLUSTER SETTING bulkio.index_backfill.batch_size = 5000;
+
 BEGIN;
 
 /*
@@ -8192,7 +8203,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '231.0.0', NULL)
+    (TRUE, NOW(), NOW(), '232.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

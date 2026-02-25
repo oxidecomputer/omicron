@@ -24,4 +24,5 @@ pub mod rot;
 pub mod sled;
 pub mod support_bundle;
 pub mod trust_quorum;
+pub mod uplink;
 pub mod zone_bundle;

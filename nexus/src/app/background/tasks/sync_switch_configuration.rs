@@ -1845,7 +1845,7 @@ struct SwitchStaticRouteV4 {
     nexthop: Ipv4Addr,
     prefix: Prefix4,
     vlan: Option<u16>,
-    priority: Option<u8>,
+    priority: u8,
 }
 
 #[derive(PartialEq, Eq, Hash, Debug)]
@@ -1853,7 +1853,7 @@ struct SwitchStaticRouteV6 {
     nexthop: Ipv6Addr,
     prefix: Prefix6,
     vlan: Option<u16>,
-    priority: Option<u8>,
+    priority: u8,
 }
 
 #[derive(PartialEq, Eq, Hash, Debug)]
@@ -1885,9 +1885,7 @@ fn static_routes_to_del(
                             nexthop: x.nexthop,
                             prefix: x.prefix,
                             vlan_id: x.vlan,
-                            rib_priority: x
-                                .priority
-                                .unwrap_or(DEFAULT_RIB_PRIORITY_STATIC),
+                            rib_priority: x.priority,
                         })
                     }
                     SwitchStaticRoute::V6(x) => {
@@ -1895,9 +1893,7 @@ fn static_routes_to_del(
                             nexthop: x.nexthop,
                             prefix: x.prefix,
                             vlan_id: x.vlan,
-                            rib_priority: x
-                                .priority
-                                .unwrap_or(DEFAULT_RIB_PRIORITY_STATIC),
+                            rib_priority: x.priority,
                         })
                     }
                 }
@@ -1913,9 +1909,7 @@ fn static_routes_to_del(
                             nexthop: x.nexthop,
                             prefix: x.prefix,
                             vlan_id: x.vlan,
-                            rib_priority: x
-                                .priority
-                                .unwrap_or(DEFAULT_RIB_PRIORITY_STATIC),
+                            rib_priority: x.priority,
                         })
                     }
                     SwitchStaticRoute::V6(x) => {
@@ -1923,9 +1917,7 @@ fn static_routes_to_del(
                             nexthop: x.nexthop,
                             prefix: x.prefix,
                             vlan_id: x.vlan,
-                            rib_priority: x
-                                .priority
-                                .unwrap_or(DEFAULT_RIB_PRIORITY_STATIC),
+                            rib_priority: x.priority,
                         })
                     }
                 }
@@ -1978,9 +1970,7 @@ fn static_routes_to_add(
                         nexthop: x.nexthop,
                         prefix: x.prefix,
                         vlan_id: x.vlan,
-                        rib_priority: x
-                            .priority
-                            .unwrap_or(DEFAULT_RIB_PRIORITY_STATIC),
+                        rib_priority: x.priority,
                     })
                 }
                 SwitchStaticRoute::V6(x) => {
@@ -1988,9 +1978,7 @@ fn static_routes_to_add(
                         nexthop: x.nexthop,
                         prefix: x.prefix,
                         vlan_id: x.vlan,
-                        rib_priority: x
-                            .priority
-                            .unwrap_or(DEFAULT_RIB_PRIORITY_STATIC),
+                        rib_priority: x.priority,
                     })
                 }
             }
@@ -2033,6 +2021,15 @@ fn static_routes_in_db(
 
             match (route.gw.ip(), route.dst.ip()) {
                 (IpAddr::V4(nexthop), IpAddr::V4(dst)) => {
+                    // TODO: https://github.com/oxidecomputer/omicron/issues/9801
+                    // This is a workaround until we have bootstore type versioning.
+                    // We want to stop using `None` as a sentinel value for DEFAULT,
+                    // and instead want to use an enum to more accurately represent what
+                    // is happening.
+                    let priority = match route.rib_priority {
+                        Some(v) => v.0,
+                        None => DEFAULT_RIB_PRIORITY_STATIC,
+                    };
                     routes.insert(SwitchStaticRoute::V4(SwitchStaticRouteV4 {
                         nexthop,
                         prefix: Prefix4 {
@@ -2040,10 +2037,19 @@ fn static_routes_in_db(
                             length: route.dst.prefix(),
                         },
                         vlan: route.vid.map(|x| x.0),
-                        priority: route.rib_priority.map(|x| x.0),
+                        priority,
                     }));
                 }
                 (IpAddr::V6(nexthop), IpAddr::V6(dst)) => {
+                    // TODO: https://github.com/oxidecomputer/omicron/issues/9801
+                    // This is a workaround until we have bootstore type versioning.
+                    // We want to stop using `None` as a sentinel value for DEFAULT,
+                    // and instead want to use an enum to more accurately represent what
+                    // is happening.
+                    let priority = match route.rib_priority {
+                        Some(v) => v.0,
+                        None => DEFAULT_RIB_PRIORITY_STATIC,
+                    };
                     routes.insert(SwitchStaticRoute::V6(SwitchStaticRouteV6 {
                         nexthop,
                         prefix: Prefix6 {
@@ -2051,7 +2057,7 @@ fn static_routes_in_db(
                             length: route.dst.prefix(),
                         },
                         vlan: route.vid.map(|x| x.0),
-                        priority: route.rib_priority.map(|x| x.0),
+                        priority,
                     }));
                 }
                 (nexthop, dst) => {
@@ -2292,7 +2298,7 @@ async fn static_routes_on_switch(
                                 nexthop: addr,
                                 prefix: dst,
                                 vlan: p.vlan_id,
-                                priority: Some(p.rib_priority),
+                                priority: p.rib_priority,
                             },
                         ));
                     }
@@ -2310,7 +2316,7 @@ async fn static_routes_on_switch(
                                 nexthop: addr,
                                 prefix: dst,
                                 vlan: p.vlan_id,
-                                priority: Some(p.rib_priority),
+                                priority: p.rib_priority,
                             },
                         ));
                     }

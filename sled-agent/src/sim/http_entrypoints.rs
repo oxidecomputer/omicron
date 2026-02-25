@@ -30,7 +30,7 @@ use omicron_common::api::internal::shared::ExternalIpGatewayMap;
 use omicron_common::api::internal::shared::SledIdentifiers;
 use omicron_common::api::internal::shared::VirtualNetworkInterfaceHost;
 use omicron_common::api::internal::shared::{
-    ResolvedVpcRouteSet, ResolvedVpcRouteState, SwitchPorts,
+    ResolvedVpcRouteSet, ResolvedVpcRouteState,
 };
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::ZpoolUuid;
@@ -76,6 +76,7 @@ use sled_agent_types::support_bundle::{
 use sled_agent_types::trust_quorum::{
     ProxyCommitRequest, ProxyPrepareAndCommitRequest, TrustQuorumNetworkConfig,
 };
+use sled_agent_types::uplink::SwitchPorts;
 use sled_agent_types::zone_bundle::{
     BundleUtilization, CleanupContext, CleanupContextUpdate, CleanupCount,
     ZoneBundleFilter, ZoneBundleId, ZoneBundleMetadata, ZonePathParam,
@@ -106,7 +107,6 @@ pub fn api() -> SledApiDescription {
         api.register(instance_poke_post)?;
         api.register(instance_poke_single_step_post)?;
         api.register(instance_post_sim_migration_source)?;
-        api.register(disk_poke_post)?;
         Ok(api)
     }
 
@@ -1144,19 +1144,5 @@ async fn instance_post_sim_migration_source(
     let sa = rqctx.context();
     let id = path_params.into_inner().propolis_id;
     sa.instance_simulate_migration_source(id, body.into_inner()).await?;
-    Ok(HttpResponseUpdatedNoContent())
-}
-
-#[endpoint {
-    method = POST,
-    path = "/disks/{disk_id}/poke",
-}]
-async fn disk_poke_post(
-    rqctx: RequestContext<Arc<SledAgent>>,
-    path_params: Path<DiskPathParam>,
-) -> Result<HttpResponseUpdatedNoContent, HttpError> {
-    let sa = rqctx.context();
-    let disk_id = path_params.into_inner().disk_id;
-    sa.disk_poke(disk_id).await;
     Ok(HttpResponseUpdatedNoContent())
 }

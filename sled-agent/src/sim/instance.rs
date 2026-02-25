@@ -470,14 +470,6 @@ impl Simulatable for SimInstance {
         }
     }
 
-    async fn set_producer(
-        &mut self,
-        _args: Self::ProducerArgs,
-    ) -> Result<(), Error> {
-        // NOTE: Not implemented, yet.
-        Ok(())
-    }
-
     fn request_transition(
         &mut self,
         target: &VmmStateRequested,

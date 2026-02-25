@@ -201,70 +201,6 @@ impl From<types::MigrationState>
     }
 }
 
-impl From<omicron_common::api::internal::nexus::DiskRuntimeState>
-    for types::DiskRuntimeState
-{
-    fn from(s: omicron_common::api::internal::nexus::DiskRuntimeState) -> Self {
-        Self {
-            disk_state: s.disk_state.into(),
-            r#gen: s.generation,
-            time_updated: s.time_updated,
-        }
-    }
-}
-
-impl From<omicron_common::api::external::DiskState> for types::DiskState {
-    fn from(s: omicron_common::api::external::DiskState) -> Self {
-        use omicron_common::api::external::DiskState::*;
-        match s {
-            Creating => Self::Creating,
-            Detached => Self::Detached,
-            ImportReady => Self::ImportReady,
-            ImportingFromUrl => Self::ImportingFromUrl,
-            ImportingFromBulkWrites => Self::ImportingFromBulkWrites,
-            Finalizing => Self::Finalizing,
-            Maintenance => Self::Maintenance,
-            Attaching(u) => Self::Attaching(u),
-            Attached(u) => Self::Attached(u),
-            Detaching(u) => Self::Detaching(u),
-            Destroyed => Self::Destroyed,
-            Faulted => Self::Faulted,
-        }
-    }
-}
-
-impl From<types::DiskRuntimeState>
-    for omicron_common::api::internal::nexus::DiskRuntimeState
-{
-    fn from(s: types::DiskRuntimeState) -> Self {
-        Self {
-            disk_state: s.disk_state.into(),
-            generation: s.r#gen,
-            time_updated: s.time_updated,
-        }
-    }
-}
-
-impl From<types::DiskState> for omicron_common::api::external::DiskState {
-    fn from(s: types::DiskState) -> Self {
-        use types::DiskState::*;
-        match s {
-            Creating => Self::Creating,
-            Detached => Self::Detached,
-            ImportReady => Self::ImportReady,
-            ImportingFromUrl => Self::ImportingFromUrl,
-            ImportingFromBulkWrites => Self::ImportingFromBulkWrites,
-            Finalizing => Self::Finalizing,
-            Maintenance => Self::Maintenance,
-            Attaching(u) => Self::Attaching(u),
-            Attached(u) => Self::Attached(u),
-            Detaching(u) => Self::Detaching(u),
-            Destroyed => Self::Destroyed,
-            Faulted => Self::Faulted,
-        }
-    }
-}
-
 impl From<omicron_common::api::external::L4PortRange> for types::L4PortRange {
     fn from(s: omicron_common::api::external::L4PortRange) -> Self {
         Self::try_from(s.to_string()).unwrap_or_else(|e| panic!("{}: {}", s, e))
@@ -380,7 +316,6 @@ pub trait TestInterfaces {
         id: PropolisUuid,
         params: SimulateMigrationSource,
     );
-    async fn disk_finish_transition(&self, id: Uuid);
 }
 
 #[async_trait]
@@ -412,18 +347,6 @@ impl TestInterfaces for Client {
         let url = format!("{}/vmms/{}/poke", baseurl, id);
         client.post(url).api_version_header(self.api_version()).send().await?;
         Ok(())
-    }
-
-    async fn disk_finish_transition(&self, id: Uuid) {
-        let baseurl = self.baseurl();
-        let client = self.client();
-        let url = format!("{}/disks/{}/poke", baseurl, id);
-        client
-            .post(url)
-            .api_version_header(self.api_version())
-            .send()
-            .await
-            .expect("disk_finish_transition() failed unexpectedly");
     }
 
     async fn vmm_simulate_migration_source(

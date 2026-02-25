@@ -72,12 +72,6 @@ pub trait Simulatable: fmt::Debug + Send + Sync {
     /// Creates a new Simulatable object.
     fn new(current: Self::CurrentState) -> Self;
 
-    /// Sets the producer based on the provided arguments.
-    async fn set_producer(
-        &mut self,
-        args: Self::ProducerArgs,
-    ) -> Result<(), Error>;
-
     /// Requests that the simulated object transition to a new target.
     ///
     /// If successful, returns the action that must be taken by the Sled Agent

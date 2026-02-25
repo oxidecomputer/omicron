@@ -51,9 +51,9 @@ use omicron_common::api::external::{ByteCount, ByteCountRangeError, Vni};
 use omicron_common::api::internal::nexus::{DiskRuntimeState, SledVmmState};
 use omicron_common::api::internal::shared::DelegatedZvol;
 use omicron_common::api::internal::shared::{
-    ExternalIpGatewayMap, HostPortConfig, RackNetworkConfig,
-    ResolvedVpcFirewallRule, ResolvedVpcRouteSet, ResolvedVpcRouteState,
-    SledIdentifiers, VirtualNetworkInterfaceHost,
+    ExternalIpGatewayMap, RackNetworkConfig, ResolvedVpcFirewallRule,
+    ResolvedVpcRouteSet, ResolvedVpcRouteState, SledIdentifiers,
+    VirtualNetworkInterfaceHost,
 };
 use omicron_common::backoff::{
     BackoffError, retry_notify, retry_policy_internal_service_aggressive,
@@ -88,6 +88,7 @@ use sled_agent_types::resolvable_files::{
 };
 use sled_agent_types::rot::Rot;
 use sled_agent_types::sled::StartSledAgentRequest;
+use sled_agent_types::uplink::HostPortConfig;
 use sled_agent_types::zone_bundle::{
     BundleUtilization, CleanupContext, CleanupCount, CleanupPeriod,
     PriorityOrder, StorageLimit, ZoneBundleMetadata,
@@ -1181,7 +1182,11 @@ impl SledAgent {
         let file_source_resolver =
             self.inner.services.zone_image_resolver().status().to_inventory();
 
-        let health_monitor = self.inner.health_monitor.to_inventory();
+        let smf_services_in_maintenance = self
+            .inner
+            .health_monitor
+            .to_inventory()
+            .smf_services_in_maintenance;
 
         let ReconcilerInventory {
             disks,
@@ -1208,7 +1213,7 @@ impl SledAgent {
             reconciler_status,
             last_reconciliation,
             file_source_resolver,
-            health_monitor,
+            smf_services_in_maintenance,
             reference_measurements: self.inner.measurements.to_inventory(),
         })
     }

@@ -26,9 +26,7 @@ use nexus_types::deployment::ClickhousePolicy;
 use nexus_types::deployment::OximeterReadPolicy;
 use nexus_types::deployment::ReconfiguratorConfigParam;
 use nexus_types::deployment::ReconfiguratorConfigView;
-use nexus_types::external_api::hardware::{
-    UninitializedSled, UninitializedSledId,
-};
+use nexus_types::external_api::hardware::UninitializedSled;
 use nexus_types::external_api::path_params::{BlueprintPath, PhysicalDiskPath};
 use nexus_types::external_api::sled::{SledPolicy, SledSelector};
 use nexus_types::external_api::support_bundle;
@@ -347,21 +345,6 @@ pub trait NexusLockstepApi {
         rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<ResultsPage<UninitializedSled>>, HttpError>;
 
-    /// Add sled to initialized rack
-    //
-    // TODO: In the future this should really be a PUT request, once we resolve
-    // https://github.com/oxidecomputer/omicron/issues/4494. It should also
-    // explicitly be tied to a rack via a `rack_id` path param. For now we assume
-    // we are only operating on single rack systems.
-    #[endpoint {
-        method = POST,
-        path = "/sleds/add",
-    }]
-    async fn sled_add(
-        rqctx: RequestContext<Self::Context>,
-        sled: TypedBody<UninitializedSledId>,
-    ) -> Result<HttpResponseCreated<SledId>, HttpError>;
-
     /// Mark a sled as expunged
     ///
     /// This is an irreversible process! It should only be called after
@@ -590,6 +573,21 @@ pub trait NexusLockstepApi {
     }]
     async fn trust_quorum_lrtq_upgrade(
         rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<Epoch>, HttpError>;
+
+    /// Remove a sled from the trust quorum
+    ///
+    /// This is a required first step towards expunging a sled
+    ///
+    /// Return the epoch of the proposed configuration so it can be polled
+    /// asynchronously.
+    #[endpoint {
+        method = POST,
+        path = "/trust-quorum/remove/{sled}"
+    }]
+    async fn trust_quorum_remove_sled(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<SledSelector>,
     ) -> Result<HttpResponseOk<Epoch>, HttpError>;
 }
 

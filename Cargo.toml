@@ -693,10 +693,10 @@ progenitor-client = "0.10.0"
 # NOTE: if you change the pinned revision of the `bhyve_api` and propolis
 # dependencies, you must also update the references in package-manifest.toml to
 # match the new revision.
-bhyve_api = { git = "https://github.com/oxidecomputer/propolis", rev = "bc121ef55741656ce118b02ceeda949b9261f49f" }
-propolis_api_types = { git = "https://github.com/oxidecomputer/propolis", rev = "bc121ef55741656ce118b02ceeda949b9261f49f" }
-propolis-client = { git = "https://github.com/oxidecomputer/propolis", rev = "bc121ef55741656ce118b02ceeda949b9261f49f" }
-propolis-mock-server = { git = "https://github.com/oxidecomputer/propolis", rev = "bc121ef55741656ce118b02ceeda949b9261f49f" }
+bhyve_api = { git = "https://github.com/oxidecomputer/propolis", rev = "36f20be9bb4c3b362029237f5feb6377c982395f" }
+propolis_api_types = { git = "https://github.com/oxidecomputer/propolis", rev = "36f20be9bb4c3b362029237f5feb6377c982395f" }
+propolis-client = { git = "https://github.com/oxidecomputer/propolis", rev = "36f20be9bb4c3b362029237f5feb6377c982395f" }
+propolis-mock-server = { git = "https://github.com/oxidecomputer/propolis", rev = "36f20be9bb4c3b362029237f5feb6377c982395f" }
 # NOTE: see above!
 proptest = "1.7.0"
 qorb = "0.4.1"
@@ -780,10 +780,10 @@ slog-term = "2.9.1"
 smf = "0.2"
 socket2 = { version = "0.5", features = ["all"] }
 sp-sim = { path = "sp-sim" }
-sprockets-tls = { git = "https://github.com/oxidecomputer/sprockets.git", rev = "8ba93f6e785e11175059b3303bfd7e8b52ad12f8" }
-sprockets-tls-test-utils = { git = "https://github.com/oxidecomputer/sprockets.git", rev = "8ba93f6e785e11175059b3303bfd7e8b52ad12f8" }
+sprockets-tls = { git = "https://github.com/oxidecomputer/sprockets.git", rev = "d2b68e4f47e3c22bce0455aeb4cfb2e61ad229ba" }
+sprockets-tls-test-utils = { git = "https://github.com/oxidecomputer/sprockets.git", rev = "d2b68e4f47e3c22bce0455aeb4cfb2e61ad229ba" }
 sqlformat = "0.3.5"
-sqlparser = { version = "0.45.0", features = [ "visitor" ] }
+sqlparser = { version = "0.61.0", features = [ "visitor" ] }
 static_assertions = "1.1.0"
 # Please do not change the Steno version to a Git dependency.  It makes it
 # harder than expected to make breaking changes (even if you specify a specific

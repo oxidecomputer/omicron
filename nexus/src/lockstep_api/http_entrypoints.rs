@@ -32,9 +32,7 @@ use nexus_types::deployment::ClickhousePolicy;
 use nexus_types::deployment::OximeterReadPolicy;
 use nexus_types::deployment::ReconfiguratorConfigParam;
 use nexus_types::deployment::ReconfiguratorConfigView;
-use nexus_types::external_api::hardware::{
-    UninitializedSled, UninitializedSledId,
-};
+use nexus_types::external_api::hardware::UninitializedSled;
 use nexus_types::external_api::path_params::{BlueprintPath, PhysicalDiskPath};
 use nexus_types::external_api::rack::RackMembershipConfigPathParams;
 use nexus_types::external_api::sled::{SledPolicy, SledSelector};
@@ -572,24 +570,6 @@ impl NexusLockstepApi for NexusLockstepApiImpl {
                 crate::context::op_context_for_internal_api(&rqctx).await;
             let sleds = nexus.sled_list_uninitialized(&opctx).await?;
             Ok(HttpResponseOk(ResultsPage { items: sleds, next_page: None }))
-        };
-        apictx
-            .internal_latencies
-            .instrument_dropshot_handler(&rqctx, handler)
-            .await
-    }
-
-    async fn sled_add(
-        rqctx: RequestContext<Self::Context>,
-        sled: TypedBody<UninitializedSledId>,
-    ) -> Result<HttpResponseCreated<SledId>, HttpError> {
-        let apictx = &rqctx.context().context;
-        let nexus = &apictx.nexus;
-        let handler = async {
-            let opctx =
-                crate::context::op_context_for_internal_api(&rqctx).await;
-            let id = nexus.sled_add(&opctx, sled.into_inner()).await?;
-            Ok(HttpResponseCreated(SledId { id }))
         };
         apictx
             .internal_latencies
@@ -1137,6 +1117,25 @@ impl NexusLockstepApi for NexusLockstepApiImpl {
             let opctx =
                 crate::context::op_context_for_internal_api(&rqctx).await;
             let epoch = nexus.tq_upgrade_from_lrtq(&opctx).await?;
+            Ok(HttpResponseOk(epoch))
+        };
+        apictx
+            .internal_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    async fn trust_quorum_remove_sled(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<SledSelector>,
+    ) -> Result<HttpResponseOk<Epoch>, HttpError> {
+        let apictx = &rqctx.context().context;
+        let nexus = &apictx.nexus;
+        let sled_id = path_params.into_inner().sled;
+        let handler = async {
+            let opctx =
+                crate::context::op_context_for_internal_api(&rqctx).await;
+            let epoch = nexus.tq_remove_sled(&opctx, sled_id).await?;
             Ok(HttpResponseOk(epoch))
         };
         apictx
