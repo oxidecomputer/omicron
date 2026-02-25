@@ -1068,7 +1068,7 @@ pub static DEMO_IMAGE_CREATE: LazyLock<image::ImageCreate> =
             name: DEMO_IMAGE_NAME.clone(),
             description: String::from(""),
         },
-        source: image::ImageSource::YouCanBootAnythingAsLongAsItsAlpine,
+        source: image::ImageSource::Snapshot { id: uuid::Uuid::new_v4() },
         os: "fake-os".to_string(),
         version: "1.0".to_string(),
     });

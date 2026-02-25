@@ -27,10 +27,11 @@ use nexus_test_utils::http_testing::RequestBuilder;
 use nexus_test_utils::resource_helpers::create_default_ip_pools;
 use nexus_test_utils::resource_helpers::create_disk;
 use nexus_test_utils::resource_helpers::create_project;
+use nexus_test_utils::resource_helpers::create_project_image;
+use nexus_test_utils::resource_helpers::delete_image;
 use nexus_test_utils::resource_helpers::object_create;
 use nexus_test_utils_macros::nexus_test;
 use nexus_types::external_api::disk;
-use nexus_types::external_api::image;
 use nexus_types::external_api::instance;
 use nexus_types::external_api::sled;
 use nexus_types::external_api::snapshot;
@@ -80,25 +81,7 @@ async fn test_snapshot_basic(cptestctx: &ControlPlaneTestContext) {
     create_project_and_pool(client).await;
     let disks_url = get_disks_url();
 
-    // Define a global image
-    let image_create_params = image::ImageCreate {
-        identity: IdentityMetadataCreateParams {
-            name: "alpine-edge".parse().unwrap(),
-            description: String::from(
-                "you can boot any image, as long as it's alpine",
-            ),
-        },
-        source: image::ImageSource::YouCanBootAnythingAsLongAsItsAlpine,
-        os: "alpine".to_string(),
-        version: "edge".to_string(),
-    };
-
-    let images_url = format!("/v1/images?project={}", PROJECT_NAME);
-    let image =
-        NexusRequest::objects_post(client, &images_url, &image_create_params)
-            .authn_as(AuthnMode::PrivilegedUser)
-            .execute_and_parse_unwrap::<image::Image>()
-            .await;
+    let image = create_project_image(client, PROJECT_NAME, "not-alpine").await;
 
     // Create a disk from this image
     let disk_size = ByteCount::from_gibibytes_u32(2);
@@ -196,25 +179,7 @@ async fn test_snapshot_without_instance(cptestctx: &ControlPlaneTestContext) {
     create_project_and_pool(client).await;
     let disks_url = get_disks_url();
 
-    // Define a global image
-    let image_create_params = image::ImageCreate {
-        identity: IdentityMetadataCreateParams {
-            name: "alpine-edge".parse().unwrap(),
-            description: String::from(
-                "you can boot any image, as long as it's alpine",
-            ),
-        },
-        source: image::ImageSource::YouCanBootAnythingAsLongAsItsAlpine,
-        os: "alpine".to_string(),
-        version: "edge".to_string(),
-    };
-
-    let images_url = format!("/v1/images?project={}", PROJECT_NAME);
-    let image =
-        NexusRequest::objects_post(client, &images_url, &image_create_params)
-            .authn_as(AuthnMode::PrivilegedUser)
-            .execute_and_parse_unwrap::<image::Image>()
-            .await;
+    let image = create_project_image(client, PROJECT_NAME, "not-alpine").await;
 
     // Create a disk from this image
     let disk_size = ByteCount::from_gibibytes_u32(2);
@@ -298,25 +263,7 @@ async fn test_snapshot_stopped_instance(cptestctx: &ControlPlaneTestContext) {
     create_project_and_pool(client).await;
     let disks_url = get_disks_url();
 
-    // Define a global image
-    let image_create_params = image::ImageCreate {
-        identity: IdentityMetadataCreateParams {
-            name: "alpine-edge".parse().unwrap(),
-            description: String::from(
-                "you can boot any image, as long as it's alpine",
-            ),
-        },
-        source: image::ImageSource::YouCanBootAnythingAsLongAsItsAlpine,
-        os: "alpine".to_string(),
-        version: "edge".to_string(),
-    };
-
-    let images_url = format!("/v1/images?project={}", PROJECT_NAME);
-    let image =
-        NexusRequest::objects_post(client, &images_url, &image_create_params)
-            .authn_as(AuthnMode::PrivilegedUser)
-            .execute_and_parse_unwrap::<image::Image>()
-            .await;
+    let image = create_project_image(client, PROJECT_NAME, "not-alpine").await;
 
     // Create a disk from this image
     let disk_size = ByteCount::from_gibibytes_u32(2);
@@ -975,25 +922,7 @@ async fn test_snapshot_unwind(cptestctx: &ControlPlaneTestContext) {
     create_project_and_pool(client).await;
     let disks_url = get_disks_url();
 
-    // Define a global image
-    let image_create_params = image::ImageCreate {
-        identity: IdentityMetadataCreateParams {
-            name: "alpine-edge".parse().unwrap(),
-            description: String::from(
-                "you can boot any image, as long as it's alpine",
-            ),
-        },
-        source: image::ImageSource::YouCanBootAnythingAsLongAsItsAlpine,
-        os: "alpine".to_string(),
-        version: "edge".to_string(),
-    };
-
-    let images_url = format!("/v1/images?project={}", PROJECT_NAME);
-    let image =
-        NexusRequest::objects_post(client, &images_url, &image_create_params)
-            .authn_as(AuthnMode::PrivilegedUser)
-            .execute_and_parse_unwrap::<image::Image>()
-            .await;
+    let image = create_project_image(client, PROJECT_NAME, "not-alpine").await;
 
     // Create a disk from this image
     let disk_size = ByteCount::from_gibibytes_u32(2);
@@ -1023,6 +952,10 @@ async fn test_snapshot_unwind(cptestctx: &ControlPlaneTestContext) {
     .unwrap()
     .parsed_body()
     .unwrap();
+
+    // Delete the image (as it uses Crucible resources, which we assert was
+    // cleaned up at the end of the test)
+    delete_image(client, PROJECT_NAME, "not-alpine").await;
 
     // Set the third region's running snapshot callback so it fails
     let zpool = disk_test.zpools().nth(2).expect("Not enough zpools");

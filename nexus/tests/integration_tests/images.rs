@@ -13,7 +13,9 @@ use nexus_test_utils::http_testing::AuthnMode;
 use nexus_test_utils::http_testing::NexusRequest;
 use nexus_test_utils::http_testing::RequestBuilder;
 use nexus_test_utils::resource_helpers::DiskTest;
+use nexus_test_utils::resource_helpers::create_disk;
 use nexus_test_utils::resource_helpers::create_project;
+use nexus_test_utils::resource_helpers::create_snapshot;
 use nexus_test_utils::resource_helpers::grant_iam;
 use nexus_test_utils_macros::nexus_test;
 use nexus_types::external_api::disk;
@@ -29,6 +31,7 @@ type ControlPlaneTestContext =
     nexus_test_utils::ControlPlaneTestContext<omicron_nexus::Server>;
 
 const PROJECT_NAME: &str = "myproj";
+const DISK_NAME: &str = "my-disk";
 
 fn get_project_images_url(project_name: &str) -> String {
     format!("/v1/images?project={}", project_name)
@@ -79,9 +82,12 @@ async fn test_image_create(cptestctx: &ControlPlaneTestContext) {
     assert_eq!(images.len(), 0);
 
     // Create an image in the project
-    let image_create_params = get_image_create(
-        image::ImageSource::YouCanBootAnythingAsLongAsItsAlpine,
-    );
+    create_disk(client, PROJECT_NAME, DISK_NAME).await;
+    let snapshot =
+        create_snapshot(client, PROJECT_NAME, DISK_NAME, DISK_NAME).await;
+    let image_create_params = get_image_create(image::ImageSource::Snapshot {
+        id: snapshot.identity.id,
+    });
 
     NexusRequest::objects_post(client, &images_url, &image_create_params)
         .authn_as(AuthnMode::PrivilegedUser)
@@ -115,12 +121,16 @@ async fn test_silo_image_create(cptestctx: &ControlPlaneTestContext) {
 
     assert_eq!(images.len(), 0);
 
-    // Create an image in the project
-    let image_create_params = get_image_create(
-        image::ImageSource::YouCanBootAnythingAsLongAsItsAlpine,
-    );
+    // Create a snapshot in the project
+    create_project(client, PROJECT_NAME).await;
+    create_disk(client, PROJECT_NAME, DISK_NAME).await;
+    let snapshot =
+        create_snapshot(client, PROJECT_NAME, DISK_NAME, DISK_NAME).await;
 
-    // Create image
+    // Create silo image
+    let image_create_params = get_image_create(image::ImageSource::Snapshot {
+        id: snapshot.identity.id,
+    });
     NexusRequest::objects_post(client, &silo_images_url, &image_create_params)
         .authn_as(AuthnMode::PrivilegedUser)
         .execute_and_parse_unwrap::<image::Image>()
@@ -145,9 +155,12 @@ async fn test_make_disk_from_image(cptestctx: &ControlPlaneTestContext) {
     create_project(client, PROJECT_NAME).await;
 
     // Create an image in the project
-    let image_create_params = get_image_create(
-        image::ImageSource::YouCanBootAnythingAsLongAsItsAlpine,
-    );
+    create_disk(client, PROJECT_NAME, DISK_NAME).await;
+    let snapshot =
+        create_snapshot(client, PROJECT_NAME, DISK_NAME, DISK_NAME).await;
+    let image_create_params = get_image_create(image::ImageSource::Snapshot {
+        id: snapshot.identity.id,
+    });
 
     let images_url = get_project_images_url(PROJECT_NAME);
 
@@ -190,9 +203,12 @@ async fn test_make_disk_from_other_project_image_fails(
     let another_project = create_project(client, "another-proj").await;
 
     let images_url = get_project_images_url(PROJECT_NAME);
-    let image_create_params = get_image_create(
-        image::ImageSource::YouCanBootAnythingAsLongAsItsAlpine,
-    );
+    create_disk(client, PROJECT_NAME, DISK_NAME).await;
+    let snapshot =
+        create_snapshot(client, PROJECT_NAME, DISK_NAME, DISK_NAME).await;
+    let image_create_params = get_image_create(image::ImageSource::Snapshot {
+        id: snapshot.identity.id,
+    });
     let image =
         NexusRequest::objects_post(client, &images_url, &image_create_params)
             .authn_as(AuthnMode::PrivilegedUser)
@@ -241,9 +257,12 @@ async fn test_make_disk_from_image_too_small(
     create_project(client, PROJECT_NAME).await;
 
     // Create an image in the project
-    let image_create_params = get_image_create(
-        image::ImageSource::YouCanBootAnythingAsLongAsItsAlpine,
-    );
+    create_disk(client, PROJECT_NAME, DISK_NAME).await;
+    let snapshot =
+        create_snapshot(client, PROJECT_NAME, DISK_NAME, DISK_NAME).await;
+    let image_create_params = get_image_create(image::ImageSource::Snapshot {
+        id: snapshot.identity.id,
+    });
 
     let images_url = get_project_images_url(PROJECT_NAME);
 
@@ -284,7 +303,7 @@ async fn test_make_disk_from_image_too_small(
         error.message,
         format!(
             "disk size {} must be greater than or equal to image size {}",
-            94371840_u32, 104857600_u32,
+            94371840_u32, 1073741824_u32,
         )
     );
 }
@@ -307,9 +326,12 @@ async fn test_image_promotion(cptestctx: &ControlPlaneTestContext) {
 
     assert_eq!(images.len(), 0);
 
-    let image_create_params = get_image_create(
-        image::ImageSource::YouCanBootAnythingAsLongAsItsAlpine,
-    );
+    create_disk(client, PROJECT_NAME, DISK_NAME).await;
+    let snapshot =
+        create_snapshot(client, PROJECT_NAME, DISK_NAME, DISK_NAME).await;
+    let image_create_params = get_image_create(image::ImageSource::Snapshot {
+        id: snapshot.identity.id,
+    });
 
     NexusRequest::objects_post(client, &images_url, &image_create_params)
         .authn_as(AuthnMode::PrivilegedUser)
@@ -415,9 +437,12 @@ async fn test_image_from_other_project_snapshot_fails(
     let snapshots_url = format!("/v1/snapshots?project={}", PROJECT_NAME);
 
     // Create an image
-    let image_create_params = get_image_create(
-        image::ImageSource::YouCanBootAnythingAsLongAsItsAlpine,
-    );
+    create_disk(client, PROJECT_NAME, DISK_NAME).await;
+    let snapshot =
+        create_snapshot(client, PROJECT_NAME, DISK_NAME, DISK_NAME).await;
+    let image_create_params = get_image_create(image::ImageSource::Snapshot {
+        id: snapshot.identity.id,
+    });
     let image: image::Image =
         NexusRequest::objects_post(client, &images_url, &image_create_params)
             .authn_as(AuthnMode::PrivilegedUser)
@@ -522,9 +547,12 @@ async fn test_image_deletion_permissions(cptestctx: &ControlPlaneTestContext) {
     let silo_images_url = "/v1/images";
     let images_url = get_project_images_url(PROJECT_NAME);
 
-    let image_create_params = get_image_create(
-        image::ImageSource::YouCanBootAnythingAsLongAsItsAlpine,
-    );
+    create_disk(client, PROJECT_NAME, DISK_NAME).await;
+    let snapshot =
+        create_snapshot(client, PROJECT_NAME, DISK_NAME, DISK_NAME).await;
+    let image_create_params = get_image_create(image::ImageSource::Snapshot {
+        id: snapshot.identity.id,
+    });
 
     let image =
         NexusRequest::objects_post(client, &images_url, &image_create_params)
