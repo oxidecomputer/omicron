@@ -396,9 +396,10 @@ enum TargetReleaseChangeError {
     )]
     UpdateToIdenticalVersion(semver::Version),
     #[error(
-        "cannot skip from major version {current} to major version {proposed}"
+        "cannot skip from scheduled release {current} \
+         to scheduled release {proposed}"
     )]
-    CannotSkipMajorVersion { current: u64, proposed: u64 },
+    CannotSkipScheduledRelease { current: u64, proposed: u64 },
     #[error(
         "cannot downgrade: requested target release version {proposed} \
          is older than current target release version {current}"
@@ -427,9 +428,15 @@ fn validate_can_set_target_release_for_mupdate_recovery(
             return Ok(());
         }
 
-        // Be paranoid: also check the host OS slots for `CurrentContents`.
-        // Mupdate writes both slots, so both slots set to `CurrentContents` is
-        // also a sign that we're waiting for a mupdate to be cleared.
+        // Also check the host OS slots for `CurrentContents`. After the
+        // blueprint planner detects a mupdate override, it sets
+        // `remove_mupdate_override` to `Some(_)` _and_ sets all OS and zone
+        // sources to `CurrentContents` (OS) and `InstallDataset` (zones). Once
+        // sled-agent has received that new config, it will remove its mupdate
+        // override, and then the planner will set `remove_mupdate_override`
+        // back to `None`. But we're still waiting for mupdate recovery if our
+        // OS slots are set to `CurrentContents` or any zone is sourced from
+        // `InstallDataset`.
         if sled_config.host_phase_2.slot_a
             == BlueprintHostPhase2DesiredContents::CurrentContents
             && sled_config.host_phase_2.slot_b
@@ -439,10 +446,9 @@ fn validate_can_set_target_release_for_mupdate_recovery(
         }
     }
 
-    // Confirm all zones have converted to running out of known artifacts. If
-    // any are still running from the install dataset, we haven't recovered from
-    // the mupdate.
-    // Now check zone configs.
+    // Confirm all zones have converted to running out of known artifacts. As
+    // noted above, if any are still running from the install dataset, we
+    // haven't recovered from the mupdate.
     for (_, zone_config) in current_blueprint.in_service_zones() {
         match &zone_config.image_source {
             BlueprintZoneImageSource::InstallDataset => {
@@ -456,7 +462,10 @@ fn validate_can_set_target_release_for_mupdate_recovery(
     // artifact sources - there hasn't been a mupdate.
     //
     // This check is inherently racy: a sled could have just been mupdated but
-    // we haven't yet noticed. There isn't much we can do about that?
+    // we haven't yet noticed. There isn't much we can do about that, but it
+    // seems quite unlikely (the same human would generally be doing both of
+    // these operations) and the operator should be able to retry this operation
+    // and have it work the second time.
     Err(TargetReleaseChangeError::NoMupdateRecoveryNeeded)
 }
 
@@ -475,13 +484,13 @@ fn validate_update_version_number_ordering(
         ));
     }
 
-    // We cannot skip major versions.
+    // We cannot skip scheduled releases.
     if proposed_new_version.major > current_version.major + 1 {
         warn!(
             log,
             "cannot start update: attempt to update past next major version"
         );
-        return Err(TargetReleaseChangeError::CannotSkipMajorVersion {
+        return Err(TargetReleaseChangeError::CannotSkipScheduledRelease {
             current: current_version.major,
             proposed: proposed_new_version.major,
         });
@@ -522,7 +531,7 @@ fn validate_update_version_number_ordering(
 //
 // We must reject target release changes if:
 //
-// * A mupdate has occurred (they must use the "set target releaes for recovery"
+// * A mupdate has occurred (they must use the "set target release for recovery"
 //   endpoint instead)
 // * Another update is in progress
 // * The new version doesn't satisfy our requirements for upgrade ordering (no
@@ -837,7 +846,7 @@ mod tests {
             ),
             (
                 &skip_major,
-                TargetReleaseChangeError::CannotSkipMajorVersion {
+                TargetReleaseChangeError::CannotSkipScheduledRelease {
                     current: 16,
                     proposed: 18,
                 },
