@@ -13,6 +13,7 @@ use nexus_db_model::SupportBundleState;
 use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
+use nexus_types::internal_api::background::SupportBundleAutoDeletionReport;
 use nexus_types::internal_api::background::SupportBundleCleanupReport;
 use nexus_types::internal_api::background::SupportBundleCollectionReport;
 use omicron_common::api::external::DataPageParams;
@@ -308,6 +309,58 @@ impl SupportBundleCollector {
         Ok(report)
     }
 
+    /// Atomically finds and marks bundles for automatic deletion.
+    ///
+    /// This maintains a buffer of free debug datasets for new bundle
+    /// allocations. Configuration (target_free_percent, min_keep_percent)
+    /// is read from the database, ensuring all Nexus replicas use consistent
+    /// values.
+    ///
+    /// The operation is atomic: finding candidates and transitioning them
+    /// to Destroying state happens in a single database query. This prevents
+    /// over-deletion when multiple Nexuses run concurrently.
+    async fn auto_mark_bundles_for_deletion(
+        &self,
+        opctx: &OpContext,
+    ) -> SupportBundleAutoDeletionReport {
+        let mut report = SupportBundleAutoDeletionReport::default();
+
+        // Atomically find and delete bundles in a single query.
+        // Config is read from the database within the query.
+        let result = self.datastore.support_bundle_auto_delete(opctx).await;
+
+        let auto_deleted = match result {
+            Ok(r) => r,
+            Err(err) => {
+                warn!(
+                    &opctx.log,
+                    "Failed to auto-mark bundles for deletion";
+                    "err" => %err
+                );
+                report.errors.push(err.to_string());
+                return report;
+            }
+        };
+
+        // Update report with state (as of before any deletions)
+        report.total_datasets = auto_deleted.total_datasets;
+        report.active_bundles = auto_deleted.active_bundles;
+        report.free_datasets = auto_deleted.free_datasets;
+        report.bundles_marked_for_deletion = auto_deleted.deleted_ids.len();
+
+        // Log each bundle that was marked for deletion
+        for id in &auto_deleted.deleted_ids {
+            info!(
+                &opctx.log,
+                "Auto-marked bundle for deletion to free dataset capacity";
+                "id" => %id,
+                "free_datasets" => auto_deleted.free_datasets,
+            );
+        }
+
+        report
+    }
+
     async fn collect_bundle(
         &self,
         opctx: &OpContext,
@@ -403,11 +456,16 @@ impl BackgroundTask for SupportBundleCollector {
                 return json!({ "error": "task disabled" });
             }
 
+            let auto_deletion_report;
             let mut cleanup_report = None;
             let mut cleanup_err = None;
             let mut collection_report = None;
             let mut collection_err = None;
 
+            // Phase 1: Auto-delete eligible bundles to maintain free dataset buffer
+            auto_deletion_report = self.auto_mark_bundles_for_deletion(&opctx).await;
+
+            // Phase 2: Cleanup destroyed/failing bundles
             match self.cleanup_destroyed_bundles(&opctx).await {
                 Ok(report) => cleanup_report = Some(report),
                 Err(err) => {
@@ -416,6 +474,7 @@ impl BackgroundTask for SupportBundleCollector {
                 }
             };
 
+            // Phase 3: Collect pending bundles
             let request = BundleRequest::default();
             match self.collect_bundle(&opctx, &request).await {
                 Ok(report) => collection_report = Some(report),
@@ -426,6 +485,7 @@ impl BackgroundTask for SupportBundleCollector {
             };
 
             json!({
+                "auto_deletion_report": Some(auto_deletion_report),
                 "cleanup_report": cleanup_report,
                 "cleanup_err": cleanup_err,
                 "collection_report": collection_report,

@@ -865,6 +865,11 @@ task: "support_bundle_collector"
   configured period: every <REDACTED_DURATION>days <REDACTED_DURATION>h <REDACTED_DURATION>m <REDACTED_DURATION>s
   last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    Support Bundle Auto-Deletion Report:
+      Total debug datasets:          0
+        Free datasets:               0
+      Active bundles:                0
+        Bundles marked for deletion: 0
     Support Bundle Cleanup Report:
       Bundles deleted from sleds: 0
       Bundles not found on sleds: 0
@@ -1452,6 +1457,11 @@ task: "support_bundle_collector"
   configured period: every <REDACTED_DURATION>days <REDACTED_DURATION>h <REDACTED_DURATION>m <REDACTED_DURATION>s
   last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    Support Bundle Auto-Deletion Report:
+      Total debug datasets:          0
+        Free datasets:               0
+      Active bundles:                0
+        Bundles marked for deletion: 0
     Support Bundle Cleanup Report:
       Bundles deleted from sleds: 0
       Bundles not found on sleds: 0
