@@ -71,7 +71,7 @@ pub enum EarlyNetworkSetupError {
     #[error("Error during request to Dendrite: {0}")]
     Dendrite(String),
 
-    #[error("Error during DNS lookup: {0}")]
+    #[error("Error during DNS lookup")]
     DnsResolver(#[from] ResolveError),
 
     #[error("BGP configuration error: {0}")]
