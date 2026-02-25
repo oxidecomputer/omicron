@@ -86,12 +86,12 @@ use nexus_lockstep_client::{
     Client as NexusClient, Error as NexusError, types as NexusTypes,
 };
 use nexus_types::deployment::{BlueprintZoneType, blueprint_zone_type};
+use nexus_types::internal_api::params::ExternalPortDiscovery;
 use ntp_admin_client::{
     Client as NtpAdminClient, Error as NtpAdminError, types::TimeSync,
 };
 use omicron_common::address::{COCKROACH_ADMIN_PORT, NTP_ADMIN_PORT};
 use omicron_common::api::external::Generation;
-use omicron_common::api::internal::shared::ExternalPortDiscovery;
 use omicron_common::api::internal::shared::LldpAdminStatus;
 use omicron_common::backoff::{
     BackoffError, retry_notify, retry_policy_internal_service_aggressive,
@@ -1058,7 +1058,7 @@ impl ServiceInner {
             external_dns_zone_name: config.external_dns_zone_name.clone(),
             recovery_silo: config.recovery_silo.clone(),
             rack_network_config,
-            external_port_count: port_discovery_mode.into(),
+            external_port_count: port_discovery_mode,
             allowed_source_ips,
             initial_trust_quorum_configuration,
         };

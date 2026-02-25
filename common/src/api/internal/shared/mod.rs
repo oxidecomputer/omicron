@@ -53,7 +53,6 @@ pub use external_ip::SourceNatConfigV6;
 pub use rack_init::BfdPeerConfig;
 pub use rack_init::BgpConfig;
 pub use rack_init::BgpPeerConfig;
-pub use rack_init::ExternalPortDiscovery;
 pub use rack_init::LldpAdminStatus;
 pub use rack_init::LldpPortConfig;
 pub use rack_init::ParseLldpAdminStatusError;
