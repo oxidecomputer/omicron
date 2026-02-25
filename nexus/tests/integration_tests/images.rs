@@ -283,7 +283,7 @@ async fn test_make_disk_from_image_too_small(
                 read_only: false,
             },
         },
-        // Nexus defines YouCanBootAnythingAsLongAsItsAlpine size as 100M
+        // The image created above is 1 GiB
         size: ByteCount::from(90 * 1024 * 1024),
     };
 

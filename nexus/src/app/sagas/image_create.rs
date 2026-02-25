@@ -406,6 +406,7 @@ pub(crate) mod test {
         cptestctx: &ControlPlaneTestContext,
     ) {
         let client = &cptestctx.external_client;
+        DiskTest::new(cptestctx).await;
         let nexus = &cptestctx.server.server_context().nexus;
 
         let project_id =
@@ -470,6 +471,7 @@ pub(crate) mod test {
         cptestctx: &ControlPlaneTestContext,
     ) {
         let log = &cptestctx.logctx.log;
+        DiskTest::new(cptestctx).await;
 
         let client = &cptestctx.external_client;
         let nexus = &cptestctx.server.server_context().nexus;
@@ -508,6 +510,7 @@ pub(crate) mod test {
         cptestctx: &ControlPlaneTestContext,
     ) {
         let log = &cptestctx.logctx.log;
+        DiskTest::new(cptestctx).await;
 
         let client = &cptestctx.external_client;
         let nexus = &cptestctx.server.server_context().nexus;
@@ -539,6 +542,7 @@ pub(crate) mod test {
         cptestctx: &ControlPlaneTestContext,
     ) {
         let client = &cptestctx.external_client;
+        DiskTest::new(cptestctx).await;
         let nexus = &cptestctx.server.server_context().nexus;
         let project_id =
             create_project(&client, PROJECT_NAME).await.identity.id;
