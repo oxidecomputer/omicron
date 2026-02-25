@@ -11,6 +11,7 @@
 //! - Updates `SwitchPortSettings` to use the new `BgpPeer`
 //! - Updates `SwitchPortSettingsCreate` to use the new `BgpPeerConfig`.
 
+use crate::v2025_12_12_00::networking::BgpPeerState;
 use omicron_common::api::external::{
     self, IdentityMetadata, IdentityMetadataCreateParams, MaxPathConfig, Name,
     NameOrId, SwitchLocation,
@@ -232,7 +233,7 @@ pub struct BgpPeerStatus {
     pub remote_asn: u32,
 
     /// State of the peer.
-    pub state: crate::v2025_12_12_00::networking::BgpPeerState,
+    pub state: BgpPeerState,
 
     /// Time of last state change.
     pub state_duration_millis: u64,
