@@ -555,13 +555,7 @@ pub struct BgpStatusSelector {
 /// Opaque object representing BGP message history for a given BGP peer. The
 /// contents of this object are not yet stable.
 #[derive(Clone, Debug, Deserialize, Serialize)]
-pub struct BgpMessageHistory(mg_admin_client::types::MessageHistory);
-
-impl BgpMessageHistory {
-    pub fn new(arg: mg_admin_client::types::MessageHistory) -> Self {
-        Self(arg)
-    }
-}
+pub struct BgpMessageHistory(pub(crate) mg_admin_client::types::MessageHistory);
 
 impl JsonSchema for BgpMessageHistory {
     fn json_schema(
@@ -593,13 +587,7 @@ pub struct SwitchBgpHistory {
 #[derive(Clone, Debug, Deserialize, JsonSchema, Serialize)]
 pub struct AggregateBgpMessageHistory {
     /// BGP history organized by switch.
-    switch_histories: Vec<SwitchBgpHistory>,
-}
-
-impl AggregateBgpMessageHistory {
-    pub fn new(switch_histories: Vec<SwitchBgpHistory>) -> Self {
-        Self { switch_histories }
-    }
+    pub(crate) switch_histories: Vec<SwitchBgpHistory>,
 }
 
 // BFD

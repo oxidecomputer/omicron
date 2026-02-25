@@ -37,3 +37,17 @@ impl From<mg_admin_client::types::FsmStateKind>
         }
     }
 }
+
+impl latest::networking::BgpMessageHistory {
+    pub fn new(arg: mg_admin_client::types::MessageHistory) -> Self {
+        Self(arg)
+    }
+}
+
+impl latest::networking::AggregateBgpMessageHistory {
+    pub fn new(
+        switch_histories: Vec<latest::networking::SwitchBgpHistory>,
+    ) -> Self {
+        Self { switch_histories }
+    }
+}
