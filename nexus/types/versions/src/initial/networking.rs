@@ -810,27 +810,6 @@ pub struct BgpConfig {
     pub vrf: Option<String>,
 }
 
-// TODO: these conversion impls between initial types and
-// `omicron_common::api::external` types should live in the later version
-// module that introduced the shape change. They currently live here because
-// `omicron-common-versions` does not yet exist.
-impl From<external::BgpConfig> for BgpConfig {
-    fn from(new: external::BgpConfig) -> Self {
-        BgpConfig { identity: new.identity, asn: new.asn, vrf: new.vrf }
-    }
-}
-
-impl From<BgpConfig> for external::BgpConfig {
-    fn from(old: BgpConfig) -> external::BgpConfig {
-        external::BgpConfig {
-            identity: old.identity,
-            asn: old.asn,
-            vrf: old.vrf,
-            max_paths: Default::default(),
-        }
-    }
-}
-
 // SWITCH PORT SETTINGS (old response type with required BgpPeer.addr)
 
 /// Switch port settings (old version with required BgpPeer.addr).

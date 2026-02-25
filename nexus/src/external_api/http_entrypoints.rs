@@ -77,7 +77,6 @@ use omicron_common::api::external::AddressLotCreateResponse;
 use omicron_common::api::external::AddressLotViewResponse;
 use omicron_common::api::external::AffinityGroupMember;
 use omicron_common::api::external::AntiAffinityGroupMember;
-use omicron_common::api::external::BgpConfig;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Disk;
 use omicron_common::api::external::Error;
@@ -4320,11 +4319,11 @@ impl NexusExternalApi for NexusExternalApiImpl {
     async fn networking_bgp_config_create(
         rqctx: RequestContext<ApiContext>,
         config: TypedBody<networking::BgpConfigCreate>,
-    ) -> Result<HttpResponseCreated<BgpConfig>, HttpError> {
+    ) -> Result<HttpResponseCreated<networking::BgpConfig>, HttpError> {
         audit_and_time(&rqctx, |opctx, nexus| async move {
             let config = config.into_inner();
             let result = nexus.bgp_config_create(&opctx, &config).await?;
-            Ok(HttpResponseCreated::<BgpConfig>(result.try_into()?))
+            Ok(HttpResponseCreated::<networking::BgpConfig>(result.try_into()?))
         })
         .await
     }
@@ -4332,7 +4331,8 @@ impl NexusExternalApi for NexusExternalApiImpl {
     async fn networking_bgp_config_list(
         rqctx: RequestContext<ApiContext>,
         query_params: Query<PaginatedByNameOrId>,
-    ) -> Result<HttpResponseOk<ResultsPage<BgpConfig>>, HttpError> {
+    ) -> Result<HttpResponseOk<ResultsPage<networking::BgpConfig>>, HttpError>
+    {
         let apictx = rqctx.context();
         let handler = async {
             let nexus = &apictx.context.nexus;

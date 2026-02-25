@@ -9,6 +9,7 @@
 //! - `BgpPeer.router_lifetime` is added for IPv6 router advertisement
 //!   lifetime.
 //! - `BgpConfigCreate` gains a `max_paths` field for BGP multipath.
+//! - `BgpConfig` gains a `max_paths` field for BGP multipath.
 //! - `BgpPeerStatus` gains a `peer_id` field.
 //! - `BgpImported` replaces the IPv4-only `BgpImportedRouteIpv4`.
 //! - `BgpExported` becomes per-route instead of a HashMap.
@@ -16,13 +17,50 @@
 //! - `SwitchPortSettingsCreate` updated to use the new `BgpPeerConfig`.
 
 use crate::v2025_12_12_00::networking::BgpPeerState;
+use api_identity::ObjectIdentity;
 use omicron_common::api::external::{
     self, IdentityMetadata, IdentityMetadataCreateParams, MaxPathConfig, Name,
-    NameOrId, SwitchLocation,
+    NameOrId, ObjectIdentity, SwitchLocation,
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::net::IpAddr;
+
+/// A base BGP configuration.
+#[derive(
+    ObjectIdentity, Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq,
+)]
+pub struct BgpConfig {
+    #[serde(flatten)]
+    pub identity: IdentityMetadata,
+
+    /// The autonomous system number of this BGP configuration.
+    pub asn: u32,
+
+    /// Optional virtual routing and forwarding identifier for this BGP
+    /// configuration.
+    pub vrf: Option<String>,
+
+    /// Maximum number of paths to use when multiple "best paths" exist
+    pub max_paths: MaxPathConfig,
+}
+
+impl From<BgpConfig> for crate::v2025_11_20_00::networking::BgpConfig {
+    fn from(new: BgpConfig) -> Self {
+        Self { identity: new.identity, asn: new.asn, vrf: new.vrf }
+    }
+}
+
+impl From<crate::v2025_11_20_00::networking::BgpConfig> for BgpConfig {
+    fn from(old: crate::v2025_11_20_00::networking::BgpConfig) -> Self {
+        Self {
+            identity: old.identity,
+            asn: old.asn,
+            vrf: old.vrf,
+            max_paths: Default::default(),
+        }
+    }
+}
 
 /// Parameters for creating a BGP configuration. This includes an autonomous
 /// system number (ASN) and a virtual routing and forwarding (VRF) identifier.

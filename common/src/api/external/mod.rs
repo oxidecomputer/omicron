@@ -3202,25 +3202,6 @@ pub struct SwitchPortRouteConfig {
     pub rib_priority: Option<u8>,
 }
 
-/// A base BGP configuration.
-#[derive(
-    ObjectIdentity, Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq,
-)]
-pub struct BgpConfig {
-    #[serde(flatten)]
-    pub identity: IdentityMetadata,
-
-    /// The autonomous system number of this BGP configuration.
-    pub asn: u32,
-
-    /// Optional virtual routing and forwarding identifier for this BGP
-    /// configuration.
-    pub vrf: Option<String>,
-
-    /// Maximum number of paths to use when multiple "best paths" exist
-    pub max_paths: MaxPathConfig,
-}
-
 /// An IP address configuration for a port settings object.
 #[derive(Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq)]
 pub struct SwitchPortAddressConfig {

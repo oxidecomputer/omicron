@@ -283,6 +283,7 @@ pub mod networking {
 
     pub use crate::v2025_12_12_00::networking::BgpPeerState;
 
+    pub use crate::v2026_02_13_01::networking::BgpConfig;
     pub use crate::v2026_02_13_01::networking::BgpConfigCreate;
     pub use crate::v2026_02_13_01::networking::BgpExported;
     pub use crate::v2026_02_13_01::networking::BgpImported;

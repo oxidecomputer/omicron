@@ -4521,7 +4521,7 @@ pub trait NexusExternalApi {
     async fn networking_bgp_config_create(
         rqctx: RequestContext<Self::Context>,
         config: TypedBody<latest::networking::BgpConfigCreate>,
-    ) -> Result<HttpResponseCreated<BgpConfig>, HttpError>;
+    ) -> Result<HttpResponseCreated<latest::networking::BgpConfig>, HttpError>;
 
     /// Create new BGP configuration
     #[endpoint {
@@ -4558,7 +4558,10 @@ pub trait NexusExternalApi {
     async fn networking_bgp_config_list(
         rqctx: RequestContext<Self::Context>,
         query_params: Query<PaginatedByNameOrId>,
-    ) -> Result<HttpResponseOk<ResultsPage<BgpConfig>>, HttpError>;
+    ) -> Result<
+        HttpResponseOk<ResultsPage<latest::networking::BgpConfig>>,
+        HttpError,
+    >;
 
     /// List BGP configurations
     #[endpoint {
