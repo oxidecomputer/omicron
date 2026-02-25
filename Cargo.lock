@@ -8318,7 +8318,6 @@ dependencies = [
  "itertools 0.14.0",
  "libc",
  "macaddr",
- "mg-admin-client",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
  "oxnet",

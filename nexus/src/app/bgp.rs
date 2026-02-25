@@ -9,8 +9,8 @@ use nexus_db_queries::context::OpContext;
 use nexus_types::external_api::networking;
 use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::{
-    self, BgpExported, BgpImported, BgpMessageHistory, CreateResult,
-    DeleteResult, ListResultVec, LookupResult, NameOrId, SwitchBgpHistory,
+    self, BgpExported, BgpImported, CreateResult, DeleteResult, ListResultVec,
+    LookupResult, NameOrId,
 };
 
 impl super::Nexus {
@@ -221,7 +221,7 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
         sel: &networking::BgpRouteSelector,
-    ) -> ListResultVec<SwitchBgpHistory> {
+    ) -> ListResultVec<networking::SwitchBgpHistory> {
         opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
 
         let mut result = Vec::new();
@@ -248,11 +248,11 @@ impl super::Nexus {
                 }
             };
 
-            result.push(SwitchBgpHistory {
+            result.push(networking::SwitchBgpHistory {
                 switch: *switch,
                 history: history
                     .into_iter()
-                    .map(|(k, v)| (k, BgpMessageHistory::new(v)))
+                    .map(|(k, v)| (k, networking::BgpMessageHistory::new(v)))
                     .collect(),
             });
         }

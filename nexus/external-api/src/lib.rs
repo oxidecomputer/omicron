@@ -4681,7 +4681,10 @@ pub trait NexusExternalApi {
     async fn networking_bgp_message_history(
         rqctx: RequestContext<Self::Context>,
         query_params: Query<latest::networking::BgpRouteSelector>,
-    ) -> Result<HttpResponseOk<AggregateBgpMessageHistory>, HttpError>;
+    ) -> Result<
+        HttpResponseOk<latest::networking::AggregateBgpMessageHistory>,
+        HttpError,
+    >;
 
     //TODO pagination? the normal by-name/by-id stuff does not work here
     /// Get imported IPv4 BGP routes

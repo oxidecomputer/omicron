@@ -76,7 +76,6 @@ use omicron_common::api::external::AddressLotBlock;
 use omicron_common::api::external::AddressLotCreateResponse;
 use omicron_common::api::external::AddressLotViewResponse;
 use omicron_common::api::external::AffinityGroupMember;
-use omicron_common::api::external::AggregateBgpMessageHistory;
 use omicron_common::api::external::AntiAffinityGroupMember;
 use omicron_common::api::external::BgpConfig;
 use omicron_common::api::external::BgpExported;
@@ -4403,14 +4402,17 @@ impl NexusExternalApi for NexusExternalApiImpl {
     async fn networking_bgp_message_history(
         rqctx: RequestContext<ApiContext>,
         query_params: Query<networking::BgpRouteSelector>,
-    ) -> Result<HttpResponseOk<AggregateBgpMessageHistory>, HttpError> {
+    ) -> Result<HttpResponseOk<networking::AggregateBgpMessageHistory>, HttpError>
+    {
         let apictx = rqctx.context();
         let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
         let handler = async {
             let nexus = &apictx.context.nexus;
             let sel = query_params.into_inner();
             let result = nexus.bgp_message_history(&opctx, &sel).await?;
-            Ok(HttpResponseOk(AggregateBgpMessageHistory::new(result)))
+            Ok(HttpResponseOk(networking::AggregateBgpMessageHistory::new(
+                result,
+            )))
         };
         apictx
             .context

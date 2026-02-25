@@ -37,7 +37,6 @@ use semver::Version;
 use serde::Deserialize;
 use serde::Serialize;
 use serde_with::{DeserializeFromStr, SerializeDisplay};
-use std::collections::HashMap;
 use std::convert::TryFrom;
 use std::fmt::Debug;
 use std::fmt::Display;
@@ -3277,56 +3276,6 @@ pub struct BgpExported {
 
     /// The destination network prefix.
     pub prefix: oxnet::IpNet,
-}
-
-/// Opaque object representing BGP message history for a given BGP peer. The
-/// contents of this object are not yet stable.
-#[derive(Clone, Debug, Deserialize, Serialize)]
-pub struct BgpMessageHistory(mg_admin_client::types::MessageHistory);
-
-impl BgpMessageHistory {
-    pub fn new(arg: mg_admin_client::types::MessageHistory) -> Self {
-        Self(arg)
-    }
-}
-
-impl JsonSchema for BgpMessageHistory {
-    fn json_schema(
-        generator: &mut schemars::r#gen::SchemaGenerator,
-    ) -> schemars::schema::Schema {
-        let obj = schemars::schema::Schema::Object(
-            schemars::schema::SchemaObject::default(),
-        );
-        generator.definitions_mut().insert(Self::schema_name(), obj.clone());
-        obj
-    }
-
-    fn schema_name() -> String {
-        "BgpMessageHistory".to_owned()
-    }
-}
-
-/// BGP message history for a particular switch.
-#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize)]
-pub struct SwitchBgpHistory {
-    /// Switch this message history is associated with.
-    pub switch: SwitchLocation,
-
-    /// Message history indexed by peer address.
-    pub history: HashMap<String, BgpMessageHistory>,
-}
-
-/// BGP message history for rack switches.
-#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize)]
-pub struct AggregateBgpMessageHistory {
-    /// BGP history organized by switch.
-    switch_histories: Vec<SwitchBgpHistory>,
-}
-
-impl AggregateBgpMessageHistory {
-    pub fn new(switch_histories: Vec<SwitchBgpHistory>) -> Self {
-        Self { switch_histories }
-    }
 }
 
 /// A route imported from a BGP peer.

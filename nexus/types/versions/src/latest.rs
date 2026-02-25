@@ -246,6 +246,7 @@ pub mod networking {
     pub use crate::v2025_11_20_00::networking::AddressLotBlockCreate;
     pub use crate::v2025_11_20_00::networking::AddressLotCreate;
     pub use crate::v2025_11_20_00::networking::AddressLotSelector;
+    pub use crate::v2025_11_20_00::networking::AggregateBgpMessageHistory;
     pub use crate::v2025_11_20_00::networking::BfdSessionDisable;
     pub use crate::v2025_11_20_00::networking::BfdSessionEnable;
     pub use crate::v2025_11_20_00::networking::BgpAnnounceListSelector;
@@ -255,6 +256,7 @@ pub mod networking {
     pub use crate::v2025_11_20_00::networking::BgpAnnouncement;
     pub use crate::v2025_11_20_00::networking::BgpAnnouncementCreate;
     pub use crate::v2025_11_20_00::networking::BgpConfigSelector;
+    pub use crate::v2025_11_20_00::networking::BgpMessageHistory;
     pub use crate::v2025_11_20_00::networking::BgpRouteSelector;
     pub use crate::v2025_11_20_00::networking::BgpStatusSelector;
     pub use crate::v2025_11_20_00::networking::LinkConfigCreate;
@@ -264,6 +266,7 @@ pub mod networking {
     pub use crate::v2025_11_20_00::networking::LoopbackAddressPath;
     pub use crate::v2025_11_20_00::networking::Route;
     pub use crate::v2025_11_20_00::networking::RouteConfig;
+    pub use crate::v2025_11_20_00::networking::SwitchBgpHistory;
     pub use crate::v2025_11_20_00::networking::SwitchInterfaceConfigCreate;
     pub use crate::v2025_11_20_00::networking::SwitchInterfaceKind;
     pub use crate::v2025_11_20_00::networking::SwitchPortApplySettings;
