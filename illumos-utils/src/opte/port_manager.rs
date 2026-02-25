@@ -20,11 +20,20 @@ use macaddr::MacAddr6;
 use omicron_common::address::IPV4_MULTICAST_RANGE;
 use omicron_common::address::IPV6_MULTICAST_RANGE;
 use omicron_common::api::external;
+use omicron_common::api::internal::shared::ClearMcast2Phys;
+use omicron_common::api::internal::shared::ClearMcastForwarding;
 use omicron_common::api::internal::shared::ExternalIpConfig;
 use omicron_common::api::internal::shared::ExternalIpGatewayMap;
 use omicron_common::api::internal::shared::ExternalIpv4Config;
 use omicron_common::api::internal::shared::ExternalIpv6Config;
 use omicron_common::api::internal::shared::InternetGatewayRouterTarget;
+use omicron_common::api::internal::shared::Mcast2PhysMapping;
+use omicron_common::api::internal::shared::McastFilterMode;
+use omicron_common::api::internal::shared::McastForwardingEntry;
+use omicron_common::api::internal::shared::McastForwardingNextHop;
+use omicron_common::api::internal::shared::McastReplication;
+use omicron_common::api::internal::shared::McastSourceFilter;
+use omicron_common::api::internal::shared::MulticastGroupCfg;
 use omicron_common::api::internal::shared::NetworkInterface;
 use omicron_common::api::internal::shared::NetworkInterfaceKind;
 use omicron_common::api::internal::shared::PrivateIpConfig;
@@ -41,10 +50,14 @@ use omicron_common::api::internal::shared::RouterVersion;
 use omicron_common::api::internal::shared::VirtualNetworkInterfaceHost;
 use oxide_vpc::api::AddRouterEntryReq;
 use oxide_vpc::api::AttachedSubnetConfig;
+use oxide_vpc::api::ClearMcast2PhysReq;
+use oxide_vpc::api::ClearMcastForwardingReq;
 use oxide_vpc::api::DelRouterEntryReq;
 use oxide_vpc::api::DetachSubnetResp;
 use oxide_vpc::api::DhcpCfg;
+use oxide_vpc::api::Direction;
 use oxide_vpc::api::ExternalIpCfg;
+use oxide_vpc::api::FilterMode;
 use oxide_vpc::api::IpCfg;
 use oxide_vpc::api::IpCidr;
 use oxide_vpc::api::Ipv4Cfg;
@@ -52,10 +65,16 @@ use oxide_vpc::api::Ipv4Cidr;
 use oxide_vpc::api::Ipv6Cfg;
 use oxide_vpc::api::Ipv6Cidr;
 use oxide_vpc::api::MacAddr;
+use oxide_vpc::api::McastSubscribeReq;
+use oxide_vpc::api::McastUnsubscribeReq;
+use oxide_vpc::api::MulticastUnderlay;
 use oxide_vpc::api::RouterClass;
 use oxide_vpc::api::SNat4Cfg;
 use oxide_vpc::api::SNat6Cfg;
 use oxide_vpc::api::SetExternalIpsReq;
+use oxide_vpc::api::SetMcast2PhysReq;
+use oxide_vpc::api::SetMcastForwardingReq;
+use oxide_vpc::api::SourceFilter;
 use oxide_vpc::api::TransitIpConfig;
 use oxide_vpc::api::VpcCfg;
 use oxnet::IpNet;
@@ -89,22 +108,24 @@ struct RouteSet {
     active_ports: usize,
 }
 
-/// Configuration for multicast groups on an OPTE port.
+/// Lock ordering for `PortManagerInner` fields:
 ///
-/// TODO: This type should be moved to [oxide_vpc::api] when OPTE dependencies
-/// are updated, following the same pattern as other VPC configuration types
-/// like [ExternalIpCfg], [IpCfg], etc.
+/// Several operations hold multiple locks simultaneously to prevent
+/// races. The two nesting pairs are:
 ///
-/// TODO: Eventually remove.
-#[derive(Debug, Clone, PartialEq)]
-pub struct MulticastGroupCfg {
-    /// The multicast group IP address (IPv4 or IPv6).
-    pub group_ip: IpAddr,
-    /// Source addresses for source-filtered multicast (optional for ASM,
-    /// required for SSM).
-    pub sources: Vec<IpAddr>,
-}
-
+/// - `vpc_routes_ensure`: `routes` → `ports` (both held to prevent
+///   concurrent Nexus instances from interleaving deltas).
+/// - `multicast_groups_ensure`: `ports` → `mcast_subscriptions`.
+/// - `create_port`, `external_ips_ensure`: `ports` → `eip_gateways`.
+/// - `firewall_rules_ensure`: `ports` only.
+///
+/// No function nests `mcast_subscriptions` → `routes` or vice versa,
+/// so there is no cycle despite `routes` → `ports` and
+/// `ports` → `mcast_subscriptions` having opposite `ports` positions.
+///
+/// `release_inner` acquires each lock sequentially (dropping the
+/// previous before acquiring the next), so it does not conflict with
+/// the nested orderings above.
 #[derive(Debug)]
 struct PortManagerInner {
     log: Logger,
@@ -127,6 +148,63 @@ struct PortManagerInner {
     ///
     /// IGW IDs are specific to the VPC of each NIC.
     eip_gateways: Mutex<HashMap<Uuid, HashMap<IpAddr, HashSet<Uuid>>>>,
+
+    /// Per-port multicast subscription state tracked for diffing.
+    /// Maps (NIC ID, NIC kind) to the set of groups currently
+    /// subscribed in OPTE, with their source filters.
+    // TODO: use `VnicUuid` instead of bare `Uuid` here and
+    // throughout port_manager.
+    mcast_subscriptions:
+        Mutex<HashMap<(Uuid, NetworkInterfaceKind), McastPortState>>,
+}
+
+/// Per-port multicast state tracked by the port manager.
+#[derive(Debug, Default)]
+struct McastPortState {
+    /// Active subscriptions, mapping group IP → source filter.
+    subscriptions: HashMap<IpAddr, SourceFilter>,
+    /// Whether multicast CIDR allow rules have been installed.
+    has_cidr_allows: bool,
+}
+
+/// The set of (CIDR, direction) pairs for multicast allow rules.
+/// Covers [`IPV4_MULTICAST_RANGE`] (224.0.0.0/4) and
+/// [`IPV6_MULTICAST_RANGE`] (ff00::/8) in both directions.
+fn mcast_cidr_allow_set() -> [(IpCidr, Direction); 4] {
+    let v4 = IPV4_MULTICAST_RANGE;
+    let v6 = IPV6_MULTICAST_RANGE;
+    let ipv4 = IpCidr::Ip4(Ipv4Cidr::new(
+        oxide_vpc::api::Ipv4Addr::from(v4.addr()),
+        oxide_vpc::api::Ipv4PrefixLen::new(v4.width()).unwrap(),
+    ));
+    let ipv6 = IpCidr::Ip6(Ipv6Cidr::new(
+        oxide_vpc::api::Ipv6Addr::from(v6.addr()),
+        oxide_vpc::api::Ipv6PrefixLen::new(v6.width()).unwrap(),
+    ));
+    [
+        (ipv4, Direction::In),
+        (ipv4, Direction::Out),
+        (ipv6, Direction::In),
+        (ipv6, Direction::Out),
+    ]
+}
+
+/// Convert a `MulticastGroupCfg` into OPTE's `SourceFilter`.
+///
+/// Empty sources maps to ASM (EXCLUDE with no entries, accepting all
+/// sources). Non-empty sources maps to SSM (INCLUDE with the listed
+/// sources).
+fn multicast_cfg_to_source_filter(cfg: &MulticastGroupCfg) -> SourceFilter {
+    if cfg.sources.is_empty() {
+        SourceFilter::default()
+    } else {
+        SourceFilter::Include(
+            cfg.sources
+                .iter()
+                .map(|s| oxide_vpc::api::IpAddr::from(*s))
+                .collect(),
+        )
+    }
 }
 
 impl PortManagerInner {
@@ -139,14 +217,15 @@ impl PortManagerInner {
     }
 }
 
-#[derive(Debug)]
 /// Parameters needed to create and configure an OPTE port.
+#[derive(Debug)]
 pub struct PortCreateParams<'a> {
     pub nic: &'a NetworkInterface,
     pub external_ips: &'a Option<ExternalIpConfig>,
     pub firewall_rules: &'a [ResolvedVpcFirewallRule],
     pub dhcp_config: DhcpCfg,
     pub attached_subnets: Vec<AttachedSubnet>,
+    pub multicast_groups: &'a [MulticastGroupCfg],
 }
 
 impl<'a> TryFrom<&PortCreateParams<'a>> for IpCfg {
@@ -411,6 +490,7 @@ impl PortManager {
             ports: Mutex::new(BTreeMap::new()),
             routes: Mutex::new(Default::default()),
             eip_gateways: Mutex::new(Default::default()),
+            mcast_subscriptions: Mutex::new(Default::default()),
         });
 
         Self { inner }
@@ -432,6 +512,7 @@ impl PortManager {
             firewall_rules,
             dhcp_config,
             attached_subnets: _,
+            multicast_groups,
         } = params;
         let is_service =
             matches!(nic.kind, NetworkInterfaceKind::Service { .. });
@@ -605,6 +686,12 @@ impl PortManager {
             add_routes(&mut route_map, key)?;
         }
         drop(route_map);
+
+        // Configure multicast group subscriptions if any were
+        // provided at instance start.
+        if !multicast_groups.is_empty() {
+            self.multicast_groups_ensure(nic.id, nic.kind, multicast_groups)?;
+        }
 
         info!(
             self.inner.log,
@@ -823,70 +910,167 @@ impl PortManager {
         Ok(())
     }
 
-    /// Validate multicast group memberships for an OPTE port.
-    ///
-    /// This method validates multicast group configurations but does not yet
-    /// configure OPTE port-level multicast group membership. The actual
-    /// multicast forwarding is currently handled by the reconciler + DPD
-    /// at the dataplane switch level.
-    ///
-    /// TODO: Once OPTE kernel module supports multicast group APIs, this
-    /// method should be updated to configure OPTE port-level multicast
-    /// group membership. Note: multicast groups are fleet-scoped and can span
-    /// across VPCs.
+    /// Ensure multicast group subscriptions for an OPTE port match the
+    /// requested set. This diffs current vs new state and issues
+    /// subscribe/unsubscribe ioctls as needed. Also manages
+    /// multicast CIDR allow rules on the port.
     pub fn multicast_groups_ensure(
         &self,
         nic_id: Uuid,
         nic_kind: NetworkInterfaceKind,
         multicast_groups: &[MulticastGroupCfg],
     ) -> Result<(), Error> {
+        // Validate and build the new subscription set before acquiring locks.
+        let mut new_subs: HashMap<IpAddr, SourceFilter> = HashMap::new();
+        for group in multicast_groups {
+            if !group.group_ip.is_multicast() {
+                return Err(Error::InvalidPortIpConfig(format!(
+                    "not a multicast address: {}",
+                    group.group_ip,
+                )));
+            }
+            new_subs
+                .insert(group.group_ip, multicast_cfg_to_source_filter(group));
+        }
+
+        let hdl = Handle::new()?;
+
+        // Hold both locks to prevent a concurrent port release from
+        // racing with subscription updates, consistent with
+        // firewall_rules_ensure and vpc_routes_ensure.
         let ports = self.inner.ports.lock().unwrap();
         let port = ports.get(&(nic_id, nic_kind)).ok_or_else(|| {
             Error::MulticastUpdateMissingPort(nic_id, nic_kind)
         })?;
+        let port_name = port.name().to_string();
 
-        debug!(
-            self.inner.log,
-            "Validating multicast group configuration for OPTE port";
-            "port_name" => port.name(),
-            "nic_id" => ?nic_id,
-            "groups" => ?multicast_groups,
-        );
+        let mut mcast_subs = self.inner.mcast_subscriptions.lock().unwrap();
+        let state = mcast_subs.entry((nic_id, nic_kind)).or_default();
 
-        // Validate multicast group configurations
-        for group in multicast_groups {
-            if !group.group_ip.is_multicast() {
-                error!(
+        // Unsubscribe groups that are no longer requested.
+        let to_remove: Vec<IpAddr> = state
+            .subscriptions
+            .keys()
+            .filter(|g| !new_subs.contains_key(g))
+            .copied()
+            .collect();
+
+        let removed = to_remove.len();
+        for group_ip in &to_remove {
+            debug!(
+                self.inner.log,
+                "unsubscribing from multicast group";
+                "port" => &port_name,
+                "group" => %group_ip,
+            );
+
+            hdl.mcast_unsubscribe(&McastUnsubscribeReq {
+                port_name: port_name.clone(),
+                group: (*group_ip).into(),
+            })?;
+
+            state.subscriptions.remove(group_ip);
+        }
+
+        // Subscribe to new groups or update changed filters.
+        let mut added = 0usize;
+        for (group_ip, filter) in &new_subs {
+            let needs_subscribe = match state.subscriptions.get(group_ip) {
+                None => true,
+                Some(current) => current != filter,
+            };
+
+            if needs_subscribe {
+                added += 1;
+                debug!(
                     self.inner.log,
-                    "Invalid multicast IP address";
-                    "group_ip" => %group.group_ip,
-                    "port_name" => port.name(),
+                    "subscribing to multicast group";
+                    "port" => &port_name,
+                    "group" => %group_ip,
+                    "filter" => ?filter,
                 );
-                return Err(Error::InvalidPortIpConfig(String::from(
-                    "invalid multicast IP address",
-                )));
+
+                hdl.mcast_subscribe(&McastSubscribeReq {
+                    port_name: port_name.clone(),
+                    group: (*group_ip).into(),
+                    filter: filter.clone(),
+                })?;
+
+                state.subscriptions.insert(*group_ip, filter.clone());
             }
         }
 
-        // TODO: Configure firewall rules to allow multicast traffic.
-        // Add exceptions in source/dest MAC/L3 addr checking for multicast
-        // addresses matching known groups, only doing cidr-checking on the
-        // multicasst destination side.
+        // Install multicast CIDR allow rules when we go from none
+        // to some subscriptions and remove when we go back to none.
+        let cidr_before = state.has_cidr_allows;
+        let has_subs = !state.subscriptions.is_empty();
+        if has_subs && !state.has_cidr_allows {
+            self.install_mcast_cidr_allows(&hdl, &port_name)?;
+            state.has_cidr_allows = true;
+        } else if !has_subs && state.has_cidr_allows {
+            self.remove_mcast_cidr_allows(&hdl, &port_name)?;
+            state.has_cidr_allows = false;
+        }
+        let cidr_changed = cidr_before != state.has_cidr_allows;
 
-        info!(
-            self.inner.log,
-            "OPTE port configured for multicast traffic";
-            "port_name" => port.name(),
-            "ipv4_range" => %IPV4_MULTICAST_RANGE,
-            "ipv6_range" => %IPV6_MULTICAST_RANGE,
-            "multicast_groups" => multicast_groups.len(),
-        );
+        if added > 0 || removed > 0 || cidr_changed {
+            info!(
+                self.inner.log,
+                "multicast subscriptions updated";
+                "port" => &port_name,
+                "added" => added,
+                "removed" => removed,
+                "active_groups" => state.subscriptions.len(),
+                "cidr_allows" => state.has_cidr_allows,
+                "cidr_changed" => cidr_changed,
+            );
+        } else {
+            debug!(
+                self.inner.log,
+                "multicast subscriptions reconciled, no change";
+                "port" => &port_name,
+                "active_groups" => state.subscriptions.len(),
+            );
+        }
 
-        // TODO: Configure OPTE port for specific multicast group membership
-        // once OPTE kernel module APIs are available. This is distinct from
-        // zone vNIC underlay configuration (see instance.rs
-        // `join_multicast_group_inner`).
+        Ok(())
+    }
 
+    /// Install CIDR allow rules for multicast traffic on a port.
+    fn install_mcast_cidr_allows(
+        &self,
+        hdl: &Handle,
+        port_name: &str,
+    ) -> Result<(), Error> {
+        for (cidr, dir) in mcast_cidr_allow_set() {
+            debug!(
+                self.inner.log,
+                "installing multicast CIDR allow rule";
+                "port" => port_name,
+                "cidr" => %cidr,
+                "direction" => ?dir,
+            );
+            hdl.allow_cidr(port_name, cidr, dir)?;
+        }
+        Ok(())
+    }
+
+    /// Remove CIDR allow rules for multicast traffic from a port.
+    fn remove_mcast_cidr_allows(
+        &self,
+        hdl: &Handle,
+        port_name: &str,
+    ) -> Result<(), Error> {
+        for (cidr, dir) in mcast_cidr_allow_set() {
+            debug!(
+                self.inner.log,
+                "removing multicast CIDR allow rule";
+                "port" => port_name,
+                "cidr" => %cidr,
+                "direction" => ?dir,
+            );
+            hdl.remove_cidr(port_name, cidr, dir)?;
+        }
         Ok(())
     }
 
@@ -1010,6 +1194,200 @@ impl PortManager {
         })?;
 
         Ok(())
+    }
+
+    /// Install a multicast overlay-to-underlay (M2P) mapping in OPTE.
+    pub fn set_mcast_m2p(&self, req: &Mcast2PhysMapping) -> Result<(), Error> {
+        info!(
+            self.inner.log,
+            "Setting multicast overlay-to-underlay mapping";
+            "group" => %req.group,
+            "underlay" => %req.underlay,
+        );
+        let underlay = MulticastUnderlay::new(req.underlay.into())
+            .map_err(Error::SetMcastM2p)?;
+        let hdl = Handle::new()?;
+        hdl.set_m2p(&SetMcast2PhysReq { group: req.group.into(), underlay })?;
+        Ok(())
+    }
+
+    /// Remove a multicast overlay-to-underlay (M2P) mapping from OPTE.
+    pub fn clear_mcast_m2p(&self, req: &ClearMcast2Phys) -> Result<(), Error> {
+        info!(
+            self.inner.log,
+            "Clearing multicast overlay-to-underlay mapping";
+            "group" => %req.group,
+            "underlay" => %req.underlay,
+        );
+        let underlay = MulticastUnderlay::new(req.underlay.into())
+            .map_err(Error::ClearMcastM2p)?;
+        let hdl = Handle::new()?;
+        hdl.clear_m2p(&ClearMcast2PhysReq {
+            group: req.group.into(),
+            underlay,
+        })?;
+        Ok(())
+    }
+
+    /// Set multicast forwarding next hops for an underlay group address.
+    pub fn set_mcast_fwd(
+        &self,
+        req: &McastForwardingEntry,
+    ) -> Result<(), Error> {
+        // Safe to unwrap: 77 is well within the 24-bit VNI range.
+        let mcast_vni =
+            Vni::new(oxide_vpc::api::DEFAULT_MULTICAST_VNI).unwrap();
+
+        info!(
+            self.inner.log,
+            "Setting multicast forwarding";
+            "underlay" => %req.underlay,
+            "next_hops" => req.next_hops.len(),
+        );
+        let underlay = MulticastUnderlay::new(req.underlay.into())
+            .map_err(Error::SetMcastFwd)?;
+        let next_hops = req
+            .next_hops
+            .iter()
+            .map(|nexthop| oxide_vpc::api::McastForwardingNextHop {
+                next_hop: oxide_vpc::api::NextHopV6 {
+                    addr: nexthop.next_hop.into(),
+                    vni: mcast_vni,
+                },
+                replication: match nexthop.replication {
+                    McastReplication::External => {
+                        oxide_vpc::api::Replication::External
+                    }
+                    McastReplication::Underlay => {
+                        oxide_vpc::api::Replication::Underlay
+                    }
+                    McastReplication::Both => oxide_vpc::api::Replication::Both,
+                },
+                source_filter: match nexthop.filter.mode {
+                    McastFilterMode::Include => SourceFilter::Include(
+                        nexthop
+                            .filter
+                            .sources
+                            .iter()
+                            .copied()
+                            .map(Into::into)
+                            .collect(),
+                    ),
+                    McastFilterMode::Exclude => SourceFilter::Exclude(
+                        nexthop
+                            .filter
+                            .sources
+                            .iter()
+                            .copied()
+                            .map(Into::into)
+                            .collect(),
+                    ),
+                },
+            })
+            .collect();
+        let hdl = Handle::new()?;
+        hdl.set_mcast_fwd(&SetMcastForwardingReq { underlay, next_hops })?;
+        Ok(())
+    }
+
+    /// Remove all multicast forwarding entries for an underlay group address.
+    pub fn clear_mcast_fwd(
+        &self,
+        req: &ClearMcastForwarding,
+    ) -> Result<(), Error> {
+        info!(
+            self.inner.log,
+            "Clearing multicast forwarding";
+            "underlay" => %req.underlay,
+        );
+        let underlay = MulticastUnderlay::new(req.underlay.into())
+            .map_err(Error::ClearMcastFwd)?;
+        let hdl = Handle::new()?;
+        hdl.clear_mcast_fwd(&ClearMcastForwardingReq { underlay })?;
+        Ok(())
+    }
+
+    /// Dump all multicast overlay-to-underlay (M2P) mappings from OPTE.
+    pub fn list_mcast_m2p(&self) -> Result<Vec<Mcast2PhysMapping>, Error> {
+        let hdl = Handle::new()?;
+        let resp = hdl.dump_m2p()?;
+        let mappings = resp
+            .ip4
+            .into_iter()
+            .map(|(group, underlay)| Mcast2PhysMapping {
+                group: IpAddr::V4(group.into()),
+                underlay: Ipv6Addr::from(underlay.addr()),
+            })
+            .chain(resp.ip6.into_iter().map(|(group, underlay)| {
+                Mcast2PhysMapping {
+                    group: IpAddr::V6(group.into()),
+                    underlay: Ipv6Addr::from(underlay.addr()),
+                }
+            }))
+            .collect();
+        Ok(mappings)
+    }
+
+    /// Dump all multicast forwarding entries from OPTE.
+    pub fn list_mcast_fwd(&self) -> Result<Vec<McastForwardingEntry>, Error> {
+        let hdl = Handle::new()?;
+        let resp = hdl.dump_mcast_fwd()?;
+        resp.entries
+            .into_iter()
+            .map(|entry| {
+                let next_hops = entry
+                    .next_hops
+                    .into_iter()
+                    .map(|nexthop| {
+                        let replication = match nexthop.replication {
+                            oxide_vpc::api::Replication::External => {
+                                McastReplication::External
+                            }
+                            oxide_vpc::api::Replication::Underlay => {
+                                McastReplication::Underlay
+                            }
+                            oxide_vpc::api::Replication::Both => {
+                                McastReplication::Both
+                            }
+                            oxide_vpc::api::Replication::Reserved => {
+                                return Err(Error::ListMcastFwd(
+                                    "OPTE returned Reserved replication \
+                                     mode, which has no defined semantics"
+                                        .to_string(),
+                                ));
+                            }
+                        };
+
+                        Ok(McastForwardingNextHop {
+                            next_hop: nexthop.next_hop.addr.into(),
+                            replication,
+                            filter: McastSourceFilter {
+                                mode: match nexthop.source_filter.mode() {
+                                    FilterMode::Include => {
+                                        McastFilterMode::Include
+                                    }
+                                    FilterMode::Exclude => {
+                                        McastFilterMode::Exclude
+                                    }
+                                },
+                                sources: nexthop
+                                    .source_filter
+                                    .sources()
+                                    .iter()
+                                    .copied()
+                                    .map(Into::into)
+                                    .collect(),
+                            },
+                        })
+                    })
+                    .collect::<Result<Vec<_>, _>>()?;
+
+                Ok(McastForwardingEntry {
+                    underlay: Ipv6Addr::from(entry.underlay.addr()),
+                    next_hops,
+                })
+            })
+            .collect()
     }
 
     pub fn attached_subnets_ensure(
@@ -1245,6 +1623,15 @@ impl PortTicket {
             remove_key(&mut routes, key);
         }
         drop(routes);
+
+        // Cleanup multicast subscription tracking for this port.
+        // Kernel state is cleaned up when the xde device is deleted.
+        self.manager
+            .mcast_subscriptions
+            .lock()
+            .unwrap()
+            .remove(&(self.id, self.kind));
+
         debug!(
             self.manager.log,
             "Removed OPTE port from manager";
@@ -1280,12 +1667,14 @@ impl Drop for PortTicket {
 mod tests {
     use super::PortCreateParams;
     use super::PortManager;
+    use crate::opte::Error;
     use crate::opte::Handle;
     use macaddr::MacAddr6;
     use omicron_common::api::external::{MacAddr, Vni};
     use omicron_common::api::internal::shared::ExternalIpConfig;
     use omicron_common::api::internal::shared::ExternalIpConfigBuilder;
     use omicron_common::api::internal::shared::InternetGatewayRouterTarget;
+    use omicron_common::api::internal::shared::MulticastGroupCfg;
     use omicron_common::api::internal::shared::NetworkInterface;
     use omicron_common::api::internal::shared::NetworkInterfaceKind;
     use omicron_common::api::internal::shared::PrivateIpConfig;
@@ -1299,16 +1688,22 @@ mod tests {
     use omicron_common::api::internal::shared::SourceNatConfigV6;
     use omicron_test_utils::dev::test_setup_log;
     use oxide_vpc::api::DhcpCfg;
+    use oxide_vpc::api::FilterMode;
     use oxide_vpc::api::IpCfg;
     use oxide_vpc::api::Ipv4Cidr;
     use oxide_vpc::api::Ipv6Cidr;
+    use oxide_vpc::api::SourceFilter;
     use oxnet::IpNet;
     use oxnet::Ipv4Net;
     use oxnet::Ipv6Net;
     use std::collections::HashSet;
+    use std::net::IpAddr;
     use std::net::Ipv4Addr;
     use std::net::Ipv6Addr;
     use uuid::Uuid;
+
+    // Maximum ephemeral port number for source NAT (14-bit range).
+    const MAX_PORT: u16 = (1 << 14) - 1;
 
     // Regression for https://github.com/oxidecomputer/omicron/issues/7541.
     #[test]
@@ -1331,7 +1726,7 @@ mod tests {
         const SERVICES_VPC_VNI: Vni = Vni::SERVICES_VNI;
 
         let handle = Handle::new().unwrap();
-        handle.set_xde_underlay("foo0", "foo1").unwrap();
+        handle.set_xde_underlay("underlay0", "underlay1").unwrap();
 
         // First, create a port for a service.
         //
@@ -1360,7 +1755,7 @@ mod tests {
                 .unwrap()
                 .into(),
         );
-        const MAX_PORT: u16 = (1 << 14) - 1;
+
         let (port0, _ticket0) = manager
             .create_port(PortCreateParams {
                 nic: &NetworkInterface {
@@ -1385,6 +1780,7 @@ mod tests {
                     dns6_servers: Vec::new(),
                 },
                 attached_subnets: vec![],
+                multicast_groups: &[],
             })
             .unwrap();
 
@@ -1564,6 +1960,7 @@ mod tests {
                     dns6_servers: Vec::new(),
                 },
                 attached_subnets: vec![],
+                multicast_groups: &[],
             })
             .unwrap();
 
@@ -1735,6 +2132,7 @@ mod tests {
                 dns6_servers: vec![],
             },
             attached_subnets: vec![],
+            multicast_groups: &[],
         };
         let IpCfg::Ipv4(oxide_vpc::api::Ipv4Cfg {
             vpc_subnet,
@@ -1808,6 +2206,7 @@ mod tests {
                 dns6_servers: vec![],
             },
             attached_subnets: vec![],
+            multicast_groups: &[],
         };
         let IpCfg::Ipv6(oxide_vpc::api::Ipv6Cfg {
             vpc_subnet,
@@ -1815,12 +2214,14 @@ mod tests {
             gateway_ip,
             external_ips:
                 oxide_vpc::api::ExternalIpCfg { snat, ephemeral_ip, floating_ips },
-            attached_subnets: _,
-            transit_ips: _,
+            attached_subnets,
+            transit_ips,
         }) = IpCfg::try_from(&prs).unwrap()
         else {
-            panic!("Expected IPv4 config")
+            panic!("Expected IPv6 config")
         };
+        assert!(attached_subnets.is_empty());
+        assert!(transit_ips.is_empty());
 
         assert_eq!(private_ip, priv_ip.into());
         assert_eq!(
@@ -1894,6 +2295,7 @@ mod tests {
                 dns6_servers: vec![],
             },
             attached_subnets: vec![],
+            multicast_groups: &[],
         };
         let IpCfg::DualStack { ipv4, ipv6 } = IpCfg::try_from(&prs).unwrap()
         else {
@@ -1984,6 +2386,7 @@ mod tests {
                 dns6_servers: vec![],
             },
             attached_subnets: vec![],
+            multicast_groups: &[],
         };
         let _ = IpCfg::try_from(&prs).expect_err(
             "Should fail to convert with public IPv6 and private IPv4",
@@ -2030,9 +2433,277 @@ mod tests {
                 dns6_servers: vec![],
             },
             attached_subnets: vec![],
+            multicast_groups: &[],
         };
         let _ = IpCfg::try_from(&prs).expect_err(
             "Should fail to convert with public IPv4 and private IPv6",
         );
+    }
+
+    #[test]
+    fn multicast_groups_ensure_diffing() {
+        let logctx = test_setup_log("multicast_groups_ensure_diffing");
+        let manager = PortManager::new(logctx.log.clone(), Ipv6Addr::LOCALHOST);
+
+        let handle = Handle::new().unwrap();
+        handle.set_xde_underlay("underlay0", "underlay1").unwrap();
+
+        let nic_id = Uuid::new_v4();
+        let nic_kind = NetworkInterfaceKind::Service { id: Uuid::new_v4() };
+
+        let private_subnet =
+            Ipv4Net::new(Ipv4Addr::new(172, 20, 0, 0), 24).unwrap();
+        let private_ip = Ipv4Addr::new(172, 20, 0, 4);
+        let ip_config =
+            PrivateIpConfig::new_ipv4(private_ip, private_subnet).unwrap();
+        let public_ip = Ipv4Addr::new(10, 0, 0, 4);
+
+        let external_ips = Some(
+            ExternalIpConfigBuilder::new()
+                .with_source_nat(
+                    SourceNatConfigV4::new(public_ip, 0, MAX_PORT).unwrap(),
+                )
+                .build()
+                .unwrap()
+                .into(),
+        );
+
+        // Bindings keep the port registered in the manager for this scope.
+        let (_port, _ticket) = manager
+            .create_port(PortCreateParams {
+                nic: &NetworkInterface {
+                    id: nic_id,
+                    kind: nic_kind,
+                    name: "opte0".parse().unwrap(),
+                    ip_config,
+                    mac: MacAddr(MacAddr6::new(
+                        0xa8, 0x40, 0x25, 0x00, 0x00, 0x01,
+                    )),
+                    vni: Vni::SERVICES_VNI,
+                    primary: true,
+                    slot: 0,
+                },
+                external_ips: &external_ips,
+                firewall_rules: &[],
+                dhcp_config: DhcpCfg {
+                    hostname: None,
+                    host_domain: None,
+                    domain_search_list: Vec::new(),
+                    dns4_servers: Vec::new(),
+                    dns6_servers: Vec::new(),
+                },
+                attached_subnets: vec![],
+                multicast_groups: &[],
+            })
+            .unwrap();
+
+        let group1: IpAddr = "239.1.1.1".parse().unwrap();
+        let group2: IpAddr = "239.1.1.2".parse().unwrap();
+        let source_a: IpAddr = "10.0.0.1".parse().unwrap();
+
+        // Subscribe to two groups: one ASM, one SSM.
+        manager
+            .multicast_groups_ensure(
+                nic_id,
+                nic_kind,
+                &[
+                    MulticastGroupCfg { group_ip: group1, sources: vec![] },
+                    MulticastGroupCfg {
+                        group_ip: group2,
+                        sources: vec![source_a],
+                    },
+                ],
+            )
+            .unwrap();
+
+        // Verify port manager tracking.
+        {
+            let subs = manager.inner.mcast_subscriptions.lock().unwrap();
+            let state = subs.get(&(nic_id, nic_kind)).unwrap();
+            assert_eq!(state.subscriptions.len(), 2);
+            assert_eq!(
+                *state.subscriptions.get(&group1).unwrap(),
+                SourceFilter::default(),
+            );
+            assert_eq!(
+                state.subscriptions.get(&group2).unwrap().mode(),
+                FilterMode::Include,
+            );
+            assert!(state.has_cidr_allows);
+        }
+
+        // Verify mock OPTE state matches.
+        {
+            let opte = handle.state().lock().unwrap();
+            let port = opte.ports.get("opte0").unwrap();
+            assert_eq!(port.mcast_subscriptions.len(), 2);
+            assert!(port.mcast_subscriptions.contains_key(&group1));
+            assert!(port.mcast_subscriptions.contains_key(&group2));
+        }
+
+        // Remove group2, keep group1.
+        manager
+            .multicast_groups_ensure(
+                nic_id,
+                nic_kind,
+                &[MulticastGroupCfg { group_ip: group1, sources: vec![] }],
+            )
+            .unwrap();
+
+        {
+            let subs = manager.inner.mcast_subscriptions.lock().unwrap();
+            let state = subs.get(&(nic_id, nic_kind)).unwrap();
+            assert_eq!(state.subscriptions.len(), 1);
+            assert!(state.subscriptions.contains_key(&group1));
+            assert!(!state.subscriptions.contains_key(&group2));
+            assert!(state.has_cidr_allows);
+        }
+
+        {
+            let opte = handle.state().lock().unwrap();
+            let port = opte.ports.get("opte0").unwrap();
+            assert_eq!(port.mcast_subscriptions.len(), 1);
+            assert!(!port.mcast_subscriptions.contains_key(&group2));
+        }
+
+        // Remove all groups.
+        manager.multicast_groups_ensure(nic_id, nic_kind, &[]).unwrap();
+
+        {
+            let subs = manager.inner.mcast_subscriptions.lock().unwrap();
+            let state = subs.get(&(nic_id, nic_kind)).unwrap();
+            assert!(state.subscriptions.is_empty());
+            assert!(!state.has_cidr_allows);
+        }
+
+        {
+            let opte = handle.state().lock().unwrap();
+            let port = opte.ports.get("opte0").unwrap();
+            assert!(port.mcast_subscriptions.is_empty());
+        }
+
+        logctx.cleanup_successful();
+    }
+
+    #[test]
+    fn multicast_port_deletion_cleanup() {
+        let logctx = test_setup_log("multicast_port_deletion_cleanup");
+        let manager = PortManager::new(logctx.log.clone(), Ipv6Addr::LOCALHOST);
+
+        let handle = Handle::new().unwrap();
+        handle.set_xde_underlay("underlay0", "underlay1").unwrap();
+
+        let nic_id = Uuid::new_v4();
+        let nic_kind = NetworkInterfaceKind::Service { id: Uuid::new_v4() };
+
+        let private_subnet =
+            Ipv4Net::new(Ipv4Addr::new(172, 20, 0, 0), 24).unwrap();
+        let private_ip = Ipv4Addr::new(172, 20, 0, 4);
+        let ip_config =
+            PrivateIpConfig::new_ipv4(private_ip, private_subnet).unwrap();
+        let public_ip = Ipv4Addr::new(10, 0, 0, 4);
+
+        let external_ips = Some(
+            ExternalIpConfigBuilder::new()
+                .with_source_nat(
+                    SourceNatConfigV4::new(public_ip, 0, MAX_PORT).unwrap(),
+                )
+                .build()
+                .unwrap()
+                .into(),
+        );
+
+        let (_port, ticket) = manager
+            .create_port(PortCreateParams {
+                nic: &NetworkInterface {
+                    id: nic_id,
+                    kind: nic_kind,
+                    name: "opte0".parse().unwrap(),
+                    ip_config,
+                    mac: MacAddr(MacAddr6::new(
+                        0xa8, 0x40, 0x25, 0x00, 0x00, 0x01,
+                    )),
+                    vni: Vni::SERVICES_VNI,
+                    primary: true,
+                    slot: 0,
+                },
+                external_ips: &external_ips,
+                firewall_rules: &[],
+                dhcp_config: DhcpCfg {
+                    hostname: None,
+                    host_domain: None,
+                    domain_search_list: Vec::new(),
+                    dns4_servers: Vec::new(),
+                    dns6_servers: Vec::new(),
+                },
+                attached_subnets: vec![],
+                multicast_groups: &[],
+            })
+            .unwrap();
+
+        let group1: IpAddr = "239.2.2.1".parse().unwrap();
+
+        // Subscribe to a multicast group.
+        manager
+            .multicast_groups_ensure(
+                nic_id,
+                nic_kind,
+                &[MulticastGroupCfg { group_ip: group1, sources: vec![] }],
+            )
+            .unwrap();
+
+        // Verify subscription tracking exists.
+        {
+            let subs = manager.inner.mcast_subscriptions.lock().unwrap();
+            assert!(
+                subs.contains_key(&(nic_id, nic_kind)),
+                "subscription tracking should exist before release"
+            );
+            let state = subs.get(&(nic_id, nic_kind)).unwrap();
+            assert_eq!(state.subscriptions.len(), 1);
+        }
+
+        // Release the port ticket, which should clean up subscription
+        // tracking.
+        ticket.release();
+
+        // Verify subscription tracking is removed.
+        {
+            let subs = manager.inner.mcast_subscriptions.lock().unwrap();
+            assert!(
+                !subs.contains_key(&(nic_id, nic_kind)),
+                "subscription tracking should be removed after release"
+            );
+        }
+
+        logctx.cleanup_successful();
+    }
+
+    #[test]
+    fn multicast_ensure_missing_port_error() {
+        let logctx = test_setup_log("multicast_ensure_missing_port_error");
+        let manager = PortManager::new(logctx.log.clone(), Ipv6Addr::LOCALHOST);
+
+        let nic_id = Uuid::new_v4();
+        let nic_kind = NetworkInterfaceKind::Instance { id: Uuid::new_v4() };
+        let group: IpAddr = "239.3.3.1".parse().unwrap();
+
+        let res = manager.multicast_groups_ensure(
+            nic_id,
+            nic_kind,
+            &[MulticastGroupCfg { group_ip: group, sources: vec![] }],
+        );
+
+        match res {
+            Err(Error::MulticastUpdateMissingPort(id, kind)) => {
+                assert_eq!(id, nic_id);
+                assert_eq!(kind, nic_kind);
+            }
+            other => {
+                panic!("expected MulticastUpdateMissingPort, got {other:?}")
+            }
+        }
+
+        logctx.cleanup_successful();
     }
 }

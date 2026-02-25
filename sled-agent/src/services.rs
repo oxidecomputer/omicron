@@ -1219,6 +1219,7 @@ impl ServiceManager {
                 dhcp_config: DhcpCfg::default(),
                 // Services do not use attached subnets, only instances.
                 attached_subnets: vec![],
+                multicast_groups: &[],
             })
             .map_err(|err| Error::ServicePortCreation {
                 service: zone_kind,

@@ -70,6 +70,21 @@ pub enum Error {
         "Tried to update attached subnets on non-existent port ({0}, {1:?})"
     )]
     AttachedSubnetUpdateMissingPort(uuid::Uuid, NetworkInterfaceKind),
+
+    #[error("Failed to set multicast-to-physical mapping: {0}")]
+    SetMcastM2p(String),
+
+    #[error("Failed to clear multicast-to-physical mapping: {0}")]
+    ClearMcastM2p(String),
+
+    #[error("Failed to set multicast forwarding: {0}")]
+    SetMcastFwd(String),
+
+    #[error("Failed to clear multicast forwarding: {0}")]
+    ClearMcastFwd(String),
+
+    #[error("Failed to list multicast forwarding: {0}")]
+    ListMcastFwd(String),
 }
 
 /// Delete all xde devices on the system.
