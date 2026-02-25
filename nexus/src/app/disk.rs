@@ -622,9 +622,11 @@ impl super::Nexus {
             // that user's program can act accordingly. In a way, the user's
             // program is an externally driven saga instead.
 
+            // Use reqwest012_client because the rev-pinned
+            // crucible-pantry-client is still on reqwest 0.12.
             let client = crucible_pantry_client::Client::new_with_client(
                 &format!("http://{}", endpoint),
-                self.reqwest_client.clone(),
+                self.reqwest012_client.clone(),
             );
             let request = crucible_pantry_client::types::BulkWriteRequest {
                 offset: param.offset,

@@ -13,7 +13,8 @@ use nexus_db_queries::authn;
 use nexus_db_queries::db;
 use nexus_db_queries::db::datastore;
 use omicron_common::api::external::DiskState;
-use omicron_common::progenitor_operation_retry::ProgenitorOperationRetry;
+use omicron_common::backoff::backon_retry_policy_internal_service;
+use progenitor_extras::retry::{GoneCheckResult, retry_operation_while};
 use serde::Deserialize;
 use serde::Serialize;
 use sled_agent_client::types::LocalStorageDatasetDeleteRequest;
@@ -245,23 +246,37 @@ async fn sdd_delete_local_storage(
         sled_agent_client.local_storage_dataset_delete(&request).await
     };
 
+    // `check_sled_in_service` returns an error if the sled is no longer in
+    // service; if it succeeds, the sled is not gone.
     let gone_check = || async {
-        osagactx.datastore().check_sled_in_service(&opctx, sled_id).await?;
-
-        // `check_sled_in_service` returns an error if the sled is no longer in
-        // service; if it succeeds, the sled is not gone.
-        Ok(false)
+        osagactx
+            .datastore()
+            .check_sled_in_service(&opctx, sled_id)
+            .await
+            .map(|()| GoneCheckResult::StillAvailable)
     };
 
-    ProgenitorOperationRetry::new(delete_operation, gone_check)
-        .run(osagactx.log())
-        .await
-        .map_err(|e| {
-            ActionError::action_failed(format!(
-                "failed to delete local storage: {}",
-                InlineErrorChain::new(&e)
-            ))
-        })?;
+    let log = osagactx.log().clone();
+    retry_operation_while(
+        backon_retry_policy_internal_service(),
+        delete_operation,
+        gone_check,
+        |notification| {
+            slog::warn!(
+                log,
+                "failed external call ({:?}), retrying in {:?}",
+                notification.error,
+                notification.delay,
+            );
+        },
+    )
+    .await
+    .map_err(|e| {
+        ActionError::action_failed(format!(
+            "failed to delete local storage: {}",
+            InlineErrorChain::new(&e)
+        ))
+    })?;
 
     Ok(())
 }

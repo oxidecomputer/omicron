@@ -87,6 +87,7 @@ use nexus_lockstep_client::{
 };
 use nexus_types::deployment::{BlueprintZoneType, blueprint_zone_type};
 use nexus_types::internal_api::params::ExternalPortDiscovery;
+use ntp_admin_client::ClientInfo as _;
 use ntp_admin_client::{
     Client as NtpAdminClient, Error as NtpAdminError, types::TimeSync,
 };

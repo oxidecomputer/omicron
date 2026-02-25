@@ -8,7 +8,7 @@ chrono.workspace = true
 clickhouse-admin-types.workspace = true
 omicron-uuid-kinds.workspace = true
 progenitor.workspace = true
-reqwest = { workspace = true, features = [ "json", "rustls-tls", "stream" ] }
+reqwest = { workspace = true, features = [ "json", "rustls", "stream" ] }
 schemars.workspace = true
 serde.workspace = true
 slog.workspace = true

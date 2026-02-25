@@ -28,9 +28,10 @@ use nexus_db_queries::{authn, authz, db};
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::http_pagination::PaginatedBy;
-use omicron_common::progenitor_operation_retry::ProgenitorOperationRetry;
+use omicron_common::backoff::backon_retry_policy_internal_service;
 use omicron_uuid_kinds::{GenericUuid, InstanceUuid, PropolisUuid, SledUuid};
 use paste::paste;
+use progenitor_extras::retry::{GoneCheckResult, retry_operation_while};
 use seq_macro::seq;
 use serde::{Deserialize, Serialize};
 use sled_agent_client::types::LocalStorageDatasetEnsureRequest;
@@ -689,23 +690,37 @@ async fn sis_ensure_local_storage(
         sled_agent_client.local_storage_dataset_ensure(&ensure_request).await
     };
 
+    // `check_sled_in_service` returns an error if the sled is no longer in
+    // service; if it succeeds, the sled is not gone.
     let gone_check = || async {
-        osagactx.datastore().check_sled_in_service(&opctx, sled_id).await?;
-
-        // `check_sled_in_service` returns an error if the sled is no longer in
-        // service; if it succeeds, the sled is not gone.
-        Ok(false)
+        osagactx
+            .datastore()
+            .check_sled_in_service(&opctx, sled_id)
+            .await
+            .map(|()| GoneCheckResult::StillAvailable)
     };
 
-    ProgenitorOperationRetry::new(ensure_operation, gone_check)
-        .run(osagactx.log())
-        .await
-        .map_err(|e| {
-            ActionError::action_failed(format!(
-                "failed to ensure local storage: {}",
-                InlineErrorChain::new(&e)
-            ))
-        })?;
+    let log = osagactx.log().clone();
+    retry_operation_while(
+        backon_retry_policy_internal_service(),
+        ensure_operation,
+        gone_check,
+        |notification| {
+            slog::warn!(
+                log,
+                "failed external call ({:?}), retrying in {:?}",
+                notification.error,
+                notification.delay,
+            );
+        },
+    )
+    .await
+    .map_err(|e| {
+        ActionError::action_failed(format!(
+            "failed to ensure local storage: {}",
+            InlineErrorChain::new(&e)
+        ))
+    })?;
 
     Ok(())
 }

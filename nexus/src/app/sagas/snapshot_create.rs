@@ -104,11 +104,13 @@ use nexus_db_model::Generation;
 use nexus_db_queries::db::identity::{Asset, Resource};
 use nexus_types::external_api::{disk, snapshot};
 use omicron_common::api::external::Error;
+use omicron_common::progenitor_operation_retry::ProgenitorOperationRetry;
 use omicron_common::progenitor_operation_retry::ProgenitorOperationRetryError;
 use omicron_common::{
-    api::external, progenitor_operation_retry::ProgenitorOperationRetry,
+    api::external, backoff::backon_retry_policy_internal_service,
 };
 use omicron_uuid_kinds::{GenericUuid, PropolisUuid, VolumeUuid};
+use progenitor_extras::retry::{GoneCheckResult, retry_operation_while};
 use rand::{RngCore, SeedableRng, rngs::StdRng};
 use serde::Deserialize;
 use serde::Serialize;
@@ -856,22 +858,37 @@ async fn ssc_send_snapshot_request_to_sled_agent(
             )
             .await
     };
+    // `check_sled_in_service` returns an error if the sled is no longer in
+    // service; if it succeeds, the sled is not gone.
     let gone_check = || async {
-        osagactx.datastore().check_sled_in_service(&opctx, sled_id).await?;
-        // `check_sled_in_service` returns an error if the sled is no longer in
-        // service; if it succeeds, the sled is not gone.
-        Ok(false)
+        osagactx
+            .datastore()
+            .check_sled_in_service(&opctx, sled_id)
+            .await
+            .map(|()| GoneCheckResult::StillAvailable)
     };
 
-    ProgenitorOperationRetry::new(snapshot_operation, gone_check)
-        .run(log)
-        .await
-        .map_err(|e| {
-            ActionError::action_failed(format!(
-                "failed to issue VMM disk snapshot request: {}",
-                InlineErrorChain::new(&e)
-            ))
-        })?;
+    let notify_log = log.clone();
+    retry_operation_while(
+        backon_retry_policy_internal_service(),
+        snapshot_operation,
+        gone_check,
+        |notification| {
+            slog::warn!(
+                notify_log,
+                "failed external call ({:?}), retrying in {:?}",
+                notification.error,
+                notification.delay,
+            );
+        },
+    )
+    .await
+    .map_err(|e| {
+        ActionError::action_failed(format!(
+            "failed to issue VMM disk snapshot request: {}",
+            InlineErrorChain::new(&e)
+        ))
+    })?;
 
     Ok(())
 }

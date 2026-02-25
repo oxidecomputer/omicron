@@ -457,6 +457,7 @@ mod test {
     use super::ResolveError;
     use super::Resolver;
     use anyhow::Context;
+    use std::sync::Arc;
     use dropshot::{
         ApiDescription, HandlerTaskMode, HttpError, HttpResponseOk,
         RequestContext, endpoint,
@@ -915,7 +916,7 @@ mod test {
         // standalone test server.
         let dns_name = ServiceName::Nexus.srv_name();
         let reqwest_client = reqwest::ClientBuilder::new()
-            .dns_resolver(resolver.clone().into())
+            .dns_resolver(Arc::new(resolver.clone()) as Arc<dyn reqwest::dns::Resolve>)
             .build()
             .expect("Failed to build client");
 
@@ -995,7 +996,7 @@ mod test {
         // standalone test server.
         let dns_name = ServiceName::Nexus.srv_name();
         let reqwest_client = reqwest::ClientBuilder::new()
-            .dns_resolver(resolver.clone().into())
+            .dns_resolver(Arc::new(resolver.clone()) as Arc<dyn reqwest::dns::Resolve>)
             .build()
             .expect("Failed to build client");
 
