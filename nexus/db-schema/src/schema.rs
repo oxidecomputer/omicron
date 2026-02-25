@@ -6,7 +6,30 @@
 //!
 //! NOTE: Should be kept up-to-date with dbinit.sql.
 
-use diesel::{allow_tables_to_appear_in_same_query, joinable, table};
+use diesel::{allow_tables_to_appear_in_same_query, joinable};
+
+/// Shadow of `diesel::table!` that also auto-registers table metadata
+/// into [`DIESEL_TABLES`](crate::DIESEL_TABLES) for test validation.
+macro_rules! table {
+    // Variant: with primary key
+    ($table_name:ident ($($pk:tt)*) {
+        $($col_name:ident -> $col_type:ty),* $(,)?
+    }) => {
+        diesel::table! {
+            $table_name ($($pk)*) { $($col_name -> $col_type,)* }
+        }
+        $crate::__register_table!($table_name; $($col_name),*);
+    };
+    // Variant: without primary key
+    ($table_name:ident {
+        $($col_name:ident -> $col_type:ty),* $(,)?
+    }) => {
+        diesel::table! {
+            $table_name { $($col_name -> $col_type,)* }
+        }
+        $crate::__register_table!($table_name; $($col_name),*);
+    };
+}
 
 table! {
     disk (id) {
@@ -1415,8 +1438,6 @@ table! {
 }
 
 table! {
-    use diesel::sql_types::*;
-
     vpc_firewall_rule (id) {
         id -> Uuid,
         name -> Text,

@@ -4970,3 +4970,526 @@ async fn compare_table_differing_not_null_order() {
     schema1.pretty_assert_eq(&schema2);
     logctx.cleanup_successful();
 }
+
+// ---------------------------------------------------------------------------
+// Test: Diesel schema.rs matches CRDB dbinit.sql
+// ---------------------------------------------------------------------------
+
+/// Maps a CRDB `data_type` string to the expected Diesel type_name suffix.
+///
+/// Returns `None` for types that need special handling (ARRAY, USER-DEFINED).
+fn crdb_base_type_to_diesel(data_type: &str) -> Option<&'static str> {
+    match data_type {
+        "uuid" => Some("diesel::sql_types::Uuid"),
+        "text" | "character varying" => Some("diesel::sql_types::Text"),
+        "timestamp with time zone" => Some("diesel::sql_types::Timestamptz"),
+        "bigint" => Some("diesel::sql_types::Int8"),
+        "integer" => Some("diesel::sql_types::Int4"),
+        "smallint" => Some("diesel::sql_types::Int2"),
+        "boolean" => Some("diesel::sql_types::Bool"),
+        "inet" => Some("diesel::sql_types::Inet"),
+        "bytea" => Some("diesel::sql_types::Binary"),
+        "jsonb" => Some("diesel::sql_types::Jsonb"),
+        "double precision" => Some("diesel::sql_types::Float8"),
+        "interval" => Some("diesel::sql_types::Interval"),
+        _ => None,
+    }
+}
+
+/// Maps a CRDB array element udt_name (e.g. `_text`) to the Diesel element
+/// type_name.
+fn crdb_array_element_to_diesel(udt_name: &str) -> Option<&'static str> {
+    match udt_name {
+        "_text" | "_varchar" => Some("diesel::sql_types::Text"),
+        "_inet" => Some("diesel::sql_types::Inet"),
+        "_int8" => Some("diesel::sql_types::Int8"),
+        "_int4" => Some("diesel::sql_types::Int4"),
+        "_uuid" => Some("diesel::sql_types::Uuid"),
+        "_bool" => Some("diesel::sql_types::Bool"),
+        _ => None,
+    }
+}
+
+/// Returns a map from CRDB enum type name to the Diesel type_name string
+/// for every enum defined in `nexus_db_schema::enums`.
+///
+/// For example: `"block_size"` → `"nexus_db_schema::enums::BlockSizeEnum"`.
+fn parse_enum_mapping() -> HashMap<String, String> {
+    nexus_db_schema::enums::crdb_to_diesel_enum_type_names()
+        .into_iter()
+        .map(|(crdb_name, diesel_name)| {
+            (crdb_name.to_string(), diesel_name.to_string())
+        })
+        .collect()
+}
+
+/// Normalizes a Diesel type_name string to a canonical form.
+///
+/// `std::any::type_name` returns internal paths (e.g.,
+/// `diesel::pg::types::sql_types::Uuid`) that differ from the re-exported
+/// paths (e.g., `diesel::sql_types::Uuid`). It also uses canonical struct
+/// names (e.g., `BigInt`) rather than the aliases used in schema.rs (e.g.,
+/// `Int8`). This function normalizes both.
+fn normalize_diesel_type(type_name: &str) -> String {
+    type_name
+        .replace("diesel::pg::types::sql_types::", "diesel::sql_types::")
+        .replace("diesel::sql_types::BigInt", "diesel::sql_types::Int8")
+        .replace("diesel::sql_types::Integer", "diesel::sql_types::Int4")
+        .replace("diesel::sql_types::SmallInt", "diesel::sql_types::Int2")
+        .replace("diesel::sql_types::Double", "diesel::sql_types::Float8")
+}
+
+/// Determines the expected Diesel type_name string for a CRDB column.
+///
+/// Given CRDB column metadata (data_type, is_nullable, udt_name) and
+/// the enum mapping, returns the expected Diesel type_name.
+fn expected_diesel_type(
+    data_type: &str,
+    is_nullable: bool,
+    udt_name: &str,
+    enum_map: &HashMap<String, String>,
+) -> Result<String, String> {
+    let base = if data_type == "ARRAY" {
+        let elem = crdb_array_element_to_diesel(udt_name).ok_or_else(|| {
+            format!("unknown array element type: udt_name={udt_name}")
+        })?;
+        // Return a sentinel that will be checked specially, because
+        // CRDB doesn't distinguish nullable vs non-nullable array
+        // elements, but Diesel does (Array<T> vs Array<Nullable<T>>).
+        format!("diesel::sql_types::Array<{elem}>")
+    } else if data_type == "USER-DEFINED" {
+        enum_map
+            .get(udt_name)
+            .cloned()
+            .ok_or_else(|| format!("unknown enum type: udt_name={udt_name}"))?
+    } else {
+        crdb_base_type_to_diesel(data_type)
+            .ok_or_else(|| format!("unknown CRDB data_type: {data_type}"))?
+            .to_string()
+    };
+
+    if is_nullable {
+        Ok(format!("diesel::sql_types::Nullable<{base}>"))
+    } else {
+        Ok(base)
+    }
+}
+
+/// Checks whether a normalized Diesel type matches the expected type from
+/// CRDB.
+///
+/// This is more lenient than exact string comparison because CRDB's
+/// information_schema does not distinguish nullable vs non-nullable array
+/// elements. Diesel may use `Array<Nullable<T>>` where CRDB reports just
+/// `Array<T>`. Both are considered matches.
+fn diesel_type_matches_expected(normalized: &str, expected: &str) -> bool {
+    if normalized == expected {
+        return true;
+    }
+    // Accept Array<Nullable<T>> when expected is Array<T>, and vice versa.
+    // CRDB arrays allow null elements by default, but information_schema
+    // doesn't report this.
+    if let Some(expected_inner) = expected
+        .strip_prefix("diesel::sql_types::Array<")
+        .and_then(|s| s.strip_suffix('>'))
+    {
+        // Check if normalized is Array<Nullable<expected_inner>>
+        let nullable_inner =
+            format!("diesel::sql_types::Nullable<{expected_inner}>");
+        let with_nullable =
+            format!("diesel::sql_types::Array<{nullable_inner}>");
+        if normalized == with_nullable {
+            return true;
+        }
+    }
+    // Same check but for Nullable<Array<...>>
+    if let Some(expected_inner) = expected
+        .strip_prefix("diesel::sql_types::Nullable<diesel::sql_types::Array<")
+        .and_then(|s| s.strip_suffix(">>"))
+    {
+        let nullable_inner =
+            format!("diesel::sql_types::Nullable<{expected_inner}>");
+        let with_nullable = format!(
+            "diesel::sql_types::Nullable<diesel::sql_types::Array<{nullable_inner}>>"
+        );
+        if normalized == with_nullable {
+            return true;
+        }
+    }
+    false
+}
+
+/// Strips `Nullable<...>` wrapping from a type string, if present.
+fn strip_nullable(type_str: &str) -> &str {
+    type_str
+        .strip_prefix("diesel::sql_types::Nullable<")
+        .and_then(|s| s.strip_suffix('>'))
+        .unwrap_or(type_str)
+}
+
+/// Compares two type strings ignoring top-level nullability.
+///
+/// Used for views, where information_schema reports all columns as nullable
+/// regardless of the underlying query structure. We still check that the
+/// base types match.
+fn diesel_type_matches_ignoring_nullability(
+    normalized: &str,
+    expected: &str,
+) -> bool {
+    let n = strip_nullable(normalized);
+    let e = strip_nullable(expected);
+    diesel_type_matches_expected(n, e)
+}
+
+/// Represents a column from CRDB's information_schema.
+#[derive(Debug)]
+struct CrdbColumn {
+    column_name: String,
+    data_type: String,
+    is_nullable: bool,
+    udt_name: String,
+}
+
+/// Queries CRDB information_schema.columns for all public columns, grouped by
+/// table name.
+async fn query_crdb_columns(
+    crdb: &CockroachInstance,
+) -> BTreeMap<String, Vec<CrdbColumn>> {
+    let client = crdb.connect().await.expect("failed to connect");
+    let rows = client
+        .query(
+            "SELECT table_name, column_name, is_nullable, data_type, udt_name \
+             FROM information_schema.columns \
+             WHERE table_schema = 'public' \
+             ORDER BY table_name, ordinal_position",
+            &[],
+        )
+        .await
+        .expect("failed to query information_schema.columns");
+    client.cleanup().await.expect("cleaning up after query");
+
+    let mut result: BTreeMap<String, Vec<CrdbColumn>> = BTreeMap::new();
+    for row in rows {
+        let table_name: String = row.get(0);
+        let column_name: String = row.get(1);
+        let is_nullable_str: String = row.get(2);
+        let data_type: String = row.get(3);
+        let udt_name: String = row.get(4);
+
+        result.entry(table_name).or_default().push(CrdbColumn {
+            column_name,
+            data_type,
+            is_nullable: is_nullable_str == "YES",
+            udt_name,
+        });
+    }
+    result
+}
+
+/// Queries CRDB information_schema.tables to identify which names are views.
+async fn query_crdb_views(
+    crdb: &CockroachInstance,
+) -> std::collections::HashSet<String> {
+    let client = crdb.connect().await.expect("failed to connect");
+    let rows = client
+        .query(
+            "SELECT table_name FROM information_schema.tables \
+             WHERE table_schema = 'public' AND table_type = 'VIEW'",
+            &[],
+        )
+        .await
+        .expect("failed to query information_schema.tables");
+    client.cleanup().await.expect("cleaning up after query");
+
+    rows.iter().map(|row| row.get::<_, String>(0)).collect()
+}
+
+/// Known exceptions where schema.rs intentionally differs from CRDB.
+fn is_known_nullable_exception(table: &str, column: &str) -> bool {
+    // These columns are NOT NULL in CRDB but Nullable in schema.rs.
+    // See comments in schema.rs: "This type isn't actually 'Nullable' - it's
+    // just handy to use the same type for insertion and querying."
+    matches!(
+        (table, column),
+        ("virtual_provisioning_collection", "time_modified")
+            | ("virtual_provisioning_resource", "time_modified")
+    )
+}
+
+/// Tables in schema.rs that do not correspond to a table or view in
+/// dbinit.sql. These are excluded from the comparison.
+const DIESEL_ONLY_TABLES: &[&str] = &[
+    // global_image is declared in schema.rs but has no corresponding
+    // table or view in dbinit.sql.
+    "global_image",
+    // inv_last_reconciliation_measurements is declared in schema.rs but
+    // has no corresponding table or view in dbinit.sql.
+    "inv_last_reconciliation_measurements",
+    // nat_version is a SEQUENCE in CRDB, not a table/view.
+    // It is represented as a table! macro in schema.rs for query purposes.
+    "nat_version",
+];
+
+/// Pre-existing mismatches between schema.rs and dbinit.sql.
+///
+/// These represent known drift that should be fixed over time. Each entry
+/// is a "table.column" string. When a mismatch is found for one of these,
+/// it is reported as a warning instead of causing test failure.
+///
+/// If you fix a mismatch, please remove the corresponding entry here.
+/// If you introduce a new mismatch, do NOT add it here — fix the drift
+/// instead.
+fn known_drift() -> std::collections::HashSet<&'static str> {
+    [
+        // --- Column existence mismatches ---
+        // Column in Diesel but not CRDB:
+        "bp_omicron_zone.underlay_address",
+        "inv_omicron_sled_config_dataset.sled_id",
+        "inv_omicron_sled_config_disk.sled_id",
+        "silo_group.active",
+        "tuf_trust_root.time_modified",
+        // Column in CRDB but not Diesel:
+        "external_subnet.first_address",
+        "external_subnet.last_address",
+        "inv_collection_error.rowid",
+        // --- Type mismatches (mostly CRDB nullable, Diesel non-nullable) ---
+        "bfd_session.mode",
+        "bgp_peer_view.min_ttl",
+        "internet_gateway_ip_address.address",
+        "internet_gateway_ip_address.internet_gateway_id",
+        "internet_gateway_ip_pool.internet_gateway_id",
+        "internet_gateway_ip_pool.ip_pool_id",
+        "inv_collection_error.message",
+        "inv_nvme_disk_firmware.slot1_is_read_only",
+        "inv_nvme_disk_firmware.slot_firmware_versions",
+        "multicast_group_member.source_ips",
+        "silo_group.user_provision_type",
+        "silo_user.user_provision_type",
+        "subnet_pool_member.first_address",
+        "subnet_pool_member.last_address",
+        "switch_port.port_name",
+        "switch_port.rack_id",
+        "switch_port.switch_location",
+        "switch_port_settings_bgp_peer_config.connect_retry",
+        "switch_port_settings_bgp_peer_config.delay_open",
+        "switch_port_settings_bgp_peer_config.hold_time",
+        "switch_port_settings_bgp_peer_config.idle_hold_time",
+        "switch_port_settings_bgp_peer_config.interface_name",
+        "switch_port_settings_bgp_peer_config.keepalive",
+        "switch_port_settings_bgp_peer_config.port_settings_id",
+        "switch_port_settings_interface_config.kind",
+        "switch_port_settings_interface_config.port_settings_id",
+        "switch_port_settings_link_config.mtu",
+        "switch_port_settings_link_config.speed",
+        "switch_port_settings_port_config.geometry",
+        "vmm.cpu_platform",
+    ]
+    .into_iter()
+    .collect()
+}
+
+#[tokio::test]
+async fn diesel_schema_matches_crdb_schema() {
+    let config = load_test_config();
+    let logctx =
+        LogContext::new("diesel_schema_matches_crdb_schema", &config.pkg.log);
+    let log = &logctx.log;
+
+    // Spin up CRDB populated with dbinit.sql
+    let db = TestDatabase::new_populate_schema_only(log).await;
+    let crdb = db.crdb();
+
+    // Query CRDB for all column metadata and identify views
+    let crdb_tables = query_crdb_columns(crdb).await;
+    let crdb_views = query_crdb_views(crdb).await;
+
+    db.terminate().await;
+
+    // Parse enum mapping from enums.rs
+    let enum_map = parse_enum_mapping();
+
+    // Build diesel_tables from the auto-registered DIESEL_TABLES slice
+    let diesel_tables: BTreeMap<&str, Vec<(&str, &str)>> =
+        nexus_db_schema::DIESEL_TABLES
+            .iter()
+            .map(|info| (info.name, (info.columns)()))
+            .collect();
+
+    let mut errors: Vec<String> = Vec::new();
+    let mut warnings: Vec<String> = Vec::new();
+    let known = known_drift();
+    let mut known_triggered: std::collections::HashSet<&str> =
+        std::collections::HashSet::new();
+
+    // Check: every Diesel table should exist in CRDB.
+    for diesel_table in diesel_tables.keys() {
+        if DIESEL_ONLY_TABLES.contains(diesel_table) {
+            continue;
+        }
+        if !crdb_tables.contains_key(*diesel_table) {
+            errors.push(format!(
+                "Table '{diesel_table}' exists in Diesel schema (schema.rs) \
+                 but is missing from CRDB (dbinit.sql).",
+            ));
+        }
+    }
+
+    // For each table present in both, compare columns.
+    for (table_name, diesel_cols) in &diesel_tables {
+        if DIESEL_ONLY_TABLES.contains(table_name) {
+            continue;
+        }
+        let Some(crdb_cols) = crdb_tables.get(*table_name) else {
+            // Already reported above.
+            continue;
+        };
+
+        let is_view = crdb_views.contains(*table_name);
+
+        // Build a map of CRDB columns for this table.
+        let crdb_col_map: HashMap<&str, &CrdbColumn> =
+            crdb_cols.iter().map(|c| (c.column_name.as_str(), c)).collect();
+
+        // Check each Diesel column exists in CRDB with the right type.
+        for (col_name, diesel_type_name) in diesel_cols {
+            let key = format!("{table_name}.{col_name}");
+            let Some(crdb_col) = crdb_col_map.get(col_name) else {
+                if known.contains(key.as_str()) {
+                    known_triggered.insert(known.get(key.as_str()).unwrap());
+                    warnings.push(format!(
+                        "(known drift) {key}: column in Diesel but not CRDB",
+                    ));
+                } else {
+                    errors.push(format!(
+                        "{key}: column exists in Diesel \
+                         (schema.rs) but not in CRDB (dbinit.sql)",
+                    ));
+                }
+                continue;
+            };
+
+            // Handle known nullable exceptions: schema.rs says Nullable
+            // but CRDB says NOT NULL. For these, we compare against the
+            // nullable version even though CRDB says NOT NULL.
+            let effective_nullable =
+                if is_known_nullable_exception(table_name, col_name) {
+                    true
+                } else {
+                    crdb_col.is_nullable
+                };
+
+            // Normalize the Diesel type_name to account for internal
+            // module paths and type aliases.
+            let normalized = normalize_diesel_type(diesel_type_name);
+
+            match expected_diesel_type(
+                &crdb_col.data_type,
+                effective_nullable,
+                &crdb_col.udt_name,
+                &enum_map,
+            ) {
+                Ok(expected) => {
+                    let matches = if is_view {
+                        // For views, information_schema reports all
+                        // columns as nullable regardless of the
+                        // underlying query. So we compare types after
+                        // stripping Nullable<> from both sides.
+                        diesel_type_matches_ignoring_nullability(
+                            &normalized,
+                            &expected,
+                        )
+                    } else {
+                        diesel_type_matches_expected(&normalized, &expected)
+                    };
+                    if !matches {
+                        if known.contains(key.as_str()) {
+                            known_triggered
+                                .insert(known.get(key.as_str()).unwrap());
+                            warnings.push(format!(
+                                "(known drift) {key}: type mismatch \
+                                 diesel={normalized} expected={expected}",
+                            ));
+                        } else {
+                            errors.push(format!(
+                                "{key}: type mismatch\n  \
+                                 Diesel (schema.rs): {normalized}\n  \
+                                 Expected from CRDB: {expected}\n  \
+                                 CRDB info: data_type={}, is_nullable={}, \
+                                 udt_name={}",
+                                crdb_col.data_type,
+                                crdb_col.is_nullable,
+                                crdb_col.udt_name,
+                            ));
+                        }
+                    }
+                }
+                Err(e) => {
+                    if known.contains(key.as_str()) {
+                        known_triggered
+                            .insert(known.get(key.as_str()).unwrap());
+                        warnings.push(format!("(known drift) {key}: {e}",));
+                    } else {
+                        errors.push(format!(
+                            "{key}: {e} (CRDB data_type={}, udt_name={})",
+                            crdb_col.data_type, crdb_col.udt_name,
+                        ));
+                    }
+                }
+            }
+        }
+
+        // Check each CRDB column exists in Diesel.
+        let diesel_col_names: std::collections::HashSet<&str> =
+            diesel_cols.iter().map(|(name, _)| *name).collect();
+        for crdb_col in crdb_cols {
+            if !diesel_col_names.contains(crdb_col.column_name.as_str()) {
+                let key = format!("{table_name}.{}", crdb_col.column_name);
+                if known.contains(key.as_str()) {
+                    known_triggered.insert(known.get(key.as_str()).unwrap());
+                    warnings.push(format!(
+                        "(known drift) {key}: column in CRDB but not Diesel",
+                    ));
+                } else {
+                    errors.push(format!(
+                        "{key}: column exists in CRDB (dbinit.sql) \
+                         but not in Diesel (schema.rs)",
+                    ));
+                }
+            }
+        }
+    }
+
+    // Report warnings (known drift) for visibility.
+    if !warnings.is_empty() {
+        warnings.sort();
+        eprintln!(
+            "Known schema drift ({} item(s), fix when possible):\n  {}",
+            warnings.len(),
+            warnings.join("\n  "),
+        );
+    }
+
+    // Check for stale known_drift entries that no longer trigger.
+    let stale: Vec<&&str> = known.difference(&known_triggered).collect();
+    if !stale.is_empty() {
+        let mut stale_sorted: Vec<&str> = stale.into_iter().copied().collect();
+        stale_sorted.sort();
+        errors.push(format!(
+            "The following known_drift entries no longer trigger and \
+             should be removed:\n  {}",
+            stale_sorted.join("\n  "),
+        ));
+    }
+
+    if !errors.is_empty() {
+        errors.sort();
+        panic!(
+            "Diesel schema.rs does not match CRDB dbinit.sql \
+             ({} error(s)):\n\n{}",
+            errors.len(),
+            errors.join("\n\n"),
+        );
+    }
+
+    logctx.cleanup_successful();
+}

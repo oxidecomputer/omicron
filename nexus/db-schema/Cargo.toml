@@ -15,6 +15,7 @@ omicron-rpaths.workspace = true
 # expensive to compile) can be parallelized with other parts of Omicron. Please
 # avoid adding dependencies to other parts of Omicron here!
 diesel.workspace = true
+linkme.workspace = true
 omicron-workspace-hack.workspace = true
 # See omicron-rpaths for more about the "pq-sys" dependency.
 pq-sys = "*"

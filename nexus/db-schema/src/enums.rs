@@ -15,6 +15,16 @@ macro_rules! define_enums {
             #[diesel(postgres_type(name = $postgres_name, schema = "public"))]
             pub struct $enum_name;
         )*
+
+        /// Returns a mapping from CRDB enum type name to the Diesel
+        /// `type_name` string for every enum defined in this module.
+        pub fn crdb_to_diesel_enum_type_names()
+            -> Vec<(&'static str, &'static str)>
+        {
+            vec![
+                $(($postgres_name, std::any::type_name::<$enum_name>()),)*
+            ]
+        }
     };
 }
 
