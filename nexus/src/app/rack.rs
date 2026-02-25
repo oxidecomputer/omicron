@@ -658,7 +658,7 @@ impl super::Nexus {
                 speed: uplink_config.uplink_port_speed.into(),
                 autoneg: uplink_config.autoneg,
                 lldp,
-                tx_eq: uplink_config.tx_eq.map(|t| t.into()),
+                tx_eq: uplink_config.tx_eq,
             };
 
             port_settings_params.links.push(link);

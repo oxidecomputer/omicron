@@ -896,11 +896,9 @@ impl ServiceInner {
                                 vlan_id: a.vlan_id,
                             })
                             .collect(),
-                        switch: config.switch.into(),
-                        uplink_port_speed: config.uplink_port_speed.into(),
-                        uplink_port_fec: config
-                            .uplink_port_fec
-                            .map(|fec| fec.into()),
+                        switch: config.switch,
+                        uplink_port_speed: config.uplink_port_speed,
+                        uplink_port_fec: config.uplink_port_fec,
                         autoneg: config.autoneg,
                         bgp_peers: config
                             .bgp_peers
@@ -990,7 +988,7 @@ impl ServiceInner {
                         mode: spec.mode,
                         remote: spec.remote,
                         required_rx: spec.required_rx,
-                        switch: spec.switch.into(),
+                        switch: spec.switch,
                     })
                     .collect(),
             }
