@@ -6454,7 +6454,7 @@ pub trait NexusExternalApi {
         tags = ["system/update"],
         versions = VERSION_SET_TARGET_RELEASE_UPDATE_RECOVERY..
     }]
-    async fn target_release_update_recovery(
+    async fn system_update_recovery_finish(
         rqctx: RequestContext<Self::Context>,
         params: TypedBody<latest::update::SetTargetReleaseParams>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;

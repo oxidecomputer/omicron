@@ -7156,7 +7156,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
         .await
     }
 
-    async fn target_release_update_recovery(
+    async fn system_update_recovery_finish(
         rqctx: RequestContext<Self::Context>,
         body: TypedBody<update::SetTargetReleaseParams>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
