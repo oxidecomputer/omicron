@@ -762,7 +762,7 @@ pub trait SledAgentApi {
     /// consistent. Reads from individual nodes may not represent the latest state.
     // THIS HAS BEEN REMOVED AND SHOULD NOT BE RESTORED. Reading from the
     // bootstore cache is inherently racy; the bootstore is eventually
-    // consistent, but reads from different nodes may return different values.
+    // consistent, and reads from different nodes may return different values.
     // Instead, callers should read from CRDB.
     #[endpoint {
         method = GET,
