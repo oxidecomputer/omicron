@@ -147,7 +147,7 @@ impl From<omicron_common::api::internal::nexus::VmmRuntimeState>
 impl From<Vmm> for sled_agent_client::types::VmmRuntimeState {
     fn from(s: Vmm) -> Self {
         Self {
-            r#gen: s.runtime.generation.into(),
+            gen_: s.runtime.generation.into(),
             state: s.runtime.state.into(),
             time_updated: s.runtime.time_state_updated,
         }
