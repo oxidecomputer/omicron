@@ -4991,6 +4991,9 @@ enum ScalarType {
     Binary,
     Jsonb,
     Interval,
+    Numeric,
+    Date,
+    Timestamp,
     /// An enum type defined in nexus_db_schema::enums.
     /// Contains the full type_name string (e.g.,
     /// "nexus_db_schema::enums::BlockSizeEnum").
@@ -5015,6 +5018,11 @@ impl std::fmt::Display for ScalarType {
             ScalarType::Binary => f.write_str("diesel::sql_types::Binary"),
             ScalarType::Jsonb => f.write_str("diesel::sql_types::Jsonb"),
             ScalarType::Interval => f.write_str("diesel::sql_types::Interval"),
+            ScalarType::Numeric => f.write_str("diesel::sql_types::Numeric"),
+            ScalarType::Date => f.write_str("diesel::sql_types::Date"),
+            ScalarType::Timestamp => {
+                f.write_str("diesel::sql_types::Timestamp")
+            }
             ScalarType::Enum(name) => f.write_str(name),
         }
     }
@@ -5081,6 +5089,9 @@ fn parse_scalar_type(s: &str) -> Result<ScalarType, String> {
         "diesel::sql_types::Binary" => Ok(ScalarType::Binary),
         "diesel::sql_types::Jsonb" => Ok(ScalarType::Jsonb),
         "diesel::sql_types::Interval" => Ok(ScalarType::Interval),
+        "diesel::sql_types::Numeric" => Ok(ScalarType::Numeric),
+        "diesel::sql_types::Date" => Ok(ScalarType::Date),
+        "diesel::sql_types::Timestamp" => Ok(ScalarType::Timestamp),
         _ if s.starts_with("nexus_db_schema::enums::") => {
             Ok(ScalarType::Enum(s.to_string()))
         }
@@ -5109,6 +5120,9 @@ fn udt_to_scalar_type(udt_name: &str) -> Option<ScalarType> {
         "text" | "varchar" => Some(ScalarType::Text),
         "timestamptz" => Some(ScalarType::Timestamptz),
         "uuid" => Some(ScalarType::Uuid),
+        "numeric" => Some(ScalarType::Numeric),
+        "date" => Some(ScalarType::Date),
+        "timestamp" => Some(ScalarType::Timestamp),
         _ => None,
     }
 }
