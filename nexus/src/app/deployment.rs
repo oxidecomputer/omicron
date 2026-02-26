@@ -333,12 +333,12 @@ impl super::Nexus {
                 // version N. From Nexus's point of view this looks like a
                 // version downgrade, but it's not: we're still trying to
                 // recover from a mupdate.)
+                let current_version = self
+                    .datastore()
+                    .tuf_repo_get_version(&opctx, &tuf_repo_id)
+                    .await?;
                 let validation_result = match intent {
                     SetTargetReleaseIntent::Update => {
-                        let current_version = self
-                            .datastore()
-                            .tuf_repo_get_version(&opctx, &tuf_repo_id)
-                            .await?;
                         validate_can_set_target_release_for_update(
                             &current_blueprint,
                             &current_version,
@@ -349,6 +349,7 @@ impl super::Nexus {
                     SetTargetReleaseIntent::RecoverFromMupdate => {
                         validate_can_set_target_release_for_mupdate_recovery(
                             &current_blueprint,
+                            &current_version,
                         )
                     }
                 };
@@ -414,28 +415,29 @@ enum TargetReleaseChangeError {
 // We must be very generous here, as discussed at our call site in
 // `target_release_update()` above. We only reject this request if there are no
 // sleds waiting for recovery from a mupdate. Because of this, this function
-// does not take any arguments about the current or proposed system
-// version (unlike `validate_can_set_target_release_for_update()`). Mupdate can
-// bypass all our typical version ordering requirements, so we have to allow
-// recovery to the _actual_ version it installed, regardless of what we
-// currently have on the system.
+// does not take an arguments about the proposed system version (unlike
+// `validate_can_set_target_release_for_update()`). Mupdate can bypass all our
+// typical version ordering requirements, so we have to allow recovery to the
+// _actual_ version it installed, regardless of what we currently have on the
+// system.
 fn validate_can_set_target_release_for_mupdate_recovery(
     current_blueprint: &Blueprint,
+    current_target_version: &semver::Version,
 ) -> Result<(), TargetReleaseChangeError> {
+    let current_target_version = current_target_version.to_string();
+
     // Check sled configs first.
     for (_, sled_config) in current_blueprint.active_sled_configs() {
-        match check_sled_config_for_mupdate(sled_config) {
-            // No mupdate detected; move on to the next sled.
-            Ok(_) => continue,
-
-            // The way the mupdate was detected doesn't matter to us - any
-            // evidence of a mupdate means we're waiting for recovery.
-            Err(
-                SledConfigMupdateDetected::RemoveMupdateOverridePresent
-                | SledConfigMupdateDetected::CurrentContents,
-            ) => {
+        match SledUpdateStatus::new(sled_config, &current_target_version) {
+            SledUpdateStatus::HasUnresolvedMupdate(_) => {
+                // We don't care how we found the unresolved mupdate; the fact
+                // that it exists means we're done.
                 return Ok(());
             }
+
+            // No evidence of a mupdate; move on to the next sled.
+            SledUpdateStatus::PreviousUpdatePending
+            | SledUpdateStatus::RunningCurrentVersion => continue,
         }
     }
 
@@ -559,74 +561,29 @@ fn validate_can_set_target_release_for_update(
 
     // Check sled configs first.
     for (sled_id, sled_config) in current_blueprint.active_sled_configs() {
-        let os_versions = match check_sled_config_for_mupdate(sled_config) {
-            // If no mupdate was detected, we get back an iterator over the
-            // versions found in the OS slot(s).
-            Ok(os_versions) => os_versions,
-            Err(SledConfigMupdateDetected::RemoveMupdateOverridePresent) => {
+        match SledUpdateStatus::new(sled_config, &current_target_version) {
+            SledUpdateStatus::HasUnresolvedMupdate(how) => {
                 warn!(
                     log,
-                    "cannot start update: mupdate override in place";
+                    "cannot start update: mupdate detected";
                     "sled_id" => %sled_id,
+                    "mupdated_detected_how" => ?how,
                 );
                 return Err(
                     TargetReleaseChangeError::WaitingForMupdateToBeCleared,
                 );
             }
-            Err(SledConfigMupdateDetected::CurrentContents) => {
+            SledUpdateStatus::PreviousUpdatePending => {
                 warn!(
                     log,
-                    "cannot start update: host OS has been mupdated";
+                    "cannot start update: host OS update not complete";
                     "sled_id" => %sled_id,
                 );
-                return Err(
-                    TargetReleaseChangeError::WaitingForMupdateToBeCleared,
-                );
+                return Err(TargetReleaseChangeError::PreviousUpdateInProgress);
             }
-        };
-
-        // Blueprints don't check which slot is supposed to be the boot disk
-        // (maybe they should?), so checking the host OS is a little funky. We
-        // consider the system to be updateable (as far as this check is
-        // concerned) if _either_ slot is set to an artifact with a version that
-        // matches the current system target version, with the expectation that
-        // seeing that means we updated this sled to that version.
-        //
-        // This is not as precise as we'd like, but in practice is unlikely to
-        // be a problem: OS slots are updated before zones, so even if we
-        // erroneously claim the OS is up to date when it isn't (e.g., if it's
-        // still booting out of an old slot), there will be many zones present
-        // that are not yet updated.
-        let mut found_current_version_in_either_slot = false;
-        for version in os_versions {
-            match version {
-                BlueprintArtifactVersion::Available { version } => {
-                    if version.as_str() == current_target_version {
-                        found_current_version_in_either_slot = true;
-                        break;
-                    }
-                }
-                BlueprintArtifactVersion::Unknown => {
-                    // This shouldn't happen; it means we have an artifact
-                    // source in the blueprint that doesn't match a known
-                    // artifact in the database. Should we instead load all
-                    // the artifacts in the current target release and check
-                    // hashes?
-                    //
-                    // For now, treat this as "not the current version".
-                }
+            SledUpdateStatus::RunningCurrentVersion => {
+                // This sled is okay to update; move on to the next.
             }
-        }
-
-        // If neither slot contains the current version, we're not done
-        // upgrading to it.
-        if !found_current_version_in_either_slot {
-            warn!(
-                log,
-                "cannot start update: host OS update not complete";
-                "sled_id" => %sled_id,
-            );
-            return Err(TargetReleaseChangeError::PreviousUpdateInProgress);
         }
     }
 
@@ -702,64 +659,108 @@ fn validate_can_set_target_release_for_update(
 //
 // (Does not count the zones _within_ a `BlueprintSledConfig`; those are checked
 // elsewhere.)
-enum SledConfigMupdateDetected {
+#[derive(Debug, Clone, Copy)]
+enum SledMupdateDetectedHow {
     RemoveMupdateOverridePresent,
-    CurrentContents,
+    BootDiskContents,
 }
 
-// Inspect `sled_config` and look for evidence of a mupdate.
-//
-// If `sled_config` indicates a mupdate has taken place, returns `Err(how)` with
-// a note how it was detected. Otherwise, returns `Ok(versions)`, an iterator
-// over the (1 or 2) OS versions present in each of the A and B M.2 slots.
-fn check_sled_config_for_mupdate(
-    sled_config: &BlueprintSledConfig,
-) -> Result<
-    impl Iterator<Item = &BlueprintArtifactVersion>,
-    SledConfigMupdateDetected,
-> {
-    // Is the planner currently trying to remove a mupdate override from this
-    // sled?
-    if sled_config.remove_mupdate_override.is_some() {
-        return Err(SledConfigMupdateDetected::RemoveMupdateOverridePresent);
-    }
+// Update status of a sled, not considering its zones, based on the current
+// target version.
+enum SledUpdateStatus {
+    // The sled has been mupdated and is waiting on mupdate recovery.
+    HasUnresolvedMupdate(SledMupdateDetectedHow),
 
-    // This sled does not have a `remove_mupdate_override` set; now check the OS
-    // slots.
-    //
-    // After the blueprint planner detects a mupdate override, it sets
-    // `remove_mupdate_override` to `Some(_)` _and_ sets all OS and zone sources
-    // to `CurrentContents` (OS) and `InstallDataset` (zones). Once sled-agent
-    // has received that new config, it will remove its mupdate override, and
-    // then the planner will set `remove_mupdate_override` back to `None`. But
-    // we're still waiting for mupdate recovery if our OS slots are set to
-    // `CurrentContents` or any zone is sourced from `InstallDataset`.
+    // The sled is not waiting on mupdate recovery, but is not running the
+    // current target version.
+    PreviousUpdatePending,
 
-    // If both OS slots are set to `CurrentContents`, we've been mupdated.
-    // Otherwise, note the version(s) present in one or both slots.
-    //
-    // When we're called by `validate_can_set_target_release_for_update()`, it
-    // cares about the slot versions, so we'll give back an iterator of all the
-    // versions. (This will contain either 1 or 2 items - if it's 0, we've been
-    // mupdated, and we'll return the appropriate error.)
-    let mut os_versions_iter =
-        [&sled_config.host_phase_2.slot_a, &sled_config.host_phase_2.slot_b]
-            .into_iter()
-            .filter_map(|slot| match slot {
-                BlueprintHostPhase2DesiredContents::CurrentContents => None,
+    // The sled is not waiting on mupdate recovery and is running the current
+    // target version.
+    RunningCurrentVersion,
+}
+
+impl SledUpdateStatus {
+    // Determine the [`SledUpdateStatus`] of the given sled based on its config
+    // and the current target version.
+    fn new(
+        sled_config: &BlueprintSledConfig,
+        current_target_version: &str,
+    ) -> Self {
+        // Is the planner currently trying to remove a mupdate override from
+        // this sled?
+        if sled_config.remove_mupdate_override.is_some() {
+            return Self::HasUnresolvedMupdate(
+                SledMupdateDetectedHow::RemoveMupdateOverridePresent,
+            );
+        }
+
+        // This sled does not have a `remove_mupdate_override` set; now check
+        // the OS slots.
+        //
+        // After the blueprint planner detects a mupdate override, it sets
+        // `remove_mupdate_override` to `Some(_)` _and_ sets all OS and zone
+        // sources to `CurrentContents` (OS) and `InstallDataset` (zones). Once
+        // sled-agent has received that new config, it will remove its mupdate
+        // override, and then the planner will set `remove_mupdate_override`
+        // back to `None`. But we're still waiting for mupdate recovery if our
+        // OS slots are set to `CurrentContents` or any zone is sourced from
+        // `InstallDataset`. (Zone checks are performed elsewhere.)
+
+        // If both OS slots are set to `CurrentContents`, we've been mupdated.
+        // Otherwise, we consider this sled to be running the current target
+        // version if either slot matches. Ideally we'd only check the slot that
+        // is supposed to be booting, but blueprints don't currently track that
+        // (maybe they should?).
+        //
+        // This is not as precise as we'd like, but in practice is unlikely to
+        // be a problem: OS slots are updated before zones, so even if we
+        // erroneously claim the OS is up to date when it isn't (e.g., if it's
+        // still booting out of an old slot), there will be many zones present
+        // that are not yet updated.
+        let mut num_slots_with_current_contents = 0;
+        let mut found_current_version_in_either_slot = false;
+        for slot in
+            [&sled_config.host_phase_2.slot_a, &sled_config.host_phase_2.slot_b]
+        {
+            match slot {
+                BlueprintHostPhase2DesiredContents::CurrentContents => {
+                    num_slots_with_current_contents += 1;
+                }
                 BlueprintHostPhase2DesiredContents::Artifact {
                     version,
                     ..
-                } => Some(version),
-            })
-            .peekable();
+                } => match version {
+                    BlueprintArtifactVersion::Available { version } => {
+                        if version.as_str() == current_target_version {
+                            found_current_version_in_either_slot = true;
+                            break;
+                        }
+                    }
+                    BlueprintArtifactVersion::Unknown => {
+                        // This shouldn't happen; it means we have an artifact
+                        // source in the blueprint that doesn't match a known
+                        // artifact in the database. It is certainly true that
+                        // it's not the current version and not evidence of a
+                        // mupdate, though, so we treat it just like any other
+                        // "not current version".
+                    }
+                },
+            }
+        }
 
-    // `os_versions_iter` will have no elements if and only if both slots are
-    // set to `CurrentContents`, which is exactly the signal of a mupdate.
-    if os_versions_iter.peek().is_none() {
-        Err(SledConfigMupdateDetected::CurrentContents)
-    } else {
-        Ok(os_versions_iter)
+        // As noted above, but now condensed: if we found the current version in
+        // either slot, we assume this sled is updated. If we instead found
+        // `CurrentContents` in both slots, this sled has been mupdated. Any
+        // other combination means the sled has not been mupdated but also isn't
+        // running the current version; i.e., it's still waiting on an update.
+        if found_current_version_in_either_slot {
+            Self::RunningCurrentVersion
+        } else if num_slots_with_current_contents == 2 {
+            Self::HasUnresolvedMupdate(SledMupdateDetectedHow::BootDiskContents)
+        } else {
+            Self::PreviousUpdatePending
+        }
     }
 }
 
@@ -1128,7 +1129,10 @@ mod tests {
         // evidence of a mupdate. We should not be able to set the target
         // release for mupdate recovery.
         assert_eq!(
-            validate_can_set_target_release_for_mupdate_recovery(&blueprint),
+            validate_can_set_target_release_for_mupdate_recovery(
+                &blueprint,
+                &current_version
+            ),
             Err(TargetReleaseChangeError::NoMupdateRecoveryNeeded)
         );
 
@@ -1176,7 +1180,8 @@ mod tests {
         ] {
             assert_eq!(
                 validate_can_set_target_release_for_mupdate_recovery(
-                    &blueprint
+                    &blueprint,
+                    &current_version,
                 ),
                 Ok(()),
                 "should find evidence of mupdate in blueprint: {description}"
