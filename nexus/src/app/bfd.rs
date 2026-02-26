@@ -14,7 +14,7 @@ impl super::Nexus {
         switch: SwitchLocation,
     ) -> Result<mg_admin_client::Client, Error> {
         let mg_client: mg_admin_client::Client = self
-            .mg_clients()
+            .mgd_clients()
             .await
             .map_err(|e| {
                 Error::internal_error(&format!("failed to get mg clients: {e}"))

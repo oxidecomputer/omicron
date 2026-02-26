@@ -6,10 +6,8 @@
 //! to relevant management daemons (dendrite, mgd, sled-agent, etc.)
 
 use crate::app::{
-    background::tasks::networking::{
-        api_to_dpd_port_settings, build_mgd_clients,
-    },
-    dpd_clients, switch_zone_address_mappings,
+    background::tasks::networking::api_to_dpd_port_settings, dpd_clients,
+    mgd_clients, switch_zone_address_mappings,
 };
 use oxnet::{IpNet, Ipv4Net, Ipv6Net};
 use slog::{Logger, o};
@@ -398,8 +396,19 @@ impl BackgroundTask for SwitchPortSettingsManager {
                 };
 
                 // TODO https://github.com/oxidecomputer/omicron/issues/5201
-                // build mgd clients
-                let mgd_clients = build_mgd_clients(mappings, &log, &self.resolver).await;
+                let mgd_clients = match
+                    mgd_clients(&self.resolver, &log).await
+                {
+                    Ok(mappings) => mappings,
+                    Err(e) => {
+                        error!(
+                            log,
+                            "failed to resolve addresses for Maghemite";
+                            "error" => %e);
+                        continue;
+                    },
+                };
+
 
                 let port_list = match self.switch_ports(opctx, &log).await {
                     Ok(value) => value,

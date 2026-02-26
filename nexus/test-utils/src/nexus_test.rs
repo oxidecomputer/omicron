@@ -115,6 +115,7 @@ pub struct ControlPlaneTestContext<N> {
     pub gateway: BTreeMap<SwitchLocation, GatewayTestContext>,
     pub dendrite:
         RwLock<HashMap<SwitchLocation, dev::dendrite::DendriteInstance>>,
+    pub lldpd: HashMap<SwitchLocation, dev::lldp::LldpdInstance>,
     /// Ports of stopped dendrite instances (for use by start_dendrite)
     pub stopped_dendrite_ports: RwLock<HashMap<SwitchLocation, u16>>,
     pub mgd: HashMap<SwitchLocation, dev::maghemite::MgdInstance>,
@@ -326,6 +327,9 @@ impl<N: NexusServer> ControlPlaneTestContext<N> {
         }
         for (_, mut mgd) in self.mgd {
             mgd.cleanup().await.unwrap();
+        }
+        for (_, mut lldpd) in self.lldpd {
+            lldpd.cleanup().await.unwrap();
         }
         self.logctx.cleanup_successful();
     }

@@ -262,7 +262,13 @@ pub struct DpdConfig {
     pub address: SocketAddr,
 }
 
-/// Configuration for the `Dendrite` dataplane daemon.
+/// Configuration for the `LLDP` daemon.
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+pub struct LldpdConfig {
+    pub address: SocketAddr,
+}
+
+/// Configuration for the `Maghemite` routing daemon.
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct MgdConfig {
     pub address: SocketAddr,
@@ -1001,6 +1007,9 @@ pub struct PackageConfig {
     /// `Dendrite` dataplane daemon configuration
     #[serde(default)]
     pub dendrite: HashMap<SwitchLocation, DpdConfig>,
+    /// `LLDP` daemon configuration
+    #[serde(default)]
+    pub lldpd: HashMap<SwitchLocation, LldpdConfig>,
     /// Maghemite mgd daemon configuration
     #[serde(default)]
     pub mgd: HashMap<SwitchLocation, MgdConfig>,
@@ -1185,6 +1194,8 @@ mod test {
             type = "from_dns"
             [dendrite.switch0]
             address = "[::1]:12224"
+            [lldpd.switch0]
+            address = "[::1]:12230"
             [mgd.switch0]
             address = "[::1]:4676"
             [initial_reconfigurator_config]
@@ -1339,6 +1350,13 @@ mod test {
                         SwitchLocation::Switch0,
                         DpdConfig {
                             address: SocketAddr::from_str("[::1]:12224")
+                                .unwrap(),
+                        }
+                    )]),
+                    lldpd: HashMap::from([(
+                        SwitchLocation::Switch0,
+                        LldpdConfig {
+                            address: SocketAddr::from_str("[::1]:12230")
                                 .unwrap(),
                         }
                     )]),

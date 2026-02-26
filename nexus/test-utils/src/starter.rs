@@ -27,6 +27,7 @@ use internal_dns_types::names::ServiceName;
 use nexus_config::Database;
 use nexus_config::DpdConfig;
 use nexus_config::InternalDns;
+use nexus_config::LldpdConfig;
 use nexus_config::MgdConfig;
 use nexus_config::NUM_INITIAL_RESERVED_IP_ADDRESSES;
 use nexus_config::NexusConfig;
@@ -146,6 +147,7 @@ pub struct ControlPlaneStarter<'a, N: NexusServer> {
     pub dendrite:
         RwLock<HashMap<SwitchLocation, dev::dendrite::DendriteInstance>>,
     pub mgd: HashMap<SwitchLocation, dev::maghemite::MgdInstance>,
+    pub lldpd: HashMap<SwitchLocation, dev::lldp::LldpdInstance>,
 
     // NOTE: Only exists after starting Nexus, until external Nexus is
     // initialized.
@@ -202,6 +204,7 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
             producer: None,
             gateway: BTreeMap::new(),
             dendrite: RwLock::new(HashMap::new()),
+            lldpd: HashMap::new(),
             mgd: HashMap::new(),
             nexus_internal: None,
             nexus_internal_addr: None,
@@ -445,12 +448,43 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
         self.config.pkg.dendrite.insert(switch_location, config);
     }
 
+    pub async fn start_lldp(&mut self, switch_location: SwitchLocation) {
+        let log = &self.logctx.log;
+        debug!(log, "Starting LLDP for {switch_location}");
+        let mgs = self.gateway.get(&switch_location).unwrap();
+        let mgs_addr =
+            SocketAddrV6::new(Ipv6Addr::LOCALHOST, mgs.port, 0, 0).into();
+
+        let dpd_port =
+            self.dendrite.read().unwrap().get(&switch_location).unwrap().port;
+
+        // Set up an instance of lldpd
+        let lldpd =
+            dev::lldp::LldpdInstance::start(0, dpd_port, Some(mgs_addr))
+                .await
+                .unwrap();
+
+        let port = lldpd.port;
+        self.lldpd.insert(switch_location, lldpd);
+        let address = SocketAddrV6::new(Ipv6Addr::LOCALHOST, port, 0, 0);
+
+        debug!(log, "lldp port is {port}");
+
+        let config = LldpdConfig { address: std::net::SocketAddr::V6(address) };
+        self.config.pkg.lldpd.insert(switch_location, config);
+    }
+
     pub async fn start_mgd(&mut self, switch_location: SwitchLocation) {
         let log = &self.logctx.log;
         debug!(log, "Starting mgd for {switch_location}");
+        let mgs = self.gateway.get(&switch_location).unwrap();
+        let mgs_addr =
+            SocketAddrV6::new(Ipv6Addr::LOCALHOST, mgs.port, 0, 0).into();
 
         // Set up an instance of mgd
-        let mgd = dev::maghemite::MgdInstance::start(0).await.unwrap();
+        let mgd = dev::maghemite::MgdInstance::start(0, Some(mgs_addr))
+            .await
+            .unwrap();
         let port = mgd.port;
         self.mgd.insert(switch_location, mgd);
         let address = SocketAddrV6::new(Ipv6Addr::LOCALHOST, port, 0, 0);
@@ -487,6 +521,7 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
                     .port,
                 self.gateway.get(&switch_location).unwrap().port,
                 self.mgd.get(&switch_location).unwrap().port,
+                self.lldpd.get(&switch_location).unwrap().port,
             )
             .unwrap()
     }
@@ -1252,6 +1287,7 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
             logctx: self.logctx,
             gateway: self.gateway,
             dendrite: RwLock::new(self.dendrite.into_inner().unwrap()),
+            lldpd: self.lldpd,
             stopped_dendrite_ports: RwLock::new(HashMap::new()),
             mgd: self.mgd,
             external_dns_zone_name: self.external_dns_zone_name.unwrap(),
@@ -1294,6 +1330,9 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
         }
         for (_, mut mgd) in self.mgd {
             mgd.cleanup().await.unwrap();
+        }
+        for (_, mut lldpd) in self.lldpd {
+            lldpd.cleanup().await.unwrap();
         }
         self.logctx.cleanup_successful();
     }
@@ -1630,6 +1669,12 @@ pub(crate) async fn setup_with_config_impl<N: NexusServer>(
                     }),
                 ),
                 (
+                    "start_lldpd_switch0",
+                    Box::new(|builder| {
+                        builder.start_lldp(SwitchLocation::Switch0).boxed()
+                    }),
+                ),
+                (
                     "start_mgd_switch0",
                     Box::new(|builder| {
                         builder.start_mgd(SwitchLocation::Switch0).boxed()
@@ -1673,6 +1718,12 @@ pub(crate) async fn setup_with_config_impl<N: NexusServer>(
                             builder
                                 .start_dendrite(SwitchLocation::Switch1)
                                 .boxed()
+                        }),
+                    ),
+                    (
+                        "start_lldpd_switch1",
+                        Box::new(|builder| {
+                            builder.start_lldp(SwitchLocation::Switch1).boxed()
                         }),
                     ),
                     (

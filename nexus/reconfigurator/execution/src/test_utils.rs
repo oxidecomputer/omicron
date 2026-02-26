@@ -118,10 +118,12 @@ pub fn overridables_for_test(
             .unwrap()
             .port;
         let mgd_port = cptestctx.mgd.get(&switch_location).unwrap().port;
+        let lldpd_port = cptestctx.lldpd.get(&switch_location).unwrap().port;
         overrides.override_switch_zone_ip(sled_id, ip);
         overrides.override_dendrite_port(sled_id, dendrite_port);
         overrides.override_mgs_port(sled_id, mgs_port);
         overrides.override_mgd_port(sled_id, mgd_port);
+        overrides.override_lldpd_port(sled_id, lldpd_port);
     }
     overrides
 }
