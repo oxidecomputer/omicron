@@ -1460,7 +1460,7 @@ impl fmt::Display for BlueprintDisplay<'_> {
             );
             writeln!(f, "{host_phase_2_table}\n")?;
 
-            // Construct the desired host phase 2 contents table
+            // Construct the desired measurements
             let measurements_table = BpTable::new(
                 BpMeasurementsTableSchema {},
                 None,
