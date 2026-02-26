@@ -12,7 +12,7 @@ use nexus_types::external_api::networking;
 use nexus_types::identity::Resource;
 use omicron_common::api::external::Error;
 use omicron_common::api::{
-    external::{self, IdentityMetadataCreateParams},
+    external::IdentityMetadataCreateParams,
     internal::shared::rack_init::MaxPathConfig,
 };
 use serde::{Deserialize, Serialize};
@@ -41,7 +41,7 @@ pub struct BgpConfig {
     pub max_paths: SqlU8,
 }
 
-impl TryFrom<BgpConfig> for external::BgpConfig {
+impl TryFrom<BgpConfig> for networking::BgpConfig {
     type Error = Error;
 
     fn try_from(value: BgpConfig) -> Result<Self, Self::Error> {

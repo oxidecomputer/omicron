@@ -4,21 +4,63 @@
 
 //! Networking types for the `BGP_UNNUMBERED_PEERS` version.
 //!
-//! This version:
-//! - Adds `max_paths` to `BgpConfigCreate`.
-//! - Adds `peer_id` to `BgpPeerStatus`.
-//! - `BgpPeer`: makes `addr` optional; adds `router_lifetime`
-//! - Updates `SwitchPortSettings` to use the new `BgpPeer`
-//! - Updates `SwitchPortSettingsCreate` to use the new `BgpPeerConfig`.
+//! This version (2026_02_13_01) adds support for BGP unnumbered peers:
+//! - `BgpPeer.addr` becomes optional (unnumbered sessions).
+//! - `BgpPeer.router_lifetime` is added for IPv6 router advertisement
+//!   lifetime.
+//! - `BgpConfigCreate` gains a `max_paths` field for BGP multipath.
+//! - `BgpConfig` gains a `max_paths` field for BGP multipath.
+//! - `BgpPeerStatus` gains a `peer_id` field.
+//! - `BgpImported` replaces the IPv4-only `BgpImportedRouteIpv4`.
+//! - `BgpExported` becomes per-route instead of a HashMap.
+//! - `SwitchPortSettings` updated to use the new `BgpPeer`
+//! - `SwitchPortSettingsCreate` updated to use the new `BgpPeerConfig`.
 
 use crate::v2025_12_12_00::networking::BgpPeerState;
+use api_identity::ObjectIdentity;
 use omicron_common::api::external::{
     self, IdentityMetadata, IdentityMetadataCreateParams, MaxPathConfig, Name,
-    NameOrId, SwitchLocation,
+    NameOrId, ObjectIdentity, SwitchLocation,
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::net::IpAddr;
+
+/// A base BGP configuration.
+#[derive(
+    ObjectIdentity, Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq,
+)]
+pub struct BgpConfig {
+    #[serde(flatten)]
+    pub identity: IdentityMetadata,
+
+    /// The autonomous system number of this BGP configuration.
+    pub asn: u32,
+
+    /// Optional virtual routing and forwarding identifier for this BGP
+    /// configuration.
+    pub vrf: Option<String>,
+
+    /// Maximum number of paths to use when multiple "best paths" exist
+    pub max_paths: MaxPathConfig,
+}
+
+impl From<BgpConfig> for crate::v2025_11_20_00::networking::BgpConfig {
+    fn from(new: BgpConfig) -> Self {
+        Self { identity: new.identity, asn: new.asn, vrf: new.vrf }
+    }
+}
+
+impl From<crate::v2025_11_20_00::networking::BgpConfig> for BgpConfig {
+    fn from(old: crate::v2025_11_20_00::networking::BgpConfig) -> Self {
+        Self {
+            identity: old.identity,
+            asn: old.asn,
+            vrf: old.vrf,
+            max_paths: Default::default(),
+        }
+    }
+}
 
 /// Parameters for creating a BGP configuration. This includes an autonomous
 /// system number (ASN) and a virtual routing and forwarding (VRF) identifier.
@@ -386,5 +428,84 @@ impl From<crate::v2025_11_20_00::networking::SwitchPortSettingsCreate>
             bgp_peers: old.bgp_peers.into_iter().map(Into::into).collect(),
             addresses: old.addresses,
         }
+    }
+}
+
+/// Route exported to a peer.
+#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq)]
+pub struct BgpExported {
+    /// Identifier for the BGP peer.
+    pub peer_id: String,
+
+    /// Switch the route is exported from.
+    pub switch: SwitchLocation,
+
+    /// The destination network prefix.
+    pub prefix: oxnet::IpNet,
+}
+
+impl From<Vec<BgpExported>> for crate::v2025_11_20_00::networking::BgpExported {
+    fn from(values: Vec<BgpExported>) -> Self {
+        use std::collections::hash_map::Entry;
+
+        let mut out = Self::default();
+
+        for export in values {
+            let oxnet::IpNet::V4(net) = export.prefix else {
+                continue;
+            };
+            match out.exports.entry(export.peer_id) {
+                Entry::Occupied(mut occupied_entry) => {
+                    occupied_entry.get_mut().push(net);
+                }
+                Entry::Vacant(vacant_entry) => {
+                    vacant_entry.insert(vec![net]);
+                }
+            }
+        }
+
+        out
+    }
+}
+
+/// A route imported from a BGP peer.
+#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq)]
+pub struct BgpImported {
+    /// The destination network prefix.
+    pub prefix: oxnet::IpNet,
+
+    /// The nexthop the prefix is reachable through.
+    pub nexthop: IpAddr,
+
+    /// BGP identifier of the originating router.
+    pub id: u32,
+
+    /// Switch the route is imported into.
+    pub switch: SwitchLocation,
+}
+
+impl TryFrom<BgpImported>
+    for crate::v2025_11_20_00::networking::BgpImportedRouteIpv4
+{
+    type Error = String;
+
+    fn try_from(value: BgpImported) -> Result<Self, Self::Error> {
+        let BgpImported { prefix, nexthop, id, switch } = value;
+
+        let prefix = match prefix {
+            oxnet::IpNet::V4(ipv4_net) => Ok(ipv4_net),
+            oxnet::IpNet::V6(ipv6_net) => {
+                Err(format!("prefix must be Ipv4Net but it is {ipv6_net}"))
+            }
+        }?;
+
+        let nexthop = match nexthop {
+            IpAddr::V4(ipv4_addr) => Ok(ipv4_addr),
+            IpAddr::V6(ipv6_addr) => {
+                Err(format!("nexthop must be Ipv4Addr but it is {ipv6_addr}"))
+            }
+        }?;
+
+        Ok(Self { prefix, nexthop, id, switch })
     }
 }

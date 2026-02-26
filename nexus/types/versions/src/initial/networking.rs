@@ -18,7 +18,6 @@ use oxnet::IpNet;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::collections::hash_map::Entry;
 use std::net::{IpAddr, Ipv4Addr};
 use uuid::Uuid;
 
@@ -782,34 +781,6 @@ pub struct BgpImportedRouteIpv4 {
     pub switch: SwitchLocation,
 }
 
-// TODO: these conversion impls between initial types and
-// `omicron_common::api::external` types should live in the later version
-// module that introduced the shape change. They currently live here because
-// `omicron-common-versions` does not yet exist.
-impl TryFrom<external::BgpImported> for BgpImportedRouteIpv4 {
-    type Error = String;
-
-    fn try_from(value: external::BgpImported) -> Result<Self, Self::Error> {
-        let external::BgpImported { prefix, nexthop, id, switch } = value;
-
-        let prefix = match prefix {
-            oxnet::IpNet::V4(ipv4_net) => Ok(ipv4_net),
-            oxnet::IpNet::V6(ipv6_net) => {
-                Err(format!("prefix must be Ipv4Net but it is {ipv6_net}"))
-            }
-        }?;
-
-        let nexthop = match nexthop {
-            IpAddr::V4(ipv4_addr) => Ok(ipv4_addr),
-            IpAddr::V6(ipv6_addr) => {
-                Err(format!("nexthop must be Ipv4Addr but it is {ipv6_addr}"))
-            }
-        }?;
-
-        Ok(Self { prefix, nexthop, id, switch })
-    }
-}
-
 // BGP EXPORTED (old HashMap-based type)
 
 /// BGP exported routes indexed by peer address.
@@ -819,29 +790,6 @@ impl TryFrom<external::BgpImported> for BgpImportedRouteIpv4 {
 pub struct BgpExported {
     /// Exported routes indexed by peer address.
     pub exports: HashMap<String, Vec<oxnet::Ipv4Net>>,
-}
-
-// TODO: see above comment on `TryFrom<external::BgpImported>`.
-impl From<Vec<external::BgpExported>> for BgpExported {
-    fn from(values: Vec<external::BgpExported>) -> Self {
-        let mut out = Self::default();
-
-        for export in values {
-            let oxnet::IpNet::V4(net) = export.prefix else {
-                continue;
-            };
-            match out.exports.entry(export.peer_id) {
-                Entry::Occupied(mut occupied_entry) => {
-                    occupied_entry.get_mut().push(net);
-                }
-                Entry::Vacant(vacant_entry) => {
-                    vacant_entry.insert(vec![net]);
-                }
-            }
-        }
-
-        out
-    }
 }
 
 // BGP CONFIG (old version without max_paths)
@@ -860,27 +808,6 @@ pub struct BgpConfig {
     /// Optional virtual routing and forwarding identifier for this BGP
     /// configuration.
     pub vrf: Option<String>,
-}
-
-// TODO: these conversion impls between initial types and
-// `omicron_common::api::external` types should live in the later version
-// module that introduced the shape change. They currently live here because
-// `omicron-common-versions` does not yet exist.
-impl From<external::BgpConfig> for BgpConfig {
-    fn from(new: external::BgpConfig) -> Self {
-        BgpConfig { identity: new.identity, asn: new.asn, vrf: new.vrf }
-    }
-}
-
-impl From<BgpConfig> for external::BgpConfig {
-    fn from(old: BgpConfig) -> external::BgpConfig {
-        external::BgpConfig {
-            identity: old.identity,
-            asn: old.asn,
-            vrf: old.vrf,
-            max_paths: Default::default(),
-        }
-    }
 }
 
 // SWITCH PORT SETTINGS (old response type with required BgpPeer.addr)

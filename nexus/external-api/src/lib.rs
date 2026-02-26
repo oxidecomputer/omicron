@@ -4521,7 +4521,7 @@ pub trait NexusExternalApi {
     async fn networking_bgp_config_create(
         rqctx: RequestContext<Self::Context>,
         config: TypedBody<latest::networking::BgpConfigCreate>,
-    ) -> Result<HttpResponseCreated<BgpConfig>, HttpError>;
+    ) -> Result<HttpResponseCreated<latest::networking::BgpConfig>, HttpError>;
 
     /// Create new BGP configuration
     #[endpoint {
@@ -4558,7 +4558,10 @@ pub trait NexusExternalApi {
     async fn networking_bgp_config_list(
         rqctx: RequestContext<Self::Context>,
         query_params: Query<PaginatedByNameOrId>,
-    ) -> Result<HttpResponseOk<ResultsPage<BgpConfig>>, HttpError>;
+    ) -> Result<
+        HttpResponseOk<ResultsPage<latest::networking::BgpConfig>>,
+        HttpError,
+    >;
 
     /// List BGP configurations
     #[endpoint {
@@ -4651,7 +4654,7 @@ pub trait NexusExternalApi {
     }]
     async fn networking_bgp_exported(
         rqctx: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseOk<Vec<BgpExported>>, HttpError>;
+    ) -> Result<HttpResponseOk<Vec<latest::networking::BgpExported>>, HttpError>;
 
     //TODO pagination? the normal by-name/by-id stuff does not work here
     /// Get BGP exported routes
@@ -4712,7 +4715,7 @@ pub trait NexusExternalApi {
     async fn networking_bgp_imported(
         rqctx: RequestContext<Self::Context>,
         query_params: Query<latest::networking::BgpRouteSelector>,
-    ) -> Result<HttpResponseOk<Vec<BgpImported>>, HttpError>;
+    ) -> Result<HttpResponseOk<Vec<latest::networking::BgpImported>>, HttpError>;
 
     /// Delete BGP configuration
     #[endpoint {
