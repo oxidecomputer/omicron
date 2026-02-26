@@ -5014,9 +5014,7 @@ impl std::fmt::Display for ScalarType {
             ScalarType::Inet => f.write_str("diesel::sql_types::Inet"),
             ScalarType::Binary => f.write_str("diesel::sql_types::Binary"),
             ScalarType::Jsonb => f.write_str("diesel::sql_types::Jsonb"),
-            ScalarType::Interval => {
-                f.write_str("diesel::sql_types::Interval")
-            }
+            ScalarType::Interval => f.write_str("diesel::sql_types::Interval"),
             ScalarType::Enum(name) => f.write_str(name),
         }
     }
@@ -5090,44 +5088,27 @@ fn parse_scalar_type(s: &str) -> Result<ScalarType, String> {
     }
 }
 
-/// Maps a CRDB `data_type` string to the expected `ScalarType`.
+/// Maps a pg-internal `udt_name` value to the corresponding `ScalarType`.
 ///
-/// Returns `None` for types that need special handling (ARRAY, USER-DEFINED).
-fn crdb_base_type_to_diesel(data_type: &str) -> Option<ScalarType> {
-    match data_type {
-        "bigint" => Some(ScalarType::BigInt),
-        "boolean" => Some(ScalarType::Bool),
+/// CockroachDB's `information_schema.columns` provides `udt_name` for every
+/// column: scalar columns get unprefixed names (`"int8"`, `"float8"`,
+/// `"timestamptz"`), and array columns get `_`-prefixed versions (`"_int8"`).
+/// This function handles the unprefixed form; callers strip the `_` for arrays.
+fn udt_to_scalar_type(udt_name: &str) -> Option<ScalarType> {
+    match udt_name {
+        "bool" => Some(ScalarType::Bool),
         "bytea" => Some(ScalarType::Binary),
-        "double precision" => Some(ScalarType::Double),
+        "float4" => Some(ScalarType::Float),
+        "float8" => Some(ScalarType::Double),
         "inet" => Some(ScalarType::Inet),
-        "integer" => Some(ScalarType::Integer),
+        "int2" => Some(ScalarType::SmallInt),
+        "int4" => Some(ScalarType::Integer),
+        "int8" => Some(ScalarType::BigInt),
         "interval" => Some(ScalarType::Interval),
         "jsonb" => Some(ScalarType::Jsonb),
-        "real" => Some(ScalarType::Float),
-        "smallint" => Some(ScalarType::SmallInt),
-        "text" | "character varying" => Some(ScalarType::Text),
-        "timestamp with time zone" => Some(ScalarType::Timestamptz),
+        "text" | "varchar" => Some(ScalarType::Text),
+        "timestamptz" => Some(ScalarType::Timestamptz),
         "uuid" => Some(ScalarType::Uuid),
-        _ => None,
-    }
-}
-
-/// Maps a CRDB array element udt_name (e.g. `_text`) to the `ScalarType`.
-fn crdb_array_element_to_diesel(udt_name: &str) -> Option<ScalarType> {
-    match udt_name {
-        "_bool" => Some(ScalarType::Bool),
-        "_bytea" => Some(ScalarType::Binary),
-        "_float4" => Some(ScalarType::Float),
-        "_float8" => Some(ScalarType::Double),
-        "_inet" => Some(ScalarType::Inet),
-        "_int2" => Some(ScalarType::SmallInt),
-        "_int4" => Some(ScalarType::Integer),
-        "_int8" => Some(ScalarType::BigInt),
-        "_interval" => Some(ScalarType::Interval),
-        "_jsonb" => Some(ScalarType::Jsonb),
-        "_text" | "_varchar" => Some(ScalarType::Text),
-        "_timestamptz" => Some(ScalarType::Timestamptz),
-        "_uuid" => Some(ScalarType::Uuid),
         _ => None,
     }
 }
@@ -5155,15 +5136,14 @@ fn normalize_diesel_type(type_name: &str) -> Result<ColumnType, String> {
         .replace("diesel::pg::types::sql_types::", "diesel::sql_types::");
 
     // Strip outer Nullable<...>
-    let (nullable, inner) =
-        if let Some(rest) = s
-            .strip_prefix("diesel::sql_types::Nullable<")
-            .and_then(|r| r.strip_suffix('>'))
-        {
-            (true, rest)
-        } else {
-            (false, s.as_str())
-        };
+    let (nullable, inner) = if let Some(rest) = s
+        .strip_prefix("diesel::sql_types::Nullable<")
+        .and_then(|r| r.strip_suffix('>'))
+    {
+        (true, rest)
+    } else {
+        (false, s.as_str())
+    };
 
     // Check for Array<...>
     let kind = if let Some(array_inner) = inner
@@ -5171,15 +5151,14 @@ fn normalize_diesel_type(type_name: &str) -> Result<ColumnType, String> {
         .and_then(|r| r.strip_suffix('>'))
     {
         // Check for inner Nullable<...> on the element
-        let (element_nullable, elem_str) =
-            if let Some(rest) = array_inner
-                .strip_prefix("diesel::sql_types::Nullable<")
-                .and_then(|r| r.strip_suffix('>'))
-            {
-                (true, rest)
-            } else {
-                (false, array_inner)
-            };
+        let (element_nullable, elem_str) = if let Some(rest) = array_inner
+            .strip_prefix("diesel::sql_types::Nullable<")
+            .and_then(|r| r.strip_suffix('>'))
+        {
+            (true, rest)
+        } else {
+            (false, array_inner)
+        };
         ColumnTypeKind::Array {
             element: parse_scalar_type(elem_str)?,
             element_nullable,
@@ -5202,7 +5181,10 @@ fn expected_diesel_type(
     enum_map: &HashMap<String, ScalarType>,
 ) -> Result<ColumnType, String> {
     let kind = if data_type == "ARRAY" {
-        let elem = crdb_array_element_to_diesel(udt_name).ok_or_else(|| {
+        let elem_udt = udt_name.strip_prefix('_').ok_or_else(|| {
+            format!("array udt_name missing '_' prefix: {udt_name}")
+        })?;
+        let elem = udt_to_scalar_type(elem_udt).ok_or_else(|| {
             format!("unknown array element type: udt_name={udt_name}")
         })?;
         // CRDB doesn't distinguish nullable vs non-nullable array
@@ -5213,14 +5195,11 @@ fn expected_diesel_type(
         let scalar = enum_map
             .get(udt_name)
             .cloned()
-            .ok_or_else(|| {
-                format!("unknown enum type: udt_name={udt_name}")
-            })?;
+            .ok_or_else(|| format!("unknown enum type: udt_name={udt_name}"))?;
         ColumnTypeKind::Scalar(scalar)
     } else {
-        let scalar = crdb_base_type_to_diesel(data_type).ok_or_else(|| {
-            format!("unknown CRDB data_type: {data_type}")
-        })?;
+        let scalar = udt_to_scalar_type(udt_name)
+            .ok_or_else(|| format!("unknown CRDB type: udt_name={udt_name}"))?;
         ColumnTypeKind::Scalar(scalar)
     };
 
