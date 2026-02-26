@@ -5237,10 +5237,11 @@ CREATE TABLE IF NOT EXISTS omicron.public.bp_sled_metadata (
 -- description of measurements specified in a blueprint
 CREATE TABLE IF NOT EXISTS omicron.public.bp_single_measurements (
     -- foreign key into the `blueprint` table
-    blueprint_id UUID NOT NULL PRIMARY KEY,
+    blueprint_id UUID NOT NULL,
     sled_id UUID NOT NULL,
 
-    image_artifact_sha256 STRING(64) NOT NULL
+    image_artifact_sha256 STRING(64) NOT NULL,
+    PRIMARY KEY (blueprint_id, sled_id, image_artifact_sha256)
 );
 
 -- description of omicron physical disks specified in a blueprint.

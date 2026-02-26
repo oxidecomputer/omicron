@@ -2227,7 +2227,7 @@ table! {
 }
 
 table! {
-    bp_single_measurements (blueprint_id) {
+    bp_single_measurements (blueprint_id, sled_id, image_artifact_sha256) {
         blueprint_id -> Uuid,
         sled_id -> Uuid,
 
