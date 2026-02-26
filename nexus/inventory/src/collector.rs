@@ -981,6 +981,12 @@ mod test {
             None,
             sim::ZpoolConfig::None,
             SledCpuFamily::AmdMilan,
+            // For now we disable the health monitor, we can change this preference
+            // later if necessary.
+            sim::ConfigHealthMonitor {
+                enabled: false,
+                sim_health_checks: None,
+            },
         );
 
         let agent =

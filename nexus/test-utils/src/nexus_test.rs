@@ -7,6 +7,7 @@
 use crate::ControlPlaneStarter;
 use crate::ControlPlaneTestContextSledAgent;
 use crate::starter::PopulateCrdb;
+use crate::starter::SledAgentOptions;
 use crate::starter::setup_with_config_impl;
 #[cfg(feature = "omicron-dev")]
 use anyhow::Context;
@@ -85,9 +86,15 @@ impl<'a> ControlPlaneBuilder<'a> {
         setup_with_config_impl(
             starter,
             PopulateCrdb::FromEnvironmentSeed,
-            sim::SimMode::Explicit,
+            SledAgentOptions {
+                sim_mode: sim::SimMode::Explicit,
+                extra_sled_agents: self.nextra_sled_agents,
+                sled_agent_health_monitor: sim::ConfigHealthMonitor {
+                    enabled: false,
+                    sim_health_checks: None,
+                },
+            },
             self.tls_cert,
-            self.nextra_sled_agents,
             DEFAULT_SP_SIM_CONFIG.into(),
             false,
         )
@@ -361,6 +368,7 @@ pub async fn omicron_dev_setup_with_config<N: NexusServer>(
     config: &mut NexusConfig,
     extra_sled_agents: u16,
     gateway_config_file: Utf8PathBuf,
+    sled_agent_health_monitor: sim::ConfigHealthMonitor,
 ) -> Result<ControlPlaneTestContext<N>> {
     let starter = ControlPlaneStarter::<N>::new("omicron-dev", config);
 
@@ -383,9 +391,12 @@ pub async fn omicron_dev_setup_with_config<N: NexusServer>(
     Ok(setup_with_config_impl(
         starter,
         PopulateCrdb::FromSeed { input_tar: seed_tar },
-        sim::SimMode::Auto,
+        SledAgentOptions {
+            sim_mode: sim::SimMode::Auto,
+            extra_sled_agents,
+            sled_agent_health_monitor,
+        },
         None,
-        extra_sled_agents,
         gateway_config_file,
         true,
     )

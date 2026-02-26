@@ -43,3 +43,14 @@ pub(crate) async fn poll_smf_services_in_maintenance(
         };
     }
 }
+
+pub(crate) async fn sim_smf_services_in_maintenance(
+    sim_smf_services_in_maintenance: Result<SvcsInMaintenanceResult, String>,
+    smf_services_in_maintenance_tx: watch::Sender<
+        Result<SvcsInMaintenanceResult, String>,
+    >,
+) {
+    smf_services_in_maintenance_tx.send_modify(|status| {
+        *status = sim_smf_services_in_maintenance;
+    })
+}

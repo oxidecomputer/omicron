@@ -15,6 +15,7 @@ use dropshot::ConfigLoggingLevel;
 use omicron_common::api::internal::nexus::Certificate;
 use omicron_common::cmd::CmdError;
 use omicron_common::cmd::fatal;
+use omicron_sled_agent::sim::ConfigHealthMonitor;
 use omicron_sled_agent::sim::RssArgs;
 use omicron_sled_agent::sim::{
     Config, ConfigHardware, ConfigStorage, ConfigZpool, SimMode, ZpoolConfig,
@@ -22,8 +23,14 @@ use omicron_sled_agent::sim::{
 };
 use omicron_uuid_kinds::SledUuid;
 use sled_hardware_types::{Baseboard, SledCpuFamily};
+use std::fs;
 use std::net::SocketAddr;
 use std::net::SocketAddrV6;
+
+pub const DEFAULT_HEALTH_MONITOR_CONFIG: &str = concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/tests/configs/health_monitor_sim.toml"
+);
 
 fn parse_sim_mode(src: &str) -> Result<SimMode, String> {
     match src {
@@ -55,6 +62,10 @@ struct Args {
 
     #[clap(action)]
     nexus_lockstep_port: u16,
+
+    /// Override the sled agent health monitor configuration file.
+    #[clap(long, default_value = DEFAULT_HEALTH_MONITOR_CONFIG)]
+    health_monitor_config: Utf8PathBuf,
 
     #[clap(long, name = "NEXUS_EXTERNAL_IP:PORT", action)]
     /// If specified, when the simulated sled agent initializes the rack, it
@@ -97,6 +108,18 @@ fn main() {
 async fn do_run() -> Result<(), CmdError> {
     let args = Args::parse();
 
+    let health_monitor_config_str =
+        fs::read_to_string(&args.health_monitor_config)
+            .context(format!("reading {:?}", &args.health_monitor_config))
+            .map_err(CmdError::Failure)?;
+    let health_monitor: ConfigHealthMonitor =
+        toml::from_str(&health_monitor_config_str)
+            .context(format!(
+                "parsing config: {}",
+                args.health_monitor_config.as_str()
+            ))
+            .map_err(CmdError::Failure)?;
+
     let tmp = camino_tempfile::tempdir()
         .map_err(|e| CmdError::Failure(anyhow!(e)))?;
     let config = Config {
@@ -127,6 +150,7 @@ async fn do_run() -> Result<(), CmdError> {
             Some(tmp.path()),
             ZpoolConfig::TenVirtualU2s,
             SledCpuFamily::AmdMilan,
+            health_monitor,
         )
     };
 

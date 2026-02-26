@@ -13,21 +13,25 @@ omicron-rpaths.workspace = true
 [dependencies]
 anyhow.workspace = true
 camino.workspace = true
+chrono.workspace = true
 clap.workspace = true
 dropshot.workspace = true
 futures.workspace = true
 gateway-client.workspace = true
 gateway-test-utils.workspace = true
+illumos-utils.workspace = true
 libc.workspace = true
 nexus-config.workspace = true
 nexus-test-interface.workspace = true
 nexus-test-utils = { workspace = true, features = ["omicron-dev"] }
 omicron-nexus.workspace = true
 omicron-workspace-hack.workspace = true
+omicron-sled-agent.workspace = true
 oxide-tokio-rt.workspace = true
 # See omicron-rpaths for more about the "pq-sys" dependency.
 pq-sys = "*"
 signal-hook-tokio.workspace = true
+sled-agent-types.workspace = true
 tokio.workspace = true
 toml.workspace = true
 
