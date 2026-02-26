@@ -565,8 +565,9 @@ impl SledAgent {
         id: ZpoolUuid,
         physical_disk_id: PhysicalDiskUuid,
         size: u64,
+        health: ZpoolHealth,
     ) {
-        self.storage.lock().insert_zpool(id, physical_disk_id, size);
+        self.storage.lock().insert_zpool(id, physical_disk_id, size, health);
     }
 
     pub fn has_zpool(&self, id: ZpoolUuid) -> bool {
@@ -912,8 +913,7 @@ impl SledAgent {
                     Ok(InventoryZpool {
                         id: *id,
                         total_size: ByteCount::try_from(zpool.total_size())?,
-                        // TODO-K: Make this customiseable
-                        health: ZpoolHealth::Online,
+                        health: zpool.health(),
                     })
                 })
                 .collect::<Result<Vec<_>, anyhow::Error>>()?,
