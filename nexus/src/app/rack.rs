@@ -26,11 +26,11 @@ use nexus_types::external_api::networking;
 use nexus_types::external_api::policy;
 use nexus_types::external_api::silo;
 use nexus_types::external_api::sled as sled_types;
+use nexus_types::internal_api::params::ExternalPortDiscovery;
 use nexus_types::inventory::SpType;
 use nexus_types::silo::silo_dns_name;
 use omicron_common::address::{Ipv6Subnet, RACK_PREFIX, get_64_subnet};
 use omicron_common::api::external::AddressLotKind;
-use omicron_common::api::external::BgpPeer;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::IdentityMetadataCreateParams;
@@ -40,7 +40,6 @@ use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::Name;
 use omicron_common::api::external::NameOrId;
 use omicron_common::api::external::ResourceType;
-use omicron_common::api::internal::shared::ExternalPortDiscovery;
 use omicron_common::api::internal::shared::LldpAdminStatus;
 use omicron_uuid_kinds::SledUuid;
 use oxnet::IpNet;
@@ -595,10 +594,10 @@ impl super::Nexus {
                 routes,
             });
 
-            let peers: Vec<BgpPeer> = uplink_config
+            let peers: Vec<networking::BgpPeer> = uplink_config
                 .bgp_peers
                 .iter()
-                .map(|r| BgpPeer {
+                .map(|r| networking::BgpPeer {
                     bgp_config: NameOrId::Name(
                         format!("as{}", r.asn).parse().unwrap(),
                     ),

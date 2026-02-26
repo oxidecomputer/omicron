@@ -78,6 +78,7 @@ api_versions!([
     // |  date-based version should be at the top of the list.
     // v
     // (next_yyyy_mm_dd_nn, IDENT),
+    (2026_02_19_00, REMOVE_SLED_ADD),
     (2026_02_13_01, BGP_UNNUMBERED_PEERS),
     (2026_02_13_00, STALE_DOCS_AND_PUNCTUATION),
     (2026_02_09_01, UPDATE_EXTERNAL_SUBNET_DOCS),
@@ -4325,7 +4326,10 @@ pub trait NexusExternalApi {
     async fn networking_switch_port_settings_create(
         rqctx: RequestContext<Self::Context>,
         new_settings: TypedBody<latest::networking::SwitchPortSettingsCreate>,
-    ) -> Result<HttpResponseCreated<SwitchPortSettings>, HttpError>;
+    ) -> Result<
+        HttpResponseCreated<latest::networking::SwitchPortSettings>,
+        HttpError,
+    >;
 
     /// Create switch port settings (old version with required BgpPeer.addr)
     #[endpoint {
@@ -4394,7 +4398,7 @@ pub trait NexusExternalApi {
     async fn networking_switch_port_settings_view(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<latest::networking::SwitchPortSettingsInfoSelector>,
-    ) -> Result<HttpResponseOk<SwitchPortSettings>, HttpError>;
+    ) -> Result<HttpResponseOk<latest::networking::SwitchPortSettings>, HttpError>;
 
     /// Get information about switch port (old version with required BgpPeer.addr)
     #[endpoint {
@@ -6034,15 +6038,13 @@ pub trait NexusExternalApi {
     >;
 
     /// Add sled to initialized rack
-    //
-    // TODO: In the future this should really be a PUT request, once we resolve
-    // https://github.com/oxidecomputer/omicron/issues/4494. It should also
-    // explicitly be tied to a rack via a `rack_id` path param. For now we assume
-    // we are only operating on single rack systems.
+    ///
+    // Removed in favor of rack membership operations
     #[endpoint {
         method = POST,
         path = "/v1/system/hardware/sleds",
-        tags = ["system/hardware"]
+        tags = ["system/hardware"],
+        versions = ..VERSION_REMOVE_SLED_ADD
     }]
     async fn sled_add(
         rqctx: RequestContext<Self::Context>,

@@ -316,7 +316,6 @@ pub trait TestInterfaces {
         id: PropolisUuid,
         params: SimulateMigrationSource,
     );
-    async fn disk_finish_transition(&self, id: Uuid);
 }
 
 #[async_trait]
@@ -348,18 +347,6 @@ impl TestInterfaces for Client {
         let url = format!("{}/vmms/{}/poke", baseurl, id);
         client.post(url).api_version_header(self.api_version()).send().await?;
         Ok(())
-    }
-
-    async fn disk_finish_transition(&self, id: Uuid) {
-        let baseurl = self.baseurl();
-        let client = self.client();
-        let url = format!("{}/disks/{}/poke", baseurl, id);
-        client
-            .post(url)
-            .api_version_header(self.api_version())
-            .send()
-            .await
-            .expect("disk_finish_transition() failed unexpectedly");
     }
 
     async fn vmm_simulate_migration_source(
