@@ -1652,7 +1652,7 @@ impl super::Nexus {
         // state.
         let vmm_runtime = sled_agent_client::types::VmmRuntimeState {
             time_updated: chrono::Utc::now(),
-            r#gen: initial_vmm.runtime.generation.next(),
+            gen_: initial_vmm.runtime.generation.next(),
             state: match operation {
                 InstanceRegisterReason::Migrate { .. } => {
                     sled_agent_client::types::VmmState::Migrating

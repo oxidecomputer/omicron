@@ -18,13 +18,13 @@ use internal_dns_types::names::ServiceName;
 use nexus_types::deployment::LastAllocatedSubnetIpOffset;
 use nexus_types::deployment::{
     Blueprint, BlueprintDatasetConfig, BlueprintDatasetDisposition,
-    BlueprintHostPhase2DesiredSlots, BlueprintPhysicalDiskConfig,
-    BlueprintPhysicalDiskDisposition, BlueprintSledConfig, BlueprintSource,
-    BlueprintZoneConfig, BlueprintZoneDisposition, BlueprintZoneImageSource,
-    BlueprintZoneType, CockroachDbPreserveDowngrade,
-    OmicronZoneExternalFloatingAddr, OmicronZoneExternalFloatingIp,
-    OmicronZoneExternalSnatIp, OximeterReadMode, PendingMgsUpdates,
-    blueprint_zone_type,
+    BlueprintHostPhase2DesiredSlots, BlueprintMeasurements,
+    BlueprintPhysicalDiskConfig, BlueprintPhysicalDiskDisposition,
+    BlueprintSledConfig, BlueprintSource, BlueprintZoneConfig,
+    BlueprintZoneDisposition, BlueprintZoneImageSource, BlueprintZoneType,
+    CockroachDbPreserveDowngrade, OmicronZoneExternalFloatingAddr,
+    OmicronZoneExternalFloatingIp, OmicronZoneExternalSnatIp, OximeterReadMode,
+    PendingMgsUpdates, blueprint_zone_type,
 };
 use nexus_types::external_api::sled::SledState;
 use omicron_common::address::{
@@ -946,6 +946,7 @@ impl Plan {
                     host_phase_2:
                         BlueprintHostPhase2DesiredSlots::current_contents(),
                     remove_mupdate_override: None,
+                    measurements: BlueprintMeasurements::InstallDataset,
                 },
             );
         }
@@ -1324,13 +1325,13 @@ impl ServicePortBuilder {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use illumos_utils::svcs::SvcsInMaintenanceResult;
     use omicron_common::address::IpRange;
     use omicron_common::api::external::ByteCount;
     use omicron_common::api::internal::shared::AllowedSourceIps;
     use omicron_common::api::internal::shared::RackNetworkConfig;
     use oxnet::Ipv6Net;
     use sled_agent_types::inventory::ConfigReconcilerInventoryStatus;
-    use sled_agent_types::inventory::HealthMonitorInventory;
     use sled_agent_types::inventory::OmicronFileSourceResolverInventory;
     use sled_agent_types::inventory::SledCpuFamily;
     use sled_agent_types::rack_init::BootstrapAddressDiscovery;
@@ -1554,7 +1555,7 @@ mod tests {
                 last_reconciliation: None,
                 file_source_resolver:
                     OmicronFileSourceResolverInventory::new_fake(),
-                health_monitor: HealthMonitorInventory::new(),
+                smf_services_in_maintenance: Ok(SvcsInMaintenanceResult::new()),
                 reference_measurements: IdOrdMap::new(),
             },
             is_scrimlet,

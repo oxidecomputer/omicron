@@ -5284,12 +5284,6 @@ fn known_column_order_drift() -> std::collections::HashSet<&'static str> {
 fn known_drift() -> std::collections::HashSet<&'static str> {
     [
         // --- Column existence mismatches ---
-        // Column in Diesel but not CRDB:
-        "bp_omicron_zone.underlay_address",
-        "inv_omicron_sled_config_dataset.sled_id",
-        "inv_omicron_sled_config_disk.sled_id",
-        "silo_group.active",
-        "tuf_trust_root.time_modified",
         // Column in CRDB but not Diesel:
         "external_subnet.first_address",
         "external_subnet.last_address",

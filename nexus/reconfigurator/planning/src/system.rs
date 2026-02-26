@@ -12,6 +12,7 @@ use clickhouse_admin_types::keeper::ClickhouseKeeperClusterMembership;
 use gateway_client::types::RotState;
 use gateway_client::types::SpComponentCaboose;
 use gateway_client::types::SpState;
+use illumos_utils::svcs::SvcsInMaintenanceResult;
 use indexmap::IndexMap;
 use ipnet::Ipv6Net;
 use ipnet::Ipv6Subnets;
@@ -61,7 +62,6 @@ use omicron_uuid_kinds::ZpoolUuid;
 use sled_agent_types::inventory::Baseboard;
 use sled_agent_types::inventory::ConfigReconcilerInventory;
 use sled_agent_types::inventory::ConfigReconcilerInventoryStatus;
-use sled_agent_types::inventory::HealthMonitorInventory;
 use sled_agent_types::inventory::Inventory;
 use sled_agent_types::inventory::InventoryDataset;
 use sled_agent_types::inventory::InventoryDisk;
@@ -1471,7 +1471,7 @@ impl Sled {
                 // XXX: return something more reasonable here?
                 file_source_resolver:
                     OmicronFileSourceResolverInventory::new_fake(),
-                health_monitor: HealthMonitorInventory::new(),
+                smf_services_in_maintenance: Ok(SvcsInMaintenanceResult::new()),
                 reference_measurements: iddqd::IdOrdMap::new(),
             }
         };
@@ -1651,7 +1651,7 @@ impl Sled {
             reconciler_status: inv_sled_agent.reconciler_status.clone(),
             last_reconciliation: inv_sled_agent.last_reconciliation.clone(),
             file_source_resolver: inv_sled_agent.file_source_resolver.clone(),
-            health_monitor: HealthMonitorInventory::new(),
+            smf_services_in_maintenance: Ok(SvcsInMaintenanceResult::new()),
             reference_measurements: inv_sled_agent
                 .reference_measurements
                 .clone(),

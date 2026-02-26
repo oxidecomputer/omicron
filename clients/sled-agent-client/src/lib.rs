@@ -156,7 +156,7 @@ impl From<types::VmmRuntimeState>
     fn from(s: types::VmmRuntimeState) -> Self {
         Self {
             state: s.state.into(),
-            generation: s.r#gen,
+            generation: s.gen_,
             time_updated: s.time_updated,
         }
     }
@@ -181,7 +181,7 @@ impl From<types::MigrationRuntimeState>
         Self {
             migration_id: s.migration_id,
             state: s.state.into(),
-            generation: s.r#gen,
+            generation: s.gen_,
             time_updated: s.time_updated,
         }
     }
@@ -316,7 +316,6 @@ pub trait TestInterfaces {
         id: PropolisUuid,
         params: SimulateMigrationSource,
     );
-    async fn disk_finish_transition(&self, id: Uuid);
 }
 
 #[async_trait]
@@ -327,7 +326,7 @@ impl TestInterfaces for Client {
         let url = format!("{}/vmms/{}/poke-single-step", baseurl, id);
         client
             .post(url)
-            .api_version_header(self.api_version())
+            .api_version_header(Client::api_version())
             .send()
             .await
             .expect("instance_single_step() failed unexpectedly");
@@ -346,20 +345,12 @@ impl TestInterfaces for Client {
         let baseurl = self.baseurl();
         let client = self.client();
         let url = format!("{}/vmms/{}/poke", baseurl, id);
-        client.post(url).api_version_header(self.api_version()).send().await?;
-        Ok(())
-    }
-
-    async fn disk_finish_transition(&self, id: Uuid) {
-        let baseurl = self.baseurl();
-        let client = self.client();
-        let url = format!("{}/disks/{}/poke", baseurl, id);
         client
             .post(url)
-            .api_version_header(self.api_version())
+            .api_version_header(Client::api_version())
             .send()
-            .await
-            .expect("disk_finish_transition() failed unexpectedly");
+            .await?;
+        Ok(())
     }
 
     async fn vmm_simulate_migration_source(
@@ -372,7 +363,7 @@ impl TestInterfaces for Client {
         let url = format!("{baseurl}/vmms/{id}/sim-migration-source");
         client
             .post(url)
-            .api_version_header(self.api_version())
+            .api_version_header(Client::api_version())
             .json(&params)
             .send()
             .await
