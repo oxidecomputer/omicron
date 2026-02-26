@@ -5230,6 +5230,48 @@ const DIESEL_ONLY_TABLES: &[&str] = &[
     "nat_version",
 ];
 
+/// Pre-existing column ordering mismatches between schema.rs and dbinit.sql.
+///
+/// These tables have columns in a different order in Diesel's `table!` macro
+/// compared to CRDB's `information_schema.columns` (ordered by
+/// `ordinal_position`). This is dangerous because Diesel's
+/// `#[derive(Queryable)]` (without `Selectable`) depends on column order.
+///
+/// Each entry should be fixed over time — for tables, this requires a
+/// migration that recreates the table with the correct column order (as was
+/// done in migration 229 for `console_session` and `device_access_token`).
+/// For views, the view definition's SELECT can simply be reordered.
+///
+/// If you fix an ordering mismatch, please remove the entry here.
+/// If you introduce a new mismatch, do NOT add it here — fix the drift
+/// instead.
+fn known_column_order_drift() -> std::collections::HashSet<&'static str> {
+    [
+        // --- Tables (require recreation migration to fix) ---
+        "bgp_config",
+        "bp_omicron_zone",
+        "disk",
+        "instance",
+        "inv_sled_agent",
+        "ip_pool",
+        "lldp_link_config",
+        "network_interface",
+        "oximeter",
+        "physical_disk",
+        "role_assignment",
+        "router_route",
+        "sled_underlay_subnet_allocation",
+        "vmm",
+        "vpc",
+        // --- Views (can fix by reordering the SELECT) ---
+        "bgp_peer_view",
+        "silo_utilization",
+        "sled_instance",
+    ]
+    .into_iter()
+    .collect()
+}
+
 /// Pre-existing mismatches between schema.rs and dbinit.sql.
 ///
 /// These represent known drift that should be fixed over time. Each entry
@@ -5319,6 +5361,9 @@ async fn diesel_schema_matches_crdb_schema() {
     let mut warnings: Vec<String> = Vec::new();
     let known = known_drift();
     let mut known_triggered: std::collections::HashSet<&str> =
+        std::collections::HashSet::new();
+    let known_order = known_column_order_drift();
+    let mut known_order_triggered: std::collections::HashSet<&str> =
         std::collections::HashSet::new();
 
     // Check: every Diesel table should exist in CRDB.
@@ -5457,6 +5502,37 @@ async fn diesel_schema_matches_crdb_schema() {
                 }
             }
         }
+
+        // Check column ordering: the relative order of columns that
+        // exist in both Diesel and CRDB must match. We filter to only
+        // shared columns so that known existence drift doesn't cause
+        // false positives here.
+        let diesel_col_order: Vec<&str> = diesel_cols
+            .iter()
+            .map(|(name, _)| *name)
+            .filter(|name| crdb_col_map.contains_key(name))
+            .collect();
+        let crdb_col_order: Vec<&str> = crdb_cols
+            .iter()
+            .map(|c| c.column_name.as_str())
+            .filter(|name| diesel_col_names.contains(name))
+            .collect();
+        if diesel_col_order != crdb_col_order {
+            if known_order.contains(table_name) {
+                known_order_triggered
+                    .insert(known_order.get(table_name).unwrap());
+                warnings.push(format!(
+                    "(known drift) {table_name}: column ordering mismatch",
+                ));
+            } else {
+                errors.push(format!(
+                    "{table_name}: column ordering mismatch between \
+                     Diesel (schema.rs) and CRDB (dbinit.sql)\n  \
+                     Diesel: {diesel_col_order:?}\n  \
+                     CRDB:   {crdb_col_order:?}",
+                ));
+            }
+        }
     }
 
     // Report warnings (known drift) for visibility.
@@ -5477,6 +5553,20 @@ async fn diesel_schema_matches_crdb_schema() {
         errors.push(format!(
             "The following known_drift entries no longer trigger and \
              should be removed:\n  {}",
+            stale_sorted.join("\n  "),
+        ));
+    }
+
+    // Check for stale known_column_order_drift entries.
+    let stale_order: Vec<&&str> =
+        known_order.difference(&known_order_triggered).collect();
+    if !stale_order.is_empty() {
+        let mut stale_sorted: Vec<&str> =
+            stale_order.into_iter().copied().collect();
+        stale_sorted.sort();
+        errors.push(format!(
+            "The following known_column_order_drift entries no longer \
+             trigger and should be removed:\n  {}",
             stale_sorted.join("\n  "),
         ));
     }
