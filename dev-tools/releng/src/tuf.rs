@@ -17,6 +17,7 @@ use semver::Version;
 use sha2::Digest;
 use sha2::Sha256;
 use slog::Logger;
+use std::collections::BTreeMap;
 use tokio::io::AsyncReadExt;
 use tufaceous_artifact::ArtifactHash;
 use tufaceous_artifact::ArtifactVersion;
@@ -51,15 +52,31 @@ pub(crate) async fn build_tuf_repo(
             format!("failed to parse artifact version from {}", version)
         })?;
 
-    // Start a new manifest by loading the Hubris staging manifest.
-    let mut manifest = DeserializedManifest::from_path(
+    let mut manifest = DeserializedManifest {
+        system_version: version,
+        artifacts: BTreeMap::new(),
+    };
+
+    for hubris in ["hubris-sp"] {
+        let artifacts_toml: BTreeMap<_, Vec<_>> = serde_json::from_slice(
+            &tokio::fs::read(&output_dir.join(hubris).join("artifacts.json"))
+                .await?,
+        )?;
+        for (kind, artifacts) in artifacts_toml {
+            manifest.artifacts.entry(kind).or_default().extend(artifacts);
+        }
+    }
+
+    // Load the Hubris (legacy) staging manifest and merge it in.
+    let hubris_staging = DeserializedManifest::from_path(
         &output_dir.join("hubris-staging/manifest.toml"),
     )
     .context("failed to open intermediate hubris staging manifest")?;
-    // Set the version.
-    manifest.system_version = version;
+    for (kind, artifacts) in hubris_staging.artifacts {
+        manifest.artifacts.entry(kind).or_default().extend(artifacts);
+    }
 
-    // Load the Hubris production manifest and merge it in.
+    // Load the Hubris production (legacy) manifest and merge it in.
     let hubris_production = DeserializedManifest::from_path(
         &output_dir.join("hubris-production/manifest.toml"),
     )

@@ -25,6 +25,7 @@ serde.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
 shell-words.workspace = true
+sigstore-verify.workspace = true
 slog.workspace = true
 slog-async.workspace = true
 slog-term.workspace = true
