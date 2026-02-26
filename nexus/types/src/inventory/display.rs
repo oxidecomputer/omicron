@@ -1284,7 +1284,7 @@ fn display_sled_config(
             .with(tabled::settings::Style::empty())
             .with(tabled::settings::Padding::new(2, 1, 0, 0))
             .to_string();
-        writeln!(indented, "MEASUREMENTS: {}", zones.len())?;
+        writeln!(indented, "MEASUREMENTS: {}", measurements.len())?;
         writeln!(indented, "{table}")?;
     }
 
