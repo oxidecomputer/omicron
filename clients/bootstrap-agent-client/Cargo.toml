@@ -11,7 +11,7 @@ workspace = true
 omicron-common.workspace = true
 progenitor.workspace = true
 regress.workspace = true
-reqwest = { workspace = true, features = [ "json", "rustls-tls", "stream" ] }
+reqwest = { workspace = true, features = [ "json", "rustls", "stream" ] }
 schemars.workspace = true
 serde.workspace = true
 serde_json.workspace = true

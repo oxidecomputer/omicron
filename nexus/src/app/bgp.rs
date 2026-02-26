@@ -9,9 +9,7 @@ use nexus_db_queries::context::OpContext;
 use nexus_types::external_api::networking;
 use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::{
-    self, BgpExported, BgpImported, BgpMessageHistory, BgpPeerStatus,
-    CreateResult, DeleteResult, ListResultVec, LookupResult, NameOrId,
-    SwitchBgpHistory,
+    self, CreateResult, DeleteResult, ListResultVec, LookupResult, NameOrId,
 };
 
 impl super::Nexus {
@@ -100,7 +98,7 @@ impl super::Nexus {
     pub async fn bgp_peer_status(
         &self,
         opctx: &OpContext,
-    ) -> ListResultVec<BgpPeerStatus> {
+    ) -> ListResultVec<networking::BgpPeerStatus> {
         opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
         let mut result = Vec::new();
         for (switch, client) in &self.mgd_clients().await.map_err(|e| {
@@ -132,7 +130,7 @@ impl super::Nexus {
                     }
                 };
                 for (peer_id, info) in peers {
-                    result.push(BgpPeerStatus {
+                    result.push(networking::BgpPeerStatus {
                         switch: *switch,
                         peer_id: peer_id.clone(),
                         addr: info.remote_ip,
@@ -153,7 +151,7 @@ impl super::Nexus {
     pub async fn bgp_exported(
         &self,
         opctx: &OpContext,
-    ) -> LookupResult<Vec<BgpExported>> {
+    ) -> LookupResult<Vec<networking::BgpExported>> {
         opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
         let mut result = vec![];
         for (switch, client) in &self.mgd_clients().await.map_err(|e| {
@@ -205,7 +203,7 @@ impl super::Nexus {
                                 ))
                             }
                         };
-                        let export = BgpExported {
+                        let export = networking::BgpExported {
                             peer_id: peer_id.clone(),
                             switch: *switch,
                             prefix,
@@ -222,7 +220,7 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
         sel: &networking::BgpRouteSelector,
-    ) -> ListResultVec<SwitchBgpHistory> {
+    ) -> ListResultVec<networking::SwitchBgpHistory> {
         opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
 
         let mut result = Vec::new();
@@ -249,11 +247,11 @@ impl super::Nexus {
                 }
             };
 
-            result.push(SwitchBgpHistory {
+            result.push(networking::SwitchBgpHistory {
                 switch: *switch,
                 history: history
                     .into_iter()
-                    .map(|(k, v)| (k, BgpMessageHistory::new(v)))
+                    .map(|(k, v)| (k, networking::BgpMessageHistory::new(v)))
                     .collect(),
             });
         }
@@ -265,7 +263,7 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
         _sel: &networking::BgpRouteSelector,
-    ) -> ListResultVec<BgpImported> {
+    ) -> ListResultVec<networking::BgpImported> {
         opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
         let mut result = Vec::new();
         for (switch, client) in &self.mgd_clients().await.map_err(|e| {
@@ -273,7 +271,7 @@ impl super::Nexus {
                 "failed to get mgd clients: {e}"
             ))
         })? {
-            let mut imported: Vec<BgpImported> = Vec::new();
+            let mut imported: Vec<networking::BgpImported> = Vec::new();
             match client.get_rib_imported_v2(None, None).await {
                 Ok(result) => {
                     for (prefix, paths) in result.into_inner().iter() {
@@ -288,7 +286,7 @@ impl super::Nexus {
                             }
                         };
                         for p in paths.iter() {
-                            let x = BgpImported {
+                            let x = networking::BgpImported {
                                 switch: *switch,
                                 prefix: ipnet,
                                 id: p

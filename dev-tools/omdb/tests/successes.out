@@ -1612,6 +1612,13 @@ parent:    <none>
     B      current contents 
 
 
+    measurements:
+    ------------------------------
+    hash              version     
+    ------------------------------
+    install dataset   (no version)
+
+
     physical disks:
     -----------------------------------------------------------------
     vendor        model              serial               disposition
@@ -1653,6 +1660,13 @@ parent:    <none>
     ------------------------
     A      current contents 
     B      current contents 
+
+
+    measurements:
+    ------------------------------
+    hash              version     
+    ------------------------------
+    install dataset   (no version)
 
 
     physical disks:
@@ -1744,6 +1758,13 @@ parent:    <none>
     B      current contents 
 
 
+    measurements:
+    ------------------------------
+    hash              version     
+    ------------------------------
+    install dataset   (no version)
+
+
     physical disks:
     -----------------------------------------------------------------
     vendor        model              serial               disposition
@@ -1785,6 +1806,13 @@ parent:    <none>
     ------------------------
     A      current contents 
     B      current contents 
+
+
+    measurements:
+    ------------------------------
+    hash              version     
+    ------------------------------
+    install dataset   (no version)
 
 
     physical disks:

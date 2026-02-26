@@ -10,6 +10,7 @@ use common::LiveTestContext;
 use common::reconfigurator::blueprint_edit_current_target;
 use futures::TryStreamExt;
 use live_tests_macros::live_test;
+use nexus_lockstep_client::ClientInfo as _;
 use nexus_lockstep_client::types::BlueprintTargetSet;
 use nexus_lockstep_client::types::QuiesceState;
 use nexus_lockstep_client::types::Saga;

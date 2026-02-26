@@ -7,7 +7,6 @@
 //! This version adds `ConnectionCollision` to `BgpPeerState` but does not
 //! include the `peer_id` field on `BgpPeerStatus`.
 
-use omicron_common::api::external;
 use omicron_common::api::external::SwitchLocation;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -36,7 +35,33 @@ pub struct BgpPeerStatus {
     pub switch: SwitchLocation,
 }
 
-/// The current state of a BGP peer (includes `ConnectionCollision`).
+impl From<crate::v2025_11_20_00::networking::BgpPeerStatus> for BgpPeerStatus {
+    fn from(old: crate::v2025_11_20_00::networking::BgpPeerStatus) -> Self {
+        BgpPeerStatus {
+            addr: old.addr,
+            local_asn: old.local_asn,
+            remote_asn: old.remote_asn,
+            state: old.state.into(),
+            state_duration_millis: old.state_duration_millis,
+            switch: old.switch,
+        }
+    }
+}
+
+impl From<BgpPeerStatus> for crate::v2025_11_20_00::networking::BgpPeerStatus {
+    fn from(new: BgpPeerStatus) -> Self {
+        Self {
+            addr: new.addr,
+            local_asn: new.local_asn,
+            remote_asn: new.remote_asn,
+            state: new.state.into(),
+            state_duration_millis: new.state_duration_millis,
+            switch: new.switch,
+        }
+    }
+}
+
+/// The current state of a BGP peer.
 #[derive(Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq)]
 #[serde(rename_all = "snake_case")]
 pub enum BgpPeerState {
@@ -53,10 +78,12 @@ pub enum BgpPeerState {
     /// Waiting for open message from peer.
     OpenSent,
 
-    /// Waiting for keepalive or notification from peer.
+    /// Waiting for keepaliave or notification from peer.
     OpenConfirm,
 
     /// There is an ongoing Connection Collision that hasn't yet been resolved.
+    /// Two connections are maintained until one connection receives an Open or
+    /// is able to progress into Established.
     ConnectionCollision,
 
     /// Synchronizing with peer.
@@ -67,32 +94,34 @@ pub enum BgpPeerState {
     Established,
 }
 
-impl From<external::BgpPeerStatus> for BgpPeerStatus {
-    fn from(new: external::BgpPeerStatus) -> Self {
-        BgpPeerStatus {
-            addr: new.addr,
-            local_asn: new.local_asn,
-            remote_asn: new.remote_asn,
-            state: match new.state {
-                external::BgpPeerState::Idle => BgpPeerState::Idle,
-                external::BgpPeerState::Connect => BgpPeerState::Connect,
-                external::BgpPeerState::Active => BgpPeerState::Active,
-                external::BgpPeerState::OpenSent => BgpPeerState::OpenSent,
-                external::BgpPeerState::OpenConfirm => {
-                    BgpPeerState::OpenConfirm
-                }
-                external::BgpPeerState::ConnectionCollision => {
-                    BgpPeerState::ConnectionCollision
-                }
-                external::BgpPeerState::SessionSetup => {
-                    BgpPeerState::SessionSetup
-                }
-                external::BgpPeerState::Established => {
-                    BgpPeerState::Established
-                }
-            },
-            state_duration_millis: new.state_duration_millis,
-            switch: new.switch,
+impl From<crate::v2025_11_20_00::networking::BgpPeerState> for BgpPeerState {
+    fn from(old: crate::v2025_11_20_00::networking::BgpPeerState) -> Self {
+        use crate::v2025_11_20_00::networking as v1;
+
+        match old {
+            v1::BgpPeerState::Idle => Self::Idle,
+            v1::BgpPeerState::Connect => Self::Connect,
+            v1::BgpPeerState::Active => Self::Active,
+            v1::BgpPeerState::OpenSent => Self::OpenSent,
+            v1::BgpPeerState::OpenConfirm => Self::OpenConfirm,
+            v1::BgpPeerState::SessionSetup => Self::SessionSetup,
+            v1::BgpPeerState::Established => Self::Established,
+        }
+    }
+}
+
+impl From<BgpPeerState> for crate::v2025_11_20_00::networking::BgpPeerState {
+    fn from(new: BgpPeerState) -> Self {
+        match new {
+            BgpPeerState::Idle => Self::Idle,
+            BgpPeerState::Connect => Self::Connect,
+            BgpPeerState::Active => Self::Active,
+            BgpPeerState::OpenSent => Self::OpenSent,
+            BgpPeerState::OpenConfirm => Self::OpenConfirm,
+            BgpPeerState::ConnectionCollision | BgpPeerState::SessionSetup => {
+                Self::SessionSetup
+            }
+            BgpPeerState::Established => Self::Established,
         }
     }
 }
