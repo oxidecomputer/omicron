@@ -9,9 +9,10 @@ use std::str::FromStr;
 use bootstore::schemes::v0 as bootstore;
 use omicron_test_utils::dev::test_setup_log;
 use sled_agent_types::early_networking::{
-    BgpConfig, BgpPeerConfig, EarlyNetworkConfig, EarlyNetworkConfigBody,
-    ImportExportPolicy, LldpAdminStatus, LldpPortConfig, MaxPathConfig,
-    PortConfig, PortFec, PortSpeed, RackNetworkConfig, SwitchLocation,
+    BgpConfig, BgpPeerConfig, EarlyNetworkConfigBody,
+    EarlyNetworkConfigEnvelope, ImportExportPolicy, LldpAdminStatus,
+    LldpPortConfig, MaxPathConfig, PortConfig, PortFec, PortSpeed,
+    RackNetworkConfig, SwitchLocation,
 };
 
 const BLOB_PATH: &str = "tests/data/early_network_blobs.txt";
@@ -22,11 +23,12 @@ const BLOB_PATH: &str = "tests/data/early_network_blobs.txt";
 fn early_network_blobs_deserialize() {
     let logctx = test_setup_log("early_network_blobs_deserialize");
 
-    let (current_desc, current_config) = current_config_example();
+    let (current_desc, current_envelope) = current_config_example();
     assert!(
         !current_desc.contains(',') && !current_desc.contains('\n'),
         "current_desc must not contain commas or newlines"
     );
+    let current_config = current_envelope.deserialize_body().unwrap();
 
     // Read old blobs as newline-delimited JSON.
     let mut known_blobs = std::fs::read_to_string(BLOB_PATH)
@@ -43,36 +45,43 @@ fn early_network_blobs_deserialize() {
             });
 
         // Attempt to deserialize this blob.
-        let config =
-            EarlyNetworkConfig::from_str(blob_json).unwrap_or_else(|error| {
+        let envelope = EarlyNetworkConfigEnvelope::from_str(blob_json)
+            .unwrap_or_else(|error| {
                 panic!(
-                    "error deserializing early_network_blobs.txt \
+                    "error deserializing early_network_blobs.txt envelope \
                     \"{blob_desc}\" (line {blob_lineno}): {error}",
                 );
             });
+        let config = envelope.deserialize_body().unwrap_or_else(|error| {
+            panic!(
+                "error deserializing early_network_blobs.txt body \
+                 \"{blob_desc}\" (line {blob_lineno}): {error}",
+            );
+        });
 
         // Does this config match the current config?
         if blob_desc == current_desc {
+            assert_eq!(envelope.generation(), current_envelope.generation());
             assert_eq!(
                 config, current_config,
-                "early_network_blobs.txt line {}: {} does not match current config",
-                blob_lineno, blob_desc
+                "early_network_blobs.txt line {blob_lineno}: \
+                 {blob_desc} does not match current config",
             );
             current_blob_is_known = true;
         }
 
-        // Now attempt to put this blob into a bootstore config, and deserialize that.
-        let network_config = bootstore::NetworkConfig {
-            generation: config.generation,
-            blob: blob_json.to_owned().into(),
-        };
-        let config2 = EarlyNetworkConfig::deserialize_bootstore_config(
-            &logctx.log,
+        // Now attempt to put this blob into a bootstore config, and deserialize
+        // that.
+        let network_config = bootstore::NetworkConfig::from(envelope);
+        let config2 = EarlyNetworkConfigEnvelope::deserialize_from_bootstore(
             &network_config,
-        ).unwrap_or_else(|error| {
+        )
+        .and_then(|envelope| envelope.deserialize_body())
+        .unwrap_or_else(|error| {
             panic!(
                 "error deserializing early_network_blobs.txt \
-                \"{blob_desc}\" (line {blob_lineno}) as bootstore config: {error}",
+                 \"{blob_desc}\" (line {blob_lineno}) as bootstore config: \
+                 {error}",
             );
         });
 
@@ -103,13 +112,12 @@ fn early_network_blobs_deserialize() {
 ///
 /// The goal is that if the definition of `EarlyNetworkConfig` changes in the
 /// future, older blobs can still be deserialized correctly.
-fn current_config_example() -> (&'static str, EarlyNetworkConfig) {
+fn current_config_example() -> (&'static str, EarlyNetworkConfigEnvelope) {
     // NOTE: the description must not contain commas or newlines.
     let description = "2026-01-22 r17";
-    let config = EarlyNetworkConfig {
-        generation: 114,
-        schema_version: EarlyNetworkConfig::schema_version(),
-        body: EarlyNetworkConfigBody {
+    let config = EarlyNetworkConfigEnvelope::new(
+        114, // generation
+        &EarlyNetworkConfigBody {
             ntp_servers: vec![],
             rack_network_config: Some(RackNetworkConfig {
                 rack_subnet: "fd00:1122:3344:100::/56".parse().unwrap(),
@@ -280,7 +288,7 @@ fn current_config_example() -> (&'static str, EarlyNetworkConfig) {
                 bfd: vec![],
             }),
         },
-    };
+    );
 
     (description, config)
 }

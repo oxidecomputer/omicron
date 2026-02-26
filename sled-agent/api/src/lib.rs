@@ -20,9 +20,10 @@ use omicron_common::api::internal::{
     },
 };
 use sled_agent_types_versions::{
-    latest, v1, v4, v6, v7, v9, v10, v11, v12, v14, v16, v17, v20,
+    latest, v1, v4, v6, v7, v9, v10, v11, v12, v14, v16, v17, v20, v24,
 };
 use sled_diagnostics::SledDiagnosticsQueryOutput;
+use slog_error_chain::InlineErrorChain;
 
 api_versions!([
     // WHEN CHANGING THE API (part 1 of 2):
@@ -36,6 +37,7 @@ api_versions!([
     // |  example for the next person.
     // v
     // (next_int, IDENT),
+    (24, BOOTSTORE_VERSIONING),
     (23, REMOVE_READ_BOOTSTORE_CONFIG_CACHE),
     (22, REMOVE_HEALTH_MONITOR_KEEP_CHECKS),
     (21, REMOVE_DISK_PUT),
@@ -808,12 +810,40 @@ pub trait SledAgentApi {
     #[endpoint {
         method = PUT,
         path = "/network-bootstore-config",
-        versions = VERSION_BGP_V6..,
+        versions = VERSION_BOOTSTORE_VERSIONING..,
     }]
     async fn write_network_bootstore_config(
         rqctx: RequestContext<Self::Context>,
-        body: TypedBody<latest::early_networking::EarlyNetworkConfig>,
+        body: TypedBody<latest::early_networking::EarlyNetworkConfigEnvelope>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
+
+    #[endpoint {
+        method = PUT,
+        path = "/network-bootstore-config",
+        versions = VERSION_BGP_V6..VERSION_BOOTSTORE_VERSIONING,
+    }]
+    async fn write_network_bootstore_config_v20(
+        rqctx: RequestContext<Self::Context>,
+        body: TypedBody<v20::early_networking::EarlyNetworkConfig>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        Self::write_network_bootstore_config(
+            rqctx,
+            body.try_map(
+                v24::early_networking::EarlyNetworkConfigEnvelope::try_from,
+            )
+            .map_err(|err| {
+                HttpError::for_bad_request(
+                    None,
+                    format!(
+                        "failed to convert EarlyNetworkConfig to \
+                         latest version: {}",
+                        InlineErrorChain::new(&err)
+                    ),
+                )
+            })?,
+        )
+        .await
+    }
 
     #[endpoint {
         method = PUT,
@@ -824,7 +854,7 @@ pub trait SledAgentApi {
         rqctx: RequestContext<Self::Context>,
         body: TypedBody<v1::early_networking::EarlyNetworkConfig>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
-        Self::write_network_bootstore_config(rqctx, body.map(|x| x.into()))
+        Self::write_network_bootstore_config_v20(rqctx, body.map(|x| x.into()))
             .await
     }
 

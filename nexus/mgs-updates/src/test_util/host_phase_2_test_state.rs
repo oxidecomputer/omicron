@@ -177,7 +177,6 @@ impl HostPhase2SledAgentContext {
 struct HostPhase2SledAgentImpl;
 
 mod api_impl {
-
     use super::HostPhase2SledAgentContext;
     use super::HostPhase2SledAgentImpl;
     use camino::Utf8PathBuf;
@@ -224,7 +223,7 @@ mod api_impl {
     use sled_agent_types::diagnostics::SledDiagnosticsLogsDownloadQueryParam;
     use sled_agent_types::disk::DiskEnsureBody;
     use sled_agent_types::disk::DiskPathParam;
-    use sled_agent_types::early_networking::EarlyNetworkConfig;
+    use sled_agent_types::early_networking::EarlyNetworkConfigEnvelope;
     use sled_agent_types::firewall_rules::VpcFirewallRulesEnsureBody;
     use sled_agent_types::instance::InstanceEnsureBody;
     use sled_agent_types::instance::InstanceExternalIpBody;
@@ -269,6 +268,7 @@ mod api_impl {
     use sled_agent_types::zone_bundle::ZoneBundleId;
     use sled_agent_types::zone_bundle::ZoneBundleMetadata;
     use sled_agent_types::zone_bundle::ZonePathParam;
+    use sled_agent_types_versions::v20;
     use sled_diagnostics::SledDiagnosticsQueryOutput;
     use std::collections::BTreeMap;
     use std::collections::BTreeSet;
@@ -761,13 +761,16 @@ mod api_impl {
 
         async fn read_network_bootstore_config_cache(
             _rqctx: RequestContext<Self::Context>,
-        ) -> Result<HttpResponseOk<EarlyNetworkConfig>, HttpError> {
+        ) -> Result<
+            HttpResponseOk<v20::early_networking::EarlyNetworkConfig>,
+            HttpError,
+        > {
             unimplemented!()
         }
 
         async fn write_network_bootstore_config(
             _rqctx: RequestContext<Self::Context>,
-            _body: TypedBody<EarlyNetworkConfig>,
+            _body: TypedBody<EarlyNetworkConfigEnvelope>,
         ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
             unimplemented!()
         }

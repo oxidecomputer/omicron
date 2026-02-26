@@ -53,7 +53,7 @@ use sled_agent_types::diagnostics::{
     SledDiagnosticsLogsDownloadPathParam, SledDiagnosticsLogsDownloadQueryParam,
 };
 use sled_agent_types::disk::{DiskEnsureBody, DiskPathParam};
-use sled_agent_types::early_networking::EarlyNetworkConfig;
+use sled_agent_types::early_networking::EarlyNetworkConfigEnvelope;
 use sled_agent_types::firewall_rules::VpcFirewallRulesEnsureBody;
 use sled_agent_types::instance::{
     InstanceEnsureBody, InstanceExternalIpBody, InstanceMulticastBody,
@@ -84,7 +84,9 @@ use sled_agent_types::zone_bundle::{
 use sled_hardware_types::BaseboardId;
 // Fixed identifiers for prior versions only
 use sled_agent_types_versions::v1;
+use sled_agent_types_versions::v20;
 use sled_diagnostics::SledDiagnosticsQueryOutput;
+use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 use trust_quorum_types::messages::{
@@ -393,15 +395,33 @@ impl SledAgentApi for SledAgentSimImpl {
 
     async fn read_network_bootstore_config_cache(
         rqctx: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseOk<EarlyNetworkConfig>, HttpError> {
-        let config =
+    ) -> Result<
+        HttpResponseOk<v20::early_networking::EarlyNetworkConfig>,
+        HttpError,
+    > {
+        // Read the current envelope, then convert it back down to the version
+        // we have to report for this (now-removed!) API endpoint.
+        use v20::early_networking::EarlyNetworkConfigBody;
+        let config_envelope =
             rqctx.context().bootstore_network_config.lock().unwrap().clone();
-        Ok(HttpResponseOk(config))
+
+        let body: EarlyNetworkConfigBody =
+            config_envelope.deserialize_body().map_err(|err| {
+                HttpError::for_internal_error(
+                    InlineErrorChain::new(&err).to_string(),
+                )
+            })?;
+
+        Ok(HttpResponseOk(v20::early_networking::EarlyNetworkConfig {
+            generation: config_envelope.generation(),
+            schema_version: EarlyNetworkConfigBody::SCHEMA_VERSION,
+            body,
+        }))
     }
 
     async fn write_network_bootstore_config(
         rqctx: RequestContext<Self::Context>,
-        body: TypedBody<EarlyNetworkConfig>,
+        body: TypedBody<EarlyNetworkConfigEnvelope>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
         let mut config =
             rqctx.context().bootstore_network_config.lock().unwrap();

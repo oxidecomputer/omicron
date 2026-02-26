@@ -24,6 +24,7 @@ serde.workspace = true
 sled-agent-types.workspace = true
 sled-diagnostics.workspace = true
 sled-hardware-types.workspace = true
+slog-error-chain.workspace = true
 tufaceous-artifact.workspace = true
 trust-quorum-types.workspace = true
 uuid.workspace = true

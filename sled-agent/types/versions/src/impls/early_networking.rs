@@ -4,63 +4,41 @@
 
 //! Implementations for early networking types.
 
-use bootstore::schemes::v0 as bootstore;
 use omicron_common::api::external;
-use slog::Logger;
 use std::fmt;
 use std::net::IpAddr;
 use std::net::Ipv6Addr;
 use std::str::FromStr;
 
 use crate::latest::early_networking::{
-    BgpPeerConfig, EarlyNetworkConfig, EarlyNetworkConfigBody, LldpAdminStatus,
-    MaxPathConfig, MaxPathConfigError, ParseLldpAdminStatusError,
-    ParseSwitchLocationError, PortFec, PortSpeed, RouterLifetimeConfig,
-    RouterLifetimeConfigError, SwitchLocation, UplinkAddressConfig,
-    UplinkAddressConfigError,
+    BgpPeerConfig, EarlyNetworkConfigBody, EarlyNetworkConfigEnvelope,
+    LldpAdminStatus, MaxPathConfig, MaxPathConfigError,
+    ParseLldpAdminStatusError, ParseSwitchLocationError, PortFec, PortSpeed,
+    RouterLifetimeConfig, RouterLifetimeConfigError, SwitchLocation,
+    UplinkAddressConfig, UplinkAddressConfigError,
 };
 
-impl FromStr for EarlyNetworkConfig {
-    type Err = String;
+mod early_network_config_serialization;
 
-    fn from_str(value: &str) -> Result<Self, Self::Err> {
-        #[derive(serde::Deserialize)]
-        struct ShadowConfig {
-            generation: u64,
-            schema_version: u32,
-            body: EarlyNetworkConfigBody,
-        }
+pub use early_network_config_serialization::EarlyNetworkConfigEnvelopeError;
 
-        match serde_json::from_str::<ShadowConfig>(&value) {
-            Ok(cfg) => Ok(EarlyNetworkConfig {
-                generation: cfg.generation,
-                schema_version: cfg.schema_version,
-                body: cfg.body,
-            }),
-            Err(e) => Err(format!("unable to parse EarlyNetworkConfig: {e:?}")),
+impl EarlyNetworkConfigEnvelope {
+    pub fn new(generation: u64, body: &EarlyNetworkConfigBody) -> Self {
+        // Serialize `body` in-memory; this can only fail if
+        // `EarlyNetworkConfigBody` contains types that can't be represented in
+        // JSON, which means any API calls involving them will fail too. We
+        // should catch this immediately in tests.
+        let body = serde_json::to_value(body)
+            .expect("EarlyNetworkConfigBody is serializable as JSON");
+        Self {
+            generation,
+            schema_version: EarlyNetworkConfigBody::SCHEMA_VERSION,
+            body,
         }
     }
-}
 
-impl EarlyNetworkConfig {
-    pub fn schema_version() -> u32 {
-        2
-    }
-
-    /// Attempt to read the contents of the bootstore, converting from old
-    /// versions if necessary.
-    pub fn deserialize_bootstore_config(
-        _log: &Logger,
-        config: &bootstore::NetworkConfig,
-    ) -> Result<Self, serde_json::Error> {
-        // Try to serialize the latest version. We don't currently try to read
-        // any old versions - the last time we changed it in a wire-incompatible
-        // way was many releases ago.
-        //
-        // If a wire-incompatible change to `EarlyNetworkConfig` is made, this
-        // function will need to change to account for that (at least during the
-        // one major release where the change is rolled out).
-        serde_json::from_slice::<EarlyNetworkConfig>(&config.blob)
+    pub fn generation(&self) -> u64 {
+        self.generation
     }
 }
 

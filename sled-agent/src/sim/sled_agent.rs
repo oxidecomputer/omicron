@@ -55,7 +55,7 @@ use sled_agent_types::dataset::LocalStorageDatasetEnsureRequest;
 use sled_agent_types::disk::DiskStateRequested;
 use sled_agent_types::early_networking::RackNetworkConfig;
 use sled_agent_types::early_networking::{
-    EarlyNetworkConfig, EarlyNetworkConfigBody,
+    EarlyNetworkConfigBody, EarlyNetworkConfigEnvelope,
 };
 use sled_agent_types::instance::{
     InstanceEnsureBody, InstanceExternalIpBody, InstanceMulticastMembership,
@@ -112,7 +112,7 @@ pub struct SledAgent {
     config: Config,
     fake_zones: Mutex<OmicronZonesConfig>,
     instance_ensure_state_error: Mutex<Option<Error>>,
-    pub bootstore_network_config: Mutex<EarlyNetworkConfig>,
+    pub bootstore_network_config: Mutex<EarlyNetworkConfigEnvelope>,
     pub(super) repo_depot:
         dropshot::HttpServer<ArtifactStore<SimArtifactStorage>>,
     pub log: Logger,
@@ -137,22 +137,22 @@ impl SledAgent {
         let instance_log = log.new(o!("kind" => "instances"));
         let storage_log = log.new(o!("kind" => "storage"));
 
-        let bootstore_network_config = Mutex::new(EarlyNetworkConfig {
-            generation: 0,
-            schema_version: 1,
-            body: EarlyNetworkConfigBody {
-                ntp_servers: Vec::new(),
-                rack_network_config: Some(RackNetworkConfig {
-                    rack_subnet: Ipv6Net::new(Ipv6Addr::UNSPECIFIED, 56)
-                        .unwrap(),
-                    infra_ip_first: IpAddr::V4(Ipv4Addr::UNSPECIFIED),
-                    infra_ip_last: IpAddr::V4(Ipv4Addr::UNSPECIFIED),
-                    ports: Vec::new(),
-                    bgp: Vec::new(),
-                    bfd: Vec::new(),
-                }),
-            },
-        });
+        let bootstore_network_config =
+            Mutex::new(EarlyNetworkConfigEnvelope::new(
+                0, // generation
+                &EarlyNetworkConfigBody {
+                    ntp_servers: Vec::new(),
+                    rack_network_config: Some(RackNetworkConfig {
+                        rack_subnet: Ipv6Net::new(Ipv6Addr::UNSPECIFIED, 56)
+                            .unwrap(),
+                        infra_ip_first: IpAddr::V4(Ipv4Addr::UNSPECIFIED),
+                        infra_ip_last: IpAddr::V4(Ipv4Addr::UNSPECIFIED),
+                        ports: Vec::new(),
+                        bgp: Vec::new(),
+                        bfd: Vec::new(),
+                    }),
+                },
+            ));
 
         let storage = Storage::new(
             id.into_untyped_uuid(),

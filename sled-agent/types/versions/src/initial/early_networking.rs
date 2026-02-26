@@ -4,7 +4,6 @@
 
 //! Types for network setup required to bring up the control plane.
 
-use bootstore::schemes::v0 as bootstore;
 use oxnet::{IpNet, Ipv4Net, Ipv6Net};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -45,19 +44,6 @@ pub struct EarlyNetworkConfigBody {
 
     // Rack network configuration as delivered from RSS or Nexus
     pub rack_network_config: Option<RackNetworkConfig>,
-}
-
-impl From<EarlyNetworkConfig> for bootstore::NetworkConfig {
-    fn from(value: EarlyNetworkConfig) -> Self {
-        // Can this ever actually fail?
-        // We literally just deserialized the same data in RSS
-        let blob = serde_json::to_vec(&value).unwrap();
-
-        // Yes this is duplicated, but that seems fine.
-        let generation = value.generation;
-
-        bootstore::NetworkConfig { generation, blob }
-    }
 }
 
 /// Initial network configuration
