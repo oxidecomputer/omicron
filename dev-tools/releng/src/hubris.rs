@@ -73,8 +73,21 @@ pub(crate) async fn fetch_hubris_artifacts(
 
     let manifest_path = crate::WORKSPACE_DIR
         .join(format!("tools/permslip_{}", ctx.env.short_name));
-    for line in fs::read_to_string(manifest_path).await?.lines() {
-        let Some(hash) = line.split_whitespace().next() else { continue };
+    for line in fs::read_to_string(&manifest_path).await?.lines() {
+        if line.is_empty() {
+            continue;
+        }
+        let Some((hash, name)) = line.split_once(' ') else {
+            anyhow::bail!("{manifest_path}: invalid line: {line}");
+        };
+
+        // Prevent downloading the SP from both permslip and Brussels.
+        if name.starts_with("all-sp-") {
+            anyhow::bail!(
+                "{manifest_path}: SP releases aren't supported, use Brussels",
+            );
+        }
+
         let data = ctx.fetch_hash(hash.parse()?, "toml").await?.data;
         let str = String::from_utf8(data).with_context(|| {
             format!("hubris artifact manifest {} was not UTF-8", hash)
