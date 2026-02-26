@@ -22,6 +22,7 @@ use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
+use omicron_common::api::external::LookupType;
 use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::InstanceUuid;
@@ -114,6 +115,11 @@ impl super::Nexus {
             sled_lookup.fetch_for(authz::Action::Modify).await?;
 
         let rack_id = RackUuid::from_untyped_uuid(sled.rack_id);
+        let authz_tq = authz::TrustQuorumConfig::new(authz::Rack::new(
+            authz::FLEET,
+            sled.rack_id,
+            LookupType::ById(sled.rack_id),
+        ));
 
         // If the sled still exists in the latest committed trust quorum
         // configuration, it cannot be expunged.
@@ -134,7 +140,7 @@ impl super::Nexus {
         // for now given that the user already has to confirm a bunch of prompts
         // before kicking off the operation.
         let (tq_latest_committed_config, _) = self
-            .tq_load_latest_possible_committed_config(opctx, rack_id)
+            .tq_load_latest_possible_committed_config(opctx, authz_tq)
             .await?;
         let baseboard_id = BaseboardId {
             part_number: sled.part_number().to_string(),

@@ -681,6 +681,58 @@ impl AuthorizedResource for Inventory {
     }
 }
 
+/// Synthetic resource to model accessing trust quorum configurations for a
+/// given rack
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct TrustQuorumConfig(Rack);
+
+impl TrustQuorumConfig {
+    pub fn new(rack: Rack) -> TrustQuorumConfig {
+        TrustQuorumConfig(rack)
+    }
+
+    pub fn rack(&self) -> &Rack {
+        &self.0
+    }
+}
+
+impl oso::PolarClass for TrustQuorumConfig {
+    fn get_polar_class_builder() -> oso::ClassBuilder<Self> {
+        oso::Class::builder()
+            .with_equality_check()
+            .add_attribute_getter("rack", |config: &TrustQuorumConfig| {
+                config.0.clone()
+            })
+    }
+}
+
+impl AuthorizedResource for TrustQuorumConfig {
+    fn load_roles<'fut>(
+        &'fut self,
+        opctx: &'fut OpContext,
+        authn: &'fut authn::Context,
+        roleset: &'fut mut RoleSet,
+    ) -> futures::future::BoxFuture<'fut, Result<(), Error>> {
+        // There are no roles on this resource, but we still need to load the
+        // Rack-related roles.
+        self.rack().load_roles(opctx, authn, roleset)
+    }
+
+    fn on_unauthorized(
+        &self,
+        _: &Authz,
+        error: Error,
+        _: AnyActor,
+        _: Action,
+    ) -> Error {
+        error
+    }
+
+    fn polar_class(&self) -> oso::Class {
+        Self::get_polar_class()
+    }
+}
+
 /// Synthetic resource describing the list of Certificates associated with a
 /// Silo
 #[derive(Clone, Debug, Eq, PartialEq)]

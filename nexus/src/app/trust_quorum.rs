@@ -4,11 +4,12 @@
 
 //! Nexus APIs for trust quorum
 
+use nexus_auth::authz;
 use nexus_auth::context::OpContext;
 use nexus_types::trust_quorum::{
     IsLrtqUpgrade, ProposedTrustQuorumConfig, TrustQuorumConfig,
 };
-use omicron_common::api::external::Error;
+use omicron_common::api::external::{Error, LookupType};
 use omicron_uuid_kinds::{GenericUuid, RackUuid, SledUuid};
 use sled_hardware_types::BaseboardId;
 use std::collections::BTreeSet;
@@ -24,11 +25,12 @@ impl super::Nexus {
     pub(crate) async fn tq_add_sleds(
         &self,
         opctx: &OpContext,
-        rack_id: RackUuid,
+        authz_tq: authz::TrustQuorumConfig,
         new_sleds: BTreeSet<BaseboardId>,
     ) -> Result<TrustQuorumConfig, Error> {
+        let rack_id = RackUuid::from_untyped_uuid(authz_tq.rack().id());
         let (latest_committed_config, latest_epoch) = self
-            .tq_load_latest_possible_committed_config(opctx, rack_id)
+            .tq_load_latest_possible_committed_config(opctx, authz_tq.clone())
             .await?;
         let new_epoch = latest_epoch.next();
         let proposed = self
@@ -42,8 +44,10 @@ impl super::Nexus {
 
         // Read back the real configuration from the database. Importantly this
         // includes a chosen coordinator.
-        let Some(new_config) =
-            self.db_datastore.tq_get_config(opctx, rack_id, new_epoch).await?
+        let Some(new_config) = self
+            .db_datastore
+            .tq_get_config(opctx, authz_tq.clone(), new_epoch)
+            .await?
         else {
             return Err(Error::internal_error(&format!(
                 "Cannot retrieve newly inserted trust quorum \
@@ -55,7 +59,7 @@ impl super::Nexus {
         let client = self
             .get_coordinator_client(
                 opctx,
-                rack_id,
+                authz_tq,
                 new_epoch,
                 &new_config.coordinator,
             )
@@ -91,13 +95,18 @@ impl super::Nexus {
         // Look up the sled to get its rack_id and baseboard_id
         let (.., sled) = self.sled_lookup(opctx, &sled_id)?.fetch().await?;
         let rack_id = RackUuid::from_untyped_uuid(sled.rack_id);
+        let authz_tq = authz::TrustQuorumConfig::new(authz::Rack::new(
+            authz::FLEET,
+            sled.rack_id,
+            LookupType::ById(sled.rack_id),
+        ));
         let sled_to_remove = BaseboardId {
             part_number: sled.part_number().to_string(),
             serial_number: sled.serial_number().to_string(),
         };
 
         let (latest_committed_config, latest_epoch) = self
-            .tq_load_latest_possible_committed_config(opctx, rack_id)
+            .tq_load_latest_possible_committed_config(opctx, authz_tq.clone())
             .await?;
         let new_epoch = latest_epoch.next();
         let proposed = self
@@ -111,8 +120,10 @@ impl super::Nexus {
 
         // Read back the real configuration from the database. Importantly this
         // includes a chosen coordinator.
-        let Some(new_config) =
-            self.db_datastore.tq_get_config(opctx, rack_id, new_epoch).await?
+        let Some(new_config) = self
+            .db_datastore
+            .tq_get_config(opctx, authz_tq.clone(), new_epoch)
+            .await?
         else {
             return Err(Error::internal_error(&format!(
                 "Cannot retrieve newly inserted trust quorum \
@@ -124,7 +135,7 @@ impl super::Nexus {
         let client = self
             .get_coordinator_client(
                 opctx,
-                rack_id,
+                authz_tq,
                 new_epoch,
                 &new_config.coordinator,
             )
@@ -152,8 +163,15 @@ impl super::Nexus {
         opctx: &OpContext,
         rack_id: RackUuid,
     ) -> Result<TrustQuorumConfig, Error> {
-        let Some(latest_config) =
-            self.db_datastore.tq_get_latest_config(opctx, rack_id).await?
+        let authz_tq = authz::TrustQuorumConfig::new(authz::Rack::new(
+            authz::FLEET,
+            rack_id.into_untyped_uuid(),
+            LookupType::ById(rack_id.into_untyped_uuid()),
+        ));
+        let Some(latest_config) = self
+            .db_datastore
+            .tq_get_latest_config(opctx, authz_tq.clone())
+            .await?
         else {
             return Err(Error::non_resourcetype_not_found(
                 "No trust quorum configuration exists for this rack",
@@ -163,7 +181,7 @@ impl super::Nexus {
         self.db_datastore
             .tq_abort_config(
                 opctx,
-                rack_id,
+                authz_tq.clone(),
                 latest_config.epoch,
                 "Aborted via API request".to_string(),
             )
@@ -171,7 +189,7 @@ impl super::Nexus {
 
         // Return the updated configuration
         self.db_datastore
-            .tq_get_config(opctx, rack_id, latest_config.epoch)
+            .tq_get_config(opctx, authz_tq, latest_config.epoch)
             .await?
             .ok_or_else(|| {
                 Error::internal_error(
@@ -194,10 +212,17 @@ impl super::Nexus {
     ) -> Result<Epoch, Error> {
         // We are only operating on a single rack here.
         let rack_id = RackUuid::from_untyped_uuid(self.rack_id());
+        let authz_tq = authz::TrustQuorumConfig::new(authz::Rack::new(
+            authz::FLEET,
+            rack_id.into_untyped_uuid(),
+            LookupType::ById(rack_id.into_untyped_uuid()),
+        ));
 
         // Let's first see if a configuration exists.
-        let new_epoch = if let Some(latest_config) =
-            self.db_datastore.tq_get_latest_config(opctx, rack_id).await?
+        let new_epoch = if let Some(latest_config) = self
+            .db_datastore
+            .tq_get_latest_config(opctx, authz_tq.clone())
+            .await?
         {
             // Is there a committed configuration? `committing` is irreversable,
             // and also indicates trust quorum has taken over.
@@ -259,8 +284,10 @@ impl super::Nexus {
 
         // Read back the real configuration from the database. Importantly this
         // includes a chosen coordinator.
-        let Some(new_config) =
-            self.db_datastore.tq_get_config(opctx, rack_id, new_epoch).await?
+        let Some(new_config) = self
+            .db_datastore
+            .tq_get_config(opctx, authz_tq.clone(), new_epoch)
+            .await?
         else {
             return Err(Error::internal_error(&format!(
                 "Cannot retrieve newly inserted trust quorum \
@@ -273,7 +300,7 @@ impl super::Nexus {
         let client = self
             .get_coordinator_client(
                 opctx,
-                rack_id,
+                authz_tq,
                 new_epoch,
                 &new_config.coordinator,
             )
@@ -296,10 +323,11 @@ impl super::Nexus {
     async fn get_coordinator_client(
         &self,
         opctx: &OpContext,
-        rack_id: RackUuid,
+        authz_tq: authz::TrustQuorumConfig,
         epoch: Epoch,
         coordinator: &BaseboardId,
     ) -> Result<sled_agent_client::Client, Error> {
+        let rack_id = RackUuid::from_untyped_uuid(authz_tq.rack().id());
         // Retrieve the sled for the coordinator
         let Some(sled) = self
             .db_datastore
@@ -319,7 +347,7 @@ impl super::Nexus {
             );
 
             self.db_datastore
-                .tq_abort_config(opctx, rack_id, epoch, msg.clone())
+                .tq_abort_config(opctx, authz_tq, epoch, msg.clone())
                 .await
                 .map_err(|e| {
                     Error::conflict(format!(
@@ -425,11 +453,15 @@ impl super::Nexus {
     pub async fn tq_load_latest_possible_committed_config(
         &self,
         opctx: &OpContext,
-        rack_id: RackUuid,
+        authz_tq: authz::TrustQuorumConfig,
     ) -> Result<(TrustQuorumConfig, Epoch), Error> {
+        let rack_id = authz_tq.rack().id();
+
         // First get the latest configuration for this rack.
-        let Some(latest_config) =
-            self.db_datastore.tq_get_latest_config(opctx, rack_id).await?
+        let Some(latest_config) = self
+            .db_datastore
+            .tq_get_latest_config(opctx, authz_tq.clone())
+            .await?
         else {
             return Err(Error::invalid_request(format!(
                 "Missing trust quorum configurations for rack {rack_id}. \
@@ -453,7 +485,7 @@ impl super::Nexus {
 
             // Load the configuration for the last commmitted epoch
             let Some(latest_committed_config) =
-                self.db_datastore.tq_get_config(opctx, rack_id, epoch).await?
+                self.db_datastore.tq_get_config(opctx, authz_tq, epoch).await?
             else {
                 return Err(Error::invalid_request(format!(
                     "Missing expected last committed trust quorum \
