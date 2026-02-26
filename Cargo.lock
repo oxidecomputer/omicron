@@ -1667,6 +1667,30 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0c9ea0ac24bc397ab3c98583a3c9ba74fa56b09a4449bbe172b9b1ddb016027a"
 
 [[package]]
+name = "cmpv2"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "961b955a666e25ee5a1091d219128d6e6401e3dab84efb1a2bf6b4035d797b39"
+dependencies = [
+ "crmf",
+ "der 0.7.10",
+ "spki 0.7.3",
+ "x509-cert",
+]
+
+[[package]]
+name = "cms"
+version = "0.2.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7b77c319abfd5219629c45c34c89ba945ed3c5e49fcde9d16b6c3885f118a730"
+dependencies = [
+ "const-oid 0.9.6",
+ "der 0.7.10",
+ "spki 0.7.3",
+ "x509-cert",
+]
+
+[[package]]
 name = "cobs"
 version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2117,6 +2141,18 @@ name = "critical-section"
 version = "1.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "790eea4361631c5e7d22598ecd5723ff611904e3344ce8720784c93e3d83d40b"
+
+[[package]]
+name = "crmf"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "36fe21b96d5b87f5de4b5b7202ec41c00110ac817ce6728fe75fb2fe5962ed92"
+dependencies = [
+ "cms",
+ "der 0.7.10",
+ "spki 0.7.3",
+ "x509-cert",
+]
 
 [[package]]
 name = "crossbeam-channel"
@@ -8272,7 +8308,7 @@ dependencies = [
  "textwrap 0.16.2",
  "thiserror 2.0.18",
  "tokio",
- "tough 0.22.0",
+ "tough 0.22.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "trust-quorum-protocol",
  "trust-quorum-types",
  "tufaceous-artifact 0.1.0",
@@ -8313,7 +8349,7 @@ dependencies = [
  "slog-error-chain",
  "strum 0.27.2",
  "thiserror 2.0.18",
- "tough 0.22.0",
+ "tough 0.22.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "tufaceous-artifact 0.1.0",
  "url",
  "uuid",
@@ -8682,6 +8718,16 @@ dependencies = [
 name = "olpc-cjson"
 version = "0.1.4"
 source = "git+https://github.com/oxidecomputer/tough?branch=oxide%2Fdevelop#56967c9651efcffd7326198f04fc388c4f0f92b9"
+dependencies = [
+ "serde",
+ "serde_json",
+ "unicode-normalization",
+]
+
+[[package]]
+name = "olpc-cjson"
+version = "0.1.4"
+source = "git+https://github.com/emilyalbini/tough?rev=d29b2b08001085f1e0ba4ba40e18e1a956fbeb06#d29b2b08001085f1e0ba4ba40e18e1a956fbeb06"
 dependencies = [
  "serde",
  "serde_json",
@@ -9287,7 +9333,7 @@ dependencies = [
  "tokio",
  "tokio-postgres",
  "tokio-util",
- "tough 0.22.0",
+ "tough 0.22.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "trust-quorum-types",
  "tufaceous 0.1.0",
  "tufaceous-artifact 0.1.0",
@@ -9570,6 +9616,7 @@ dependencies = [
  "serde",
  "serde_json",
  "shell-words",
+ "sigstore-verify",
  "slog",
  "slog-async",
  "slog-term",
@@ -9861,6 +9908,8 @@ dependencies = [
  "digest 0.11.3",
  "dof 0.3.0",
  "dof 0.4.0",
+ "ecdsa 0.16.9",
+ "ed25519 2.2.3",
  "ed25519-dalek 2.2.0",
  "either",
  "elliptic-curve 0.13.8",
@@ -9977,7 +10026,7 @@ dependencies = [
  "toml_edit 0.19.15",
  "toml_edit 0.22.27",
  "toml_parser",
- "tough 0.22.0",
+ "tough 0.22.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "tracing",
  "typenum",
  "url",
@@ -10701,6 +10750,18 @@ dependencies = [
  "serde",
  "serde_json",
  "uuid",
+]
+
+[[package]]
+name = "p256"
+version = "0.13.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c9863ad85fa8f4460f9c48cb909d38a0d689dba1f6f6988a5e3e0d31071bcd4b"
+dependencies = [
+ "ecdsa 0.16.9",
+ "elliptic-curve 0.13.8",
+ "primeorder 0.13.6",
+ "sha2 0.10.9",
 ]
 
 [[package]]
@@ -12869,7 +12930,7 @@ dependencies = [
  "ml-kem",
  "module-lattice",
  "num-bigint",
- "p256",
+ "p256 0.14.0-rc.10",
  "p384 0.14.0-rc.10",
  "p521",
  "pageant",
@@ -13140,6 +13201,12 @@ name = "ryu"
 version = "1.0.23"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9774ba4a74de5f7b1c1451ed6cd5285a32eddb5cccb8cc655a4e50009e06477f"
+
+[[package]]
+name = "ryu-js"
+version = "1.0.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "04d056b875a9d2e6cb9a61d127afee9ac5999b9f87bcb32079d1318e505be714"
 
 [[package]]
 name = "salsa20"
@@ -13580,6 +13647,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "serde_json_canonicalizer"
+version = "0.3.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fe52319a927259afbfa5180c5157cd8167edfd3e8c254f9558c7fef44c5649f2"
+dependencies = [
+ "ryu-js",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "serde_path_to_error"
 version = "0.1.20"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -13886,6 +13964,33 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5584bfb3e0d348139d8210285e39f6d2f8a1902ac06de343e06357d1d763d8e6"
 dependencies = [
  "libc",
+]
+
+[[package]]
+name = "sigstore-verify"
+version = "0.1.0"
+source = "git+https://github.com/oxidecomputer/sigstore-verify?rev=6a657cde6ff87121adc23fbd9633df66787a0fe1#6a657cde6ff87121adc23fbd9633df66787a0fe1"
+dependencies = [
+ "base64 0.22.1",
+ "cms",
+ "der 0.7.10",
+ "ecdsa 0.16.9",
+ "ed25519-dalek 2.2.0",
+ "futures",
+ "hex",
+ "jiff",
+ "p256 0.13.2",
+ "p384 0.13.1",
+ "serde",
+ "serde_json",
+ "serde_json_canonicalizer",
+ "sha1 0.11.0",
+ "sha2 0.11.0",
+ "thiserror 2.0.18",
+ "tokio",
+ "tough 0.22.0 (git+https://github.com/emilyalbini/tough?rev=d29b2b08001085f1e0ba4ba40e18e1a956fbeb06)",
+ "x509-cert",
+ "x509-tsp",
 ]
 
 [[package]]
@@ -14833,7 +14938,7 @@ dependencies = [
  "ed25519-dalek 3.0.0-rc.0",
  "hex",
  "hmac 0.13.0",
- "p256",
+ "p256 0.14.0-rc.10",
  "p384 0.14.0-rc.10",
  "p521",
  "rand_core 0.10.0",
@@ -15983,6 +16088,40 @@ dependencies = [
 
 [[package]]
 name = "tough"
+version = "0.22.0"
+source = "git+https://github.com/emilyalbini/tough?rev=d29b2b08001085f1e0ba4ba40e18e1a956fbeb06#d29b2b08001085f1e0ba4ba40e18e1a956fbeb06"
+dependencies = [
+ "async-recursion",
+ "async-trait",
+ "aws-lc-rs",
+ "bytes",
+ "chrono",
+ "dyn-clone",
+ "futures",
+ "futures-core",
+ "globset",
+ "hex",
+ "log",
+ "olpc-cjson 0.1.4 (git+https://github.com/emilyalbini/tough?rev=d29b2b08001085f1e0ba4ba40e18e1a956fbeb06)",
+ "pem",
+ "percent-encoding",
+ "reqwest 0.13.2",
+ "rustls",
+ "serde",
+ "serde_json",
+ "serde_plain",
+ "snafu",
+ "tempfile",
+ "tokio",
+ "tokio-util",
+ "typed-path",
+ "untrusted 0.7.1",
+ "url",
+ "walkdir",
+]
+
+[[package]]
+name = "tough"
 version = "0.24.0"
 source = "git+https://github.com/oxidecomputer/tough?branch=oxide%2Fdevelop#56967c9651efcffd7326198f04fc388c4f0f92b9"
 dependencies = [
@@ -16547,7 +16686,7 @@ dependencies = [
  "thiserror 2.0.18",
  "tokio",
  "toml 0.8.23",
- "tough 0.22.0",
+ "tough 0.22.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "tufaceous-artifact 0.1.0",
  "tufaceous-brand-metadata 0.1.0",
  "url",
@@ -16846,7 +16985,7 @@ dependencies = [
  "thiserror 2.0.18",
  "tokio",
  "tokio-util",
- "tough 0.22.0",
+ "tough 0.22.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "tufaceous 0.1.0",
  "tufaceous-artifact 0.1.0",
  "tufaceous-brand-metadata 0.1.0",
@@ -17594,7 +17733,7 @@ dependencies = [
  "tokio-stream",
  "tokio-util",
  "toml 0.8.23",
- "tough 0.22.0",
+ "tough 0.22.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "transceiver-controller 0.1.1 (git+https://github.com/oxidecomputer/transceiver-control)",
  "tufaceous 0.1.0",
  "tufaceous-artifact 0.1.0",
@@ -18293,6 +18432,17 @@ dependencies = [
  "der 0.7.10",
  "spki 0.7.3",
  "tls_codec",
+]
+
+[[package]]
+name = "x509-tsp"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f5ceece934a21607055b7ac5c25adb56a2ff559804b10705dc674d1d838c15e1"
+dependencies = [
+ "cmpv2",
+ "cms",
+ "der 0.7.10",
 ]
 
 [[package]]
