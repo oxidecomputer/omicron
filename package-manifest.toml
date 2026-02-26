@@ -708,8 +708,8 @@ output.intermediate_only = true
 service_name = "lldp"
 source.type = "prebuilt"
 source.repo = "lldp"
-source.commit = "01b79698257c8d0414a2da6529e381c6c1a50893"
-source.sha256 = "896e184232559a117aa91a7307ee77a9f441f5bea4296938c7fcdf24ef28788d"
+source.commit = "d22509dfdb051321b859e924948605115691b93c"
+source.sha256 = "cf93d374b751a0b760dd5adb3737cd5b239c2ba427749164974b262c0c446593"
 output.type = "zone"
 output.intermediate_only = true
 

@@ -6299,7 +6299,7 @@ dependencies = [
 [[package]]
 name = "lldpd-client"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/lldp?rev=01b79698257c8d0414a2da6529e381c6c1a50893#01b79698257c8d0414a2da6529e381c6c1a50893"
+source = "git+https://github.com/oxidecomputer/lldp?rev=d22509dfdb051321b859e924948605115691b93c#d22509dfdb051321b859e924948605115691b93c"
 dependencies = [
  "chrono",
  "futures",
@@ -6317,7 +6317,7 @@ dependencies = [
 [[package]]
 name = "lldpd-common"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/lldp?rev=01b79698257c8d0414a2da6529e381c6c1a50893#01b79698257c8d0414a2da6529e381c6c1a50893"
+source = "git+https://github.com/oxidecomputer/lldp?rev=d22509dfdb051321b859e924948605115691b93c#d22509dfdb051321b859e924948605115691b93c"
 dependencies = [
  "anyhow",
  "dpd-client 0.1.0 (git+https://github.com/oxidecomputer/dendrite?branch=main)",
@@ -11336,7 +11336,7 @@ dependencies = [
 [[package]]
 name = "protocol"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/lldp?rev=01b79698257c8d0414a2da6529e381c6c1a50893#01b79698257c8d0414a2da6529e381c6c1a50893"
+source = "git+https://github.com/oxidecomputer/lldp?rev=d22509dfdb051321b859e924948605115691b93c#d22509dfdb051321b859e924948605115691b93c"
 dependencies = [
  "anyhow",
  "schemars 0.8.22",
