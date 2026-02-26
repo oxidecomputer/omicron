@@ -4975,170 +4975,300 @@ async fn compare_table_differing_not_null_order() {
 // Test: Diesel schema.rs matches CRDB dbinit.sql
 // ---------------------------------------------------------------------------
 
-/// Maps a CRDB `data_type` string to the expected Diesel type_name suffix.
+/// A scalar SQL type (the innermost type, no Nullable/Array wrappers).
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum ScalarType {
+    BigInt,
+    Integer,
+    SmallInt,
+    Double,
+    Float,
+    Bool,
+    Text,
+    Uuid,
+    Timestamptz,
+    Inet,
+    Binary,
+    Jsonb,
+    Interval,
+    /// An enum type defined in nexus_db_schema::enums.
+    /// Contains the full type_name string (e.g.,
+    /// "nexus_db_schema::enums::BlockSizeEnum").
+    Enum(String),
+}
+
+impl std::fmt::Display for ScalarType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ScalarType::BigInt => f.write_str("diesel::sql_types::BigInt"),
+            ScalarType::Integer => f.write_str("diesel::sql_types::Integer"),
+            ScalarType::SmallInt => f.write_str("diesel::sql_types::SmallInt"),
+            ScalarType::Double => f.write_str("diesel::sql_types::Double"),
+            ScalarType::Float => f.write_str("diesel::sql_types::Float"),
+            ScalarType::Bool => f.write_str("diesel::sql_types::Bool"),
+            ScalarType::Text => f.write_str("diesel::sql_types::Text"),
+            ScalarType::Uuid => f.write_str("diesel::sql_types::Uuid"),
+            ScalarType::Timestamptz => {
+                f.write_str("diesel::sql_types::Timestamptz")
+            }
+            ScalarType::Inet => f.write_str("diesel::sql_types::Inet"),
+            ScalarType::Binary => f.write_str("diesel::sql_types::Binary"),
+            ScalarType::Jsonb => f.write_str("diesel::sql_types::Jsonb"),
+            ScalarType::Interval => {
+                f.write_str("diesel::sql_types::Interval")
+            }
+            ScalarType::Enum(name) => f.write_str(name),
+        }
+    }
+}
+
+/// A fully described column SQL type: base type + nullability + array-ness.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ColumnType {
+    nullable: bool,
+    kind: ColumnTypeKind,
+}
+
+impl std::fmt::Display for ColumnType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        if self.nullable {
+            write!(f, "diesel::sql_types::Nullable<{}>", self.kind)
+        } else {
+            write!(f, "{}", self.kind)
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum ColumnTypeKind {
+    Scalar(ScalarType),
+    Array { element: ScalarType, element_nullable: bool },
+}
+
+impl std::fmt::Display for ColumnTypeKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ColumnTypeKind::Scalar(s) => write!(f, "{s}"),
+            ColumnTypeKind::Array { element, element_nullable } => {
+                if *element_nullable {
+                    write!(
+                        f,
+                        "diesel::sql_types::Array<\
+                         diesel::sql_types::Nullable<{element}>>"
+                    )
+                } else {
+                    write!(f, "diesel::sql_types::Array<{element}>")
+                }
+            }
+        }
+    }
+}
+
+/// Parses a normalized type name string into a `ScalarType`.
+///
+/// Known `diesel::sql_types::*` names map to the corresponding variant;
+/// everything else is treated as `ScalarType::Enum`.
+fn parse_scalar_type(s: &str) -> Result<ScalarType, String> {
+    match s {
+        "diesel::sql_types::BigInt" => Ok(ScalarType::BigInt),
+        "diesel::sql_types::Integer" => Ok(ScalarType::Integer),
+        "diesel::sql_types::SmallInt" => Ok(ScalarType::SmallInt),
+        "diesel::sql_types::Double" => Ok(ScalarType::Double),
+        "diesel::sql_types::Float" => Ok(ScalarType::Float),
+        "diesel::sql_types::Bool" => Ok(ScalarType::Bool),
+        "diesel::sql_types::Text" => Ok(ScalarType::Text),
+        "diesel::sql_types::Uuid" => Ok(ScalarType::Uuid),
+        "diesel::sql_types::Timestamptz" => Ok(ScalarType::Timestamptz),
+        "diesel::sql_types::Inet" => Ok(ScalarType::Inet),
+        "diesel::sql_types::Binary" => Ok(ScalarType::Binary),
+        "diesel::sql_types::Jsonb" => Ok(ScalarType::Jsonb),
+        "diesel::sql_types::Interval" => Ok(ScalarType::Interval),
+        _ if s.starts_with("nexus_db_schema::enums::") => {
+            Ok(ScalarType::Enum(s.to_string()))
+        }
+        _ => Err(format!("unknown Diesel type: {s}")),
+    }
+}
+
+/// Maps a CRDB `data_type` string to the expected `ScalarType`.
 ///
 /// Returns `None` for types that need special handling (ARRAY, USER-DEFINED).
-fn crdb_base_type_to_diesel(data_type: &str) -> Option<&'static str> {
+fn crdb_base_type_to_diesel(data_type: &str) -> Option<ScalarType> {
     match data_type {
-        "uuid" => Some("diesel::sql_types::Uuid"),
-        "text" | "character varying" => Some("diesel::sql_types::Text"),
-        "timestamp with time zone" => Some("diesel::sql_types::Timestamptz"),
-        "bigint" => Some("diesel::sql_types::Int8"),
-        "integer" => Some("diesel::sql_types::Int4"),
-        "smallint" => Some("diesel::sql_types::Int2"),
-        "boolean" => Some("diesel::sql_types::Bool"),
-        "inet" => Some("diesel::sql_types::Inet"),
-        "bytea" => Some("diesel::sql_types::Binary"),
-        "jsonb" => Some("diesel::sql_types::Jsonb"),
-        "double precision" => Some("diesel::sql_types::Float8"),
-        "interval" => Some("diesel::sql_types::Interval"),
+        "bigint" => Some(ScalarType::BigInt),
+        "boolean" => Some(ScalarType::Bool),
+        "bytea" => Some(ScalarType::Binary),
+        "double precision" => Some(ScalarType::Double),
+        "inet" => Some(ScalarType::Inet),
+        "integer" => Some(ScalarType::Integer),
+        "interval" => Some(ScalarType::Interval),
+        "jsonb" => Some(ScalarType::Jsonb),
+        "real" => Some(ScalarType::Float),
+        "smallint" => Some(ScalarType::SmallInt),
+        "text" | "character varying" => Some(ScalarType::Text),
+        "timestamp with time zone" => Some(ScalarType::Timestamptz),
+        "uuid" => Some(ScalarType::Uuid),
         _ => None,
     }
 }
 
-/// Maps a CRDB array element udt_name (e.g. `_text`) to the Diesel element
-/// type_name.
-fn crdb_array_element_to_diesel(udt_name: &str) -> Option<&'static str> {
+/// Maps a CRDB array element udt_name (e.g. `_text`) to the `ScalarType`.
+fn crdb_array_element_to_diesel(udt_name: &str) -> Option<ScalarType> {
     match udt_name {
-        "_text" | "_varchar" => Some("diesel::sql_types::Text"),
-        "_inet" => Some("diesel::sql_types::Inet"),
-        "_int8" => Some("diesel::sql_types::Int8"),
-        "_int4" => Some("diesel::sql_types::Int4"),
-        "_uuid" => Some("diesel::sql_types::Uuid"),
-        "_bool" => Some("diesel::sql_types::Bool"),
+        "_bool" => Some(ScalarType::Bool),
+        "_bytea" => Some(ScalarType::Binary),
+        "_float4" => Some(ScalarType::Float),
+        "_float8" => Some(ScalarType::Double),
+        "_inet" => Some(ScalarType::Inet),
+        "_int2" => Some(ScalarType::SmallInt),
+        "_int4" => Some(ScalarType::Integer),
+        "_int8" => Some(ScalarType::BigInt),
+        "_interval" => Some(ScalarType::Interval),
+        "_jsonb" => Some(ScalarType::Jsonb),
+        "_text" | "_varchar" => Some(ScalarType::Text),
+        "_timestamptz" => Some(ScalarType::Timestamptz),
+        "_uuid" => Some(ScalarType::Uuid),
         _ => None,
     }
 }
 
-/// Returns a map from CRDB enum type name to the Diesel type_name string
+/// Returns a map from CRDB enum type name to the `ScalarType`
 /// for every enum defined in `nexus_db_schema::enums`.
 ///
-/// For example: `"block_size"` → `"nexus_db_schema::enums::BlockSizeEnum"`.
-fn parse_enum_mapping() -> HashMap<String, String> {
+/// For example: `"block_size"` → `ScalarType::Enum("nexus_db_schema::enums::BlockSizeEnum")`.
+fn parse_enum_mapping() -> HashMap<String, ScalarType> {
     nexus_db_schema::enums::crdb_to_diesel_enum_type_names()
         .into_iter()
         .map(|(crdb_name, diesel_name)| {
-            (crdb_name.to_string(), diesel_name.to_string())
+            (crdb_name.to_string(), ScalarType::Enum(diesel_name.to_string()))
         })
         .collect()
 }
 
-/// Normalizes a Diesel type_name string to a canonical form.
+/// Parses a Diesel `std::any::type_name` string into a `ColumnType`.
 ///
-/// `std::any::type_name` returns internal paths (e.g.,
-/// `diesel::pg::types::sql_types::Uuid`) that differ from the re-exported
-/// paths (e.g., `diesel::sql_types::Uuid`). It also uses canonical struct
-/// names (e.g., `BigInt`) rather than the aliases used in schema.rs (e.g.,
-/// `Int8`). This function normalizes both.
-fn normalize_diesel_type(type_name: &str) -> String {
-    type_name
-        .replace("diesel::pg::types::sql_types::", "diesel::sql_types::")
-        .replace("diesel::sql_types::BigInt", "diesel::sql_types::Int8")
-        .replace("diesel::sql_types::Integer", "diesel::sql_types::Int4")
-        .replace("diesel::sql_types::SmallInt", "diesel::sql_types::Int2")
-        .replace("diesel::sql_types::Double", "diesel::sql_types::Float8")
+/// Handles module path normalization (`diesel::pg::types::sql_types::` →
+/// `diesel::sql_types::`), then strips outer `Nullable<>`, `Array<>`, and
+/// inner `Nullable<>` wrappers to produce a structured representation.
+fn normalize_diesel_type(type_name: &str) -> Result<ColumnType, String> {
+    let s = type_name
+        .replace("diesel::pg::types::sql_types::", "diesel::sql_types::");
+
+    // Strip outer Nullable<...>
+    let (nullable, inner) =
+        if let Some(rest) = s
+            .strip_prefix("diesel::sql_types::Nullable<")
+            .and_then(|r| r.strip_suffix('>'))
+        {
+            (true, rest)
+        } else {
+            (false, s.as_str())
+        };
+
+    // Check for Array<...>
+    let kind = if let Some(array_inner) = inner
+        .strip_prefix("diesel::sql_types::Array<")
+        .and_then(|r| r.strip_suffix('>'))
+    {
+        // Check for inner Nullable<...> on the element
+        let (element_nullable, elem_str) =
+            if let Some(rest) = array_inner
+                .strip_prefix("diesel::sql_types::Nullable<")
+                .and_then(|r| r.strip_suffix('>'))
+            {
+                (true, rest)
+            } else {
+                (false, array_inner)
+            };
+        ColumnTypeKind::Array {
+            element: parse_scalar_type(elem_str)?,
+            element_nullable,
+        }
+    } else {
+        ColumnTypeKind::Scalar(parse_scalar_type(inner)?)
+    };
+
+    Ok(ColumnType { nullable, kind })
 }
 
-/// Determines the expected Diesel type_name string for a CRDB column.
+/// Determines the expected `ColumnType` for a CRDB column.
 ///
 /// Given CRDB column metadata (data_type, is_nullable, udt_name) and
-/// the enum mapping, returns the expected Diesel type_name.
+/// the enum mapping, returns the expected structured type.
 fn expected_diesel_type(
     data_type: &str,
     is_nullable: bool,
     udt_name: &str,
-    enum_map: &HashMap<String, String>,
-) -> Result<String, String> {
-    let base = if data_type == "ARRAY" {
+    enum_map: &HashMap<String, ScalarType>,
+) -> Result<ColumnType, String> {
+    let kind = if data_type == "ARRAY" {
         let elem = crdb_array_element_to_diesel(udt_name).ok_or_else(|| {
             format!("unknown array element type: udt_name={udt_name}")
         })?;
-        // Return a sentinel that will be checked specially, because
         // CRDB doesn't distinguish nullable vs non-nullable array
-        // elements, but Diesel does (Array<T> vs Array<Nullable<T>>).
-        format!("diesel::sql_types::Array<{elem}>")
+        // elements, so we default to non-nullable here; the match
+        // function ignores element nullability.
+        ColumnTypeKind::Array { element: elem, element_nullable: false }
     } else if data_type == "USER-DEFINED" {
-        enum_map
+        let scalar = enum_map
             .get(udt_name)
             .cloned()
-            .ok_or_else(|| format!("unknown enum type: udt_name={udt_name}"))?
+            .ok_or_else(|| {
+                format!("unknown enum type: udt_name={udt_name}")
+            })?;
+        ColumnTypeKind::Scalar(scalar)
     } else {
-        crdb_base_type_to_diesel(data_type)
-            .ok_or_else(|| format!("unknown CRDB data_type: {data_type}"))?
-            .to_string()
+        let scalar = crdb_base_type_to_diesel(data_type).ok_or_else(|| {
+            format!("unknown CRDB data_type: {data_type}")
+        })?;
+        ColumnTypeKind::Scalar(scalar)
     };
 
-    if is_nullable {
-        Ok(format!("diesel::sql_types::Nullable<{base}>"))
-    } else {
-        Ok(base)
-    }
+    Ok(ColumnType { nullable: is_nullable, kind })
 }
 
-/// Checks whether a normalized Diesel type matches the expected type from
-/// CRDB.
+/// Checks whether the Diesel type matches the CRDB-derived type.
 ///
-/// This is more lenient than exact string comparison because CRDB's
+/// This is more lenient than exact equality because CRDB's
 /// information_schema does not distinguish nullable vs non-nullable array
-/// elements. Diesel may use `Array<Nullable<T>>` where CRDB reports just
-/// `Array<T>`. Both are considered matches.
-fn diesel_type_matches_expected(normalized: &str, expected: &str) -> bool {
-    if normalized == expected {
-        return true;
+/// elements. Array element nullability is ignored in the comparison.
+fn diesel_type_matches_expected(
+    diesel_type: &ColumnType,
+    crdb_type: &ColumnType,
+) -> bool {
+    if diesel_type.nullable != crdb_type.nullable {
+        return false;
     }
-    // Accept Array<Nullable<T>> when expected is Array<T>, and vice versa.
-    // CRDB arrays allow null elements by default, but information_schema
-    // doesn't report this.
-    if let Some(expected_inner) = expected
-        .strip_prefix("diesel::sql_types::Array<")
-        .and_then(|s| s.strip_suffix('>'))
-    {
-        // Check if normalized is Array<Nullable<expected_inner>>
-        let nullable_inner =
-            format!("diesel::sql_types::Nullable<{expected_inner}>");
-        let with_nullable =
-            format!("diesel::sql_types::Array<{nullable_inner}>");
-        if normalized == with_nullable {
-            return true;
+    match (&diesel_type.kind, &crdb_type.kind) {
+        (ColumnTypeKind::Scalar(d), ColumnTypeKind::Scalar(c)) => d == c,
+        (
+            ColumnTypeKind::Array { element: d, .. },
+            ColumnTypeKind::Array { element: c, .. },
+        ) => {
+            // Ignore element_nullable — CRDB can't report it
+            d == c
         }
+        _ => false,
     }
-    // Same check but for Nullable<Array<...>>
-    if let Some(expected_inner) = expected
-        .strip_prefix("diesel::sql_types::Nullable<diesel::sql_types::Array<")
-        .and_then(|s| s.strip_suffix(">>"))
-    {
-        let nullable_inner =
-            format!("diesel::sql_types::Nullable<{expected_inner}>");
-        let with_nullable = format!(
-            "diesel::sql_types::Nullable<diesel::sql_types::Array<{nullable_inner}>>"
-        );
-        if normalized == with_nullable {
-            return true;
-        }
-    }
-    false
 }
 
-/// Strips `Nullable<...>` wrapping from a type string, if present.
-fn strip_nullable(type_str: &str) -> &str {
-    type_str
-        .strip_prefix("diesel::sql_types::Nullable<")
-        .and_then(|s| s.strip_suffix('>'))
-        .unwrap_or(type_str)
-}
-
-/// Compares two type strings ignoring top-level nullability.
+/// Compares two types ignoring top-level nullability.
 ///
 /// Used for views, where information_schema reports all columns as nullable
 /// regardless of the underlying query structure. We still check that the
 /// base types match.
 fn diesel_type_matches_ignoring_nullability(
-    normalized: &str,
-    expected: &str,
+    diesel_type: &ColumnType,
+    crdb_type: &ColumnType,
 ) -> bool {
-    let n = strip_nullable(normalized);
-    let e = strip_nullable(expected);
-    diesel_type_matches_expected(n, e)
+    match (&diesel_type.kind, &crdb_type.kind) {
+        (ColumnTypeKind::Scalar(d), ColumnTypeKind::Scalar(c)) => d == c,
+        (
+            ColumnTypeKind::Array { element: d, .. },
+            ColumnTypeKind::Array { element: c, .. },
+        ) => d == c,
+        _ => false,
+    }
 }
 
 /// Represents a column from CRDB's information_schema.
@@ -5417,9 +5547,15 @@ async fn diesel_schema_matches_crdb_schema() {
                     crdb_col.is_nullable
                 };
 
-            // Normalize the Diesel type_name to account for internal
-            // module paths and type aliases.
-            let normalized = normalize_diesel_type(diesel_type_name);
+            let diesel_type = match normalize_diesel_type(diesel_type_name) {
+                Ok(t) => t,
+                Err(e) => {
+                    errors.push(format!(
+                        "{key}: failed to parse Diesel type: {e}",
+                    ));
+                    continue;
+                }
+            };
 
             match expected_diesel_type(
                 &crdb_col.data_type,
@@ -5427,18 +5563,18 @@ async fn diesel_schema_matches_crdb_schema() {
                 &crdb_col.udt_name,
                 &enum_map,
             ) {
-                Ok(expected) => {
+                Ok(crdb_type) => {
                     let matches = if is_view {
                         // For views, information_schema reports all
                         // columns as nullable regardless of the
                         // underlying query. So we compare types after
                         // stripping Nullable<> from both sides.
                         diesel_type_matches_ignoring_nullability(
-                            &normalized,
-                            &expected,
+                            &diesel_type,
+                            &crdb_type,
                         )
                     } else {
-                        diesel_type_matches_expected(&normalized, &expected)
+                        diesel_type_matches_expected(&diesel_type, &crdb_type)
                     };
                     if !matches {
                         if known.contains(key.as_str()) {
@@ -5446,13 +5582,13 @@ async fn diesel_schema_matches_crdb_schema() {
                                 .insert(known.get(key.as_str()).unwrap());
                             warnings.push(format!(
                                 "(known drift) {key}: type mismatch \
-                                 diesel={normalized} expected={expected}",
+                                 diesel={diesel_type} expected={crdb_type}",
                             ));
                         } else {
                             errors.push(format!(
                                 "{key}: type mismatch\n  \
-                                 Diesel (schema.rs): {normalized}\n  \
-                                 Expected from CRDB: {expected}\n  \
+                                 Diesel (schema.rs): {diesel_type}\n  \
+                                 Expected from CRDB: {crdb_type}\n  \
                                  CRDB info: data_type={}, is_nullable={}, \
                                  udt_name={}",
                                 crdb_col.data_type,
