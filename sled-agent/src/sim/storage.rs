@@ -1147,6 +1147,7 @@ pub(crate) struct Zpool {
     physical_disk_id: PhysicalDiskUuid,
     total_size: u64,
     datasets: HashMap<DatasetUuid, DatasetContents>,
+    // TODO-K: Simulate health here?
 }
 
 impl Zpool {

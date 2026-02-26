@@ -126,8 +126,7 @@ pub mod inventory {
     pub use crate::v16::inventory::ConfigReconcilerInventory;
     pub use crate::v16::inventory::SingleMeasurementInventory;
 
-    pub use crate::v22::inventory::Inventory;
-
+    pub use crate::v23::inventory::Inventory;
     pub use crate::v23::inventory::InventoryZpool;
 
     pub use crate::impls::inventory::ManifestBootInventoryDisplay;

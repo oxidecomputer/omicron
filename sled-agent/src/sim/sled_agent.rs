@@ -24,6 +24,7 @@ use dropshot::Body;
 use dropshot::HttpError;
 use futures::Stream;
 use iddqd::IdOrdMap;
+use illumos_utils::zpool::ZpoolHealth;
 use omicron_common::api::external::{
     ByteCount, Error, Generation, ResourceType,
 };
@@ -911,6 +912,8 @@ impl SledAgent {
                     Ok(InventoryZpool {
                         id: *id,
                         total_size: ByteCount::try_from(zpool.total_size())?,
+                        // TODO-K: Make this customiseable
+                        health: ZpoolHealth::Online,
                     })
                 })
                 .collect::<Result<Vec<_>, anyhow::Error>>()?,

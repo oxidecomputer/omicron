@@ -27,6 +27,7 @@ use diesel::pg::Pg;
 use diesel::serialize::ToSql;
 use diesel::{serialize, sql_types};
 use iddqd::IdOrdMap;
+use illumos_utils::zpool::ZpoolHealth;
 use ipnetwork::IpNetwork;
 use nexus_db_schema::schema::inv_zone_manifest_non_boot;
 use nexus_db_schema::schema::inv_zone_manifest_zone;
@@ -2291,6 +2292,8 @@ impl From<InvZpool> for nexus_types::inventory::Zpool {
             time_collected: pool.time_collected,
             id: pool.id.into(),
             total_size: *pool.total_size,
+            // TODO-K: Actually fetch this from DB
+            health: ZpoolHealth::Online,
         }
     }
 }
