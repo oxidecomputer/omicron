@@ -4,7 +4,7 @@
 
 mod cmd;
 mod helios;
-mod hubris;
+mod hubris_legacy;
 mod job;
 mod tuf;
 mod tuf_v2;
@@ -832,10 +832,10 @@ async fn main() -> Result<()> {
         .after("recovery-libraries");
     }
 
-    for env in hubris::Environment::ALL {
+    for env in hubris_legacy::Environment::ALL {
         jobs.push(
-            format!("hubris-{}", env.short_name),
-            hubris::fetch_hubris_artifacts(
+            format!("hubris-legacy-{}", env.short_name),
+            hubris_legacy::fetch_hubris_artifacts(
                 logger.clone(),
                 env,
                 client.clone(),
@@ -859,8 +859,8 @@ async fn main() -> Result<()> {
     .after("tuf-stamp")
     .after("host-image")
     .after("recovery-image")
-    .after("hubris-staging")
-    .after("hubris-production");
+    .after("hubris-legacy-staging")
+    .after("hubris-legacy-production");
 
     jobs.push(
         "tuf-v2-repo",
@@ -874,8 +874,8 @@ async fn main() -> Result<()> {
     .after("tuf-v2-host")
     .after("tuf-v2-recovery")
     .after("tuf-v2-zones")
-    .after("hubris-staging")
-    .after("hubris-production");
+    .after("hubris-legacy-staging")
+    .after("hubris-legacy-production");
 
     // RUN JOBS ===============================================================
     let start = Instant::now();
