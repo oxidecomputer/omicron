@@ -194,7 +194,7 @@ pub enum Error {
     #[error(transparent)]
     ZoneInstall(#[from] illumos_utils::running_zone::InstallZoneError),
 
-    #[error("Error contacting ddmd: {0}")]
+    #[error("Error contacting ddmd")]
     DdmError(#[from] DdmError),
 
     #[error("Failed to access underlay device: {0}")]

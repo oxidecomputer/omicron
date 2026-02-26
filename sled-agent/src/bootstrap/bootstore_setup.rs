@@ -144,7 +144,7 @@ pub async fn poll_ddmd_for_bootstore_and_tq_peer_update(
             Err(err) => {
                 warn!(
                     log, "Failed to get prefixes from ddmd";
-                    "err" => #%err,
+                    &err,
                 );
                 break;
             }

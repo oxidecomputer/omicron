@@ -22,3 +22,4 @@ sled-hardware-types.workspace = true
 omicron-workspace-hack.workspace = true
 ddm-admin-client.workspace = true
 uuid.workspace = true
+slog-error-chain.workspace = true
