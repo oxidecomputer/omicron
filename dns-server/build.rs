@@ -10,8 +10,6 @@ fn main() {
         .expect("detected VCS at repo root");
 
     materializer
-        .materialize(
-            "openapi/dns-server/dns-server-1.0.0-49359e.json.gitstub",
-        )
+        .materialize("openapi/dns-server/dns-server-1.0.0-49359e.json.gitstub")
         .expect("materialized dns-server v1 git stub");
 }
