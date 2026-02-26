@@ -96,7 +96,8 @@ fn check_underlay_ips(blippy: &mut Blippy<'_>) {
                 );
             }
         } else {
-            let subnet = blippy.blueprint().sleds.get(&sled_id).unwrap().subnet;
+            let sled_config = blippy.blueprint().sleds.get(&sled_id).unwrap();
+            let subnet = sled_config.subnet;
 
             // Any given subnet should be used by at most one sled.
             match sled_subnets_by_subnet.entry(subnet) {
@@ -127,6 +128,21 @@ fn check_underlay_ips(blippy: &mut Blippy<'_>) {
                     SledKind::UnderlayIpOnWrongSubnet {
                         zone: zone.clone(),
                         subnet,
+                    },
+                );
+            }
+
+            // Any underlay IP (other than internal DNS, which we check above)
+            // from this sled should be no higher than this sled's last
+            // allocated IP.
+            let last_allocated_ip = sled_config.last_allocated_ip();
+            if last_allocated_ip < ip {
+                blippy.push_sled_note(
+                    sled_id,
+                    Severity::Fatal,
+                    SledKind::UnderlayIpAboveLastAllocatedIp {
+                        zone: zone.clone(),
+                        last_allocated_ip,
                     },
                 );
             }
@@ -367,7 +383,8 @@ fn check_datasets(blippy: &mut Blippy<'_>) {
     // map as we perform the next set of checks.
     let mut crucible_zone_by_zpool = BTreeMap::new();
 
-    // All disks should have debug, zone root, and local storage datasets.
+    // All disks should have debug, zone root, and both encrypted and
+    // unencrypted local storage datasets.
     for (&sled_id, sled_config) in &blippy.blueprint().sleds {
         let sled_datasets = datasets.get_cached(blippy, sled_id, sled_config);
 
@@ -421,6 +438,23 @@ fn check_datasets(blippy: &mut Blippy<'_>) {
                         sled_id,
                         Severity::Fatal,
                         SledKind::ZpoolMissingLocalStorageDataset {
+                            zpool: disk.pool_id,
+                        },
+                    );
+                }
+            }
+
+            match sled_datasets.and_then(|by_zpool| {
+                by_zpool.get(&DatasetKind::LocalStorageUnencrypted)
+            }) {
+                Some(dataset) => {
+                    expected_datasets.insert(dataset.id);
+                }
+                None => {
+                    blippy.push_sled_note(
+                        sled_id,
+                        Severity::Fatal,
+                        SledKind::ZpoolMissingLocalStorageUnencryptedDataset {
                             zpool: disk.pool_id,
                         },
                     );
@@ -577,7 +611,7 @@ fn check_mupdate_override(blippy: &mut Blippy<'_>) {
     // Perform checks for invariants that should be upheld if
     // remove_mupdate_override is set for a sled.
     for (&sled_id, sled) in &blippy.blueprint().sleds {
-        if !sled.state.matches(SledFilter::InService) {
+        if !SledFilter::InService.matches_state(sled.state) {
             continue;
         }
 
@@ -733,6 +767,7 @@ mod tests {
     use crate::BlippyReportSortKey;
     use crate::blippy::Kind;
     use crate::blippy::Note;
+    use ipnet::IpAdd;
     use nexus_reconfigurator_planning::example::ExampleSystemBuilder;
     use nexus_reconfigurator_planning::example::example;
     use nexus_types::deployment::BlueprintArtifactVersion;
@@ -826,6 +861,62 @@ mod tests {
                 },
             },
         ];
+
+        let report = Blippy::new_blueprint_only(&blueprint)
+            .into_report(BlippyReportSortKey::Kind);
+        eprintln!("{}", report.display());
+        for note in expected_notes {
+            assert!(
+                report.notes().contains(&note),
+                "did not find expected note {note:?}"
+            );
+        }
+
+        logctx.cleanup_successful();
+    }
+
+    #[test]
+    fn test_underlay_ip_above_last_allocated() {
+        static TEST_NAME: &str = "test_underlay_ip_above_last_allocated";
+        let logctx = test_setup_log(TEST_NAME);
+        let (_, _, mut blueprint) = example(&logctx.log, TEST_NAME);
+
+        // Assign an "above last" IP to a Nexus zone.
+        let (sled_id, sled_config) = blueprint
+            .sleds
+            .iter_mut()
+            .find(|(_sled_id, config)| {
+                config.zones.iter().any(|z| z.zone_type.is_nexus())
+            })
+            .expect("at least one Nexus zone");
+
+        // Get the current `last_allocated_ip`, then change Nexus's IP to be one
+        // above that.
+        let last_allocated_ip = sled_config.last_allocated_ip();
+        let bad_ip = last_allocated_ip.saturating_add(1);
+        let mut nexus_config = None;
+
+        for mut z in &mut sled_config.zones {
+            if let BlueprintZoneType::Nexus(nexus) = &mut z.zone_type {
+                nexus.internal_address.set_ip(bad_ip);
+                nexus_config = Some(z.into_ref().clone());
+                break;
+            }
+        }
+
+        // We know this sled has a Nexus, so the loop must have populated this.
+        let nexus_config = nexus_config.unwrap();
+
+        let expected_notes = [Note {
+            severity: Severity::Fatal,
+            kind: Kind::Sled {
+                sled_id: *sled_id,
+                kind: Box::new(SledKind::UnderlayIpAboveLastAllocatedIp {
+                    zone: nexus_config,
+                    last_allocated_ip,
+                }),
+            },
+        }];
 
         let report = Blippy::new_blueprint_only(&blueprint)
             .into_report(BlippyReportSortKey::Kind);
@@ -1701,7 +1792,8 @@ mod tests {
                 let note = match dataset.kind {
                     DatasetKind::Debug
                     | DatasetKind::TransientZoneRoot
-                    | DatasetKind::LocalStorage => Note {
+                    | DatasetKind::LocalStorage
+                    | DatasetKind::LocalStorageUnencrypted => Note {
                         severity: Severity::Fatal,
                         kind: Kind::Sled {
                             sled_id,

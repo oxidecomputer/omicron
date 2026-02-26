@@ -4,6 +4,7 @@
 
 //! Background task for automatically restarting failed instances.
 
+use crate::app::background::Activator;
 use crate::app::background::BackgroundTask;
 use crate::app::saga::StartSaga;
 use crate::app::sagas::NexusSaga;
@@ -29,6 +30,10 @@ pub struct InstanceReincarnation {
     /// The maximum number of concurrently executing instance-start sagas.
     concurrency_limit: NonZeroU32,
     disabled: bool,
+    /// Activator for the multicast reconciler background task.
+    /// Called after successful instance-start sagas to trigger member state
+    /// transitions ("Joining" → "Joined") for instances with multicast memberships.
+    task_multicast_reconciler: Activator,
 }
 
 const DEFAULT_MAX_CONCURRENT_REINCARNATIONS: NonZeroU32 =
@@ -119,6 +124,13 @@ impl BackgroundTask for InstanceReincarnation {
                 );
             }
 
+            // Activate multicast reconciler if any instances were reincarnated.
+            // This triggers member state transitions ("Joining" → "Joined") for
+            // instances with multicast group memberships.
+            if !status.instances_reincarnated.is_empty() {
+                self.task_multicast_reconciler.activate();
+            }
+
             serde_json::json!(status)
         })
     }
@@ -129,12 +141,14 @@ impl InstanceReincarnation {
         datastore: Arc<DataStore>,
         sagas: Arc<dyn StartSaga>,
         disabled: bool,
+        task_multicast_reconciler: Activator,
     ) -> Self {
         Self {
             datastore,
             sagas,
             concurrency_limit: DEFAULT_MAX_CONCURRENT_REINCARNATIONS,
             disabled,
+            task_multicast_reconciler,
         }
     }
 
@@ -308,7 +322,6 @@ impl InstanceReincarnation {
 mod test {
     use super::*;
     use crate::app::sagas::test_helpers;
-    use crate::external_api::params;
     use chrono::Utc;
     use nexus_db_lookup::LookupPath;
     use nexus_db_model::Generation;
@@ -324,6 +337,7 @@ mod test {
         create_default_ip_pools, create_project, object_create,
     };
     use nexus_test_utils_macros::nexus_test;
+    use nexus_types::external_api::instance;
     use omicron_common::api::external::ByteCount;
     use omicron_common::api::external::IdentityMetadataCreateParams;
     use omicron_common::api::external::InstanceAutoRestartPolicy;
@@ -371,7 +385,7 @@ mod test {
             object_create::<_, omicron_common::api::external::Instance>(
                 &cptestctx.external_client,
                 &instances_url,
-                &params::InstanceCreate {
+                &instance::InstanceCreate {
                     identity: IdentityMetadataCreateParams {
                         name,
                         description: "It's an instance".into(),
@@ -387,7 +401,7 @@ mod test {
                     hostname: "myhostname".try_into().unwrap(),
                     user_data: Vec::new(),
                     network_interfaces:
-                        params::InstanceNetworkInterfaceAttachment::None,
+                        instance::InstanceNetworkInterfaceAttachment::None,
                     external_ips: Vec::new(),
                     disks: Vec::new(),
                     boot_disk: None,
@@ -561,6 +575,7 @@ mod test {
             datastore.clone(),
             nexus.sagas.clone(),
             false,
+            Activator::new(),
         );
 
         // Noop test
@@ -613,6 +628,7 @@ mod test {
             datastore.clone(),
             nexus.sagas.clone(),
             false,
+            Activator::new(),
         );
 
         // Create an instance in the `Failed` state that's eligible to be
@@ -659,6 +675,7 @@ mod test {
             datastore.clone(),
             nexus.sagas.clone(),
             false,
+            Activator::new(),
         );
 
         // Create instances in the `Failed` state that are eligible to be
@@ -839,6 +856,7 @@ mod test {
             datastore.clone(),
             nexus.sagas.clone(),
             false,
+            Activator::new(),
         );
 
         let instance1 = create_instance(

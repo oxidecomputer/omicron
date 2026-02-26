@@ -26,16 +26,11 @@ use nexus_types::deployment::ClickhousePolicy;
 use nexus_types::deployment::OximeterReadPolicy;
 use nexus_types::deployment::ReconfiguratorConfigParam;
 use nexus_types::deployment::ReconfiguratorConfigView;
-use nexus_types::external_api::headers::RangeRequest;
-use nexus_types::external_api::params;
-use nexus_types::external_api::params::PhysicalDiskPath;
-use nexus_types::external_api::params::SledSelector;
-use nexus_types::external_api::params::UninitializedSledId;
-use nexus_types::external_api::shared;
-use nexus_types::external_api::shared::UninitializedSled;
-use nexus_types::external_api::views::Ping;
-use nexus_types::external_api::views::PingStatus;
-use nexus_types::external_api::views::SledPolicy;
+use nexus_types::external_api::hardware::UninitializedSled;
+use nexus_types::external_api::path_params::{BlueprintPath, PhysicalDiskPath};
+use nexus_types::external_api::sled::{SledPolicy, SledSelector};
+use nexus_types::external_api::support_bundle;
+use nexus_types::external_api::system::{Ping, PingStatus};
 use nexus_types::internal_api::params::InstanceMigrateRequest;
 use nexus_types::internal_api::params::RackInitializationRequest;
 use nexus_types::internal_api::views::BackgroundTask;
@@ -44,6 +39,8 @@ use nexus_types::internal_api::views::MgsUpdateDriverStatus;
 use nexus_types::internal_api::views::QuiesceStatus;
 use nexus_types::internal_api::views::Saga;
 use nexus_types::internal_api::views::UpdateStatus;
+use nexus_types::trust_quorum::TrustQuorumConfig;
+use nexus_types_versions::latest::headers::RangeRequest;
 use omicron_common::api::external::Instance;
 use omicron_common::api::external::http_pagination::PaginatedById;
 use omicron_common::api::external::http_pagination::PaginatedByTimeAndId;
@@ -51,6 +48,7 @@ use omicron_uuid_kinds::*;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
+use trust_quorum_types::types::Epoch;
 use uuid::Uuid;
 
 const RACK_INITIALIZATION_REQUEST_MAX_BYTES: usize = 10 * 1024 * 1024;
@@ -232,7 +230,7 @@ pub trait NexusLockstepApi {
     }]
     async fn blueprint_view(
         rqctx: RequestContext<Self::Context>,
-        path_params: Path<nexus_types::external_api::params::BlueprintPath>,
+        path_params: Path<BlueprintPath>,
     ) -> Result<HttpResponseOk<Blueprint>, HttpError>;
 
     /// Deletes one blueprint
@@ -242,7 +240,7 @@ pub trait NexusLockstepApi {
     }]
     async fn blueprint_delete(
         rqctx: RequestContext<Self::Context>,
-        path_params: Path<nexus_types::external_api::params::BlueprintPath>,
+        path_params: Path<BlueprintPath>,
     ) -> Result<HttpResponseDeleted, HttpError>;
 
     // Managing the current target blueprint
@@ -347,21 +345,6 @@ pub trait NexusLockstepApi {
         rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<ResultsPage<UninitializedSled>>, HttpError>;
 
-    /// Add sled to initialized rack
-    //
-    // TODO: In the future this should really be a PUT request, once we resolve
-    // https://github.com/oxidecomputer/omicron/issues/4494. It should also
-    // explicitly be tied to a rack via a `rack_id` path param. For now we assume
-    // we are only operating on single rack systems.
-    #[endpoint {
-        method = POST,
-        path = "/sleds/add",
-    }]
-    async fn sled_add(
-        rqctx: RequestContext<Self::Context>,
-        sled: TypedBody<UninitializedSledId>,
-    ) -> Result<HttpResponseCreated<SledId>, HttpError>;
-
     /// Mark a sled as expunged
     ///
     /// This is an irreversible process! It should only be called after
@@ -402,7 +385,10 @@ pub trait NexusLockstepApi {
     async fn support_bundle_list(
         rqctx: RequestContext<Self::Context>,
         query_params: Query<PaginatedByTimeAndId>,
-    ) -> Result<HttpResponseOk<ResultsPage<shared::SupportBundleInfo>>, HttpError>;
+    ) -> Result<
+        HttpResponseOk<ResultsPage<support_bundle::SupportBundleInfo>>,
+        HttpError,
+    >;
 
     /// View a support bundle
     #[endpoint {
@@ -411,8 +397,8 @@ pub trait NexusLockstepApi {
     }]
     async fn support_bundle_view(
         rqctx: RequestContext<Self::Context>,
-        path_params: Path<params::SupportBundlePath>,
-    ) -> Result<HttpResponseOk<shared::SupportBundleInfo>, HttpError>;
+        path_params: Path<support_bundle::SupportBundlePath>,
+    ) -> Result<HttpResponseOk<support_bundle::SupportBundleInfo>, HttpError>;
 
     /// Download the index of a support bundle
     #[endpoint {
@@ -422,7 +408,7 @@ pub trait NexusLockstepApi {
     async fn support_bundle_index(
         rqctx: RequestContext<Self::Context>,
         headers: Header<RangeRequest>,
-        path_params: Path<params::SupportBundlePath>,
+        path_params: Path<support_bundle::SupportBundlePath>,
     ) -> Result<Response<Body>, HttpError>;
 
     /// Download the contents of a support bundle
@@ -433,7 +419,7 @@ pub trait NexusLockstepApi {
     async fn support_bundle_download(
         rqctx: RequestContext<Self::Context>,
         headers: Header<RangeRequest>,
-        path_params: Path<params::SupportBundlePath>,
+        path_params: Path<support_bundle::SupportBundlePath>,
     ) -> Result<Response<Body>, HttpError>;
 
     /// Download a file within a support bundle
@@ -444,7 +430,7 @@ pub trait NexusLockstepApi {
     async fn support_bundle_download_file(
         rqctx: RequestContext<Self::Context>,
         headers: Header<RangeRequest>,
-        path_params: Path<params::SupportBundleFilePath>,
+        path_params: Path<support_bundle::SupportBundleFilePath>,
     ) -> Result<Response<Body>, HttpError>;
 
     /// Download the metadata of a support bundle
@@ -455,7 +441,7 @@ pub trait NexusLockstepApi {
     async fn support_bundle_head(
         rqctx: RequestContext<Self::Context>,
         headers: Header<RangeRequest>,
-        path_params: Path<params::SupportBundlePath>,
+        path_params: Path<support_bundle::SupportBundlePath>,
     ) -> Result<Response<Body>, HttpError>;
 
     /// Download the metadata of a file within the support bundle
@@ -466,7 +452,7 @@ pub trait NexusLockstepApi {
     async fn support_bundle_head_file(
         rqctx: RequestContext<Self::Context>,
         headers: Header<RangeRequest>,
-        path_params: Path<params::SupportBundleFilePath>,
+        path_params: Path<support_bundle::SupportBundleFilePath>,
     ) -> Result<Response<Body>, HttpError>;
 
     /// Create a new support bundle
@@ -476,8 +462,8 @@ pub trait NexusLockstepApi {
     }]
     async fn support_bundle_create(
         rqctx: RequestContext<Self::Context>,
-        body: TypedBody<params::SupportBundleCreate>,
-    ) -> Result<HttpResponseCreated<shared::SupportBundleInfo>, HttpError>;
+        body: TypedBody<support_bundle::SupportBundleCreate>,
+    ) -> Result<HttpResponseCreated<support_bundle::SupportBundleInfo>, HttpError>;
 
     /// Delete an existing support bundle
     ///
@@ -489,7 +475,7 @@ pub trait NexusLockstepApi {
     }]
     async fn support_bundle_delete(
         rqctx: RequestContext<Self::Context>,
-        path_params: Path<params::SupportBundlePath>,
+        path_params: Path<support_bundle::SupportBundlePath>,
     ) -> Result<HttpResponseDeleted, HttpError>;
 
     /// Update a support bundle
@@ -499,9 +485,9 @@ pub trait NexusLockstepApi {
     }]
     async fn support_bundle_update(
         rqctx: RequestContext<Self::Context>,
-        path_params: Path<params::SupportBundlePath>,
-        body: TypedBody<params::SupportBundleUpdate>,
-    ) -> Result<HttpResponseOk<shared::SupportBundleInfo>, HttpError>;
+        path_params: Path<support_bundle::SupportBundlePath>,
+        body: TypedBody<support_bundle::SupportBundleUpdate>,
+    ) -> Result<HttpResponseOk<support_bundle::SupportBundleInfo>, HttpError>;
 
     /// Get the current clickhouse policy
     #[endpoint {
@@ -562,6 +548,47 @@ pub trait NexusLockstepApi {
     async fn quiesce_get(
         rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<QuiesceStatus>, HttpError>;
+
+    /// Retrieve the trust quorum configuration for the given epoch, or latest
+    // if no epoch is given
+    #[endpoint {
+        method = GET,
+        path = "/trust-quorum/config/{rack_id}",
+    }]
+    async fn trust_quorum_get_config(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<
+            nexus_types::external_api::rack::RackMembershipConfigPathParams,
+        >,
+        query_params: Query<TrustQuorumEpochQueryParam>,
+    ) -> Result<HttpResponseOk<TrustQuorumConfig>, HttpError>;
+
+    /// Initiate an LRTQ upgrade
+    ///
+    /// Return the epoch of the proposed configuration, so it can be polled
+    /// asynchronously.
+    #[endpoint {
+        method = POST,
+        path = "/trust-quorum/lrtq-upgrade"
+    }]
+    async fn trust_quorum_lrtq_upgrade(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<Epoch>, HttpError>;
+
+    /// Remove a sled from the trust quorum
+    ///
+    /// This is a required first step towards expunging a sled
+    ///
+    /// Return the epoch of the proposed configuration so it can be polled
+    /// asynchronously.
+    #[endpoint {
+        method = POST,
+        path = "/trust-quorum/remove/{sled}"
+    }]
+    async fn trust_quorum_remove_sled(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<SledSelector>,
+    ) -> Result<HttpResponseOk<Epoch>, HttpError>;
 }
 
 /// Path parameters for Rack requests.
@@ -609,4 +636,9 @@ pub struct SledId {
 #[derive(Deserialize, JsonSchema)]
 pub struct VersionPathParam {
     pub version: u32,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct TrustQuorumEpochQueryParam {
+    pub epoch: Option<Epoch>,
 }

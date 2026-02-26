@@ -84,6 +84,7 @@
 //!   +----------------------+
 //! ```
 
+mod file_archiver;
 mod handle;
 mod helpers;
 mod task;

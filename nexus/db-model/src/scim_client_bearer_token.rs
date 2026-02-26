@@ -5,7 +5,7 @@
 use chrono::DateTime;
 use chrono::Utc;
 use nexus_db_schema::schema::scim_client_bearer_token;
-use nexus_types::external_api::views;
+use nexus_types::external_api::scim;
 use uuid::Uuid;
 
 /// A SCIM client sends requests to a SCIM provider (in this case, Nexus) using
@@ -31,9 +31,9 @@ impl ScimClientBearerToken {
     }
 }
 
-impl From<ScimClientBearerToken> for views::ScimClientBearerToken {
-    fn from(t: ScimClientBearerToken) -> views::ScimClientBearerToken {
-        views::ScimClientBearerToken {
+impl From<ScimClientBearerToken> for scim::ScimClientBearerToken {
+    fn from(t: ScimClientBearerToken) -> scim::ScimClientBearerToken {
+        scim::ScimClientBearerToken {
             id: t.id,
             time_created: t.time_created,
             time_expires: t.time_expires,
@@ -41,9 +41,9 @@ impl From<ScimClientBearerToken> for views::ScimClientBearerToken {
     }
 }
 
-impl From<ScimClientBearerToken> for views::ScimClientBearerTokenValue {
-    fn from(t: ScimClientBearerToken) -> views::ScimClientBearerTokenValue {
-        views::ScimClientBearerTokenValue {
+impl From<ScimClientBearerToken> for scim::ScimClientBearerTokenValue {
+    fn from(t: ScimClientBearerToken) -> scim::ScimClientBearerTokenValue {
+        scim::ScimClientBearerTokenValue {
             id: t.id,
             time_created: t.time_created,
             time_expires: t.time_expires,

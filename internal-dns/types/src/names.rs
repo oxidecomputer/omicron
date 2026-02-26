@@ -68,9 +68,7 @@ pub enum ServiceName {
     OximeterReader,
     ManagementGatewayService,
     RepoDepot,
-    Wicketd,
     Dendrite,
-    Tfport,
     CruciblePantry,
     SledAgent(SledUuid),
     Crucible(OmicronZoneUuid),
@@ -112,9 +110,7 @@ impl ServiceName {
             ServiceName::OximeterReader => "oximeter-reader",
             ServiceName::ManagementGatewayService => "mgs",
             ServiceName::RepoDepot => "repo-depot",
-            ServiceName::Wicketd => "wicketd",
             ServiceName::Dendrite => "dendrite",
-            ServiceName::Tfport => "tfport",
             ServiceName::CruciblePantry => "crucible-pantry",
             ServiceName::SledAgent(_) => "sledagent",
             ServiceName::Crucible(_) => "crucible",
@@ -146,9 +142,7 @@ impl ServiceName {
             | ServiceName::OximeterReader
             | ServiceName::ManagementGatewayService
             | ServiceName::RepoDepot
-            | ServiceName::Wicketd
             | ServiceName::Dendrite
-            | ServiceName::Tfport
             | ServiceName::CruciblePantry
             | ServiceName::BoundaryNtp
             | ServiceName::InternalNtp

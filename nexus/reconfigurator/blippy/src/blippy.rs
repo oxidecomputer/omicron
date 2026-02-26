@@ -27,6 +27,7 @@ use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::ZpoolUuid;
 use std::collections::BTreeSet;
 use std::net::IpAddr;
+use std::net::Ipv6Addr;
 use std::net::SocketAddrV6;
 use tufaceous_artifact::ArtifactHash;
 
@@ -139,6 +140,12 @@ pub enum SledKind {
         zone: BlueprintZoneConfig,
         subnet: Ipv6Subnet<SLED_PREFIX>,
     },
+    /// A sled has a zone with an IP that is above the sled's overall "last
+    /// allocated IP" value.
+    UnderlayIpAboveLastAllocatedIp {
+        zone: BlueprintZoneConfig,
+        last_allocated_ip: Ipv6Addr,
+    },
     /// Two sleds are using the same sled subnet.
     ConflictingSledSubnets {
         other_sled: SledUuid,
@@ -192,6 +199,8 @@ pub enum SledKind {
     ZpoolMissingZoneRootDataset { zpool: ZpoolUuid },
     /// A zpool is missing its LocalStorage dataset.
     ZpoolMissingLocalStorageDataset { zpool: ZpoolUuid },
+    /// A zpool is missing its LocalStorageUnencrypted dataset.
+    ZpoolMissingLocalStorageUnencryptedDataset { zpool: ZpoolUuid },
     /// A zone's filesystem dataset is missing from `blueprint_datasets`.
     ZoneMissingFilesystemDataset { zone: BlueprintZoneConfig },
     /// A zone's durable dataset is missing from `blueprint_datasets`.
@@ -267,6 +276,19 @@ impl fmt::Display for SledKind {
                     zone.id,
                     zone.underlay_ip(),
                     subnet,
+                )
+            }
+            SledKind::UnderlayIpAboveLastAllocatedIp {
+                zone,
+                last_allocated_ip,
+            } => {
+                write!(
+                    f,
+                    "{:?} zone {} underlay IP {} is above the sled's last \
+                     allocated IP: {last_allocated_ip}",
+                    zone.zone_type.kind(),
+                    zone.id,
+                    zone.underlay_ip(),
                 )
             }
             SledKind::ConflictingSledSubnets { other_sled, subnet } => {
@@ -363,6 +385,12 @@ impl fmt::Display for SledKind {
             SledKind::ZpoolMissingLocalStorageDataset { zpool } => {
                 write!(f, "zpool {zpool} is missing its LocalStorage dataset")
             }
+            SledKind::ZpoolMissingLocalStorageUnencryptedDataset { zpool } => {
+                write!(
+                    f,
+                    "zpool {zpool} is missing its LocalStorageUnencrypted dataset"
+                )
+            }
             SledKind::ZoneMissingFilesystemDataset { zone } => {
                 write!(
                     f,
@@ -409,6 +437,10 @@ impl fmt::Display for SledKind {
                     }
 
                     DatasetKind::LocalStorage => "local_storage",
+
+                    DatasetKind::LocalStorageUnencrypted => {
+                        "local_storage_unencrypted"
+                    }
                 };
                 write!(
                     f,

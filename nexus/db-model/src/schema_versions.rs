@@ -7,7 +7,7 @@
 //! For details, see schema/crdb/README.adoc in the root of this repository.
 
 use anyhow::{Context, bail, ensure};
-use camino::Utf8Path;
+use camino::{Utf8Path, Utf8PathBuf};
 use semver::Version;
 use std::{collections::BTreeMap, sync::LazyLock};
 
@@ -16,7 +16,7 @@ use std::{collections::BTreeMap, sync::LazyLock};
 ///
 /// This must be updated when you change the database schema.  Refer to
 /// schema/crdb/README.adoc in the root of this repository for details.
-pub const SCHEMA_VERSION: Version = Version::new(217, 0, 0);
+pub const SCHEMA_VERSION: Version = Version::new(232, 0, 0);
 
 /// List of all past database schema versions, in *reverse* order
 ///
@@ -28,6 +28,21 @@ static KNOWN_VERSIONS: LazyLock<Vec<KnownVersion>> = LazyLock::new(|| {
         // |  leaving the first copy as an example for the next person.
         // v
         // KnownVersion::new(next_int, "unique-dirname-with-the-sql-files"),
+        KnownVersion::new(232, "index-backfill-batch-size"),
+        KnownVersion::new(231, "bgp-config-max-paths-not-null"),
+        KnownVersion::new(230, "bgp-unnumbered-peers"),
+        KnownVersion::new(229, "fix-session-token-column-order"),
+        KnownVersion::new(228, "read-only-crucible-disks"),
+        KnownVersion::new(227, "local-storage-unencrypted-dataset"),
+        KnownVersion::new(226, "measurement-proper-inventory"),
+        KnownVersion::new(225, "dual-stack-ephemeral-ip"),
+        KnownVersion::new(224, "add-external-subnets"),
+        KnownVersion::new(223, "ip-pool-range-by-pool-id-index"),
+        KnownVersion::new(222, "audit-log-credential-id"),
+        KnownVersion::new(221, "audit-log-auth-method-enum"),
+        KnownVersion::new(220, "multicast-implicit-lifecycle"),
+        KnownVersion::new(219, "blueprint-sled-last-used-ip"),
+        KnownVersion::new(218, "measurements"),
         KnownVersion::new(217, "multiple-default-ip-pools-per-silo"),
         KnownVersion::new(216, "add-trust-quorum"),
         KnownVersion::new(215, "support-up-to-12-disks"),
@@ -437,7 +452,7 @@ impl SchemaVersion {
             })?;
             let pathbuf = entry.into_path();
 
-            // Ensure filename ends with ".sql"
+            // Ensure filename ends with ".sql".
             if pathbuf.extension() != Some("sql") {
                 continue;
             }
@@ -451,14 +466,27 @@ impl SchemaVersion {
                 continue;
             };
 
-            // Ensure the remaining filename is either empty (i.e., the filename
-            // is exactly "up.sql") or parseable as an unsigned integer. We give
-            // "up.sql" the "up_number" 0 (checked in the loop below), and
-            // require any other number to be nonzero.
-            if remaining_filename.is_empty() {
-                up_sqls.push((0, pathbuf));
+            // Check for the non-transactional suffix, and strip it if present.
+            let (number_part, non_transactional) = match remaining_filename
+                .strip_suffix(NON_TRANSACTIONAL_SUFFIX)
+            {
+                Some(stripped) => (stripped, true),
+                None => (remaining_filename, false),
+            };
+
+            // Ensure the number part is either empty (i.e., the filename is
+            // exactly "up.sql" or "up-danger-non-transactional.sql") or
+            // parseable as an unsigned integer. We give "up.sql" the
+            // "up_number" 0 (checked in the loop below), and require any other
+            // number to be nonzero.
+            if number_part.is_empty() {
+                up_sqls.push(ParsedUpSql {
+                    up_number: 0,
+                    path: pathbuf,
+                    non_transactional,
+                });
             } else {
-                let Ok(up_number) = remaining_filename.parse::<u64>() else {
+                let Ok(up_number) = number_part.parse::<u64>() else {
                     bail!(
                         "invalid filename (non-numeric `up*.sql`): {pathbuf}",
                     );
@@ -468,37 +496,40 @@ impl SchemaVersion {
                     "invalid filename (`up*.sql` numbering must start at 1): \
                      {pathbuf}",
                 );
-                up_sqls.push((up_number, pathbuf));
+                up_sqls.push(ParsedUpSql {
+                    up_number,
+                    path: pathbuf,
+                    non_transactional,
+                });
             }
         }
-        up_sqls.sort();
+        up_sqls.sort_by_key(|s| s.up_number);
 
         // Validate that we have a reasonable sequence of `up*.sql` numbers.
         match up_sqls.as_slice() {
             [] => bail!("no `up*.sql` files found"),
-            [(up_number, path)] => {
+            [single] => {
                 // For a single file, we allow either `up.sql` (keyed as
                 // up_number=0) or `up1.sql`; reject any higher number.
                 ensure!(
-                    *up_number <= 1,
+                    single.up_number <= 1,
                     "`up*.sql` numbering must start at 1: found first file \
-                     {path}"
+                     {}",
+                    single.path
                 );
             }
             _ => {
-                for (i, (up_number, path)) in up_sqls.iter().enumerate() {
+                for (i, parsed) in up_sqls.iter().enumerate() {
                     // We have 2 or more `up*.sql`; they should be numbered
                     // exactly 1..=up_sqls.len().
-                    if i as u64 + 1 != *up_number {
+                    if i as u64 + 1 != parsed.up_number {
                         // We know we have at least two elements, so report an
                         // error referencing either the next item (if we're
                         // first) or the previous item (if we're not first).
                         let (path_a, path_b) = if i == 0 {
-                            let (_, next_path) = &up_sqls[1];
-                            (path, next_path)
+                            (&parsed.path, &up_sqls[1].path)
                         } else {
-                            let (_, prev_path) = &up_sqls[i - 1];
-                            (prev_path, path)
+                            (&up_sqls[i - 1].path, &parsed.path)
                         };
                         bail!("invalid `up*.sql` sequence: {path_a}, {path_b}");
                     }
@@ -506,19 +537,20 @@ impl SchemaVersion {
             }
         }
 
-        // This collection of `up*.sql` files is valid.  Read them all, in
+        // This collection of `up*.sql` files is valid. Read them all, in
         // order.
         let mut steps = vec![];
-        for (_, path) in up_sqls.into_iter() {
-            let sql = std::fs::read_to_string(&path)
-                .with_context(|| format!("Cannot read {path}"))?;
+        for parsed in up_sqls {
+            let sql = std::fs::read_to_string(&parsed.path)
+                .with_context(|| format!("Cannot read {}", parsed.path))?;
             // unwrap: `file_name()` is documented to return `None` only when
-            // the path is `..`.  But we got this path from reading the
+            // the path is `..`. But we got this path from reading the
             // directory, and that process explicitly documents that it skips
             // `..`.
             steps.push(SchemaUpgradeStep {
-                label: path.file_name().unwrap().to_string(),
+                label: parsed.path.file_name().unwrap().to_string(),
                 sql,
+                non_transactional: parsed.non_transactional,
             });
         }
 
@@ -552,11 +584,48 @@ impl std::fmt::Display for SchemaVersion {
     }
 }
 
+/// A parsed `up*.sql` filename, before the file content has been read.
+struct ParsedUpSql {
+    /// Sequence number (0 for `up.sql`, 1+ for numbered files).
+    up_number: u64,
+    /// Path to the file.
+    path: Utf8PathBuf,
+    /// Whether the filename carries the `-danger-non-transactional` suffix.
+    non_transactional: bool,
+}
+
+/// Filename suffix that marks a migration step as non-transactional.
+///
+/// A file named `up-danger-non-transactional.sql` (or
+/// `up1-danger-non-transactional.sql`, etc.) will be executed outside a
+/// transaction.
+///
+/// **This is a last-resort feature.** Do not use it unless strictly necessary.
+/// Currently, the only non-transactional schema update is `SET CLUSTER
+/// SETTING`.
+///
+/// # Why "DANGER"?
+///
+/// Non-transactional steps have significant TOCTOU implications. Transactional
+/// schema updates only need to be idempotent with respect to other Nexus
+/// instances applying the *same* `up.sql` file. Non-transactional updates must
+/// be idempotent across *other* schema updates as well.
+///
+/// Consider: `up1.sql` adds a column and `up2.sql` removes it. With
+/// transactions, the column is guaranteed gone after both run. But if `up1.sql`
+/// is non-transactional, another Nexus instance could race ahead, apply both
+/// `up1.sql` and `up2.sql`, and then the first instance re-applies `up1.sql`,
+/// leaving the column in an indeterminate state. This means typical schema
+/// statements cannot be marked non-transactional; only special situations like
+/// cluster-wide settings are appropriate.
+const NON_TRANSACTIONAL_SUFFIX: &str = "-danger-non-transactional";
+
 /// Describes a single file containing a schema change, as SQL.
 #[derive(Debug, Clone)]
 pub struct SchemaUpgradeStep {
     label: String,
     sql: String,
+    non_transactional: bool,
 }
 
 impl SchemaUpgradeStep {
@@ -569,6 +638,16 @@ impl SchemaUpgradeStep {
     /// Returns the actual SQL to execute for this step
     pub fn sql(&self) -> &str {
         self.sql.as_ref()
+    }
+
+    /// Returns whether this step must be executed outside a transaction.
+    ///
+    /// CockroachDB statements like `SET CLUSTER SETTING` cannot be executed
+    /// inside a multi-statement transaction. Steps whose filename carries the
+    /// `NON_TRANSACTIONAL_SUFFIX` (e.g. `up-danger-non-transactional.sql`)
+    /// will return `true` here.
+    pub fn is_non_transactional(&self) -> bool {
+        self.non_transactional
     }
 }
 
@@ -817,6 +896,12 @@ mod test {
             ("up1a.sql", "invalid filename (non-numeric `up*.sql`)"),
             ("upaaa1.sql", "invalid filename (non-numeric `up*.sql`)"),
             ("up-3.sql", "invalid filename (non-numeric `up*.sql`)"),
+            // Misspelled suffix (underscore instead of hyphen) is rejected as
+            // non-numeric.
+            (
+                "up1-danger-non_transactional.sql",
+                "invalid filename (non-numeric `up*.sql`)",
+            ),
             (
                 "up0.sql",
                 "invalid filename (`up*.sql` numbering must start at 1)",
@@ -902,6 +987,9 @@ mod test {
             &["up1.sql", "up01.sql"],
             &["up1.sql", "up3.sql"],
             &["up1.sql", "up2.sql", "up3.sql", "up02.sql"],
+            // A plain file and its non-transactional variant both parse to
+            // the same number, producing a duplicate.
+            &["up1.sql", "up1-danger-non-transactional.sql"],
         ] {
             let tempdir = Utf8TempDir::new().unwrap();
             for filename in invalid_filenames {
@@ -933,6 +1021,59 @@ mod test {
         }
     }
 
+    // Confirm that `is_non_transactional()` is determined by the filename
+    // suffix, not the file content.
+    #[tokio::test]
+    async fn test_non_transactional_filename_detection() {
+        // Helper: create a single-file migration directory with the given
+        // filename and content, then return the loaded step.
+        async fn load_single_step(
+            filename: &str,
+            content: &str,
+        ) -> SchemaUpgradeStep {
+            let tempdir = Utf8TempDir::new().unwrap();
+            tokio::fs::write(tempdir.path().join(filename), content)
+                .await
+                .unwrap();
+            let version = SchemaVersion::load_from_directory(
+                Version::new(99, 0, 0),
+                tempdir.path(),
+            )
+            .unwrap();
+            version.upgrade_from_previous.into_iter().next().unwrap()
+        }
+
+        // Non-transactional: suffix in filename.
+        let step = load_single_step(
+            "up-danger-non-transactional.sql",
+            "SET CLUSTER SETTING x = 1;",
+        )
+        .await;
+        assert!(
+            step.is_non_transactional(),
+            "expected non-transactional for suffix in filename",
+        );
+
+        // Non-transactional: numbered variant.
+        let step = load_single_step(
+            "up1-danger-non-transactional.sql",
+            "SET CLUSTER SETTING x = 1;",
+        )
+        .await;
+        assert!(
+            step.is_non_transactional(),
+            "expected non-transactional for numbered suffix in filename",
+        );
+
+        // Transactional: plain numbered filename.
+        let step =
+            load_single_step("up1.sql", "CREATE TABLE foo (id INT);").await;
+        assert!(
+            !step.is_non_transactional(),
+            "expected transactional for plain numbered filename",
+        );
+    }
+
     // Confirm that `SchemaVersion::load_from_directory()` accepts legal
     // collections of `up*.sql` filenames.
     #[tokio::test]
@@ -946,6 +1087,10 @@ mod test {
                 "up11.sql",
             ],
             &["up00001.sql", "up00002.sql", "up00003.sql"],
+            // Non-transactional suffix variants.
+            &["up-danger-non-transactional.sql"],
+            &["up1.sql", "up2-danger-non-transactional.sql"],
+            &["up1-danger-non-transactional.sql", "up2.sql"],
         ] {
             let tempdir = Utf8TempDir::new().unwrap();
             for filename in filenames {

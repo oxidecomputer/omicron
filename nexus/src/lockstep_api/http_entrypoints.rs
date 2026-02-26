@@ -32,16 +32,13 @@ use nexus_types::deployment::ClickhousePolicy;
 use nexus_types::deployment::OximeterReadPolicy;
 use nexus_types::deployment::ReconfiguratorConfigParam;
 use nexus_types::deployment::ReconfiguratorConfigView;
-use nexus_types::external_api::headers::RangeRequest;
-use nexus_types::external_api::params::PhysicalDiskPath;
-use nexus_types::external_api::params::SledSelector;
-use nexus_types::external_api::params::SupportBundleFilePath;
-use nexus_types::external_api::params::SupportBundlePath;
-use nexus_types::external_api::params::SupportBundleUpdate;
-use nexus_types::external_api::params::UninitializedSledId;
-use nexus_types::external_api::shared;
-use nexus_types::external_api::shared::UninitializedSled;
-use nexus_types::external_api::views::SledPolicy;
+use nexus_types::external_api::hardware::UninitializedSled;
+use nexus_types::external_api::path_params::{BlueprintPath, PhysicalDiskPath};
+use nexus_types::external_api::rack::RackMembershipConfigPathParams;
+use nexus_types::external_api::sled::{SledPolicy, SledSelector};
+use nexus_types::external_api::support_bundle::{
+    self, SupportBundleFilePath, SupportBundlePath, SupportBundleUpdate,
+};
 use nexus_types::internal_api::params::InstanceMigrateRequest;
 use nexus_types::internal_api::params::RackInitializationRequest;
 use nexus_types::internal_api::views::BackgroundTask;
@@ -51,6 +48,9 @@ use nexus_types::internal_api::views::QuiesceStatus;
 use nexus_types::internal_api::views::Saga;
 use nexus_types::internal_api::views::UpdateStatus;
 use nexus_types::internal_api::views::to_list;
+use nexus_types::trust_quorum::TrustQuorumConfig;
+use nexus_types_versions::latest::headers::RangeRequest;
+use omicron_common::api::external::Error;
 use omicron_common::api::external::Instance;
 use omicron_common::api::external::http_pagination::PaginatedById;
 use omicron_common::api::external::http_pagination::PaginatedByTimeAndId;
@@ -61,6 +61,7 @@ use omicron_common::api::external::http_pagination::data_page_params_for;
 use omicron_uuid_kinds::*;
 use range_requests::PotentialRange;
 use slog_error_chain::InlineErrorChain;
+use trust_quorum_types::types::Epoch;
 
 use crate::app::support_bundles::SupportBundleQueryType;
 use crate::context::ApiContext;
@@ -342,7 +343,7 @@ impl NexusLockstepApi for NexusLockstepApiImpl {
     /// Fetches one blueprint
     async fn blueprint_view(
         rqctx: RequestContext<Self::Context>,
-        path_params: Path<nexus_types::external_api::params::BlueprintPath>,
+        path_params: Path<BlueprintPath>,
     ) -> Result<HttpResponseOk<Blueprint>, HttpError> {
         let apictx = &rqctx.context().context;
         let handler = async {
@@ -363,7 +364,7 @@ impl NexusLockstepApi for NexusLockstepApiImpl {
     /// Deletes one blueprint
     async fn blueprint_delete(
         rqctx: RequestContext<Self::Context>,
-        path_params: Path<nexus_types::external_api::params::BlueprintPath>,
+        path_params: Path<BlueprintPath>,
     ) -> Result<HttpResponseDeleted, HttpError> {
         let apictx = &rqctx.context().context;
         let handler = async {
@@ -576,24 +577,6 @@ impl NexusLockstepApi for NexusLockstepApiImpl {
             .await
     }
 
-    async fn sled_add(
-        rqctx: RequestContext<Self::Context>,
-        sled: TypedBody<UninitializedSledId>,
-    ) -> Result<HttpResponseCreated<SledId>, HttpError> {
-        let apictx = &rqctx.context().context;
-        let nexus = &apictx.nexus;
-        let handler = async {
-            let opctx =
-                crate::context::op_context_for_internal_api(&rqctx).await;
-            let id = nexus.sled_add(&opctx, sled.into_inner()).await?;
-            Ok(HttpResponseCreated(SledId { id }))
-        };
-        apictx
-            .internal_latencies
-            .instrument_dropshot_handler(&rqctx, handler)
-            .await
-    }
-
     async fn sled_expunge(
         rqctx: RequestContext<Self::Context>,
         sled: TypedBody<SledSelector>,
@@ -634,8 +617,10 @@ impl NexusLockstepApi for NexusLockstepApiImpl {
     async fn support_bundle_list(
         rqctx: RequestContext<ApiContext>,
         query_params: Query<PaginatedByTimeAndId>,
-    ) -> Result<HttpResponseOk<ResultsPage<shared::SupportBundleInfo>>, HttpError>
-    {
+    ) -> Result<
+        HttpResponseOk<ResultsPage<support_bundle::SupportBundleInfo>>,
+        HttpError,
+    > {
         let apictx = rqctx.context();
         let handler = async {
             let nexus = &apictx.context.nexus;
@@ -656,7 +641,7 @@ impl NexusLockstepApi for NexusLockstepApiImpl {
             Ok(HttpResponseOk(ScanByTimeAndId::results_page(
                 &query,
                 bundles,
-                &|_, bundle: &shared::SupportBundleInfo| {
+                &|_, bundle: &support_bundle::SupportBundleInfo| {
                     (bundle.time_created, bundle.id.into_untyped_uuid())
                 },
             )?))
@@ -671,7 +656,8 @@ impl NexusLockstepApi for NexusLockstepApiImpl {
     async fn support_bundle_view(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<SupportBundlePath>,
-    ) -> Result<HttpResponseOk<shared::SupportBundleInfo>, HttpError> {
+    ) -> Result<HttpResponseOk<support_bundle::SupportBundleInfo>, HttpError>
+    {
         let apictx = rqctx.context();
         let handler = async {
             let nexus = &apictx.context.nexus;
@@ -875,8 +861,9 @@ impl NexusLockstepApi for NexusLockstepApiImpl {
 
     async fn support_bundle_create(
         rqctx: RequestContext<Self::Context>,
-        body: TypedBody<nexus_types::external_api::params::SupportBundleCreate>,
-    ) -> Result<HttpResponseCreated<shared::SupportBundleInfo>, HttpError> {
+        body: TypedBody<support_bundle::SupportBundleCreate>,
+    ) -> Result<HttpResponseCreated<support_bundle::SupportBundleInfo>, HttpError>
+    {
         let apictx = rqctx.context();
         let handler = async {
             let nexus = &apictx.context.nexus;
@@ -933,7 +920,8 @@ impl NexusLockstepApi for NexusLockstepApiImpl {
         rqctx: RequestContext<Self::Context>,
         path_params: Path<SupportBundlePath>,
         body: TypedBody<SupportBundleUpdate>,
-    ) -> Result<HttpResponseOk<shared::SupportBundleInfo>, HttpError> {
+    ) -> Result<HttpResponseOk<support_bundle::SupportBundleInfo>, HttpError>
+    {
         let apictx = rqctx.context();
         let handler = async {
             let nexus = &apictx.context.nexus;
@@ -1077,6 +1065,78 @@ impl NexusLockstepApi for NexusLockstepApiImpl {
             let opctx =
                 crate::context::op_context_for_internal_api(&rqctx).await;
             Ok(HttpResponseOk(nexus.quiesce_state(&opctx).await?))
+        };
+        apictx
+            .internal_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    async fn trust_quorum_get_config(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<RackMembershipConfigPathParams>,
+        query_params: Query<TrustQuorumEpochQueryParam>,
+    ) -> Result<HttpResponseOk<TrustQuorumConfig>, HttpError> {
+        let apictx = rqctx.context();
+        let nexus = &apictx.context.nexus;
+        let path_params = path_params.into_inner();
+        let rack_id = RackUuid::from_untyped_uuid(path_params.rack_id);
+        let epoch = query_params.into_inner().epoch;
+        let handler = async {
+            let opctx =
+                crate::context::op_context_for_internal_api(&rqctx).await;
+            let config = if let Some(epoch) = epoch {
+                nexus.datastore().tq_get_config(&opctx, rack_id, epoch).await?
+            } else {
+                nexus.datastore().tq_get_latest_config(&opctx, rack_id).await?
+            };
+            if let Some(config) = config {
+                Ok(HttpResponseOk(config))
+            } else {
+                Err(Error::non_resourcetype_not_found(
+                    "could not find trust quorum config",
+                ))?
+            }
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    // N.B. This is a temporary method until release 20. We ignore the rack_id
+    // for simplicity because we will only operate on a single rack, which we
+    // know from Nexus.
+    async fn trust_quorum_lrtq_upgrade(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<Epoch>, HttpError> {
+        let apictx = &rqctx.context().context;
+        let nexus = &apictx.nexus;
+        let handler = async {
+            let opctx =
+                crate::context::op_context_for_internal_api(&rqctx).await;
+            let epoch = nexus.tq_upgrade_from_lrtq(&opctx).await?;
+            Ok(HttpResponseOk(epoch))
+        };
+        apictx
+            .internal_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    async fn trust_quorum_remove_sled(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<SledSelector>,
+    ) -> Result<HttpResponseOk<Epoch>, HttpError> {
+        let apictx = &rqctx.context().context;
+        let nexus = &apictx.nexus;
+        let sled_id = path_params.into_inner().sled;
+        let handler = async {
+            let opctx =
+                crate::context::op_context_for_internal_api(&rqctx).await;
+            let epoch = nexus.tq_remove_sled(&opctx, sled_id).await?;
+            Ok(HttpResponseOk(epoch))
         };
         apictx
             .internal_latencies

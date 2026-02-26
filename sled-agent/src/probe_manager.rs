@@ -32,9 +32,9 @@ use sled_agent_config_reconciler::{
     AvailableDatasetsReceiver, CurrentlyManagedZpools,
     CurrentlyManagedZpoolsReceiver,
 };
+use sled_agent_resolvable_files::ramdisk_file_source;
 use sled_agent_types::probes::ExternalIp;
 use sled_agent_types::probes::ProbeCreate;
-use sled_agent_zone_images::ramdisk_file_source;
 use slog::{Logger, error, warn};
 use std::collections::{HashMap, HashSet};
 use std::hash::{Hash, Hasher};
@@ -374,6 +374,10 @@ impl ProbeManagerInner {
                 priority: VpcFirewallRulePriority(100),
             }],
             dhcp_config: DhcpCfg::default(),
+            // TODO-completeness: Attached subnets are meant only for instances,
+            // but probes are supposed to mimic instances as closely as
+            // possible. We should consider if we want to support them here.
+            attached_subnets: vec![],
         })?;
 
         let installed_zone = ZoneBuilderFactory::new()

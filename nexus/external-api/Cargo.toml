@@ -9,6 +9,7 @@ workspace = true
 
 [dependencies]
 anyhow.workspace = true
+base64.workspace = true
 api_identity.workspace = true
 chrono.workspace = true
 dropshot-api-manager-types.workspace = true
@@ -18,6 +19,7 @@ hyper.workspace = true
 ipnetwork.workspace = true
 itertools.workspace = true
 nexus-types.workspace = true
+nexus-types-versions.workspace = true
 omicron-common.workspace = true
 omicron-uuid-kinds.workspace = true
 omicron-workspace-hack.workspace = true
@@ -28,5 +30,10 @@ oxql-types.workspace = true
 schemars.workspace = true
 scim2-rs.workspace = true
 serde.workspace = true
+serde_json.workspace = true
+trust-quorum-types.workspace = true
 tufaceous-artifact.workspace = true
 uuid.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true

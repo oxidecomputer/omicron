@@ -31,7 +31,6 @@ use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::fmt;
 use std::net::IpAddr;
-use std::net::Ipv4Addr;
 use std::net::Ipv6Addr;
 use std::str::FromStr;
 use tufaceous_artifact::ArtifactHash;
@@ -99,8 +98,9 @@ pub struct BootstrapSledDescription {
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct UserSpecifiedRackNetworkConfig {
-    pub infra_ip_first: Ipv4Addr,
-    pub infra_ip_last: Ipv4Addr,
+    pub rack_subnet_address: Option<Ipv6Addr>,
+    pub infra_ip_first: IpAddr,
+    pub infra_ip_last: IpAddr,
     // Map of switch -> port -> configuration, under the assumption that
     // (switch, port) is unique.
     pub switch0: BTreeMap<String, UserSpecifiedPortConfig>,
@@ -171,13 +171,13 @@ impl UserSpecifiedRackNetworkConfig {
     }
 }
 
-/// User-specified version of [`PortConfigV2`].
+/// User-specified version of [`PortConfig`].
 ///
-/// All of [`PortConfigV2`] is user-specified. But we expect the port name to
-/// be a key, rather than a field as in [`PortConfigV2`]. So this has all of
+/// All of [`PortConfig`] is user-specified. But we expect the port name to
+/// be a key, rather than a field as in [`PortConfig`]. So this has all of
 /// the fields other than the port name.
 ///
-/// [`PortConfigV2`]: omicron_common::api::internal::shared::PortConfigV2
+/// [`PortConfig`]: omicron_common::api::internal::shared::PortConfig
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct UserSpecifiedPortConfig {
@@ -209,7 +209,7 @@ pub struct UserSpecifiedBgpPeerConfig {
     /// Switch port the peer is reachable on.
     pub port: String,
     /// Address of the peer.
-    pub addr: Ipv4Addr,
+    pub addr: Option<IpAddr>,
     /// How long to keep a session alive without a keepalive in seconds.
     /// Defaults to 6 seconds.
     pub hold_time: Option<u64>,
@@ -255,6 +255,9 @@ pub struct UserSpecifiedBgpPeerConfig {
     /// Associate a VLAN ID with a BGP peer session.
     #[serde(default)]
     pub vlan_id: Option<u16>,
+    /// Router lifetime in seconds for unnumbered BGP peers.
+    #[serde(default)]
+    pub router_lifetime: u16,
 }
 
 impl UserSpecifiedBgpPeerConfig {

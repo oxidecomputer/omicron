@@ -13,6 +13,7 @@ use sled_agent_types::inventory::OmicronSledConfig;
 use sled_agent_types_versions::v4;
 use sled_agent_types_versions::v10;
 use sled_agent_types_versions::v11;
+use sled_agent_types_versions::v14;
 use slog::Logger;
 use slog::info;
 use slog::warn;
@@ -64,6 +65,7 @@ macro_rules! version_conversion_chain {
 // attempt to parse the ledgered config. Add new versions to the top of the
 // list.
 version_conversion_chain!(
+    v14::inventory::OmicronSledConfig,
     v11::inventory::OmicronSledConfig,
     v10::inventory::OmicronSledConfig,
     v4::inventory::OmicronSledConfig,
@@ -268,6 +270,8 @@ pub(super) mod tests {
         "expectorate/v10-sled-config.json";
     const EXPECTORATE_V11_CONFIG_PATH: &str =
         "expectorate/v11-sled-config.json";
+    const EXPECTORATE_V14_CONFIG_PATH: &str =
+        "expectorate/v14-sled-config.json";
 
     // This is solely an expectorate test to guarantee:
     //
@@ -294,6 +298,8 @@ pub(super) mod tests {
             .expect("converted from v4");
         let v11 = v11::inventory::OmicronSledConfig::try_from(v10.clone())
             .expect("converted from v10");
+        let v14 = v14::inventory::OmicronSledConfig::try_from(v11.clone())
+            .expect("converted from v11");
 
         expectorate::assert_contents(
             EXPECTORATE_V10_CONFIG_PATH,
@@ -303,13 +309,17 @@ pub(super) mod tests {
             EXPECTORATE_V11_CONFIG_PATH,
             &serde_json::to_string_pretty(&v11).unwrap(),
         );
-
+        expectorate::assert_contents(
+            EXPECTORATE_V14_CONFIG_PATH,
+            &serde_json::to_string_pretty(&v14).unwrap(),
+        );
         logctx.cleanup_successful();
     }
 
     #[tokio::test]
     async fn read_config_converts_from_older_versions() {
-        let logctx = dev::test_setup_log("can_convert_v4_to_newer_versions");
+        let logctx =
+            dev::test_setup_log("read_config_converts_from_older_versions");
         let log = &logctx.log;
 
         // All our configs should match the latest version. We use an explicit
@@ -317,13 +327,13 @@ pub(super) mod tests {
         // compilation error if the latest version changes. Bump the
         // version here and add the new version's path to the array of ledger
         // paths below.
-        let latest_version_path = EXPECTORATE_V11_CONFIG_PATH;
-        let expected_config = v11::inventory::OmicronSledConfig::read_from(
+        let latest_version_path = EXPECTORATE_V14_CONFIG_PATH;
+        let expected_config = v14::inventory::OmicronSledConfig::read_from(
             log,
             latest_version_path.into(),
         )
         .await
-        .expect("read v11 config");
+        .expect("read v14 config");
 
         // Reading old configs should rewrite the file to match the newest
         // version.
@@ -346,6 +356,7 @@ pub(super) mod tests {
             V4_CONFIG_PATH,
             EXPECTORATE_V10_CONFIG_PATH,
             EXPECTORATE_V11_CONFIG_PATH,
+            EXPECTORATE_V14_CONFIG_PATH,
         ] {
             // Copy the ledger into `my-ledger.json`
             let dst_ledger_path = tempdir.child("my-ledger.json");

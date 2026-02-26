@@ -17,23 +17,43 @@ use http::header;
 use nexus_db_queries::db::fixed_data::silo::DEFAULT_SILO;
 use nexus_test_interface::NexusServer;
 use nexus_types::deployment::Blueprint;
-use nexus_types::external_api::params;
-use nexus_types::external_api::shared;
-use nexus_types::external_api::shared::Baseboard;
-use nexus_types::external_api::shared::IpRange;
-use nexus_types::external_api::views;
-use nexus_types::external_api::views::AffinityGroup;
-use nexus_types::external_api::views::AntiAffinityGroup;
-use nexus_types::external_api::views::Certificate;
-use nexus_types::external_api::views::FloatingIp;
-use nexus_types::external_api::views::InternetGateway;
-use nexus_types::external_api::views::InternetGatewayIpAddress;
-use nexus_types::external_api::views::InternetGatewayIpPool;
-use nexus_types::external_api::views::IpPool;
-use nexus_types::external_api::views::IpPoolRange;
-use nexus_types::external_api::views::User;
-use nexus_types::external_api::views::VpcSubnet;
-use nexus_types::external_api::views::{Project, Silo, Vpc, VpcRouter};
+use nexus_types::external_api::affinity;
+use nexus_types::external_api::affinity::{AffinityGroup, AntiAffinityGroup};
+use nexus_types::external_api::certificate;
+use nexus_types::external_api::certificate::Certificate;
+use nexus_types::external_api::device::{
+    DeviceAccessTokenGrant, DeviceAccessTokenRequest, DeviceAuthRequest,
+    DeviceAuthResponse, DeviceAuthVerify,
+};
+use nexus_types::external_api::disk;
+use nexus_types::external_api::external_subnet;
+use nexus_types::external_api::external_subnet::ExternalSubnet;
+use nexus_types::external_api::floating_ip;
+use nexus_types::external_api::floating_ip::FloatingIp;
+use nexus_types::external_api::hardware::Baseboard;
+use nexus_types::external_api::image;
+use nexus_types::external_api::instance;
+use nexus_types::external_api::internet_gateway;
+use nexus_types::external_api::internet_gateway::{
+    InternetGateway, InternetGatewayIpAddress, InternetGatewayIpPool,
+};
+use nexus_types::external_api::ip_pool;
+use nexus_types::external_api::ip_pool::{
+    IpPool, IpPoolRange, IpRange, IpVersion,
+};
+use nexus_types::external_api::multicast;
+use nexus_types::external_api::policy;
+use nexus_types::external_api::project;
+use nexus_types::external_api::project::Project;
+use nexus_types::external_api::silo;
+use nexus_types::external_api::silo::Silo;
+use nexus_types::external_api::snapshot;
+use nexus_types::external_api::subnet_pool;
+use nexus_types::external_api::subnet_pool::{SubnetPool, SubnetPoolMember};
+use nexus_types::external_api::switch;
+use nexus_types::external_api::user::User;
+use nexus_types::external_api::vpc;
+use nexus_types::external_api::vpc::{Vpc, VpcRouter, VpcSubnet};
 use nexus_types::identity::Resource;
 use nexus_types::internal_api::params as internal_params;
 use omicron_common::api::external::AffinityPolicy;
@@ -69,6 +89,7 @@ use omicron_uuid_kinds::SiloGroupUuid;
 use omicron_uuid_kinds::SiloUserUuid;
 use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::ZpoolUuid;
+use oxnet::IpNet;
 use oxnet::Ipv4Net;
 use oxnet::Ipv6Net;
 use slog::debug;
@@ -269,7 +290,7 @@ pub async fn create_ip_pool(
     pool_name: &str,
     ip_range: Option<IpRange>,
 ) -> (IpPool, IpPoolRange) {
-    let pool_params = params::IpPoolCreate::new(
+    let pool_params = ip_pool::IpPoolCreate::new(
         IdentityMetadataCreateParams {
             name: pool_name.parse().unwrap(),
             description: String::from("an ip pool"),
@@ -277,7 +298,7 @@ pub async fn create_ip_pool(
         ip_range
             .as_ref()
             .map(|r| r.version())
-            .unwrap_or_else(views::IpVersion::v4),
+            .unwrap_or_else(ip_pool::IpVersion::v4),
     );
     let pool = object_create(client, "/v1/system/ip-pools", &pool_params).await;
 
@@ -307,14 +328,14 @@ pub async fn create_multicast_ip_pool(
     let pool = object_create(
         client,
         "/v1/system/ip-pools",
-        &params::IpPoolCreate::new_multicast(
+        &ip_pool::IpPoolCreate::new_multicast(
             IdentityMetadataCreateParams {
                 name: pool_name.parse().unwrap(),
                 description: String::from("a multicast ip pool"),
             },
             ip_range
                 .map(|r| r.version())
-                .unwrap_or_else(|| views::IpVersion::V4),
+                .unwrap_or_else(|| ip_pool::IpVersion::V4),
         ),
     )
     .await;
@@ -339,9 +360,9 @@ pub async fn link_ip_pool(
     is_default: bool,
 ) {
     let link =
-        params::IpPoolLinkSilo { silo: NameOrId::Id(*silo_id), is_default };
+        ip_pool::IpPoolLinkSilo { silo: NameOrId::Id(*silo_id), is_default };
     let url = format!("/v1/system/ip-pools/{pool_name}/silos");
-    object_create::<params::IpPoolLinkSilo, views::IpPoolSiloLink>(
+    object_create::<ip_pool::IpPoolLinkSilo, ip_pool::IpPoolSiloLink>(
         client, &url, &link,
     )
     .await;
@@ -352,7 +373,7 @@ pub async fn link_ip_pool(
 /// What you want for any test that is not testing IP logic specifically
 pub async fn create_default_ip_pools(
     client: &ClientTestContext,
-) -> (views::IpPool, views::IpPool) {
+) -> (IpPool, IpPool) {
     let ranges = [
         IpRange::try_from((
             std::net::Ipv4Addr::new(10, 0, 0, 0),
@@ -378,21 +399,137 @@ pub async fn create_floating_ip(
     client: &ClientTestContext,
     fip_name: &str,
     project: &str,
-    ip: Option<IpAddr>,
-    parent_pool_name: Option<&str>,
+    address_allocator: floating_ip::AddressAllocator,
 ) -> FloatingIp {
     object_create(
         client,
         &format!("/v1/floating-ips?project={project}"),
-        &params::FloatingIpCreate {
+        &floating_ip::FloatingIpCreate {
             identity: IdentityMetadataCreateParams {
                 name: fip_name.parse().unwrap(),
                 description: String::from("a floating ip"),
             },
-            ip,
-            pool: parent_pool_name.map(|v| NameOrId::Name(v.parse().unwrap())),
-            ip_version: None,
+            address_allocator,
         },
+    )
+    .await
+}
+
+pub async fn create_subnet_pool(
+    client: &ClientTestContext,
+    pool_name: &str,
+    ip_version: IpVersion,
+) -> SubnetPool {
+    object_create(
+        client,
+        "/v1/system/subnet-pools/",
+        &subnet_pool::SubnetPoolCreate {
+            identity: IdentityMetadataCreateParams {
+                name: pool_name.parse().unwrap(),
+                description: String::from("a subnet pool"),
+            },
+            ip_version,
+        },
+    )
+    .await
+}
+
+/// Create a subnet pool and link it to the default silo.
+pub async fn create_default_subnet_pool(
+    client: &ClientTestContext,
+    pool_name: &str,
+    ip_version: IpVersion,
+) -> SubnetPool {
+    let pool = create_subnet_pool(client, pool_name, ip_version).await;
+    link_subnet_pool(
+        client,
+        pool_name,
+        &nexus_types::silo::DEFAULT_SILO_ID,
+        true,
+    )
+    .await;
+    pool
+}
+
+/// Create a subnet pool member, with the min / max prefix lengths taken from
+/// the subnet itself.
+pub async fn create_subnet_pool_member(
+    client: &ClientTestContext,
+    pool_name: &str,
+    subnet: IpNet,
+) -> SubnetPoolMember {
+    object_create(
+        client,
+        &format!("/v1/system/subnet-pools/{pool_name}/members/add"),
+        &subnet_pool::SubnetPoolMemberAdd {
+            subnet,
+            min_prefix_length: None,
+            max_prefix_length: None,
+        },
+    )
+    .await
+}
+
+pub async fn create_subnet_pool_member_with_prefix_lengths(
+    client: &ClientTestContext,
+    pool_name: &str,
+    subnet: IpNet,
+    min_prefix_length: u8,
+    max_prefix_length: u8,
+) -> SubnetPoolMember {
+    object_create(
+        client,
+        &format!("/v1/system/subnet-pools/{pool_name}/members/add"),
+        &subnet_pool::SubnetPoolMemberAdd {
+            subnet,
+            min_prefix_length: Some(min_prefix_length),
+            max_prefix_length: Some(max_prefix_length),
+        },
+    )
+    .await
+}
+
+pub async fn link_subnet_pool(
+    client: &ClientTestContext,
+    pool_name: &str,
+    silo_id: &Uuid,
+    is_default: bool,
+) {
+    let link = subnet_pool::SubnetPoolLinkSilo {
+        silo: NameOrId::Id(*silo_id),
+        is_default,
+    };
+    let url = format!("/v1/system/subnet-pools/{pool_name}/silos");
+    object_create::<
+        subnet_pool::SubnetPoolLinkSilo,
+        subnet_pool::SubnetPoolSiloLink,
+    >(client, &url, &link)
+    .await;
+}
+
+pub async fn create_external_subnet_in_pool(
+    client: &ClientTestContext,
+    pool_name: &str,
+    project_name: &str,
+    subnet_name: &str,
+    prefix_len: u8,
+) -> ExternalSubnet {
+    let params = external_subnet::ExternalSubnetCreate {
+        identity: IdentityMetadataCreateParams {
+            name: subnet_name.parse().unwrap(),
+            description: format!("external subnet {subnet_name}"),
+        },
+        allocator: external_subnet::ExternalSubnetAllocator::Auto {
+            prefix_len,
+            pool_selector: ip_pool::PoolSelector::Explicit {
+                pool: pool_name.parse::<Name>().unwrap().into(),
+            },
+        },
+    };
+    object_create(
+        client,
+        &format!("/v1/external-subnets?project={project_name}"),
+        &params,
     )
     .await
 }
@@ -407,14 +544,14 @@ pub async fn create_certificate(
     object_create(
         client,
         &url,
-        &params::CertificateCreate {
+        &certificate::CertificateCreate {
             identity: IdentityMetadataCreateParams {
                 name: cert_name.parse().unwrap(),
                 description: String::from("sells rainsticks"),
             },
             cert,
             key,
-            service: shared::ServiceUsingCertificate::ExternalApi,
+            service: certificate::ServiceUsingCertificate::ExternalApi,
         },
     )
     .await
@@ -431,7 +568,7 @@ pub async fn create_switch(
     part: &str,
     revision: u32,
     rack_id: Uuid,
-) -> views::Switch {
+) -> switch::Switch {
     object_put(
         client,
         "/switches",
@@ -451,7 +588,7 @@ pub async fn create_silo(
     client: &ClientTestContext,
     silo_name: &str,
     discoverable: bool,
-    identity_mode: shared::SiloIdentityMode,
+    identity_mode: silo::SiloIdentityMode,
 ) -> Silo {
     create_silo_with_admin_group_name(
         client,
@@ -467,18 +604,18 @@ pub async fn create_silo_with_admin_group_name(
     client: &ClientTestContext,
     silo_name: &str,
     discoverable: bool,
-    identity_mode: shared::SiloIdentityMode,
+    identity_mode: silo::SiloIdentityMode,
     admin_group_name: Option<String>,
 ) -> Silo {
     object_create(
         client,
         "/v1/system/silos",
-        &params::SiloCreate {
+        &silo::SiloCreate {
             identity: IdentityMetadataCreateParams {
                 name: silo_name.parse().unwrap(),
                 description: "a silo".to_string(),
             },
-            quotas: params::SiloQuotasCreate::arbitrarily_high_default(),
+            quotas: silo::SiloQuotasCreate::arbitrarily_high_default(),
             discoverable,
             identity_mode,
             admin_group_name,
@@ -525,7 +662,7 @@ pub mod test_params {
 
 pub async fn create_local_user(
     client: &ClientTestContext,
-    silo: &views::Silo,
+    silo: &Silo,
     username: &UserId,
     password: test_params::UserPassword,
 ) -> User {
@@ -547,7 +684,7 @@ pub async fn create_project(
     object_create(
         client,
         "/v1/projects",
-        &params::ProjectCreate {
+        &project::ProjectCreate {
             identity: IdentityMetadataCreateParams {
                 name: project_name.parse().unwrap(),
                 description: "a pier".to_string(),
@@ -567,14 +704,14 @@ pub async fn create_disk(
     object_create(
         client,
         &url,
-        &params::DiskCreate {
+        &disk::DiskCreate {
             identity: IdentityMetadataCreateParams {
                 name: disk_name.parse().unwrap(),
                 description: String::from("sells rainsticks"),
             },
-            disk_backend: params::DiskBackend::Distributed {
-                disk_source: params::DiskSource::Blank {
-                    block_size: params::BlockSize::try_from(512).unwrap(),
+            disk_backend: disk::DiskBackend::Distributed {
+                disk_source: disk::DiskSource::Blank {
+                    block_size: disk::BlockSize::try_from(512).unwrap(),
                 },
             },
             size: ByteCount::from_gibibytes_u32(1),
@@ -587,21 +724,53 @@ pub async fn create_disk_from_snapshot(
     client: &ClientTestContext,
     project_name: &str,
     disk_name: &str,
-    snapshot_id: Uuid,
+    snapshot: &snapshot::Snapshot,
+    read_only: bool,
 ) -> Disk {
     let url = format!("/v1/disks?project={}", project_name);
     object_create(
         client,
         &url,
-        &params::DiskCreate {
+        &disk::DiskCreate {
             identity: IdentityMetadataCreateParams {
                 name: disk_name.parse().unwrap(),
                 description: String::from("sells rainsticks"),
             },
-            disk_backend: params::DiskBackend::Distributed {
-                disk_source: params::DiskSource::Snapshot { snapshot_id },
+            disk_backend: disk::DiskBackend::Distributed {
+                disk_source: disk::DiskSource::Snapshot {
+                    snapshot_id: snapshot.identity.id,
+                    read_only,
+                },
             },
-            size: ByteCount::from_gibibytes_u32(1),
+            size: snapshot.size,
+        },
+    )
+    .await
+}
+
+pub async fn create_disk_from_image(
+    client: &ClientTestContext,
+    project_name: &str,
+    disk_name: &str,
+    image: &image::Image,
+    read_only: bool,
+) -> Disk {
+    let url = format!("/v1/disks?project={}", project_name);
+    object_create(
+        client,
+        &url,
+        &disk::DiskCreate {
+            identity: IdentityMetadataCreateParams {
+                name: disk_name.parse().unwrap(),
+                description: String::from("sells rainsticks"),
+            },
+            disk_backend: disk::DiskBackend::Distributed {
+                disk_source: disk::DiskSource::Image {
+                    image_id: image.identity.id,
+                    read_only,
+                },
+            },
+            size: image.size,
         },
     )
     .await
@@ -612,13 +781,13 @@ pub async fn create_snapshot(
     project_name: &str,
     disk_name: &str,
     snapshot_name: &str,
-) -> views::Snapshot {
+) -> snapshot::Snapshot {
     let snapshots_url = format!("/v1/snapshots?project={}", project_name);
 
     object_create(
         client,
         &snapshots_url,
-        &params::SnapshotCreate {
+        &snapshot::SnapshotCreate {
             identity: IdentityMetadataCreateParams {
                 name: snapshot_name.parse().unwrap(),
                 description: format!("snapshot {:?}", snapshot_name),
@@ -648,28 +817,26 @@ pub async fn delete_snapshot(
     object_delete(client, &url).await
 }
 
-pub async fn create_alpine_project_image(
+pub async fn create_project_image(
     client: &ClientTestContext,
     project_name: &str,
     image_name: &str,
-) -> views::Image {
-    let images_url = format!("/v1/images?project={}", project_name);
-    object_create(
+) -> image::Image {
+    let disk_name = image_name;
+    create_disk(client, project_name, disk_name).await;
+    let snapshot_name = image_name;
+    let snapshot =
+        create_snapshot(client, project_name, disk_name, snapshot_name).await;
+    let image = create_project_image_from_snapshot(
         client,
-        &images_url,
-        &params::ImageCreate {
-            identity: IdentityMetadataCreateParams {
-                name: image_name.parse().unwrap(),
-                description: String::from(
-                    "you can boot any image, as long as it's alpine",
-                ),
-            },
-            source: params::ImageSource::YouCanBootAnythingAsLongAsItsAlpine,
-            os: "alpine".to_string(),
-            version: "edge".to_string(),
-        },
+        project_name,
+        image_name,
+        snapshot.identity.id,
     )
-    .await
+    .await;
+    delete_disk(client, project_name, disk_name).await;
+    delete_snapshot(client, project_name, snapshot_name).await;
+    image
 }
 
 pub async fn create_project_image_from_snapshot(
@@ -677,17 +844,17 @@ pub async fn create_project_image_from_snapshot(
     project_name: &str,
     image_name: &str,
     snapshot_id: Uuid,
-) -> views::Image {
+) -> image::Image {
     let images_url = format!("/v1/images?project={}", project_name);
     object_create(
         client,
         &images_url,
-        &params::ImageCreate {
+        &image::ImageCreate {
             identity: IdentityMetadataCreateParams {
                 name: image_name.parse().unwrap(),
                 description: String::from("it's an image alright"),
             },
-            source: params::ImageSource::Snapshot { id: snapshot_id },
+            source: image::ImageSource::Snapshot { id: snapshot_id },
             os: "os".to_string(),
             version: "version".to_string(),
         },
@@ -700,7 +867,7 @@ pub async fn delete_image(
     project_name: &str,
     image_name: &str,
 ) {
-    let url = format!("/v1/image/{}?project={}", image_name, project_name);
+    let url = format!("/v1/images/{}?project={}", image_name, project_name);
     object_delete(client, &url).await
 }
 
@@ -716,16 +883,16 @@ pub async fn create_instance(
         client,
         project_name,
         instance_name,
-        &params::InstanceNetworkInterfaceAttachment::DefaultIpv4,
+        &instance::InstanceNetworkInterfaceAttachment::DefaultIpv4,
         // Disks=
-        Vec::<params::InstanceDiskAttachment>::new(),
+        Vec::<instance::InstanceDiskAttachment>::new(),
         // External IPs=
-        Vec::<params::ExternalIpCreate>::new(),
+        Vec::<instance::ExternalIpCreate>::new(),
         true,
         Default::default(),
         None,
         // Multicast groups=
-        Vec::<NameOrId>::new(),
+        Vec::<multicast::MulticastGroupJoinSpec>::new(),
     )
     .await
 }
@@ -737,20 +904,20 @@ pub async fn create_instance_with(
     client: &ClientTestContext,
     project_name: &str,
     instance_name: &str,
-    nics: &params::InstanceNetworkInterfaceAttachment,
-    disks: Vec<params::InstanceDiskAttachment>,
-    external_ips: Vec<params::ExternalIpCreate>,
+    nics: &instance::InstanceNetworkInterfaceAttachment,
+    disks: Vec<instance::InstanceDiskAttachment>,
+    external_ips: Vec<instance::ExternalIpCreate>,
     start: bool,
     auto_restart_policy: Option<InstanceAutoRestartPolicy>,
     cpu_platform: Option<InstanceCpuPlatform>,
-    multicast_groups: Vec<NameOrId>,
+    multicast_groups: Vec<multicast::MulticastGroupJoinSpec>,
 ) -> Instance {
     let url = format!("/v1/instances?project={}", project_name);
 
     object_create(
         client,
         &url,
-        &params::InstanceCreate {
+        &instance::InstanceCreate {
             identity: IdentityMetadataCreateParams {
                 name: instance_name.parse().unwrap(),
                 description: format!("instance {:?}", instance_name),
@@ -801,7 +968,7 @@ pub async fn create_affinity_group(
     object_create(
         &client,
         format!("/v1/affinity-groups?project={}", &project_name).as_str(),
-        &params::AffinityGroupCreate {
+        &affinity::AffinityGroupCreate {
             identity: IdentityMetadataCreateParams {
                 name: group_name.parse().unwrap(),
                 description: String::from("affinity group description"),
@@ -821,7 +988,7 @@ pub async fn create_anti_affinity_group(
     object_create(
         &client,
         format!("/v1/anti-affinity-groups?project={}", &project_name).as_str(),
-        &params::AntiAffinityGroupCreate {
+        &affinity::AntiAffinityGroupCreate {
             identity: IdentityMetadataCreateParams {
                 name: group_name.parse().unwrap(),
                 description: String::from("anti-affinity group description"),
@@ -841,7 +1008,7 @@ pub async fn create_vpc(
     object_create(
         &client,
         format!("/v1/vpcs?project={}", &project_name).as_str(),
-        &params::VpcCreate {
+        &vpc::VpcCreate {
             identity: IdentityMetadataCreateParams {
                 name: vpc_name.parse().unwrap(),
                 description: "vpc description".to_string(),
@@ -867,7 +1034,7 @@ pub async fn create_vpc_with_error(
             Method::POST,
             format!("/v1/vpcs?project={}", &project_name).as_str(),
         )
-        .body(Some(&params::VpcCreate {
+        .body(Some(&vpc::VpcCreate {
             identity: IdentityMetadataCreateParams {
                 name: vpc_name.parse().unwrap(),
                 description: String::from("vpc description"),
@@ -897,7 +1064,7 @@ pub async fn create_vpc_subnet(
     object_create(
         &client,
         &format!("/v1/vpc-subnets?project={project_name}&vpc={vpc_name}"),
-        &params::VpcSubnetCreate {
+        &vpc::VpcSubnetCreate {
             identity: IdentityMetadataCreateParams {
                 name: subnet_name.parse().unwrap(),
                 description: "vpc description".to_string(),
@@ -921,7 +1088,7 @@ pub async fn create_router(
         &client,
         format!("/v1/vpc-routers?project={}&vpc={}", &project_name, &vpc_name)
             .as_str(),
-        &params::VpcRouterCreate {
+        &vpc::VpcRouterCreate {
             identity: IdentityMetadataCreateParams {
                 name: router_name.parse().unwrap(),
                 description: String::from("router description"),
@@ -952,7 +1119,7 @@ pub async fn create_route(
             &project_name, &vpc_name, &router_name
         )
         .as_str(),
-        &params::RouterRouteCreate {
+        &vpc::RouterRouteCreate {
             identity: IdentityMetadataCreateParams {
                 name: route_name.parse().unwrap(),
                 description: String::from("route description"),
@@ -990,7 +1157,7 @@ pub async fn create_route_with_error(
             )
             .as_str(),
         )
-        .body(Some(&params::RouterRouteCreate {
+        .body(Some(&vpc::RouterRouteCreate {
             identity: IdentityMetadataCreateParams {
                 name: route_name.parse().unwrap(),
                 description: String::from("route description"),
@@ -1021,7 +1188,7 @@ pub async fn create_internet_gateway(
             &project_name, &vpc_name
         )
         .as_str(),
-        &params::VpcRouterCreate {
+        &vpc::VpcRouterCreate {
             identity: IdentityMetadataCreateParams {
                 name: internet_gateway_name.parse().unwrap(),
                 description: String::from("internet gateway description"),
@@ -1074,7 +1241,7 @@ pub async fn attach_ip_pool_to_igw(
     NexusRequest::objects_post(
         &client,
         url.as_str(),
-        &params::InternetGatewayIpPoolCreate {
+        &internet_gateway::InternetGatewayIpPoolCreate {
             identity: IdentityMetadataCreateParams {
                 name: attachment_name.parse().unwrap(),
                 description: String::from("attached pool descriptoion"),
@@ -1126,7 +1293,7 @@ pub async fn attach_ip_address_to_igw(
     NexusRequest::objects_post(
         &client,
         url.as_str(),
-        &params::InternetGatewayIpAddressCreate {
+        &internet_gateway::InternetGatewayIpAddressCreate {
             identity: IdentityMetadataCreateParams {
                 name: attachment_name.parse().unwrap(),
                 description: String::from("attached pool descriptoion"),
@@ -1174,7 +1341,8 @@ pub async fn assert_ip_pool_utilization(
     capacity: f64,
 ) {
     let url = format!("/v1/system/ip-pools/{}/utilization", pool_name);
-    let utilization: views::IpPoolUtilization = object_get(client, &url).await;
+    let utilization: ip_pool::IpPoolUtilization =
+        object_get(client, &url).await;
     let remaining = capacity - f64::from(allocated);
     assert_eq!(
         remaining, utilization.remaining,
@@ -1204,7 +1372,7 @@ pub async fn grant_iam<T>(
     T: serde::Serialize + serde::de::DeserializeOwned,
 {
     let policy_url = format!("{}/policy", grant_resource_url);
-    let existing_policy: shared::Policy<T> =
+    let existing_policy: policy::Policy<T> =
         NexusRequest::object_get(client, &policy_url)
             .authn_as(run_as.clone())
             .execute()
@@ -1213,14 +1381,14 @@ pub async fn grant_iam<T>(
             .parsed_body()
             .expect("failed to parse policy");
     let new_role_assignment =
-        shared::RoleAssignment::for_silo_user(grant_user, grant_role);
+        policy::RoleAssignment::for_silo_user(grant_user, grant_role);
     let new_role_assignments = existing_policy
         .role_assignments
         .into_iter()
         .chain(std::iter::once(new_role_assignment))
         .collect();
 
-    let new_policy = shared::Policy { role_assignments: new_role_assignments };
+    let new_policy = policy::Policy { role_assignments: new_role_assignments };
 
     // TODO-correctness use etag when we have it
     NexusRequest::object_put(client, &policy_url, Some(&new_policy))
@@ -1246,7 +1414,7 @@ pub async fn grant_iam_for_group<T>(
     T: serde::Serialize + serde::de::DeserializeOwned,
 {
     let policy_url = format!("{}/policy", grant_resource_url);
-    let existing_policy: shared::Policy<T> =
+    let existing_policy: policy::Policy<T> =
         NexusRequest::object_get(client, &policy_url)
             .authn_as(run_as.clone())
             .execute()
@@ -1255,14 +1423,14 @@ pub async fn grant_iam_for_group<T>(
             .parsed_body()
             .expect("failed to parse policy");
     let new_role_assignment =
-        shared::RoleAssignment::for_silo_group(grant_group, grant_role);
+        policy::RoleAssignment::for_silo_group(grant_group, grant_role);
     let new_role_assignments = existing_policy
         .role_assignments
         .into_iter()
         .chain(std::iter::once(new_role_assignment))
         .collect();
 
-    let new_policy = shared::Policy { role_assignments: new_role_assignments };
+    let new_policy = policy::Policy { role_assignments: new_role_assignments };
 
     // TODO-correctness use etag when we have it
     NexusRequest::object_put(client, &policy_url, Some(&new_policy))
@@ -1351,6 +1519,54 @@ pub async fn create_console_session<N: NexusServer>(
         TEST_SUITE_PASSWORD,
     )
     .await
+}
+
+/// Get a device access token via the OAuth device flow.
+pub async fn get_device_token(
+    client: &ClientTestContext,
+    authn_mode: AuthnMode,
+) -> DeviceAccessTokenGrant {
+    let client_id = uuid::Uuid::new_v4();
+    let auth_response: DeviceAuthResponse =
+        RequestBuilder::new(client, Method::POST, "/device/auth")
+            .allow_non_dropshot_errors()
+            .body_urlencoded(Some(&DeviceAuthRequest {
+                client_id,
+                ttl_seconds: None,
+            }))
+            .expect_status(Some(StatusCode::OK))
+            .execute()
+            .await
+            .unwrap()
+            .parsed_body()
+            .unwrap();
+
+    NexusRequest::new(
+        RequestBuilder::new(client, Method::POST, "/device/confirm")
+            .body(Some(&DeviceAuthVerify {
+                user_code: auth_response.user_code,
+            }))
+            .expect_status(Some(StatusCode::NO_CONTENT)),
+    )
+    .authn_as(authn_mode)
+    .execute()
+    .await
+    .unwrap();
+
+    RequestBuilder::new(client, Method::POST, "/device/token")
+        .allow_non_dropshot_errors()
+        .body_urlencoded(Some(&DeviceAccessTokenRequest {
+            grant_type: "urn:ietf:params:oauth:grant-type:device_code"
+                .to_string(),
+            device_code: auth_response.device_code,
+            client_id,
+        }))
+        .expect_status(Some(StatusCode::OK))
+        .execute()
+        .await
+        .unwrap()
+        .parsed_body()
+        .unwrap()
 }
 
 #[derive(Debug)]
@@ -1745,7 +1961,7 @@ impl<'a, N: NexusServer> DiskTest<'a, N> {
                 serial: disk_identity.serial.clone(),
                 model: disk_identity.model.clone(),
                 variant:
-                    nexus_types::external_api::params::PhysicalDiskKind::U2,
+                    nexus_types::external_api::physical_disk::PhysicalDiskKind::U2,
                 sled_id,
             };
 

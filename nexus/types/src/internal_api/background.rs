@@ -3,7 +3,7 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use crate::deployment::PlanningReport;
-use crate::external_api::views;
+use crate::external_api::alert;
 use chrono::DateTime;
 use chrono::Utc;
 use gateway_types::component::SpType;
@@ -11,6 +11,7 @@ use iddqd::IdOrdItem;
 use iddqd::IdOrdMap;
 use iddqd::id_upcast;
 use omicron_common::api::external::Generation;
+use omicron_common::api::external::SwitchLocation;
 use omicron_uuid_kinds::AlertReceiverUuid;
 use omicron_uuid_kinds::AlertUuid;
 use omicron_uuid_kinds::BlueprintUuid;
@@ -162,8 +163,10 @@ pub struct MulticastGroupReconcilerStatus {
     /// Number of members processed ("Joining"→"Joined", "Left" with
     /// time_deleted→hard-deleted cleanup).
     pub members_processed: usize,
-    /// Number of members deleted (Left + time_deleted).
+    /// Number of members deleted ("Left" + time_deleted).
     pub members_deleted: usize,
+    /// Number of empty groups marked for deletion (implicit deletion).
+    pub empty_groups_marked: usize,
     /// Errors that occurred during reconciliation operations.
     pub errors: Vec<String>,
 }
@@ -298,6 +301,7 @@ impl SupportBundleCollectionStep {
     ///
     /// These are used both when creating steps and when validating in tests.
     pub const STEP_BUNDLE_ID: &'static str = "bundle id";
+    pub const STEP_USER_COMMENT: &'static str = "user comment";
     pub const STEP_RECONFIGURATOR_STATE: &'static str = "reconfigurator state";
     pub const STEP_EREPORTS: &'static str = "ereports";
     pub const STEP_SLED_CUBBY_INFO: &'static str = "sled cubby info";
@@ -612,6 +616,7 @@ pub struct BlueprintRendezvousStats {
     pub debug_dataset: DatasetsRendezvousStats,
     pub crucible_dataset: CrucibleDatasetsRendezvousStats,
     pub local_storage_dataset: DatasetsRendezvousStats,
+    pub local_storage_unencrypted_dataset: DatasetsRendezvousStats,
 }
 
 /// Stats for the rendezvous table that stores Crucible datasets
@@ -828,7 +833,7 @@ pub struct WebhookDeliveryFailure {
     pub delivery_id: WebhookDeliveryUuid,
     pub alert_id: AlertUuid,
     pub attempt: usize,
-    pub result: views::WebhookDeliveryAttemptResult,
+    pub result: alert::WebhookDeliveryAttemptResult,
     pub response_status: Option<u16>,
     pub response_duration: Option<chrono::TimeDelta>,
 }
@@ -927,6 +932,45 @@ pub struct ProbeDistributorStatus {
     pub probes_by_sled: HashMap<SledUuid, usize>,
     /// Errors when sending a probe.
     pub errors: Vec<ProbeError>,
+}
+
+#[derive(Serialize, Deserialize)]
+pub enum TrustQuorumManagerStatus {
+    PerRackStatus { statuses: Vec<String>, errors: Vec<String> },
+    Error(String),
+}
+
+#[derive(Default, Deserialize, Serialize)]
+pub struct AttachedSubnetManagerStatus {
+    /// Error reaching the database to fetch attached subnets.
+    pub db_error: Option<String>,
+    /// Details about attached subnets sent to Dendrite instances.
+    pub dendrite: HashMap<SwitchLocation, DendriteSubnetDetails>,
+    /// Details about attached subnets sent to sleds.
+    pub sled: HashMap<SledUuid, SledSubnetDetails>,
+}
+
+/// Details about attached subnets sent to a single Dendrite instance.
+#[derive(Default, Deserialize, Serialize)]
+pub struct DendriteSubnetDetails {
+    /// Number of new subnets added.
+    pub n_subnets_added: usize,
+    /// Number of existing subnets removed.
+    pub n_subnets_removed: usize,
+    /// Total number of subnets on the instance after the operation is
+    /// completed.
+    pub n_total_subnets: usize,
+    /// Errors encountered when sending attached subnets.
+    pub errors: Vec<String>,
+}
+
+/// Details about attached subnets sent to a single sled.
+#[derive(Default, Deserialize, Serialize)]
+pub struct SledSubnetDetails {
+    /// Total number of subnets, across all instances on the sled.
+    pub n_subnets: usize,
+    /// Errors encountered when sending attached subnets.
+    pub errors: Vec<String>,
 }
 
 #[cfg(test)]

@@ -51,11 +51,10 @@ use nexus_db_queries::authn::{Actor, Reason};
 use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::model::{DeviceAccessToken, DeviceAuthRequest};
-use omicron_uuid_kinds::SiloUserUuid;
+use omicron_uuid_kinds::{GenericUuid, SiloUserUuid};
 
 use anyhow::anyhow;
-use nexus_types::external_api::params;
-use nexus_types::external_api::views;
+use nexus_types::external_api::device;
 use omicron_common::api::external::{
     CreateResult, DataPageParams, Error, ListResultVec,
 };
@@ -78,7 +77,7 @@ impl super::Nexus {
     pub(crate) async fn device_auth_request_create(
         &self,
         opctx: &OpContext,
-        params: params::DeviceAuthRequest,
+        params: device::DeviceAuthRequest,
     ) -> CreateResult<DeviceAuthRequest> {
         // TODO-correctness: the `user_code` generated for a new request
         // is used as a primary key, but may potentially collide with an
@@ -240,12 +239,12 @@ impl super::Nexus {
 
     /// Look up the actor for which a token was granted.
     /// Corresponds to a request *after* completing the flow above.
-    /// Returns the actor and the token's expiration time (if any).
+    /// Returns the actor, the token's expiration time (if any), and the token ID.
     pub(crate) async fn authenticate_token(
         &self,
         opctx: &OpContext,
         token: String,
-    ) -> Result<(Actor, Option<chrono::DateTime<Utc>>), Reason> {
+    ) -> Result<(Actor, Option<chrono::DateTime<Utc>>, Uuid), Reason> {
         let (.., db_access_token) = self
             .db_datastore
             .device_token_lookup_by_token(opctx, token)
@@ -271,6 +270,7 @@ impl super::Nexus {
         let silo_id = db_silo_user.silo_id;
 
         let expiration = db_access_token.time_expires;
+        let token_id = db_access_token.id().into_untyped_uuid();
 
         if let Some(time_expires) = expiration {
             let now = Utc::now();
@@ -286,13 +286,13 @@ impl super::Nexus {
             }
         }
 
-        Ok((Actor::SiloUser { silo_user_id, silo_id }, expiration))
+        Ok((Actor::SiloUser { silo_user_id, silo_id }, expiration, token_id))
     }
 
     pub(crate) async fn device_access_token(
         &self,
         opctx: &OpContext,
-        params: params::DeviceAccessTokenRequest,
+        params: device::DeviceAccessTokenRequest,
     ) -> Result<Response<Body>, HttpError> {
         // RFC 8628 §3.4
         if params.grant_type != "urn:ietf:params:oauth:grant-type:device_code" {
@@ -317,7 +317,7 @@ impl super::Nexus {
             Ok(response) => match response {
                 Granted(token) => self.build_oauth_response(
                     StatusCode::OK,
-                    &views::DeviceAccessTokenGrant::from(token),
+                    &device::DeviceAccessTokenGrant::from(token),
                 ),
                 Pending => self.build_oauth_response(
                     StatusCode::BAD_REQUEST,

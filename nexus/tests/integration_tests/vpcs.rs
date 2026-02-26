@@ -16,9 +16,14 @@ use nexus_test_utils::resource_helpers::{
     create_vpc_with_error, grant_iam, objects_list_page_authz, test_params,
 };
 use nexus_test_utils_macros::nexus_test;
-use nexus_types::external_api::params;
-use nexus_types::external_api::shared::{ProjectRole, SiloRole};
-use nexus_types::external_api::views::{Silo, Vpc};
+use nexus_types::external_api::floating_ip;
+use nexus_types::external_api::instance;
+use nexus_types::external_api::internet_gateway;
+use nexus_types::external_api::ip_pool;
+use nexus_types::external_api::policy;
+use nexus_types::external_api::project;
+use nexus_types::external_api::silo;
+use nexus_types::external_api::vpc;
 use nexus_types::identity::{Asset, Resource};
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::IdentityMetadataUpdateParams;
@@ -90,7 +95,7 @@ async fn test_vpcs(cptestctx: &ControlPlaneTestContext) {
     NexusRequest::new(
         RequestBuilder::new(client, Method::POST, &vpcs_url)
             .expect_status(Some(StatusCode::BAD_REQUEST))
-            .body(Some(&params::VpcCreate {
+            .body(Some(&vpc::VpcCreate {
                 identity: IdentityMetadataCreateParams {
                     name: "just-rainsticks".parse().unwrap(),
                     description: String::from("vpc description"),
@@ -131,7 +136,7 @@ async fn test_vpcs(cptestctx: &ControlPlaneTestContext) {
     assert_eq!(error.message, "already exists: vpc \"just-rainsticks\"");
 
     // creating a VPC with the same name in another project works, though
-    let vpc2: Vpc = create_vpc(&client, PROJECT_NAME_2, vpc_name).await;
+    let vpc2: vpc::Vpc = create_vpc(&client, PROJECT_NAME_2, vpc_name).await;
     assert_eq!(vpc2.identity.name, "just-rainsticks");
 
     // List VPCs again and expect to find the one we just created.
@@ -145,7 +150,7 @@ async fn test_vpcs(cptestctx: &ControlPlaneTestContext) {
     vpcs_eq(&vpcs[1], &vpc);
 
     // Update the VPC
-    let update_params = params::VpcUpdate {
+    let update_params = vpc::VpcUpdate {
         identity: IdentityMetadataUpdateParams {
             name: Some("new-name".parse().unwrap()),
             description: Some("another description".to_string()),
@@ -230,11 +235,14 @@ async fn test_vpcs(cptestctx: &ControlPlaneTestContext) {
     vpcs_eq(&vpcs[0], &default_vpc);
 }
 
-async fn vpcs_list(client: &ClientTestContext, vpcs_url: &str) -> Vec<Vpc> {
-    objects_list_page_authz::<Vpc>(client, vpcs_url).await.items
+async fn vpcs_list(
+    client: &ClientTestContext,
+    vpcs_url: &str,
+) -> Vec<vpc::Vpc> {
+    objects_list_page_authz::<vpc::Vpc>(client, vpcs_url).await.items
 }
 
-async fn vpc_get(client: &ClientTestContext, vpc_url: &str) -> Vpc {
+async fn vpc_get(client: &ClientTestContext, vpc_url: &str) -> vpc::Vpc {
     NexusRequest::object_get(client, vpc_url)
         .authn_as(AuthnMode::PrivilegedUser)
         .execute_and_parse_unwrap()
@@ -244,15 +252,15 @@ async fn vpc_get(client: &ClientTestContext, vpc_url: &str) -> Vpc {
 async fn vpc_put(
     client: &ClientTestContext,
     vpc_url: &str,
-    params: params::VpcUpdate,
-) -> Vpc {
+    params: vpc::VpcUpdate,
+) -> vpc::Vpc {
     NexusRequest::object_put(client, vpc_url, Some(&params))
         .authn_as(AuthnMode::PrivilegedUser)
         .execute_and_parse_unwrap()
         .await
 }
 
-fn vpcs_eq(vpc1: &Vpc, vpc2: &Vpc) {
+fn vpcs_eq(vpc1: &vpc::Vpc, vpc2: &vpc::Vpc) {
     identity_eq(&vpc1.identity, &vpc2.identity);
     assert_eq!(vpc1.project_id, vpc2.project_id);
 }
@@ -270,7 +278,7 @@ async fn test_vpc_limited_collaborator_role(
     let vpcs_url = format!("/v1/vpcs?project={}", project_name);
 
     use nexus_db_queries::db::fixed_data::silo::DEFAULT_SILO;
-    let silo: Silo = NexusRequest::object_get(
+    let silo: silo::Silo = NexusRequest::object_get(
         client,
         &format!("/v1/system/silos/{}", DEFAULT_SILO.name()),
     )
@@ -278,11 +286,11 @@ async fn test_vpc_limited_collaborator_role(
     .execute_and_parse_unwrap()
     .await;
 
-    // Grant the Project Collaborator role to a local user
+    // Grant the project::Project Collaborator role to a local user
     grant_iam(
         client,
         &project_url,
-        ProjectRole::Collaborator,
+        policy::ProjectRole::Collaborator,
         USER_TEST_UNPRIVILEGED.id(),
         AuthnMode::PrivilegedUser,
     )
@@ -301,7 +309,7 @@ async fn test_vpc_limited_collaborator_role(
     grant_iam(
         client,
         &silo_url,
-        SiloRole::LimitedCollaborator,
+        policy::SiloRole::LimitedCollaborator,
         limited_user.id,
         AuthnMode::PrivilegedUser,
     )
@@ -309,10 +317,10 @@ async fn test_vpc_limited_collaborator_role(
 
     // Test 1: Verify the PrivilegedUser can create a VPC
     let vpc_name = "test-vpc";
-    let _vpc_priv: Vpc = NexusRequest::objects_post(
+    let _vpc_priv: vpc::Vpc = NexusRequest::objects_post(
         client,
         &vpcs_url,
-        &params::VpcCreate {
+        &vpc::VpcCreate {
             identity: IdentityMetadataCreateParams {
                 name: vpc_name.parse().unwrap(),
                 description: "test vpc".to_string(),
@@ -330,10 +338,10 @@ async fn test_vpc_limited_collaborator_role(
 
     // Test 2: Unprivileged user with Collaborator role CAN create a VPC
     let vpc_name2 = "test-vpc-2";
-    let vpc: Vpc = NexusRequest::objects_post(
+    let vpc: vpc::Vpc = NexusRequest::objects_post(
         client,
         &vpcs_url,
-        &params::VpcCreate {
+        &vpc::VpcCreate {
             identity: IdentityMetadataCreateParams {
                 name: vpc_name2.parse().unwrap(),
                 description: "test vpc 2".to_string(),
@@ -354,12 +362,12 @@ async fn test_vpc_limited_collaborator_role(
 
     // Test 3: User with silo.limited-collaborator role CAN read/list VPCs
     // (inherits project.limited-collaborator → project.viewer)
-    let vpcs_list: Vec<Vpc> = NexusRequest::object_get(client, &vpcs_url)
+    let vpcs_list: Vec<vpc::Vpc> = NexusRequest::object_get(client, &vpcs_url)
         .authn_as(AuthnMode::SiloUser(limited_user.id))
         .execute()
         .await
         .expect("silo.limited-collaborator should be able to list VPCs")
-        .parsed_body::<dropshot::ResultsPage<Vpc>>()
+        .parsed_body::<dropshot::ResultsPage<vpc::Vpc>>()
         .unwrap()
         .items;
     assert!(
@@ -371,7 +379,7 @@ async fn test_vpc_limited_collaborator_role(
     // (inherits project.limited-collaborator, which cannot modify networking)
     NexusRequest::new(
         RequestBuilder::new(client, Method::POST, &vpcs_url)
-            .body(Some(&params::VpcCreate {
+            .body(Some(&vpc::VpcCreate {
                 identity: IdentityMetadataCreateParams {
                     name: "forbidden-vpc".parse().unwrap(),
                     description: "should not be created".to_string(),
@@ -399,7 +407,7 @@ async fn test_limited_collaborator_can_create_instance(
     create_project(&client, &project_name).await;
 
     use nexus_db_queries::db::fixed_data::silo::DEFAULT_SILO;
-    let silo: Silo = NexusRequest::object_get(
+    let silo: silo::Silo = NexusRequest::object_get(
         client,
         &format!("/v1/system/silos/{}", DEFAULT_SILO.name()),
     )
@@ -420,7 +428,7 @@ async fn test_limited_collaborator_can_create_instance(
     grant_iam(
         client,
         &silo_url,
-        SiloRole::LimitedCollaborator,
+        policy::SiloRole::LimitedCollaborator,
         limited_user.id,
         AuthnMode::PrivilegedUser,
     )
@@ -428,16 +436,16 @@ async fn test_limited_collaborator_can_create_instance(
 
     // First verify the project exists and user can see it
     use dropshot::ResultsPage;
-    use nexus_types::external_api::views::Project;
     let projects_url = "/v1/projects";
-    let projects: Vec<Project> = NexusRequest::object_get(client, projects_url)
-        .authn_as(AuthnMode::SiloUser(limited_user.id))
-        .execute()
-        .await
-        .expect("limited-collaborator should be able to list projects")
-        .parsed_body::<ResultsPage<Project>>()
-        .unwrap()
-        .items;
+    let projects: Vec<project::Project> =
+        NexusRequest::object_get(client, projects_url)
+            .authn_as(AuthnMode::SiloUser(limited_user.id))
+            .execute()
+            .await
+            .expect("limited-collaborator should be able to list projects")
+            .parsed_body::<ResultsPage<project::Project>>()
+            .unwrap()
+            .items;
 
     assert!(
         projects.iter().any(|p| p.identity.name == project_name),
@@ -451,7 +459,7 @@ async fn test_limited_collaborator_can_create_instance(
     let instance: Instance = NexusRequest::objects_post(
         client,
         &instances_url,
-        &params::InstanceCreate {
+        &instance::InstanceCreate {
             identity: IdentityMetadataCreateParams {
                 name: instance_name.parse().unwrap(),
                 description: "test instance created by limited-collaborator"
@@ -464,7 +472,7 @@ async fn test_limited_collaborator_can_create_instance(
             user_data: vec![],
             ssh_public_keys: None,
             network_interfaces:
-                params::InstanceNetworkInterfaceAttachment::DefaultIpv4,
+                instance::InstanceNetworkInterfaceAttachment::DefaultIpv4,
             external_ips: vec![],
             multicast_groups: vec![],
             disks: vec![],
@@ -497,7 +505,7 @@ async fn test_limited_collaborator_blocked_from_networking_resources(
     create_project(&client, &project_name).await;
 
     use nexus_db_queries::db::fixed_data::silo::DEFAULT_SILO;
-    let silo: Silo = NexusRequest::object_get(
+    let silo: silo::Silo = NexusRequest::object_get(
         client,
         &format!("/v1/system/silos/{}", DEFAULT_SILO.name()),
     )
@@ -518,7 +526,7 @@ async fn test_limited_collaborator_blocked_from_networking_resources(
     grant_iam(
         client,
         &silo_url,
-        SiloRole::LimitedCollaborator,
+        policy::SiloRole::LimitedCollaborator,
         limited_user.id,
         AuthnMode::PrivilegedUser,
     )
@@ -528,7 +536,7 @@ async fn test_limited_collaborator_blocked_from_networking_resources(
     let vpcs_url = format!("/v1/vpcs?project={}", project_name);
     NexusRequest::new(
         RequestBuilder::new(client, Method::POST, &vpcs_url)
-            .body(Some(&params::VpcCreate {
+            .body(Some(&vpc::VpcCreate {
                 identity: IdentityMetadataCreateParams {
                     name: "forbidden-vpc".parse().unwrap(),
                     description: "should not be created".to_string(),
@@ -548,7 +556,7 @@ async fn test_limited_collaborator_blocked_from_networking_resources(
         format!("/v1/vpc-subnets?project={}&vpc=default", project_name);
     NexusRequest::new(
         RequestBuilder::new(client, Method::POST, &subnets_url)
-            .body(Some(&params::VpcSubnetCreate {
+            .body(Some(&vpc::VpcSubnetCreate {
                 identity: IdentityMetadataCreateParams {
                     name: "forbidden-subnet".parse().unwrap(),
                     description: "should not be created".to_string(),
@@ -569,7 +577,7 @@ async fn test_limited_collaborator_blocked_from_networking_resources(
         format!("/v1/vpc-routers?project={}&vpc=default", project_name);
     NexusRequest::new(
         RequestBuilder::new(client, Method::POST, &routers_url)
-            .body(Some(&params::VpcRouterCreate {
+            .body(Some(&vpc::VpcRouterCreate {
                 identity: IdentityMetadataCreateParams {
                     name: "forbidden-router".parse().unwrap(),
                     description: "should not be created".to_string(),
@@ -587,7 +595,7 @@ async fn test_limited_collaborator_blocked_from_networking_resources(
         format!("/v1/internet-gateways?project={}&vpc=default", project_name);
     NexusRequest::new(
         RequestBuilder::new(client, Method::POST, &igw_url)
-            .body(Some(&params::InternetGatewayCreate {
+            .body(Some(&internet_gateway::InternetGatewayCreate {
                 identity: IdentityMetadataCreateParams {
                     name: "forbidden-gateway".parse().unwrap(),
                     description: "should not be created".to_string(),
@@ -607,7 +615,7 @@ async fn test_limited_collaborator_blocked_from_networking_resources(
     let _igw = NexusRequest::objects_post(
         client,
         &igw_url,
-        &params::InternetGatewayCreate {
+        &internet_gateway::InternetGatewayCreate {
             identity: IdentityMetadataCreateParams {
                 name: igw_name.parse().unwrap(),
                 description: "test gateway".to_string(),
@@ -618,14 +626,14 @@ async fn test_limited_collaborator_blocked_from_networking_resources(
     .execute()
     .await
     .expect("privileged user should create gateway")
-    .parsed_body::<nexus_types::external_api::views::InternetGateway>()
+    .parsed_body::<internet_gateway::InternetGateway>()
     .unwrap();
 
     let router_name = "test-router";
     let _router = NexusRequest::objects_post(
         client,
         &routers_url,
-        &params::VpcRouterCreate {
+        &vpc::VpcRouterCreate {
             identity: IdentityMetadataCreateParams {
                 name: router_name.parse().unwrap(),
                 description: "test router".to_string(),
@@ -636,7 +644,7 @@ async fn test_limited_collaborator_blocked_from_networking_resources(
     .execute()
     .await
     .expect("privileged user should create router")
-    .parsed_body::<nexus_types::external_api::views::VpcRouter>()
+    .parsed_body::<vpc::VpcRouter>()
     .unwrap();
 
     // Test 4: Cannot create router route
@@ -646,7 +654,7 @@ async fn test_limited_collaborator_blocked_from_networking_resources(
     );
     NexusRequest::new(
         RequestBuilder::new(client, Method::POST, &routes_url)
-            .body(Some(&params::RouterRouteCreate {
+            .body(Some(&vpc::RouterRouteCreate {
                 identity: IdentityMetadataCreateParams {
                     name: "forbidden-route".parse().unwrap(),
                     description: "should not be created".to_string(),
@@ -668,7 +676,7 @@ async fn test_limited_collaborator_blocked_from_networking_resources(
     );
     NexusRequest::new(
         RequestBuilder::new(client, Method::POST, &pool_attach_url)
-            .body(Some(&params::InternetGatewayIpPoolCreate {
+            .body(Some(&internet_gateway::InternetGatewayIpPoolCreate {
                 identity: IdentityMetadataCreateParams {
                     name: "forbidden-pool-attach".parse().unwrap(),
                     description: "should not be created".to_string(),
@@ -728,7 +736,7 @@ async fn test_limited_collaborator_can_manage_floating_ips_and_nics(
     create_project(&client, &project_name).await;
 
     use nexus_db_queries::db::fixed_data::silo::DEFAULT_SILO;
-    let silo: Silo = NexusRequest::object_get(
+    let silo: silo::Silo = NexusRequest::object_get(
         client,
         &format!("/v1/system/silos/{}", DEFAULT_SILO.name()),
     )
@@ -749,7 +757,7 @@ async fn test_limited_collaborator_can_manage_floating_ips_and_nics(
     grant_iam(
         client,
         &silo_url,
-        SiloRole::LimitedCollaborator,
+        policy::SiloRole::LimitedCollaborator,
         limited_user.id,
         AuthnMode::PrivilegedUser,
     )
@@ -758,18 +766,19 @@ async fn test_limited_collaborator_can_manage_floating_ips_and_nics(
     // Test 1: Limited-collaborator CAN create a floating IP
     let fips_url = format!("/v1/floating-ips?project={}", project_name);
     let fip_name = "test-fip";
-    use nexus_types::external_api::views::FloatingIp;
-    let fip: FloatingIp = NexusRequest::objects_post(
+    let fip: floating_ip::FloatingIp = NexusRequest::objects_post(
         client,
         &fips_url,
-        &params::FloatingIpCreate {
+        &floating_ip::FloatingIpCreate {
             identity: IdentityMetadataCreateParams {
                 name: fip_name.parse().unwrap(),
                 description: "test floating ip".to_string(),
             },
-            ip: None,
-            pool: Some(v4_pool.identity.name.clone().into()),
-            ip_version: None,
+            address_allocator: floating_ip::AddressAllocator::Auto {
+                pool_selector: ip_pool::PoolSelector::Explicit {
+                    pool: v4_pool.identity.name.clone().into(),
+                },
+            },
         },
     )
     .authn_as(AuthnMode::SiloUser(limited_user.id))
@@ -783,10 +792,10 @@ async fn test_limited_collaborator_can_manage_floating_ips_and_nics(
     // Test 2: Limited-collaborator CAN update a floating IP
     let fip_url =
         format!("/v1/floating-ips/{}?project={}", fip_name, project_name);
-    let updated_fip: FloatingIp = NexusRequest::object_put(
+    let updated_fip: floating_ip::FloatingIp = NexusRequest::object_put(
         client,
         &fip_url,
-        Some(&params::FloatingIpUpdate {
+        Some(&floating_ip::FloatingIpUpdate {
             identity: IdentityMetadataUpdateParams {
                 name: Some(fip_name.parse().unwrap()),
                 description: Some("updated description".to_string()),
@@ -811,5 +820,5 @@ async fn test_limited_collaborator_can_manage_floating_ips_and_nics(
     // Note: We don't explicitly test NIC CRUD here because:
     // - NIC creation is tested in test_limited_collaborator_can_create_instance
     //   (NICs are created as part of instance creation)
-    // - The key authorization check (Read on VpcSubnet) is what we fixed
+    // - The key authorization check (Read on vpc::VpcSubnet) is what we fixed
 }

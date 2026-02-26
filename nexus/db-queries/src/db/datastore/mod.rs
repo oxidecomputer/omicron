@@ -71,6 +71,7 @@ mod disk;
 mod dns;
 mod ereport;
 mod external_ip;
+mod external_subnet;
 pub mod fm;
 mod identity_provider;
 mod image;
@@ -135,10 +136,14 @@ pub use db_metadata::ValidatedDatastoreSetupAction;
 pub use deployment::BlueprintLimitReachedOutput;
 pub use disk::CrucibleDisk;
 pub use disk::Disk;
+pub use disk::LocalStorageAllocation;
 pub use disk::LocalStorageDisk;
 pub use dns::DataStoreDnsTest;
 pub use dns::DnsVersionUpdateBuilder;
 pub use ereport::EreportFilters;
+pub use external_ip::FloatingIpAllocation;
+pub use external_subnet::ExternalSubnetBeginOpResult;
+pub use external_subnet::ExternalSubnetCompleteOpResult;
 pub use instance::{
     InstanceAndActiveVmm, InstanceGestalt, InstanceStateComputer,
 };
@@ -290,9 +295,9 @@ impl DataStore {
             || async {
                 if let Some(try_for) = try_for {
                     if std::time::Instant::now() > start + try_for {
-                        return Err(BackoffError::permanent(
+                        return Err(BackoffError::permanent(String::from(
                             "Timeout waiting for DataStore::new_with_timeout",
-                        ));
+                        )));
                     }
                 }
 
@@ -309,9 +314,9 @@ impl DataStore {
                                 "Cannot check schema version / Nexus access";
                                 InlineErrorChain::new(err.as_ref()),
                             );
-                            BackoffError::transient(
-                                "Cannot check schema version / Nexus access",
-                            )
+                            BackoffError::transient(format!(
+                                "Cannot check schema version / Nexus access: {err:#}",
+                            ))
                         })?;
 
                     match checked_action.action() {
@@ -326,14 +331,11 @@ impl DataStore {
                                 .attempt_handoff(*nexus_id)
                                 .await
                                 .map_err(|err| {
-                                    warn!(
-                                        log,
-                                        "Could not handoff to new nexus";
-                                        err
+                                    let msg = format!(
+                                        "Could not handoff to new nexus: {err}"
                                     );
-                                    BackoffError::transient(
-                                        "Could not handoff to new nexus",
-                                    )
+                                    warn!(log, "{msg}");
+                                    BackoffError::transient(msg)
                                 })?;
 
                             // If the handoff was successful, immediately
@@ -343,9 +345,9 @@ impl DataStore {
                         }
                         DatastoreSetupAction::TryLater => {
                             error!(log, "Waiting for metadata; trying later");
-                            return Err(BackoffError::permanent(
+                            return Err(BackoffError::permanent(String::from(
                                 "Waiting for metadata; trying later",
-                            ));
+                            )));
                         }
                         DatastoreSetupAction::Update => {
                             info!(
@@ -355,23 +357,38 @@ impl DataStore {
                             datastore
                                 .update_schema(checked_action, config)
                                 .await
-                                .map_err(|err| {
-                                    warn!(
-                                        log,
-                                        "Failed to update schema version";
-                                        InlineErrorChain::new(err.as_ref())
-                                    );
-                                    BackoffError::transient(
-                                        "Failed to update schema version",
-                                    )
+                                .map_err(|err| match err {
+                                    BackoffError::Permanent(e) => {
+                                        error!(
+                                            log,
+                                            "Failed to update schema version \
+                                            (permanent error, will not retry)";
+                                            InlineErrorChain::new(e.as_ref())
+                                        );
+                                        BackoffError::permanent(format!(
+                                            "Failed to update schema version: {e:#}"
+                                        ))
+                                    }
+                                    BackoffError::Transient {
+                                        err: e, ..
+                                    } => {
+                                        warn!(
+                                            log,
+                                            "Failed to update schema version";
+                                            InlineErrorChain::new(e.as_ref())
+                                        );
+                                        BackoffError::transient(format!(
+                                            "Failed to update schema version: {e:#}"
+                                        ))
+                                    }
                                 })?;
                             return Ok(());
                         }
                         DatastoreSetupAction::Refuse => {
                             error!(log, "Datastore should not be used");
-                            return Err(BackoffError::permanent(
+                            return Err(BackoffError::permanent(String::from(
                                 "Datastore should not be used",
-                            ));
+                            )));
                         }
                     }
                 }
@@ -612,7 +629,9 @@ mod test {
     use nexus_db_model::to_db_typed_uuid;
     use nexus_types::deployment::Blueprint;
     use nexus_types::deployment::BlueprintTarget;
-    use nexus_types::external_api::params;
+    use nexus_types::external_api::disk as disk_types;
+    use nexus_types::external_api::project;
+    use nexus_types::external_api::ssh_key;
     use nexus_types::silo::DEFAULT_SILO_ID;
     use omicron_common::address::REPO_DEPOT_PORT;
     use omicron_common::api::external::{
@@ -677,7 +696,7 @@ mod test {
 
         let project = Project::new(
             authz_silo.id(),
-            params::ProjectCreate {
+            project::ProjectCreate {
                 identity: IdentityMetadataCreateParams {
                     name: "project".parse().unwrap(),
                     description: "desc".to_string(),
@@ -1149,8 +1168,8 @@ mod test {
         // Allocate regions from the datasets for this disk. Do it a few times
         // for good measure.
         for alloc_seed in 0..10 {
-            let disk_source = params::DiskSource::Blank {
-                block_size: params::BlockSize::try_from(4096).unwrap(),
+            let disk_source = disk_types::DiskSource::Blank {
+                block_size: disk_types::BlockSize::try_from(4096).unwrap(),
             };
             let size = ByteCount::from_mebibytes_u32(1);
             let volume_id = VolumeUuid::new_v4();
@@ -1243,8 +1262,8 @@ mod test {
         // Allocate regions from the datasets for this disk. Do it a few times
         // for good measure.
         for alloc_seed in 0..10 {
-            let disk_source = params::DiskSource::Blank {
-                block_size: params::BlockSize::try_from(4096).unwrap(),
+            let disk_source = disk_types::DiskSource::Blank {
+                block_size: disk_types::BlockSize::try_from(4096).unwrap(),
             };
             let size = ByteCount::from_mebibytes_u32(1);
             let volume_id = VolumeUuid::new_v4();
@@ -1331,8 +1350,8 @@ mod test {
         // Allocate regions from the datasets for this disk. Do it a few times
         // for good measure.
         for alloc_seed in 0..10 {
-            let disk_source = params::DiskSource::Blank {
-                block_size: params::BlockSize::try_from(4096).unwrap(),
+            let disk_source = disk_types::DiskSource::Blank {
+                block_size: disk_types::BlockSize::try_from(4096).unwrap(),
             };
             let size = ByteCount::from_mebibytes_u32(1);
             let volume_id = VolumeUuid::new_v4();
@@ -1377,8 +1396,8 @@ mod test {
         .await;
 
         // Allocate regions from the datasets for this volume.
-        let disk_source = params::DiskSource::Blank {
-            block_size: params::BlockSize::try_from(4096).unwrap(),
+        let disk_source = disk_types::DiskSource::Blank {
+            block_size: disk_types::BlockSize::try_from(4096).unwrap(),
         };
         let size = ByteCount::from_mebibytes_u32(500);
         let volume_id = VolumeUuid::new_v4();
@@ -1481,8 +1500,8 @@ mod test {
             .await;
 
         // Allocate regions from the datasets for this volume.
-        let disk_source = params::DiskSource::Blank {
-            block_size: params::BlockSize::try_from(4096).unwrap(),
+        let disk_source = disk_types::DiskSource::Blank {
+            block_size: disk_types::BlockSize::try_from(4096).unwrap(),
         };
         let size = ByteCount::from_mebibytes_u32(500);
         let volume1_id = VolumeUuid::new_v4();
@@ -1575,8 +1594,8 @@ mod test {
             .await;
 
         // Allocate regions from the datasets for this volume.
-        let disk_source = params::DiskSource::Blank {
-            block_size: params::BlockSize::try_from(4096).unwrap(),
+        let disk_source = disk_types::DiskSource::Blank {
+            block_size: disk_types::BlockSize::try_from(4096).unwrap(),
         };
         let size = ByteCount::from_mebibytes_u32(500);
         let volume1_id = VolumeUuid::new_v4();
@@ -1667,8 +1686,8 @@ mod test {
         ];
 
         let volume_id = VolumeUuid::new_v4();
-        let disk_source = params::DiskSource::Blank {
-            block_size: params::BlockSize::try_from(4096).unwrap(),
+        let disk_source = disk_types::DiskSource::Blank {
+            block_size: disk_types::BlockSize::try_from(4096).unwrap(),
         };
         let size = ByteCount::from_mebibytes_u32(500);
 
@@ -1734,8 +1753,8 @@ mod test {
         .await;
 
         let disk_size = test_zpool_size();
-        let disk_source = params::DiskSource::Blank {
-            block_size: params::BlockSize::try_from(4096).unwrap(),
+        let disk_source = disk_types::DiskSource::Blank {
+            block_size: disk_types::BlockSize::try_from(4096).unwrap(),
         };
         let alloc_size = ByteCount::try_from(disk_size.to_bytes() * 2).unwrap();
         let volume1_id = VolumeUuid::new_v4();
@@ -1885,7 +1904,7 @@ mod test {
         let public_key = "ssh-test AAAAAAAAKEY".to_string();
         let ssh_key = SshKey::new(
             silo_user_id,
-            params::SshKeyCreate {
+            ssh_key::SshKeyCreate {
                 identity: IdentityMetadataCreateParams {
                     name: key_name.clone(),
                     description: "my SSH public key".to_string(),

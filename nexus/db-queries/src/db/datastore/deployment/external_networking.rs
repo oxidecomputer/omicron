@@ -16,7 +16,7 @@ use nexus_db_model::IncompleteNetworkInterface;
 use nexus_db_model::IpPool;
 use nexus_types::deployment::BlueprintZoneConfig;
 use nexus_types::deployment::OmicronZoneExternalIp;
-use nexus_types::external_api::params::PrivateIpStackCreate;
+use nexus_types::external_api::instance::PrivateIpStackCreate;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::IpVersion;
@@ -1503,7 +1503,7 @@ mod tests {
         .expect("created builder");
 
         let to_expunge = builder
-            .current_zones(BlueprintZoneDisposition::is_in_service)
+            .current_in_service_zones()
             .filter_map(|(sled_id, zone)| {
                 if zone.zone_type.is_external_dns() {
                     Some((sled_id, zone.id))

@@ -5,7 +5,7 @@ use nexus_db_queries::authn;
 use nexus_test_utils::http_testing::AuthnMode;
 use nexus_test_utils::http_testing::NexusRequest;
 use nexus_test_utils_macros::nexus_test;
-use nexus_types::external_api::views::UserBuiltin;
+use nexus_types::external_api::user::UserBuiltin;
 use omicron_uuid_kinds::GenericUuid;
 use std::collections::BTreeMap;
 

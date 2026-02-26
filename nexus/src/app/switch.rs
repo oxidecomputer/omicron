@@ -4,7 +4,7 @@ use nexus_db_model::Switch;
 use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db;
-use nexus_types::external_api::params;
+use nexus_types::external_api::sled;
 use nexus_types::internal_api::params::SwitchPutRequest;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
@@ -17,7 +17,7 @@ impl super::Nexus {
     pub fn switch_lookup<'a>(
         &'a self,
         opctx: &'a OpContext,
-        switch_selector: params::SwitchSelector,
+        switch_selector: sled::SwitchSelector,
     ) -> LookupResult<lookup::Switch<'a>> {
         Ok(LookupPath::new(opctx, &self.db_datastore)
             .switch_id(switch_selector.switch))

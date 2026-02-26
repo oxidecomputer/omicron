@@ -5,9 +5,6 @@
 //! Rack management
 
 use crate::app::CONTROL_PLANE_STORAGE_BUFFER;
-use crate::external_api::params;
-use crate::external_api::params::CertificateCreate;
-use crate::external_api::shared::ServiceUsingCertificate;
 use crate::internal_api::params::RackInitializationRequest;
 use internal_dns_types::names::DNS_ZONE;
 use ipnetwork::{IpNetwork, Ipv6Network};
@@ -23,32 +20,17 @@ use nexus_db_queries::db::datastore::RackInit;
 use nexus_db_queries::db::datastore::SledUnderlayAllocationResult;
 use nexus_types::deployment::CockroachDbClusterVersion;
 use nexus_types::deployment::SledFilter;
-use nexus_types::external_api::params::Address;
-use nexus_types::external_api::params::AddressConfig;
-use nexus_types::external_api::params::AddressLotBlockCreate;
-use nexus_types::external_api::params::BgpAnnounceSetCreate;
-use nexus_types::external_api::params::BgpAnnouncementCreate;
-use nexus_types::external_api::params::BgpConfigCreate;
-use nexus_types::external_api::params::LinkConfigCreate;
-use nexus_types::external_api::params::LldpLinkConfigCreate;
-use nexus_types::external_api::params::RouteConfig;
-use nexus_types::external_api::params::SwitchPortConfigCreate;
-use nexus_types::external_api::params::UninitializedSledId;
-use nexus_types::external_api::params::{
-    AddressLotCreate, BgpPeerConfig, Route, SiloCreate,
-    SwitchPortSettingsCreate,
-};
-use nexus_types::external_api::shared::Baseboard;
-use nexus_types::external_api::shared::FleetRole;
-use nexus_types::external_api::shared::SiloIdentityMode;
-use nexus_types::external_api::shared::SiloRole;
-use nexus_types::external_api::shared::UninitializedSled;
-use nexus_types::external_api::views;
+use nexus_types::external_api::certificate;
+use nexus_types::external_api::hardware;
+use nexus_types::external_api::networking;
+use nexus_types::external_api::policy;
+use nexus_types::external_api::silo;
+use nexus_types::external_api::sled as sled_types;
+use nexus_types::internal_api::params::ExternalPortDiscovery;
 use nexus_types::inventory::SpType;
 use nexus_types::silo::silo_dns_name;
 use omicron_common::address::{Ipv6Subnet, RACK_PREFIX, get_64_subnet};
 use omicron_common::api::external::AddressLotKind;
-use omicron_common::api::external::BgpPeer;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::IdentityMetadataCreateParams;
@@ -58,19 +40,20 @@ use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::Name;
 use omicron_common::api::external::NameOrId;
 use omicron_common::api::external::ResourceType;
-use omicron_common::api::internal::shared::ExternalPortDiscovery;
 use omicron_common::api::internal::shared::LldpAdminStatus;
 use omicron_uuid_kinds::SledUuid;
 use oxnet::IpNet;
+use oxnet::Ipv6Net;
 use sled_agent_client::types::AddSledRequest;
 use sled_agent_client::types::StartSledAgentRequest;
 use sled_agent_client::types::StartSledAgentRequestBody;
+use sled_hardware_types::BaseboardId;
 
 use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::collections::HashMap;
-use std::net::IpAddr;
+use std::net::Ipv6Addr;
 use std::num::NonZeroU32;
 use std::str::FromStr;
 use uuid::Uuid;
@@ -159,7 +142,7 @@ impl super::Nexus {
                 // certificates start from one (e.g., certificate names
                 // "default-1", "default-2", etc).
                 let i = i + 1;
-                CertificateCreate {
+                certificate::CertificateCreate {
                     identity: IdentityMetadataCreateParams {
                         name: Name::try_from(format!("default-{i}")).unwrap(),
                         description: format!(
@@ -168,7 +151,7 @@ impl super::Nexus {
                     },
                     cert: c.cert,
                     key: c.key,
-                    service: ServiceUsingCertificate::ExternalApi,
+                    service: certificate::ServiceUsingCertificate::ExternalApi,
                 }
             })
             .collect();
@@ -286,11 +269,11 @@ impl super::Nexus {
         // Administrators of the Recovery Silo are automatically made
         // administrators of the Fleet.
         let mapped_fleet_roles = BTreeMap::from([(
-            SiloRole::Admin,
-            BTreeSet::from([FleetRole::Admin]),
+            policy::SiloRole::Admin,
+            BTreeSet::from([policy::FleetRole::Admin]),
         )]);
 
-        let recovery_silo = SiloCreate {
+        let recovery_silo = silo::SiloCreate {
             identity: IdentityMetadataCreateParams {
                 name: request.recovery_silo.silo_name,
                 description: "built-in recovery Silo".to_string(),
@@ -299,9 +282,9 @@ impl super::Nexus {
             // it's not intended to be used to deploy workloads. Operators can
             // add capacity after the fact if they want to use it for that
             // purpose.
-            quotas: params::SiloQuotasCreate::empty(),
+            quotas: silo::SiloQuotasCreate::empty(),
             discoverable: false,
-            identity_mode: SiloIdentityMode::LocalOnly,
+            identity_mode: silo::SiloIdentityMode::LocalOnly,
             admin_group_name: None,
             tls_certificates,
             mapped_fleet_roles,
@@ -401,13 +384,15 @@ impl super::Nexus {
 
         let kind = AddressLotKind::Infra;
 
-        let first_address = IpAddr::V4(rack_network_config.infra_ip_first);
-        let last_address = IpAddr::V4(rack_network_config.infra_ip_last);
-        let ipv4_block = AddressLotBlockCreate { first_address, last_address };
+        let first_address = rack_network_config.infra_ip_first;
+        let last_address = rack_network_config.infra_ip_last;
+        let ipv4_block =
+            networking::AddressLotBlockCreate { first_address, last_address };
 
         let blocks = vec![ipv4_block];
 
-        let address_lot_params = AddressLotCreate { identity, kind, blocks };
+        let address_lot_params =
+            networking::AddressLotCreate { identity, kind, blocks };
 
         match self
             .db_datastore
@@ -441,7 +426,7 @@ impl super::Nexus {
                 .db_datastore
                 .address_lot_create(
                     &opctx,
-                    &AddressLotCreate {
+                    &networking::AddressLotCreate {
                         identity: IdentityMetadataCreateParams {
                             name: address_lot_name,
                             description: format!(
@@ -453,10 +438,7 @@ impl super::Nexus {
                         blocks: bgp_config
                             .originate
                             .iter()
-                            .map(|o| AddressLotBlockCreate {
-                                first_address: o.first_addr().into(),
-                                last_address: o.last_addr().into(),
-                            })
+                            .map(|ipnet| (*ipnet).into())
                             .collect(),
                     },
                 )
@@ -476,7 +458,7 @@ impl super::Nexus {
                 .db_datastore
                 .bgp_create_announce_set(
                     &opctx,
-                    &BgpAnnounceSetCreate {
+                    &networking::BgpAnnounceSetCreate {
                         identity: IdentityMetadataCreateParams {
                             name: announce_set_name.clone(),
                             description: format!(
@@ -487,13 +469,13 @@ impl super::Nexus {
                         announcement: bgp_config
                             .originate
                             .iter()
-                            .map(|ipv4_net| BgpAnnouncementCreate {
+                            .map(|ipnet| networking::BgpAnnouncementCreate {
                                 address_lot_block: NameOrId::Name(
                                     format!("as{}", bgp_config.asn)
                                         .parse()
                                         .unwrap(),
                                 ),
-                                network: (*ipv4_net).into(),
+                                network: *ipnet,
                             })
                             .collect(),
                     },
@@ -514,7 +496,7 @@ impl super::Nexus {
                 .db_datastore
                 .bgp_config_create(
                     &opctx,
-                    &BgpConfigCreate {
+                    &networking::BgpConfigCreate {
                         identity: IdentityMetadataCreateParams {
                             name: bgp_config_name,
                             description: format!(
@@ -527,6 +509,7 @@ impl super::Nexus {
                         vrf: None,
                         shaper: bgp_config.shaper.clone(),
                         checker: bgp_config.checker.clone(),
+                        max_paths: bgp_config.max_paths,
                     },
                 )
                 .await
@@ -559,27 +542,30 @@ impl super::Nexus {
                 description: "initial uplink configuration".to_string(),
             };
 
-            let port_config = SwitchPortConfigCreate {
-                    geometry: nexus_types::external_api::params::SwitchPortGeometry::Qsfp28x1,
-                };
-
-            let mut port_settings_params = SwitchPortSettingsCreate {
-                identity,
-                port_config,
-                groups: vec![],
-                links: vec![],
-                interfaces: vec![],
-                routes: vec![],
-                bgp_peers: vec![],
-                addresses: vec![],
+            let port_config = networking::SwitchPortConfigCreate {
+                geometry: networking::SwitchPortGeometry::Qsfp28x1,
             };
 
-            let addresses: Vec<Address> = uplink_config
+            let mut port_settings_params =
+                networking::SwitchPortSettingsCreate {
+                    identity,
+                    port_config,
+                    groups: vec![],
+                    links: vec![],
+                    interfaces: vec![],
+                    routes: vec![],
+                    bgp_peers: vec![],
+                    addresses: vec![],
+                };
+
+            let addresses: Vec<networking::Address> = uplink_config
                 .addresses
                 .iter()
-                .map(|a| Address {
+                .map(|a| networking::Address {
                     address_lot: NameOrId::Name(address_lot_name.clone()),
-                    address: a.address,
+                    address: a.address.unwrap_or_else(|| {
+                        IpNet::V6(Ipv6Net::host_net(Ipv6Addr::UNSPECIFIED))
+                    }),
                     vlan_id: a.vlan_id,
                 })
                 .collect();
@@ -587,15 +573,15 @@ impl super::Nexus {
             let link_name =
                 Name::from_str("phy0").expect("interface name should be valid");
 
-            port_settings_params.addresses.push(AddressConfig {
+            port_settings_params.addresses.push(networking::AddressConfig {
                 link_name: link_name.clone(),
                 addresses,
             });
 
-            let routes: Vec<Route> = uplink_config
+            let routes: Vec<networking::Route> = uplink_config
                 .routes
                 .iter()
-                .map(|r| Route {
+                .map(|r| networking::Route {
                     dst: r.destination,
                     gw: r.nexthop,
                     vid: r.vlan_id,
@@ -603,19 +589,24 @@ impl super::Nexus {
                 })
                 .collect();
 
-            port_settings_params
-                .routes
-                .push(RouteConfig { link_name: link_name.clone(), routes });
+            port_settings_params.routes.push(networking::RouteConfig {
+                link_name: link_name.clone(),
+                routes,
+            });
 
-            let peers: Vec<BgpPeer> = uplink_config
+            let peers: Vec<networking::BgpPeer> = uplink_config
                 .bgp_peers
                 .iter()
-                .map(|r| BgpPeer {
+                .map(|r| networking::BgpPeer {
                     bgp_config: NameOrId::Name(
                         format!("as{}", r.asn).parse().unwrap(),
                     ),
                     interface_name: link_name.clone(),
-                    addr: r.addr.into(),
+                    addr: if r.addr.is_unspecified() {
+                        None
+                    } else {
+                        Some(r.addr)
+                    },
                     hold_time: r.hold_time() as u32,
                     idle_hold_time: r.idle_hold_time() as u32,
                     delay_open: r.delay_open() as u32,
@@ -631,19 +622,21 @@ impl super::Nexus {
                     allowed_import: r.allowed_import.clone(),
                     allowed_export: r.allowed_export.clone(),
                     vlan_id: r.vlan_id,
+                    router_lifetime: r.router_lifetime.as_u16(),
                 })
                 .collect();
 
-            port_settings_params
-                .bgp_peers
-                .push(BgpPeerConfig { link_name: link_name.clone(), peers });
+            port_settings_params.bgp_peers.push(networking::BgpPeerConfig {
+                link_name: link_name.clone(),
+                peers,
+            });
 
             let lldp = match &uplink_config.lldp {
-                None => LldpLinkConfigCreate {
+                None => networking::LldpLinkConfigCreate {
                     enabled: false,
                     ..Default::default()
                 },
-                Some(l) => LldpLinkConfigCreate {
+                Some(l) => networking::LldpLinkConfigCreate {
                     enabled: l.status == LldpAdminStatus::Enabled,
                     link_name: l.port_id.clone(),
                     link_description: l.port_description.clone(),
@@ -657,7 +650,7 @@ impl super::Nexus {
                 },
             };
 
-            let link = LinkConfigCreate {
+            let link = networking::LinkConfigCreate {
                 link_name: link_name.clone(),
                 //TODO https://github.com/oxidecomputer/omicron/issues/2274
                 mtu: 1500,
@@ -739,8 +732,10 @@ impl super::Nexus {
             )
             .await?;
 
-        // Plumb the firewall rules for the built-in services
-        self.plumb_service_firewall_rules(opctx, &[]).await?;
+        // Note: Service firewall rules are plumbed in Server::start() via
+        // await_ip_allowlist_plumbing(), which runs before the external HTTP
+        // server starts. This ensures rules are in place for both fresh rack
+        // initialization and Nexus restart scenarios.
 
         // We've potentially updated the list of DNS servers and the DNS
         // configuration for both internal and external DNS, plus the Silo
@@ -799,7 +794,7 @@ impl super::Nexus {
     pub(crate) async fn sled_list_uninitialized(
         &self,
         opctx: &OpContext,
-    ) -> ListResultVec<UninitializedSled> {
+    ) -> ListResultVec<hardware::UninitializedSled> {
         debug!(self.log, "Getting latest collection");
         // Grab the SPs from the last collection
         let collection =
@@ -824,28 +819,31 @@ impl super::Nexus {
             .sled_list(opctx, &pagparams, SledFilter::InService)
             .await?;
 
-        let mut uninitialized_sleds: Vec<UninitializedSled> = collection
-            .sps
-            .into_iter()
-            .filter_map(|(k, v)| {
-                if v.sp_type == SpType::Sled {
-                    Some(UninitializedSled {
-                        baseboard: Baseboard {
-                            serial: k.serial_number.clone(),
-                            part: k.part_number.clone(),
-                            revision: v.baseboard_revision,
-                        },
-                        rack_id: self.rack_id,
-                        cubby: v.sp_slot,
-                    })
-                } else {
-                    None
-                }
-            })
-            .collect();
+        let mut uninitialized_sleds: Vec<hardware::UninitializedSled> =
+            collection
+                .sps
+                .into_iter()
+                .filter_map(|(k, v)| {
+                    if v.sp_type == SpType::Sled {
+                        Some(hardware::UninitializedSled {
+                            baseboard: hardware::Baseboard {
+                                serial: k.serial_number.clone(),
+                                part: k.part_number.clone(),
+                                revision: v.baseboard_revision,
+                            },
+                            rack_id: self.rack_id,
+                            cubby: v.sp_slot,
+                        })
+                    } else {
+                        None
+                    }
+                })
+                .collect();
 
-        let sled_baseboards: BTreeSet<Baseboard> =
-            sleds.into_iter().map(|s| views::Sled::from(s).baseboard).collect();
+        let sled_baseboards: BTreeSet<hardware::Baseboard> = sleds
+            .into_iter()
+            .map(|s| sled_types::Sled::from(s).baseboard)
+            .collect();
 
         // Retain all sleds that exist but are not in the sled table
         uninitialized_sleds.retain(|s| !sled_baseboards.contains(&s.baseboard));
@@ -856,7 +854,7 @@ impl super::Nexus {
     pub(crate) async fn sled_add(
         &self,
         opctx: &OpContext,
-        sled: UninitializedSledId,
+        sled: hardware::UninitializedSledId,
     ) -> Result<SledUuid, Error> {
         let baseboard_id = sled.clone().into();
         let hw_baseboard_id = self
@@ -890,7 +888,7 @@ impl super::Nexus {
         };
 
         // Convert `UninitializedSledId` to the sled-agent type
-        let baseboard_id = sled_agent_client::types::BaseboardId {
+        let baseboard_id = BaseboardId {
             serial_number: sled.serial.clone(),
             part_number: sled.part.clone(),
         };

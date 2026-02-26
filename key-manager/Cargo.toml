@@ -10,6 +10,7 @@ workspace = true
 [dependencies]
 async-trait.workspace = true
 hkdf.workspace = true
+key-manager-types.workspace = true
 omicron-common.workspace = true
 secrecy.workspace = true
 sha3.workspace = true
@@ -18,4 +19,3 @@ thiserror.workspace = true
 tokio.workspace = true
 zeroize.workspace = true
 omicron-workspace-hack.workspace = true
-

@@ -116,6 +116,8 @@ pub struct ControlPlaneTestContext<N> {
     pub dendrite:
         RwLock<HashMap<SwitchLocation, dev::dendrite::DendriteInstance>>,
     pub lldpd: HashMap<SwitchLocation, dev::lldp::LldpdInstance>,
+    /// Ports of stopped dendrite instances (for use by start_dendrite)
+    pub stopped_dendrite_ports: RwLock<HashMap<SwitchLocation, u16>>,
     pub mgd: HashMap<SwitchLocation, dev::maghemite::MgdInstance>,
     pub external_dns_zone_name: String,
     pub external_dns: dns_server::TransientServer,
@@ -215,6 +217,8 @@ impl<N: NexusServer> ControlPlaneTestContext<N> {
     }
 
     /// Stop a Dendrite instance for testing failure scenarios.
+    ///
+    /// Stores the port so that [`Self::restart_dendrite`] can restart on the same port.
     pub async fn stop_dendrite(
         &self,
         switch_location: omicron_common::api::external::SwitchLocation,
@@ -226,8 +230,82 @@ impl<N: NexusServer> ControlPlaneTestContext<N> {
         let dendrite_opt =
             { self.dendrite.write().unwrap().remove(&switch_location) };
         if let Some(mut dendrite) = dendrite_opt {
+            // Store the port for later restart via start_dendrite
+            self.stopped_dendrite_ports
+                .write()
+                .unwrap()
+                .insert(switch_location, dendrite.port);
             dendrite.cleanup().await.unwrap();
         }
+    }
+
+    /// Restart a Dendrite instance for testing drift correction scenarios.
+    ///
+    /// Simulates a switch restart where DPD loses its programmed state.
+    /// Restarts on the same port so test DNS stays valid.
+    ///
+    /// Works both when Dendrite is currently running (will stop and restart)
+    /// or when it was previously stopped via [`Self::stop_dendrite`].
+    pub async fn restart_dendrite(
+        &self,
+        switch_location: omicron_common::api::external::SwitchLocation,
+    ) {
+        // Get port either from running instance or from stored port after stop
+        // Extract from mutex first to avoid holding lock across await
+        let old = self.dendrite.write().unwrap().remove(&switch_location);
+        let port = if let Some(mut old) = old {
+            let port = old.port;
+            old.cleanup().await.unwrap();
+            port
+        } else {
+            // Must have been stopped - get stored port
+            self.stopped_dendrite_ports
+                .write()
+                .unwrap()
+                .remove(&switch_location)
+                .expect("Dendrite not running and no stored port from stop_dendrite")
+        };
+
+        let mgs = self.gateway.get(&switch_location).unwrap();
+        let mgs_addr = std::net::SocketAddrV6::new(
+            std::net::Ipv6Addr::LOCALHOST,
+            mgs.port,
+            0,
+            0,
+        )
+        .into();
+
+        let dendrite =
+            omicron_test_utils::dev::dendrite::DendriteInstance::start(
+                port,
+                Some(self.internal_client.bind_address),
+                Some(mgs_addr),
+            )
+            .await
+            .unwrap();
+
+        // Wait for Dendrite to be ready before returning.
+        // We check `switch_identifiers()` rather than just `dpd_uptime()`
+        // because Nexus needs switch_identifiers to work to determine which
+        // switch to program.
+        let dpd_client = dpd_client::Client::new(
+            &format!("http://[::1]:{port}"),
+            dpd_client::ClientState {
+                tag: String::from("test-restart-wait"),
+                log: self.logctx.log.clone(),
+            },
+        );
+        loop {
+            match dpd_client.switch_identifiers().await {
+                Ok(_) => break,
+                Err(_) => {
+                    tokio::time::sleep(std::time::Duration::from_millis(50))
+                        .await;
+                }
+            }
+        }
+
+        self.dendrite.write().unwrap().insert(switch_location, dendrite);
     }
 
     pub async fn teardown(mut self) {

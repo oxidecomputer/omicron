@@ -12,6 +12,7 @@ pub mod http_pagination;
 pub use crate::address::IpVersion;
 pub use crate::api::internal::shared::AllowedSourceIps;
 pub use crate::api::internal::shared::SwitchLocation;
+pub use crate::api::internal::shared::rack_init::MaxPathConfig;
 use crate::update::ArtifactId;
 use anyhow::Context;
 use api_identity::ObjectIdentity;
@@ -284,8 +285,6 @@ impl TryFrom<String> for Name {
 }
 
 impl FromStr for Name {
-    // TODO: We should have better error types here.
-    // See https://github.com/oxidecomputer/omicron/issues/347
     type Err = String;
 
     fn from_str(value: &str) -> Result<Self, Self::Err> {
@@ -376,8 +375,6 @@ impl TryFrom<String> for NameOrId {
 }
 
 impl FromStr for NameOrId {
-    // TODO: We should have better error types here.
-    // See https://github.com/oxidecomputer/omicron/issues/347
     type Err = String;
 
     fn from_str(value: &str) -> Result<Self, Self::Err> {
@@ -957,6 +954,7 @@ pub enum ResourceType {
     DeviceAccessToken,
     DeviceAuthRequest,
     Disk,
+    ExternalSubnet,
     Fleet,
     FloatingIp,
     IdentityProvider,
@@ -1000,6 +998,9 @@ pub enum ResourceType {
     Snapshot,
     SshKey,
     SupportBundle,
+    SubnetPool,
+    SubnetPoolMember,
+    SubnetPoolSiloLink,
     Switch,
     SwitchPort,
     SwitchPortSettings,
@@ -1457,6 +1458,8 @@ pub struct Disk {
     pub state: DiskState,
     pub device_path: String,
     pub disk_type: DiskType,
+    /// Whether or not this disk is read-only.
+    pub read_only: bool,
 }
 
 /// State of a Disk
@@ -2558,6 +2561,11 @@ impl Vni {
     pub fn random_system() -> Self {
         Self(rand::rng().random_range(0..Self::MIN_GUEST_VNI))
     }
+
+    /// Returns the VNI as a raw u32.
+    pub const fn as_u32(&self) -> u32 {
+        self.0
+    }
 }
 
 impl From<Vni> for u32 {
@@ -2886,39 +2894,6 @@ pub struct SwitchPortSettingsIdentity {
     pub identity: IdentityMetadata,
 }
 
-/// This structure contains all port settings information in one place. It's a
-/// convenience data structure for getting a complete view of a particular
-/// port's settings.
-#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq)]
-pub struct SwitchPortSettings {
-    #[serde(flatten)]
-    pub identity: IdentityMetadata,
-
-    /// Switch port settings included from other switch port settings groups.
-    pub groups: Vec<SwitchPortSettingsGroups>,
-
-    /// Layer 1 physical port settings.
-    pub port: SwitchPortConfig,
-
-    /// Layer 2 link settings.
-    pub links: Vec<SwitchPortLinkConfig>,
-
-    /// Layer 3 interface settings.
-    pub interfaces: Vec<SwitchInterfaceConfig>,
-
-    /// Vlan interface settings.
-    pub vlan_interfaces: Vec<SwitchVlanInterfaceConfig>,
-
-    /// IP route settings.
-    pub routes: Vec<SwitchPortRouteConfig>,
-
-    /// BGP peer settings.
-    pub bgp_peers: Vec<BgpPeer>,
-
-    /// Layer 3 IP address settings.
-    pub addresses: Vec<SwitchPortAddressView>,
-}
-
 /// This structure maps a port settings object to a port settings groups. Port
 /// settings objects may inherit settings from groups. This mapping defines the
 /// relationship between settings objects and the groups they reference.
@@ -3228,73 +3203,6 @@ pub struct SwitchPortRouteConfig {
     pub rib_priority: Option<u8>,
 }
 
-/// A BGP peer configuration for an interface. Includes the set of announcements
-/// that will be advertised to the peer identified by `addr`. The `bgp_config`
-/// parameter is a reference to global BGP parameters. The `interface_name`
-/// indicates what interface the peer should be contacted on.
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
-pub struct BgpPeer {
-    /// The global BGP configuration used for establishing a session with this
-    /// peer.
-    pub bgp_config: NameOrId,
-
-    /// The name of interface to peer on. This is relative to the port
-    /// configuration this BGP peer configuration is a part of. For example this
-    /// value could be phy0 to refer to a primary physical interface. Or it
-    /// could be vlan47 to refer to a VLAN interface.
-    pub interface_name: Name,
-
-    /// The address of the host to peer with.
-    pub addr: IpAddr,
-
-    /// How long to hold peer connections between keepalives (seconds).
-    pub hold_time: u32,
-
-    /// How long to hold a peer in idle before attempting a new session
-    /// (seconds).
-    pub idle_hold_time: u32,
-
-    /// How long to delay sending an open request after establishing a TCP
-    /// session (seconds).
-    pub delay_open: u32,
-
-    /// How long to to wait between TCP connection retries (seconds).
-    pub connect_retry: u32,
-
-    /// How often to send keepalive requests (seconds).
-    pub keepalive: u32,
-
-    /// Require that a peer has a specified ASN.
-    pub remote_asn: Option<u32>,
-
-    /// Require messages from a peer have a minimum IP time to live field.
-    pub min_ttl: Option<u8>,
-
-    /// Use the given key for TCP-MD5 authentication with the peer.
-    pub md5_auth_key: Option<String>,
-
-    /// Apply the provided multi-exit discriminator (MED) updates sent to the peer.
-    pub multi_exit_discriminator: Option<u32>,
-
-    /// Include the provided communities in updates sent to the peer.
-    pub communities: Vec<u32>,
-
-    /// Apply a local preference to routes received from this peer.
-    pub local_pref: Option<u32>,
-
-    /// Enforce that the first AS in paths received from this peer is the peer's AS.
-    pub enforce_first_as: bool,
-
-    /// Define import policy for a peer.
-    pub allowed_import: ImportExportPolicy,
-
-    /// Define export policy for a peer.
-    pub allowed_export: ImportExportPolicy,
-
-    /// Associate a VLAN ID with a peer.
-    pub vlan_id: Option<u16>,
-}
-
 /// A base BGP configuration.
 #[derive(
     ObjectIdentity, Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq,
@@ -3309,6 +3217,9 @@ pub struct BgpConfig {
     /// Optional virtual routing and forwarding identifier for this BGP
     /// configuration.
     pub vrf: Option<String>,
+
+    /// Maximum number of paths to use when multiple "best paths" exist
+    pub max_paths: MaxPathConfig,
 }
 
 /// Represents a BGP announce set by id. The id can be used with other API calls
@@ -3433,6 +3344,9 @@ pub struct BgpPeerStatus {
     /// IP address of the peer.
     pub addr: IpAddr,
 
+    /// Interface name
+    pub peer_id: String,
+
     /// Local autonomous system number.
     pub local_asn: u32,
 
@@ -3449,13 +3363,17 @@ pub struct BgpPeerStatus {
     pub switch: SwitchLocation,
 }
 
-/// The current status of a BGP peer.
-#[derive(
-    Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq, Default,
-)]
+/// Route exported to a peer.
+#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq)]
 pub struct BgpExported {
-    /// Exported routes indexed by peer address.
-    pub exports: HashMap<String, Vec<Ipv4Net>>,
+    /// Identifier for the BGP peer.
+    pub peer_id: String,
+
+    /// Switch the route is exported from.
+    pub switch: SwitchLocation,
+
+    /// The destination network prefix.
+    pub prefix: oxnet::IpNet,
 }
 
 /// Opaque object representing BGP message history for a given BGP peer. The
@@ -3510,12 +3428,12 @@ impl AggregateBgpMessageHistory {
 
 /// A route imported from a BGP peer.
 #[derive(Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq)]
-pub struct BgpImportedRouteIpv4 {
+pub struct BgpImported {
     /// The destination network prefix.
-    pub prefix: oxnet::Ipv4Net,
+    pub prefix: oxnet::IpNet,
 
     /// The nexthop the prefix is reachable through.
-    pub nexthop: Ipv4Addr,
+    pub nexthop: IpAddr,
 
     /// BGP identifier of the originating router.
     pub id: u32,

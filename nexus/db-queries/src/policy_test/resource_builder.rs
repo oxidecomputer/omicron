@@ -16,7 +16,7 @@ use nexus_auth::authz::ApiResourceWithRolesType;
 use nexus_auth::authz::AuthorizedResource;
 use nexus_auth::context::OpContext;
 use nexus_db_model::DatabaseString;
-use nexus_types::external_api::shared;
+use nexus_types::external_api::policy;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::LookupType;
 use omicron_uuid_kinds::SiloUserUuid;
@@ -126,7 +126,7 @@ impl<'a> ResourceBuilder<'a> {
             let new_role_assignments = old_role_assignments
                 .into_iter()
                 .map(|r| r.try_into().unwrap())
-                .chain(std::iter::once(shared::RoleAssignment::for_silo_user(
+                .chain(std::iter::once(policy::RoleAssignment::for_silo_user(
                     user_id, role,
                 )))
                 .collect::<Vec<_>>();
@@ -249,6 +249,7 @@ impl_dyn_authorized_resource_for_resource!(authz::Certificate);
 impl_dyn_authorized_resource_for_resource!(authz::DeviceAccessToken);
 impl_dyn_authorized_resource_for_resource!(authz::DeviceAuthRequest);
 impl_dyn_authorized_resource_for_resource!(authz::Disk);
+impl_dyn_authorized_resource_for_resource!(authz::ExternalSubnet);
 impl_dyn_authorized_resource_for_resource!(authz::Fleet);
 impl_dyn_authorized_resource_for_resource!(authz::FloatingIp);
 impl_dyn_authorized_resource_for_resource!(authz::IdentityProvider);
@@ -273,6 +274,7 @@ impl_dyn_authorized_resource_for_resource!(authz::SiloUser);
 impl_dyn_authorized_resource_for_resource!(authz::Sled);
 impl_dyn_authorized_resource_for_resource!(authz::Snapshot);
 impl_dyn_authorized_resource_for_resource!(authz::SshKey);
+impl_dyn_authorized_resource_for_resource!(authz::SubnetPool);
 impl_dyn_authorized_resource_for_resource!(authz::SupportBundle);
 impl_dyn_authorized_resource_for_resource!(authz::TufArtifact);
 impl_dyn_authorized_resource_for_resource!(authz::TufRepo);
@@ -296,8 +298,9 @@ impl_dyn_authorized_resource_for_global!(authz::MulticastGroupList);
 impl_dyn_authorized_resource_for_global!(authz::AuditLog);
 impl_dyn_authorized_resource_for_global!(authz::Inventory);
 impl_dyn_authorized_resource_for_global!(authz::QuiesceState);
-impl_dyn_authorized_resource_for_global!(authz::UpdateTrustRootList);
+impl_dyn_authorized_resource_for_global!(authz::SubnetPoolList);
 impl_dyn_authorized_resource_for_global!(authz::TargetReleaseConfig);
+impl_dyn_authorized_resource_for_global!(authz::UpdateTrustRootList);
 
 impl DynAuthorizedResource for authz::SiloCertificateList {
     fn do_authorize<'a, 'b>(

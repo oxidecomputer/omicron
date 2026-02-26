@@ -6,8 +6,6 @@
 //! callers that update in lockstep with Nexus itself (e.g. rack initialization,
 //! tests and debugging)
 
-use std::collections::HashMap;
-
 use iddqd::IdOrdItem;
 use iddqd::id_upcast;
 use uuid::Uuid;
@@ -50,6 +48,7 @@ progenitor::generate_api!(
         DnsConfigParams = nexus_types::internal_api::params::DnsConfigParams,
         DnsConfigZone = nexus_types::internal_api::params::DnsConfigZone,
         DnsRecord = nexus_types::internal_api::params::DnsRecord,
+        ExternalPortDiscovery = nexus_types::internal_api::params::ExternalPortDiscovery,
         Generation = omicron_common::api::external::Generation,
         ImportExportPolicy = omicron_common::api::external::ImportExportPolicy,
         MacAddr = omicron_common::api::external::MacAddr,
@@ -67,6 +66,7 @@ progenitor::generate_api!(
         ReconfiguratorConfigView = nexus_types::deployment::ReconfiguratorConfigView,
         RecoverySiloConfig = sled_agent_types_versions::latest::rack_init::RecoverySiloConfig,
         SledAgentUpdateStatus = nexus_types::internal_api::views::SledAgentUpdateStatus,
+        TrustQuorumConfig = nexus_types::trust_quorum::TrustQuorumConfig,
         UpdateStatus = nexus_types::internal_api::views::UpdateStatus,
         ZoneStatus = nexus_types::internal_api::views::ZoneStatus,
         ZpoolName = omicron_common::zpool_name::ZpoolName,
@@ -209,29 +209,6 @@ impl From<omicron_common::api::internal::shared::SwitchLocation>
             omicron_common::api::internal::shared::SwitchLocation::Switch1 => {
                 types::SwitchLocation::Switch1
             }
-        }
-    }
-}
-
-impl From<omicron_common::api::internal::shared::ExternalPortDiscovery>
-    for types::ExternalPortDiscovery
-{
-    fn from(
-        value: omicron_common::api::internal::shared::ExternalPortDiscovery,
-    ) -> Self {
-        match value {
-            omicron_common::api::internal::shared::ExternalPortDiscovery::Auto(val) => {
-                let new: HashMap<_, _> = val.iter().map(|(slot, addr)| {
-                    (slot.to_string(), *addr)
-                }).collect();
-                types::ExternalPortDiscovery::Auto(new)
-            },
-            omicron_common::api::internal::shared::ExternalPortDiscovery::Static(val) => {
-                let new: HashMap<_, _> = val.iter().map(|(slot, ports)| {
-                    (slot.to_string(), ports.clone())
-                }).collect();
-                types::ExternalPortDiscovery::Static(new)
-            },
         }
     }
 }

@@ -7,6 +7,7 @@
 use crate::db::model::Resources;
 use crate::db::model::SledResourceVmm;
 use crate::db::raw_query_builder::QueryBuilder;
+use crate::db::raw_query_builder::TrustedStr;
 use crate::db::raw_query_builder::TypedSqlQuery;
 use diesel::sql_types;
 use nexus_db_model::SledCpuFamily;
@@ -23,9 +24,9 @@ use uuid::Uuid;
 #[derive(Debug, Clone)]
 pub struct LocalStorageAllocation {
     pub disk_id: Uuid,
-    pub local_storage_dataset_allocation_id: DatasetUuid,
+    pub local_storage_unencrypted_dataset_allocation_id: DatasetUuid,
     pub required_dataset_size: i64,
-    pub local_storage_dataset_id: DatasetUuid,
+    pub local_storage_unencrypted_dataset_id: DatasetUuid,
     pub pool_id: ZpoolUuid,
     pub sled_id: SledUuid,
 }
@@ -386,152 +387,7 @@ pub fn sled_insert_resource_query(
         ),",
     );
 
-    match local_storage_allocation_required {
-        LocalStorageAllocationRequired::No => {}
-
-        LocalStorageAllocationRequired::Yes { allocations } => {
-            // Update each local storage disk's allocation id
-            //
-            // For each local storage specific disk record, set the allocation
-            // id. The code below creates a large CASE statement with one WHEN
-            // for each disk ID, then includes that list of disk IDs in the
-            // WHERE clause:
-            //
-            // UPDATED_LOCAL_STORAGE_DISK_RECORDS
-            //   AS (
-            //     UPDATE
-            //       disk_type_local_storage
-            //     SET
-            //       local_storage_dataset_allocation_id = CASE disk_id
-            //         WHEN $9 THEN $10
-            //         WHEN $11 THEN $12
-            //       END
-            //     WHERE
-            //       disk_id IN ($13, $14)
-            //     RETURNING
-            //       *
-            //   ),
-
-            query.sql(
-                " UPDATED_LOCAL_STORAGE_DISK_RECORDS \
-                    AS ( \
-                      UPDATE \
-                        disk_type_local_storage \
-                      SET
-                        local_storage_dataset_allocation_id = CASE disk_id
-                ",
-            );
-
-            for allocation in allocations {
-                let LocalStorageAllocation {
-                    disk_id,
-                    local_storage_dataset_allocation_id,
-                    ..
-                } = allocation;
-
-                query
-                    .sql("WHEN ")
-                    .param()
-                    .bind::<sql_types::Uuid, _>(*disk_id)
-                    .sql(" THEN ")
-                    .param()
-                    .bind::<sql_types::Uuid, _>(
-                        local_storage_dataset_allocation_id.into_untyped_uuid(),
-                    )
-                    .sql(" ");
-            }
-
-            query.sql("   END WHERE disk_id IN ( ");
-
-            for (index, allocation) in allocations.iter().enumerate() {
-                let LocalStorageAllocation { disk_id, .. } = allocation;
-
-                query.param().bind::<sql_types::Uuid, _>(*disk_id);
-
-                if index != (allocations.len() - 1) {
-                    query.sql(",");
-                }
-            }
-
-            query.sql("  ) RETURNING *), ");
-
-            // Create new local storage dataset allocation records.
-
-            query.sql(
-                " NEW_LOCAL_STORAGE_ALLOCATION_RECORDS AS (
-                    INSERT INTO local_storage_dataset_allocation VALUES ",
-            );
-
-            for (index, allocation) in allocations.iter().enumerate() {
-                let LocalStorageAllocation {
-                    local_storage_dataset_allocation_id,
-                    local_storage_dataset_id,
-                    pool_id,
-                    sled_id,
-                    required_dataset_size,
-                    ..
-                } = allocation;
-
-                query.sql("(");
-
-                query.param().bind::<sql_types::Uuid, _>(
-                    local_storage_dataset_allocation_id.into_untyped_uuid(),
-                );
-                query.sql(",");
-
-                query.sql("NOW(),");
-                query.sql("NULL,");
-
-                query.param().bind::<sql_types::Uuid, _>(
-                    local_storage_dataset_id.into_untyped_uuid(),
-                );
-                query.sql(",");
-
-                query
-                    .param()
-                    .bind::<sql_types::Uuid, _>(pool_id.into_untyped_uuid());
-                query.sql(",");
-
-                query
-                    .param()
-                    .bind::<sql_types::Uuid, _>(sled_id.into_untyped_uuid());
-                query.sql(",");
-
-                query
-                    .param()
-                    .bind::<sql_types::BigInt, _>(*required_dataset_size);
-
-                query.sql(")");
-
-                if index != (allocations.len() - 1) {
-                    query.sql(",");
-                }
-            }
-
-            query.sql(" RETURNING *), ");
-
-            // Update the rendezvous_local_storage_dataset table's size_used
-            // column by adding these new rows
-
-            query.sql(
-                "UPDATE_RENDEZVOUS_TABLES as (
-                  UPDATE
-                    rendezvous_local_storage_dataset
-                   SET
-                     size_used = size_used + NEW_RECORDS.dataset_size
-                   FROM
-                     NEW_LOCAL_STORAGE_ALLOCATION_RECORDS as NEW_RECORDS
-                   WHERE
-                     NEW_RECORDS.local_storage_dataset_id = \
-                       rendezvous_local_storage_dataset.id AND
-                     rendezvous_local_storage_dataset.time_tombstoned IS NULL
-                   RETURNING *
-                ),",
-            );
-        }
-    }
-
-    // The insert is only valid if:
+    // Any mutation this CTE does is only valid if:
     //
     // - The sled still has space for our instance
     // - The sled is not banned (due to anti-affinity rules)
@@ -568,31 +424,40 @@ pub fn sled_insert_resource_query(
 
                 // First, make sure that the additional usage fits in the zpool
 
-                // Add up crucible and local dataset usage, plus the altered
-                // local_storage_dataset_allocation records
+                // Add up crucible and local storage datasets usage, plus the
+                // soon-to-be-inserted
+                // local_storage_unencrypted_dataset_allocation records
 
                 query
                     .sql(
                         "((SELECT \
                             SUM(crucible_dataset.size_used +
-                              rendezvous_local_storage_dataset.size_used +
-                              NEW_RECORDS.dataset_size)
+                              COALESCE(rendezvous_local_storage_dataset.size_used, 0) +
+                              COALESCE(rendezvous_local_storage_unencrypted_dataset.size_used, 0) + ",
+                    )
+                    .param()
+                    .bind::<sql_types::BigInt, _>(
+                        allocation.required_dataset_size,
+                    )
+                    .sql(
+                        "
+                              )
                            FROM
                              crucible_dataset
-                           JOIN
+                           LEFT JOIN
                              rendezvous_local_storage_dataset
                            ON
                              crucible_dataset.pool_id = \
-                               rendezvous_local_storage_dataset.pool_id
-                           JOIN
-                             NEW_LOCAL_STORAGE_ALLOCATION_RECORDS AS NEW_RECORDS
+                               rendezvous_local_storage_dataset.pool_id AND
+                               rendezvous_local_storage_dataset.time_tombstoned is NULL
+                           LEFT JOIN
+                             rendezvous_local_storage_unencrypted_dataset
                            ON
-                             crucible_dataset.pool_id = NEW_RECORDS.pool_id
+                             crucible_dataset.pool_id = \
+                               rendezvous_local_storage_unencrypted_dataset.pool_id AND
+                               rendezvous_local_storage_unencrypted_dataset.time_tombstoned is NULL
                            WHERE
-                             (crucible_dataset.size_used IS NOT NULL) AND
-                             (crucible_dataset.time_deleted IS NULL) AND
-                             (rendezvous_local_storage_dataset.time_tombstoned \
-                               IS NULL) AND
+                             crucible_dataset.time_deleted IS NULL AND
                              (crucible_dataset.pool_id = ",
                     )
                     .param()
@@ -666,13 +531,15 @@ pub fn sled_insert_resource_query(
                         "(SELECT \
                              time_tombstoned IS NULL AND no_provision IS FALSE
                            FROM
-                             rendezvous_local_storage_dataset
+                             rendezvous_local_storage_unencrypted_dataset
                            WHERE
-                             rendezvous_local_storage_dataset.id = ",
+                             rendezvous_local_storage_unencrypted_dataset.id = ",
                     )
                     .param()
                     .bind::<sql_types::Uuid, _>(
-                        allocation.local_storage_dataset_id.into_untyped_uuid(),
+                        allocation
+                            .local_storage_unencrypted_dataset_id
+                            .into_untyped_uuid(),
                     );
 
                 query.sql(")");
@@ -687,6 +554,223 @@ pub fn sled_insert_resource_query(
     }
 
     query.sql(")");
+
+    match local_storage_allocation_required {
+        LocalStorageAllocationRequired::No => {}
+
+        LocalStorageAllocationRequired::Yes { allocations } => {
+            // Update each local storage disk's allocation id
+            //
+            // For each local storage specific disk record, set the allocation
+            // id. The code below creates a large CASE statement with one WHEN
+            // for each disk ID, then includes that list of disk IDs in the
+            // WHERE clause:
+            //
+            // UPDATED_LOCAL_STORAGE_DISK_RECORDS
+            //   AS (
+            //     UPDATE
+            //       disk_type_local_storage
+            //     SET
+            //       local_storage_unencrypted_dataset_allocation_id = CASE disk_id
+            //         WHEN $9 THEN $10
+            //         WHEN $11 THEN $12
+            //       END
+            //     WHERE
+            //       disk_id IN ($13, $14)
+            //       AND EXISTS(SELECT 1 FROM insert_valid)
+            //     RETURNING
+            //       *
+            //   ),
+
+            query.sql(
+                ", UPDATED_LOCAL_STORAGE_DISK_RECORDS \
+                    AS ( \
+                      UPDATE \
+                        disk_type_local_storage \
+                      SET
+                        local_storage_unencrypted_dataset_allocation_id = CASE disk_id
+                ",
+            );
+
+            for allocation in allocations {
+                let LocalStorageAllocation {
+                    disk_id,
+                    local_storage_unencrypted_dataset_allocation_id,
+                    ..
+                } = allocation;
+
+                query
+                    .sql("WHEN ")
+                    .param()
+                    .bind::<sql_types::Uuid, _>(*disk_id)
+                    .sql(" THEN ")
+                    .param()
+                    .bind::<sql_types::Uuid, _>(
+                        local_storage_unencrypted_dataset_allocation_id
+                            .into_untyped_uuid(),
+                    )
+                    .sql(" ");
+            }
+
+            query.sql("   END WHERE disk_id IN ( ");
+
+            for (index, allocation) in allocations.iter().enumerate() {
+                let LocalStorageAllocation { disk_id, .. } = allocation;
+
+                query.param().bind::<sql_types::Uuid, _>(*disk_id);
+
+                if index != (allocations.len() - 1) {
+                    query.sql(",");
+                }
+            }
+
+            query.sql("  ) AND EXISTS(SELECT 1 FROM insert_valid)");
+            query.sql(" RETURNING *), ");
+
+            // Create new local storage dataset allocation records.
+            //
+            // These insertions also have to be conditional on INSERT_VALID,
+            // which unfortunately means that they take the form of:
+            //
+            //   NEW_LOCAL_STORAGE_ALLOCATION_RECORDS_{index} AS (
+            //     INSERT INTO local_storage_unencrypted_dataset_allocation (
+            //       id, time_created, time_deleted, \
+            //       local_storage_unencrypted_dataset_id, pool_id, sled_id, \
+            //       dataset_size
+            //     )
+            //     SELECT
+            //       $1, $2, $3, $4, $5, $6, $7
+            //     WHERE EXISTS(SELECT 1 FROM insert_valid) RETURNING *
+            //   )
+            //
+            // The unfortunate part is multiple intermediate statements instead
+            // of one large one, but this format is required in order to insert
+            // rows conditional on INSERT_VALID.
+
+            for (index, allocation) in allocations.iter().enumerate() {
+                let LocalStorageAllocation {
+                    local_storage_unencrypted_dataset_allocation_id,
+                    local_storage_unencrypted_dataset_id,
+                    pool_id,
+                    sled_id,
+                    required_dataset_size,
+                    ..
+                } = allocation;
+
+                // This `TrustedStr` is constructed using the enumeration index,
+                // not user input, and uniquely names each INSERT.
+                query.sql(
+                    TrustedStr::i_take_responsibility_for_validating_this_string(
+                        format!("NEW_LOCAL_STORAGE_ALLOCATION_RECORDS_{index}")
+                    )
+                );
+
+                query.sql(
+                    " AS (
+                    INSERT INTO local_storage_unencrypted_dataset_allocation
+                        (id, time_created, time_deleted, \
+                         local_storage_unencrypted_dataset_id, pool_id, \
+                         sled_id, dataset_size)
+                    SELECT ",
+                );
+
+                query.param().bind::<sql_types::Uuid, _>(
+                    local_storage_unencrypted_dataset_allocation_id
+                        .into_untyped_uuid(),
+                );
+                query.sql(",");
+
+                query.sql("NOW(),");
+                query.sql("NULL,");
+
+                query.param().bind::<sql_types::Uuid, _>(
+                    local_storage_unencrypted_dataset_id.into_untyped_uuid(),
+                );
+                query.sql(",");
+
+                query
+                    .param()
+                    .bind::<sql_types::Uuid, _>(pool_id.into_untyped_uuid());
+                query.sql(",");
+
+                query
+                    .param()
+                    .bind::<sql_types::Uuid, _>(sled_id.into_untyped_uuid());
+                query.sql(",");
+
+                query
+                    .param()
+                    .bind::<sql_types::BigInt, _>(*required_dataset_size);
+
+                query.sql(" WHERE EXISTS(SELECT 1 FROM insert_valid)");
+                query.sql(" RETURNING *),");
+            }
+
+            // Update the rendezvous_local_storage_unencrypted dataset table's
+            // size_used column in a similar manner to how
+            // `disk_type_local_storage` is updated, using the CASE pattern:
+            //
+            //   UPDATE_RENDEZVOUS_TABLES AS (
+            //     UPDATE
+            //       rendezvous_local_storage_unencrypted_dataset
+            //     SET
+            //       size_used = size_used + CASE pool_id
+            //         WHEN $1 THEN $2
+            //         WHEN $3 THEN $4
+            //       END
+            //     WHERE
+            //       pool_id IN ($13, $14) AND
+            //       time_tombstoned IS NULL
+            //       AND EXISTS(SELECT 1 FROM insert_valid)
+            //     RETURNING *
+            //   )
+
+            query.sql(
+                "UPDATE_RENDEZVOUS_TABLES as (
+                   UPDATE rendezvous_local_storage_unencrypted_dataset
+                   SET size_used = size_used + CASE pool_id
+                   ",
+            );
+
+            for allocation in allocations {
+                let LocalStorageAllocation {
+                    pool_id,
+                    required_dataset_size,
+                    ..
+                } = allocation;
+
+                query
+                    .sql("WHEN ")
+                    .param()
+                    .bind::<sql_types::Uuid, _>(pool_id.into_untyped_uuid())
+                    .sql(" THEN ")
+                    .param()
+                    .bind::<sql_types::BigInt, _>(*required_dataset_size)
+                    .sql(" ");
+            }
+
+            query.sql(" END WHERE pool_id IN (");
+
+            for (index, allocation) in allocations.iter().enumerate() {
+                let LocalStorageAllocation { pool_id, .. } = allocation;
+
+                query
+                    .param()
+                    .bind::<sql_types::Uuid, _>(pool_id.into_untyped_uuid());
+
+                if index != (allocations.len() - 1) {
+                    query.sql(",");
+                }
+            }
+
+            query.sql(
+                ") AND time_tombstoned IS NULL
+                   AND EXISTS(SELECT 1 FROM insert_valid)
+                   RETURNING *
+                 )",
+            );
+        }
+    }
 
     // Finally, perform the INSERT if it's still valid.
     query.sql("
@@ -828,17 +912,21 @@ mod test {
                 allocations: nonempty![
                     LocalStorageAllocation {
                         disk_id: Uuid::nil(),
-                        local_storage_dataset_allocation_id: DatasetUuid::nil(),
+                        local_storage_unencrypted_dataset_allocation_id:
+                            DatasetUuid::nil(),
                         required_dataset_size: 64 * 1024 * 1024 * 1024,
-                        local_storage_dataset_id: DatasetUuid::nil(),
+                        local_storage_unencrypted_dataset_id: DatasetUuid::nil(
+                        ),
                         pool_id: ZpoolUuid::nil(),
                         sled_id: SledUuid::nil(),
                     },
                     LocalStorageAllocation {
                         disk_id: Uuid::nil(),
-                        local_storage_dataset_allocation_id: DatasetUuid::nil(),
+                        local_storage_unencrypted_dataset_allocation_id:
+                            DatasetUuid::nil(),
                         required_dataset_size: 128 * 1024 * 1024 * 1024,
-                        local_storage_dataset_id: DatasetUuid::nil(),
+                        local_storage_unencrypted_dataset_id: DatasetUuid::nil(
+                        ),
                         pool_id: ZpoolUuid::nil(),
                         sled_id: SledUuid::nil(),
                     }
@@ -893,9 +981,10 @@ mod test {
             &LocalStorageAllocationRequired::Yes {
                 allocations: nonempty![LocalStorageAllocation {
                     disk_id: Uuid::nil(),
-                    local_storage_dataset_allocation_id: DatasetUuid::nil(),
+                    local_storage_unencrypted_dataset_allocation_id:
+                        DatasetUuid::nil(),
                     required_dataset_size: 128 * 1024 * 1024 * 1024,
-                    local_storage_dataset_id: DatasetUuid::nil(),
+                    local_storage_unencrypted_dataset_id: DatasetUuid::nil(),
                     pool_id: ZpoolUuid::nil(),
                     sled_id: SledUuid::nil(),
                 }],
@@ -913,17 +1002,21 @@ mod test {
                 allocations: nonempty![
                     LocalStorageAllocation {
                         disk_id: Uuid::nil(),
-                        local_storage_dataset_allocation_id: DatasetUuid::nil(),
+                        local_storage_unencrypted_dataset_allocation_id:
+                            DatasetUuid::nil(),
                         required_dataset_size: 128 * 1024 * 1024 * 1024,
-                        local_storage_dataset_id: DatasetUuid::nil(),
+                        local_storage_unencrypted_dataset_id: DatasetUuid::nil(
+                        ),
                         pool_id: ZpoolUuid::nil(),
                         sled_id: SledUuid::nil(),
                     },
                     LocalStorageAllocation {
                         disk_id: Uuid::nil(),
-                        local_storage_dataset_allocation_id: DatasetUuid::nil(),
+                        local_storage_unencrypted_dataset_allocation_id:
+                            DatasetUuid::nil(),
                         required_dataset_size: 256 * 1024 * 1024 * 1024,
-                        local_storage_dataset_id: DatasetUuid::nil(),
+                        local_storage_unencrypted_dataset_id: DatasetUuid::nil(
+                        ),
                         pool_id: ZpoolUuid::nil(),
                         sled_id: SledUuid::nil(),
                     },

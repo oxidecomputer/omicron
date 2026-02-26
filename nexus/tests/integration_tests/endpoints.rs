@@ -19,13 +19,35 @@ use nexus_test_utils::RACK_UUID;
 use nexus_test_utils::SLED_AGENT_UUID;
 use nexus_test_utils::SWITCH_UUID;
 use nexus_test_utils::resource_helpers::test_params;
-use nexus_types::external_api::params;
-use nexus_types::external_api::params::PrivateIpStackCreate;
-use nexus_types::external_api::shared;
-use nexus_types::external_api::shared::IpRange;
-use nexus_types::external_api::shared::IpVersion;
-use nexus_types::external_api::shared::Ipv4Range;
-use nexus_types::external_api::views::SledProvisionPolicy;
+use nexus_types::external_api::affinity;
+use nexus_types::external_api::alert;
+use nexus_types::external_api::certificate;
+use nexus_types::external_api::disk;
+use nexus_types::external_api::external_subnet;
+use nexus_types::external_api::floating_ip;
+use nexus_types::external_api::identity_provider;
+use nexus_types::external_api::image;
+use nexus_types::external_api::instance;
+use nexus_types::external_api::instance::PrivateIpStackCreate;
+use nexus_types::external_api::internet_gateway;
+use nexus_types::external_api::ip_pool;
+use nexus_types::external_api::multicast;
+use nexus_types::external_api::networking;
+use nexus_types::external_api::path_params;
+use nexus_types::external_api::policy;
+use nexus_types::external_api::project;
+use nexus_types::external_api::rack;
+use nexus_types::external_api::silo;
+use nexus_types::external_api::sled;
+use nexus_types::external_api::snapshot;
+use nexus_types::external_api::ssh_key;
+use nexus_types::external_api::subnet_pool;
+use nexus_types::external_api::support_bundle;
+use nexus_types::external_api::system;
+use nexus_types::external_api::timeseries;
+use nexus_types::external_api::update;
+use nexus_types::external_api::vpc;
+use omicron_common::address::{IpRange, IpVersion, Ipv4Range};
 use omicron_common::api::external::AddressLotKind;
 use omicron_common::api::external::AffinityPolicy;
 use omicron_common::api::external::AllowedSourceIps;
@@ -44,6 +66,7 @@ use omicron_common::api::external::UserId;
 use omicron_common::api::external::VpcFirewallRuleUpdateParams;
 use omicron_test_utils::certificates::CertificateChain;
 use semver::Version;
+use std::collections::BTreeSet;
 use std::net::IpAddr;
 use std::net::Ipv4Addr;
 use std::num::NonZeroU32;
@@ -66,10 +89,31 @@ pub static HARDWARE_SLED_PROVISION_POLICY_URL: LazyLock<String> =
             SLED_AGENT_UUID
         )
     });
+pub static HARDWARE_RACK_MEMBERSHIP_URL: LazyLock<String> =
+    LazyLock::new(|| {
+        format!("/v1/system/hardware/racks/{}/membership", RACK_UUID)
+    });
+pub static HARDWARE_RACK_MEMBERSHIP_ADD_URL: LazyLock<String> =
+    LazyLock::new(|| {
+        format!("/v1/system/hardware/racks/{}/membership/add", RACK_UUID)
+    });
+pub static HARDWARE_RACK_MEMBERSHIP_ABORT_URL: LazyLock<String> =
+    LazyLock::new(|| {
+        format!("/v1/system/hardware/racks/{}/membership/abort", RACK_UUID)
+    });
+pub static DEMO_RACK_ADD_SLEDS_REQUEST: LazyLock<
+    rack::RackMembershipAddSledsRequest,
+> = LazyLock::new(|| rack::RackMembershipAddSledsRequest {
+    sled_ids: BTreeSet::from([sled_hardware_types::BaseboardId {
+        serial_number: "demo-serial".to_string(),
+        part_number: "demo-part".to_string(),
+    }]),
+});
+
 pub static DEMO_SLED_PROVISION_POLICY: LazyLock<
-    params::SledProvisionPolicyParams,
-> = LazyLock::new(|| params::SledProvisionPolicyParams {
-    state: SledProvisionPolicy::NonProvisionable,
+    sled::SledProvisionPolicyParams,
+> = LazyLock::new(|| sled::SledProvisionPolicyParams {
+    state: sled::SledProvisionPolicy::NonProvisionable,
 });
 
 pub static HARDWARE_SWITCH_URL: LazyLock<String> =
@@ -85,16 +129,63 @@ pub static HARDWARE_SLED_DISK_URL: LazyLock<String> = LazyLock::new(|| {
 pub static SLED_INSTANCES_URL: LazyLock<String> = LazyLock::new(|| {
     format!("/v1/system/hardware/sleds/{}/instances", SLED_AGENT_UUID)
 });
-pub static DEMO_UNINITIALIZED_SLED: LazyLock<params::UninitializedSledId> =
-    LazyLock::new(|| params::UninitializedSledId {
-        serial: "demo-serial".to_string(),
-        part: "demo-part".to_string(),
-    });
 
 pub const SUPPORT_BUNDLES_URL: &'static str =
     "/experimental/v1/system/support-bundles";
 pub static SUPPORT_BUNDLE_URL: LazyLock<String> =
     LazyLock::new(|| format!("{SUPPORT_BUNDLES_URL}/{{id}}"));
+pub static SUPPORT_BUNDLE_DOWNLOAD_URL: LazyLock<String> =
+    LazyLock::new(|| format!("{SUPPORT_BUNDLES_URL}/{{id}}/download"));
+pub static SUPPORT_BUNDLE_DOWNLOAD_FILE_URL: LazyLock<String> =
+    LazyLock::new(|| {
+        format!("{SUPPORT_BUNDLES_URL}/{{id}}/download/some-file.txt")
+    });
+pub static SUPPORT_BUNDLE_INDEX_URL: LazyLock<String> =
+    LazyLock::new(|| format!("{SUPPORT_BUNDLES_URL}/{{id}}/index"));
+
+// Probes
+pub static DEMO_PROBES_URL: LazyLock<String> = LazyLock::new(|| {
+    format!("/experimental/v1/probes?project={}", *DEMO_PROJECT_NAME)
+});
+pub static DEMO_PROBE_URL: LazyLock<String> = LazyLock::new(|| {
+    format!("/experimental/v1/probes/demo-probe?project={}", *DEMO_PROJECT_NAME)
+});
+
+// Switch port / LLDP
+pub static DEMO_SWITCH_PORT_STATUS_URL: LazyLock<String> = LazyLock::new(
+    || {
+        format!(
+            "/v1/system/hardware/switch-port/qsfp0/status?rack_id={}&switch_location=switch0",
+            RACK_UUID
+        )
+    },
+);
+pub static DEMO_SWITCH_PORT_LLDP_CONFIG_URL: LazyLock<String> = LazyLock::new(
+    || {
+        format!(
+            "/v1/system/hardware/switch-port/qsfp0/lldp/config?rack_id={}&switch_location=switch0",
+            RACK_UUID
+        )
+    },
+);
+pub static DEMO_LLDP_NEIGHBORS_URL: LazyLock<String> = LazyLock::new(|| {
+    format!(
+        "/v1/system/hardware/rack-switch-port/{}/switch0/qsfp0/lldp/neighbors",
+        RACK_UUID
+    )
+});
+
+// Alert resend
+pub static DEMO_ALERT_RESEND_URL: LazyLock<String> = LazyLock::new(|| {
+    format!(
+        "/v1/alerts/00000000-0000-0000-0000-000000000000/resend?receiver={}",
+        *DEMO_WEBHOOK_RECEIVER_NAME
+    )
+});
+
+// Access token delete
+pub const DEMO_ACCESS_TOKEN_DELETE_URL: &str =
+    "/v1/me/access-tokens/00000000-0000-0000-0000-000000000000";
 
 // Global policy
 pub const SYSTEM_POLICY_URL: &'static str = "/v1/system/policy";
@@ -110,15 +201,15 @@ pub static DEMO_SILO_POLICY_URL: LazyLock<String> =
     LazyLock::new(|| format!("/v1/system/silos/{}/policy", *DEMO_SILO_NAME));
 pub static DEMO_SILO_QUOTAS_URL: LazyLock<String> =
     LazyLock::new(|| format!("/v1/system/silos/{}/quotas", *DEMO_SILO_NAME));
-pub static DEMO_SILO_CREATE: LazyLock<params::SiloCreate> =
-    LazyLock::new(|| params::SiloCreate {
+pub static DEMO_SILO_CREATE: LazyLock<silo::SiloCreate> =
+    LazyLock::new(|| silo::SiloCreate {
         identity: IdentityMetadataCreateParams {
             name: DEMO_SILO_NAME.clone(),
             description: String::from(""),
         },
-        quotas: params::SiloQuotasCreate::arbitrarily_high_default(),
+        quotas: silo::SiloQuotasCreate::arbitrarily_high_default(),
         discoverable: true,
-        identity_mode: shared::SiloIdentityMode::SamlJit,
+        identity_mode: silo::SiloIdentityMode::SamlJit,
         admin_group_name: None,
         tls_certificates: vec![],
         mapped_fleet_roles: Default::default(),
@@ -194,8 +285,8 @@ pub static DEMO_PROJECT_URL_VPCS: LazyLock<String> =
 pub static DEMO_PROJECT_URL_FIPS: LazyLock<String> = LazyLock::new(|| {
     format!("/v1/floating-ips?project={}", *DEMO_PROJECT_NAME)
 });
-pub static DEMO_PROJECT_CREATE: LazyLock<params::ProjectCreate> =
-    LazyLock::new(|| params::ProjectCreate {
+pub static DEMO_PROJECT_CREATE: LazyLock<project::ProjectCreate> =
+    LazyLock::new(|| project::ProjectCreate {
         identity: IdentityMetadataCreateParams {
             name: DEMO_PROJECT_NAME.clone(),
             description: String::from(""),
@@ -217,8 +308,8 @@ pub static DEMO_VPC_URL_ROUTERS: LazyLock<String> =
     LazyLock::new(|| format!("/v1/vpc-routers?{}", *DEMO_VPC_SELECTOR));
 pub static DEMO_VPC_URL_SUBNETS: LazyLock<String> =
     LazyLock::new(|| format!("/v1/vpc-subnets?{}", *DEMO_VPC_SELECTOR));
-pub static DEMO_VPC_CREATE: LazyLock<params::VpcCreate> =
-    LazyLock::new(|| params::VpcCreate {
+pub static DEMO_VPC_CREATE: LazyLock<vpc::VpcCreate> =
+    LazyLock::new(|| vpc::VpcCreate {
         identity: IdentityMetadataCreateParams {
             name: DEMO_VPC_NAME.clone(),
             description: String::from(""),
@@ -240,8 +331,8 @@ pub static DEMO_VPC_SUBNET_INTERFACES_URL: LazyLock<String> =
             *DEMO_VPC_SUBNET_NAME, *DEMO_VPC_SELECTOR
         )
     });
-pub static DEMO_VPC_SUBNET_CREATE: LazyLock<params::VpcSubnetCreate> =
-    LazyLock::new(|| params::VpcSubnetCreate {
+pub static DEMO_VPC_SUBNET_CREATE: LazyLock<vpc::VpcSubnetCreate> =
+    LazyLock::new(|| vpc::VpcSubnetCreate {
         identity: IdentityMetadataCreateParams {
             name: DEMO_VPC_SUBNET_NAME.clone(),
             description: String::from(""),
@@ -266,8 +357,8 @@ pub static DEMO_VPC_ROUTER_URL_ROUTES: LazyLock<String> = LazyLock::new(|| {
         *DEMO_PROJECT_NAME, *DEMO_VPC_NAME, *DEMO_VPC_ROUTER_NAME
     )
 });
-pub static DEMO_VPC_ROUTER_CREATE: LazyLock<params::VpcRouterCreate> =
-    LazyLock::new(|| params::VpcRouterCreate {
+pub static DEMO_VPC_ROUTER_CREATE: LazyLock<vpc::VpcRouterCreate> =
+    LazyLock::new(|| vpc::VpcRouterCreate {
         identity: IdentityMetadataCreateParams {
             name: DEMO_VPC_ROUTER_NAME.clone(),
             description: String::from(""),
@@ -286,8 +377,8 @@ pub static DEMO_ROUTER_ROUTE_URL: LazyLock<String> = LazyLock::new(|| {
         *DEMO_VPC_ROUTER_NAME
     )
 });
-pub static DEMO_ROUTER_ROUTE_CREATE: LazyLock<params::RouterRouteCreate> =
-    LazyLock::new(|| params::RouterRouteCreate {
+pub static DEMO_ROUTER_ROUTE_CREATE: LazyLock<vpc::RouterRouteCreate> =
+    LazyLock::new(|| vpc::RouterRouteCreate {
         identity: IdentityMetadataCreateParams {
             name: DEMO_ROUTER_ROUTE_NAME.clone(),
             description: String::from(""),
@@ -312,16 +403,16 @@ pub static DEMO_INTERNET_GATEWAY_URL: LazyLock<String> = LazyLock::new(|| {
     )
 });
 pub static DEMO_INTERNET_GATEWAY_CREATE: LazyLock<
-    params::InternetGatewayCreate,
-> = LazyLock::new(|| params::InternetGatewayCreate {
+    internet_gateway::InternetGatewayCreate,
+> = LazyLock::new(|| internet_gateway::InternetGatewayCreate {
     identity: IdentityMetadataCreateParams {
         name: DEMO_INTERNET_GATEWAY_NAME.clone(),
         description: String::from(""),
     },
 });
 pub static DEMO_INTERNET_GATEWAY_IP_POOL_CREATE: LazyLock<
-    params::InternetGatewayIpPoolCreate,
-> = LazyLock::new(|| params::InternetGatewayIpPoolCreate {
+    internet_gateway::InternetGatewayIpPoolCreate,
+> = LazyLock::new(|| internet_gateway::InternetGatewayIpPoolCreate {
     identity: IdentityMetadataCreateParams {
         name: DEMO_INTERNET_GATEWAY_NAME.clone(),
         description: String::from(""),
@@ -329,8 +420,8 @@ pub static DEMO_INTERNET_GATEWAY_IP_POOL_CREATE: LazyLock<
     ip_pool: NameOrId::Id(uuid::Uuid::new_v4()),
 });
 pub static DEMO_INTERNET_GATEWAY_IP_ADDRESS_CREATE: LazyLock<
-    params::InternetGatewayIpAddressCreate,
-> = LazyLock::new(|| params::InternetGatewayIpAddressCreate {
+    internet_gateway::InternetGatewayIpAddressCreate,
+> = LazyLock::new(|| internet_gateway::InternetGatewayIpAddressCreate {
     identity: IdentityMetadataCreateParams {
         name: DEMO_INTERNET_GATEWAY_NAME.clone(),
         description: String::from(""),
@@ -387,38 +478,37 @@ pub static DEMO_DISKS_URL: LazyLock<String> =
 pub static DEMO_DISK_URL: LazyLock<String> = LazyLock::new(|| {
     format!("/v1/disks/{}?{}", *DEMO_DISK_NAME, *DEMO_PROJECT_SELECTOR)
 });
-pub static DEMO_DISK_CREATE: LazyLock<params::DiskCreate> =
-    LazyLock::new(|| {
-        params::DiskCreate {
-            identity: IdentityMetadataCreateParams {
-                name: DEMO_DISK_NAME.clone(),
-                description: "".parse().unwrap(),
+pub static DEMO_DISK_CREATE: LazyLock<disk::DiskCreate> = LazyLock::new(|| {
+    disk::DiskCreate {
+        identity: IdentityMetadataCreateParams {
+            name: DEMO_DISK_NAME.clone(),
+            description: "".parse().unwrap(),
+        },
+        disk_backend: disk::DiskBackend::Distributed {
+            disk_source: disk::DiskSource::Blank {
+                block_size: disk::BlockSize::try_from(4096).unwrap(),
             },
-            disk_backend: params::DiskBackend::Distributed {
-                disk_source: params::DiskSource::Blank {
-                    block_size: params::BlockSize::try_from(4096).unwrap(),
-                },
-            },
-            size: ByteCount::from_gibibytes_u32(
-                // divide by at least two to leave space for snapshot blocks
-                DiskTest::DEFAULT_ZPOOL_SIZE_GIB / 5,
-            ),
-        }
-    });
+        },
+        size: ByteCount::from_gibibytes_u32(
+            // divide by at least two to leave space for snapshot blocks
+            DiskTest::DEFAULT_ZPOOL_SIZE_GIB / 5,
+        ),
+    }
+});
 
 // Related to importing blocks from an external source
 pub static DEMO_IMPORT_DISK_NAME: LazyLock<Name> =
     LazyLock::new(|| "demo-import-disk".parse().unwrap());
-pub static DEMO_IMPORT_DISK_CREATE: LazyLock<params::DiskCreate> =
+pub static DEMO_IMPORT_DISK_CREATE: LazyLock<disk::DiskCreate> =
     LazyLock::new(|| {
-        params::DiskCreate {
+        disk::DiskCreate {
             identity: IdentityMetadataCreateParams {
                 name: DEMO_IMPORT_DISK_NAME.clone(),
                 description: "".parse().unwrap(),
             },
-            disk_backend: params::DiskBackend::Distributed {
-                disk_source: params::DiskSource::ImportingBlocks {
-                    block_size: params::BlockSize::try_from(4096).unwrap(),
+            disk_backend: disk::DiskBackend::Distributed {
+                disk_source: disk::DiskSource::ImportingBlocks {
+                    block_size: disk::BlockSize::try_from(4096).unwrap(),
                 },
             },
             size: ByteCount::from_gibibytes_u32(
@@ -482,8 +572,8 @@ pub static DEMO_AFFINITY_GROUP_INSTANCE_MEMBER_URL: LazyLock<String> =
             *DEMO_PROJECT_SELECTOR
         )
     });
-pub static DEMO_AFFINITY_GROUP_CREATE: LazyLock<params::AffinityGroupCreate> =
-    LazyLock::new(|| params::AffinityGroupCreate {
+pub static DEMO_AFFINITY_GROUP_CREATE: LazyLock<affinity::AffinityGroupCreate> =
+    LazyLock::new(|| affinity::AffinityGroupCreate {
         identity: IdentityMetadataCreateParams {
             name: DEMO_AFFINITY_GROUP_NAME.clone(),
             description: String::from(""),
@@ -491,8 +581,8 @@ pub static DEMO_AFFINITY_GROUP_CREATE: LazyLock<params::AffinityGroupCreate> =
         policy: AffinityPolicy::Allow,
         failure_domain: FailureDomain::Sled,
     });
-pub static DEMO_AFFINITY_GROUP_UPDATE: LazyLock<params::AffinityGroupUpdate> =
-    LazyLock::new(|| params::AffinityGroupUpdate {
+pub static DEMO_AFFINITY_GROUP_UPDATE: LazyLock<affinity::AffinityGroupUpdate> =
+    LazyLock::new(|| affinity::AffinityGroupUpdate {
         identity: IdentityMetadataUpdateParams {
             name: None,
             description: Some(String::from("an updated description")),
@@ -529,8 +619,8 @@ pub static DEMO_ANTI_AFFINITY_GROUP_INSTANCE_MEMBER_URL: LazyLock<String> =
         )
     });
 pub static DEMO_ANTI_AFFINITY_GROUP_CREATE: LazyLock<
-    params::AntiAffinityGroupCreate,
-> = LazyLock::new(|| params::AntiAffinityGroupCreate {
+    affinity::AntiAffinityGroupCreate,
+> = LazyLock::new(|| affinity::AntiAffinityGroupCreate {
     identity: IdentityMetadataCreateParams {
         name: DEMO_ANTI_AFFINITY_GROUP_NAME.clone(),
         description: String::from(""),
@@ -539,8 +629,8 @@ pub static DEMO_ANTI_AFFINITY_GROUP_CREATE: LazyLock<
     failure_domain: FailureDomain::Sled,
 });
 pub static DEMO_ANTI_AFFINITY_GROUP_UPDATE: LazyLock<
-    params::AntiAffinityGroupUpdate,
-> = LazyLock::new(|| params::AntiAffinityGroupUpdate {
+    affinity::AntiAffinityGroupUpdate,
+> = LazyLock::new(|| affinity::AntiAffinityGroupUpdate {
     identity: IdentityMetadataUpdateParams {
         name: None,
         description: Some(String::from("an updated description")),
@@ -646,8 +736,15 @@ pub static DEMO_INSTANCE_EXTERNAL_IPS_URL: LazyLock<String> =
             *DEMO_INSTANCE_NAME, *DEMO_PROJECT_SELECTOR
         )
     });
-pub static DEMO_INSTANCE_CREATE: LazyLock<params::InstanceCreate> =
-    LazyLock::new(|| params::InstanceCreate {
+pub static DEMO_INSTANCE_EXTERNAL_SUBNETS_URL: LazyLock<String> =
+    LazyLock::new(|| {
+        format!(
+            "/v1/instances/{}/external-subnets?{}",
+            *DEMO_INSTANCE_NAME, *DEMO_PROJECT_SELECTOR
+        )
+    });
+pub static DEMO_INSTANCE_CREATE: LazyLock<instance::InstanceCreate> =
+    LazyLock::new(|| instance::InstanceCreate {
         identity: IdentityMetadataCreateParams {
             name: DEMO_INSTANCE_NAME.clone(),
             description: String::from(""),
@@ -658,10 +755,11 @@ pub static DEMO_INSTANCE_CREATE: LazyLock<params::InstanceCreate> =
         user_data: vec![],
         ssh_public_keys: Some(Vec::new()),
         network_interfaces:
-            params::InstanceNetworkInterfaceAttachment::DefaultIpv4,
-        external_ips: vec![params::ExternalIpCreate::Ephemeral {
-            pool: Some(DEMO_IP_POOL_NAME.clone().into()),
-            ip_version: None,
+            instance::InstanceNetworkInterfaceAttachment::DefaultIpv4,
+        external_ips: vec![instance::ExternalIpCreate::Ephemeral {
+            pool_selector: ip_pool::PoolSelector::Explicit {
+                pool: DEMO_IP_POOL_NAME.clone().into(),
+            },
         }],
         disks: vec![],
         boot_disk: None,
@@ -671,8 +769,8 @@ pub static DEMO_INSTANCE_CREATE: LazyLock<params::InstanceCreate> =
         anti_affinity_groups: Vec::new(),
         multicast_groups: Vec::new(),
     });
-pub static DEMO_STOPPED_INSTANCE_CREATE: LazyLock<params::InstanceCreate> =
-    LazyLock::new(|| params::InstanceCreate {
+pub static DEMO_STOPPED_INSTANCE_CREATE: LazyLock<instance::InstanceCreate> =
+    LazyLock::new(|| instance::InstanceCreate {
         identity: IdentityMetadataCreateParams {
             name: DEMO_STOPPED_INSTANCE_NAME.clone(),
             description: String::from(""),
@@ -683,10 +781,11 @@ pub static DEMO_STOPPED_INSTANCE_CREATE: LazyLock<params::InstanceCreate> =
         user_data: vec![],
         ssh_public_keys: Some(Vec::new()),
         network_interfaces:
-            params::InstanceNetworkInterfaceAttachment::DefaultIpv4,
-        external_ips: vec![params::ExternalIpCreate::Ephemeral {
-            pool: Some(DEMO_IP_POOL_NAME.clone().into()),
-            ip_version: None,
+            instance::InstanceNetworkInterfaceAttachment::DefaultIpv4,
+        external_ips: vec![instance::ExternalIpCreate::Ephemeral {
+            pool_selector: ip_pool::PoolSelector::Explicit {
+                pool: DEMO_IP_POOL_NAME.clone().into(),
+            },
         }],
         disks: vec![],
         boot_disk: None,
@@ -696,8 +795,8 @@ pub static DEMO_STOPPED_INSTANCE_CREATE: LazyLock<params::InstanceCreate> =
         anti_affinity_groups: Vec::new(),
         multicast_groups: Vec::new(),
     });
-pub static DEMO_INSTANCE_UPDATE: LazyLock<params::InstanceUpdate> =
-    LazyLock::new(|| params::InstanceUpdate {
+pub static DEMO_INSTANCE_UPDATE: LazyLock<instance::InstanceUpdate> =
+    LazyLock::new(|| instance::InstanceUpdate {
         boot_disk: Nullable(None),
         cpu_platform: Nullable(None),
         auto_restart_policy: Nullable(None),
@@ -716,8 +815,8 @@ pub static DEMO_INSTANCE_NIC_URL: LazyLock<String> = LazyLock::new(|| {
     )
 });
 pub static DEMO_INSTANCE_NIC_CREATE: LazyLock<
-    params::InstanceNetworkInterfaceCreate,
-> = LazyLock::new(|| params::InstanceNetworkInterfaceCreate {
+    instance::InstanceNetworkInterfaceCreate,
+> = LazyLock::new(|| instance::InstanceNetworkInterfaceCreate {
     identity: IdentityMetadataCreateParams {
         name: DEMO_INSTANCE_NIC_NAME.clone(),
         description: String::from(""),
@@ -727,8 +826,8 @@ pub static DEMO_INSTANCE_NIC_CREATE: LazyLock<
     ip_config: PrivateIpStackCreate::auto_ipv4(),
 });
 pub static DEMO_INSTANCE_NIC_PUT: LazyLock<
-    params::InstanceNetworkInterfaceUpdate,
-> = LazyLock::new(|| params::InstanceNetworkInterfaceUpdate {
+    instance::InstanceNetworkInterfaceUpdate,
+> = LazyLock::new(|| instance::InstanceNetworkInterfaceUpdate {
     identity: IdentityMetadataUpdateParams {
         name: None,
         description: Some(String::from("an updated description")),
@@ -745,15 +844,15 @@ pub const DEMO_CERTIFICATE_URL: &'static str =
 pub static DEMO_CERTIFICATE: LazyLock<CertificateChain> = LazyLock::new(|| {
     CertificateChain::new(format!("*.sys.{DNS_ZONE_EXTERNAL_TESTING}"))
 });
-pub static DEMO_CERTIFICATE_CREATE: LazyLock<params::CertificateCreate> =
-    LazyLock::new(|| params::CertificateCreate {
+pub static DEMO_CERTIFICATE_CREATE: LazyLock<certificate::CertificateCreate> =
+    LazyLock::new(|| certificate::CertificateCreate {
         identity: IdentityMetadataCreateParams {
             name: DEMO_CERTIFICATE_NAME.clone(),
             description: String::from(""),
         },
         cert: DEMO_CERTIFICATE.cert_chain_as_pem(),
         key: DEMO_CERTIFICATE.end_cert_private_key_as_pem(),
-        service: shared::ServiceUsingCertificate::ExternalApi,
+        service: certificate::ServiceUsingCertificate::ExternalApi,
     });
 
 // Multicast groups and members
@@ -767,17 +866,7 @@ pub static DEMO_MULTICAST_GROUP_URL: LazyLock<String> = LazyLock::new(|| {
 });
 pub static DEMO_MULTICAST_GROUP_MEMBERS_URL: LazyLock<String> =
     LazyLock::new(|| {
-        format!(
-            "/v1/multicast-groups/{}/members?project={}",
-            *DEMO_MULTICAST_GROUP_NAME, *DEMO_PROJECT_NAME
-        )
-    });
-pub static DEMO_MULTICAST_GROUP_MEMBER_URL: LazyLock<String> =
-    LazyLock::new(|| {
-        format!(
-            "/v1/multicast-groups/{}/members/{}?project={}",
-            *DEMO_MULTICAST_GROUP_NAME, *DEMO_INSTANCE_NAME, *DEMO_PROJECT_NAME
-        )
+        format!("/v1/multicast-groups/{}/members", *DEMO_MULTICAST_GROUP_NAME)
     });
 pub static DEMO_INSTANCE_MULTICAST_GROUPS_URL: LazyLock<String> =
     LazyLock::new(|| {
@@ -793,34 +882,11 @@ pub static DEMO_INSTANCE_MULTICAST_GROUP_JOIN_URL: LazyLock<String> =
             *DEMO_INSTANCE_NAME, *DEMO_MULTICAST_GROUP_NAME, *DEMO_PROJECT_NAME
         )
     });
-pub static DEMO_MULTICAST_GROUP_BY_IP_URL: LazyLock<String> =
-    LazyLock::new(|| {
-        "/v1/system/multicast-groups/by-ip/224.0.1.100".to_string()
-    });
-pub static DEMO_MULTICAST_GROUP_CREATE: LazyLock<params::MulticastGroupCreate> =
-    LazyLock::new(|| params::MulticastGroupCreate {
-        identity: IdentityMetadataCreateParams {
-            name: DEMO_MULTICAST_GROUP_NAME.clone(),
-            description: String::from("demo multicast group"),
-        },
-        multicast_ip: Some("224.0.1.100".parse().unwrap()),
-        pool: Some(DEMO_MULTICAST_IP_POOL_NAME.clone().into()),
-        source_ips: Some(Vec::new()),
-        mvlan: None,
-    });
-pub static DEMO_MULTICAST_GROUP_UPDATE: LazyLock<params::MulticastGroupUpdate> =
-    LazyLock::new(|| params::MulticastGroupUpdate {
-        identity: IdentityMetadataUpdateParams {
-            name: None,
-            description: Some("updated description".to_string()),
-        },
-        source_ips: Some(Vec::new()),
-        mvlan: None,
-    });
-pub static DEMO_MULTICAST_MEMBER_ADD: LazyLock<
-    params::MulticastGroupMemberAdd,
-> = LazyLock::new(|| params::MulticastGroupMemberAdd {
-    instance: DEMO_INSTANCE_NAME.clone().into(),
+pub static DEMO_INSTANCE_MULTICAST_GROUP_JOIN: LazyLock<
+    multicast::InstanceMulticastGroupJoin,
+> = LazyLock::new(|| multicast::InstanceMulticastGroupJoin {
+    source_ips: None,
+    ip_version: None,
 });
 
 // Switch port settings and status
@@ -835,8 +901,8 @@ pub static DEMO_SWITCH_PORT_SETTINGS_APPLY_URL: LazyLock<String> =
         )
     });
 pub static DEMO_SWITCH_PORT_SETTINGS: LazyLock<
-    params::SwitchPortApplySettings,
-> = LazyLock::new(|| params::SwitchPortApplySettings {
+    networking::SwitchPortApplySettings,
+> = LazyLock::new(|| networking::SwitchPortApplySettings {
     port_settings: NameOrId::Name("portofino".parse().unwrap()),
 });
 /* TODO requires dpd access
@@ -859,8 +925,8 @@ pub static DEMO_LOOPBACK_URL: LazyLock<String> = LazyLock::new(|| {
         "203.0.113.99/24",
     )
 });
-pub static DEMO_LOOPBACK_CREATE: LazyLock<params::LoopbackAddressCreate> =
-    LazyLock::new(|| params::LoopbackAddressCreate {
+pub static DEMO_LOOPBACK_CREATE: LazyLock<networking::LoopbackAddressCreate> =
+    LazyLock::new(|| networking::LoopbackAddressCreate {
         address_lot: NameOrId::Name("parkinglot".parse().unwrap()),
         rack_id: uuid::Uuid::new_v4(),
         switch_location: "switch0".parse().unwrap(),
@@ -874,9 +940,9 @@ pub const DEMO_SWITCH_PORT_SETTINGS_URL: &'static str =
 pub const DEMO_SWITCH_PORT_SETTINGS_INFO_URL: &'static str =
     "/v1/system/networking/switch-port-settings/protofino";
 pub static DEMO_SWITCH_PORT_SETTINGS_CREATE: LazyLock<
-    params::SwitchPortSettingsCreate,
+    networking::SwitchPortSettingsCreate,
 > = LazyLock::new(|| {
-    params::SwitchPortSettingsCreate::new(IdentityMetadataCreateParams {
+    networking::SwitchPortSettingsCreate::new(IdentityMetadataCreateParams {
         name: "portofino".parse().unwrap(),
         description: "just a port".into(),
     })
@@ -888,14 +954,14 @@ pub const DEMO_ADDRESS_LOT_URL: &'static str =
     "/v1/system/networking/address-lot/parkinglot";
 pub const DEMO_ADDRESS_LOT_BLOCKS_URL: &'static str =
     "/v1/system/networking/address-lot/parkinglot/blocks";
-pub static DEMO_ADDRESS_LOT_CREATE: LazyLock<params::AddressLotCreate> =
-    LazyLock::new(|| params::AddressLotCreate {
+pub static DEMO_ADDRESS_LOT_CREATE: LazyLock<networking::AddressLotCreate> =
+    LazyLock::new(|| networking::AddressLotCreate {
         identity: IdentityMetadataCreateParams {
             name: "parkinglot".parse().unwrap(),
             description: "an address parking lot".into(),
         },
         kind: AddressLotKind::Infra,
-        blocks: vec![params::AddressLotBlockCreate {
+        blocks: vec![networking::AddressLotBlockCreate {
             first_address: "203.0.113.10".parse().unwrap(),
             last_address: "203.0.113.20".parse().unwrap(),
         }],
@@ -903,8 +969,8 @@ pub static DEMO_ADDRESS_LOT_CREATE: LazyLock<params::AddressLotCreate> =
 
 pub const DEMO_BGP_CONFIG_CREATE_URL: &'static str =
     "/v1/system/networking/bgp?name_or_id=as47";
-pub static DEMO_BGP_CONFIG: LazyLock<params::BgpConfigCreate> =
-    LazyLock::new(|| params::BgpConfigCreate {
+pub static DEMO_BGP_CONFIG: LazyLock<networking::BgpConfigCreate> =
+    LazyLock::new(|| networking::BgpConfigCreate {
         identity: IdentityMetadataCreateParams {
             name: "as47".parse().unwrap(),
             description: "BGP config for AS47".into(),
@@ -914,16 +980,17 @@ pub static DEMO_BGP_CONFIG: LazyLock<params::BgpConfigCreate> =
         vrf: None,
         checker: None,
         shaper: None,
+        max_paths: Default::default(),
     });
 pub const DEMO_BGP_ANNOUNCE_SET_URL: &'static str =
     "/v1/system/networking/bgp-announce-set";
-pub static DEMO_BGP_ANNOUNCE: LazyLock<params::BgpAnnounceSetCreate> =
-    LazyLock::new(|| params::BgpAnnounceSetCreate {
+pub static DEMO_BGP_ANNOUNCE: LazyLock<networking::BgpAnnounceSetCreate> =
+    LazyLock::new(|| networking::BgpAnnounceSetCreate {
         identity: IdentityMetadataCreateParams {
             name: "a-bag-of-addrs".parse().unwrap(),
             description: "a bag of addrs".into(),
         },
-        announcement: vec![params::BgpAnnouncementCreate {
+        announcement: vec![networking::BgpAnnouncementCreate {
             address_lot_block: NameOrId::Name("some-block".parse().unwrap()),
             network: "10.0.0.0/16".parse().unwrap(),
         }],
@@ -937,7 +1004,7 @@ pub const DEMO_BGP_STATUS_URL: &'static str =
 pub const DEMO_BGP_EXPORTED_URL: &'static str =
     "/v1/system/networking/bgp-exported";
 pub const DEMO_BGP_ROUTES_IPV4_URL: &'static str =
-    "/v1/system/networking/bgp-routes-ipv4?asn=47";
+    "/v1/system/networking/bgp-imported?asn=47";
 pub const DEMO_BGP_MESSAGE_HISTORY_URL: &'static str =
     "/v1/system/networking/bgp-message-history?asn=47";
 
@@ -950,8 +1017,8 @@ pub const DEMO_BFD_ENABLE_URL: &'static str =
 pub const DEMO_BFD_DISABLE_URL: &'static str =
     "/v1/system/networking/bfd-disable";
 
-pub static DEMO_BFD_ENABLE: LazyLock<params::BfdSessionEnable> =
-    LazyLock::new(|| params::BfdSessionEnable {
+pub static DEMO_BFD_ENABLE: LazyLock<networking::BfdSessionEnable> =
+    LazyLock::new(|| networking::BfdSessionEnable {
         local: None,
         remote: "10.0.0.1".parse().unwrap(),
         detection_threshold: 3,
@@ -960,8 +1027,8 @@ pub static DEMO_BFD_ENABLE: LazyLock<params::BfdSessionEnable> =
         mode: omicron_common::api::external::BfdMode::MultiHop,
     });
 
-pub static DEMO_BFD_DISABLE: LazyLock<params::BfdSessionDisable> =
-    LazyLock::new(|| params::BfdSessionDisable {
+pub static DEMO_BFD_DISABLE: LazyLock<networking::BfdSessionDisable> =
+    LazyLock::new(|| networking::BfdSessionDisable {
         remote: "10.0.0.1".parse().unwrap(),
         switch: "switch0".parse().unwrap(),
     });
@@ -989,13 +1056,13 @@ pub static DEMO_SILO_DEMOTE_IMAGE_URL: LazyLock<String> = LazyLock::new(|| {
     )
 });
 
-pub static DEMO_IMAGE_CREATE: LazyLock<params::ImageCreate> =
-    LazyLock::new(|| params::ImageCreate {
+pub static DEMO_IMAGE_CREATE: LazyLock<image::ImageCreate> =
+    LazyLock::new(|| image::ImageCreate {
         identity: IdentityMetadataCreateParams {
             name: DEMO_IMAGE_NAME.clone(),
             description: String::from(""),
         },
-        source: params::ImageSource::YouCanBootAnythingAsLongAsItsAlpine,
+        source: image::ImageSource::Snapshot { id: uuid::Uuid::new_v4() },
         os: "fake-os".to_string(),
         version: "1.0".to_string(),
     });
@@ -1006,9 +1073,9 @@ pub static DEMO_IP_POOLS_PROJ_URL: LazyLock<String> =
 pub const DEMO_IP_POOLS_URL: &'static str = "/v1/system/ip-pools";
 pub static DEMO_IP_POOL_NAME: LazyLock<Name> =
     LazyLock::new(|| "default".parse().unwrap());
-pub static DEMO_IP_POOL_CREATE: LazyLock<params::IpPoolCreate> =
+pub static DEMO_IP_POOL_CREATE: LazyLock<ip_pool::IpPoolCreate> =
     LazyLock::new(|| {
-        params::IpPoolCreate::new(
+        ip_pool::IpPoolCreate::new(
             IdentityMetadataCreateParams {
                 name: DEMO_IP_POOL_NAME.clone(),
                 description: String::from("an IP pool"),
@@ -1026,8 +1093,8 @@ pub static DEMO_IP_POOL_URL: LazyLock<String> =
     LazyLock::new(|| format!("/v1/system/ip-pools/{}", *DEMO_IP_POOL_NAME));
 pub static DEMO_IP_POOL_UTILIZATION_URL: LazyLock<String> =
     LazyLock::new(|| format!("{}/utilization", *DEMO_IP_POOL_URL));
-pub static DEMO_IP_POOL_UPDATE: LazyLock<params::IpPoolUpdate> =
-    LazyLock::new(|| params::IpPoolUpdate {
+pub static DEMO_IP_POOL_UPDATE: LazyLock<ip_pool::IpPoolUpdate> =
+    LazyLock::new(|| ip_pool::IpPoolUpdate {
         identity: IdentityMetadataUpdateParams {
             name: None,
             description: Some(String::from("a new IP pool")),
@@ -1037,9 +1104,9 @@ pub static DEMO_IP_POOL_UPDATE: LazyLock<params::IpPoolUpdate> =
 // Multicast IP Pool
 pub static DEMO_MULTICAST_IP_POOL_NAME: LazyLock<Name> =
     LazyLock::new(|| "default-multicast".parse().unwrap());
-pub static DEMO_MULTICAST_IP_POOL_CREATE: LazyLock<params::IpPoolCreate> =
+pub static DEMO_MULTICAST_IP_POOL_CREATE: LazyLock<ip_pool::IpPoolCreate> =
     LazyLock::new(|| {
-        params::IpPoolCreate::new_multicast(
+        ip_pool::IpPoolCreate::new_multicast(
             IdentityMetadataCreateParams {
                 name: DEMO_MULTICAST_IP_POOL_NAME.clone(),
                 description: String::from("a multicast IP pool"),
@@ -1054,26 +1121,28 @@ pub static DEMO_MULTICAST_IP_POOL_SILOS_URL: LazyLock<String> =
     LazyLock::new(|| format!("{}/silos", *DEMO_MULTICAST_IP_POOL_URL));
 pub static DEMO_MULTICAST_IP_POOL_RANGE: LazyLock<IpRange> =
     LazyLock::new(|| {
+        // Use 224.1.0.x to avoid reserved addresses in 224.0.1.x (PTP, NTP, etc.)
         IpRange::V4(
             Ipv4Range::new(
-                Ipv4Addr::new(224, 0, 1, 100),
-                Ipv4Addr::new(224, 0, 1, 200),
+                Ipv4Addr::new(224, 1, 0, 100),
+                Ipv4Addr::new(224, 1, 0, 200),
             )
             .unwrap(),
         )
     });
 pub static DEMO_MULTICAST_IP_POOL_RANGES_ADD_URL: LazyLock<String> =
     LazyLock::new(|| format!("{}/ranges/add", *DEMO_MULTICAST_IP_POOL_URL));
-pub static DEMO_MULTICAST_IP_POOL_SILOS_BODY: LazyLock<params::IpPoolLinkSilo> =
-    LazyLock::new(|| params::IpPoolLinkSilo {
-        silo: NameOrId::Id(DEFAULT_SILO.identity().id),
-        is_default: false, // multicast pool is not the default
-    });
+pub static DEMO_MULTICAST_IP_POOL_SILOS_BODY: LazyLock<
+    ip_pool::IpPoolLinkSilo,
+> = LazyLock::new(|| ip_pool::IpPoolLinkSilo {
+    silo: NameOrId::Id(DEFAULT_SILO.identity().id),
+    is_default: false, // multicast pool is not the default
+});
 
 pub static DEMO_IP_POOL_SILOS_URL: LazyLock<String> =
     LazyLock::new(|| format!("{}/silos", *DEMO_IP_POOL_URL));
-pub static DEMO_IP_POOL_SILOS_BODY: LazyLock<params::IpPoolLinkSilo> =
-    LazyLock::new(|| params::IpPoolLinkSilo {
+pub static DEMO_IP_POOL_SILOS_BODY: LazyLock<ip_pool::IpPoolLinkSilo> =
+    LazyLock::new(|| ip_pool::IpPoolLinkSilo {
         silo: NameOrId::Id(DEFAULT_SILO.identity().id),
         is_default: true, // necessary for demo instance create to go through
     });
@@ -1081,8 +1150,8 @@ pub static DEMO_IP_POOL_SILOS_BODY: LazyLock<params::IpPoolLinkSilo> =
 pub static DEMO_IP_POOL_SILO_URL: LazyLock<String> = LazyLock::new(|| {
     format!("{}/silos/{}", *DEMO_IP_POOL_URL, *DEMO_SILO_NAME)
 });
-pub static DEMO_IP_POOL_SILO_UPDATE_BODY: LazyLock<params::IpPoolSiloUpdate> =
-    LazyLock::new(|| params::IpPoolSiloUpdate { is_default: false });
+pub static DEMO_IP_POOL_SILO_UPDATE_BODY: LazyLock<ip_pool::IpPoolSiloUpdate> =
+    LazyLock::new(|| ip_pool::IpPoolSiloUpdate { is_default: false });
 
 pub static DEMO_IP_POOL_RANGE: LazyLock<IpRange> = LazyLock::new(|| {
     IpRange::V4(
@@ -1110,6 +1179,120 @@ pub static DEMO_IP_POOL_SERVICE_RANGES_ADD_URL: LazyLock<String> =
 pub static DEMO_IP_POOL_SERVICE_RANGES_DEL_URL: LazyLock<String> =
     LazyLock::new(|| format!("{}/remove", *DEMO_IP_POOL_SERVICE_RANGES_URL));
 
+// Subnet Pools
+pub const DEMO_SUBNET_POOLS_URL: &'static str = "/v1/system/subnet-pools";
+pub static DEMO_SUBNET_POOL_NAME: LazyLock<Name> =
+    LazyLock::new(|| "demo-subnet-pool".parse().unwrap());
+pub static DEMO_SUBNET_POOL_CREATE: LazyLock<subnet_pool::SubnetPoolCreate> =
+    LazyLock::new(|| subnet_pool::SubnetPoolCreate {
+        identity: IdentityMetadataCreateParams {
+            name: DEMO_SUBNET_POOL_NAME.clone(),
+            description: String::from("a subnet pool"),
+        },
+        ip_version: IpVersion::V4,
+    });
+pub static DEMO_SUBNET_POOL_URL: LazyLock<String> = LazyLock::new(|| {
+    format!("/v1/system/subnet-pools/{}", *DEMO_SUBNET_POOL_NAME)
+});
+pub static DEMO_SUBNET_POOL_UPDATE: LazyLock<subnet_pool::SubnetPoolUpdate> =
+    LazyLock::new(|| subnet_pool::SubnetPoolUpdate {
+        identity: IdentityMetadataUpdateParams {
+            name: None,
+            description: Some(String::from("an updated subnet pool")),
+        },
+    });
+pub static DEMO_SUBNET_POOL_MEMBERS_URL: LazyLock<String> =
+    LazyLock::new(|| format!("{}/members", *DEMO_SUBNET_POOL_URL));
+pub static DEMO_SUBNET_POOL_MEMBERS_ADD_URL: LazyLock<String> =
+    LazyLock::new(|| format!("{}/add", *DEMO_SUBNET_POOL_MEMBERS_URL));
+pub static DEMO_SUBNET_POOL_MEMBERS_REMOVE_URL: LazyLock<String> =
+    LazyLock::new(|| format!("{}/remove", *DEMO_SUBNET_POOL_MEMBERS_URL));
+pub static DEMO_SUBNET_POOL_MEMBER_ADD: LazyLock<
+    subnet_pool::SubnetPoolMemberAdd,
+> = LazyLock::new(|| subnet_pool::SubnetPoolMemberAdd {
+    subnet: "10.1.0.0/16".parse().unwrap(),
+    min_prefix_length: None,
+    max_prefix_length: None,
+});
+pub static DEMO_SUBNET_POOL_MEMBER_REMOVE: LazyLock<
+    subnet_pool::SubnetPoolMemberRemove,
+> = LazyLock::new(|| subnet_pool::SubnetPoolMemberRemove {
+    subnet: "10.0.0.0/16".parse().unwrap(),
+});
+pub static DEMO_SUBNET_POOL_SILOS_URL: LazyLock<String> =
+    LazyLock::new(|| format!("{}/silos", *DEMO_SUBNET_POOL_URL));
+pub static DEMO_SILO_SUBNET_POOLS_URL: LazyLock<String> =
+    LazyLock::new(|| format!("{}/subnet-pools", *DEMO_SILO_URL));
+pub static DEMO_SUBNET_POOL_LINK_SILO: LazyLock<
+    subnet_pool::SubnetPoolLinkSilo,
+> = LazyLock::new(|| subnet_pool::SubnetPoolLinkSilo {
+    silo: NameOrId::Id(DEFAULT_SILO.identity().id),
+    is_default: true,
+});
+pub static DEMO_SUBNET_POOL_SILO_URL: LazyLock<String> = LazyLock::new(|| {
+    format!("{}/silos/{}", *DEMO_SUBNET_POOL_URL, *DEMO_SILO_NAME)
+});
+pub static DEMO_SUBNET_POOL_SILO_UPDATE: LazyLock<
+    subnet_pool::SubnetPoolSiloUpdate,
+> = LazyLock::new(|| subnet_pool::SubnetPoolSiloUpdate { is_default: true });
+pub static DEMO_SUBNET_POOL_UTILIZATION_URL: LazyLock<String> =
+    LazyLock::new(|| format!("{}/utilization", *DEMO_SUBNET_POOL_URL));
+pub static DEMO_CURRENT_SILO_SUBNET_POOLS_URL: &str = "/v1/subnet-pools";
+pub static DEMO_CURRENT_SILO_SUBNET_POOL_URL: LazyLock<String> =
+    LazyLock::new(|| format!("/v1/subnet-pools/{}", *DEMO_SUBNET_POOL_NAME));
+
+// External Subnets (project-scoped)
+pub static DEMO_EXTERNAL_SUBNETS_URL: LazyLock<String> = LazyLock::new(|| {
+    format!("/v1/external-subnets?project={}", *DEMO_PROJECT_NAME)
+});
+pub static DEMO_EXTERNAL_SUBNET_NAME: LazyLock<Name> =
+    LazyLock::new(|| "demo-external-subnet".parse().unwrap());
+pub static DEMO_EXTERNAL_SUBNET_CREATE: LazyLock<
+    external_subnet::ExternalSubnetCreate,
+> = LazyLock::new(|| external_subnet::ExternalSubnetCreate {
+    identity: IdentityMetadataCreateParams {
+        name: DEMO_EXTERNAL_SUBNET_NAME.clone(),
+        description: String::from("an external subnet"),
+    },
+    allocator: external_subnet::ExternalSubnetAllocator::Auto {
+        prefix_len: 24,
+        pool_selector: ip_pool::PoolSelector::default(),
+    },
+});
+pub static DEMO_EXTERNAL_SUBNET_URL: LazyLock<String> = LazyLock::new(|| {
+    format!(
+        "/v1/external-subnets/{}?project={}",
+        *DEMO_EXTERNAL_SUBNET_NAME, *DEMO_PROJECT_NAME
+    )
+});
+pub static DEMO_EXTERNAL_SUBNET_UPDATE: LazyLock<
+    external_subnet::ExternalSubnetUpdate,
+> = LazyLock::new(|| external_subnet::ExternalSubnetUpdate {
+    identity: IdentityMetadataUpdateParams {
+        name: None,
+        description: Some(String::from("an updated external subnet")),
+    },
+});
+pub static DEMO_EXTERNAL_SUBNET_ATTACH_URL: LazyLock<String> =
+    LazyLock::new(|| {
+        format!(
+            "/v1/external-subnets/{}/attach?project={}",
+            *DEMO_EXTERNAL_SUBNET_NAME, *DEMO_PROJECT_NAME
+        )
+    });
+pub static DEMO_EXTERNAL_SUBNET_ATTACH: LazyLock<
+    external_subnet::ExternalSubnetAttach,
+> = LazyLock::new(|| external_subnet::ExternalSubnetAttach {
+    instance: DEMO_INSTANCE_NAME.clone().into(),
+});
+pub static DEMO_EXTERNAL_SUBNET_DETACH_URL: LazyLock<String> =
+    LazyLock::new(|| {
+        format!(
+            "/v1/external-subnets/{}/detach?project={}",
+            *DEMO_EXTERNAL_SUBNET_NAME, *DEMO_PROJECT_NAME
+        )
+    });
+
 // Snapshots
 pub static DEMO_SNAPSHOT_NAME: LazyLock<Name> =
     LazyLock::new(|| "demo-snapshot".parse().unwrap());
@@ -1119,8 +1302,8 @@ pub static DEMO_SNAPSHOT_URL: LazyLock<String> = LazyLock::new(|| {
         *DEMO_SNAPSHOT_NAME, *DEMO_PROJECT_NAME
     )
 });
-pub static DEMO_SNAPSHOT_CREATE: LazyLock<params::SnapshotCreate> =
-    LazyLock::new(|| params::SnapshotCreate {
+pub static DEMO_SNAPSHOT_CREATE: LazyLock<snapshot::SnapshotCreate> =
+    LazyLock::new(|| snapshot::SnapshotCreate {
         identity: IdentityMetadataCreateParams {
             name: DEMO_SNAPSHOT_NAME.clone(),
             description: String::from(""),
@@ -1133,8 +1316,8 @@ pub const DEMO_SSHKEYS_URL: &'static str = "/v1/me/ssh-keys";
 pub static DEMO_SSHKEY_NAME: LazyLock<Name> =
     LazyLock::new(|| "aaaaa-ssh-key".parse().unwrap());
 
-pub static DEMO_SSHKEY_CREATE: LazyLock<params::SshKeyCreate> =
-    LazyLock::new(|| params::SshKeyCreate {
+pub static DEMO_SSHKEY_CREATE: LazyLock<ssh_key::SshKeyCreate> =
+    LazyLock::new(|| ssh_key::SshKeyCreate {
         identity: IdentityMetadataCreateParams {
             name: DEMO_SSHKEY_NAME.clone(),
             description: "a demo key".to_string(),
@@ -1172,34 +1355,33 @@ pub static DEMO_FLOATING_IP_DETACH_URL: LazyLock<String> =
         )
     });
 
-pub static DEMO_FLOAT_IP_CREATE: LazyLock<params::FloatingIpCreate> =
-    LazyLock::new(|| params::FloatingIpCreate {
+pub static DEMO_FLOAT_IP_CREATE: LazyLock<floating_ip::FloatingIpCreate> =
+    LazyLock::new(|| floating_ip::FloatingIpCreate {
         identity: IdentityMetadataCreateParams {
             name: DEMO_FLOAT_IP_NAME.clone(),
             description: String::from("a new IP pool"),
         },
-        ip: Some(Ipv4Addr::new(10, 0, 0, 141).into()),
-        pool: None,
-        ip_version: None,
+        address_allocator: floating_ip::AddressAllocator::Explicit {
+            ip: Ipv4Addr::new(10, 0, 0, 141).into(),
+        },
     });
 
-pub static DEMO_FLOAT_IP_UPDATE: LazyLock<params::FloatingIpUpdate> =
-    LazyLock::new(|| params::FloatingIpUpdate {
+pub static DEMO_FLOAT_IP_UPDATE: LazyLock<floating_ip::FloatingIpUpdate> =
+    LazyLock::new(|| floating_ip::FloatingIpUpdate {
         identity: IdentityMetadataUpdateParams {
             name: None,
             description: Some(String::from("an updated Floating IP")),
         },
     });
 
-pub static DEMO_FLOAT_IP_ATTACH: LazyLock<params::FloatingIpAttach> =
-    LazyLock::new(|| params::FloatingIpAttach {
-        kind: params::FloatingIpParentKind::Instance,
+pub static DEMO_FLOAT_IP_ATTACH: LazyLock<floating_ip::FloatingIpAttach> =
+    LazyLock::new(|| floating_ip::FloatingIpAttach {
+        kind: floating_ip::FloatingIpParentKind::Instance,
         parent: DEMO_FLOAT_IP_NAME.clone().into(),
     });
-pub static DEMO_EPHEMERAL_IP_ATTACH: LazyLock<params::EphemeralIpCreate> =
-    LazyLock::new(|| params::EphemeralIpCreate {
-        pool: None,
-        ip_version: None,
+pub static DEMO_EPHEMERAL_IP_ATTACH: LazyLock<instance::EphemeralIpCreate> =
+    LazyLock::new(|| instance::EphemeralIpCreate {
+        pool_selector: ip_pool::PoolSelector::Auto { ip_version: None },
     });
 // Identity providers
 pub const IDENTITY_PROVIDERS_URL: &'static str =
@@ -1218,14 +1400,14 @@ pub static SPECIFIC_SAML_IDENTITY_PROVIDER_URL: LazyLock<String> =
     });
 
 pub static SAML_IDENTITY_PROVIDER: LazyLock<
-    params::SamlIdentityProviderCreate,
-> = LazyLock::new(|| params::SamlIdentityProviderCreate {
+    identity_provider::SamlIdentityProviderCreate,
+> = LazyLock::new(|| identity_provider::SamlIdentityProviderCreate {
     identity: IdentityMetadataCreateParams {
         name: DEMO_SAML_IDENTITY_PROVIDER_NAME.clone(),
         description: "a demo provider".to_string(),
     },
 
-    idp_metadata_source: params::IdpMetadataSource::Url {
+    idp_metadata_source: identity_provider::IdpMetadataSource::Url {
         url: HTTP_SERVER.url("/descriptor").to_string(),
     },
 
@@ -1266,8 +1448,8 @@ pub static SYSTEM_TIMESERIES_LIST_URL: LazyLock<String> =
 pub static SYSTEM_TIMESERIES_QUERY_URL: LazyLock<String> =
     LazyLock::new(|| String::from("/v1/system/timeseries/query"));
 
-pub static DEMO_TIMESERIES_QUERY: LazyLock<params::TimeseriesQuery> =
-    LazyLock::new(|| params::TimeseriesQuery {
+pub static DEMO_TIMESERIES_QUERY: LazyLock<timeseries::TimeseriesQuery> =
+    LazyLock::new(|| timeseries::TimeseriesQuery {
         query: String::from("get http_service:request_latency_histogram"),
         include_summaries: false,
     });
@@ -1282,14 +1464,14 @@ pub static DEMO_USER_CREATE: LazyLock<test_params::UserCreate> =
 // Allowlist for user-facing services.
 pub static ALLOW_LIST_URL: LazyLock<String> =
     LazyLock::new(|| String::from("/v1/system/networking/allow-list"));
-pub static ALLOW_LIST_UPDATE: LazyLock<params::AllowListUpdate> =
-    LazyLock::new(|| params::AllowListUpdate {
+pub static ALLOW_LIST_UPDATE: LazyLock<system::AllowListUpdate> =
+    LazyLock::new(|| system::AllowListUpdate {
         allowed_ips: AllowedSourceIps::Any,
     });
 
 // Updates
-pub static DEMO_TARGET_RELEASE: LazyLock<params::SetTargetReleaseParams> =
-    LazyLock::new(|| params::SetTargetReleaseParams {
+pub static DEMO_TARGET_RELEASE: LazyLock<update::SetTargetReleaseParams> =
+    LazyLock::new(|| update::SetTargetReleaseParams {
         system_version: Version::new(0, 0, 0),
     });
 
@@ -1300,8 +1482,8 @@ pub static WEBHOOK_RECEIVERS_URL: &'static str = "/v1/webhook-receivers";
 
 pub static DEMO_WEBHOOK_RECEIVER_NAME: LazyLock<Name> =
     LazyLock::new(|| "my-great-webhook".parse().unwrap());
-pub static DEMO_WEBHOOK_RECEIVER_CREATE: LazyLock<params::WebhookCreate> =
-    LazyLock::new(|| params::WebhookCreate {
+pub static DEMO_WEBHOOK_RECEIVER_CREATE: LazyLock<alert::WebhookCreate> =
+    LazyLock::new(|| alert::WebhookCreate {
         identity: IdentityMetadataCreateParams {
             name: DEMO_WEBHOOK_RECEIVER_NAME.clone(),
             description: "webhook, line, and sinker".to_string(),
@@ -1315,8 +1497,8 @@ pub static DEMO_WEBHOOK_RECEIVER_CREATE: LazyLock<params::WebhookCreate> =
     });
 
 pub static DEMO_WEBHOOK_RECEIVER_UPDATE: LazyLock<
-    params::WebhookReceiverUpdate,
-> = LazyLock::new(|| params::WebhookReceiverUpdate {
+    alert::WebhookReceiverUpdate,
+> = LazyLock::new(|| alert::WebhookReceiverUpdate {
     identity: IdentityMetadataUpdateParams {
         name: None,
         description: Some("webhooked on phonics".to_string()),
@@ -1340,12 +1522,12 @@ pub static DEMO_ALERT_DELIVERIES_URL: LazyLock<String> =
 pub static DEMO_ALERT_SUBSCRIPTIONS_URL: LazyLock<String> =
     LazyLock::new(|| format!("{}/subscriptions", *DEMO_ALERT_RECEIVER_URL));
 
-pub static DEMO_ALERT_SUBSCRIPTION: LazyLock<shared::AlertSubscription> =
+pub static DEMO_ALERT_SUBSCRIPTION: LazyLock<alert::AlertSubscription> =
     LazyLock::new(|| "test.foo.**".parse().unwrap());
 
 pub static DEMO_ALERT_SUBSCRIPTION_CREATE: LazyLock<
-    params::AlertSubscriptionCreate,
-> = LazyLock::new(|| params::AlertSubscriptionCreate {
+    alert::AlertSubscriptionCreate,
+> = LazyLock::new(|| alert::AlertSubscriptionCreate {
     subscription: DEMO_ALERT_SUBSCRIPTION.clone(),
 });
 
@@ -1369,8 +1551,8 @@ pub static DEMO_WEBHOOK_SECRET_DELETE_URL: LazyLock<String> =
         )
     });
 
-pub static DEMO_WEBHOOK_SECRET_CREATE: LazyLock<params::WebhookSecretCreate> =
-    LazyLock::new(|| params::WebhookSecretCreate {
+pub static DEMO_WEBHOOK_SECRET_CREATE: LazyLock<alert::WebhookSecretCreate> =
+    LazyLock::new(|| alert::WebhookSecretCreate {
         secret: "TRUSTNO1".to_string(),
     });
 
@@ -1407,6 +1589,14 @@ pub static SCIM_TOKEN_URL: LazyLock<String> = LazyLock::new(|| {
         DEFAULT_SILO.identity().name,
     )
 });
+
+// SCIM v2 endpoints (bearer token auth, not session auth)
+pub const SCIM_V2_USERS_URL: &str = "/scim/v2/Users";
+pub const SCIM_V2_USER_URL: &str =
+    "/scim/v2/Users/00000000-0000-0000-0000-000000000000";
+pub const SCIM_V2_GROUPS_URL: &str = "/scim/v2/Groups";
+pub const SCIM_V2_GROUP_URL: &str =
+    "/scim/v2/Groups/00000000-0000-0000-0000-000000000000";
 
 /// Describes an API endpoint to be verified by the "unauthorized" test
 ///
@@ -1511,12 +1701,22 @@ pub enum AllowedMethod {
     GetVolatile,
     /// HTTP "GET" method with websocket handshake headers.
     GetWebsocket,
+    /// HTTP "HEAD" method
+    #[allow(dead_code)]
+    Head,
+    /// HTTP "HEAD" method, but where we cannot statically define a URL that
+    /// will work (similar to GetNonexistent). The test runner should not expect
+    /// to get a 200 for privileged requests.
+    HeadNonexistent,
     /// HTTP "POST" method, with sample input (which should be valid input for
     /// this endpoint)
     Post(serde_json::Value),
     /// HTTP "PUT" method, with sample input (which should be valid input for
     /// this endpoint)
     Put(serde_json::Value),
+    /// HTTP "PATCH" method, with sample input (which should be valid input for
+    /// this endpoint)
+    Patch(serde_json::Value),
 }
 
 impl AllowedMethod {
@@ -1529,8 +1729,12 @@ impl AllowedMethod {
             | AllowedMethod::GetUnimplemented
             | AllowedMethod::GetVolatile
             | AllowedMethod::GetWebsocket => &Method::GET,
+            AllowedMethod::Head | AllowedMethod::HeadNonexistent => {
+                &Method::HEAD
+            }
             AllowedMethod::Post(_) => &Method::POST,
             AllowedMethod::Put(_) => &Method::PUT,
+            AllowedMethod::Patch(_) => &Method::PATCH,
         }
     }
 
@@ -1545,9 +1749,12 @@ impl AllowedMethod {
             | AllowedMethod::GetNonexistent
             | AllowedMethod::GetUnimplemented
             | AllowedMethod::GetVolatile
-            | AllowedMethod::GetWebsocket => None,
+            | AllowedMethod::GetWebsocket
+            | AllowedMethod::Head
+            | AllowedMethod::HeadNonexistent => None,
             AllowedMethod::Post(body) => Some(&body),
             AllowedMethod::Put(body) => Some(&body),
+            AllowedMethod::Patch(body) => Some(&body),
         }
     }
 }
@@ -1568,8 +1775,8 @@ pub static VERIFY_ENDPOINTS: LazyLock<Vec<VerifyEndpoint>> = LazyLock::new(
                 allowed_methods: vec![
                     AllowedMethod::Get,
                     AllowedMethod::Put(
-                        serde_json::to_value(&shared::Policy::<
-                            shared::FleetRole,
+                        serde_json::to_value(&policy::Policy::<
+                            policy::FleetRole,
                         > {
                             role_assignments: vec![],
                         })
@@ -1703,6 +1910,150 @@ pub static VERIFY_ENDPOINTS: LazyLock<Vec<VerifyEndpoint>> = LazyLock::new(
                     serde_json::to_value(&*DEMO_IP_POOL_RANGE).unwrap(),
                 )],
             },
+            /* Subnet Pools */
+            VerifyEndpoint {
+                url: &DEMO_SUBNET_POOLS_URL,
+                visibility: Visibility::Public,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![
+                    AllowedMethod::Get,
+                    AllowedMethod::Post(
+                        serde_json::to_value(&*DEMO_SUBNET_POOL_CREATE)
+                            .unwrap(),
+                    ),
+                ],
+            },
+            VerifyEndpoint {
+                url: &DEMO_SUBNET_POOL_URL,
+                visibility: Visibility::Protected,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![
+                    AllowedMethod::Get,
+                    AllowedMethod::Put(
+                        serde_json::to_value(&*DEMO_SUBNET_POOL_UPDATE)
+                            .unwrap(),
+                    ),
+                    AllowedMethod::Delete,
+                ],
+            },
+            // Subnet pool members list endpoint
+            VerifyEndpoint {
+                url: &DEMO_SUBNET_POOL_MEMBERS_URL,
+                visibility: Visibility::Protected,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![AllowedMethod::Get],
+            },
+            // Subnet pool members/add endpoint
+            VerifyEndpoint {
+                url: &DEMO_SUBNET_POOL_MEMBERS_ADD_URL,
+                visibility: Visibility::Protected,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![AllowedMethod::Post(
+                    serde_json::to_value(&*DEMO_SUBNET_POOL_MEMBER_ADD)
+                        .unwrap(),
+                )],
+            },
+            // Subnet pool members/remove endpoint
+            VerifyEndpoint {
+                url: &DEMO_SUBNET_POOL_MEMBERS_REMOVE_URL,
+                visibility: Visibility::Protected,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![AllowedMethod::Post(
+                    serde_json::to_value(&*DEMO_SUBNET_POOL_MEMBER_REMOVE)
+                        .unwrap(),
+                )],
+            },
+            VerifyEndpoint {
+                url: &DEMO_SUBNET_POOL_SILOS_URL,
+                visibility: Visibility::Protected,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![
+                    AllowedMethod::Get,
+                    AllowedMethod::Post(
+                        serde_json::to_value(&*DEMO_SUBNET_POOL_LINK_SILO)
+                            .unwrap(),
+                    ),
+                ],
+            },
+            VerifyEndpoint {
+                url: &DEMO_SILO_SUBNET_POOLS_URL,
+                visibility: Visibility::Protected,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![AllowedMethod::Get],
+            },
+            VerifyEndpoint {
+                url: &DEMO_SUBNET_POOL_SILO_URL,
+                visibility: Visibility::Protected,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![
+                    AllowedMethod::Put(
+                        serde_json::to_value(&*DEMO_SUBNET_POOL_SILO_UPDATE)
+                            .unwrap(),
+                    ),
+                    AllowedMethod::Delete,
+                ],
+            },
+            VerifyEndpoint {
+                url: &DEMO_SUBNET_POOL_UTILIZATION_URL,
+                visibility: Visibility::Protected,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![AllowedMethod::GetUnimplemented],
+            },
+            VerifyEndpoint {
+                url: &DEMO_CURRENT_SILO_SUBNET_POOLS_URL,
+                visibility: Visibility::Protected,
+                unprivileged_access: UnprivilegedAccess::ReadOnly,
+                allowed_methods: vec![AllowedMethod::Get],
+            },
+            VerifyEndpoint {
+                url: &DEMO_CURRENT_SILO_SUBNET_POOL_URL,
+                visibility: Visibility::Protected,
+                unprivileged_access: UnprivilegedAccess::ReadOnly,
+                allowed_methods: vec![AllowedMethod::Get],
+            },
+            /* External Subnets (project-scoped) */
+            VerifyEndpoint {
+                url: &DEMO_EXTERNAL_SUBNETS_URL,
+                visibility: Visibility::Protected,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![
+                    AllowedMethod::Get,
+                    AllowedMethod::Post(
+                        serde_json::to_value(&*DEMO_EXTERNAL_SUBNET_CREATE)
+                            .unwrap(),
+                    ),
+                ],
+            },
+            VerifyEndpoint {
+                url: &DEMO_EXTERNAL_SUBNET_URL,
+                visibility: Visibility::Protected,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![
+                    AllowedMethod::Get,
+                    AllowedMethod::Put(
+                        serde_json::to_value(&*DEMO_EXTERNAL_SUBNET_UPDATE)
+                            .unwrap(),
+                    ),
+                    AllowedMethod::Delete,
+                ],
+            },
+            VerifyEndpoint {
+                url: &DEMO_EXTERNAL_SUBNET_ATTACH_URL,
+                visibility: Visibility::Protected,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![AllowedMethod::Post(
+                    serde_json::to_value(&*DEMO_EXTERNAL_SUBNET_ATTACH)
+                        .unwrap(),
+                )],
+            },
+            VerifyEndpoint {
+                url: &DEMO_EXTERNAL_SUBNET_DETACH_URL,
+                visibility: Visibility::Protected,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![AllowedMethod::Post(
+                    serde_json::to_value(&()).unwrap(),
+                )],
+            },
             /* Silos */
             VerifyEndpoint {
                 url: "/v1/system/silos",
@@ -1737,8 +2088,8 @@ pub static VERIFY_ENDPOINTS: LazyLock<Vec<VerifyEndpoint>> = LazyLock::new(
                 allowed_methods: vec![
                     AllowedMethod::Get,
                     AllowedMethod::Put(
-                        serde_json::to_value(&shared::Policy::<
-                            shared::SiloRole,
+                        serde_json::to_value(&policy::Policy::<
+                            policy::SiloRole,
                         > {
                             role_assignments: vec![],
                         })
@@ -1753,7 +2104,7 @@ pub static VERIFY_ENDPOINTS: LazyLock<Vec<VerifyEndpoint>> = LazyLock::new(
                 allowed_methods: vec![
                     AllowedMethod::Get,
                     AllowedMethod::Put(
-                        serde_json::to_value(params::SiloQuotasCreate::empty())
+                        serde_json::to_value(silo::SiloQuotasCreate::empty())
                             .unwrap(),
                     ),
                 ],
@@ -1789,8 +2140,8 @@ pub static VERIFY_ENDPOINTS: LazyLock<Vec<VerifyEndpoint>> = LazyLock::new(
                 allowed_methods: vec![
                     AllowedMethod::Get,
                     AllowedMethod::Put(
-                        serde_json::to_value(&shared::Policy::<
-                            shared::SiloRole,
+                        serde_json::to_value(&policy::Policy::<
+                            policy::SiloRole,
                         > {
                             role_assignments: vec![],
                         })
@@ -1805,7 +2156,7 @@ pub static VERIFY_ENDPOINTS: LazyLock<Vec<VerifyEndpoint>> = LazyLock::new(
                 allowed_methods: vec![
                     AllowedMethod::Get,
                     AllowedMethod::Put(
-                        serde_json::to_value(&params::SiloAuthSettingsUpdate {
+                        serde_json::to_value(&silo::SiloAuthSettingsUpdate {
                             device_token_max_ttl_seconds: Nullable(
                                 NonZeroU32::new(3),
                             ),
@@ -1925,7 +2276,7 @@ pub static VERIFY_ENDPOINTS: LazyLock<Vec<VerifyEndpoint>> = LazyLock::new(
                     AllowedMethod::Get,
                     AllowedMethod::Delete,
                     AllowedMethod::Put(
-                        serde_json::to_value(params::ProjectUpdate {
+                        serde_json::to_value(project::ProjectUpdate {
                             identity: IdentityMetadataUpdateParams {
                                 name: None,
                                 description: Some("different".to_string()),
@@ -1942,8 +2293,8 @@ pub static VERIFY_ENDPOINTS: LazyLock<Vec<VerifyEndpoint>> = LazyLock::new(
                 allowed_methods: vec![
                     AllowedMethod::Get,
                     AllowedMethod::Put(
-                        serde_json::to_value(&shared::Policy::<
-                            shared::ProjectRole,
+                        serde_json::to_value(&policy::Policy::<
+                            policy::ProjectRole,
                         > {
                             role_assignments: vec![],
                         })
@@ -1970,7 +2321,7 @@ pub static VERIFY_ENDPOINTS: LazyLock<Vec<VerifyEndpoint>> = LazyLock::new(
                 allowed_methods: vec![
                     AllowedMethod::Get,
                     AllowedMethod::Put(
-                        serde_json::to_value(&params::VpcUpdate {
+                        serde_json::to_value(&vpc::VpcUpdate {
                             identity: IdentityMetadataUpdateParams {
                                 name: None,
                                 description: Some("different".to_string()),
@@ -2016,7 +2367,7 @@ pub static VERIFY_ENDPOINTS: LazyLock<Vec<VerifyEndpoint>> = LazyLock::new(
                 allowed_methods: vec![
                     AllowedMethod::Get,
                     AllowedMethod::Put(
-                        serde_json::to_value(&params::VpcSubnetUpdate {
+                        serde_json::to_value(&vpc::VpcSubnetUpdate {
                             identity: IdentityMetadataUpdateParams {
                                 name: None,
                                 description: Some("different".to_string()),
@@ -2053,7 +2404,7 @@ pub static VERIFY_ENDPOINTS: LazyLock<Vec<VerifyEndpoint>> = LazyLock::new(
                 allowed_methods: vec![
                     AllowedMethod::Get,
                     AllowedMethod::Put(
-                        serde_json::to_value(&params::VpcRouterUpdate {
+                        serde_json::to_value(&vpc::VpcRouterUpdate {
                             identity: IdentityMetadataUpdateParams {
                                 name: None,
                                 description: Some("different".to_string()),
@@ -2084,7 +2435,7 @@ pub static VERIFY_ENDPOINTS: LazyLock<Vec<VerifyEndpoint>> = LazyLock::new(
                 allowed_methods: vec![
                     AllowedMethod::Get,
                     AllowedMethod::Put(
-                        serde_json::to_value(&params::RouterRouteUpdate {
+                        serde_json::to_value(&vpc::RouterRouteUpdate {
                             identity: IdentityMetadataUpdateParams {
                                 name: None,
                                 description: Some("different".to_string()),
@@ -2195,7 +2546,7 @@ pub static VERIFY_ENDPOINTS: LazyLock<Vec<VerifyEndpoint>> = LazyLock::new(
                 visibility: Visibility::Protected,
                 unprivileged_access: UnprivilegedAccess::None,
                 allowed_methods: vec![AllowedMethod::Post(
-                    serde_json::to_value(params::DiskPath {
+                    serde_json::to_value(path_params::DiskPath {
                         disk: DEMO_DISK_NAME.clone().into(),
                     })
                     .unwrap(),
@@ -2206,7 +2557,7 @@ pub static VERIFY_ENDPOINTS: LazyLock<Vec<VerifyEndpoint>> = LazyLock::new(
                 visibility: Visibility::Protected,
                 unprivileged_access: UnprivilegedAccess::None,
                 allowed_methods: vec![AllowedMethod::Post(
-                    serde_json::to_value(params::DiskPath {
+                    serde_json::to_value(path_params::DiskPath {
                         disk: DEMO_DISK_NAME.clone().into(),
                     })
                     .unwrap(),
@@ -2331,7 +2682,7 @@ pub static VERIFY_ENDPOINTS: LazyLock<Vec<VerifyEndpoint>> = LazyLock::new(
                 allowed_methods: {
                     use base64::prelude::*;
                     vec![AllowedMethod::Post(
-                        serde_json::to_value(params::ImportBlocksBulkWrite {
+                        serde_json::to_value(disk::ImportBlocksBulkWrite {
                             offset: 0,
                             base64_encoded_data: BASE64_STANDARD
                                 .encode([0; 4096]),
@@ -2509,6 +2860,13 @@ pub static VERIFY_ENDPOINTS: LazyLock<Vec<VerifyEndpoint>> = LazyLock::new(
                 unprivileged_access: UnprivilegedAccess::None,
                 allowed_methods: vec![AllowedMethod::Get],
             },
+            /* Instance external subnets */
+            VerifyEndpoint {
+                url: &DEMO_INSTANCE_EXTERNAL_SUBNETS_URL,
+                visibility: Visibility::Protected,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![AllowedMethod::Get],
+            },
             VerifyEndpoint {
                 url: &DEMO_INSTANCE_EPHEMERAL_IP_URL,
                 visibility: Visibility::Protected,
@@ -2554,6 +2912,29 @@ pub static VERIFY_ENDPOINTS: LazyLock<Vec<VerifyEndpoint>> = LazyLock::new(
                 allowed_methods: vec![AllowedMethod::Get],
             },
             VerifyEndpoint {
+                url: &HARDWARE_RACK_MEMBERSHIP_URL,
+                visibility: Visibility::Protected,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![AllowedMethod::GetNonexistent],
+            },
+            VerifyEndpoint {
+                url: &HARDWARE_RACK_MEMBERSHIP_ADD_URL,
+                visibility: Visibility::Protected,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![AllowedMethod::Post(
+                    serde_json::to_value(&*DEMO_RACK_ADD_SLEDS_REQUEST)
+                        .unwrap(),
+                )],
+            },
+            VerifyEndpoint {
+                url: &HARDWARE_RACK_MEMBERSHIP_ABORT_URL,
+                visibility: Visibility::Protected,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![AllowedMethod::Post(
+                    serde_json::Value::Null,
+                )],
+            },
+            VerifyEndpoint {
                 url: &HARDWARE_UNINITIALIZED_SLEDS,
                 visibility: Visibility::Public,
                 unprivileged_access: UnprivilegedAccess::None,
@@ -2563,13 +2944,7 @@ pub static VERIFY_ENDPOINTS: LazyLock<Vec<VerifyEndpoint>> = LazyLock::new(
                 url: "/v1/system/hardware/sleds",
                 visibility: Visibility::Public,
                 unprivileged_access: UnprivilegedAccess::None,
-                allowed_methods: vec![
-                    AllowedMethod::Get,
-                    AllowedMethod::Post(
-                        serde_json::to_value(&*DEMO_UNINITIALIZED_SLED)
-                            .unwrap(),
-                    ),
-                ],
+                allowed_methods: vec![AllowedMethod::Get],
             },
             VerifyEndpoint {
                 url: &SLED_INSTANCES_URL,
@@ -2629,9 +3004,14 @@ pub static VERIFY_ENDPOINTS: LazyLock<Vec<VerifyEndpoint>> = LazyLock::new(
                 unprivileged_access: UnprivilegedAccess::None,
                 allowed_methods: vec![
                     AllowedMethod::Get,
-                    AllowedMethod::Post(serde_json::to_value(&nexus_types::external_api::params::SupportBundleCreate {
-                        user_comment: None,
-                    }).unwrap()),
+                    AllowedMethod::Post(
+                        serde_json::to_value(
+                            &support_bundle::SupportBundleCreate {
+                                user_comment: None,
+                            },
+                        )
+                        .unwrap(),
+                    ),
                 ],
             },
             VerifyEndpoint {
@@ -2642,12 +3022,42 @@ pub static VERIFY_ENDPOINTS: LazyLock<Vec<VerifyEndpoint>> = LazyLock::new(
                     AllowedMethod::Get,
                     AllowedMethod::Delete,
                     AllowedMethod::Put(
-                        serde_json::to_value(&params::SupportBundleUpdate {
-                            user_comment: None,
-                        })
+                        serde_json::to_value(
+                            &support_bundle::SupportBundleUpdate {
+                                user_comment: None,
+                            },
+                        )
                         .unwrap(),
                     ),
                 ],
+            },
+            // Note: We use GetNonexistent/HeadNonexistent because the bundle is
+            // created but not in "Active" state (which requires background task
+            // processing). Privileged GET/HEAD will fail with 400, not 200, so
+            // we skip that check.
+            VerifyEndpoint {
+                url: &SUPPORT_BUNDLE_DOWNLOAD_URL,
+                visibility: Visibility::Protected,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![
+                    AllowedMethod::GetNonexistent,
+                    AllowedMethod::HeadNonexistent,
+                ],
+            },
+            VerifyEndpoint {
+                url: &SUPPORT_BUNDLE_DOWNLOAD_FILE_URL,
+                visibility: Visibility::Protected,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![
+                    AllowedMethod::GetNonexistent,
+                    AllowedMethod::HeadNonexistent,
+                ],
+            },
+            VerifyEndpoint {
+                url: &SUPPORT_BUNDLE_INDEX_URL,
+                visibility: Visibility::Protected,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![AllowedMethod::GetNonexistent],
             },
             /* Updates */
             VerifyEndpoint {
@@ -2679,7 +3089,7 @@ pub static VERIFY_ENDPOINTS: LazyLock<Vec<VerifyEndpoint>> = LazyLock::new(
                         serde_json::Value::Null,
                     ),
                     // get doesn't use the query param but it doesn't break if it's there
-                    AllowedMethod::Get
+                    AllowedMethod::Get,
                 ],
             },
             VerifyEndpoint {
@@ -2692,19 +3102,15 @@ pub static VERIFY_ENDPOINTS: LazyLock<Vec<VerifyEndpoint>> = LazyLock::new(
                 url: "/v1/system/update/target-release",
                 visibility: Visibility::Public,
                 unprivileged_access: UnprivilegedAccess::None,
-                allowed_methods: vec![
-                    AllowedMethod::Put(
-                        serde_json::to_value(&*DEMO_TARGET_RELEASE).unwrap(),
-                    ),
-                ],
+                allowed_methods: vec![AllowedMethod::Put(
+                    serde_json::to_value(&*DEMO_TARGET_RELEASE).unwrap(),
+                )],
             },
             VerifyEndpoint {
                 url: "/v1/system/update/status",
                 visibility: Visibility::Public,
                 unprivileged_access: UnprivilegedAccess::None,
-                allowed_methods: vec![
-                    AllowedMethod::Get,
-                ],
+                allowed_methods: vec![AllowedMethod::Get],
             },
             /* Metrics */
             VerifyEndpoint {
@@ -2891,7 +3297,10 @@ pub static VERIFY_ENDPOINTS: LazyLock<Vec<VerifyEndpoint>> = LazyLock::new(
                 url: &DEMO_ADDRESS_LOT_URL,
                 visibility: Visibility::Protected,
                 unprivileged_access: UnprivilegedAccess::None,
-                allowed_methods: vec![AllowedMethod::GetNonexistent, AllowedMethod::Delete],
+                allowed_methods: vec![
+                    AllowedMethod::GetNonexistent,
+                    AllowedMethod::Delete,
+                ],
             },
             VerifyEndpoint {
                 url: &DEMO_ADDRESS_LOT_BLOCKS_URL,
@@ -3170,64 +3579,29 @@ pub static VERIFY_ENDPOINTS: LazyLock<Vec<VerifyEndpoint>> = LazyLock::new(
                 unprivileged_access: UnprivilegedAccess::None,
                 allowed_methods: vec![AllowedMethod::Get],
             },
-
             // Multicast groups
 
-            // Multicast groups are fleet-scoped and allow any authenticated user
-            // (including unprivileged) to create, read, modify, and delete groups
-            // to enable cross-project and cross-silo multicast communication.
+            // Multicast groups are fleet-scoped. Any authenticated user in
+            // their fleet can list/read groups. Member operations require
+            // Instance::Modify permission on the instance being attached.
+            // Groups are created/deleted implicitly via member add/remove.
             VerifyEndpoint {
                 url: &MULTICAST_GROUPS_URL,
                 visibility: Visibility::Public,
                 unprivileged_access: UnprivilegedAccess::Full,
-                allowed_methods: vec![
-                    AllowedMethod::Get,
-                    AllowedMethod::Post(
-                        serde_json::to_value(&*DEMO_MULTICAST_GROUP_CREATE).unwrap(),
-                    ),
-                ],
+                allowed_methods: vec![AllowedMethod::Get],
             },
             VerifyEndpoint {
                 url: &DEMO_MULTICAST_GROUP_URL,
                 visibility: Visibility::Public,
                 unprivileged_access: UnprivilegedAccess::Full,
-                allowed_methods: vec![
-                    AllowedMethod::Get,
-                    AllowedMethod::Put(
-                        serde_json::to_value(&*DEMO_MULTICAST_GROUP_UPDATE).unwrap(),
-                    ),
-                    AllowedMethod::Delete,
-                ],
+                allowed_methods: vec![AllowedMethod::Get],
             },
-            // Multicast member endpoints have asymmetric authorization:
-            // - GET operations only check fleet-scoped group Read permission (accessible to all authenticated users)
-            // - POST/DELETE operations require project-scoped instance Modify permission
-            //
-            // When unprivileged users try to add/remove instances from inaccessible projects,
-            // the instance lookup fails with 404 (not 403) to prevent information leakage.
-            // This is correct security behavior.
-            //
-            // Configuration: Protected + ReadOnly
-            // - GET: Not tested for unprivileged access here (verified in authorization.rs tests)
-            // - POST/DELETE: Correctly expect 404 when instance is in inaccessible project
             VerifyEndpoint {
                 url: &DEMO_MULTICAST_GROUP_MEMBERS_URL,
-                visibility: Visibility::Protected,
-                unprivileged_access: UnprivilegedAccess::ReadOnly,
-                allowed_methods: vec![
-                    AllowedMethod::GetVolatile,
-                    AllowedMethod::Post(
-                        serde_json::to_value(&*DEMO_MULTICAST_MEMBER_ADD).unwrap(),
-                    ),
-                ],
-            },
-            VerifyEndpoint {
-                url: &DEMO_MULTICAST_GROUP_MEMBER_URL,
-                visibility: Visibility::Protected,
-                unprivileged_access: UnprivilegedAccess::ReadOnly,
-                allowed_methods: vec![
-                    AllowedMethod::Delete,
-                ],
+                visibility: Visibility::Public,
+                unprivileged_access: UnprivilegedAccess::Full,
+                allowed_methods: vec![AllowedMethod::Get],
             },
             VerifyEndpoint {
                 url: &DEMO_INSTANCE_MULTICAST_GROUPS_URL,
@@ -3240,15 +3614,14 @@ pub static VERIFY_ENDPOINTS: LazyLock<Vec<VerifyEndpoint>> = LazyLock::new(
                 visibility: Visibility::Protected,
                 unprivileged_access: UnprivilegedAccess::None,
                 allowed_methods: vec![
-                    AllowedMethod::Put(serde_json::to_value(()).unwrap()),
+                    AllowedMethod::Put(
+                        serde_json::to_value(
+                            &*DEMO_INSTANCE_MULTICAST_GROUP_JOIN,
+                        )
+                        .unwrap(),
+                    ),
                     AllowedMethod::Delete,
                 ],
-            },
-            VerifyEndpoint {
-                url: &DEMO_MULTICAST_GROUP_BY_IP_URL,
-                visibility: Visibility::Public,
-                unprivileged_access: UnprivilegedAccess::None,
-                allowed_methods: vec![AllowedMethod::Get],
             },
             // Audit log
             VerifyEndpoint {
@@ -3275,6 +3648,133 @@ pub static VERIFY_ENDPOINTS: LazyLock<Vec<VerifyEndpoint>> = LazyLock::new(
                     AllowedMethod::Get,
                     AllowedMethod::Delete,
                 ],
+            },
+            // SCIM v2 endpoints (bearer token auth). These use GetNonexistent
+            // because the default silo is LocalOnly, not SamlScim, so we can't
+            // actually authenticate with a SCIM token in this test.
+            VerifyEndpoint {
+                url: SCIM_V2_USERS_URL,
+                visibility: Visibility::Public,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![
+                    AllowedMethod::GetNonexistent,
+                    AllowedMethod::Post(serde_json::json!({
+                        "userName": "test@example.com",
+                    })),
+                ],
+            },
+            VerifyEndpoint {
+                url: SCIM_V2_USER_URL,
+                visibility: Visibility::Protected,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![
+                    AllowedMethod::GetNonexistent,
+                    AllowedMethod::Put(serde_json::json!({
+                        "userName": "test@example.com",
+                    })),
+                    AllowedMethod::Patch(serde_json::json!({
+                        "schemas": ["urn:ietf:params:scim:api:messages:2.0:PatchOp"],
+                        "Operations": [],
+                    })),
+                    AllowedMethod::Delete,
+                ],
+            },
+            VerifyEndpoint {
+                url: SCIM_V2_GROUPS_URL,
+                visibility: Visibility::Public,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![
+                    AllowedMethod::GetNonexistent,
+                    AllowedMethod::Post(serde_json::json!({
+                        "displayName": "test-group",
+                    })),
+                ],
+            },
+            VerifyEndpoint {
+                url: SCIM_V2_GROUP_URL,
+                visibility: Visibility::Protected,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![
+                    AllowedMethod::GetNonexistent,
+                    AllowedMethod::Put(serde_json::json!({
+                        "displayName": "test-group",
+                    })),
+                    AllowedMethod::Patch(serde_json::json!({
+                        "schemas": ["urn:ietf:params:scim:api:messages:2.0:PatchOp"],
+                        "Operations": [],
+                    })),
+                    AllowedMethod::Delete,
+                ],
+            },
+            // Probes
+            VerifyEndpoint {
+                url: &DEMO_PROBES_URL,
+                visibility: Visibility::Public,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![
+                    AllowedMethod::GetNonexistent,
+                    AllowedMethod::Post(serde_json::json!({
+                        "name": "test-probe",
+                        "description": "",
+                        "sled": SLED_AGENT_UUID,
+                    })),
+                ],
+            },
+            VerifyEndpoint {
+                url: &DEMO_PROBE_URL,
+                visibility: Visibility::Public,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![
+                    AllowedMethod::GetNonexistent,
+                    AllowedMethod::Delete,
+                ],
+            },
+            // Networking - Switch Port / LLDP
+            VerifyEndpoint {
+                url: &DEMO_SWITCH_PORT_STATUS_URL,
+                visibility: Visibility::Public,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![AllowedMethod::GetNonexistent],
+            },
+            VerifyEndpoint {
+                url: &DEMO_SWITCH_PORT_LLDP_CONFIG_URL,
+                visibility: Visibility::Public,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![
+                    AllowedMethod::GetNonexistent,
+                    AllowedMethod::Post(serde_json::json!({
+                        "id": "00000000-0000-0000-0000-000000000000",
+                        "enabled": false,
+                        "link_name": null,
+                        "link_description": null,
+                        "chassis_id": null,
+                        "system_name": null,
+                        "system_description": null,
+                        "management_ip": null,
+                    })),
+                ],
+            },
+            VerifyEndpoint {
+                url: &DEMO_LLDP_NEIGHBORS_URL,
+                visibility: Visibility::Public,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![AllowedMethod::GetNonexistent],
+            },
+            // Alert Delivery Resend
+            VerifyEndpoint {
+                url: &DEMO_ALERT_RESEND_URL,
+                visibility: Visibility::Protected,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![AllowedMethod::Post(serde_json::json!(
+                    {}
+                ))],
+            },
+            // Access Token Delete
+            VerifyEndpoint {
+                url: DEMO_ACCESS_TOKEN_DELETE_URL,
+                visibility: Visibility::Protected,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![AllowedMethod::Delete],
             },
         ]
     },

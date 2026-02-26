@@ -23,17 +23,24 @@ use nexus_test_utils::http_testing::AuthnMode;
 use nexus_test_utils::http_testing::NexusRequest;
 use nexus_test_utils::http_testing::RequestBuilder;
 use nexus_test_utils::identity_eq;
+use nexus_test_utils::resource_helpers;
 use nexus_test_utils::resource_helpers::create_default_ip_pools;
 use nexus_test_utils::resource_helpers::create_disk;
 use nexus_test_utils::resource_helpers::create_instance;
 use nexus_test_utils::resource_helpers::create_project;
+use nexus_test_utils::resource_helpers::create_project_image;
+use nexus_test_utils::resource_helpers::object_create_error;
 use nexus_test_utils_macros::nexus_test;
-use nexus_types::external_api::params;
+use nexus_types::external_api::disk;
+use nexus_types::external_api::path_params;
+use nexus_types::external_api::sled;
+use nexus_types::external_api::snapshot;
 use nexus_types::identity::Asset;
 use nexus_types::silo::DEFAULT_SILO_ID;
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::Disk;
 use omicron_common::api::external::DiskState;
+use omicron_common::api::external::DiskType;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::Instance;
 use omicron_common::api::external::InstanceState;
@@ -47,7 +54,9 @@ use omicron_uuid_kinds::InstanceUuid;
 use omicron_uuid_kinds::VolumeUuid;
 use omicron_uuid_kinds::ZpoolUuid;
 use sled_agent_client::TestInterfaces as _;
+use sled_agent_client::VolumeConstructionRequest;
 use std::collections::HashSet;
+use std::collections::VecDeque;
 use std::sync::Arc;
 use tokio::sync::oneshot;
 use uuid::Uuid;
@@ -355,14 +364,14 @@ async fn test_disk_create_disk_that_already_exists_fails(
     let disks_url = get_disks_url();
 
     // Create a disk.
-    let new_disk = params::DiskCreate {
+    let new_disk = disk::DiskCreate {
         identity: IdentityMetadataCreateParams {
             name: DISK_NAME.parse().unwrap(),
             description: String::from("sells rainsticks"),
         },
-        disk_backend: params::DiskBackend::Distributed {
-            disk_source: params::DiskSource::Blank {
-                block_size: params::BlockSize::try_from(512).unwrap(),
+        disk_backend: disk::DiskBackend::Distributed {
+            disk_source: disk::DiskSource::Blank {
+                block_size: disk::BlockSize::try_from(512).unwrap(),
             },
         },
         size: ByteCount::from_gibibytes_u32(1),
@@ -574,7 +583,7 @@ async fn test_disk_move_between_instances(cptestctx: &ControlPlaneTestContext) {
 
     let error: HttpErrorResponseBody = NexusRequest::new(
         RequestBuilder::new(client, Method::POST, &url_instance2_attach_disk)
-            .body(Some(&params::DiskPath {
+            .body(Some(&path_params::DiskPath {
                 disk: disk.identity.name.clone().into(),
             }))
             .expect_status(Some(StatusCode::BAD_REQUEST)),
@@ -635,7 +644,7 @@ async fn test_disk_move_between_instances(cptestctx: &ControlPlaneTestContext) {
     // instance (the first one).
     let error: HttpErrorResponseBody = NexusRequest::new(
         RequestBuilder::new(client, Method::POST, &url_instance_attach_disk)
-            .body(Some(&params::DiskPath {
+            .body(Some(&path_params::DiskPath {
                 disk: disk.identity.name.clone().into(),
             }))
             .expect_status(Some(StatusCode::BAD_REQUEST)),
@@ -761,14 +770,14 @@ async fn test_disk_region_creation_failure(
     );
 
     let disks_url = get_disks_url();
-    let new_disk = params::DiskCreate {
+    let new_disk = disk::DiskCreate {
         identity: IdentityMetadataCreateParams {
             name: DISK_NAME.parse().unwrap(),
             description: String::from("sells rainsticks"),
         },
-        disk_backend: params::DiskBackend::Distributed {
-            disk_source: params::DiskSource::Blank {
-                block_size: params::BlockSize::try_from(512).unwrap(),
+        disk_backend: disk::DiskBackend::Distributed {
+            disk_source: disk::DiskSource::Blank {
+                block_size: disk::BlockSize::try_from(512).unwrap(),
             },
         },
         size: disk_size,
@@ -814,14 +823,14 @@ async fn test_disk_invalid_block_size_rejected(
 
     let disks_url = get_disks_url();
 
-    let new_disk = params::DiskCreate {
+    let new_disk = disk::DiskCreate {
         identity: IdentityMetadataCreateParams {
             name: DISK_NAME.parse().unwrap(),
             description: String::from("sells rainsticks"),
         },
-        disk_backend: params::DiskBackend::Distributed {
-            disk_source: params::DiskSource::Blank {
-                block_size: params::BlockSize(1024),
+        disk_backend: disk::DiskBackend::Distributed {
+            disk_source: disk::DiskSource::Blank {
+                block_size: disk::BlockSize(1024),
             },
         },
         size: disk_size,
@@ -859,14 +868,14 @@ async fn test_disk_reject_total_size_not_divisible_by_block_size(
     );
 
     let disks_url = get_disks_url();
-    let new_disk = params::DiskCreate {
+    let new_disk = disk::DiskCreate {
         identity: IdentityMetadataCreateParams {
             name: DISK_NAME.parse().unwrap(),
             description: String::from("sells rainsticks"),
         },
-        disk_backend: params::DiskBackend::Distributed {
-            disk_source: params::DiskSource::Blank {
-                block_size: params::BlockSize::try_from(512).unwrap(),
+        disk_backend: disk::DiskBackend::Distributed {
+            disk_source: disk::DiskSource::Blank {
+                block_size: disk::BlockSize::try_from(512).unwrap(),
             },
         },
         size: disk_size,
@@ -895,14 +904,14 @@ async fn test_disk_reject_total_size_less_than_min_disk_size_bytes(
 
     // Attempt to allocate the disk, observe a server error.
     let disks_url = get_disks_url();
-    let new_disk = params::DiskCreate {
+    let new_disk = disk::DiskCreate {
         identity: IdentityMetadataCreateParams {
             name: DISK_NAME.parse().unwrap(),
             description: String::from("sells rainsticks"),
         },
-        disk_backend: params::DiskBackend::Distributed {
-            disk_source: params::DiskSource::Blank {
-                block_size: params::BlockSize::try_from(512).unwrap(),
+        disk_backend: disk::DiskBackend::Distributed {
+            disk_source: disk::DiskSource::Blank {
+                block_size: disk::BlockSize::try_from(512).unwrap(),
             },
         },
         size: disk_size,
@@ -940,14 +949,14 @@ async fn test_disk_reject_total_size_greater_than_max_disk_size_bytes(
 
     // Atempt to allocate the disk, observe a server error.
     let disks_url = get_disks_url();
-    let new_disk = params::DiskCreate {
+    let new_disk = disk::DiskCreate {
         identity: IdentityMetadataCreateParams {
             name: DISK_NAME.parse().unwrap(),
             description: String::from("sells rainsticks"),
         },
-        disk_backend: params::DiskBackend::Distributed {
-            disk_source: params::DiskSource::Blank {
-                block_size: params::BlockSize::try_from(512).unwrap(),
+        disk_backend: disk::DiskBackend::Distributed {
+            disk_source: disk::DiskSource::Blank {
+                block_size: disk::BlockSize::try_from(512).unwrap(),
             },
         },
         size: disk_size,
@@ -986,14 +995,14 @@ async fn test_disk_reject_total_size_not_divisible_by_min_disk_size(
 
     // Attempt to allocate the disk, observe a server error.
     let disks_url = get_disks_url();
-    let new_disk = params::DiskCreate {
+    let new_disk = disk::DiskCreate {
         identity: IdentityMetadataCreateParams {
             name: DISK_NAME.parse().unwrap(),
             description: String::from("sells rainsticks"),
         },
-        disk_backend: params::DiskBackend::Distributed {
-            disk_source: params::DiskSource::Blank {
-                block_size: params::BlockSize::try_from(512).unwrap(),
+        disk_backend: disk::DiskBackend::Distributed {
+            disk_source: disk::DiskSource::Blank {
+                block_size: disk::BlockSize::try_from(512).unwrap(),
             },
         },
         size: disk_size,
@@ -1038,14 +1047,14 @@ async fn test_disk_backed_by_multiple_region_sets(
     // Ask for a 20 gibibyte disk.
     let disk_size = ByteCount::from_gibibytes_u32(20);
     let disks_url = get_disks_url();
-    let new_disk = params::DiskCreate {
+    let new_disk = disk::DiskCreate {
         identity: IdentityMetadataCreateParams {
             name: DISK_NAME.parse().unwrap(),
             description: String::from("sells rainsticks"),
         },
-        disk_backend: params::DiskBackend::Distributed {
-            disk_source: params::DiskSource::Blank {
-                block_size: params::BlockSize::try_from(512).unwrap(),
+        disk_backend: disk::DiskBackend::Distributed {
+            disk_source: disk::DiskSource::Blank {
+                block_size: disk::BlockSize::try_from(512).unwrap(),
             },
         },
         size: disk_size,
@@ -1076,14 +1085,14 @@ async fn test_disk_too_big(cptestctx: &ControlPlaneTestContext) {
     // Ask for a 300 gibibyte disk (but only 16 is available)
     let disk_size = ByteCount::from_gibibytes_u32(300);
     let disks_url = get_disks_url();
-    let new_disk = params::DiskCreate {
+    let new_disk = disk::DiskCreate {
         identity: IdentityMetadataCreateParams {
             name: DISK_NAME.parse().unwrap(),
             description: String::from("sells rainsticks"),
         },
-        disk_backend: params::DiskBackend::Distributed {
-            disk_source: params::DiskSource::Blank {
-                block_size: params::BlockSize::try_from(512).unwrap(),
+        disk_backend: disk::DiskBackend::Distributed {
+            disk_source: disk::DiskSource::Blank {
+                block_size: disk::BlockSize::try_from(512).unwrap(),
             },
         },
         size: disk_size,
@@ -1165,14 +1174,14 @@ async fn test_disk_virtual_provisioning_collection(
     // in which it was allocated
     let disk_size = ByteCount::from_gibibytes_u32(1);
     let disks_url = get_disks_url();
-    let disk_one = params::DiskCreate {
+    let disk_one = disk::DiskCreate {
         identity: IdentityMetadataCreateParams {
             name: "disk-one".parse().unwrap(),
             description: String::from("sells rainsticks"),
         },
-        disk_backend: params::DiskBackend::Distributed {
-            disk_source: params::DiskSource::Blank {
-                block_size: params::BlockSize::try_from(512).unwrap(),
+        disk_backend: disk::DiskBackend::Distributed {
+            disk_source: disk::DiskSource::Blank {
+                block_size: disk::BlockSize::try_from(512).unwrap(),
             },
         },
         size: disk_size,
@@ -1226,14 +1235,14 @@ async fn test_disk_virtual_provisioning_collection(
     // Each project should be using "one disk" of real storage, but the org
     // should be using both.
     let disks_url = format!("/v1/disks?project={}", PROJECT_NAME_2);
-    let disk_one = params::DiskCreate {
+    let disk_one = disk::DiskCreate {
         identity: IdentityMetadataCreateParams {
             name: "disk-two".parse().unwrap(),
             description: String::from("sells rainsticks"),
         },
-        disk_backend: params::DiskBackend::Distributed {
-            disk_source: params::DiskSource::Blank {
-                block_size: params::BlockSize::try_from(512).unwrap(),
+        disk_backend: disk::DiskBackend::Distributed {
+            disk_source: disk::DiskSource::Blank {
+                block_size: disk::BlockSize::try_from(512).unwrap(),
             },
         },
         size: disk_size,
@@ -1330,14 +1339,14 @@ async fn test_disk_virtual_provisioning_collection_failed_delete(
     // Create a 1 GB disk
     let disk_size = ByteCount::from_gibibytes_u32(1);
     let disks_url = get_disks_url();
-    let disk_one = params::DiskCreate {
+    let disk_one = disk::DiskCreate {
         identity: IdentityMetadataCreateParams {
             name: "disk-one".parse().unwrap(),
             description: String::from("sells rainsticks"),
         },
-        disk_backend: params::DiskBackend::Distributed {
-            disk_source: params::DiskSource::Blank {
-                block_size: params::BlockSize::try_from(512).unwrap(),
+        disk_backend: disk::DiskBackend::Distributed {
+            disk_source: disk::DiskSource::Blank {
+                block_size: disk::BlockSize::try_from(512).unwrap(),
             },
         },
         size: disk_size,
@@ -1466,14 +1475,14 @@ async fn test_phantom_disk_rename(cptestctx: &ControlPlaneTestContext) {
     // Create a 1 GB disk
     let disk_size = ByteCount::from_gibibytes_u32(1);
     let disks_url = get_disks_url();
-    let disk_one = params::DiskCreate {
+    let disk_one = disk::DiskCreate {
         identity: IdentityMetadataCreateParams {
             name: "disk-one".parse().unwrap(),
             description: String::from("sells rainsticks"),
         },
-        disk_backend: params::DiskBackend::Distributed {
-            disk_source: params::DiskSource::Blank {
-                block_size: params::BlockSize::try_from(512).unwrap(),
+        disk_backend: disk::DiskBackend::Distributed {
+            disk_source: disk::DiskSource::Blank {
+                block_size: disk::BlockSize::try_from(512).unwrap(),
             },
         },
         size: disk_size,
@@ -1608,14 +1617,14 @@ async fn test_disk_size_accounting(cptestctx: &ControlPlaneTestContext) {
     let disk_size = ByteCount::from_gibibytes_u32(7);
     let disks_url = get_disks_url();
 
-    let disk_one = params::DiskCreate {
+    let disk_one = disk::DiskCreate {
         identity: IdentityMetadataCreateParams {
             name: "disk-one".parse().unwrap(),
             description: String::from("sells rainsticks"),
         },
-        disk_backend: params::DiskBackend::Distributed {
-            disk_source: params::DiskSource::Blank {
-                block_size: params::BlockSize::try_from(512).unwrap(),
+        disk_backend: disk::DiskBackend::Distributed {
+            disk_source: disk::DiskSource::Blank {
+                block_size: disk::BlockSize::try_from(512).unwrap(),
             },
         },
         size: disk_size,
@@ -1645,14 +1654,14 @@ async fn test_disk_size_accounting(cptestctx: &ControlPlaneTestContext) {
     // Ask for a 6 gibibyte disk, this should fail because there isn't space
     // available.
     let disk_size = ByteCount::from_gibibytes_u32(6);
-    let disk_two = params::DiskCreate {
+    let disk_two = disk::DiskCreate {
         identity: IdentityMetadataCreateParams {
             name: "disk-two".parse().unwrap(),
             description: String::from("sells rainsticks"),
         },
-        disk_backend: params::DiskBackend::Distributed {
-            disk_source: params::DiskSource::Blank {
-                block_size: params::BlockSize::try_from(512).unwrap(),
+        disk_backend: disk::DiskBackend::Distributed {
+            disk_source: disk::DiskSource::Blank {
+                block_size: disk::BlockSize::try_from(512).unwrap(),
             },
         },
         size: disk_size,
@@ -1699,14 +1708,14 @@ async fn test_disk_size_accounting(cptestctx: &ControlPlaneTestContext) {
 
     // Ask for a 10 gibibyte disk.
     let disk_size = ByteCount::from_gibibytes_u32(10);
-    let disk_three = params::DiskCreate {
+    let disk_three = disk::DiskCreate {
         identity: IdentityMetadataCreateParams {
             name: "disk-three".parse().unwrap(),
             description: String::from("sells rainsticks"),
         },
-        disk_backend: params::DiskBackend::Distributed {
-            disk_source: params::DiskSource::Blank {
-                block_size: params::BlockSize::try_from(512).unwrap(),
+        disk_backend: disk::DiskBackend::Distributed {
+            disk_source: disk::DiskSource::Blank {
+                block_size: disk::BlockSize::try_from(512).unwrap(),
             },
         },
         size: disk_size,
@@ -1752,14 +1761,14 @@ async fn test_multiple_disks_multiple_zpools(
     let disk_size = ByteCount::from_gibibytes_u32(10);
     let disks_url = get_disks_url();
 
-    let disk_one = params::DiskCreate {
+    let disk_one = disk::DiskCreate {
         identity: IdentityMetadataCreateParams {
             name: "disk-one".parse().unwrap(),
             description: String::from("sells rainsticks"),
         },
-        disk_backend: params::DiskBackend::Distributed {
-            disk_source: params::DiskSource::Blank {
-                block_size: params::BlockSize::try_from(512).unwrap(),
+        disk_backend: disk::DiskBackend::Distributed {
+            disk_source: disk::DiskSource::Blank {
+                block_size: disk::BlockSize::try_from(512).unwrap(),
             },
         },
         size: disk_size,
@@ -1777,14 +1786,14 @@ async fn test_multiple_disks_multiple_zpools(
 
     // Ask for another 10 gibibyte disk
     let disk_size = ByteCount::from_gibibytes_u32(10);
-    let disk_two = params::DiskCreate {
+    let disk_two = disk::DiskCreate {
         identity: IdentityMetadataCreateParams {
             name: "disk-two".parse().unwrap(),
             description: String::from("sells rainsticks"),
         },
-        disk_backend: params::DiskBackend::Distributed {
-            disk_source: params::DiskSource::Blank {
-                block_size: params::BlockSize::try_from(512).unwrap(),
+        disk_backend: disk::DiskBackend::Distributed {
+            disk_source: disk::DiskSource::Blank {
+                block_size: disk::BlockSize::try_from(512).unwrap(),
             },
         },
         size: disk_size,
@@ -1808,14 +1817,14 @@ async fn test_disk_create_for_importing(cptestctx: &ControlPlaneTestContext) {
     create_project_and_pool(client).await;
     let disks_url = get_disks_url();
 
-    let new_disk = params::DiskCreate {
+    let new_disk = disk::DiskCreate {
         identity: IdentityMetadataCreateParams {
             name: DISK_NAME.parse().unwrap(),
             description: String::from("sells rainsticks"),
         },
-        disk_backend: params::DiskBackend::Distributed {
-            disk_source: params::DiskSource::ImportingBlocks {
-                block_size: params::BlockSize::try_from(512).unwrap(),
+        disk_backend: disk::DiskBackend::Distributed {
+            disk_source: disk::DiskSource::ImportingBlocks {
+                block_size: disk::BlockSize::try_from(512).unwrap(),
             },
         },
         size: ByteCount::from_gibibytes_u32(1),
@@ -1855,14 +1864,14 @@ async fn test_project_delete_disk_no_auth_idempotent(
     // Create a disk
     let disks_url = get_disks_url();
 
-    let new_disk = params::DiskCreate {
+    let new_disk = disk::DiskCreate {
         identity: IdentityMetadataCreateParams {
             name: DISK_NAME.parse().unwrap(),
             description: String::from("sells rainsticks"),
         },
-        disk_backend: params::DiskBackend::Distributed {
-            disk_source: params::DiskSource::Blank {
-                block_size: params::BlockSize::try_from(512).unwrap(),
+        disk_backend: disk::DiskBackend::Distributed {
+            disk_source: disk::DiskSource::Blank {
+                block_size: disk::BlockSize::try_from(512).unwrap(),
             },
         },
         size: ByteCount::from_gibibytes_u32(1),
@@ -1943,8 +1952,8 @@ async fn test_single_region_allocate(cptestctx: &ControlPlaneTestContext) {
             &opctx,
             RegionAllocationFor::DiskVolume { volume_id },
             RegionAllocationParameters::FromDiskSource {
-                disk_source: &params::DiskSource::Blank {
-                    block_size: params::BlockSize::try_from(512).unwrap(),
+                disk_source: &disk::DiskSource::Blank {
+                    block_size: disk::BlockSize::try_from(512).unwrap(),
                 },
                 size: ByteCount::from_gibibytes_u32(1),
             },
@@ -2038,8 +2047,8 @@ async fn test_region_allocation_strategy_random_is_idempotent(
         .disk_region_allocate(
             &opctx,
             db_disk.volume_id(),
-            &params::DiskSource::Blank {
-                block_size: params::BlockSize::try_from(
+            &disk::DiskSource::Blank {
+                block_size: disk::BlockSize::try_from(
                     region.block_size().to_bytes() as u32,
                 )
                 .unwrap(),
@@ -2079,8 +2088,8 @@ async fn test_region_allocation_strategy_random_is_idempotent_arbitrary(
             &opctx,
             RegionAllocationFor::DiskVolume { volume_id },
             RegionAllocationParameters::FromDiskSource {
-                disk_source: &params::DiskSource::Blank {
-                    block_size: params::BlockSize::try_from(512).unwrap(),
+                disk_source: &disk::DiskSource::Blank {
+                    block_size: disk::BlockSize::try_from(512).unwrap(),
                 },
                 size: ByteCount::from_gibibytes_u32(1),
             },
@@ -2099,8 +2108,8 @@ async fn test_region_allocation_strategy_random_is_idempotent_arbitrary(
             &opctx,
             RegionAllocationFor::DiskVolume { volume_id },
             RegionAllocationParameters::FromDiskSource {
-                disk_source: &params::DiskSource::Blank {
-                    block_size: params::BlockSize::try_from(512).unwrap(),
+                disk_source: &disk::DiskSource::Blank {
+                    block_size: disk::BlockSize::try_from(512).unwrap(),
                 },
                 size: ByteCount::from_gibibytes_u32(1),
             },
@@ -2169,8 +2178,8 @@ async fn test_single_region_allocate_for_replace(
             &opctx,
             RegionAllocationFor::DiskVolume { volume_id: db_disk.volume_id() },
             RegionAllocationParameters::FromDiskSource {
-                disk_source: &params::DiskSource::Blank {
-                    block_size: params::BlockSize::try_from(
+                disk_source: &disk::DiskSource::Blank {
+                    block_size: disk::BlockSize::try_from(
                         region_to_replace.block_size().to_bytes() as u32,
                     )
                     .unwrap(),
@@ -2250,8 +2259,8 @@ async fn test_single_region_allocate_for_replace_not_enough_zpools(
             &opctx,
             RegionAllocationFor::DiskVolume { volume_id: db_disk.volume_id() },
             RegionAllocationParameters::FromDiskSource {
-                disk_source: &params::DiskSource::Blank {
-                    block_size: params::BlockSize::try_from(
+                disk_source: &disk::DiskSource::Blank {
+                    block_size: disk::BlockSize::try_from(
                         region_to_replace.block_size().to_bytes() as u32,
                     )
                     .unwrap(),
@@ -2271,8 +2280,8 @@ async fn test_single_region_allocate_for_replace_not_enough_zpools(
             &opctx,
             RegionAllocationFor::DiskVolume { volume_id: db_disk.volume_id() },
             RegionAllocationParameters::FromDiskSource {
-                disk_source: &params::DiskSource::Blank {
-                    block_size: params::BlockSize::try_from(
+                disk_source: &disk::DiskSource::Blank {
+                    block_size: disk::BlockSize::try_from(
                         region_to_replace.block_size().to_bytes() as u32,
                     )
                     .unwrap(),
@@ -2396,9 +2405,7 @@ async fn test_disk_expunge(cptestctx: &ControlPlaneTestContext) {
         .make_request(
             Method::POST,
             "/sleds/expunge",
-            Some(params::SledSelector {
-                sled: SLED_AGENT_UUID.parse().unwrap(),
-            }),
+            Some(sled::SledSelector { sled: SLED_AGENT_UUID.parse().unwrap() }),
             StatusCode::OK,
         )
         .await
@@ -2485,14 +2492,14 @@ async fn test_do_not_provision_on_dataset_not_enough(
 
     let disks_url = get_disks_url();
 
-    let new_disk = params::DiskCreate {
+    let new_disk = disk::DiskCreate {
         identity: IdentityMetadataCreateParams {
             name: DISK_NAME.parse().unwrap(),
             description: String::from("sells rainsticks"),
         },
-        disk_backend: params::DiskBackend::Distributed {
-            disk_source: params::DiskSource::Blank {
-                block_size: params::BlockSize::try_from(512).unwrap(),
+        disk_backend: disk::DiskBackend::Distributed {
+            disk_source: disk::DiskSource::Blank {
+                block_size: disk::BlockSize::try_from(512).unwrap(),
             },
         },
         size: ByteCount::from_gibibytes_u32(1),
@@ -2552,14 +2559,14 @@ async fn test_zpool_control_plane_storage_buffer(
     let disks_url = get_disks_url();
 
     // Creating a 8G disk will work (10G size used due to reservation overhead)
-    let new_disk = params::DiskCreate {
+    let new_disk = disk::DiskCreate {
         identity: IdentityMetadataCreateParams {
             name: "disk1".parse().unwrap(),
             description: String::from("sells rainsticks"),
         },
-        disk_backend: params::DiskBackend::Distributed {
-            disk_source: params::DiskSource::Blank {
-                block_size: params::BlockSize::try_from(512).unwrap(),
+        disk_backend: disk::DiskBackend::Distributed {
+            disk_source: disk::DiskSource::Blank {
+                block_size: disk::BlockSize::try_from(512).unwrap(),
             },
         },
         size: ByteCount::from_gibibytes_u32(8),
@@ -2577,14 +2584,14 @@ async fn test_zpool_control_plane_storage_buffer(
 
     // Creating a 4G disk will also work (5G size used due to reservation
     // overhead plus the previous 10G size used is less than 16G)
-    let new_disk = params::DiskCreate {
+    let new_disk = disk::DiskCreate {
         identity: IdentityMetadataCreateParams {
             name: "disk2".parse().unwrap(),
             description: String::from("sells rainsticks"),
         },
-        disk_backend: params::DiskBackend::Distributed {
-            disk_source: params::DiskSource::Blank {
-                block_size: params::BlockSize::try_from(512).unwrap(),
+        disk_backend: disk::DiskBackend::Distributed {
+            disk_source: disk::DiskSource::Blank {
+                block_size: disk::BlockSize::try_from(512).unwrap(),
             },
         },
         size: ByteCount::from_gibibytes_u32(4),
@@ -2676,14 +2683,14 @@ async fn test_list_all_types_of_disk(cptestctx: &ControlPlaneTestContext) {
     let disks_url = get_disks_url();
 
     // Distributed disk
-    let new_disk = params::DiskCreate {
+    let new_disk = disk::DiskCreate {
         identity: IdentityMetadataCreateParams {
             name: "disk1".parse().unwrap(),
             description: String::from("sells rainsticks"),
         },
-        disk_backend: params::DiskBackend::Distributed {
-            disk_source: params::DiskSource::Blank {
-                block_size: params::BlockSize::try_from(512).unwrap(),
+        disk_backend: disk::DiskBackend::Distributed {
+            disk_source: disk::DiskSource::Blank {
+                block_size: disk::BlockSize::try_from(512).unwrap(),
             },
         },
         size: ByteCount::from_gibibytes_u32(1),
@@ -2701,12 +2708,12 @@ async fn test_list_all_types_of_disk(cptestctx: &ControlPlaneTestContext) {
 
     // Local disk
 
-    let new_disk = params::DiskCreate {
+    let new_disk = disk::DiskCreate {
         identity: IdentityMetadataCreateParams {
             name: "disk2".parse().unwrap(),
             description: String::from("sells rainsticks"),
         },
-        disk_backend: params::DiskBackend::Local {},
+        disk_backend: disk::DiskBackend::Local {},
         size: ByteCount::from_gibibytes_u32(1),
     };
 
@@ -2733,6 +2740,429 @@ async fn test_list_all_types_of_disk(cptestctx: &ControlPlaneTestContext) {
     .unwrap();
 }
 
+#[nexus_test]
+async fn test_create_read_only_disk_from_snapshot(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+    DiskTest::new(&cptestctx).await;
+    create_project_and_pool(client).await;
+    let disks_url = get_disks_url();
+
+    // Define an image
+    let image = create_project_image(client, PROJECT_NAME, "not-alpine").await;
+
+    // Create a base disk from this image, which we will then create a snapshot
+    // from in order to create our read-only disk from that snapshot.
+    let disk_size = ByteCount::from_gibibytes_u32(2);
+    let base_disk_name = "base-disk";
+    let base_disk = disk::DiskCreate {
+        identity: IdentityMetadataCreateParams {
+            name: base_disk_name.parse().unwrap(),
+            description: String::from("sells rainsticks"),
+        },
+        disk_backend: disk::DiskBackend::Distributed {
+            disk_source: disk::DiskSource::Image {
+                image_id: image.identity.id,
+                read_only: false,
+            },
+        },
+        size: disk_size,
+    };
+
+    NexusRequest::new(
+        RequestBuilder::new(client, Method::POST, &disks_url)
+            .body(Some(&base_disk))
+            .expect_status(Some(StatusCode::CREATED)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute_and_parse_unwrap::<Disk>()
+    .await;
+
+    // Assert the base disk is detached
+    let base_disk = disk_get(client, &get_disk_url(base_disk_name)).await;
+    assert_eq!(base_disk.state, DiskState::Detached);
+
+    // Create a snapshot of the base disk.
+    let snapshot = resource_helpers::create_snapshot(
+        client,
+        PROJECT_NAME,
+        base_disk_name,
+        "ro-snapshot",
+    )
+    .await;
+    assert_eq!(snapshot.disk_id, base_disk.identity.id);
+    assert_eq!(snapshot.size, base_disk.size);
+
+    // Okay, now make a read-only disk out of that snapshot.
+    let ro_disk = resource_helpers::create_disk_from_snapshot(
+        client,
+        PROJECT_NAME,
+        "ro-disk-from-snap",
+        &snapshot,
+        true,
+    )
+    .await;
+
+    assert!(ro_disk.read_only);
+    assert_eq!(ro_disk.snapshot_id, Some(snapshot.identity.id));
+    assert_eq!(ro_disk.size, snapshot.size);
+    assert_eq!(
+        ro_disk.state,
+        DiskState::Detached,
+        "read-only disks should be created in the detached state, ready for \
+         use."
+    );
+    assert!(
+        matches!(ro_disk.disk_type, DiskType::Distributed),
+        "read-only disks can only be distributed, but got: {:?}",
+        ro_disk.disk_type
+    );
+
+    // And, just to check, let's also make a read/write disk from the snapshot,
+    // and assert that it is *not* read-only.
+    let rw_disk = resource_helpers::create_disk_from_snapshot(
+        client,
+        PROJECT_NAME,
+        "rw-disk-from-snap",
+        &snapshot,
+        false,
+    )
+    .await;
+
+    assert!(!rw_disk.read_only);
+    assert_eq!(rw_disk.snapshot_id, Some(snapshot.identity.id));
+    assert_eq!(rw_disk.size, snapshot.size);
+}
+
+#[nexus_test]
+async fn test_create_read_only_disk_from_image(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+    DiskTest::new(&cptestctx).await;
+    create_project_and_pool(client).await;
+
+    // Define a global image.
+    let image = {
+        // We'll do this ourselves by snapshotting a blank disk, rather than
+        // reusing `YouCanBootAnythingYouLikeAsLongAsItsAlpine` as the other
+        // tests do, because the disk created from the image must be >= 1GiB,
+        // and alpine is teensy. Whatever, we're not trying to boot from it.
+        //
+        // We'll pretend it's my hobby OS, because I thought that would be
+        // funny.
+        let base_disk_name = "mycelium-disk";
+        resource_helpers::create_disk(&client, PROJECT_NAME, base_disk_name)
+            .await;
+        let base_disk = disk_get(client, &get_disk_url(base_disk_name)).await;
+        assert_eq!(base_disk.state, DiskState::Detached);
+
+        // Create a snapshot of the base disk.
+        let snap_for_img_name = "mycelium-snap";
+        let snap_for_img = resource_helpers::create_snapshot(
+            client,
+            PROJECT_NAME,
+            base_disk_name,
+            snap_for_img_name,
+        )
+        .await;
+
+        // Finally, create the image.
+        resource_helpers::create_project_image_from_snapshot(
+            client,
+            PROJECT_NAME,
+            "mycelium",
+            snap_for_img.identity.id,
+        )
+        .await
+    };
+
+    // Create a read-only disk from the image
+    let ro_disk = resource_helpers::create_disk_from_image(
+        client,
+        PROJECT_NAME,
+        "ro-disk-from-img",
+        &image,
+        true,
+    )
+    .await;
+
+    assert!(ro_disk.read_only);
+    assert_eq!(ro_disk.image_id, Some(image.identity.id));
+    assert_eq!(ro_disk.snapshot_id, None);
+    assert_eq!(ro_disk.size, image.size);
+    assert_eq!(
+        ro_disk.state,
+        DiskState::Detached,
+        "read-only disks should be created in the detached state, ready for \
+         use."
+    );
+    assert!(
+        matches!(ro_disk.disk_type, DiskType::Distributed),
+        "read-only disks can only be distributed, but got: {:?}",
+        ro_disk.disk_type
+    );
+
+    // And, just to check, let's also make a read/write disk from the same
+    // base image, and assert that it is *not* read-only.
+    let rw_disk = resource_helpers::create_disk_from_image(
+        client,
+        PROJECT_NAME,
+        "rw-disk-from-img",
+        &image,
+        false,
+    )
+    .await;
+
+    assert!(!rw_disk.read_only);
+    assert_eq!(rw_disk.image_id, Some(image.identity.id));
+    assert_eq!(rw_disk.snapshot_id, None);
+    assert_eq!(rw_disk.size, image.size);
+}
+
+#[nexus_test]
+async fn test_cannot_snapshot_read_only_disk(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+    DiskTest::new(&cptestctx).await;
+    create_project_and_pool(client).await;
+    let disks_url = get_disks_url();
+
+    // Define an image
+    let image = create_project_image(client, PROJECT_NAME, "not-alpine").await;
+
+    // Create a base disk from this image, which we will then create a snapshot
+    // from in order to create our read-only disk from that snapshot.
+    let disk_size = ByteCount::from_gibibytes_u32(2);
+    let base_disk_name = "base-disk";
+    let base_disk = disk::DiskCreate {
+        identity: IdentityMetadataCreateParams {
+            name: base_disk_name.parse().unwrap(),
+            description: String::from("sells rainsticks"),
+        },
+        disk_backend: disk::DiskBackend::Distributed {
+            disk_source: disk::DiskSource::Image {
+                image_id: image.identity.id,
+                read_only: false,
+            },
+        },
+        size: disk_size,
+    };
+
+    NexusRequest::new(
+        RequestBuilder::new(client, Method::POST, &disks_url)
+            .body(Some(&base_disk))
+            .expect_status(Some(StatusCode::CREATED)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute_and_parse_unwrap::<Disk>()
+    .await;
+
+    // Assert the base disk is detached
+    let base_disk = disk_get(client, &get_disk_url(base_disk_name)).await;
+    assert_eq!(base_disk.state, DiskState::Detached);
+
+    // Create a snapshot of the base disk.
+    let snapshot = resource_helpers::create_snapshot(
+        client,
+        PROJECT_NAME,
+        base_disk_name,
+        "ro-snapshot",
+    )
+    .await;
+    assert_eq!(snapshot.disk_id, base_disk.identity.id);
+    assert_eq!(snapshot.size, base_disk.size);
+
+    // Okay, now make a read-only disk out of that snapshot.
+    let ro_disk = resource_helpers::create_disk_from_snapshot(
+        client,
+        PROJECT_NAME,
+        "ro-disk-from-snap",
+        &snapshot,
+        true,
+    )
+    .await;
+
+    assert!(ro_disk.read_only);
+
+    // Now try to take a snapshot of the read-only disk. It should fail with a
+    // 400.
+    object_create_error(
+        client,
+        &format!("/v1/snapshots?project={}", PROJECT_NAME),
+        &snapshot::SnapshotCreate {
+            identity: IdentityMetadataCreateParams {
+                name: "will-not-work".parse().unwrap(),
+                description: String::from("no thanks"),
+            },
+            disk: ro_disk.identity.name.clone().try_into().unwrap(),
+        },
+        http::StatusCode::BAD_REQUEST,
+    )
+    .await;
+}
+
+/// Tests that multiple read-only disks created from the same underlying
+/// snapshot (or image) receive VCRs with unique UUIDs, so that the Crucible
+/// upstairs instances for the two read-only disks can co-exist peacefully.
+#[nexus_test]
+async fn test_read_only_disk_different_vcr(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+    DiskTest::new(&cptestctx).await;
+    create_project_and_pool(client).await;
+    let disks_url = get_disks_url();
+
+    // Create a base blank disk, which we will then create a snapshot from in
+    // order to create our read-only disk from that snapshot.
+
+    let disk_size = ByteCount::from_gibibytes_u32(2);
+    let base_disk_name = "base-disk";
+    let base_disk = disk::DiskCreate {
+        identity: IdentityMetadataCreateParams {
+            name: base_disk_name.parse().unwrap(),
+            description: String::from("sells rainsticks"),
+        },
+        disk_backend: disk::DiskBackend::Distributed {
+            disk_source: disk::DiskSource::Blank {
+                block_size: disk::BlockSize::try_from(512).unwrap(),
+            },
+        },
+        size: disk_size,
+    };
+
+    let base_disk = NexusRequest::new(
+        RequestBuilder::new(client, Method::POST, &disks_url)
+            .body(Some(&base_disk))
+            .expect_status(Some(StatusCode::CREATED)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute_and_parse_unwrap::<Disk>()
+    .await;
+
+    // Create a snapshot of the base disk.
+    let snapshot = resource_helpers::create_snapshot(
+        client,
+        PROJECT_NAME,
+        base_disk_name,
+        "ro-snapshot",
+    )
+    .await;
+    assert_eq!(snapshot.disk_id, base_disk.identity.id);
+    assert_eq!(snapshot.size, base_disk.size);
+
+    // Okay, now make two read-only disks out of that snapshot.
+    let ro_disk_1 = resource_helpers::create_disk_from_snapshot(
+        client,
+        PROJECT_NAME,
+        "ro-disk-from-snap-1",
+        &snapshot,
+        true,
+    )
+    .await;
+
+    let ro_disk_2 = resource_helpers::create_disk_from_snapshot(
+        client,
+        PROJECT_NAME,
+        "ro-disk-from-snap-2",
+        &snapshot,
+        true,
+    )
+    .await;
+
+    assert!(ro_disk_1.read_only);
+    assert!(ro_disk_2.read_only);
+
+    assert_eq!(ro_disk_1.snapshot_id, Some(snapshot.identity.id));
+    assert_eq!(ro_disk_2.snapshot_id, Some(snapshot.identity.id));
+
+    // Ensure the VCRs for each read-only disk are different
+
+    let nexus = &cptestctx.server.server_context().nexus;
+    let datastore = nexus.datastore();
+    let opctx =
+        OpContext::for_tests(cptestctx.logctx.log.new(o!()), datastore.clone());
+
+    let ro_db_disk_1 =
+        get_crucible_disk(datastore, &opctx, ro_disk_1.identity.id).await;
+    let ro_db_disk_2 =
+        get_crucible_disk(datastore, &opctx, ro_disk_2.identity.id).await;
+
+    let ro_db_volume_1 = datastore
+        .volume_get(ro_db_disk_1.volume_id())
+        .await
+        .expect("volume_get without error")
+        .expect("volume exists");
+
+    let vcr_1: VolumeConstructionRequest =
+        serde_json::from_str(ro_db_volume_1.data()).expect("valid VCR");
+
+    let ro_db_volume_2 = datastore
+        .volume_get(ro_db_disk_2.volume_id())
+        .await
+        .expect("volume_get without error")
+        .expect("volume exists");
+
+    let vcr_2: VolumeConstructionRequest =
+        serde_json::from_str(ro_db_volume_2.data()).expect("valid VCR");
+
+    // Gather the unique IDs present in the volumes, and ensure there is no
+    // overlap.
+    fn gather_ids(ids: &mut HashSet<Uuid>, vcr: &VolumeConstructionRequest) {
+        let mut parts: VecDeque<&VolumeConstructionRequest> = VecDeque::new();
+        parts.push_back(&vcr);
+
+        while let Some(vcr_part) = parts.pop_front() {
+            match vcr_part {
+                VolumeConstructionRequest::Volume {
+                    sub_volumes,
+                    read_only_parent,
+                    ..
+                } => {
+                    // Do not insert the volume's ID as that will not be used
+                    // when constructing upstairs, and this test is specifically
+                    // trying to catch when upstairs IDs are reused.
+
+                    for sub_volume in sub_volumes {
+                        parts.push_back(sub_volume);
+                    }
+
+                    if let Some(read_only_parent) = read_only_parent {
+                        parts.push_back(read_only_parent);
+                    }
+                }
+
+                VolumeConstructionRequest::Region { opts, .. } => {
+                    if !ids.insert(opts.id) {
+                        // Panic if there is ID reuse in different region sets
+                        // in the same VCR
+                        panic!(
+                            "ID {} used in more than one region set!",
+                            opts.id
+                        );
+                    }
+                }
+
+                VolumeConstructionRequest::Url { .. }
+                | VolumeConstructionRequest::File { .. } => {
+                    panic!("should not be constructing these anymore");
+                }
+            }
+        }
+    }
+
+    let mut volume_1_ids = HashSet::new();
+    gather_ids(&mut volume_1_ids, &vcr_1);
+
+    let mut volume_2_ids = HashSet::new();
+    gather_ids(&mut volume_2_ids, &vcr_2);
+
+    assert_eq!(volume_1_ids.intersection(&volume_2_ids).count(), 0);
+}
+
 async fn disk_get(client: &ClientTestContext, disk_url: &str) -> Disk {
     NexusRequest::object_get(client, disk_url)
         .authn_as(AuthnMode::PrivilegedUser)
@@ -2757,7 +3187,7 @@ async fn disk_post(
 ) -> Disk {
     NexusRequest::new(
         RequestBuilder::new(client, Method::POST, url)
-            .body(Some(&params::DiskPath { disk: disk_name.into() }))
+            .body(Some(&path_params::DiskPath { disk: disk_name.into() }))
             .expect_status(Some(StatusCode::ACCEPTED)),
     )
     .authn_as(AuthnMode::PrivilegedUser)

@@ -42,6 +42,7 @@ mod downstairs;
 pub mod ereport;
 mod ereporter_type;
 mod external_ip;
+mod external_subnet;
 pub mod fm;
 mod generation;
 mod identity_provider;
@@ -192,6 +193,7 @@ pub use downstairs::*;
 pub use ereport::Ereport;
 pub use ereporter_type::*;
 pub use external_ip::*;
+pub use external_subnet::*;
 pub use fm::{SitrepMetadata, SitrepVersion};
 pub use generation::*;
 pub use identity_provider::*;
@@ -463,9 +465,7 @@ pub trait DatabaseString: Sized {
 }
 
 use anyhow::anyhow;
-use nexus_types::external_api::shared::FleetRole;
-use nexus_types::external_api::shared::ProjectRole;
-use nexus_types::external_api::shared::SiloRole;
+use nexus_types::external_api::policy::{FleetRole, ProjectRole, SiloRole};
 use std::borrow::Cow;
 
 impl DatabaseString for FleetRole {

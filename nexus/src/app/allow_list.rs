@@ -7,8 +7,7 @@
 //! Nexus methods for operating on source IP allowlists.
 
 use nexus_db_queries::context::OpContext;
-use nexus_types::external_api::params;
-use nexus_types::external_api::views::AllowList;
+use nexus_types::external_api::system;
 use omicron_common::api::external;
 use omicron_common::api::external::Error;
 use std::net::IpAddr;
@@ -20,11 +19,11 @@ impl super::Nexus {
     pub async fn allow_list_view(
         &self,
         opctx: &OpContext,
-    ) -> Result<AllowList, Error> {
+    ) -> Result<system::AllowList, Error> {
         self.db_datastore
             .allow_list_view(opctx)
             .await
-            .and_then(AllowList::try_from)
+            .and_then(system::AllowList::try_from)
     }
 
     /// Upsert the allowlist of source IPs that can reach user-facing services.
@@ -33,8 +32,8 @@ impl super::Nexus {
         opctx: &OpContext,
         remote_addr: IpAddr,
         server_kind: ServerKind,
-        params: params::AllowListUpdate,
-    ) -> Result<AllowList, Error> {
+        params: system::AllowListUpdate,
+    ) -> Result<system::AllowList, Error> {
         if let external::AllowedSourceIps::List(list) = &params.allowed_ips {
             // Size limits on the allowlist.
             const MAX_ALLOWLIST_LENGTH: usize = 1000;
@@ -93,7 +92,7 @@ impl super::Nexus {
             .db_datastore
             .allow_list_upsert(opctx, params.allowed_ips.clone())
             .await
-            .and_then(AllowList::try_from)?;
+            .and_then(system::AllowList::try_from)?;
 
         // Notify the sled-agents of the updated firewall rules.
         //

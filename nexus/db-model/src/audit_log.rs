@@ -11,7 +11,7 @@ use chrono::{DateTime, Utc};
 use diesel::prelude::*;
 use ipnetwork::IpNetwork;
 use nexus_db_schema::schema::{audit_log, audit_log_complete};
-use nexus_types::external_api::views;
+use nexus_types::external_api::audit;
 use omicron_common::api::external::Error;
 use omicron_uuid_kinds::BuiltInUserUuid;
 use omicron_uuid_kinds::GenericUuid;
@@ -38,7 +38,10 @@ pub struct AuditLogEntryInitParams {
     pub source_ip: IpAddr,
     pub user_agent: Option<String>,
     pub actor: AuditLogActor,
-    pub auth_method: Option<String>,
+    pub auth_method: Option<AuditLogAuthMethod>,
+    /// ID of the credential used to authenticate (session ID, access token ID,
+    /// or SCIM token ID). Not set for unauthenticated requests or spoof auth.
+    pub credential_id: Option<Uuid>,
 }
 
 impl_enum_type!(
@@ -86,6 +89,54 @@ impl_enum_type!(
     Timeout => b"timeout"
 );
 
+impl_enum_type!(
+    AuditLogAuthMethodEnum:
+
+    #[derive(
+        Clone,
+        Copy,
+        Debug,
+        AsExpression,
+        FromSqlRow,
+        Serialize,
+        Deserialize,
+        PartialEq,
+        Eq,
+    )]
+    pub enum AuditLogAuthMethod;
+
+    // Enum values
+    SessionCookie => b"session_cookie"
+    AccessToken => b"access_token"
+    ScimToken => b"scim_token"
+    Spoof => b"spoof"
+);
+
+impl From<AuditLogAuthMethod> for audit::AuthMethod {
+    fn from(m: AuditLogAuthMethod) -> Self {
+        match m {
+            AuditLogAuthMethod::SessionCookie => {
+                audit::AuthMethod::SessionCookie
+            }
+            AuditLogAuthMethod::AccessToken => audit::AuthMethod::AccessToken,
+            AuditLogAuthMethod::ScimToken => audit::AuthMethod::ScimToken,
+            AuditLogAuthMethod::Spoof => audit::AuthMethod::Spoof,
+        }
+    }
+}
+
+impl From<&nexus_types::authn::SchemeName> for AuditLogAuthMethod {
+    fn from(s: &nexus_types::authn::SchemeName) -> Self {
+        use nexus_types::authn::SchemeName;
+        match s {
+            SchemeName::SessionCookie => AuditLogAuthMethod::SessionCookie,
+            SchemeName::AccessToken => AuditLogAuthMethod::AccessToken,
+            SchemeName::ScimToken => AuditLogAuthMethod::ScimToken,
+            SchemeName::Spoof => AuditLogAuthMethod::Spoof,
+        }
+    }
+}
+
 #[derive(Queryable, Insertable, Selectable, Clone, Debug)]
 #[diesel(table_name = audit_log)]
 pub struct AuditLogEntryInit {
@@ -115,7 +166,11 @@ pub struct AuditLogEntryInit {
 
     /// API token or session cookie. Optional because it will not be defined
     /// on unauthenticated requests like login attempts.
-    pub auth_method: Option<String>,
+    pub auth_method: Option<AuditLogAuthMethod>,
+
+    /// ID of the credential used to authenticate (session ID, access token ID,
+    /// or SCIM token ID). Not set for unauthenticated requests or spoof auth.
+    pub credential_id: Option<Uuid>,
 }
 
 impl From<AuditLogEntryInitParams> for AuditLogEntryInit {
@@ -128,6 +183,7 @@ impl From<AuditLogEntryInitParams> for AuditLogEntryInit {
             user_agent,
             actor,
             auth_method,
+            credential_id,
         } = params;
 
         let (actor_id, actor_silo_id, actor_kind) = match actor {
@@ -161,6 +217,7 @@ impl From<AuditLogEntryInitParams> for AuditLogEntryInit {
             source_ip: source_ip.into(),
             user_agent,
             auth_method,
+            credential_id,
         }
     }
 }
@@ -182,20 +239,24 @@ pub struct AuditLogEntry {
     /// Actor kind indicating builtin user, silo user, or unauthenticated
     pub actor_kind: AuditLogActorKind,
 
-    /// The name of the authn scheme used. None if unauthenticated.
-    pub auth_method: Option<String>,
-
     // Fields that are not present on init
     /// Time log entry was completed with info about result of operation
     pub time_completed: DateTime<Utc>,
-    /// Result kind indicating success, error, or timeout
-    pub result_kind: AuditLogResultKind,
     /// Optional because not present for timeout result
     pub http_status_code: Option<SqlU16>,
     /// Optional even if result is an error
     pub error_code: Option<String>,
     /// Always present if result is an error
     pub error_message: Option<String>,
+    /// Result kind indicating success, error, or timeout
+    pub result_kind: AuditLogResultKind,
+
+    /// The authn scheme used. None if unauthenticated.
+    pub auth_method: Option<AuditLogAuthMethod>,
+
+    /// ID of the credential used to authenticate (session ID, access token ID,
+    /// or SCIM token ID). Not set for unauthenticated requests or spoof auth.
+    pub credential_id: Option<Uuid>,
 }
 
 /// Struct that we can use as a kind of constructor arg for our actual audit
@@ -267,7 +328,7 @@ impl From<AuditLogCompletion> for AuditLogCompletionUpdate {
 
 /// None of the error cases here should be possible given the DB constraints and
 /// the way we construct these rows when writing them to the database.
-impl TryFrom<AuditLogEntry> for views::AuditLogEntry {
+impl TryFrom<AuditLogEntry> for audit::AuditLogEntry {
     type Error = Error;
 
     fn try_from(entry: AuditLogEntry) -> Result<Self, Self::Error> {
@@ -286,7 +347,7 @@ impl TryFrom<AuditLogEntry> for views::AuditLogEntry {
                             "UserBuiltin actor missing actor_id",
                         )
                     })?;
-                    views::AuditLogEntryActor::UserBuiltin {
+                    audit::AuditLogEntryActor::UserBuiltin {
                         user_builtin_id: BuiltInUserUuid::from_untyped_uuid(
                             user_builtin_id,
                         ),
@@ -301,7 +362,7 @@ impl TryFrom<AuditLogEntry> for views::AuditLogEntry {
                             "SiloUser actor missing actor_silo_id",
                         )
                     })?;
-                    views::AuditLogEntryActor::SiloUser {
+                    audit::AuditLogEntryActor::SiloUser {
                         silo_user_id: SiloUserUuid::from_untyped_uuid(
                             silo_user_id,
                         ),
@@ -314,13 +375,13 @@ impl TryFrom<AuditLogEntry> for views::AuditLogEntry {
                             "Scim actor missing actor_silo_id",
                         )
                     })?;
-                    views::AuditLogEntryActor::Scim { silo_id }
+                    audit::AuditLogEntryActor::Scim { silo_id }
                 }
                 AuditLogActorKind::Unauthenticated => {
-                    views::AuditLogEntryActor::Unauthenticated
+                    audit::AuditLogEntryActor::Unauthenticated
                 }
             },
-            auth_method: entry.auth_method,
+            auth_method: entry.auth_method.map(Into::into),
             time_completed: entry.time_completed,
             result: match entry.result_kind {
                 AuditLogResultKind::Success => {
@@ -328,7 +389,7 @@ impl TryFrom<AuditLogEntry> for views::AuditLogEntry {
                         .ok_or_else(|| Error::internal_error(
                             "Audit log success result without http_status_code",
                         ))?;
-                    views::AuditLogEntryResult::Success {
+                    audit::AuditLogEntryResult::Success {
                         http_status_code: http_status_code.0,
                     }
                 }
@@ -343,16 +404,17 @@ impl TryFrom<AuditLogEntry> for views::AuditLogEntry {
                         .ok_or_else(|| Error::internal_error(
                             "Audit log error result without http_status_code",
                         ))?;
-                    views::AuditLogEntryResult::Error {
+                    audit::AuditLogEntryResult::Error {
                         http_status_code: http_status_code.0,
                         error_code: entry.error_code,
                         error_message,
                     }
                 }
                 AuditLogResultKind::Timeout => {
-                    views::AuditLogEntryResult::Unknown
+                    audit::AuditLogEntryResult::Unknown
                 }
             },
+            credential_id: entry.credential_id,
         })
     }
 }

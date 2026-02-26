@@ -4,18 +4,24 @@
 
 //! Multicast-specific datastore test helpers.
 
-use std::net::Ipv4Addr;
+use std::net::{IpAddr, Ipv4Addr};
+
+/// Empty source IPs slice for passing to functions that take `Option<&[IpAddr]>`.
+///
+/// Use `Some(NO_SOURCE_IPS)` to explicitly clear source IPs (switch to ASM),
+/// vs `None` which preserves existing source IPs on reactivation.
+pub const NO_SOURCE_IPS: &[IpAddr] = &[];
 
 use uuid::Uuid;
 
-use nexus_db_model::MulticastGroupState;
 use nexus_db_model::{
     IncompleteIpPoolResource, IncompleteVpc, IpPool, IpPoolReservationType,
     IpPoolResourceType, IpVersion,
 };
-use nexus_types::external_api::params;
-use nexus_types::external_api::shared::{IpRange, Ipv4Range};
+use nexus_types::external_api::vpc;
 use nexus_types::identity::Resource;
+use nexus_types::multicast::MulticastGroupCreate;
+use omicron_common::address::{IpRange, Ipv4Range};
 use omicron_common::api::external::{IdentityMetadataCreateParams, LookupType};
 use omicron_uuid_kinds::{GenericUuid, MulticastGroupUuid, SledUuid};
 
@@ -67,7 +73,7 @@ pub async fn create_test_setup_with_range(
     let project_id = project.id();
 
     // Create VPC for multicast groups
-    let vpc_params = params::VpcCreate {
+    let vpc_params = vpc::VpcCreate {
         identity: IdentityMetadataCreateParams {
             name: format!("{}-vpc", project_name).parse().unwrap(),
             description: format!("Test VPC for project {}", project_name),
@@ -163,14 +169,12 @@ pub async fn create_test_setup_with_range(
 pub async fn create_test_group(
     opctx: &OpContext,
     datastore: &DataStore,
-    setup: &TestSetup,
     group_name: &str,
     multicast_ip: &str,
 ) -> nexus_db_model::ExternalMulticastGroup {
     create_test_group_with_state(
         opctx,
         datastore,
-        setup,
         group_name,
         multicast_ip,
         false,
@@ -182,33 +186,31 @@ pub async fn create_test_group(
 pub async fn create_test_group_with_state(
     opctx: &OpContext,
     datastore: &DataStore,
-    setup: &TestSetup,
     group_name: &str,
     multicast_ip: &str,
     make_active: bool,
 ) -> nexus_db_model::ExternalMulticastGroup {
-    let params = params::MulticastGroupCreate {
+    let params = MulticastGroupCreate {
         identity: IdentityMetadataCreateParams {
             name: group_name.parse().unwrap(),
-            description: format!("Test group: {}", group_name),
+            description: format!("Test group: {group_name}"),
         },
         multicast_ip: Some(multicast_ip.parse().unwrap()),
-        source_ips: None,
-        pool: None,
         mvlan: None,
+        has_sources: false,
+        ip_version: None,
     };
 
     let group = datastore
-        .multicast_group_create(&opctx, &params, Some(setup.authz_pool.clone()))
+        .multicast_group_create(&opctx, &params)
         .await
         .expect("Should create multicast group");
 
     if make_active {
         datastore
-            .multicast_group_set_state(
+            .multicast_group_set_active(
                 opctx,
                 MulticastGroupUuid::from_untyped_uuid(group.id()),
-                MulticastGroupState::Active,
             )
             .await
             .expect("Should transition group to 'Active' state");

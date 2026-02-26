@@ -58,6 +58,7 @@ pub(crate) fn api_to_dpd_port_settings(
                 addrs: settings
                     .addresses
                     .iter()
+                    .filter(|a| !a.address.addr().is_unspecified())
                     .map(|a| a.address.addr())
                     .collect(),
             },

@@ -139,13 +139,16 @@ pub enum Error {
     #[error("Could not find kstat with the expected name")]
     NoSuchKstat,
 
-    #[error("Kstat does not have the expected data type")]
+    #[error(
+        "Kstat does not have the expected data type: \
+         expected {expected:?} but found {found:?}"
+    )]
     UnexpectedDataType { expected: NamedType, found: NamedType },
 
     #[error("Expected a named kstat")]
     ExpectedNamedKstat,
 
-    #[error("Duplicate target instance")]
+    #[error("Duplicate target instance: {target_name}")]
     DuplicateTarget {
         target_name: String,
         fields: BTreeMap<String, FieldValue>,
@@ -176,7 +179,11 @@ pub enum Error {
     Expired(Expiration),
 
     #[error("Expired after unsucessfull collections for {duration:?}")]
-    ExpiredAfterDuration { duration: Duration, error: Box<Error> },
+    ExpiredAfterDuration {
+        duration: Duration,
+        #[source]
+        error: Box<Error>,
+    },
 }
 
 /// Type alias for a list of kstats.

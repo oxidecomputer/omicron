@@ -7,7 +7,7 @@ use chrono::{DateTime, Utc};
 use db_macros::Resource;
 use diesel::sql_types;
 use nexus_db_schema::schema::router_route;
-use nexus_types::external_api::params;
+use nexus_types::external_api::vpc;
 use nexus_types::identity::Resource;
 use omicron_common::api::external;
 use std::borrow::Cow;
@@ -92,7 +92,7 @@ impl RouterRoute {
         route_id: Uuid,
         vpc_router_id: Uuid,
         kind: external::RouterRouteKind,
-        params: params::RouterRouteCreate,
+        params: vpc::RouterRouteCreate,
     ) -> Self {
         let identity = RouterRouteIdentity::new(route_id, params.identity);
         Self {
@@ -217,8 +217,8 @@ impl RouterRouteUpdate {
     }
 }
 
-impl From<params::RouterRouteUpdate> for RouterRouteUpdate {
-    fn from(params: params::RouterRouteUpdate) -> Self {
+impl From<vpc::RouterRouteUpdate> for RouterRouteUpdate {
+    fn from(params: vpc::RouterRouteUpdate) -> Self {
         Self {
             name: params.identity.name.map(Name),
             description: params.identity.description,

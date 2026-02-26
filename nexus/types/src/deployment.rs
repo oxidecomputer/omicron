@@ -12,7 +12,7 @@
 //! nexus/db-model, but nexus/reconfigurator/planning does not currently know
 //! about nexus/db-model and it's convenient to separate these concerns.)
 
-use crate::external_api::views::SledState;
+use crate::external_api::sled::SledState;
 use crate::internal_api::params::DnsConfigParams;
 use crate::inventory::Collection;
 pub use crate::inventory::SourceNatConfigGeneric;
@@ -28,8 +28,10 @@ use iddqd::IdOrdMap;
 use iddqd::id_ord_map::Entry;
 use iddqd::id_ord_map::RefMut;
 use iddqd::id_upcast;
+use ipnet::IpAdd;
 use omicron_common::address::Ipv6Subnet;
 use omicron_common::address::SLED_PREFIX;
+use omicron_common::address::SLED_RESERVED_ADDRESSES;
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::Generation;
 use omicron_common::api::external::TufArtifactMeta;
@@ -849,6 +851,13 @@ pub enum BlueprintExpungedZoneAccessReason {
     /// new producers or if it has any assigned producers.
     OximeterExpungeAndReassignProducers,
 
+    /// The planner must compare expunged zones against inventory to transition
+    /// them to "ready for cleanup".
+    ///
+    /// The planner does not need to account for this when pruning zones.
+    /// (Moving them to "ready for cleanup" is a _prerequisite_ for pruning.)
+    PlannerCheckReadyForCleanup,
+
     // --------------------------------------------------------------------
     // Catch-all variants for non-production callers. The planner does not need
     // to account for these when pruning.
@@ -859,6 +868,10 @@ pub enum BlueprintExpungedZoneAccessReason {
     /// Omdb allows support operators to poke at blueprint contents, including
     /// expunged zones.
     Omdb,
+
+    /// `reconfigurator-cli` allows manual blueprint changes, including
+    /// modifying expunged zones.
+    ReconfiguratorCli,
 
     /// Various unit and integration tests access expunged zones.
     Test,
@@ -1198,9 +1211,13 @@ impl fmt::Display for BlueprintDisplay<'_> {
 
         // Loop through all sleds and print details of their configs.
         for (sled_id, config) in sleds {
+            let last_allocated_ip = config.last_allocated_ip();
+
             let BlueprintSledConfig {
                 state,
                 subnet,
+                // covered by `last_allocated_ip` computed above
+                last_allocated_ip_subnet_offset: _,
                 sled_agent_generation,
                 disks,
                 datasets,
@@ -1211,10 +1228,12 @@ impl fmt::Display for BlueprintDisplay<'_> {
 
             // Report toplevel sled info
             writeln!(f, "\n  sled: {sled_id}")?;
-            let mut rows = Vec::new();
-            rows.push((STATE, state.to_string()));
-            rows.push((CONFIG_GENERATION, sled_agent_generation.to_string()));
-            rows.push((SUBNET, subnet.to_string()));
+            let mut rows = vec![
+                (STATE, state.to_string()),
+                (CONFIG_GENERATION, sled_agent_generation.to_string()),
+                (SUBNET, subnet.to_string()),
+                (LAST_ALLOCATED_IP, last_allocated_ip.to_string()),
+            ];
 
             if let Some(id) = remove_mupdate_override {
                 rows.push((WILL_REMOVE_MUPDATE_OVERRIDE, id.to_string()));
@@ -1314,6 +1333,21 @@ pub struct BlueprintSledConfig {
     pub state: SledState,
     pub subnet: Ipv6Subnet<SLED_PREFIX>,
 
+    /// Each sled is assigned an IPv6 /64 `subnet` (above). Currently, the
+    /// lowest /112 subnet within the sled subnet is reserved for control plane
+    /// services, and of that the lowest 32 IPs are reserved for special zones
+    /// (global zone, switch zone) and rack setup.
+    /// `last_allocated_ip_subnet_offset` therefore starts at 32 for new sleds,
+    /// and the planner chooses IP addresses for new zones by incrementing it
+    /// and taking that offset into `subnet`.
+    ///
+    /// Planning will fail if `last_allocated_ip_subnet_offset` reaches
+    /// its maximal value. This is very unlikely given current rates of updates
+    /// and IP assignments, but is well within the realm of "possible". Giving
+    /// Reconfigurator a larger chunk of IPs is tracked by
+    /// <https://github.com/oxidecomputer/omicron/issues/9534>.
+    pub last_allocated_ip_subnet_offset: LastAllocatedSubnetIpOffset,
+
     /// Generation number used when this type is converted into an
     /// `OmicronSledConfig` for use by sled-agent.
     ///
@@ -1333,6 +1367,10 @@ pub struct BlueprintSledConfig {
 }
 
 impl BlueprintSledConfig {
+    pub fn last_allocated_ip(&self) -> Ipv6Addr {
+        self.last_allocated_ip_subnet_offset.to_ip(self.subnet)
+    }
+
     /// Converts self into [`OmicronSledConfig`].
     ///
     /// This function is effectively a `From` implementation, but
@@ -1376,6 +1414,7 @@ impl BlueprintSledConfig {
                 .collect(),
             remove_mupdate_override: self.remove_mupdate_override,
             host_phase_2: self.host_phase_2.into(),
+            measurements: BTreeSet::new(),
         }
     }
 
@@ -1403,6 +1442,49 @@ impl BlueprintSledConfig {
     /// `Expunged`, false otherwise.
     pub fn are_all_zones_expunged(&self) -> bool {
         self.zones.iter().all(|c| c.disposition.is_expunged())
+    }
+}
+
+/// Offset stored within [`BlueprintSledConfig`] indicating the last IP
+/// Reconfigurator has allocated within that sled's subnet.
+///
+/// The inner value has a minimum of [`SLED_RESERVED_ADDRESSES`]; we treat all
+/// of those as "already allocated".
+#[derive(
+    Debug, Clone, Copy, Eq, PartialEq, JsonSchema, Serialize, Diffable,
+)]
+#[serde(transparent)]
+pub struct LastAllocatedSubnetIpOffset(u16);
+
+impl LastAllocatedSubnetIpOffset {
+    pub fn initial() -> Self {
+        Self(SLED_RESERVED_ADDRESSES)
+    }
+
+    /// Construct a new offset, enforcing our lower bound of
+    /// [`SLED_RESERVED_ADDRESSES`].
+    pub fn new(offset: u16) -> Self {
+        let offset = u16::max(offset, SLED_RESERVED_ADDRESSES);
+        Self(offset)
+    }
+
+    /// Convert this offset into the `offset`'th IP in `subnet`.
+    pub fn to_ip(self, subnet: Ipv6Subnet<SLED_PREFIX>) -> Ipv6Addr {
+        subnet.net().prefix().saturating_add(u128::from(self.0))
+    }
+
+    pub fn into_u16(self) -> u16 {
+        self.0
+    }
+}
+
+impl<'de> Deserialize<'de> for LastAllocatedSubnetIpOffset {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let inner = u16::deserialize(deserializer)?;
+        Ok(LastAllocatedSubnetIpOffset::new(inner))
     }
 }
 
@@ -1559,12 +1641,11 @@ impl BlueprintZoneDisposition {
     /// Always returns true.
     ///
     /// This is intended for use with methods that take a filtering closure
-    /// operating on a `BlueprintZoneDisposition` (e.g.,
-    /// `Blueprint::all_omicron_zones()`), allowing callers to make it clear
-    /// they accept any disposition via
+    /// operating on a `BlueprintZoneDisposition`, allowing callers to make it
+    /// clear they accept any disposition via
     ///
     /// ```rust,ignore
-    /// blueprint.all_omicron_zones(BlueprintZoneDisposition::any)
+    /// blueprint.zones_with_filter(BlueprintZoneDisposition::any)
     /// ```
     pub fn any(self) -> bool {
         true

@@ -2,13 +2,13 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use crate::external_api::params;
 use db::model::{LoopbackAddress, Name};
 use nexus_db_lookup::LookupPath;
 use nexus_db_lookup::lookup;
 use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db;
+use nexus_types::external_api::networking;
 use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::{
     CreateResult, DataPageParams, DeleteResult, Error, ListResultVec,
@@ -35,7 +35,7 @@ impl super::Nexus {
     pub(crate) async fn loopback_address_create(
         self: &Arc<Self>,
         opctx: &OpContext,
-        params: params::LoopbackAddressCreate,
+        params: networking::LoopbackAddressCreate,
     ) -> CreateResult<LoopbackAddress> {
         opctx.authorize(authz::Action::CreateChild, &authz::FLEET).await?;
 

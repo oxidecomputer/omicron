@@ -41,11 +41,14 @@ declare_saga_actions! {
     DEALLOCATE_EXTERNAL_IP -> "no_result3" {
         + sid_deallocate_external_ip
     }
-    LEAVE_MULTICAST_GROUPS -> "no_result4" {
+    DETACH_EXTERNAL_SUBNETS -> "no_result4" {
+        + sid_detach_external_subnets
+    }
+    LEAVE_MULTICAST_GROUPS -> "no_result5" {
         + sid_leave_multicast_groups
     }
-    INSTANCE_DELETE_NAT -> "no_result5" {
-        + sid_delete_nat
+    INSTANCE_DELETE_DENDRITE_CONFIG -> "no_result6" {
+        + sid_delete_dendrite_config
     }
 }
 
@@ -65,10 +68,11 @@ impl NexusSaga for SagaInstanceDelete {
         _params: &Self::Params,
         mut builder: steno::DagBuilder,
     ) -> Result<steno::Dag, super::SagaInitError> {
-        builder.append(instance_delete_nat_action());
+        builder.append(instance_delete_dendrite_config_action());
         builder.append(instance_delete_record_action());
         builder.append(delete_network_interfaces_action());
         builder.append(deallocate_external_ip_action());
+        builder.append(detach_external_subnets_action());
         builder.append(leave_multicast_groups_action());
         Ok(builder.build()?)
     }
@@ -112,7 +116,7 @@ async fn sid_delete_network_interfaces(
     Ok(())
 }
 
-async fn sid_delete_nat(
+async fn sid_delete_dendrite_config(
     sagactx: NexusActionContext,
 ) -> Result<(), ActionError> {
     let params = sagactx.saga_params::<Params>()?;
@@ -202,13 +206,30 @@ async fn sid_deallocate_external_ip(
     Ok(())
 }
 
+async fn sid_detach_external_subnets(
+    sagactx: NexusActionContext,
+) -> Result<(), ActionError> {
+    let osagactx = sagactx.user_data();
+    let params = sagactx.saga_params::<Params>()?;
+    let opctx = crate::context::op_context_for_saga_action(
+        &sagactx,
+        &params.serialized_authn,
+    );
+    osagactx
+        .datastore()
+        .instance_detach_external_subnets(&opctx, params.authz_instance.id())
+        .await
+        .map_err(ActionError::action_failed)?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod test {
     use crate::{
         app::saga::create_saga_dag,
         app::sagas::instance_create::test::verify_clean_slate,
         app::sagas::instance_delete::Params,
-        app::sagas::instance_delete::SagaInstanceDelete, external_api::params,
+        app::sagas::instance_delete::SagaInstanceDelete,
     };
     use dropshot::test_util::ClientTestContext;
     use nexus_db_lookup::LookupPath;
@@ -218,6 +239,8 @@ mod test {
     use nexus_test_utils::resource_helpers::create_disk;
     use nexus_test_utils::resource_helpers::create_project;
     use nexus_test_utils_macros::nexus_test;
+    use nexus_types::external_api::ip_pool::PoolSelector;
+    use nexus_types::external_api::{instance as instance_types, project};
     use nexus_types::identity::Resource;
     use omicron_common::address::IpVersion;
     use omicron_common::api::external::{
@@ -262,8 +285,8 @@ mod test {
     }
 
     // Helper for creating instance create parameters
-    fn new_instance_create_params() -> params::InstanceCreate {
-        params::InstanceCreate {
+    fn new_instance_create_params() -> instance_types::InstanceCreate {
+        instance_types::InstanceCreate {
             identity: IdentityMetadataCreateParams {
                 name: INSTANCE_NAME.parse().unwrap(),
                 description: "My instance".to_string(),
@@ -274,13 +297,16 @@ mod test {
             user_data: vec![],
             ssh_public_keys: Some(Vec::new()),
             network_interfaces:
-                params::InstanceNetworkInterfaceAttachment::DefaultDualStack,
-            external_ips: vec![params::ExternalIpCreate::Ephemeral {
-                pool: None,
-                ip_version: Some(IpVersion::V4),
+                instance_types::InstanceNetworkInterfaceAttachment::DefaultDualStack,
+            external_ips: vec![instance_types::ExternalIpCreate::Ephemeral {
+                pool_selector: PoolSelector::Auto {
+                    ip_version: Some(IpVersion::V4),
+                },
             }],
-            boot_disk: Some(params::InstanceDiskAttachment::Attach(
-                params::InstanceDiskAttach { name: DISK_NAME.parse().unwrap() },
+            boot_disk: Some(instance_types::InstanceDiskAttachment::Attach(
+                instance_types::InstanceDiskAttach {
+                    name: DISK_NAME.parse().unwrap(),
+                },
             )),
             cpu_platform: None,
             disks: Vec::new(),
@@ -324,12 +350,12 @@ mod test {
 
     async fn create_instance(
         cptestctx: &ControlPlaneTestContext,
-        params: params::InstanceCreate,
+        params: instance_types::InstanceCreate,
     ) -> db::model::Instance {
         let nexus = &cptestctx.server.server_context().nexus;
         let opctx = test_opctx(&cptestctx);
 
-        let project_selector = params::ProjectSelector {
+        let project_selector = project::ProjectSelector {
             project: PROJECT_NAME.to_string().try_into().unwrap(),
         };
         let project_lookup =

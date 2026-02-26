@@ -4,7 +4,3 @@
 
 pub mod console_api;
 pub(crate) mod http_entrypoints;
-
-pub(crate) use nexus_types::external_api::params;
-pub(crate) use nexus_types::external_api::shared;
-pub(crate) use nexus_types::external_api::views;

@@ -78,11 +78,12 @@ mod test {
     use nexus_types::deployment::BlueprintZoneImageSource;
     use nexus_types::deployment::BlueprintZoneType;
     use nexus_types::deployment::CockroachDbPreserveDowngrade;
+    use nexus_types::deployment::LastAllocatedSubnetIpOffset;
     use nexus_types::deployment::OmicronZoneExternalFloatingIp;
     use nexus_types::deployment::OximeterReadMode;
     use nexus_types::deployment::PendingMgsUpdates;
     use nexus_types::deployment::blueprint_zone_type;
-    use nexus_types::external_api::views::SledState;
+    use nexus_types::external_api::sled::SledState;
     use nexus_types::inventory::NetworkInterface;
     use nexus_types::inventory::NetworkInterfaceKind;
     use omicron_common::address::Ipv6Subnet;
@@ -164,6 +165,8 @@ mod test {
             BlueprintSledConfig {
                 state: SledState::Active,
                 subnet: Ipv6Subnet::new(Ipv6Addr::LOCALHOST),
+                last_allocated_ip_subnet_offset:
+                    LastAllocatedSubnetIpOffset::initial(),
                 sled_agent_generation: Generation::new(),
                 zones,
                 disks: IdOrdMap::new(),

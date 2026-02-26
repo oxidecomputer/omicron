@@ -4,8 +4,6 @@
 
 //! Test-only support code for testing MGS update planning.
 
-use std::collections::BTreeMap;
-
 use chrono::Utc;
 use gateway_client::types::PowerState;
 use gateway_client::types::RotState;
@@ -15,6 +13,7 @@ use gateway_client::types::SpState;
 use gateway_types::rot::RotSlot;
 use iddqd::IdOrdItem;
 use iddqd::IdOrdMap;
+use illumos_utils::svcs::SvcsInMaintenanceResult;
 use nexus_types::deployment::BlueprintArtifactVersion;
 use nexus_types::deployment::BlueprintHostPhase2DesiredContents;
 use nexus_types::deployment::ExpectedVersion;
@@ -41,16 +40,17 @@ use sled_agent_types::inventory::BootPartitionContents;
 use sled_agent_types::inventory::BootPartitionDetails;
 use sled_agent_types::inventory::ConfigReconcilerInventory;
 use sled_agent_types::inventory::ConfigReconcilerInventoryStatus;
-use sled_agent_types::inventory::HealthMonitorInventory;
 use sled_agent_types::inventory::HostPhase2DesiredSlots;
 use sled_agent_types::inventory::Inventory;
+use sled_agent_types::inventory::OmicronFileSourceResolverInventory;
 use sled_agent_types::inventory::OmicronSledConfig;
 use sled_agent_types::inventory::SledCpuFamily;
 use sled_agent_types::inventory::SledRole;
-use sled_agent_types::inventory::ZoneImageResolverInventory;
 use sled_hardware_types::COSMO_SLED_MODEL;
 use sled_hardware_types::GIMLET_SLED_MODEL;
 use sled_hardware_types::OxideSled;
+use std::collections::BTreeMap;
+use std::collections::BTreeSet;
 use tufaceous_artifact::ArtifactHash;
 use tufaceous_artifact::ArtifactKind;
 use tufaceous_artifact::ArtifactVersion;
@@ -1302,6 +1302,7 @@ impl<'a> TestBoardCollectionBuilder<'a> {
                     zones: IdOrdMap::new(),
                     remove_mupdate_override: None,
                     host_phase_2: HostPhase2DesiredSlots::current_contents(),
+                    measurements: BTreeSet::new(),
                 };
 
                 // The only sled-agent fields that matter for the purposes of
@@ -1368,9 +1369,12 @@ impl<'a> TestBoardCollectionBuilder<'a> {
                             ledgered_sled_config: Some(fake_sled_config),
                             reconciler_status:
                                 ConfigReconcilerInventoryStatus::NotYetRun,
-                            zone_image_resolver:
-                                ZoneImageResolverInventory::new_fake(),
-                            health_monitor: HealthMonitorInventory::new(),
+                            file_source_resolver:
+                                OmicronFileSourceResolverInventory::new_fake(),
+                            smf_services_in_maintenance: Ok(
+                                SvcsInMaintenanceResult::new(),
+                            ),
+                            reference_measurements: IdOrdMap::new(),
                         },
                     )
                     .unwrap();

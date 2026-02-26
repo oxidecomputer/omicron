@@ -12,6 +12,7 @@ use clickhouse_admin_types::keeper::ClickhouseKeeperClusterMembership;
 use gateway_client::types::RotState;
 use gateway_client::types::SpComponentCaboose;
 use gateway_client::types::SpState;
+use illumos_utils::svcs::SvcsInMaintenanceResult;
 use indexmap::IndexMap;
 use ipnet::Ipv6Net;
 use ipnet::Ipv6Subnets;
@@ -31,11 +32,11 @@ use nexus_types::deployment::SledDisk;
 use nexus_types::deployment::SledResources;
 use nexus_types::deployment::TargetReleaseDescription;
 use nexus_types::deployment::TufRepoPolicy;
-use nexus_types::external_api::views::PhysicalDiskPolicy;
-use nexus_types::external_api::views::PhysicalDiskState;
-use nexus_types::external_api::views::SledPolicy;
-use nexus_types::external_api::views::SledProvisionPolicy;
-use nexus_types::external_api::views::SledState;
+use nexus_types::external_api::physical_disk::PhysicalDiskPolicy;
+use nexus_types::external_api::physical_disk::PhysicalDiskState;
+use nexus_types::external_api::sled::SledPolicy;
+use nexus_types::external_api::sled::SledProvisionPolicy;
+use nexus_types::external_api::sled::SledState;
 use nexus_types::inventory::Caboose;
 use nexus_types::inventory::CabooseWhich;
 use nexus_types::inventory::PowerState;
@@ -61,17 +62,16 @@ use omicron_uuid_kinds::ZpoolUuid;
 use sled_agent_types::inventory::Baseboard;
 use sled_agent_types::inventory::ConfigReconcilerInventory;
 use sled_agent_types::inventory::ConfigReconcilerInventoryStatus;
-use sled_agent_types::inventory::HealthMonitorInventory;
 use sled_agent_types::inventory::Inventory;
 use sled_agent_types::inventory::InventoryDataset;
 use sled_agent_types::inventory::InventoryDisk;
 use sled_agent_types::inventory::InventoryZpool;
 use sled_agent_types::inventory::ManifestBootInventory;
 use sled_agent_types::inventory::MupdateOverrideBootInventory;
+use sled_agent_types::inventory::OmicronFileSourceResolverInventory;
 use sled_agent_types::inventory::OmicronSledConfig;
 use sled_agent_types::inventory::SledCpuFamily;
 use sled_agent_types::inventory::SledRole;
-use sled_agent_types::inventory::ZoneImageResolverInventory;
 use sled_agent_types::inventory::ZoneKind;
 use sled_hardware_types::BaseboardId;
 use sled_hardware_types::GIMLET_SLED_MODEL;
@@ -318,6 +318,18 @@ impl SystemDescription {
 
     pub fn target_internal_dns_zone_count(&self) -> usize {
         self.target_internal_dns_zone_count
+    }
+
+    pub fn set_target_oximeter_zone_count(
+        &mut self,
+        count: usize,
+    ) -> &mut Self {
+        self.target_oximeter_zone_count = count;
+        self
+    }
+
+    pub fn target_oximeter_zone_count(&self) -> usize {
+        self.target_oximeter_zone_count
     }
 
     pub fn external_ip_policy(&self) -> &ExternalIpPolicy {
@@ -683,6 +695,17 @@ impl SystemDescription {
         Ok(self)
     }
 
+    /// Set the measurement manifest for a sled from a provided `TufRepoDescription`.
+    pub fn sled_set_measurement_manifest(
+        &mut self,
+        sled_id: SledUuid,
+        boot_inventory: Result<ManifestBootInventory, String>,
+    ) -> anyhow::Result<&mut Self> {
+        let sled = self.get_sled_mut(sled_id)?;
+        sled.set_measurement_manifest(boot_inventory);
+        Ok(self)
+    }
+
     pub fn sled_sp_active_version(
         &self,
         sled_id: SledUuid,
@@ -867,33 +890,6 @@ impl SystemDescription {
     }
 
     pub fn set_target_release(
-        &mut self,
-        description: TargetReleaseDescription,
-    ) -> &mut Self {
-        // Create a new TufRepoPolicy by bumping the generation.
-        let new_repo = TufRepoPolicy {
-            target_release_generation: self
-                .tuf_repo
-                .target_release_generation
-                .next(),
-            description,
-        };
-
-        let _old_repo = self.set_tuf_repo_inner(new_repo);
-
-        // It's tempting to consider setting old_repo to the current tuf_repo,
-        // but that requires the invariant that old_repo is always the current
-        // target release and that an update isn't currently in progress. See
-        // https://github.com/oxidecomputer/omicron/issues/8056 for some
-        // discussion.
-        //
-        // We provide a method to set the old repo explicitly with these
-        // assumptions in mind: `set_target_release_and_old_repo`.
-
-        self
-    }
-
-    pub fn set_target_release_and_old_repo(
         &mut self,
         description: TargetReleaseDescription,
     ) -> &mut Self {
@@ -1473,8 +1469,10 @@ impl Sled {
                     ),
                 ),
                 // XXX: return something more reasonable here?
-                zone_image_resolver: ZoneImageResolverInventory::new_fake(),
-                health_monitor: HealthMonitorInventory::new(),
+                file_source_resolver:
+                    OmicronFileSourceResolverInventory::new_fake(),
+                smf_services_in_maintenance: Ok(SvcsInMaintenanceResult::new()),
+                reference_measurements: iddqd::IdOrdMap::new(),
             }
         };
 
@@ -1652,8 +1650,11 @@ impl Sled {
             ledgered_sled_config: inv_sled_agent.ledgered_sled_config.clone(),
             reconciler_status: inv_sled_agent.reconciler_status.clone(),
             last_reconciliation: inv_sled_agent.last_reconciliation.clone(),
-            zone_image_resolver: inv_sled_agent.zone_image_resolver.clone(),
-            health_monitor: HealthMonitorInventory::new(),
+            file_source_resolver: inv_sled_agent.file_source_resolver.clone(),
+            smf_services_in_maintenance: Ok(SvcsInMaintenanceResult::new()),
+            reference_measurements: inv_sled_agent
+                .reference_measurements
+                .clone(),
         };
 
         Sled {
@@ -1747,8 +1748,18 @@ impl Sled {
         boot_inventory: Result<ManifestBootInventory, String>,
     ) {
         self.inventory_sled_agent
-            .zone_image_resolver
+            .file_source_resolver
             .zone_manifest
+            .boot_inventory = boot_inventory;
+    }
+
+    fn set_measurement_manifest(
+        &mut self,
+        boot_inventory: Result<ManifestBootInventory, String>,
+    ) {
+        self.inventory_sled_agent
+            .file_source_resolver
+            .measurement_manifest
             .boot_inventory = boot_inventory;
     }
 
@@ -2045,7 +2056,7 @@ impl Sled {
         let prev = mem::replace(
             &mut self
                 .inventory_sled_agent
-                .zone_image_resolver
+                .file_source_resolver
                 .mupdate_override
                 .boot_override,
             inv,
