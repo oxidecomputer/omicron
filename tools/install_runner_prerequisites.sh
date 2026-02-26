@@ -112,7 +112,7 @@ function install_packages {
   if [[ "${HOST_OS}" == "SunOS" ]]; then
     packages=(
       'pkg:/package/pkg'
-      'library/postgresql-13'
+      'library/postgresql-18'
       'pkg-config'
       'brand/omicron1/tools'
       'library/libxmlsec1'
