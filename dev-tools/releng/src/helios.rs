@@ -12,6 +12,7 @@ use serde::Deserialize;
 use slog::Logger;
 use tokio::io::AsyncWriteExt;
 use tokio::io::BufWriter;
+use std::path::Path;
 
 use crate::HELIOS_PKGREPO;
 use crate::Jobs;
@@ -23,7 +24,7 @@ const MANIFEST_PATH: &str = "incorporation.p5m";
 const REPO_PATH: &str = "incorporation";
 pub const ARCHIVE_PATH: &str = "incorporation.p5p";
 
-pub const PUBLISHER: &str = "helios-dev";
+pub const PUBLISHER: &str = "helios";
 
 pub(crate) enum Action {
     Generate { version: String },
@@ -109,6 +110,26 @@ pub(crate) async fn push_incorporation_jobs(
     Ok(())
 }
 
+async fn parse_version_id<P: AsRef<Path>>(path: P) -> std::io::Result<u32> {
+    let contents = fs::read_to_string(path).await?;
+
+    let value = contents
+        .lines()
+        .find_map(|line| {
+            line.strip_prefix("VERSION_ID=").map(|v| v.trim_matches('"'))
+        })
+        .ok_or_else(|| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "VERSION_ID not found",
+            )
+        })?;
+
+    value
+        .parse::<u32>()
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))
+}
+
 async fn generate_incorporation_manifest(
     logger: Logger,
     path: Utf8PathBuf,
@@ -119,9 +140,11 @@ async fn generate_incorporation_manifest(
         fmri: String,
     }
 
+    let dashrev = parse_version_id("/etc/os-release").await?;
+
     let mut manifest = BufWriter::new(File::create(path).await?);
     let preamble = format!(
-        r#"set name=pkg.fmri value=pkg://{PUBLISHER}/{INCORP_NAME}@{version},5.11
+        r#"set name=pkg.fmri value=pkg://{PUBLISHER}/{INCORP_NAME}@{version}-{dashrev}.0,5.11
 set name=pkg.summary value="Incorporation to constrain software delivered in Omicron Release V{version} images"
 set name=info.classification value="org.opensolaris.category.2008:Meta Packages/Incorporations"
 set name=variant.opensolaris.zone value=global value=nonglobal
