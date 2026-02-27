@@ -60,7 +60,7 @@ pub mod v20;
 #[path = "remove_health_monitor_keep_checks/mod.rs"]
 pub mod v22;
 #[path = "add_zpool_health_to_inventory/mod.rs"]
-pub mod v23;
+pub mod v24;
 #[path = "add_switch_zone_operator_policy/mod.rs"]
 pub mod v3;
 #[path = "add_nexus_lockstep_port_to_inventory/mod.rs"]
