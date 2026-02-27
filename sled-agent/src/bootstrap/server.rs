@@ -157,8 +157,8 @@ pub enum StartError {
     #[error("Failed to bind sprocket server")]
     BindSprocketsServer(#[source] io::Error),
 
-    #[error("Failed to initialize lrtq node as learner: {0}")]
-    FailedLearnerInit(bootstore::NodeRequestError),
+    #[error("Failed to initialize lrtq node as learner")]
+    FailedLearnerInit(#[source] bootstore::NodeRequestError),
 }
 
 /// Server for the bootstrap agent.
