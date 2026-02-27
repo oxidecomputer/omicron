@@ -5327,121 +5327,12 @@ async fn query_crdb_views(
     rows.iter().map(|row| row.get::<_, String>(0)).collect()
 }
 
-/// Known exceptions where schema.rs intentionally differs from CRDB.
+/// Formats a list of items for expectorate comparison.
 ///
-/// These columns are NOT NULL in CRDB but Nullable in schema.rs.
-/// See comments in schema.rs: "This type isn't actually 'Nullable' - it's
-/// just handy to use the same type for insertion and querying."
-fn known_nullable_exceptions()
--> std::collections::HashSet<(&'static str, &'static str)> {
-    [
-        ("virtual_provisioning_collection", "time_modified"),
-        ("virtual_provisioning_resource", "time_modified"),
-    ]
-    .into_iter()
-    .collect()
-}
-
-/// Tables in schema.rs that do not correspond to a table or view in
-/// dbinit.sql. These are excluded from the comparison.
-const DIESEL_ONLY_TABLES: &[&str] = &[
-    // nat_version is a SEQUENCE in CRDB, not a table/view.
-    // It is represented as a table! macro in schema.rs for query purposes.
-    "nat_version",
-];
-
-/// Pre-existing column ordering mismatches between schema.rs and dbinit.sql.
-///
-/// These tables have columns in a different order in Diesel's `table!` macro
-/// compared to CRDB's `information_schema.columns` (ordered by
-/// `ordinal_position`). This is dangerous because Diesel's
-/// `#[derive(Queryable)]` (without `Selectable`) depends on column order.
-///
-/// Each entry should be fixed over time — for tables, this requires a
-/// migration that recreates the table with the correct column order (as was
-/// done in migration 229 for `console_session` and `device_access_token`).
-/// For views, the view definition's SELECT can simply be reordered.
-///
-/// If you fix an ordering mismatch, please remove the entry here.
-/// If you introduce a new mismatch, do NOT add it here — fix the drift
-/// instead.
-fn known_column_order_drift() -> std::collections::HashSet<&'static str> {
-    [
-        // --- Tables (require recreation migration to fix) ---
-        "bgp_config",
-        "bp_omicron_zone",
-        "disk",
-        "instance",
-        "inv_sled_agent",
-        "ip_pool",
-        "lldp_link_config",
-        "network_interface",
-        "oximeter",
-        "physical_disk",
-        "role_assignment",
-        "router_route",
-        "sled_underlay_subnet_allocation",
-        "vmm",
-        "vpc",
-        // --- Views (can fix by reordering the SELECT) ---
-        "bgp_peer_view",
-        "silo_utilization",
-        "sled_instance",
-    ]
-    .into_iter()
-    .collect()
-}
-
-/// Pre-existing mismatches between schema.rs and dbinit.sql.
-///
-/// These represent known drift that should be fixed over time. Each entry
-/// is a "table.column" string. When a mismatch is found for one of these,
-/// it is reported as a warning instead of causing test failure.
-///
-/// If you fix a mismatch, please remove the corresponding entry here.
-/// If you introduce a new mismatch, do NOT add it here — fix the drift
-/// instead.
-fn known_drift() -> std::collections::HashSet<&'static str> {
-    [
-        // --- Column existence mismatches ---
-        // Column in CRDB but not Diesel:
-        "external_subnet.first_address",
-        "external_subnet.last_address",
-        "inv_collection_error.rowid",
-        // --- Type mismatches (mostly CRDB nullable, Diesel non-nullable) ---
-        "bfd_session.mode",
-        "bgp_peer_view.min_ttl",
-        "internet_gateway_ip_address.address",
-        "internet_gateway_ip_address.internet_gateway_id",
-        "internet_gateway_ip_pool.internet_gateway_id",
-        "internet_gateway_ip_pool.ip_pool_id",
-        "inv_collection_error.message",
-        "inv_nvme_disk_firmware.slot1_is_read_only",
-        "inv_nvme_disk_firmware.slot_firmware_versions",
-        "multicast_group_member.source_ips",
-        "silo_group.user_provision_type",
-        "silo_user.user_provision_type",
-        "subnet_pool_member.first_address",
-        "subnet_pool_member.last_address",
-        "switch_port.port_name",
-        "switch_port.rack_id",
-        "switch_port.switch_location",
-        "switch_port_settings_bgp_peer_config.connect_retry",
-        "switch_port_settings_bgp_peer_config.delay_open",
-        "switch_port_settings_bgp_peer_config.hold_time",
-        "switch_port_settings_bgp_peer_config.idle_hold_time",
-        "switch_port_settings_bgp_peer_config.interface_name",
-        "switch_port_settings_bgp_peer_config.keepalive",
-        "switch_port_settings_bgp_peer_config.port_settings_id",
-        "switch_port_settings_interface_config.kind",
-        "switch_port_settings_interface_config.port_settings_id",
-        "switch_port_settings_link_config.mtu",
-        "switch_port_settings_link_config.speed",
-        "switch_port_settings_port_config.geometry",
-        "vmm.cpu_platform",
-    ]
-    .into_iter()
-    .collect()
+/// Each item on its own line, with a trailing newline. Empty input produces
+/// an empty string (which expectorate matches against an empty file).
+fn format_list(items: &[String]) -> String {
+    if items.is_empty() { String::new() } else { items.join("\n") + "\n" }
 }
 
 #[tokio::test]
@@ -5472,27 +5363,12 @@ async fn diesel_schema_matches_crdb_schema() {
             .collect();
 
     let mut errors: Vec<String> = Vec::new();
-    let mut warnings: Vec<String> = Vec::new();
-    let known = known_drift();
-    let mut known_triggered: std::collections::HashSet<&str> =
-        std::collections::HashSet::new();
-    let known_order = known_column_order_drift();
-    let mut known_order_triggered: std::collections::HashSet<&str> =
-        std::collections::HashSet::new();
-    let mut diesel_only_triggered: std::collections::HashSet<&str> =
-        std::collections::HashSet::new();
-    let nullable_exceptions = known_nullable_exceptions();
-    let mut nullable_exceptions_triggered: std::collections::HashSet<(
-        &str,
-        &str,
-    )> = std::collections::HashSet::new();
+    let mut nullable_exceptions: Vec<String> = Vec::new();
+    let mut column_order_drift: Vec<String> = Vec::new();
+    let mut known_drift: Vec<String> = Vec::new();
 
     // Check: every Diesel table should exist in CRDB.
     for diesel_table in diesel_tables.keys() {
-        if DIESEL_ONLY_TABLES.contains(diesel_table) {
-            diesel_only_triggered.insert(diesel_table);
-            continue;
-        }
         if !crdb_tables.contains_key(*diesel_table) {
             errors.push(format!(
                 "Table '{diesel_table}' exists in Diesel schema (schema.rs) \
@@ -5503,12 +5379,8 @@ async fn diesel_schema_matches_crdb_schema() {
 
     // For each table present in both, compare columns.
     for (table_name, diesel_cols) in &diesel_tables {
-        if DIESEL_ONLY_TABLES.contains(table_name) {
-            diesel_only_triggered.insert(table_name);
-            continue;
-        }
         let Some(crdb_cols) = crdb_tables.get(*table_name) else {
-            // Already reported above.
+            // Diesel-only table, already recorded above.
             continue;
         };
 
@@ -5522,30 +5394,8 @@ async fn diesel_schema_matches_crdb_schema() {
         for (col_name, diesel_type_name) in diesel_cols {
             let key = format!("{table_name}.{col_name}");
             let Some(crdb_col) = crdb_col_map.get(col_name) else {
-                if known.contains(key.as_str()) {
-                    known_triggered.insert(known.get(key.as_str()).unwrap());
-                    warnings.push(format!(
-                        "(known drift) {key}: column in Diesel but not CRDB",
-                    ));
-                } else {
-                    errors.push(format!(
-                        "{key}: column exists in Diesel \
-                         (schema.rs) but not in CRDB (dbinit.sql)",
-                    ));
-                }
+                known_drift.push(key.clone());
                 continue;
-            };
-
-            // Handle known nullable exceptions: schema.rs says Nullable
-            // but CRDB says NOT NULL. For these, we compare against the
-            // nullable version even though CRDB says NOT NULL.
-            let effective_nullable = if nullable_exceptions
-                .contains(&(*table_name, *col_name))
-            {
-                nullable_exceptions_triggered.insert((*table_name, *col_name));
-                true
-            } else {
-                crdb_col.is_nullable
             };
 
             let diesel_type = match normalize_diesel_type(diesel_type_name) {
@@ -5560,7 +5410,7 @@ async fn diesel_schema_matches_crdb_schema() {
 
             match expected_diesel_type(
                 &crdb_col.data_type,
-                effective_nullable,
+                crdb_col.is_nullable,
                 &crdb_col.udt_name,
                 &enum_map,
             ) {
@@ -5578,38 +5428,30 @@ async fn diesel_schema_matches_crdb_schema() {
                         diesel_type_matches_expected(&diesel_type, &crdb_type)
                     };
                     if !matches {
-                        if known.contains(key.as_str()) {
-                            known_triggered
-                                .insert(known.get(key.as_str()).unwrap());
-                            warnings.push(format!(
-                                "(known drift) {key}: type mismatch \
-                                 diesel={diesel_type} expected={crdb_type}",
-                            ));
-                        } else {
-                            errors.push(format!(
-                                "{key}: type mismatch\n  \
-                                 Diesel (schema.rs): {diesel_type}\n  \
-                                 Expected from CRDB: {crdb_type}\n  \
-                                 CRDB info: data_type={}, is_nullable={}, \
-                                 udt_name={}",
-                                crdb_col.data_type,
-                                crdb_col.is_nullable,
-                                crdb_col.udt_name,
-                            ));
+                        // Check if this is a nullable exception: CRDB
+                        // says NOT NULL but Diesel says Nullable, and
+                        // that explains the mismatch.
+                        if !is_view && !crdb_col.is_nullable {
+                            let expected_nullable = ColumnType {
+                                nullable: true,
+                                ..crdb_type.clone()
+                            };
+                            if diesel_type_matches_expected(
+                                &diesel_type,
+                                &expected_nullable,
+                            ) {
+                                nullable_exceptions.push(key.clone());
+                                continue;
+                            }
                         }
+                        known_drift.push(key.clone());
                     }
                 }
                 Err(e) => {
-                    if known.contains(key.as_str()) {
-                        known_triggered
-                            .insert(known.get(key.as_str()).unwrap());
-                        warnings.push(format!("(known drift) {key}: {e}",));
-                    } else {
-                        errors.push(format!(
-                            "{key}: {e} (CRDB data_type={}, udt_name={})",
-                            crdb_col.data_type, crdb_col.udt_name,
-                        ));
-                    }
+                    // If expected_diesel_type can't map the CRDB type,
+                    // that's drift too (unknown UDT, etc.).
+                    known_drift.push(key.clone());
+                    eprintln!("  note: {key}: {e}");
                 }
             }
         }
@@ -5620,17 +5462,7 @@ async fn diesel_schema_matches_crdb_schema() {
         for crdb_col in crdb_cols {
             if !diesel_col_names.contains(crdb_col.column_name.as_str()) {
                 let key = format!("{table_name}.{}", crdb_col.column_name);
-                if known.contains(key.as_str()) {
-                    known_triggered.insert(known.get(key.as_str()).unwrap());
-                    warnings.push(format!(
-                        "(known drift) {key}: column in CRDB but not Diesel",
-                    ));
-                } else {
-                    errors.push(format!(
-                        "{key}: column exists in CRDB (dbinit.sql) \
-                         but not in Diesel (schema.rs)",
-                    ));
-                }
+                known_drift.push(key);
             }
         }
 
@@ -5649,92 +5481,44 @@ async fn diesel_schema_matches_crdb_schema() {
             .filter(|name| diesel_col_names.contains(name))
             .collect();
         if diesel_col_order != crdb_col_order {
-            if known_order.contains(table_name) {
-                known_order_triggered
-                    .insert(known_order.get(table_name).unwrap());
-                warnings.push(format!(
-                    "(known drift) {table_name}: column ordering mismatch",
-                ));
-            } else {
-                errors.push(format!(
-                    "{table_name}: column ordering mismatch between \
-                     Diesel (schema.rs) and CRDB (dbinit.sql)\n  \
-                     Diesel: {diesel_col_order:?}\n  \
-                     CRDB:   {crdb_col_order:?}",
-                ));
-            }
+            column_order_drift.push(table_name.to_string());
         }
     }
 
-    // Report warnings (known drift) for visibility.
-    if !warnings.is_empty() {
-        warnings.sort();
+    // Sort and compare each anomaly category against its expectorate file.
+    nullable_exceptions.sort();
+    expectorate::assert_contents(
+        "tests/output/schema_nullable_exceptions.txt",
+        &format_list(&nullable_exceptions),
+    );
+
+    column_order_drift.sort();
+    expectorate::assert_contents(
+        "tests/output/schema_column_order_drift.txt",
+        &format_list(&column_order_drift),
+    );
+
+    known_drift.sort();
+    expectorate::assert_contents(
+        "tests/output/schema_known_drift.txt",
+        &format_list(&known_drift),
+    );
+
+    // Print informational output about drift for visibility.
+    let total_drift = known_drift.len() + column_order_drift.len();
+    if total_drift > 0 {
         eprintln!(
-            "Known schema drift ({} item(s), fix when possible):\n  {}",
-            warnings.len(),
-            warnings.join("\n  "),
+            "Known schema drift ({total_drift} item(s), fix when possible):"
         );
+        for entry in &known_drift {
+            eprintln!("  {entry}");
+        }
+        for entry in &column_order_drift {
+            eprintln!("  {entry}: column ordering mismatch");
+        }
     }
 
-    // Check for stale known_drift entries that no longer trigger.
-    let stale: Vec<&&str> = known.difference(&known_triggered).collect();
-    if !stale.is_empty() {
-        let mut stale_sorted: Vec<&str> = stale.into_iter().copied().collect();
-        stale_sorted.sort();
-        errors.push(format!(
-            "The following known_drift entries no longer trigger and \
-             should be removed:\n  {}",
-            stale_sorted.join("\n  "),
-        ));
-    }
-
-    // Check for stale known_column_order_drift entries.
-    let stale_order: Vec<&&str> =
-        known_order.difference(&known_order_triggered).collect();
-    if !stale_order.is_empty() {
-        let mut stale_sorted: Vec<&str> =
-            stale_order.into_iter().copied().collect();
-        stale_sorted.sort();
-        errors.push(format!(
-            "The following known_column_order_drift entries no longer \
-             trigger and should be removed:\n  {}",
-            stale_sorted.join("\n  "),
-        ));
-    }
-
-    // Check for stale DIESEL_ONLY_TABLES entries.
-    let stale_diesel_only: Vec<&&str> = DIESEL_ONLY_TABLES
-        .iter()
-        .filter(|t| !diesel_only_triggered.contains(**t))
-        .collect();
-    if !stale_diesel_only.is_empty() {
-        let mut stale_sorted: Vec<&str> =
-            stale_diesel_only.into_iter().copied().collect();
-        stale_sorted.sort();
-        errors.push(format!(
-            "The following DIESEL_ONLY_TABLES entries no longer match \
-             any table in schema.rs and should be removed:\n  {}",
-            stale_sorted.join("\n  "),
-        ));
-    }
-
-    // Check for stale nullable exception entries.
-    let stale_nullable: Vec<_> = nullable_exceptions
-        .difference(&nullable_exceptions_triggered)
-        .collect();
-    if !stale_nullable.is_empty() {
-        let mut stale_sorted: Vec<String> = stale_nullable
-            .into_iter()
-            .map(|(t, c)| format!("{t}.{c}"))
-            .collect();
-        stale_sorted.sort();
-        errors.push(format!(
-            "The following known_nullable_exceptions entries no longer \
-             trigger and should be removed:\n  {}",
-            stale_sorted.join("\n  "),
-        ));
-    }
-
+    // Hard errors are truly unexpected problems (e.g. type parse failures).
     if !errors.is_empty() {
         errors.sort();
         panic!(
