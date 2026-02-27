@@ -23,28 +23,6 @@ mod early_network_config_serialization;
 
 pub use early_network_config_serialization::EarlyNetworkConfigEnvelopeError;
 
-/*
-impl EarlyNetworkConfigEnvelope {
-    pub fn new(generation: u64, body: &EarlyNetworkConfigBody) -> Self {
-        // Serialize `body` in-memory; this can only fail if
-        // `EarlyNetworkConfigBody` contains types that can't be represented in
-        // JSON, which means any API calls involving them will fail too. We
-        // should catch this immediately in tests.
-        let body = serde_json::to_value(body)
-            .expect("EarlyNetworkConfigBody is serializable as JSON");
-        Self {
-            generation,
-            schema_version: EarlyNetworkConfigBody::SCHEMA_VERSION,
-            body,
-        }
-    }
-
-    pub fn generation(&self) -> u64 {
-        self.generation
-    }
-}
-*/
-
 impl BgpPeerConfig {
     /// The default hold time for a BGP peer in seconds.
     pub const DEFAULT_HOLD_TIME: u64 = 6;
