@@ -167,8 +167,16 @@ pub struct BgpPeerView {
     pub router_lifetime: SqlU16,
 }
 
+#[derive(Debug, thiserror::Error)]
+pub enum BgpPeerConfigDataError {
+    #[error("database contains illegal router lifetime value")]
+    RouterLifetime(#[source] RouterLifetimeConfigError),
+    #[error("database contains illegal min_ttl value: {0}")]
+    MinTtl(u32),
+}
+
 impl TryFrom<BgpPeerView> for BgpPeerConfig {
-    type Error = RouterLifetimeConfigError;
+    type Error = BgpPeerConfigDataError;
 
     fn try_from(value: BgpPeerView) -> Result<Self, Self::Error> {
         // For unnumbered peers (addr is None), use UNSPECIFIED
@@ -177,10 +185,18 @@ impl TryFrom<BgpPeerView> for BgpPeerConfig {
             Some(addr) => addr.ip(),
         };
 
-        // TODO-correctness We should have db constraints to ensure this can't
+        // TODO-correctness We should have db constraints to ensure these can't
         // fail.
         let router_lifetime =
-            RouterLifetimeConfig::new(value.router_lifetime.0)?;
+            RouterLifetimeConfig::new(value.router_lifetime.0)
+                .map_err(BgpPeerConfigDataError::RouterLifetime)?;
+        let min_ttl = value
+            .min_ttl
+            .map(|val| {
+                u8::try_from(*val)
+                    .map_err(|_| BgpPeerConfigDataError::MinTtl(*val))
+            })
+            .transpose()?;
 
         Ok(Self {
             asn: *value.asn,
@@ -194,7 +210,7 @@ impl TryFrom<BgpPeerView> for BgpPeerConfig {
             enforce_first_as: value.enforce_first_as,
             local_pref: value.local_pref.map(|x| x.into()),
             md5_auth_key: value.md5_auth_key,
-            min_ttl: value.min_ttl.map(|x| x.0 as u8), //TODO avoid cast return error
+            min_ttl,
             multi_exit_discriminator: value
                 .multi_exit_discriminator
                 .map(|x| x.into()),
