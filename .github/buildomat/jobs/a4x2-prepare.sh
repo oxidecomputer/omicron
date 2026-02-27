@@ -2,7 +2,7 @@
 #:
 #: name = "a4x2-prepare"
 #: variety = "basic"
-#: target = "helios-2.0"
+#: target = "helios-3.0"
 #: rust_toolchain = true
 #: output_rules = [
 #:	"=/out/cargo-bay-ce.tgz",
