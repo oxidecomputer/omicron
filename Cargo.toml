@@ -479,8 +479,8 @@ dns-server-api = { path = "dns-server-api" }
 dns-service-client = { path = "clients/dns-service-client" }
 dpd-client = { git = "https://github.com/oxidecomputer/dendrite", rev = "37992295b5dc708d8f120cee805d67418741b556" }
 dropshot = { version = "0.16.6", features = [ "usdt-probes" ] }
-dropshot-api-manager = "0.3.0"
-dropshot-api-manager-types = "0.3.0"
+dropshot-api-manager = "0.4.0"
+dropshot-api-manager-types = "0.4.0"
 dyn-clone = "1.0.20"
 either = "1.15.0"
 ereport-types = { path = "ereport/types" }
@@ -517,6 +517,7 @@ trust-quorum-protocol = { path = "trust-quorum/protocol" }
 trust-quorum-test-utils = { path = "trust-quorum/test-utils" }
 trust-quorum-types = { path = "trust-quorum/types" }
 trust-quorum-types-versions = { path = "trust-quorum/types/versions" }
+git-stub-vcs = "0.1.0"
 glob = "0.3.2"
 guppy = "0.17.20"
 headers = "0.4.1"
@@ -1023,6 +1024,11 @@ opt-level = 3
 [profile.dev.package.gfss]
 opt-level = 3
 
+# This speeds up `cargo xtask openapi generate` by ~2x.
+[profile.dev.package.drift]
+opt-level = 3
+[profile.dev.package.dropshot-api-manager]
+opt-level = 3
 
 #
 # It's common during development to use a local copy of various complex
