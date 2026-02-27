@@ -1427,7 +1427,8 @@ impl BackgroundTask for SwitchPortSettingsManager {
                             Err(e) => {
                                 error!(
                                     log,
-                                    "bootstore config does not deserialized to current EarlyNetworkConfig format";
+                                    "bootstore config failed to deserialize \
+                                     to current EarlyNetworkConfig format";
                                     "key" => %NETWORK_KEY,
                                     "value" => %data,
                                     "error" => %e,
@@ -1545,7 +1546,13 @@ impl BackgroundTask for SwitchPortSettingsManager {
                         let config = BootstoreConfig {
                             key: NETWORK_KEY.into(),
                             generation,
-                            data: serde_json::to_value(&envelope).unwrap(),
+                            // We're serializing an envelope (guaranteed to be
+                            // representable as JSON) to JSOn in memory, so this
+                            // can't fail.
+                            data: serde_json::to_value(&envelope).expect(
+                                "EarlyNetworkConfigEnvelope can be serialized \
+                                 as JSON",
+                            ),
                             time_created: chrono::Utc::now(),
                             time_deleted: None,
                         };

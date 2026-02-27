@@ -87,6 +87,11 @@ impl EarlyNetworkConfigEnvelope {
     pub fn deserialize_body(
         &self,
     ) -> Result<EarlyNetworkConfigBody, EarlyNetworkConfigEnvelopeError> {
+        // TODO: This only handles the current schema version (2). Once we add a
+        // new schema version, as written we'll need to update this function.
+        // The plan is to replace the implementation of this function with one
+        // that ensures any new `EarlyNetworkConfigBody` types are statically
+        // guaranteed to be covered, have correct `SCHEMA_VERSION` values, etc.
         if self.schema_version == EarlyNetworkConfigBody::SCHEMA_VERSION {
             let body: EarlyNetworkConfigBody =
                 serde_json::from_value(self.body.clone()).map_err(|err| {
