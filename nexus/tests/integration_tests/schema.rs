@@ -5363,7 +5363,6 @@ async fn diesel_schema_matches_crdb_schema() {
             .collect();
 
     let mut errors: Vec<String> = Vec::new();
-    let mut nullable_exceptions: Vec<String> = Vec::new();
     let mut column_order_drift: Vec<String> = Vec::new();
     let mut known_drift: Vec<String> = Vec::new();
 
@@ -5428,22 +5427,6 @@ async fn diesel_schema_matches_crdb_schema() {
                         diesel_type_matches_expected(&diesel_type, &crdb_type)
                     };
                     if !matches {
-                        // Check if this is a nullable exception: CRDB
-                        // says NOT NULL but Diesel says Nullable, and
-                        // that explains the mismatch.
-                        if !is_view && !crdb_col.is_nullable {
-                            let expected_nullable = ColumnType {
-                                nullable: true,
-                                ..crdb_type.clone()
-                            };
-                            if diesel_type_matches_expected(
-                                &diesel_type,
-                                &expected_nullable,
-                            ) {
-                                nullable_exceptions.push(key.clone());
-                                continue;
-                            }
-                        }
                         known_drift.push(key.clone());
                     }
                 }
@@ -5486,12 +5469,6 @@ async fn diesel_schema_matches_crdb_schema() {
     }
 
     // Sort and compare each anomaly category against its expectorate file.
-    nullable_exceptions.sort();
-    expectorate::assert_contents(
-        "tests/output/schema_nullable_exceptions.txt",
-        &format_list(&nullable_exceptions),
-    );
-
     column_order_drift.sort();
     expectorate::assert_contents(
         "tests/output/schema_column_order_drift.txt",

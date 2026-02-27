@@ -19,10 +19,9 @@ pub enum CollectionTypeProvisioned {
 /// Describes virtual_provisioning_collection for a collection
 #[derive(Clone, Selectable, Queryable, Insertable, Debug)]
 #[diesel(table_name = virtual_provisioning_collection)]
-#[diesel(treat_none_as_default_value = true)]
 pub struct VirtualProvisioningCollection {
     pub id: Uuid,
-    pub time_modified: Option<DateTime<Utc>>,
+    pub time_modified: DateTime<Utc>,
     pub collection_type: String,
 
     pub virtual_disk_bytes_provisioned: ByteCount,
@@ -34,7 +33,7 @@ impl VirtualProvisioningCollection {
     pub fn new(id: Uuid, collection_type: CollectionTypeProvisioned) -> Self {
         Self {
             id,
-            time_modified: None,
+            time_modified: Utc::now(),
             collection_type: collection_type.to_string(),
             virtual_disk_bytes_provisioned: ByteCount(
                 external::ByteCount::from(0),
