@@ -7,7 +7,7 @@
       "url": "https://oxide.computer",
       "email": "api@oxide.computer"
     },
-    "version": "23.0.0"
+    "version": "24.0.0"
   },
   "paths": {
     "/artifacts": {
@@ -370,7 +370,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/EarlyNetworkConfig"
+                "$ref": "#/components/schemas/WriteNetworkConfigRequest"
               }
             }
           },
@@ -5082,30 +5082,6 @@
         "required": [
           "nanos",
           "secs"
-        ]
-      },
-      "EarlyNetworkConfig": {
-        "description": "Network configuration required to bring up the control plane\n\nThe fields in this structure are those from `RackInitializeRequest` necessary for use beyond RSS. This is just for the initial rack configuration and cold boot purposes. Updates come from Nexus.",
-        "type": "object",
-        "properties": {
-          "body": {
-            "$ref": "#/components/schemas/EarlyNetworkConfigBody"
-          },
-          "generation": {
-            "type": "integer",
-            "format": "uint64",
-            "minimum": 0
-          },
-          "schema_version": {
-            "type": "integer",
-            "format": "uint32",
-            "minimum": 0
-          }
-        },
-        "required": [
-          "body",
-          "generation",
-          "schema_version"
         ]
       },
       "EarlyNetworkConfigBody": {
@@ -10143,6 +10119,24 @@
         "required": [
           "rules",
           "vni"
+        ]
+      },
+      "WriteNetworkConfigRequest": {
+        "description": "Structure for requests from Nexus to sled-agent to write a new `EarlyNetworkConfigBody` into the replicated bootstore.\n\n[`WriteNetworkConfigRequest`] INTENTIONALLY does not have a `From` implementation from prior API versions. It is critically important that sled-agent not attempt to rewrite old `EarlyNetworkConfigBody` types to the latest version. For more about this, see the comments on the relevant endpoint in `sled-agent-api`.",
+        "type": "object",
+        "properties": {
+          "body": {
+            "$ref": "#/components/schemas/EarlyNetworkConfigBody"
+          },
+          "generation": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "body",
+          "generation"
         ]
       },
       "ZoneArtifactInventory": {
