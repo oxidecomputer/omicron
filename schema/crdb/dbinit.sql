@@ -4502,6 +4502,23 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_nvme_disk_firmware (
     PRIMARY KEY (inv_collection_id, sled_id, slot)
 );
 
+CREATE TYPE IF NOT EXISTS omicron.public.inv_zpool_health AS ENUM (
+    -- The device is online and functioning.
+    'online',
+    -- One or more components are degraded or faulted, but sufficient replicas
+    -- exist to continue functioning.
+    'degraded',
+    -- One or more components are degraded or faulted, and insufficient replicas
+    -- exist to continue functioning.
+    'faulted',
+    -- The device was explicitly taken offline by "zpool offline".
+    'offline',
+    -- The device was physically removed.
+    'removed',
+    -- The device could not be opened.
+    'unavailable'
+);
+
 CREATE TABLE IF NOT EXISTS omicron.public.inv_zpool (
     -- where this observation came from
     -- (foreign key into `inv_collection` table)
@@ -4513,6 +4530,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_zpool (
     id UUID NOT NULL,
     sled_id UUID NOT NULL,
     total_size INT NOT NULL,
+    health omicron.public.inv_zpool_health NOT NULL,
 
     -- PK consisting of:
     -- - Which collection this was
@@ -8203,7 +8221,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '232.0.0', NULL)
+    (TRUE, NOW(), NOW(), '233.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

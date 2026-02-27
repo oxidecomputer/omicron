@@ -99,6 +99,21 @@ impl FromStr for ZpoolHealth {
     }
 }
 
+// TODO-K: Use display instead?
+impl ToString for ZpoolHealth {
+    // TODO-K: make this lowercase?
+    fn to_string(&self) -> String {
+        match self {
+            ZpoolHealth::Online => "ONLINE".to_string(),
+            ZpoolHealth::Degraded => "DEGRADED".to_string(),
+            ZpoolHealth::Faulted => "FAULTED".to_string(),
+            ZpoolHealth::Offline => "OFFLINE".to_string(),
+            ZpoolHealth::Removed => "REMOVED".to_string(),
+            ZpoolHealth::Unavailable => "UNAVAIL".to_string(),
+        }
+    }
+}
+
 /// Describes a Zpool.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ZpoolInfo {

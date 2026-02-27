@@ -615,6 +615,7 @@ mod test {
     use crate::db::raw_query_builder::expectorate_query_contents;
     use async_bb8_diesel::AsyncRunQueryDsl;
     use chrono::Utc;
+    use illumos_utils::zpool::ZpoolHealth;
     use omicron_test_utils::dev;
     use omicron_uuid_kinds::BlueprintUuid;
     use omicron_uuid_kinds::CollectionUuid;
@@ -1122,6 +1123,8 @@ mod test {
                     u2.zpool_id,
                     sled_config.sled_id,
                     u2.inventory_total_size.into(),
+                    // TODO-K: Actually add health to the zpool object?
+                    ZpoolHealth::Online,
                 )
                 .await;
 
@@ -1152,6 +1155,7 @@ mod test {
         zpool_id: ZpoolUuid,
         sled_id: SledUuid,
         total_size: ByteCount,
+        health: ZpoolHealth,
     ) {
         use nexus_db_schema::schema::inv_zpool::dsl;
 
@@ -1163,6 +1167,7 @@ mod test {
             id: zpool_id.into(),
             sled_id: to_db_typed_uuid(sled_id),
             total_size,
+            health: health.into(),
         };
 
         diesel::insert_into(dsl::inv_zpool)

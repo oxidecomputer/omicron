@@ -670,9 +670,10 @@ fn display_sleds(
             writeln!(indented, "zpools")?;
         }
         for zpool in zpools {
-            let Zpool { id, total_size, .. } = zpool;
+            let Zpool { id, total_size, health, .. } = zpool;
             let mut indent2 = IndentWriter::new("  ", &mut indented);
-            writeln!(indent2, "{id}: total size: {total_size}")?;
+            // TODO-K: add health here
+            writeln!(indent2, "{id}: total size: {total_size} health: {}", health.to_string())?;
         }
 
         if !datasets.is_empty() {
