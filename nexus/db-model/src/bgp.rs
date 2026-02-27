@@ -12,7 +12,7 @@ use nexus_types::external_api::networking;
 use nexus_types::identity::Resource;
 use omicron_common::api::external::Error;
 use omicron_common::api::{
-    external::{self, IdentityMetadataCreateParams},
+    external::IdentityMetadataCreateParams,
     internal::shared::rack_init::MaxPathConfig,
 };
 use serde::{Deserialize, Serialize};
@@ -41,7 +41,7 @@ pub struct BgpConfig {
     pub max_paths: SqlU8,
 }
 
-impl TryFrom<BgpConfig> for external::BgpConfig {
+impl TryFrom<BgpConfig> for networking::BgpConfig {
     type Error = Error;
 
     fn try_from(value: BgpConfig) -> Result<Self, Self::Error> {
@@ -115,9 +115,9 @@ impl From<networking::BgpAnnounceSetCreate> for BgpAnnounceSet {
     }
 }
 
-impl Into<external::BgpAnnounceSet> for BgpAnnounceSet {
-    fn into(self) -> external::BgpAnnounceSet {
-        external::BgpAnnounceSet { identity: self.identity() }
+impl Into<networking::BgpAnnounceSet> for BgpAnnounceSet {
+    fn into(self) -> networking::BgpAnnounceSet {
+        networking::BgpAnnounceSet { identity: self.identity() }
     }
 }
 
@@ -131,9 +131,9 @@ pub struct BgpAnnouncement {
     pub network: IpNetwork,
 }
 
-impl Into<external::BgpAnnouncement> for BgpAnnouncement {
-    fn into(self) -> external::BgpAnnouncement {
-        external::BgpAnnouncement {
+impl Into<networking::BgpAnnouncement> for BgpAnnouncement {
+    fn into(self) -> networking::BgpAnnouncement {
+        networking::BgpAnnouncement {
             announce_set_id: self.announce_set_id,
             address_lot_block_id: self.address_lot_block_id,
             network: self.network.into(),

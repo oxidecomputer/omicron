@@ -89,6 +89,7 @@ paste.workspace = true
 # See omicron-rpaths for more about the "pq-sys" dependency.
 pq-sys = "*"
 progenitor-client.workspace = true
+progenitor-extras.workspace = true
 propolis-client.workspace = true
 qorb.workspace = true
 rand.workspace = true
@@ -96,7 +97,8 @@ range-requests.workspace = true
 ref-cast.workspace = true
 rdb-types.workspace = true
 regex.workspace = true
-reqwest = { workspace = true, features = ["json"] }
+reqwest = { workspace = true, features = ["http2", "json"] }
+reqwest012 = { workspace = true }
 ring.workspace = true
 samael.workspace = true
 schemars = { workspace = true, features = ["chrono", "uuid1"] }

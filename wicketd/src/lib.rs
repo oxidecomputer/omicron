@@ -44,6 +44,7 @@ use std::{
 };
 use transceivers::Manager as TransceiverManager;
 pub use update_tracker::{StartUpdateError, UpdateTracker};
+use wicketd_client::ClientInfo as _;
 
 /// Command line arguments for wicketd
 pub struct Args {

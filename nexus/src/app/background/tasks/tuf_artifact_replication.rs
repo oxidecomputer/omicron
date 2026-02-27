@@ -80,6 +80,7 @@ use omicron_common::api::external::Generation;
 use omicron_uuid_kinds::SledUuid;
 use rand::seq::{IndexedRandom, SliceRandom};
 use serde_json::json;
+use sled_agent_client::ClientInfo as _;
 use sled_agent_client::types::ArtifactConfig;
 use slog_error_chain::InlineErrorChain;
 use tokio::sync::mpsc::error::TryRecvError;

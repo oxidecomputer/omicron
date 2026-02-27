@@ -15,6 +15,7 @@ chrono.workspace = true
 daft.workspace = true
 dropshot.workspace = true
 http.workspace = true
+mg-admin-client.workspace = true
 omicron-common.workspace = true
 omicron-passwords.workspace = true
 omicron-uuid-kinds.workspace = true

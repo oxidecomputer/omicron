@@ -368,7 +368,7 @@ async fn resolve_nexus_and_register(
             log.clone(),
         );
         client
-            .cpapi_producers_post(&endpoint.into())
+            .cpapi_producers_post(endpoint)
             .await
             .map(|response| response.into_inner().lease_duration.into())
             .map_err(|e| BackoffError::transient(Either::Right(e)))

@@ -62,7 +62,7 @@ pub enum EarlyNetworkSetupError {
     #[error("Bad configuration for setting up rack: {0}")]
     BadConfig(String),
 
-    #[error("Error contacting ddmd: {0}")]
+    #[error("Error contacting ddmd")]
     DdmError(#[from] DdmError),
 
     #[error("Error during request to MGS: {0}")]
@@ -71,7 +71,7 @@ pub enum EarlyNetworkSetupError {
     #[error("Error during request to Dendrite: {0}")]
     Dendrite(String),
 
-    #[error("Error during DNS lookup: {0}")]
+    #[error("Error during DNS lookup")]
     DnsResolver(#[from] ResolveError),
 
     #[error("BGP configuration error: {0}")]
