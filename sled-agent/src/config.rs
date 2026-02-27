@@ -124,21 +124,21 @@ pub struct Config {
 
 #[derive(Debug, thiserror::Error)]
 pub enum ConfigError {
-    #[error("Failed to read config from {path}: {err}")]
+    #[error("Failed to read config from {path}")]
     Io {
         path: Utf8PathBuf,
         #[source]
         err: std::io::Error,
     },
-    #[error("Failed to parse config from {path}: {err}")]
+    #[error("Failed to parse config from {path}")]
     Parse {
         path: Utf8PathBuf,
         #[source]
         err: anyhow::Error,
     },
-    #[error("Loading certificate: {0}")]
+    #[error("Loading certificate")]
     Certificate(#[source] anyhow::Error),
-    #[error("Could not determine if host is an Oxide sled: {0}")]
+    #[error("Could not determine if host is an Oxide sled")]
     SystemDetection(#[source] anyhow::Error),
     #[error("Could not enumerate physical links")]
     FindLinks(#[from] FindPhysicalLinkError),
