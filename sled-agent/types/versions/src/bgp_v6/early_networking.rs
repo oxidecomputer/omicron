@@ -5,6 +5,8 @@
 //! Types for network setup required to bring up the control plane.
 
 use crate::v1::early_networking as v1;
+use crate::v24::early_networking::EarlyNetworkConfigEnvelope;
+use bootstore::schemes::v0 as bootstore;
 use oxnet::{IpNet, Ipv6Net};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -33,101 +35,18 @@ pub struct EarlyNetworkConfig {
     pub body: EarlyNetworkConfigBody,
 }
 
-impl From<v1::EarlyNetworkConfig> for EarlyNetworkConfig {
-    fn from(value: v1::EarlyNetworkConfig) -> Self {
-        let rack_network_config =
-            value.body.rack_network_config.map(|v1_config| {
-                RackNetworkConfig {
-                    rack_subnet: v1_config.rack_subnet,
-                    infra_ip_first: std::net::IpAddr::V4(
-                        v1_config.infra_ip_first,
-                    ),
-                    infra_ip_last: std::net::IpAddr::V4(
-                        v1_config.infra_ip_last,
-                    ),
-                    ports: v1_config
-                        .ports
-                        .into_iter()
-                        .map(|p| PortConfig {
-                            routes: p.routes,
-                            addresses: p
-                                .addresses
-                                .into_iter()
-                                .map(|a| UplinkAddressConfig {
-                                    address: if a
-                                        .address
-                                        .addr()
-                                        .is_unspecified()
-                                    {
-                                        None
-                                    } else {
-                                        Some(a.address)
-                                    },
-                                    vlan_id: a.vlan_id,
-                                })
-                                .collect(),
-                            switch: p.switch,
-                            port: p.port,
-                            uplink_port_speed: p.uplink_port_speed,
-                            uplink_port_fec: p.uplink_port_fec,
-                            bgp_peers: p
-                                .bgp_peers
-                                .into_iter()
-                                .map(|peer| BgpPeerConfig {
-                                    asn: peer.asn,
-                                    port: peer.port,
-                                    addr: peer.addr.into(), // Ipv4Addr -> IpAddr
-                                    hold_time: peer.hold_time,
-                                    idle_hold_time: peer.idle_hold_time,
-                                    delay_open: peer.delay_open,
-                                    connect_retry: peer.connect_retry,
-                                    keepalive: peer.keepalive,
-                                    remote_asn: peer.remote_asn,
-                                    min_ttl: peer.min_ttl,
-                                    md5_auth_key: peer.md5_auth_key,
-                                    multi_exit_discriminator: peer
-                                        .multi_exit_discriminator,
-                                    communities: peer.communities,
-                                    local_pref: peer.local_pref,
-                                    enforce_first_as: peer.enforce_first_as,
-                                    allowed_import: peer.allowed_import,
-                                    allowed_export: peer.allowed_export,
-                                    vlan_id: peer.vlan_id,
-                                    router_lifetime: Default::default(),
-                                })
-                                .collect(),
-                            autoneg: p.autoneg,
-                            lldp: p.lldp,
-                            tx_eq: p.tx_eq,
-                        })
-                        .collect(),
-                    bgp: v1_config
-                        .bgp
-                        .into_iter()
-                        .map(|b| BgpConfig {
-                            asn: b.asn,
-                            originate: b
-                                .originate
-                                .iter()
-                                .map(|i| IpNet::V4(*i))
-                                .collect(),
-                            shaper: b.shaper,
-                            checker: b.checker,
-                            max_paths: MaxPathConfig::default(),
-                        })
-                        .collect(),
-                    bfd: v1_config.bfd,
-                }
-            });
+impl From<EarlyNetworkConfig> for bootstore::NetworkConfig {
+    fn from(value: EarlyNetworkConfig) -> Self {
+        // We're serialzing in-memory; this can only fail if
+        // `EarlyNetworkConfig` contains types that can't be represented as
+        // JSON, which (a) should never happend and (b) we should catch
+        // immediately in tests.
+        let blob = serde_json::to_vec(&value).unwrap();
 
-        EarlyNetworkConfig {
-            generation: value.generation,
-            schema_version: value.schema_version,
-            body: EarlyNetworkConfigBody {
-                ntp_servers: value.body.ntp_servers,
-                rack_network_config,
-            },
-        }
+        // Yes this is duplicated, but that seems fine.
+        let generation = value.generation;
+
+        bootstore::NetworkConfig { generation, blob }
     }
 }
 
@@ -300,6 +219,23 @@ pub struct EarlyNetworkConfigBody {
 // version of `EarlyNetworkConfigBody` has its own distinct `SCHEMA_VERSION`.
 impl EarlyNetworkConfigBody {
     pub const SCHEMA_VERSION: u32 = 2;
+}
+
+// This lives here instead of under `crate::impls::*` because we need a
+// `From<EarlyNetworkConfigBody> for EarlyNetworkConfigEnvelope` implementation
+// for every supported version of `EarlyNetworkConfigBody`.
+impl From<&'_ EarlyNetworkConfigBody> for EarlyNetworkConfigEnvelope {
+    fn from(value: &'_ EarlyNetworkConfigBody) -> Self {
+        Self {
+            schema_version: EarlyNetworkConfigBody::SCHEMA_VERSION,
+            // We're serialzing in-memory; this can only fail if
+            // `EarlyNetworkConfigBody` contains types that can't be represented
+            // as JSON, which (a) should never happend and (b) we should catch
+            // immediately in tests.
+            body: serde_json::to_value(value)
+                .expect("EarlyNetworkConfigBody can be serialized as JSON"),
+        }
+    }
 }
 
 /// Initial network configuration

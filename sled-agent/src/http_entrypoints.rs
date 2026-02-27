@@ -8,6 +8,7 @@ use super::sled_agent::SledAgent;
 use crate::sled_agent::Error as SledAgentError;
 use crate::support_bundle::storage::SupportBundleQueryType;
 use crate::zone_bundle::BundleError;
+use bootstore::schemes::v0::NetworkConfig;
 use camino::Utf8PathBuf;
 use dropshot::{
     ApiDescription, Body, ErrorStatusCode, FreeformBody, Header, HttpError,
@@ -40,9 +41,7 @@ use sled_agent_types::diagnostics::{
     SledDiagnosticsLogsDownloadPathParam, SledDiagnosticsLogsDownloadQueryParam,
 };
 use sled_agent_types::disk::{DiskEnsureBody, DiskPathParam};
-use sled_agent_types::early_networking::{
-    EarlyNetworkConfigEnvelope, WriteNetworkConfigRequest,
-};
+use sled_agent_types::early_networking::EarlyNetworkConfigEnvelope;
 use sled_agent_types::firewall_rules::VpcFirewallRulesEnsureBody;
 use sled_agent_types::instance::{
     InstanceEnsureBody, InstanceExternalIpBody, InstanceMulticastBody,
@@ -79,8 +78,7 @@ use trust_quorum_types::messages::{
 use trust_quorum_types::status::{CommitStatus, CoordinatorStatus, NodeStatus};
 
 // Fixed identifiers for prior versions only
-use sled_agent_types_versions::v1;
-use sled_agent_types_versions::v20;
+use sled_agent_types_versions::{v1, v20, v24};
 use sled_diagnostics::{
     SledDiagnosticsCommandHttpOutput, SledDiagnosticsQueryOutput,
 };
@@ -835,7 +833,7 @@ impl SledAgentApi for SledAgentImpl {
 
     async fn write_network_bootstore_config(
         rqctx: RequestContext<Self::Context>,
-        body: TypedBody<WriteNetworkConfigRequest>,
+        body: TypedBody<v24::early_networking::WriteNetworkConfigRequest>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
         let sa = rqctx.context();
         let bs = sa.bootstore();
@@ -849,6 +847,49 @@ impl SledAgentApi for SledAgentImpl {
                 InlineErrorChain::new(&e),
             ))
         })?;
+
+        Ok(HttpResponseUpdatedNoContent())
+    }
+
+    // As explained in `sled-agent-api`, we must faithfully implement old
+    // versions of `write_network_bootstore_config()` _without_ upconverting the
+    // request into the latest bootstore `NetworkConfig` we understand. Doing so
+    // opens a window where we could replicate a newer `NetworkConfig` to sleds
+    // that don't yet know how to deserialize it.
+    async fn write_network_bootstore_config_v20(
+        rqctx: RequestContext<Self::Context>,
+        body: TypedBody<v20::early_networking::EarlyNetworkConfig>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        let sa = rqctx.context();
+        let bs = sa.bootstore();
+        let config = body.into_inner();
+
+        bs.update_network_config(NetworkConfig::from(config)).await.map_err(
+            |e| {
+                HttpError::for_internal_error(format!(
+                    "failed to write updated config to boot store: {e}"
+                ))
+            },
+        )?;
+
+        Ok(HttpResponseUpdatedNoContent())
+    }
+
+    async fn write_network_bootstore_config_v1(
+        rqctx: RequestContext<Self::Context>,
+        body: TypedBody<v1::early_networking::EarlyNetworkConfig>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        let sa = rqctx.context();
+        let bs = sa.bootstore();
+        let config = body.into_inner();
+
+        bs.update_network_config(NetworkConfig::from(config)).await.map_err(
+            |e| {
+                HttpError::for_internal_error(format!(
+                    "failed to write updated config to boot store: {e}"
+                ))
+            },
+        )?;
 
         Ok(HttpResponseUpdatedNoContent())
     }

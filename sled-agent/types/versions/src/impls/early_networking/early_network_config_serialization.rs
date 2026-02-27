@@ -108,17 +108,3 @@ impl EarlyNetworkConfigEnvelope {
         }
     }
 }
-
-impl From<&'_ EarlyNetworkConfigBody> for EarlyNetworkConfigEnvelope {
-    fn from(value: &'_ EarlyNetworkConfigBody) -> Self {
-        Self {
-            schema_version: EarlyNetworkConfigBody::SCHEMA_VERSION,
-            // We're serialzing in-memory; this can only fail if
-            // `EarlyNetworkConfigBody` contains types that can't be represented
-            // as JSON, which (a) should never happend and (b) we should catch
-            // immediately in tests.
-            body: serde_json::to_value(value)
-                .expect("EarlyNetworkConfigBody can be serialized as JSON"),
-        }
-    }
-}

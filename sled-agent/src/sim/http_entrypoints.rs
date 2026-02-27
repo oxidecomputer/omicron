@@ -54,7 +54,6 @@ use sled_agent_types::diagnostics::{
 };
 use sled_agent_types::disk::{DiskEnsureBody, DiskPathParam};
 use sled_agent_types::early_networking::EarlyNetworkConfigEnvelope;
-use sled_agent_types::early_networking::WriteNetworkConfigRequest;
 use sled_agent_types::firewall_rules::VpcFirewallRulesEnsureBody;
 use sled_agent_types::instance::{
     InstanceEnsureBody, InstanceExternalIpBody, InstanceMulticastBody,
@@ -82,6 +81,7 @@ use sled_agent_types::zone_bundle::{
     BundleUtilization, CleanupContext, CleanupContextUpdate, CleanupCount,
     ZoneBundleFilter, ZoneBundleId, ZoneBundleMetadata, ZonePathParam,
 };
+use sled_agent_types_versions::v24;
 use sled_hardware_types::BaseboardId;
 // Fixed identifiers for prior versions only
 use sled_agent_types_versions::v1;
@@ -432,7 +432,7 @@ impl SledAgentApi for SledAgentSimImpl {
 
     async fn write_network_bootstore_config(
         rqctx: RequestContext<Self::Context>,
-        body: TypedBody<WriteNetworkConfigRequest>,
+        body: TypedBody<v24::early_networking::WriteNetworkConfigRequest>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
         let mut config =
             rqctx.context().bootstore_network_config.lock().unwrap();
@@ -441,6 +441,32 @@ impl SledAgentApi for SledAgentSimImpl {
         *config = EarlyNetworkConfigEnvelope::from(&body.body)
             .serialize_to_bootstore_with_generation(body.generation);
         Ok(HttpResponseUpdatedNoContent())
+    }
+
+    async fn write_network_bootstore_config_v20(
+        _rqctx: RequestContext<Self::Context>,
+        _body: TypedBody<v20::early_networking::EarlyNetworkConfig>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        // Real sled-agent has to support this endpoint for backwards
+        // compatibility during an update; sim-sled-agent doesn't.
+        Err(HttpError::for_bad_request(
+            None,
+            "old bootstore APIs not supported in simulated sled-agent"
+                .to_string(),
+        ))
+    }
+
+    async fn write_network_bootstore_config_v1(
+        _rqctx: RequestContext<Self::Context>,
+        _body: TypedBody<v1::early_networking::EarlyNetworkConfig>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        // Real sled-agent has to support this endpoint for backwards
+        // compatibility during an update; sim-sled-agent doesn't.
+        Err(HttpError::for_bad_request(
+            None,
+            "old bootstore APIs not supported in simulated sled-agent"
+                .to_string(),
+        ))
     }
 
     /// Fetch basic information about this sled

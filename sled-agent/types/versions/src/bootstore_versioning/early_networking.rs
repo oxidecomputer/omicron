@@ -29,18 +29,16 @@ use serde::{Deserialize, Serialize};
 
 /// Structure for requests from Nexus to sled-agent to write a new
 /// `EarlyNetworkConfigBody` into the replicated bootstore.
+///
+/// [`WriteNetworkConfigRequest`] INTENTIONALLY does not have a `From`
+/// implementation from prior API versions. It is critically important that
+/// sled-agent not attempt to rewrite old `EarlyNetworkConfigBody` types to the
+/// latest version. For more about this, see the comments on the relevant
+/// endpoint in `sled-agent-api`.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
 pub struct WriteNetworkConfigRequest {
     pub generation: u64,
     pub body: EarlyNetworkConfigBody,
-}
-
-impl From<crate::v20::early_networking::EarlyNetworkConfig>
-    for WriteNetworkConfigRequest
-{
-    fn from(value: crate::v20::early_networking::EarlyNetworkConfig) -> Self {
-        Self { generation: value.generation, body: value.body }
-    }
 }
 
 /// Envelope containing a versioned JSON blob (an `EarlyNetworkConfigBody`).

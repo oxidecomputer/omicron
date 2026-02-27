@@ -4,6 +4,7 @@
 
 //! Types for network setup required to bring up the control plane.
 
+use bootstore::schemes::v0 as bootstore;
 use oxnet::{IpNet, Ipv4Net, Ipv6Net};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -28,6 +29,21 @@ pub struct EarlyNetworkConfig {
 
     // The actual configuration details
     pub body: EarlyNetworkConfigBody,
+}
+
+impl From<EarlyNetworkConfig> for bootstore::NetworkConfig {
+    fn from(value: EarlyNetworkConfig) -> Self {
+        // We're serialzing in-memory; this can only fail if
+        // `EarlyNetworkConfig` contains types that can't be represented as
+        // JSON, which (a) should never happend and (b) we should catch
+        // immediately in tests.
+        let blob = serde_json::to_vec(&value).unwrap();
+
+        // Yes this is duplicated, but that seems fine.
+        let generation = value.generation;
+
+        bootstore::NetworkConfig { generation, blob }
+    }
 }
 
 /// This is the actual configuration of EarlyNetworking.
