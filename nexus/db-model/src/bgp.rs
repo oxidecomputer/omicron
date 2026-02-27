@@ -154,7 +154,7 @@ pub struct BgpPeerView {
     pub idle_hold_time: SqlU32,
     pub keepalive: SqlU32,
     pub remote_asn: Option<SqlU32>,
-    pub min_ttl: Option<SqlU32>,
+    pub min_ttl: Option<SqlU8>,
     pub md5_auth_key: Option<String>,
     pub multi_exit_discriminator: Option<SqlU32>,
     pub local_pref: Option<SqlU32>,
