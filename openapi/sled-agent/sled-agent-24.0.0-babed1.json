@@ -7,7 +7,7 @@
       "url": "https://oxide.computer",
       "email": "api@oxide.computer"
     },
-    "version": "23.0.0"
+    "version": "24.0.0"
   },
   "paths": {
     "/artifacts": {
@@ -364,29 +364,6 @@
       }
     },
     "/network-bootstore-config": {
-      "get": {
-        "summary": "This API endpoint is only reading the local sled agent's view of the",
-        "description": "bootstore. The boostore is a distributed data store that is eventually consistent. Reads from individual nodes may not represent the latest state.",
-        "operationId": "read_network_bootstore_config_cache",
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/EarlyNetworkConfig"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      },
       "put": {
         "operationId": "write_network_bootstore_config",
         "requestBody": {
