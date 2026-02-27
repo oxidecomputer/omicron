@@ -87,6 +87,8 @@ use std::cmp::Ordering;
 use std::collections::BTreeMap;
 use std::time::Duration;
 
+#[cfg(any(feature = "cpu", test))]
+pub mod cpu;
 #[cfg(any(feature = "datalink", test))]
 pub mod link;
 mod sampler;

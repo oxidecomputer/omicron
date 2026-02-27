@@ -27,7 +27,7 @@ uuid = { workspace = true, optional = true }
 omicron-workspace-hack.workspace = true
 
 [features]
-default = ["http-instruments", "datalink"]
+default = ["http-instruments", "cpu", "datalink"]
 http-instruments = [
     "dep:chrono",
     "dep:dropshot",
@@ -53,6 +53,7 @@ kstat = [
     "dep:thiserror",
     "dep:uuid"
 ]
+cpu = ["kstat"]
 datalink = ["kstat"]
 
 [dev-dependencies]
