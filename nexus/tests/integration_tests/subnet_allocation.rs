@@ -176,8 +176,8 @@ async fn test_subnet_allocation(cptestctx: &ControlPlaneTestContext) {
     )
     .await;
     assert!(error.message.starts_with(&format!(
-        "No available IP addresses for interface in \
-        subnet '{SUBNET_NAME}' with ID '"
+        "No available IPv4 addresses for interface \
+        in subnet '{SUBNET_NAME}' with ID '"
     )));
 
     // Verify the subnet lists the two addresses as in use

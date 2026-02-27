@@ -7,11 +7,11 @@
 
 use omicron_common::address::IpRange;
 use omicron_common::api::external::AllowedSourceIps;
-use omicron_common::api::internal::shared::BgpConfig;
-use omicron_common::api::internal::shared::LldpPortConfig;
-use omicron_common::api::internal::shared::RouteConfig;
-use omicron_common::api::internal::shared::UplinkAddressConfig;
 use serde::Serialize;
+use sled_agent_types::early_networking::BgpConfig;
+use sled_agent_types::early_networking::LldpPortConfig;
+use sled_agent_types::early_networking::RouteConfig;
+use sled_agent_types::early_networking::UplinkAddressConfig;
 use sled_hardware_types::Baseboard;
 use std::borrow::Cow;
 use std::collections::BTreeSet;

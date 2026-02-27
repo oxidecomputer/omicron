@@ -152,6 +152,13 @@ to:   blueprint 8da82a8e-bf97-4fbd-8ddd-9f6462732cf1
 
   sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c (active, config generation 2 -> 3):
 
+    measurements:
+    ---------------------------
+    hash      version          
+    ---------------------------
+    unknown   (unknown version)
+
+
     host phase 2 contents:
     ------------------------
     slot   boot image source
@@ -228,6 +235,13 @@ to:   blueprint 8da82a8e-bf97-4fbd-8ddd-9f6462732cf1
 
   sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 (active, config generation 2 -> 3):
 
+    measurements:
+    ---------------------------
+    hash      version          
+    ---------------------------
+    unknown   (unknown version)
+
+
     host phase 2 contents:
     ------------------------
     slot   boot image source
@@ -299,6 +313,13 @@ to:   blueprint 8da82a8e-bf97-4fbd-8ddd-9f6462732cf1
 
 
   sled d81c6a84-79b8-4958-ae41-ea46c9b19763 (active, config generation 2 -> 3):
+
+    measurements:
+    ---------------------------
+    hash      version          
+    ---------------------------
+    unknown   (unknown version)
+
 
     host phase 2 contents:
     ------------------------
@@ -1171,6 +1192,13 @@ parent:    8da82a8e-bf97-4fbd-8ddd-9f6462732cf1
     B      current contents 
 
 
+    measurements:
+    ---------------------------
+    hash      version          
+    ---------------------------
+    unknown   (unknown version)
+
+
     physical disks:
     ------------------------------------------------------------------------------------
     vendor        model        serial                                        disposition
@@ -1243,6 +1271,13 @@ parent:    8da82a8e-bf97-4fbd-8ddd-9f6462732cf1
     B      current contents 
 
 
+    measurements:
+    ---------------------------
+    hash      version          
+    ---------------------------
+    unknown   (unknown version)
+
+
     physical disks:
     ------------------------------------------------------------------------------------
     vendor        model        serial                                        disposition
@@ -1310,6 +1345,13 @@ parent:    8da82a8e-bf97-4fbd-8ddd-9f6462732cf1
     ------------------------
     A      current contents 
     B      current contents 
+
+
+    measurements:
+    ---------------------------
+    hash      version          
+    ---------------------------
+    unknown   (unknown version)
 
 
     physical disks:
@@ -1407,6 +1449,13 @@ to:   blueprint af934083-59b5-4bf6-8966-6fb5292c29e1
  MODIFIED SLEDS:
 
   sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c (active, config generation 3 -> 4):
+
+    measurements:
+    ---------------------------
+    hash      version          
+    ---------------------------
+    unknown   (unknown version)
+
 
     host phase 2 contents:
     ------------------------
@@ -1853,6 +1902,13 @@ to:   blueprint a5a8f242-ffa5-473c-8efd-2acf2dc0b736
  MODIFIED SLEDS:
 
   sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c (active, config generation 4 -> 5):
+
+    measurements:
+    ---------------------------
+    hash      version          
+    ---------------------------
+    unknown   (unknown version)
+
 
     host phase 2 contents:
     --------------------------------

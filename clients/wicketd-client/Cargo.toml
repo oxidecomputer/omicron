@@ -15,7 +15,7 @@ omicron-uuid-kinds.workspace = true
 omicron-workspace-hack.workspace = true
 progenitor.workspace = true
 regress.workspace = true
-reqwest = { workspace = true, features = ["rustls-tls", "stream"] }
+reqwest = { workspace = true, features = ["rustls", "stream"] }
 schemars.workspace = true
 semver.workspace = true
 serde.workspace = true

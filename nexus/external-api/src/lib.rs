@@ -78,6 +78,7 @@ api_versions!([
     // |  date-based version should be at the top of the list.
     // v
     // (next_yyyy_mm_dd_nn, IDENT),
+    (2026_02_19_00, REMOVE_SLED_ADD),
     (2026_02_13_01, BGP_UNNUMBERED_PEERS),
     (2026_02_13_00, STALE_DOCS_AND_PUNCTUATION),
     (2026_02_09_01, UPDATE_EXTERNAL_SUBNET_DOCS),
@@ -4325,7 +4326,10 @@ pub trait NexusExternalApi {
     async fn networking_switch_port_settings_create(
         rqctx: RequestContext<Self::Context>,
         new_settings: TypedBody<latest::networking::SwitchPortSettingsCreate>,
-    ) -> Result<HttpResponseCreated<SwitchPortSettings>, HttpError>;
+    ) -> Result<
+        HttpResponseCreated<latest::networking::SwitchPortSettings>,
+        HttpError,
+    >;
 
     /// Create switch port settings (old version with required BgpPeer.addr)
     #[endpoint {
@@ -4394,7 +4398,7 @@ pub trait NexusExternalApi {
     async fn networking_switch_port_settings_view(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<latest::networking::SwitchPortSettingsInfoSelector>,
-    ) -> Result<HttpResponseOk<SwitchPortSettings>, HttpError>;
+    ) -> Result<HttpResponseOk<latest::networking::SwitchPortSettings>, HttpError>;
 
     /// Get information about switch port (old version with required BgpPeer.addr)
     #[endpoint {
@@ -4518,7 +4522,7 @@ pub trait NexusExternalApi {
     async fn networking_bgp_config_create(
         rqctx: RequestContext<Self::Context>,
         config: TypedBody<latest::networking::BgpConfigCreate>,
-    ) -> Result<HttpResponseCreated<BgpConfig>, HttpError>;
+    ) -> Result<HttpResponseCreated<latest::networking::BgpConfig>, HttpError>;
 
     /// Create new BGP configuration
     #[endpoint {
@@ -4555,7 +4559,10 @@ pub trait NexusExternalApi {
     async fn networking_bgp_config_list(
         rqctx: RequestContext<Self::Context>,
         query_params: Query<PaginatedByNameOrId>,
-    ) -> Result<HttpResponseOk<ResultsPage<BgpConfig>>, HttpError>;
+    ) -> Result<
+        HttpResponseOk<ResultsPage<latest::networking::BgpConfig>>,
+        HttpError,
+    >;
 
     /// List BGP configurations
     #[endpoint {
@@ -4589,7 +4596,7 @@ pub trait NexusExternalApi {
     }]
     async fn networking_bgp_status(
         rqctx: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseOk<Vec<BgpPeerStatus>>, HttpError>;
+    ) -> Result<HttpResponseOk<Vec<latest::networking::BgpPeerStatus>>, HttpError>;
 
     //TODO pagination? the normal by-name/by-id stuff does not work here
     /// Get BGP peer status
@@ -4630,41 +4637,11 @@ pub trait NexusExternalApi {
         HttpResponseOk<Vec<v2025_11_20_00::networking::BgpPeerStatus>>,
         HttpError,
     > {
-        let result = Self::networking_bgp_status(rqctx).await?.0;
+        let result = Self::networking_bgp_status_v2025_12_12_00(rqctx).await?.0;
         Ok(HttpResponseOk(
             result
                 .into_iter()
-                .map(|x| v2025_11_20_00::networking::BgpPeerStatus {
-                    addr: x.addr,
-                    local_asn: x.local_asn,
-                    remote_asn: x.remote_asn,
-                    state: match x.state {
-                        BgpPeerState::Idle => {
-                            v2025_11_20_00::networking::BgpPeerState::Idle
-                        }
-                        BgpPeerState::Connect => {
-                            v2025_11_20_00::networking::BgpPeerState::Connect
-                        }
-                        BgpPeerState::Active => {
-                            v2025_11_20_00::networking::BgpPeerState::Active
-                        }
-                        BgpPeerState::OpenSent => {
-                            v2025_11_20_00::networking::BgpPeerState::OpenSent
-                        }
-                        BgpPeerState::OpenConfirm => {
-                            v2025_11_20_00::networking::BgpPeerState::OpenConfirm
-                        }
-                        BgpPeerState::ConnectionCollision
-                        | BgpPeerState::SessionSetup => {
-                            v2025_11_20_00::networking::BgpPeerState::SessionSetup
-                        }
-                        BgpPeerState::Established => {
-                            v2025_11_20_00::networking::BgpPeerState::Established
-                        }
-                    },
-                    state_duration_millis: x.state_duration_millis,
-                    switch: x.switch,
-                })
+                .map(v2025_11_20_00::networking::BgpPeerStatus::from)
                 .collect(),
         ))
     }
@@ -4678,7 +4655,7 @@ pub trait NexusExternalApi {
     }]
     async fn networking_bgp_exported(
         rqctx: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseOk<Vec<BgpExported>>, HttpError>;
+    ) -> Result<HttpResponseOk<Vec<latest::networking::BgpExported>>, HttpError>;
 
     //TODO pagination? the normal by-name/by-id stuff does not work here
     /// Get BGP exported routes
@@ -4708,7 +4685,10 @@ pub trait NexusExternalApi {
     async fn networking_bgp_message_history(
         rqctx: RequestContext<Self::Context>,
         query_params: Query<latest::networking::BgpRouteSelector>,
-    ) -> Result<HttpResponseOk<AggregateBgpMessageHistory>, HttpError>;
+    ) -> Result<
+        HttpResponseOk<latest::networking::AggregateBgpMessageHistory>,
+        HttpError,
+    >;
 
     //TODO pagination? the normal by-name/by-id stuff does not work here
     /// Get imported IPv4 BGP routes
@@ -4736,7 +4716,7 @@ pub trait NexusExternalApi {
     async fn networking_bgp_imported(
         rqctx: RequestContext<Self::Context>,
         query_params: Query<latest::networking::BgpRouteSelector>,
-    ) -> Result<HttpResponseOk<Vec<BgpImported>>, HttpError>;
+    ) -> Result<HttpResponseOk<Vec<latest::networking::BgpImported>>, HttpError>;
 
     /// Delete BGP configuration
     #[endpoint {
@@ -4761,7 +4741,7 @@ pub trait NexusExternalApi {
     async fn networking_bgp_announce_set_update(
         rqctx: RequestContext<Self::Context>,
         config: TypedBody<latest::networking::BgpAnnounceSetCreate>,
-    ) -> Result<HttpResponseOk<BgpAnnounceSet>, HttpError>;
+    ) -> Result<HttpResponseOk<latest::networking::BgpAnnounceSet>, HttpError>;
 
     /// List BGP announce sets
     #[endpoint {
@@ -4772,7 +4752,10 @@ pub trait NexusExternalApi {
     async fn networking_bgp_announce_set_list(
         rqctx: RequestContext<Self::Context>,
         query_params: Query<PaginatedByNameOrId>,
-    ) -> Result<HttpResponseOk<Vec<BgpAnnounceSet>>, HttpError>;
+    ) -> Result<
+        HttpResponseOk<Vec<latest::networking::BgpAnnounceSet>>,
+        HttpError,
+    >;
 
     /// Delete BGP announce set
     #[endpoint {
@@ -4796,7 +4779,10 @@ pub trait NexusExternalApi {
     async fn networking_bgp_announcement_list(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<latest::networking::BgpAnnounceSetSelector>,
-    ) -> Result<HttpResponseOk<Vec<BgpAnnouncement>>, HttpError>;
+    ) -> Result<
+        HttpResponseOk<Vec<latest::networking::BgpAnnouncement>>,
+        HttpError,
+    >;
 
     /// Enable BFD session
     #[endpoint {
@@ -6034,15 +6020,13 @@ pub trait NexusExternalApi {
     >;
 
     /// Add sled to initialized rack
-    //
-    // TODO: In the future this should really be a PUT request, once we resolve
-    // https://github.com/oxidecomputer/omicron/issues/4494. It should also
-    // explicitly be tied to a rack via a `rack_id` path param. For now we assume
-    // we are only operating on single rack systems.
+    ///
+    // Removed in favor of rack membership operations
     #[endpoint {
         method = POST,
         path = "/v1/system/hardware/sleds",
-        tags = ["system/hardware"]
+        tags = ["system/hardware"],
+        versions = ..VERSION_REMOVE_SLED_ADD
     }]
     async fn sled_add(
         rqctx: RequestContext<Self::Context>,

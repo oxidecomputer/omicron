@@ -24,7 +24,6 @@ use nexus_test_interface::NexusServer;
 use omicron_common::api::external::Name;
 use omicron_common::api::external::UserId;
 use omicron_common::api::internal::nexus::Certificate;
-use omicron_common::api::internal::shared::SwitchLocation;
 use omicron_sled_agent::sim;
 use omicron_test_utils::dev;
 use omicron_test_utils::dev::poll;
@@ -34,6 +33,7 @@ use omicron_uuid_kinds::BlueprintUuid;
 use omicron_uuid_kinds::SledUuid;
 use oximeter_collector::Oximeter;
 use oximeter_producer::Server as ProducerServer;
+use sled_agent_types::early_networking::SwitchLocation;
 use slog::debug;
 use std::collections::BTreeMap;
 use std::collections::HashMap;
@@ -218,10 +218,7 @@ impl<N: NexusServer> ControlPlaneTestContext<N> {
     /// Stop a Dendrite instance for testing failure scenarios.
     ///
     /// Stores the port so that [`Self::restart_dendrite`] can restart on the same port.
-    pub async fn stop_dendrite(
-        &self,
-        switch_location: omicron_common::api::external::SwitchLocation,
-    ) {
+    pub async fn stop_dendrite(&self, switch_location: SwitchLocation) {
         use slog::debug;
         let log = &self.logctx.log;
         debug!(log, "Stopping Dendrite for {switch_location}");
@@ -245,10 +242,7 @@ impl<N: NexusServer> ControlPlaneTestContext<N> {
     ///
     /// Works both when Dendrite is currently running (will stop and restart)
     /// or when it was previously stopped via [`Self::stop_dendrite`].
-    pub async fn restart_dendrite(
-        &self,
-        switch_location: omicron_common::api::external::SwitchLocation,
-    ) {
+    pub async fn restart_dendrite(&self, switch_location: SwitchLocation) {
         // Get port either from running instance or from stored port after stop
         // Extract from mutex first to avoid holding lock across await
         let old = self.dendrite.write().unwrap().remove(&switch_location);

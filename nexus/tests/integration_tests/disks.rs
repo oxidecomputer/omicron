@@ -28,10 +28,10 @@ use nexus_test_utils::resource_helpers::create_default_ip_pools;
 use nexus_test_utils::resource_helpers::create_disk;
 use nexus_test_utils::resource_helpers::create_instance;
 use nexus_test_utils::resource_helpers::create_project;
+use nexus_test_utils::resource_helpers::create_project_image;
 use nexus_test_utils::resource_helpers::object_create_error;
 use nexus_test_utils_macros::nexus_test;
 use nexus_types::external_api::disk;
-use nexus_types::external_api::image;
 use nexus_types::external_api::path_params;
 use nexus_types::external_api::sled;
 use nexus_types::external_api::snapshot;
@@ -2749,25 +2749,8 @@ async fn test_create_read_only_disk_from_snapshot(
     create_project_and_pool(client).await;
     let disks_url = get_disks_url();
 
-    // Define a global image
-    let image_create_params = image::ImageCreate {
-        identity: IdentityMetadataCreateParams {
-            name: "alpine".parse().unwrap(),
-            description: String::from(
-                "you can boot any image, as long as it's alpine",
-            ),
-        },
-        source: image::ImageSource::YouCanBootAnythingAsLongAsItsAlpine,
-        os: "alpine".to_string(),
-        version: "edge".to_string(),
-    };
-
-    let images_url = format!("/v1/images?project={}", PROJECT_NAME);
-    let image =
-        NexusRequest::objects_post(client, &images_url, &image_create_params)
-            .authn_as(AuthnMode::PrivilegedUser)
-            .execute_and_parse_unwrap::<image::Image>()
-            .await;
+    // Define an image
+    let image = create_project_image(client, PROJECT_NAME, "not-alpine").await;
 
     // Create a base disk from this image, which we will then create a snapshot
     // from in order to create our read-only disk from that snapshot.
@@ -2947,25 +2930,8 @@ async fn test_cannot_snapshot_read_only_disk(
     create_project_and_pool(client).await;
     let disks_url = get_disks_url();
 
-    // Define a global image
-    let image_create_params = image::ImageCreate {
-        identity: IdentityMetadataCreateParams {
-            name: "alpine".parse().unwrap(),
-            description: String::from(
-                "you can boot any image, as long as it's alpine",
-            ),
-        },
-        source: image::ImageSource::YouCanBootAnythingAsLongAsItsAlpine,
-        os: "alpine".to_string(),
-        version: "edge".to_string(),
-    };
-
-    let images_url = format!("/v1/images?project={}", PROJECT_NAME);
-    let image =
-        NexusRequest::objects_post(client, &images_url, &image_create_params)
-            .authn_as(AuthnMode::PrivilegedUser)
-            .execute_and_parse_unwrap::<image::Image>()
-            .await;
+    // Define an image
+    let image = create_project_image(client, PROJECT_NAME, "not-alpine").await;
 
     // Create a base disk from this image, which we will then create a snapshot
     // from in order to create our read-only disk from that snapshot.

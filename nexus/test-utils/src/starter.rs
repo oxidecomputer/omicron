@@ -37,6 +37,7 @@ use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::BlueprintDatasetConfig;
 use nexus_types::deployment::BlueprintDatasetDisposition;
 use nexus_types::deployment::BlueprintHostPhase2DesiredSlots;
+use nexus_types::deployment::BlueprintMeasurements;
 use nexus_types::deployment::BlueprintPhysicalDiskConfig;
 use nexus_types::deployment::BlueprintPhysicalDiskDisposition;
 use nexus_types::deployment::BlueprintSledConfig;
@@ -76,7 +77,6 @@ use omicron_common::api::internal::shared::NetworkInterface;
 use omicron_common::api::internal::shared::NetworkInterfaceKind;
 use omicron_common::api::internal::shared::PrivateIpConfig;
 use omicron_common::api::internal::shared::SourceNatConfigGeneric;
-use omicron_common::api::internal::shared::SwitchLocation;
 use omicron_common::disk::CompressionAlgorithm;
 use omicron_common::zpool_name::ZpoolName;
 use omicron_sled_agent::sim;
@@ -95,6 +95,7 @@ use oximeter_producer::Server as ProducerServer;
 use sled_agent_client::types::EarlyNetworkConfig;
 use sled_agent_client::types::EarlyNetworkConfigBody;
 use sled_agent_client::types::RackNetworkConfig;
+use sled_agent_types::early_networking::SwitchLocation;
 use sled_agent_types::inventory::HostPhase2DesiredSlots;
 use sled_agent_types::inventory::OmicronSledConfig;
 use sled_agent_types::inventory::OmicronZoneDataset;
@@ -1396,6 +1397,7 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
                     remove_mupdate_override: None,
                     host_phase_2:
                         BlueprintHostPhase2DesiredSlots::current_contents(),
+                    measurements: BlueprintMeasurements::InstallDataset,
                 },
             );
         }

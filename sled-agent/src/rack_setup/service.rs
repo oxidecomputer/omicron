@@ -72,7 +72,6 @@ use crate::bootstrap::early_networking::{
     EarlyNetworkSetup, EarlyNetworkSetupError,
 };
 use crate::bootstrap::rss_handle::BootstrapAgentHandle;
-use crate::bootstrap::trust_quorum_setup::TRUST_QUORUM_INTEGRATION_ENABLED;
 use crate::rack_setup::plan::service::PlanError as ServicePlanError;
 use crate::rack_setup::plan::sled::Plan as SledPlan;
 use bootstore::schemes::v0 as bootstore;
@@ -87,12 +86,12 @@ use nexus_lockstep_client::{
 };
 use nexus_types::deployment::{BlueprintZoneType, blueprint_zone_type};
 use nexus_types::internal_api::params::ExternalPortDiscovery;
+use ntp_admin_client::ClientInfo as _;
 use ntp_admin_client::{
     Client as NtpAdminClient, Error as NtpAdminError, types::TimeSync,
 };
 use omicron_common::address::{COCKROACH_ADMIN_PORT, NTP_ADMIN_PORT};
 use omicron_common::api::external::Generation;
-use omicron_common::api::internal::shared::LldpAdminStatus;
 use omicron_common::backoff::{
     BackoffError, retry_notify, retry_policy_internal_service_aggressive,
 };
@@ -108,7 +107,7 @@ use sled_agent_client::{
 };
 use sled_agent_config_reconciler::InternalDisksReceiver;
 use sled_agent_types::early_networking::{
-    EarlyNetworkConfig, EarlyNetworkConfigBody,
+    EarlyNetworkConfig, EarlyNetworkConfigBody, LldpAdminStatus,
 };
 use sled_agent_types::inventory::{
     ConfigReconcilerInventoryResult, HostPhase2DesiredSlots, OmicronSledConfig,
@@ -897,11 +896,9 @@ impl ServiceInner {
                                 vlan_id: a.vlan_id,
                             })
                             .collect(),
-                        switch: config.switch.into(),
-                        uplink_port_speed: config.uplink_port_speed.into(),
-                        uplink_port_fec: config
-                            .uplink_port_fec
-                            .map(|fec| fec.into()),
+                        switch: config.switch,
+                        uplink_port_speed: config.uplink_port_speed,
+                        uplink_port_fec: config.uplink_port_fec,
                         autoneg: config.autoneg,
                         bgp_peers: config
                             .bgp_peers
@@ -985,22 +982,13 @@ impl ServiceInner {
                 bfd: config
                     .bfd
                     .iter()
-                    .map(|spec| {
-                        NexusTypes::BfdPeerConfig {
-                    detection_threshold: spec.detection_threshold,
-                    local: spec.local,
-                    mode: match spec.mode {
-                        omicron_common::api::external::BfdMode::SingleHop => {
-                            NexusTypes::BfdMode::SingleHop
-                        }
-                        omicron_common::api::external::BfdMode::MultiHop => {
-                            NexusTypes::BfdMode::MultiHop
-                        }
-                    },
-                    remote: spec.remote,
-                    required_rx: spec.required_rx,
-                    switch: spec.switch.into(),
-                }
+                    .map(|spec| NexusTypes::BfdPeerConfig {
+                        detection_threshold: spec.detection_threshold,
+                        local: spec.local,
+                        mode: spec.mode,
+                        remote: spec.remote,
+                        required_rx: spec.required_rx,
+                        switch: spec.switch,
                     })
                     .collect(),
             }
@@ -1294,16 +1282,8 @@ impl ServiceInner {
         rss_step.update(RssStep::InitTrustQuorum);
         // Initialize the trust quorum if there are peers configured.
 
-        let initial_trust_quorum_configuration = if let Some(peers) =
-            &config.trust_quorum_peers
-        {
-            let initial_membership: BTreeSet<_> =
-                peers.iter().cloned().collect();
-            bootstore
-                .init_rack(sled_plan.rack_id.into(), initial_membership)
-                .await?;
-
-            if TRUST_QUORUM_INTEGRATION_ENABLED {
+        let initial_trust_quorum_configuration =
+            if let Some(peers) = &config.trust_quorum_peers {
                 let tq_members: BTreeSet<BaseboardId> = peers
                     .iter()
                     .cloned()
@@ -1325,15 +1305,16 @@ impl ServiceInner {
                 })
             } else {
                 None
-            }
-        } else {
-            None
-        };
+            };
 
         // Save the relevant network config in the bootstore. We want this to
         // happen before we `initialize_sleds` so each scrimlet (including us)
         // can use its normal boot path of "read network config for our switch
         // from the bootstore".
+        //
+        // TODO: In future releases, we will get rid of the bootstore entirely,
+        // and early_network_config will be replicated by the trust quorum
+        // nodes.
         let early_network_config = EarlyNetworkConfig {
             generation: 1,
             schema_version: 2,
@@ -1756,6 +1737,7 @@ mod test {
     use super::*;
     use crate::rack_setup::plan::service::{Plan as ServicePlan, SledInfo};
     use iddqd::IdOrdMap;
+    use illumos_utils::svcs::SvcsInMaintenanceResult;
     use nexus_reconfigurator_blippy::{Blippy, BlippyReportSortKey};
     use omicron_common::{
         address::{Ipv6Subnet, SLED_PREFIX, get_sled_address},
@@ -1764,9 +1746,9 @@ mod test {
     };
     use omicron_uuid_kinds::SledUuid;
     use sled_agent_types::inventory::{
-        Baseboard, ConfigReconcilerInventoryStatus, HealthMonitorInventory,
-        Inventory, InventoryDisk, OmicronFileSourceResolverInventory,
-        OmicronZoneType, SledCpuFamily, SledRole,
+        Baseboard, ConfigReconcilerInventoryStatus, Inventory, InventoryDisk,
+        OmicronFileSourceResolverInventory, OmicronZoneType, SledCpuFamily,
+        SledRole,
     };
     use sled_agent_types::rack_init::rack_initialize_request_test_config;
 
@@ -1812,7 +1794,7 @@ mod test {
                 last_reconciliation: None,
                 file_source_resolver:
                     OmicronFileSourceResolverInventory::new_fake(),
-                health_monitor: HealthMonitorInventory::new(),
+                smf_services_in_maintenance: Ok(SvcsInMaintenanceResult::new()),
                 reference_measurements: IdOrdMap::new(),
             },
             true,

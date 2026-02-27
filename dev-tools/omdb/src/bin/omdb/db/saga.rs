@@ -658,8 +658,7 @@ async fn get_saga_sec_status(
             | nexus_lockstep_client::Error::ResponseBodyError(_)
             | nexus_lockstep_client::Error::InvalidResponsePayload(_, _)
             | nexus_lockstep_client::Error::UnexpectedResponse(_)
-            | nexus_lockstep_client::Error::PreHookError(_)
-            | nexus_lockstep_client::Error::PostHookError(_) => {
+            | nexus_lockstep_client::Error::Custom(_) => {
                 return SagaSecStatus::SecPingError {
                     sec_id: current_sec,
                     observed_error: e.to_string(),

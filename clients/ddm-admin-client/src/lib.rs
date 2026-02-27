@@ -18,6 +18,7 @@ use sled_hardware_types::underlay::BOOTSTRAP_MASK;
 use sled_hardware_types::underlay::BOOTSTRAP_PREFIX;
 use sled_hardware_types::underlay::BootstrapInterface;
 use slog::Logger;
+use slog_error_chain::SlogInlineError;
 use std::net::Ipv6Addr;
 use std::net::SocketAddr;
 use std::net::SocketAddrV6;
@@ -28,12 +29,12 @@ use crate::types::EnableStatsRequest;
 // TODO-cleanup Is it okay to hardcode this port number here?
 const DDMD_PORT: u16 = 8000;
 
-#[derive(Debug, Error)]
+#[derive(Debug, Error, SlogInlineError)]
 pub enum DdmError {
-    #[error("Failed to construct an HTTP client: {0}")]
-    HttpClient(#[from] reqwest::Error),
+    #[error("Failed to construct an HTTP client:")]
+    HttpClient(#[from] reqwest012::Error),
 
-    #[error("Failed making HTTP request to ddmd: {0}")]
+    #[error("Failed making HTTP request to ddmd")]
     DdmdApi(#[from] Error<types::Error>),
 }
 
@@ -57,7 +58,9 @@ impl Client {
         let log =
             log.new(slog::o!("DdmAdminClient" => SocketAddr::V6(ddmd_addr)));
 
-        let inner = reqwest::ClientBuilder::new()
+        // Use reqwest012 because the rev-pinned maghemite ddm-admin-client
+        // is still on reqwest 0.12.
+        let inner = reqwest012::ClientBuilder::new()
             .connect_timeout(dur)
             .timeout(dur)
             .build()?;

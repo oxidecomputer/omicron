@@ -1438,7 +1438,7 @@ authz_resource! {
     parent = "Project",
     primary_key = { uuid_kind = ExternalSubnetKind },
     roles_allowed = false,
-    polar_snippet = InProjectFull,
+    polar_snippet = InProjectLimited,
 }
 
 // MulticastGroup Authorization

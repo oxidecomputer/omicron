@@ -22,9 +22,10 @@ use nexus_db_schema::schema::{
 use nexus_types::external_api::networking as networking_types;
 use nexus_types::identity::Resource;
 use omicron_common::api::external;
-use omicron_common::api::external::{BgpPeer, ImportExportPolicy};
-use omicron_common::api::internal::shared::{PortFec, PortSpeed};
 use serde::{Deserialize, Serialize};
+use sled_agent_types::early_networking::ImportExportPolicy;
+use sled_agent_types::early_networking::PortFec;
+use sled_agent_types::early_networking::PortSpeed;
 use uuid::Uuid;
 
 impl_enum_type!(
@@ -741,7 +742,7 @@ impl SwitchPortBgpPeerConfig {
         port_settings_id: Uuid,
         bgp_config_id: Uuid,
         interface_name: Name,
-        p: &BgpPeer,
+        p: &networking_types::BgpPeer,
     ) -> Self {
         Self {
             id: Uuid::new_v4(),

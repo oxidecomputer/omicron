@@ -25,7 +25,6 @@ use nexus_types::external_api::certificate;
 use nexus_types::external_api::disk;
 use nexus_types::external_api::external_subnet;
 use nexus_types::external_api::floating_ip;
-use nexus_types::external_api::hardware;
 use nexus_types::external_api::identity_provider;
 use nexus_types::external_api::image;
 use nexus_types::external_api::instance;
@@ -67,6 +66,7 @@ use omicron_common::api::external::UserId;
 use omicron_common::api::external::VpcFirewallRuleUpdateParams;
 use omicron_test_utils::certificates::CertificateChain;
 use semver::Version;
+use sled_agent_types::early_networking::BfdMode;
 use std::collections::BTreeSet;
 use std::net::IpAddr;
 use std::net::Ipv4Addr;
@@ -130,11 +130,6 @@ pub static HARDWARE_SLED_DISK_URL: LazyLock<String> = LazyLock::new(|| {
 pub static SLED_INSTANCES_URL: LazyLock<String> = LazyLock::new(|| {
     format!("/v1/system/hardware/sleds/{}/instances", SLED_AGENT_UUID)
 });
-pub static DEMO_UNINITIALIZED_SLED: LazyLock<hardware::UninitializedSledId> =
-    LazyLock::new(|| hardware::UninitializedSledId {
-        serial: "demo-serial".to_string(),
-        part: "demo-part".to_string(),
-    });
 
 pub const SUPPORT_BUNDLES_URL: &'static str =
     "/experimental/v1/system/support-bundles";
@@ -1030,7 +1025,7 @@ pub static DEMO_BFD_ENABLE: LazyLock<networking::BfdSessionEnable> =
         detection_threshold: 3,
         required_rx: 1000000,
         switch: "switch0".parse().unwrap(),
-        mode: omicron_common::api::external::BfdMode::MultiHop,
+        mode: BfdMode::MultiHop,
     });
 
 pub static DEMO_BFD_DISABLE: LazyLock<networking::BfdSessionDisable> =
@@ -1068,7 +1063,7 @@ pub static DEMO_IMAGE_CREATE: LazyLock<image::ImageCreate> =
             name: DEMO_IMAGE_NAME.clone(),
             description: String::from(""),
         },
-        source: image::ImageSource::YouCanBootAnythingAsLongAsItsAlpine,
+        source: image::ImageSource::Snapshot { id: uuid::Uuid::new_v4() },
         os: "fake-os".to_string(),
         version: "1.0".to_string(),
     });
@@ -2950,13 +2945,7 @@ pub static VERIFY_ENDPOINTS: LazyLock<Vec<VerifyEndpoint>> = LazyLock::new(
                 url: "/v1/system/hardware/sleds",
                 visibility: Visibility::Public,
                 unprivileged_access: UnprivilegedAccess::None,
-                allowed_methods: vec![
-                    AllowedMethod::Get,
-                    AllowedMethod::Post(
-                        serde_json::to_value(&*DEMO_UNINITIALIZED_SLED)
-                            .unwrap(),
-                    ),
-                ],
+                allowed_methods: vec![AllowedMethod::Get],
             },
             VerifyEndpoint {
                 url: &SLED_INSTANCES_URL,

@@ -38,12 +38,12 @@ use nexus_types::external_api::networking;
 use nexus_types::identity::Resource;
 use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::{
-    self, CreateResult, DataPageParams, DeleteResult, Error,
-    ImportExportPolicy, ListResultVec, LookupResult, NameOrId, ResourceType,
-    SwitchPortAddressView, UpdateResult,
+    self, CreateResult, DataPageParams, DeleteResult, Error, ListResultVec,
+    LookupResult, NameOrId, ResourceType, SwitchPortAddressView, UpdateResult,
 };
 use ref_cast::RefCast;
 use serde::{Deserialize, Serialize};
+use sled_agent_types::early_networking::ImportExportPolicy;
 use uuid::Uuid;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -70,9 +70,9 @@ pub struct BgpPeerConfig {
     pub router_lifetime: SqlU16,
 }
 
-impl Into<external::BgpPeer> for BgpPeerConfig {
-    fn into(self) -> external::BgpPeer {
-        external::BgpPeer {
+impl Into<networking::BgpPeer> for BgpPeerConfig {
+    fn into(self) -> networking::BgpPeer {
+        networking::BgpPeer {
             bgp_config: self.bgp_config_id.into(),
             interface_name: self.interface_name.into(),
             addr: self.addr.map(|a| a.ip()),
@@ -131,9 +131,9 @@ impl SwitchPortSettingsCombinedResult {
     }
 }
 
-impl Into<external::SwitchPortSettings> for SwitchPortSettingsCombinedResult {
-    fn into(self) -> external::SwitchPortSettings {
-        external::SwitchPortSettings {
+impl Into<networking::SwitchPortSettings> for SwitchPortSettingsCombinedResult {
+    fn into(self) -> networking::SwitchPortSettings {
+        networking::SwitchPortSettings {
             identity: self.settings.identity(),
             port: self.port.into(),
             groups: self.groups.into_iter().map(Into::into).collect(),
@@ -1398,7 +1398,7 @@ async fn do_switch_port_settings_create(
     .get_results_async(conn)
     .await?;
 
-    let mut peer_by_addr: BTreeMap<IpAddr, &external::BgpPeer> =
+    let mut peer_by_addr: BTreeMap<IpAddr, &networking::BgpPeer> =
         BTreeMap::new();
 
     let mut bgp_peer_config = Vec::new();
@@ -1869,14 +1869,14 @@ mod test {
     use crate::db::datastore::UpdatePrecondition;
     use crate::db::pub_test_utils::TestDatabase;
     use nexus_types::external_api::networking::{
-        BgpAnnounceSetCreate, BgpConfigCreate, BgpPeerConfig,
+        BgpAnnounceSetCreate, BgpConfigCreate, BgpPeer, BgpPeerConfig,
         SwitchPortConfigCreate, SwitchPortGeometry, SwitchPortSettingsCreate,
     };
     use omicron_common::api::external::{
-        BgpPeer, IdentityMetadataCreateParams, ImportExportPolicy, Name,
-        NameOrId,
+        IdentityMetadataCreateParams, Name, NameOrId,
     };
     use omicron_test_utils::dev;
+    use sled_agent_types::early_networking::ImportExportPolicy;
     use std::{collections::HashMap, str::FromStr};
     use uuid::Uuid;
 

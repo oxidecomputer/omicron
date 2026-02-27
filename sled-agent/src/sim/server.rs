@@ -110,7 +110,6 @@ impl Server {
         let sled_agent = SledAgent::new_simulated_with_id(
             &config,
             sa_log,
-            config.nexus_address,
             Arc::clone(&nexus_client),
             simulated_upstairs.clone(),
             sled_index,

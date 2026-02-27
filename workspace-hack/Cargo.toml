@@ -21,7 +21,7 @@ workspace = true
 ahash = { version = "0.8.12" }
 aho-corasick = { version = "1.1.3" }
 anyhow = { version = "1.0.99", features = ["backtrace"] }
-aws-lc-rs = { version = "1.12.4", features = ["prebuilt-nasm"] }
+aws-lc-rs = { version = "1.16.0", features = ["prebuilt-nasm"] }
 base16ct = { version = "0.2.0", default-features = false, features = ["alloc"] }
 base64 = { version = "0.22.1" }
 base64ct = { version = "1.6.0", default-features = false, features = ["std"] }
@@ -31,6 +31,7 @@ bstr = { version = "1.10.0" }
 buf-list = { version = "1.0.3", default-features = false, features = ["tokio1"] }
 byteorder = { version = "1.5.0" }
 bytes = { version = "1.11.1", features = ["serde"] }
+camino = { version = "1.2.2", default-features = false, features = ["serde1"] }
 chrono = { version = "0.4.43", features = ["serde"] }
 cipher = { version = "0.4.4", default-features = false, features = ["block-padding", "zeroize"] }
 clap = { version = "4.5.48", features = ["cargo", "derive", "env", "wrap_help"] }
@@ -52,10 +53,11 @@ elliptic-curve = { version = "0.13.8", features = ["ecdh", "hazmat", "pem", "std
 env_logger = { version = "0.11.8", default-features = false, features = ["auto-color"] }
 ff = { version = "0.13.0", default-features = false, features = ["alloc"] }
 flate2 = { version = "1.1.2", features = ["zlib-rs"] }
+foldhash = { version = "0.2.0" }
 form_urlencoded = { version = "1.2.2" }
 fs-err = { version = "3.1.1", default-features = false, features = ["tokio"] }
 futures-channel = { version = "0.3.31", features = ["sink"] }
-futures-core = { version = "0.3.31" }
+futures-core = { version = "0.3.32" }
 futures-io = { version = "0.3.31" }
 futures-sink = { version = "0.3.31" }
 futures-task = { version = "0.3.31", default-features = false, features = ["std"] }
@@ -65,7 +67,7 @@ gateway-messages = { git = "https://github.com/oxidecomputer/management-gateway-
 generic-array = { version = "0.14.7", default-features = false, features = ["more_lengths", "zeroize"] }
 getrandom-6f8ce4dd05d13bba = { package = "getrandom", version = "0.2.15", default-features = false, features = ["js", "rdrand", "std"] }
 group = { version = "0.13.0", default-features = false, features = ["alloc"] }
-hashbrown = { version = "0.16.1", default-features = false, features = ["allocator-api2", "inline-more"] }
+hashbrown = { version = "0.16.1" }
 hex = { version = "0.4.3", features = ["serde"] }
 hickory-proto = { version = "0.25.2", features = ["serde", "text-parsing"] }
 hmac = { version = "0.12.1", default-features = false, features = ["reset"] }
@@ -102,20 +104,21 @@ portable-atomic = { version = "1.11.0" }
 postgres-types = { version = "0.2.9", default-features = false, features = ["with-chrono-0_4", "with-serde_json-1", "with-uuid-1"] }
 ppv-lite86 = { version = "0.2.20", default-features = false, features = ["simd", "std"] }
 predicates = { version = "3.1.3" }
-proc-macro2 = { version = "1.0.101" }
+proc-macro2 = { version = "1.0.106" }
 proptest = { version = "1.7.0" }
 rand-274715c4dabd11b0 = { package = "rand", version = "0.9.2" }
 rand-c38e5c1d305a1b54 = { package = "rand", version = "0.8.5" }
 rand_chacha-274715c4dabd11b0 = { package = "rand_chacha", version = "0.9.0", default-features = false, features = ["std"] }
 rand_chacha-468e82937335b1c9 = { package = "rand_chacha", version = "0.3.1", default-features = false, features = ["std"] }
-regex = { version = "1.11.3" }
-regex-automata = { version = "0.4.11", default-features = false, features = ["dfa", "hybrid", "meta", "nfa", "perf", "std", "unicode"] }
+regex = { version = "1.12.3" }
+regex-automata = { version = "0.4.14", default-features = false, features = ["dfa", "hybrid", "meta", "nfa", "perf", "std", "unicode"] }
 regex-syntax = { version = "0.8.5" }
-reqwest = { version = "0.12.24", features = ["blocking", "cookies", "json", "rustls-tls", "stream"] }
+reqwest-594e8ee84c453af0 = { package = "reqwest", version = "0.13.2", default-features = false, features = ["blocking", "cookies", "http2", "json", "query", "rustls", "stream"] }
+reqwest-5ef9efb8ec2df382 = { package = "reqwest", version = "0.12.28", features = ["blocking", "json", "rustls-tls", "stream"] }
 rsa = { version = "0.9.8", features = ["serde", "sha2"] }
 rustc-hash = { version = "2.1.1" }
-rustls = { version = "0.23.19", features = ["ring"] }
-rustls-webpki = { version = "0.102.8", default-features = false, features = ["aws_lc_rs", "ring", "std"] }
+rustls = { version = "0.23.37", features = ["ring"] }
+rustls-webpki = { version = "0.103.9", default-features = false, features = ["aws-lc-rs", "ring", "std"] }
 schemars = { version = "0.8.22", features = ["bytes", "chrono", "semver", "url", "uuid1"] }
 scopeguard = { version = "1.2.0" }
 semver = { version = "1.0.27", features = ["serde"] }
@@ -135,8 +138,8 @@ string_cache = { version = "0.8.9" }
 strum-2f80eeee3b1b6c7e = { package = "strum", version = "0.26.3", features = ["derive"] }
 strum-754bda37e0fb3874 = { package = "strum", version = "0.27.2", features = ["derive"] }
 subtle = { version = "2.6.1" }
-syn-f595c2ba2a3f28df = { package = "syn", version = "2.0.114", features = ["extra-traits", "fold", "full", "visit", "visit-mut"] }
-time = { version = "0.3.43", features = ["formatting", "local-offset", "macros", "parsing"] }
+syn-f595c2ba2a3f28df = { package = "syn", version = "2.0.117", features = ["extra-traits", "fold", "full", "visit", "visit-mut"] }
+time = { version = "0.3.47", features = ["formatting", "local-offset", "macros", "parsing"] }
 tokio = { version = "1.49.0", features = ["full", "test-util"] }
 tokio-postgres = { version = "0.7.13", features = ["with-chrono-0_4", "with-serde_json-1", "with-uuid-1"] }
 tokio-rustls = { version = "0.26.0", default-features = false, features = ["logging", "ring", "tls12"] }
@@ -162,7 +165,7 @@ zip-3b31131e45eafb45 = { package = "zip", version = "0.6.6", default-features = 
 ahash = { version = "0.8.12" }
 aho-corasick = { version = "1.1.3" }
 anyhow = { version = "1.0.99", features = ["backtrace"] }
-aws-lc-rs = { version = "1.12.4", features = ["prebuilt-nasm"] }
+aws-lc-rs = { version = "1.16.0", features = ["prebuilt-nasm"] }
 base16ct = { version = "0.2.0", default-features = false, features = ["alloc"] }
 base64 = { version = "0.22.1" }
 base64ct = { version = "1.6.0", default-features = false, features = ["std"] }
@@ -172,6 +175,7 @@ bstr = { version = "1.10.0" }
 buf-list = { version = "1.0.3", default-features = false, features = ["tokio1"] }
 byteorder = { version = "1.5.0" }
 bytes = { version = "1.11.1", features = ["serde"] }
+camino = { version = "1.2.2", default-features = false, features = ["serde1"] }
 cc = { version = "1.2.56", default-features = false, features = ["parallel"] }
 chrono = { version = "0.4.43", features = ["serde"] }
 cipher = { version = "0.4.4", default-features = false, features = ["block-padding", "zeroize"] }
@@ -194,10 +198,11 @@ elliptic-curve = { version = "0.13.8", features = ["ecdh", "hazmat", "pem", "std
 env_logger = { version = "0.11.8", default-features = false, features = ["auto-color"] }
 ff = { version = "0.13.0", default-features = false, features = ["alloc"] }
 flate2 = { version = "1.1.2", features = ["zlib-rs"] }
+foldhash = { version = "0.2.0" }
 form_urlencoded = { version = "1.2.2" }
 fs-err = { version = "3.1.1", default-features = false, features = ["tokio"] }
 futures-channel = { version = "0.3.31", features = ["sink"] }
-futures-core = { version = "0.3.31" }
+futures-core = { version = "0.3.32" }
 futures-io = { version = "0.3.31" }
 futures-sink = { version = "0.3.31" }
 futures-task = { version = "0.3.31", default-features = false, features = ["std"] }
@@ -207,7 +212,7 @@ gateway-messages = { git = "https://github.com/oxidecomputer/management-gateway-
 generic-array = { version = "0.14.7", default-features = false, features = ["more_lengths", "zeroize"] }
 getrandom-6f8ce4dd05d13bba = { package = "getrandom", version = "0.2.15", default-features = false, features = ["js", "rdrand", "std"] }
 group = { version = "0.13.0", default-features = false, features = ["alloc"] }
-hashbrown = { version = "0.16.1", default-features = false, features = ["allocator-api2", "inline-more"] }
+hashbrown = { version = "0.16.1" }
 heck = { version = "0.4.1", features = ["unicode"] }
 hex = { version = "0.4.3", features = ["serde"] }
 hickory-proto = { version = "0.25.2", features = ["serde", "text-parsing"] }
@@ -245,20 +250,21 @@ portable-atomic = { version = "1.11.0" }
 postgres-types = { version = "0.2.9", default-features = false, features = ["with-chrono-0_4", "with-serde_json-1", "with-uuid-1"] }
 ppv-lite86 = { version = "0.2.20", default-features = false, features = ["simd", "std"] }
 predicates = { version = "3.1.3" }
-proc-macro2 = { version = "1.0.101" }
+proc-macro2 = { version = "1.0.106" }
 proptest = { version = "1.7.0" }
 rand-274715c4dabd11b0 = { package = "rand", version = "0.9.2" }
 rand-c38e5c1d305a1b54 = { package = "rand", version = "0.8.5" }
 rand_chacha-274715c4dabd11b0 = { package = "rand_chacha", version = "0.9.0", default-features = false, features = ["std"] }
 rand_chacha-468e82937335b1c9 = { package = "rand_chacha", version = "0.3.1", default-features = false, features = ["std"] }
-regex = { version = "1.11.3" }
-regex-automata = { version = "0.4.11", default-features = false, features = ["dfa", "hybrid", "meta", "nfa", "perf", "std", "unicode"] }
+regex = { version = "1.12.3" }
+regex-automata = { version = "0.4.14", default-features = false, features = ["dfa", "hybrid", "meta", "nfa", "perf", "std", "unicode"] }
 regex-syntax = { version = "0.8.5" }
-reqwest = { version = "0.12.24", features = ["blocking", "cookies", "json", "rustls-tls", "stream"] }
+reqwest-594e8ee84c453af0 = { package = "reqwest", version = "0.13.2", default-features = false, features = ["blocking", "cookies", "http2", "json", "query", "rustls", "stream"] }
+reqwest-5ef9efb8ec2df382 = { package = "reqwest", version = "0.12.28", features = ["blocking", "json", "rustls-tls", "stream"] }
 rsa = { version = "0.9.8", features = ["serde", "sha2"] }
 rustc-hash = { version = "2.1.1" }
-rustls = { version = "0.23.19", features = ["ring"] }
-rustls-webpki = { version = "0.102.8", default-features = false, features = ["aws_lc_rs", "ring", "std"] }
+rustls = { version = "0.23.37", features = ["ring"] }
+rustls-webpki = { version = "0.103.9", default-features = false, features = ["aws-lc-rs", "ring", "std"] }
 schemars = { version = "0.8.22", features = ["bytes", "chrono", "semver", "url", "uuid1"] }
 scopeguard = { version = "1.2.0" }
 semver = { version = "1.0.27", features = ["serde"] }
@@ -280,9 +286,9 @@ strum-2f80eeee3b1b6c7e = { package = "strum", version = "0.26.3", features = ["d
 strum-754bda37e0fb3874 = { package = "strum", version = "0.27.2", features = ["derive"] }
 subtle = { version = "2.6.1" }
 syn-dff4ba8e3ae991db = { package = "syn", version = "1.0.109", features = ["extra-traits", "fold", "full", "visit"] }
-syn-f595c2ba2a3f28df = { package = "syn", version = "2.0.114", features = ["extra-traits", "fold", "full", "visit", "visit-mut"] }
-time = { version = "0.3.43", features = ["formatting", "local-offset", "macros", "parsing"] }
-time-macros = { version = "0.2.24", default-features = false, features = ["formatting", "parsing"] }
+syn-f595c2ba2a3f28df = { package = "syn", version = "2.0.117", features = ["extra-traits", "fold", "full", "visit", "visit-mut"] }
+time = { version = "0.3.47", features = ["formatting", "local-offset", "macros", "parsing"] }
+time-macros = { version = "0.2.27", default-features = false, features = ["formatting", "parsing"] }
 tokio = { version = "1.49.0", features = ["full", "test-util"] }
 tokio-postgres = { version = "0.7.13", features = ["with-chrono-0_4", "with-serde_json-1", "with-uuid-1"] }
 tokio-rustls = { version = "0.26.0", default-features = false, features = ["logging", "ring", "tls12"] }
@@ -318,6 +324,7 @@ miniz_oxide = { version = "0.8.5", default-features = false, features = ["with-a
 mio = { version = "1.0.2", features = ["net", "os-ext"] }
 rustix-d585fab2519d2d1 = { package = "rustix", version = "0.38.37", features = ["event", "fs", "net", "pipe", "process", "stdio", "system", "termios", "time"] }
 rustix-dff4ba8e3ae991db = { package = "rustix", version = "1.1.3", features = ["fs", "stdio", "termios"] }
+tokio-rustls = { version = "0.26.0", default-features = false, features = ["aws-lc-rs"] }
 zerocopy-ca01ad9e24f5d932 = { package = "zerocopy", version = "0.7.35", features = ["derive", "simd"] }
 
 [target.x86_64-unknown-linux-gnu.build-dependencies]
@@ -332,6 +339,7 @@ miniz_oxide = { version = "0.8.5", default-features = false, features = ["with-a
 mio = { version = "1.0.2", features = ["net", "os-ext"] }
 rustix-d585fab2519d2d1 = { package = "rustix", version = "0.38.37", features = ["event", "fs", "net", "pipe", "process", "stdio", "system", "termios", "time"] }
 rustix-dff4ba8e3ae991db = { package = "rustix", version = "1.1.3", features = ["fs", "stdio", "termios"] }
+tokio-rustls = { version = "0.26.0", default-features = false, features = ["aws-lc-rs"] }
 zerocopy-ca01ad9e24f5d932 = { package = "zerocopy", version = "0.7.35", features = ["derive", "simd"] }
 
 [target.x86_64-apple-darwin.dependencies]
@@ -343,6 +351,8 @@ miniz_oxide = { version = "0.8.5", default-features = false, features = ["with-a
 mio = { version = "1.0.2", features = ["net", "os-ext"] }
 rustix-d585fab2519d2d1 = { package = "rustix", version = "0.38.37", features = ["event", "fs", "net", "pipe", "process", "stdio", "system", "termios", "time"] }
 rustix-dff4ba8e3ae991db = { package = "rustix", version = "1.1.3", features = ["fs", "stdio", "termios"] }
+security-framework-sys = { version = "2.17.0", features = ["OSX_10_10", "OSX_10_11", "OSX_10_12", "OSX_10_9"] }
+tokio-rustls = { version = "0.26.0", default-features = false, features = ["aws-lc-rs"] }
 
 [target.x86_64-apple-darwin.build-dependencies]
 cookie = { version = "0.18.1", default-features = false, features = ["percent-encode"] }
@@ -353,6 +363,8 @@ miniz_oxide = { version = "0.8.5", default-features = false, features = ["with-a
 mio = { version = "1.0.2", features = ["net", "os-ext"] }
 rustix-d585fab2519d2d1 = { package = "rustix", version = "0.38.37", features = ["event", "fs", "net", "pipe", "process", "stdio", "system", "termios", "time"] }
 rustix-dff4ba8e3ae991db = { package = "rustix", version = "1.1.3", features = ["fs", "stdio", "termios"] }
+security-framework-sys = { version = "2.17.0", features = ["OSX_10_10", "OSX_10_11", "OSX_10_12", "OSX_10_9"] }
+tokio-rustls = { version = "0.26.0", default-features = false, features = ["aws-lc-rs"] }
 
 [target.aarch64-apple-darwin.dependencies]
 cookie = { version = "0.18.1", default-features = false, features = ["percent-encode"] }
@@ -363,6 +375,8 @@ miniz_oxide = { version = "0.8.5", default-features = false, features = ["with-a
 mio = { version = "1.0.2", features = ["net", "os-ext"] }
 rustix-d585fab2519d2d1 = { package = "rustix", version = "0.38.37", features = ["event", "fs", "net", "pipe", "process", "stdio", "system", "termios", "time"] }
 rustix-dff4ba8e3ae991db = { package = "rustix", version = "1.1.3", features = ["fs", "stdio", "termios"] }
+security-framework-sys = { version = "2.17.0", features = ["OSX_10_10", "OSX_10_11", "OSX_10_12", "OSX_10_9"] }
+tokio-rustls = { version = "0.26.0", default-features = false, features = ["aws-lc-rs"] }
 
 [target.aarch64-apple-darwin.build-dependencies]
 cookie = { version = "0.18.1", default-features = false, features = ["percent-encode"] }
@@ -373,6 +387,8 @@ miniz_oxide = { version = "0.8.5", default-features = false, features = ["with-a
 mio = { version = "1.0.2", features = ["net", "os-ext"] }
 rustix-d585fab2519d2d1 = { package = "rustix", version = "0.38.37", features = ["event", "fs", "net", "pipe", "process", "stdio", "system", "termios", "time"] }
 rustix-dff4ba8e3ae991db = { package = "rustix", version = "1.1.3", features = ["fs", "stdio", "termios"] }
+security-framework-sys = { version = "2.17.0", features = ["OSX_10_10", "OSX_10_11", "OSX_10_12", "OSX_10_9"] }
+tokio-rustls = { version = "0.26.0", default-features = false, features = ["aws-lc-rs"] }
 
 [target.x86_64-unknown-illumos.dependencies]
 cookie = { version = "0.18.1", default-features = false, features = ["percent-encode"] }
@@ -381,32 +397,29 @@ dof-9fbad63c4bcf4a8f = { package = "dof", version = "0.4.0", default-features = 
 getrandom-468e82937335b1c9 = { package = "getrandom", version = "0.3.4", default-features = false, features = ["std"] }
 hyper-rustls = { version = "0.27.7", features = ["http2", "ring", "webpki-tokio"] }
 hyper-util = { version = "0.1.19", features = ["full"] }
-itertools-5ef9efb8ec2df382 = { package = "itertools", version = "0.12.1" }
 itertools-93f6ce9d446188ac = { package = "itertools", version = "0.10.5" }
 miniz_oxide = { version = "0.8.5", default-features = false, features = ["with-alloc"] }
 mio = { version = "1.0.2", features = ["net", "os-ext"] }
-nom = { version = "7.1.3" }
 rustix-d585fab2519d2d1 = { package = "rustix", version = "0.38.37", features = ["event", "fs", "net", "pipe", "process", "stdio", "system", "termios", "time"] }
 rustix-dff4ba8e3ae991db = { package = "rustix", version = "1.1.3", features = ["fs", "stdio", "termios"] }
+tokio-rustls = { version = "0.26.0", default-features = false, features = ["aws-lc-rs"] }
 toml_edit-cdcf2f9584511fe6 = { package = "toml_edit", version = "0.19.15", features = ["serde"] }
 winnow-3b31131e45eafb45 = { package = "winnow", version = "0.6.26", features = ["simd"] }
 zerocopy-ca01ad9e24f5d932 = { package = "zerocopy", version = "0.7.35", features = ["derive", "simd"] }
 
 [target.x86_64-unknown-illumos.build-dependencies]
-clang-sys = { version = "1.8.1", default-features = false, features = ["clang_11_0", "runtime"] }
 cookie = { version = "0.18.1", default-features = false, features = ["percent-encode"] }
 dof-468e82937335b1c9 = { package = "dof", version = "0.3.0", default-features = false, features = ["des"] }
 dof-9fbad63c4bcf4a8f = { package = "dof", version = "0.4.0", default-features = false, features = ["des"] }
 getrandom-468e82937335b1c9 = { package = "getrandom", version = "0.3.4", default-features = false, features = ["std"] }
 hyper-rustls = { version = "0.27.7", features = ["http2", "ring", "webpki-tokio"] }
 hyper-util = { version = "0.1.19", features = ["full"] }
-itertools-5ef9efb8ec2df382 = { package = "itertools", version = "0.12.1" }
 itertools-93f6ce9d446188ac = { package = "itertools", version = "0.10.5" }
 miniz_oxide = { version = "0.8.5", default-features = false, features = ["with-alloc"] }
 mio = { version = "1.0.2", features = ["net", "os-ext"] }
-nom = { version = "7.1.3" }
 rustix-d585fab2519d2d1 = { package = "rustix", version = "0.38.37", features = ["event", "fs", "net", "pipe", "process", "stdio", "system", "termios", "time"] }
 rustix-dff4ba8e3ae991db = { package = "rustix", version = "1.1.3", features = ["fs", "stdio", "termios"] }
+tokio-rustls = { version = "0.26.0", default-features = false, features = ["aws-lc-rs"] }
 toml_edit-cdcf2f9584511fe6 = { package = "toml_edit", version = "0.19.15", features = ["serde"] }
 winnow-3b31131e45eafb45 = { package = "winnow", version = "0.6.26", features = ["simd"] }
 zerocopy-ca01ad9e24f5d932 = { package = "zerocopy", version = "0.7.35", features = ["derive", "simd"] }

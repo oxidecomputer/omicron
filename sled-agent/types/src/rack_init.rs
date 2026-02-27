@@ -85,20 +85,18 @@ pub fn rack_initialize_request_test_config() -> RackInitializeRequest {
 
 #[cfg(test)]
 mod tests {
-    use std::net::IpAddr;
-    use std::net::Ipv4Addr;
-    use std::net::Ipv6Addr;
-
+    use super::*;
+    use crate::early_networking::RackNetworkConfig;
+    use anyhow::Context;
     use camino::Utf8PathBuf;
     use omicron_common::address::{
         AZ_PREFIX, IpRange, RACK_PREFIX, SLED_PREFIX,
     };
     use omicron_common::api::external::AllowedSourceIps;
-    use omicron_common::api::internal::shared::RackNetworkConfig;
-
-    use super::*;
-    use anyhow::Context;
     use oxnet::Ipv6Net;
+    use std::net::IpAddr;
+    use std::net::Ipv4Addr;
+    use std::net::Ipv6Addr;
 
     #[test]
     fn parse_rack_initialization() {

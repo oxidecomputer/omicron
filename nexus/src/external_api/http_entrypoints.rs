@@ -76,14 +76,7 @@ use omicron_common::api::external::AddressLotBlock;
 use omicron_common::api::external::AddressLotCreateResponse;
 use omicron_common::api::external::AddressLotViewResponse;
 use omicron_common::api::external::AffinityGroupMember;
-use omicron_common::api::external::AggregateBgpMessageHistory;
 use omicron_common::api::external::AntiAffinityGroupMember;
-use omicron_common::api::external::BgpAnnounceSet;
-use omicron_common::api::external::BgpAnnouncement;
-use omicron_common::api::external::BgpConfig;
-use omicron_common::api::external::BgpExported;
-use omicron_common::api::external::BgpImported;
-use omicron_common::api::external::BgpPeerStatus;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Disk;
 use omicron_common::api::external::Error;
@@ -99,7 +92,6 @@ use omicron_common::api::external::RouterRoute;
 use omicron_common::api::external::RouterRouteKind;
 use omicron_common::api::external::ServiceIcmpConfig;
 use omicron_common::api::external::SwitchPort;
-use omicron_common::api::external::SwitchPortSettings;
 use omicron_common::api::external::SwitchPortSettingsIdentity;
 use omicron_common::api::external::VpcFirewallRuleUpdateParams;
 use omicron_common::api::external::VpcFirewallRules;
@@ -1222,10 +1214,10 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 project::ProjectSelector { project: path.project };
             let project_lookup =
                 nexus.project_lookup(&opctx, project_selector)?;
-            nexus
+            let policy = nexus
                 .project_update_policy(&opctx, &project_lookup, &new_policy)
                 .await?;
-            Ok(HttpResponseOk(new_policy))
+            Ok(HttpResponseOk(policy))
         })
         .await
     }
@@ -4056,12 +4048,13 @@ impl NexusExternalApi for NexusExternalApiImpl {
     async fn networking_switch_port_settings_create(
         rqctx: RequestContext<ApiContext>,
         new_settings: TypedBody<networking::SwitchPortSettingsCreate>,
-    ) -> Result<HttpResponseCreated<SwitchPortSettings>, HttpError> {
+    ) -> Result<HttpResponseCreated<networking::SwitchPortSettings>, HttpError>
+    {
         audit_and_time(&rqctx, |opctx, nexus| async move {
             let params = new_settings.into_inner();
             let result =
                 nexus.switch_port_settings_post(&opctx, params).await?;
-            let settings: SwitchPortSettings = result.into();
+            let settings: networking::SwitchPortSettings = result.into();
             Ok(HttpResponseCreated(settings))
         })
         .await
@@ -4120,7 +4113,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
     async fn networking_switch_port_settings_view(
         rqctx: RequestContext<ApiContext>,
         path_params: Path<networking::SwitchPortSettingsInfoSelector>,
-    ) -> Result<HttpResponseOk<SwitchPortSettings>, HttpError> {
+    ) -> Result<HttpResponseOk<networking::SwitchPortSettings>, HttpError> {
         let apictx = rqctx.context();
         let handler = async {
             let nexus = &apictx.context.nexus;
@@ -4326,11 +4319,11 @@ impl NexusExternalApi for NexusExternalApiImpl {
     async fn networking_bgp_config_create(
         rqctx: RequestContext<ApiContext>,
         config: TypedBody<networking::BgpConfigCreate>,
-    ) -> Result<HttpResponseCreated<BgpConfig>, HttpError> {
+    ) -> Result<HttpResponseCreated<networking::BgpConfig>, HttpError> {
         audit_and_time(&rqctx, |opctx, nexus| async move {
             let config = config.into_inner();
             let result = nexus.bgp_config_create(&opctx, &config).await?;
-            Ok(HttpResponseCreated::<BgpConfig>(result.try_into()?))
+            Ok(HttpResponseCreated::<networking::BgpConfig>(result.try_into()?))
         })
         .await
     }
@@ -4338,7 +4331,8 @@ impl NexusExternalApi for NexusExternalApiImpl {
     async fn networking_bgp_config_list(
         rqctx: RequestContext<ApiContext>,
         query_params: Query<PaginatedByNameOrId>,
-    ) -> Result<HttpResponseOk<ResultsPage<BgpConfig>>, HttpError> {
+    ) -> Result<HttpResponseOk<ResultsPage<networking::BgpConfig>>, HttpError>
+    {
         let apictx = rqctx.context();
         let handler = async {
             let nexus = &apictx.context.nexus;
@@ -4371,7 +4365,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
     //TODO pagination? the normal by-name/by-id stuff does not work here
     async fn networking_bgp_status(
         rqctx: RequestContext<ApiContext>,
-    ) -> Result<HttpResponseOk<Vec<BgpPeerStatus>>, HttpError> {
+    ) -> Result<HttpResponseOk<Vec<networking::BgpPeerStatus>>, HttpError> {
         let apictx = rqctx.context();
         let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
         let handler = async {
@@ -4388,7 +4382,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
 
     async fn networking_bgp_exported(
         rqctx: RequestContext<ApiContext>,
-    ) -> Result<HttpResponseOk<Vec<BgpExported>>, HttpError> {
+    ) -> Result<HttpResponseOk<Vec<networking::BgpExported>>, HttpError> {
         let apictx = rqctx.context();
         let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
         let handler = async {
@@ -4406,14 +4400,17 @@ impl NexusExternalApi for NexusExternalApiImpl {
     async fn networking_bgp_message_history(
         rqctx: RequestContext<ApiContext>,
         query_params: Query<networking::BgpRouteSelector>,
-    ) -> Result<HttpResponseOk<AggregateBgpMessageHistory>, HttpError> {
+    ) -> Result<HttpResponseOk<networking::AggregateBgpMessageHistory>, HttpError>
+    {
         let apictx = rqctx.context();
         let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
         let handler = async {
             let nexus = &apictx.context.nexus;
             let sel = query_params.into_inner();
             let result = nexus.bgp_message_history(&opctx, &sel).await?;
-            Ok(HttpResponseOk(AggregateBgpMessageHistory::new(result)))
+            Ok(HttpResponseOk(networking::AggregateBgpMessageHistory::new(
+                result,
+            )))
         };
         apictx
             .context
@@ -4450,7 +4447,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
     async fn networking_bgp_imported(
         rqctx: RequestContext<ApiContext>,
         query_params: Query<networking::BgpRouteSelector>,
-    ) -> Result<HttpResponseOk<Vec<BgpImported>>, HttpError> {
+    ) -> Result<HttpResponseOk<Vec<networking::BgpImported>>, HttpError> {
         let apictx = rqctx.context();
         let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
         let handler = async {
@@ -4481,11 +4478,11 @@ impl NexusExternalApi for NexusExternalApiImpl {
     async fn networking_bgp_announce_set_update(
         rqctx: RequestContext<ApiContext>,
         config: TypedBody<networking::BgpAnnounceSetCreate>,
-    ) -> Result<HttpResponseOk<BgpAnnounceSet>, HttpError> {
+    ) -> Result<HttpResponseOk<networking::BgpAnnounceSet>, HttpError> {
         audit_and_time(&rqctx, |opctx, nexus| async move {
             let config = config.into_inner();
             let result = nexus.bgp_update_announce_set(&opctx, &config).await?;
-            Ok(HttpResponseOk::<BgpAnnounceSet>(result.0.into()))
+            Ok(HttpResponseOk::<networking::BgpAnnounceSet>(result.0.into()))
         })
         .await
     }
@@ -4493,7 +4490,8 @@ impl NexusExternalApi for NexusExternalApiImpl {
     async fn networking_bgp_announce_set_list(
         rqctx: RequestContext<ApiContext>,
         query_params: Query<PaginatedByNameOrId>,
-    ) -> Result<HttpResponseOk<Vec<BgpAnnounceSet>>, HttpError> {
+    ) -> Result<HttpResponseOk<Vec<networking::BgpAnnounceSet>>, HttpError>
+    {
         let apictx = rqctx.context();
         let handler = async {
             let nexus = &apictx.context.nexus;
@@ -4533,7 +4531,8 @@ impl NexusExternalApi for NexusExternalApiImpl {
     async fn networking_bgp_announcement_list(
         rqctx: RequestContext<ApiContext>,
         path_params: Path<networking::BgpAnnounceSetSelector>,
-    ) -> Result<HttpResponseOk<Vec<BgpAnnouncement>>, HttpError> {
+    ) -> Result<HttpResponseOk<Vec<networking::BgpAnnouncement>>, HttpError>
+    {
         let apictx = rqctx.context();
         let handler = async {
             let nexus = &apictx.context.nexus;

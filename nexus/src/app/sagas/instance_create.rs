@@ -26,13 +26,13 @@ use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::Name;
 use omicron_common::api::external::NameOrId;
 use omicron_common::api::external::{Error, InternalContext};
-use omicron_common::api::internal::shared::SwitchLocation;
 use omicron_uuid_kinds::{
     AntiAffinityGroupUuid, GenericUuid, InstanceUuid, MulticastGroupUuid,
 };
 use ref_cast::RefCast;
 use serde::Deserialize;
 use serde::Serialize;
+use sled_agent_types::early_networking::SwitchLocation;
 use slog::{info, warn};
 use std::collections::HashSet;
 use std::convert::TryFrom;
@@ -1495,8 +1495,8 @@ pub mod test {
     use omicron_common::api::external::{
         ByteCount, IdentityMetadataCreateParams, InstanceCpuCount,
     };
-    use omicron_common::api::internal::shared::SwitchLocation;
     use omicron_sled_agent::sim::SledAgent;
+    use sled_agent_types::early_networking::SwitchLocation;
     use std::collections::HashSet;
     use uuid::Uuid;
 
@@ -1642,8 +1642,8 @@ pub mod test {
             == "detached"
     }
 
-    async fn no_instances_or_disks_on_sled(sled_agent: &SledAgent) -> bool {
-        sled_agent.vmm_count().await == 0 && sled_agent.disk_count().await == 0
+    async fn no_instances_on_sled(sled_agent: &SledAgent) -> bool {
+        sled_agent.vmm_count().await == 0
     }
 
     pub(crate) async fn verify_clean_slate(
@@ -1672,7 +1672,7 @@ pub mod test {
             .await
         );
         assert!(disk_is_detached(datastore).await);
-        assert!(no_instances_or_disks_on_sled(&sled_agent).await);
+        assert!(no_instances_on_sled(&sled_agent).await);
 
         let v2p_mappings = &*sled_agent.v2p_mappings.lock().unwrap();
         assert!(v2p_mappings.is_empty());
