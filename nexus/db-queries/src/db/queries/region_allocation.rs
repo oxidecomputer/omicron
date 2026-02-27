@@ -1123,7 +1123,6 @@ mod test {
                     u2.zpool_id,
                     sled_config.sled_id,
                     u2.inventory_total_size.into(),
-                    // TODO-K: Actually add health to the zpool object?
                     ZpoolHealth::Online,
                 )
                 .await;
