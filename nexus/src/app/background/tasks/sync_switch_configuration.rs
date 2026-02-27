@@ -47,10 +47,7 @@ use nexus_types::identity::{Asset, Resource};
 use omicron_common::OMICRON_DPD_TAG;
 use omicron_common::{
     address::{Ipv6Subnet, get_sled_address},
-    api::{
-        external::{DataPageParams, ImportExportPolicy, SwitchLocation},
-        internal::shared::ParseSwitchLocationError,
-    },
+    api::external::DataPageParams,
 };
 use rdb_types::{Prefix, Prefix4, Prefix6};
 use serde_json::json;
@@ -62,6 +59,9 @@ use sled_agent_client::types::{
     RouterLifetimeConfig as SledRouterLifetimeConfig, TxEqConfig,
     UplinkAddressConfig,
 };
+use sled_agent_types::early_networking::ImportExportPolicy;
+use sled_agent_types::early_networking::ParseSwitchLocationError;
+use sled_agent_types::early_networking::SwitchLocation;
 use std::{
     collections::{HashMap, HashSet, hash_map::Entry},
     hash::Hash,

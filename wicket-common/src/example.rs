@@ -10,13 +10,11 @@ use gateway_types::component::SpType;
 use maplit::{btreemap, btreeset};
 use omicron_common::{
     address::{IpRange, Ipv4Range},
-    api::{
-        external::AllowedSourceIps,
-        internal::shared::{
-            BgpConfig, BgpPeerConfig, LldpAdminStatus, LldpPortConfig, PortFec,
-            PortSpeed, RouteConfig, TxEqConfig, rack_init::MaxPathConfig,
-        },
-    },
+    api::external::AllowedSourceIps,
+};
+use sled_agent_types::early_networking::{
+    BgpConfig, BgpPeerConfig, LldpAdminStatus, LldpPortConfig, MaxPathConfig,
+    PortFec, PortSpeed, RouteConfig, TxEqConfig,
 };
 use sled_hardware_types::Baseboard;
 

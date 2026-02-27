@@ -23,8 +23,8 @@ use omicron_common::address::IpRange;
 use omicron_common::address::Ipv4Range;
 use omicron_common::address::Ipv6Range;
 use omicron_common::api::external::AllowedSourceIps;
-use omicron_common::api::external::SwitchLocation;
 use oxnet::Ipv6Net;
+use sled_agent_types::early_networking::SwitchLocation;
 use sled_hardware_types::Baseboard;
 use slog::debug;
 use slog::warn;
@@ -759,9 +759,9 @@ fn build_port_config(
     use bootstrap_agent_lockstep_client::types::SwitchLocation as BaSwitchLocation;
     use bootstrap_agent_lockstep_client::types::TxEqConfig as BaTxEqConfig;
     use bootstrap_agent_lockstep_client::types::UplinkAddressConfig as BaUplinkAddressConfig;
-    use omicron_common::api::internal::shared::LldpAdminStatus;
-    use omicron_common::api::internal::shared::PortFec;
-    use omicron_common::api::internal::shared::PortSpeed;
+    use sled_agent_types::early_networking::LldpAdminStatus;
+    use sled_agent_types::early_networking::PortFec;
+    use sled_agent_types::early_networking::PortSpeed;
 
     BaPortConfig {
         port: port.to_owned(),

@@ -11,11 +11,9 @@ use nexus_db_schema::schema::{
 use nexus_types::external_api::networking;
 use nexus_types::identity::Resource;
 use omicron_common::api::external::Error;
-use omicron_common::api::{
-    external::IdentityMetadataCreateParams,
-    internal::shared::rack_init::MaxPathConfig,
-};
+use omicron_common::api::external::IdentityMetadataCreateParams;
 use serde::{Deserialize, Serialize};
+use sled_agent_types::early_networking::MaxPathConfig;
 use slog_error_chain::InlineErrorChain;
 use uuid::Uuid;
 
