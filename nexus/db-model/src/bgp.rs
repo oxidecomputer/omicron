@@ -13,8 +13,14 @@ use nexus_types::identity::Resource;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use serde::{Deserialize, Serialize};
+use sled_agent_types::early_networking::BgpPeerConfig;
+use sled_agent_types::early_networking::ImportExportPolicy;
 use sled_agent_types::early_networking::MaxPathConfig;
+use sled_agent_types::early_networking::RouterLifetimeConfig;
+use sled_agent_types::early_networking::RouterLifetimeConfigError;
 use slog_error_chain::InlineErrorChain;
+use std::net::IpAddr;
+use std::net::Ipv6Addr;
 use uuid::Uuid;
 
 #[derive(
@@ -159,4 +165,45 @@ pub struct BgpPeerView {
     pub enforce_first_as: bool,
     pub vlan_id: Option<SqlU16>,
     pub router_lifetime: SqlU16,
+}
+
+impl TryFrom<BgpPeerView> for BgpPeerConfig {
+    type Error = RouterLifetimeConfigError;
+
+    fn try_from(value: BgpPeerView) -> Result<Self, Self::Error> {
+        // For unnumbered peers (addr is None), use UNSPECIFIED
+        let addr = match value.addr {
+            None => IpAddr::V6(Ipv6Addr::UNSPECIFIED),
+            Some(addr) => addr.ip(),
+        };
+
+        // TODO-correctness We should have db constraints to ensure this can't
+        // fail.
+        let router_lifetime =
+            RouterLifetimeConfig::new(value.router_lifetime.0)?;
+
+        Ok(Self {
+            asn: *value.asn,
+            port: value.port_name,
+            addr,
+            hold_time: Some(value.hold_time.0.into()),
+            idle_hold_time: Some(value.idle_hold_time.0.into()),
+            delay_open: Some(value.delay_open.0.into()),
+            connect_retry: Some(value.connect_retry.0.into()),
+            keepalive: Some(value.keepalive.0.into()),
+            enforce_first_as: value.enforce_first_as,
+            local_pref: value.local_pref.map(|x| x.into()),
+            md5_auth_key: value.md5_auth_key,
+            min_ttl: value.min_ttl.map(|x| x.0 as u8), //TODO avoid cast return error
+            multi_exit_discriminator: value
+                .multi_exit_discriminator
+                .map(|x| x.into()),
+            remote_asn: value.remote_asn.map(|x| x.into()),
+            communities: Vec::new(),
+            allowed_export: ImportExportPolicy::NoFiltering,
+            allowed_import: ImportExportPolicy::NoFiltering,
+            vlan_id: value.vlan_id.map(|x| x.0),
+            router_lifetime,
+        })
+    }
 }

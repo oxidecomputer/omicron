@@ -133,7 +133,9 @@ pub struct BgpPeerConfig {
     pub vlan_id: Option<u16>,
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq, JsonSchema)]
+#[derive(
+    Clone, Debug, Deserialize, Serialize, PartialEq, Eq, Hash, JsonSchema,
+)]
 pub struct BfdPeerConfig {
     pub local: Option<IpAddr>,
     pub remote: IpAddr,
@@ -143,7 +145,9 @@ pub struct BfdPeerConfig {
     pub switch: SwitchLocation,
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq, JsonSchema)]
+#[derive(
+    Clone, Debug, Deserialize, Serialize, PartialEq, Eq, Hash, JsonSchema,
+)]
 pub struct RouteConfig {
     /// The destination of the route.
     pub destination: IpNet,
@@ -171,7 +175,15 @@ pub struct UplinkAddressConfig {
 pub struct UplinkAddressConfigError(pub(crate) String);
 
 #[derive(
-    Clone, Debug, Default, Deserialize, Serialize, PartialEq, Eq, JsonSchema,
+    Clone,
+    Debug,
+    Default,
+    Deserialize,
+    Serialize,
+    PartialEq,
+    Eq,
+    Hash,
+    JsonSchema,
 )]
 #[serde(rename_all = "snake_case")]
 /// To what extent should this port participate in LLDP
@@ -189,7 +201,9 @@ pub struct ParseLldpAdminStatusError(pub(crate) String);
 /// Per-port LLDP configuration settings.  Only the "status" setting is
 /// mandatory.  All other fields have natural defaults or may be inherited from
 /// the switch.
-#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq, JsonSchema)]
+#[derive(
+    Clone, Debug, Deserialize, Serialize, PartialEq, Eq, Hash, JsonSchema,
+)]
 pub struct LldpPortConfig {
     /// To what extent should this port participate in LLDP
     pub status: LldpAdminStatus,
@@ -218,7 +232,7 @@ pub struct LldpPortConfig {
 /// Per-port tx-eq overrides.  This can be used to fine-tune the transceiver
 /// equalization settings to improve signal integrity.
 #[derive(
-    Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq, JsonSchema,
+    Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq, Hash, JsonSchema,
 )]
 pub struct TxEqConfig {
     /// Pre-cursor tap1
@@ -332,6 +346,7 @@ pub enum PortFec {
     Eq,
     Ord,
     PartialOrd,
+    Hash,
 )]
 #[serde(rename_all = "snake_case")]
 pub enum BfdMode {

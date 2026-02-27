@@ -18,6 +18,7 @@ use crate::support_bundle::storage::SupportBundleQueryType;
 use crate::updates::UpdateManager;
 use anyhow::Context;
 use anyhow::bail;
+use bootstore::schemes::v0 as bootstore;
 use bytes::Bytes;
 use chrono::Utc;
 use dropshot::Body;
@@ -112,7 +113,7 @@ pub struct SledAgent {
     config: Config,
     fake_zones: Mutex<OmicronZonesConfig>,
     instance_ensure_state_error: Mutex<Option<Error>>,
-    pub bootstore_network_config: Mutex<EarlyNetworkConfigEnvelope>,
+    pub bootstore_network_config: Mutex<bootstore::NetworkConfig>,
     pub(super) repo_depot:
         dropshot::HttpServer<ArtifactStore<SimArtifactStorage>>,
     pub log: Logger,
@@ -137,22 +138,21 @@ impl SledAgent {
         let instance_log = log.new(o!("kind" => "instances"));
         let storage_log = log.new(o!("kind" => "storage"));
 
-        let bootstore_network_config =
-            Mutex::new(EarlyNetworkConfigEnvelope::new(
-                0, // generation
-                &EarlyNetworkConfigBody {
-                    ntp_servers: Vec::new(),
-                    rack_network_config: Some(RackNetworkConfig {
-                        rack_subnet: Ipv6Net::new(Ipv6Addr::UNSPECIFIED, 56)
-                            .unwrap(),
-                        infra_ip_first: IpAddr::V4(Ipv4Addr::UNSPECIFIED),
-                        infra_ip_last: IpAddr::V4(Ipv4Addr::UNSPECIFIED),
-                        ports: Vec::new(),
-                        bgp: Vec::new(),
-                        bfd: Vec::new(),
-                    }),
-                },
-            ));
+        let bootstore_network_config = Mutex::new(
+            EarlyNetworkConfigEnvelope::from(&EarlyNetworkConfigBody {
+                ntp_servers: Vec::new(),
+                rack_network_config: Some(RackNetworkConfig {
+                    rack_subnet: Ipv6Net::new(Ipv6Addr::UNSPECIFIED, 56)
+                        .unwrap(),
+                    infra_ip_first: IpAddr::V4(Ipv4Addr::UNSPECIFIED),
+                    infra_ip_last: IpAddr::V4(Ipv4Addr::UNSPECIFIED),
+                    ports: Vec::new(),
+                    bgp: Vec::new(),
+                    bfd: Vec::new(),
+                }),
+            })
+            .serialize_to_bootstore_with_generation(0),
+        );
 
         let storage = Storage::new(
             id.into_untyped_uuid(),

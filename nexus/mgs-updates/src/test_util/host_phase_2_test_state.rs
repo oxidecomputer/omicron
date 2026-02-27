@@ -223,7 +223,7 @@ mod api_impl {
     use sled_agent_types::diagnostics::SledDiagnosticsLogsDownloadQueryParam;
     use sled_agent_types::disk::DiskEnsureBody;
     use sled_agent_types::disk::DiskPathParam;
-    use sled_agent_types::early_networking::EarlyNetworkConfigEnvelope;
+    use sled_agent_types::early_networking::WriteNetworkConfigRequest;
     use sled_agent_types::firewall_rules::VpcFirewallRulesEnsureBody;
     use sled_agent_types::instance::InstanceEnsureBody;
     use sled_agent_types::instance::InstanceExternalIpBody;
@@ -770,7 +770,7 @@ mod api_impl {
 
         async fn write_network_bootstore_config(
             _rqctx: RequestContext<Self::Context>,
-            _body: TypedBody<EarlyNetworkConfigEnvelope>,
+            _body: TypedBody<WriteNetworkConfigRequest>,
         ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
             unimplemented!()
         }

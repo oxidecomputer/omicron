@@ -6,30 +6,46 @@
 //!
 //! Changes in this version:
 //!
-//! * `EarlyNetworkConfigEnvelope` replaces `EarlyNetworkConfig`. The `body` is
-//!   now stored as an opaque JSON blob, allowing us to first deserialize the
-//!   envelope, inspect `schema_version`, then deserialize `body` with the
-//!   appropriate `EarlyNetworkConfigBody` type. This will prevent the need to
-//!   rev `EarlyNetworkConfigEnvelope` every time `EarlyNetworkConfigBody`
-//!   changes, and makes parsing more precise (we know the exact version of any
-//!   serialized `EarlyNetworkConfigBody` kept inside an envelope).
+//! * `EarlyNetworkConfig` is gone, replaced by the following two types.
+//! * `WriteNetworkConfigRequest` includes the `generation` from
+//!   `EarlyNetworkConfig` and a versioned `EarlyNetworkConfigBody`. This is the
+//!   type used in the sled-agent API handler to write new network configs, but
+//!   it is not itself serialized in the bootstore. (It's converted into a
+//!   `NetworkConfig` containing an `EarlyNetworkConfigEnvelope`.) This type
+//!   will need a new version any time `EarlyNetworkConfigBody` changes, but the
+//!   new type should be trivial.
+//! * `EarlyNetworkConfigEnvelope` includes the `schema_version` from
+//!   `EarlyNetworkConfig` and an opaque JSON blob `body`. This allows it to be
+//!   deserialized independently from the versioning of the
+//!   `EarlyNetworkConfigBody` it contains. This type does not need a new
+//!   version when `EarlyNetworkConfigBody` changes, but the deserialization
+//!   code it contains will need to be updated to account for the new possible
+//!   schema version. This type does _not_ derive `JsonSchema`, because it is
+//!   not expected to be used in any APIs.
 
+use crate::v20::early_networking::EarlyNetworkConfigBody;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-/// Network configuration required to bring up the control plane
-///
-/// The fields in this structure are those from
-/// `RackInitializeRequest` necessary for use beyond RSS.
-/// This is just for the initial rack configuration and cold boot purposes.
-/// Updates come from Nexus.
+/// Structure for requests from Nexus to sled-agent to write a new
+/// `EarlyNetworkConfigBody` into the replicated bootstore.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
-pub struct EarlyNetworkConfigEnvelope {
-    // The current generation number of data as stored in CRDB.
-    // The initial generation is set during RSS time and then only mutated
-    // by Nexus.
-    pub(crate) generation: u64,
+pub struct WriteNetworkConfigRequest {
+    pub generation: u64,
+    pub body: EarlyNetworkConfigBody,
+}
 
+impl From<crate::v20::early_networking::EarlyNetworkConfig>
+    for WriteNetworkConfigRequest
+{
+    fn from(value: crate::v20::early_networking::EarlyNetworkConfig) -> Self {
+        Self { generation: value.generation, body: value.body }
+    }
+}
+
+/// Envelope containing a versioned JSON blob (an `EarlyNetworkConfigBody`).
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+pub struct EarlyNetworkConfigEnvelope {
     // Which version of `EarlyNetworkConfigBody` is serialized into `body`.
     pub(crate) schema_version: u32,
 
@@ -51,6 +67,7 @@ pub enum EarlyNetworkConfigError {
     UnexpectedSchemaVersion { got: u32, expected: u32 },
 }
 
+/*
 impl TryFrom<crate::v20::early_networking::EarlyNetworkConfig>
     for EarlyNetworkConfigEnvelope
 {
@@ -72,10 +89,7 @@ impl TryFrom<crate::v20::early_networking::EarlyNetworkConfig>
         let body = serde_json::to_value(&value.body)
             .map_err(EarlyNetworkConfigError::SerializeBody)?;
 
-        Ok(Self {
-            generation: value.generation,
-            schema_version: value.schema_version,
-            body,
-        })
+        Ok(Self { schema_version: value.schema_version, body })
     }
 }
+*/

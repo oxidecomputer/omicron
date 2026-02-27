@@ -54,6 +54,7 @@ pub mod disk {
 
 pub mod early_networking {
     pub use crate::v1::early_networking::BfdMode;
+    pub use crate::v1::early_networking::BfdPeerConfig;
     pub use crate::v1::early_networking::ImportExportPolicy;
     pub use crate::v1::early_networking::LldpAdminStatus;
     pub use crate::v1::early_networking::LldpPortConfig;
@@ -78,6 +79,7 @@ pub mod early_networking {
     pub use crate::v20::early_networking::UplinkAddressConfigError;
 
     pub use crate::v24::early_networking::EarlyNetworkConfigEnvelope;
+    pub use crate::v24::early_networking::WriteNetworkConfigRequest;
 
     pub use crate::impls::early_networking::EarlyNetworkConfigEnvelopeError;
 }

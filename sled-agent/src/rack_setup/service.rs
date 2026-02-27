@@ -1315,16 +1315,15 @@ impl ServiceInner {
         // TODO: In future releases, we will get rid of the bootstore entirely,
         // and early_network_config will be replicated by the trust quorum
         // nodes.
-        let early_network_config = EarlyNetworkConfigEnvelope::new(
-            1, // generation
-            &EarlyNetworkConfigBody {
+        let early_network_config =
+            EarlyNetworkConfigEnvelope::from(&EarlyNetworkConfigBody {
                 ntp_servers: config.ntp_servers.clone(),
                 rack_network_config: Some(config.rack_network_config.clone()),
-            },
-        );
+            })
+            .serialize_to_bootstore_with_generation(1);
         info!(self.log, "Writing Rack Network Configuration to bootstore");
         rss_step.update(RssStep::NetworkConfigUpdate);
-        bootstore.update_network_config(early_network_config.into()).await?;
+        bootstore.update_network_config(early_network_config).await?;
 
         rss_step.update(RssStep::SledInit);
         // Forward the sled initialization requests to our sled-agent.

@@ -54,6 +54,7 @@ use sled_agent_types::diagnostics::{
 };
 use sled_agent_types::disk::{DiskEnsureBody, DiskPathParam};
 use sled_agent_types::early_networking::EarlyNetworkConfigEnvelope;
+use sled_agent_types::early_networking::WriteNetworkConfigRequest;
 use sled_agent_types::firewall_rules::VpcFirewallRulesEnsureBody;
 use sled_agent_types::instance::{
     InstanceEnsureBody, InstanceExternalIpBody, InstanceMulticastBody,
@@ -402,18 +403,28 @@ impl SledAgentApi for SledAgentSimImpl {
         // Read the current envelope, then convert it back down to the version
         // we have to report for this (now-removed!) API endpoint.
         use v20::early_networking::EarlyNetworkConfigBody;
-        let config_envelope =
+
+        let config =
             rqctx.context().bootstore_network_config.lock().unwrap().clone();
 
+        let envelope =
+            EarlyNetworkConfigEnvelope::deserialize_from_bootstore(&config)
+                .map_err(|err| {
+                    HttpError::for_internal_error(format!(
+                        "could not deserialize bootstore contents: {}",
+                        InlineErrorChain::new(&err)
+                    ))
+                })?;
         let body: EarlyNetworkConfigBody =
-            config_envelope.deserialize_body().map_err(|err| {
-                HttpError::for_internal_error(
-                    InlineErrorChain::new(&err).to_string(),
-                )
+            envelope.deserialize_body().map_err(|err| {
+                HttpError::for_internal_error(format!(
+                    "could not deserialize early network config body: {}",
+                    InlineErrorChain::new(&err)
+                ))
             })?;
 
         Ok(HttpResponseOk(v20::early_networking::EarlyNetworkConfig {
-            generation: config_envelope.generation(),
+            generation: config.generation,
             schema_version: EarlyNetworkConfigBody::SCHEMA_VERSION,
             body,
         }))
@@ -421,11 +432,14 @@ impl SledAgentApi for SledAgentSimImpl {
 
     async fn write_network_bootstore_config(
         rqctx: RequestContext<Self::Context>,
-        body: TypedBody<EarlyNetworkConfigEnvelope>,
+        body: TypedBody<WriteNetworkConfigRequest>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
         let mut config =
             rqctx.context().bootstore_network_config.lock().unwrap();
-        *config = body.into_inner();
+        let body = body.into_inner();
+
+        *config = EarlyNetworkConfigEnvelope::from(&body.body)
+            .serialize_to_bootstore_with_generation(body.generation);
         Ok(HttpResponseUpdatedNoContent())
     }
 

@@ -20,10 +20,9 @@ use omicron_common::api::internal::{
     },
 };
 use sled_agent_types_versions::{
-    latest, v1, v4, v6, v7, v9, v10, v11, v12, v14, v16, v17, v20, v24,
+    latest, v1, v4, v6, v7, v9, v10, v11, v12, v14, v16, v17, v20,
 };
 use sled_diagnostics::SledDiagnosticsQueryOutput;
-use slog_error_chain::InlineErrorChain;
 
 api_versions!([
     // WHEN CHANGING THE API (part 1 of 2):
@@ -814,7 +813,7 @@ pub trait SledAgentApi {
     }]
     async fn write_network_bootstore_config(
         rqctx: RequestContext<Self::Context>,
-        body: TypedBody<latest::early_networking::EarlyNetworkConfigEnvelope>,
+        body: TypedBody<latest::early_networking::WriteNetworkConfigRequest>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
 
     #[endpoint {
@@ -826,23 +825,7 @@ pub trait SledAgentApi {
         rqctx: RequestContext<Self::Context>,
         body: TypedBody<v20::early_networking::EarlyNetworkConfig>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
-        Self::write_network_bootstore_config(
-            rqctx,
-            body.try_map(
-                v24::early_networking::EarlyNetworkConfigEnvelope::try_from,
-            )
-            .map_err(|err| {
-                HttpError::for_bad_request(
-                    None,
-                    format!(
-                        "failed to convert EarlyNetworkConfig to \
-                         latest version: {}",
-                        InlineErrorChain::new(&err)
-                    ),
-                )
-            })?,
-        )
-        .await
+        Self::write_network_bootstore_config(rqctx, body.map(From::from)).await
     }
 
     #[endpoint {
@@ -854,7 +837,7 @@ pub trait SledAgentApi {
         rqctx: RequestContext<Self::Context>,
         body: TypedBody<v1::early_networking::EarlyNetworkConfig>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
-        Self::write_network_bootstore_config_v20(rqctx, body.map(|x| x.into()))
+        Self::write_network_bootstore_config_v20(rqctx, body.map(From::from))
             .await
     }
 

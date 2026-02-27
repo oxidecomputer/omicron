@@ -11,17 +11,19 @@ use std::net::Ipv6Addr;
 use std::str::FromStr;
 
 use crate::latest::early_networking::{
-    BgpPeerConfig, EarlyNetworkConfigBody, EarlyNetworkConfigEnvelope,
-    LldpAdminStatus, MaxPathConfig, MaxPathConfigError,
+    BgpPeerConfig, LldpAdminStatus, MaxPathConfig, MaxPathConfigError,
     ParseLldpAdminStatusError, ParseSwitchLocationError, PortFec, PortSpeed,
     RouterLifetimeConfig, RouterLifetimeConfigError, SwitchLocation,
     UplinkAddressConfig, UplinkAddressConfigError,
 };
 
+// Early network serialization/deserialization is complex enough we stash it off
+// in its own module.
 mod early_network_config_serialization;
 
 pub use early_network_config_serialization::EarlyNetworkConfigEnvelopeError;
 
+/*
 impl EarlyNetworkConfigEnvelope {
     pub fn new(generation: u64, body: &EarlyNetworkConfigBody) -> Self {
         // Serialize `body` in-memory; this can only fail if
@@ -41,6 +43,7 @@ impl EarlyNetworkConfigEnvelope {
         self.generation
     }
 }
+*/
 
 impl BgpPeerConfig {
     /// The default hold time for a BGP peer in seconds.

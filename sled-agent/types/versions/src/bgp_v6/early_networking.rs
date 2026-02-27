@@ -320,7 +320,9 @@ pub struct RackNetworkConfig {
     pub bfd: Vec<v1::BfdPeerConfig>,
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq, JsonSchema)]
+#[derive(
+    Clone, Debug, Deserialize, Serialize, PartialEq, Eq, Hash, JsonSchema,
+)]
 pub struct BgpPeerConfig {
     /// The autonomous system number of the router the peer belongs to.
     pub asn: u32,
@@ -375,7 +377,9 @@ pub struct BgpPeerConfig {
     pub router_lifetime: RouterLifetimeConfig,
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq, JsonSchema)]
+#[derive(
+    Clone, Debug, Deserialize, Serialize, PartialEq, Eq, Hash, JsonSchema,
+)]
 pub struct PortConfig {
     /// The set of routes associated with this port.
     pub routes: Vec<v1::RouteConfig>,
@@ -428,7 +432,9 @@ impl From<v1::UplinkAddressConfig> for UplinkAddressConfig {
 #[derive(Debug, PartialEq, Eq, Deserialize, Serialize)]
 pub struct UplinkAddressConfigError(pub(crate) String);
 
-#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq, JsonSchema)]
+#[derive(
+    Clone, Debug, Deserialize, Serialize, PartialEq, Eq, Hash, JsonSchema,
+)]
 pub struct BgpConfig {
     /// The autonomous system number for the BGP configuration.
     pub asn: u32,
@@ -449,7 +455,7 @@ pub struct BgpConfig {
     pub max_paths: MaxPathConfig,
 }
 
-#[derive(Debug, Copy, Clone, Eq, PartialEq, Serialize)]
+#[derive(Debug, Copy, Clone, Eq, PartialEq, Hash, Serialize)]
 pub struct MaxPathConfig(u8);
 
 impl MaxPathConfig {
@@ -534,7 +540,7 @@ pub enum MaxPathConfigError {
 ///
 /// This value is used in IPv6 Router Advertisements to indicate how long
 /// the router should be considered valid by neighbors.
-#[derive(Debug, Copy, Clone, Eq, PartialEq, Serialize)]
+#[derive(Debug, Copy, Clone, Eq, PartialEq, Hash, Serialize)]
 pub struct RouterLifetimeConfig(u16);
 
 impl RouterLifetimeConfig {

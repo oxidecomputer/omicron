@@ -8,7 +8,6 @@ use super::sled_agent::SledAgent;
 use crate::sled_agent::Error as SledAgentError;
 use crate::support_bundle::storage::SupportBundleQueryType;
 use crate::zone_bundle::BundleError;
-use bootstore::schemes::v0::NetworkConfig;
 use camino::Utf8PathBuf;
 use dropshot::{
     ApiDescription, Body, ErrorStatusCode, FreeformBody, Header, HttpError,
@@ -41,7 +40,9 @@ use sled_agent_types::diagnostics::{
     SledDiagnosticsLogsDownloadPathParam, SledDiagnosticsLogsDownloadQueryParam,
 };
 use sled_agent_types::disk::{DiskEnsureBody, DiskPathParam};
-use sled_agent_types::early_networking::EarlyNetworkConfigEnvelope;
+use sled_agent_types::early_networking::{
+    EarlyNetworkConfigEnvelope, WriteNetworkConfigRequest,
+};
 use sled_agent_types::firewall_rules::VpcFirewallRulesEnsureBody;
 use sled_agent_types::instance::{
     InstanceEnsureBody, InstanceExternalIpBody, InstanceMulticastBody,
@@ -786,6 +787,11 @@ impl SledAgentApi for SledAgentImpl {
         HttpResponseOk<v20::early_networking::EarlyNetworkConfig>,
         HttpError,
     > {
+        // This endpoint has been removed, so we're forever pinned to returning
+        // a `v20::early_networking::EarlyNetworkConfigBody`. If a new version
+        // of that type is added, we'll need to update this code to convert from
+        // the version we get back from `deserialize_from_bootstore()` into the
+        // v20 version we need.
         use v20::early_networking::EarlyNetworkConfigBody;
 
         let sa = rqctx.context();
@@ -799,20 +805,11 @@ impl SledAgentApi for SledAgentImpl {
 
         let config = match config {
             Some(config) => {
-                // This endpoint has been removed, so we're forever pinned to
-                // returning a `v20::early_networking::EarlyNetworkConfigBody`.
-                // If a new version of that type is added, we'll need to update
-                // this code to convert from the version we get back from
-                // `deserialize_from_bootstore()` into the v20 version we need.
-                let (generation, body): (u64, EarlyNetworkConfigBody) =
+                let body: EarlyNetworkConfigBody =
                     EarlyNetworkConfigEnvelope::deserialize_from_bootstore(
                         &config,
                     )
-                    .and_then(|envelope| {
-                        envelope
-                            .deserialize_body()
-                            .map(|body| (envelope.generation(), body))
-                    })
+                    .and_then(|envelope| envelope.deserialize_body())
                     .map_err(|err| {
                         HttpError::for_internal_error(format!(
                             "failed to deserialize early network config: {}",
@@ -820,7 +817,7 @@ impl SledAgentApi for SledAgentImpl {
                         ))
                     })?;
                 v20::early_networking::EarlyNetworkConfig {
-                    generation,
+                    generation: config.generation,
                     schema_version: EarlyNetworkConfigBody::SCHEMA_VERSION,
                     body,
                 }
@@ -838,19 +835,20 @@ impl SledAgentApi for SledAgentImpl {
 
     async fn write_network_bootstore_config(
         rqctx: RequestContext<Self::Context>,
-        body: TypedBody<EarlyNetworkConfigEnvelope>,
+        body: TypedBody<WriteNetworkConfigRequest>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
         let sa = rqctx.context();
         let bs = sa.bootstore();
-        let config = body.into_inner();
+        let body = body.into_inner();
+        let config = EarlyNetworkConfigEnvelope::from(&body.body)
+            .serialize_to_bootstore_with_generation(body.generation);
 
-        bs.update_network_config(NetworkConfig::from(config)).await.map_err(
-            |e| {
-                HttpError::for_internal_error(format!(
-                    "failed to write updated config to boot store: {e}"
-                ))
-            },
-        )?;
+        bs.update_network_config(config).await.map_err(|e| {
+            HttpError::for_internal_error(format!(
+                "failed to write updated config to boot store: {}",
+                InlineErrorChain::new(&e),
+            ))
+        })?;
 
         Ok(HttpResponseUpdatedNoContent())
     }

@@ -10,7 +10,6 @@ use crate::latest::early_networking::EarlyNetworkConfigBody;
 use crate::latest::early_networking::EarlyNetworkConfigEnvelope;
 use bootstore::schemes::v0 as bootstore;
 use slog_error_chain::SlogInlineError;
-use std::str::FromStr;
 
 #[derive(Debug, thiserror::Error, SlogInlineError)]
 pub enum EarlyNetworkConfigEnvelopeError {
@@ -33,22 +32,51 @@ pub enum EarlyNetworkConfigEnvelopeError {
 }
 
 impl EarlyNetworkConfigEnvelope {
+    /// Seriealize the contents of this envelope into a bootstore-suitable type,
+    /// tagged with the given `generation`.
+    pub fn serialize_to_bootstore_with_generation(
+        &self,
+        generation: u64,
+    ) -> bootstore::NetworkConfig {
+        // Serialize ourself in memory; this can't fail, because we only contain
+        // a generation and a JSON blob, both of which can be represented in
+        // JSON.
+        let blob = serde_json::to_vec(self).expect(
+            "EarlyNetworkConfigEnvelope can always be serialized as JSON",
+        );
+        bootstore::NetworkConfig { generation, blob }
+    }
+
     /// Deserialize the contents of the bootstore config into an
     /// [`EarlyNetworkConfigEnvelope`].
     ///
     /// The returned envelope must be further deserialized by
     /// [`EarlyNetworkConfigEnvelope::deserialize_body()`] to get at the actual
     /// early network configuration.
+    ///
+    /// This is a thin wrapper around [`serde_json::from_slice()`] to wrap the
+    /// error type in something consistent with [`Self::deserialize_body()`].
     pub fn deserialize_from_bootstore(
         config: &bootstore::NetworkConfig,
     ) -> Result<Self, EarlyNetworkConfigEnvelopeError> {
-        Self::deserialize_from_slice(&config.blob)
+        serde_json::from_slice(&config.blob).map_err(|err| {
+            EarlyNetworkConfigEnvelopeError::DeserializeEnvelope { err }
+        })
     }
 
-    fn deserialize_from_slice(
-        data: &[u8],
+    /// Deserialize the contents of a JSON blob into an
+    /// [`EarlyNetworkConfigEnvelope`].
+    ///
+    /// The returned envelope must be further deserialized by
+    /// [`EarlyNetworkConfigEnvelope::deserialize_body()`] to get at the actual
+    /// early network configuration.
+    ///
+    /// This is a thin wrapper around [`serde_json::from_value()`] to wrap the
+    /// error type in something consistent with [`Self::deserialize_body()`].
+    pub fn deserialize_from_value(
+        value: serde_json::Value,
     ) -> Result<Self, EarlyNetworkConfigEnvelopeError> {
-        serde_json::from_slice(data).map_err(|err| {
+        serde_json::from_value(value).map_err(|err| {
             EarlyNetworkConfigEnvelopeError::DeserializeEnvelope { err }
         })
     }
@@ -76,24 +104,16 @@ impl EarlyNetworkConfigEnvelope {
     }
 }
 
-impl From<EarlyNetworkConfigEnvelope> for bootstore::NetworkConfig {
-    fn from(value: EarlyNetworkConfigEnvelope) -> Self {
-        let blob = serde_json::to_vec(&value).expect(
-            "EarlyNetworkConfigEnvelope can always be serialized as JSON",
-        );
-
-        // This is duplicated from the envelope out so bootstore knows the
-        // latest version to replicate, but that seems fine.
-        let generation = value.generation;
-
-        Self { generation, blob }
-    }
-}
-
-impl FromStr for EarlyNetworkConfigEnvelope {
-    type Err = EarlyNetworkConfigEnvelopeError;
-
-    fn from_str(value: &str) -> Result<Self, Self::Err> {
-        Self::deserialize_from_slice(value.as_bytes())
+impl From<&'_ EarlyNetworkConfigBody> for EarlyNetworkConfigEnvelope {
+    fn from(value: &'_ EarlyNetworkConfigBody) -> Self {
+        Self {
+            schema_version: EarlyNetworkConfigBody::SCHEMA_VERSION,
+            // We're serialzing in-memory; this can only fail if
+            // `EarlyNetworkConfigBody` contains types that can't be represented
+            // as JSON, which (a) should never happend and (b) we should catch
+            // immediately in tests.
+            body: serde_json::to_value(value)
+                .expect("EarlyNetworkConfigBody can be serialized as JSON"),
+        }
     }
 }
