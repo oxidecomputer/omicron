@@ -988,7 +988,7 @@ impl InstanceManagerRunner {
             if let Some(instance) = self.jobs.remove(&id) {
                 let (tx, rx) = oneshot::channel();
                 if let Err(e) = instance.terminate(tx, VmmStateOwner::Runner) {
-                    warn!(self.log, "use_only_these_disks: Failed to request instance removal"; "err" => ?e);
+                    warn!(self.log, "use_only_these_disks: Failed to request instance removal"; InlineErrorChain::new(&e));
                     continue;
                 }
 
