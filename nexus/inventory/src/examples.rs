@@ -532,6 +532,7 @@ pub fn representative() -> Representative {
         zpools.push(InventoryZpool {
             id: pool_id,
             total_size: ByteCount::from(4096),
+            health: illumos_utils::zpool::ZpoolHealth::Online,
         });
     }
     let dataset_name = DatasetName::new(

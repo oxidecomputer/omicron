@@ -1106,6 +1106,7 @@ mod tests {
     use hyper::header::{
         ACCEPT_RANGES, CONTENT_LENGTH, CONTENT_RANGE, CONTENT_TYPE,
     };
+    use illumos_utils::zpool::ZpoolHealth;
     use omicron_common::disk::DatasetConfig;
     use omicron_common::disk::DatasetKind;
     use omicron_common::disk::DatasetName;
@@ -1139,6 +1140,7 @@ mod tests {
                     zpool_id,
                     PhysicalDiskUuid::new_v4(), // doesn't matter
                     100 * 1024 * 1024,          // doesn't matter
+                    ZpoolHealth::Online,        // doesn't matter
                 );
             }
             Self { storage_test_harness: harness, zpool_id }

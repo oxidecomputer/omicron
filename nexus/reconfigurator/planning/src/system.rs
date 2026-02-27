@@ -13,6 +13,7 @@ use gateway_client::types::RotState;
 use gateway_client::types::SpComponentCaboose;
 use gateway_client::types::SpState;
 use illumos_utils::svcs::SvcsInMaintenanceResult;
+use illumos_utils::zpool::ZpoolHealth;
 use indexmap::IndexMap;
 use ipnet::Ipv6Net;
 use ipnet::Ipv6Subnets;
@@ -1455,6 +1456,7 @@ impl Sled {
                     .map(|id| InventoryZpool {
                         id: *id,
                         total_size: ByteCount::from_gibibytes_u32(100),
+                        health: ZpoolHealth::Online,
                     })
                     .collect(),
                 datasets: vec![],

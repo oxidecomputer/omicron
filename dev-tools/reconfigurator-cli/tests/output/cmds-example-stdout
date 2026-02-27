@@ -1598,9 +1598,9 @@ sled 2eb69596-f081-4e2d-9425-9994926e0832 (role = Gimlet, serial serial1)
       U2: DiskIdentity { vendor: "fake-vendor", model: "fake-model", serial: "serial-6d012675-6f54-4b6a-8658-ab0076237569" } in 1
       U2: DiskIdentity { vendor: "fake-vendor", model: "fake-model", serial: "serial-9a065406-12a0-4b29-926e-d66bb785d17b" } in 2
     zpools
-      64ea76fb-6673-4810-8e53-c2458b75eb01: total size: 100 GiB
-      6d012675-6f54-4b6a-8658-ab0076237569: total size: 100 GiB
-      9a065406-12a0-4b29-926e-d66bb785d17b: total size: 100 GiB
+      64ea76fb-6673-4810-8e53-c2458b75eb01: total size: 100 GiB health: online
+      6d012675-6f54-4b6a-8658-ab0076237569: total size: 100 GiB health: online
+      9a065406-12a0-4b29-926e-d66bb785d17b: total size: 100 GiB health: online
     datasets:
       oxp_9a065406-12a0-4b29-926e-d66bb785d17b/crypt/debug - id: 1338efa2-c05b-4231-9180-db10555139ff, compression: gzip-9
         available: 1 GiB, used: 0 B
@@ -1746,9 +1746,9 @@ sled 32d8d836-4d8a-4e54-8fa9-f31d79c42646 (role = Gimlet, serial serial2)
       U2: DiskIdentity { vendor: "fake-vendor", model: "fake-model", serial: "serial-687e054b-a9b5-4404-8b3f-0ea119c44a6a" } in 1
       U2: DiskIdentity { vendor: "fake-vendor", model: "fake-model", serial: "serial-a4e8a5cc-cd1c-4a08-bcf1-31785f7cda28" } in 2
     zpools
-      2db3c119-38fa-41c0-8dbe-89689b84d655: total size: 100 GiB
-      687e054b-a9b5-4404-8b3f-0ea119c44a6a: total size: 100 GiB
-      a4e8a5cc-cd1c-4a08-bcf1-31785f7cda28: total size: 100 GiB
+      2db3c119-38fa-41c0-8dbe-89689b84d655: total size: 100 GiB health: online
+      687e054b-a9b5-4404-8b3f-0ea119c44a6a: total size: 100 GiB health: online
+      a4e8a5cc-cd1c-4a08-bcf1-31785f7cda28: total size: 100 GiB health: online
     datasets:
       oxp_a4e8a5cc-cd1c-4a08-bcf1-31785f7cda28/crypt/zone/oxz_crucible_e668d83e-a28c-42dc-b574-467e57403cc1 - id: 0304cb4a-6013-4ecd-a9ba-c0fb45874cfc, compression: off
         available: 1 GiB, used: 0 B
@@ -1894,9 +1894,9 @@ sled 89d02b1b-478c-401a-8e28-7a26f74fa41b (role = Gimlet, serial serial0)
       U2: DiskIdentity { vendor: "fake-vendor", model: "fake-model", serial: "serial-ab94a812-86ce-428c-bbbb-6ce1ab0b071b" } in 1
       U2: DiskIdentity { vendor: "fake-vendor", model: "fake-model", serial: "serial-f96f5901-2907-4f21-bfeb-772f8a3c4e44" } in 2
     zpools
-      0477165a-a72e-4814-b8d6-74aa02cb2040: total size: 100 GiB
-      ab94a812-86ce-428c-bbbb-6ce1ab0b071b: total size: 100 GiB
-      f96f5901-2907-4f21-bfeb-772f8a3c4e44: total size: 100 GiB
+      0477165a-a72e-4814-b8d6-74aa02cb2040: total size: 100 GiB health: online
+      ab94a812-86ce-428c-bbbb-6ce1ab0b071b: total size: 100 GiB health: online
+      f96f5901-2907-4f21-bfeb-772f8a3c4e44: total size: 100 GiB health: online
     datasets:
       oxp_f96f5901-2907-4f21-bfeb-772f8a3c4e44/crucible - id: 03708424-a92a-4f02-8ad6-ccbc6f64c5a4, compression: off
         available: 1 GiB, used: 0 B

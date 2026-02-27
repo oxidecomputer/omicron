@@ -1788,6 +1788,7 @@ pub(in crate::db::datastore) mod test {
     use anyhow::{Context, Result};
     use async_bb8_diesel::AsyncConnection;
     use async_bb8_diesel::AsyncSimpleConnection;
+    use illumos_utils::zpool::ZpoolHealth;
     use itertools::Itertools;
     use nexus_db_lookup::LookupPath;
     use nexus_db_model::PhysicalDiskKind;
@@ -3921,6 +3922,7 @@ pub(in crate::db::datastore) mod test {
                     u2.zpool_id,
                     sled_config.sled_id,
                     u2.inventory_total_size.into(),
+                    ZpoolHealth::Online,
                 )
                 .await;
 
@@ -4083,6 +4085,7 @@ pub(in crate::db::datastore) mod test {
         zpool_id: ZpoolUuid,
         sled_id: SledUuid,
         total_size: ByteCount,
+        health: ZpoolHealth,
     ) {
         use nexus_db_schema::schema::inv_zpool::dsl;
 
@@ -4094,6 +4097,7 @@ pub(in crate::db::datastore) mod test {
             id: zpool_id.into(),
             sled_id: to_db_typed_uuid(sled_id),
             total_size,
+            health: health.into(),
         };
 
         diesel::insert_into(dsl::inv_zpool)

@@ -14,6 +14,7 @@ use dropshot::Method;
 use dropshot::test_util::ClientTestContext;
 use http::StatusCode;
 use http::header;
+use illumos_utils::zpool::ZpoolHealth;
 use nexus_db_queries::db::fixed_data::silo::DEFAULT_SILO;
 use nexus_test_interface::NexusServer;
 use nexus_types::deployment::Blueprint;
@@ -1579,6 +1580,7 @@ pub struct TestZpool {
     pub id: ZpoolUuid,
     pub size: ByteCount,
     datasets: Vec<TestDataset>,
+    pub health: ZpoolHealth,
 }
 
 impl TestZpool {
@@ -1798,6 +1800,7 @@ impl<'a, N: NexusServer> DiskTest<'a, N> {
                         kind: DatasetKind::Crucible,
                     }],
                     Self::DEFAULT_ZPOOL_SIZE_GIB,
+                    ZpoolHealth::Online,
                 )
                 .await;
             }
@@ -1844,6 +1847,7 @@ impl<'a, N: NexusServer> DiskTest<'a, N> {
                 },
             ],
             gibibytes,
+            ZpoolHealth::Online,
         )
         .await
     }
@@ -1937,6 +1941,7 @@ impl<'a, N: NexusServer> DiskTest<'a, N> {
         zpool_id: ZpoolUuid,
         datasets: Vec<TestDataset>,
         gibibytes: u32,
+        zpool_health: ZpoolHealth,
     ) {
         let cptestctx = self.cptestctx;
 
@@ -1946,6 +1951,7 @@ impl<'a, N: NexusServer> DiskTest<'a, N> {
             id: zpool_id,
             size: ByteCount::from_gibibytes_u32(gibibytes),
             datasets,
+            health: zpool_health,
         };
 
         let disk_identity = DiskIdentity {
@@ -2002,6 +2008,7 @@ impl<'a, N: NexusServer> DiskTest<'a, N> {
             zpool.id,
             physical_disk_id,
             zpool.size.to_bytes(),
+            zpool.health,
         );
 
         for dataset in &zpool.datasets {

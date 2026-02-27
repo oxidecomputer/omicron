@@ -16,6 +16,7 @@ use headers::authorization::Credentials;
 use http::StatusCode;
 use http::method::Method;
 use httptest::{Expectation, ServerBuilder, matchers::*, responders::*};
+use illumos_utils::zpool::ZpoolHealth;
 use nexus_db_queries::authn::external::spoof;
 use nexus_test_utils::http_testing::AuthnMode;
 use nexus_test_utils::http_testing::NexusRequest;
@@ -87,6 +88,7 @@ async fn test_unauthorized() {
                 },
             ],
             DiskTest::DEFAULT_ZPOOL_SIZE_GIB,
+            ZpoolHealth::Online,
         )
         .await;
     disk_test.propagate_datasets_to_sleds().await;

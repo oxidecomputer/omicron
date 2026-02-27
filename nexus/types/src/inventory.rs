@@ -22,6 +22,7 @@ use iddqd::IdOrdItem;
 use iddqd::IdOrdMap;
 use iddqd::id_upcast;
 use illumos_utils::svcs::SvcsInMaintenanceResult;
+use illumos_utils::zpool::ZpoolHealth;
 use omicron_common::api::external::ByteCount;
 pub use omicron_common::api::internal::shared::NetworkInterface;
 pub use omicron_common::api::internal::shared::NetworkInterfaceKind;
@@ -568,11 +569,17 @@ pub struct Zpool {
     pub time_collected: DateTime<Utc>,
     pub id: ZpoolUuid,
     pub total_size: ByteCount,
+    pub health: ZpoolHealth,
 }
 
 impl Zpool {
     pub fn new(time_collected: DateTime<Utc>, pool: InventoryZpool) -> Zpool {
-        Zpool { time_collected, id: pool.id, total_size: pool.total_size }
+        Zpool {
+            time_collected,
+            id: pool.id,
+            total_size: pool.total_size,
+            health: pool.health,
+        }
     }
 }
 

@@ -23,6 +23,7 @@ use crucible_agent_client::types::{
 use dropshot::HandlerTaskMode;
 use dropshot::HttpError;
 use illumos_utils::zfs::DatasetProperties;
+use illumos_utils::zpool::ZpoolHealth;
 use omicron_common::api::external::ByteCount;
 use omicron_common::disk::DatasetManagementStatus;
 use omicron_common::disk::DatasetName;
@@ -1147,6 +1148,7 @@ pub(crate) struct Zpool {
     physical_disk_id: PhysicalDiskUuid,
     total_size: u64,
     datasets: HashMap<DatasetUuid, DatasetContents>,
+    health: ZpoolHealth,
 }
 
 impl Zpool {
@@ -1154,8 +1156,15 @@ impl Zpool {
         id: ZpoolUuid,
         physical_disk_id: PhysicalDiskUuid,
         total_size: u64,
+        health: ZpoolHealth,
     ) -> Self {
-        Zpool { id, physical_disk_id, total_size, datasets: HashMap::new() }
+        Zpool {
+            id,
+            physical_disk_id,
+            total_size,
+            datasets: HashMap::new(),
+            health,
+        }
     }
 
     fn insert_crucible_dataset(
@@ -1181,6 +1190,10 @@ impl Zpool {
         };
 
         crucible
+    }
+
+    pub fn health(&self) -> ZpoolHealth {
+        self.health
     }
 
     pub fn total_size(&self) -> u64 {
@@ -1777,9 +1790,11 @@ impl StorageInner {
         zpool_id: ZpoolUuid,
         disk_id: PhysicalDiskUuid,
         size: u64,
+        health: ZpoolHealth,
     ) {
         // Update our local data
-        self.zpools.insert(zpool_id, Zpool::new(zpool_id, disk_id, size));
+        self.zpools
+            .insert(zpool_id, Zpool::new(zpool_id, disk_id, size, health));
     }
 
     /// Returns an immutable reference to all zpools

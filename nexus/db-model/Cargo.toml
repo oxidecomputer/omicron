@@ -23,6 +23,7 @@ hex.workspace = true
 iddqd.workspace = true
 ipnetwork.workspace = true
 itertools.workspace = true
+illumos-utils.workspace = true
 macaddr.workspace = true
 newtype_derive.workspace = true
 omicron-cockroach-metrics.workspace = true
