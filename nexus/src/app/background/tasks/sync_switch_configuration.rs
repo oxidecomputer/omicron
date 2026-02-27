@@ -1193,7 +1193,7 @@ impl BackgroundTask for SwitchPortSettingsManager {
                                     enforce_first_as: c.enforce_first_as,
                                     local_pref: c.local_pref.map(|x| x.into()),
                                     md5_auth_key: c.md5_auth_key,
-                                    min_ttl: c.min_ttl.map(|x| x.0 as u8), //TODO avoid cast return error
+                                    min_ttl: c.min_ttl.map(|x| x.0),
                                     multi_exit_discriminator: c.multi_exit_discriminator.map(|x| x.into()),
                                     remote_asn: c.remote_asn.map(|x| x.into()),
                                     communities: Vec::new(),
