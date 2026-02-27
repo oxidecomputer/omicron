@@ -83,6 +83,8 @@ NOTE: This section assumes you're already familiar with the prerequisites and en
 * When using Cargo's check/build/clippy commands, use `--all-targets` to make sure you're checking or building the test code, too.
 * Use https://rust-analyzer.github.io/book/configuration#cargo.targetDir[`cargo.targetDir`] to give rust-analyzer a target directory other than `./target` so it doesn't block you from running commands in the terminal. This uses extra disk space.
 
+These are explained a bit more below, along with some common pitfalls.
+
 .How to set `cargo.targetDir` in various editors
 [%collapsible]
 ====
@@ -96,8 +98,6 @@ cargo.targetDir = true
 
 ====
 
-
-These are explained a bit more below, along with some common pitfalls.
 
 Here's an example workflow.  Suppose you're working on some changes to the Nexus database model (`nexus-db-model` package, located at `nexus/db-model` from the root).  While you're actively writing and checking code, you might run:
 
