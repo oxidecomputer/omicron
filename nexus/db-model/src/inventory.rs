@@ -29,7 +29,6 @@ use diesel::{serialize, sql_types};
 use iddqd::IdOrdMap;
 use illumos_utils::zpool::ZpoolHealth;
 use ipnetwork::IpNetwork;
-
 use nexus_db_schema::schema::inv_zone_manifest_non_boot;
 use nexus_db_schema::schema::inv_zone_manifest_zone;
 use nexus_db_schema::schema::{
