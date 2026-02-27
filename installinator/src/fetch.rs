@@ -12,17 +12,16 @@ use buf_list::BufList;
 use bytes::Bytes;
 use display_error_chain::DisplayErrorChain;
 use installinator_client::ClientError;
-use installinator_common::{
-    InstallinatorProgressMetadata, StepContext, StepProgress,
-};
+use installinator_common::{InstallinatorProgressMetadata, StepProgress};
+use oxide_update_engine::types::events::ProgressUnits;
 use tokio::{sync::mpsc, time::Instant};
 use tufaceous_artifact::ArtifactHashId;
-use update_engine::events::ProgressUnits;
 
 use crate::{
     artifact::ArtifactClient,
     errors::{ArtifactFetchError, DiscoverPeersError, HttpError},
     peers::{PeerAddress, PeerAddresses},
+    spec::StepContext,
 };
 
 /// A fetched artifact.

@@ -47,7 +47,8 @@ unicode-width.workspace = true
 zeroize.workspace = true
 
 omicron-passwords.workspace = true
-update-engine.workspace = true
+oxide-update-engine-display.workspace = true
+oxide-update-engine-types.workspace = true
 wicket-common.workspace = true
 wicketd-client.workspace = true
 omicron-workspace-hack.workspace = true

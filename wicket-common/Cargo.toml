@@ -17,6 +17,8 @@ maplit.workspace = true
 omicron-common.workspace = true
 omicron-workspace-hack.workspace = true
 owo-colors.workspace = true
+oxide-update-engine.workspace = true
+oxide-update-engine-types.workspace = true
 oxnet.workspace = true
 schemars.workspace = true
 serde.workspace = true
@@ -28,7 +30,6 @@ thiserror.workspace = true
 tokio.workspace = true
 transceiver-controller.workspace = true
 tufaceous-artifact.workspace = true
-update-engine.workspace = true
 
 [dev-dependencies]
 toml.workspace = true

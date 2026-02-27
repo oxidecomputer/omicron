@@ -19,12 +19,12 @@ use http::StatusCode;
 use installinator_client::ClientError;
 use installinator_common::{Event, EventBuffer, EventReport};
 use omicron_uuid_kinds::MupdateUuid;
+use oxide_update_engine::types::spec::AsError;
 use tokio::{
     sync::{mpsc, watch},
     task::JoinHandle,
     time,
 };
-use update_engine::AsError;
 
 use crate::{
     artifact::ArtifactClient,
@@ -72,7 +72,7 @@ impl ProgressReporter {
         update_id: MupdateUuid,
         report_backend: ReportProgressBackend,
     ) -> (Self, mpsc::Sender<Event>) {
-        let (event_sender, event_receiver) = update_engine::channel();
+        let (event_sender, event_receiver) = oxide_update_engine::channel();
         let ret = Self {
             log: log.new(slog::o!("component" => "EventReporter")),
             update_id,

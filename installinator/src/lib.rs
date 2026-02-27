@@ -13,6 +13,7 @@ mod hardware;
 mod mock_peers;
 mod peers;
 mod reporter;
+mod spec;
 #[cfg(test)]
 mod test_helpers;
 mod write;

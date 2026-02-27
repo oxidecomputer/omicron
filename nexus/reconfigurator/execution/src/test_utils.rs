@@ -15,7 +15,7 @@ use nexus_types::{
     },
     quiesce::SagaQuiesceHandle,
 };
-use update_engine::TerminalKind;
+use oxide_update_engine_types::buffer::TerminalKind;
 
 use crate::{RealizeBlueprintOutput, RequiredRealizeArgs};
 use tokio::sync::watch;
