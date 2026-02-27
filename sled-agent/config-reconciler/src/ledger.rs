@@ -629,6 +629,7 @@ fn config_artifact_hashes(
         .filter_map(|zone| zone.image_source.artifact_hash())
         .chain(config.host_phase_2.slot_a.artifact_hash())
         .chain(config.host_phase_2.slot_b.artifact_hash())
+        .chain(config.measurements.iter().map(|x| x.hash))
 }
 
 async fn load_sled_config(

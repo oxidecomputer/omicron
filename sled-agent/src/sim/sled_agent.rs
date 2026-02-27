@@ -31,9 +31,8 @@ use omicron_common::api::internal::nexus::{
     DiskRuntimeState, MigrationRuntimeState, MigrationState, SledVmmState,
 };
 use omicron_common::api::internal::shared::{
-    RackNetworkConfig, ResolvedVpcRoute, ResolvedVpcRouteSet,
-    ResolvedVpcRouteState, RouterId, RouterKind, RouterVersion,
-    VirtualNetworkInterfaceHost,
+    ResolvedVpcRoute, ResolvedVpcRouteSet, ResolvedVpcRouteState, RouterId,
+    RouterKind, RouterVersion, VirtualNetworkInterfaceHost,
 };
 use omicron_common::disk::{
     DatasetsConfig, DatasetsManagementResult, DiskIdentity, DiskVariant,
@@ -54,6 +53,7 @@ use sled_agent_health_monitor::HealthMonitorHandle;
 use sled_agent_types::attached_subnet::{AttachedSubnet, AttachedSubnets};
 use sled_agent_types::dataset::LocalStorageDatasetEnsureRequest;
 use sled_agent_types::disk::DiskStateRequested;
+use sled_agent_types::early_networking::RackNetworkConfig;
 use sled_agent_types::early_networking::{
     EarlyNetworkConfig, EarlyNetworkConfigBody,
 };

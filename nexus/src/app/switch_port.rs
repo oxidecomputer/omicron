@@ -14,12 +14,12 @@ use nexus_db_queries::db::datastore::UpdatePrecondition;
 use nexus_db_queries::db::model::{SwitchPort, SwitchPortSettings};
 use nexus_types::external_api::networking;
 use nexus_types::external_api::switch::SwitchLinkState;
-use omicron_common::api::external::SwitchLocation;
 use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::{
     self, CreateResult, DataPageParams, DeleteResult, Error, ListResultVec,
     LookupResult, Name, NameOrId, UpdateResult,
 };
+use sled_agent_types::early_networking::SwitchLocation;
 use std::sync::Arc;
 use uuid::Uuid;
 

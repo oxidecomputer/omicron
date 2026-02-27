@@ -6,11 +6,11 @@
 
 use std::net::IpAddr;
 
-use omicron_common::api::external::BfdMode;
 use omicron_common::api::external::Name;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
+use sled_agent_types::early_networking::BfdMode;
 
 #[derive(
     Clone,

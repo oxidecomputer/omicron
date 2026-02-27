@@ -1024,6 +1024,11 @@ opt-level = 3
 [profile.dev.package.gfss]
 opt-level = 3
 
+# This speeds up `cargo xtask openapi generate` by ~2x.
+[profile.dev.package.drift]
+opt-level = 3
+[profile.dev.package.dropshot-api-manager]
+opt-level = 3
 
 #
 # It's common during development to use a local copy of various complex
