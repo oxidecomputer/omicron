@@ -47,12 +47,12 @@ use slog::{Logger, debug, error, info, warn};
 
 use dpd_client::Error as DpdError;
 use dpd_client::types::{
-    AdminScopedIpv6, ExternalForwarding, InternalForwarding, IpSrc, MacAddr,
+    ExternalForwarding, InternalForwarding, IpSrc, MacAddr,
     MulticastGroupCreateExternalEntry, MulticastGroupCreateUnderlayEntry,
     MulticastGroupExternalResponse, MulticastGroupMember,
     MulticastGroupResponse, MulticastGroupUnderlayResponse,
     MulticastGroupUpdateExternalEntry, MulticastGroupUpdateUnderlayEntry,
-    NatTarget, Vni,
+    MulticastTag, NatTarget, UnderlayMulticastIpv6, Vni,
 };
 use internal_dns_resolver::Resolver;
 
@@ -102,16 +102,20 @@ impl IntoExternalResponse for MulticastGroupResponse {
 }
 
 /// Trait for converting database IPv6 types into DPD's
-/// [`AdminScopedIpv6`] type.
-trait IntoAdminScoped {
-    /// Convert to [`AdminScopedIpv6`], rejecting IPv4 addresses.
-    fn into_admin_scoped(self) -> Result<AdminScopedIpv6, Error>;
+/// [`UnderlayMulticastIpv6`] type.
+trait IntoUnderlayMulticastIpv6 {
+    /// Convert to [`UnderlayMulticastIpv6`], rejecting IPv4 addresses.
+    fn into_underlay_multicast_ipv6(
+        self,
+    ) -> Result<UnderlayMulticastIpv6, Error>;
 }
 
-impl IntoAdminScoped for IpAddr {
-    fn into_admin_scoped(self) -> Result<AdminScopedIpv6, Error> {
+impl IntoUnderlayMulticastIpv6 for IpAddr {
+    fn into_underlay_multicast_ipv6(
+        self,
+    ) -> Result<UnderlayMulticastIpv6, Error> {
         match self {
-            IpAddr::V6(ipv6) => Ok(AdminScopedIpv6(ipv6)),
+            IpAddr::V6(ipv6) => Ok(UnderlayMulticastIpv6(ipv6)),
             IpAddr::V4(_) => Err(Error::invalid_request(
                 "underlay multicast groups must use IPv6 addresses",
             )),
@@ -188,7 +192,7 @@ impl MulticastDataplaneClient {
     async fn dpd_ensure_underlay_created(
         &self,
         client: &dpd_client::Client,
-        ip: AdminScopedIpv6,
+        ip: UnderlayMulticastIpv6,
         tag: &str,
         switch: &SwitchLocation,
     ) -> MulticastDataplaneResult<MulticastGroupUnderlayResponse> {
@@ -295,7 +299,11 @@ impl MulticastDataplaneClient {
         create: &MulticastGroupCreateExternalEntry,
         switch: &SwitchLocation,
     ) -> MulticastDataplaneResult<MulticastGroupExternalResponse> {
-        match client.multicast_group_update_external(&group_ip, update).await {
+        let tag: MulticastTag = "nexus".parse().unwrap();
+        match client
+            .multicast_group_update_external(&group_ip, &tag, update)
+            .await
+        {
             Ok(r) => Ok(r.into_inner()),
             Err(DpdError::ErrorResponse(resp))
                 if resp.status() == reqwest::StatusCode::NOT_FOUND =>
@@ -401,7 +409,7 @@ impl MulticastDataplaneClient {
             })?
             .map(u16::from);
         let underlay_ip_admin =
-            underlay_group.multicast_ip.ip().into_admin_scoped()?;
+            underlay_group.multicast_ip.ip().into_underlay_multicast_ipv6()?;
         let underlay_ipv6 = match underlay_group.multicast_ip.ip() {
             IpAddr::V6(ipv6) => ipv6,
             IpAddr::V4(_) => {
@@ -558,8 +566,11 @@ impl MulticastDataplaneClient {
                 Error::internal_error(&format!("invalid VLAN ID: {e:#}"))
             })?
             .map(u16::from);
-        let underlay_ip_admin =
-            params.underlay_group.multicast_ip.ip().into_admin_scoped()?;
+        let underlay_ip_admin = params
+            .underlay_group
+            .multicast_ip
+            .ip()
+            .into_underlay_multicast_ipv6()?;
         let underlay_ipv6 = match params.underlay_group.multicast_ip.ip() {
             IpAddr::V6(ipv6) => ipv6,
             IpAddr::V4(_) => {
@@ -646,13 +657,13 @@ impl MulticastDataplaneClient {
                     };
 
                     // Update underlay tag preserving members
-                    let underlay_entry = MulticastGroupUpdateUnderlayEntry {
-                        members,
-                        tag: Some(new_name.clone()),
-                    };
+                    let underlay_entry =
+                        MulticastGroupUpdateUnderlayEntry { members };
+                    let tag: MulticastTag = "nexus".parse().unwrap();
                     let underlay_response = client
                         .multicast_group_update_underlay(
                             &underlay_ip_admin,
+                            &tag,
                             &underlay_entry,
                         )
                         .await
@@ -675,7 +686,6 @@ impl MulticastDataplaneClient {
                     let update_entry = MulticastGroupUpdateExternalEntry {
                         external_forwarding: external_forwarding.clone(),
                         internal_forwarding: internal_forwarding.clone(),
-                        tag: Some(new_name.clone()),
                         sources: sources.clone(),
                     };
                     let create_entry = MulticastGroupCreateExternalEntry {
@@ -766,14 +776,14 @@ impl MulticastDataplaneClient {
             let operation_name = operation_name.clone();
 
             async move {
-                let underlay_ip_admin = underlay_ip.into_admin_scoped()?;
+                let underlay_ip_admin = underlay_ip.into_underlay_multicast_ipv6()?;
 
                 // Get current underlay group state, create if missing
                 let current_group_res = client
                     .multicast_group_get_underlay(&underlay_ip_admin)
                     .await;
 
-                let (current_members, current_tag) = match current_group_res {
+                let (current_members, _current_tag) = match current_group_res {
                     Ok(response) => {
                         let inner = response.into_inner();
                         (inner.members, inner.tag)
@@ -885,11 +895,13 @@ impl MulticastDataplaneClient {
                 // Try to update the underlay group (move updated_members)
                 let update_entry = MulticastGroupUpdateUnderlayEntry {
                     members: updated_members,
-                    tag: current_tag.clone(),
                 };
 
+                let tag: MulticastTag = "nexus".parse().unwrap();
+
                 let update_res = client
-                    .multicast_group_update_underlay(&underlay_ip_admin, &update_entry)
+                    .multicast_group_update_underlay(
+                        &underlay_ip_admin, &tag, &update_entry)
                     .await;
 
                 match update_res {
@@ -915,7 +927,7 @@ impl MulticastDataplaneClient {
 
                         // Delete the stale underlay group
                         if let Err(e) = client
-                            .multicast_group_delete(&underlay_ip)
+                            .multicast_group_delete(&underlay_ip, &tag)
                             .await
                         {
                             warn!(
@@ -1308,7 +1320,9 @@ impl MulticastDataplaneClient {
         );
 
         match client
-            .multicast_group_get_underlay(&underlay_ip.into_admin_scoped()?)
+            .multicast_group_get_underlay(
+                &underlay_ip.into_underlay_multicast_ipv6()?,
+            )
             .await
         {
             Ok(response) => {
@@ -1362,13 +1376,16 @@ impl MulticastDataplaneClient {
         );
 
         let dpd_clients = &self.dpd_clients;
+        let dpd_tag: MulticastTag = tag
+            .parse()
+            .map_err(|_| Error::internal_error("invalid multicast tag"))?;
 
         // Execute cleanup operations on all switches in parallel
         let cleanup_ops = dpd_clients.iter().map(|(location, client)| {
-            let tag = tag.to_string();
             let log = self.log.clone();
+            let dpd_tag = dpd_tag.clone();
             async move {
-                match client.multicast_reset_by_tag(&tag).await {
+                match client.multicast_reset_by_tag(&dpd_tag).await {
                     Ok(_) => {
                         debug!(
                             log,
