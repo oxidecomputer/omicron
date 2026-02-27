@@ -95,6 +95,39 @@ These are explained a bit more below, along with some common pitfalls.
 [language-server.rust-analyzer.config]
 cargo.targetDir = true
 ----
+.Neovim (using rustaceanvim)
+[source, lua]
+----
+vim.g.rustaceanvim = {
+  server = {
+    default_settings = {
+      ['rust-analyzer'] = {
+        cargo = {
+          targetDir = true,
+        },
+      },
+    },
+  },
+}
+----
+.Neovim (using LazyVim): merge the following into custom.lua
+[source, lua]
+----
+  {
+    "mrcjkb/rustaceanvim",
+    opts = {
+      server = {
+        default_settings = {
+          ["rust-analyzer"] = {
+            cargo = {
+              targetDir = true,
+            },
+          },
+        },
+      },
+    },
+  },
+----
 
 ====
 
