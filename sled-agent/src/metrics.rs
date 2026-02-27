@@ -8,6 +8,9 @@ use illumos_utils::running_zone::RunningZone;
 use omicron_common::api::internal::nexus::ProducerEndpoint;
 use omicron_common::api::internal::nexus::ProducerKind;
 use omicron_common::api::internal::shared::SledIdentifiers;
+use omicron_uuid_kinds::GenericUuid;
+use oximeter_instruments::http::HttpService;
+use oximeter_instruments::http::LatencyTracker;
 use oximeter_instruments::kstat::CollectionDetails;
 use oximeter_instruments::kstat::Error as KstatError;
 use oximeter_instruments::kstat::KstatSampler;
@@ -352,6 +355,8 @@ pub struct MetricsManager {
     tx: mpsc::Sender<Message>,
     /// The background task itself.
     _task: tokio::task::JoinHandle<()>,
+    /// HTTP request latency tracker.
+    pub latencies: LatencyTracker,
 }
 
 impl MetricsManager {
@@ -363,10 +368,29 @@ impl MetricsManager {
     ) -> Result<Self, Error> {
         let sampler = KstatSampler::new(log).map_err(Error::Kstat)?;
         let server = start_producer_server(&log, identifiers.sled_id, address)?;
+
+        let http_target = HttpService {
+            name: "sled-agent".into(),
+            id: identifiers.sled_id.into_untyped_uuid(),
+        };
+        const LATENCY_START_POWER: u16 = 3;
+        const LATENCY_END_POWER: u16 = 12;
+        let http_tracker = LatencyTracker::with_log_linear_bins(
+            http_target,
+            LATENCY_START_POWER,
+            LATENCY_END_POWER,
+        )
+        .unwrap();
+
         server
             .registry()
             .register_producer(sampler.clone())
             .expect("actually infallible");
+        server
+            .registry()
+            .register_producer(http_tracker.clone())
+            .expect("actually infallible");
+
         let (tx, rx) = mpsc::channel(QUEUE_SIZE);
         let task_log = log.new(o!("component" => "metrics-task"));
         let _task = tokio::task::spawn(metrics_task(
@@ -376,7 +400,7 @@ impl MetricsManager {
             task_log,
             rx,
         ));
-        Ok(Self { tx, _task })
+        Ok(Self { tx, _task, latencies: http_tracker })
     }
 
     /// Return a queue that can be used to send requests to the metrics task.
