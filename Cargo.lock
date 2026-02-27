@@ -9700,6 +9700,8 @@ dependencies = [
 [[package]]
 name = "oxide-update-engine"
 version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2c64ad9b5deccdc4e76bb72cabd29259fccc68496d847fa0e76a4e8db2e7dc04"
 dependencies = [
  "cancel-safe-futures",
  "debug-ignore",
@@ -9714,6 +9716,8 @@ dependencies = [
 [[package]]
 name = "oxide-update-engine-display"
 version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4f828b84d143059650da3b24788053f56f84db5b9b50012d3f386cc8ee82a46b"
 dependencies = [
  "chrono",
  "debug-ignore",
@@ -9729,6 +9733,8 @@ dependencies = [
 [[package]]
 name = "oxide-update-engine-types"
 version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1b0b3d92cd1becedf4da8d3e99d8c644714dbadd9f533a304c50b5acb238d36b"
 dependencies = [
  "anyhow",
  "derive-where",

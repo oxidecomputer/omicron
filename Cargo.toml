@@ -1029,9 +1029,6 @@ opt-level = 3
 # dependencies.  If you want to use those, uncomment one of these blocks.
 #
 [patch.crates-io]
-oxide-update-engine = { path = "../oxide-update-engine/crates/oxide-update-engine" }
-oxide-update-engine-display = { path = "../oxide-update-engine/crates/oxide-update-engine-display" }
-oxide-update-engine-types = { path = "../oxide-update-engine/crates/oxide-update-engine-types" }
 # diesel = { path = "../../diesel/diesel" }
 # drift = { path = "../drift" }
 # dropshot = { path = "../dropshot/dropshot" }
