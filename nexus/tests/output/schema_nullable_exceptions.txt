@@ -1,2 +1,0 @@
-virtual_provisioning_collection.time_modified
-virtual_provisioning_resource.time_modified
