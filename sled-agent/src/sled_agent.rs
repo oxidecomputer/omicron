@@ -62,6 +62,7 @@ use omicron_ddm_admin_client::Client as DdmAdminClient;
 use omicron_uuid_kinds::{
     GenericUuid, MupdateOverrideUuid, PropolisUuid, SledUuid,
 };
+use oximeter_instruments::http::LatencyTracker;
 use oxnet::IpNet;
 use sled_agent_config_reconciler::{
     ConfigReconcilerHandle, ConfigReconcilerSpawnToken, InternalDisks,
@@ -404,7 +405,7 @@ struct SledAgentInner {
     health_monitor: HealthMonitorHandle,
 
     // Object handling production of metrics for oximeter.
-    _metrics_manager: MetricsManager,
+    metrics_manager: MetricsManager,
 
     // Component of Sled Agent responsible for managing instrumentation probes.
     probes: ProbeManager,
@@ -721,7 +722,7 @@ impl SledAgent {
                 health_monitor: long_running_task_handles
                     .health_monitor
                     .clone(),
-                _metrics_manager: metrics_manager,
+                metrics_manager,
                 repo_depot,
                 measurements: long_running_task_handles.measurements.clone(),
             }),
@@ -760,6 +761,10 @@ impl SledAgent {
 
     pub fn id(&self) -> SledUuid {
         self.inner.id
+    }
+
+    pub(crate) fn latencies(&self) -> &LatencyTracker {
+        &self.inner.metrics_manager.latencies
     }
 
     pub fn logger(&self) -> &Logger {

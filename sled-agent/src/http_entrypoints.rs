@@ -103,10 +103,14 @@ impl SledAgentApi for SledAgentImpl {
     ) -> Result<HttpResponseOk<Vec<ZoneBundleMetadata>>, HttpError> {
         let sa = rqctx.context();
         let filter = query.into_inner().filter;
-        sa.list_all_zone_bundles(filter.as_deref())
+        sa.latencies()
+            .instrument_dropshot_handler(&rqctx, async {
+                sa.list_all_zone_bundles(filter.as_deref())
+                    .await
+                    .map(HttpResponseOk)
+                    .map_err(HttpError::from)
+            })
             .await
-            .map(HttpResponseOk)
-            .map_err(HttpError::from)
     }
 
     async fn zone_bundle_list(
@@ -116,10 +120,14 @@ impl SledAgentApi for SledAgentImpl {
         let params = params.into_inner();
         let zone_name = params.zone_name;
         let sa = rqctx.context();
-        sa.list_zone_bundles(&zone_name)
+        sa.latencies()
+            .instrument_dropshot_handler(&rqctx, async {
+                sa.list_zone_bundles(&zone_name)
+                    .await
+                    .map(HttpResponseOk)
+                    .map_err(HttpError::from)
+            })
             .await
-            .map(HttpResponseOk)
-            .map_err(HttpError::from)
     }
 
     async fn zone_bundle_get(
@@ -131,39 +139,45 @@ impl SledAgentApi for SledAgentImpl {
         let zone_name = params.zone_name;
         let bundle_id = params.bundle_id;
         let sa = rqctx.context();
-        let Some(path) = sa
-            .get_zone_bundle_paths(&zone_name, &bundle_id)
+        sa.latencies()
+            .instrument_dropshot_handler(&rqctx, async {
+                let Some(path) = sa
+                    .get_zone_bundle_paths(&zone_name, &bundle_id)
+                    .await
+                    .map_err(HttpError::from)?
+                    .into_iter()
+                    .next()
+                else {
+                    return Err(HttpError::for_not_found(
+                        None,
+                        format!(
+                            "No zone bundle for zone '{}' with ID '{}'",
+                            zone_name, bundle_id
+                        ),
+                    ));
+                };
+                let f = tokio::fs::File::open(&path).await.map_err(|e| {
+                    HttpError::for_internal_error(format!(
+                        "failed to open zone bundle file at {}: {:?}",
+                        path, e,
+                    ))
+                })?;
+                let file_access =
+                    hyper_staticfile::vfs::TokioFileAccess::new(f);
+                let file_stream =
+                    hyper_staticfile::util::FileBytesStream::new(file_access);
+                let body =
+                    Body::wrap(hyper_staticfile::Body::Full(file_stream));
+                let body = FreeformBody(body);
+                let mut response =
+                    HttpResponseHeaders::new_unnamed(HttpResponseOk(body));
+                response.headers_mut().append(
+                    http::header::CONTENT_TYPE,
+                    "application/gzip".try_into().unwrap(),
+                );
+                Ok(response)
+            })
             .await
-            .map_err(HttpError::from)?
-            .into_iter()
-            .next()
-        else {
-            return Err(HttpError::for_not_found(
-                None,
-                format!(
-                    "No zone bundle for zone '{}' with ID '{}'",
-                    zone_name, bundle_id
-                ),
-            ));
-        };
-        let f = tokio::fs::File::open(&path).await.map_err(|e| {
-            HttpError::for_internal_error(format!(
-                "failed to open zone bundle file at {}: {:?}",
-                path, e,
-            ))
-        })?;
-        let file_access = hyper_staticfile::vfs::TokioFileAccess::new(f);
-        let file_stream =
-            hyper_staticfile::util::FileBytesStream::new(file_access);
-        let body = Body::wrap(hyper_staticfile::Body::Full(file_stream));
-        let body = FreeformBody(body);
-        let mut response =
-            HttpResponseHeaders::new_unnamed(HttpResponseOk(body));
-        response.headers_mut().append(
-            http::header::CONTENT_TYPE,
-            "application/gzip".try_into().unwrap(),
-        );
-        Ok(response)
     }
 
     async fn zone_bundle_delete(
@@ -174,27 +188,31 @@ impl SledAgentApi for SledAgentImpl {
         let zone_name = params.zone_name;
         let bundle_id = params.bundle_id;
         let sa = rqctx.context();
-        let paths = sa
-            .get_zone_bundle_paths(&zone_name, &bundle_id)
+        sa.latencies()
+            .instrument_dropshot_handler(&rqctx, async {
+                let paths = sa
+                    .get_zone_bundle_paths(&zone_name, &bundle_id)
+                    .await
+                    .map_err(HttpError::from)?;
+                if paths.is_empty() {
+                    return Err(HttpError::for_not_found(
+                        None,
+                        format!(
+                            "No zone bundle for zone '{}' with ID '{}'",
+                            zone_name, bundle_id
+                        ),
+                    ));
+                };
+                for path in paths.into_iter() {
+                    tokio::fs::remove_file(&path).await.map_err(|e| {
+                        HttpError::for_internal_error(format!(
+                            "Failed to delete zone bundle: {e}"
+                        ))
+                    })?;
+                }
+                Ok(HttpResponseDeleted())
+            })
             .await
-            .map_err(HttpError::from)?;
-        if paths.is_empty() {
-            return Err(HttpError::for_not_found(
-                None,
-                format!(
-                    "No zone bundle for zone '{}' with ID '{}'",
-                    zone_name, bundle_id
-                ),
-            ));
-        };
-        for path in paths.into_iter() {
-            tokio::fs::remove_file(&path).await.map_err(|e| {
-                HttpError::for_internal_error(format!(
-                    "Failed to delete zone bundle: {e}"
-                ))
-            })?;
-        }
-        Ok(HttpResponseDeleted())
     }
 
     async fn zone_bundle_utilization(
@@ -204,17 +222,25 @@ impl SledAgentApi for SledAgentImpl {
         HttpError,
     > {
         let sa = rqctx.context();
-        sa.zone_bundle_utilization()
+        sa.latencies()
+            .instrument_dropshot_handler(&rqctx, async {
+                sa.zone_bundle_utilization()
+                    .await
+                    .map(HttpResponseOk)
+                    .map_err(HttpError::from)
+            })
             .await
-            .map(HttpResponseOk)
-            .map_err(HttpError::from)
     }
 
     async fn zone_bundle_cleanup_context(
         rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<CleanupContext>, HttpError> {
         let sa = rqctx.context();
-        Ok(HttpResponseOk(sa.zone_bundle_cleanup_context().await))
+        sa.latencies()
+            .instrument_dropshot_handler(&rqctx, async {
+                Ok(HttpResponseOk(sa.zone_bundle_cleanup_context().await))
+            })
+            .await
     }
 
     async fn zone_bundle_cleanup_context_update(
@@ -223,23 +249,36 @@ impl SledAgentApi for SledAgentImpl {
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
         let sa = rqctx.context();
         let params = body.into_inner();
-        let new_period =
-            params.period.map(CleanupPeriod::new).transpose().map_err(|e| {
-                HttpError::from(SledAgentError::from(BundleError::from(e)))
-            })?;
-        let new_priority = params.priority;
-        let new_limit =
-            params.storage_limit.map(StorageLimit::new).transpose().map_err(
-                |e| HttpError::from(SledAgentError::from(BundleError::from(e))),
-            )?;
-        sa.update_zone_bundle_cleanup_context(
-            new_period,
-            new_limit,
-            new_priority,
-        )
-        .await
-        .map(|_| HttpResponseUpdatedNoContent())
-        .map_err(HttpError::from)
+        sa.latencies()
+            .instrument_dropshot_handler(&rqctx, async {
+                let new_period =
+                    params.period.map(CleanupPeriod::new).transpose().map_err(
+                        |e| {
+                            HttpError::from(SledAgentError::from(
+                                BundleError::from(e),
+                            ))
+                        },
+                    )?;
+                let new_priority = params.priority;
+                let new_limit = params
+                    .storage_limit
+                    .map(StorageLimit::new)
+                    .transpose()
+                    .map_err(|e| {
+                        HttpError::from(SledAgentError::from(
+                            BundleError::from(e),
+                        ))
+                    })?;
+                sa.update_zone_bundle_cleanup_context(
+                    new_period,
+                    new_limit,
+                    new_priority,
+                )
+                .await
+                .map(|_| HttpResponseUpdatedNoContent())
+                .map_err(HttpError::from)
+            })
+            .await
     }
 
     async fn support_bundle_list(
@@ -247,14 +286,17 @@ impl SledAgentApi for SledAgentImpl {
         path_params: Path<SupportBundleListPathParam>,
     ) -> Result<HttpResponseOk<Vec<SupportBundleMetadata>>, HttpError> {
         let sa = rqctx.context();
-
         let SupportBundleListPathParam { zpool_id, dataset_id } =
             path_params.into_inner();
-
-        let bundles =
-            sa.as_support_bundle_storage().list(zpool_id, dataset_id).await?;
-
-        Ok(HttpResponseOk(bundles))
+        sa.latencies()
+            .instrument_dropshot_handler(&rqctx, async {
+                let bundles = sa
+                    .as_support_bundle_storage()
+                    .list(zpool_id, dataset_id)
+                    .await?;
+                Ok(HttpResponseOk(bundles))
+            })
+            .await
     }
 
     async fn support_bundle_start_creation(
@@ -262,16 +304,17 @@ impl SledAgentApi for SledAgentImpl {
         path_params: Path<SupportBundlePathParam>,
     ) -> Result<HttpResponseCreated<SupportBundleMetadata>, HttpError> {
         let sa = rqctx.context();
-
         let SupportBundlePathParam { zpool_id, dataset_id, support_bundle_id } =
             path_params.into_inner();
-
-        let metadata = sa
-            .as_support_bundle_storage()
-            .start_creation(zpool_id, dataset_id, support_bundle_id)
-            .await?;
-
-        Ok(HttpResponseCreated(metadata))
+        sa.latencies()
+            .instrument_dropshot_handler(&rqctx, async {
+                let metadata = sa
+                    .as_support_bundle_storage()
+                    .start_creation(zpool_id, dataset_id, support_bundle_id)
+                    .await?;
+                Ok(HttpResponseCreated(metadata))
+            })
+            .await
     }
 
     async fn support_bundle_transfer(
@@ -281,24 +324,25 @@ impl SledAgentApi for SledAgentImpl {
         body: StreamingBody,
     ) -> Result<HttpResponseCreated<SupportBundleMetadata>, HttpError> {
         let sa = rqctx.context();
-
         let SupportBundlePathParam { zpool_id, dataset_id, support_bundle_id } =
             path_params.into_inner();
         let SupportBundleTransferQueryParams { offset } =
             query_params.into_inner();
-
-        let metadata = sa
-            .as_support_bundle_storage()
-            .transfer(
-                zpool_id,
-                dataset_id,
-                support_bundle_id,
-                offset,
-                body.into_stream(),
-            )
-            .await?;
-
-        Ok(HttpResponseCreated(metadata))
+        sa.latencies()
+            .instrument_dropshot_handler(&rqctx, async {
+                let metadata = sa
+                    .as_support_bundle_storage()
+                    .transfer(
+                        zpool_id,
+                        dataset_id,
+                        support_bundle_id,
+                        offset,
+                        body.into_stream(),
+                    )
+                    .await?;
+                Ok(HttpResponseCreated(metadata))
+            })
+            .await
     }
 
     async fn support_bundle_finalize(
@@ -307,18 +351,19 @@ impl SledAgentApi for SledAgentImpl {
         query_params: Query<SupportBundleFinalizeQueryParams>,
     ) -> Result<HttpResponseCreated<SupportBundleMetadata>, HttpError> {
         let sa = rqctx.context();
-
         let SupportBundlePathParam { zpool_id, dataset_id, support_bundle_id } =
             path_params.into_inner();
         let SupportBundleFinalizeQueryParams { hash } =
             query_params.into_inner();
-
-        let metadata = sa
-            .as_support_bundle_storage()
-            .finalize(zpool_id, dataset_id, support_bundle_id, hash)
-            .await?;
-
-        Ok(HttpResponseCreated(metadata))
+        sa.latencies()
+            .instrument_dropshot_handler(&rqctx, async {
+                let metadata = sa
+                    .as_support_bundle_storage()
+                    .finalize(zpool_id, dataset_id, support_bundle_id, hash)
+                    .await?;
+                Ok(HttpResponseCreated(metadata))
+            })
+            .await
     }
 
     async fn support_bundle_download(
@@ -329,21 +374,24 @@ impl SledAgentApi for SledAgentImpl {
         let sa = rqctx.context();
         let SupportBundlePathParam { zpool_id, dataset_id, support_bundle_id } =
             path_params.into_inner();
-
         let range = headers
             .into_inner()
             .range
             .map(|r| PotentialRange::new(r.as_bytes()));
-        Ok(sa
-            .as_support_bundle_storage()
-            .get(
-                zpool_id,
-                dataset_id,
-                support_bundle_id,
-                range,
-                SupportBundleQueryType::Whole,
-            )
-            .await?)
+        sa.latencies()
+            .instrument_dropshot_handler(&rqctx, async {
+                Ok(sa
+                    .as_support_bundle_storage()
+                    .get(
+                        zpool_id,
+                        dataset_id,
+                        support_bundle_id,
+                        range,
+                        SupportBundleQueryType::Whole,
+                    )
+                    .await?)
+            })
+            .await
     }
 
     async fn support_bundle_download_file(
@@ -357,21 +405,24 @@ impl SledAgentApi for SledAgentImpl {
                 SupportBundlePathParam { zpool_id, dataset_id, support_bundle_id },
             file,
         } = path_params.into_inner();
-
         let range = headers
             .into_inner()
             .range
             .map(|r| PotentialRange::new(r.as_bytes()));
-        Ok(sa
-            .as_support_bundle_storage()
-            .get(
-                zpool_id,
-                dataset_id,
-                support_bundle_id,
-                range,
-                SupportBundleQueryType::Path { file_path: file },
-            )
-            .await?)
+        sa.latencies()
+            .instrument_dropshot_handler(&rqctx, async {
+                Ok(sa
+                    .as_support_bundle_storage()
+                    .get(
+                        zpool_id,
+                        dataset_id,
+                        support_bundle_id,
+                        range,
+                        SupportBundleQueryType::Path { file_path: file },
+                    )
+                    .await?)
+            })
+            .await
     }
 
     async fn support_bundle_index(
@@ -382,21 +433,24 @@ impl SledAgentApi for SledAgentImpl {
         let sa = rqctx.context();
         let SupportBundlePathParam { zpool_id, dataset_id, support_bundle_id } =
             path_params.into_inner();
-
         let range = headers
             .into_inner()
             .range
             .map(|r| PotentialRange::new(r.as_bytes()));
-        Ok(sa
-            .as_support_bundle_storage()
-            .get(
-                zpool_id,
-                dataset_id,
-                support_bundle_id,
-                range,
-                SupportBundleQueryType::Index,
-            )
-            .await?)
+        sa.latencies()
+            .instrument_dropshot_handler(&rqctx, async {
+                Ok(sa
+                    .as_support_bundle_storage()
+                    .get(
+                        zpool_id,
+                        dataset_id,
+                        support_bundle_id,
+                        range,
+                        SupportBundleQueryType::Index,
+                    )
+                    .await?)
+            })
+            .await
     }
 
     async fn support_bundle_head(
@@ -407,21 +461,24 @@ impl SledAgentApi for SledAgentImpl {
         let sa = rqctx.context();
         let SupportBundlePathParam { zpool_id, dataset_id, support_bundle_id } =
             path_params.into_inner();
-
         let range = headers
             .into_inner()
             .range
             .map(|r| PotentialRange::new(r.as_bytes()));
-        Ok(sa
-            .as_support_bundle_storage()
-            .head(
-                zpool_id,
-                dataset_id,
-                support_bundle_id,
-                range,
-                SupportBundleQueryType::Whole,
-            )
-            .await?)
+        sa.latencies()
+            .instrument_dropshot_handler(&rqctx, async {
+                Ok(sa
+                    .as_support_bundle_storage()
+                    .head(
+                        zpool_id,
+                        dataset_id,
+                        support_bundle_id,
+                        range,
+                        SupportBundleQueryType::Whole,
+                    )
+                    .await?)
+            })
+            .await
     }
 
     async fn support_bundle_head_file(
@@ -435,21 +492,24 @@ impl SledAgentApi for SledAgentImpl {
                 SupportBundlePathParam { zpool_id, dataset_id, support_bundle_id },
             file,
         } = path_params.into_inner();
-
         let range = headers
             .into_inner()
             .range
             .map(|r| PotentialRange::new(r.as_bytes()));
-        Ok(sa
-            .as_support_bundle_storage()
-            .head(
-                zpool_id,
-                dataset_id,
-                support_bundle_id,
-                range,
-                SupportBundleQueryType::Path { file_path: file },
-            )
-            .await?)
+        sa.latencies()
+            .instrument_dropshot_handler(&rqctx, async {
+                Ok(sa
+                    .as_support_bundle_storage()
+                    .head(
+                        zpool_id,
+                        dataset_id,
+                        support_bundle_id,
+                        range,
+                        SupportBundleQueryType::Path { file_path: file },
+                    )
+                    .await?)
+            })
+            .await
     }
 
     async fn support_bundle_head_index(
@@ -460,21 +520,24 @@ impl SledAgentApi for SledAgentImpl {
         let sa = rqctx.context();
         let SupportBundlePathParam { zpool_id, dataset_id, support_bundle_id } =
             path_params.into_inner();
-
         let range = headers
             .into_inner()
             .range
             .map(|r| PotentialRange::new(r.as_bytes()));
-        Ok(sa
-            .as_support_bundle_storage()
-            .head(
-                zpool_id,
-                dataset_id,
-                support_bundle_id,
-                range,
-                SupportBundleQueryType::Index,
-            )
-            .await?)
+        sa.latencies()
+            .instrument_dropshot_handler(&rqctx, async {
+                Ok(sa
+                    .as_support_bundle_storage()
+                    .head(
+                        zpool_id,
+                        dataset_id,
+                        support_bundle_id,
+                        range,
+                        SupportBundleQueryType::Index,
+                    )
+                    .await?)
+            })
+            .await
     }
 
     async fn support_bundle_delete(
@@ -482,14 +545,16 @@ impl SledAgentApi for SledAgentImpl {
         path_params: Path<SupportBundlePathParam>,
     ) -> Result<HttpResponseDeleted, HttpError> {
         let sa = rqctx.context();
-
         let SupportBundlePathParam { zpool_id, dataset_id, support_bundle_id } =
             path_params.into_inner();
-
-        sa.as_support_bundle_storage()
-            .delete(zpool_id, dataset_id, support_bundle_id)
-            .await?;
-        Ok(HttpResponseDeleted())
+        sa.latencies()
+            .instrument_dropshot_handler(&rqctx, async {
+                sa.as_support_bundle_storage()
+                    .delete(zpool_id, dataset_id, support_bundle_id)
+                    .await?;
+                Ok(HttpResponseDeleted())
+            })
+            .await
     }
 
     async fn zone_bundle_cleanup(
@@ -497,17 +562,28 @@ impl SledAgentApi for SledAgentImpl {
     ) -> Result<HttpResponseOk<BTreeMap<Utf8PathBuf, CleanupCount>>, HttpError>
     {
         let sa = rqctx.context();
-        sa.zone_bundle_cleanup()
+        sa.latencies()
+            .instrument_dropshot_handler(&rqctx, async {
+                sa.zone_bundle_cleanup()
+                    .await
+                    .map(HttpResponseOk)
+                    .map_err(HttpError::from)
+            })
             .await
-            .map(HttpResponseOk)
-            .map_err(HttpError::from)
     }
 
     async fn zones_list(
         rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<Vec<String>>, HttpError> {
         let sa = rqctx.context();
-        sa.zones_list().await.map(HttpResponseOk).map_err(HttpError::from)
+        sa.latencies()
+            .instrument_dropshot_handler(&rqctx, async {
+                sa.zones_list()
+                    .await
+                    .map(HttpResponseOk)
+                    .map_err(HttpError::from)
+            })
+            .await
     }
 
     async fn omicron_config_put(
@@ -516,15 +592,23 @@ impl SledAgentApi for SledAgentImpl {
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
         let sa = rqctx.context();
         let body_args = body.into_inner();
-        sa.set_omicron_config(body_args).await??;
-        Ok(HttpResponseUpdatedNoContent())
+        sa.latencies()
+            .instrument_dropshot_handler(&rqctx, async {
+                sa.set_omicron_config(body_args).await??;
+                Ok(HttpResponseUpdatedNoContent())
+            })
+            .await
     }
 
     async fn sled_role_get_v1(
         rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<v1::inventory::SledRole>, HttpError> {
         let sa = rqctx.context();
-        Ok(HttpResponseOk(sa.get_role()))
+        sa.latencies()
+            .instrument_dropshot_handler(&rqctx, async {
+                Ok(HttpResponseOk(sa.get_role()))
+            })
+            .await
     }
 
     async fn vmm_register(
@@ -535,9 +619,14 @@ impl SledAgentApi for SledAgentImpl {
         let sa = rqctx.context();
         let propolis_id = path_params.into_inner().propolis_id;
         let body_args = body.into_inner();
-        Ok(HttpResponseOk(
-            sa.instance_ensure_registered(propolis_id, body_args).await?,
-        ))
+        sa.latencies()
+            .instrument_dropshot_handler(&rqctx, async {
+                Ok(HttpResponseOk(
+                    sa.instance_ensure_registered(propolis_id, body_args)
+                        .await?,
+                ))
+            })
+            .await
     }
 
     async fn vmm_unregister(
@@ -546,7 +635,11 @@ impl SledAgentApi for SledAgentImpl {
     ) -> Result<HttpResponseOk<VmmUnregisterResponse>, HttpError> {
         let sa = rqctx.context();
         let id = path_params.into_inner().propolis_id;
-        Ok(HttpResponseOk(sa.instance_ensure_unregistered(id).await?))
+        sa.latencies()
+            .instrument_dropshot_handler(&rqctx, async {
+                Ok(HttpResponseOk(sa.instance_ensure_unregistered(id).await?))
+            })
+            .await
     }
 
     async fn vmm_put_state(
@@ -557,7 +650,13 @@ impl SledAgentApi for SledAgentImpl {
         let sa = rqctx.context();
         let id = path_params.into_inner().propolis_id;
         let body_args = body.into_inner();
-        Ok(HttpResponseOk(sa.instance_ensure_state(id, body_args.state).await?))
+        sa.latencies()
+            .instrument_dropshot_handler(&rqctx, async {
+                Ok(HttpResponseOk(
+                    sa.instance_ensure_state(id, body_args.state).await?,
+                ))
+            })
+            .await
     }
 
     async fn vmm_get_state(
@@ -566,7 +665,11 @@ impl SledAgentApi for SledAgentImpl {
     ) -> Result<HttpResponseOk<SledVmmState>, HttpError> {
         let sa = rqctx.context();
         let id = path_params.into_inner().propolis_id;
-        Ok(HttpResponseOk(sa.instance_get_state(id).await?))
+        sa.latencies()
+            .instrument_dropshot_handler(&rqctx, async {
+                Ok(HttpResponseOk(sa.instance_get_state(id).await?))
+            })
+            .await
     }
 
     async fn vmm_put_external_ip(
@@ -577,8 +680,12 @@ impl SledAgentApi for SledAgentImpl {
         let sa = rqctx.context();
         let id = path_params.into_inner().propolis_id;
         let body_args = body.into_inner();
-        sa.instance_put_external_ip(id, &body_args).await?;
-        Ok(HttpResponseUpdatedNoContent())
+        sa.latencies()
+            .instrument_dropshot_handler(&rqctx, async {
+                sa.instance_put_external_ip(id, &body_args).await?;
+                Ok(HttpResponseUpdatedNoContent())
+            })
+            .await
     }
 
     async fn vmm_delete_external_ip(
@@ -589,8 +696,12 @@ impl SledAgentApi for SledAgentImpl {
         let sa = rqctx.context();
         let id = path_params.into_inner().propolis_id;
         let body_args = body.into_inner();
-        sa.instance_delete_external_ip(id, &body_args).await?;
-        Ok(HttpResponseUpdatedNoContent())
+        sa.latencies()
+            .instrument_dropshot_handler(&rqctx, async {
+                sa.instance_delete_external_ip(id, &body_args).await?;
+                Ok(HttpResponseUpdatedNoContent())
+            })
+            .await
     }
 
     async fn vmm_join_multicast_group(
@@ -601,8 +712,12 @@ impl SledAgentApi for SledAgentImpl {
         let sa = rqctx.context();
         let id = path_params.into_inner().propolis_id;
         let body_args = body.into_inner();
-        sa.instance_join_multicast_group(id, &body_args).await?;
-        Ok(HttpResponseUpdatedNoContent())
+        sa.latencies()
+            .instrument_dropshot_handler(&rqctx, async {
+                sa.instance_join_multicast_group(id, &body_args).await?;
+                Ok(HttpResponseUpdatedNoContent())
+            })
+            .await
     }
 
     async fn vmm_leave_multicast_group(
@@ -613,8 +728,12 @@ impl SledAgentApi for SledAgentImpl {
         let sa = rqctx.context();
         let id = path_params.into_inner().propolis_id;
         let body_args = body.into_inner();
-        sa.instance_leave_multicast_group(id, &body_args).await?;
-        Ok(HttpResponseUpdatedNoContent())
+        sa.latencies()
+            .instrument_dropshot_handler(&rqctx, async {
+                sa.instance_leave_multicast_group(id, &body_args).await?;
+                Ok(HttpResponseUpdatedNoContent())
+            })
+            .await
     }
 
     async fn disk_put(
@@ -625,41 +744,60 @@ impl SledAgentApi for SledAgentImpl {
         let sa = rqctx.context();
         let disk_id = path_params.into_inner().disk_id;
         let body_args = body.into_inner();
-        Ok(HttpResponseOk(
-            sa.disk_ensure(
-                disk_id,
-                body_args.initial_runtime.clone(),
-                body_args.target.clone(),
-            )
+        sa.latencies()
+            .instrument_dropshot_handler(&rqctx, async {
+                Ok(HttpResponseOk(
+                    sa.disk_ensure(
+                        disk_id,
+                        body_args.initial_runtime.clone(),
+                        body_args.target.clone(),
+                    )
+                    .await
+                    .map_err(|e| Error::from(e))?,
+                ))
+            })
             .await
-            .map_err(|e| Error::from(e))?,
-        ))
     }
 
     async fn artifact_list(
         rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<ArtifactListResponse>, HttpError> {
-        Ok(HttpResponseOk(rqctx.context().artifact_store().list().await?))
+        let sa = rqctx.context();
+        sa.latencies()
+            .instrument_dropshot_handler(&rqctx, async {
+                Ok(HttpResponseOk(sa.artifact_store().list().await?))
+            })
+            .await
     }
 
     async fn artifact_config_get(
         rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<ArtifactConfig>, HttpError> {
-        match rqctx.context().artifact_store().get_config() {
-            Some(config) => Ok(HttpResponseOk(config)),
-            None => Err(HttpError::for_not_found(
-                None,
-                "No artifact configuration present".to_string(),
-            )),
-        }
+        let sa = rqctx.context();
+        sa.latencies()
+            .instrument_dropshot_handler(&rqctx, async {
+                match sa.artifact_store().get_config() {
+                    Some(config) => Ok(HttpResponseOk(config)),
+                    None => Err(HttpError::for_not_found(
+                        None,
+                        "No artifact configuration present".to_string(),
+                    )),
+                }
+            })
+            .await
     }
 
     async fn artifact_config_put(
         rqctx: RequestContext<Self::Context>,
         body: TypedBody<ArtifactConfig>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
-        rqctx.context().artifact_store().put_config(body.into_inner()).await?;
-        Ok(HttpResponseUpdatedNoContent())
+        let sa = rqctx.context();
+        sa.latencies()
+            .instrument_dropshot_handler(&rqctx, async {
+                sa.artifact_store().put_config(body.into_inner()).await?;
+                Ok(HttpResponseUpdatedNoContent())
+            })
+            .await
     }
 
     async fn artifact_copy_from_depot(
@@ -669,15 +807,18 @@ impl SledAgentApi for SledAgentImpl {
         body: TypedBody<ArtifactCopyFromDepotBody>,
     ) -> Result<HttpResponseAccepted<ArtifactCopyFromDepotResponse>, HttpError>
     {
+        let sa = rqctx.context();
         let sha256 = path_params.into_inner().sha256;
         let generation = query_params.into_inner().generation;
         let depot_base_url = body.into_inner().depot_base_url;
-        rqctx
-            .context()
-            .artifact_store()
-            .copy_from_depot(sha256, generation, &depot_base_url)
-            .await?;
-        Ok(HttpResponseAccepted(ArtifactCopyFromDepotResponse {}))
+        sa.latencies()
+            .instrument_dropshot_handler(&rqctx, async {
+                sa.artifact_store()
+                    .copy_from_depot(sha256, generation, &depot_base_url)
+                    .await?;
+                Ok(HttpResponseAccepted(ArtifactCopyFromDepotResponse {}))
+            })
+            .await
     }
 
     async fn artifact_put(
@@ -686,15 +827,18 @@ impl SledAgentApi for SledAgentImpl {
         query_params: Query<ArtifactQueryParam>,
         body: StreamingBody,
     ) -> Result<HttpResponseOk<ArtifactPutResponse>, HttpError> {
+        let sa = rqctx.context();
         let sha256 = path_params.into_inner().sha256;
         let generation = query_params.into_inner().generation;
-        Ok(HttpResponseOk(
-            rqctx
-                .context()
-                .artifact_store()
-                .put_body(sha256, generation, body)
-                .await?,
-        ))
+        sa.latencies()
+            .instrument_dropshot_handler(&rqctx, async {
+                Ok(HttpResponseOk(
+                    sa.artifact_store()
+                        .put_body(sha256, generation, body)
+                        .await?,
+                ))
+            })
+            .await
     }
 
     async fn vmm_issue_disk_snapshot_request(
@@ -706,17 +850,19 @@ impl SledAgentApi for SledAgentImpl {
         let sa = rqctx.context();
         let path_params = path_params.into_inner();
         let body = body.into_inner();
-
-        sa.vmm_issue_disk_snapshot_request(
-            path_params.propolis_id,
-            path_params.disk_id,
-            body.snapshot_id,
-        )
-        .await?;
-
-        Ok(HttpResponseOk(VmmIssueDiskSnapshotRequestResponse {
-            snapshot_id: body.snapshot_id,
-        }))
+        sa.latencies()
+            .instrument_dropshot_handler(&rqctx, async {
+                sa.vmm_issue_disk_snapshot_request(
+                    path_params.propolis_id,
+                    path_params.disk_id,
+                    body.snapshot_id,
+                )
+                .await?;
+                Ok(HttpResponseOk(VmmIssueDiskSnapshotRequestResponse {
+                    snapshot_id: body.snapshot_id,
+                }))
+            })
+            .await
     }
 
     async fn vpc_firewall_rules_put(
@@ -727,12 +873,14 @@ impl SledAgentApi for SledAgentImpl {
         let sa = rqctx.context();
         let _vpc_id = path_params.into_inner().vpc_id;
         let body_args = body.into_inner();
-
-        sa.firewall_rules_ensure(body_args.vni, &body_args.rules[..])
+        sa.latencies()
+            .instrument_dropshot_handler(&rqctx, async {
+                sa.firewall_rules_ensure(body_args.vni, &body_args.rules[..])
+                    .await
+                    .map_err(Error::from)?;
+                Ok(HttpResponseUpdatedNoContent())
+            })
             .await
-            .map_err(Error::from)?;
-
-        Ok(HttpResponseUpdatedNoContent())
     }
 
     async fn set_v2p(
@@ -741,10 +889,14 @@ impl SledAgentApi for SledAgentImpl {
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
         let sa = rqctx.context();
         let body_args = body.into_inner();
-
-        sa.set_virtual_nic_host(&body_args).await.map_err(Error::from)?;
-
-        Ok(HttpResponseUpdatedNoContent())
+        sa.latencies()
+            .instrument_dropshot_handler(&rqctx, async {
+                sa.set_virtual_nic_host(&body_args)
+                    .await
+                    .map_err(Error::from)?;
+                Ok(HttpResponseUpdatedNoContent())
+            })
+            .await
     }
 
     async fn del_v2p(
@@ -753,10 +905,14 @@ impl SledAgentApi for SledAgentImpl {
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
         let sa = rqctx.context();
         let body_args = body.into_inner();
-
-        sa.unset_virtual_nic_host(&body_args).await.map_err(Error::from)?;
-
-        Ok(HttpResponseUpdatedNoContent())
+        sa.latencies()
+            .instrument_dropshot_handler(&rqctx, async {
+                sa.unset_virtual_nic_host(&body_args)
+                    .await
+                    .map_err(Error::from)?;
+                Ok(HttpResponseUpdatedNoContent())
+            })
+            .await
     }
 
     async fn list_v2p(
@@ -764,10 +920,13 @@ impl SledAgentApi for SledAgentImpl {
     ) -> Result<HttpResponseOk<Vec<VirtualNetworkInterfaceHost>>, HttpError>
     {
         let sa = rqctx.context();
-
-        let vnics = sa.list_virtual_nics().await.map_err(Error::from)?;
-
-        Ok(HttpResponseOk(vnics))
+        sa.latencies()
+            .instrument_dropshot_handler(&rqctx, async {
+                let vnics =
+                    sa.list_virtual_nics().await.map_err(Error::from)?;
+                Ok(HttpResponseOk(vnics))
+            })
+            .await
     }
 
     async fn uplink_ensure(
@@ -775,40 +934,48 @@ impl SledAgentApi for SledAgentImpl {
         body: TypedBody<SwitchPorts>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
         let sa = rqctx.context();
-        sa.ensure_scrimlet_host_ports(body.into_inner().uplinks).await?;
-        Ok(HttpResponseUpdatedNoContent())
+        sa.latencies()
+            .instrument_dropshot_handler(&rqctx, async {
+                sa.ensure_scrimlet_host_ports(body.into_inner().uplinks)
+                    .await?;
+                Ok(HttpResponseUpdatedNoContent())
+            })
+            .await
     }
 
     async fn read_network_bootstore_config_cache(
         rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<EarlyNetworkConfig>, HttpError> {
         let sa = rqctx.context();
-        let bs = sa.bootstore();
-
-        let config = bs.get_network_config().await.map_err(|e| {
-            HttpError::for_internal_error(format!(
-                "failed to get bootstore: {e}"
-            ))
-        })?;
-
-        let config = match config {
-            Some(config) => EarlyNetworkConfig::deserialize_bootstore_config(
-                &rqctx.log, &config,
-            )
-            .map_err(|e| {
-                HttpError::for_internal_error(format!(
-                    "deserialize early network config: {e}"
-                ))
-            })?,
-            None => {
-                return Err(HttpError::for_unavail(
-                    None,
-                    "early network config does not exist yet".into(),
-                ));
-            }
-        };
-
-        Ok(HttpResponseOk(config))
+        sa.latencies()
+            .instrument_dropshot_handler(&rqctx, async {
+                let bs = sa.bootstore();
+                let config = bs.get_network_config().await.map_err(|e| {
+                    HttpError::for_internal_error(format!(
+                        "failed to get bootstore: {e}"
+                    ))
+                })?;
+                let config = match config {
+                    Some(config) => {
+                        EarlyNetworkConfig::deserialize_bootstore_config(
+                            &rqctx.log, &config,
+                        )
+                        .map_err(|e| {
+                            HttpError::for_internal_error(format!(
+                                "deserialize early network config: {e}"
+                            ))
+                        })?
+                    }
+                    None => {
+                        return Err(HttpError::for_unavail(
+                            None,
+                            "early network config does not exist yet".into(),
+                        ));
+                    }
+                };
+                Ok(HttpResponseOk(config))
+            })
+            .await
     }
 
     async fn write_network_bootstore_config(
@@ -816,18 +983,20 @@ impl SledAgentApi for SledAgentImpl {
         body: TypedBody<EarlyNetworkConfig>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
         let sa = rqctx.context();
-        let bs = sa.bootstore();
         let config = body.into_inner();
-
-        bs.update_network_config(NetworkConfig::from(config)).await.map_err(
-            |e| {
-                HttpError::for_internal_error(format!(
-                    "failed to write updated config to boot store: {e}"
-                ))
-            },
-        )?;
-
-        Ok(HttpResponseUpdatedNoContent())
+        sa.latencies()
+            .instrument_dropshot_handler(&rqctx, async {
+                let bs = sa.bootstore();
+                bs.update_network_config(NetworkConfig::from(config))
+                    .await
+                    .map_err(|e| {
+                        HttpError::for_internal_error(format!(
+                            "failed to write updated config to boot store: {e}"
+                        ))
+                    })?;
+                Ok(HttpResponseUpdatedNoContent())
+            })
+            .await
     }
 
     async fn sled_add(
@@ -836,61 +1005,84 @@ impl SledAgentApi for SledAgentImpl {
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
         let sa = rqctx.context();
         let request = body.into_inner();
-
-        crate::sled_agent::sled_add(
-            sa.logger().clone(),
-            sa.sprockets().clone(),
-            sa.measurements().clone(),
-            request.sled_id,
-            request.start_request,
-        )
-        .await
-        .map_err(|e| {
-            let message = format!("Failed to add sled to rack cluster: {e}");
-            HttpError {
-                status_code: ErrorStatusCode::INTERNAL_SERVER_ERROR,
-                error_code: None,
-                external_message: message.clone(),
-                internal_message: message,
-                headers: None,
-            }
-        })?;
-        Ok(HttpResponseUpdatedNoContent())
+        sa.latencies()
+            .instrument_dropshot_handler(&rqctx, async {
+                crate::sled_agent::sled_add(
+                    sa.logger().clone(),
+                    sa.sprockets().clone(),
+                    sa.measurements().clone(),
+                    request.sled_id,
+                    request.start_request,
+                )
+                .await
+                .map_err(|e| {
+                    let message =
+                        format!("Failed to add sled to rack cluster: {e}");
+                    HttpError {
+                        status_code: ErrorStatusCode::INTERNAL_SERVER_ERROR,
+                        error_code: None,
+                        external_message: message.clone(),
+                        internal_message: message,
+                        headers: None,
+                    }
+                })?;
+                Ok(HttpResponseUpdatedNoContent())
+            })
+            .await
     }
 
     async fn inventory(
         request_context: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<Inventory>, HttpError> {
         let sa = request_context.context();
-        Ok(HttpResponseOk(sa.inventory().await?))
+        sa.latencies()
+            .instrument_dropshot_handler(&request_context, async {
+                Ok(HttpResponseOk(sa.inventory().await?))
+            })
+            .await
     }
 
     async fn sled_identifiers(
         request_context: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<SledIdentifiers>, HttpError> {
-        Ok(HttpResponseOk(request_context.context().sled_identifiers()))
+        let sa = request_context.context();
+        sa.latencies()
+            .instrument_dropshot_handler(&request_context, async {
+                Ok(HttpResponseOk(sa.sled_identifiers()))
+            })
+            .await
     }
 
     async fn bootstore_status(
         request_context: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<BootstoreStatus>, HttpError> {
         let sa = request_context.context();
-        let bootstore = sa.bootstore();
-        let status = bootstore
-            .get_status()
+        sa.latencies()
+            .instrument_dropshot_handler(&request_context, async {
+                let bootstore = sa.bootstore();
+                let status = bootstore
+                    .get_status()
+                    .await
+                    .map_err(|e| {
+                        HttpError::from(
+                            omicron_common::api::external::Error::from(e),
+                        )
+                    })?
+                    .into();
+                Ok(HttpResponseOk(status))
+            })
             .await
-            .map_err(|e| {
-                HttpError::from(omicron_common::api::external::Error::from(e))
-            })?
-            .into();
-        Ok(HttpResponseOk(status))
     }
 
     async fn list_vpc_routes(
         request_context: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<Vec<ResolvedVpcRouteState>>, HttpError> {
         let sa = request_context.context();
-        Ok(HttpResponseOk(sa.list_vpc_routes()))
+        sa.latencies()
+            .instrument_dropshot_handler(&request_context, async {
+                Ok(HttpResponseOk(sa.list_vpc_routes()))
+            })
+            .await
     }
 
     async fn set_vpc_routes(
@@ -898,8 +1090,12 @@ impl SledAgentApi for SledAgentImpl {
         body: TypedBody<Vec<ResolvedVpcRouteSet>>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
         let sa = request_context.context();
-        sa.set_vpc_routes(body.into_inner())?;
-        Ok(HttpResponseUpdatedNoContent())
+        sa.latencies()
+            .instrument_dropshot_handler(&request_context, async {
+                sa.set_vpc_routes(body.into_inner())?;
+                Ok(HttpResponseUpdatedNoContent())
+            })
+            .await
     }
 
     async fn set_eip_gateways(
@@ -907,16 +1103,24 @@ impl SledAgentApi for SledAgentImpl {
         body: TypedBody<ExternalIpGatewayMap>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
         let sa = request_context.context();
-        sa.set_eip_gateways(body.into_inner()).await?;
-        Ok(HttpResponseUpdatedNoContent())
+        sa.latencies()
+            .instrument_dropshot_handler(&request_context, async {
+                sa.set_eip_gateways(body.into_inner()).await?;
+                Ok(HttpResponseUpdatedNoContent())
+            })
+            .await
     }
 
     async fn support_zoneadm_info(
         request_context: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<SledDiagnosticsQueryOutput>, HttpError> {
         let sa = request_context.context();
-        let res = sa.support_zoneadm_info().await;
-        Ok(HttpResponseOk(res.get_output()))
+        sa.latencies()
+            .instrument_dropshot_handler(&request_context, async {
+                let res = sa.support_zoneadm_info().await;
+                Ok(HttpResponseOk(res.get_output()))
+            })
+            .await
     }
 
     async fn support_ipadm_info(
@@ -924,13 +1128,17 @@ impl SledAgentApi for SledAgentImpl {
     ) -> Result<HttpResponseOk<Vec<SledDiagnosticsQueryOutput>>, HttpError>
     {
         let sa = request_context.context();
-        Ok(HttpResponseOk(
-            sa.support_ipadm_info()
-                .await
-                .into_iter()
-                .map(|cmd| cmd.get_output())
-                .collect::<Vec<_>>(),
-        ))
+        sa.latencies()
+            .instrument_dropshot_handler(&request_context, async {
+                Ok(HttpResponseOk(
+                    sa.support_ipadm_info()
+                        .await
+                        .into_iter()
+                        .map(|cmd| cmd.get_output())
+                        .collect::<Vec<_>>(),
+                ))
+            })
+            .await
     }
 
     async fn support_dladm_info(
@@ -938,21 +1146,29 @@ impl SledAgentApi for SledAgentImpl {
     ) -> Result<HttpResponseOk<Vec<SledDiagnosticsQueryOutput>>, HttpError>
     {
         let sa = request_context.context();
-        Ok(HttpResponseOk(
-            sa.support_dladm_info()
-                .await
-                .into_iter()
-                .map(|cmd| cmd.get_output())
-                .collect::<Vec<_>>(),
-        ))
+        sa.latencies()
+            .instrument_dropshot_handler(&request_context, async {
+                Ok(HttpResponseOk(
+                    sa.support_dladm_info()
+                        .await
+                        .into_iter()
+                        .map(|cmd| cmd.get_output())
+                        .collect::<Vec<_>>(),
+                ))
+            })
+            .await
     }
 
     async fn support_nvmeadm_info(
         request_context: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<SledDiagnosticsQueryOutput>, HttpError> {
         let sa = request_context.context();
-        let res = sa.support_nvmeadm_info().await;
-        Ok(HttpResponseOk(res.get_output()))
+        sa.latencies()
+            .instrument_dropshot_handler(&request_context, async {
+                let res = sa.support_nvmeadm_info().await;
+                Ok(HttpResponseOk(res.get_output()))
+            })
+            .await
     }
 
     async fn support_pargs_info(
@@ -960,13 +1176,17 @@ impl SledAgentApi for SledAgentImpl {
     ) -> Result<HttpResponseOk<Vec<SledDiagnosticsQueryOutput>>, HttpError>
     {
         let sa = request_context.context();
-        Ok(HttpResponseOk(
-            sa.support_pargs_info()
-                .await
-                .into_iter()
-                .map(|cmd| cmd.get_output())
-                .collect::<Vec<_>>(),
-        ))
+        sa.latencies()
+            .instrument_dropshot_handler(&request_context, async {
+                Ok(HttpResponseOk(
+                    sa.support_pargs_info()
+                        .await
+                        .into_iter()
+                        .map(|cmd| cmd.get_output())
+                        .collect::<Vec<_>>(),
+                ))
+            })
+            .await
     }
 
     async fn support_pstack_info(
@@ -974,13 +1194,17 @@ impl SledAgentApi for SledAgentImpl {
     ) -> Result<HttpResponseOk<Vec<SledDiagnosticsQueryOutput>>, HttpError>
     {
         let sa = request_context.context();
-        Ok(HttpResponseOk(
-            sa.support_pstack_info()
-                .await
-                .into_iter()
-                .map(|cmd| cmd.get_output())
-                .collect::<Vec<_>>(),
-        ))
+        sa.latencies()
+            .instrument_dropshot_handler(&request_context, async {
+                Ok(HttpResponseOk(
+                    sa.support_pstack_info()
+                        .await
+                        .into_iter()
+                        .map(|cmd| cmd.get_output())
+                        .collect::<Vec<_>>(),
+                ))
+            })
+            .await
     }
 
     async fn support_pfiles_info(
@@ -988,29 +1212,41 @@ impl SledAgentApi for SledAgentImpl {
     ) -> Result<HttpResponseOk<Vec<SledDiagnosticsQueryOutput>>, HttpError>
     {
         let sa = request_context.context();
-        Ok(HttpResponseOk(
-            sa.support_pfiles_info()
-                .await
-                .into_iter()
-                .map(|cmd| cmd.get_output())
-                .collect::<Vec<_>>(),
-        ))
+        sa.latencies()
+            .instrument_dropshot_handler(&request_context, async {
+                Ok(HttpResponseOk(
+                    sa.support_pfiles_info()
+                        .await
+                        .into_iter()
+                        .map(|cmd| cmd.get_output())
+                        .collect::<Vec<_>>(),
+                ))
+            })
+            .await
     }
 
     async fn support_zfs_info(
         request_context: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<SledDiagnosticsQueryOutput>, HttpError> {
         let sa = request_context.context();
-        let res = sa.support_zfs_info().await;
-        Ok(HttpResponseOk(res.get_output()))
+        sa.latencies()
+            .instrument_dropshot_handler(&request_context, async {
+                let res = sa.support_zfs_info().await;
+                Ok(HttpResponseOk(res.get_output()))
+            })
+            .await
     }
 
     async fn support_zpool_info(
         request_context: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<SledDiagnosticsQueryOutput>, HttpError> {
         let sa = request_context.context();
-        let res = sa.support_zpool_info().await;
-        Ok(HttpResponseOk(res.get_output()))
+        sa.latencies()
+            .instrument_dropshot_handler(&request_context, async {
+                let res = sa.support_zpool_info().await;
+                Ok(HttpResponseOk(res.get_output()))
+            })
+            .await
     }
 
     async fn support_health_check(
@@ -1018,24 +1254,32 @@ impl SledAgentApi for SledAgentImpl {
     ) -> Result<HttpResponseOk<Vec<SledDiagnosticsQueryOutput>>, HttpError>
     {
         let sa = request_context.context();
-        Ok(HttpResponseOk(
-            sa.support_health_check()
-                .await
-                .into_iter()
-                .map(|cmd| cmd.get_output())
-                .collect::<Vec<_>>(),
-        ))
+        sa.latencies()
+            .instrument_dropshot_handler(&request_context, async {
+                Ok(HttpResponseOk(
+                    sa.support_health_check()
+                        .await
+                        .into_iter()
+                        .map(|cmd| cmd.get_output())
+                        .collect::<Vec<_>>(),
+                ))
+            })
+            .await
     }
 
     async fn support_logs(
         request_context: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<Vec<String>>, HttpError> {
         let sa = request_context.context();
-        sa.as_support_bundle_logs()
-            .zones_list()
+        sa.latencies()
+            .instrument_dropshot_handler(&request_context, async {
+                sa.as_support_bundle_logs()
+                    .zones_list()
+                    .await
+                    .map(HttpResponseOk)
+                    .map_err(HttpError::from)
+            })
             .await
-            .map(HttpResponseOk)
-            .map_err(HttpError::from)
     }
 
     async fn support_logs_download(
@@ -1048,60 +1292,80 @@ impl SledAgentApi for SledAgentImpl {
             path_params.into_inner();
         let SledDiagnosticsLogsDownloadQueryParam { max_rotated } =
             query_params.into_inner();
-
-        sa.as_support_bundle_logs()
-            .get_logs_for_zone(zone, max_rotated)
+        sa.latencies()
+            .instrument_dropshot_handler(&request_context, async {
+                sa.as_support_bundle_logs()
+                    .get_logs_for_zone(zone, max_rotated)
+                    .await
+                    .map_err(HttpError::from)
+            })
             .await
-            .map_err(HttpError::from)
     }
 
     async fn chicken_switch_destroy_orphaned_datasets_get_v1(
-        _request_context: RequestContext<Self::Context>,
+        request_context: RequestContext<Self::Context>,
     ) -> Result<
         HttpResponseOk<v1::debug::ChickenSwitchDestroyOrphanedDatasets>,
         HttpError,
     > {
-        // This API has been removed, but we still provide an endpoint for
-        // backwards compatibility. Only `omdb` ever called this endpoint, so we
-        // could probably just always return an error, but we can at least
-        // attempt to do something reasonable. We've removed this chicken switch
-        // and always attempt to destroy orphans, so we can just claim the
-        // chicken switch is always in that state.
-        let destroy_orphans = true;
-        Ok(HttpResponseOk(v1::debug::ChickenSwitchDestroyOrphanedDatasets {
-            destroy_orphans,
-        }))
+        let sa = request_context.context();
+        sa.latencies()
+            .instrument_dropshot_handler(&request_context, async {
+                // This API has been removed, but we still provide an endpoint for
+                // backwards compatibility. Only `omdb` ever called this endpoint, so we
+                // could probably just always return an error, but we can at least
+                // attempt to do something reasonable. We've removed this chicken switch
+                // and always attempt to destroy orphans, so we can just claim the
+                // chicken switch is always in that state.
+                let destroy_orphans = true;
+                Ok(HttpResponseOk(
+                    v1::debug::ChickenSwitchDestroyOrphanedDatasets {
+                        destroy_orphans,
+                    },
+                ))
+            })
+            .await
     }
 
     async fn chicken_switch_destroy_orphaned_datasets_put_v1(
-        _request_context: RequestContext<Self::Context>,
+        request_context: RequestContext<Self::Context>,
         body: TypedBody<v1::debug::ChickenSwitchDestroyOrphanedDatasets>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        let sa = request_context.context();
         let v1::debug::ChickenSwitchDestroyOrphanedDatasets { destroy_orphans } =
             body.into_inner();
-
-        // This API has been removed, but we still provide an endpoint for
-        // backwards compatibility. Only `omdb` ever called this endpoint, so we
-        // could probably just always return an error, but we can at least
-        // attempt to do something reasonable. We've removed this chicken switch
-        // and always attempt to destroy orphans, so we can treat requests to
-        // destroy orphans as successful and attempts to disable it as an error.
-        if destroy_orphans {
-            Ok(HttpResponseUpdatedNoContent())
-        } else {
-            Err(HttpError::for_bad_request(
-                None,
-                "orphaned dataset destruction can no longer be disabled"
-                    .to_string(),
-            ))
-        }
+        sa.latencies()
+            .instrument_dropshot_handler(&request_context, async {
+                // This API has been removed, but we still provide an endpoint for
+                // backwards compatibility. Only `omdb` ever called this endpoint, so we
+                // could probably just always return an error, but we can at least
+                // attempt to do something reasonable. We've removed this chicken switch
+                // and always attempt to destroy orphans, so we can treat requests to
+                // destroy orphans as successful and attempts to disable it as an error.
+                if destroy_orphans {
+                    Ok(HttpResponseUpdatedNoContent())
+                } else {
+                    Err(HttpError::for_bad_request(
+                    None,
+                    "orphaned dataset destruction can no longer be disabled"
+                        .to_string(),
+                ))
+                }
+            })
+            .await
     }
 
     async fn debug_operator_switch_zone_policy_get(
         request_context: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<OperatorSwitchZonePolicy>, HttpError> {
         let sa = request_context.context();
-        Ok(HttpResponseOk(sa.hardware_monitor().current_switch_zone_policy()))
+        sa.latencies()
+            .instrument_dropshot_handler(&request_context, async {
+                Ok(HttpResponseOk(
+                    sa.hardware_monitor().current_switch_zone_policy(),
+                ))
+            })
+            .await
     }
 
     async fn debug_operator_switch_zone_policy_put(
@@ -1110,45 +1374,47 @@ impl SledAgentApi for SledAgentImpl {
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
         let sa = request_context.context();
         let policy = body.into_inner();
-        match policy {
-            OperatorSwitchZonePolicy::StartIfSwitchPresent => (),
-            OperatorSwitchZonePolicy::StopDespiteSwitchPresence => {
-                // Disabling our switch zone is very dangerous: if our switch
-                // zone is the only one that's up, shutting it off will disable
-                // all connectivity to the rack. As a safety, refuse to set our
-                // policy to "off" if this request came from our switch zone;
-                // i.e., only allow disabling the switch zone if we have at
-                // least some evidence that the _other_ switch zone is up.
-                let our_switch_zone_ip = sa.switch_zone_underlay_info().ip;
-                if request_context.request.remote_addr().ip()
-                    == our_switch_zone_ip
-                {
-                    // Build an explicit `HttpError` instead of using
-                    // `HttpError::for_bad_request()` so we can return a useful
-                    // `external_message`.
-                    let message = "requests to disable the switch zone must \
-                                   come from the other switch zone"
-                        .to_string();
-                    return Err(HttpError {
-                        status_code: ErrorStatusCode::BAD_REQUEST,
-                        error_code: None,
-                        external_message: message.clone(),
-                        internal_message: message,
-                        headers: None,
-                    });
+        sa.latencies()
+            .instrument_dropshot_handler(&request_context, async {
+                match policy {
+                    OperatorSwitchZonePolicy::StartIfSwitchPresent => (),
+                    OperatorSwitchZonePolicy::StopDespiteSwitchPresence => {
+                        let our_switch_zone_ip =
+                            sa.switch_zone_underlay_info().ip;
+                        if request_context.request.remote_addr().ip()
+                            == our_switch_zone_ip
+                        {
+                            let message =
+                                "requests to disable the switch zone must \
+                                       come from the other switch zone"
+                                    .to_string();
+                            return Err(HttpError {
+                                status_code: ErrorStatusCode::BAD_REQUEST,
+                                error_code: None,
+                                external_message: message.clone(),
+                                internal_message: message,
+                                headers: None,
+                            });
+                        }
+                    }
                 }
-            }
-        }
-        sa.hardware_monitor().set_switch_zone_policy(policy);
-        Ok(HttpResponseUpdatedNoContent())
+                sa.hardware_monitor().set_switch_zone_policy(policy);
+                Ok(HttpResponseUpdatedNoContent())
+            })
+            .await
     }
 
     async fn probes_put(
         request_context: RequestContext<Self::Context>,
         body: TypedBody<ProbeSet>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
-        request_context.context().set_probes(body.into_inner().probes);
-        Ok(HttpResponseUpdatedNoContent())
+        let sa = request_context.context();
+        sa.latencies()
+            .instrument_dropshot_handler(&request_context, async {
+                sa.set_probes(body.into_inner().probes);
+                Ok(HttpResponseUpdatedNoContent())
+            })
+            .await
     }
 
     async fn local_storage_dataset_ensure(
@@ -1157,10 +1423,12 @@ impl SledAgentApi for SledAgentImpl {
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
         let sa = request_context.context();
         let request = body.into_inner();
-
-        sa.create_local_storage_dataset(request).await?;
-
-        Ok(HttpResponseUpdatedNoContent())
+        sa.latencies()
+            .instrument_dropshot_handler(&request_context, async {
+                sa.create_local_storage_dataset(request).await?;
+                Ok(HttpResponseUpdatedNoContent())
+            })
+            .await
     }
 
     async fn local_storage_dataset_delete(
@@ -1169,10 +1437,12 @@ impl SledAgentApi for SledAgentImpl {
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
         let sa = request_context.context();
         let request = body.into_inner();
-
-        sa.delete_local_storage_dataset(request).await?;
-
-        Ok(HttpResponseUpdatedNoContent())
+        sa.latencies()
+            .instrument_dropshot_handler(&request_context, async {
+                sa.delete_local_storage_dataset(request).await?;
+                Ok(HttpResponseUpdatedNoContent())
+            })
+            .await
     }
 
     async fn trust_quorum_reconfigure(
@@ -1181,12 +1451,16 @@ impl SledAgentApi for SledAgentImpl {
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
         let sa = request_context.context();
         let msg = body.into_inner();
-
-        sa.trust_quorum().reconfigure(msg).await.map_err(|e| {
-            HttpError::for_internal_error(InlineErrorChain::new(&e).to_string())
-        })?;
-
-        Ok(HttpResponseUpdatedNoContent())
+        sa.latencies()
+            .instrument_dropshot_handler(&request_context, async {
+                sa.trust_quorum().reconfigure(msg).await.map_err(|e| {
+                    HttpError::for_internal_error(
+                        InlineErrorChain::new(&e).to_string(),
+                    )
+                })?;
+                Ok(HttpResponseUpdatedNoContent())
+            })
+            .await
     }
 
     async fn trust_quorum_upgrade_from_lrtq(
@@ -1195,12 +1469,18 @@ impl SledAgentApi for SledAgentImpl {
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
         let sa = request_context.context();
         let msg = body.into_inner();
-
-        sa.trust_quorum().upgrade_from_lrtq(msg).await.map_err(|e| {
-            HttpError::for_internal_error(InlineErrorChain::new(&e).to_string())
-        })?;
-
-        Ok(HttpResponseUpdatedNoContent())
+        sa.latencies()
+            .instrument_dropshot_handler(&request_context, async {
+                sa.trust_quorum().upgrade_from_lrtq(msg).await.map_err(
+                    |e| {
+                        HttpError::for_internal_error(
+                            InlineErrorChain::new(&e).to_string(),
+                        )
+                    },
+                )?;
+                Ok(HttpResponseUpdatedNoContent())
+            })
+            .await
     }
 
     async fn trust_quorum_commit(
@@ -1209,40 +1489,45 @@ impl SledAgentApi for SledAgentImpl {
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
         let sa = request_context.context();
         let request = body.into_inner();
-
-        let status = sa
-            .trust_quorum()
-            .commit(request.rack_id, request.epoch)
+        sa.latencies()
+            .instrument_dropshot_handler(&request_context, async {
+                let status = sa
+                    .trust_quorum()
+                    .commit(request.rack_id, request.epoch)
+                    .await
+                    .map_err(|e| {
+                        HttpError::for_internal_error(
+                            InlineErrorChain::new(&e).to_string(),
+                        )
+                    })?;
+                if status == CommitStatus::Pending {
+                    return Err(HttpError::for_internal_error(
+                        "commit returned Pending, which is unexpected"
+                            .to_string(),
+                    ));
+                }
+                Ok(HttpResponseUpdatedNoContent())
+            })
             .await
-            .map_err(|e| {
-                HttpError::for_internal_error(
-                    InlineErrorChain::new(&e).to_string(),
-                )
-            })?;
-
-        // Pending is not expected for commit operations - it indicates an error
-        if status == CommitStatus::Pending {
-            return Err(HttpError::for_internal_error(
-                "commit returned Pending, which is unexpected".to_string(),
-            ));
-        }
-
-        Ok(HttpResponseUpdatedNoContent())
     }
 
     async fn trust_quorum_coordinator_status(
         request_context: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<Option<CoordinatorStatus>>, HttpError> {
         let sa = request_context.context();
-
-        let status =
-            sa.trust_quorum().coordinator_status().await.map_err(|e| {
-                HttpError::for_internal_error(
-                    InlineErrorChain::new(&e).to_string(),
-                )
-            })?;
-
-        Ok(HttpResponseOk(status))
+        sa.latencies()
+            .instrument_dropshot_handler(&request_context, async {
+                let status =
+                    sa.trust_quorum().coordinator_status().await.map_err(
+                        |e| {
+                            HttpError::for_internal_error(
+                                InlineErrorChain::new(&e).to_string(),
+                            )
+                        },
+                    )?;
+                Ok(HttpResponseOk(status))
+            })
+            .await
     }
 
     async fn trust_quorum_prepare_and_commit(
@@ -1251,18 +1536,20 @@ impl SledAgentApi for SledAgentImpl {
     ) -> Result<HttpResponseOk<CommitStatus>, HttpError> {
         let sa = request_context.context();
         let request = body.into_inner();
-
-        let status = sa
-            .trust_quorum()
-            .prepare_and_commit(request.config)
+        sa.latencies()
+            .instrument_dropshot_handler(&request_context, async {
+                let status = sa
+                    .trust_quorum()
+                    .prepare_and_commit(request.config)
+                    .await
+                    .map_err(|e| {
+                        HttpError::for_internal_error(
+                            InlineErrorChain::new(&e).to_string(),
+                        )
+                    })?;
+                Ok(HttpResponseOk(status))
+            })
             .await
-            .map_err(|e| {
-                HttpError::for_internal_error(
-                    InlineErrorChain::new(&e).to_string(),
-                )
-            })?;
-
-        Ok(HttpResponseOk(status))
     }
 
     async fn trust_quorum_proxy_commit(
@@ -1271,30 +1558,31 @@ impl SledAgentApi for SledAgentImpl {
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
         let sa = request_context.context();
         let request = body.into_inner();
-
-        let status = sa
-            .trust_quorum()
-            .proxy()
-            .commit(
-                request.destination,
-                request.request.rack_id,
-                request.request.epoch,
-            )
+        sa.latencies()
+            .instrument_dropshot_handler(&request_context, async {
+                let status = sa
+                    .trust_quorum()
+                    .proxy()
+                    .commit(
+                        request.destination,
+                        request.request.rack_id,
+                        request.request.epoch,
+                    )
+                    .await
+                    .map_err(|e| {
+                        HttpError::for_internal_error(
+                            InlineErrorChain::new(&e).to_string(),
+                        )
+                    })?;
+                if status == CommitStatus::Pending {
+                    return Err(HttpError::for_internal_error(
+                        "commit returned Pending, which is unexpected"
+                            .to_string(),
+                    ));
+                }
+                Ok(HttpResponseUpdatedNoContent())
+            })
             .await
-            .map_err(|e| {
-                HttpError::for_internal_error(
-                    InlineErrorChain::new(&e).to_string(),
-                )
-            })?;
-
-        // Pending is not expected for commit operations - it indicates an error
-        if status == CommitStatus::Pending {
-            return Err(HttpError::for_internal_error(
-                "commit returned Pending, which is unexpected".to_string(),
-            ));
-        }
-
-        Ok(HttpResponseUpdatedNoContent())
     }
 
     async fn trust_quorum_proxy_prepare_and_commit(
@@ -1303,19 +1591,24 @@ impl SledAgentApi for SledAgentImpl {
     ) -> Result<HttpResponseOk<CommitStatus>, HttpError> {
         let sa = request_context.context();
         let request = body.into_inner();
-
-        let status = sa
-            .trust_quorum()
-            .proxy()
-            .prepare_and_commit(request.destination, request.request.config)
+        sa.latencies()
+            .instrument_dropshot_handler(&request_context, async {
+                let status = sa
+                    .trust_quorum()
+                    .proxy()
+                    .prepare_and_commit(
+                        request.destination,
+                        request.request.config,
+                    )
+                    .await
+                    .map_err(|e| {
+                        HttpError::for_internal_error(
+                            InlineErrorChain::new(&e).to_string(),
+                        )
+                    })?;
+                Ok(HttpResponseOk(status))
+            })
             .await
-            .map_err(|e| {
-                HttpError::for_internal_error(
-                    InlineErrorChain::new(&e).to_string(),
-                )
-            })?;
-
-        Ok(HttpResponseOk(status))
     }
 
     async fn trust_quorum_proxy_status(
@@ -1324,29 +1617,37 @@ impl SledAgentApi for SledAgentImpl {
     ) -> Result<HttpResponseOk<NodeStatus>, HttpError> {
         let sa = request_context.context();
         let destination = query_params.into_inner();
-
-        let status =
-            sa.trust_quorum().proxy().status(destination).await.map_err(
-                |e| {
-                    HttpError::for_internal_error(
-                        InlineErrorChain::new(&e).to_string(),
-                    )
-                },
-            )?;
-
-        Ok(HttpResponseOk(status))
+        sa.latencies()
+            .instrument_dropshot_handler(&request_context, async {
+                let status = sa
+                    .trust_quorum()
+                    .proxy()
+                    .status(destination)
+                    .await
+                    .map_err(|e| {
+                        HttpError::for_internal_error(
+                            InlineErrorChain::new(&e).to_string(),
+                        )
+                    })?;
+                Ok(HttpResponseOk(status))
+            })
+            .await
     }
 
     async fn trust_quorum_status(
         request_context: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<NodeStatus>, HttpError> {
         let sa = request_context.context();
-
-        let status = sa.trust_quorum().status().await.map_err(|e| {
-            HttpError::for_internal_error(InlineErrorChain::new(&e).to_string())
-        })?;
-
-        Ok(HttpResponseOk(status))
+        sa.latencies()
+            .instrument_dropshot_handler(&request_context, async {
+                let status = sa.trust_quorum().status().await.map_err(|e| {
+                    HttpError::for_internal_error(
+                        InlineErrorChain::new(&e).to_string(),
+                    )
+                })?;
+                Ok(HttpResponseOk(status))
+            })
+            .await
     }
 
     async fn trust_quorum_network_config_get(
@@ -1354,12 +1655,17 @@ impl SledAgentApi for SledAgentImpl {
     ) -> Result<HttpResponseOk<Option<TrustQuorumNetworkConfig>>, HttpError>
     {
         let sa = request_context.context();
-
-        let config = sa.trust_quorum().network_config().await.map_err(|e| {
-            HttpError::for_internal_error(InlineErrorChain::new(&e).to_string())
-        })?;
-
-        Ok(HttpResponseOk(config.map(TrustQuorumNetworkConfig::from)))
+        sa.latencies()
+            .instrument_dropshot_handler(&request_context, async {
+                let config =
+                    sa.trust_quorum().network_config().await.map_err(|e| {
+                        HttpError::for_internal_error(
+                            InlineErrorChain::new(&e).to_string(),
+                        )
+                    })?;
+                Ok(HttpResponseOk(config.map(TrustQuorumNetworkConfig::from)))
+            })
+            .await
     }
 
     async fn trust_quorum_network_config_put(
@@ -1368,16 +1674,19 @@ impl SledAgentApi for SledAgentImpl {
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
         let sa = request_context.context();
         let config = body.into_inner();
-
-        sa.trust_quorum().update_network_config(config.into()).await.map_err(
-            |e| {
-                HttpError::for_internal_error(
-                    InlineErrorChain::new(&e).to_string(),
-                )
-            },
-        )?;
-
-        Ok(HttpResponseUpdatedNoContent())
+        sa.latencies()
+            .instrument_dropshot_handler(&request_context, async {
+                sa.trust_quorum()
+                    .update_network_config(config.into())
+                    .await
+                    .map_err(|e| {
+                        HttpError::for_internal_error(
+                            InlineErrorChain::new(&e).to_string(),
+                        )
+                    })?;
+                Ok(HttpResponseUpdatedNoContent())
+            })
+            .await
     }
 
     async fn vmm_put_attached_subnets(
@@ -1387,10 +1696,14 @@ impl SledAgentApi for SledAgentImpl {
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
         let sa = request_context.context();
         let propolis_id = path_params.into_inner().propolis_id;
-        sa.instance_put_attached_subnets(propolis_id, body.into_inner())
+        sa.latencies()
+            .instrument_dropshot_handler(&request_context, async {
+                sa.instance_put_attached_subnets(propolis_id, body.into_inner())
+                    .await
+                    .map(|_| HttpResponseUpdatedNoContent())
+                    .map_err(HttpError::from)
+            })
             .await
-            .map(|_| HttpResponseUpdatedNoContent())
-            .map_err(HttpError::from)
     }
 
     async fn vmm_delete_attached_subnets(
@@ -1399,10 +1712,14 @@ impl SledAgentApi for SledAgentImpl {
     ) -> Result<HttpResponseDeleted, HttpError> {
         let sa = request_context.context();
         let propolis_id = path_params.into_inner().propolis_id;
-        sa.instance_delete_attached_subnets(propolis_id)
+        sa.latencies()
+            .instrument_dropshot_handler(&request_context, async {
+                sa.instance_delete_attached_subnets(propolis_id)
+                    .await
+                    .map(|_| HttpResponseDeleted())
+                    .map_err(HttpError::from)
+            })
             .await
-            .map(|_| HttpResponseDeleted())
-            .map_err(HttpError::from)
     }
 
     async fn vmm_post_attached_subnet(
@@ -1413,10 +1730,14 @@ impl SledAgentApi for SledAgentImpl {
         let sa = request_context.context();
         let propolis_id = path_params.into_inner().propolis_id;
         let subnet = body.into_inner();
-        sa.instance_attach_subnet(propolis_id, subnet)
+        sa.latencies()
+            .instrument_dropshot_handler(&request_context, async {
+                sa.instance_attach_subnet(propolis_id, subnet)
+                    .await
+                    .map(|_| HttpResponseUpdatedNoContent())
+                    .map_err(HttpError::from)
+            })
             .await
-            .map(|_| HttpResponseUpdatedNoContent())
-            .map_err(HttpError::from)
     }
 
     async fn vmm_delete_attached_subnet(
@@ -1426,10 +1747,14 @@ impl SledAgentApi for SledAgentImpl {
         let sa = request_context.context();
         let VmmSubnetPathParam { propolis_id, subnet } =
             path_params.into_inner();
-        sa.instance_detach_subnet(propolis_id, subnet)
+        sa.latencies()
+            .instrument_dropshot_handler(&request_context, async {
+                sa.instance_detach_subnet(propolis_id, subnet)
+                    .await
+                    .map(|_| HttpResponseDeleted())
+                    .map_err(HttpError::from)
+            })
             .await
-            .map(|_| HttpResponseDeleted())
-            .map_err(HttpError::from)
     }
 
     async fn rot_measurement_log(
@@ -1438,8 +1763,12 @@ impl SledAgentApi for SledAgentImpl {
     ) -> Result<HttpResponseOk<MeasurementLog>, HttpError> {
         let sa = request_context.context();
         let rot = sa.rot_attestor(path_params.into_inner().rot);
-        let log = rot.get_measurement_log().await?;
-        Ok(HttpResponseOk(log.into()))
+        sa.latencies()
+            .instrument_dropshot_handler(&request_context, async {
+                let log = rot.get_measurement_log().await?;
+                Ok(HttpResponseOk(log.into()))
+            })
+            .await
     }
 
     async fn rot_certificate_chain(
@@ -1448,8 +1777,12 @@ impl SledAgentApi for SledAgentImpl {
     ) -> Result<HttpResponseOk<CertificateChain>, HttpError> {
         let sa = request_context.context();
         let rot = sa.rot_attestor(path_params.into_inner().rot);
-        let chain = rot.get_certificate_chain().await?;
-        Ok(HttpResponseOk(chain.into()))
+        sa.latencies()
+            .instrument_dropshot_handler(&request_context, async {
+                let chain = rot.get_certificate_chain().await?;
+                Ok(HttpResponseOk(chain.into()))
+            })
+            .await
     }
 
     async fn rot_attest(
@@ -1460,7 +1793,11 @@ impl SledAgentApi for SledAgentImpl {
         let sa = request_context.context();
         let rot = sa.rot_attestor(path_params.into_inner().rot);
         let nonce = body.into_inner();
-        let attestation = rot.attest(nonce.into()).await?;
-        Ok(HttpResponseOk(attestation.into()))
+        sa.latencies()
+            .instrument_dropshot_handler(&request_context, async {
+                let attestation = rot.attest(nonce.into()).await?;
+                Ok(HttpResponseOk(attestation.into()))
+            })
+            .await
     }
 }
