@@ -33,11 +33,12 @@ pub struct EarlyNetworkConfig {
 
 impl From<EarlyNetworkConfig> for bootstore::NetworkConfig {
     fn from(value: EarlyNetworkConfig) -> Self {
-        // We're serialzing in-memory; this can only fail if
+        // We're serializing in-memory; this can only fail if
         // `EarlyNetworkConfig` contains types that can't be represented as
-        // JSON, which (a) should never happend and (b) we should catch
+        // JSON, which (a) should never happened and (b) we should catch
         // immediately in tests.
-        let blob = serde_json::to_vec(&value).unwrap();
+        let blob = serde_json::to_vec(&value)
+            .expect("EarlyNetworkConfig can always be serialized as JSON");
 
         // Yes this is duplicated, but that seems fine.
         let generation = value.generation;
