@@ -285,7 +285,11 @@ impl From<Error> for dropshot::HttpError {
                 e @ crate::instance_manager::Error::NoSuchVmm(_),
             ) => HttpError::for_not_found(
                 Some(NO_SUCH_INSTANCE.to_string()),
-                e.to_string(),
+                // NoSuchVmm has no source error, so it's currently not necessary to use a
+                // chain-logging adapter here, but if that changes in the future, the compiler
+                // won't enforce anything, and maybe there will be a lint for this problem, one
+                // day, so might as well construct the adapter.
+                InlineErrorChain::new(&e).to_string(),
             ),
             Error::ZoneBundle(ref inner) => match inner {
                 BundleError::NoStorage | BundleError::Unavailable { .. } => {
