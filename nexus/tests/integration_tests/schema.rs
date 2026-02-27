@@ -5328,26 +5328,23 @@ async fn query_crdb_views(
 }
 
 /// Known exceptions where schema.rs intentionally differs from CRDB.
-fn is_known_nullable_exception(table: &str, column: &str) -> bool {
-    // These columns are NOT NULL in CRDB but Nullable in schema.rs.
-    // See comments in schema.rs: "This type isn't actually 'Nullable' - it's
-    // just handy to use the same type for insertion and querying."
-    matches!(
-        (table, column),
-        ("virtual_provisioning_collection", "time_modified")
-            | ("virtual_provisioning_resource", "time_modified")
-    )
+///
+/// These columns are NOT NULL in CRDB but Nullable in schema.rs.
+/// See comments in schema.rs: "This type isn't actually 'Nullable' - it's
+/// just handy to use the same type for insertion and querying."
+fn known_nullable_exceptions()
+-> std::collections::HashSet<(&'static str, &'static str)> {
+    [
+        ("virtual_provisioning_collection", "time_modified"),
+        ("virtual_provisioning_resource", "time_modified"),
+    ]
+    .into_iter()
+    .collect()
 }
 
 /// Tables in schema.rs that do not correspond to a table or view in
 /// dbinit.sql. These are excluded from the comparison.
 const DIESEL_ONLY_TABLES: &[&str] = &[
-    // global_image is declared in schema.rs but has no corresponding
-    // table or view in dbinit.sql.
-    "global_image",
-    // inv_last_reconciliation_measurements is declared in schema.rs but
-    // has no corresponding table or view in dbinit.sql.
-    "inv_last_reconciliation_measurements",
     // nat_version is a SEQUENCE in CRDB, not a table/view.
     // It is represented as a table! macro in schema.rs for query purposes.
     "nat_version",
@@ -5482,10 +5479,18 @@ async fn diesel_schema_matches_crdb_schema() {
     let known_order = known_column_order_drift();
     let mut known_order_triggered: std::collections::HashSet<&str> =
         std::collections::HashSet::new();
+    let mut diesel_only_triggered: std::collections::HashSet<&str> =
+        std::collections::HashSet::new();
+    let nullable_exceptions = known_nullable_exceptions();
+    let mut nullable_exceptions_triggered: std::collections::HashSet<(
+        &str,
+        &str,
+    )> = std::collections::HashSet::new();
 
     // Check: every Diesel table should exist in CRDB.
     for diesel_table in diesel_tables.keys() {
         if DIESEL_ONLY_TABLES.contains(diesel_table) {
+            diesel_only_triggered.insert(diesel_table);
             continue;
         }
         if !crdb_tables.contains_key(*diesel_table) {
@@ -5499,6 +5504,7 @@ async fn diesel_schema_matches_crdb_schema() {
     // For each table present in both, compare columns.
     for (table_name, diesel_cols) in &diesel_tables {
         if DIESEL_ONLY_TABLES.contains(table_name) {
+            diesel_only_triggered.insert(table_name);
             continue;
         }
         let Some(crdb_cols) = crdb_tables.get(*table_name) else {
@@ -5533,12 +5539,14 @@ async fn diesel_schema_matches_crdb_schema() {
             // Handle known nullable exceptions: schema.rs says Nullable
             // but CRDB says NOT NULL. For these, we compare against the
             // nullable version even though CRDB says NOT NULL.
-            let effective_nullable =
-                if is_known_nullable_exception(table_name, col_name) {
-                    true
-                } else {
-                    crdb_col.is_nullable
-                };
+            let effective_nullable = if nullable_exceptions
+                .contains(&(*table_name, *col_name))
+            {
+                nullable_exceptions_triggered.insert((*table_name, *col_name));
+                true
+            } else {
+                crdb_col.is_nullable
+            };
 
             let diesel_type = match normalize_diesel_type(diesel_type_name) {
                 Ok(t) => t,
@@ -5689,6 +5697,39 @@ async fn diesel_schema_matches_crdb_schema() {
         stale_sorted.sort();
         errors.push(format!(
             "The following known_column_order_drift entries no longer \
+             trigger and should be removed:\n  {}",
+            stale_sorted.join("\n  "),
+        ));
+    }
+
+    // Check for stale DIESEL_ONLY_TABLES entries.
+    let stale_diesel_only: Vec<&&str> = DIESEL_ONLY_TABLES
+        .iter()
+        .filter(|t| !diesel_only_triggered.contains(**t))
+        .collect();
+    if !stale_diesel_only.is_empty() {
+        let mut stale_sorted: Vec<&str> =
+            stale_diesel_only.into_iter().copied().collect();
+        stale_sorted.sort();
+        errors.push(format!(
+            "The following DIESEL_ONLY_TABLES entries no longer match \
+             any table in schema.rs and should be removed:\n  {}",
+            stale_sorted.join("\n  "),
+        ));
+    }
+
+    // Check for stale nullable exception entries.
+    let stale_nullable: Vec<_> = nullable_exceptions
+        .difference(&nullable_exceptions_triggered)
+        .collect();
+    if !stale_nullable.is_empty() {
+        let mut stale_sorted: Vec<String> = stale_nullable
+            .into_iter()
+            .map(|(t, c)| format!("{t}.{c}"))
+            .collect();
+        stale_sorted.sort();
+        errors.push(format!(
+            "The following known_nullable_exceptions entries no longer \
              trigger and should be removed:\n  {}",
             stale_sorted.join("\n  "),
         ));
