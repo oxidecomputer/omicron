@@ -28,6 +28,7 @@ use sled_agent_types::attached_subnet::AttachedSubnets;
 use sled_agent_types::instance::*;
 use sled_agent_types::instance::{InstanceEnsureBody, InstanceMulticastBody};
 use slog::Logger;
+use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 use tokio::sync::{mpsc, oneshot};
@@ -38,16 +39,16 @@ const QUEUE_SIZE: usize = 256;
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
-    #[error("Instance error: {0}")]
+    #[error("Instance error")]
     Instance(#[from] crate::instance::Error),
 
     #[error("VMM with ID {0} not found")]
     NoSuchVmm(PropolisUuid),
 
-    #[error("OPTE port management error: {0}")]
+    #[error("OPTE port management error")]
     Opte(#[from] illumos_utils::opte::Error),
 
-    #[error("Cannot find data link: {0}")]
+    #[error("Cannot find data link")]
     Underlay(#[from] sled_hardware::underlay::Error),
 
     #[error("Zone bundle error")]
@@ -668,7 +669,7 @@ impl InstanceManagerRunner {
                             self.log,
                             "Error handling request";
                             "request" => request_variant.unwrap(),
-                            "err" => ?err
+                            InlineErrorChain::new(&err)
                         );
                     }
                 }
