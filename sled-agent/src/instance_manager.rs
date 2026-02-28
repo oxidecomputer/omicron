@@ -38,16 +38,16 @@ const QUEUE_SIZE: usize = 256;
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
-    #[error("Instance error: {0}")]
+    #[error("Instance error")]
     Instance(#[from] crate::instance::Error),
 
     #[error("VMM with ID {0} not found")]
     NoSuchVmm(PropolisUuid),
 
-    #[error("OPTE port management error: {0}")]
+    #[error("OPTE port management error")]
     Opte(#[from] illumos_utils::opte::Error),
 
-    #[error("Cannot find data link: {0}")]
+    #[error("Cannot find data link")]
     Underlay(#[from] sled_hardware::underlay::Error),
 
     #[error("Zone bundle error")]
