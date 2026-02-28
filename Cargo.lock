@@ -8382,7 +8382,6 @@ dependencies = [
  "omicron-workspace-hack",
  "oxnet",
  "parse-display",
- "progenitor-client 0.10.0",
  "progenitor-client 0.13.0",
  "proptest",
  "protocol",
