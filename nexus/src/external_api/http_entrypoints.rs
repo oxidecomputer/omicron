@@ -5,6 +5,7 @@
 //! Handler functions (entrypoints) for external HTTP APIs
 
 use super::console_api;
+use crate::app::SetTargetReleaseIntent;
 use crate::app::external_endpoints::authority_for_request;
 use crate::app::support_bundles::SupportBundleQueryType;
 use crate::context::{ApiContext, audit_and_time};
@@ -32,7 +33,6 @@ use http::{Response, StatusCode, header};
 use ipnetwork::IpNetwork;
 use nexus_db_lookup::lookup::ImageLookup;
 use nexus_db_lookup::lookup::ImageParentLookup;
-use nexus_db_model::TargetReleaseSource;
 use nexus_db_queries::authn::external::session_cookie::{self, SessionStore};
 use nexus_db_queries::authz;
 use nexus_db_queries::db;
@@ -7143,70 +7143,29 @@ impl NexusExternalApi for NexusExternalApiImpl {
         body: TypedBody<update::SetTargetReleaseParams>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
         audit_and_time(&rqctx, |opctx, nexus| async move {
-            let params = body.into_inner();
-            let system_version = params.system_version;
-
-            // We don't need a transaction for the following queries because
-            // (1) the generation numbers provide optimistic concurrency control:
-            // if another request were to successfully update the target release
-            // between when we fetch it here and when we try to update it below,
-            // our update would fail because the next generation number would
-            // would already be taken; and
-            // (2) we assume that TUF repo depot records are immutable, i.e.,
-            // system version X.Y.Z won't designate different repos over time.
-            let current_target_release =
-                nexus.datastore().target_release_get_current(&opctx).await?;
-            let current_target_release_source = current_target_release
-                .release_source()
-                .map_err(|err| Error::internal_error(&format!("{err:#}")))?;
-
-            match current_target_release_source {
-                TargetReleaseSource::Unspecified => {
-                    // There is no current target release; it's always fine to
-                    // set the first one.
-                }
-                TargetReleaseSource::SystemVersion(tuf_repo_id) => {
-                    // Disallow downgrades.
-                    let current_version = nexus
-                        .datastore()
-                        .tuf_repo_get_version(&opctx, &tuf_repo_id)
-                        .await?;
-                    if !is_new_target_release_version_allowed(
-                        &current_version,
-                        &system_version,
-                    ) {
-                        return Err(Error::invalid_request(format!(
-                            "Requested target release ({system_version}) \
-                             must not be older than current target release \
-                             ({current_version})."
-                        ))
-                        .into());
-                    }
-
-                    // Ensure we don't change the target release mid-update.
-                    nexus
-                        .validate_target_release_change_allowed(
-                            &opctx,
-                            &current_version,
-                        )
-                        .await?;
-                }
-            }
-
-            // Fetch the TUF repo metadata and update the target release.
-            let tuf_repo_id = nexus
-                .datastore()
-                .tuf_repo_get_by_version(&opctx, system_version.into())
-                .await?
-                .id;
-            let next_target_release =
-                nexus_db_model::TargetRelease::new_system_version(
-                    &current_target_release,
-                    tuf_repo_id,
-                );
             nexus
-                .datastore()
-                .target_release_insert(&opctx, next_target_release)
+                .target_release_update(
+                    &opctx,
+                    body.into_inner(),
+                    SetTargetReleaseIntent::Update,
+                )
+                .await?;
+            Ok(HttpResponseUpdatedNoContent())
+        })
+        .await
+    }
+
+    async fn system_update_recovery_finish(
+        rqctx: RequestContext<Self::Context>,
+        body: TypedBody<update::SetTargetReleaseParams>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        audit_and_time(&rqctx, |opctx, nexus| async move {
+            nexus
+                .target_release_update(
+                    &opctx,
+                    body.into_inner(),
+                    SetTargetReleaseIntent::RecoverFromMupdate,
+                )
                 .await?;
             Ok(HttpResponseUpdatedNoContent())
         })
@@ -8953,63 +8912,5 @@ impl NexusExternalApi for NexusExternalApiImpl {
             }))
         })
         .await
-    }
-}
-
-fn is_new_target_release_version_allowed(
-    current_version: &semver::Version,
-    proposed_new_version: &semver::Version,
-) -> bool {
-    let mut current_version = current_version.clone();
-    let mut proposed_new_version = proposed_new_version.clone();
-
-    // Strip out the build metadata; this allows upgrading from one commit on
-    // the same major/minor/release/patch to another. This isn't always right -
-    // we shouldn't allow downgrading to an earlier commit - but we don't have
-    // enough information in the version strings today to determine that. See
-    // <https://github.com/oxidecomputer/omicron/issues/9071>.
-    current_version.build = semver::BuildMetadata::EMPTY;
-    proposed_new_version.build = semver::BuildMetadata::EMPTY;
-
-    proposed_new_version >= current_version
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_is_new_target_release_version_allowed() {
-        // Updating between versions that differ only in build metadata should
-        // be allowed in both directions.
-        let v1: semver::Version = "16.0.0-0.ci+git544f608e05a".parse().unwrap();
-        let v2: semver::Version = "16.0.0-0.ci+git8571be38c0b".parse().unwrap();
-        assert!(is_new_target_release_version_allowed(&v1, &v2));
-        assert!(is_new_target_release_version_allowed(&v2, &v1));
-
-        // Updating from a version to itself is always allowed. (This is
-        // important for clearing mupdate overrides.)
-        assert!(is_new_target_release_version_allowed(&v1, &v1));
-        assert!(is_new_target_release_version_allowed(&v2, &v2));
-
-        // We should be able to upgrade but not downgrade if the versions differ
-        // in major/minor/patch/prerelease.
-        for (v1, v2) in [
-            ("15.0.0-0.ci+git12345", "16.0.0-0.ci+git12345"),
-            ("16.0.0-0.ci+git12345", "16.1.0-0.ci+git12345"),
-            ("16.1.0-0.ci+git12345", "16.1.1-0.ci+git12345"),
-            ("16.1.1-0.ci+git12345", "16.1.1-1.ci+git12345"),
-        ] {
-            let v1: semver::Version = v1.parse().unwrap();
-            let v2: semver::Version = v2.parse().unwrap();
-            assert!(
-                is_new_target_release_version_allowed(&v1, &v2),
-                "should be allowed to upgrade from {v1} to {v2}"
-            );
-            assert!(
-                !is_new_target_release_version_allowed(&v2, &v1),
-                "should not be allowed to upgrade from {v1} to {v2}"
-            );
-        }
     }
 }

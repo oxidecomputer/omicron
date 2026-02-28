@@ -4,17 +4,32 @@
 
 //! Get/set the target release via the external API.
 
+use anyhow::Context as _;
 use anyhow::Result;
 use chrono::Utc;
+use dropshot::HttpErrorResponseBody;
 use dropshot::test_util::ClientTestContext;
 use http::StatusCode;
 use http::method::Method;
+use nexus_db_queries::authn;
+use nexus_db_queries::authz;
+use nexus_db_queries::context::OpContext;
+use nexus_lockstep_client::types::BlueprintTargetSet;
+use nexus_test_interface::NexusServer;
+use nexus_test_utils::ControlPlaneTestContext;
 use nexus_test_utils::http_testing::AuthnMode;
+use nexus_test_utils::http_testing::TestResponse;
 use nexus_test_utils::http_testing::{NexusRequest, RequestBuilder};
 use nexus_test_utils::resource_helpers::object_get;
+use nexus_types::deployment::BlueprintArtifactVersion;
+use nexus_types::deployment::BlueprintHostPhase2DesiredContents;
+use nexus_types::deployment::BlueprintZoneImageSource;
 use nexus_types::external_api::update;
 use nexus_types::external_api::update::SetTargetReleaseParams;
+use omicron_uuid_kinds::{BlueprintUuid, GenericUuid};
 use semver::Version;
+use std::sync::Arc;
+use tufaceous_artifact::ArtifactKind;
 use tufaceous_artifact::{ArtifactVersion, KnownArtifactKind};
 use tufaceous_lib::assemble::ManifestTweak;
 
@@ -51,7 +66,7 @@ async fn get_set_target_release() -> Result<()> {
 
     // Adding a fake (tufaceous) repo and then setting it as the
     // target release should succeed.
-    {
+    let version_1_0_0 = {
         let before = Utc::now();
         let system_version = Version::new(1, 0, 0);
         let response: update::TufRepoUpload = trust_root
@@ -63,7 +78,12 @@ async fn get_set_target_release() -> Result<()> {
             .parsed_body()?;
         assert_eq!(system_version, response.repo.system_version);
 
-        set_target_release(client, &system_version).await?;
+        set_target_release_for_update_with_expected_status(
+            client,
+            &system_version,
+            StatusCode::NO_CONTENT,
+        )
+        .await?;
 
         let status: update::UpdateStatus =
             object_get(client, "/v1/system/update/status").await;
@@ -73,7 +93,11 @@ async fn get_set_target_release() -> Result<()> {
         assert!(target_release.time_requested >= before);
         assert!(target_release.time_requested <= after);
         assert_eq!(target_release.version, system_version);
-    }
+        system_version
+    };
+
+    // Fake completing an update to 1.0.0.
+    install_target_blueprint_with_update_complete(&ctx, &version_1_0_0).await?;
 
     // Adding a repo with non-semver artifact versions should be ok, too.
     {
@@ -95,7 +119,12 @@ async fn get_set_target_release() -> Result<()> {
             .parsed_body()?;
         assert_eq!(system_version, response.repo.system_version);
 
-        set_target_release(client, &system_version).await?;
+        set_target_release_for_update_with_expected_status(
+            client,
+            &system_version,
+            StatusCode::NO_CONTENT,
+        )
+        .await?;
 
         let status: update::UpdateStatus =
             object_get(client, "/v1/system/update/status").await;
@@ -109,15 +138,166 @@ async fn get_set_target_release() -> Result<()> {
 
     // Attempting to downgrade to an earlier system version (2.0.0 → 1.0.0)
     // should not be allowed.
-    set_target_release(client, &Version::new(1, 0, 0))
-        .await
-        .expect_err("shouldn't be able to downgrade system");
+    let response = set_target_release_for_update_with_expected_status(
+        client,
+        &version_1_0_0,
+        StatusCode::BAD_REQUEST,
+    )
+    .await?;
+    let err = response.parsed_body::<HttpErrorResponseBody>().unwrap();
+    assert!(
+        err.message.contains("cannot downgrade"),
+        "unexpected error message: {}",
+        err.message
+    );
+
+    // We also shouldn't be able to upgrade to a subsequent version, because we
+    // haven't completed the update to 2.0.0 yet (the current blueprint is still
+    // the one we installed above to complete the update to 1.0.0).
+    let response = set_target_release_for_update_with_expected_status(
+        client,
+        &Version::new(3, 0, 0),
+        StatusCode::BAD_REQUEST,
+    )
+    .await?;
+    let err = response.parsed_body::<HttpErrorResponseBody>().unwrap();
+    assert!(
+        err.message.contains("previous update is still in progress"),
+        "unexpected error message: {}",
+        err.message
+    );
 
     ctx.teardown().await;
     Ok(())
 }
 
-pub async fn set_target_release(
+/// Create a `Blueprint` with all host OS and zone image sources set to match
+/// artifacts from the TUF repo with the given `system_version`.
+///
+/// This emulates completion of a system update sufficiently to start another
+/// subsequent update. A TUF repo matching `system_version` must already exist
+/// in the database.
+pub async fn install_target_blueprint_with_update_complete<N: NexusServer>(
+    ctx: &ControlPlaneTestContext<N>,
+    system_version: &Version,
+) -> Result<(), anyhow::Error> {
+    let lockstep_client = ctx.lockstep_client();
+    let datastore = ctx.server.datastore();
+    let log = &ctx.logctx.log;
+    let opctx = OpContext::for_background(
+        log.clone(),
+        Arc::new(authz::Authz::new(log)),
+        authn::Context::internal_api(),
+        datastore.clone(),
+    );
+
+    // Get the TUF repo at `system_version`.
+    let tuf_repo = datastore
+        .tuf_repo_get_by_version(&opctx, system_version.clone().into())
+        .await
+        .with_context(|| {
+            format!("getting TUF repo with version {system_version}")
+        })?;
+    let tuf_repo_artifacts =
+        datastore.tuf_list_repo_artifacts(&opctx, tuf_repo.id()).await?;
+
+    // Get the hashes of host phase 2 and some zone. (We don't have to match up
+    // particular zone kinds; we can use one zone artifact for all zones. This
+    // seems a little fishy, but we rely on the planner to do the right thing.)
+    let host_phase_2_artifact_hash = tuf_repo_artifacts
+        .iter()
+        .find_map(|a| {
+            if a.kind == ArtifactKind::HOST_PHASE_2.as_str() {
+                Some(a.sha256)
+            } else {
+                None
+            }
+        })
+        .context("no host phase 2 artifact in TUF repo")?;
+    let zone_artifact_hash = tuf_repo_artifacts
+        .iter()
+        .find_map(|a| {
+            if a.kind == KnownArtifactKind::Zone.to_string() {
+                Some(a.sha256)
+            } else {
+                None
+            }
+        })
+        .context("no zone artifact in TUF repo")?;
+
+    // Get the current blueprint.
+    let target_id =
+        lockstep_client.blueprint_target_view().await?.into_inner().target_id;
+    let mut blueprint = lockstep_client
+        .blueprint_view(target_id.as_untyped_uuid())
+        .await?
+        .into_inner();
+
+    // Create a child blueprint by mutating the IDs in place; update metadata
+    // for easier manual debugging if needed.
+    blueprint.parent_blueprint_id = Some(blueprint.id);
+    blueprint.id = BlueprintUuid::new_v4();
+    blueprint.time_created = Utc::now();
+    blueprint.creator = "get_set_target_release test".to_string();
+    blueprint.comment = "manual update to 1.0.0".to_string();
+
+    // Modify all the OS and zone sources to point to the 1.0.0 TUF repo.
+    let bp_artifact_version = BlueprintArtifactVersion::Available {
+        version: ArtifactVersion::new(system_version.to_string()).unwrap(),
+    };
+    for sled in blueprint.sleds.values_mut() {
+        // We should set the "active" slot, but we don't track that in the
+        // blueprint. Just pick one arbitrarily; Nexus's update validation logic
+        // works around the lack of an active slot indicator.
+        sled.host_phase_2.slot_a =
+            BlueprintHostPhase2DesiredContents::Artifact {
+                version: bp_artifact_version.clone(),
+                hash: *host_phase_2_artifact_hash,
+            };
+
+        for mut zone in sled.zones.iter_mut() {
+            zone.image_source = BlueprintZoneImageSource::Artifact {
+                version: bp_artifact_version.clone(),
+                hash: *zone_artifact_hash,
+            };
+        }
+    }
+
+    // Import this blueprint and make it the new target, reflecting a
+    // completed update to `system_version`.
+    lockstep_client.blueprint_import(&blueprint).await?;
+    lockstep_client
+        .blueprint_target_set(&BlueprintTargetSet {
+            enabled: false,
+            target_id: blueprint.id,
+        })
+        .await?;
+
+    Ok(())
+}
+
+pub async fn set_target_release_for_update_with_expected_status(
+    client: &ClientTestContext,
+    system_version: &Version,
+    expected_status: StatusCode,
+) -> Result<TestResponse, anyhow::Error> {
+    NexusRequest::new(
+        RequestBuilder::new(
+            client,
+            Method::PUT,
+            "/v1/system/update/target-release",
+        )
+        .body(Some(&SetTargetReleaseParams {
+            system_version: system_version.clone(),
+        }))
+        .expect_status(Some(expected_status)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+}
+
+pub async fn set_target_release_for_mupdate_recovery(
     client: &ClientTestContext,
     system_version: &Version,
 ) -> Result<(), anyhow::Error> {
@@ -125,7 +305,7 @@ pub async fn set_target_release(
         RequestBuilder::new(
             client,
             Method::PUT,
-            "/v1/system/update/target-release",
+            "/v1/system/update/recovery-finish",
         )
         .body(Some(&SetTargetReleaseParams {
             system_version: system_version.clone(),

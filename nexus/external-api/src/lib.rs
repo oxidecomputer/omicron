@@ -78,6 +78,7 @@ api_versions!([
     // |  date-based version should be at the top of the list.
     // v
     // (next_yyyy_mm_dd_nn, IDENT),
+    (2026_02_25_00, SET_TARGET_RELEASE_UPDATE_RECOVERY),
     (2026_02_19_00, REMOVE_SLED_ADD),
     (2026_02_13_01, BGP_UNNUMBERED_PEERS),
     (2026_02_13_00, STALE_DOCS_AND_PUNCTUATION),
@@ -6408,6 +6409,34 @@ pub trait NexusExternalApi {
         tags = ["system/update"],
     }]
     async fn target_release_update(
+        rqctx: RequestContext<Self::Context>,
+        params: TypedBody<latest::update::SetTargetReleaseParams>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
+
+    /// Instructs the system that a system recovery operation ("mupdate") was
+    /// completed using the software in the specified release
+    ///
+    /// The system recovery operation is used to bypass the control plane to
+    /// deploy known-working software when the control plane itself is not
+    /// functioning or otherwise unable to update itself.  When the control
+    /// plane detects this, it stops making any changes to deployed software to
+    /// avoid reverting the recovery itself.  This operation puts the control
+    /// plane back in charge of determining what software should be deployed,
+    /// instructing it that the specified software (which is also what's
+    /// currently running) is what's supposed to be deployed.
+    ///
+    /// If the provided version does not match what's currently running, the
+    /// control plane will continue to avoid changing deployed software until
+    /// this operation is invoked with the correct version.
+    ///
+    /// This endpoint should only be called at the direction of Oxide support.
+    #[endpoint {
+        method = PUT,
+        path = "/v1/system/update/recovery-finish",
+        tags = ["system/update"],
+        versions = VERSION_SET_TARGET_RELEASE_UPDATE_RECOVERY..
+    }]
+    async fn system_update_recovery_finish(
         rqctx: RequestContext<Self::Context>,
         params: TypedBody<latest::update::SetTargetReleaseParams>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;

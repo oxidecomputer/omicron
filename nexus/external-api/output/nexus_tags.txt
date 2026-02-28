@@ -344,6 +344,7 @@ system_subnet_pool_view                  GET      /v1/system/subnet-pools/{pool}
 
 API operations found with tag "system/update"
 OPERATION ID                             METHOD   URL PATH
+system_update_recovery_finish            PUT      /v1/system/update/recovery-finish
 system_update_repository_list            GET      /v1/system/update/repositories
 system_update_repository_upload          PUT      /v1/system/update/repositories
 system_update_repository_view            GET      /v1/system/update/repositories/{system_version}
