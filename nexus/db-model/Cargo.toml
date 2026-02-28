@@ -64,6 +64,7 @@ tufaceous-artifact.workspace = true
 [dev-dependencies]
 camino-tempfile.workspace = true
 expectorate.workspace = true
-regex.workspace = true
 proptest.workspace = true
+regex.workspace = true
+sqlparser.workspace = true
 test-strategy.workspace = true

@@ -3233,9 +3233,9 @@ dependencies = [
 
 [[package]]
 name = "dropshot-api-manager"
-version = "0.5.0"
+version = "0.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "eb641546360dd322782b77f70aab2084cced6a97b2429f36addc21d179a77393"
+checksum = "268912522437969d7ef5db2b7ae3c968906fb668163dfc586b0176aa83d5c4b0"
 dependencies = [
  "anyhow",
  "atomicwrites",
@@ -3266,9 +3266,9 @@ dependencies = [
 
 [[package]]
 name = "dropshot-api-manager-types"
-version = "0.5.0"
+version = "0.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "806d5a05f73bde1442ed8b9d5db7ffe718b2846e69f575a2dafff120205e28e7"
+checksum = "fecb2e86c2b2517bdc8516c389b0e69754e27e5974926e792e96d5fbe5c427fb"
 dependencies = [
  "anyhow",
  "camino",
@@ -7026,6 +7026,7 @@ dependencies = [
  "sled-hardware-types",
  "slog",
  "slog-error-chain",
+ "sqlparser",
  "steno",
  "strum 0.27.2",
  "test-strategy",
