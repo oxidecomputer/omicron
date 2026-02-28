@@ -101,19 +101,18 @@ impl IntoExternalResponse for MulticastGroupResponse {
     }
 }
 
-/// Trait for converting database IPv6 types into DPD's
-/// [`UnderlayMulticastIpv6`] type.
-trait IntoUnderlayMulticastIpv6 {
+/// Convert an [`IpAddr`] into a DPD [`UnderlayMulticastIpv6`],
+/// rejecting IPv4.
+///
+/// Note: named without the `Ipv6` suffix because the input type is the general
+/// `IpAddr`.
+trait IntoUnderlayMulticast {
     /// Convert to [`UnderlayMulticastIpv6`], rejecting IPv4 addresses.
-    fn into_underlay_multicast_ipv6(
-        self,
-    ) -> Result<UnderlayMulticastIpv6, Error>;
+    fn into_underlay_multicast(self) -> Result<UnderlayMulticastIpv6, Error>;
 }
 
-impl IntoUnderlayMulticastIpv6 for IpAddr {
-    fn into_underlay_multicast_ipv6(
-        self,
-    ) -> Result<UnderlayMulticastIpv6, Error> {
+impl IntoUnderlayMulticast for IpAddr {
+    fn into_underlay_multicast(self) -> Result<UnderlayMulticastIpv6, Error> {
         match self {
             IpAddr::V6(ipv6) => Ok(UnderlayMulticastIpv6(ipv6)),
             IpAddr::V4(_) => Err(Error::invalid_request(
@@ -295,13 +294,13 @@ impl MulticastDataplaneClient {
         &self,
         client: &dpd_client::Client,
         group_ip: IpAddr,
+        tag: &MulticastTag,
         update: &MulticastGroupUpdateExternalEntry,
         create: &MulticastGroupCreateExternalEntry,
         switch: &SwitchLocation,
     ) -> MulticastDataplaneResult<MulticastGroupExternalResponse> {
-        let tag: MulticastTag = "nexus".parse().unwrap();
         match client
-            .multicast_group_update_external(&group_ip, &tag, update)
+            .multicast_group_update_external(&group_ip, tag, update)
             .await
         {
             Ok(r) => Ok(r.into_inner()),
@@ -409,7 +408,7 @@ impl MulticastDataplaneClient {
             })?
             .map(u16::from);
         let underlay_ip_admin =
-            underlay_group.multicast_ip.ip().into_underlay_multicast_ipv6()?;
+            underlay_group.multicast_ip.ip().into_underlay_multicast()?;
         let underlay_ipv6 = match underlay_group.multicast_ip.ip() {
             IpAddr::V6(ipv6) => ipv6,
             IpAddr::V4(_) => {
@@ -427,17 +426,12 @@ impl MulticastDataplaneClient {
 
         let external_group_ip = external_group.multicast_ip.ip();
 
-        // Source filtering logic per RFC 4607:
-        // - SSM (232/8, ff3x::/32): MUST use specific sources. SSM semantically
-        //   requires source specification; `has_any_source_member` is ignored
-        //   because API validation prevents SSM joins without sources.
-        // - ASM: Use `has_any_source_member` to decide filtering behavior.
-        //
-        // TODO: Once Dendrite accepts ASM source filtering, enable it for ASM
-        // groups where `has_any_source_member=false`. Currently ASM always gets
-        // `None` because Dendrite only supports SSM filtering.
+        // Source filtering per RFC 4607:
+        // - SSM (232/8, ff3x::/32): always use specific sources. API
+        //   validation prevents SSM joins without sources.
+        // - ASM: use specific sources when all members specify sources,
+        //   otherwise None to allow any source at the switch level.
         let sources_dpd = if is_ssm_address(external_group_ip) {
-            // SSM: always use specific sources (RFC 4607 compliance)
             Some(
                 source_filter
                     .specific_sources
@@ -445,10 +439,16 @@ impl MulticastDataplaneClient {
                     .map(|ip| IpSrc::Exact(*ip))
                     .collect::<Vec<_>>(),
             )
-        } else {
-            // ASM: Dendrite doesn't support ASM filtering yet
-            // TODO: check `has_any_source_member` to enable/disable filtering
+        } else if source_filter.has_any_source_member {
             None
+        } else {
+            Some(
+                source_filter
+                    .specific_sources
+                    .iter()
+                    .map(|ip| IpSrc::Exact(*ip))
+                    .collect::<Vec<_>>(),
+            )
         };
 
         let create_operations =
@@ -570,7 +570,7 @@ impl MulticastDataplaneClient {
             .underlay_group
             .multicast_ip
             .ip()
-            .into_underlay_multicast_ipv6()?;
+            .into_underlay_multicast()?;
         let underlay_ipv6 = match params.underlay_group.multicast_ip.ip() {
             IpAddr::V6(ipv6) => ipv6,
             IpAddr::V4(_) => {
@@ -589,17 +589,12 @@ impl MulticastDataplaneClient {
         let new_name_str = params.new_name.to_string();
         let external_group_ip = params.external_group.multicast_ip.ip();
 
-        // Source filtering logic per RFC 4607:
-        // - SSM (232/8, ff3x::/32): MUST use specific sources. SSM semantically
-        //   requires source specification; `has_any_source_member` is ignored
-        //   because API validation prevents SSM joins without sources.
-        // - ASM: Use `has_any_source_member` to decide filtering behavior.
-        //
-        // TODO: Once Dendrite accepts ASM source filtering, enable it for ASM
-        // groups where `has_any_source_member=false`. Currently ASM always gets
-        // `None` because Dendrite only supports SSM filtering.
+        // Source filtering per RFC 4607:
+        // - SSM (232/8, ff3x::/32): always use specific sources. API
+        //   validation prevents SSM joins without sources.
+        // - ASM: use specific sources when all members specify sources,
+        //   otherwise None to allow any source at the switch level.
         let sources_dpd = if is_ssm_address(external_group_ip) {
-            // SSM: always use specific sources (RFC 4607 compliance)
             Some(
                 params
                     .source_filter
@@ -608,10 +603,17 @@ impl MulticastDataplaneClient {
                     .map(|ip| IpSrc::Exact(*ip))
                     .collect::<Vec<_>>(),
             )
-        } else {
-            // ASM: Dendrite doesn't support ASM filtering yet
-            // TODO: check `has_any_source_member` to enable/disable filtering
+        } else if params.source_filter.has_any_source_member {
             None
+        } else {
+            Some(
+                params
+                    .source_filter
+                    .specific_sources
+                    .iter()
+                    .map(|ip| IpSrc::Exact(*ip))
+                    .collect::<Vec<_>>(),
+            )
         };
 
         let update_operations =
@@ -622,25 +624,37 @@ impl MulticastDataplaneClient {
                 let underlay_ip_admin = underlay_ip_admin.clone();
                 async move {
                     // Ensure/get underlay members, create if missing
-                    let members = match client
+                    let (members, existing_tag) = match client
                         .multicast_group_get_underlay(&underlay_ip_admin)
                         .await
                     {
-                        Ok(r) => r.into_inner().members,
+                        Ok(r) => {
+                            let inner = r.into_inner();
+                            (inner.members, inner.tag)
+                        }
                         Err(DpdError::ErrorResponse(resp))
                             if resp.status()
                                 == reqwest::StatusCode::NOT_FOUND =>
                         {
-                            // Create missing underlay group with new tag and empty members
+                            // Create missing underlay group with DB tag and empty members
+                            let db_tag = params
+                                .underlay_group
+                                .tag
+                                .as_deref()
+                                .ok_or_else(|| {
+                                Error::internal_error(
+                                    "underlay multicast group missing tag",
+                                )
+                            })?;
                             let created = self
                                 .dpd_ensure_underlay_created(
                                     client,
                                     underlay_ip_admin.clone(),
-                                    &new_name,
+                                    db_tag,
                                     switch_location,
                                 )
                                 .await?;
-                            created.members
+                            (created.members, created.tag)
                         }
                         Err(e) => {
                             error!(
@@ -656,10 +670,16 @@ impl MulticastDataplaneClient {
                         }
                     };
 
-                    // Update underlay tag preserving members
+                    // Update underlay preserving members, using existing
+                    // tag for authorization
                     let underlay_entry =
                         MulticastGroupUpdateUnderlayEntry { members };
-                    let tag: MulticastTag = "nexus".parse().unwrap();
+                    let tag: MulticastTag =
+                        existing_tag.try_into().map_err(|e| {
+                            Error::internal_error(&format!(
+                                "invalid multicast tag: {e}"
+                            ))
+                        })?;
                     let underlay_response = client
                         .multicast_group_update_underlay(
                             &underlay_ip_admin,
@@ -700,6 +720,7 @@ impl MulticastDataplaneClient {
                         .dpd_update_external_or_create(
                             client,
                             external_group_ip,
+                            &tag,
                             &update_entry,
                             &create_entry,
                             switch_location,
@@ -776,14 +797,14 @@ impl MulticastDataplaneClient {
             let operation_name = operation_name.clone();
 
             async move {
-                let underlay_ip_admin = underlay_ip.into_underlay_multicast_ipv6()?;
+                let underlay_ip_admin = underlay_ip.into_underlay_multicast()?;
 
                 // Get current underlay group state, create if missing
                 let current_group_res = client
                     .multicast_group_get_underlay(&underlay_ip_admin)
                     .await;
 
-                let (current_members, _current_tag) = match current_group_res {
+                let (current_members, current_tag) = match current_group_res {
                     Ok(response) => {
                         let inner = response.into_inner();
                         (inner.members, inner.tag)
@@ -889,15 +910,17 @@ impl MulticastDataplaneClient {
                 let dpd_operation_done =
                     format!("{operation_name}_member_in_underlay_group");
 
-                // Apply the modification function (consumes member)
+                // Apply the modification function
                 let updated_members = modify_fn(current_members, member);
 
-                // Try to update the underlay group (move updated_members)
                 let update_entry = MulticastGroupUpdateUnderlayEntry {
                     members: updated_members,
                 };
 
-                let tag: MulticastTag = "nexus".parse().unwrap();
+                let tag: MulticastTag = current_tag.clone().try_into()
+                    .map_err(|e| Error::internal_error(
+                        &format!("invalid multicast tag: {e}")
+                    ))?;
 
                 let update_res = client
                     .multicast_group_update_underlay(
@@ -925,22 +948,57 @@ impl MulticastDataplaneClient {
                             "dpd_operation" => "modify_group_membership_recreate"
                         );
 
-                        // Delete the stale underlay group
-                        if let Err(e) = client
+                        // TODO: this `reset_by_tag` fallback can be removed
+                        // once DPD's `modify_group_internal` calls
+                        // `process_membership_changes` in the
+                        // empty-transition arm, preventing the 500 that
+                        // triggers this recovery path.
+                        // See https://github.com/oxidecomputer/dendrite/pull/232
+                        //
+                        // Try to delete the stale underlay group. If this
+                        // fails because the underlay group is still
+                        // referenced by an external group via NAT target,
+                        // fall back to `reset_by_tag`, which deletes
+                        // external groups first so the ASIC state is clean
+                        // for the next reconciler pass.
+                        if let Err(del_err) = client
                             .multicast_group_delete(&underlay_ip, &tag)
                             .await
                         {
                             warn!(
                                 log,
-                                "underlay delete failed during recovery (continuing)";
+                                "underlay delete failed, resetting all \
+                                 groups by tag for clean ASIC state";
                                 "underlay_ip" => %underlay_ip,
                                 "switch" => %location,
-                                "error" => %e
+                                "delete_error" => %del_err,
+                                "dpd_operation" => "modify_group_membership_recreate"
                             );
+
+                            if let Err(reset_err) = client
+                                .multicast_reset_by_tag(&tag)
+                                .await
+                            {
+                                error!(
+                                    log,
+                                    "tag reset also failed during recovery";
+                                    "underlay_ip" => %underlay_ip,
+                                    "switch" => %location,
+                                    "error" => %reset_err,
+                                    "dpd_operation" => "modify_group_membership_recreate"
+                                );
+                            }
+
+                            // Return error so the reconciler retries.
+                            // Drift correction will recreate the groups
+                            // with clean ASIC state on the next pass.
+                            return Err(Error::internal_error(&format!(
+                                "underlay group recovery on {location}: \
+                                 reset by tag after delete failed ({del_err})"
+                            )));
                         }
 
-                        // Recreate with the updated members (reuse from update_entry)
-                        // Use authoritative tag from underlay_group, not stale current_tag
+                        // Recreate with the updated members
                         let create_entry = MulticastGroupCreateUnderlayEntry {
                             group_ip: underlay_ip_admin.clone(),
                             members: update_entry.members,
@@ -1321,7 +1379,7 @@ impl MulticastDataplaneClient {
 
         match client
             .multicast_group_get_underlay(
-                &underlay_ip.into_underlay_multicast_ipv6()?,
+                &underlay_ip.into_underlay_multicast()?,
             )
             .await
         {

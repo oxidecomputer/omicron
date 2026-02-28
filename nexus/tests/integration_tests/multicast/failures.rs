@@ -45,10 +45,9 @@ use nexus_types::external_api::multicast::{
     InstanceMulticastGroupJoin, MulticastGroup, MulticastGroupJoinSpec,
     MulticastGroupMember,
 };
-use omicron_common::api::external::{
-    IdentityMetadataCreateParams, InstanceState, NameOrId, SwitchLocation,
-};
+use omicron_common::api::external::InstanceState;
 use omicron_uuid_kinds::{InstanceUuid, MulticastGroupUuid};
+use sled_agent_types::early_networking::SwitchLocation;
 
 use super::*;
 use crate::integration_tests::instances as instance_helpers;

@@ -1057,7 +1057,7 @@ async fn test_ssm_source_ip_behavior(cptestctx: &ControlPlaneTestContext) {
         .flatten()
         .filter_map(|src| match src {
             dpd_types::IpSrc::Exact(ip) => Some(*ip),
-            dpd_types::IpSrc::Subnet(_) => None, // SSM uses exact sources
+            dpd_types::IpSrc::Any => None, // Any-source (ASM) wildcard
         })
         .collect();
     dpd_source_ips.sort();
