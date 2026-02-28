@@ -3440,6 +3440,166 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_measurement_blueprint() {
+        const TEST_NAME: &str = "test_measurement_blueprint";
+        // Setup
+        let logctx = dev::test_setup_log(TEST_NAME);
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        // Create a cohesive representative collection/policy/blueprint
+        let (_, planning_input, blueprint1) =
+            representative(&logctx.log, TEST_NAME);
+        let authz_blueprint1 = authz_blueprint_from_id(blueprint1.id);
+
+        // Write it to the database and read it back.
+        datastore
+            .blueprint_insert(&opctx, &blueprint1)
+            .await
+            .expect("failed to insert blueprint");
+        let blueprint_read = datastore
+            .blueprint_read(&opctx, &authz_blueprint1)
+            .await
+            .expect("failed to read collection back");
+
+        for (_, s) in blueprint_read.sleds {
+            assert!(s.measurements == BlueprintMeasurements::Unknown);
+        }
+
+        const ARTIFACT_VERSION_1: ArtifactVersion =
+            ArtifactVersion::new_const("1.0.0");
+        const ARTIFACT_VERSION_2: ArtifactVersion =
+            ArtifactVersion::new_const("2.0.0");
+        const MEASUREMENT_ARTIFACT_HASH_1: ArtifactHash = ArtifactHash([3; 32]);
+        const MEASUREMENT_ARTIFACT_HASH_2: ArtifactHash = ArtifactHash([4; 32]);
+        const MEASUREMENT_ARTIFACT_HASH_3: ArtifactHash = ArtifactHash([5; 32]);
+
+        const SYSTEM_VERSION: semver::Version = semver::Version::new(0, 0, 1);
+        const SYSTEM_HASH: ArtifactHash = ArtifactHash([3; 32]);
+
+        let tuf_repo = TufRepoDescription {
+            repo: TufRepoMeta {
+                hash: SYSTEM_HASH,
+                targets_role_version: 0,
+                valid_until: Utc::now(),
+                system_version: SYSTEM_VERSION,
+                file_name: String::new(),
+            },
+            artifacts: vec![
+                TufArtifactMeta {
+                    id: ArtifactId {
+                        name: "measurment1".into(),
+                        version: ARTIFACT_VERSION_1,
+                        kind: ArtifactKind::MEASUREMENT_CORPUS,
+                    },
+                    hash: MEASUREMENT_ARTIFACT_HASH_1,
+                    size: 0,
+                    board: None,
+                    sign: None,
+                },
+                TufArtifactMeta {
+                    id: ArtifactId {
+                        name: "measurement2".into(),
+                        version: ARTIFACT_VERSION_1,
+                        kind: ArtifactKind::MEASUREMENT_CORPUS,
+                    },
+                    hash: MEASUREMENT_ARTIFACT_HASH_2,
+                    size: 0,
+                    board: None,
+                    sign: None,
+                },
+                TufArtifactMeta {
+                    id: ArtifactId {
+                        name: "measurement3".into(),
+                        version: ARTIFACT_VERSION_2,
+                        kind: ArtifactKind::MEASUREMENT_CORPUS,
+                    },
+                    hash: MEASUREMENT_ARTIFACT_HASH_3,
+                    size: 0,
+                    board: None,
+                    sign: None,
+                },
+            ],
+        };
+
+        // Add rows to the tuf_artifact table to test version lookups.
+        {
+            // Add a zone artifact and two host phase 2 artifacts.
+            datastore
+                .tuf_repo_insert(opctx, &tuf_repo)
+                .await
+                .expect("inserted TUF repo");
+        }
+
+        let mut builder = BlueprintBuilder::new_based_on(
+            &logctx.log,
+            &blueprint1,
+            "test2",
+            PlannerRng::from_entropy(),
+        )
+        .expect("failed to create builder");
+
+        let mut measurements = BTreeSet::new();
+
+        for artifact in &tuf_repo.artifacts {
+            if artifact.id.kind == ArtifactKind::MEASUREMENT_CORPUS {
+                measurements.insert(BlueprintSingleMeasurement {
+                    version: BlueprintArtifactVersion::Available {
+                        version: artifact.id.version.clone(),
+                    },
+                    hash: artifact.hash,
+                });
+            }
+        }
+
+        assert!(measurements.len() == 3);
+
+        let artifacts = BlueprintArtifactMeasurements::new(measurements)
+            .expect("this is non-zero");
+
+        for (s, _) in planning_input.all_sleds(SledFilter::InService) {
+            builder
+                .sled_set_measurements(
+                    s,
+                    BlueprintMeasurements::Artifacts {
+                        artifacts: artifacts.clone(),
+                    },
+                )
+                .expect("set measurements");
+        }
+
+        let blueprint2 = builder.build(BlueprintSource::Test);
+        let authz_blueprint2 = authz_blueprint_from_id(blueprint2.id);
+        // Write it to the database and read it back.
+        datastore
+            .blueprint_insert(&opctx, &blueprint2)
+            .await
+            .expect("failed to insert blueprint");
+        let blueprint_read = datastore
+            .blueprint_read(&opctx, &authz_blueprint2)
+            .await
+            .expect("failed to read collection back");
+
+        for (_, s) in blueprint_read.sleds {
+            match s.measurements {
+                BlueprintMeasurements::InstallDataset => {
+                    panic!("Failed to pickup measurements")
+                }
+                BlueprintMeasurements::Artifacts { artifacts } => {
+                    if artifacts.len() != 3 {
+                        panic!("expected 3 got {}", artifacts.len());
+                    }
+                }
+                BlueprintMeasurements::Unknown => {
+                    panic!("We should not be unknown")
+                }
+            }
+        }
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
     async fn test_representative_blueprint() {
         const TEST_NAME: &str = "test_representative_blueprint";
         // Setup
