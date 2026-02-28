@@ -140,8 +140,7 @@ impl SledAgent {
 
         let bootstore_network_config = Mutex::new(
             EarlyNetworkConfigEnvelope::from(&EarlyNetworkConfigBody {
-                ntp_servers: Vec::new(),
-                rack_network_config: Some(RackNetworkConfig {
+                rack_network_config: RackNetworkConfig {
                     rack_subnet: Ipv6Net::new(Ipv6Addr::UNSPECIFIED, 56)
                         .unwrap(),
                     infra_ip_first: IpAddr::V4(Ipv4Addr::UNSPECIFIED),
@@ -149,7 +148,7 @@ impl SledAgent {
                     ports: Vec::new(),
                     bgp: Vec::new(),
                     bfd: Vec::new(),
-                }),
+                },
             })
             .serialize_to_bootstore_with_generation(0),
         );

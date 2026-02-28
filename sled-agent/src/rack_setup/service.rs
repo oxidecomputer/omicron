@@ -1317,8 +1317,7 @@ impl ServiceInner {
         // nodes.
         let early_network_config =
             EarlyNetworkConfigEnvelope::from(&EarlyNetworkConfigBody {
-                ntp_servers: config.ntp_servers.clone(),
-                rack_network_config: Some(config.rack_network_config.clone()),
+                rack_network_config: config.rack_network_config.clone(),
             })
             .serialize_to_bootstore_with_generation(1);
         info!(self.log, "Writing Rack Network Configuration to bootstore");

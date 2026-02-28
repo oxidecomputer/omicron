@@ -321,7 +321,7 @@ impl From<Error> for omicron_common::api::external::Error {
 #[derive(Debug, Clone)]
 pub struct UnderlayInfo {
     pub ip: Ipv6Addr,
-    pub rack_network_config: Option<RackNetworkConfig>,
+    pub rack_network_config: RackNetworkConfig,
 }
 
 fn display_zone_init_errors(errors: &[(String, Box<Error>)]) -> String {
@@ -616,7 +616,7 @@ struct SledAgentInfo {
     resolver: Resolver,
     underlay_address: Ipv6Addr,
     rack_id: Uuid,
-    rack_network_config: Option<RackNetworkConfig>,
+    rack_network_config: RackNetworkConfig,
     metrics_queue: MetricsRequestQueue,
 }
 
@@ -817,7 +817,7 @@ impl ServiceManager {
         port_manager: PortManager,
         underlay_address: Ipv6Addr,
         rack_id: Uuid,
-        rack_network_config: Option<RackNetworkConfig>,
+        rack_network_config: RackNetworkConfig,
         metrics_queue: MetricsRequestQueue,
     ) -> Result<(), Error> {
         info!(
@@ -1097,17 +1097,6 @@ impl ServiceManager {
             rack_network_config,
             ..
         } = &self.inner.sled_info.get().ok_or(Error::SledAgentNotReady)?;
-
-        let Some(rack_network_config) = rack_network_config.as_ref() else {
-            // If we're in a test/dev environments with no uplinks, we have
-            // nothing to do; print a warning in the (hopefully unlikely) event
-            // we land here on a real rack.
-            warn!(
-                self.inner.log,
-                "No rack network config present; skipping OPTE NAT config",
-            );
-            return Ok(vec![]);
-        };
 
         let uplinked_switch_zone_addrs =
             EarlyNetworkSetup::new(&self.inner.log)
@@ -3414,23 +3403,13 @@ impl ServiceManager {
         // but we probably don't want to use backoff here.
         const RETRY_DELAY: Duration = Duration::from_secs(1);
 
-        // We can only ensure uplinks if we have a rack network config.
-        //
-        // It'd be surprising to have `underlay_info` containing our underlay IP
-        // without a rack network config, but it is technically possible. These
-        // bits of information are ledgered separately, and we could have
-        // ledgered our underlay IP, then crashed before the bootstore gossip
-        // happened to tell us the rack network config, and are now restarting.
-        let Some(rack_network_config) = &underlay_info.rack_network_config
-        else {
-            return;
-        };
+        let rack_network_config = &underlay_info.rack_network_config;
 
         loop {
             match self
                 .ensure_switch_zone_uplinks_configured(
                     underlay_info.ip,
-                    &rack_network_config,
+                    rack_network_config,
                 )
                 .await
             {

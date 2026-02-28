@@ -6,9 +6,8 @@
 //! to relevant management daemons (dendrite, mgd, sled-agent, etc.)
 
 use crate::app::{
-    background::{
-        LoadedTargetBlueprint,
-        tasks::networking::{api_to_dpd_port_settings, build_mgd_clients},
+    background::tasks::networking::{
+        api_to_dpd_port_settings, build_mgd_clients,
     },
     dpd_clients, switch_zone_address_mappings,
 };
@@ -21,7 +20,6 @@ use nexus_db_model::{
     AddressLotBlock, BgpConfig, BootstoreConfig, INFRA_LOT, LoopbackAddress,
     NETWORK_KEY, SwitchLinkSpeed,
 };
-use tokio::sync::watch;
 use uuid::Uuid;
 
 use crate::app::background::BackgroundTask;
@@ -131,16 +129,11 @@ impl Default for AddStaticRouteRequest {
 pub struct SwitchPortSettingsManager {
     datastore: Arc<DataStore>,
     resolver: Resolver,
-    rx_blueprint: watch::Receiver<Option<LoadedTargetBlueprint>>,
 }
 
 impl SwitchPortSettingsManager {
-    pub fn new(
-        datastore: Arc<DataStore>,
-        resolver: Resolver,
-        rx_blueprint: watch::Receiver<Option<LoadedTargetBlueprint>>,
-    ) -> Self {
-        Self { datastore, resolver, rx_blueprint }
+    pub fn new(datastore: Arc<DataStore>, resolver: Resolver) -> Self {
+        Self { datastore, resolver }
     }
 
     async fn switch_ports(
@@ -1031,40 +1024,6 @@ impl BackgroundTask for SwitchPortSettingsManager {
                 // calculate and apply bootstore changes
                 //
 
-                // TODO: #5232 Make ntp servers w/ generation tracking
-                // first-class citizens in the db
-                //
-                // In the meantime, we can read the NTP servers from the current
-                // target blueprint.
-                let ntp_servers = {
-                    // Clone the target blueprint to avoid holding the watch
-                    // channel any longer than necessary.
-                    let Some(LoadedTargetBlueprint { blueprint, .. }) = self
-                        .rx_blueprint
-                        .borrow_and_update()
-                        .clone()
-                    else {
-                        warn!(
-                            log,
-                            "no blueprint loaded yet; skipping bootstore sync",
-                        );
-                        continue;
-                    };
-
-                    match blueprint.upstream_ntp_config() {
-                        Some(config) => config.ntp_servers.to_vec(),
-                        None => {
-                            warn!(
-                                log,
-                                "target blueprint has no upstream NTP config; \
-                                 assuming this is a dev/test system and \
-                                 skipping bootstore sync",
-                            );
-                            continue;
-                        }
-                    }
-                };
-
                 // build the desired bootstore config from the records we've fetched
                 let subnet = match rack.rack_subnet {
                     Some(IpNetwork::V6(subnet)) => subnet.into(),
@@ -1348,15 +1307,14 @@ impl BackgroundTask for SwitchPortSettingsManager {
                 };
 
                 let desired_config = EarlyNetworkConfigBody {
-                    ntp_servers,
-                    rack_network_config: Some(RackNetworkConfig {
+                    rack_network_config: RackNetworkConfig {
                         rack_subnet: subnet,
                         infra_ip_first,
                         infra_ip_last,
                         ports,
                         bgp,
                         bfd,
-                    }),
+                    },
                 };
 
                 // bootstore_needs_update is a boolean value that determines
@@ -1386,33 +1344,18 @@ impl BackgroundTask for SwitchPortSettingsManager {
                             .and_then(|envelope| envelope.deserialize_body())
                         {
                             Ok(config) => {
-                                let current_ntp_servers: HashSet<String> = config.ntp_servers.clone().into_iter().collect();
-                                let desired_ntp_servers: HashSet<String> = desired_config.ntp_servers.clone().into_iter().collect();
-
-                                let rnc_differs = match (config.rack_network_config.clone(), desired_config.rack_network_config.clone()) {
-                                    (Some(current_rnc), Some(desired_rnc)) => {
-                                        !hashset_eq(current_rnc.bgp.clone(), desired_rnc.bgp.clone()) ||
-                                        !hashset_eq(current_rnc.bfd.clone(), desired_rnc.bfd.clone()) ||
-                                        !hashset_eq(current_rnc.ports.clone(), desired_rnc.ports.clone()) ||
-                                        current_rnc.rack_subnet != desired_rnc.rack_subnet ||
-                                        current_rnc.infra_ip_first != desired_rnc.infra_ip_first ||
-                                        current_rnc.infra_ip_last != desired_rnc.infra_ip_last
-                                    },
-                                    (None, Some(_)) => true,
-                                    _ => {
-                                        todo!("error")
-                                    }
+                                let current_rnc = &config.rack_network_config;
+                                let desired_rnc = &desired_config.rack_network_config;
+                                let rnc_differs = {
+                                    !hashset_eq(current_rnc.bgp.clone(), desired_rnc.bgp.clone()) ||
+                                    !hashset_eq(current_rnc.bfd.clone(), desired_rnc.bfd.clone()) ||
+                                    !hashset_eq(current_rnc.ports.clone(), desired_rnc.ports.clone()) ||
+                                    current_rnc.rack_subnet != desired_rnc.rack_subnet ||
+                                    current_rnc.infra_ip_first != desired_rnc.infra_ip_first ||
+                                    current_rnc.infra_ip_last != desired_rnc.infra_ip_last
                                 };
 
-                                if current_ntp_servers != desired_ntp_servers {
-                                    info!(
-                                        log,
-                                        "ntp servers have changed";
-                                        "old" => ?current_ntp_servers,
-                                        "new" => ?desired_ntp_servers,
-                                    );
-                                    true
-                                } else if rnc_differs {
+                                if rnc_differs {
                                     info!(
                                         log,
                                         "rack network config has changed";

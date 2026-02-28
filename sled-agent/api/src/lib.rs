@@ -20,7 +20,7 @@ use omicron_common::api::internal::{
     },
 };
 use sled_agent_types_versions::{
-    latest, v1, v4, v6, v7, v9, v10, v11, v12, v14, v16, v17, v20, v24,
+    latest, v1, v4, v6, v7, v9, v10, v11, v12, v14, v16, v17, v20, v24, v25,
 };
 use sled_diagnostics::SledDiagnosticsQueryOutput;
 
@@ -36,6 +36,7 @@ api_versions!([
     // |  example for the next person.
     // v
     // (next_int, IDENT),
+    (25, RACK_NETWORK_CONFIG_NOT_OPTIONAL),
     (24, BOOTSTORE_VERSIONING),
     (23, REMOVE_READ_BOOTSTORE_CONFIG_CACHE),
     (22, REMOVE_HEALTH_MONITOR_KEEP_CHECKS),
@@ -838,9 +839,19 @@ pub trait SledAgentApi {
     #[endpoint {
         method = PUT,
         path = "/network-bootstore-config",
-        versions = VERSION_BOOTSTORE_VERSIONING..,
+        versions = VERSION_RACK_NETWORK_CONFIG_NOT_OPTIONAL..,
     }]
     async fn write_network_bootstore_config(
+        rqctx: RequestContext<Self::Context>,
+        body: TypedBody<v25::early_networking::WriteNetworkConfigRequest>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
+
+    #[endpoint {
+        method = PUT,
+        path = "/network-bootstore-config",
+        versions = VERSION_BOOTSTORE_VERSIONING..VERSION_RACK_NETWORK_CONFIG_NOT_OPTIONAL,
+    }]
+    async fn write_network_bootstore_config_v24(
         rqctx: RequestContext<Self::Context>,
         body: TypedBody<v24::early_networking::WriteNetworkConfigRequest>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;

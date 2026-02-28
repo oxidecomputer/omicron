@@ -82,6 +82,7 @@ use sled_agent_types::zone_bundle::{
     ZoneBundleFilter, ZoneBundleId, ZoneBundleMetadata, ZonePathParam,
 };
 use sled_agent_types_versions::v24;
+use sled_agent_types_versions::v25;
 use sled_hardware_types::BaseboardId;
 // Fixed identifiers for prior versions only
 use sled_agent_types_versions::v1;
@@ -415,13 +416,15 @@ impl SledAgentApi for SledAgentSimImpl {
                         InlineErrorChain::new(&err)
                     ))
                 })?;
-        let body: EarlyNetworkConfigBody =
-            envelope.deserialize_body().map_err(|err| {
+        let body: EarlyNetworkConfigBody = envelope
+            .deserialize_body()
+            .map_err(|err| {
                 HttpError::for_internal_error(format!(
                     "could not deserialize early network config body: {}",
                     InlineErrorChain::new(&err)
                 ))
-            })?;
+            })?
+            .into();
 
         Ok(HttpResponseOk(v20::early_networking::EarlyNetworkConfig {
             generation: config.generation,
@@ -431,6 +434,19 @@ impl SledAgentApi for SledAgentSimImpl {
     }
 
     async fn write_network_bootstore_config(
+        rqctx: RequestContext<Self::Context>,
+        body: TypedBody<v25::early_networking::WriteNetworkConfigRequest>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        let mut config =
+            rqctx.context().bootstore_network_config.lock().unwrap();
+        let body = body.into_inner();
+
+        *config = EarlyNetworkConfigEnvelope::from(&body.body)
+            .serialize_to_bootstore_with_generation(body.generation);
+        Ok(HttpResponseUpdatedNoContent())
+    }
+
+    async fn write_network_bootstore_config_v24(
         rqctx: RequestContext<Self::Context>,
         body: TypedBody<v24::early_networking::WriteNetworkConfigRequest>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
