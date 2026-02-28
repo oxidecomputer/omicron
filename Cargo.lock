@@ -978,7 +978,7 @@ dependencies = [
  "camino-tempfile",
  "chacha20poly1305",
  "ciborium",
- "derive_more 0.99.20",
+ "derive_more 2.1.1",
  "hex",
  "hkdf",
  "omicron-common",
@@ -1654,7 +1654,7 @@ dependencies = [
  "camino-tempfile",
  "chrono",
  "daft",
- "derive_more 0.99.20",
+ "derive_more 2.1.1",
  "expectorate",
  "itertools 0.14.0",
  "omicron-common",
@@ -1963,9 +1963,9 @@ checksum = "6245d59a3e82a7fc217c5828a6692dbc6dfb63a0c8c90495621f7b9d79704a0e"
 
 [[package]]
 name = "convert_case"
-version = "0.7.1"
+version = "0.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bb402b8d4c85569410425650ce3eddc7d698ed96d39a73f941b08fb63082f1e7"
+checksum = "633458d4ef8c78b72454de2d54fd6ab2e60f9e02be22f3c6104cdc8a4e0fceb9"
 dependencies = [
  "unicode-segmentation",
 ]
@@ -2199,7 +2199,7 @@ checksum = "d8b9f2e4c67f833b660cdb0a3523065869fb35570177239812ed4c905aeff87b"
 dependencies = [
  "bitflags 2.9.4",
  "crossterm_winapi",
- "derive_more 2.0.1",
+ "derive_more 2.1.1",
  "document-features",
  "futures-core",
  "mio",
@@ -2725,22 +2725,23 @@ dependencies = [
 
 [[package]]
 name = "derive_more"
-version = "2.0.1"
+version = "2.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "093242cf7570c207c83073cf82f79706fe7b8317e98620a47d5be7c3d8497678"
+checksum = "d751e9e49156b02b44f9c1815bcb94b984cdcc4396ecc32521c739452808b134"
 dependencies = [
  "derive_more-impl",
 ]
 
 [[package]]
 name = "derive_more-impl"
-version = "2.0.1"
+version = "2.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bda628edc44c4bb645fbe0f758797143e4e07926f7ebf4e9bdfbd3d2ce621df3"
+checksum = "799a97264921d8623a957f6c3b9011f3b5492f557bbb7a5a19b7fa6d06ba8dcb"
 dependencies = [
- "convert_case 0.7.1",
+ "convert_case 0.10.0",
  "proc-macro2",
  "quote",
+ "rustc_version 0.4.1",
  "syn 2.0.117",
 ]
 
@@ -7771,7 +7772,7 @@ dependencies = [
  "cookie",
  "daft",
  "derive-where",
- "derive_more 0.99.20",
+ "derive_more 2.1.1",
  "dropshot",
  "either",
  "ereport-types",
@@ -9126,7 +9127,7 @@ dependencies = [
  "clickhouse-admin-types",
  "cockroach-admin-client",
  "crucible-agent-client",
- "derive_more 0.99.20",
+ "derive_more 2.1.1",
  "dice-verifier 0.3.0-pre0 (git+https://github.com/oxidecomputer/dice-util?branch=main)",
  "display-error-chain",
  "dns-server",
@@ -9331,6 +9332,8 @@ dependencies = [
  "daft",
  "data-encoding",
  "der",
+ "derive_more 2.1.1",
+ "derive_more-impl",
  "digest",
  "dof 0.3.0",
  "dof 0.4.0",
@@ -13542,7 +13545,7 @@ dependencies = [
  "camino-tempfile-ext",
  "chrono",
  "debug-ignore",
- "derive_more 0.99.20",
+ "derive_more 2.1.1",
  "dropshot",
  "either",
  "expectorate",
@@ -13591,7 +13594,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "async-trait",
- "derive_more 0.99.20",
+ "derive_more 2.1.1",
  "dropshot",
  "futures",
  "illumos-utils",
@@ -13837,7 +13840,7 @@ dependencies = [
  "camino-tempfile",
  "cfg-if",
  "debug-ignore",
- "derive_more 0.99.20",
+ "derive_more 2.1.1",
  "expectorate",
  "futures",
  "glob",
@@ -15635,7 +15638,7 @@ dependencies = [
  "ciborium",
  "daft",
  "debug-ignore",
- "derive_more 0.99.20",
+ "derive_more 2.1.1",
  "dropshot",
  "futures",
  "gfss",
@@ -15684,7 +15687,7 @@ dependencies = [
  "chacha20poly1305",
  "ciborium",
  "daft",
- "derive_more 0.99.20",
+ "derive_more 2.1.1",
  "dropshot",
  "gfss",
  "hex",
@@ -15749,7 +15752,7 @@ name = "trust-quorum-types-versions"
 version = "0.1.0"
 dependencies = [
  "daft",
- "derive_more 0.99.20",
+ "derive_more 2.1.1",
  "gfss",
  "iddqd",
  "omicron-uuid-kinds",
