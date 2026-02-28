@@ -1659,8 +1659,19 @@ impl DistributionSupport for f64 {}
 /// statistical information tracked to compute the mean, standard deviation, and
 /// quantile estimates.
 ///
-/// Min, max, and the p-* quantiles are treated as optional due to the
-/// possibility of distribution operations, like subtraction.
+/// Min, max, and the p-* quantiles are treated as optional because they
+/// cannot be subtracted over time to convert from cumulative to delta
+/// values.
+///
+/// Note: bin counts can be subtracted over time to calculate rates, which
+/// can in turn be used to estimate arbitrary quantiles over arbitrary time
+/// ranges. However, other statistical fields represent streaming
+/// calculations: their value at a given point represents the cumulative
+/// streaming estimate dating to the start time of that series. Streaming
+/// estimates are also only available for the 0th point in a series and
+/// after gaps in the series, since they can't be subtracted over time
+/// points. Use histogram statistics rather than streaming statistics
+/// for use cases that require estimates over specific time ranges.
 #[derive(Clone, Debug, Deserialize, JsonSchema, PartialEq, Serialize)]
 #[schemars(rename = "Distribution{T}")]
 pub struct Distribution<T: DistributionSupport> {
