@@ -694,6 +694,12 @@ impl TrustQuorumConfig {
     pub fn rack(&self) -> &Rack {
         &self.0
     }
+
+    fn not_found(&self) -> Error {
+        // The information that we are preventing from leaking is anything
+        // having to do with a given rack.
+        LookupType::ById(self.0.id()).into_not_found(ResourceType::Rack)
+    }
 }
 
 impl oso::PolarClass for TrustQuorumConfig {
@@ -713,19 +719,39 @@ impl AuthorizedResource for TrustQuorumConfig {
         authn: &'fut authn::Context,
         roleset: &'fut mut RoleSet,
     ) -> futures::future::BoxFuture<'fut, Result<(), Error>> {
-        // There are no roles on this resource, but we still need to load the
-        // Rack-related roles.
+        // There are no roles on this resource, but we still need to walk the
+        // tree to get to the `fleet`.
         self.rack().load_roles(opctx, authn, roleset)
     }
 
+    // We want the trust quorum config to have the same visibility as the rack
+    // it is a part of.
+    //
+    // In a multirack world, we'll probably end up providing roles for racks.
+    // For now though, we just ensure that unauthorized users cannot know that a
+    // rack id exists, in the same manner as is done for an [`ApiResource`].
     fn on_unauthorized(
         &self,
-        _: &Authz,
+        authz: &Authz,
         error: Error,
-        _: AnyActor,
-        _: Action,
+        actor: AnyActor,
+        action: Action,
     ) -> Error {
-        error
+        if action == Action::Read {
+            return self.not_found();
+        }
+
+        // If the user failed an authz check, and they can't even read this
+        // resource, then we should produce a 404 rather than a 401/403.
+        match authz.is_allowed(&actor, Action::Read, self) {
+            Err(error) => Error::internal_error(&format!(
+                "failed to compute read authorization to determine visibility: \
+                {:#}",
+                error
+            )),
+            Ok(false) => self.not_found(),
+            Ok(true) => error,
+        }
     }
 
     fn polar_class(&self) -> oso::Class {
