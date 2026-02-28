@@ -160,6 +160,7 @@ Authz checks can be done at any layer, but generally they should be done as clos
 * `nexus/auth/src/authz/oso_generic.rs` - Oso initialization
 * `nexus/authz-macros/src/lib.rs` - `authz_resource!` macro
 * `nexus/db-queries/src/policy_test/resources.rs` - Policy test setup
+* `nexus/db-queries/src/policy_test/resource_builder.rs` - Policy test related trait implementations
 * `nexus/db-lookup/src/lookup_path.rs` - LookupPath implementation
 * `nexus/types/src/external_api/shared.rs` - Role enum definitions
 
@@ -217,6 +218,7 @@ for init in generated_inits {
 
 In `nexus/db-queries/src/policy_test/resources.rs`, the test defines instances of the authz type in order to test what permissions different roles have on it.
 
+
 ==== Example: Disk (project-level resource)
 
 In `nexus/auth/src/authz/api_resources.rs`, the authz type is defined with:
@@ -262,6 +264,13 @@ async fn make_project(/* ... */) {
 }
 ----
 
+In `nexus/db-queries/src/policy_test/resource_builder.rs`, `DynAuthorizedResource` is implemented for the resource:
+
+[source,rust]
+----
+impl_dyn_authorized_resource_for_resource!(authz::Disk);
+----
+
 ==== Example: VpcSubnet (project networking resource, nested under Vpc)
 
 In `nexus/auth/src/authz/api_resources.rs`, the authz type is defined with:
@@ -293,6 +302,13 @@ for init in generated_inits {
 ----
 
 In `nexus/db-queries/src/policy_test/resources.rs`, test instances are created in the parent's helper.
+
+In `nexus/db-queries/src/policy_test/resource_builder.rs`, `DynAuthorizedResource` is implemented for the resource:
+
+[source,rust]
+----
+impl_dyn_authorized_resource_for_resource!(authz::VpcSubnet);
+----
 
 ==== Choosing the Right Polar Snippet
 
@@ -478,6 +494,13 @@ In `nexus/db-queries/src/policy_test/resources.rs`, the constant is used in `mak
 builder.new_resource(authz::INVENTORY);
 ----
 
+In `nexus/db-queries/src/policy_test/resource_builder.rs`, `DynAuthorizedResource` is implemented for the resource:
+
+[source,rust]
+----
+impl_dyn_authorized_resource_for_resource!(authz::Inventory);
+----
+
 ==== Example: SiloCertificateList (nested synthetic resource)
 
 As with top-level synthetic resources, these are defined with some boilerplate.  These don't have global singletons though because they're always nested under some other dynamic type.  The `add_attribute_getter` and `load_roles()` bits below will change slightly depending on the parent type.
@@ -577,6 +600,28 @@ async fn make_silo(/* ... */) {
     let silo = authz::Silo::new(/* ... */);
     // ...
     builder.new_resource(authz::SiloCertificateList::new(silo.clone()));
+}
+----
+
+In `nexus/db-queries/src/policy_test/resource_builder.rs`, `DynAuthorizedResource` is implemented for the resource:
+
+[source,rust]
+----
+impl DynAuthorizedResource for authz::SiloCertificateList {
+    fn do_authorize<'a, 'b>(
+        &'a self,
+        opctx: &'b OpContext,
+        action: authz::Action,
+    ) -> BoxFuture<'a, Result<(), Error>>
+    where
+        'b: 'a,
+    {
+        opctx.authorize(action, self).boxed()
+    }
+
+    fn resource_name(&self) -> String {
+        format!("{}: certificate list", self.silo().resource_name())
+    }
 }
 ----
 

@@ -3233,9 +3233,9 @@ dependencies = [
 
 [[package]]
 name = "dropshot-api-manager"
-version = "0.5.1"
+version = "0.5.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "268912522437969d7ef5db2b7ae3c968906fb668163dfc586b0176aa83d5c4b0"
+checksum = "c38a99616a680fafd8b7a03cc300aab80b0bbf0fb17c6baac53431d9d12b64b5"
 dependencies = [
  "anyhow",
  "atomicwrites",
@@ -3266,9 +3266,9 @@ dependencies = [
 
 [[package]]
 name = "dropshot-api-manager-types"
-version = "0.5.1"
+version = "0.5.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fecb2e86c2b2517bdc8516c389b0e69754e27e5974926e792e96d5fbe5c427fb"
+checksum = "f5116e3d69b975bb89824a721d0326707b8643e4fd3ba69ca880de1aada768cf"
 dependencies = [
  "anyhow",
  "camino",
