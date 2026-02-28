@@ -5528,6 +5528,7 @@ dependencies = [
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
  "oxide-tokio-rt",
+ "parallel-task-set",
  "partial-io",
  "proptest",
  "reqwest 0.13.2",

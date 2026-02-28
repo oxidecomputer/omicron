@@ -17,6 +17,9 @@ use std::{
 use anyhow::{Result, bail};
 use async_trait::async_trait;
 use bytes::Bytes;
+use futures::FutureExt;
+use futures::future;
+use futures::future::BoxFuture;
 use installinator_client::{ClientError, ResponseValue};
 use installinator_common::EventReport;
 use omicron_uuid_kinds::MupdateUuid;
@@ -62,17 +65,18 @@ impl MockPeersUniverse {
 
     fn strategy(max_peer_count: usize) -> impl Strategy<Value = Self> {
         let artifact_strategy = prop_oneof![
-            // Don't try shrinking the bytes inside the artifact -- their individual values don't
-            // matter.
+            // Don't try shrinking the bytes inside the artifact -- their
+            // individual values don't matter.
             99 => prop::collection::vec(any::<u8>().no_shrink(), 0..4096),
             // Make it not very unlikely that the artifact is empty.
             1 => Just(Vec::new()),
         ];
 
-        // We can assume without loss of generality that content is fetched from peers in
-        // ascending IPv6 order. In other words, the addresses themselves aren't relevant beyond
-        // being unique identifiers. This means that this code can use a BTreeMap rather than a
-        // fancier structure like an IndexMap.
+        // We can assume without loss of generality that content is fetched from
+        // peers in ascending IPv6 order. In other words, the addresses
+        // themselves aren't relevant beyond being unique identifiers. This
+        // means that this code can use a BTreeMap rather than a fancier
+        // structure like an IndexMap.
         let peers_strategy = prop::collection::btree_map(
             any::<PeerAddress>(),
             any::<MockResponse_>(),
@@ -118,8 +122,8 @@ impl MockPeersUniverse {
                 peers
                     .ok()?
                     .successful_peer(timeout)
-                    // attempt is zero-indexed here, but the attempt returned by FetchedArtifact is
-                    // 1-indexed.
+                    // attempt is zero-indexed here, but the attempt returned by
+                    // FetchedArtifact is 1-indexed.
                     .map(|addr| (attempt + 1, addr))
             })
             .next()
@@ -163,8 +167,8 @@ impl MockPeersUniverse {
 
 #[derive(Copy, Clone, Debug, Arbitrary)]
 enum AttemptBitmap {
-    /// Any u32 is a valid bitmap. If there are fewer peers than bits in the bitmap, the
-    /// higher-order bits will be ignored.
+    /// Any u32 is a valid bitmap. If there are fewer peers than bits in the
+    /// bitmap, the higher-order bits will be ignored.
     ///
     /// (We check in MockPeersUniverse::new that there are at most 32 peers.)
     #[weight(9)]
@@ -199,11 +203,16 @@ impl MockFetchBackend {
 
     /// Returns the peer that can return the entire dataset within the timeout.
     fn successful_peer(&self, timeout: Duration) -> Option<PeerAddress> {
-        self.selected_peers.iter()
+        self.selected_peers
+            .iter()
             .filter_map(|(addr, peer)| {
                 if peer.artifact != self.artifact {
-                    // We don't handle the case where the peer returns the wrong artifact yet.
-                    panic!("peer artifact not the same as self.artifact -- can't happen in normal use");
+                    // We don't handle the case where the peer returns the wrong
+                    // artifact yet.
+                    panic!(
+                        "peer artifact not the same as self.artifact -- \
+                         can't happen in normal use"
+                    );
                 }
 
                 match &peer.response {
@@ -212,15 +221,20 @@ impl MockFetchBackend {
                         for action in actions {
                             match action {
                                 ResponseAction::Response { after, count } => {
-                                    // Each action must finish under the timeout. Note that within Tokio,
-                                    // timers of the same duration should fire in the order that they were
-                                    // created, because that's the order they'll be added to the linked list
-                                    // for that timer wheel slot. While this is not yet guaranteed in
-                                    // Tokio's documentation, it is the only reasonable implementation so we
-                                    // rely on it here.
+                                    // Each action must finish under the
+                                    // timeout. Note that within Tokio, timers
+                                    // of the same duration should fire in the
+                                    // order that they were created, because
+                                    // that's the order they'll be added to the
+                                    // linked list for that timer wheel slot.
+                                    // While this is not yet guaranteed in
+                                    // Tokio's documentation, it is the only
+                                    // reasonable implementation so we rely on
+                                    // it here.
                                     //
-                                    // Since Peers creates the timeout BEFORE MockPeersUniverse sets its
-                                    // delay, action.after must be less than timeout.
+                                    // Since Peers creates the timeout BEFORE
+                                    // MockPeersUniverse sets its delay,
+                                    // action.after must be less than timeout.
                                     if *after >= timeout {
                                         return None;
                                     }
@@ -235,25 +249,25 @@ impl MockFetchBackend {
                         }
                         None
                     }
-                    MockResponse::Forbidden { .. } | MockResponse::NotFound { .. } => None,
+                    MockResponse::Forbidden { .. }
+                    | MockResponse::NotFound { .. } => None,
                 }
             })
             .next()
     }
 }
 
-#[async_trait]
 impl FetchArtifactImpl for MockFetchBackend {
     fn peers(&self) -> &PeerAddresses {
         &self.peer_addresses
     }
 
-    async fn fetch_from_peer_impl(
+    fn fetch_from_peer_impl(
         &self,
         peer: PeerAddress,
         // We don't (yet) use the artifact ID in MockPeers
         _artifact_hash_id: ArtifactHashId,
-    ) -> Result<(u64, FetchReceiver), HttpError> {
+    ) -> BoxFuture<'static, Result<(u64, FetchReceiver), HttpError>> {
         let peer_data = self
             .get(peer)
             .unwrap_or_else(|| panic!("peer {peer} not found in selection"))
@@ -263,7 +277,7 @@ impl FetchArtifactImpl for MockFetchBackend {
         let (sender, receiver) = mpsc::channel(8);
         tokio::spawn(async move { peer_data.send_response(sender).await });
         // TODO: add tests to ensure an invalid artifact size is correctly detected
-        Ok((artifact_size, receiver))
+        future::ready(Ok((artifact_size, receiver))).boxed()
     }
 }
 
