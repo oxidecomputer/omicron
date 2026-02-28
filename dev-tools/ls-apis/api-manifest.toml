@@ -552,6 +552,15 @@ put those conversions into the client rather than omicron_common.
 
 [[dependency_filter_rules]]
 ancestor = "nexus-types"
+client = "mg-admin-client"
+evaluation = "bogus"
+note = """
+nexus-types depends on mg-admin-client to impl some `From` conversions and for
+defining some types.
+"""
+
+[[dependency_filter_rules]]
+ancestor = "nexus-types"
 client = "gateway-client"
 evaluation = "bogus"
 note = """

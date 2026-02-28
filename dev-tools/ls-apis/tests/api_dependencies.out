@@ -62,7 +62,7 @@ LLDP daemon (client: lldpd-client)
     consumed by: tfportd (dendrite/tfportd) via 1 path
 
 Maghemite MG Admin (client: mg-admin-client)
-    consumed by: omicron-nexus (omicron/nexus) via 1 path
+    consumed by: omicron-nexus (omicron/nexus) via 2 paths
     consumed by: omicron-sled-agent (omicron/sled-agent) via 1 path
 
 Nexus Internal API (client: nexus-client)

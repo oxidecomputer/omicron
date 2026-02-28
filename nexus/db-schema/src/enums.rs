@@ -34,6 +34,7 @@ define_enums! {
     BpDatasetDispositionEnum => "bp_dataset_disposition",
     BpPhysicalDiskDispositionEnum => "bp_physical_disk_disposition",
     BpSourceEnum => "bp_source",
+    BpSledMeasurementsEnum => "bp_sled_measurements",
     BpZoneDispositionEnum => "bp_zone_disposition",
     BpZoneImageSourceEnum => "bp_zone_image_source",
     CabooseWhichEnum => "caboose_which",

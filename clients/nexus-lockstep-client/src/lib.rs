@@ -32,6 +32,7 @@ progenitor::generate_api!(
     },
     replace = {
         BaseboardId = sled_hardware_types::BaseboardId,
+        BfdMode = sled_agent_types::early_networking::BfdMode,
         // It's kind of unfortunate to pull in such a complex and unstable type
         // as "blueprint" this way, but we have really useful functionality
         // (e.g., diff'ing) that's implemented on our local type.
@@ -51,7 +52,7 @@ progenitor::generate_api!(
         DnsRecord = nexus_types::internal_api::params::DnsRecord,
         ExternalPortDiscovery = nexus_types::internal_api::params::ExternalPortDiscovery,
         Generation = omicron_common::api::external::Generation,
-        ImportExportPolicy = omicron_common::api::external::ImportExportPolicy,
+        ImportExportPolicy = sled_agent_types::early_networking::ImportExportPolicy,
         MacAddr = omicron_common::api::external::MacAddr,
         MgsUpdateDriverStatus = nexus_types::internal_api::views::MgsUpdateDriverStatus,
         Name = omicron_common::api::external::Name,
@@ -62,11 +63,14 @@ progenitor::generate_api!(
         OximeterReadPolicy = nexus_types::deployment::OximeterReadPolicy,
         PendingMgsUpdate = nexus_types::deployment::PendingMgsUpdate,
         PlannerConfig = nexus_types::deployment::PlannerConfig,
+        PortFec = sled_agent_types::early_networking::PortFec,
+        PortSpeed = sled_agent_types::early_networking::PortSpeed,
         ReconfiguratorConfig = nexus_types::deployment::ReconfiguratorConfig,
         ReconfiguratorConfigParam = nexus_types::deployment::ReconfiguratorConfigParam,
         ReconfiguratorConfigView = nexus_types::deployment::ReconfiguratorConfigView,
         RecoverySiloConfig = sled_agent_types_versions::latest::rack_init::RecoverySiloConfig,
         SledAgentUpdateStatus = nexus_types::internal_api::views::SledAgentUpdateStatus,
+        SwitchLocation = sled_agent_types::early_networking::SwitchLocation,
         TrustQuorumConfig = nexus_types::trust_quorum::TrustQuorumConfig,
         UpdateStatus = nexus_types::internal_api::views::UpdateStatus,
         ZoneStatus = nexus_types::internal_api::views::ZoneStatus,
@@ -142,75 +146,6 @@ impl From<&omicron_common::api::internal::shared::SourceNatConfigGeneric>
     ) -> Self {
         let (first_port, last_port) = r.port_range_raw();
         Self { ip: r.ip, first_port, last_port }
-    }
-}
-
-impl From<omicron_common::api::internal::shared::PortSpeed>
-    for types::PortSpeed
-{
-    fn from(value: omicron_common::api::internal::shared::PortSpeed) -> Self {
-        match value {
-            omicron_common::api::internal::shared::PortSpeed::Speed0G => {
-                types::PortSpeed::Speed0G
-            }
-            omicron_common::api::internal::shared::PortSpeed::Speed1G => {
-                types::PortSpeed::Speed1G
-            }
-            omicron_common::api::internal::shared::PortSpeed::Speed10G => {
-                types::PortSpeed::Speed10G
-            }
-            omicron_common::api::internal::shared::PortSpeed::Speed25G => {
-                types::PortSpeed::Speed25G
-            }
-            omicron_common::api::internal::shared::PortSpeed::Speed40G => {
-                types::PortSpeed::Speed40G
-            }
-            omicron_common::api::internal::shared::PortSpeed::Speed50G => {
-                types::PortSpeed::Speed50G
-            }
-            omicron_common::api::internal::shared::PortSpeed::Speed100G => {
-                types::PortSpeed::Speed100G
-            }
-            omicron_common::api::internal::shared::PortSpeed::Speed200G => {
-                types::PortSpeed::Speed200G
-            }
-            omicron_common::api::internal::shared::PortSpeed::Speed400G => {
-                types::PortSpeed::Speed400G
-            }
-        }
-    }
-}
-
-impl From<omicron_common::api::internal::shared::PortFec> for types::PortFec {
-    fn from(value: omicron_common::api::internal::shared::PortFec) -> Self {
-        match value {
-            omicron_common::api::internal::shared::PortFec::Firecode => {
-                types::PortFec::Firecode
-            }
-            omicron_common::api::internal::shared::PortFec::None => {
-                types::PortFec::None
-            }
-            omicron_common::api::internal::shared::PortFec::Rs => {
-                types::PortFec::Rs
-            }
-        }
-    }
-}
-
-impl From<omicron_common::api::internal::shared::SwitchLocation>
-    for types::SwitchLocation
-{
-    fn from(
-        value: omicron_common::api::internal::shared::SwitchLocation,
-    ) -> Self {
-        match value {
-            omicron_common::api::internal::shared::SwitchLocation::Switch0 => {
-                types::SwitchLocation::Switch0
-            }
-            omicron_common::api::internal::shared::SwitchLocation::Switch1 => {
-                types::SwitchLocation::Switch1
-            }
-        }
     }
 }
 

@@ -96,6 +96,13 @@ parent:    02697f74-b14a-4418-90f0-c28b2a3a6aa9
     B      current contents 
 
 
+    measurements:
+    ---------------------------
+    hash      version          
+    ---------------------------
+    unknown   (unknown version)
+
+
     physical disks:
     ------------------------------------------------------------------------------------
     vendor        model        serial                                        disposition
@@ -224,6 +231,13 @@ parent:    02697f74-b14a-4418-90f0-c28b2a3a6aa9
     B      current contents 
 
 
+    measurements:
+    ---------------------------
+    hash      version          
+    ---------------------------
+    unknown   (unknown version)
+
+
     physical disks:
     ------------------------------------------------------------------------------------
     vendor        model        serial                                        disposition
@@ -347,6 +361,13 @@ parent:    02697f74-b14a-4418-90f0-c28b2a3a6aa9
     ------------------------
     A      current contents 
     B      current contents 
+
+
+    measurements:
+    ---------------------------
+    hash      version          
+    ---------------------------
+    unknown   (unknown version)
 
 
     physical disks:
@@ -553,6 +574,13 @@ parent:    02697f74-b14a-4418-90f0-c28b2a3a6aa9
     B      current contents 
 
 
+    measurements:
+    ---------------------------
+    hash      version          
+    ---------------------------
+    unknown   (unknown version)
+
+
     physical disks:
     ------------------------------------------------------------------------------------
     vendor        model        serial                                        disposition
@@ -746,6 +774,13 @@ to:   blueprint 86db3308-f817-4626-8838-4085949a6a41
  ADDED SLEDS:
 
   sled 89d02b1b-478c-401a-8e28-7a26f74fa41b (active, config generation 2):
+
+    measurements:
+    ---------------------------
+    hash      version          
+    ---------------------------
++   unknown   (unknown version)
+
 
     host phase 2 contents:
     ------------------------
@@ -970,6 +1005,13 @@ to:   blueprint 02697f74-b14a-4418-90f0-c28b2a3a6aa9
  REMOVED SLEDS:
 
   sled 89d02b1b-478c-401a-8e28-7a26f74fa41b (was active, config generation 2):
+
+    measurements:
+    ---------------------------
+    hash      version          
+    ---------------------------
+-   unknown   (unknown version)
+
 
     host phase 2 contents:
     ------------------------
@@ -1221,6 +1263,13 @@ parent:    02697f74-b14a-4418-90f0-c28b2a3a6aa9
     B      current contents 
 
 
+    measurements:
+    ---------------------------
+    hash      version          
+    ---------------------------
+    unknown   (unknown version)
+
+
     physical disks:
     ------------------------------------------------------------------------------------
     vendor        model        serial                                        disposition
@@ -1280,6 +1329,13 @@ parent:    02697f74-b14a-4418-90f0-c28b2a3a6aa9
     B      current contents 
 
 
+    measurements:
+    ---------------------------
+    hash      version          
+    ---------------------------
+    unknown   (unknown version)
+
+
     physical disks:
     ------------------------------------------------------------------------------------
     vendor        model        serial                                        disposition
@@ -1337,6 +1393,13 @@ parent:    02697f74-b14a-4418-90f0-c28b2a3a6aa9
     ------------------------
     A      current contents 
     B      current contents 
+
+
+    measurements:
+    ---------------------------
+    hash      version          
+    ---------------------------
+    unknown   (unknown version)
 
 
     physical disks:
@@ -2102,6 +2165,13 @@ to:   blueprint 86db3308-f817-4626-8838-4085949a6a41
  MODIFIED SLEDS:
 
   sled 32d8d836-4d8a-4e54-8fa9-f31d79c42646 (active -> decommissioned, config generation 2 -> 3):
+
+    measurements:
+    ---------------------------
+    hash      version          
+    ---------------------------
+    unknown   (unknown version)
+
 
     host phase 2 contents:
     ------------------------

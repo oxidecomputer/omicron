@@ -6,8 +6,9 @@
 //! to relevant management daemons (dendrite, mgd, sled-agent, etc.)
 
 use crate::app::{
-    background::tasks::networking::{
-        api_to_dpd_port_settings, build_mgd_clients,
+    background::{
+        LoadedTargetBlueprint,
+        tasks::networking::{api_to_dpd_port_settings, build_mgd_clients},
     },
     dpd_clients, switch_zone_address_mappings,
 };
@@ -20,6 +21,7 @@ use nexus_db_model::{
     AddressLotBlock, BgpConfig, BootstoreConfig, INFRA_LOT, LoopbackAddress,
     NETWORK_KEY, SwitchLinkSpeed,
 };
+use tokio::sync::watch;
 use uuid::Uuid;
 
 use crate::app::background::BackgroundTask;
@@ -45,10 +47,7 @@ use nexus_types::identity::{Asset, Resource};
 use omicron_common::OMICRON_DPD_TAG;
 use omicron_common::{
     address::{Ipv6Subnet, get_sled_address},
-    api::{
-        external::{DataPageParams, ImportExportPolicy, SwitchLocation},
-        internal::shared::ParseSwitchLocationError,
-    },
+    api::external::DataPageParams,
 };
 use rdb_types::{Prefix, Prefix4, Prefix6};
 use serde_json::json;
@@ -60,6 +59,9 @@ use sled_agent_client::types::{
     RouterLifetimeConfig as SledRouterLifetimeConfig, TxEqConfig,
     UplinkAddressConfig,
 };
+use sled_agent_types::early_networking::ImportExportPolicy;
+use sled_agent_types::early_networking::ParseSwitchLocationError;
+use sled_agent_types::early_networking::SwitchLocation;
 use std::{
     collections::{HashMap, HashSet, hash_map::Entry},
     hash::Hash,
@@ -122,11 +124,16 @@ impl Default for AddStaticRouteRequest {
 pub struct SwitchPortSettingsManager {
     datastore: Arc<DataStore>,
     resolver: Resolver,
+    rx_blueprint: watch::Receiver<Option<LoadedTargetBlueprint>>,
 }
 
 impl SwitchPortSettingsManager {
-    pub fn new(datastore: Arc<DataStore>, resolver: Resolver) -> Self {
-        Self { datastore, resolver }
+    pub fn new(
+        datastore: Arc<DataStore>,
+        resolver: Resolver,
+        rx_blueprint: watch::Receiver<Option<LoadedTargetBlueprint>>,
+    ) -> Self {
+        Self { datastore, resolver, rx_blueprint }
     }
 
     async fn switch_ports(
@@ -1027,44 +1034,37 @@ impl BackgroundTask for SwitchPortSettingsManager {
                 // calculate and apply bootstore changes
                 //
 
-                // TODO: #5232 Make ntp servers w/ generation tracking first-class citizens in the db
-                // We're using the latest bootstore config from the sled agents to get the ntp
-                // servers. We should instead be pulling this information from the db. However, it
-                // seems that we're currently not storing the ntp servers in the db as a first-class
-                // citizen, so we'll need to add that first.
+                // TODO: #5232 Make ntp servers w/ generation tracking
+                // first-class citizens in the db
+                //
+                // In the meantime, we can read the NTP servers from the current
+                // target blueprint.
+                let ntp_servers = {
+                    // Clone the target blueprint to avoid holding the watch
+                    // channel any longer than necessary.
+                    let Some(LoadedTargetBlueprint { blueprint, .. }) = self
+                        .rx_blueprint
+                        .borrow_and_update()
+                        .clone()
+                    else {
+                        warn!(
+                            log,
+                            "no blueprint loaded yet; skipping bootstore sync",
+                        );
+                        continue;
+                    };
 
-                // find the active sled-agent bootstore config with the highest generation
-                let mut latest_sled_agent_bootstore_config: Option<EarlyNetworkConfig> = None;
-
-                // Since we update the first scrimlet we can reach (we failover to the second one
-                // if updating the first one fails) we need to check them both.
-                for (_location, client) in &scrimlet_sled_agent_clients {
-                    let scrimlet_cfg  = match client.read_network_bootstore_config_cache().await {
-                        Ok(config) => config,
-                        Err(e) => {
-                            error!(log, "unable to read bootstore config from scrimlet"; "error" => ?e);
+                    match blueprint.upstream_ntp_config() {
+                        Some(config) => config.ntp_servers.to_vec(),
+                        None => {
+                            warn!(
+                                log,
+                                "target blueprint has no upstream NTP config; \
+                                 assuming this is a dev/test system and \
+                                 skipping bootstore sync",
+                            );
                             continue;
                         }
-                    };
-                    if let Some(other_config) = latest_sled_agent_bootstore_config.as_mut() {
-                        if other_config.generation < scrimlet_cfg.generation {
-                            *other_config = scrimlet_cfg.clone();
-                        }
-                    } else {
-                        latest_sled_agent_bootstore_config = Some(scrimlet_cfg.clone());
-                    }
-                }
-
-                // TODO: this will also be removed once the above is resolved
-                // Move on to the next rack if neither scrimlet is reachable.
-                // if both scrimlets are unreachable we probably have bigger problems on this rack
-                let ntp_servers = match latest_sled_agent_bootstore_config {
-                    Some(config) => {
-                        config.body.ntp_servers.clone()
-                    },
-                    None => {
-                        error!(log, "both scrimlets are unreachable, cannot update bootstore");
-                        continue;
                     }
                 };
 

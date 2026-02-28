@@ -145,7 +145,7 @@ async fn possible_sled_agent_addrs(
             Err(err) => {
                 warn!(
                     log, "Failed to get prefixes from ddm";
-                    "err" => #%err,
+                    &err,
                 );
                 tokio::time::sleep(RETRY).await;
             }
@@ -164,7 +164,7 @@ async fn make_ddm_admin_client(log: &Logger) -> DdmAdminClient {
             Err(err) => {
                 warn!(
                     log, "Failed to construct DdmAdminClient";
-                    "err" => #%err,
+                    &err,
                 );
                 tokio::time::sleep(DDM_CONSTRUCT_RETRY).await;
             }
