@@ -716,7 +716,7 @@ ratatui = "0.29.0"
 rats-corim = { git = "https://github.com/oxidecomputer/rats-corim.git", rev = "f0d5d5168d3d31487a56df32c676b0c6240bcc6b" }
 raw-cpuid = { git = "https://github.com/oxidecomputer/rust-cpuid.git", rev = "a4cf01df76f35430ff5d39dc2fe470bcb953503b" }
 rayon = "1.10"
-rcgen = "0.12.1"
+rcgen = "0.14.7"
 rdb-types = { git = "https://github.com/oxidecomputer/maghemite", rev = "8f5527da3c53398c95c50b1af088637e7b6c5718" }
 reconfigurator-cli = { path = "dev-tools/reconfigurator-cli" }
 reedline = "0.40.0"

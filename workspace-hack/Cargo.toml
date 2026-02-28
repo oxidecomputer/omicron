@@ -118,6 +118,7 @@ reqwest-5ef9efb8ec2df382 = { package = "reqwest", version = "0.12.28", features 
 rsa = { version = "0.9.8", features = ["serde", "sha2"] }
 rustc-hash = { version = "2.1.1" }
 rustls = { version = "0.23.37", features = ["ring"] }
+rustls-pki-types = { version = "1.14.0", features = ["std"] }
 rustls-webpki = { version = "0.103.9", default-features = false, features = ["aws-lc-rs", "ring", "std"] }
 schemars = { version = "0.8.22", features = ["bytes", "chrono", "semver", "url", "uuid1"] }
 scopeguard = { version = "1.2.0" }
@@ -264,6 +265,7 @@ reqwest-5ef9efb8ec2df382 = { package = "reqwest", version = "0.12.28", features 
 rsa = { version = "0.9.8", features = ["serde", "sha2"] }
 rustc-hash = { version = "2.1.1" }
 rustls = { version = "0.23.37", features = ["ring"] }
+rustls-pki-types = { version = "1.14.0", features = ["std"] }
 rustls-webpki = { version = "0.103.9", default-features = false, features = ["aws-lc-rs", "ring", "std"] }
 schemars = { version = "0.8.22", features = ["bytes", "chrono", "semver", "url", "uuid1"] }
 scopeguard = { version = "1.2.0" }
