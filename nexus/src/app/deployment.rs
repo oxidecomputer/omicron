@@ -415,7 +415,7 @@ enum TargetReleaseChangeError {
 // We must be very generous here, as discussed at our call site in
 // `target_release_update()` above. We only reject this request if there are no
 // sleds waiting for recovery from a mupdate. Because of this, this function
-// does not take an arguments about the proposed system version (unlike
+// does not take any arguments about the proposed system version (unlike
 // `validate_can_set_target_release_for_update()`). Mupdate can bypass all our
 // typical version ordering requirements, so we have to allow recovery to the
 // _actual_ version it installed, regardless of what we currently have on the
@@ -665,8 +665,8 @@ enum SledMupdateDetectedHow {
     BootDiskContents,
 }
 
-// Update status of a sled, not considering its zones, based on the current
-// target version.
+// Status of any update or mupdate on a sled, not considering its zones, based
+// on the current target version.
 enum SledUpdateStatus {
     // The sled has been mupdated and is waiting on mupdate recovery.
     HasUnresolvedMupdate(SledMupdateDetectedHow),
