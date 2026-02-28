@@ -74,3 +74,4 @@ if_exists = "append"
 resolve = { which = "ipcc" }
 attest = { which = "ipcc" }
 roots = ["/usr/share/oxide/idcerts/staging.pem", "/usr/share/oxide/idcerts/production.pem"]
+enforce = "Enforced"
