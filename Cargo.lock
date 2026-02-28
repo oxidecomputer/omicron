@@ -7025,6 +7025,7 @@ dependencies = [
  "sled-hardware-types",
  "slog",
  "slog-error-chain",
+ "sqlparser",
  "steno",
  "strum 0.27.2",
  "test-strategy",

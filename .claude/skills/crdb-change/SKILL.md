@@ -77,7 +77,11 @@ In `nexus/db-model/src/schema_versions.rs`, bump `SCHEMA_VERSION`.
 
 In `nexus/db-model/src/schema_versions.rs`, add the new version to the `KNOWN_VERSIONS` list.
 
-### Step 8: Test the migration
+### Step 8: Generate verification files
+
+Run `EXPECTORATE=overwrite cargo nextest run -p nexus-db-model 'test_migration_verification_files'` to auto-generate `.verify.sql` files for any migration steps that contain backfill-prone DDL (`CREATE INDEX`, `ADD CONSTRAINT`, `ALTER COLUMN SET NOT NULL`, or `ADD COLUMN` with `NOT NULL` / non-null `DEFAULT` / `STORED` computed columns). Check in any generated files alongside the migration. If your migration doesn't contain backfill-prone DDL, no files are generated and this step is a no-op.
+
+### Step 9: Test the migration
 
 Run `cargo nextest run -p omicron-nexus schema` to verify that the migration is correct.
 
