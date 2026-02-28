@@ -37,8 +37,8 @@ oxide-client.workspace = true
 oxide-tokio-rt.workspace = true
 rand.workspace = true
 reqwest = { workspace = true, features = ["cookies"] }
-russh = "0.45.0"
-russh-keys = "0.45.0"
+russh = "0.57.1"
+russh-keys = "0.49.2"
 serde.workspace = true
 serde_json.workspace = true
 sled-agent-types.workspace = true
