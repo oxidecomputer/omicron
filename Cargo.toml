@@ -693,7 +693,7 @@ proc-macro2 = "1.0"
 progenitor = "0.13.0"
 progenitor-client = "0.13.0"
 progenitor-extras = "0.1.0"
-progenitor-client010 = { package = "progenitor-client", version = "0.10.0" }
+progenitor-client010 = { package = "progenitor-client", version = "0.13.0" }
 # NOTE: if you change the pinned revision of the `bhyve_api` and propolis
 # dependencies, you must also update the references in package-manifest.toml to
 # match the new revision.
