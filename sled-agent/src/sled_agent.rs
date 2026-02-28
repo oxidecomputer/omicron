@@ -386,7 +386,7 @@ struct SledAgentInner {
     rot_attestor: RotAttestationHandle,
 
     // The rack network config provided at RSS time.
-    rack_network_config: Option<RackNetworkConfig>,
+    rack_network_config: RackNetworkConfig,
 
     // Object managing zone bundles.
     zone_bundler: zone_bundle::ZoneBundler,
@@ -617,7 +617,7 @@ impl SledAgent {
 
             Ok(early_network_config.rack_network_config)
         };
-        let rack_network_config: Option<RackNetworkConfig> =
+        let rack_network_config: RackNetworkConfig =
             retry_notify::<_, String, _, _, _, _>(
                 retry_policy_internal_service_aggressive(),
                 get_network_config,

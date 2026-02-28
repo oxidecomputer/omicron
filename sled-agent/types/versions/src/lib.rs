@@ -61,6 +61,8 @@ pub mod v20;
 pub mod v22;
 #[path = "bootstore_versioning/mod.rs"]
 pub mod v24;
+#[path = "rack_network_config_not_optional/mod.rs"]
+pub mod v25;
 #[path = "add_switch_zone_operator_policy/mod.rs"]
 pub mod v3;
 #[path = "add_nexus_lockstep_port_to_inventory/mod.rs"]

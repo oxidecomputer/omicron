@@ -78,7 +78,7 @@ use trust_quorum_types::messages::{
 use trust_quorum_types::status::{CommitStatus, CoordinatorStatus, NodeStatus};
 
 // Fixed identifiers for prior versions only
-use sled_agent_types_versions::{v1, v20, v24};
+use sled_agent_types_versions::{v1, v20, v24, v25};
 use sled_diagnostics::{
     SledDiagnosticsCommandHttpOutput, SledDiagnosticsQueryOutput,
 };
@@ -813,7 +813,8 @@ impl SledAgentApi for SledAgentImpl {
                             "failed to deserialize early network config: {}",
                             InlineErrorChain::new(&err),
                         ))
-                    })?;
+                    })?
+                    .into();
                 v20::early_networking::EarlyNetworkConfig {
                     generation: config.generation,
                     schema_version: EarlyNetworkConfigBody::SCHEMA_VERSION,
@@ -832,6 +833,26 @@ impl SledAgentApi for SledAgentImpl {
     }
 
     async fn write_network_bootstore_config(
+        rqctx: RequestContext<Self::Context>,
+        body: TypedBody<v25::early_networking::WriteNetworkConfigRequest>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        let sa = rqctx.context();
+        let bs = sa.bootstore();
+        let body = body.into_inner();
+        let config = EarlyNetworkConfigEnvelope::from(&body.body)
+            .serialize_to_bootstore_with_generation(body.generation);
+
+        bs.update_network_config(config).await.map_err(|e| {
+            HttpError::for_internal_error(format!(
+                "failed to write updated config to boot store: {}",
+                InlineErrorChain::new(&e),
+            ))
+        })?;
+
+        Ok(HttpResponseUpdatedNoContent())
+    }
+
+    async fn write_network_bootstore_config_v24(
         rqctx: RequestContext<Self::Context>,
         body: TypedBody<v24::early_networking::WriteNetworkConfigRequest>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {

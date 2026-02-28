@@ -365,7 +365,7 @@
     },
     "/network-bootstore-config": {
       "put": {
-        "operationId": "write_network_bootstore_config",
+        "operationId": "write_network_bootstore_config_v24",
         "requestBody": {
           "content": {
             "application/json": {

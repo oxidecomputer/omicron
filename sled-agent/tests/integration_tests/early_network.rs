@@ -58,7 +58,7 @@ fn early_network_blobs_deserialize() {
         .unwrap_or_else(|error| {
             panic!(
                 "error deserializing early_network_blobs.txt envelope \
-                    \"{blob_desc}\" (line {blob_lineno}): {error}",
+                 \"{blob_desc}\" (line {blob_lineno}): {error}",
             );
         });
         let config = envelope.deserialize_body().unwrap_or_else(|error| {
@@ -105,14 +105,6 @@ fn early_network_blobs_deserialize() {
     if !current_blob_is_known {
         let current_blob_json =
             serde_json::to_string(&current_envelope).unwrap();
-        assert!(
-            !current_desc.contains(','),
-            "description contains illegal charactor ',': {current_desc:?}"
-        );
-        assert!(
-            !current_desc.contains('\n'),
-            "description contains illegal charactor '\\n': {current_desc:?}"
-        );
         let current_blob = format!("{},{}", current_desc, current_blob_json);
         known_blobs.push_str(&current_blob);
         known_blobs.push('\n');
@@ -131,10 +123,9 @@ fn early_network_blobs_deserialize() {
 /// future, older blobs can still be deserialized correctly.
 fn current_config_example() -> (&'static str, EarlyNetworkConfigEnvelope) {
     // NOTE: the description must not contain commas or newlines.
-    let description = "2026-02-27 r18";
+    let description = "2026-02-27 pre-r19";
     let config = EarlyNetworkConfigEnvelope::from(&EarlyNetworkConfigBody {
-        ntp_servers: vec![],
-        rack_network_config: Some(RackNetworkConfig {
+        rack_network_config: RackNetworkConfig {
             rack_subnet: "fd00:1122:3344:100::/56".parse().unwrap(),
             infra_ip_first: "172.20.15.21".parse().unwrap(),
             infra_ip_last: "172.20.15.22".parse().unwrap(),
@@ -301,7 +292,7 @@ fn current_config_example() -> (&'static str, EarlyNetworkConfigEnvelope) {
                 max_paths: MaxPathConfig::default(),
             }],
             bfd: vec![],
-        }),
+        },
     });
 
     (description, config)

@@ -712,7 +712,6 @@ impl BackgroundTasksInitializer {
             task_impl: Box::new(SwitchPortSettingsManager::new(
                 datastore.clone(),
                 resolver.clone(),
-                rx_blueprint.clone(),
             )),
             opctx: opctx.child(BTreeMap::new()),
             watchers: vec![],
