@@ -18,6 +18,15 @@ versions = [
 ]
 
 [[metrics]]
+name = "vmm_vsz"
+description = "Total virtual memory reserved for reasons other than direct access by the virtual machine"
+units = "bytes"
+datum_type = "u64"
+versions = [
+    { added_in = 1, fields = [ ] }
+]
+
+[[metrics]]
 name = "reset"
 description = "Cumulative number of times the virtual machine has been reset"
 units = "count"
