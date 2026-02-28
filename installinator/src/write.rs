@@ -17,9 +17,9 @@ use camino::{Utf8Path, Utf8PathBuf};
 use iddqd::IdOrdMap;
 use illumos_utils::zpool::{Zpool, ZpoolName};
 use installinator_common::{
-    ControlPlaneZonesSpec, ControlPlaneZonesStepId, RawDiskWriter, StepContext,
-    StepProgress, StepResult, StepSuccess, UpdateEngine, WriteComponent,
-    WriteError, WriteOutput, WriteSpec, WriteStepId,
+    ControlPlaneZonesSpec, ControlPlaneZonesStepId, RawDiskWriter,
+    StepProgress, WriteComponent, WriteError, WriteOutput, WriteSpec,
+    WriteStepId,
 };
 use omicron_common::{
     disk::M2Slot,
@@ -29,6 +29,12 @@ use omicron_common::{
     },
 };
 use omicron_uuid_kinds::{MupdateOverrideUuid, MupdateUuid};
+use oxide_update_engine::{
+    StepResult, UpdateEngine,
+    types::{
+        errors::NestedEngineError, events::ProgressUnits, spec::EngineSpec,
+    },
+};
 use sha2::{Digest, Sha256};
 use slog::{Logger, info, warn};
 use tokio::{
@@ -39,11 +45,12 @@ use tokio::{
 };
 use tufaceous_artifact::{ArtifactHash, ArtifactHashId};
 use tufaceous_lib::ControlPlaneZoneImages;
-use update_engine::{
-    StepSpec, errors::NestedEngineError, events::ProgressUnits,
-};
 
-use crate::{async_temp_file::AsyncNamedTempFile, hardware::Hardware};
+use crate::{
+    async_temp_file::AsyncNamedTempFile,
+    hardware::Hardware,
+    spec::{StepContext, StepHandle, StepSuccess},
+};
 
 #[derive(Clone, Debug)]
 struct ArtifactDestination {
@@ -677,8 +684,6 @@ impl ControlPlaneZoneWriteContext<'_> {
         transport: &'b mut impl WriteTransport,
         zpool: Option<&'b ZpoolName>,
     ) {
-        use update_engine::StepHandle;
-
         let slot = self.slot;
         let mupdate_override_uuid = self.mupdate_override_uuid;
 
@@ -1189,7 +1194,7 @@ impl WriteTransport for BlockDeviceTransport {
 
 /// On success, returns the block size required when interacting with
 /// `destination`.
-async fn write_artifact_impl<S: StepSpec<ProgressMetadata = ()>>(
+async fn write_artifact_impl<S: EngineSpec<ProgressMetadata = ()>>(
     component: WriteComponent,
     slot: M2Slot,
     mut artifact: BufList,
@@ -1264,7 +1269,10 @@ mod tests {
     use std::{collections::VecDeque, sync::Arc};
 
     use super::*;
-    use crate::test_helpers::{dummy_artifact_hash_id, with_test_runtime};
+    use crate::{
+        spec::StepSuccess,
+        test_helpers::{dummy_artifact_hash_id, with_test_runtime},
+    };
 
     use anyhow::Result;
     use bytes::{Buf, Bytes};
@@ -1430,7 +1438,7 @@ mod tests {
             (SharedTransport(Arc::clone(&inner)), SharedTransport(inner))
         };
 
-        let (event_sender, event_receiver) = update_engine::channel();
+        let (event_sender, event_receiver) = oxide_update_engine::channel();
 
         let receiver_handle = tokio::spawn(async move {
             ReceiverStream::new(event_receiver).collect::<Vec<_>>().await

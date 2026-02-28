@@ -32,6 +32,7 @@ omicron-common.workspace = true
 omicron-ddm-admin-client.workspace = true
 omicron-uuid-kinds.workspace = true
 oxide-tokio-rt.workspace = true
+oxide-update-engine.workspace = true
 reqwest.workspace = true
 sha2.workspace = true
 serde_json.workspace = true
@@ -48,7 +49,6 @@ thiserror.workspace = true
 tokio = { workspace = true, features = ["full"] }
 tufaceous-artifact.workspace = true
 tufaceous-lib.workspace = true
-update-engine.workspace = true
 omicron-workspace-hack.workspace = true
 
 [dev-dependencies]

@@ -5,11 +5,12 @@
 use std::net::IpAddr;
 
 use dpd_client::types::PortId;
+use oxide_update_engine_types::spec::AsError;
+use oxide_update_engine_types::spec::EngineSpec;
 use oxnet::IpNet;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
-use update_engine::StepSpec;
 
 #[derive(Debug, Error)]
 pub enum UplinkPreflightTerminalError {
@@ -39,7 +40,7 @@ pub enum UplinkPreflightTerminalError {
     },
 }
 
-impl update_engine::AsError for UplinkPreflightTerminalError {
+impl AsError for UplinkPreflightTerminalError {
     fn as_error(&self) -> &(dyn std::error::Error + 'static) {
         self
     }
@@ -50,7 +51,10 @@ type DpdError = dpd_client::Error<dpd_client::types::Error>;
 #[derive(JsonSchema)]
 pub enum UplinkPreflightCheckSpec {}
 
-impl StepSpec for UplinkPreflightCheckSpec {
+impl EngineSpec for UplinkPreflightCheckSpec {
+    fn spec_name() -> String {
+        "UplinkPreflightCheckSpec".to_owned()
+    }
     type Component = String;
     type StepId = UplinkPreflightStepId;
     type StepMetadata = ();
@@ -58,6 +62,16 @@ impl StepSpec for UplinkPreflightCheckSpec {
     type CompletionMetadata = Vec<String>;
     type SkippedMetadata = ();
     type Error = UplinkPreflightTerminalError;
+
+    fn rust_type_info()
+    -> Option<oxide_update_engine_types::schema::RustTypeInfo> {
+        Some(oxide_update_engine_types::schema::RustTypeInfo {
+            crate_name: "wicket-common",
+            version: "0.1.0",
+            path: "wicket_common::preflight_check\
+                   ::UplinkPreflightCheckSpec",
+        })
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -74,4 +88,5 @@ pub enum UplinkPreflightStepId {
     CleanupL1,
 }
 
-update_engine::define_update_engine!(pub UplinkPreflightCheckSpec);
+oxide_update_engine::define_update_engine!(pub UplinkPreflightCheckSpec);
+oxide_update_engine_types::define_update_engine_types!(pub UplinkPreflightCheckSpec);

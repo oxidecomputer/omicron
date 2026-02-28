@@ -20,12 +20,12 @@ use bytes::Bytes;
 use installinator_client::{ClientError, ResponseValue};
 use installinator_common::EventReport;
 use omicron_uuid_kinds::MupdateUuid;
+use oxide_update_engine::types::events::StepEventIsTerminal;
 use proptest::{collection::vec_deque, prelude::*};
 use reqwest::StatusCode;
 use test_strategy::Arbitrary;
 use tokio::sync::mpsc;
 use tufaceous_artifact::ArtifactHashId;
-use update_engine::events::StepEventIsTerminal;
 
 use crate::{
     errors::{DiscoverPeersError, HttpError},
@@ -690,6 +690,7 @@ mod tests {
         errors::DiscoverPeersError,
         fetch::{FetchArtifactBackend, FetchedArtifact},
         reporter::{ProgressReporter, ReportProgressBackend},
+        spec::{StepContext, StepSuccess, UpdateEngine},
         test_helpers::{dummy_artifact_hash_id, with_test_runtime},
     };
 
@@ -697,8 +698,8 @@ mod tests {
     use futures::{StreamExt, future};
     use installinator_common::{
         InstallinatorCompletionMetadata, InstallinatorComponent,
-        InstallinatorProgressMetadata, InstallinatorStepId, StepContext,
-        StepEvent, StepEventKind, StepOutcome, StepSuccess, UpdateEngine,
+        InstallinatorProgressMetadata, InstallinatorStepId, StepEvent,
+        StepEventKind, StepOutcome,
     };
     use omicron_test_utils::dev::test_setup_log;
     use test_strategy::proptest;
