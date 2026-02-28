@@ -252,7 +252,14 @@ fn print_server_components<'a>(
             );
         }
         for (c, path) in apis.component_apis_consumed(s, filter)? {
-            println!("{}    consumes: {}", prefix, c);
+            if apis.idu_only_edge_note(s, c).is_some() {
+                println!(
+                    "{}    consumes: {} (intra-deployment-unit-only)",
+                    prefix, c
+                );
+            } else {
+                println!("{}    consumes: {}", prefix, c);
+            }
             if show_deps {
                 for p in path.nodes() {
                     println!("{}        via: {}", prefix, p);
