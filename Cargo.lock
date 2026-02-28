@@ -3233,9 +3233,9 @@ dependencies = [
 
 [[package]]
 name = "dropshot-api-manager"
-version = "0.4.0"
+version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c463547bdf97f91147335f7c5f6e5bf4e3b145c5ebb6ee18ee7bedd2d3c704f0"
+checksum = "eb641546360dd322782b77f70aab2084cced6a97b2429f36addc21d179a77393"
 dependencies = [
  "anyhow",
  "atomicwrites",
@@ -3254,6 +3254,7 @@ dependencies = [
  "openapiv3",
  "owo-colors 4.2.3",
  "paste",
+ "rayon",
  "semver 1.0.27",
  "serde_json",
  "sha2",
@@ -3265,9 +3266,9 @@ dependencies = [
 
 [[package]]
 name = "dropshot-api-manager-types"
-version = "0.4.0"
+version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1156e942915e6a772361ce6ff0dec833d203c86b8f4ce3890626c84d0ef2a3c2"
+checksum = "806d5a05f73bde1442ed8b9d5db7ffe718b2846e69f575a2dafff120205e28e7"
 dependencies = [
  "anyhow",
  "camino",
