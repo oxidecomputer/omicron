@@ -110,7 +110,7 @@ fn dpd_state_matches_tag(
     db_group: &MulticastGroup,
 ) -> bool {
     match (&dpd_group.tag, &db_group.tag) {
-        (Some(dpd_tag), Some(db_tag)) => dpd_tag == db_tag,
+        (dpd_tag, Some(db_tag)) => dpd_tag == db_tag,
         _ => false,
     }
 }
@@ -948,7 +948,7 @@ mod tests {
         dpd_client::types::MulticastGroupExternalResponse {
             group_ip: "232.1.1.1".parse().unwrap(),
             sources,
-            tag: Some("test-tag".to_string()),
+            tag: "test-tag".to_string(),
             external_group_id: 1,
             external_forwarding: dpd_client::types::ExternalForwarding {
                 vlan_id: None,

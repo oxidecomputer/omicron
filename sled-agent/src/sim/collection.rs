@@ -412,7 +412,7 @@ mod test {
         assert_eq!(r1.vmm_state.time_updated, rnext.vmm_state.time_updated);
         assert_eq!(rnext.vmm_state.state, rnext.vmm_state.state);
         assert_eq!(r1.vmm_state.generation, rnext.vmm_state.generation);
-        assert!(rx.try_next().is_err());
+        assert!(rx.try_recv().is_err());
 
         // Stopping an instance that was never started synchronously destroys
         // its VMM.
@@ -424,7 +424,7 @@ mod test {
         assert!(rnext.vmm_state.generation > rprev.vmm_state.generation);
         assert!(rnext.vmm_state.time_updated >= rprev.vmm_state.time_updated);
         assert_eq!(rnext.vmm_state.state, VmmState::Destroyed);
-        assert!(rx.try_next().is_err());
+        assert!(rx.try_recv().is_err());
 
         logctx.cleanup_successful();
     }
@@ -451,16 +451,16 @@ mod test {
         assert_eq!(r1.vmm_state.time_updated, rnext.vmm_state.time_updated);
         assert_eq!(r1.vmm_state.state, rnext.vmm_state.state);
         assert_eq!(r1.vmm_state.generation, rnext.vmm_state.generation);
-        assert!(rx.try_next().is_err());
+        assert!(rx.try_recv().is_err());
 
         // Set up a transition to Running. This has no immediate effect on the
         // simulated instance's state, but it does queue up a transition.
         let mut rprev = r1;
-        assert!(rx.try_next().is_err());
+        assert!(rx.try_recv().is_err());
         let dropped = instance.transition(VmmStateRequested::Running).unwrap();
         assert!(dropped.is_none());
         assert!(instance.object.desired().is_some());
-        assert!(rx.try_next().is_err());
+        assert!(rx.try_recv().is_err());
 
         // The VMM should still be Starting and its generation should not have
         // changed (the transition to Running is queued but hasn't executed).
@@ -476,7 +476,7 @@ mod test {
         assert!(rnext.vmm_state.generation > rprev.vmm_state.generation);
         assert!(rnext.vmm_state.time_updated >= rprev.vmm_state.time_updated);
         assert!(instance.object.desired().is_none());
-        assert!(rx.try_next().is_err());
+        assert!(rx.try_recv().is_err());
         assert_eq!(rprev.vmm_state.state, VmmState::Starting);
         assert_eq!(rnext.vmm_state.state, VmmState::Running);
         assert!(rnext.vmm_state.generation > rprev.vmm_state.generation);
@@ -492,7 +492,7 @@ mod test {
         let dropped = instance.transition(VmmStateRequested::Running).unwrap();
         assert!(dropped.is_none());
         assert!(instance.object.desired().is_none());
-        assert!(rx.try_next().is_err());
+        assert!(rx.try_recv().is_err());
         let rnext = instance.object.current();
         assert_eq!(rnext.vmm_state.generation, rprev.vmm_state.generation);
         assert_eq!(rnext.vmm_state.time_updated, rprev.vmm_state.time_updated);
@@ -501,7 +501,7 @@ mod test {
 
         // If we go back to any stopped state, we go through the async process
         // again.
-        assert!(rx.try_next().is_err());
+        assert!(rx.try_recv().is_err());
         let dropped = instance.transition(VmmStateRequested::Stopped).unwrap();
         assert!(dropped.is_none());
         assert!(instance.object.desired().is_some());

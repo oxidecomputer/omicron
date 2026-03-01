@@ -26,7 +26,7 @@ fn test_wicket_ssh_force_command_like() {
 }
 
 fn make_cmd(tempdir: &Path) -> Command {
-    let mut cmd = Command::cargo_bin("wicket").unwrap();
+    let mut cmd = assert_cmd::cargo_bin_cmd!("wicket");
     // Set the log path to the temp dir, because the default is to log to
     // /tmp/wicket.log (which might be owned by a different user).
     cmd.env("WICKET_LOG_PATH", tempdir.join("wicket.log"));
