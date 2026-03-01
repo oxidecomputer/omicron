@@ -112,6 +112,7 @@ use nexus_db_model::VolumeResourceUsage;
 use nexus_db_model::VpcSubnet;
 use nexus_db_model::Zpool;
 use nexus_db_model::to_db_typed_uuid;
+use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db;
 use nexus_db_queries::db::DataStore;
@@ -151,6 +152,7 @@ use omicron_common::api::external;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Generation;
 use omicron_common::api::external::InstanceState;
+use omicron_common::api::external::LookupType;
 use omicron_common::api::external::MacAddr;
 use omicron_uuid_kinds::CollectionUuid;
 use omicron_uuid_kinds::DatasetUuid;
@@ -8165,8 +8167,13 @@ async fn cmd_db_trust_quorum_list_configs(
     }
 
     let limit = fetch_opts.fetch_limit;
+    let authz_tq = authz::TrustQuorumConfig::new(authz::Rack::new(
+        authz::FLEET,
+        args.rack_id.into_untyped_uuid(),
+        LookupType::ById(args.rack_id.into_untyped_uuid()),
+    ));
     let configs = datastore
-        .tq_list_config(opctx, args.rack_id, &first_page::<i64>(limit))
+        .tq_list_config(opctx, authz_tq, &first_page::<i64>(limit))
         .await
         .context("listing trust quorum configurations")?;
 

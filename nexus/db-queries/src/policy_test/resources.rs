@@ -88,14 +88,10 @@ pub async fn make_resources(
     make_silo(&mut builder, "silo1", main_silo_id, true).await;
     make_silo(&mut builder, "silo2", Uuid::new_v4(), false).await;
 
-    // Various other resources
-    let rack_id = "c037e882-8b6d-c8b5-bef4-97e848eb0a50".parse().unwrap();
-    builder.new_resource(authz::Rack::new(
-        authz::FLEET,
-        rack_id,
-        LookupType::ById(rack_id),
-    ));
+    // Rack hierarchy
+    make_rack(&mut builder);
 
+    // Various other resources
     let sled_id = "8a785566-adaf-c8d8-e886-bee7f9b73ca7".parse().unwrap();
     builder.new_resource(authz::Sled::new(
         authz::FLEET,
@@ -227,6 +223,15 @@ async fn make_services(builder: &mut ResourceBuilder<'_>) {
         oximeter_service_id,
         LookupType::ById(oximeter_service_id),
     ));
+}
+
+/// Helper for `make_resources()` that constructs a small Rack hierarchy
+fn make_rack(builder: &mut ResourceBuilder<'_>) {
+    let rack_id = "c037e882-8b6d-c8b5-bef4-97e848eb0a50".parse().unwrap();
+    let rack =
+        authz::Rack::new(authz::FLEET, rack_id, LookupType::ById(rack_id));
+    builder.new_resource(rack.clone());
+    builder.new_resource(authz::TrustQuorumConfig::new(rack));
 }
 
 /// Helper for `make_resources()` that constructs a small Silo hierarchy

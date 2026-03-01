@@ -139,24 +139,20 @@ impl DataStore {
     pub async fn tq_insert_rss_config_after_handoff(
         opctx: &OpContext,
         conn: &async_bb8_diesel::Connection<DbConnection>,
-        rack_id: RackUuid,
+        authz_tq: authz::TrustQuorumConfig,
         initial_members: BTreeSet<BaseboardId>,
         coordinator: BaseboardId,
     ) -> Result<(), Error> {
-        let authz_rack = authz::Rack::new(
-            authz::FLEET,
-            rack_id.into_untyped_uuid(),
-            LookupType::ById(rack_id.into_untyped_uuid()),
-        );
-        opctx.authorize(authz::Action::Modify, &authz_rack).await?;
+        opctx.authorize(authz::Action::Modify, &authz_tq).await?;
 
+        let rack_id = RackUuid::from_untyped_uuid(authz_tq.rack().id());
         let initial_config = TrustQuorumConfig::new_rss_committed_config(
             rack_id,
             initial_members,
             coordinator,
         );
 
-        Self::insert_tq_config_conn(opctx, conn, initial_config)
+        Self::insert_tq_config_conn(conn, initial_config)
             .await
             .map_err(|err| err.into_public_ignore_retries())
     }
@@ -165,15 +161,11 @@ impl DataStore {
     pub async fn tq_get_latest_config(
         &self,
         opctx: &OpContext,
-        rack_id: RackUuid,
+        authz_tq: authz::TrustQuorumConfig,
     ) -> OptionalLookupResult<TrustQuorumConfig> {
-        let authz_rack = authz::Rack::new(
-            authz::FLEET,
-            rack_id.into_untyped_uuid(),
-            LookupType::ById(rack_id.into_untyped_uuid()),
-        );
-        opctx.authorize(authz::Action::Read, &authz_rack).await?;
+        opctx.authorize(authz::Action::Read, &authz_tq).await?;
         let conn = &*self.pool_connection_authorized(opctx).await?;
+        let rack_id = RackUuid::from_untyped_uuid(authz_tq.rack().id());
 
         Self::tq_get_latest_config_with_members_conn(conn, rack_id)
             .await
@@ -183,17 +175,13 @@ impl DataStore {
     pub async fn tq_list_config(
         &self,
         opctx: &OpContext,
-        rack_id: RackUuid,
+        authz_tq: authz::TrustQuorumConfig,
         pagparams: &DataPageParams<'_, i64>,
     ) -> ListResultVec<DbTrustQuorumConfiguration> {
-        let authz_rack = authz::Rack::new(
-            authz::FLEET,
-            rack_id.into_untyped_uuid(),
-            LookupType::ById(rack_id.into_untyped_uuid()),
-        );
-        opctx.authorize(authz::Action::Read, &authz_rack).await?;
+        opctx.authorize(authz::Action::Read, &authz_tq).await?;
         let conn = &*self.pool_connection_authorized(opctx).await?;
 
+        let rack_id = RackUuid::from_untyped_uuid(authz_tq.rack().id());
         use nexus_db_schema::schema::trust_quorum_configuration::dsl;
         paginated(dsl::trust_quorum_configuration, dsl::epoch, pagparams)
             .filter(dsl::rack_id.eq(DbTypedUuid::<RackKind>::from(rack_id)))
@@ -207,16 +195,12 @@ impl DataStore {
     pub async fn tq_get_config(
         &self,
         opctx: &OpContext,
-        rack_id: RackUuid,
+        authz_tq: authz::TrustQuorumConfig,
         epoch: Epoch,
     ) -> OptionalLookupResult<TrustQuorumConfig> {
-        let authz_rack = authz::Rack::new(
-            authz::FLEET,
-            rack_id.into_untyped_uuid(),
-            LookupType::ById(rack_id.into_untyped_uuid()),
-        );
-        opctx.authorize(authz::Action::Read, &authz_rack).await?;
+        opctx.authorize(authz::Action::Read, &authz_tq).await?;
         let conn = &*self.pool_connection_authorized(opctx).await?;
+        let rack_id = RackUuid::from_untyped_uuid(authz_tq.rack().id());
 
         Self::tq_get_config_with_members_from_epoch_conn(conn, rack_id, epoch)
             .await
@@ -368,12 +352,12 @@ impl DataStore {
         opctx: &OpContext,
         proposed: ProposedTrustQuorumConfig,
     ) -> Result<(), Error> {
-        let authz_rack = authz::Rack::new(
+        let authz_tq = authz::TrustQuorumConfig::new(authz::Rack::new(
             authz::FLEET,
             proposed.rack_id.into_untyped_uuid(),
             LookupType::ById(proposed.rack_id.into_untyped_uuid()),
-        );
-        opctx.authorize(authz::Action::Modify, &authz_rack).await?;
+        ));
+        opctx.authorize(authz::Action::Modify, &authz_tq).await?;
         let conn = &*self.pool_connection_authorized(opctx).await?;
 
         let err = OptionalError::new();
@@ -405,7 +389,7 @@ impl DataStore {
                     }
 
                     // Save the new config
-                    Self::insert_tq_config_conn(opctx, &c, validated.config)
+                    Self::insert_tq_config_conn(&c, validated.config)
                         .await
                         .map_err(|txn_error| txn_error.into_diesel(&err))
                 }
@@ -654,12 +638,12 @@ impl DataStore {
         config: trust_quorum_types::configuration::Configuration,
         acked_prepares: BTreeSet<BaseboardId>,
     ) -> Result<TrustQuorumConfigState, Error> {
-        let authz_rack = authz::Rack::new(
+        let authz_tq = authz::TrustQuorumConfig::new(authz::Rack::new(
             authz::FLEET,
             config.rack_id.into_untyped_uuid(),
             LookupType::ById(config.rack_id.into_untyped_uuid()),
-        );
-        opctx.authorize(authz::Action::Modify, &authz_rack).await?;
+        ));
+        opctx.authorize(authz::Action::Modify, &authz_tq).await?;
         let conn = &*self.pool_connection_authorized(opctx).await?;
 
         let epoch = epoch_to_i64(config.epoch)?;
@@ -816,18 +800,14 @@ impl DataStore {
     pub async fn tq_update_commit_status(
         &self,
         opctx: &OpContext,
-        rack_id: RackUuid,
+        authz_tq: authz::TrustQuorumConfig,
         epoch: Epoch,
         acked_commits: BTreeSet<BaseboardId>,
     ) -> Result<TrustQuorumConfigState, Error> {
-        let authz_rack = authz::Rack::new(
-            authz::FLEET,
-            rack_id.into_untyped_uuid(),
-            LookupType::ById(rack_id.into_untyped_uuid()),
-        );
-        opctx.authorize(authz::Action::Modify, &authz_rack).await?;
+        opctx.authorize(authz::Action::Modify, &authz_tq).await?;
         let conn = &*self.pool_connection_authorized(opctx).await?;
 
+        let rack_id = RackUuid::from_untyped_uuid(authz_tq.rack().id());
         let epoch = epoch_to_i64(epoch)?;
 
         let err = OptionalError::new();
@@ -925,18 +905,14 @@ impl DataStore {
     pub async fn tq_abort_config(
         &self,
         opctx: &OpContext,
-        rack_id: RackUuid,
+        authz_tq: authz::TrustQuorumConfig,
         epoch: Epoch,
         abort_reason: String,
     ) -> Result<(), Error> {
-        let authz_rack = authz::Rack::new(
-            authz::FLEET,
-            rack_id.into_untyped_uuid(),
-            LookupType::ById(rack_id.into_untyped_uuid()),
-        );
-        opctx.authorize(authz::Action::Modify, &authz_rack).await?;
+        opctx.authorize(authz::Action::Modify, &authz_tq).await?;
         let conn = &*self.pool_connection_authorized(opctx).await?;
 
+        let rack_id = RackUuid::from_untyped_uuid(authz_tq.rack().id());
         let epoch = epoch_to_i64(epoch)?;
 
         let err = OptionalError::new();
@@ -1014,17 +990,9 @@ impl DataStore {
 
     // Unconditional insert
     async fn insert_tq_config_conn(
-        opctx: &OpContext,
         conn: &async_bb8_diesel::Connection<DbConnection>,
         config: TrustQuorumConfig,
     ) -> Result<(), TransactionError<Error>> {
-        let authz_rack = authz::Rack::new(
-            authz::FLEET,
-            config.rack_id.into_untyped_uuid(),
-            LookupType::ById(config.rack_id.into_untyped_uuid()),
-        );
-        opctx.authorize(authz::Action::Modify, &authz_rack).await?;
-
         let hw_baseboard_ids = Self::lookup_hw_baseboard_ids_conn(
             conn,
             config.members.keys().cloned(),
@@ -1501,6 +1469,14 @@ mod tests {
     use omicron_uuid_kinds::RackUuid;
     use uuid::Uuid;
 
+    fn make_authz_tq(rack_id: RackUuid) -> authz::TrustQuorumConfig {
+        authz::TrustQuorumConfig::new(authz::Rack::new(
+            authz::FLEET,
+            rack_id.into_untyped_uuid(),
+            LookupType::ById(rack_id.into_untyped_uuid()),
+        ))
+    }
+
     async fn insert_hw_baseboard_ids(db: &TestDatabase) -> Vec<HwBaseboardId> {
         let (_, datastore) = (db.opctx(), db.datastore());
         let conn = datastore.pool_connection_for_tests().await.unwrap();
@@ -1548,7 +1524,7 @@ mod tests {
         DataStore::tq_insert_rss_config_after_handoff(
             opctx,
             &conn,
-            rack_id,
+            make_authz_tq(rack_id),
             members.clone(),
             coordinator,
         )
@@ -1638,7 +1614,7 @@ mod tests {
         // Read the config back and check that it's preparing for LRTQ upgrade
         // with no acks.
         let read_config = datastore
-            .tq_get_latest_config(opctx, rack_id)
+            .tq_get_latest_config(opctx, make_authz_tq(rack_id))
             .await
             .expect("no error")
             .expect("returned config");
@@ -1676,7 +1652,7 @@ mod tests {
         DataStore::tq_insert_rss_config_after_handoff(
             opctx,
             &conn,
-            rack_id,
+            make_authz_tq(rack_id),
             members.clone(),
             coordinator,
         )
@@ -1696,7 +1672,7 @@ mod tests {
 
         // Read the config back and check that it's preparing with no acks
         let read_config = datastore
-            .tq_get_latest_config(opctx, rack_id)
+            .tq_get_latest_config(opctx, make_authz_tq(rack_id))
             .await
             .expect("no error")
             .expect("returned config");
@@ -1730,7 +1706,7 @@ mod tests {
         let e = datastore
             .tq_update_commit_status(
                 opctx,
-                rack_id,
+                make_authz_tq(rack_id),
                 config.epoch,
                 acked_commits,
             )
@@ -1765,7 +1741,7 @@ mod tests {
             .unwrap();
 
         let read_config = datastore
-            .tq_get_latest_config(opctx, rack_id)
+            .tq_get_latest_config(opctx, make_authz_tq(rack_id))
             .await
             .expect("no error")
             .expect("returned config");
@@ -1801,7 +1777,7 @@ mod tests {
             .unwrap();
 
         let read_config = datastore
-            .tq_get_latest_config(opctx, rack_id)
+            .tq_get_latest_config(opctx, make_authz_tq(rack_id))
             .await
             .expect("no error")
             .expect("returned config");
@@ -1843,7 +1819,7 @@ mod tests {
             .unwrap();
 
         let read_config = datastore
-            .tq_get_latest_config(opctx, rack_id)
+            .tq_get_latest_config(opctx, make_authz_tq(rack_id))
             .await
             .expect("no error")
             .expect("returned config");
@@ -1883,7 +1859,7 @@ mod tests {
         datastore
             .tq_update_commit_status(
                 opctx,
-                rack_id,
+                make_authz_tq(rack_id),
                 config.epoch,
                 coordinator_config.members.keys().cloned().collect(),
             )
@@ -1891,7 +1867,7 @@ mod tests {
             .unwrap();
 
         let read_config = datastore
-            .tq_get_latest_config(opctx, rack_id)
+            .tq_get_latest_config(opctx, make_authz_tq(rack_id))
             .await
             .expect("no error")
             .expect("returned config");
@@ -1930,7 +1906,7 @@ mod tests {
         DataStore::tq_insert_rss_config_after_handoff(
             opctx,
             &conn,
-            rack_id,
+            make_authz_tq(rack_id),
             members.clone(),
             coordinator,
         )
@@ -1965,7 +1941,7 @@ mod tests {
             };
 
         let read_config = datastore
-            .tq_get_latest_config(opctx, rack_id)
+            .tq_get_latest_config(opctx, make_authz_tq(rack_id))
             .await
             .expect("no error")
             .expect("returned config");
@@ -1989,7 +1965,7 @@ mod tests {
             .unwrap();
 
         let read_config = datastore
-            .tq_get_latest_config(opctx, rack_id)
+            .tq_get_latest_config(opctx, make_authz_tq(rack_id))
             .await
             .expect("no error")
             .expect("returned config");
@@ -2031,7 +2007,7 @@ mod tests {
         datastore
             .tq_update_commit_status(
                 opctx,
-                rack_id,
+                make_authz_tq(rack_id),
                 config.epoch,
                 coordinator_config
                     .members
@@ -2044,7 +2020,7 @@ mod tests {
             .unwrap();
 
         let read_config = datastore
-            .tq_get_latest_config(opctx, rack_id)
+            .tq_get_latest_config(opctx, make_authz_tq(rack_id))
             .await
             .expect("no error")
             .expect("returned config");
@@ -2076,7 +2052,7 @@ mod tests {
         datastore
             .tq_update_commit_status(
                 opctx,
-                rack_id,
+                make_authz_tq(rack_id),
                 config.epoch,
                 coordinator_config
                     .members
@@ -2089,7 +2065,7 @@ mod tests {
             .unwrap();
 
         let read_config = datastore
-            .tq_get_latest_config(opctx, rack_id)
+            .tq_get_latest_config(opctx, make_authz_tq(rack_id))
             .await
             .expect("no error")
             .expect("returned config");
@@ -2116,7 +2092,7 @@ mod tests {
         datastore.tq_insert_latest_config(opctx, next_config).await.unwrap();
 
         let read_config = datastore
-            .tq_get_config(opctx, rack_id, Epoch(2))
+            .tq_get_config(opctx, make_authz_tq(rack_id), Epoch(2))
             .await
             .expect("no error")
             .expect("returned config");
@@ -2160,7 +2136,7 @@ mod tests {
         DataStore::tq_insert_rss_config_after_handoff(
             opctx,
             &conn,
-            rack_id,
+            make_authz_tq(rack_id),
             members.clone(),
             coordinator,
         )
@@ -2180,13 +2156,23 @@ mod tests {
 
         // Aborting should succeed, since we haven't committed
         datastore
-            .tq_abort_config(opctx, config.rack_id, config.epoch, "test".into())
+            .tq_abort_config(
+                opctx,
+                make_authz_tq(config.rack_id),
+                config.epoch,
+                "test".into(),
+            )
             .await
             .unwrap();
 
         // Aborting is idempotent
         datastore
-            .tq_abort_config(opctx, config.rack_id, config.epoch, "test".into())
+            .tq_abort_config(
+                opctx,
+                make_authz_tq(config.rack_id),
+                config.epoch,
+                "test".into(),
+            )
             .await
             .unwrap();
 
@@ -2239,7 +2225,7 @@ mod tests {
 
         // Retrieve the configuration and ensure it is actually aborted
         let read_config = datastore
-            .tq_get_latest_config(opctx, rack_id)
+            .tq_get_latest_config(opctx, make_authz_tq(rack_id))
             .await
             .expect("no error")
             .expect("returned config");
@@ -2261,7 +2247,12 @@ mod tests {
 
         // Trying to abort the old config will fail because it's stale
         datastore
-            .tq_abort_config(opctx, config.rack_id, config.epoch, "test".into())
+            .tq_abort_config(
+                opctx,
+                make_authz_tq(config.rack_id),
+                config.epoch,
+                "test".into(),
+            )
             .await
             .unwrap_err();
 
@@ -2292,7 +2283,7 @@ mod tests {
         datastore
             .tq_abort_config(
                 opctx,
-                config2.rack_id,
+                make_authz_tq(config2.rack_id),
                 config2.epoch,
                 "test".into(),
             )
@@ -2331,7 +2322,7 @@ mod tests {
             DataStore::tq_insert_rss_config_after_handoff(
                 opctx,
                 &conn,
-                rack_id,
+                make_authz_tq(rack_id),
                 members.clone(),
                 coordinator,
             )

@@ -8,6 +8,7 @@ use crate::app::background::BackgroundTask;
 use crate::app::rack::rack_subnet;
 use anyhow::{Context, Error, anyhow, bail};
 use futures::future::BoxFuture;
+use nexus_auth::authz;
 use nexus_auth::context::OpContext;
 use nexus_db_model::SledUnderlaySubnetAllocation;
 use nexus_db_queries::db::DataStore;
@@ -22,6 +23,7 @@ use nexus_types::trust_quorum::{
     TrustQuorumMemberState,
 };
 use omicron_common::address::{Ipv6Subnet, RACK_PREFIX, get_64_subnet};
+use omicron_common::api::external::LookupType;
 use omicron_uuid_kinds::{GenericUuid, RackUuid, SledUuid};
 use parallel_task_set::ParallelTaskSet;
 use rand::seq::SliceRandom;
@@ -211,8 +213,13 @@ async fn drive_reconfiguration(
     rack_id: RackUuid,
     epoch: Epoch,
 ) -> Result<Status, Error> {
+    let authz_tq = authz::TrustQuorumConfig::new(authz::Rack::new(
+        authz::FLEET,
+        rack_id.into_untyped_uuid(),
+        LookupType::ById(rack_id.into_untyped_uuid()),
+    ));
     let Some(config) = datastore
-        .tq_get_config(&opctx, rack_id, epoch)
+        .tq_get_config(&opctx, authz_tq.clone(), epoch)
         .await
         .context("Failed to get tq configuration")?
     else {
@@ -398,10 +405,15 @@ async fn commit(
 
     if !acked.is_empty() {
         // Write state back to DB
+        let authz_tq = authz::TrustQuorumConfig::new(authz::Rack::new(
+            authz::FLEET,
+            nexus_config.rack_id.into_untyped_uuid(),
+            LookupType::ById(nexus_config.rack_id.into_untyped_uuid()),
+        ));
         let state = datastore
             .tq_update_commit_status(
                 &opctx,
-                nexus_config.rack_id,
+                authz_tq,
                 nexus_config.epoch,
                 acked.clone(),
             )
@@ -476,8 +488,13 @@ async fn allocate_subnets_and_start_sled_agents(
 
     // Retrieve the last committed configuration so we can diff members and see
     // who was added.
+    let authz_tq = authz::TrustQuorumConfig::new(authz::Rack::new(
+        authz::FLEET,
+        rack_id.into_untyped_uuid(),
+        LookupType::ById(rack_id.into_untyped_uuid()),
+    ));
     let Some(last_committed_config) =
-        datastore.tq_get_config(&opctx, rack_id, last_committed_epoch).await?
+        datastore.tq_get_config(&opctx, authz_tq, last_committed_epoch).await?
     else {
         bail!(
             "Failed to retrieve config from DB for rack {rack_id}, \
