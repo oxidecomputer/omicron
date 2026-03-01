@@ -41,7 +41,7 @@ use sled_agent_types::diagnostics::{
     SledDiagnosticsLogsDownloadPathParam, SledDiagnosticsLogsDownloadQueryParam,
 };
 use sled_agent_types::disk::{DiskEnsureBody, DiskPathParam};
-use sled_agent_types::early_networking::EarlyNetworkConfig;
+use sled_agent_types::early_networking::EarlyNetworkConfigEnvelope;
 use sled_agent_types::firewall_rules::VpcFirewallRulesEnsureBody;
 use sled_agent_types::instance::{
     InstanceEnsureBody, InstanceExternalIpBody, InstanceMulticastBody,
@@ -78,7 +78,7 @@ use trust_quorum_types::messages::{
 use trust_quorum_types::status::{CommitStatus, CoordinatorStatus, NodeStatus};
 
 // Fixed identifiers for prior versions only
-use sled_agent_types_versions::v1;
+use sled_agent_types_versions::{v1, v20, v24};
 use sled_diagnostics::{
     SledDiagnosticsCommandHttpOutput, SledDiagnosticsQueryOutput,
 };
@@ -781,7 +781,17 @@ impl SledAgentApi for SledAgentImpl {
 
     async fn read_network_bootstore_config_cache(
         rqctx: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseOk<EarlyNetworkConfig>, HttpError> {
+    ) -> Result<
+        HttpResponseOk<v20::early_networking::EarlyNetworkConfig>,
+        HttpError,
+    > {
+        // This endpoint has been removed, so we're forever pinned to returning
+        // a `v20::early_networking::EarlyNetworkConfigBody`. If a new version
+        // of that type is added, we'll need to update this code to convert from
+        // the version we get back from `deserialize_from_bootstore()` into the
+        // v20 version we need.
+        use v20::early_networking::EarlyNetworkConfigBody;
+
         let sa = rqctx.context();
         let bs = sa.bootstore();
 
@@ -792,14 +802,24 @@ impl SledAgentApi for SledAgentImpl {
         })?;
 
         let config = match config {
-            Some(config) => EarlyNetworkConfig::deserialize_bootstore_config(
-                &rqctx.log, &config,
-            )
-            .map_err(|e| {
-                HttpError::for_internal_error(format!(
-                    "deserialize early network config: {e}"
-                ))
-            })?,
+            Some(config) => {
+                let body: EarlyNetworkConfigBody =
+                    EarlyNetworkConfigEnvelope::deserialize_from_bootstore(
+                        &config,
+                    )
+                    .and_then(|envelope| envelope.deserialize_body())
+                    .map_err(|err| {
+                        HttpError::for_internal_error(format!(
+                            "failed to deserialize early network config: {}",
+                            InlineErrorChain::new(&err),
+                        ))
+                    })?;
+                v20::early_networking::EarlyNetworkConfig {
+                    generation: config.generation,
+                    schema_version: EarlyNetworkConfigBody::SCHEMA_VERSION,
+                    body,
+                }
+            }
             None => {
                 return Err(HttpError::for_unavail(
                     None,
@@ -813,7 +833,51 @@ impl SledAgentApi for SledAgentImpl {
 
     async fn write_network_bootstore_config(
         rqctx: RequestContext<Self::Context>,
-        body: TypedBody<EarlyNetworkConfig>,
+        body: TypedBody<v24::early_networking::WriteNetworkConfigRequest>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        let sa = rqctx.context();
+        let bs = sa.bootstore();
+        let body = body.into_inner();
+        let config = EarlyNetworkConfigEnvelope::from(&body.body)
+            .serialize_to_bootstore_with_generation(body.generation);
+
+        bs.update_network_config(config).await.map_err(|e| {
+            HttpError::for_internal_error(format!(
+                "failed to write updated config to boot store: {}",
+                InlineErrorChain::new(&e),
+            ))
+        })?;
+
+        Ok(HttpResponseUpdatedNoContent())
+    }
+
+    // As explained in `sled-agent-api`, we must faithfully implement old
+    // versions of `write_network_bootstore_config()` _without_ upconverting the
+    // request into the latest bootstore `NetworkConfig` we understand. Doing so
+    // opens a window where we could replicate a newer `NetworkConfig` to sleds
+    // that don't yet know how to deserialize it.
+    async fn write_network_bootstore_config_v20(
+        rqctx: RequestContext<Self::Context>,
+        body: TypedBody<v20::early_networking::EarlyNetworkConfig>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        let sa = rqctx.context();
+        let bs = sa.bootstore();
+        let config = body.into_inner();
+
+        bs.update_network_config(NetworkConfig::from(config)).await.map_err(
+            |e| {
+                HttpError::for_internal_error(format!(
+                    "failed to write updated config to boot store: {e}"
+                ))
+            },
+        )?;
+
+        Ok(HttpResponseUpdatedNoContent())
+    }
+
+    async fn write_network_bootstore_config_v1(
+        rqctx: RequestContext<Self::Context>,
+        body: TypedBody<v1::early_networking::EarlyNetworkConfig>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
         let sa = rqctx.context();
         let bs = sa.bootstore();

@@ -50,11 +50,20 @@ impl From<sled_agent_types::early_networking::BfdMode> for BfdMode {
     fn from(value: sled_agent_types::early_networking::BfdMode) -> Self {
         match value {
             sled_agent_types::early_networking::BfdMode::SingleHop => {
-                BfdMode::SingleHop
+                Self::SingleHop
             }
             sled_agent_types::early_networking::BfdMode::MultiHop => {
-                BfdMode::MultiHop
+                Self::MultiHop
             }
+        }
+    }
+}
+
+impl From<BfdMode> for sled_agent_types::early_networking::BfdMode {
+    fn from(value: BfdMode) -> Self {
+        match value {
+            BfdMode::SingleHop => Self::SingleHop,
+            BfdMode::MultiHop => Self::MultiHop,
         }
     }
 }

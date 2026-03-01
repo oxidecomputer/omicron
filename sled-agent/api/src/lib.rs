@@ -20,7 +20,7 @@ use omicron_common::api::internal::{
     },
 };
 use sled_agent_types_versions::{
-    latest, v1, v4, v6, v7, v9, v10, v11, v12, v14, v16, v17, v20,
+    latest, v1, v4, v6, v7, v9, v10, v11, v12, v14, v16, v17, v20, v24,
 };
 use sled_diagnostics::SledDiagnosticsQueryOutput;
 
@@ -36,6 +36,7 @@ api_versions!([
     // |  example for the next person.
     // v
     // (next_int, IDENT),
+    (24, BOOTSTORE_VERSIONING),
     (23, REMOVE_READ_BOOTSTORE_CONFIG_CACHE),
     (22, REMOVE_HEALTH_MONITOR_KEEP_CHECKS),
     (21, REMOVE_DISK_PUT),
@@ -805,14 +806,53 @@ pub trait SledAgentApi {
         Ok(HttpResponseOk(result))
     }
 
+    // -------------------------------------------------------------------------
+    // WARNING WARNING WARNING
+    //
+    // When adding new versions of `write_network_bootstore_config`, DO NOT
+    // provide a default implementation for the old version to convert the
+    // request to the latest type and forward the call to the latest method.
+    // Doing so can result in a broken update, because it can induce this
+    // sequence:
+    //
+    // 1. One scrimlet is updated; its sled agent is now running the new
+    //    version.
+    // 2. Nexus (still running the old version) sends a
+    //    `write_network_bootstore_config_vN()` request to the updated scrimlet.
+    // 3. The scrimlet converts the from-old-Nexus `vN` request to the latest
+    //    bootstore format and tells the bootstore to replicate it.
+    // 4. Other sleds, which have NOT YET been updated, will now see the new
+    //    version and be unable to deserialize it.
+    //
+    // We'll only hit this bad sequence if something in the underlying
+    // `EarlyNetworkConfigBody` body changes that causes Nexus to send a new
+    // config. That's not something we expect to be common in the middle of an
+    // update, but it's certainly possible!
+    //
+    // Instead, sled-agent needs to implement the old versions of this endpoint,
+    // and ensure they still do the same thing they did in the previous release
+    // (i.e., faithfully serialize the _old_ format into the bootstore). The
+    // latest version does _not_ use the `latest::*` type alias to be a gentle
+    // stumbling block toward this comment.
+    // -------------------------------------------------------------------------
     #[endpoint {
         method = PUT,
         path = "/network-bootstore-config",
-        versions = VERSION_BGP_V6..,
+        versions = VERSION_BOOTSTORE_VERSIONING..,
     }]
     async fn write_network_bootstore_config(
         rqctx: RequestContext<Self::Context>,
-        body: TypedBody<latest::early_networking::EarlyNetworkConfig>,
+        body: TypedBody<v24::early_networking::WriteNetworkConfigRequest>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
+
+    #[endpoint {
+        method = PUT,
+        path = "/network-bootstore-config",
+        versions = VERSION_BGP_V6..VERSION_BOOTSTORE_VERSIONING,
+    }]
+    async fn write_network_bootstore_config_v20(
+        rqctx: RequestContext<Self::Context>,
+        body: TypedBody<v20::early_networking::EarlyNetworkConfig>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
 
     #[endpoint {
@@ -823,10 +863,7 @@ pub trait SledAgentApi {
     async fn write_network_bootstore_config_v1(
         rqctx: RequestContext<Self::Context>,
         body: TypedBody<v1::early_networking::EarlyNetworkConfig>,
-    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
-        Self::write_network_bootstore_config(rqctx, body.map(|x| x.into()))
-            .await
-    }
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
 
     /// Add a sled to a rack that was already initialized via RSS
     #[endpoint {

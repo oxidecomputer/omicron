@@ -31,6 +31,22 @@ pub struct EarlyNetworkConfig {
     pub body: EarlyNetworkConfigBody,
 }
 
+impl From<EarlyNetworkConfig> for bootstore::NetworkConfig {
+    fn from(value: EarlyNetworkConfig) -> Self {
+        // We're serializing in-memory; this can only fail if
+        // `EarlyNetworkConfig` contains types that can't be represented as
+        // JSON, which (a) should never happened and (b) we should catch
+        // immediately in tests.
+        let blob = serde_json::to_vec(&value)
+            .expect("EarlyNetworkConfig can always be serialized as JSON");
+
+        // Yes this is duplicated, but that seems fine.
+        let generation = value.generation;
+
+        bootstore::NetworkConfig { generation, blob }
+    }
+}
+
 /// This is the actual configuration of EarlyNetworking.
 ///
 /// We nest it below the "header" of `generation` and `schema_version` so that
@@ -45,19 +61,6 @@ pub struct EarlyNetworkConfigBody {
 
     // Rack network configuration as delivered from RSS or Nexus
     pub rack_network_config: Option<RackNetworkConfig>,
-}
-
-impl From<EarlyNetworkConfig> for bootstore::NetworkConfig {
-    fn from(value: EarlyNetworkConfig) -> Self {
-        // Can this ever actually fail?
-        // We literally just deserialized the same data in RSS
-        let blob = serde_json::to_vec(&value).unwrap();
-
-        // Yes this is duplicated, but that seems fine.
-        let generation = value.generation;
-
-        bootstore::NetworkConfig { generation, blob }
-    }
 }
 
 /// Initial network configuration
@@ -147,7 +150,9 @@ pub struct BgpPeerConfig {
     pub vlan_id: Option<u16>,
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq, JsonSchema)]
+#[derive(
+    Clone, Debug, Deserialize, Serialize, PartialEq, Eq, Hash, JsonSchema,
+)]
 pub struct BfdPeerConfig {
     pub local: Option<IpAddr>,
     pub remote: IpAddr,
@@ -157,7 +162,9 @@ pub struct BfdPeerConfig {
     pub switch: SwitchLocation,
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq, JsonSchema)]
+#[derive(
+    Clone, Debug, Deserialize, Serialize, PartialEq, Eq, Hash, JsonSchema,
+)]
 pub struct RouteConfig {
     /// The destination of the route.
     pub destination: IpNet,
@@ -185,7 +192,15 @@ pub struct UplinkAddressConfig {
 pub struct UplinkAddressConfigError(pub(crate) String);
 
 #[derive(
-    Clone, Debug, Default, Deserialize, Serialize, PartialEq, Eq, JsonSchema,
+    Clone,
+    Debug,
+    Default,
+    Deserialize,
+    Serialize,
+    PartialEq,
+    Eq,
+    Hash,
+    JsonSchema,
 )]
 #[serde(rename_all = "snake_case")]
 /// To what extent should this port participate in LLDP
@@ -203,7 +218,9 @@ pub struct ParseLldpAdminStatusError(pub(crate) String);
 /// Per-port LLDP configuration settings.  Only the "status" setting is
 /// mandatory.  All other fields have natural defaults or may be inherited from
 /// the switch.
-#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq, JsonSchema)]
+#[derive(
+    Clone, Debug, Deserialize, Serialize, PartialEq, Eq, Hash, JsonSchema,
+)]
 pub struct LldpPortConfig {
     /// To what extent should this port participate in LLDP
     pub status: LldpAdminStatus,
@@ -232,7 +249,7 @@ pub struct LldpPortConfig {
 /// Per-port tx-eq overrides.  This can be used to fine-tune the transceiver
 /// equalization settings to improve signal integrity.
 #[derive(
-    Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq, JsonSchema,
+    Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq, Hash, JsonSchema,
 )]
 pub struct TxEqConfig {
     /// Pre-cursor tap1
@@ -346,6 +363,7 @@ pub enum PortFec {
     Eq,
     Ord,
     PartialOrd,
+    Hash,
 )]
 #[serde(rename_all = "snake_case")]
 pub enum BfdMode {

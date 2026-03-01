@@ -4,14 +4,13 @@
 
 //! Tests that EarlyNetworkConfig deserializes across versions.
 
-use std::str::FromStr;
-
 use bootstore::schemes::v0 as bootstore;
 use omicron_test_utils::dev::test_setup_log;
 use sled_agent_types::early_networking::{
-    BgpConfig, BgpPeerConfig, EarlyNetworkConfig, EarlyNetworkConfigBody,
-    ImportExportPolicy, LldpAdminStatus, LldpPortConfig, MaxPathConfig,
-    PortConfig, PortFec, PortSpeed, RackNetworkConfig, SwitchLocation,
+    BgpConfig, BgpPeerConfig, EarlyNetworkConfigBody,
+    EarlyNetworkConfigEnvelope, ImportExportPolicy, LldpAdminStatus,
+    LldpPortConfig, MaxPathConfig, PortConfig, PortFec, PortSpeed,
+    RackNetworkConfig, SwitchLocation,
 };
 
 const BLOB_PATH: &str = "tests/data/early_network_blobs.txt";
@@ -22,11 +21,12 @@ const BLOB_PATH: &str = "tests/data/early_network_blobs.txt";
 fn early_network_blobs_deserialize() {
     let logctx = test_setup_log("early_network_blobs_deserialize");
 
-    let (current_desc, current_config) = current_config_example();
+    let (current_desc, current_envelope) = current_config_example();
     assert!(
         !current_desc.contains(',') && !current_desc.contains('\n'),
         "current_desc must not contain commas or newlines"
     );
+    let current_config = current_envelope.deserialize_body().unwrap();
 
     // Read old blobs as newline-delimited JSON.
     let mut known_blobs = std::fs::read_to_string(BLOB_PATH)
@@ -42,37 +42,54 @@ fn early_network_blobs_deserialize() {
                 );
             });
 
+        // Convert the blob into a bootstore type; the generation doesn't matter
+        // here. (We used to duplicate it between the bootstore type and the
+        // inner type, so some lines of `known_blobs` will contain a generation
+        // - we ignore those.)
+        let blob_network_config = bootstore::NetworkConfig {
+            generation: 0,
+            blob: blob_json.as_bytes().to_vec(),
+        };
+
         // Attempt to deserialize this blob.
-        let config =
-            EarlyNetworkConfig::from_str(blob_json).unwrap_or_else(|error| {
-                panic!(
-                    "error deserializing early_network_blobs.txt \
+        let envelope = EarlyNetworkConfigEnvelope::deserialize_from_bootstore(
+            &blob_network_config,
+        )
+        .unwrap_or_else(|error| {
+            panic!(
+                "error deserializing early_network_blobs.txt envelope \
                     \"{blob_desc}\" (line {blob_lineno}): {error}",
-                );
-            });
+            );
+        });
+        let config = envelope.deserialize_body().unwrap_or_else(|error| {
+            panic!(
+                "error deserializing early_network_blobs.txt body \
+                 \"{blob_desc}\" (line {blob_lineno}): {error}",
+            );
+        });
 
         // Does this config match the current config?
         if blob_desc == current_desc {
             assert_eq!(
                 config, current_config,
-                "early_network_blobs.txt line {}: {} does not match current config",
-                blob_lineno, blob_desc
+                "early_network_blobs.txt line {blob_lineno}: \
+                 {blob_desc} does not match current config",
             );
             current_blob_is_known = true;
         }
 
-        // Now attempt to put this blob into a bootstore config, and deserialize that.
-        let network_config = bootstore::NetworkConfig {
-            generation: config.generation,
-            blob: blob_json.to_owned().into(),
-        };
-        let config2 = EarlyNetworkConfig::deserialize_bootstore_config(
-            &logctx.log,
+        // Now attempt to put this blob into a bootstore config, and deserialize
+        // that.
+        let network_config = envelope.serialize_to_bootstore_with_generation(0);
+        let config2 = EarlyNetworkConfigEnvelope::deserialize_from_bootstore(
             &network_config,
-        ).unwrap_or_else(|error| {
+        )
+        .and_then(|envelope| envelope.deserialize_body())
+        .unwrap_or_else(|error| {
             panic!(
                 "error deserializing early_network_blobs.txt \
-                \"{blob_desc}\" (line {blob_lineno}) as bootstore config: {error}",
+                 \"{blob_desc}\" (line {blob_lineno}) as bootstore config: \
+                 {error}",
             );
         });
 
@@ -86,7 +103,16 @@ fn early_network_blobs_deserialize() {
 
     // If the current blob was not covered, add it to the list of known blobs.
     if !current_blob_is_known {
-        let current_blob_json = serde_json::to_string(&current_config).unwrap();
+        let current_blob_json =
+            serde_json::to_string(&current_envelope).unwrap();
+        assert!(
+            !current_desc.contains(','),
+            "description contains illegal charactor ',': {current_desc:?}"
+        );
+        assert!(
+            !current_desc.contains('\n'),
+            "description contains illegal charactor '\\n': {current_desc:?}"
+        );
         let current_blob = format!("{},{}", current_desc, current_blob_json);
         known_blobs.push_str(&current_blob);
         known_blobs.push('\n');
@@ -103,184 +129,180 @@ fn early_network_blobs_deserialize() {
 ///
 /// The goal is that if the definition of `EarlyNetworkConfig` changes in the
 /// future, older blobs can still be deserialized correctly.
-fn current_config_example() -> (&'static str, EarlyNetworkConfig) {
+fn current_config_example() -> (&'static str, EarlyNetworkConfigEnvelope) {
     // NOTE: the description must not contain commas or newlines.
-    let description = "2026-01-22 r17";
-    let config = EarlyNetworkConfig {
-        generation: 114,
-        schema_version: EarlyNetworkConfig::schema_version(),
-        body: EarlyNetworkConfigBody {
-            ntp_servers: vec![],
-            rack_network_config: Some(RackNetworkConfig {
-                rack_subnet: "fd00:1122:3344:100::/56".parse().unwrap(),
-                infra_ip_first: "172.20.15.21".parse().unwrap(),
-                infra_ip_last: "172.20.15.22".parse().unwrap(),
-                ports: vec![
-                    PortConfig {
-                        routes: vec![],
-                        addresses: vec![],
-                        switch: SwitchLocation::Switch1,
-                        port: "qsfp0".to_owned(),
-                        uplink_port_speed: PortSpeed::Speed100G,
-                        uplink_port_fec: None,
-                        bgp_peers: vec![],
-                        autoneg: false,
-                        tx_eq: None,
-                        lldp: None,
-                    },
-                    PortConfig {
-                        routes: vec![],
-                        addresses: vec![],
-                        switch: SwitchLocation::Switch1,
-                        port: "qsfp26".to_owned(),
-                        uplink_port_speed: PortSpeed::Speed100G,
-                        uplink_port_fec: Some(PortFec::Rs),
-                        bgp_peers: vec![],
-                        autoneg: false,
-                        tx_eq: None,
-                        lldp: Some(LldpPortConfig {
-                            status: LldpAdminStatus::Disabled,
-                            chassis_id: None,
-                            port_id: None,
-                            port_description: None,
-                            system_name: None,
-                            system_description: None,
-                            management_addrs: None,
-                        }),
-                    },
-                    PortConfig {
-                        routes: vec![],
-                        addresses: vec!["172.20.15.53/29".parse().unwrap()],
-                        switch: SwitchLocation::Switch1,
+    let description = "2026-02-27 r18";
+    let config = EarlyNetworkConfigEnvelope::from(&EarlyNetworkConfigBody {
+        ntp_servers: vec![],
+        rack_network_config: Some(RackNetworkConfig {
+            rack_subnet: "fd00:1122:3344:100::/56".parse().unwrap(),
+            infra_ip_first: "172.20.15.21".parse().unwrap(),
+            infra_ip_last: "172.20.15.22".parse().unwrap(),
+            ports: vec![
+                PortConfig {
+                    routes: vec![],
+                    addresses: vec![],
+                    switch: SwitchLocation::Switch1,
+                    port: "qsfp0".to_owned(),
+                    uplink_port_speed: PortSpeed::Speed100G,
+                    uplink_port_fec: None,
+                    bgp_peers: vec![],
+                    autoneg: false,
+                    tx_eq: None,
+                    lldp: None,
+                },
+                PortConfig {
+                    routes: vec![],
+                    addresses: vec![],
+                    switch: SwitchLocation::Switch1,
+                    port: "qsfp26".to_owned(),
+                    uplink_port_speed: PortSpeed::Speed100G,
+                    uplink_port_fec: Some(PortFec::Rs),
+                    bgp_peers: vec![],
+                    autoneg: false,
+                    tx_eq: None,
+                    lldp: Some(LldpPortConfig {
+                        status: LldpAdminStatus::Disabled,
+                        chassis_id: None,
+                        port_id: None,
+                        port_description: None,
+                        system_name: None,
+                        system_description: None,
+                        management_addrs: None,
+                    }),
+                },
+                PortConfig {
+                    routes: vec![],
+                    addresses: vec!["172.20.15.53/29".parse().unwrap()],
+                    switch: SwitchLocation::Switch1,
+                    port: "qsfp18".to_owned(),
+                    uplink_port_speed: PortSpeed::Speed100G,
+                    uplink_port_fec: Some(PortFec::Rs),
+                    bgp_peers: vec![BgpPeerConfig {
+                        asn: 65002,
                         port: "qsfp18".to_owned(),
-                        uplink_port_speed: PortSpeed::Speed100G,
-                        uplink_port_fec: Some(PortFec::Rs),
-                        bgp_peers: vec![BgpPeerConfig {
-                            asn: 65002,
-                            port: "qsfp18".to_owned(),
-                            addr: "172.20.15.51".parse().unwrap(),
-                            hold_time: Some(6),
-                            idle_hold_time: Some(3),
-                            delay_open: Some(3),
-                            connect_retry: Some(3),
-                            keepalive: Some(2),
-                            remote_asn: None,
-                            min_ttl: None,
-                            md5_auth_key: None,
-                            multi_exit_discriminator: None,
-                            communities: Vec::new(),
-                            local_pref: None,
-                            enforce_first_as: false,
-                            allowed_import: ImportExportPolicy::NoFiltering,
-                            allowed_export: ImportExportPolicy::Allow(vec![
-                                "172.20.52.0/22".parse().unwrap(),
-                                "172.20.26.0/24".parse().unwrap(),
-                            ]),
-                            vlan_id: None,
-                            router_lifetime: Default::default(),
-                        }],
-                        autoneg: false,
-                        tx_eq: None,
-                        lldp: Some(LldpPortConfig {
-                            status: LldpAdminStatus::Disabled,
-                            chassis_id: None,
-                            port_id: None,
-                            port_description: None,
-                            system_name: None,
-                            system_description: None,
-                            management_addrs: None,
-                        }),
-                    },
-                    PortConfig {
-                        routes: vec![],
-                        addresses: vec!["172.20.15.45/29".parse().unwrap()],
-                        switch: SwitchLocation::Switch0,
+                        addr: "172.20.15.51".parse().unwrap(),
+                        hold_time: Some(6),
+                        idle_hold_time: Some(3),
+                        delay_open: Some(3),
+                        connect_retry: Some(3),
+                        keepalive: Some(2),
+                        remote_asn: None,
+                        min_ttl: None,
+                        md5_auth_key: None,
+                        multi_exit_discriminator: None,
+                        communities: Vec::new(),
+                        local_pref: None,
+                        enforce_first_as: false,
+                        allowed_import: ImportExportPolicy::NoFiltering,
+                        allowed_export: ImportExportPolicy::Allow(vec![
+                            "172.20.52.0/22".parse().unwrap(),
+                            "172.20.26.0/24".parse().unwrap(),
+                        ]),
+                        vlan_id: None,
+                        router_lifetime: Default::default(),
+                    }],
+                    autoneg: false,
+                    tx_eq: None,
+                    lldp: Some(LldpPortConfig {
+                        status: LldpAdminStatus::Disabled,
+                        chassis_id: None,
+                        port_id: None,
+                        port_description: None,
+                        system_name: None,
+                        system_description: None,
+                        management_addrs: None,
+                    }),
+                },
+                PortConfig {
+                    routes: vec![],
+                    addresses: vec!["172.20.15.45/29".parse().unwrap()],
+                    switch: SwitchLocation::Switch0,
+                    port: "qsfp18".to_owned(),
+                    uplink_port_speed: PortSpeed::Speed100G,
+                    uplink_port_fec: Some(PortFec::Rs),
+                    bgp_peers: vec![BgpPeerConfig {
+                        asn: 65002,
                         port: "qsfp18".to_owned(),
-                        uplink_port_speed: PortSpeed::Speed100G,
-                        uplink_port_fec: Some(PortFec::Rs),
-                        bgp_peers: vec![BgpPeerConfig {
-                            asn: 65002,
-                            port: "qsfp18".to_owned(),
-                            addr: "172.20.15.43".parse().unwrap(),
-                            hold_time: Some(6),
-                            idle_hold_time: Some(0),
-                            delay_open: Some(3),
-                            connect_retry: Some(3),
-                            keepalive: Some(2),
-                            remote_asn: None,
-                            min_ttl: None,
-                            md5_auth_key: None,
-                            multi_exit_discriminator: None,
-                            communities: Vec::new(),
-                            local_pref: None,
-                            enforce_first_as: false,
-                            allowed_import: ImportExportPolicy::NoFiltering,
-                            allowed_export: ImportExportPolicy::Allow(vec![
-                                "172.20.52.0/22".parse().unwrap(),
-                                "172.20.26.0/24".parse().unwrap(),
-                            ]),
-                            vlan_id: None,
-                            router_lifetime: Default::default(),
-                        }],
-                        autoneg: false,
-                        tx_eq: None,
-                        lldp: Some(LldpPortConfig {
-                            status: LldpAdminStatus::Disabled,
-                            chassis_id: None,
-                            port_id: None,
-                            port_description: None,
-                            system_name: None,
-                            system_description: None,
-                            management_addrs: None,
-                        }),
-                    },
-                    PortConfig {
-                        routes: vec![],
-                        addresses: vec![],
-                        switch: SwitchLocation::Switch0,
-                        port: "qsfp0".to_owned(),
-                        uplink_port_speed: PortSpeed::Speed100G,
-                        uplink_port_fec: None,
-                        bgp_peers: vec![],
-                        autoneg: false,
-                        tx_eq: None,
-                        lldp: None,
-                    },
-                    PortConfig {
-                        routes: vec![],
-                        addresses: vec![],
-                        switch: SwitchLocation::Switch0,
-                        port: "qsfp26".to_owned(),
-                        uplink_port_speed: PortSpeed::Speed100G,
-                        uplink_port_fec: Some(PortFec::Rs),
-                        bgp_peers: vec![],
-                        autoneg: false,
-                        tx_eq: None,
-                        lldp: Some(LldpPortConfig {
-                            status: LldpAdminStatus::Disabled,
-                            chassis_id: None,
-                            port_id: None,
-                            port_description: None,
-                            system_name: None,
-                            system_description: None,
-                            management_addrs: None,
-                        }),
-                    },
+                        addr: "172.20.15.43".parse().unwrap(),
+                        hold_time: Some(6),
+                        idle_hold_time: Some(0),
+                        delay_open: Some(3),
+                        connect_retry: Some(3),
+                        keepalive: Some(2),
+                        remote_asn: None,
+                        min_ttl: None,
+                        md5_auth_key: None,
+                        multi_exit_discriminator: None,
+                        communities: Vec::new(),
+                        local_pref: None,
+                        enforce_first_as: false,
+                        allowed_import: ImportExportPolicy::NoFiltering,
+                        allowed_export: ImportExportPolicy::Allow(vec![
+                            "172.20.52.0/22".parse().unwrap(),
+                            "172.20.26.0/24".parse().unwrap(),
+                        ]),
+                        vlan_id: None,
+                        router_lifetime: Default::default(),
+                    }],
+                    autoneg: false,
+                    tx_eq: None,
+                    lldp: Some(LldpPortConfig {
+                        status: LldpAdminStatus::Disabled,
+                        chassis_id: None,
+                        port_id: None,
+                        port_description: None,
+                        system_name: None,
+                        system_description: None,
+                        management_addrs: None,
+                    }),
+                },
+                PortConfig {
+                    routes: vec![],
+                    addresses: vec![],
+                    switch: SwitchLocation::Switch0,
+                    port: "qsfp0".to_owned(),
+                    uplink_port_speed: PortSpeed::Speed100G,
+                    uplink_port_fec: None,
+                    bgp_peers: vec![],
+                    autoneg: false,
+                    tx_eq: None,
+                    lldp: None,
+                },
+                PortConfig {
+                    routes: vec![],
+                    addresses: vec![],
+                    switch: SwitchLocation::Switch0,
+                    port: "qsfp26".to_owned(),
+                    uplink_port_speed: PortSpeed::Speed100G,
+                    uplink_port_fec: Some(PortFec::Rs),
+                    bgp_peers: vec![],
+                    autoneg: false,
+                    tx_eq: None,
+                    lldp: Some(LldpPortConfig {
+                        status: LldpAdminStatus::Disabled,
+                        chassis_id: None,
+                        port_id: None,
+                        port_description: None,
+                        system_name: None,
+                        system_description: None,
+                        management_addrs: None,
+                    }),
+                },
+            ],
+            bgp: vec![BgpConfig {
+                asn: 65002,
+                originate: vec![
+                    "172.20.52.0/22".parse().unwrap(),
+                    "172.20.26.0/24".parse().unwrap(),
                 ],
-                bgp: vec![BgpConfig {
-                    asn: 65002,
-                    originate: vec![
-                        "172.20.52.0/22".parse().unwrap(),
-                        "172.20.26.0/24".parse().unwrap(),
-                    ],
-                    shaper: None,
-                    checker: None,
-                    max_paths: MaxPathConfig::default(),
-                }],
-                bfd: vec![],
-            }),
-        },
-    };
+                shaper: None,
+                checker: None,
+                max_paths: MaxPathConfig::default(),
+            }],
+            bfd: vec![],
+        }),
+    });
 
     (description, config)
 }

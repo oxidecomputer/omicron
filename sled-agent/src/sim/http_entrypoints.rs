@@ -53,7 +53,7 @@ use sled_agent_types::diagnostics::{
     SledDiagnosticsLogsDownloadPathParam, SledDiagnosticsLogsDownloadQueryParam,
 };
 use sled_agent_types::disk::{DiskEnsureBody, DiskPathParam};
-use sled_agent_types::early_networking::EarlyNetworkConfig;
+use sled_agent_types::early_networking::EarlyNetworkConfigEnvelope;
 use sled_agent_types::firewall_rules::VpcFirewallRulesEnsureBody;
 use sled_agent_types::instance::{
     InstanceEnsureBody, InstanceExternalIpBody, InstanceMulticastBody,
@@ -81,10 +81,13 @@ use sled_agent_types::zone_bundle::{
     BundleUtilization, CleanupContext, CleanupContextUpdate, CleanupCount,
     ZoneBundleFilter, ZoneBundleId, ZoneBundleMetadata, ZonePathParam,
 };
+use sled_agent_types_versions::v24;
 use sled_hardware_types::BaseboardId;
 // Fixed identifiers for prior versions only
 use sled_agent_types_versions::v1;
+use sled_agent_types_versions::v20;
 use sled_diagnostics::SledDiagnosticsQueryOutput;
+use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 use trust_quorum_types::messages::{
@@ -393,20 +396,77 @@ impl SledAgentApi for SledAgentSimImpl {
 
     async fn read_network_bootstore_config_cache(
         rqctx: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseOk<EarlyNetworkConfig>, HttpError> {
+    ) -> Result<
+        HttpResponseOk<v20::early_networking::EarlyNetworkConfig>,
+        HttpError,
+    > {
+        // Read the current envelope, then convert it back down to the version
+        // we have to report for this (now-removed!) API endpoint.
+        use v20::early_networking::EarlyNetworkConfigBody;
+
         let config =
             rqctx.context().bootstore_network_config.lock().unwrap().clone();
-        Ok(HttpResponseOk(config))
+
+        let envelope =
+            EarlyNetworkConfigEnvelope::deserialize_from_bootstore(&config)
+                .map_err(|err| {
+                    HttpError::for_internal_error(format!(
+                        "could not deserialize bootstore contents: {}",
+                        InlineErrorChain::new(&err)
+                    ))
+                })?;
+        let body: EarlyNetworkConfigBody =
+            envelope.deserialize_body().map_err(|err| {
+                HttpError::for_internal_error(format!(
+                    "could not deserialize early network config body: {}",
+                    InlineErrorChain::new(&err)
+                ))
+            })?;
+
+        Ok(HttpResponseOk(v20::early_networking::EarlyNetworkConfig {
+            generation: config.generation,
+            schema_version: EarlyNetworkConfigBody::SCHEMA_VERSION,
+            body,
+        }))
     }
 
     async fn write_network_bootstore_config(
         rqctx: RequestContext<Self::Context>,
-        body: TypedBody<EarlyNetworkConfig>,
+        body: TypedBody<v24::early_networking::WriteNetworkConfigRequest>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
         let mut config =
             rqctx.context().bootstore_network_config.lock().unwrap();
-        *config = body.into_inner();
+        let body = body.into_inner();
+
+        *config = EarlyNetworkConfigEnvelope::from(&body.body)
+            .serialize_to_bootstore_with_generation(body.generation);
         Ok(HttpResponseUpdatedNoContent())
+    }
+
+    async fn write_network_bootstore_config_v20(
+        _rqctx: RequestContext<Self::Context>,
+        _body: TypedBody<v20::early_networking::EarlyNetworkConfig>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        // Real sled-agent has to support this endpoint for backwards
+        // compatibility during an update; sim-sled-agent doesn't.
+        Err(HttpError::for_bad_request(
+            None,
+            "old bootstore APIs not supported in simulated sled-agent"
+                .to_string(),
+        ))
+    }
+
+    async fn write_network_bootstore_config_v1(
+        _rqctx: RequestContext<Self::Context>,
+        _body: TypedBody<v1::early_networking::EarlyNetworkConfig>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        // Real sled-agent has to support this endpoint for backwards
+        // compatibility during an update; sim-sled-agent doesn't.
+        Err(HttpError::for_bad_request(
+            None,
+            "old bootstore APIs not supported in simulated sled-agent"
+                .to_string(),
+        ))
     }
 
     /// Fetch basic information about this sled
