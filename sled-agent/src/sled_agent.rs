@@ -547,6 +547,18 @@ impl SledAgent {
             }
         }
 
+        // Start tracking CPU metrics.
+        match metrics_manager.request_queue().track_cpu() {
+            Ok(_) => {
+                debug!(log, "started tracking CPU metrics")
+            }
+            Err(e) => error!(
+                log,
+                "failed to track CPU metrics";
+                "error" => slog_error_chain::InlineErrorChain::new(&e),
+            ),
+        }
+
         // Create the PortManager to manage all the OPTE ports on the sled.
         let port_manager = PortManager::new(
             parent_log.new(o!("component" => "PortManager")),
