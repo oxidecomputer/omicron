@@ -12,11 +12,17 @@ use libc::SIGINT;
 use nexus_config::NexusConfig;
 use nexus_test_interface::NexusServer;
 use nexus_test_utils::resource_helpers::DiskTest;
+use omicron_sled_agent::sim::ConfigHealthMonitor;
 use signal_hook_tokio::Signals;
 use std::fs;
 
 const DEFAULT_NEXUS_CONFIG: &str =
     concat!(env!("CARGO_MANIFEST_DIR"), "/../../nexus/examples/config.toml");
+
+const DEFAULT_HEALTH_MONITOR_CONFIG: &str = concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../../sled-agent/tests/configs/health_monitor_sim.toml"
+);
 
 fn main() -> anyhow::Result<()> {
     oxide_tokio_rt::run(async {
@@ -58,6 +64,9 @@ struct RunAllArgs {
     /// Override the nexus configuration file.
     #[clap(long, default_value = DEFAULT_NEXUS_CONFIG)]
     nexus_config: Utf8PathBuf,
+    /// Override the sled agent health monitor configuration file.
+    #[clap(long, default_value = DEFAULT_HEALTH_MONITOR_CONFIG)]
+    health_monitor_config: Utf8PathBuf,
 }
 
 impl RunAllArgs {
@@ -88,10 +97,23 @@ impl RunAllArgs {
                 .set_port(p);
         }
 
+        let health_monitor_config_str =
+            fs::read_to_string(&self.health_monitor_config)?;
+        let sled_agent_health_monitor: ConfigHealthMonitor =
+            toml::from_str(&health_monitor_config_str).context(format!(
+                "parsing config: {}",
+                self.health_monitor_config.as_str()
+            ))?;
+
         println!("omicron-dev: setting up all services ... ");
         let cptestctx = nexus_test_utils::omicron_dev_setup_with_config::<
             omicron_nexus::Server,
-        >(&mut config, 0, self.gateway_config.clone())
+        >(
+            &mut config,
+            0,
+            self.gateway_config.clone(),
+            sled_agent_health_monitor,
+        )
         .await
         .context("error setting up services")?;
 

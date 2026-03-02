@@ -11,9 +11,10 @@ use super::instance::{self, SimInstance};
 use super::storage::CrucibleData;
 use super::storage::Storage;
 use crate::artifact_store::ArtifactStore;
+use crate::long_running_tasks::spawn_health_monitor_tasks;
 use crate::nexus::NexusClient;
-use crate::sim::SimulatedUpstairs;
 use crate::sim::simulatable::Simulatable;
+use crate::sim::{ConfigHealthMonitor, SimulatedUpstairs};
 use crate::support_bundle::storage::SupportBundleQueryType;
 use crate::updates::UpdateManager;
 use anyhow::Context;
@@ -168,7 +169,14 @@ impl SledAgent {
                 .await
                 .start(&log, &config.dropshot);
 
-        let health_monitor = HealthMonitorHandle::stub();
+        let ConfigHealthMonitor { enabled, sim_health_checks } =
+            config.health_monitor.clone();
+
+        let health_monitor = if enabled {
+            spawn_health_monitor_tasks(&log).await
+        } else {
+            HealthMonitorHandle::spawn_sim(sim_health_checks)
+        };
 
         Arc::new(SledAgent {
             id,

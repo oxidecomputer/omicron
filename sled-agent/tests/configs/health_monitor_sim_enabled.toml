@@ -1,0 +1,8 @@
+#
+# Sled agent health monitor: example config file
+#
+# With this configuration, the actual health monitor will be running, performing
+# the actual health checks against the machine this is running on.
+#
+
+enabled = true
