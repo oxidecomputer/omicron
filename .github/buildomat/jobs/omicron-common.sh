@@ -4,7 +4,9 @@
 #: variety = "basic"
 #: target = "helios-2.0"
 #: rust_toolchain = true
-#: output_rules = []
+#: output_rules = [
+#:  "%/var/tmp/ci-resource-usage.csv",
+#: ]
 
 # Verify that omicron-common builds successfully when used as a dependency
 # in an external project. It must not leak anything that requires an external
@@ -19,6 +21,9 @@ source .github/buildomat/ci-env.sh
 
 cargo --version
 rustc --version
+
+cargo build --release -p ci-resource-usage
+bmat process start ci-resource-usage target/release/ci-resource-usage /var/tmp/ci-resource-usage.csv
 
 cd /tmp
 cargo new --lib test-project

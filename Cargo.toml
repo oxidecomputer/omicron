@@ -32,6 +32,7 @@ members = [
     "cockroach-metrics",
     "common",
     "dev-tools/cert-dev",
+    "dev-tools/ci-resource-usage",
     "dev-tools/clickana",
     "dev-tools/clickhouse-cluster-dev",
     "dev-tools/ch-dev",

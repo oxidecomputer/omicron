@@ -11,6 +11,7 @@
 #:	"%/var/tmp/omicron_tmp/**/*",
 #:	"!/var/tmp/omicron_tmp/crdb-base*",
 #:	"!/var/tmp/omicron_tmp/rustc*",
+#:  "%/var/tmp/ci-resource-usage.csv",
 #: ]
 #: access_repos = [
 #:	"oxidecomputer/dendrite",
