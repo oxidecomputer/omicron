@@ -2,9 +2,11 @@
 #:
 #: name = "clippy (helios)"
 #: variety = "basic"
-#: target = "helios-2.0"
+#: target = "helios-2.0-20260324"
 #: rust_toolchain = true
-#: output_rules = []
+#: output_rules = [
+#:  "%/var/tmp/ci-resource-usage.csv",
+#: ]
 
 # Run clippy on illumos (not just other systems) because a bunch of our code
 # (that we want to check) is conditionally-compiled on illumos only.
@@ -27,6 +29,9 @@ source .github/buildomat/ci-env.sh
 
 cargo --version
 rustc --version
+
+cargo build --release -p ci-resource-usage
+bmat process start ci-resource-usage target/release/ci-resource-usage /var/tmp/ci-resource-usage.csv
 
 banner prerequisites
 ptime -m bash ./tools/install_builder_prerequisites.sh -y
