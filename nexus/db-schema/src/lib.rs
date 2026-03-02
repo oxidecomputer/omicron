@@ -25,7 +25,7 @@ pub static DIESEL_TABLES: [DieselTableInfo];
 
 /// Internal macro used by our `table!` shadow to register table metadata.
 ///
-/// In test builds, this registers each table into the [`DIESEL_TABLES`]
+/// In test builds, this registers each table into the `DIESEL_TABLES`
 /// distributed slice so that integration tests can enumerate all Diesel
 /// tables. In non-test builds, this is a no-op.
 #[macro_export]
