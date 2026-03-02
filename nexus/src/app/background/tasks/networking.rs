@@ -9,7 +9,8 @@ use dpd_client::types::{
 use internal_dns_types::names::ServiceName;
 use nexus_db_model::{SwitchLinkFec, SwitchLinkSpeed};
 use nexus_db_queries::db;
-use omicron_common::{address::MGD_PORT, api::external::SwitchLocation};
+use omicron_common::address::MGD_PORT;
+use sled_agent_types::early_networking::SwitchLocation;
 use std::{
     collections::HashMap,
     net::{Ipv6Addr, SocketAddrV6},

@@ -60,8 +60,9 @@ use nexus_db_model::{ExternalMulticastGroup, UnderlayMulticastGroup};
 use nexus_db_queries::db::datastore::multicast::members::SourceFilterState;
 use nexus_types::identity::Resource;
 use omicron_common::address::is_ssm_address;
-use omicron_common::api::external::{Error, SwitchLocation};
+use omicron_common::api::external::Error;
 use omicron_common::vlan::VlanID;
+use sled_agent_types::early_networking::SwitchLocation;
 
 use crate::app::dpd_clients;
 

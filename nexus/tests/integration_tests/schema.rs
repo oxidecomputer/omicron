@@ -21,11 +21,11 @@ use nexus_test_utils::sql::Row;
 use nexus_test_utils::sql::SqlEnum;
 use nexus_test_utils::sql::process_rows;
 use nexus_test_utils::{ControlPlaneStarter, load_test_config};
-use omicron_common::api::internal::shared::SwitchLocation;
 use omicron_test_utils::dev::db::{Client, CockroachInstance};
 use pretty_assertions::{assert_eq, assert_ne};
 use semver::Version;
 use similar_asserts;
+use sled_agent_types::early_networking::SwitchLocation;
 use slog::Logger;
 use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
@@ -193,6 +193,27 @@ async fn apply_update(
             if NOT_IDEMPOTENT_VERSIONS.contains(&version.semver()) {
                 break;
             }
+        }
+
+        // After applying the step, run its verification SQL (if any) in a
+        // separate transaction — just like the real Nexus startup path does.
+        // This confirms that async backfill operations (CREATE INDEX,
+        // ALTER COLUMN SET NOT NULL, ADD CONSTRAINT, ADD COLUMN with
+        // backfill) actually completed.
+        if let Some(verify_sql) = step.verification_sql() {
+            info!(
+                log,
+                "Verifying schema change";
+                "file" => step.label()
+            );
+            client.batch_execute(verify_sql).await.unwrap_or_else(|e| {
+                panic!(
+                    "Verification failed for {} in version {}: {}",
+                    step.label(),
+                    version.semver(),
+                    e
+                )
+            });
         }
     }
 

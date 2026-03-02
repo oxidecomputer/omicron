@@ -66,6 +66,7 @@ use omicron_common::api::external::UserId;
 use omicron_common::api::external::VpcFirewallRuleUpdateParams;
 use omicron_test_utils::certificates::CertificateChain;
 use semver::Version;
+use sled_agent_types::early_networking::BfdMode;
 use std::collections::BTreeSet;
 use std::net::IpAddr;
 use std::net::Ipv4Addr;
@@ -1024,7 +1025,7 @@ pub static DEMO_BFD_ENABLE: LazyLock<networking::BfdSessionEnable> =
         detection_threshold: 3,
         required_rx: 1000000,
         switch: "switch0".parse().unwrap(),
-        mode: omicron_common::api::external::BfdMode::MultiHop,
+        mode: BfdMode::MultiHop,
     });
 
 pub static DEMO_BFD_DISABLE: LazyLock<networking::BfdSessionDisable> =
@@ -3100,6 +3101,14 @@ pub static VERIFY_ENDPOINTS: LazyLock<Vec<VerifyEndpoint>> = LazyLock::new(
             },
             VerifyEndpoint {
                 url: "/v1/system/update/target-release",
+                visibility: Visibility::Public,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![AllowedMethod::Put(
+                    serde_json::to_value(&*DEMO_TARGET_RELEASE).unwrap(),
+                )],
+            },
+            VerifyEndpoint {
+                url: "/v1/system/update/recovery-finish",
                 visibility: Visibility::Public,
                 unprivileged_access: UnprivilegedAccess::None,
                 allowed_methods: vec![AllowedMethod::Put(

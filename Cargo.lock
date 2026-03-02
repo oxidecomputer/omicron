@@ -1066,6 +1066,7 @@ dependencies = [
  "schemars 0.8.22",
  "serde",
  "serde_json",
+ "sled-agent-types",
  "sled-hardware-types",
  "slog",
 ]
@@ -2986,6 +2987,7 @@ dependencies = [
  "dns-service-client",
  "dropshot",
  "expectorate",
+ "git-stub-vcs",
  "hickory-client",
  "hickory-proto 0.25.2",
  "hickory-resolver 0.25.2",
@@ -3231,9 +3233,9 @@ dependencies = [
 
 [[package]]
 name = "dropshot-api-manager"
-version = "0.3.0"
+version = "0.5.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f45b53c5eab26bfb0246e53c6c586558331c6e4efa3dc29ff9fb0373a6c3d87a"
+checksum = "c38a99616a680fafd8b7a03cc300aab80b0bbf0fb17c6baac53431d9d12b64b5"
 dependencies = [
  "anyhow",
  "atomicwrites",
@@ -3244,12 +3246,15 @@ dependencies = [
  "dropshot",
  "dropshot-api-manager-types",
  "fs-err 3.1.1",
+ "git-stub",
+ "git-stub-vcs",
  "hex",
  "indent_write",
  "newtype_derive",
  "openapiv3",
  "owo-colors 4.2.3",
  "paste",
+ "rayon",
  "semver 1.0.27",
  "serde_json",
  "sha2",
@@ -3261,9 +3266,9 @@ dependencies = [
 
 [[package]]
 name = "dropshot-api-manager-types"
-version = "0.3.0"
+version = "0.5.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b78a68bd7f0470aec18807e53b0f975661453dae80995c03bbb370d9d0c6eb6f"
+checksum = "f5116e3d69b975bb89824a721d0326707b8643e4fd3ba69ca880de1aada768cf"
 dependencies = [
  "anyhow",
  "camino",
@@ -4256,6 +4261,30 @@ name = "gimli"
 version = "0.31.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "07e28edb80900c19c28f1072f2e8aeca7fa06b23cd4169cefe1af5aa3260783f"
+
+[[package]]
+name = "git-stub"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4a42c6ab99e8c06cf862540c646368223b12225328d094fb0ed7755434376a1e"
+dependencies = [
+ "camino",
+ "hex",
+ "thiserror 2.0.18",
+]
+
+[[package]]
+name = "git-stub-vcs"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "030ad7aaa1d066e8fb39ac2748f1a12b072eed4a4af8d2e073fc80ba74ab173c"
+dependencies = [
+ "atomicwrites",
+ "camino",
+ "fs-err 3.1.1",
+ "git-stub",
+ "thiserror 2.0.18",
+]
 
 [[package]]
 name = "git2"
@@ -6909,6 +6938,7 @@ dependencies = [
  "serde",
  "serde_json",
  "serde_with",
+ "sled-agent-types",
  "tokio-postgres",
  "toml 0.8.23",
  "uuid",
@@ -7016,6 +7046,7 @@ dependencies = [
  "sled-hardware-types",
  "slog",
  "slog-error-chain",
+ "sqlparser",
  "steno",
  "strum 0.27.2",
  "test-strategy",
@@ -7283,6 +7314,7 @@ dependencies = [
  "schemars 0.8.22",
  "serde",
  "serde_json",
+ "sled-agent-types",
  "sled-agent-types-versions",
  "sled-hardware-types",
  "slog",
@@ -7846,6 +7878,7 @@ dependencies = [
  "semver 1.0.27",
  "serde",
  "serde_json",
+ "sled-agent-types",
  "sled-hardware-types",
  "slog-error-chain",
  "strum 0.27.2",
@@ -8411,6 +8444,7 @@ dependencies = [
  "serde",
  "sled-hardware-types",
  "slog",
+ "slog-error-chain",
  "thiserror 2.0.18",
  "tokio",
  "uuid",
@@ -9303,6 +9337,7 @@ dependencies = [
  "buf-list",
  "byteorder",
  "bytes",
+ "camino",
  "cc",
  "chrono",
  "cipher",
@@ -16823,6 +16858,7 @@ dependencies = [
  "serde",
  "serde_json",
  "shell-words",
+ "sled-agent-types",
  "sled-hardware-types",
  "slog",
  "slog-async",
@@ -16863,6 +16899,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2",
+ "sled-agent-types",
  "sled-hardware-types",
  "slog",
  "thiserror 2.0.18",

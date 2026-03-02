@@ -40,13 +40,13 @@ use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::Name;
 use omicron_common::api::external::NameOrId;
 use omicron_common::api::external::ResourceType;
-use omicron_common::api::internal::shared::LldpAdminStatus;
 use omicron_uuid_kinds::SledUuid;
 use oxnet::IpNet;
 use oxnet::Ipv6Net;
 use sled_agent_client::types::AddSledRequest;
 use sled_agent_client::types::StartSledAgentRequest;
 use sled_agent_client::types::StartSledAgentRequestBody;
+use sled_agent_types::early_networking::LldpAdminStatus;
 use sled_hardware_types::BaseboardId;
 
 use slog_error_chain::InlineErrorChain;
@@ -658,7 +658,7 @@ impl super::Nexus {
                 speed: uplink_config.uplink_port_speed.into(),
                 autoneg: uplink_config.autoneg,
                 lldp,
-                tx_eq: uplink_config.tx_eq.map(|t| t.into()),
+                tx_eq: uplink_config.tx_eq,
             };
 
             port_settings_params.links.push(link);

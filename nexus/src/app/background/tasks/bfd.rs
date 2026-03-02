@@ -18,8 +18,9 @@ use mg_admin_client::ClientInfo;
 use mg_admin_client::types::{BfdPeerConfig, SessionMode};
 use nexus_db_model::{BfdMode, BfdSession};
 use nexus_db_queries::{context::OpContext, db::DataStore};
-use omicron_common::api::external::{DataPageParams, SwitchLocation};
+use omicron_common::api::external::DataPageParams;
 use serde_json::json;
+use sled_agent_types::early_networking::SwitchLocation;
 use std::{
     collections::HashSet,
     hash::Hash,
