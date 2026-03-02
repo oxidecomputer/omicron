@@ -7160,11 +7160,17 @@ dependencies = [
 name = "nexus-db-schema"
 version = "0.1.0"
 dependencies = [
+ "camino",
  "diesel",
  "linkme",
  "omicron-rpaths",
+ "omicron-test-utils",
  "omicron-workspace-hack",
  "pq-sys",
+ "similar-asserts",
+ "slog",
+ "tokio",
+ "tokio-postgres",
 ]
 
 [[package]]

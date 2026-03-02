@@ -12,7 +12,7 @@ experimental = ["benchmarks", "setup-scripts"]
 # environment where the seed file doesn't exist.
 # Exclude omicron-live-tests because those don't need this and also don't have
 # it available in the environment in which they run.
-filter = 'rdeps(nexus-test-utils) - package(omicron-dev) - package(omicron-live-tests)'
+filter = 'rdeps(nexus-test-utils) + package(nexus-db-schema) - package(omicron-dev) - package(omicron-live-tests)'
 setup = 'crdb-seed'
 
 [profile.ci]
