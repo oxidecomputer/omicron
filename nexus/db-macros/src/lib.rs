@@ -338,7 +338,7 @@ fn build_resource_identity(
                 id: #external_uuid_ty,
                 params: ::omicron_common::api::external::IdentityMetadataCreateParams
             ) -> Self {
-                let now = ::chrono::Utc::now();
+                let now = ::omicron_common::now_db_precision();
                 Self {
                     id: #convert_external_to_db,
                     name: params.name.into(),
@@ -383,7 +383,7 @@ fn build_asset_identity(
             pub fn new(
                 id: #external_uuid_ty,
             ) -> Self {
-                let now = ::chrono::Utc::now();
+                let now = ::omicron_common::now_db_precision();
                 Self {
                     id: #convert_external_to_db,
                     time_created: now,

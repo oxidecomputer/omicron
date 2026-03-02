@@ -5,7 +5,6 @@
 //! VPCs and firewall rules
 
 use crate::app::sagas;
-use crate::external_api::params;
 use nexus_db_lookup::LookupPath;
 use nexus_db_lookup::lookup;
 use nexus_db_queries::authn;
@@ -14,6 +13,8 @@ use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db;
 use nexus_db_queries::db::model::Name;
 use nexus_defaults as defaults;
+use nexus_types::external_api::project;
+use nexus_types::external_api::vpc;
 use omicron_common::api::external;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DeleteResult;
@@ -38,23 +39,26 @@ impl super::Nexus {
     pub fn vpc_lookup<'a>(
         &'a self,
         opctx: &'a OpContext,
-        vpc_selector: params::VpcSelector,
+        vpc_selector: vpc::VpcSelector,
     ) -> LookupResult<lookup::Vpc<'a>> {
         match vpc_selector {
-            params::VpcSelector { vpc: NameOrId::Id(id), project: None } => {
-                let vpc = LookupPath::new(opctx, &self.db_datastore).vpc_id(id);
-                Ok(vpc)
+            vpc::VpcSelector { vpc: NameOrId::Id(id), project: None } => {
+                let v = LookupPath::new(opctx, &self.db_datastore).vpc_id(id);
+                Ok(v)
             }
-            params::VpcSelector {
+            vpc::VpcSelector {
                 vpc: NameOrId::Name(name),
-                project: Some(project),
+                project: Some(proj),
             } => {
-                let vpc = self
-                    .project_lookup(opctx, params::ProjectSelector { project })?
+                let v = self
+                    .project_lookup(
+                        opctx,
+                        project::ProjectSelector { project: proj },
+                    )?
                     .vpc_name_owned(name.into());
-                Ok(vpc)
+                Ok(v)
             }
-            params::VpcSelector { vpc: NameOrId::Id(_), project: Some(_) } => {
+            vpc::VpcSelector { vpc: NameOrId::Id(_), project: Some(_) } => {
                 Err(Error::invalid_request(
                     "when providing vpc as an ID, project should not be specified",
                 ))
@@ -69,7 +73,7 @@ impl super::Nexus {
         self: &Arc<Self>,
         opctx: &OpContext,
         project_lookup: &lookup::Project<'_>,
-        params: &params::VpcCreate,
+        params: &vpc::VpcCreate,
     ) -> CreateResult<db::model::Vpc> {
         let (.., authz_project) =
             project_lookup.lookup_for(authz::Action::CreateChild).await?;
@@ -111,7 +115,7 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
         vpc_lookup: &lookup::Vpc<'_>,
-        params: &params::VpcUpdate,
+        params: &vpc::VpcUpdate,
     ) -> UpdateResult<db::model::Vpc> {
         let (.., authz_vpc) =
             vpc_lookup.lookup_for(authz::Action::Modify).await?;

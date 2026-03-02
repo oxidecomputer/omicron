@@ -374,6 +374,10 @@ impl ProbeManagerInner {
                 priority: VpcFirewallRulePriority(100),
             }],
             dhcp_config: DhcpCfg::default(),
+            // TODO-completeness: Attached subnets are meant only for instances,
+            // but probes are supposed to mimic instances as closely as
+            // possible. We should consider if we want to support them here.
+            attached_subnets: vec![],
         })?;
 
         let installed_zone = ZoneBuilderFactory::new()

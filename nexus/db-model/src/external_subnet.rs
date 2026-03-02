@@ -22,9 +22,12 @@ use nexus_db_schema::schema::external_subnet;
 use nexus_db_schema::schema::subnet_pool;
 use nexus_db_schema::schema::subnet_pool_member;
 use nexus_db_schema::schema::subnet_pool_silo_link;
-use nexus_types::external_api::params;
+use nexus_types::external_api::external_subnet as external_subnet_types;
+use nexus_types::external_api::subnet_pool as subnet_pool_types;
+use nexus_types::identity::Resource as _;
 use omicron_common::api::external;
 use omicron_common::api::external::Error;
+use omicron_uuid_kinds::GenericUuid as _;
 use omicron_uuid_kinds::InstanceKind;
 use omicron_uuid_kinds::SubnetPoolKind;
 use omicron_uuid_kinds::SubnetPoolMemberKind;
@@ -72,12 +75,28 @@ impl SubnetPool {
     }
 }
 
+impl From<SubnetPool> for subnet_pool_types::SubnetPool {
+    fn from(value: SubnetPool) -> Self {
+        Self { identity: value.identity(), ip_version: value.ip_version.into() }
+    }
+}
+
 #[derive(AsChangeset, Clone, Debug)]
 #[diesel(table_name = subnet_pool)]
 pub struct SubnetPoolUpdate {
     pub name: Option<Name>,
     pub description: Option<String>,
     pub time_modified: DateTime<Utc>,
+}
+
+impl From<subnet_pool_types::SubnetPoolUpdate> for SubnetPoolUpdate {
+    fn from(value: subnet_pool_types::SubnetPoolUpdate) -> Self {
+        Self {
+            name: value.identity.name.map(Into::into),
+            description: value.identity.description,
+            time_modified: Utc::now(),
+        }
+    }
 }
 
 /// A member of a Subnet Pool.
@@ -97,9 +116,22 @@ pub struct SubnetPoolMember {
     rcgen: Generation,
 }
 
+impl From<SubnetPoolMember> for subnet_pool_types::SubnetPoolMember {
+    fn from(value: SubnetPoolMember) -> Self {
+        Self {
+            id: value.id.into_untyped_uuid(),
+            time_created: value.time_created,
+            subnet_pool_id: value.subnet_pool_id.into_untyped_uuid(),
+            subnet: value.subnet.into(),
+            min_prefix_length: value.min_prefix_length.into(),
+            max_prefix_length: value.max_prefix_length.into(),
+        }
+    }
+}
+
 impl SubnetPoolMember {
     pub fn new(
-        params: &params::SubnetPoolMemberAdd,
+        params: &subnet_pool_types::SubnetPoolMemberAdd,
         pool_id: SubnetPoolUuid,
     ) -> Result<Self, Error> {
         // Require that the subnet is actually a network, i.e.,
@@ -204,12 +236,39 @@ pub struct ExternalSubnet {
     pub instance_id: Option<DbTypedUuid<InstanceKind>>,
 }
 
+impl From<ExternalSubnet> for external_subnet_types::ExternalSubnet {
+    fn from(value: ExternalSubnet) -> Self {
+        Self {
+            identity: value.identity(),
+            subnet: value.subnet.into(),
+            project_id: value.project_id,
+            subnet_pool_id: value.subnet_pool_id.into_untyped_uuid(),
+            subnet_pool_member_id: value
+                .subnet_pool_member_id
+                .into_untyped_uuid(),
+            instance_id: value.instance_id.map(|id| id.into_untyped_uuid()),
+        }
+    }
+}
+
 #[derive(AsChangeset, Clone, Debug)]
 #[diesel(table_name = external_subnet)]
 pub struct ExternalSubnetUpdate {
     pub name: Option<Name>,
     pub description: Option<String>,
     pub time_modified: DateTime<Utc>,
+}
+
+impl From<external_subnet_types::ExternalSubnetUpdate>
+    for ExternalSubnetUpdate
+{
+    fn from(value: external_subnet_types::ExternalSubnetUpdate) -> Self {
+        Self {
+            name: value.identity.name.map(Into::into),
+            description: value.identity.description,
+            time_modified: Utc::now(),
+        }
+    }
 }
 
 #[derive(
@@ -221,4 +280,14 @@ pub struct SubnetPoolSiloLink {
     pub silo_id: Uuid,
     pub ip_version: IpVersion,
     pub is_default: bool,
+}
+
+impl From<SubnetPoolSiloLink> for subnet_pool_types::SubnetPoolSiloLink {
+    fn from(value: SubnetPoolSiloLink) -> Self {
+        Self {
+            subnet_pool_id: value.subnet_pool_id.into_untyped_uuid(),
+            silo_id: value.silo_id.into_untyped_uuid(),
+            is_default: value.is_default,
+        }
+    }
 }

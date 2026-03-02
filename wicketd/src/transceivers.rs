@@ -5,7 +5,7 @@
 //! Fetching transceiver state from the SP.
 
 use gateway_client::types::SpIdentifier;
-use omicron_common::api::external::SwitchLocation;
+use sled_agent_types::early_networking::SwitchLocation;
 use slog::{Logger, debug, error};
 use std::{
     collections::HashMap,
@@ -288,7 +288,7 @@ async fn fetch_transceivers_from_one_switch(
             Err(e) => error!(
                 log,
                 "failed to fetch transceiver state";
-                "interafce" => interface,
+                "interface" => interface,
                 "error" => %e,
             ),
         }

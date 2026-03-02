@@ -24,6 +24,7 @@ use nexus_types::deployment::BlueprintDatasetDisposition;
 use nexus_types::deployment::BlueprintExpungedZoneAccessReason;
 use nexus_types::deployment::BlueprintHostPhase2DesiredContents;
 use nexus_types::deployment::BlueprintHostPhase2DesiredSlots;
+use nexus_types::deployment::BlueprintMeasurements;
 use nexus_types::deployment::BlueprintPhysicalDiskConfig;
 use nexus_types::deployment::BlueprintPhysicalDiskDisposition;
 use nexus_types::deployment::BlueprintSledConfig;
@@ -33,7 +34,7 @@ use nexus_types::deployment::BlueprintZoneType;
 use nexus_types::deployment::LastAllocatedSubnetIpOffset;
 use nexus_types::deployment::PendingMgsUpdate;
 use nexus_types::deployment::blueprint_zone_type;
-use nexus_types::external_api::views::SledState;
+use nexus_types::external_api::sled::SledState;
 use omicron_common::address::Ipv6Subnet;
 use omicron_common::address::SLED_PREFIX;
 use omicron_common::api::external::Generation;
@@ -264,6 +265,8 @@ impl SledEditor {
                     .remove_mupdate_override
                     .finalize(),
                 host_phase_2: self.host_phase_2.finalize(),
+                // This will change once the reconfigurator work is moved through
+                measurements: BlueprintMeasurements::Unknown,
             },
             edit_counts: SledEditCounts {
                 disks: disks_counts,
@@ -383,8 +386,10 @@ impl SledEditor {
             PartialDatasetConfig::for_debug(zpool),
             // Transient Zone Root dataset
             PartialDatasetConfig::for_transient_zone_root(zpool),
-            // a LocalStorage dataset
-            PartialDatasetConfig::for_local_storage_root(zpool),
+            // an encrypted LocalStorage dataset
+            PartialDatasetConfig::for_local_storage(zpool),
+            // an unencrypted LocalStorage dataset
+            PartialDatasetConfig::for_local_storage_unencrypted(zpool),
         ];
 
         for dataset_config in dataset_configs {

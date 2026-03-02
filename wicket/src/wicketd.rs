@@ -420,7 +420,7 @@ impl WicketdManager {
                             continue;
                         }
                         prev = Some(rsp.clone());
-                        let _ = tx.send(Event::RssConfig(rsp));
+                        let _ = tx.send(Event::RssConfig(Box::new(rsp)));
                     }
                     Err(err) => {
                         warn!(

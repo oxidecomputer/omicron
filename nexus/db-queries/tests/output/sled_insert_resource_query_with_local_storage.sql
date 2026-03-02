@@ -100,16 +100,22 @@ WITH
         AND (
             (
               SELECT
-                sum(crucible_dataset.size_used + rendezvous_local_storage_dataset.size_used + $11)
+                sum(
+                  crucible_dataset.size_used
+                  + COALESCE(rendezvous_local_storage_dataset.size_used, 0)
+                  + COALESCE(rendezvous_local_storage_unencrypted_dataset.size_used, 0)
+                  + $11
+                )
               FROM
                 crucible_dataset
-                JOIN rendezvous_local_storage_dataset ON
+                LEFT JOIN rendezvous_local_storage_dataset ON
                     crucible_dataset.pool_id = rendezvous_local_storage_dataset.pool_id
+                    AND rendezvous_local_storage_dataset.time_tombstoned IS NULL
+                LEFT JOIN rendezvous_local_storage_unencrypted_dataset ON
+                    crucible_dataset.pool_id = rendezvous_local_storage_unencrypted_dataset.pool_id
+                    AND rendezvous_local_storage_unencrypted_dataset.time_tombstoned IS NULL
               WHERE
-                (crucible_dataset.size_used IS NOT NULL)
-                AND (crucible_dataset.time_deleted IS NULL)
-                AND (rendezvous_local_storage_dataset.time_tombstoned IS NULL)
-                AND crucible_dataset.pool_id = $12
+                crucible_dataset.time_deleted IS NULL AND crucible_dataset.pool_id = $12
               GROUP BY
                 crucible_dataset.pool_id
             )
@@ -145,22 +151,29 @@ WITH
                 SELECT
                   time_tombstoned IS NULL AND no_provision IS false
                 FROM
-                  rendezvous_local_storage_dataset
+                  rendezvous_local_storage_unencrypted_dataset
                 WHERE
-                  rendezvous_local_storage_dataset.id = $16
+                  rendezvous_local_storage_unencrypted_dataset.id = $16
               )
             AND (
                 SELECT
-                  sum(crucible_dataset.size_used + rendezvous_local_storage_dataset.size_used + $17)
+                  sum(
+                    crucible_dataset.size_used
+                    + COALESCE(rendezvous_local_storage_dataset.size_used, 0)
+                    + COALESCE(rendezvous_local_storage_unencrypted_dataset.size_used, 0)
+                    + $17
+                  )
                 FROM
                   crucible_dataset
-                  JOIN rendezvous_local_storage_dataset ON
+                  LEFT JOIN rendezvous_local_storage_dataset ON
                       crucible_dataset.pool_id = rendezvous_local_storage_dataset.pool_id
+                      AND rendezvous_local_storage_dataset.time_tombstoned IS NULL
+                  LEFT JOIN rendezvous_local_storage_unencrypted_dataset ON
+                      crucible_dataset.pool_id
+                      = rendezvous_local_storage_unencrypted_dataset.pool_id
+                      AND rendezvous_local_storage_unencrypted_dataset.time_tombstoned IS NULL
                 WHERE
-                  (crucible_dataset.size_used IS NOT NULL)
-                  AND (crucible_dataset.time_deleted IS NULL)
-                  AND (rendezvous_local_storage_dataset.time_tombstoned IS NULL)
-                  AND crucible_dataset.pool_id = $18
+                  crucible_dataset.time_deleted IS NULL AND crucible_dataset.pool_id = $18
                 GROUP BY
                   crucible_dataset.pool_id
               )
@@ -196,9 +209,9 @@ WITH
                 SELECT
                   time_tombstoned IS NULL AND no_provision IS false
                 FROM
-                  rendezvous_local_storage_dataset
+                  rendezvous_local_storage_unencrypted_dataset
                 WHERE
-                  rendezvous_local_storage_dataset.id = $22
+                  rendezvous_local_storage_unencrypted_dataset.id = $22
               )
           )
     ),
@@ -207,7 +220,8 @@ WITH
       UPDATE
         disk_type_local_storage
       SET
-        local_storage_dataset_allocation_id = CASE disk_id WHEN $23 THEN $24 WHEN $25 THEN $26 END
+        local_storage_unencrypted_dataset_allocation_id
+          = CASE disk_id WHEN $23 THEN $24 WHEN $25 THEN $26 END
       WHERE
         disk_id IN ($27, $28) AND EXISTS(SELECT 1 FROM insert_valid)
       RETURNING
@@ -217,8 +231,16 @@ WITH
     AS (
       INSERT
       INTO
-        local_storage_dataset_allocation
-          (id, time_created, time_deleted, local_storage_dataset_id, pool_id, sled_id, dataset_size)
+        local_storage_unencrypted_dataset_allocation
+          (
+            id,
+            time_created,
+            time_deleted,
+            local_storage_unencrypted_dataset_id,
+            pool_id,
+            sled_id,
+            dataset_size
+          )
       SELECT
         $29, now(), NULL, $30, $31, $32, $33
       WHERE
@@ -230,8 +252,16 @@ WITH
     AS (
       INSERT
       INTO
-        local_storage_dataset_allocation
-          (id, time_created, time_deleted, local_storage_dataset_id, pool_id, sled_id, dataset_size)
+        local_storage_unencrypted_dataset_allocation
+          (
+            id,
+            time_created,
+            time_deleted,
+            local_storage_unencrypted_dataset_id,
+            pool_id,
+            sled_id,
+            dataset_size
+          )
       SELECT
         $34, now(), NULL, $35, $36, $37, $38
       WHERE
@@ -242,7 +272,7 @@ WITH
   update_rendezvous_tables
     AS (
       UPDATE
-        rendezvous_local_storage_dataset
+        rendezvous_local_storage_unencrypted_dataset
       SET
         size_used = size_used + CASE pool_id WHEN $39 THEN $40 WHEN $41 THEN $42 END
       WHERE

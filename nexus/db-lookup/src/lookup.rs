@@ -499,6 +499,14 @@ impl<'a> LookupPath<'a> {
     pub fn subnet_pool_name(self, name: Name) -> SubnetPool<'a> {
         SubnetPool::OwnedName(Root { lookup_root: self }, name)
     }
+
+    /// Select a resource of type [`ExternalSubnet`], identified by its UUID.
+    pub fn external_subnet_id(
+        self,
+        id: ExternalSubnetUuid,
+    ) -> ExternalSubnet<'a> {
+        ExternalSubnet::PrimaryKey(Root { lookup_root: self }, id)
+    }
 }
 
 /// Represents the head of the selection path for a resource

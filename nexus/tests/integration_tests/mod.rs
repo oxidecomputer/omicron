@@ -33,6 +33,7 @@ mod ip_pools;
 mod local_storage;
 mod metrics;
 mod metrics_querier;
+#[cfg(feature = "multicast")]
 mod multicast;
 mod oximeter;
 mod pantry;
@@ -69,5 +70,6 @@ mod vpc_subnets;
 mod vpcs;
 mod webhooks;
 
-// This module is used only for shared data, not test cases.
+// These modules are used only for shared data/utilities, not test cases.
+mod endpoint_coverage;
 mod endpoints;

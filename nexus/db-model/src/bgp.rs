@@ -2,16 +2,19 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use crate::{SqlU16, SqlU32};
+use crate::{SqlU8, SqlU16, SqlU32};
 use db_macros::Resource;
 use ipnetwork::IpNetwork;
 use nexus_db_schema::schema::{
     bgp_announce_set, bgp_announcement, bgp_config, bgp_peer_view,
 };
-use nexus_types::external_api::params;
+use nexus_types::external_api::networking;
 use nexus_types::identity::Resource;
-use omicron_common::api::external::{self, IdentityMetadataCreateParams};
+use omicron_common::api::external::Error;
+use omicron_common::api::external::IdentityMetadataCreateParams;
 use serde::{Deserialize, Serialize};
+use sled_agent_types::early_networking::MaxPathConfig;
+use slog_error_chain::InlineErrorChain;
 use uuid::Uuid;
 
 #[derive(
@@ -33,21 +36,33 @@ pub struct BgpConfig {
     pub vrf: Option<String>,
     pub shaper: Option<String>,
     pub checker: Option<String>,
+    pub max_paths: SqlU8,
 }
 
-impl Into<external::BgpConfig> for BgpConfig {
-    fn into(self) -> external::BgpConfig {
-        external::BgpConfig {
-            identity: self.identity(),
-            asn: self.asn.into(),
-            vrf: self.vrf,
-        }
+impl TryFrom<BgpConfig> for networking::BgpConfig {
+    type Error = Error;
+
+    fn try_from(value: BgpConfig) -> Result<Self, Self::Error> {
+        let max_paths =
+            MaxPathConfig::new(*value.max_paths).map_err(|err| {
+                Error::internal_error(&format!(
+                    "invalid database contents: \
+                     could not convert MaxPathConfig: {}",
+                    InlineErrorChain::new(&err)
+                ))
+            })?;
+        Ok(Self {
+            identity: value.identity(),
+            asn: value.asn.into(),
+            vrf: value.vrf,
+            max_paths,
+        })
     }
 }
 
 impl BgpConfig {
     pub fn from_config_create(
-        c: &params::BgpConfigCreate,
+        c: &networking::BgpConfigCreate,
         bgp_announce_set_id: Uuid,
     ) -> BgpConfig {
         BgpConfig {
@@ -63,6 +78,7 @@ impl BgpConfig {
             vrf: c.vrf.as_ref().map(|x| x.to_string()),
             shaper: c.shaper.as_ref().map(|x| x.to_string()),
             checker: c.checker.as_ref().map(|x| x.to_string()),
+            max_paths: c.max_paths.as_u8().into(),
         }
     }
 }
@@ -83,8 +99,8 @@ pub struct BgpAnnounceSet {
     pub identity: BgpAnnounceSetIdentity,
 }
 
-impl From<params::BgpAnnounceSetCreate> for BgpAnnounceSet {
-    fn from(x: params::BgpAnnounceSetCreate) -> BgpAnnounceSet {
+impl From<networking::BgpAnnounceSetCreate> for BgpAnnounceSet {
+    fn from(x: networking::BgpAnnounceSetCreate) -> BgpAnnounceSet {
         BgpAnnounceSet {
             identity: BgpAnnounceSetIdentity::new(
                 Uuid::new_v4(),
@@ -97,9 +113,9 @@ impl From<params::BgpAnnounceSetCreate> for BgpAnnounceSet {
     }
 }
 
-impl Into<external::BgpAnnounceSet> for BgpAnnounceSet {
-    fn into(self) -> external::BgpAnnounceSet {
-        external::BgpAnnounceSet { identity: self.identity() }
+impl Into<networking::BgpAnnounceSet> for BgpAnnounceSet {
+    fn into(self) -> networking::BgpAnnounceSet {
+        networking::BgpAnnounceSet { identity: self.identity() }
     }
 }
 
@@ -113,9 +129,9 @@ pub struct BgpAnnouncement {
     pub network: IpNetwork,
 }
 
-impl Into<external::BgpAnnouncement> for BgpAnnouncement {
-    fn into(self) -> external::BgpAnnouncement {
-        external::BgpAnnouncement {
+impl Into<networking::BgpAnnouncement> for BgpAnnouncement {
+    fn into(self) -> networking::BgpAnnouncement {
+        networking::BgpAnnouncement {
             announce_set_id: self.announce_set_id,
             address_lot_block_id: self.address_lot_block_id,
             network: self.network.into(),
@@ -128,7 +144,7 @@ impl Into<external::BgpAnnouncement> for BgpAnnouncement {
 pub struct BgpPeerView {
     pub switch_location: String,
     pub port_name: String,
-    pub addr: IpNetwork,
+    pub addr: Option<IpNetwork>,
     pub asn: SqlU32,
     pub connect_retry: SqlU32,
     pub delay_open: SqlU32,
@@ -142,4 +158,5 @@ pub struct BgpPeerView {
     pub local_pref: Option<SqlU32>,
     pub enforce_first_as: bool,
     pub vlan_id: Option<SqlU16>,
+    pub router_lifetime: SqlU16,
 }

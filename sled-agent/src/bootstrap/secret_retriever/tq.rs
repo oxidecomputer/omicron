@@ -17,6 +17,7 @@ use key_manager::{
 };
 use secrecy::ExposeSecret;
 use std::time::Duration;
+use tokio::time::{sleep, timeout};
 use trust_quorum::NodeTaskHandle;
 use trust_quorum_protocol::ReconstructedRackSecret;
 use trust_quorum_types::types::Epoch;
@@ -26,6 +27,11 @@ use trust_quorum_types::types::Epoch;
 /// When `load_rack_secret` returns `None`, the retriever polls at this
 /// interval until the secret becomes available.
 const POLL_INTERVAL: Duration = Duration::from_millis(500);
+
+/// Timeout for share collection (2 minutes).
+///
+/// If shares cannot be collected within this time, an error is returned.
+const POLL_TIMEOUT: Duration = Duration::from_secs(120);
 
 /// A [`key_manager::SecretRetriever`] for use with full Trust Quorum (TQ).
 pub(super) struct TqSecretRetriever {
@@ -50,20 +56,24 @@ impl TqSecretRetriever {
     async fn load_latest_with_retry(
         &self,
     ) -> Result<(Epoch, ReconstructedRackSecret), SecretRetrieverError> {
-        loop {
-            match self.handle.load_latest_rack_secret().await {
-                Ok(Some((epoch, secret))) => return Ok((epoch, secret)),
-                Ok(None) => {
-                    // Share collection in progress, keep polling
-                    tokio::time::sleep(POLL_INTERVAL).await;
-                }
-                Err(e) => {
-                    return Err(SecretRetrieverError::TrustQuorum(
-                        e.to_string(),
-                    ));
+        timeout(POLL_TIMEOUT, async {
+            loop {
+                match self.handle.load_latest_rack_secret().await {
+                    Ok(Some((epoch, secret))) => return Ok((epoch, secret)),
+                    Ok(None) => {
+                        // Share collection in progress, keep polling
+                        sleep(POLL_INTERVAL).await;
+                    }
+                    Err(e) => {
+                        return Err(SecretRetrieverError::TrustQuorum(
+                            e.to_string(),
+                        ));
+                    }
                 }
             }
-        }
+        })
+        .await
+        .map_err(|_| SecretRetrieverError::Timeout)?
     }
 
     /// Poll for a specific epoch's rack secret until available.
@@ -73,20 +83,24 @@ impl TqSecretRetriever {
         &self,
         epoch: Epoch,
     ) -> Result<ReconstructedRackSecret, SecretRetrieverError> {
-        loop {
-            match self.handle.load_rack_secret(epoch).await {
-                Ok(Some(secret)) => return Ok(secret),
-                Ok(None) => {
-                    // Share collection in progress, keep polling
-                    tokio::time::sleep(POLL_INTERVAL).await;
-                }
-                Err(e) => {
-                    return Err(SecretRetrieverError::TrustQuorum(
-                        e.to_string(),
-                    ));
+        timeout(POLL_TIMEOUT, async {
+            loop {
+                match self.handle.load_rack_secret(epoch).await {
+                    Ok(Some(secret)) => return Ok(secret),
+                    Ok(None) => {
+                        // Share collection in progress, keep polling
+                        sleep(POLL_INTERVAL).await;
+                    }
+                    Err(e) => {
+                        return Err(SecretRetrieverError::TrustQuorum(
+                            e.to_string(),
+                        ));
+                    }
                 }
             }
-        }
+        })
+        .await
+        .map_err(|_| SecretRetrieverError::Timeout)?
     }
 }
 

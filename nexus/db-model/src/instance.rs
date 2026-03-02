@@ -7,6 +7,7 @@ use super::{
     ByteCount, Disk, ExternalIp, Generation, InstanceAutoRestartPolicy,
     InstanceCpuCount, InstanceCpuPlatform, InstanceState, Vmm, VmmState,
 };
+use crate::ExternalSubnet;
 use crate::collection::DatastoreAttachTargetConfig;
 use crate::serde_time_delta::optional_time_delta;
 use chrono::{DateTime, TimeDelta, Utc};
@@ -15,8 +16,8 @@ use diesel::expression::{ValidGrouping, is_aggregate};
 use diesel::pg;
 use diesel::prelude::*;
 use diesel::sql_types::{Bool, Nullable};
-use nexus_db_schema::schema::{disk, external_ip, instance};
-use nexus_types::external_api::params;
+use nexus_db_schema::schema::{disk, external_ip, external_subnet, instance};
+use nexus_types::external_api::instance as instance_types;
 use omicron_uuid_kinds::{GenericUuid, InstanceUuid};
 use serde::Deserialize;
 use serde::Serialize;
@@ -111,7 +112,7 @@ impl Instance {
     pub fn new(
         instance_id: InstanceUuid,
         project_id: Uuid,
-        params: &params::InstanceCreate,
+        params: &instance_types::InstanceCreate,
     ) -> Self {
         let identity = InstanceIdentity::new(
             instance_id.into_untyped_uuid(),
@@ -223,6 +224,17 @@ impl DatastoreAttachTargetConfig<ExternalIp> for Instance {
     type ResourceIdColumn = external_ip::dsl::id;
     type ResourceCollectionIdColumn = external_ip::dsl::parent_id;
     type ResourceTimeDeletedColumn = external_ip::dsl::time_deleted;
+}
+
+impl DatastoreAttachTargetConfig<ExternalSubnet> for Instance {
+    type Id = Uuid;
+
+    type CollectionIdColumn = instance::dsl::id;
+    type CollectionTimeDeletedColumn = instance::dsl::time_deleted;
+
+    type ResourceIdColumn = external_subnet::dsl::id;
+    type ResourceCollectionIdColumn = external_subnet::dsl::instance_id;
+    type ResourceTimeDeletedColumn = external_subnet::dsl::time_deleted;
 }
 
 /// Runtime state of the Instance, including the actual running state and minimal

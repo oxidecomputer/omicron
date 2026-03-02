@@ -241,13 +241,14 @@ mod test {
         StepOutcome, StepStatus,
     };
     use nexus_types::deployment::{
-        Blueprint, BlueprintHostPhase2DesiredSlots, BlueprintSledConfig,
-        BlueprintSource, BlueprintTarget, BlueprintZoneConfig,
-        BlueprintZoneDisposition, BlueprintZoneImageSource, BlueprintZoneType,
+        Blueprint, BlueprintHostPhase2DesiredSlots, BlueprintMeasurements,
+        BlueprintSledConfig, BlueprintSource, BlueprintTarget,
+        BlueprintZoneConfig, BlueprintZoneDisposition,
+        BlueprintZoneImageSource, BlueprintZoneType,
         CockroachDbPreserveDowngrade, OximeterReadMode, PendingMgsUpdates,
         blueprint_zone_type,
     };
-    use nexus_types::external_api::views::SledState;
+    use nexus_types::external_api::sled::SledState;
     use omicron_common::address::Ipv6Subnet;
     use omicron_common::api::external;
     use omicron_common::api::external::Generation;
@@ -295,6 +296,7 @@ mod test {
                         remove_mupdate_override: None,
                         host_phase_2:
                             BlueprintHostPhase2DesiredSlots::current_contents(),
+                        measurements: BlueprintMeasurements::InstallDataset,
                     },
                 )
             })

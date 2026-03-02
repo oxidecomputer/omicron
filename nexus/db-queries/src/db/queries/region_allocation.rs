@@ -291,13 +291,19 @@ pub fn allocation_query(
       crucible_dataset.pool_id,
       (
        sum(crucible_dataset.size_used) +
-       sum(coalesce(rendezvous_local_storage_dataset.size_used, 0))
+       sum(coalesce(rendezvous_local_storage_dataset.size_used, 0)) +
+       sum(coalesce(rendezvous_local_storage_unencrypted_dataset.size_used, 0))
       ) AS size_used
     FROM
-      crucible_dataset LEFT JOIN rendezvous_local_storage_dataset
+      crucible_dataset
+    LEFT JOIN rendezvous_local_storage_dataset
       ON
         crucible_dataset.pool_id = rendezvous_local_storage_dataset.pool_id AND
         rendezvous_local_storage_dataset.time_tombstoned is NULL
+    LEFT JOIN rendezvous_local_storage_unencrypted_dataset
+      ON
+        crucible_dataset.pool_id = rendezvous_local_storage_unencrypted_dataset.pool_id AND
+        rendezvous_local_storage_unencrypted_dataset.time_tombstoned is NULL
     WHERE
       crucible_dataset.size_used IS NOT NULL AND
       crucible_dataset.time_deleted IS NULL

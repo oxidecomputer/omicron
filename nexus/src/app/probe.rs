@@ -6,8 +6,8 @@ use nexus_db_lookup::lookup;
 use nexus_db_model::Probe;
 use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
-use nexus_types::external_api::params;
-use nexus_types::external_api::shared::ProbeInfo;
+use nexus_types::external_api::ip_pool;
+use nexus_types::external_api::probe;
 use nexus_types::identity::Resource;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::{
@@ -22,7 +22,7 @@ impl super::Nexus {
         opctx: &OpContext,
         project_lookup: &lookup::Project<'_>,
         pagparams: &PaginatedBy<'_>,
-    ) -> ListResultVec<ProbeInfo> {
+    ) -> ListResultVec<probe::ProbeInfo> {
         let (.., authz_project) =
             project_lookup.lookup_for(authz::Action::ListChildren).await?;
         self.db_datastore.probe_list(opctx, &authz_project, pagparams).await
@@ -34,7 +34,7 @@ impl super::Nexus {
         opctx: &OpContext,
         project_lookup: &lookup::Project<'_>,
         name_or_id: &NameOrId,
-    ) -> LookupResult<ProbeInfo> {
+    ) -> LookupResult<probe::ProbeInfo> {
         let (.., authz_project) =
             project_lookup.lookup_for(authz::Action::CreateChild).await?;
         self.db_datastore.probe_get(opctx, &authz_project, &name_or_id).await
@@ -48,17 +48,17 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
         project_lookup: &lookup::Project<'_>,
-        new_probe_params: &params::ProbeCreate,
+        new_probe_params: &probe::ProbeCreate,
     ) -> CreateResult<Probe> {
         let (.., authz_project) =
             project_lookup.lookup_for(authz::Action::CreateChild).await?;
 
         // Destructure pool_selector to get pool and ip_version
         let (pool, ip_version) = match &new_probe_params.pool_selector {
-            params::PoolSelector::Explicit { pool } => {
+            ip_pool::PoolSelector::Explicit { pool } => {
                 (Some(pool.clone()), None)
             }
-            params::PoolSelector::Auto { ip_version } => (None, *ip_version),
+            ip_pool::PoolSelector::Auto { ip_version } => (None, *ip_version),
         };
 
         // resolve NameOrId into authz::IpPool

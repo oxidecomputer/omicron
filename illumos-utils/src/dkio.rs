@@ -6,6 +6,7 @@
 
 use libc::c_int;
 use libc::c_uint;
+use libc::c_ulonglong;
 use std::io;
 use std::ptr;
 
@@ -132,3 +133,18 @@ type diskaddr_t = libc::c_ulonglong;
 const DKIOC: c_int = 0x04 << 8;
 const DKIOCGMEDIAINFOEXT: c_int = DKIOC | 48;
 const DKIOCFLUSHWRITECACHE: c_int = DKIOC | 34;
+
+// Related to raw zvols
+
+pub const DKIOCRAWVOLSTATUS: libc::c_int = DKIOC | 30;
+pub const DKIOCRAWVOLSTOP: libc::c_int = DKIOC | 31;
+
+#[derive(Debug, Default, Clone, Copy)]
+#[repr(C)]
+#[allow(non_camel_case_types)]
+pub struct dk_rawvol_status {
+    pub drs_vers: c_uint,
+    pub drs_status: c_int,
+    pub drs_zoff: c_ulonglong,
+    pub drs_len: c_ulonglong,
+}

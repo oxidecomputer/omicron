@@ -6,7 +6,7 @@ use dropshot::{HttpError, HttpResponseFound, http_response_found};
 use nexus_auth::context::OpContext;
 use nexus_db_model::{ConsoleSession, Name};
 use nexus_db_queries::authn::silos::IdentityProviderType;
-use nexus_types::external_api::{params::RelativeUri, shared::RelayState};
+use nexus_types::external_api::saml::{RelativeUri, RelayState};
 
 impl super::Nexus {
     pub(crate) async fn login_saml_redirect(

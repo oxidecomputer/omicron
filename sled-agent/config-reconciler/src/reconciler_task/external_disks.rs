@@ -26,6 +26,7 @@ use omicron_uuid_kinds::ZpoolUuid;
 use rand::distr::{Alphanumeric, SampleString};
 use sled_agent_types::inventory::ConfigReconcilerInventoryResult;
 use sled_storage::config::MountConfig;
+use sled_storage::dataset::CRYPT_DATASET;
 use sled_storage::dataset::DatasetError;
 use sled_storage::dataset::ZONE_DATASET;
 use sled_storage::disk::Disk;
@@ -44,7 +45,10 @@ use std::future::Future;
 use std::sync::Arc;
 use std::sync::OnceLock;
 use tokio::sync::watch;
+use trust_quorum_types::types::Epoch;
 
+use super::datasets::DiskRekeyInfo;
+use crate::dataset_serialization_task::RekeyResult;
 use crate::debug_collector::FormerZoneRootArchiver;
 use crate::disks_common::MaybeUpdatedDisk;
 use crate::disks_common::update_properties_from_raw_disk;
@@ -291,6 +295,33 @@ impl ExternalDisks {
         &self,
     ) -> Arc<CurrentlyManagedZpools> {
         Arc::clone(&*self.currently_managed_zpools_tx.borrow())
+    }
+
+    /// Returns rekey info for all managed disks.
+    pub(super) fn disk_rekey_info(
+        &self,
+    ) -> impl Iterator<Item = DiskRekeyInfo<'_>> {
+        self.disks.iter().filter_map(|disk_state| match &disk_state.state {
+            DiskState::Managed(disk) => Some(DiskRekeyInfo {
+                disk,
+                disk_id: disk_state.config.id,
+                cached_epoch: disk_state.epoch,
+            }),
+            DiskState::FailedToManage(_) => None,
+        })
+    }
+
+    /// Apply the results of a rekey operation, updating cached epochs for succeeded disks.
+    pub(super) fn apply_rekey_result(
+        &mut self,
+        result: &RekeyResult,
+        target_epoch: Epoch,
+    ) {
+        for &disk_id in &result.succeeded {
+            if let Some(mut disk_state) = self.disks.get_mut(&disk_id) {
+                disk_state.epoch = Some(target_epoch);
+            }
+        }
     }
 
     fn update_output_watch_channels(&self) {
@@ -568,14 +599,21 @@ impl ExternalDisks {
         disk_adopter: &T,
         log: &Logger,
     ) -> ExternalDiskState {
-        match current.map(|d| &d.state) {
+        match current {
             // If we're already managing this disk, check whether there are any
             // new properties to update.
-            Some(DiskState::Managed(disk)) => {
-                self.update_disk_properties(disk, config, raw_disk, log)
+            Some(ExternalDiskState {
+                state: DiskState::Managed(disk),
+                epoch,
+                ..
+            }) => {
+                self.update_disk_properties(disk, config, raw_disk, *epoch, log)
             }
             // If we previously failed to manage this disk, try again.
-            Some(DiskState::FailedToManage(prev_err)) => {
+            Some(ExternalDiskState {
+                state: DiskState::FailedToManage(prev_err),
+                ..
+            }) => {
                 info!(
                     log, "Retrying management of disk";
                     "disk_identity" => ?config.identity,
@@ -611,6 +649,7 @@ impl ExternalDisks {
         disk: &Disk,
         config: OmicronPhysicalDiskConfig,
         raw_disk: &RawDisk,
+        current_epoch: Option<Epoch>,
         log: &Logger,
     ) -> ExternalDiskState {
         // Make sure the incoming config's zpool ID matches our
@@ -637,7 +676,7 @@ impl ExternalDisks {
             MaybeUpdatedDisk::Unchanged => disk.clone(),
         };
 
-        ExternalDiskState::managed(config, disk)
+        ExternalDiskState::managed(config, disk, current_epoch)
     }
 
     async fn start_managing_disk<T: DiskAdopter>(
@@ -651,12 +690,13 @@ impl ExternalDisks {
             .adopt_disk(raw_disk, &self.mount_config, config.pool_id, log)
             .await
         {
-            Ok(disk) => {
+            Ok(AdoptedDisk { disk, epoch }) => {
                 info!(
                     log, "Successfully started management of disk";
                     "disk_identity" => ?config.identity,
+                    "epoch" => ?epoch,
                 );
-                ExternalDiskState::managed(config, disk)
+                ExternalDiskState::managed(config, disk, epoch)
             }
             Err(err) => {
                 warn!(
@@ -674,18 +714,25 @@ impl ExternalDisks {
 struct ExternalDiskState {
     config: OmicronPhysicalDiskConfig,
     state: DiskState,
+    /// The current encryption epoch for this disk's crypt dataset.
+    /// None if the disk is not yet managed or doesn't have encryption.
+    epoch: Option<Epoch>,
 }
 
 impl ExternalDiskState {
-    fn managed(config: OmicronPhysicalDiskConfig, disk: Disk) -> Self {
-        Self { config, state: DiskState::Managed(disk) }
+    fn managed(
+        config: OmicronPhysicalDiskConfig,
+        disk: Disk,
+        epoch: Option<Epoch>,
+    ) -> Self {
+        Self { config, state: DiskState::Managed(disk), epoch }
     }
 
     fn failed(
         config: OmicronPhysicalDiskConfig,
         err: DiskManagementError,
     ) -> Self {
-        Self { config, state: DiskState::FailedToManage(err) }
+        Self { config, state: DiskState::FailedToManage(err), epoch: None }
     }
 }
 
@@ -705,17 +752,31 @@ enum DiskState {
     FailedToManage(DiskManagementError),
 }
 
+/// Result of successfully adopting a disk.
+struct AdoptedDisk {
+    /// The adopted disk.
+    disk: Disk,
+    /// The current encryption epoch for this disk's crypt dataset.
+    /// None if the disk doesn't have encryption or the epoch could not be read.
+    epoch: Option<Epoch>,
+}
+
 /// Helper to allow unit tests to run without interacting with the real [`Disk`]
 /// implementation. In production, the only implementor of this trait is
 /// [`RealDiskAdopter`].
 trait DiskAdopter {
+    /// Adopt a disk, returning the disk and its current encryption epoch.
+    ///
+    /// The epoch is read from the oxide:epoch property on the crypt dataset
+    /// after successful adoption. Returns `None` for the epoch if the disk
+    /// is not encrypted or the epoch could not be read.
     fn adopt_disk(
         &self,
         raw_disk: RawDisk,
         mount_config: &MountConfig,
         pool_id: ZpoolUuid,
         log: &Logger,
-    ) -> impl Future<Output = Result<Disk, DiskManagementError>> + Send;
+    ) -> impl Future<Output = Result<AdoptedDisk, DiskManagementError>> + Send;
 
     fn archive_and_destroy_former_zone_roots(
         &self,
@@ -737,8 +798,8 @@ impl DiskAdopter for RealDiskAdopter<'_> {
         mount_config: &MountConfig,
         pool_id: ZpoolUuid,
         log: &Logger,
-    ) -> Result<Disk, DiskManagementError> {
-        Disk::new(
+    ) -> Result<AdoptedDisk, DiskManagementError> {
+        let disk = Disk::new(
             log,
             mount_config,
             raw_disk,
@@ -757,7 +818,50 @@ impl DiskAdopter for RealDiskAdopter<'_> {
                 }
                 _ => DiskManagementError::Other(err_string),
             }
-        })
+        })?;
+
+        // Read the epoch from the crypt dataset after successful adoption.
+        // This tells us what encryption key the disk is currently using.
+        let crypt_dataset = format!("{}/{}", disk.zpool_name(), CRYPT_DATASET);
+        let epoch = match Zfs::get_oxide_value(&crypt_dataset, "epoch").await {
+            Ok(epoch_str) => match epoch_str.parse::<u64>() {
+                Ok(epoch_val) => {
+                    debug!(
+                        log,
+                        "Read epoch from adopted disk";
+                        "zpool" => %disk.zpool_name(),
+                        "epoch" => epoch_val,
+                    );
+                    // ZFS stores epoch as u64; we wrap it in the Epoch
+                    // newtype for type safety in the reconciler.
+                    Some(Epoch(epoch_val))
+                }
+                Err(e) => {
+                    warn!(
+                        log,
+                        "Failed to parse epoch from adopted disk";
+                        "zpool" => %disk.zpool_name(),
+                        "epoch_str" => &epoch_str,
+                        "error" => %e,
+                    );
+                    None
+                }
+            },
+            Err(e) => {
+                // This could happen if the disk doesn't have an encrypted
+                // crypt dataset (shouldn't happen in production) or if there
+                // was an error reading the property.
+                warn!(
+                    log,
+                    "Failed to read epoch from adopted disk";
+                    "zpool" => %disk.zpool_name(),
+                    "error" => %e,
+                );
+                None
+            }
+        };
+
+        Ok(AdoptedDisk { disk, epoch })
     }
 
     async fn archive_and_destroy_former_zone_roots(
@@ -971,7 +1075,7 @@ mod tests {
             _mount_config: &MountConfig,
             pool_id: ZpoolUuid,
             _log: &Logger,
-        ) -> Result<Disk, DiskManagementError> {
+        ) -> Result<AdoptedDisk, DiskManagementError> {
             // ExternalDisks should only adopt U2 disks
             assert_eq!(raw_disk.variant(), DiskVariant::U2);
             let disk = Disk::Real(PooledDisk {
@@ -988,7 +1092,8 @@ mod tests {
                 firmware: raw_disk.firmware().clone(),
             });
             self.requests.lock().unwrap().push(raw_disk);
-            Ok(disk)
+            // In tests, use epoch 0 as the initial epoch
+            Ok(AdoptedDisk { disk, epoch: Some(Epoch(0)) })
         }
 
         async fn archive_and_destroy_former_zone_roots(

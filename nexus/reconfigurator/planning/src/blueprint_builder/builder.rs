@@ -51,7 +51,7 @@ use nexus_types::deployment::TufRepoContentsError;
 use nexus_types::deployment::UpstreamNtpConfig;
 use nexus_types::deployment::ZpoolName;
 use nexus_types::deployment::blueprint_zone_type;
-use nexus_types::external_api::views::SledState;
+use nexus_types::external_api::sled::SledState;
 use omicron_common::address::CLICKHOUSE_HTTP_PORT;
 use omicron_common::address::DNS_HTTP_PORT;
 use omicron_common::address::DNS_PORT;
@@ -2625,7 +2625,7 @@ pub mod test {
     use nexus_types::deployment::OmicronZoneNetworkResources;
     use nexus_types::deployment::PlanningInput;
     use nexus_types::deployment::SledFilter;
-    use nexus_types::external_api::views::SledPolicy;
+    use nexus_types::external_api::sled::SledPolicy;
     use omicron_common::address::IpRange;
     use omicron_test_utils::dev::test_setup_log;
     use std::collections::BTreeSet;
@@ -2980,12 +2980,17 @@ pub mod test {
                         removed: 0
                     }
                 );
-                // Each disk addition should also result in a debug + zone root
-                // + local storage dataset addition.
+                // Each disk addition should also result in adding the following
+                // datasets:
+                //
+                // - debug
+                // - zone root
+                // - encrypted local storage dataset
+                // - unencrypted local storage dataset
                 assert_eq!(
                     edits.datasets,
                     EditCounts {
-                        added: 3 * usize::from(SledBuilder::DEFAULT_NPOOLS),
+                        added: 4 * usize::from(SledBuilder::DEFAULT_NPOOLS),
                         updated: 0,
                         expunged: 0,
                         removed: 0

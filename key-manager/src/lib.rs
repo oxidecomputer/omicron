@@ -9,7 +9,9 @@ use std::fmt::Debug;
 
 use async_trait::async_trait;
 use hkdf::Hkdf;
-use secrecy::{ExposeSecret, ExposeSecretMut, SecretBox};
+use key_manager_types::Aes256GcmDiskEncryptionKey;
+pub use key_manager_types::VersionedAes256GcmDiskEncryptionKey;
+use secrecy::{ExposeSecret, SecretBox};
 use sha3::Sha3_256;
 use slog::{Logger, o, warn};
 use tokio::sync::{mpsc, oneshot};
@@ -50,27 +52,6 @@ pub enum Error {
 
     #[error("Failed to retrieve secret: {0}")]
     SecretRetrieval(#[from] SecretRetrieverError),
-}
-
-/// Derived Disk Encryption key
-#[derive(Default)]
-struct Aes256GcmDiskEncryptionKey(SecretBox<[u8; 32]>);
-
-/// A Disk encryption key for a given epoch to be used with ZFS datasets for
-/// U.2 devices
-pub struct VersionedAes256GcmDiskEncryptionKey {
-    epoch: u64,
-    key: Aes256GcmDiskEncryptionKey,
-}
-
-impl VersionedAes256GcmDiskEncryptionKey {
-    pub fn epoch(&self) -> u64 {
-        self.epoch
-    }
-
-    pub fn expose_secret(&self) -> &[u8; 32] {
-        &self.key.0.expose_secret()
-    }
 }
 
 /// A request sent from a [`StorageKeyRequester`] to the [`KeyManager`].
@@ -255,11 +236,11 @@ impl<S: SecretRetriever> KeyManager<S> {
                 disk_id.model.as_bytes(),
                 disk_id.serial.as_bytes(),
             ],
-            key.0.expose_secret_mut(),
+            key.expose_secret_mut(),
         )
         .unwrap();
 
-        Ok(VersionedAes256GcmDiskEncryptionKey { epoch, key })
+        Ok(VersionedAes256GcmDiskEncryptionKey::new(epoch, key))
     }
 
     /// Return the epochs for all secrets which are loaded
@@ -309,6 +290,9 @@ pub enum SecretRetrieverError {
 
     #[error("Trust quorum error: {0}")]
     TrustQuorum(String),
+
+    #[error("Timeout retrieving secret")]
+    Timeout,
 }
 
 /// A mechanism for retrieving a secrets to use as input key material to HKDF-
@@ -405,7 +389,7 @@ mod tests {
         };
         let epoch = 0;
         let key = km.disk_encryption_key(epoch, &disk_id).await.unwrap();
-        assert_eq!(key.epoch, epoch);
+        assert_eq!(key.epoch(), epoch);
 
         // Key derivation is deterministic based on disk_id and loaded secrets
         let key2 = km.disk_encryption_key(epoch, &disk_id).await.unwrap();
@@ -436,8 +420,8 @@ mod tests {
         let epoch = 0;
         let key1 = km.disk_encryption_key(epoch, &id_1).await.unwrap();
         let key2 = km.disk_encryption_key(epoch, &id_2).await.unwrap();
-        assert_eq!(key1.epoch, epoch);
-        assert_eq!(key2.epoch, epoch);
+        assert_eq!(key1.epoch(), epoch);
+        assert_eq!(key2.epoch(), epoch);
         assert_ne!(key1.expose_secret(), key2.expose_secret());
     }
 

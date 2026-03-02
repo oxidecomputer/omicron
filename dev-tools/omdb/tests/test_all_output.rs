@@ -9,6 +9,7 @@
 
 use dropshot::Method;
 use expectorate::assert_contents;
+use gateway_client::ClientInfo as _;
 use http::StatusCode;
 use nexus_test_utils::wait_for_producer;
 use nexus_test_utils::{OXIMETER_UUID, PRODUCER_UUID};
@@ -16,10 +17,10 @@ use nexus_test_utils_macros::nexus_test;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::SledFilter;
 use nexus_types::deployment::UnstableReconfiguratorState;
-use omicron_common::api::external::SwitchLocation;
 use omicron_test_utils::dev::test_cmds::Redactor;
 use omicron_test_utils::dev::test_cmds::path_to_executable;
 use omicron_test_utils::dev::test_cmds::run_command;
+use sled_agent_types::early_networking::SwitchLocation;
 use slog_error_chain::InlineErrorChain;
 use std::fmt::Write;
 use std::net::IpAddr;
@@ -136,7 +137,7 @@ async fn test_omdb_success_cases(cptestctx: &ControlPlaneTestContext) {
 
     let cmd_path = path_to_executable(CMD_OMDB);
 
-    let postgres_url = cptestctx.database.listen_url();
+    let postgres_url = cptestctx.database.listen_url().to_string();
     let nexus_lockstep_url =
         format!("http://{}/", cptestctx.lockstep_client.bind_address);
     let mgs_url = cptestctx
@@ -364,9 +365,9 @@ async fn test_omdb_success_cases(cptestctx: &ControlPlaneTestContext) {
 
     for args in invocations {
         println!("running commands with args: {:?}", args);
-        let p = postgres_url.to_string();
+        let p = postgres_url.clone();
         let u = nexus_lockstep_url.clone();
-        let g = mgs_url.clone();
+        let g = mgs_url.to_owned();
         let ox = ox_url.clone();
         let ch = ch_url.clone();
         do_run_extra(

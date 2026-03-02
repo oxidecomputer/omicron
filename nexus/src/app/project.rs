@@ -5,8 +5,6 @@
 //! Project APIs
 
 use crate::app::sagas;
-use crate::external_api::params;
-use crate::external_api::shared;
 use anyhow::Context;
 use nexus_db_lookup::LookupPath;
 use nexus_db_lookup::lookup;
@@ -14,6 +12,8 @@ use nexus_db_queries::authn;
 use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db;
+use nexus_types::external_api::policy;
+use nexus_types::external_api::project;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DeleteResult;
 use omicron_common::api::external::Error;
@@ -29,14 +29,14 @@ impl super::Nexus {
     pub fn project_lookup<'a>(
         &'a self,
         opctx: &'a OpContext,
-        project_selector: params::ProjectSelector,
+        project_selector: project::ProjectSelector,
     ) -> LookupResult<lookup::Project<'a>> {
         let lookup_path = LookupPath::new(opctx, &self.db_datastore);
         Ok(match project_selector {
-            params::ProjectSelector { project: NameOrId::Id(id) } => {
+            project::ProjectSelector { project: NameOrId::Id(id) } => {
                 lookup_path.project_id(id)
             }
-            params::ProjectSelector { project: NameOrId::Name(name) } => {
+            project::ProjectSelector { project: NameOrId::Name(name) } => {
                 lookup_path.project_name_owned(name.into())
             }
         })
@@ -45,7 +45,7 @@ impl super::Nexus {
     pub(crate) async fn project_create(
         self: &Arc<Self>,
         opctx: &OpContext,
-        new_project: &params::ProjectCreate,
+        new_project: &project::ProjectCreate,
     ) -> CreateResult<db::model::Project> {
         let authz_silo = opctx
             .authn
@@ -85,7 +85,7 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
         project_lookup: &lookup::Project<'_>,
-        new_params: &params::ProjectUpdate,
+        new_params: &project::ProjectUpdate,
     ) -> UpdateResult<db::model::Project> {
         let (.., authz_project) =
             project_lookup.lookup_for(authz::Action::Modify).await?;
@@ -112,7 +112,7 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
         project_lookup: &lookup::Project<'_>,
-    ) -> LookupResult<shared::Policy<shared::ProjectRole>> {
+    ) -> LookupResult<policy::Policy<policy::ProjectRole>> {
         let (.., authz_project) =
             project_lookup.lookup_for(authz::Action::ReadPolicy).await?;
         let role_assignments = self
@@ -123,15 +123,15 @@ impl super::Nexus {
             .map(|r| r.try_into().context("parsing database role assignment"))
             .collect::<Result<Vec<_>, _>>()
             .map_err(|error| Error::internal_error(&format!("{:#}", error)))?;
-        Ok(shared::Policy { role_assignments })
+        Ok(policy::Policy { role_assignments })
     }
 
     pub(crate) async fn project_update_policy(
         &self,
         opctx: &OpContext,
         project_lookup: &lookup::Project<'_>,
-        policy: &shared::Policy<shared::ProjectRole>,
-    ) -> UpdateResult<shared::Policy<shared::ProjectRole>> {
+        new_policy: &policy::Policy<policy::ProjectRole>,
+    ) -> UpdateResult<policy::Policy<policy::ProjectRole>> {
         let (.., authz_project) =
             project_lookup.lookup_for(authz::Action::ModifyPolicy).await?;
 
@@ -140,12 +140,12 @@ impl super::Nexus {
             .role_assignment_replace_visible(
                 opctx,
                 &authz_project,
-                &policy.role_assignments,
+                &new_policy.role_assignments,
             )
             .await?
             .into_iter()
             .map(|r| r.try_into())
             .collect::<Result<Vec<_>, _>>()?;
-        Ok(shared::Policy { role_assignments })
+        Ok(policy::Policy { role_assignments })
     }
 }

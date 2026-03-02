@@ -8,11 +8,10 @@ use super::{
 };
 use crate::app::sagas::declare_saga_actions;
 use crate::app::{authn, authz, db};
-use crate::external_api::params;
 use nexus_db_lookup::LookupPath;
+use nexus_types::external_api::image;
 use omicron_common::api::external;
 use omicron_common::api::external::Error;
-use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::VolumeUuid;
 use serde::Deserialize;
 use serde::Serialize;
@@ -52,7 +51,7 @@ impl ImageType {
 pub(crate) struct Params {
     pub serialized_authn: authn::saga::Serialized,
     pub image_type: ImageType,
-    pub create_params: params::ImageCreate,
+    pub create_params: image::ImageCreate,
 }
 
 // image create saga: actions
@@ -82,7 +81,7 @@ impl NexusSaga for SagaImageCreate {
     }
 
     fn make_saga_dag(
-        params: &Self::Params,
+        _params: &Self::Params,
         mut builder: steno::DagBuilder,
     ) -> Result<steno::Dag, SagaInitError> {
         builder.append(Node::action(
@@ -96,18 +95,6 @@ impl NexusSaga for SagaImageCreate {
             "GenerateDestVolumeId",
             ACTION_GENERATE_ID.as_ref(),
         ));
-
-        match &params.create_params.source {
-            params::ImageSource::Snapshot { .. } => {}
-
-            params::ImageSource::YouCanBootAnythingAsLongAsItsAlpine => {
-                builder.append(Node::action(
-                    "alpine_volume_id",
-                    "GenerateAlpineVolumeId",
-                    ACTION_GENERATE_ID.as_ref(),
-                ));
-            }
-        }
 
         builder.append(get_source_volume_action());
         builder.append(create_image_record_action());
@@ -137,7 +124,7 @@ async fn simc_get_source_volume(
     );
 
     match &params.create_params.source {
-        params::ImageSource::Snapshot { id } => {
+        image::ImageSource::Snapshot { id } => {
             let (.., db_snapshot) =
                 LookupPath::new(&opctx, osagactx.datastore())
                     .snapshot_id(*id)
@@ -180,44 +167,6 @@ async fn simc_get_source_volume(
                 size: db_snapshot.size.into(),
             })
         }
-
-        params::ImageSource::YouCanBootAnythingAsLongAsItsAlpine => {
-            let alpine_volume_id =
-                sagactx.lookup::<VolumeUuid>("alpine_volume_id")?;
-
-            // Each Propolis zone ships with an alpine.iso (it's part of the
-            // package-manifest.toml blobs), and for development purposes allow
-            // users to boot that. This should go away when that blob does.
-            let block_size = db::model::BlockSize::Traditional;
-
-            let volume_construction_request =
-                sled_agent_client::VolumeConstructionRequest::File {
-                    id: alpine_volume_id.into_untyped_uuid(),
-                    block_size: u64::from(block_size.to_bytes()),
-                    path: "/opt/oxide/propolis-server/blob/alpine.iso".into(),
-                };
-
-            osagactx
-                .datastore()
-                .volume_create(alpine_volume_id, volume_construction_request)
-                .await
-                .map_err(ActionError::action_failed)?;
-
-            // Nexus runs in its own zone so we can't ask the propolis zone
-            // image tar file for size of alpine.iso. Conservatively set the
-            // size to 100M (at the time of this comment, it's 41M). Any disk
-            // created from this image has to be larger than it, and our
-            // smallest disk size is 1G, so this is valid.
-            let size: u64 = 100 * 1024 * 1024;
-            let size: external::ByteCount = size.try_into().map_err(|e| {
-                ActionError::action_failed(Error::invalid_value(
-                    "size",
-                    format!("size is invalid: {}", e),
-                ))
-            })?;
-
-            Ok(SourceVolume { volume_id: alpine_volume_id, block_size, size })
-        }
     }
 }
 
@@ -248,7 +197,7 @@ async fn simc_create_image_record(
     let source_volume = sagactx.lookup::<SourceVolume>("source_volume")?;
 
     let record = match &params.create_params.source {
-        params::ImageSource::Snapshot { .. } => {
+        image::ImageSource::Snapshot { .. } => {
             db::model::Image {
                 identity: db::model::ImageIdentity::new(
                     image_id,
@@ -261,24 +210,6 @@ async fn simc_create_image_record(
                 os: params.create_params.os.clone(),
                 version: params.create_params.version.clone(),
                 digest: None, // TODO
-                block_size: source_volume.block_size,
-                size: source_volume.size.into(),
-            }
-        }
-
-        params::ImageSource::YouCanBootAnythingAsLongAsItsAlpine => {
-            db::model::Image {
-                identity: db::model::ImageIdentity::new(
-                    image_id,
-                    params.create_params.identity.clone(),
-                ),
-                silo_id: params.image_type.silo_id(),
-                project_id: params.image_type.project_id(),
-                volume_id: source_volume.volume_id.into(),
-                url: None,
-                os: "alpine".into(),
-                version: "propolis-blob".into(),
-                digest: None,
                 block_size: source_volume.block_size,
                 size: source_volume.size.into(),
             }
@@ -355,7 +286,7 @@ async fn simc_create_image_record_undo(
 #[cfg(test)]
 pub(crate) mod test {
     use super::*;
-    use crate::{app::saga::create_saga_dag, external_api::params};
+    use crate::app::saga::create_saga_dag;
     use async_bb8_diesel::AsyncRunQueryDsl;
     use diesel::{
         ExpressionMethods, OptionalExtension, QueryDsl, SelectableHelper,
@@ -381,6 +312,7 @@ pub(crate) mod test {
     async fn new_test_params(
         cptestctx: &ControlPlaneTestContext,
         project_id: Uuid,
+        snapshot_id: Uuid,
     ) -> Params {
         let opctx = test_opctx(cptestctx);
         let datastore = cptestctx.server.server_context().nexus.datastore();
@@ -395,13 +327,12 @@ pub(crate) mod test {
         Params {
             serialized_authn: Serialized::for_opctx(&opctx),
             image_type: ImageType::Silo { authz_silo },
-            create_params: params::ImageCreate {
+            create_params: image::ImageCreate {
                 identity: IdentityMetadataCreateParams {
                     name: "image".parse().unwrap(),
                     description: String::from("description"),
                 },
-                source:
-                    params::ImageSource::YouCanBootAnythingAsLongAsItsAlpine,
+                source: image::ImageSource::Snapshot { id: snapshot_id },
                 os: "debian".to_string(),
                 version: "12".to_string(),
             },
@@ -430,8 +361,11 @@ pub(crate) mod test {
 
         create_disk(&client, PROJECT_NAME, DISK_NAME).await;
 
-        let snapshot =
-            create_snapshot(&client, PROJECT_NAME, DISK_NAME, "snapshot").await;
+        let snapshot_id =
+            create_snapshot(&client, PROJECT_NAME, DISK_NAME, "snapshot")
+                .await
+                .identity
+                .id;
 
         // Build the saga DAG with the provided test parameters and run it.
         let opctx = test_opctx(cptestctx);
@@ -446,14 +380,12 @@ pub(crate) mod test {
         let params = Params {
             serialized_authn: Serialized::for_opctx(&opctx),
             image_type: ImageType::Project { authz_silo, authz_project },
-            create_params: params::ImageCreate {
+            create_params: image::ImageCreate {
                 identity: IdentityMetadataCreateParams {
                     name: "image".parse().unwrap(),
                     description: String::from("description"),
                 },
-                source: params::ImageSource::Snapshot {
-                    id: snapshot.identity.id,
-                },
+                source: image::ImageSource::Snapshot { id: snapshot_id },
                 os: "debian".to_string(),
                 version: "12".to_string(),
             },
@@ -474,14 +406,23 @@ pub(crate) mod test {
         cptestctx: &ControlPlaneTestContext,
     ) {
         let client = &cptestctx.external_client;
+        DiskTest::new(cptestctx).await;
         let nexus = &cptestctx.server.server_context().nexus;
 
         let project_id =
             create_project(&client, PROJECT_NAME).await.identity.id;
 
+        create_disk(&client, PROJECT_NAME, DISK_NAME).await;
+
+        let snapshot_id =
+            create_snapshot(&client, PROJECT_NAME, DISK_NAME, "snapshot")
+                .await
+                .identity
+                .id;
+
         // Build the saga DAG with the provided test parameters and run it.
 
-        let params = new_test_params(&cptestctx, project_id).await;
+        let params = new_test_params(&cptestctx, project_id, snapshot_id).await;
 
         let output =
             nexus.sagas.saga_execute::<SagaImageCreate>(params).await.unwrap();
@@ -530,11 +471,18 @@ pub(crate) mod test {
         cptestctx: &ControlPlaneTestContext,
     ) {
         let log = &cptestctx.logctx.log;
+        DiskTest::new(cptestctx).await;
 
         let client = &cptestctx.external_client;
         let nexus = &cptestctx.server.server_context().nexus;
         let project_id =
             create_project(&client, PROJECT_NAME).await.identity.id;
+        create_disk(&client, PROJECT_NAME, DISK_NAME).await;
+        let snapshot_id =
+            create_snapshot(&client, PROJECT_NAME, DISK_NAME, "snapshot")
+                .await
+                .identity
+                .id;
 
         crate::app::sagas::test_helpers::action_failure_can_unwind::<
             SagaImageCreate,
@@ -544,7 +492,7 @@ pub(crate) mod test {
             nexus,
             || {
                 Box::pin(async {
-                    new_test_params(&cptestctx, project_id).await
+                    new_test_params(&cptestctx, project_id, snapshot_id).await
                 })
             },
             || {
@@ -562,11 +510,18 @@ pub(crate) mod test {
         cptestctx: &ControlPlaneTestContext,
     ) {
         let log = &cptestctx.logctx.log;
+        DiskTest::new(cptestctx).await;
 
         let client = &cptestctx.external_client;
         let nexus = &cptestctx.server.server_context().nexus;
         let project_id =
             create_project(&client, PROJECT_NAME).await.identity.id;
+        create_disk(&client, PROJECT_NAME, DISK_NAME).await;
+        let snapshot_id =
+            create_snapshot(&client, PROJECT_NAME, DISK_NAME, "snapshot")
+                .await
+                .identity
+                .id;
 
         crate::app::sagas::test_helpers::action_failure_can_unwind_idempotently::<
             SagaImageCreate,
@@ -575,7 +530,7 @@ pub(crate) mod test {
         >(
             nexus,
             || Box::pin(async {
-                new_test_params(&cptestctx, project_id).await
+                new_test_params(&cptestctx, project_id, snapshot_id).await
             }),
             || Box::pin(async { verify_clean_slate(&cptestctx).await; }),
             log
@@ -587,14 +542,21 @@ pub(crate) mod test {
         cptestctx: &ControlPlaneTestContext,
     ) {
         let client = &cptestctx.external_client;
+        DiskTest::new(cptestctx).await;
         let nexus = &cptestctx.server.server_context().nexus;
         let project_id =
             create_project(&client, PROJECT_NAME).await.identity.id;
+        create_disk(&client, PROJECT_NAME, DISK_NAME).await;
+        let snapshot_id =
+            create_snapshot(&client, PROJECT_NAME, DISK_NAME, "snapshot")
+                .await
+                .identity
+                .id;
 
         // Build the saga DAG with the provided test parameters
         let opctx = test_opctx(&cptestctx);
 
-        let params = new_test_params(&cptestctx, project_id).await;
+        let params = new_test_params(&cptestctx, project_id, snapshot_id).await;
         let dag = create_saga_dag::<SagaImageCreate>(params).unwrap();
         crate::app::sagas::test_helpers::actions_succeed_idempotently(
             nexus, dag,
@@ -603,7 +565,7 @@ pub(crate) mod test {
 
         // Delete the (silo) image, and verify clean slate
 
-        let image_selector = params::ImageSelector {
+        let image_selector = image::ImageSelector {
             project: None,
             image: Name::try_from("image".to_string()).unwrap().into(),
         };

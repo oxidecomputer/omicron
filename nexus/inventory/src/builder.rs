@@ -675,7 +675,7 @@ impl CollectionBuilder {
             reconciler_status: inventory.reconciler_status,
             last_reconciliation: inventory.last_reconciliation,
             file_source_resolver: inventory.file_source_resolver,
-            health_monitor: inventory.health_monitor,
+            smf_services_in_maintenance: inventory.smf_services_in_maintenance,
             reference_measurements: inventory.reference_measurements,
         };
 
@@ -772,18 +772,7 @@ impl CollectionBuilder {
     }
 }
 
-/// Returns the current time, truncated to the previous microsecond.
-///
-/// This exists because the database doesn't store nanosecond-precision, so if
-/// we store nanosecond-precision timestamps, then DateTime conversion is lossy
-/// when round-tripping through the database.  That's rather inconvenient.
-pub fn now_db_precision() -> DateTime<Utc> {
-    let ts = Utc::now();
-    let nanosecs = ts.timestamp_subsec_nanos();
-    let micros = ts.timestamp_subsec_micros();
-    let only_nanos = nanosecs - micros * 1000;
-    ts - std::time::Duration::from_nanos(u64::from(only_nanos))
-}
+pub use omicron_common::now_db_precision;
 
 #[cfg(test)]
 mod test {

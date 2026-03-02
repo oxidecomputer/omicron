@@ -81,8 +81,8 @@ use omicron_common::address::{
 use omicron_common::address::{Ipv6Subnet, NEXUS_TECHPORT_EXTERNAL_PORT};
 use omicron_common::api::external::Generation;
 use omicron_common::api::internal::shared::{
-    ExternalIpConfig, ExternalIpConfigBuilder, ExternalIps, HostPortConfig,
-    PrivateIpConfig, RackNetworkConfig, SledIdentifiers,
+    ExternalIpConfig, ExternalIpConfigBuilder, ExternalIps, PrivateIpConfig,
+    SledIdentifiers,
 };
 use omicron_common::backoff::{
     BackoffError, retry_notify, retry_policy_internal_service_aggressive,
@@ -93,6 +93,7 @@ use omicron_uuid_kinds::OmicronZoneUuid;
 use sled_agent_resolvable_files::{
     ZoneImageSourceResolver, ramdisk_file_source,
 };
+use sled_agent_types::early_networking::RackNetworkConfig;
 use sled_agent_types::inventory::{
     OmicronZoneConfig, OmicronZoneType, ZoneKind,
 };
@@ -100,6 +101,7 @@ use sled_agent_types::resolvable_files::{
     MupdateOverrideReadError, PreparedOmicronZone,
 };
 use sled_agent_types::sled::SWITCH_ZONE_BASEBOARD_FILE;
+use sled_agent_types::uplink::HostPortConfig;
 use sled_hardware::DendriteAsic;
 use sled_hardware::SledMode;
 use sled_hardware::is_oxide_sled;
@@ -193,7 +195,7 @@ pub enum Error {
     #[error(transparent)]
     ZoneInstall(#[from] illumos_utils::running_zone::InstallZoneError),
 
-    #[error("Error contacting ddmd: {0}")]
+    #[error("Error contacting ddmd")]
     DdmError(#[from] DdmError),
 
     #[error("Failed to access underlay device: {0}")]
@@ -1210,6 +1212,8 @@ impl ServiceManager {
                 external_ips: &external_ips,
                 firewall_rules: &[],
                 dhcp_config: DhcpCfg::default(),
+                // Services do not use attached subnets, only instances.
+                attached_subnets: vec![],
             })
             .map_err(|err| Error::ServicePortCreation {
                 service: zone_kind,

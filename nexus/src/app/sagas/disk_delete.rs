@@ -13,9 +13,11 @@ use nexus_db_queries::authn;
 use nexus_db_queries::db;
 use nexus_db_queries::db::datastore;
 use omicron_common::api::external::DiskState;
-use omicron_common::progenitor_operation_retry::ProgenitorOperationRetry;
+use omicron_common::backoff::backon_retry_policy_internal_service;
+use progenitor_extras::retry::{GoneCheckResult, retry_operation_while};
 use serde::Deserialize;
 use serde::Serialize;
+use sled_agent_client::types::LocalStorageDatasetDeleteRequest;
 use steno::ActionError;
 use steno::Node;
 use uuid::Uuid;
@@ -41,11 +43,11 @@ declare_saga_actions! {
         + sdd_account_space
         - sdd_account_space_undo
     }
-    DEALLOCATE_LOCAL_STORAGE -> "deallocate_local_storage" {
-        + sdd_deallocate_local_storage
-    }
     DELETE_LOCAL_STORAGE -> "delete_local_storage" {
         + sdd_delete_local_storage
+    }
+    DEALLOCATE_LOCAL_STORAGE -> "deallocate_local_storage" {
+        + sdd_deallocate_local_storage
     }
 }
 
@@ -104,8 +106,12 @@ impl NexusSaga for SagaDiskDelete {
             }
 
             datastore::Disk::LocalStorage(_) => {
-                builder.append(deallocate_local_storage_action());
+                // Attempt deleting the local storage before removing the
+                // database record. If the delete does not succeed, at least the
+                // user can re-request the deletion.
+
                 builder.append(delete_local_storage_action());
+                builder.append(deallocate_local_storage_action());
             }
         }
 
@@ -196,37 +202,6 @@ async fn sdd_account_space_undo(
     Ok(())
 }
 
-async fn sdd_deallocate_local_storage(
-    sagactx: NexusActionContext,
-) -> Result<(), ActionError> {
-    let osagactx = sagactx.user_data();
-    let params = sagactx.saga_params::<Params>()?;
-    let opctx = crate::context::op_context_for_saga_action(
-        &sagactx,
-        &params.serialized_authn,
-    );
-
-    let datastore::Disk::LocalStorage(disk) = params.disk else {
-        unreachable!(
-            "check during `make_saga_dag` should have ensured disk type is \
-            local storage"
-        );
-    };
-
-    let Some(allocation) = disk.local_storage_dataset_allocation else {
-        // Nothing to do!
-        return Ok(());
-    };
-
-    osagactx
-        .datastore()
-        .delete_local_storage_dataset_allocation(&opctx, allocation.id())
-        .await
-        .map_err(ActionError::action_failed)?;
-
-    Ok(())
-}
-
 async fn sdd_delete_local_storage(
     sagactx: NexusActionContext,
 ) -> Result<(), ActionError> {
@@ -249,9 +224,13 @@ async fn sdd_delete_local_storage(
         return Ok(());
     };
 
-    let dataset_id = allocation.id();
-    let pool_id = allocation.pool_id();
     let sled_id = allocation.sled_id();
+
+    let request = LocalStorageDatasetDeleteRequest {
+        zpool_id: allocation.pool_id(),
+        dataset_id: allocation.id(),
+        encrypted_at_rest: allocation.encrypted_at_rest(),
+    };
 
     // Get a sled agent client
 
@@ -264,28 +243,66 @@ async fn sdd_delete_local_storage(
     // Ensure that the local storage is deleted
 
     let delete_operation = || async {
-        sled_agent_client
-            .local_storage_dataset_delete(&pool_id, &dataset_id)
-            .await
+        sled_agent_client.local_storage_dataset_delete(&request).await
     };
 
+    // `check_sled_in_service` returns an error if the sled is no longer in
+    // service; if it succeeds, the sled is not gone.
     let gone_check = || async {
-        osagactx.datastore().check_sled_in_service(&opctx, sled_id).await?;
-
-        // `check_sled_in_service` returns an error if the sled is no longer in
-        // service; if it succeeds, the sled is not gone.
-        Ok(false)
+        osagactx
+            .datastore()
+            .check_sled_in_service(&opctx, sled_id)
+            .await
+            .map(|()| GoneCheckResult::StillAvailable)
     };
 
-    ProgenitorOperationRetry::new(delete_operation, gone_check)
-        .run(osagactx.log())
+    let log = osagactx.log().clone();
+    retry_operation_while(
+        backon_retry_policy_internal_service(),
+        delete_operation,
+        gone_check,
+        |notification| {
+            slog::warn!(
+                log,
+                "failed to delete local storage dataset, retrying in {:?}",
+                notification.delay;
+                InlineErrorChain::new(&notification.error),
+            );
+        },
+    )
+    .await
+    .map_err(|e| {
+        ActionError::action_failed(format!(
+            "failed to delete local storage: {}",
+            InlineErrorChain::new(&e)
+        ))
+    })?;
+
+    Ok(())
+}
+
+async fn sdd_deallocate_local_storage(
+    sagactx: NexusActionContext,
+) -> Result<(), ActionError> {
+    let osagactx = sagactx.user_data();
+    let params = sagactx.saga_params::<Params>()?;
+    let opctx = crate::context::op_context_for_saga_action(
+        &sagactx,
+        &params.serialized_authn,
+    );
+
+    let datastore::Disk::LocalStorage(disk) = params.disk else {
+        unreachable!(
+            "check during `make_saga_dag` should have ensured disk type is \
+            local storage"
+        );
+    };
+
+    osagactx
+        .datastore()
+        .delete_local_storage_dataset_allocations(&opctx, &disk)
         .await
-        .map_err(|e| {
-            ActionError::action_failed(format!(
-                "failed to delete local storage: {}",
-                InlineErrorChain::new(&e)
-            ))
-        })?;
+        .map_err(ActionError::action_failed)?;
 
     Ok(())
 }
@@ -302,7 +319,7 @@ pub(crate) mod test {
     use nexus_test_utils::resource_helpers::DiskTest;
     use nexus_test_utils::resource_helpers::create_project;
     use nexus_test_utils_macros::nexus_test;
-    use nexus_types::external_api::params;
+    use nexus_types::external_api::project;
     use omicron_common::api::external::Name;
 
     type ControlPlaneTestContext =
@@ -321,7 +338,7 @@ pub(crate) mod test {
         let nexus = &cptestctx.server.server_context().nexus;
         let opctx = test_opctx(&cptestctx);
 
-        let project_selector = params::ProjectSelector {
+        let project_selector = project::ProjectSelector {
             project: Name::try_from(PROJECT_NAME.to_string()).unwrap().into(),
         };
 

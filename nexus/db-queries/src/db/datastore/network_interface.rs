@@ -418,6 +418,33 @@ impl DataStore {
                 }
             }
         })
+        .and_then(|nic| {
+            // Verify that the created NIC has the requested IP address
+            // types. Note that our sql constraint ensures that at least
+            // one of ip and ipv6 is populated, so we should never reach
+            // this point if both address types failed to create.
+            // However, if the user requested a dual-stack NIC and only
+            // received a single address type, our sql constraint is
+            // satisfied, and we need the additional check here.
+            let wants_v4 = interface.ip_config.as_ipv4_create().is_some();
+            let wants_v6 = interface.ip_config.as_ipv6_create().is_some();
+            let missing_v4 = wants_v4 && nic.ipv4.is_none();
+            let missing_v6 = wants_v6 && nic.ipv6.is_none();
+            if missing_v4 || missing_v6 {
+                Err(TransactionError::CustomError(
+                    network_interface::InsertError::NoAvailableIpAddresses {
+                        name: interface.subnet.identity.name.to_string(),
+                        id: subnet_id,
+                        ip_versions:
+                            network_interface::MissingIpVersions::from_missing(
+                                missing_v4, missing_v6,
+                            ),
+                    },
+                ))
+            } else {
+                Ok(nic)
+            }
+        })
     }
 
     /// Delete all network interfaces attached to the given instance.
@@ -1068,7 +1095,7 @@ mod tests {
     use crate::db::pub_test_utils::TestDatabase;
     use nexus_config::NUM_INITIAL_RESERVED_IP_ADDRESSES;
     use nexus_db_fixed_data::vpc_subnet::NEXUS_VPC_SUBNET;
-    use nexus_types::external_api::params::PrivateIpStackCreate;
+    use nexus_types::external_api::instance::PrivateIpStackCreate;
     use omicron_common::address::NEXUS_OPTE_IPV4_SUBNET;
     use omicron_test_utils::dev;
     use std::collections::BTreeSet;

@@ -6,20 +6,22 @@
 
 use std::net::{IpAddr, Ipv6Addr};
 
+use super::NexusActionContext;
 use crate::Nexus;
+use crate::app::instance_network::InstanceNetworkFilters;
+use http::StatusCode;
 use nexus_db_lookup::LookupPath;
 use nexus_db_model::{
-    ByteCount, ExternalIp, InstanceState, IpAttachState, NatEntry,
+    ByteCount, ExternalIp, InstanceState, IpAttachState, IpNet, NatEntry,
     SledReservationConstraints, SledResourceVmm, VmmCpuPlatform, VmmState,
 };
 use nexus_db_queries::authz;
+use nexus_db_queries::db::datastore::ExternalSubnetBeginOpResult;
 use nexus_db_queries::{authn, context::OpContext, db, db::DataStore};
 use omicron_common::api::external::{Error, IpVersion, NameOrId};
 use omicron_uuid_kinds::{GenericUuid, InstanceUuid, PropolisUuid, SledUuid};
 use serde::{Deserialize, Serialize};
 use steno::ActionError;
-
-use super::NexusActionContext;
 
 /// The port propolis-server listens on inside the propolis zone.
 const DEFAULT_PROPOLIS_PORT: u16 = 12400;
@@ -179,17 +181,17 @@ pub async fn instance_ip_move_state(
     }
 }
 
-/// Yields the sled on which an instance is found to be running so that IP
-/// attachment and detachment operations can be propagated there.
+/// Yields the sled on which an instance is found to be running so that IP and
+/// subnet attachment and detachment operations can be propagated there.
 ///
 /// # Preconditions
 ///
 /// To synchronize correctly with other concurrent operations on an instance,
-/// the calling saga must have placed the IP it is attaching or detaching into
-/// the Attaching or Detaching state so that concurrent attempts to start the
-/// instance will notice that the IP state is in flux and ask the caller to
-/// retry.
-pub(super) async fn instance_ip_get_instance_state(
+/// the calling saga must have placed the IP or subnet it is attaching or
+/// detaching into the Attaching or Detaching state so that concurrent attempts
+/// to start the instance will notice that the IP state is in flux and ask the
+/// caller to retry.
+pub(super) async fn networking_resource_instance_state(
     sagactx: &NexusActionContext,
     serialized_authn: &authn::saga::Serialized,
     authz_instance: &authz::Instance,
@@ -219,7 +221,8 @@ pub(super) async fn instance_ip_get_instance_state(
         });
 
     slog::debug!(
-        osagactx.log(), "evaluating instance state for IP attach/detach";
+        osagactx.log(),
+        "evaluating instance state for networking attach/detach";
         "instance_state" => ?found_instance_state,
         "vmm_state" => ?found_vmm_state
     );
@@ -231,8 +234,8 @@ pub(super) async fn instance_ip_get_instance_state(
     //             otherwise convert OPTE ensure to 'service unavailable'
     //             and undo.
     // - deleting: can only be called from stopped -- we won't push to dpd
-    //             or sled-agent, and IP record might be deleted or forcibly
-    //             detached. Catch here just in case.
+    //             or sled-agent, and IP / subnet record might be deleted
+    //             or forcibly detached. Catch here just in case.
     // - starting: see below.
     match (found_instance_state, found_vmm_state) {
         // If there's no VMM, the instance is definitely not on any sled.
@@ -254,20 +257,20 @@ pub(super) async fn instance_ip_get_instance_state(
         // Although an instance with a Starting (or Creating) VMM has a sled
         // assignment, there's no way to tell at this point whether or not
         // there's a  concurrent instance-start saga that has passed the point
-        // where it sends IP assignments to the instance's new sled:
+        // where it sends IP / subnet assignments to the instance's new sled:
         //
-        // - If the start saga is still in progress and hasn't pushed any IP
-        //   information to the instance's new sled yet, then either of two
-        //   things can happen:
-        //   - This function's caller can finish modifying IPs before the start
-        //     saga propagates IP information to the sled. In this case the
-        //     calling saga should do nothing--the start saga will send the
-        //     right IP set to the sled.
+        // - If the start saga is still in progress and hasn't pushed any
+        //   network information to the instance's new sled yet, then either of
+        //   two things can happen:
+        //   - This function's caller can finish modifying IPs or subnets before
+        //     the start saga propagates information to the sled. In this case,
+        //     the calling saga should do nothing--the start saga will send the
+        //     right IP or subnet set to the sled.
         //   - If the start saga "wins" the race, it will see that the instance
         //     still has an attaching/detaching IP and bail out.
         //  - If the start saga is already done, and Nexus is just waiting for
         //    the VMM to report that it's Running, the calling saga needs to
-        //    send the IP change to the instance's sled.
+        //    send the IP or subnet change to the instance's sled.
         //
         // There's no way to distinguish these cases, so if a VMM is Starting,
         // block the attach/detach.
@@ -291,13 +294,15 @@ pub(super) async fn instance_ip_get_instance_state(
         }
         (InstanceState::Creating, _) => {
             return Err(ActionError::action_failed(Error::invalid_request(
-                "cannot modify instance IPs, instance is still being created",
+                "cannot modify instance IP or subnets, instance is \
+                still being created",
             )));
         }
         (InstanceState::Failed, _)
         | (InstanceState::Vmm, Some(VmmState::Failed)) => {
             return Err(ActionError::action_failed(Error::invalid_request(
-                "cannot modify instance IPs, instance is in unhealthy state",
+                "cannot modify instance IPs or subnets, instance is \
+                in unhealthy state",
             )));
         }
 
@@ -322,6 +327,163 @@ pub(super) async fn instance_ip_get_instance_state(
     }
 
     Ok(propolis_and_sled_id)
+}
+
+/// Send details about a new attached subnet to Dendrite.
+pub(super) async fn send_subnet_attachment_to_dpd(
+    sagactx: &NexusActionContext,
+    serialized_authn: &authn::saga::Serialized,
+    authz_instance: &authz::Instance,
+    sled_uuid: Option<SledUuid>,
+    subnet: ExternalSubnetBeginOpResult,
+) -> Result<Option<IpNet>, ActionError> {
+    let osagactx = sagactx.user_data();
+    let datastore = osagactx.datastore();
+    let opctx =
+        crate::context::op_context_for_saga_action(&sagactx, serialized_authn);
+
+    // Check that we have a sled and actually want to proceed with the saga.
+    let Some(sled_uuid) = sled_uuid else {
+        return Ok(None);
+    };
+    let ExternalSubnetBeginOpResult { subnet, do_saga } = subnet;
+    if !do_saga {
+        return Ok(None);
+    }
+
+    // Querying sleds requires fleet access; use the instance allocator context
+    // for this.
+    let (.., sled) = LookupPath::new(&osagactx.nexus().opctx_alloc, datastore)
+        .sled_id(sled_uuid)
+        .fetch()
+        .await
+        .map_err(ActionError::action_failed)?;
+
+    // Build the instance target for Dendrite.
+    //
+    // We first need the primary NIC of the instance, since we're mapping to the
+    // inner MAC and VNI.
+    let primary_nic = datastore
+        .derive_guest_network_interface_info(&opctx, &authz_instance)
+        .await
+        .map_err(ActionError::action_failed)?
+        .into_iter()
+        .find(|nic| nic.primary)
+        .ok_or_else(|| {
+            ActionError::action_failed(Error::internal_error(
+                "instance does not have a primary NIC, \
+                cannot yet send Dendrite attached subnet info",
+            ))
+        })?;
+    let target = dpd_client::types::InstanceTarget {
+        inner_mac: dpd_client::types::MacAddr {
+            a: primary_nic.mac.into_array(),
+        },
+        internal_ip: sled.ip.into(),
+        vni: dpd_client::types::Vni(primary_nic.vni.into()),
+    };
+    osagactx
+        .nexus()
+        .send_attached_subnet_to_dendrite(&[subnet.subnet.into()], target)
+        .await
+        .map(|_| Some(subnet.subnet))
+        .map_err(ActionError::action_failed)
+}
+
+/// Delete an attached subnet from Dendrite.
+pub(super) async fn delete_subnet_attachment_from_dpd(
+    sagactx: &NexusActionContext,
+    subnet: IpNet,
+) -> Result<(), ActionError> {
+    sagactx
+        .user_data()
+        .nexus()
+        .delete_attached_subnet_from_dendrite(subnet.into())
+        .await
+        .map_err(ActionError::action_failed)
+}
+
+/// Send details about a new attached subnet to OPTE.
+pub(super) async fn send_subnet_attachment_to_opte(
+    sagactx: &NexusActionContext,
+    vmm_and_sled: Option<VmmAndSledIds>,
+    subnet: ExternalSubnetBeginOpResult,
+) -> Result<(), ActionError> {
+    let osagactx = sagactx.user_data();
+    let Some(VmmAndSledIds { vmm_id: propolis_id, sled_id }) = vmm_and_sled
+    else {
+        return Ok(());
+    };
+    let ExternalSubnetBeginOpResult { subnet, do_saga } = subnet;
+    if !do_saga {
+        return Ok(());
+    }
+    let request = sled_agent_client::types::AttachedSubnet {
+        // TODO-completeness: Expand this code to handle VPC subnets too. See
+        // https://github.com/oxidecomputer/omicron/issues/9580.
+        kind: sled_agent_client::types::AttachedSubnetKind::External,
+        subnet: subnet.subnet.into(),
+    };
+    let result = osagactx
+        .nexus()
+        .sled_client(&sled_id)
+        .await
+        .map_err(|_| {
+            ActionError::action_failed(Error::unavail(
+                "sled agent client went away mid-attach/detach",
+            ))
+        })?
+        .vmm_post_attached_subnet(&propolis_id, &request)
+        .await;
+    let result = match result {
+        Ok(_) => Ok(()),
+        Err(progenitor_client::Error::ErrorResponse(err))
+            if err.status() == StatusCode::CONFLICT =>
+        {
+            Ok(())
+        }
+        Err(progenitor_client::Error::CommunicationError(_)) => {
+            Err(Error::unavail("sled agent client went away mid-attach/detach"))
+        }
+        Err(e) => Err(Error::internal_error(e.to_string().as_str())),
+    };
+    result.map_err(ActionError::action_failed)
+}
+
+/// Delete a single attached subnet from OPTE.
+pub(super) async fn delete_subnet_attachment_from_opte(
+    sagactx: &NexusActionContext,
+    vmm_and_sled: Option<VmmAndSledIds>,
+    subnet: ExternalSubnetBeginOpResult,
+) -> Result<(), ActionError> {
+    let osagactx = sagactx.user_data();
+    let Some(VmmAndSledIds { vmm_id: propolis_id, sled_id }) = vmm_and_sled
+    else {
+        return Ok(());
+    };
+    let ExternalSubnetBeginOpResult { subnet, do_saga } = subnet;
+    if !do_saga {
+        return Ok(());
+    }
+    osagactx
+        .nexus()
+        .sled_client(&sled_id)
+        .await
+        .map_err(|_| {
+            ActionError::action_failed(Error::unavail(
+                "sled agent client went away mid-attach/detach",
+            ))
+        })?
+        .vmm_delete_attached_subnet(&propolis_id, &subnet.subnet.into())
+        .await
+        .map(|_| ())
+        .map_err(|e| match e {
+            progenitor_client::Error::CommunicationError(_) => {
+                Error::unavail("sled agent client went away mid-attach/detach")
+            }
+            e => Error::internal_error(e.to_string().as_str()),
+        })
+        .map_err(ActionError::action_failed)
 }
 
 /// Adds a NAT entry to DPD, routing packets bound for `target_ip` to a
@@ -369,7 +531,7 @@ pub async fn instance_ip_add_nat(
             &opctx,
             InstanceUuid::from_untyped_uuid(authz_instance.id()),
             &sled.address(),
-            Some(target_ip.id),
+            InstanceNetworkFilters::single_ip(target_ip.id),
         )
         .await
         .and_then(|v| {

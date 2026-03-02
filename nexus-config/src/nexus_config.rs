@@ -16,13 +16,13 @@ pub use omicron_common::address::MIN_VPC_IPV4_SUBNET_PREFIX;
 use omicron_common::address::NEXUS_TECHPORT_EXTERNAL_PORT;
 pub use omicron_common::address::NUM_INITIAL_RESERVED_IP_ADDRESSES;
 use omicron_common::address::RACK_PREFIX;
-use omicron_common::api::internal::shared::SwitchLocation;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_with::DisplayFromStr;
 use serde_with::DurationSeconds;
 use serde_with::serde_as;
+use sled_agent_types::early_networking::SwitchLocation;
 use std::collections::HashMap;
 use std::fmt;
 use std::net::IpAddr;
@@ -433,6 +433,8 @@ pub struct BackgroundTaskConfig {
     pub multicast_reconciler: MulticastGroupReconcilerConfig,
     /// configuration for trust quorum manager task
     pub trust_quorum: TrustQuorumConfig,
+    /// configuration for the attached subnet manager
+    pub attached_subnet_manager: AttachedSubnetManagerConfig,
 }
 
 #[serde_as]
@@ -1016,6 +1018,15 @@ pub struct PackageConfig {
     pub default_region_allocation_strategy: RegionAllocationStrategy,
 }
 
+#[serde_as]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct AttachedSubnetManagerConfig {
+    /// period (in seconds) for periodic activations of the background task that
+    /// pushes attached subnets to the switches and sleds.
+    #[serde_as(as = "DurationSeconds<u64>")]
+    pub period_secs: Duration,
+}
+
 // Re-export SchemeName from nexus-types for use in config parsing.
 pub use nexus_types::authn::SchemeName;
 
@@ -1041,7 +1052,6 @@ mod test {
     use omicron_common::address::{
         CLICKHOUSE_TCP_PORT, Ipv6Subnet, RACK_PREFIX,
     };
-    use omicron_common::api::internal::shared::SwitchLocation;
 
     use camino::{Utf8Path, Utf8PathBuf};
     use dropshot::ConfigDropshot;
@@ -1241,6 +1251,7 @@ mod test {
             probe_distributor.period_secs = 50
             multicast_reconciler.period_secs = 60
             trust_quorum.period_secs = 60
+            attached_subnet_manager.period_secs = 60
             [default_region_allocation_strategy]
             type = "random"
             seed = 0
@@ -1501,6 +1512,9 @@ mod test {
                         trust_quorum: TrustQuorumConfig {
                             period_secs: Duration::from_secs(60),
                         },
+                        attached_subnet_manager: AttachedSubnetManagerConfig {
+                            period_secs: Duration::from_secs(60),
+                        },
                     },
                     multicast: MulticastConfig { enabled: false },
                     default_region_allocation_strategy:
@@ -1605,6 +1619,7 @@ mod test {
             probe_distributor.period_secs = 47
             multicast_reconciler.period_secs = 60
             trust_quorum.period_secs = 60
+            attached_subnet_manager.period_secs = 60
 
             [default_region_allocation_strategy]
             type = "random"

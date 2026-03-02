@@ -8,6 +8,7 @@ use crate::PRODUCER_UUID;
 use crate::SLED_AGENT_UUID;
 use crate::SLED_AGENT2_UUID;
 use crate::TEST_SUITE_PASSWORD;
+use crate::TEST_SUITE_PASSWORD_HASH;
 use anyhow::Result;
 use camino::Utf8Path;
 use camino::Utf8PathBuf;
@@ -36,6 +37,7 @@ use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::BlueprintDatasetConfig;
 use nexus_types::deployment::BlueprintDatasetDisposition;
 use nexus_types::deployment::BlueprintHostPhase2DesiredSlots;
+use nexus_types::deployment::BlueprintMeasurements;
 use nexus_types::deployment::BlueprintPhysicalDiskConfig;
 use nexus_types::deployment::BlueprintPhysicalDiskDisposition;
 use nexus_types::deployment::BlueprintSledConfig;
@@ -54,7 +56,7 @@ use nexus_types::deployment::PendingMgsUpdates;
 use nexus_types::deployment::PlannerConfig;
 use nexus_types::deployment::ReconfiguratorConfig;
 use nexus_types::deployment::blueprint_zone_type;
-use nexus_types::external_api::views::SledState;
+use nexus_types::external_api::sled::SledState;
 use nexus_types::internal_api::params::DnsConfigParams;
 use omicron_common::address::DNS_OPTE_IPV4_SUBNET;
 use omicron_common::address::DNS_OPTE_IPV6_SUBNET;
@@ -75,7 +77,6 @@ use omicron_common::api::internal::shared::NetworkInterface;
 use omicron_common::api::internal::shared::NetworkInterfaceKind;
 use omicron_common::api::internal::shared::PrivateIpConfig;
 use omicron_common::api::internal::shared::SourceNatConfigGeneric;
-use omicron_common::api::internal::shared::SwitchLocation;
 use omicron_common::disk::CompressionAlgorithm;
 use omicron_common::zpool_name::ZpoolName;
 use omicron_sled_agent::sim;
@@ -94,7 +95,8 @@ use oximeter_producer::LogConfig;
 use oximeter_producer::Server as ProducerServer;
 use sled_agent_client::types::EarlyNetworkConfig;
 use sled_agent_client::types::EarlyNetworkConfigBody;
-use sled_agent_client::types::RackNetworkConfigV2;
+use sled_agent_client::types::RackNetworkConfig;
+use sled_agent_types::early_networking::SwitchLocation;
 use sled_agent_types::inventory::HostPhase2DesiredSlots;
 use sled_agent_types::inventory::OmicronSledConfig;
 use sled_agent_types::inventory::OmicronZoneDataset;
@@ -756,14 +758,7 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
         let silo_name: Name = "test-suite-silo".parse().unwrap();
         let user_name =
             UserId::try_from("test-privileged".to_string()).unwrap();
-        let user_password_hash = omicron_passwords::Hasher::default()
-            .create_password(
-                &omicron_passwords::Password::new(TEST_SUITE_PASSWORD).unwrap(),
-            )
-            .unwrap()
-            .as_str()
-            .parse()
-            .unwrap();
+        let user_password_hash = TEST_SUITE_PASSWORD_HASH.parse().unwrap();
         let recovery_silo = RecoverySiloConfig {
             silo_name: silo_name.clone(),
             user_name: user_name.clone(),
@@ -927,7 +922,7 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
         let early_network_config = EarlyNetworkConfig {
             body: EarlyNetworkConfigBody {
                 ntp_servers: Vec::new(),
-                rack_network_config: Some(RackNetworkConfigV2 {
+                rack_network_config: Some(RackNetworkConfig {
                     bfd: Vec::new(),
                     bgp: Vec::new(),
                     infra_ip_first: "192.0.2.10".parse().unwrap(),
@@ -1405,6 +1400,7 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
                     remove_mupdate_override: None,
                     host_phase_2:
                         BlueprintHostPhase2DesiredSlots::current_contents(),
+                    measurements: BlueprintMeasurements::InstallDataset,
                 },
             );
         }

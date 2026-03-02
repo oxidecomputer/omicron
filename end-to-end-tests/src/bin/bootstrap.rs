@@ -48,7 +48,7 @@ async fn run_test() -> Result<()> {
     eprintln!("creating IP{} IP pool... {:?} - {:?}", ip_version, first, last);
     let pool_name = "default";
     client
-        .ip_pool_create()
+        .system_ip_pool_create()
         .body(IpPoolCreate {
             name: pool_name.parse().unwrap(),
             description: "Default IP pool".to_string(),
@@ -58,7 +58,7 @@ async fn run_test() -> Result<()> {
         .send()
         .await?;
     client
-        .ip_pool_silo_link()
+        .system_ip_pool_silo_link()
         .pool(pool_name)
         .body(IpPoolLinkSilo {
             silo: NameOrId::Name(params.silo_name().parse().unwrap()),
@@ -67,7 +67,7 @@ async fn run_test() -> Result<()> {
         .send()
         .await?;
     client
-        .ip_pool_range_add()
+        .system_ip_pool_range_add()
         .pool(pool_name)
         .body(try_create_ip_range(first, last)?)
         .send()
@@ -86,7 +86,7 @@ async fn run_test() -> Result<()> {
     eprintln!("creating IP{} IP pool... {:?} - {:?}", ip_version, first, last);
     let pool_name = "default-v6";
     client
-        .ip_pool_create()
+        .system_ip_pool_create()
         .body(IpPoolCreate {
             name: pool_name.parse().unwrap(),
             description: "Default IPv6 pool".to_string(),
@@ -96,7 +96,7 @@ async fn run_test() -> Result<()> {
         .send()
         .await?;
     client
-        .ip_pool_silo_link()
+        .system_ip_pool_silo_link()
         .pool(pool_name)
         .body(IpPoolLinkSilo {
             silo: NameOrId::Name(params.silo_name().parse().unwrap()),
@@ -105,7 +105,7 @@ async fn run_test() -> Result<()> {
         .send()
         .await?;
     client
-        .ip_pool_range_add()
+        .system_ip_pool_range_add()
         .pool(pool_name)
         .body(try_create_ip_range(first, last)?)
         .send()

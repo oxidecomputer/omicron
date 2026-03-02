@@ -12,10 +12,10 @@ use super::SagaInitError;
 use super::declare_saga_actions;
 use crate::app::sagas::common_storage::call_pantry_detach;
 use crate::app::sagas::snapshot_create;
-use crate::external_api::params;
 use nexus_db_lookup::LookupPath;
 use nexus_db_model::Generation;
 use nexus_db_queries::{authn, authz, db::datastore};
+use nexus_types::external_api::snapshot;
 use omicron_common::api::external;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::Name;
@@ -83,7 +83,7 @@ impl NexusSaga for SagaFinalizeDisk {
                 disk: params.disk.clone(),
                 attach_instance_id: None,
                 use_the_pantry: true,
-                create_params: params::SnapshotCreate {
+                create_params: snapshot::SnapshotCreate {
                     identity: external::IdentityMetadataCreateParams {
                         name: snapshot_name.clone(),
                         description: format!(

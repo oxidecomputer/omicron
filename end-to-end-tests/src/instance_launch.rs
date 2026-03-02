@@ -48,6 +48,7 @@ async fn instance_launch() -> Result<()> {
             description: String::new(),
             disk_backend: DiskBackend::Distributed(DiskSource::Image {
                 image_id: ctx.get_silo_image_id("debian11").await?,
+                read_only: false,
             }),
             size: ByteCount(2048 * 1024 * 1024),
         })

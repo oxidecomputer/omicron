@@ -116,6 +116,7 @@ trust_quorum.period_secs = 60
 # TTL for backplane topology cache (static platform configuration)
 # Default: 86400 seconds (24 hours) - refreshed on-demand when validation fails
 # multicast_reconciler.backplane_cache_ttl_secs = 86400
+attached_subnet_manager.period_secs = 60
 
 [default_region_allocation_strategy]
 # by default, allocate across 3 distinct sleds

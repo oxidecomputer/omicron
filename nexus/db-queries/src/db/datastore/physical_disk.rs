@@ -340,6 +340,7 @@ mod test {
     use crate::db::pub_test_utils::helpers::SledUpdateBuilder;
     use dropshot::PaginationOrder;
     use iddqd::IdOrdMap;
+    use illumos_utils::svcs::SvcsInMaintenanceResult;
     use nexus_db_lookup::LookupPath;
     use nexus_types::identity::Asset;
     use omicron_common::api::external::ByteCount;
@@ -347,9 +348,8 @@ mod test {
     use omicron_test_utils::dev;
     use omicron_uuid_kinds::ZpoolUuid;
     use sled_agent_types::inventory::{
-        Baseboard, ConfigReconcilerInventoryStatus, HealthMonitorInventory,
-        Inventory, InventoryDisk, OmicronFileSourceResolverInventory,
-        SledCpuFamily, SledRole,
+        Baseboard, ConfigReconcilerInventoryStatus, Inventory, InventoryDisk,
+        OmicronFileSourceResolverInventory, SledCpuFamily, SledRole,
     };
     use std::num::NonZeroU32;
 
@@ -708,7 +708,9 @@ mod test {
                     last_reconciliation: None,
                     file_source_resolver:
                         OmicronFileSourceResolverInventory::new_fake(),
-                    health_monitor: HealthMonitorInventory::new(),
+                    smf_services_in_maintenance: Ok(
+                        SvcsInMaintenanceResult::new(),
+                    ),
                     reference_measurements: IdOrdMap::new(),
                 },
             )

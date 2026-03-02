@@ -48,11 +48,15 @@ use nexus_test_utils::resource_helpers::create_default_ip_pools;
 use nexus_test_utils::resource_helpers::create_disk;
 use nexus_test_utils::resource_helpers::create_disk_from_snapshot;
 use nexus_test_utils::resource_helpers::create_project;
+use nexus_test_utils::resource_helpers::create_project_image;
 use nexus_test_utils::resource_helpers::create_snapshot;
+use nexus_test_utils::resource_helpers::delete_image;
 use nexus_test_utils::resource_helpers::object_create;
 use nexus_test_utils_macros::nexus_test;
-use nexus_types::external_api::params;
-use nexus_types::external_api::views;
+use nexus_types::external_api::disk;
+use nexus_types::external_api::image;
+use nexus_types::external_api::sled;
+use nexus_types::external_api::snapshot;
 use nexus_types::identity::Asset;
 use nexus_types::identity::Resource;
 use omicron_common::api::external;
@@ -110,48 +114,27 @@ async fn create_project_and_pool(client: &ClientTestContext) -> Uuid {
     project.identity.id
 }
 
-async fn create_image(client: &ClientTestContext) -> views::Image {
+async fn create_image(client: &ClientTestContext) -> image::Image {
     create_project_and_pool(client).await;
-
-    // Define a global image
-
-    let image_create_params = params::ImageCreate {
-        identity: IdentityMetadataCreateParams {
-            name: "alpine-edge".parse().unwrap(),
-            description: String::from(
-                "you can boot any image, as long as it's alpine",
-            ),
-        },
-        source: params::ImageSource::YouCanBootAnythingAsLongAsItsAlpine,
-        os: "alpine".to_string(),
-        version: "edge".to_string(),
-    };
-
-    let images_url = format!("/v1/images?project={}", PROJECT_NAME);
-    NexusRequest::objects_post(client, &images_url, &image_create_params)
-        .authn_as(AuthnMode::PrivilegedUser)
-        .execute()
-        .await
-        .unwrap()
-        .parsed_body()
-        .unwrap()
+    create_project_image(client, PROJECT_NAME, "not-alpine").await
 }
 
 async fn create_base_disk(
     client: &ClientTestContext,
-    image: &views::Image,
+    image: &image::Image,
     disks_url: &String,
     base_disk_name: &Name,
 ) -> external::Disk {
     let disk_size = ByteCount::from_gibibytes_u32(2);
-    let base_disk = params::DiskCreate {
+    let base_disk = disk::DiskCreate {
         identity: IdentityMetadataCreateParams {
             name: base_disk_name.clone(),
             description: String::from("sells rainsticks"),
         },
-        disk_backend: params::DiskBackend::Distributed {
-            disk_source: params::DiskSource::Image {
+        disk_backend: disk::DiskBackend::Distributed {
+            disk_source: disk::DiskSource::Image {
                 image_id: image.identity.id,
+                read_only: false,
             },
         },
         size: disk_size,
@@ -189,12 +172,15 @@ async fn test_snapshot_then_delete_disk(cptestctx: &ControlPlaneTestContext) {
     // Create a disk from this image
     let base_disk =
         create_base_disk(&client, &image, &disks_url, &base_disk_name).await;
+    // Delete the image (as it uses Crucible resources, which we assert was
+    // cleaned up at the end of the test)
+    delete_image(client, PROJECT_NAME, "not-alpine").await;
 
     // Issue snapshot request
-    let snapshot: views::Snapshot = object_create(
+    let snapshot: snapshot::Snapshot = object_create(
         client,
         &get_snapshots_url(),
-        &params::SnapshotCreate {
+        &snapshot::SnapshotCreate {
             identity: IdentityMetadataCreateParams {
                 name: "a-snapshot".parse().unwrap(),
                 description: "a snapshot!".to_string(),
@@ -250,12 +236,15 @@ async fn test_delete_snapshot_then_disk(cptestctx: &ControlPlaneTestContext) {
     // Create a disk from this image
     let base_disk =
         create_base_disk(&client, &image, &disks_url, &base_disk_name).await;
+    // Delete the image (as it uses Crucible resources, which we assert was
+    // cleaned up at the end of the test)
+    delete_image(client, PROJECT_NAME, "not-alpine").await;
 
     // Issue snapshot request
-    let snapshot: views::Snapshot = object_create(
+    let snapshot: snapshot::Snapshot = object_create(
         client,
         &get_snapshots_url(),
-        &params::SnapshotCreate {
+        &snapshot::SnapshotCreate {
             identity: IdentityMetadataCreateParams {
                 name: "a-snapshot".parse().unwrap(),
                 description: "a snapshot!".to_string(),
@@ -310,13 +299,16 @@ async fn test_multiple_snapshots(cptestctx: &ControlPlaneTestContext) {
     // Create a disk from this image
     let base_disk =
         create_base_disk(&client, &image, &disks_url, &base_disk_name).await;
+    // Delete the image (as it uses Crucible resources, which we assert was
+    // cleaned up at the end of the test)
+    delete_image(client, PROJECT_NAME, "not-alpine").await;
 
     // Issue snapshot requests
     for i in 0..4 {
-        let snapshot: views::Snapshot = object_create(
+        let snapshot: snapshot::Snapshot = object_create(
             client,
             &get_snapshots_url(),
-            &params::SnapshotCreate {
+            &snapshot::SnapshotCreate {
                 identity: IdentityMetadataCreateParams {
                     name: format!("a-snapshot-{}", i).parse().unwrap(),
                     description: "a snapshot!".to_string(),
@@ -375,10 +367,10 @@ async fn test_snapshot_prevents_other_disk(
         create_base_disk(&client, &image, &disks_url, &base_disk_name).await;
 
     // Issue snapshot request
-    let snapshot: views::Snapshot = object_create(
+    let snapshot: snapshot::Snapshot = object_create(
         client,
         &get_snapshots_url(),
-        &params::SnapshotCreate {
+        &snapshot::SnapshotCreate {
             identity: IdentityMetadataCreateParams {
                 name: "a-snapshot".parse().unwrap(),
                 description: "a snapshot!".to_string(),
@@ -408,14 +400,15 @@ async fn test_snapshot_prevents_other_disk(
     // means the region wasn't deleted.
     let disk_size = ByteCount::from_gibibytes_u32(10);
     let next_disk_name: Name = "next-disk".parse().unwrap();
-    let next_disk = params::DiskCreate {
+    let next_disk = disk::DiskCreate {
         identity: IdentityMetadataCreateParams {
             name: next_disk_name.clone(),
             description: String::from("will fail"),
         },
-        disk_backend: params::DiskBackend::Distributed {
-            disk_source: params::DiskSource::Image {
+        disk_backend: disk::DiskBackend::Distributed {
+            disk_source: disk::DiskSource::Image {
                 image_id: image.identity.id,
+                read_only: false,
             },
         },
         size: disk_size,
@@ -438,9 +431,6 @@ async fn test_snapshot_prevents_other_disk(
         .await
         .expect("failed to delete snapshot");
 
-    // All resources were deleted
-    assert!(disk_test.crucible_resources_deleted().await);
-
     // Disk allocation will work now
     let _next_disk: external::Disk = NexusRequest::new(
         RequestBuilder::new(client, Method::POST, &disks_url)
@@ -461,6 +451,9 @@ async fn test_snapshot_prevents_other_disk(
         .await
         .expect("failed to delete disk");
 
+    // Delete the image
+    delete_image(client, PROJECT_NAME, "not-alpine").await;
+
     // Assert everything was cleaned up
     assert!(disk_test.crucible_resources_deleted().await);
 }
@@ -478,14 +471,14 @@ async fn test_multiple_disks_multiple_snapshots_order_1(
     // Create a blank disk
     let disk_size = ByteCount::from_gibibytes_u32(2);
     let first_disk_name: Name = "first-disk".parse().unwrap();
-    let first_disk = params::DiskCreate {
+    let first_disk = disk::DiskCreate {
         identity: IdentityMetadataCreateParams {
             name: first_disk_name.clone(),
             description: String::from("disk 1"),
         },
-        disk_backend: params::DiskBackend::Distributed {
-            disk_source: params::DiskSource::Blank {
-                block_size: params::BlockSize::try_from(512).unwrap(),
+        disk_backend: disk::DiskBackend::Distributed {
+            disk_source: disk::DiskSource::Blank {
+                block_size: disk::BlockSize::try_from(512).unwrap(),
             },
         },
         size: disk_size,
@@ -504,10 +497,10 @@ async fn test_multiple_disks_multiple_snapshots_order_1(
     .unwrap();
 
     // Issue snapshot request
-    let first_snapshot: views::Snapshot = object_create(
+    let first_snapshot: snapshot::Snapshot = object_create(
         client,
         &get_snapshots_url(),
-        &params::SnapshotCreate {
+        &snapshot::SnapshotCreate {
             identity: IdentityMetadataCreateParams {
                 name: "first-snapshot".parse().unwrap(),
                 description: "first snapshot!".to_string(),
@@ -522,14 +515,14 @@ async fn test_multiple_disks_multiple_snapshots_order_1(
 
     // Create another blank disk
     let second_disk_name: Name = "second-disk".parse().unwrap();
-    let second_disk = params::DiskCreate {
+    let second_disk = disk::DiskCreate {
         identity: IdentityMetadataCreateParams {
             name: second_disk_name.clone(),
             description: String::from("disk 1"),
         },
-        disk_backend: params::DiskBackend::Distributed {
-            disk_source: params::DiskSource::Blank {
-                block_size: params::BlockSize::try_from(512).unwrap(),
+        disk_backend: disk::DiskBackend::Distributed {
+            disk_source: disk::DiskSource::Blank {
+                block_size: disk::BlockSize::try_from(512).unwrap(),
             },
         },
         size: disk_size,
@@ -548,10 +541,10 @@ async fn test_multiple_disks_multiple_snapshots_order_1(
     .unwrap();
 
     // Issue snapshot request for the second disk
-    let second_snapshot: views::Snapshot = object_create(
+    let second_snapshot: snapshot::Snapshot = object_create(
         client,
         &get_snapshots_url(),
-        &params::SnapshotCreate {
+        &snapshot::SnapshotCreate {
             identity: IdentityMetadataCreateParams {
                 name: "second-snapshot".parse().unwrap(),
                 description: "second snapshot!".to_string(),
@@ -617,14 +610,14 @@ async fn test_multiple_disks_multiple_snapshots_order_2(
     // Create a blank disk
     let disk_size = ByteCount::from_gibibytes_u32(2);
     let first_disk_name: Name = "first-disk".parse().unwrap();
-    let first_disk = params::DiskCreate {
+    let first_disk = disk::DiskCreate {
         identity: IdentityMetadataCreateParams {
             name: first_disk_name.clone(),
             description: String::from("disk 1"),
         },
-        disk_backend: params::DiskBackend::Distributed {
-            disk_source: params::DiskSource::Blank {
-                block_size: params::BlockSize::try_from(512).unwrap(),
+        disk_backend: disk::DiskBackend::Distributed {
+            disk_source: disk::DiskSource::Blank {
+                block_size: disk::BlockSize::try_from(512).unwrap(),
             },
         },
         size: disk_size,
@@ -643,10 +636,10 @@ async fn test_multiple_disks_multiple_snapshots_order_2(
     .unwrap();
 
     // Issue snapshot request
-    let first_snapshot: views::Snapshot = object_create(
+    let first_snapshot: snapshot::Snapshot = object_create(
         client,
         &get_snapshots_url(),
-        &params::SnapshotCreate {
+        &snapshot::SnapshotCreate {
             identity: IdentityMetadataCreateParams {
                 name: "first-snapshot".parse().unwrap(),
                 description: "first snapshot!".to_string(),
@@ -661,14 +654,14 @@ async fn test_multiple_disks_multiple_snapshots_order_2(
 
     // Create another blank disk
     let second_disk_name: Name = "second-disk".parse().unwrap();
-    let second_disk = params::DiskCreate {
+    let second_disk = disk::DiskCreate {
         identity: IdentityMetadataCreateParams {
             name: second_disk_name.clone(),
             description: String::from("disk 1"),
         },
-        disk_backend: params::DiskBackend::Distributed {
-            disk_source: params::DiskSource::Blank {
-                block_size: params::BlockSize::try_from(512).unwrap(),
+        disk_backend: disk::DiskBackend::Distributed {
+            disk_source: disk::DiskSource::Blank {
+                block_size: disk::BlockSize::try_from(512).unwrap(),
             },
         },
         size: disk_size,
@@ -687,10 +680,10 @@ async fn test_multiple_disks_multiple_snapshots_order_2(
     .unwrap();
 
     // Issue snapshot request for the second disk
-    let second_snapshot: views::Snapshot = object_create(
+    let second_snapshot: snapshot::Snapshot = object_create(
         client,
         &get_snapshots_url(),
-        &params::SnapshotCreate {
+        &snapshot::SnapshotCreate {
             identity: IdentityMetadataCreateParams {
                 name: "second-snapshot".parse().unwrap(),
                 description: "second snapshot!".to_string(),
@@ -751,14 +744,14 @@ async fn prepare_for_test_multiple_layers_of_snapshots(
     // Create a blank disk
     let disk_size = ByteCount::from_gibibytes_u32(1);
     let layer_1_disk_name: Name = "layer-1-disk".parse().unwrap();
-    let layer_1_disk = params::DiskCreate {
+    let layer_1_disk = disk::DiskCreate {
         identity: IdentityMetadataCreateParams {
             name: layer_1_disk_name.clone(),
             description: String::from("layer 1"),
         },
-        disk_backend: params::DiskBackend::Distributed {
-            disk_source: params::DiskSource::Blank {
-                block_size: params::BlockSize::try_from(512).unwrap(),
+        disk_backend: disk::DiskBackend::Distributed {
+            disk_source: disk::DiskSource::Blank {
+                block_size: disk::BlockSize::try_from(512).unwrap(),
             },
         },
         size: disk_size,
@@ -777,10 +770,10 @@ async fn prepare_for_test_multiple_layers_of_snapshots(
     .unwrap();
 
     // Issue snapshot request
-    let layer_1_snapshot: views::Snapshot = object_create(
+    let layer_1_snapshot: snapshot::Snapshot = object_create(
         client,
         &get_snapshots_url(),
-        &params::SnapshotCreate {
+        &snapshot::SnapshotCreate {
             identity: IdentityMetadataCreateParams {
                 name: "layer-1-snapshot".parse().unwrap(),
                 description: "layer 1 snapshot!".to_string(),
@@ -795,14 +788,15 @@ async fn prepare_for_test_multiple_layers_of_snapshots(
 
     // Create a layer 2 disk out of the layer 1 snapshot
     let layer_2_disk_name: Name = "layer-2-disk".parse().unwrap();
-    let layer_2_disk = params::DiskCreate {
+    let layer_2_disk = disk::DiskCreate {
         identity: IdentityMetadataCreateParams {
             name: layer_2_disk_name.clone(),
             description: String::from("layer 2"),
         },
-        disk_backend: params::DiskBackend::Distributed {
-            disk_source: params::DiskSource::Snapshot {
+        disk_backend: disk::DiskBackend::Distributed {
+            disk_source: disk::DiskSource::Snapshot {
                 snapshot_id: layer_1_snapshot.identity.id,
+                read_only: false,
             },
         },
         size: disk_size,
@@ -821,10 +815,10 @@ async fn prepare_for_test_multiple_layers_of_snapshots(
     .unwrap();
 
     // Issue snapshot request for the second disk
-    let layer_2_snapshot: views::Snapshot = object_create(
+    let layer_2_snapshot: snapshot::Snapshot = object_create(
         client,
         &get_snapshots_url(),
-        &params::SnapshotCreate {
+        &snapshot::SnapshotCreate {
             identity: IdentityMetadataCreateParams {
                 name: "layer-2-snapshot".parse().unwrap(),
                 description: "layer 2 snapshot!".to_string(),
@@ -839,14 +833,15 @@ async fn prepare_for_test_multiple_layers_of_snapshots(
 
     // Create a layer 3 disk out of the layer 2 snapshot
     let layer_3_disk_name: Name = "layer-3-disk".parse().unwrap();
-    let layer_3_disk = params::DiskCreate {
+    let layer_3_disk = disk::DiskCreate {
         identity: IdentityMetadataCreateParams {
             name: layer_3_disk_name.clone(),
             description: String::from("layer 3"),
         },
-        disk_backend: params::DiskBackend::Distributed {
-            disk_source: params::DiskSource::Snapshot {
+        disk_backend: disk::DiskBackend::Distributed {
+            disk_source: disk::DiskSource::Snapshot {
                 snapshot_id: layer_2_snapshot.identity.id,
+                read_only: false,
             },
         },
         size: disk_size,
@@ -865,10 +860,10 @@ async fn prepare_for_test_multiple_layers_of_snapshots(
     .unwrap();
 
     // Issue snapshot request for the third disk
-    let layer_3_snapshot: views::Snapshot = object_create(
+    let layer_3_snapshot: snapshot::Snapshot = object_create(
         client,
         &get_snapshots_url(),
-        &params::SnapshotCreate {
+        &snapshot::SnapshotCreate {
             identity: IdentityMetadataCreateParams {
                 name: "layer-3-snapshot".parse().unwrap(),
                 description: "layer 3 snapshot!".to_string(),
@@ -1042,10 +1037,10 @@ async fn test_create_image_from_snapshot(cptestctx: &ControlPlaneTestContext) {
     // Issue snapshot request
     let snapshots_url = format!("/v1/snapshots?project={}", PROJECT_NAME);
 
-    let snapshot: views::Snapshot = object_create(
+    let snapshot: snapshot::Snapshot = object_create(
         client,
         &snapshots_url,
-        &params::SnapshotCreate {
+        &snapshot::SnapshotCreate {
             identity: IdentityMetadataCreateParams {
                 name: "a-snapshot".parse().unwrap(),
                 description: "a snapshot!".to_string(),
@@ -1056,17 +1051,17 @@ async fn test_create_image_from_snapshot(cptestctx: &ControlPlaneTestContext) {
     .await;
 
     // Create an image from the snapshot
-    let image_create_params = params::ImageCreate {
+    let image_create_params = image::ImageCreate {
         identity: IdentityMetadataCreateParams {
             name: "debian-11".parse().unwrap(),
             description: String::from("debian's cool too"),
         },
-        source: params::ImageSource::Snapshot { id: snapshot.identity.id },
+        source: image::ImageSource::Snapshot { id: snapshot.identity.id },
         os: "debian".parse().unwrap(),
         version: "11".into(),
     };
 
-    let _image: views::Image =
+    let _image: image::Image =
         NexusRequest::objects_post(client, "/v1/images", &image_create_params)
             .authn_as(AuthnMode::PrivilegedUser)
             .execute()
@@ -1098,13 +1093,17 @@ async fn test_create_image_from_snapshot_delete(
     let _base_disk =
         create_base_disk(&client, &image, &disks_url, &base_disk_name).await;
 
+    // Delete the image (as it uses Crucible resources, which we assert was
+    // cleaned up at the end of the test)
+    delete_image(client, PROJECT_NAME, "not-alpine").await;
+
     // Issue snapshot request
     let snapshots_url = format!("/v1/snapshots?project={}", PROJECT_NAME);
 
-    let snapshot: views::Snapshot = object_create(
+    let snapshot: snapshot::Snapshot = object_create(
         client,
         &snapshots_url,
-        &params::SnapshotCreate {
+        &snapshot::SnapshotCreate {
             identity: IdentityMetadataCreateParams {
                 name: "a-snapshot".parse().unwrap(),
                 description: "a snapshot!".to_string(),
@@ -1115,17 +1114,17 @@ async fn test_create_image_from_snapshot_delete(
     .await;
 
     // Create an image from the snapshot
-    let image_create_params = params::ImageCreate {
+    let image_create_params = image::ImageCreate {
         identity: IdentityMetadataCreateParams {
             name: "debian-11".parse().unwrap(),
             description: String::from("debian's cool too"),
         },
-        source: params::ImageSource::Snapshot { id: snapshot.identity.id },
+        source: image::ImageSource::Snapshot { id: snapshot.identity.id },
         os: "debian".parse().unwrap(),
         version: "11".into(),
     };
 
-    let _image: views::Image =
+    let _image: image::Image =
         NexusRequest::objects_post(client, "/v1/images", &image_create_params)
             .authn_as(AuthnMode::PrivilegedUser)
             .execute()
@@ -1194,14 +1193,14 @@ async fn delete_image_test(
 
     let disk_size = ByteCount::from_gibibytes_u32(2);
     let base_disk_name: Name = "base-disk".parse().unwrap();
-    let base_disk = params::DiskCreate {
+    let base_disk = disk::DiskCreate {
         identity: IdentityMetadataCreateParams {
             name: base_disk_name.clone(),
             description: String::from("all your base disk are belong to us"),
         },
-        disk_backend: params::DiskBackend::Distributed {
-            disk_source: params::DiskSource::Blank {
-                block_size: params::BlockSize::try_from(512).unwrap(),
+        disk_backend: disk::DiskBackend::Distributed {
+            disk_source: disk::DiskSource::Blank {
+                block_size: disk::BlockSize::try_from(512).unwrap(),
             },
         },
         size: disk_size,
@@ -1222,10 +1221,10 @@ async fn delete_image_test(
     // Issue snapshot request
     let snapshots_url = format!("/v1/snapshots?project={}", PROJECT_NAME);
 
-    let snapshot: views::Snapshot = object_create(
+    let snapshot: snapshot::Snapshot = object_create(
         client,
         &snapshots_url,
-        &params::SnapshotCreate {
+        &snapshot::SnapshotCreate {
             identity: IdentityMetadataCreateParams {
                 name: "a-snapshot".parse().unwrap(),
                 description: String::from("you are on the way to destruction"),
@@ -1236,19 +1235,19 @@ async fn delete_image_test(
     .await;
 
     // Create an image from the snapshot
-    let image_create_params = params::ImageCreate {
+    let image_create_params = image::ImageCreate {
         identity: IdentityMetadataCreateParams {
             name: "debian-11".parse().unwrap(),
             description: String::from(
                 "you have no chance to survive make your time",
             ),
         },
-        source: params::ImageSource::Snapshot { id: snapshot.identity.id },
+        source: image::ImageSource::Snapshot { id: snapshot.identity.id },
         os: "debian".parse().unwrap(),
         version: "12".into(),
     };
 
-    let _image: views::Image =
+    let _image: image::Image =
         NexusRequest::objects_post(client, "/v1/images", &image_create_params)
             .authn_as(AuthnMode::PrivilegedUser)
             .execute()
@@ -2491,14 +2490,14 @@ async fn test_disk_create_saga_unwinds_correctly(
         .set_region_creation_error(true);
 
     let disk_size = ByteCount::from_gibibytes_u32(2);
-    let base_disk = params::DiskCreate {
+    let base_disk = disk::DiskCreate {
         identity: IdentityMetadataCreateParams {
             name: base_disk_name.clone(),
             description: String::from("sells rainsticks"),
         },
-        disk_backend: params::DiskBackend::Distributed {
-            disk_source: params::DiskSource::Blank {
-                block_size: params::BlockSize::try_from(512).unwrap(),
+        disk_backend: disk::DiskBackend::Distributed {
+            disk_source: disk::DiskSource::Blank {
+                block_size: disk::BlockSize::try_from(512).unwrap(),
             },
         },
         size: disk_size,
@@ -2537,14 +2536,14 @@ async fn test_snapshot_create_saga_unwinds_correctly(
     // Create a disk
 
     let disk_size = ByteCount::from_gibibytes_u32(2);
-    let base_disk = params::DiskCreate {
+    let base_disk = disk::DiskCreate {
         identity: IdentityMetadataCreateParams {
             name: base_disk_name.clone(),
             description: String::from("sells rainsticks"),
         },
-        disk_backend: params::DiskBackend::Distributed {
-            disk_source: params::DiskSource::Blank {
-                block_size: params::BlockSize::try_from(512).unwrap(),
+        disk_backend: disk::DiskBackend::Distributed {
+            disk_source: disk::DiskSource::Blank {
+                block_size: disk::BlockSize::try_from(512).unwrap(),
             },
         },
         size: disk_size,
@@ -2563,7 +2562,7 @@ async fn test_snapshot_create_saga_unwinds_correctly(
         .set_region_creation_error(true);
 
     // Create a snapshot
-    let snapshot_create = params::SnapshotCreate {
+    let snapshot_create = snapshot::SnapshotCreate {
         identity: IdentityMetadataCreateParams {
             name: "a-snapshot".parse().unwrap(),
             description: "a snapshot!".to_string(),
@@ -3339,14 +3338,14 @@ async fn test_cte_returns_regions(cptestctx: &ControlPlaneTestContext) {
     create_project_and_pool(client).await;
     let disks_url = get_disks_url();
 
-    let disk = params::DiskCreate {
+    let disk = disk::DiskCreate {
         identity: IdentityMetadataCreateParams {
             name: "disk".parse().unwrap(),
             description: String::from("disk"),
         },
-        disk_backend: params::DiskBackend::Distributed {
-            disk_source: params::DiskSource::Blank {
-                block_size: params::BlockSize::try_from(512).unwrap(),
+        disk_backend: disk::DiskBackend::Distributed {
+            disk_source: disk::DiskSource::Blank {
+                block_size: disk::BlockSize::try_from(512).unwrap(),
             },
         },
         size: ByteCount::from_gibibytes_u32(2),
@@ -3448,8 +3447,8 @@ impl TestReadOnlyRegionReferenceUsage {
                     snapshot_id,
                 },
                 RegionAllocationParameters::FromDiskSource {
-                    disk_source: &params::DiskSource::Blank {
-                        block_size: params::BlockSize::try_from(512).unwrap(),
+                    disk_source: &disk::DiskSource::Blank {
+                        block_size: disk::BlockSize::try_from(512).unwrap(),
                     },
                     size: ByteCount::from_gibibytes_u32(1),
                 },
@@ -3953,7 +3952,8 @@ async fn test_read_only_region_reference_counting(
         &client,
         PROJECT_NAME,
         "disk-from-snapshot",
-        snapshot.identity.id,
+        &snapshot,
+        false,
     )
     .await;
 
@@ -4225,7 +4225,8 @@ async fn test_read_only_region_reference_counting_layers(
         &client,
         PROJECT_NAME,
         "disk-from-snapshot",
-        snapshot.identity.id,
+        &snapshot,
+        false,
     )
     .await;
 
@@ -4510,8 +4511,8 @@ async fn test_volume_replace_snapshot_respects_accounting(
                 snapshot_id: db_snapshot.id(),
             },
             RegionAllocationParameters::FromDiskSource {
-                disk_source: &params::DiskSource::Blank {
-                    block_size: params::BlockSize::try_from(512).unwrap(),
+                disk_source: &disk::DiskSource::Blank {
+                    block_size: disk::BlockSize::try_from(512).unwrap(),
                 },
                 size: ByteCount::from_gibibytes_u32(1),
             },
@@ -4705,7 +4706,8 @@ async fn test_volume_remove_rop_respects_accounting(
         &client,
         PROJECT_NAME,
         "disk-from-snapshot",
-        snapshot.identity.id,
+        &snapshot,
+        false,
     )
     .await;
 
@@ -4872,7 +4874,8 @@ async fn test_volume_remove_rop_respects_accounting_no_modify_others(
         &client,
         PROJECT_NAME,
         "disk-from-snapshot",
-        snapshot.identity.id,
+        &snapshot,
+        false,
     )
     .await;
 
@@ -4893,7 +4896,8 @@ async fn test_volume_remove_rop_respects_accounting_no_modify_others(
         &client,
         PROJECT_NAME,
         "another-disk-from-snapshot",
-        snapshot.identity.id,
+        &snapshot,
+        false,
     )
     .await;
 
@@ -5141,7 +5145,8 @@ async fn test_migrate_to_ref_count_with_records(
         &client,
         PROJECT_NAME,
         "disk-from-snapshot",
-        snapshot.identity.id,
+        &snapshot,
+        false,
     )
     .await;
 
@@ -5222,12 +5227,12 @@ async fn test_migrate_to_ref_count_with_records_soft_delete_volume(
     let snapshot =
         create_snapshot(&client, PROJECT_NAME, "disk", "snapshot").await;
 
-    let params = params::ImageCreate {
+    let params = image::ImageCreate {
         identity: IdentityMetadataCreateParams {
             name: "windows98".parse().unwrap(),
             description: String::from("as soon as we get CSM support!"),
         },
-        source: params::ImageSource::Snapshot { id: snapshot.identity.id },
+        source: image::ImageSource::Snapshot { id: snapshot.identity.id },
         os: "windows98".to_string(),
         version: "se".to_string(),
     };
@@ -5491,7 +5496,8 @@ async fn test_double_layer_with_read_only_region_delete(
         &client,
         PROJECT_NAME,
         "disk-from-snapshot",
-        snapshot.identity.id,
+        &snapshot,
+        false,
     )
     .await;
 
@@ -5499,7 +5505,8 @@ async fn test_double_layer_with_read_only_region_delete(
         &client,
         PROJECT_NAME,
         "another-disk-from-snapshot",
-        snapshot.identity.id,
+        &snapshot,
+        false,
     )
     .await;
 
@@ -5701,7 +5708,8 @@ async fn test_double_layer_snapshot_with_read_only_region_delete_2(
         &client,
         PROJECT_NAME,
         "disk-from-snapshot",
-        snapshot.identity.id,
+        &snapshot,
+        false,
     )
     .await;
 
@@ -5913,8 +5921,8 @@ async fn test_no_zombie_read_only_regions(cptestctx: &ControlPlaneTestContext) {
                 snapshot_id,
             },
             RegionAllocationParameters::FromDiskSource {
-                disk_source: &params::DiskSource::Blank {
-                    block_size: params::BlockSize::try_from(512).unwrap(),
+                disk_source: &disk::DiskSource::Blank {
+                    block_size: disk::BlockSize::try_from(512).unwrap(),
                 },
                 size: ByteCount::from_gibibytes_u32(1),
             },
@@ -6098,8 +6106,8 @@ async fn test_no_zombie_read_write_regions(
                 snapshot_id,
             },
             RegionAllocationParameters::FromDiskSource {
-                disk_source: &params::DiskSource::Blank {
-                    block_size: params::BlockSize::try_from(512).unwrap(),
+                disk_source: &disk::DiskSource::Blank {
+                    block_size: disk::BlockSize::try_from(512).unwrap(),
                 },
                 size: ByteCount::from_gibibytes_u32(1),
             },
@@ -6269,11 +6277,11 @@ async fn test_proper_region_sled_redundancy(
     let sleds_found = sleds_list(&client, &sleds_url).await;
     assert_eq!(sleds_found.len(), 4);
     for sled in sleds_found {
-        assert_eq!(sled.state, views::SledState::Active);
+        assert_eq!(sled.state, sled::SledState::Active);
         assert!(matches!(
             sled.policy,
-            views::SledPolicy::InService {
-                provision_policy: views::SledProvisionPolicy::Provisionable
+            sled::SledPolicy::InService {
+                provision_policy: sled::SledProvisionPolicy::Provisionable
             },
         ));
     }
@@ -6290,8 +6298,8 @@ async fn test_proper_region_sled_redundancy(
                 &opctx,
                 RegionAllocationFor::SnapshotVolume { volume_id, snapshot_id },
                 RegionAllocationParameters::FromDiskSource {
-                    disk_source: &params::DiskSource::Blank {
-                        block_size: params::BlockSize::try_from(512).unwrap(),
+                    disk_source: &disk::DiskSource::Blank {
+                        block_size: disk::BlockSize::try_from(512).unwrap(),
                     },
                     size: ByteCount::from_gibibytes_u32(1),
                 },

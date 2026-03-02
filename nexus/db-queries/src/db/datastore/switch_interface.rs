@@ -17,7 +17,7 @@ use nexus_db_errors::ErrorHandler;
 use nexus_db_errors::OptionalError;
 use nexus_db_errors::public_error_from_diesel;
 use nexus_db_model::to_db_typed_uuid;
-use nexus_types::external_api::params::LoopbackAddressCreate;
+use nexus_types::external_api::networking::LoopbackAddressCreate;
 use omicron_common::api::external::{
     CreateResult, DataPageParams, DeleteResult, Error, ListResultVec,
     LookupResult, ResourceType,

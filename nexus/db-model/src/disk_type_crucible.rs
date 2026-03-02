@@ -4,7 +4,7 @@
 
 use crate::typed_uuid::DbTypedUuid;
 use nexus_db_schema::schema::disk_type_crucible;
-use nexus_types::external_api::params;
+use nexus_types::external_api::disk;
 use omicron_uuid_kinds::VolumeKind;
 use omicron_uuid_kinds::VolumeUuid;
 use serde::{Deserialize, Serialize};
@@ -37,23 +37,34 @@ pub struct DiskTypeCrucible {
     /// saga, then this field will contain the serialized SocketAddrV6 of that
     /// Pantry.
     pub pantry_address: Option<String>,
+
+    /// `true` if this disk is read-only.
+    ///
+    /// Read-only disks are backed by read-only volumes (created for an image or
+    /// snapshot), and are exposed to the guest as read-only block devices by
+    /// Propolis.
+    pub read_only: bool,
 }
 
 impl DiskTypeCrucible {
     pub fn new(
         disk_id: Uuid,
         volume_id: VolumeUuid,
-        disk_source: &params::DiskSource,
+        disk_source: &disk::DiskSource,
     ) -> Self {
-        let create_snapshot_id = match disk_source {
-            params::DiskSource::Snapshot { snapshot_id } => Some(*snapshot_id),
-            _ => None,
-        };
-
-        // XXX further enum here for different image types?
-        let create_image_id = match disk_source {
-            params::DiskSource::Image { image_id } => Some(*image_id),
-            _ => None,
+        let mut create_snapshot_id = None;
+        let mut create_image_id = None;
+        let read_only = match disk_source {
+            &disk::DiskSource::Snapshot { snapshot_id, read_only } => {
+                create_snapshot_id = Some(snapshot_id);
+                read_only
+            }
+            &disk::DiskSource::Image { image_id, read_only } => {
+                // XXX further enum here for different image types?
+                create_image_id = Some(image_id);
+                read_only
+            }
+            _ => false,
         };
 
         Self {
@@ -62,6 +73,7 @@ impl DiskTypeCrucible {
             create_snapshot_id,
             create_image_id,
             pantry_address: None,
+            read_only,
         }
     }
 

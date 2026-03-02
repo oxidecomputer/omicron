@@ -198,6 +198,7 @@ mod api_impl {
     use dropshot::StreamingBody;
     use dropshot::TypedBody;
     use iddqd::IdOrdMap;
+    use illumos_utils::svcs::SvcsInMaintenanceResult;
     use omicron_common::api::external::Generation;
     use omicron_common::api::internal::nexus::DiskRuntimeState;
     use omicron_common::api::internal::nexus::SledVmmState;
@@ -205,7 +206,7 @@ mod api_impl {
     use omicron_common::api::internal::shared::SledIdentifiers;
     use omicron_common::api::internal::shared::VirtualNetworkInterfaceHost;
     use omicron_common::api::internal::shared::{
-        ResolvedVpcRouteSet, ResolvedVpcRouteState, SwitchPorts,
+        ResolvedVpcRouteSet, ResolvedVpcRouteState,
     };
     use sled_agent_types::artifact::ArtifactConfig;
     use sled_agent_types::artifact::ArtifactCopyFromDepotBody;
@@ -215,8 +216,8 @@ mod api_impl {
     use sled_agent_types::artifact::ArtifactPutResponse;
     use sled_agent_types::artifact::ArtifactQueryParam;
     use sled_agent_types::bootstore::BootstoreStatus;
+    use sled_agent_types::dataset::LocalStorageDatasetDeleteRequest;
     use sled_agent_types::dataset::LocalStorageDatasetEnsureRequest;
-    use sled_agent_types::dataset::LocalStoragePathParam;
     use sled_agent_types::debug::ChickenSwitchDestroyOrphanedDatasets;
     use sled_agent_types::debug::OperatorSwitchZonePolicy;
     use sled_agent_types::diagnostics::SledDiagnosticsLogsDownloadPathParm;
@@ -241,7 +242,6 @@ mod api_impl {
     use sled_agent_types::inventory::BootPartitionDetails;
     use sled_agent_types::inventory::ConfigReconcilerInventory;
     use sled_agent_types::inventory::ConfigReconcilerInventoryStatus;
-    use sled_agent_types::inventory::HealthMonitorInventory;
     use sled_agent_types::inventory::HostPhase2DesiredContents;
     use sled_agent_types::inventory::HostPhase2DesiredSlots;
     use sled_agent_types::inventory::Inventory;
@@ -260,6 +260,7 @@ mod api_impl {
     use sled_agent_types::support_bundle::SupportBundleMetadata;
     use sled_agent_types::support_bundle::SupportBundlePathParam;
     use sled_agent_types::support_bundle::SupportBundleTransferQueryParams;
+    use sled_agent_types::uplink::SwitchPorts;
     use sled_agent_types::zone_bundle::BundleUtilization;
     use sled_agent_types::zone_bundle::CleanupContext;
     use sled_agent_types::zone_bundle::CleanupContextUpdate;
@@ -397,7 +398,7 @@ mod api_impl {
                         non_boot_status: IdOrdMap::new(),
                     },
                 },
-                health_monitor: HealthMonitorInventory::new(),
+                smf_services_in_maintenance: Ok(SvcsInMaintenanceResult::new()),
                 reference_measurements: IdOrdMap::new(),
             }))
         }
@@ -936,7 +937,6 @@ mod api_impl {
 
         async fn local_storage_dataset_ensure(
             _request_context: RequestContext<Self::Context>,
-            _path_params: Path<LocalStoragePathParam>,
             _body: TypedBody<LocalStorageDatasetEnsureRequest>,
         ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
             unimplemented!()
@@ -944,7 +944,7 @@ mod api_impl {
 
         async fn local_storage_dataset_delete(
             _request_context: RequestContext<Self::Context>,
-            _path_params: Path<LocalStoragePathParam>,
+            _body: TypedBody<LocalStorageDatasetDeleteRequest>,
         ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
             unimplemented!()
         }
@@ -1052,6 +1052,69 @@ mod api_impl {
                 sled_agent_types::trust_quorum::TrustQuorumNetworkConfig,
             >,
         ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+            unimplemented!()
+        }
+
+        async fn vmm_put_attached_subnets(
+            _request_context: RequestContext<Self::Context>,
+            _path_params: Path<sled_agent_types::instance::VmmPathParam>,
+            _body: TypedBody<
+                sled_agent_types::attached_subnet::AttachedSubnets,
+            >,
+        ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+            unimplemented!()
+        }
+
+        async fn vmm_delete_attached_subnets(
+            _request_context: RequestContext<Self::Context>,
+            _path_params: Path<sled_agent_types::instance::VmmPathParam>,
+        ) -> Result<HttpResponseDeleted, HttpError> {
+            unimplemented!()
+        }
+
+        async fn vmm_post_attached_subnet(
+            _request_context: RequestContext<Self::Context>,
+            _path_params: Path<sled_agent_types::instance::VmmPathParam>,
+            _body: TypedBody<sled_agent_types::attached_subnet::AttachedSubnet>,
+        ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+            unimplemented!()
+        }
+
+        async fn vmm_delete_attached_subnet(
+            _request_context: RequestContext<Self::Context>,
+            _path_params: Path<
+                sled_agent_types::attached_subnet::VmmSubnetPathParam,
+            >,
+        ) -> Result<HttpResponseDeleted, HttpError> {
+            unimplemented!()
+        }
+
+        async fn rot_measurement_log(
+            _request_context: RequestContext<Self::Context>,
+            _path_params: Path<sled_agent_types::rot::RotPathParams>,
+        ) -> Result<
+            HttpResponseOk<sled_agent_types::rot::MeasurementLog>,
+            HttpError,
+        > {
+            unimplemented!()
+        }
+
+        async fn rot_certificate_chain(
+            _request_context: RequestContext<Self::Context>,
+            _path_params: Path<sled_agent_types::rot::RotPathParams>,
+        ) -> Result<
+            HttpResponseOk<sled_agent_types::rot::CertificateChain>,
+            HttpError,
+        > {
+            unimplemented!()
+        }
+
+        async fn rot_attest(
+            _request_context: RequestContext<Self::Context>,
+            _path_params: Path<sled_agent_types::rot::RotPathParams>,
+            _body: TypedBody<sled_agent_types::rot::Nonce>,
+        ) -> Result<HttpResponseOk<sled_agent_types::rot::Attestation>, HttpError>
+        {
             unimplemented!()
         }
     }

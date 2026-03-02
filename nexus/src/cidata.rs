@@ -91,7 +91,7 @@ fn build_vfat(meta_data: &[u8], user_data: &[u8]) -> io::Result<Vec<u8>> {
 
 #[cfg(test)]
 mod tests {
-    use nexus_types::external_api::params::MAX_USER_DATA_BYTES;
+    use nexus_types::external_api::instance::MAX_USER_DATA_BYTES;
 
     /// the fatfs crate has some unfortunate panics if you ask it to do
     /// incredibly stupid things, like format an empty disk or create a

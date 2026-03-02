@@ -16,9 +16,9 @@ use nexus_test_utils::http_testing::NexusRequest;
 use nexus_test_utils::resource_helpers::create_certificate;
 use nexus_test_utils::resource_helpers::delete_certificate;
 use nexus_test_utils_macros::nexus_test;
-use nexus_types::external_api::params;
-use nexus_types::external_api::shared;
-use nexus_types::external_api::views::Certificate;
+use nexus_types::external_api::certificate::{
+    Certificate, CertificateCreate, ServiceUsingCertificate,
+};
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::internal::nexus::Certificate as InternalCertificate;
 use omicron_test_utils::certificates::CertificateChain;
@@ -85,14 +85,14 @@ async fn cert_create_expect_error(
     key: String,
 ) -> String {
     let url = CERTS_URL.to_string();
-    let params = params::CertificateCreate {
+    let params = CertificateCreate {
         identity: IdentityMetadataCreateParams {
             name: name.parse().unwrap(),
             description: String::from("sells rainsticks"),
         },
         cert,
         key,
-        service: shared::ServiceUsingCertificate::ExternalApi,
+        service: ServiceUsingCertificate::ExternalApi,
     };
 
     NexusRequest::expect_failure_with_body(
@@ -610,7 +610,11 @@ async fn test_silo_certificates() {
         );
     if let oxide_client::Error::CommunicationError(error) = error {
         assert!(error.is_connect());
-        assert!(error.chain().to_string().contains("self-signed certificate"));
+        assert!(
+            error.chain().to_string().contains("invalid peer certificate"),
+            "expected TLS certificate error, got: {}",
+            error.chain()
+        );
     } else {
         panic!(
             "unexpected error connecting with wrong certificate: {:#}",
@@ -629,7 +633,11 @@ async fn test_silo_certificates() {
         );
     if let oxide_client::Error::CommunicationError(error) = error {
         assert!(error.is_connect());
-        assert!(error.chain().to_string().contains("self-signed certificate"));
+        assert!(
+            error.chain().to_string().contains("invalid peer certificate"),
+            "expected TLS certificate error, got: {}",
+            error.chain()
+        );
     } else {
         panic!(
             "unexpected error connecting with wrong certificate: {:#}",

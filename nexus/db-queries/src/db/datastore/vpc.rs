@@ -141,7 +141,7 @@ impl DataStore {
         let igw = db::model::InternetGateway::new(
             *SERVICES_INTERNET_GATEWAY_ID,
             authz_vpc.id(),
-            nexus_types::external_api::params::InternetGatewayCreate {
+            nexus_types::external_api::internet_gateway::InternetGatewayCreate {
                 identity: IdentityMetadataCreateParams {
                     name: "default".parse().unwrap(),
                     description: String::from("Default VPC gateway"),
@@ -170,7 +170,7 @@ impl DataStore {
                 SERVICES_VPC.system_router_id,
                 *SERVICES_VPC_ID,
                 VpcRouterKind::System,
-                nexus_types::external_api::params::VpcRouterCreate {
+                nexus_types::external_api::vpc::VpcRouterCreate {
                     identity: IdentityMetadataCreateParams {
                         name: "system".parse().unwrap(),
                         description: "Built-in VPC Router for Oxide Services"
@@ -187,7 +187,7 @@ impl DataStore {
             *SERVICES_INTERNET_GATEWAY_DEFAULT_ROUTE_V4,
             SERVICES_VPC.system_router_id,
             ExternalRouteKind::Default,
-            nexus_types::external_api::params::RouterRouteCreate {
+            nexus_types::external_api::vpc::RouterRouteCreate {
                 identity: IdentityMetadataCreateParams {
                     name: "default-v4".parse().unwrap(),
                     description: String::from("Default IPv4 route"),
@@ -205,7 +205,7 @@ impl DataStore {
             *SERVICES_INTERNET_GATEWAY_DEFAULT_ROUTE_V6,
             SERVICES_VPC.system_router_id,
             ExternalRouteKind::Default,
-            nexus_types::external_api::params::RouterRouteCreate {
+            nexus_types::external_api::vpc::RouterRouteCreate {
                 identity: IdentityMetadataCreateParams {
                     name: "default-v6".parse().unwrap(),
                     description: String::from("Default IPv6 route"),
@@ -2989,8 +2989,10 @@ mod tests {
     use nexus_types::deployment::BlueprintZoneConfig;
     use nexus_types::deployment::BlueprintZoneDisposition;
     use nexus_types::deployment::BlueprintZoneImageSource;
-    use nexus_types::external_api::params;
-    use nexus_types::external_api::params::PrivateIpStackCreate;
+    use nexus_types::external_api::instance as instance_types;
+    use nexus_types::external_api::instance::PrivateIpStackCreate;
+    use nexus_types::external_api::project;
+    use nexus_types::external_api::vpc;
     use nexus_types::identity::Asset;
     use omicron_common::api::external;
     use omicron_common::api::external::Generation;
@@ -3021,7 +3023,7 @@ mod tests {
         let (opctx, datastore) = (db.opctx(), db.datastore());
 
         // Create a project.
-        let project_params = params::ProjectCreate {
+        let project_params = project::ProjectCreate {
             identity: IdentityMetadataCreateParams {
                 name: "project".parse().unwrap(),
                 description: String::from("test project"),
@@ -3043,7 +3045,7 @@ mod tests {
                 Uuid::new_v4(),
                 authz_project.id(),
                 Uuid::new_v4(),
-                params::VpcCreate {
+                vpc::VpcCreate {
                     identity: IdentityMetadataCreateParams {
                         name: name.clone(),
                         description: description.clone(),
@@ -3084,7 +3086,7 @@ mod tests {
             Uuid::new_v4(),
             authz_project.id(),
             Uuid::new_v4(),
-            params::VpcCreate {
+            vpc::VpcCreate {
                 identity: IdentityMetadataCreateParams {
                     name: name.clone(),
                     description: description.clone(),
@@ -3126,7 +3128,7 @@ mod tests {
         let (opctx, datastore) = (db.opctx(), db.datastore());
 
         // Create a project.
-        let project_params = params::ProjectCreate {
+        let project_params = project::ProjectCreate {
             identity: IdentityMetadataCreateParams {
                 name: "project".parse().unwrap(),
                 description: String::from("test project"),
@@ -3148,7 +3150,7 @@ mod tests {
                 Uuid::new_v4(),
                 authz_project.id(),
                 Uuid::new_v4(),
-                params::VpcCreate {
+                vpc::VpcCreate {
                     identity: IdentityMetadataCreateParams {
                         name: name.clone(),
                         description: description.clone(),
@@ -3190,7 +3192,7 @@ mod tests {
             Uuid::new_v4(),
             authz_project.id(),
             Uuid::new_v4(),
-            params::VpcCreate {
+            vpc::VpcCreate {
                 identity: IdentityMetadataCreateParams {
                     name: name.clone(),
                     description: description.clone(),
@@ -3541,7 +3543,7 @@ mod tests {
         datastore: &DataStore,
     ) -> (authz::Project, authz::Vpc, Vpc, authz::VpcRouter, VpcRouter) {
         // Create a project and VPC.
-        let project_params = params::ProjectCreate {
+        let project_params = project::ProjectCreate {
             identity: IdentityMetadataCreateParams {
                 name: "project".parse().unwrap(),
                 description: String::from("test project"),
@@ -3559,7 +3561,7 @@ mod tests {
             Uuid::new_v4(),
             authz_project.id(),
             Uuid::new_v4(),
-            params::VpcCreate {
+            vpc::VpcCreate {
                 identity: IdentityMetadataCreateParams {
                     name: vpc_name.clone(),
                     description: description.clone(),
@@ -3594,7 +3596,7 @@ mod tests {
             db_vpc.system_router_id,
             db_vpc.id(),
             VpcRouterKind::System,
-            nexus_types::external_api::params::VpcRouterCreate {
+            nexus_types::external_api::vpc::VpcRouterCreate {
                 identity: IdentityMetadataCreateParams {
                     name: "system".parse().unwrap(),
                     description: description.clone(),
@@ -3969,7 +3971,7 @@ mod tests {
                     Uuid::new_v4(),
                     authz_router.id(),
                     external::RouterRouteKind::Custom,
-                    params::RouterRouteCreate {
+                    vpc::RouterRouteCreate {
                         identity: IdentityMetadataCreateParams {
                             name: "to-vpn".parse().unwrap(),
                             description: "A rule...".into(),
@@ -4005,7 +4007,7 @@ mod tests {
                 db::model::Instance::new(
                     InstanceUuid::new_v4(),
                     authz_project.id(),
-                    &params::InstanceCreate {
+                    &instance_types::InstanceCreate {
                         identity: IdentityMetadataCreateParams {
                             name: inst_name.clone(),
                             description: "An instance...".into(),
@@ -4015,7 +4017,7 @@ mod tests {
                         hostname: "insty".parse().unwrap(),
                         user_data: vec![],
                         network_interfaces:
-                            params::InstanceNetworkInterfaceAttachment::None,
+                            instance_types::InstanceNetworkInterfaceAttachment::None,
                         external_ips: vec![],
                         disks: vec![],
                         boot_disk: None,

@@ -555,6 +555,9 @@ pub enum AuthnMode {
     SiloUser(SiloUserUuid),
     Session(String),
     DeviceToken(String),
+    /// SCIM bearer token authentication. The value is the raw token (the
+    /// `oxide-scim-` prefix is added automatically).
+    ScimToken(String),
 }
 
 impl AuthnMode {
@@ -587,6 +590,10 @@ impl AuthnMode {
             }
             AuthnMode::DeviceToken(token) => {
                 let header_value = format!("Bearer {}", token);
+                parse_header_pair(http::header::AUTHORIZATION, header_value)
+            }
+            AuthnMode::ScimToken(token) => {
+                let header_value = format!("Bearer oxide-scim-{}", token);
                 parse_header_pair(http::header::AUTHORIZATION, header_value)
             }
         }
@@ -634,6 +641,12 @@ impl<'a> NexusRequest<'a> {
     pub fn websocket_handshake(mut self) -> Self {
         self.request_builder =
             self.request_builder.expect_websocket_handshake();
+        self
+    }
+
+    /// Allow non-Dropshot error responses (e.g., SCIM endpoints).
+    pub fn allow_non_dropshot_errors(mut self) -> Self {
+        self.request_builder = self.request_builder.allow_non_dropshot_errors();
         self
     }
 
