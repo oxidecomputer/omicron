@@ -22,6 +22,7 @@ use omicron_common::{
     },
 };
 use omicron_uuid_kinds::{InternalZpoolUuid, MupdateUuid};
+use oxide_update_engine_types::spec::SerializableError;
 use sled_agent_config_reconciler::{
     InternalDiskDetails, InternalDisksReceiver, InternalDisksWithBootDisk,
 };
@@ -31,7 +32,6 @@ use sled_storage::config::MountConfig;
 use tokio::sync::oneshot;
 use tufaceous_artifact::{ArtifactHashId, ArtifactKind, KnownArtifactKind};
 use update_common::artifacts::UpdatePlan;
-use update_engine::NestedError;
 use wicket::OutputKind;
 use wicket_common::{
     inventory::{SpIdentifier, SpType},
@@ -265,7 +265,7 @@ async fn test_updates() {
             .expect("wicket rack-update clear failed");
 
         // stdout should contain a JSON object.
-        let response: Result<ClearUpdateStateResponse, NestedError> =
+        let response: Result<ClearUpdateStateResponse, SerializableError> =
             serde_json::from_slice(&stdout).expect("stdout is valid JSON");
         assert_eq!(
             response.expect("expected Ok response"),

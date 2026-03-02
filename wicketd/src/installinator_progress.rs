@@ -14,11 +14,9 @@ use std::{
 
 use installinator_api::EventReportStatus;
 use omicron_uuid_kinds::MupdateUuid;
+use oxide_update_engine_types::events::{EventReport, StepEventIsTerminal};
+use oxide_update_engine_types::spec::GenericSpec;
 use tokio::sync::{oneshot, watch};
-use update_engine::{
-    NestedSpec,
-    events::{EventReport, StepEventIsTerminal},
-};
 
 /// Creates the artifact server and update tracker's interfaces to the
 /// installinator progress tracker.
@@ -55,7 +53,7 @@ impl IprArtifactServer {
     pub(crate) fn report_progress(
         &self,
         update_id: MupdateUuid,
-        report: EventReport<NestedSpec>,
+        report: EventReport<GenericSpec>,
     ) -> EventReportStatus {
         let mut running_updates = self.running_updates.lock().unwrap();
         if let Some(update) = running_updates.get_mut(&update_id) {
@@ -157,20 +155,20 @@ impl IprUpdateTracker {
 /// Type alias for the receiver that resolves when the first message from the
 /// installinator has been received.
 pub(crate) type IprStartReceiver =
-    oneshot::Receiver<watch::Receiver<EventReport<NestedSpec>>>;
+    oneshot::Receiver<watch::Receiver<EventReport<GenericSpec>>>;
 
 #[derive(Debug)]
 #[must_use]
 enum RunningUpdate {
     /// This is the initial state: the first message from the installinator
     /// hasn't been received yet.
-    Initial(oneshot::Sender<watch::Receiver<EventReport<NestedSpec>>>),
+    Initial(oneshot::Sender<watch::Receiver<EventReport<GenericSpec>>>),
 
     /// Reports from the installinator have been received.
     ///
     /// This is an `UnboundedSender` to avoid cancel-safety issues (see
     /// <https://github.com/oxidecomputer/omicron/pull/3579>).
-    ReportsReceived(watch::Sender<EventReport<NestedSpec>>),
+    ReportsReceived(watch::Sender<EventReport<GenericSpec>>),
 
     /// All messages have been received.
     ///
@@ -210,8 +208,8 @@ impl RunningUpdate {
 
     fn send_and_next_state(
         log: &slog::Logger,
-        sender: watch::Sender<EventReport<NestedSpec>>,
-        report: EventReport<NestedSpec>,
+        sender: watch::Sender<EventReport<GenericSpec>>,
+        report: EventReport<GenericSpec>,
     ) -> (Self, EventReportStatus) {
         let is_terminal = Self::is_terminal(&report);
         match sender.send(report) {
@@ -259,7 +257,7 @@ impl RunningUpdate {
         }
     }
 
-    fn is_terminal(report: &EventReport<NestedSpec>) -> bool {
+    fn is_terminal(report: &EventReport<GenericSpec>) -> bool {
         report
             .step_events
             .last()
@@ -305,9 +303,8 @@ mod tests {
     };
     use omicron_common::disk::M2Slot;
     use omicron_test_utils::dev::test_setup_log;
-    use schemars::JsonSchema;
-    use update_engine::ExecutionId;
-    use uuid::Uuid;
+    use oxide_update_engine_types::events::ExecutionUuid;
+    use oxide_update_engine_types::spec::EngineSpec;
 
     use super::*;
 
@@ -352,12 +349,12 @@ mod tests {
             "first report matches"
         );
 
-        let execution_id = ExecutionId(Uuid::new_v4());
+        let execution_id = ExecutionUuid::new_v4();
 
         // Send a completion report.
         let completion_report = installinator_common::EventReport {
             step_events: vec![StepEvent {
-                spec: InstallinatorSpec::schema_name(),
+                spec: InstallinatorSpec::spec_name(),
                 execution_id,
                 event_index: 0,
                 total_elapsed: Duration::from_secs(2),

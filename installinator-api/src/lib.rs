@@ -18,8 +18,9 @@ use dropshot_api_manager_types::api_versions;
 use hyper::header;
 use installinator_common_versions::latest;
 use omicron_uuid_kinds::MupdateUuid;
+use oxide_update_engine_types::events::EventReport;
+use oxide_update_engine_types::spec::GenericSpec;
 use tufaceous_artifact::ArtifactHashId;
-use update_engine::{NestedSpec, events::EventReport};
 
 api_versions!([
     // Do not create new versions of this client-side versioned API.
@@ -57,7 +58,7 @@ pub trait InstallinatorApi {
     async fn report_progress(
         rqctx: RequestContext<Self::Context>,
         path: Path<latest::report::ReportQuery>,
-        report: TypedBody<EventReport<NestedSpec>>,
+        report: TypedBody<EventReport<GenericSpec>>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
 }
 

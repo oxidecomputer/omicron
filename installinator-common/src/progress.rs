@@ -7,6 +7,8 @@ use std::{collections::BTreeSet, fmt, net::SocketAddr};
 use camino::Utf8PathBuf;
 use illumos_utils::zpool;
 use omicron_common::disk::M2Slot;
+use oxide_update_engine_types::errors::NestedEngineError;
+use oxide_update_engine_types::spec::{AsError, EngineSpec};
 use schemars::{
     JsonSchema,
     r#gen::SchemaGenerator,
@@ -15,19 +17,21 @@ use schemars::{
 use serde::{Deserialize, Serialize};
 use serde_with::rust::deserialize_ignore_any;
 use thiserror::Error;
-use update_engine::{AsError, StepSpec, errors::NestedEngineError};
 
 // ---
 // Type definitions for use by installinator code.
 // ---
 
-update_engine::define_update_engine!(pub InstallinatorSpec);
+oxide_update_engine_types::define_update_engine_types!(pub InstallinatorSpec);
 
 /// The specification for installinator events.
 #[derive(JsonSchema)]
 pub enum InstallinatorSpec {}
 
-impl StepSpec for InstallinatorSpec {
+impl EngineSpec for InstallinatorSpec {
+    fn spec_name() -> String {
+        "InstallinatorSpec".to_owned()
+    }
     type Component = InstallinatorComponent;
     type StepId = InstallinatorStepId;
     type StepMetadata = InstallinatorStepMetadata;
@@ -35,6 +39,15 @@ impl StepSpec for InstallinatorSpec {
     type CompletionMetadata = InstallinatorCompletionMetadata;
     type SkippedMetadata = serde_json::Value;
     type Error = anyhow::Error;
+
+    fn rust_type_info()
+    -> Option<oxide_update_engine_types::schema::RustTypeInfo> {
+        Some(oxide_update_engine_types::schema::RustTypeInfo {
+            crate_name: "installinator-common",
+            version: "0.1.0",
+            path: "installinator_common::InstallinatorSpec",
+        })
+    }
 }
 
 /// Installinator components.
@@ -175,7 +188,10 @@ impl WriteOutput {
 #[derive(JsonSchema)]
 pub enum WriteSpec {}
 
-impl StepSpec for WriteSpec {
+impl EngineSpec for WriteSpec {
+    fn spec_name() -> String {
+        "WriteSpec".to_owned()
+    }
     type Component = WriteComponent;
     type StepId = WriteStepId;
     type StepMetadata = ();
@@ -286,7 +302,10 @@ pub enum ControlPlaneZonesSpec {}
 
 // This is a nested spec used within a `WriteSpec` engine, and we reuse a couple
 // of `WriteSpec`'s types for simplicity.
-impl StepSpec for ControlPlaneZonesSpec {
+impl EngineSpec for ControlPlaneZonesSpec {
+    fn spec_name() -> String {
+        "ControlPlaneZonesSpec".to_owned()
+    }
     type Component = WriteComponent;
     type StepId = ControlPlaneZonesStepId;
     type StepMetadata = ();

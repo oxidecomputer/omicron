@@ -14,25 +14,24 @@ use nexus_db_queries::db::DataStore;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::PendingMgsUpdates;
 use nexus_types::deployment::SledFilter;
-use nexus_types::deployment::execution::StepSkipped;
 use nexus_types::deployment::execution::overridables;
 use nexus_types::deployment::execution::{
     ComponentRegistrar, Event, ExecutionComponent, ExecutionStepId,
     Overridables, ReconfiguratorExecutionSpec, SharedStepHandle, Sled,
-    StepHandle, StepResult, UpdateEngine,
+    StepHandle, StepResult, StepSkipped, UpdateEngine,
 };
 use nexus_types::quiesce::SagaQuiesceHandle;
 use nexus_types::quiesce::SagaReassignmentDone;
 use omicron_uuid_kinds::OmicronZoneUuid;
+use oxide_update_engine::StepSuccess;
+use oxide_update_engine::StepWarning;
+use oxide_update_engine_types::spec::merge_anyhow_list;
 use slog::info;
 use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 use tokio::sync::mpsc;
 use tokio::sync::watch;
-use update_engine::StepSuccess;
-use update_engine::StepWarning;
-use update_engine::merge_anyhow_list;
 
 mod clickhouse;
 mod cockroachdb;

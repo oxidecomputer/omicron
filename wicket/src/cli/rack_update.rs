@@ -16,12 +16,11 @@ use std::{
 use anyhow::{Context, Result, anyhow, bail};
 use camino::Utf8PathBuf;
 use clap::{Args, Subcommand, ValueEnum};
+use oxide_update_engine_display::{GroupDisplay, LineDisplayStyles};
+use oxide_update_engine_types::buffer::EventBuffer;
+use oxide_update_engine_types::spec::SerializableError;
 use slog::Logger;
 use tokio::{sync::watch, task::JoinHandle};
-use update_engine::{
-    EventBuffer, NestedError,
-    display::{GroupDisplay, LineDisplayStyles},
-};
 use wicket_common::{
     WICKETD_TIMEOUT,
     rack_update::ClearUpdateStateResponse,
@@ -374,8 +373,8 @@ impl ClearArgs {
                 }
             }
             MessageFormat::Json => {
-                let response =
-                    response.map_err(|error| NestedError::new(error.as_ref()));
+                let response = response
+                    .map_err(|error| SerializableError::new(error.as_ref()));
                 // Return the response as a JSON object.
                 serde_json::to_writer_pretty(output.stdout, &response)
                     .context("error writing to output")?;

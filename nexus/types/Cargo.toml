@@ -60,7 +60,8 @@ tufaceous-artifact.workspace = true
 
 newtype-uuid.workspace = true
 nexus-types-versions.workspace = true
-update-engine.workspace = true
+oxide-update-engine.workspace = true
+oxide-update-engine-types.workspace = true
 unicode-width.workspace = true
 uuid.workspace = true
 url = { workspace = true, features = ["serde"] }

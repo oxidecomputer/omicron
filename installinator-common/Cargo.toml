@@ -13,6 +13,7 @@ camino.workspace = true
 illumos-utils.workspace = true
 installinator-common-versions.workspace = true
 omicron-common.workspace = true
+oxide-update-engine-types.workspace = true
 libc.workspace = true
 schemars.workspace = true
 serde.workspace = true
@@ -20,7 +21,6 @@ serde_json.workspace = true
 serde_with.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
-update-engine.workspace = true
 omicron-workspace-hack.workspace = true
 
 [dev-dependencies]

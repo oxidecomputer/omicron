@@ -10,8 +10,7 @@ use camino::{Utf8Path, Utf8PathBuf};
 use clap::{Args, Parser, Subcommand};
 use installinator_common::{
     InstallinatorCompletionMetadata, InstallinatorComponent, InstallinatorSpec,
-    InstallinatorStepId, StepContext, StepHandle, StepProgress, StepSuccess,
-    StepWarning, UpdateEngine,
+    InstallinatorStepId, StepProgress,
 };
 use omicron_common::FileKv;
 use sha2::{Digest, Sha256};
@@ -21,7 +20,6 @@ use tufaceous_artifact::{
     InstallinatorDocument, KnownArtifactKind,
 };
 use tufaceous_lib::ControlPlaneZoneImages;
-use update_engine::StepResult;
 
 use crate::{
     ArtifactWriter, MeasurementToWrite, WriteDestination,
@@ -29,6 +27,10 @@ use crate::{
     fetch::{FetchArtifactBackend, FetchedArtifact, HttpFetchBackend},
     peers::{DiscoveryMechanism, LastKnownPeer},
     reporter::{HttpProgressBackend, ProgressReporter, ReportProgressBackend},
+    spec::{
+        StepContext, StepHandle, StepResult, StepSuccess, StepWarning,
+        UpdateEngine,
+    },
 };
 
 /// Installinator app.

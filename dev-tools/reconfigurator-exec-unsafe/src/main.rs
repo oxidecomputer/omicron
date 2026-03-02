@@ -25,6 +25,10 @@ use nexus_types::quiesce::SagaQuiesceHandle;
 use omicron_common::api::external::DataPageParams;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
+use oxide_update_engine_display::LineDisplay;
+use oxide_update_engine_display::LineDisplayStyles;
+use oxide_update_engine_types::buffer::EventBuffer;
+use oxide_update_engine_types::spec::SerializableError;
 use qorb::resolver::Resolver;
 use qorb::resolvers::fixed::FixedResolver;
 use slog::info;
@@ -34,10 +38,6 @@ use std::num::NonZeroU32;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::watch;
-use update_engine::EventBuffer;
-use update_engine::NestedError;
-use update_engine::display::LineDisplay;
-use update_engine::display::LineDisplayStyles;
 
 fn main() -> Result<(), anyhow::Error> {
     let args = ReconfiguratorExec::parse();
@@ -166,7 +166,7 @@ impl ReconfiguratorExec {
             );
         }
 
-        let (sender, mut receiver) = update_engine::channel();
+        let (sender, mut receiver) = oxide_update_engine::channel();
 
         let receiver_task = tokio::spawn(async move {
             let mut event_buffer = EventBuffer::default();
@@ -257,8 +257,9 @@ impl ReconfiguratorExec {
         .context("blueprint execution failed");
 
         // Get and dump the report from the receiver task.
-        let event_buffer =
-            receiver_task.await.map_err(|error| NestedError::new(&error))?;
+        let event_buffer = receiver_task
+            .await
+            .map_err(|error| SerializableError::new(&error))?;
         let mut line_display = LineDisplay::new(std::io::stdout());
         let should_colorize = match self.color {
             ColorChoice::Always => true,

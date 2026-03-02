@@ -59,6 +59,8 @@ omicron-uuid-kinds.workspace = true
 omicron-workspace-hack.workspace = true
 owo-colors.workspace = true
 oxide-tokio-rt.workspace = true
+oxide-update-engine-display.workspace = true
+oxide-update-engine-types.workspace = true
 oximeter-client.workspace = true
 oximeter-db = { workspace = true, default-features = false, features = [
     "oxql",
@@ -88,7 +90,6 @@ tokio = { workspace = true, features = ["full"] }
 trust-quorum-types.workspace = true
 tufaceous-artifact.workspace = true
 unicode-width.workspace = true
-update-engine.workspace = true
 url.workspace = true
 uuid.workspace = true
 

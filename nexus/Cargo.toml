@@ -149,6 +149,8 @@ nexus-types-versions.workspace = true
 omicron-common.workspace = true
 omicron-passwords.workspace = true
 oxide-tokio-rt.workspace = true
+oxide-update-engine.workspace = true
+oxide-update-engine-types.workspace = true
 oximeter.workspace = true
 oximeter-instruments = { workspace = true, features = ["http-instruments"] }
 oximeter-producer.workspace = true
@@ -157,7 +159,6 @@ rustls = { workspace = true }
 rustls-pemfile = { workspace = true }
 scim2-rs.workspace = true
 update-common.workspace = true
-update-engine.workspace = true
 omicron-workspace-hack.workspace = true
 omicron-uuid-kinds.workspace = true
 zip = { workspace = true, features = ["jiff-02"] }
