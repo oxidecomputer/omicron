@@ -2,7 +2,7 @@
 #:
 #: name = "build-and-test (helios)"
 #: variety = "basic"
-#: target = "helios-2.0"
+#: target = "test-emily"
 #: rust_toolchain = true
 #: output_rules = [
 #:	"%/work/*",
@@ -12,6 +12,7 @@
 #:	"%/var/tmp/omicron_tmp/**/*",
 #:	"!/var/tmp/omicron_tmp/crdb-base*",
 #:	"!/var/tmp/omicron_tmp/rustc*",
+#:  "%/var/tmp/ci-resource-usage.csv",
 #: ]
 #: access_repos = [
 #:	"oxidecomputer/dendrite"
