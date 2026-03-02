@@ -11,7 +11,7 @@ use crate::unsigned::SqlU8;
 use chrono::{DateTime, Utc};
 use db_macros::Resource;
 use nexus_db_schema::schema::disk;
-use nexus_types::external_api::params;
+use nexus_types::external_api::disk as disk_types;
 use omicron_common::api::external;
 use omicron_common::api::internal;
 use serde::{Deserialize, Serialize};
@@ -85,7 +85,7 @@ impl Disk {
     pub fn new(
         disk_id: Uuid,
         project_id: Uuid,
-        params: &params::DiskCreate,
+        params: &disk_types::DiskCreate,
         block_size: BlockSize,
         runtime_initial: DiskRuntimeState,
         disk_type: DiskType,

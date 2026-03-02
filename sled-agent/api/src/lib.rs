@@ -16,11 +16,11 @@ use omicron_common::api::internal::{
     nexus::{DiskRuntimeState, SledVmmState},
     shared::{
         ExternalIpGatewayMap, ResolvedVpcRouteSet, ResolvedVpcRouteState,
-        SledIdentifiers, SwitchPorts, VirtualNetworkInterfaceHost,
+        SledIdentifiers, VirtualNetworkInterfaceHost,
     },
 };
 use sled_agent_types_versions::{
-    latest, v1, v4, v6, v7, v9, v10, v11, v12, v14, v17,
+    latest, v1, v4, v6, v7, v9, v10, v11, v12, v14, v16, v17, v20,
 };
 use sled_diagnostics::SledDiagnosticsQueryOutput;
 
@@ -36,6 +36,9 @@ api_versions!([
     // |  example for the next person.
     // v
     // (next_int, IDENT),
+    (23, REMOVE_READ_BOOTSTORE_CONFIG_CACHE),
+    (22, REMOVE_HEALTH_MONITOR_KEEP_CHECKS),
+    (21, REMOVE_DISK_PUT),
     (20, BGP_V6),
     (19, ADD_ROT_ATTESTATION),
     (18, ADD_ATTACHED_SUBNETS),
@@ -595,6 +598,7 @@ pub trait SledAgentApi {
     #[endpoint {
         method = PUT,
         path = "/disks/{disk_id}",
+        versions = ..VERSION_REMOVE_DISK_PUT,
     }]
     async fn disk_put(
         rqctx: RequestContext<Self::Context>,
@@ -738,7 +742,7 @@ pub trait SledAgentApi {
     }]
     async fn uplink_ensure(
         rqctx: RequestContext<Self::Context>,
-        body: TypedBody<SwitchPorts>,
+        body: TypedBody<latest::uplink::SwitchPorts>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
 
     #[endpoint {
@@ -748,7 +752,7 @@ pub trait SledAgentApi {
     }]
     async fn uplink_ensure_v1(
         rqctx: RequestContext<Self::Context>,
-        body: TypedBody<v1::rack_init::SwitchPorts>,
+        body: TypedBody<v1::uplink::SwitchPorts>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
         Self::uplink_ensure(rqctx, body.map(From::from)).await
     }
@@ -756,15 +760,19 @@ pub trait SledAgentApi {
     /// This API endpoint is only reading the local sled agent's view of the
     /// bootstore. The boostore is a distributed data store that is eventually
     /// consistent. Reads from individual nodes may not represent the latest state.
+    // THIS HAS BEEN REMOVED AND SHOULD NOT BE RESTORED. Reading from the
+    // bootstore cache is inherently racy; the bootstore is eventually
+    // consistent, and reads from different nodes may return different values.
+    // Instead, callers should read from CRDB.
     #[endpoint {
         method = GET,
         path = "/network-bootstore-config",
-        versions = VERSION_BGP_V6..,
+        versions = VERSION_BGP_V6..VERSION_REMOVE_READ_BOOTSTORE_CONFIG_CACHE,
     }]
     async fn read_network_bootstore_config_cache(
         rqctx: RequestContext<Self::Context>,
     ) -> Result<
-        HttpResponseOk<latest::early_networking::EarlyNetworkConfig>,
+        HttpResponseOk<v20::early_networking::EarlyNetworkConfig>,
         HttpError,
     >;
 
@@ -834,11 +842,26 @@ pub trait SledAgentApi {
     #[endpoint {
         method = GET,
         path = "/inventory",
-        versions = VERSION_MEASUREMENT_PROPER_INVENTORY..,
+        versions = VERSION_REMOVE_HEALTH_MONITOR_KEEP_CHECKS..,
     }]
     async fn inventory(
         rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<latest::inventory::Inventory>, HttpError>;
+
+    /// Fetch basic information about this sled
+    #[endpoint {
+        operation_id = "inventory",
+        method = GET,
+        path = "/inventory",
+        versions = VERSION_MEASUREMENT_PROPER_INVENTORY..VERSION_REMOVE_HEALTH_MONITOR_KEEP_CHECKS,
+    }]
+    async fn inventory_v16(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<v16::inventory::Inventory>, HttpError> {
+        Self::inventory(rqctx).await.map(|HttpResponseOk(inv)| {
+            HttpResponseOk(v16::inventory::Inventory::from(inv))
+        })
+    }
 
     /// Fetch basic information about this sled
     #[endpoint {
@@ -850,7 +873,7 @@ pub trait SledAgentApi {
     async fn inventory_v14(
         rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<v14::inventory::Inventory>, HttpError> {
-        let HttpResponseOk(inventory) = Self::inventory(rqctx).await?;
+        let HttpResponseOk(inventory) = Self::inventory_v16(rqctx).await?;
         inventory.try_into().map_err(HttpError::from).map(HttpResponseOk)
     }
 

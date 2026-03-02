@@ -22,6 +22,17 @@
  *    sparingly."
  */
 
+/*
+ * Reduce the index backfill batch size from the default of 50,000 to 5,000.
+ * This prevents OOM failures during CREATE INDEX migrations on large tables.
+ * See https://github.com/oxidecomputer/omicron/issues/9874 and
+ * https://github.com/oxidecomputer/omicron-9874-findings for details.
+ *
+ * This must be outside the transaction because SET CLUSTER SETTING cannot be
+ * used inside a transaction.
+ */
+SET CLUSTER SETTING bulkio.index_backfill.batch_size = 5000;
+
 BEGIN;
 
 /*
@@ -5185,6 +5196,13 @@ CREATE TABLE IF NOT EXISTS omicron.public.bp_target (
     time_made_target TIMESTAMPTZ NOT NULL
 );
 
+
+CREATE TYPE IF NOT EXISTS omicron.public.bp_sled_measurements AS ENUM (
+    'unknown',
+    'install_dataset',
+    'artifacts'
+);
+
 -- metadata associated with a single sled in a blueprint
 CREATE TABLE IF NOT EXISTS omicron.public.bp_sled_metadata (
     -- foreign key into `blueprint` table
@@ -5210,7 +5228,20 @@ CREATE TABLE IF NOT EXISTS omicron.public.bp_sled_metadata (
         CHECK (last_allocated_ip_subnet_offset BETWEEN 0 AND 65535)
         NOT NULL,
 
+    -- the measurements for this sled
+    measurements omicron.public.bp_sled_measurements NOT NULL,
+
     PRIMARY KEY (blueprint_id, sled_id)
+);
+
+-- description of measurements specified in a blueprint
+CREATE TABLE IF NOT EXISTS omicron.public.bp_single_measurements (
+    -- foreign key into the `blueprint` table
+    blueprint_id UUID NOT NULL,
+    sled_id UUID NOT NULL,
+
+    image_artifact_sha256 STRING(64) NOT NULL,
+    PRIMARY KEY (blueprint_id, sled_id, image_artifact_sha256)
 );
 
 -- description of omicron physical disks specified in a blueprint.
@@ -8192,7 +8223,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '231.0.0', NULL)
+    (TRUE, NOW(), NOW(), '233.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

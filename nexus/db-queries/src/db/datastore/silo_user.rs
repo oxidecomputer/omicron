@@ -25,8 +25,7 @@ use chrono::Utc;
 use diesel::prelude::*;
 use nexus_db_errors::ErrorHandler;
 use nexus_db_errors::public_error_from_diesel;
-use nexus_types::external_api::params;
-use nexus_types::external_api::views;
+use nexus_types::external_api::user;
 use nexus_types::identity::Asset;
 use nexus_types::identity::Resource;
 use omicron_common::api::external::CreateResult;
@@ -168,8 +167,8 @@ impl From<SiloUser> for model::SiloUser {
     }
 }
 
-impl From<SiloUser> for views::User {
-    fn from(u: SiloUser) -> views::User {
+impl From<SiloUser> for user::User {
+    fn from(u: SiloUser) -> user::User {
         match u {
             SiloUser::ApiOnly(u) => u.into(),
             SiloUser::Jit(u) => u.into(),
@@ -227,9 +226,9 @@ impl From<SiloUserApiOnly> for SiloUser {
     }
 }
 
-impl From<SiloUserApiOnly> for views::User {
-    fn from(u: SiloUserApiOnly) -> views::User {
-        views::User {
+impl From<SiloUserApiOnly> for user::User {
+    fn from(u: SiloUserApiOnly) -> user::User {
+        user::User {
             id: u.id,
             // TODO the use of external_id as display_name is temporary
             display_name: u.external_id,
@@ -287,9 +286,9 @@ impl From<SiloUserJit> for SiloUser {
     }
 }
 
-impl From<SiloUserJit> for views::User {
-    fn from(u: SiloUserJit) -> views::User {
-        views::User {
+impl From<SiloUserJit> for user::User {
+    fn from(u: SiloUserJit) -> user::User {
+        user::User {
             id: u.id,
             // TODO the use of external_id as display_name is temporary
             display_name: u.external_id,
@@ -358,9 +357,9 @@ impl From<SiloUserScim> for SiloUser {
     }
 }
 
-impl From<SiloUserScim> for views::User {
-    fn from(u: SiloUserScim) -> views::User {
-        views::User {
+impl From<SiloUserScim> for user::User {
+    fn from(u: SiloUserScim) -> user::User {
+        user::User {
             id: u.id,
             // TODO the use of user_name as display_name is temporary
             display_name: u.user_name,
@@ -884,7 +883,7 @@ impl DataStore {
         .map(|u| {
             UserBuiltin::new(
                 u.id,
-                params::UserBuiltinCreate {
+                user::UserBuiltinCreate {
                     identity: IdentityMetadataCreateParams {
                         name: u.name.clone(),
                         description: String::from(u.description),

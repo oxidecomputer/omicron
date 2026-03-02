@@ -33,11 +33,13 @@ use nexus_test_utils::resource_helpers::{
     object_create_error,
 };
 use nexus_test_utils_macros::nexus_test;
-use nexus_types::external_api::params::{
-    InstanceCreate, InstanceMulticastGroupJoin,
-    InstanceNetworkInterfaceAttachment,
+use nexus_types::external_api::instance::{
+    InstanceCreate, InstanceNetworkInterfaceAttachment,
 };
-use nexus_types::external_api::views::MulticastGroupMember;
+use nexus_types::external_api::multicast::{
+    InstanceMulticastGroupJoin, MulticastGroup, MulticastGroupIdentifier,
+    MulticastGroupJoinSpec, MulticastGroupMember,
+};
 use omicron_common::address::is_ssm_address;
 use omicron_common::api::external::{
     ByteCount, IdentityMetadataCreateParams, Instance, InstanceCpuCount,

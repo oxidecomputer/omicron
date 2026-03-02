@@ -106,7 +106,6 @@ pub(crate) mod test {
     use crate::{
         app::sagas::vpc_subnet_update::Params,
         app::sagas::vpc_subnet_update::SagaVpcSubnetUpdate,
-        external_api::params,
     };
     use chrono::Utc;
     use dropshot::test_util::ClientTestContext;
@@ -116,6 +115,7 @@ pub(crate) mod test {
     use nexus_test_utils::resource_helpers::create_project;
     use nexus_test_utils::resource_helpers::create_router;
     use nexus_test_utils_macros::nexus_test;
+    use nexus_types::external_api::vpc;
     use omicron_common::api::external::NameOrId;
     use uuid::Uuid;
 
@@ -152,7 +152,7 @@ pub(crate) mod test {
         let (.., authz_vpc, authz_subnet, _) = nexus
             .vpc_subnet_lookup(
                 &opctx,
-                params::SubnetSelector {
+                vpc::SubnetSelector {
                     project: Some(project_id.into()),
                     vpc: Some(NameOrId::Name("default".parse().unwrap())),
                     subnet: NameOrId::Name("default".parse().unwrap()),
@@ -166,7 +166,7 @@ pub(crate) mod test {
         let (.., custom_router, _) = nexus
             .vpc_router_lookup(
                 &opctx,
-                params::RouterSelector {
+                vpc::RouterSelector {
                     project: None,
                     vpc: None,
                     router: NameOrId::Id(router_id),

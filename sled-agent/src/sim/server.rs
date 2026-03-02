@@ -26,9 +26,8 @@ use internal_dns_types::names::ServiceName;
 use nexus_client::types as NexusTypes;
 use nexus_config::NUM_INITIAL_RESERVED_IP_ADDRESSES;
 use nexus_lockstep_client::types::{
-    AllowedSourceIps, CrucibleDatasetCreateRequest, ExternalPortDiscovery,
-    IpRange, Ipv4Range, Ipv6Range, RackInitializationRequest,
-    RackNetworkConfig,
+    AllowedSourceIps, CrucibleDatasetCreateRequest, IpRange, Ipv4Range,
+    Ipv6Range, RackInitializationRequest, RackNetworkConfig,
 };
 use nexus_types::deployment::{
     BlueprintPhysicalDiskConfig, BlueprintPhysicalDiskDisposition,
@@ -37,6 +36,7 @@ use nexus_types::deployment::{
 use nexus_types::deployment::{
     BlueprintZoneConfig, BlueprintZoneDisposition, BlueprintZoneType,
 };
+use nexus_types::internal_api::params::ExternalPortDiscovery;
 use nexus_types::inventory::NetworkInterfaceKind;
 use omicron_common::FileKv;
 use omicron_common::address::NEXUS_OPTE_IPV4_SUBNET;
@@ -110,7 +110,6 @@ impl Server {
         let sled_agent = SledAgent::new_simulated_with_id(
             &config,
             sa_log,
-            config.nexus_address,
             Arc::clone(&nexus_client),
             simulated_upstairs.clone(),
             sled_index,

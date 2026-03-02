@@ -14,7 +14,7 @@
 //! as gone.
 
 use super::impl_enum_type;
-use nexus_types::external_api::views;
+use nexus_types::external_api::physical_disk;
 use serde::{Deserialize, Serialize};
 
 impl_enum_type!(
@@ -28,24 +28,28 @@ impl_enum_type!(
     Expunged => b"expunged"
 );
 
-impl From<PhysicalDiskPolicy> for views::PhysicalDiskPolicy {
+impl From<PhysicalDiskPolicy> for physical_disk::PhysicalDiskPolicy {
     fn from(policy: PhysicalDiskPolicy) -> Self {
         match policy {
             PhysicalDiskPolicy::InService => {
-                views::PhysicalDiskPolicy::InService
+                physical_disk::PhysicalDiskPolicy::InService
             }
-            PhysicalDiskPolicy::Expunged => views::PhysicalDiskPolicy::Expunged,
+            PhysicalDiskPolicy::Expunged => {
+                physical_disk::PhysicalDiskPolicy::Expunged
+            }
         }
     }
 }
 
-impl From<views::PhysicalDiskPolicy> for PhysicalDiskPolicy {
-    fn from(policy: views::PhysicalDiskPolicy) -> Self {
+impl From<physical_disk::PhysicalDiskPolicy> for PhysicalDiskPolicy {
+    fn from(policy: physical_disk::PhysicalDiskPolicy) -> Self {
         match policy {
-            views::PhysicalDiskPolicy::InService => {
+            physical_disk::PhysicalDiskPolicy::InService => {
                 PhysicalDiskPolicy::InService
             }
-            views::PhysicalDiskPolicy::Expunged => PhysicalDiskPolicy::Expunged,
+            physical_disk::PhysicalDiskPolicy::Expunged => {
+                PhysicalDiskPolicy::Expunged
+            }
         }
     }
 }

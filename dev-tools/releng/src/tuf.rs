@@ -68,14 +68,6 @@ pub(crate) async fn build_tuf_repo(
         manifest.artifacts.entry(kind).or_default().extend(artifacts);
     }
 
-    if let Some(path) = extra_manifest {
-        let m = DeserializedManifest::from_path(&path)
-            .context("failed to open extra manifest")?;
-        for (kind, artifacts) in m.artifacts {
-            manifest.artifacts.entry(kind).or_default().extend(artifacts);
-        }
-    }
-
     let mut measurement_corpus = vec![];
 
     let mut read_dir = fs::read_dir(
@@ -116,6 +108,14 @@ pub(crate) async fn build_tuf_repo(
     manifest
         .artifacts
         .insert(KnownArtifactKind::MeasurementCorpus, measurement_corpus);
+
+    if let Some(path) = extra_manifest {
+        let m = DeserializedManifest::from_path(&path)
+            .context("failed to open extra manifest")?;
+        for (kind, artifacts) in m.artifacts {
+            manifest.artifacts.entry(kind).or_default().extend(artifacts);
+        }
+    }
 
     // Add the OS images.
     manifest.artifacts.insert(

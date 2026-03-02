@@ -560,6 +560,15 @@ put those conversions into the client rather than omicron_common.
 
 [[dependency_filter_rules]]
 ancestor = "nexus-types"
+client = "mg-admin-client"
+evaluation = "bogus"
+note = """
+nexus-types depends on mg-admin-client to impl some `From` conversions and for
+defining some types.
+"""
+
+[[dependency_filter_rules]]
+ancestor = "nexus-types"
 client = "gateway-client"
 evaluation = "bogus"
 note = """
@@ -667,6 +676,18 @@ permalinks = [
     "https://github.com/oxidecomputer/lldp/blob/61479b6/lldpd/src/dendrite.rs#L194",
     "https://github.com/oxidecomputer/lldp/blob/61479b6/lldpd/misc/lldpd.xml",
     "https://github.com/oxidecomputer/lldp/blob/61479b6/lldpd/misc/svc-lldpd",
+]
+
+[[intra_deployment_unit_only_edges]]
+server = "lldpd"
+client = "gateway-client"
+note = """
+lldpd defaults to localhost for gateway (main.rs:194), and the SMF start
+script doesn't override it.
+"""
+permalinks = [
+    "https://github.com/oxidecomputer/lldp/blob/d22509dfdb051321b859e924948605115691b93c/lldpd/src/main.rs#L148-L154",
+    "https://github.com/oxidecomputer/lldp/blob/d22509dfdb051321b859e924948605115691b93c/lldpd/misc/svc-lldpd",
 ]
 
 [[intra_deployment_unit_only_edges]]

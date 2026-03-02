@@ -975,8 +975,7 @@ impl InstanceRunner {
                             | nexus_client::Error::UnexpectedResponse(_)
                             | nexus_client::Error::InvalidUpgrade(_)
                             | nexus_client::Error::ResponseBodyError(_)
-                            | nexus_client::Error::PreHookError(_)
-                            | nexus_client::Error::PostHookError(_) => {
+                            | nexus_client::Error::Custom(_) => {
                                 BackoffError::permanent(Error::Notification(
                                     err,
                                 ))
@@ -2627,7 +2626,9 @@ impl InstanceRunner {
 
         // We use a custom client builder here because the default progenitor
         // one has a timeout of 15s but we want to be able to wait indefinitely.
-        let reqwest_client = reqwest::ClientBuilder::new().build().unwrap();
+        // Use reqwest012 because the rev-pinned propolis-client is still on
+        // reqwest 0.12.
+        let reqwest_client = reqwest012::ClientBuilder::new().build().unwrap();
         let client = Arc::new(PropolisClient::new_with_client(
             &format!("http://{}", &self.propolis_addr),
             reqwest_client,

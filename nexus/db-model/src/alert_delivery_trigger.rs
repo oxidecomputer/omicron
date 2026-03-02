@@ -3,7 +3,7 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use super::impl_enum_type;
-use nexus_types::external_api::views;
+use nexus_types::external_api::alert;
 use serde::Deserialize;
 use serde::Serialize;
 use std::fmt;
@@ -39,11 +39,11 @@ impl AlertDeliveryTrigger {
 impl fmt::Display for AlertDeliveryTrigger {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         // Forward to the canonical implementation in nexus-types.
-        views::AlertDeliveryTrigger::from(*self).fmt(f)
+        alert::AlertDeliveryTrigger::from(*self).fmt(f)
     }
 }
 
-impl From<AlertDeliveryTrigger> for views::AlertDeliveryTrigger {
+impl From<AlertDeliveryTrigger> for alert::AlertDeliveryTrigger {
     fn from(trigger: AlertDeliveryTrigger) -> Self {
         match trigger {
             AlertDeliveryTrigger::Alert => Self::Alert,
@@ -53,12 +53,12 @@ impl From<AlertDeliveryTrigger> for views::AlertDeliveryTrigger {
     }
 }
 
-impl From<views::AlertDeliveryTrigger> for AlertDeliveryTrigger {
-    fn from(trigger: views::AlertDeliveryTrigger) -> Self {
+impl From<alert::AlertDeliveryTrigger> for AlertDeliveryTrigger {
+    fn from(trigger: alert::AlertDeliveryTrigger) -> Self {
         match trigger {
-            views::AlertDeliveryTrigger::Alert => Self::Alert,
-            views::AlertDeliveryTrigger::Resend => Self::Resend,
-            views::AlertDeliveryTrigger::Probe => Self::Probe,
+            alert::AlertDeliveryTrigger::Alert => Self::Alert,
+            alert::AlertDeliveryTrigger::Resend => Self::Resend,
+            alert::AlertDeliveryTrigger::Probe => Self::Probe,
         }
     }
 }
@@ -66,6 +66,6 @@ impl From<views::AlertDeliveryTrigger> for AlertDeliveryTrigger {
 impl FromStr for AlertDeliveryTrigger {
     type Err = omicron_common::api::external::Error;
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        views::AlertDeliveryTrigger::from_str(s).map(Into::into)
+        alert::AlertDeliveryTrigger::from_str(s).map(Into::into)
     }
 }

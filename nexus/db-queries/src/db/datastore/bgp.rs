@@ -16,21 +16,22 @@ use nexus_db_model::{
     BgpPeerView, SwitchPortBgpPeerConfigAllowExport,
     SwitchPortBgpPeerConfigAllowImport, SwitchPortBgpPeerConfigCommunity,
 };
-use nexus_types::external_api::params;
+use nexus_types::external_api::networking;
 use nexus_types::identity::Resource;
 use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::{
     CreateResult, DeleteResult, Error, ListResultVec, LookupResult, NameOrId,
-    ResourceType, SwitchLocation,
+    ResourceType,
 };
 use ref_cast::RefCast;
+use sled_agent_types::early_networking::SwitchLocation;
 use uuid::Uuid;
 
 impl DataStore {
     pub async fn bgp_config_create(
         &self,
         opctx: &OpContext,
-        config: &params::BgpConfigCreate,
+        config: &networking::BgpConfigCreate,
     ) -> CreateResult<BgpConfig> {
         use nexus_db_schema::schema::bgp_config::dsl;
         use nexus_db_schema::schema::{
@@ -222,7 +223,7 @@ impl DataStore {
     pub async fn bgp_config_delete(
         &self,
         opctx: &OpContext,
-        sel: &params::BgpConfigSelector,
+        sel: &networking::BgpConfigSelector,
     ) -> DeleteResult {
         use nexus_db_schema::schema::bgp_config;
         use nexus_db_schema::schema::bgp_config::dsl as bgp_config_dsl;
@@ -435,7 +436,7 @@ impl DataStore {
     pub async fn bgp_announcement_list(
         &self,
         opctx: &OpContext,
-        sel: &params::BgpAnnounceSetSelector,
+        sel: &networking::BgpAnnounceSetSelector,
     ) -> ListResultVec<BgpAnnouncement> {
         use nexus_db_schema::schema::{
             bgp_announce_set, bgp_announce_set::dsl as announce_set_dsl,
@@ -528,7 +529,7 @@ impl DataStore {
     pub async fn bgp_update_announce_set(
         &self,
         opctx: &OpContext,
-        announce: &params::BgpAnnounceSetCreate,
+        announce: &networking::BgpAnnounceSetCreate,
     ) -> CreateResult<(BgpAnnounceSet, Vec<BgpAnnouncement>)> {
         use nexus_db_schema::schema::bgp_announce_set::dsl as announce_set_dsl;
         use nexus_db_schema::schema::bgp_announcement::dsl as bgp_announcement_dsl;
@@ -607,7 +608,7 @@ impl DataStore {
     pub async fn bgp_create_announce_set(
         &self,
         opctx: &OpContext,
-        announce: &params::BgpAnnounceSetCreate,
+        announce: &networking::BgpAnnounceSetCreate,
     ) -> CreateResult<(BgpAnnounceSet, Vec<BgpAnnouncement>)> {
         use nexus_db_schema::schema::bgp_announce_set::dsl as announce_set_dsl;
         use nexus_db_schema::schema::bgp_announcement::dsl as bgp_announcement_dsl;
@@ -694,7 +695,7 @@ impl DataStore {
     pub async fn bgp_delete_announce_set(
         &self,
         opctx: &OpContext,
-        sel: &params::BgpAnnounceSetSelector,
+        sel: &networking::BgpAnnounceSetSelector,
     ) -> DeleteResult {
         use nexus_db_schema::schema::bgp_announce_set;
         use nexus_db_schema::schema::bgp_announce_set::dsl as announce_set_dsl;
@@ -1073,7 +1074,7 @@ mod tests {
         datastore
             .bgp_create_announce_set(
                 &opctx,
-                &params::BgpAnnounceSetCreate {
+                &networking::BgpAnnounceSetCreate {
                     identity: IdentityMetadataCreateParams {
                         name: announce_name.clone(),
                         description: String::from("a test announce set"),
@@ -1087,7 +1088,7 @@ mod tests {
         datastore
             .bgp_config_create(
                 &opctx,
-                &params::BgpConfigCreate {
+                &networking::BgpConfigCreate {
                     identity: IdentityMetadataCreateParams {
                         name: config_name.clone(),
                         description: String::from("a test config"),
@@ -1106,7 +1107,7 @@ mod tests {
         datastore
             .bgp_config_delete(
                 &opctx,
-                &params::BgpConfigSelector {
+                &networking::BgpConfigSelector {
                     name_or_id: NameOrId::Name(config_name),
                 },
             )
@@ -1116,7 +1117,7 @@ mod tests {
         datastore
             .bgp_delete_announce_set(
                 &opctx,
-                &params::BgpAnnounceSetSelector {
+                &networking::BgpAnnounceSetSelector {
                     announce_set: NameOrId::Name(announce_name),
                 },
             )

@@ -32,7 +32,9 @@ use nexus_db_model::Snapshot;
 use nexus_db_model::SnapshotIdentity;
 use nexus_db_model::SnapshotState;
 use nexus_db_model::Vmm;
-use nexus_types::external_api::params;
+use nexus_types::external_api::affinity;
+use nexus_types::external_api::instance as instance_types;
+use nexus_types::external_api::project;
 use nexus_types::identity::Resource;
 use omicron_common::api::external;
 use omicron_common::api::external::{
@@ -62,7 +64,7 @@ pub async fn create_project(
 
     let project = Project::new(
         authz_silo.id(),
-        params::ProjectCreate {
+        project::ProjectCreate {
             identity: external::IdentityMetadataCreateParams {
                 name: name.parse().unwrap(),
                 description: "desc".to_string(),
@@ -231,7 +233,7 @@ pub async fn create_stopped_instance_record(
     let instance = Instance::new(
         InstanceUuid::new_v4(),
         authz_project.id(),
-        &params::InstanceCreate {
+        &instance_types::InstanceCreate {
             identity: external::IdentityMetadataCreateParams {
                 name: name.parse().unwrap(),
                 description: "".to_string(),
@@ -241,7 +243,7 @@ pub async fn create_stopped_instance_record(
             hostname: "myhostname".try_into().unwrap(),
             user_data: Vec::new(),
             network_interfaces:
-                params::InstanceNetworkInterfaceAttachment::DefaultDualStack,
+                instance_types::InstanceNetworkInterfaceAttachment::DefaultDualStack,
             external_ips: Vec::new(),
             disks: Vec::new(),
             boot_disk: None,
@@ -304,7 +306,7 @@ pub async fn create_affinity_group(
         &authz_project,
         nexus_db_model::AffinityGroup::new(
             authz_project.id(),
-            params::AffinityGroupCreate {
+            affinity::AffinityGroupCreate {
                 identity: external::IdentityMetadataCreateParams {
                     name: group_name.parse().unwrap(),
                     description: "desc".to_string(),
@@ -348,7 +350,7 @@ pub async fn create_anti_affinity_group(
         &authz_project,
         nexus_db_model::AntiAffinityGroup::new(
             authz_project.id(),
-            params::AntiAffinityGroupCreate {
+            affinity::AntiAffinityGroupCreate {
                 identity: external::IdentityMetadataCreateParams {
                     name: group_name.parse().unwrap(),
                     description: "desc".to_string(),

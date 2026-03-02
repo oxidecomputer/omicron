@@ -26,7 +26,7 @@ progenitor::generate_api!(
     replace = {
         AllowedSourceIps = omicron_common::api::external::AllowedSourceIps,
         Baseboard = sled_hardware_types::Baseboard,
-        ImportExportPolicy = omicron_common::api::external::ImportExportPolicy,
+        ImportExportPolicy = sled_agent_types::early_networking::ImportExportPolicy,
     },
 );
 

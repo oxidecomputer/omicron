@@ -12,7 +12,7 @@ chrono.workspace = true
 futures.workspace = true
 omicron-common.workspace = true
 progenitor.workspace = true
-reqwest = { workspace = true, features = ["json", "rustls-tls", "stream"] }
+reqwest = { workspace = true, features = ["json", "rustls", "stream"] }
 serde.workspace = true
 slog.workspace = true
 uuid.workspace = true

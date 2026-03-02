@@ -221,7 +221,6 @@ physical_disk_list                       GET      /v1/system/hardware/disks
 physical_disk_view                       GET      /v1/system/hardware/disks/{disk_id}
 rack_list                                GET      /v1/system/hardware/racks
 rack_view                                GET      /v1/system/hardware/racks/{rack_id}
-sled_add                                 POST     /v1/system/hardware/sleds
 sled_instance_list                       GET      /v1/system/hardware/sleds/{sled_id}/instances
 sled_list                                GET      /v1/system/hardware/sleds
 sled_list_uninitialized                  GET      /v1/system/hardware/sleds-uninitialized
@@ -345,6 +344,7 @@ system_subnet_pool_view                  GET      /v1/system/subnet-pools/{pool}
 
 API operations found with tag "system/update"
 OPERATION ID                             METHOD   URL PATH
+system_update_recovery_finish            PUT      /v1/system/update/recovery-finish
 system_update_repository_list            GET      /v1/system/update/repositories
 system_update_repository_upload          PUT      /v1/system/update/repositories
 system_update_repository_view            GET      /v1/system/update/repositories/{system_version}

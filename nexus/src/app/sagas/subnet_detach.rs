@@ -18,7 +18,7 @@ use anyhow::Context as _;
 use nexus_db_model::IpAttachState;
 use nexus_db_queries::db::datastore::ExternalSubnetBeginOpResult;
 use nexus_db_queries::db::datastore::ExternalSubnetCompleteOpResult;
-use nexus_types::external_api::views;
+use nexus_types::external_api::external_subnet;
 use serde::Deserialize;
 use serde::Serialize;
 use steno::ActionError;
@@ -208,7 +208,7 @@ async fn ssd_notify_opte_undo(
 
 async fn ssd_complete_detach(
     sagactx: NexusActionContext,
-) -> Result<views::ExternalSubnet, ActionError> {
+) -> Result<external_subnet::ExternalSubnet, ActionError> {
     let log = sagactx.user_data().log();
     let datastore = sagactx.user_data().datastore();
     let params = sagactx.saga_params::<Params>()?;
@@ -272,16 +272,16 @@ pub(crate) mod test {
     use crate::app::sagas::test_helpers;
     use nexus_db_lookup::LookupPath;
     use nexus_test_utils::resource_helpers::create_default_ip_pools;
+    use nexus_test_utils::resource_helpers::create_default_subnet_pool;
     use nexus_test_utils::resource_helpers::create_external_subnet_in_pool;
     use nexus_test_utils::resource_helpers::create_instance;
     use nexus_test_utils::resource_helpers::create_project;
-    use nexus_test_utils::resource_helpers::create_subnet_pool;
     use nexus_test_utils::resource_helpers::create_subnet_pool_member;
     use nexus_test_utils_macros::nexus_test;
-    use nexus_types::external_api::views::ExternalSubnet;
-    use nexus_types::external_api::views::Project;
-    use nexus_types::external_api::views::SubnetPool;
-    use nexus_types::external_api::views::SubnetPoolMember;
+    use nexus_types::external_api::external_subnet::ExternalSubnet;
+    use nexus_types::external_api::project::Project;
+    use nexus_types::external_api::subnet_pool::SubnetPool;
+    use nexus_types::external_api::subnet_pool::SubnetPoolMember;
     use omicron_common::address::IpVersion;
     use omicron_common::api::external::LookupType;
     use omicron_common::api::external::SimpleIdentityOrName;
@@ -314,7 +314,8 @@ pub(crate) mod test {
         let datastore = cptestctx.server.server_context().nexus.datastore();
 
         let subnet_pool =
-            create_subnet_pool(client, SUBNET_POOL_NAME, IpVersion::V4).await;
+            create_default_subnet_pool(client, SUBNET_POOL_NAME, IpVersion::V4)
+                .await;
         let member = create_subnet_pool_member(
             client,
             SUBNET_POOL_NAME,

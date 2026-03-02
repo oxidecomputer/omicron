@@ -168,6 +168,13 @@ to:   blueprint 8da82a8e-bf97-4fbd-8ddd-9f6462732cf1
 
   sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c (active, config generation 2 -> 3):
 
+    measurements:
+    ---------------------------
+    hash      version          
+    ---------------------------
+    unknown   (unknown version)
+
+
     host phase 2 contents:
     ------------------------
     slot   boot image source
@@ -244,6 +251,13 @@ to:   blueprint 8da82a8e-bf97-4fbd-8ddd-9f6462732cf1
 
   sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 (active, config generation 2 -> 3):
 
+    measurements:
+    ---------------------------
+    hash      version          
+    ---------------------------
+    unknown   (unknown version)
+
+
     host phase 2 contents:
     ------------------------
     slot   boot image source
@@ -315,6 +329,13 @@ to:   blueprint 8da82a8e-bf97-4fbd-8ddd-9f6462732cf1
 
 
   sled d81c6a84-79b8-4958-ae41-ea46c9b19763 (active, config generation 2 -> 3):
+
+    measurements:
+    ---------------------------
+    hash      version          
+    ---------------------------
+    unknown   (unknown version)
+
 
     host phase 2 contents:
     ------------------------
@@ -1615,6 +1636,13 @@ to:   blueprint d60afc57-f15d-476c-bd0f-b1071e2bb976
 
   sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 (active, config generation 3 -> 4):
 
+    measurements:
+    ---------------------------
+    hash      version          
+    ---------------------------
+    unknown   (unknown version)
+
+
     host phase 2 contents:
     --------------------------------
     slot   boot image source        
@@ -2356,6 +2384,13 @@ to:   blueprint 9f89efdf-a23e-4137-b7cc-79f4a91cbe1f
 
   sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c (active, config generation 3 -> 4):
 
+    measurements:
+    ---------------------------
+    hash      version          
+    ---------------------------
+    unknown   (unknown version)
+
+
     host phase 2 contents:
     --------------------------------
     slot   boot image source        
@@ -2996,6 +3031,13 @@ to:   blueprint 459a45a5-616e-421f-873b-2fb08c36205c
 
   sled d81c6a84-79b8-4958-ae41-ea46c9b19763 (active, config generation 3 -> 4):
 
+    measurements:
+    ---------------------------
+    hash      version          
+    ---------------------------
+    unknown   (unknown version)
+
+
     host phase 2 contents:
     --------------------------------
     slot   boot image source        
@@ -3136,6 +3178,13 @@ to:   blueprint b2295597-5788-482e-acf9-1731ec63fbd2
 
   sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c (active, config generation 4 -> 5):
 
+    measurements:
+    ---------------------------
+    hash      version          
+    ---------------------------
+    unknown   (unknown version)
+
+
     host phase 2 contents:
     ------------------------------
     slot   boot image source      
@@ -3272,6 +3321,13 @@ to:   blueprint 6fad8fd4-e825-433f-b76d-495484e068ce
  MODIFIED SLEDS:
 
   sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c (active, config generation 5 -> 6):
+
+    measurements:
+    ---------------------------
+    hash      version          
+    ---------------------------
+    unknown   (unknown version)
+
 
     host phase 2 contents:
     ------------------------------
@@ -3417,6 +3473,13 @@ to:   blueprint 24b6e243-100c-428d-8ea6-35b504226f55
 
   sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c (active, config generation 6 -> 7):
 
+    measurements:
+    ---------------------------
+    hash      version          
+    ---------------------------
+    unknown   (unknown version)
+
+
     host phase 2 contents:
     ------------------------------
     slot   boot image source      
@@ -3553,6 +3616,13 @@ to:   blueprint 79fff7a2-2495-4c75-8465-4dc01bab48ce
  MODIFIED SLEDS:
 
   sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c (active, config generation 7 -> 8):
+
+    measurements:
+    ---------------------------
+    hash      version          
+    ---------------------------
+    unknown   (unknown version)
+
 
     host phase 2 contents:
     ------------------------------
@@ -3706,6 +3776,13 @@ to:   blueprint 3bcc37b2-0c0b-44d0-b4ed-3bcb605e4312
  MODIFIED SLEDS:
 
   sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c (active, config generation 8 -> 9):
+
+    measurements:
+    ---------------------------
+    hash      version          
+    ---------------------------
+    unknown   (unknown version)
+
 
     host phase 2 contents:
     ------------------------------
@@ -3861,6 +3938,13 @@ to:   blueprint 4d2eb6f3-7eb1-443a-8e76-7ecf05da2f6d
 
   sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c (active, config generation 9 -> 10):
 
+    measurements:
+    ---------------------------
+    hash      version          
+    ---------------------------
+    unknown   (unknown version)
+
+
     host phase 2 contents:
     ------------------------------
     slot   boot image source      
@@ -3992,6 +4076,13 @@ to:   blueprint e2125c83-b255-45c9-bc9b-802cff09a812
  MODIFIED SLEDS:
 
   sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c (active, config generation 10 -> 11):
+
+    measurements:
+    ---------------------------
+    hash      version          
+    ---------------------------
+    unknown   (unknown version)
+
 
     host phase 2 contents:
     ------------------------------
@@ -4148,6 +4239,13 @@ to:   blueprint f4a6848e-d13c-46e1-8c6a-944f886d7ba3
  MODIFIED SLEDS:
 
   sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c (active, config generation 11 -> 12):
+
+    measurements:
+    ---------------------------
+    hash      version          
+    ---------------------------
+    unknown   (unknown version)
+
 
     host phase 2 contents:
     ------------------------------
@@ -4306,6 +4404,13 @@ to:   blueprint 834e4dbe-3b71-443d-bd4c-20e8253abc0c
 
   sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c (active, config generation 12 -> 13):
 
+    measurements:
+    ---------------------------
+    hash      version          
+    ---------------------------
+    unknown   (unknown version)
+
+
     host phase 2 contents:
     ------------------------------
     slot   boot image source      
@@ -4449,6 +4554,13 @@ to:   blueprint d9c5c5e3-c532-4c45-9ef5-22cb00f6a2e1
  MODIFIED SLEDS:
 
   sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c (active, config generation 13 -> 14):
+
+    measurements:
+    ---------------------------
+    hash      version          
+    ---------------------------
+    unknown   (unknown version)
+
 
     host phase 2 contents:
     ------------------------------
@@ -4595,6 +4707,13 @@ to:   blueprint e2deb7c0-2262-49fe-855f-4250c22afb36
 
   sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c (active, config generation 14 -> 15):
 
+    measurements:
+    ---------------------------
+    hash      version          
+    ---------------------------
+    unknown   (unknown version)
+
+
     host phase 2 contents:
     ------------------------------
     slot   boot image source      
@@ -4731,6 +4850,13 @@ to:   blueprint 23ce505c-8991-44a5-8863-f2b906fba9cf
  MODIFIED SLEDS:
 
   sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c (active, config generation 15 -> 16):
+
+    measurements:
+    ---------------------------
+    hash      version          
+    ---------------------------
+    unknown   (unknown version)
+
 
     host phase 2 contents:
     ------------------------------
@@ -4872,6 +4998,13 @@ to:   blueprint c0d81ea6-909c-4efb-964e-beff67f6da0d
 
   sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 (active, config generation 4 -> 5):
 
+    measurements:
+    ---------------------------
+    hash      version          
+    ---------------------------
+    unknown   (unknown version)
+
+
     host phase 2 contents:
     ------------------------------
     slot   boot image source      
@@ -4996,6 +5129,13 @@ to:   blueprint 60b55d33-5fec-4277-9864-935197eaead7
  MODIFIED SLEDS:
 
   sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 (active, config generation 5 -> 6):
+
+    measurements:
+    ---------------------------
+    hash      version          
+    ---------------------------
+    unknown   (unknown version)
+
 
     host phase 2 contents:
     ------------------------------
@@ -5141,6 +5281,13 @@ to:   blueprint aa13f40f-41ff-4b68-bee1-df2e1f805544
  MODIFIED SLEDS:
 
   sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 (active, config generation 6 -> 7):
+
+    measurements:
+    ---------------------------
+    hash      version          
+    ---------------------------
+    unknown   (unknown version)
+
 
     host phase 2 contents:
     ------------------------------
@@ -5288,6 +5435,13 @@ to:   blueprint 316ccd9e-5c53-46c3-a2e9-20c3867b7111
 
   sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 (active, config generation 7 -> 8):
 
+    measurements:
+    ---------------------------
+    hash      version          
+    ---------------------------
+    unknown   (unknown version)
+
+
     host phase 2 contents:
     ------------------------------
     slot   boot image source      
@@ -5414,6 +5568,13 @@ to:   blueprint 02078c95-3d58-4b7b-a03f-9b160361c50a
  MODIFIED SLEDS:
 
   sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 (active, config generation 8 -> 9):
+
+    measurements:
+    ---------------------------
+    hash      version          
+    ---------------------------
+    unknown   (unknown version)
+
 
     host phase 2 contents:
     ------------------------------
@@ -5553,6 +5714,13 @@ to:   blueprint e7a01ffc-6b0e-408b-917b-b1efe18b3110
 
   sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 (active, config generation 9 -> 10):
 
+    measurements:
+    ---------------------------
+    hash      version          
+    ---------------------------
+    unknown   (unknown version)
+
+
     host phase 2 contents:
     ------------------------------
     slot   boot image source      
@@ -5689,6 +5857,13 @@ to:   blueprint 880e2ffc-8187-4275-a2f3-1b36aa2f4482
  MODIFIED SLEDS:
 
   sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 (active, config generation 10 -> 11):
+
+    measurements:
+    ---------------------------
+    hash      version          
+    ---------------------------
+    unknown   (unknown version)
+
 
     host phase 2 contents:
     ------------------------------
@@ -5839,6 +6014,13 @@ to:   blueprint c4a20bcb-1a71-4e88-97b4-36d16f55daec
  MODIFIED SLEDS:
 
   sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 (active, config generation 11 -> 12):
+
+    measurements:
+    ---------------------------
+    hash      version          
+    ---------------------------
+    unknown   (unknown version)
+
 
     host phase 2 contents:
     ------------------------------
@@ -5991,6 +6173,13 @@ to:   blueprint a2c6496d-98fc-444d-aa36-99508aa72367
 
   sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 (active, config generation 12 -> 13):
 
+    measurements:
+    ---------------------------
+    hash      version          
+    ---------------------------
+    unknown   (unknown version)
+
+
     host phase 2 contents:
     ------------------------------
     slot   boot image source      
@@ -6131,6 +6320,13 @@ to:   blueprint 6ed56354-5941-40d1-a06c-b0e940701d52
  MODIFIED SLEDS:
 
   sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 (active, config generation 13 -> 14):
+
+    measurements:
+    ---------------------------
+    hash      version          
+    ---------------------------
+    unknown   (unknown version)
+
 
     host phase 2 contents:
     ------------------------------
@@ -6274,6 +6470,13 @@ to:   blueprint 9078c4ba-3a73-4b3f-ac2c-acb501f89cb2
 
   sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 (active, config generation 14 -> 15):
 
+    measurements:
+    ---------------------------
+    hash      version          
+    ---------------------------
+    unknown   (unknown version)
+
+
     host phase 2 contents:
     ------------------------------
     slot   boot image source      
@@ -6411,6 +6614,13 @@ to:   blueprint 8763abc1-8a42-4932-b5a7-33109e0e0152
 
   sled d81c6a84-79b8-4958-ae41-ea46c9b19763 (active, config generation 4 -> 5):
 
+    measurements:
+    ---------------------------
+    hash      version          
+    ---------------------------
+    unknown   (unknown version)
+
+
     host phase 2 contents:
     ------------------------------
     slot   boot image source      
@@ -6535,6 +6745,13 @@ to:   blueprint 2b89e0d7-f15b-4474-8ac4-85959ed1bc88
  MODIFIED SLEDS:
 
   sled d81c6a84-79b8-4958-ae41-ea46c9b19763 (active, config generation 5 -> 6):
+
+    measurements:
+    ---------------------------
+    hash      version          
+    ---------------------------
+    unknown   (unknown version)
+
 
     host phase 2 contents:
     ------------------------------
@@ -6668,6 +6885,13 @@ to:   blueprint 7f6b7297-c2bc-4f67-b3c0-c8e555ebbdc4
  MODIFIED SLEDS:
 
   sled d81c6a84-79b8-4958-ae41-ea46c9b19763 (active, config generation 6 -> 7):
+
+    measurements:
+    ---------------------------
+    hash      version          
+    ---------------------------
+    unknown   (unknown version)
+
 
     host phase 2 contents:
     ------------------------------
@@ -6803,6 +7027,13 @@ to:   blueprint 59630e63-c953-4807-9e84-9e750a79f68e
 
   sled d81c6a84-79b8-4958-ae41-ea46c9b19763 (active, config generation 7 -> 8):
 
+    measurements:
+    ---------------------------
+    hash      version          
+    ---------------------------
+    unknown   (unknown version)
+
+
     host phase 2 contents:
     ------------------------------
     slot   boot image source      
@@ -6928,6 +7159,13 @@ to:   blueprint e93650dc-b5ba-4ec7-8550-9171c1ada194
  MODIFIED SLEDS:
 
   sled d81c6a84-79b8-4958-ae41-ea46c9b19763 (active, config generation 8 -> 9):
+
+    measurements:
+    ---------------------------
+    hash      version          
+    ---------------------------
+    unknown   (unknown version)
+
 
     host phase 2 contents:
     ------------------------------
@@ -7072,6 +7310,13 @@ to:   blueprint 90650737-8142-47a6-9a48-a10efc487e57
  MODIFIED SLEDS:
 
   sled d81c6a84-79b8-4958-ae41-ea46c9b19763 (active, config generation 9 -> 10):
+
+    measurements:
+    ---------------------------
+    hash      version          
+    ---------------------------
+    unknown   (unknown version)
+
 
     host phase 2 contents:
     ------------------------------
@@ -7218,6 +7463,13 @@ to:   blueprint 2182613d-dc9f-41eb-9c6a-d33801849caa
 
   sled d81c6a84-79b8-4958-ae41-ea46c9b19763 (active, config generation 10 -> 11):
 
+    measurements:
+    ---------------------------
+    hash      version          
+    ---------------------------
+    unknown   (unknown version)
+
+
     host phase 2 contents:
     ------------------------------
     slot   boot image source      
@@ -7358,6 +7610,13 @@ to:   blueprint e8b088a8-7da0-480b-a2dc-75ffef068ece
 
   sled d81c6a84-79b8-4958-ae41-ea46c9b19763 (active, config generation 11 -> 12):
 
+    measurements:
+    ---------------------------
+    hash      version          
+    ---------------------------
+    unknown   (unknown version)
+
+
     host phase 2 contents:
     ------------------------------
     slot   boot image source      
@@ -7497,6 +7756,13 @@ to:   blueprint 810ea95a-4730-43dd-867e-1984aeb9d873
 
   sled d81c6a84-79b8-4958-ae41-ea46c9b19763 (active, config generation 12 -> 13):
 
+    measurements:
+    ---------------------------
+    hash      version          
+    ---------------------------
+    unknown   (unknown version)
+
+
     host phase 2 contents:
     ------------------------------
     slot   boot image source      
@@ -7627,6 +7893,13 @@ to:   blueprint 67c074ef-c52e-4ff1-851a-598c04dc2c8d
  MODIFIED SLEDS:
 
   sled d81c6a84-79b8-4958-ae41-ea46c9b19763 (active, config generation 13 -> 14):
+
+    measurements:
+    ---------------------------
+    hash      version          
+    ---------------------------
+    unknown   (unknown version)
+
 
     host phase 2 contents:
     ------------------------------
@@ -7776,6 +8049,13 @@ to:   blueprint 0a8d2f87-1d3e-4296-ba07-108940a7a57e
  MODIFIED SLEDS:
 
   sled d81c6a84-79b8-4958-ae41-ea46c9b19763 (active, config generation 14 -> 15):
+
+    measurements:
+    ---------------------------
+    hash      version          
+    ---------------------------
+    unknown   (unknown version)
+
 
     host phase 2 contents:
     ------------------------------
@@ -7932,6 +8212,13 @@ to:   blueprint d69e1109-06be-4469-8876-4292dc7885d7
 
   sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c (active, config generation 16 -> 17):
 
+    measurements:
+    ---------------------------
+    hash      version          
+    ---------------------------
+    unknown   (unknown version)
+
+
     host phase 2 contents:
     ------------------------------
     slot   boot image source      
@@ -8011,6 +8298,13 @@ to:   blueprint d69e1109-06be-4469-8876-4292dc7885d7
 
   sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 (active, config generation 15 -> 16):
 
+    measurements:
+    ---------------------------
+    hash      version          
+    ---------------------------
+    unknown   (unknown version)
+
+
     host phase 2 contents:
     ------------------------------
     slot   boot image source      
@@ -8086,6 +8380,13 @@ to:   blueprint d69e1109-06be-4469-8876-4292dc7885d7
 
 
   sled d81c6a84-79b8-4958-ae41-ea46c9b19763 (active, config generation 15 -> 16):
+
+    measurements:
+    ---------------------------
+    hash      version          
+    ---------------------------
+    unknown   (unknown version)
+
 
     host phase 2 contents:
     ------------------------------
@@ -8380,6 +8681,13 @@ to:   blueprint 8e0cc787-e068-4a45-97ed-21029cbe4ddf
 
   sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 (active, config generation 17 -> 18):
 
+    measurements:
+    ---------------------------
+    hash      version          
+    ---------------------------
+    unknown   (unknown version)
+
+
     host phase 2 contents:
     ------------------------------
     slot   boot image source      
@@ -8522,6 +8830,13 @@ to:   blueprint e31c9054-8549-4c68-acf9-a01f68d1fc9b
 
   sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c (active, config generation 17 -> 18):
 
+    measurements:
+    ---------------------------
+    hash      version          
+    ---------------------------
+    unknown   (unknown version)
+
+
     host phase 2 contents:
     ------------------------------
     slot   boot image source      
@@ -8602,6 +8917,13 @@ to:   blueprint e31c9054-8549-4c68-acf9-a01f68d1fc9b
 
 
   sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 (active, config generation 18):
+
+    measurements:
+    ---------------------------
+    hash      version          
+    ---------------------------
+    unknown   (unknown version)
+
 
     host phase 2 contents:
     ------------------------------
@@ -8736,6 +9058,13 @@ to:   blueprint 3e332949-6785-4aff-ad86-6134f5ce6152
 
   sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 (active, config generation 18 -> 19):
 
+    measurements:
+    ---------------------------
+    hash      version          
+    ---------------------------
+    unknown   (unknown version)
+
+
     host phase 2 contents:
     ------------------------------
     slot   boot image source      
@@ -8866,6 +9195,13 @@ to:   blueprint 05685571-d61f-4754-a2b2-604ea8c45dff
  MODIFIED SLEDS:
 
   sled d81c6a84-79b8-4958-ae41-ea46c9b19763 (active, config generation 16 -> 17):
+
+    measurements:
+    ---------------------------
+    hash      version          
+    ---------------------------
+    unknown   (unknown version)
+
 
     host phase 2 contents:
     ------------------------------
@@ -9011,6 +9347,13 @@ to:   blueprint 008e1541-3d9d-4a50-a877-eed4a3cf86ab
 
   sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c (active, config generation 18):
 
+    measurements:
+    ---------------------------
+    hash      version          
+    ---------------------------
+    unknown   (unknown version)
+
+
     host phase 2 contents:
     ------------------------------
     slot   boot image source      
@@ -9091,6 +9434,13 @@ to:   blueprint 008e1541-3d9d-4a50-a877-eed4a3cf86ab
 
   sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 (active, config generation 19):
 
+    measurements:
+    ---------------------------
+    hash      version          
+    ---------------------------
+    unknown   (unknown version)
+
+
     host phase 2 contents:
     ------------------------------
     slot   boot image source      
@@ -9169,6 +9519,13 @@ to:   blueprint 008e1541-3d9d-4a50-a877-eed4a3cf86ab
 
 
   sled d81c6a84-79b8-4958-ae41-ea46c9b19763 (active, config generation 17):
+
+    measurements:
+    ---------------------------
+    hash      version          
+    ---------------------------
+    unknown   (unknown version)
+
 
     host phase 2 contents:
     ------------------------------
@@ -9288,6 +9645,13 @@ parent:    05685571-d61f-4754-a2b2-604ea8c45dff
     B      artifact: version 1.0.0
 
 
+    measurements:
+    ---------------------------
+    hash      version          
+    ---------------------------
+    unknown   (unknown version)
+
+
     physical disks:
     ------------------------------------------------------------------------------------
     vendor        model        serial                                        disposition
@@ -9372,6 +9736,13 @@ parent:    05685571-d61f-4754-a2b2-604ea8c45dff
     B      artifact: version 1.0.0
 
 
+    measurements:
+    ---------------------------
+    hash      version          
+    ---------------------------
+    unknown   (unknown version)
+
+
     physical disks:
     ------------------------------------------------------------------------------------
     vendor        model        serial                                        disposition
@@ -9453,6 +9824,13 @@ parent:    05685571-d61f-4754-a2b2-604ea8c45dff
     ------------------------------
     A      current contents       
     B      artifact: version 1.0.0
+
+
+    measurements:
+    ---------------------------
+    hash      version          
+    ---------------------------
+    unknown   (unknown version)
 
 
     physical disks:

@@ -1296,40 +1296,6 @@
         }
       }
     },
-    "/sleds/add": {
-      "post": {
-        "summary": "Add sled to initialized rack",
-        "operationId": "sled_add",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/UninitializedSledId"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "201": {
-            "description": "successful creation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SledId"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      }
-    },
     "/sleds/expunge": {
       "post": {
         "summary": "Mark a sled as expunged",
@@ -1439,6 +1405,46 @@
         "summary": "Initiate an LRTQ upgrade",
         "description": "Return the epoch of the proposed configuration, so it can be polled asynchronously.",
         "operationId": "trust_quorum_lrtq_upgrade",
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "uint64",
+                  "type": "integer",
+                  "format": "uint64",
+                  "minimum": 0
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/trust-quorum/remove/{sled}": {
+      "post": {
+        "summary": "Remove a sled from the trust quorum",
+        "description": "This is a required first step towards expunging a sled\n\nReturn the epoch of the proposed configuration so it can be polled asynchronously.",
+        "operationId": "trust_quorum_remove_sled",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "sled",
+            "description": "ID of the sled",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "description": "successful operation",
@@ -2057,6 +2063,14 @@
           "time_created"
         ]
       },
+      "BlueprintArtifactMeasurements": {
+        "description": "This is a private inner type to ensure the measurment set is always non-empty",
+        "type": "array",
+        "items": {
+          "$ref": "#/components/schemas/BlueprintSingleMeasurement"
+        },
+        "uniqueItems": true
+      },
       "BlueprintArtifactVersion": {
         "description": "The version of an artifact in a blueprint.\n\nThis is used for debugging output.",
         "oneOf": [
@@ -2221,6 +2235,56 @@
         "required": [
           "slot_a",
           "slot_b"
+        ]
+      },
+      "BlueprintMeasurements": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "unknown"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "install_dataset"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "artifacts": {
+                "$ref": "#/components/schemas/BlueprintArtifactMeasurements"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "artifacts"
+                ]
+              }
+            },
+            "required": [
+              "artifacts",
+              "type"
+            ]
+          }
         ]
       },
       "BlueprintMetadata": {
@@ -2418,6 +2482,22 @@
           }
         ]
       },
+      "BlueprintSingleMeasurement": {
+        "type": "object",
+        "properties": {
+          "hash": {
+            "type": "string",
+            "format": "hex string (32 bytes)"
+          },
+          "version": {
+            "$ref": "#/components/schemas/BlueprintArtifactVersion"
+          }
+        },
+        "required": [
+          "hash",
+          "version"
+        ]
+      },
       "BlueprintSledConfig": {
         "description": "Information about the configuration of a sled as recorded in a blueprint.\n\nPart of [`Blueprint`].",
         "type": "object",
@@ -2467,6 +2547,9 @@
             "format": "uint16",
             "minimum": 0
           },
+          "measurements": {
+            "$ref": "#/components/schemas/BlueprintMeasurements"
+          },
           "remove_mupdate_override": {
             "nullable": true,
             "allOf": [
@@ -2513,6 +2596,7 @@
           "disks",
           "host_phase_2",
           "last_allocated_ip_subnet_offset",
+          "measurements",
           "sled_agent_generation",
           "state",
           "subnet",
@@ -8650,17 +8734,6 @@
           "zones"
         ]
       },
-      "SledId": {
-        "type": "object",
-        "properties": {
-          "id": {
-            "$ref": "#/components/schemas/SledUuid"
-          }
-        },
-        "required": [
-          "id"
-        ]
-      },
       "SledPolicy": {
         "description": "The operator-defined policy of a sled.",
         "oneOf": [
@@ -9223,22 +9296,6 @@
           "baseboard",
           "cubby",
           "rack_id"
-        ]
-      },
-      "UninitializedSledId": {
-        "description": "The unique hardware ID for a sled",
-        "type": "object",
-        "properties": {
-          "part": {
-            "type": "string"
-          },
-          "serial": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "part",
-          "serial"
         ]
       },
       "UninitializedSledResultsPage": {

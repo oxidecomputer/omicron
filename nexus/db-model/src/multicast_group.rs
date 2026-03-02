@@ -91,7 +91,7 @@ use db_macros::Resource;
 use nexus_db_schema::schema::{
     multicast_group, multicast_group_member, underlay_multicast_group,
 };
-use nexus_types::external_api::views;
+use nexus_types::external_api::multicast as multicast_types;
 use omicron_common::api::external::{self, IdentityMetadata};
 use omicron_uuid_kinds::SledKind;
 
@@ -298,11 +298,11 @@ pub struct MulticastGroupMember {
 
 // Conversions to external API views
 
-impl TryFrom<MulticastGroupMember> for views::MulticastGroupMember {
+impl TryFrom<MulticastGroupMember> for multicast_types::MulticastGroupMember {
     type Error = external::Error;
 
     fn try_from(member: MulticastGroupMember) -> Result<Self, Self::Error> {
-        Ok(views::MulticastGroupMember {
+        Ok(multicast_types::MulticastGroupMember {
             identity: IdentityMetadata {
                 id: member.id,
                 name: format!("member-{}", member.id).parse().map_err(|e| {

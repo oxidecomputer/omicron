@@ -11,7 +11,7 @@ use super::{ActionRegistry, NexusActionContext, NexusSaga};
 use crate::app::sagas::declare_saga_actions;
 use crate::app::{authn, authz};
 use nexus_db_model::{IpAttachState, NatEntry};
-use nexus_types::external_api::views;
+use nexus_types::external_api::external_ip;
 use omicron_common::api::external::Error;
 use omicron_uuid_kinds::{GenericUuid, InstanceUuid};
 use serde::Deserialize;
@@ -273,7 +273,7 @@ async fn siia_update_opte_undo(
 
 async fn siia_complete_attach(
     sagactx: NexusActionContext,
-) -> Result<views::ExternalIp, ActionError> {
+) -> Result<external_ip::ExternalIp, ActionError> {
     let log = sagactx.user_data().log();
     let params = sagactx.saga_params::<Params>()?;
     let target_ip = sagactx.lookup::<ModifyStateForExternalIp>("target_ip")?;
@@ -344,7 +344,8 @@ pub(crate) mod test {
         create_project,
     };
     use nexus_test_utils_macros::nexus_test;
-    use nexus_types::external_api::params;
+    use nexus_types::external_api::floating_ip;
+    use nexus_types::external_api::ip_pool;
     use omicron_common::api::external::SimpleIdentityOrName;
     use sled_agent_types::instance::InstanceExternalIpBody;
 
@@ -362,8 +363,8 @@ pub(crate) mod test {
             client,
             FIP_NAME,
             &project.identity.id.to_string(),
-            params::AddressAllocator::Auto {
-                pool_selector: params::PoolSelector::Explicit {
+            floating_ip::AddressAllocator::Auto {
+                pool_selector: ip_pool::PoolSelector::Explicit {
                     pool: v4_pool.identity.name.clone().into(),
                 },
             },

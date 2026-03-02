@@ -19,7 +19,6 @@ use nexus_db_queries::db::DataStore;
 use nexus_types::internal_api::background::AttachedSubnetManagerStatus;
 use nexus_types::internal_api::background::DendriteSubnetDetails;
 use nexus_types::internal_api::background::SledSubnetDetails;
-use omicron_common::api::external::SwitchLocation;
 use omicron_common::api::internal::shared;
 use omicron_common::api::internal::shared::AttachedSubnetId;
 use omicron_uuid_kinds::PropolisUuid;
@@ -30,6 +29,7 @@ use serde_json::json;
 use sled_agent_client::types::AttachedSubnet;
 use sled_agent_client::types::AttachedSubnetKind;
 use sled_agent_client::types::AttachedSubnets;
+use sled_agent_types::early_networking::SwitchLocation;
 use slog::Logger;
 use slog::debug;
 use slog::error;
@@ -445,10 +445,10 @@ mod test {
     use nexus_db_model::IpAttachState;
     use nexus_db_schema::schema::external_subnet::dsl;
     use nexus_test_utils::resource_helpers::create_default_ip_pools;
+    use nexus_test_utils::resource_helpers::create_default_subnet_pool;
     use nexus_test_utils::resource_helpers::create_external_subnet_in_pool;
     use nexus_test_utils::resource_helpers::create_instance;
     use nexus_test_utils::resource_helpers::create_project;
-    use nexus_test_utils::resource_helpers::create_subnet_pool;
     use nexus_test_utils::resource_helpers::create_subnet_pool_member;
     use nexus_test_utils_macros::nexus_test;
     use omicron_common::address::IpVersion;
@@ -567,7 +567,7 @@ mod test {
 
         // Create a resource hierarchy.
         let _subnet_pool =
-            create_subnet_pool(client, "apple", IpVersion::V6).await;
+            create_default_subnet_pool(client, "apple", IpVersion::V6).await;
         let _member = create_subnet_pool_member(
             client,
             "apple",

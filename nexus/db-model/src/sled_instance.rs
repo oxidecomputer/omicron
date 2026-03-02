@@ -2,7 +2,7 @@ use crate::Name;
 use crate::VmmState;
 use db_macros::Asset;
 use nexus_db_schema::schema::sled_instance;
-use nexus_types::external_api::views;
+use nexus_types::external_api::sled;
 use nexus_types::identity::Asset;
 use serde::Deserialize;
 use serde::Serialize;
@@ -26,7 +26,7 @@ pub struct SledInstance {
     pub memory: i64,
 }
 
-impl From<SledInstance> for views::SledInstance {
+impl From<SledInstance> for sled::SledInstance {
     fn from(sled_instance: SledInstance) -> Self {
         Self {
             identity: sled_instance.identity(),

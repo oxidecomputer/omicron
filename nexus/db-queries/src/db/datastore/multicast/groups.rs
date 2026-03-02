@@ -29,7 +29,7 @@ use uuid::Uuid;
 
 use nexus_db_errors::{ErrorHandler, public_error_from_diesel};
 use nexus_db_lookup::DbConnection;
-use nexus_types::external_api::views;
+use nexus_types::external_api::multicast::{self as views};
 use nexus_types::identity::Resource;
 use nexus_types::multicast::MulticastGroupCreate;
 use omicron_common::api::external::http_pagination::PaginatedBy;
@@ -938,6 +938,7 @@ mod tests {
     use std::net::{IpAddr, Ipv4Addr};
 
     use nexus_types::identity::Resource;
+    use nexus_types::multicast::MulticastGroupCreate;
     use omicron_common::address::{IpRange, Ipv4Range};
     use omicron_test_utils::dev;
     use omicron_uuid_kinds::{GenericUuid, InstanceUuid};

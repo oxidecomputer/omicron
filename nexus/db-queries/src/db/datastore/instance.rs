@@ -2312,7 +2312,8 @@ mod tests {
     use nexus_db_model::VmmCpuPlatform;
     use nexus_db_model::VmmRuntimeState;
     use nexus_db_model::VmmState;
-    use nexus_types::external_api::params;
+    use nexus_types::external_api::instance as instance_types;
+    use nexus_types::external_api::project;
     use nexus_types::identity::Asset;
     use nexus_types::silo::DEFAULT_SILO_ID;
     use omicron_common::api::external;
@@ -2332,7 +2333,7 @@ mod tests {
                 Project::new_with_id(
                     project_id,
                     silo_id,
-                    params::ProjectCreate {
+                    project::ProjectCreate {
                         identity: IdentityMetadataCreateParams {
                             name: "stuff".parse().unwrap(),
                             description: "Where I keep my stuff".into(),
@@ -2359,7 +2360,7 @@ mod tests {
                 Instance::new(
                     instance_id,
                     authz_project.id(),
-                    &params::InstanceCreate {
+                    &instance_types::InstanceCreate {
                         identity: IdentityMetadataCreateParams {
                             name: name.parse().unwrap(),
                             description: "It's an instance".into(),
@@ -2369,7 +2370,7 @@ mod tests {
                         hostname: "myhostname".try_into().unwrap(),
                         user_data: Vec::new(),
                         network_interfaces:
-                            params::InstanceNetworkInterfaceAttachment::None,
+                            instance_types::InstanceNetworkInterfaceAttachment::None,
                         external_ips: Vec::new(),
                         disks: Vec::new(),
                         boot_disk: None,

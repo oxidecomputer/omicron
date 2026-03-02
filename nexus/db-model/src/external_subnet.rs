@@ -22,8 +22,8 @@ use nexus_db_schema::schema::external_subnet;
 use nexus_db_schema::schema::subnet_pool;
 use nexus_db_schema::schema::subnet_pool_member;
 use nexus_db_schema::schema::subnet_pool_silo_link;
-use nexus_types::external_api::params;
-use nexus_types::external_api::views;
+use nexus_types::external_api::external_subnet as external_subnet_types;
+use nexus_types::external_api::subnet_pool as subnet_pool_types;
 use nexus_types::identity::Resource as _;
 use omicron_common::api::external;
 use omicron_common::api::external::Error;
@@ -75,7 +75,7 @@ impl SubnetPool {
     }
 }
 
-impl From<SubnetPool> for views::SubnetPool {
+impl From<SubnetPool> for subnet_pool_types::SubnetPool {
     fn from(value: SubnetPool) -> Self {
         Self { identity: value.identity(), ip_version: value.ip_version.into() }
     }
@@ -89,8 +89,8 @@ pub struct SubnetPoolUpdate {
     pub time_modified: DateTime<Utc>,
 }
 
-impl From<params::SubnetPoolUpdate> for SubnetPoolUpdate {
-    fn from(value: params::SubnetPoolUpdate) -> Self {
+impl From<subnet_pool_types::SubnetPoolUpdate> for SubnetPoolUpdate {
+    fn from(value: subnet_pool_types::SubnetPoolUpdate) -> Self {
         Self {
             name: value.identity.name.map(Into::into),
             description: value.identity.description,
@@ -116,7 +116,7 @@ pub struct SubnetPoolMember {
     rcgen: Generation,
 }
 
-impl From<SubnetPoolMember> for views::SubnetPoolMember {
+impl From<SubnetPoolMember> for subnet_pool_types::SubnetPoolMember {
     fn from(value: SubnetPoolMember) -> Self {
         Self {
             id: value.id.into_untyped_uuid(),
@@ -131,7 +131,7 @@ impl From<SubnetPoolMember> for views::SubnetPoolMember {
 
 impl SubnetPoolMember {
     pub fn new(
-        params: &params::SubnetPoolMemberAdd,
+        params: &subnet_pool_types::SubnetPoolMemberAdd,
         pool_id: SubnetPoolUuid,
     ) -> Result<Self, Error> {
         // Require that the subnet is actually a network, i.e.,
@@ -236,7 +236,7 @@ pub struct ExternalSubnet {
     pub instance_id: Option<DbTypedUuid<InstanceKind>>,
 }
 
-impl From<ExternalSubnet> for views::ExternalSubnet {
+impl From<ExternalSubnet> for external_subnet_types::ExternalSubnet {
     fn from(value: ExternalSubnet) -> Self {
         Self {
             identity: value.identity(),
@@ -259,8 +259,10 @@ pub struct ExternalSubnetUpdate {
     pub time_modified: DateTime<Utc>,
 }
 
-impl From<params::ExternalSubnetUpdate> for ExternalSubnetUpdate {
-    fn from(value: params::ExternalSubnetUpdate) -> Self {
+impl From<external_subnet_types::ExternalSubnetUpdate>
+    for ExternalSubnetUpdate
+{
+    fn from(value: external_subnet_types::ExternalSubnetUpdate) -> Self {
         Self {
             name: value.identity.name.map(Into::into),
             description: value.identity.description,
@@ -280,7 +282,7 @@ pub struct SubnetPoolSiloLink {
     pub is_default: bool,
 }
 
-impl From<SubnetPoolSiloLink> for views::SubnetPoolSiloLink {
+impl From<SubnetPoolSiloLink> for subnet_pool_types::SubnetPoolSiloLink {
     fn from(value: SubnetPoolSiloLink) -> Self {
         Self {
             subnet_pool_id: value.subnet_pool_id.into_untyped_uuid(),

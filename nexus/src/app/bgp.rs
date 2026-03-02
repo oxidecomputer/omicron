@@ -3,22 +3,20 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use crate::app::authz;
-use crate::external_api::params;
 use mg_admin_client::types::MessageHistoryRequest;
 use nexus_db_model::{BgpAnnounceSet, BgpAnnouncement, BgpConfig};
 use nexus_db_queries::context::OpContext;
+use nexus_types::external_api::networking;
 use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::{
-    self, BgpExported, BgpImported, BgpMessageHistory, BgpPeerStatus,
-    CreateResult, DeleteResult, ListResultVec, LookupResult, NameOrId,
-    SwitchBgpHistory,
+    self, CreateResult, DeleteResult, ListResultVec, LookupResult, NameOrId,
 };
 
 impl super::Nexus {
     pub async fn bgp_config_create(
         &self,
         opctx: &OpContext,
-        config: &params::BgpConfigCreate,
+        config: &networking::BgpConfigCreate,
     ) -> CreateResult<BgpConfig> {
         opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
         let result = self.db_datastore.bgp_config_create(opctx, config).await?;
@@ -46,7 +44,7 @@ impl super::Nexus {
     pub async fn bgp_config_delete(
         &self,
         opctx: &OpContext,
-        sel: &params::BgpConfigSelector,
+        sel: &networking::BgpConfigSelector,
     ) -> DeleteResult {
         opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
         let result = self.db_datastore.bgp_config_delete(opctx, sel).await?;
@@ -56,7 +54,7 @@ impl super::Nexus {
     pub async fn bgp_update_announce_set(
         &self,
         opctx: &OpContext,
-        announce: &params::BgpAnnounceSetCreate,
+        announce: &networking::BgpAnnounceSetCreate,
     ) -> CreateResult<(BgpAnnounceSet, Vec<BgpAnnouncement>)> {
         opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
         let result =
@@ -80,7 +78,7 @@ impl super::Nexus {
     pub async fn bgp_delete_announce_set(
         &self,
         opctx: &OpContext,
-        sel: &params::BgpAnnounceSetSelector,
+        sel: &networking::BgpAnnounceSetSelector,
     ) -> DeleteResult {
         opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
         let result =
@@ -91,7 +89,7 @@ impl super::Nexus {
     pub async fn bgp_announcement_list(
         &self,
         opctx: &OpContext,
-        sel: &params::BgpAnnounceSetSelector,
+        sel: &networking::BgpAnnounceSetSelector,
     ) -> ListResultVec<BgpAnnouncement> {
         opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
         self.db_datastore.bgp_announcement_list(opctx, sel).await
@@ -100,7 +98,7 @@ impl super::Nexus {
     pub async fn bgp_peer_status(
         &self,
         opctx: &OpContext,
-    ) -> ListResultVec<BgpPeerStatus> {
+    ) -> ListResultVec<networking::BgpPeerStatus> {
         opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
         let mut result = Vec::new();
         for (switch, client) in &self.mg_clients().await.map_err(|e| {
@@ -132,7 +130,7 @@ impl super::Nexus {
                     }
                 };
                 for (peer_id, info) in peers {
-                    result.push(BgpPeerStatus {
+                    result.push(networking::BgpPeerStatus {
                         switch: *switch,
                         peer_id: peer_id.clone(),
                         addr: info.remote_ip,
@@ -153,7 +151,7 @@ impl super::Nexus {
     pub async fn bgp_exported(
         &self,
         opctx: &OpContext,
-    ) -> LookupResult<Vec<BgpExported>> {
+    ) -> LookupResult<Vec<networking::BgpExported>> {
         opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
         let mut result = vec![];
         for (switch, client) in &self.mg_clients().await.map_err(|e| {
@@ -205,7 +203,7 @@ impl super::Nexus {
                                 ))
                             }
                         };
-                        let export = BgpExported {
+                        let export = networking::BgpExported {
                             peer_id: peer_id.clone(),
                             switch: *switch,
                             prefix,
@@ -221,8 +219,8 @@ impl super::Nexus {
     pub async fn bgp_message_history(
         &self,
         opctx: &OpContext,
-        sel: &params::BgpRouteSelector,
-    ) -> ListResultVec<SwitchBgpHistory> {
+        sel: &networking::BgpRouteSelector,
+    ) -> ListResultVec<networking::SwitchBgpHistory> {
         opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
 
         let mut result = Vec::new();
@@ -249,11 +247,11 @@ impl super::Nexus {
                 }
             };
 
-            result.push(SwitchBgpHistory {
+            result.push(networking::SwitchBgpHistory {
                 switch: *switch,
                 history: history
                     .into_iter()
-                    .map(|(k, v)| (k, BgpMessageHistory::new(v)))
+                    .map(|(k, v)| (k, networking::BgpMessageHistory::new(v)))
                     .collect(),
             });
         }
@@ -264,8 +262,8 @@ impl super::Nexus {
     pub async fn bgp_imported_routes(
         &self,
         opctx: &OpContext,
-        _sel: &params::BgpRouteSelector,
-    ) -> ListResultVec<BgpImported> {
+        _sel: &networking::BgpRouteSelector,
+    ) -> ListResultVec<networking::BgpImported> {
         opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
         let mut result = Vec::new();
         for (switch, client) in &self.mg_clients().await.map_err(|e| {
@@ -273,7 +271,7 @@ impl super::Nexus {
                 "failed to get mg clients: {e}"
             ))
         })? {
-            let mut imported: Vec<BgpImported> = Vec::new();
+            let mut imported: Vec<networking::BgpImported> = Vec::new();
             match client.get_rib_imported_v2(None, None).await {
                 Ok(result) => {
                     for (prefix, paths) in result.into_inner().iter() {
@@ -288,7 +286,7 @@ impl super::Nexus {
                             }
                         };
                         for p in paths.iter() {
-                            let x = BgpImported {
+                            let x = networking::BgpImported {
                                 switch: *switch,
                                 prefix: ipnet,
                                 id: p

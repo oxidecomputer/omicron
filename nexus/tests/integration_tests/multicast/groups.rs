@@ -40,12 +40,11 @@ use nexus_test_utils::resource_helpers::{
     object_get, object_get_error, object_put_error,
 };
 use nexus_test_utils_macros::nexus_test;
-use nexus_types::external_api::params::{
-    InstanceMulticastGroupJoin, IpPoolCreate,
+use nexus_types::external_api::ip_pool::{
+    IpPool, IpPoolCreate, IpPoolRange, IpRange, IpVersion, Ipv4Range, Ipv6Range,
 };
-use nexus_types::external_api::shared::{IpRange, Ipv4Range, Ipv6Range};
-use nexus_types::external_api::views::{
-    IpPool, IpPoolRange, IpVersion, MulticastGroup, MulticastGroupMember,
+use nexus_types::external_api::multicast::{
+    InstanceMulticastGroupJoin, MulticastGroup, MulticastGroupMember,
 };
 use omicron_common::api::external::{
     IdentityMetadataCreateParams, InstanceState,
@@ -1058,7 +1057,7 @@ async fn test_ssm_source_ip_behavior(cptestctx: &ControlPlaneTestContext) {
         .flatten()
         .filter_map(|src| match src {
             dpd_types::IpSrc::Exact(ip) => Some(*ip),
-            dpd_types::IpSrc::Subnet(_) => None, // SSM uses exact sources
+            dpd_types::IpSrc::Any => None, // Any-source (ASM) wildcard
         })
         .collect();
     dpd_source_ips.sort();

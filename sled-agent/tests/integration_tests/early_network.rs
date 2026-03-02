@@ -7,18 +7,11 @@
 use std::str::FromStr;
 
 use bootstore::schemes::v0 as bootstore;
-use omicron_common::api::internal::shared::rack_init::MaxPathConfig;
-use omicron_common::api::internal::shared::{LldpAdminStatus, LldpPortConfig};
-use omicron_common::api::{
-    external::{ImportExportPolicy, SwitchLocation},
-    internal::shared::{
-        BgpConfig, BgpPeerConfig, PortConfig, PortFec, PortSpeed,
-        RackNetworkConfig,
-    },
-};
 use omicron_test_utils::dev::test_setup_log;
 use sled_agent_types::early_networking::{
-    EarlyNetworkConfig, EarlyNetworkConfigBody,
+    BgpConfig, BgpPeerConfig, EarlyNetworkConfig, EarlyNetworkConfigBody,
+    ImportExportPolicy, LldpAdminStatus, LldpPortConfig, MaxPathConfig,
+    PortConfig, PortFec, PortSpeed, RackNetworkConfig, SwitchLocation,
 };
 
 const BLOB_PATH: &str = "tests/data/early_network_blobs.txt";
