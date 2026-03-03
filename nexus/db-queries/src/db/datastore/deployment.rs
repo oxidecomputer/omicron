@@ -3524,7 +3524,7 @@ mod tests {
 
         // Add rows to the tuf_artifact table to test version lookups.
         {
-            // Add a zone artifact and two host phase 2 artifacts.
+            // Add measurement artifacts.
             datastore
                 .tuf_repo_insert(opctx, &tuf_repo)
                 .await
@@ -3552,7 +3552,7 @@ mod tests {
             }
         }
 
-        assert!(measurements.len() == 3);
+        assert_eq!(measurements.len(), 3);
 
         let artifacts = BlueprintArtifactMeasurements::new(measurements)
             .expect("this is non-zero");
@@ -3585,10 +3585,8 @@ mod tests {
                 BlueprintMeasurements::InstallDataset => {
                     panic!("Failed to pickup measurements")
                 }
-                BlueprintMeasurements::Artifacts { artifacts } => {
-                    if artifacts.len() != 3 {
-                        panic!("expected 3 got {}", artifacts.len());
-                    }
+                BlueprintMeasurements::Artifacts { artifacts: found_artifacts } => {
+                    assert_eq!(artifacts, found_artifacts);
                 }
                 BlueprintMeasurements::Unknown => {
                     panic!("We should not be unknown")
