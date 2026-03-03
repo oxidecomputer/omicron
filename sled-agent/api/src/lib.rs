@@ -842,8 +842,9 @@ pub trait SledAgentApi {
         method = PUT,
         path = "/network-bootstore-config",
         versions = VERSION_BOOTSTORE_VERSIONING..,
+        operation_id = "write_network_bootstore_config",
     }]
-    async fn write_network_bootstore_config(
+    async fn write_network_bootstore_config_v24(
         rqctx: RequestContext<Self::Context>,
         body: TypedBody<v24::early_networking::WriteNetworkConfigRequest>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
@@ -854,6 +855,7 @@ pub trait SledAgentApi {
         method = PUT,
         path = "/network-bootstore-config",
         versions = VERSION_BGP_V6..VERSION_BOOTSTORE_VERSIONING,
+        operation_id = "write_network_bootstore_config",
     }]
     async fn write_network_bootstore_config_v20(
         rqctx: RequestContext<Self::Context>,
@@ -866,6 +868,7 @@ pub trait SledAgentApi {
         method = PUT,
         path = "/network-bootstore-config",
         versions = ..VERSION_BGP_V6,
+        operation_id = "write_network_bootstore_config",
     }]
     async fn write_network_bootstore_config_v1(
         rqctx: RequestContext<Self::Context>,

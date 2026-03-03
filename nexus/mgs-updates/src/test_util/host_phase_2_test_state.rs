@@ -769,7 +769,7 @@ mod api_impl {
             unimplemented!()
         }
 
-        async fn write_network_bootstore_config(
+        async fn write_network_bootstore_config_v24(
             _rqctx: RequestContext<Self::Context>,
             _body: TypedBody<v24::early_networking::WriteNetworkConfigRequest>,
         ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
