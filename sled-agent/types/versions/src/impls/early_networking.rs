@@ -21,6 +21,7 @@ use crate::latest::early_networking::{
 // in its own module.
 mod early_network_config_serialization;
 
+pub use early_network_config_serialization::EarlyNetworkConfigEnvelope;
 pub use early_network_config_serialization::EarlyNetworkConfigEnvelopeError;
 
 impl BgpPeerConfig {

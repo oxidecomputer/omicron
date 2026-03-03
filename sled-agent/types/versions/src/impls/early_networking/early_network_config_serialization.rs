@@ -47,10 +47,10 @@
 //!    and handles conversion up to the latest via the `TryFrom<_>` impls
 //!    described above.
 
-use crate::latest::early_networking::EarlyNetworkConfigEnvelope;
-use crate::{latest, v20, v25};
+use crate::{latest, v20, v26};
 use bootstore::schemes::v0 as bootstore;
 use serde::de::DeserializeOwned;
+use serde::{Deserialize, Serialize};
 use slog_error_chain::SlogInlineError;
 
 #[derive(Debug, thiserror::Error, SlogInlineError)]
@@ -191,6 +191,33 @@ macro_rules! versioned_decode {
     }};
 }
 
+/// Envelope containing a versioned JSON blob (an `EarlyNetworkConfigBody`).
+///
+/// A [`crate::latest::early_networking::WriteNetworkConfigRequest`] ultimately
+/// results in a new [`bootstore::NetworkConfig`] being written to the
+/// bootstore:
+///
+/// * The `WriteNetworkConfigRequest::body` will be wrapped in an
+///   [`EarlyNetworkConfigEnvelope`]. `schema_version` records the
+///   `EarlyNetworkConfigBody::SCHEMA_VERSION` of the particular version of
+///   the body, and `body` contains the JSON-ified `EarlyNetworkConfigBody`
+///   itself.
+/// * The `NetworkConfig::generation` will be set to the generation from the
+///   incoming `WriteNetworkConfigRequest::generation`. The
+///   `NetworkConfig::blob` contains the JSON-ified
+///   [`EarlyNetworkConfigEnvelope`] from the previous bullet.
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+pub struct EarlyNetworkConfigEnvelope {
+    // Which version of `EarlyNetworkConfigBody` is serialized into `body`.
+    pub(crate) schema_version: u32,
+
+    // The actual early network configuration details.
+    //
+    // These are a serialized `EarlyNetworkConfigBody` of some version. We must
+    // inspect `schema_version` to know how to interpret this value.
+    pub(crate) body: serde_json::Value,
+}
+
 impl EarlyNetworkConfigEnvelope {
     /// Serialize the contents of this envelope into a bootstore-suitable type,
     /// tagged with the given `generation`.
@@ -264,7 +291,7 @@ impl EarlyNetworkConfigEnvelope {
         // a new `EarlyNetworkConfigBody` version.
         let f = versioned_decode!(
             v20::early_networking::EarlyNetworkConfigBody,
-            v25::early_networking::EarlyNetworkConfigBody,
+            v26::early_networking::EarlyNetworkConfigBody,
         );
         f(self.schema_version, self.body.clone())
     }
@@ -279,4 +306,42 @@ fn deserialize_body<T: DeserializeOwned>(
     serde_json::from_value(value).map_err(|err| {
         EarlyNetworkConfigEnvelopeError::DeserializeBody { schema_version, err }
     })
+}
+
+// We need to be able to construct [`EarlyNetworkConfigEnvelope`]s for every
+// version of `EarlyNetworkConfigBody` (starting from the current version of
+// `EarlyNetworkConfigBody` when `EarlyNetworkConfigEnvelope` was introduced).
+//
+// Put those `From` impls here.
+impl From<&'_ v20::early_networking::EarlyNetworkConfigBody>
+    for EarlyNetworkConfigEnvelope
+{
+    fn from(value: &'_ v20::early_networking::EarlyNetworkConfigBody) -> Self {
+        Self {
+            schema_version:
+                v20::early_networking::EarlyNetworkConfigBody::SCHEMA_VERSION,
+            // We're serializing in-memory; this can only fail if
+            // `EarlyNetworkConfigBody` contains types that can't be represented
+            // as JSON, which (a) should never happen and (b) we should catch
+            // immediately in tests.
+            body: serde_json::to_value(value)
+                .expect("EarlyNetworkConfigBody can be serialized as JSON"),
+        }
+    }
+}
+impl From<&'_ v26::early_networking::EarlyNetworkConfigBody>
+    for EarlyNetworkConfigEnvelope
+{
+    fn from(value: &'_ v26::early_networking::EarlyNetworkConfigBody) -> Self {
+        Self {
+            schema_version:
+                v26::early_networking::EarlyNetworkConfigBody::SCHEMA_VERSION,
+            // We're serializing in-memory; this can only fail if
+            // `EarlyNetworkConfigBody` contains types that can't be represented
+            // as JSON, which (a) should never happen and (b) we should catch
+            // immediately in tests.
+            body: serde_json::to_value(value)
+                .expect("EarlyNetworkConfigBody can be serialized as JSON"),
+        }
+    }
 }

@@ -8,7 +8,6 @@
 //! * `EarlyNetworkConfigBody.rack_network_config` is not optional
 //! * `EarlyNetworkConfigBody.ntp_servers` is removed (it was unused)
 
-use crate::latest::early_networking::EarlyNetworkConfigEnvelope;
 use crate::v20::early_networking::RackNetworkConfig;
 use anyhow::bail;
 use schemars::JsonSchema;
@@ -53,23 +52,6 @@ impl TryFrom<crate::v20::early_networking::EarlyNetworkConfigBody>
             );
         };
         Ok(Self { rack_network_config })
-    }
-}
-
-// This lives here instead of under `crate::impls::*` because we need a
-// `From<EarlyNetworkConfigBody> for EarlyNetworkConfigEnvelope` implementation
-// for every supported version of `EarlyNetworkConfigBody`.
-impl From<&'_ EarlyNetworkConfigBody> for EarlyNetworkConfigEnvelope {
-    fn from(value: &'_ EarlyNetworkConfigBody) -> Self {
-        Self {
-            schema_version: EarlyNetworkConfigBody::SCHEMA_VERSION,
-            // We're serializing in-memory; this can only fail if
-            // `EarlyNetworkConfigBody` contains types that can't be represented
-            // as JSON, which (a) should never happened and (b) we should catch
-            // immediately in tests.
-            body: serde_json::to_value(value)
-                .expect("EarlyNetworkConfigBody can be serialized as JSON"),
-        }
     }
 }
 

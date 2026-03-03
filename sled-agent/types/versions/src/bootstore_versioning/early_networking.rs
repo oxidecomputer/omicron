@@ -40,29 +40,3 @@ pub struct WriteNetworkConfigRequest {
     pub generation: u64,
     pub body: EarlyNetworkConfigBody,
 }
-
-/// Envelope containing a versioned JSON blob (an `EarlyNetworkConfigBody`).
-///
-/// A [`WriteNetworkConfigRequest`] ultimately results in a new
-/// [`bootstore::schemes::v0::NetworkConfig`] being written to the bootstore:
-///
-/// * The [`WriteNetworkConfigRequest::body`] will be wrapped in an
-///   [`EarlyNetworkConfigEnvelope`]. `schema_version` records the
-///   [`EarlyNetworkConfigBody::SCHEMA_VERSION`] of the particular version of
-///   the body, and `body` contains the JSON-ified `EarlyNetworkConfigBody`
-///   itself.
-/// * The `NetworkConfig::generation` will be set to the generation from the
-///   incoming [`WriteNetworkConfigRequest::generation`]. The
-///   `NetworkConfig::blob` contains the JSON-ified
-///   [`EarlyNetworkConfigEnvelope`] from the previous bullet.
-#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
-pub struct EarlyNetworkConfigEnvelope {
-    // Which version of `EarlyNetworkConfigBody` is serialized into `body`.
-    pub(crate) schema_version: u32,
-
-    // The actual early network configuration details.
-    //
-    // These are a serialized `EarlyNetworkConfigBody` of some version. We must
-    // inspect `schema_version` to know how to interpret this value.
-    pub(crate) body: serde_json::Value,
-}
