@@ -11,6 +11,7 @@ use serde::Serialize;
 use sled_agent_types::early_networking::BgpConfig;
 use sled_agent_types::early_networking::LldpPortConfig;
 use sled_agent_types::early_networking::RouteConfig;
+use sled_agent_types::early_networking::UplinkAddress;
 use sled_agent_types::early_networking::UplinkAddressConfig;
 use sled_hardware_types::Baseboard;
 use std::borrow::Cow;
@@ -373,8 +374,12 @@ fn populate_uplink_table(cfg: &UserSpecifiedPortConfig) -> Table {
     for a in addresses {
         let UplinkAddressConfig { address, vlan_id } = a;
         let mut x = InlineTable::new();
-        if let Some(address) = address {
-            x.insert("address", string_value(address));
+        match address {
+            // TODO-john fix this
+            UplinkAddress::LinkLocal => (),
+            UplinkAddress::Address { ip_net } => {
+                x.insert("address", string_value(ip_net));
+            }
         }
         if let Some(vlan_id) = vlan_id {
             x.insert("vlan_id", i64_value(i64::from(*vlan_id)));
@@ -514,10 +519,10 @@ fn populate_uplink_table(cfg: &UserSpecifiedPortConfig) -> Table {
         }
 
         // router_lifetime
-        if *router_lifetime != 0 {
+        if router_lifetime.as_u16() != 0 {
             peer.insert(
                 "router_lifetime",
-                i64_item(i64::from(*router_lifetime)),
+                i64_item(i64::from(router_lifetime.as_u16())),
             );
         }
 

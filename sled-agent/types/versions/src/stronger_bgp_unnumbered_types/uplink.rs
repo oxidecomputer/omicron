@@ -8,8 +8,21 @@
 //! * TODO-john
 
 use crate::v1;
+use crate::v20;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+
+/// A set of switch uplinks.
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
+pub struct SwitchPorts {
+    pub uplinks: Vec<HostPortConfig>,
+}
+
+impl From<v20::uplink::SwitchPorts> for SwitchPorts {
+    fn from(value: v20::uplink::SwitchPorts) -> Self {
+        Self { uplinks: value.uplinks.into_iter().map(From::from).collect() }
+    }
+}
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, JsonSchema)]
 pub struct HostPortConfig {
@@ -23,4 +36,15 @@ pub struct HostPortConfig {
     pub lldp: Option<v1::early_networking::LldpPortConfig>,
 
     pub tx_eq: Option<v1::early_networking::TxEqConfig>,
+}
+
+impl From<v20::uplink::HostPortConfig> for HostPortConfig {
+    fn from(value: v20::uplink::HostPortConfig) -> Self {
+        Self {
+            port: value.port,
+            addrs: value.addrs.into_iter().map(From::from).collect(),
+            lldp: value.lldp,
+            tx_eq: value.tx_eq,
+        }
+    }
 }

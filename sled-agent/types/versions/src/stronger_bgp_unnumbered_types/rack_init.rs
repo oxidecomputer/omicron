@@ -3,13 +3,16 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 //! Rack initialization types
+//!
+//! Changes in this version:
+//! * TODO-john
 
 use super::early_networking::RackNetworkConfig;
 use crate::bootstrap_v1::rack_init::RecoverySiloConfig;
 use crate::impls::rack_init::default_allowed_source_ips;
 use crate::impls::rack_init::validate_external_dns;
+use crate::v20::rack_init::BootstrapAddressDiscovery;
 use anyhow::Result;
-use camino::Utf8PathBuf;
 use omicron_common::{
     address::IpRange,
     api::{external::AllowedSourceIps, internal::nexus::Certificate},
@@ -17,7 +20,7 @@ use omicron_common::{
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use sled_hardware_types::Baseboard;
-use std::{collections::BTreeSet, net::IpAddr, net::Ipv6Addr};
+use std::net::IpAddr;
 
 /// Configuration for the "rack setup service".
 ///
@@ -69,32 +72,6 @@ pub struct RackInitializeRequest {
     pub allowed_source_ips: AllowedSourceIps,
 }
 
-#[derive(Debug, thiserror::Error)]
-pub enum RackInitializeRequestParseError {
-    #[error("Failed to read config from {path}: {err}")]
-    Io {
-        path: Utf8PathBuf,
-        #[source]
-        err: std::io::Error,
-    },
-    #[error("Failed to deserialize config from {path}: {err}")]
-    Deserialize {
-        path: Utf8PathBuf,
-        #[source]
-        err: anyhow::Error,
-    },
-    #[error("Loading certificate: {0}")]
-    Certificate(#[source] anyhow::Error),
-}
-
-#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, JsonSchema)]
-#[serde(rename_all = "snake_case", tag = "type")]
-pub enum BootstrapAddressDiscovery {
-    /// Ignore all bootstrap addresses except our own.
-    OnlyOurs,
-    /// Ignore all bootstrap addresses except the following.
-    OnlyThese { addrs: BTreeSet<Ipv6Addr> },
-}
 // "Shadow" copy of `RackInitializeRequest` that does no validation on its
 // fields.
 #[derive(Clone, Deserialize)]
@@ -113,7 +90,7 @@ struct UnvalidatedRackInitializeRequest {
     allowed_source_ips: AllowedSourceIps,
 }
 
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct RackInitializeRequestParams {
     pub rack_initialize_request: RackInitializeRequest,
     pub skip_timesync: bool,

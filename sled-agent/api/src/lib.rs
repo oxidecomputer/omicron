@@ -21,7 +21,7 @@ use omicron_common::api::internal::{
 };
 use sled_agent_types_versions::{
     latest, v1, v4, v6, v7, v9, v10, v11, v12, v14, v16, v17, v20, v22, v24,
-    v25, v26,
+    v25, v26, v29,
 };
 use sled_diagnostics::SledDiagnosticsQueryOutput;
 
@@ -745,12 +745,24 @@ pub trait SledAgentApi {
     #[endpoint {
         method = POST,
         path = "/switch-ports",
-        versions = VERSION_BGP_V6..,
+        versions = VERSION_STRONGER_BGP_UNNUMBERED_TYPES..,
     }]
     async fn uplink_ensure(
         rqctx: RequestContext<Self::Context>,
         body: TypedBody<latest::uplink::SwitchPorts>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
+
+    #[endpoint {
+        method = POST,
+        path = "/switch-ports",
+        versions = VERSION_BGP_V6..VERSION_STRONGER_BGP_UNNUMBERED_TYPES,
+    }]
+    async fn uplink_ensure_v20(
+        rqctx: RequestContext<Self::Context>,
+        body: TypedBody<v20::uplink::SwitchPorts>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        Self::uplink_ensure(rqctx, body.map(From::from)).await
+    }
 
     #[endpoint {
         method = POST,
@@ -761,7 +773,7 @@ pub trait SledAgentApi {
         rqctx: RequestContext<Self::Context>,
         body: TypedBody<v1::uplink::SwitchPorts>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
-        Self::uplink_ensure(rqctx, body.map(From::from)).await
+        Self::uplink_ensure_v20(rqctx, body.map(From::from)).await
     }
 
     /// This API endpoint is only reading the local sled agent's view of the
@@ -847,7 +859,20 @@ pub trait SledAgentApi {
     #[endpoint {
         method = PUT,
         path = "/network-bootstore-config",
-        versions = VERSION_RACK_NETWORK_CONFIG_NOT_OPTIONAL..,
+        versions = VERSION_STRONGER_BGP_UNNUMBERED_TYPES..,
+        operation_id = "write_network_bootstore_config",
+    }]
+    async fn write_network_bootstore_config_v28(
+        rqctx: RequestContext<Self::Context>,
+        body: TypedBody<v29::early_networking::WriteNetworkConfigRequest>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
+
+    // As described above, this must not forward to newer versions; sled-agent
+    // must implement this by faithfully serializing the requested version.
+    #[endpoint {
+        method = PUT,
+        path = "/network-bootstore-config",
+        versions = VERSION_RACK_NETWORK_CONFIG_NOT_OPTIONAL..VERSION_STRONGER_BGP_UNNUMBERED_TYPES,
         operation_id = "write_network_bootstore_config",
     }]
     async fn write_network_bootstore_config_v26(

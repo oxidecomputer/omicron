@@ -888,14 +888,7 @@ impl ServiceInner {
                                 rib_priority: r.rib_priority,
                             })
                             .collect(),
-                        addresses: config
-                            .addresses
-                            .iter()
-                            .map(|a| NexusTypes::UplinkAddressConfig {
-                                address: a.address,
-                                vlan_id: a.vlan_id,
-                            })
-                            .collect(),
+                        addresses: config.addresses.clone(),
                         switch: config.switch,
                         uplink_port_speed: config.uplink_port_speed,
                         uplink_port_fec: config.uplink_port_fec,

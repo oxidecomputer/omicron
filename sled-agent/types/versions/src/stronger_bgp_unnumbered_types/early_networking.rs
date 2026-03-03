@@ -13,30 +13,62 @@ use crate::v26::early_networking as v26;
 use oxnet::{IpNet, Ipv6Net};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use std::net::IpAddr;
+use std::net::{IpAddr, Ipv6Addr};
 
 #[derive(Debug, thiserror::Error)]
 #[error("IP address must not be the unspecified address (0.0.0.0 or ::)")]
 pub struct UnspecifiedIpError;
 
 #[derive(
-    Clone, Debug, Deserialize, Serialize, PartialEq, Eq, JsonSchema, Hash,
+    Clone,
+    Copy,
+    Debug,
+    Deserialize,
+    Serialize,
+    PartialEq,
+    Eq,
+    JsonSchema,
+    Hash,
+    PartialOrd,
+    Ord,
 )]
+#[serde(tag = "type", rename_all = "snake_case")]
 pub enum UplinkAddress {
     LinkLocal,
-    Address(SpecifiedIpNet),
+    Address { ip_net: SpecifiedIpNet },
 }
 
 #[derive(
-    Clone, Debug, Deserialize, Serialize, PartialEq, Eq, JsonSchema, Hash,
+    Clone,
+    Copy,
+    Debug,
+    Deserialize,
+    Serialize,
+    PartialEq,
+    Eq,
+    JsonSchema,
+    Hash,
+    PartialOrd,
+    Ord,
 )]
+#[serde(tag = "type", rename_all = "snake_case")]
 pub enum RouterPeerAddress {
     Unnumbered,
-    Numbered(SpecifiedIpAddr),
+    Numbered { ip: SpecifiedIpAddr },
 }
 
 #[derive(
-    Clone, Debug, Deserialize, Serialize, PartialEq, Eq, JsonSchema, Hash,
+    Clone,
+    Copy,
+    Debug,
+    Deserialize,
+    Serialize,
+    PartialEq,
+    Eq,
+    JsonSchema,
+    Hash,
+    PartialOrd,
+    Ord,
 )]
 #[serde(try_from = "IpNet", into = "IpNet")]
 pub struct SpecifiedIpNet(pub(crate) IpNet);
@@ -63,7 +95,17 @@ impl TryFrom<IpNet> for SpecifiedIpNet {
 }
 
 #[derive(
-    Clone, Debug, Deserialize, Serialize, PartialEq, Eq, JsonSchema, Hash,
+    Clone,
+    Copy,
+    Debug,
+    Deserialize,
+    Serialize,
+    PartialEq,
+    Eq,
+    JsonSchema,
+    Hash,
+    PartialOrd,
+    Ord,
 )]
 #[serde(try_from = "IpAddr", into = "IpAddr")]
 pub struct SpecifiedIpAddr(pub(crate) IpAddr);
@@ -104,8 +146,18 @@ pub struct UplinkAddressConfig {
 impl From<v20::UplinkAddressConfig> for UplinkAddressConfig {
     fn from(value: v20::UplinkAddressConfig) -> Self {
         let address = match value.address.map(SpecifiedIpNet::try_from) {
-            Some(Ok(net)) => UplinkAddress::Address(net),
+            Some(Ok(ip_net)) => UplinkAddress::Address { ip_net },
             Some(Err(UnspecifiedIpError)) | None => UplinkAddress::LinkLocal,
+        };
+        Self { address, vlan_id: value.vlan_id }
+    }
+}
+
+impl From<UplinkAddressConfig> for v20::UplinkAddressConfig {
+    fn from(value: UplinkAddressConfig) -> Self {
+        let address = match value.address {
+            UplinkAddress::LinkLocal => None,
+            UplinkAddress::Address { ip_net } => Some(ip_net.into()),
         };
         Self { address, vlan_id: value.vlan_id }
     }
@@ -120,7 +172,7 @@ pub struct PortConfig {
     /// This port's addresses and optional vlan IDs
     pub addresses: Vec<UplinkAddressConfig>,
     /// Switch the port belongs to.
-    pub switch: v1::SwitchLocation,
+    pub switch: v1::SwitchSlot,
     /// Nmae of the port this config applies to.
     pub port: String,
     /// Port speed.
@@ -140,6 +192,23 @@ pub struct PortConfig {
 
 impl From<v20::PortConfig> for PortConfig {
     fn from(value: v20::PortConfig) -> Self {
+        Self {
+            routes: value.routes,
+            addresses: value.addresses.into_iter().map(From::from).collect(),
+            switch: value.switch,
+            port: value.port,
+            uplink_port_speed: value.uplink_port_speed,
+            uplink_port_fec: value.uplink_port_fec,
+            bgp_peers: value.bgp_peers.into_iter().map(From::from).collect(),
+            autoneg: value.autoneg,
+            lldp: value.lldp,
+            tx_eq: value.tx_eq,
+        }
+    }
+}
+
+impl From<PortConfig> for v20::PortConfig {
+    fn from(value: PortConfig) -> Self {
         Self {
             routes: value.routes,
             addresses: value.addresses.into_iter().map(From::from).collect(),
@@ -214,8 +283,38 @@ pub struct BgpPeerConfig {
 impl From<v20::BgpPeerConfig> for BgpPeerConfig {
     fn from(value: v20::BgpPeerConfig) -> Self {
         let addr = match SpecifiedIpAddr::try_from(value.addr) {
-            Ok(ip) => RouterPeerAddress::Numbered(ip),
+            Ok(ip) => RouterPeerAddress::Numbered { ip },
             Err(UnspecifiedIpError) => RouterPeerAddress::Unnumbered,
+        };
+        Self {
+            asn: value.asn,
+            port: value.port,
+            addr,
+            hold_time: value.hold_time,
+            idle_hold_time: value.idle_hold_time,
+            delay_open: value.delay_open,
+            connect_retry: value.connect_retry,
+            keepalive: value.keepalive,
+            remote_asn: value.remote_asn,
+            min_ttl: value.min_ttl,
+            md5_auth_key: value.md5_auth_key,
+            multi_exit_discriminator: value.multi_exit_discriminator,
+            communities: value.communities,
+            local_pref: value.local_pref,
+            enforce_first_as: value.enforce_first_as,
+            allowed_import: value.allowed_import,
+            allowed_export: value.allowed_export,
+            vlan_id: value.vlan_id,
+            router_lifetime: value.router_lifetime,
+        }
+    }
+}
+
+impl From<BgpPeerConfig> for v20::BgpPeerConfig {
+    fn from(value: BgpPeerConfig) -> Self {
+        let addr = match value.addr {
+            RouterPeerAddress::Unnumbered => IpAddr::V6(Ipv6Addr::UNSPECIFIED),
+            RouterPeerAddress::Numbered { ip } => ip.into(),
         };
         Self {
             asn: value.asn,
@@ -288,6 +387,23 @@ impl TryFrom<v26::EarlyNetworkConfigBody> for EarlyNetworkConfigBody {
                 bfd: old.bfd,
             },
         })
+    }
+}
+
+impl From<EarlyNetworkConfigBody> for v26::EarlyNetworkConfigBody {
+    fn from(new: EarlyNetworkConfigBody) -> Self {
+        let new = new.rack_network_config;
+
+        Self {
+            rack_network_config: v20::RackNetworkConfig {
+                rack_subnet: new.rack_subnet,
+                infra_ip_first: new.infra_ip_first,
+                infra_ip_last: new.infra_ip_last,
+                ports: new.ports.into_iter().map(From::from).collect(),
+                bgp: new.bgp,
+                bfd: new.bfd,
+            },
+        }
     }
 }
 

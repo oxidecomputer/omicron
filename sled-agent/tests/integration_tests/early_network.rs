@@ -10,7 +10,7 @@ use sled_agent_types::early_networking::{
     BgpConfig, BgpPeerConfig, EarlyNetworkConfigBody,
     EarlyNetworkConfigEnvelope, ImportExportPolicy, LldpAdminStatus,
     LldpPortConfig, MaxPathConfig, PortConfig, PortFec, PortSpeed,
-    RackNetworkConfig, SwitchSlot, UplinkAddressConfig,
+    RackNetworkConfig, RouterPeerAddress, SwitchSlot, UplinkAddressConfig,
 };
 
 const BLOB_PATH: &str = "tests/data/early_network_blobs.txt";
@@ -174,7 +174,9 @@ fn current_config_example() -> (&'static str, EarlyNetworkConfigEnvelope) {
                     bgp_peers: vec![BgpPeerConfig {
                         asn: 65002,
                         port: "qsfp18".to_owned(),
-                        addr: "172.20.15.51".parse().unwrap(),
+                        addr: RouterPeerAddress::Numbered {
+                            ip: "172.20.15.51".parse().unwrap(),
+                        },
                         hold_time: Some(6),
                         idle_hold_time: Some(3),
                         delay_open: Some(3),
@@ -219,7 +221,9 @@ fn current_config_example() -> (&'static str, EarlyNetworkConfigEnvelope) {
                     bgp_peers: vec![BgpPeerConfig {
                         asn: 65002,
                         port: "qsfp18".to_owned(),
-                        addr: "172.20.15.43".parse().unwrap(),
+                        addr: RouterPeerAddress::Numbered {
+                            ip: "172.20.15.43".parse().unwrap(),
+                        },
                         hold_time: Some(6),
                         idle_hold_time: Some(0),
                         delay_open: Some(3),

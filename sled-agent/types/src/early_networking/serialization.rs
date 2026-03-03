@@ -50,7 +50,7 @@
 use bootstore::schemes::v0 as bootstore;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
-use sled_agent_types_versions::{latest, v20, v26, v27};
+use sled_agent_types_versions::{latest, v20, v26, v29};
 use slog_error_chain::SlogInlineError;
 
 #[derive(Debug, thiserror::Error, SlogInlineError)]
@@ -303,7 +303,7 @@ impl EarlyNetworkConfigEnvelope {
         let f = versioned_decode!(
             v20::early_networking::EarlyNetworkConfigBody,
             v26::early_networking::EarlyNetworkConfigBody,
-            v27::early_networking::EarlyNetworkConfigBody,
+            v29::early_networking::EarlyNetworkConfigBody,
         );
         f(self.schema_version, self.body.clone())
     }
@@ -351,6 +351,22 @@ impl From<&'_ v26::early_networking::EarlyNetworkConfigBody>
             // We're serializing in-memory; this can only fail if
             // `EarlyNetworkConfigBody` contains types that can't be represented
             // as JSON, which (a) should never happen and (b) we should catch
+            // immediately in tests.
+            body: serde_json::to_value(value)
+                .expect("EarlyNetworkConfigBody can be serialized as JSON"),
+        }
+    }
+}
+impl From<&'_ v29::early_networking::EarlyNetworkConfigBody>
+    for EarlyNetworkConfigEnvelope
+{
+    fn from(value: &'_ v29::early_networking::EarlyNetworkConfigBody) -> Self {
+        Self {
+            schema_version:
+                v29::early_networking::EarlyNetworkConfigBody::SCHEMA_VERSION,
+            // We're serializing in-memory; this can only fail if
+            // `EarlyNetworkConfigBody` contains types that can't be represented
+            // as JSON, which (a) should never happened and (b) we should catch
             // immediately in tests.
             body: serde_json::to_value(value)
                 .expect("EarlyNetworkConfigBody can be serialized as JSON"),

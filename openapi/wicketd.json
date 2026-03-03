@@ -3893,6 +3893,13 @@
           "nexthop"
         ]
       },
+      "RouterLifetimeConfig": {
+        "description": "Router lifetime in seconds for unnumbered BGP peers",
+        "type": "integer",
+        "format": "uint16",
+        "minimum": 0,
+        "maximum": 9000
+      },
       "RssStep": {
         "description": "Steps we go through during initial rack setup. Keep this list in order that they happen.\n\n<details><summary>JSON schema</summary>\n\n```json { \"description\": \"Steps we go through during initial rack setup. Keep this list in order that they happen.\", \"oneOf\": [ { \"type\": \"object\", \"required\": [ \"status\" ], \"properties\": { \"status\": { \"type\": \"string\", \"enum\": [ \"requested\" ] } } }, { \"type\": \"object\", \"required\": [ \"status\" ], \"properties\": { \"status\": { \"type\": \"string\", \"enum\": [ \"starting\" ] } } }, { \"type\": \"object\", \"required\": [ \"status\" ], \"properties\": { \"status\": { \"type\": \"string\", \"enum\": [ \"load_existing_plan\" ] } } }, { \"type\": \"object\", \"required\": [ \"status\" ], \"properties\": { \"status\": { \"type\": \"string\", \"enum\": [ \"create_sled_plan\" ] } } }, { \"type\": \"object\", \"required\": [ \"status\" ], \"properties\": { \"status\": { \"type\": \"string\", \"enum\": [ \"init_trust_quorum\" ] } } }, { \"type\": \"object\", \"required\": [ \"status\" ], \"properties\": { \"status\": { \"type\": \"string\", \"enum\": [ \"network_config_update\" ] } } }, { \"type\": \"object\", \"required\": [ \"status\" ], \"properties\": { \"status\": { \"type\": \"string\", \"enum\": [ \"sled_init\" ] } } }, { \"type\": \"object\", \"required\": [ \"status\" ], \"properties\": { \"status\": { \"type\": \"string\", \"enum\": [ \"init_dns\" ] } } }, { \"type\": \"object\", \"required\": [ \"status\" ], \"properties\": { \"status\": { \"type\": \"string\", \"enum\": [ \"configure_dns\" ] } } }, { \"type\": \"object\", \"required\": [ \"status\" ], \"properties\": { \"status\": { \"type\": \"string\", \"enum\": [ \"init_ntp\" ] } } }, { \"type\": \"object\", \"required\": [ \"status\" ], \"properties\": { \"status\": { \"type\": \"string\", \"enum\": [ \"wait_for_time_sync\" ] } } }, { \"type\": \"object\", \"required\": [ \"status\" ], \"properties\": { \"status\": { \"type\": \"string\", \"enum\": [ \"wait_for_database\" ] } } }, { \"type\": \"object\", \"required\": [ \"status\" ], \"properties\": { \"status\": { \"type\": \"string\", \"enum\": [ \"cluster_init\" ] } } }, { \"type\": \"object\", \"required\": [ \"status\" ], \"properties\": { \"status\": { \"type\": \"string\", \"enum\": [ \"zones_init\" ] } } }, { \"type\": \"object\", \"required\": [ \"status\" ], \"properties\": { \"status\": { \"type\": \"string\", \"enum\": [ \"nexus_handoff\" ] } } } ] } ``` </details>",
         "oneOf": [
@@ -4631,6 +4638,9 @@
           "power",
           "switch"
         ]
+      },
+      "SpecifiedIpNet": {
+        "$ref": "#/components/schemas/IpNet"
       },
       "StartUpdateOptions": {
         "type": "object",
@@ -7416,15 +7426,50 @@
           }
         ]
       },
+      "UplinkAddress": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "link_local"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "ip_net": {
+                "$ref": "#/components/schemas/SpecifiedIpNet"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "address"
+                ]
+              }
+            },
+            "required": [
+              "ip_net",
+              "type"
+            ]
+          }
+        ]
+      },
       "UplinkAddressConfig": {
         "type": "object",
         "properties": {
           "address": {
-            "nullable": true,
-            "description": "The address to be used on the uplink. Set to `None` for an Ipv6 Link Local address.",
+            "description": "The address to be used on the uplink.",
             "allOf": [
               {
-                "$ref": "#/components/schemas/IpNet"
+                "$ref": "#/components/schemas/UplinkAddress"
               }
             ]
           },
@@ -7436,7 +7481,10 @@
             "format": "uint16",
             "minimum": 0
           }
-        }
+        },
+        "required": [
+          "address"
+        ]
       },
       "UplinkPreflightStepId": {
         "oneOf": [
@@ -7701,9 +7749,11 @@
           "router_lifetime": {
             "description": "Router lifetime in seconds for unnumbered BGP peers.",
             "default": 0,
-            "type": "integer",
-            "format": "uint16",
-            "minimum": 0
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/RouterLifetimeConfig"
+              }
+            ]
           },
           "vlan_id": {
             "nullable": true,

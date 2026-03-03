@@ -23,6 +23,7 @@ use sled_agent_types::early_networking::LldpPortConfig;
 use sled_agent_types::early_networking::PortFec;
 use sled_agent_types::early_networking::PortSpeed;
 use sled_agent_types::early_networking::RouteConfig;
+use sled_agent_types::early_networking::RouterLifetimeConfig;
 use sled_agent_types::early_networking::SwitchSlot;
 use sled_agent_types::early_networking::TxEqConfig;
 use sled_agent_types::early_networking::UplinkAddressConfig;
@@ -252,7 +253,7 @@ pub struct UserSpecifiedBgpPeerConfig {
     pub vlan_id: Option<u16>,
     /// Router lifetime in seconds for unnumbered BGP peers.
     #[serde(default)]
-    pub router_lifetime: u16,
+    pub router_lifetime: RouterLifetimeConfig,
 }
 
 impl UserSpecifiedBgpPeerConfig {

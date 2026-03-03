@@ -19,9 +19,10 @@ use sled_agent_types::early_networking::ImportExportPolicy;
 use sled_agent_types::early_networking::MaxPathConfig;
 use sled_agent_types::early_networking::RouterLifetimeConfig;
 use sled_agent_types::early_networking::RouterLifetimeConfigError;
+use sled_agent_types::early_networking::RouterPeerAddress;
+use sled_agent_types::early_networking::SpecifiedIpAddr;
+use sled_agent_types::early_networking::UnspecifiedIpError;
 use slog_error_chain::InlineErrorChain;
-use std::net::IpAddr;
-use std::net::Ipv6Addr;
 use uuid::Uuid;
 
 #[derive(
@@ -179,10 +180,15 @@ impl TryFrom<BgpPeerView> for BgpPeerConfig {
 
     fn try_from(value: BgpPeerView) -> Result<Self, Self::Error> {
         // For unnumbered peers (addr is None), use UNSPECIFIED
-        let addr = match value.addr {
-            None => IpAddr::V6(Ipv6Addr::UNSPECIFIED),
-            Some(addr) => addr.ip(),
-        };
+        //
+        // TODO-john stronger type? NULL?
+        let addr =
+            match value.addr.map(|addr| SpecifiedIpAddr::try_from(addr.ip())) {
+                Some(Ok(ip)) => RouterPeerAddress::Numbered { ip },
+                None | Some(Err(UnspecifiedIpError)) => {
+                    RouterPeerAddress::Unnumbered
+                }
+            };
 
         // TODO-correctness We should have db constraints to ensure these can't
         // fail.

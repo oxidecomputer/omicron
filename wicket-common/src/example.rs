@@ -14,7 +14,8 @@ use omicron_common::{
 };
 use sled_agent_types::early_networking::{
     BgpConfig, BgpPeerConfig, LldpAdminStatus, LldpPortConfig, MaxPathConfig,
-    PortFec, PortSpeed, RouteConfig, TxEqConfig, UplinkAddressConfig,
+    PortFec, PortSpeed, RouteConfig, RouterLifetimeConfig, TxEqConfig,
+    UplinkAddressConfig,
 };
 use sled_hardware_types::Baseboard;
 
@@ -117,7 +118,7 @@ impl ExampleRackSetupData {
                     "127.0.0.1/8".parse().unwrap(),
                 ]),
                 vlan_id: None,
-                router_lifetime: 0,
+                router_lifetime: RouterLifetimeConfig::new(0).unwrap(),
             },
             UserSpecifiedBgpPeerConfig {
                 asn: 28,
@@ -141,7 +142,7 @@ impl ExampleRackSetupData {
                 ]),
                 allowed_export: UserSpecifiedImportExportPolicy::Allow(vec![]),
                 vlan_id: None,
-                router_lifetime: 0,
+                router_lifetime: RouterLifetimeConfig::new(0).unwrap(),
             },
         ];
 
@@ -166,7 +167,7 @@ impl ExampleRackSetupData {
             ]),
             allowed_export: UserSpecifiedImportExportPolicy::NoFiltering,
             vlan_id: None,
-            router_lifetime: 0,
+            router_lifetime: RouterLifetimeConfig::new(0).unwrap(),
         }];
 
         let switch0_port0_lldp = Some(LldpPortConfig {

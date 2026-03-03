@@ -180,9 +180,10 @@ pub mod rack_init {
     pub use crate::bootstrap_v1::rack_init::RecoverySiloConfig;
 
     pub use crate::v20::rack_init::BootstrapAddressDiscovery;
-    pub use crate::v20::rack_init::RackInitializeRequest;
-    pub use crate::v20::rack_init::RackInitializeRequestParams;
     pub use crate::v20::rack_init::RackInitializeRequestParseError;
+
+    pub use crate::v29::rack_init::RackInitializeRequest;
+    pub use crate::v29::rack_init::RackInitializeRequestParams;
 }
 
 pub mod rot {
@@ -225,9 +226,8 @@ pub mod trust_quorum {
 }
 
 pub mod uplink {
-    pub use crate::v20::uplink::SwitchPorts;
-
-    pub use crate::v26::uplink::HostPortConfig;
+    pub use crate::v29::uplink::HostPortConfig;
+    pub use crate::v29::uplink::SwitchPorts;
 }
 
 pub mod zone_bundle {

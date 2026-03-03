@@ -12,15 +12,20 @@ use crate::latest::early_networking::PortFec;
 use crate::latest::early_networking::PortSpeed;
 use crate::latest::early_networking::RouterLifetimeConfig;
 use crate::latest::early_networking::RouterLifetimeConfigError;
+use crate::latest::early_networking::SpecifiedIpAddr;
+use crate::latest::early_networking::SpecifiedIpNet;
 use crate::latest::early_networking::SwitchSlot;
+use crate::latest::early_networking::UnspecifiedIpError;
+use crate::latest::early_networking::UplinkAddress;
 use crate::latest::early_networking::UplinkAddressConfig;
 use omicron_common::api::external;
 use oxnet::IpNet;
 use oxnet::IpNetParseError;
+use oxnet::Ipv6Net;
 use std::fmt;
+use std::net::AddrParseError;
 use std::net::IpAddr;
 use std::net::Ipv6Addr;
-use std::net::AddrParseError;
 use std::str::FromStr;
 
 impl BgpPeerConfig {
@@ -128,6 +133,12 @@ impl std::fmt::Display for SpecifiedIpAddr {
     }
 }
 
+impl SpecifiedIpNet {
+    pub const fn addr(&self) -> IpAddr {
+        self.0.addr()
+    }
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum SpecifiedIpNetParseError {
     #[error("invalid IP net")]
@@ -164,42 +175,52 @@ impl FromStr for SpecifiedIpAddr {
     }
 }
 
-impl UplinkAddressConfig {
-    /// Construct an `UplinkAddressConfig` with no VLAN ID.
-    pub fn without_vlan(address: IpNet) -> Self {
-        // TODO-cleanup Squash unspecified addresses down to `None`. We want
-        // better types here:
-        // <https://github.com/oxidecomputer/omicron/issues/9832>.
-        let address =
-            if address.addr().is_unspecified() { None } else { Some(address) };
-        Self { address, vlan_id: None }
+impl UplinkAddress {
+    /// Squash this address down to a flat IP address by converting
+    /// [`UplinkAddress::LinkLocal`] to `::`.
+    ///
+    /// Uses of this function probably indicate places where we could consider
+    /// using stronger types.
+    pub fn addr_squashing_link_local_to_unspecified(&self) -> IpAddr {
+        match self {
+            UplinkAddress::LinkLocal => IpAddr::V6(Ipv6Addr::UNSPECIFIED),
+            UplinkAddress::Address { ip_net } => ip_net.addr(),
+        }
     }
 
-    pub fn addr(&self) -> IpAddr {
-        match self.address {
-            Some(ipaddr) => ipaddr.addr(),
-            None => IpAddr::V6(Ipv6Addr::UNSPECIFIED),
+    /// Squash this address down to an [`IpNet`] address by converting
+    /// [`UplinkAddress::LinkLocal`] to `::/128`.
+    ///
+    /// Uses of this function probably indicate places where we could consider
+    /// using stronger types.
+    pub fn ip_net_squashing_link_local_to_unspecified(&self) -> IpNet {
+        match *self {
+            UplinkAddress::LinkLocal => {
+                IpNet::V6(Ipv6Net::host_net(Ipv6Addr::UNSPECIFIED))
+            }
+            UplinkAddress::Address { ip_net } => ip_net.into(),
         }
+    }
+
+}
+
+impl UplinkAddressConfig {
+    /// Helper to construct an `UplinkAddressConfig` with a specified IP net and
+    /// no VLAN ID.
+    pub fn without_vlan(ip_net: SpecifiedIpNet) -> Self {
+        Self { address: UplinkAddress::Address { ip_net }, vlan_id: None }
     }
 
     /// Format `self` appropriately for passing to `uplinkd`'s SMF properties.
     pub fn to_uplinkd_smf_property(&self) -> String {
-        fn addr_string(addr: &oxnet::IpNet) -> String {
-            if addr.addr().is_unspecified() {
-                "link-local".into()
-            } else {
-                addr.to_string()
-            }
-        }
+        let addr: &dyn fmt::Display = match self.address {
+            UplinkAddress::LinkLocal => &"link-local",
+            UplinkAddress::Address { ip_net } => &ip_net.addr(),
+        };
 
-        // TODO-cleanup for now, squash address values of both `None` and
-        // `Some(UNSPECIFIED)` down to "link-local". We want better types here:
-        // <https://github.com/oxidecomputer/omicron/issues/9832>.
-        match (&self.address, self.vlan_id) {
-            (Some(addr), None) => addr_string(addr),
-            (Some(addr), Some(v)) => format!("{};{v}", addr_string(addr)),
-            (None, None) => "link-local".to_string(),
-            (None, Some(v)) => format!("link-local;{v}"),
+        match self.vlan_id {
+            Some(v) => format!("{addr};{v}"),
+            None => addr.to_string(),
         }
     }
 }

@@ -42,18 +42,17 @@ use omicron_common::api::external::NameOrId;
 use omicron_common::api::external::ResourceType;
 use omicron_uuid_kinds::SledUuid;
 use oxnet::IpNet;
-use oxnet::Ipv6Net;
 use sled_agent_client::types::AddSledRequest;
 use sled_agent_client::types::StartSledAgentRequest;
 use sled_agent_client::types::StartSledAgentRequestBody;
 use sled_agent_types::early_networking::LldpAdminStatus;
+use sled_agent_types::early_networking::RouterPeerAddress;
 use sled_hardware_types::BaseboardId;
 
 use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::collections::HashMap;
-use std::net::Ipv6Addr;
 use std::num::NonZeroU32;
 use std::str::FromStr;
 use uuid::Uuid;
@@ -552,9 +551,10 @@ impl super::Nexus {
                 .iter()
                 .map(|a| networking::Address {
                     address_lot: NameOrId::Name(address_lot_name.clone()),
-                    address: a.address.unwrap_or_else(|| {
-                        IpNet::V6(Ipv6Net::host_net(Ipv6Addr::UNSPECIFIED))
-                    }),
+                    // TODO-john do we want to update the external API?
+                    address: a
+                        .address
+                        .ip_net_squashing_link_local_to_unspecified(),
                     vlan_id: a.vlan_id,
                 })
                 .collect();
@@ -591,10 +591,10 @@ impl super::Nexus {
                         format!("as{}", r.asn).parse().unwrap(),
                     ),
                     interface_name: link_name.clone(),
-                    addr: if r.addr.is_unspecified() {
-                        None
-                    } else {
-                        Some(r.addr)
+                    // TODO-john do we want to update the external API?
+                    addr: match r.addr {
+                        RouterPeerAddress::Unnumbered => None,
+                        RouterPeerAddress::Numbered { ip } => Some(ip.into()),
                     },
                     hold_time: r.hold_time() as u32,
                     idle_hold_time: r.idle_hold_time() as u32,

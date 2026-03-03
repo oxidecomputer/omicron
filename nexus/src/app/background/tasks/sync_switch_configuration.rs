@@ -50,9 +50,6 @@ use omicron_common::{
 use rdb_types::{Prefix, Prefix4, Prefix6};
 use serde_json::json;
 use sled_agent_client::types::HostPortConfig;
-use sled_agent_types::early_networking::BfdPeerConfig;
-use sled_agent_types::early_networking::BgpConfig as SledBgpConfig;
-use sled_agent_types::early_networking::BgpPeerConfig as SledBgpPeerConfig;
 use sled_agent_types::early_networking::EarlyNetworkConfigBody;
 use sled_agent_types::early_networking::EarlyNetworkConfigEnvelope;
 use sled_agent_types::early_networking::ImportExportPolicy;
@@ -66,6 +63,13 @@ use sled_agent_types::early_networking::SwitchSlot;
 use sled_agent_types::early_networking::TxEqConfig;
 use sled_agent_types::early_networking::UplinkAddressConfig;
 use sled_agent_types::early_networking::WriteNetworkConfigRequest;
+use sled_agent_types::early_networking::{BfdPeerConfig, SpecifiedIpNet};
+use sled_agent_types::early_networking::{
+    BgpConfig as SledBgpConfig, UplinkAddress,
+};
+use sled_agent_types::early_networking::{
+    BgpPeerConfig as SledBgpPeerConfig, RouterPeerAddress, UnspecifiedIpError,
+};
 use slog_error_chain::InlineErrorChain;
 use std::{
     collections::{HashMap, HashSet, hash_map::Entry},
@@ -1107,7 +1111,15 @@ impl BackgroundTask for SwitchPortSettingsManager {
                             .iter()
                             .map(|a|
                                  UplinkAddressConfig {
-                                     address: if a.address.addr().is_unspecified() {None} else {Some(a.address)},
+                                     // TODO-john stronger type on a.address?
+                                     address: match SpecifiedIpNet::try_from(a.address) {
+                                         Ok(ip_net) => UplinkAddress::Address {
+                                             ip_net,
+                                         },
+                                         Err(UnspecifiedIpError) => {
+                                             UplinkAddress::LinkLocal
+                                         }
+                                     },
                                      vlan_id: a.vlan_id
                                  }
                             ).collect(),
@@ -1160,11 +1172,14 @@ impl BackgroundTask for SwitchPortSettingsManager {
                     ;
 
                     for peer in port_config.bgp_peers.iter_mut() {
-                        // For unnumbered peers (addr is UNSPECIFIED), pass None
-                        let peer_addr_for_lookup = if peer.addr.is_unspecified() {
-                            None
-                        } else {
-                            Some(IpNetwork::from(peer.addr))
+                        // For unnumbered peers, pass None
+                        //
+                        // TODO-john stronger type?
+                        let peer_addr_for_lookup = match peer.addr {
+                            RouterPeerAddress::Unnumbered => None,
+                            RouterPeerAddress::Numbered { ip } => {
+                                Some(IpNetwork::from(IpAddr::from(ip)))
+                            }
                         };
 
                         peer.communities = match self
@@ -1724,10 +1739,10 @@ fn uplinks(
                 .addresses
                 .iter()
                 .map(|a| UplinkAddressConfig {
-                    address: if a.address.addr().is_unspecified() {
-                        None
-                    } else {
-                        Some(a.address)
+                    // TODO-john stronger type on a.address?
+                    address: match SpecifiedIpNet::try_from(a.address) {
+                        Ok(ip_net) => UplinkAddress::Address { ip_net },
+                        Err(UnspecifiedIpError) => UplinkAddress::LinkLocal,
                     },
                     vlan_id: a.vlan_id,
                 })

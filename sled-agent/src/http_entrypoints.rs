@@ -78,7 +78,7 @@ use trust_quorum_types::messages::{
 use trust_quorum_types::status::{CommitStatus, CoordinatorStatus, NodeStatus};
 
 // Fixed identifiers for prior versions only
-use sled_agent_types_versions::{v1, v20, v25, v26};
+use sled_agent_types_versions::{v1, v20, v25, v26, v28};
 use sled_diagnostics::{
     SledDiagnosticsCommandHttpOutput, SledDiagnosticsQueryOutput,
 };
@@ -957,6 +957,7 @@ impl SledAgentApi for SledAgentImpl {
         //
         // Use shorter names so rustfmt doesn't give up on this function.
         use v20::early_networking::EarlyNetworkConfigBody as BodyV20;
+        use v26::early_networking::EarlyNetworkConfigBody as BodyV26;
         type LatestEnvelope = EarlyNetworkConfigEnvelope;
 
         let sa = rqctx.context();
@@ -972,7 +973,7 @@ impl SledAgentApi for SledAgentImpl {
 
                 let config = match config {
                     Some(config) => {
-                        let body: BodyV20 =
+                        let latest_version_body =
                             LatestEnvelope::deserialize_from_bootstore(&config)
                                 .and_then(|envelope| {
                                     envelope.deserialize_body()
@@ -983,8 +984,9 @@ impl SledAgentApi for SledAgentImpl {
                                          early network config: {}",
                                         InlineErrorChain::new(&err),
                                     ))
-                                })?
-                                .into();
+                                })?;
+                        let body =
+                            BodyV20::from(BodyV26::from(latest_version_body));
                         v20::early_networking::EarlyNetworkConfig {
                             generation: config.generation,
                             schema_version: BodyV20::SCHEMA_VERSION,
@@ -1002,6 +1004,26 @@ impl SledAgentApi for SledAgentImpl {
                 Ok(HttpResponseOk(config))
             })
             .await
+    }
+
+    async fn write_network_bootstore_config_v28(
+        rqctx: RequestContext<Self::Context>,
+        body: TypedBody<v28::early_networking::WriteNetworkConfigRequest>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        let sa = rqctx.context();
+        let bs = sa.bootstore();
+        let body = body.into_inner();
+        let config = EarlyNetworkConfigEnvelope::from(&body.body)
+            .serialize_to_bootstore_with_generation(body.generation);
+
+        bs.update_network_config(config).await.map_err(|e| {
+            HttpError::for_internal_error(format!(
+                "failed to write updated config to boot store: {}",
+                InlineErrorChain::new(&e),
+            ))
+        })?;
+
+        Ok(HttpResponseUpdatedNoContent())
     }
 
     async fn write_network_bootstore_config_v26(

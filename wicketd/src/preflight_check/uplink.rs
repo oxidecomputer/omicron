@@ -28,6 +28,7 @@ use oxnet::IpNet;
 use sled_agent_types::early_networking::PortFec as OmicronPortFec;
 use sled_agent_types::early_networking::PortSpeed as OmicronPortSpeed;
 use sled_agent_types::early_networking::SwitchSlot;
+use sled_agent_types::early_networking::UplinkAddress;
 use slog::Logger;
 use slog::error;
 use slog::o;
@@ -377,7 +378,7 @@ fn add_steps_for_single_local_uplink_preflight_check<'a>(
                     'waiting_for_addr: loop {
                         match addr.address {
                             // When we are using numbered uplinks
-                            Some(uplink_cidr) => {
+                            UplinkAddress::Address { ip_net: uplink_cidr } => {
                                 let ipadm_out = match execute_command(&[
                                     IPADM,
                                     "show-addr",
@@ -409,7 +410,7 @@ fn add_steps_for_single_local_uplink_preflight_check<'a>(
                                 }
                             }
                             // unnumbered uplinks
-                            None => {
+                            UplinkAddress::LinkLocal => {
                                 // look for a new unnumbered uplink
                                 let new_count = match execute_command(&[
                                     IPADM,
@@ -837,7 +838,11 @@ fn build_port_settings(
 
     let mut port_settings = PortSettings { links: HashMap::new() };
 
-    let addrs = uplink.addresses.iter().map(|a| a.addr()).collect();
+    let addrs = uplink
+        .addresses
+        .iter()
+        .map(|a| a.address.addr_squashing_link_local_to_unspecified())
+        .collect();
 
     port_settings.links.insert(
         link_id.to_string(),
