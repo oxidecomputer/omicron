@@ -78,6 +78,7 @@ api_versions!([
     // |  date-based version should be at the top of the list.
     // v
     // (next_yyyy_mm_dd_nn, IDENT),
+    (2026_03_02_00, ADD_TIME_FIELDS_TO_USERS),
     (2026_02_25_00, SET_TARGET_RELEASE_UPDATE_RECOVERY),
     (2026_02_19_00, REMOVE_SLED_ADD),
     (2026_02_13_01, BGP_UNNUMBERED_PEERS),
@@ -670,23 +671,63 @@ pub trait NexusExternalApi {
         method = GET,
         path = "/v1/system/users",
         tags = ["system/silos"],
+        versions = VERSION_ADD_TIME_FIELDS_TO_USERS..,
     }]
     async fn silo_user_list(
         rqctx: RequestContext<Self::Context>,
         query_params: Query<PaginatedById<latest::silo::SiloSelector>>,
     ) -> Result<HttpResponseOk<ResultsPage<latest::user::User>>, HttpError>;
 
+    /// List built-in (system) users in silo
+    #[endpoint {
+        operation_id = "silo_user_list",
+        method = GET,
+        path = "/v1/system/users",
+        tags = ["system/silos"],
+        versions = ..VERSION_ADD_TIME_FIELDS_TO_USERS,
+    }]
+    async fn silo_user_list_v2025_11_20_00(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<PaginatedById<latest::silo::SiloSelector>>,
+    ) -> Result<HttpResponseOk<ResultsPage<v2025_11_20_00::user::User>>, HttpError> {
+        Self::silo_user_list(rqctx, query_params).await.map(|HttpResponseOk(page)| {
+            HttpResponseOk(ResultsPage {
+                items: page.items.into_iter().map(Into::into).collect(),
+                next_page: page.next_page,
+            })
+        })
+    }
+
     /// Fetch built-in (system) user
     #[endpoint {
         method = GET,
         path = "/v1/system/users/{user_id}",
         tags = ["system/silos"],
+        versions = VERSION_ADD_TIME_FIELDS_TO_USERS..,
     }]
     async fn silo_user_view(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<latest::user::UserParam>,
         query_params: Query<latest::silo::SiloSelector>,
     ) -> Result<HttpResponseOk<latest::user::User>, HttpError>;
+
+    /// Fetch built-in (system) user
+    #[endpoint {
+        operation_id = "silo_user_view",
+        method = GET,
+        path = "/v1/system/users/{user_id}",
+        tags = ["system/silos"],
+        versions = ..VERSION_ADD_TIME_FIELDS_TO_USERS,
+    }]
+    async fn silo_user_view_v2025_11_20_00(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::user::UserParam>,
+        query_params: Query<latest::silo::SiloSelector>,
+    ) -> Result<HttpResponseOk<v2025_11_20_00::user::User>, HttpError> {
+        Self::silo_user_view(rqctx, path_params, query_params)
+            .await
+            .map(|HttpResponseOk(u)| HttpResponseOk(u.into()))
+    }
 
     // Silo identity providers
 
@@ -755,12 +796,35 @@ pub trait NexusExternalApi {
         method = POST,
         path = "/v1/system/identity-providers/local/users",
         tags = ["system/silos"],
+        versions = VERSION_ADD_TIME_FIELDS_TO_USERS..,
     }]
     async fn local_idp_user_create(
         rqctx: RequestContext<Self::Context>,
         query_params: Query<latest::silo::SiloSelector>,
         new_user_params: TypedBody<latest::user::UserCreate>,
     ) -> Result<HttpResponseCreated<latest::user::User>, HttpError>;
+
+    /// Create user
+    ///
+    /// Users can only be created in Silos with `provision_type` == `Fixed`.
+    /// Otherwise, Silo users are just-in-time (JIT) provisioned when a user
+    /// first logs in using an external Identity Provider.
+    #[endpoint {
+        operation_id = "local_idp_user_create",
+        method = POST,
+        path = "/v1/system/identity-providers/local/users",
+        tags = ["system/silos"],
+        versions = ..VERSION_ADD_TIME_FIELDS_TO_USERS,
+    }]
+    async fn local_idp_user_create_v2025_11_20_00(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<latest::silo::SiloSelector>,
+        new_user_params: TypedBody<latest::user::UserCreate>,
+    ) -> Result<HttpResponseCreated<v2025_11_20_00::user::User>, HttpError> {
+        Self::local_idp_user_create(rqctx, query_params, new_user_params)
+            .await
+            .map(|HttpResponseCreated(u)| HttpResponseCreated(u.into()))
+    }
 
     /// Delete user
     #[endpoint {
@@ -6461,22 +6525,61 @@ pub trait NexusExternalApi {
         method = GET,
         path = "/v1/users",
         tags = ["silos"],
+        versions = VERSION_ADD_TIME_FIELDS_TO_USERS..,
     }]
     async fn user_list(
         rqctx: RequestContext<Self::Context>,
         query_params: Query<PaginatedById<latest::user::OptionalGroupSelector>>,
     ) -> Result<HttpResponseOk<ResultsPage<latest::user::User>>, HttpError>;
 
+    /// List users
+    #[endpoint {
+        operation_id = "user_list",
+        method = GET,
+        path = "/v1/users",
+        tags = ["silos"],
+        versions = ..VERSION_ADD_TIME_FIELDS_TO_USERS,
+    }]
+    async fn user_list_v2025_11_20_00(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<PaginatedById<latest::user::OptionalGroupSelector>>,
+    ) -> Result<HttpResponseOk<ResultsPage<v2025_11_20_00::user::User>>, HttpError> {
+        Self::user_list(rqctx, query_params).await.map(|HttpResponseOk(page)| {
+            HttpResponseOk(ResultsPage {
+                items: page.items.into_iter().map(Into::into).collect(),
+                next_page: page.next_page,
+            })
+        })
+    }
+
     /// Fetch user
     #[endpoint {
         method = GET,
         path = "/v1/users/{user_id}",
         tags = ["silos"],
+        versions = VERSION_ADD_TIME_FIELDS_TO_USERS..,
     }]
     async fn user_view(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<latest::path_params::UserPath>,
     ) -> Result<HttpResponseOk<latest::user::User>, HttpError>;
+
+    /// Fetch user
+    #[endpoint {
+        operation_id = "user_view",
+        method = GET,
+        path = "/v1/users/{user_id}",
+        tags = ["silos"],
+        versions = ..VERSION_ADD_TIME_FIELDS_TO_USERS,
+    }]
+    async fn user_view_v2025_11_20_00(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::path_params::UserPath>,
+    ) -> Result<HttpResponseOk<v2025_11_20_00::user::User>, HttpError> {
+        Self::user_view(rqctx, path_params)
+            .await
+            .map(|HttpResponseOk(u)| HttpResponseOk(u.into()))
+    }
 
     /// List user's access tokens
     #[endpoint {
@@ -6529,22 +6632,61 @@ pub trait NexusExternalApi {
         method = GET,
         path = "/v1/groups",
         tags = ["silos"],
+        versions = VERSION_ADD_TIME_FIELDS_TO_USERS..,
     }]
     async fn group_list(
         rqctx: RequestContext<Self::Context>,
         query_params: Query<PaginatedById>,
     ) -> Result<HttpResponseOk<ResultsPage<latest::user::Group>>, HttpError>;
 
+    /// List groups
+    #[endpoint {
+        operation_id = "group_list",
+        method = GET,
+        path = "/v1/groups",
+        tags = ["silos"],
+        versions = ..VERSION_ADD_TIME_FIELDS_TO_USERS,
+    }]
+    async fn group_list_v2025_11_20_00(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<PaginatedById>,
+    ) -> Result<HttpResponseOk<ResultsPage<v2025_11_20_00::user::Group>>, HttpError> {
+        Self::group_list(rqctx, query_params).await.map(|HttpResponseOk(page)| {
+            HttpResponseOk(ResultsPage {
+                items: page.items.into_iter().map(Into::into).collect(),
+                next_page: page.next_page,
+            })
+        })
+    }
+
     /// Fetch group
     #[endpoint {
         method = GET,
         path = "/v1/groups/{group_id}",
         tags = ["silos"],
+        versions = VERSION_ADD_TIME_FIELDS_TO_USERS..,
     }]
     async fn group_view(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<latest::path_params::GroupPath>,
     ) -> Result<HttpResponseOk<latest::user::Group>, HttpError>;
+
+    /// Fetch group
+    #[endpoint {
+        operation_id = "group_view",
+        method = GET,
+        path = "/v1/groups/{group_id}",
+        tags = ["silos"],
+        versions = ..VERSION_ADD_TIME_FIELDS_TO_USERS,
+    }]
+    async fn group_view_v2025_11_20_00(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::path_params::GroupPath>,
+    ) -> Result<HttpResponseOk<v2025_11_20_00::user::Group>, HttpError> {
+        Self::group_view(rqctx, path_params)
+            .await
+            .map(|HttpResponseOk(u)| HttpResponseOk(u.into()))
+    }
 
     // Built-in (system) users
 
@@ -6577,21 +6719,59 @@ pub trait NexusExternalApi {
         method = GET,
         path = "/v1/me",
         tags = ["current-user"],
+        versions = VERSION_ADD_TIME_FIELDS_TO_USERS..,
     }]
     async fn current_user_view(
         rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<latest::user::CurrentUser>, HttpError>;
+
+    /// Fetch user for current session
+    #[endpoint {
+        operation_id = "current_user_view",
+        method = GET,
+        path = "/v1/me",
+        tags = ["current-user"],
+        versions = ..VERSION_ADD_TIME_FIELDS_TO_USERS,
+    }]
+    async fn current_user_view_v2025_11_20_00(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<v2025_11_20_00::user::CurrentUser>, HttpError> {
+        Self::current_user_view(rqctx)
+            .await
+            .map(|HttpResponseOk(u)| HttpResponseOk(u.into()))
+    }
 
     /// Fetch current user's groups
     #[endpoint {
         method = GET,
         path = "/v1/me/groups",
         tags = ["current-user"],
+        versions = VERSION_ADD_TIME_FIELDS_TO_USERS..,
     }]
     async fn current_user_groups(
         rqctx: RequestContext<Self::Context>,
         query_params: Query<PaginatedById>,
     ) -> Result<HttpResponseOk<ResultsPage<latest::user::Group>>, HttpError>;
+
+    /// Fetch current user's groups
+    #[endpoint {
+        operation_id = "current_user_groups",
+        method = GET,
+        path = "/v1/me/groups",
+        tags = ["current-user"],
+        versions = ..VERSION_ADD_TIME_FIELDS_TO_USERS,
+    }]
+    async fn current_user_groups_v2025_11_20_00(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<PaginatedById>,
+    ) -> Result<HttpResponseOk<ResultsPage<v2025_11_20_00::user::Group>>, HttpError> {
+        Self::current_user_groups(rqctx, query_params).await.map(|HttpResponseOk(page)| {
+            HttpResponseOk(ResultsPage {
+                items: page.items.into_iter().map(Into::into).collect(),
+                next_page: page.next_page,
+            })
+        })
+    }
 
     // Per-user SSH public keys
 

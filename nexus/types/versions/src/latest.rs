@@ -509,11 +509,11 @@ pub mod ssh_key {
 }
 
 pub mod user {
-    pub use crate::v2025_11_20_00::user::CurrentUser;
-    pub use crate::v2025_11_20_00::user::Group;
+    pub use crate::v2026_03_02_00::user::CurrentUser;
+    pub use crate::v2026_03_02_00::user::Group;
     pub use crate::v2025_11_20_00::user::OptionalGroupSelector;
     pub use crate::v2025_11_20_00::user::Password;
-    pub use crate::v2025_11_20_00::user::User;
+    pub use crate::v2026_03_02_00::user::User;
     pub use crate::v2025_11_20_00::user::UserBuiltin;
     pub use crate::v2025_11_20_00::user::UserBuiltinCreate;
     pub use crate::v2025_11_20_00::user::UserBuiltinSelector;
