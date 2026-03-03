@@ -2953,6 +2953,10 @@ table! {
 
 // Allow multicast tables to appear together for NOT EXISTS subqueries
 allow_tables_to_appear_in_same_query!(multicast_group, multicast_group_member);
+allow_tables_to_appear_in_same_query!(
+    multicast_group,
+    underlay_multicast_group
+);
 
 allow_tables_to_appear_in_same_query!(user_data_export, snapshot, image);
 
