@@ -32,7 +32,7 @@ pub enum EarlyNetworkConfigEnvelopeError {
 }
 
 impl EarlyNetworkConfigEnvelope {
-    /// Seriealize the contents of this envelope into a bootstore-suitable type,
+    /// Serialize the contents of this envelope into a bootstore-suitable type,
     /// tagged with the given `generation`.
     pub fn serialize_to_bootstore_with_generation(
         &self,
