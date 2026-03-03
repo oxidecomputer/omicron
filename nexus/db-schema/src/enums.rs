@@ -70,6 +70,7 @@ define_enums! {
     InvConfigReconcilerStatusKindEnum => "inv_config_reconciler_status_kind",
     InvZoneImageSourceEnum => "inv_zone_image_source",
     InvZoneManifestSourceEnum => "inv_zone_manifest_source",
+    InvZpoolHealthEnum => "inv_zpool_health",
     IpAttachStateEnum => "ip_attach_state",
     IpKindEnum => "ip_kind",
     IpPoolReservationTypeEnum => "ip_pool_reservation_type",

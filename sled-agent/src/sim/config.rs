@@ -7,6 +7,7 @@
 use crate::updates::ConfigUpdates;
 use camino::Utf8Path;
 use dropshot::ConfigDropshot;
+use illumos_utils::zpool::ZpoolHealth;
 use omicron_uuid_kinds::SledUuid;
 use serde::Deserialize;
 use serde::Serialize;
@@ -43,6 +44,8 @@ pub enum SimMode {
 pub struct ConfigZpool {
     /// The size of the Zpool in bytes.
     pub size: u64,
+    /// The health status the zpool will report to be in.
+    pub health: ZpoolHealth,
 }
 
 /// Configuration describing simulated storage.
@@ -137,7 +140,10 @@ impl Config {
             ZpoolConfig::None => vec![],
 
             ZpoolConfig::TenVirtualU2s => {
-                vec![ConfigZpool { size: 1 << 40 }; 10]
+                vec![
+                    ConfigZpool { size: 1 << 40, health: ZpoolHealth::Online };
+                    10
+                ]
             }
         };
 

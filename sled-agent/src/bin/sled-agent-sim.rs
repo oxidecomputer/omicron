@@ -12,6 +12,7 @@ use clap::Parser;
 use dropshot::ConfigDropshot;
 use dropshot::ConfigLogging;
 use dropshot::ConfigLoggingLevel;
+use illumos_utils::zpool::ZpoolHealth;
 use omicron_common::api::internal::nexus::Certificate;
 use omicron_common::cmd::CmdError;
 use omicron_common::cmd::fatal;
@@ -106,7 +107,13 @@ async fn do_run() -> Result<(), CmdError> {
         },
         storage: ConfigStorage {
             // Create 10 "virtual" U.2s, with 1 TB of storage.
-            zpools: vec![ConfigZpool { size: 1 << 40 }; 10],
+            zpools: vec![
+                ConfigZpool {
+                    size: 1 << 40,
+                    health: ZpoolHealth::Online
+                };
+                10
+            ],
             ip: (*args.sled_agent_addr.ip()).into(),
         },
         hardware: ConfigHardware {
