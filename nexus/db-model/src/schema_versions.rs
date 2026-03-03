@@ -28,7 +28,10 @@ static KNOWN_VERSIONS: LazyLock<Vec<KnownVersion>> = LazyLock::new(|| {
         // |  leaving the first copy as an example for the next person.
         // v
         // KnownVersion::new(next_int, "unique-dirname-with-the-sql-files"),
-        KnownVersion::new(235, "remove-virtual-provisioning-time-modified-default"),
+        KnownVersion::new(
+            235,
+            "remove-virtual-provisioning-time-modified-default",
+        ),
         KnownVersion::new(234, "inv-zpool-health"),
         KnownVersion::new(233, "measurement-blueprints"),
         KnownVersion::new(232, "index-backfill-batch-size"),
