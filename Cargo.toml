@@ -466,7 +466,7 @@ omicron-ddm-admin-client = { path = "clients/ddm-admin-client" }
 datatest-stable = "0.3.2"
 db-macros = { path = "nexus/db-macros" }
 debug-ignore = "1.0.5"
-derive_more = "0.99.20"
+derive_more = "2.1.1"
 derive-where = "1.5.0"
 dev-tools-common = { path = "dev-tools/common" }
 dice-verifier = { git = "https://github.com/oxidecomputer/dice-util", branch = "main", default-features = false }
