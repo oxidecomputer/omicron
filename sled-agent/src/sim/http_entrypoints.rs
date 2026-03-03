@@ -433,7 +433,7 @@ impl SledAgentApi for SledAgentSimImpl {
         }))
     }
 
-    async fn write_network_bootstore_config(
+    async fn write_network_bootstore_config_v25(
         rqctx: RequestContext<Self::Context>,
         body: TypedBody<v25::early_networking::WriteNetworkConfigRequest>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {

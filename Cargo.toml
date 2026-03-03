@@ -477,10 +477,10 @@ digest = "0.10.7"
 dns-server = { path = "dns-server" }
 dns-server-api = { path = "dns-server-api" }
 dns-service-client = { path = "clients/dns-service-client" }
-dpd-client = { git = "https://github.com/oxidecomputer/dendrite", rev = "37992295b5dc708d8f120cee805d67418741b556" }
+dpd-client = { git = "https://github.com/oxidecomputer/dendrite", rev = "f20f786e67c86388dfaaf0ef3aa9d2693dfe1da4" }
 dropshot = { version = "0.16.6", features = [ "usdt-probes" ] }
-dropshot-api-manager = "0.4.0"
-dropshot-api-manager-types = "0.4.0"
+dropshot-api-manager = "0.5.2"
+dropshot-api-manager-types = "0.5.2"
 dyn-clone = "1.0.20"
 either = "1.15.0"
 ereport-types = { path = "ereport/types" }
@@ -569,6 +569,7 @@ key-manager = { path = "key-manager" }
 key-manager-types = { path = "key-manager/types" }
 kstat-rs = "0.2.4"
 libc = "0.2.174"
+linkme = "0.3"
 libipcc = { git = "https://github.com/oxidecomputer/ipcc-rs", rev = "524eb8f125003dff50b9703900c6b323f00f9e1b" }
 libfalcon = { git = "https://github.com/oxidecomputer/falcon", branch = "main" }
 libnvme = { git = "https://github.com/oxidecomputer/libnvme", rev = "dd5bb221d327a1bc9287961718c3c10d6bd37da0" }

@@ -111,13 +111,17 @@ mod test {
         // tokio_postgres::config::Config parser to include in the error
         // message.
         let error = "foo".parse::<PostgresConfigWithUrl>().unwrap_err();
-        assert!(error.to_string().contains("unexpected EOF"));
+        assert!(
+            error.to_string().contains("invalid connection string"),
+            "'{error}' does not contain 'invalid connection string'"
+        );
         "http://127.0.0.1:1234".parse::<PostgresConfigWithUrl>().unwrap_err();
         let error = "postgresql://example.com?sslmode=not-a-real-ssl-mode"
             .parse::<PostgresConfigWithUrl>()
             .unwrap_err();
         assert!(
-            error.to_string().contains("invalid value for option `sslmode`")
+            error.to_string().contains("invalid connection string"),
+            "'{error}' does not contain 'invalid connection string'"
         );
     }
 

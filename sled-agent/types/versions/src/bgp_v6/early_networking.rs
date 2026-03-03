@@ -39,7 +39,7 @@ impl From<EarlyNetworkConfig> for bootstore::NetworkConfig {
     fn from(value: EarlyNetworkConfig) -> Self {
         // We're serializing in-memory; this can only fail if
         // `EarlyNetworkConfig` contains types that can't be represented as
-        // JSON, which (a) should never happened and (b) we should catch
+        // JSON, which (a) should never happen and (b) we should catch
         // immediately in tests.
         let blob = serde_json::to_vec(&value)
             .expect("EarlyNetworkConfig can always be serialized as JSON");
@@ -231,7 +231,7 @@ impl From<&'_ EarlyNetworkConfigBody> for EarlyNetworkConfigEnvelope {
             schema_version: EarlyNetworkConfigBody::SCHEMA_VERSION,
             // We're serializing in-memory; this can only fail if
             // `EarlyNetworkConfigBody` contains types that can't be represented
-            // as JSON, which (a) should never happened and (b) we should catch
+            // as JSON, which (a) should never happen and (b) we should catch
             // immediately in tests.
             body: serde_json::to_value(value)
                 .expect("EarlyNetworkConfigBody can be serialized as JSON"),

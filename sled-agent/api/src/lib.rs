@@ -836,12 +836,16 @@ pub trait SledAgentApi {
     // latest version does _not_ use the `latest::*` type alias to be a gentle
     // stumbling block toward this comment.
     // -------------------------------------------------------------------------
+
+    // As described above, this must not forward to newer versions; sled-agent
+    // must implement this by faithfully serializing the requested version.
     #[endpoint {
         method = PUT,
         path = "/network-bootstore-config",
         versions = VERSION_RACK_NETWORK_CONFIG_NOT_OPTIONAL..,
+        operation_id = "write_network_bootstore_config",
     }]
-    async fn write_network_bootstore_config(
+    async fn write_network_bootstore_config_v25(
         rqctx: RequestContext<Self::Context>,
         body: TypedBody<v25::early_networking::WriteNetworkConfigRequest>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
@@ -856,20 +860,26 @@ pub trait SledAgentApi {
         body: TypedBody<v24::early_networking::WriteNetworkConfigRequest>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
 
+    // As described above, this must not forward to newer versions; sled-agent
+    // must implement this by faithfully serializing the requested version.
     #[endpoint {
         method = PUT,
         path = "/network-bootstore-config",
         versions = VERSION_BGP_V6..VERSION_BOOTSTORE_VERSIONING,
+        operation_id = "write_network_bootstore_config",
     }]
     async fn write_network_bootstore_config_v20(
         rqctx: RequestContext<Self::Context>,
         body: TypedBody<v20::early_networking::EarlyNetworkConfig>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
 
+    // As described above, this must not forward to newer versions; sled-agent
+    // must implement this by faithfully serializing the requested version.
     #[endpoint {
         method = PUT,
         path = "/network-bootstore-config",
         versions = ..VERSION_BGP_V6,
+        operation_id = "write_network_bootstore_config",
     }]
     async fn write_network_bootstore_config_v1(
         rqctx: RequestContext<Self::Context>,

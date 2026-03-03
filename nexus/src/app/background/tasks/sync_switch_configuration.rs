@@ -1490,7 +1490,7 @@ impl BackgroundTask for SwitchPortSettingsManager {
                             key: NETWORK_KEY.into(),
                             generation,
                             // We're serializing an envelope (guaranteed to be
-                            // representable as JSON) to JSOn in memory, so this
+                            // representable as JSON) to JSON in memory, so this
                             // can't fail.
                             data: serde_json::to_value(&envelope).expect(
                                 "EarlyNetworkConfigEnvelope can be serialized \
