@@ -36,8 +36,8 @@
 //!    practice you must ensure that the conversion will not fail except in
 //!    cases where the rack truly cannot start up. Failure to convert here will
 //!    result in sled-agent rendering itself inoperable on startup, forever
-//!    logging whatever conversion error is being reported. We MUST ensure that
-//!    we can always convert old versions to new versions.
+//!    logging whatever conversion error is being reported. We MUST always be
+//!    able to convert old versions to new versions.
 //!
 //! 4. Update [`EarlyNetworkConfigEnvelope::deserialize_body()`] below, adding
 //!    your new version (via the `vN::early_networking::EarlyNetworkConfigBody`
