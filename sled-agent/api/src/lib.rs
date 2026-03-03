@@ -37,6 +37,7 @@ api_versions!([
     // |  example for the next person.
     // v
     // (next_int, IDENT),
+    (29, STRONGER_BGP_UNNUMBERED_TYPES),
     (28, MODIFY_SERVICES_IN_INVENTORY),
     (27, RENAME_SWITCH_LOCATION_TO_SWITCH_SLOT),
     (26, RACK_NETWORK_CONFIG_NOT_OPTIONAL),

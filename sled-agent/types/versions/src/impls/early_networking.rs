@@ -16,9 +16,11 @@ use crate::latest::early_networking::SwitchSlot;
 use crate::latest::early_networking::UplinkAddressConfig;
 use omicron_common::api::external;
 use oxnet::IpNet;
+use oxnet::IpNetParseError;
 use std::fmt;
 use std::net::IpAddr;
 use std::net::Ipv6Addr;
+use std::net::AddrParseError;
 use std::str::FromStr;
 
 impl BgpPeerConfig {
@@ -111,6 +113,54 @@ impl FromStr for RouterLifetimeConfig {
 impl std::fmt::Display for RouterLifetimeConfig {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.as_u16())
+    }
+}
+
+impl std::fmt::Display for SpecifiedIpNet {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.0.fmt(f)
+    }
+}
+
+impl std::fmt::Display for SpecifiedIpAddr {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.0.fmt(f)
+    }
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum SpecifiedIpNetParseError {
+    #[error("invalid IP net")]
+    IpNetParseError(#[from] IpNetParseError),
+    #[error(transparent)]
+    UnspecifiedIpError(#[from] UnspecifiedIpError),
+}
+
+impl FromStr for SpecifiedIpNet {
+    type Err = SpecifiedIpNetParseError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let ip = IpNet::from_str(s)?;
+        let addr = Self::try_from(ip)?;
+        Ok(addr)
+    }
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum SpecifiedIpAddrParseError {
+    #[error(transparent)]
+    AddrParseError(#[from] AddrParseError),
+    #[error(transparent)]
+    UnspecifiedIpError(#[from] UnspecifiedIpError),
+}
+
+impl FromStr for SpecifiedIpAddr {
+    type Err = SpecifiedIpAddrParseError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let ip = IpAddr::from_str(s)?;
+        let addr = Self::try_from(ip)?;
+        Ok(addr)
     }
 }
 

@@ -65,17 +65,22 @@ pub mod early_networking {
     pub use crate::v1::early_networking::TxEqConfig;
 
     pub use crate::v20::early_networking::BgpConfig;
-    pub use crate::v20::early_networking::BgpPeerConfig;
     pub use crate::v20::early_networking::MaxPathConfig;
     pub use crate::v20::early_networking::MaxPathConfigError;
-    pub use crate::v20::early_networking::PortConfig;
-    pub use crate::v20::early_networking::RackNetworkConfig;
     pub use crate::v20::early_networking::RouterLifetimeConfig;
     pub use crate::v20::early_networking::RouterLifetimeConfigError;
-    pub use crate::v20::early_networking::UplinkAddressConfig;
 
-    pub use crate::v26::early_networking::EarlyNetworkConfigBody;
-    pub use crate::v26::early_networking::WriteNetworkConfigRequest;
+    pub use crate::v29::early_networking::BgpPeerConfig;
+    pub use crate::v29::early_networking::EarlyNetworkConfigBody;
+    pub use crate::v29::early_networking::PortConfig;
+    pub use crate::v29::early_networking::RackNetworkConfig;
+    pub use crate::v29::early_networking::RouterPeerAddress;
+    pub use crate::v29::early_networking::SpecifiedIpAddr;
+    pub use crate::v29::early_networking::SpecifiedIpNet;
+    pub use crate::v29::early_networking::UnspecifiedIpError;
+    pub use crate::v29::early_networking::UplinkAddress;
+    pub use crate::v29::early_networking::UplinkAddressConfig;
+    pub use crate::v29::early_networking::WriteNetworkConfigRequest;
 }
 
 pub mod firewall_rules {
@@ -220,8 +225,9 @@ pub mod trust_quorum {
 }
 
 pub mod uplink {
-    pub use crate::v20::uplink::HostPortConfig;
     pub use crate::v20::uplink::SwitchPorts;
+
+    pub use crate::v26::uplink::HostPortConfig;
 }
 
 pub mod zone_bundle {
