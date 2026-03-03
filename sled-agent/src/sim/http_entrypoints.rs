@@ -81,11 +81,11 @@ use sled_agent_types::zone_bundle::{
     BundleUtilization, CleanupContext, CleanupContextUpdate, CleanupCount,
     ZoneBundleFilter, ZoneBundleId, ZoneBundleMetadata, ZonePathParam,
 };
-use sled_agent_types_versions::v24;
 use sled_hardware_types::BaseboardId;
 // Fixed identifiers for prior versions only
 use sled_agent_types_versions::v1;
 use sled_agent_types_versions::v20;
+use sled_agent_types_versions::v25;
 use sled_diagnostics::SledDiagnosticsQueryOutput;
 use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
@@ -430,9 +430,9 @@ impl SledAgentApi for SledAgentSimImpl {
         }))
     }
 
-    async fn write_network_bootstore_config_v24(
+    async fn write_network_bootstore_config_v25(
         rqctx: RequestContext<Self::Context>,
-        body: TypedBody<v24::early_networking::WriteNetworkConfigRequest>,
+        body: TypedBody<v25::early_networking::WriteNetworkConfigRequest>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
         let mut config =
             rqctx.context().bootstore_network_config.lock().unwrap();

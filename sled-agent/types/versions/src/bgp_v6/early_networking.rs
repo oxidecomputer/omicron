@@ -5,7 +5,7 @@
 //! Types for network setup required to bring up the control plane.
 
 use crate::v1::early_networking as v1;
-use crate::v24::early_networking::EarlyNetworkConfigEnvelope;
+use crate::v25::early_networking::EarlyNetworkConfigEnvelope;
 use bootstore::schemes::v0 as bootstore;
 use oxnet::{IpNet, Ipv6Net};
 use schemars::JsonSchema;

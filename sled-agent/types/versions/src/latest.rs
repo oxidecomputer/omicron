@@ -78,8 +78,8 @@ pub mod early_networking {
     pub use crate::v20::early_networking::UplinkAddressConfig;
     pub use crate::v20::early_networking::UplinkAddressConfigError;
 
-    pub use crate::v24::early_networking::EarlyNetworkConfigEnvelope;
-    pub use crate::v24::early_networking::WriteNetworkConfigRequest;
+    pub use crate::v25::early_networking::EarlyNetworkConfigEnvelope;
+    pub use crate::v25::early_networking::WriteNetworkConfigRequest;
 
     pub use crate::impls::early_networking::EarlyNetworkConfigEnvelopeError;
 }
@@ -122,7 +122,6 @@ pub mod inventory {
     pub use crate::v1::inventory::HostPhase2DesiredSlots;
     pub use crate::v1::inventory::InventoryDataset;
     pub use crate::v1::inventory::InventoryDisk;
-    pub use crate::v1::inventory::InventoryZpool;
     pub use crate::v1::inventory::ManifestBootInventory;
     pub use crate::v1::inventory::ManifestInventory;
     pub use crate::v1::inventory::ManifestNonBootInventory;
@@ -154,7 +153,8 @@ pub mod inventory {
     pub use crate::v16::inventory::ConfigReconcilerInventory;
     pub use crate::v16::inventory::SingleMeasurementInventory;
 
-    pub use crate::v22::inventory::Inventory;
+    pub use crate::v24::inventory::Inventory;
+    pub use crate::v24::inventory::InventoryZpool;
 
     pub use crate::impls::inventory::ManifestBootInventoryDisplay;
     pub use crate::impls::inventory::ManifestInventoryDisplay;

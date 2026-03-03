@@ -269,7 +269,7 @@ mod api_impl {
     use sled_agent_types::zone_bundle::ZonePathParam;
     use sled_agent_types_versions::v1;
     use sled_agent_types_versions::v20;
-    use sled_agent_types_versions::v24;
+    use sled_agent_types_versions::v25;
     use sled_diagnostics::SledDiagnosticsQueryOutput;
     use std::collections::BTreeMap;
     use std::collections::BTreeSet;
@@ -769,9 +769,9 @@ mod api_impl {
             unimplemented!()
         }
 
-        async fn write_network_bootstore_config_v24(
+        async fn write_network_bootstore_config_v25(
             _rqctx: RequestContext<Self::Context>,
-            _body: TypedBody<v24::early_networking::WriteNetworkConfigRequest>,
+            _body: TypedBody<v25::early_networking::WriteNetworkConfigRequest>,
         ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
             unimplemented!()
         }

@@ -78,7 +78,7 @@ use trust_quorum_types::messages::{
 use trust_quorum_types::status::{CommitStatus, CoordinatorStatus, NodeStatus};
 
 // Fixed identifiers for prior versions only
-use sled_agent_types_versions::{v1, v20, v24};
+use sled_agent_types_versions::{v1, v20, v25};
 use sled_diagnostics::{
     SledDiagnosticsCommandHttpOutput, SledDiagnosticsQueryOutput,
 };
@@ -1003,9 +1003,9 @@ impl SledAgentApi for SledAgentImpl {
             .await
     }
 
-    async fn write_network_bootstore_config_v24(
+    async fn write_network_bootstore_config_v25(
         rqctx: RequestContext<Self::Context>,
-        body: TypedBody<v24::early_networking::WriteNetworkConfigRequest>,
+        body: TypedBody<v25::early_networking::WriteNetworkConfigRequest>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
         let sa = rqctx.context();
         let bs = sa.bootstore();

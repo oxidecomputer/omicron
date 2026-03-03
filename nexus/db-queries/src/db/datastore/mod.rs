@@ -622,6 +622,7 @@ mod test {
     use chrono::{Duration, Utc};
     use futures::StreamExt;
     use futures::stream;
+    use illumos_utils::zpool::ZpoolHealth;
     use nexus_config::RegionAllocationStrategy;
     use nexus_db_fixed_data::silo::DEFAULT_SILO;
     use nexus_db_lookup::LookupPath;
@@ -866,6 +867,10 @@ mod test {
         ByteCount::from_gibibytes_u32(100)
     }
 
+    fn test_zpool_default_health() -> ZpoolHealth {
+        ZpoolHealth::Online
+    }
+
     const TEST_VENDOR: &str = "test-vendor";
     const TEST_MODEL: &str = "test-model";
 
@@ -952,6 +957,7 @@ mod test {
             id: zpool_id.into(),
             sled_id: to_db_typed_uuid(sled_id),
             total_size: test_zpool_size().into(),
+            health: test_zpool_default_health().into(),
         };
         diesel::insert_into(dsl::inv_zpool)
             .values(inv_pool)
