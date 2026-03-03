@@ -106,8 +106,8 @@ impl NoopConvertInfo {
                 .boot_inventory
                 .as_ref()
             {
-                Ok(zm) => (
-                    Some(zm),
+                Ok(manifest) => (
+                    Some(manifest),
                     "Unexpected error with measurement manifest".to_owned(),
                 ),
                 Err(message) => (None, message.to_owned()),
