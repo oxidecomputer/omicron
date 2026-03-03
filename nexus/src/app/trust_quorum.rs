@@ -9,7 +9,7 @@ use nexus_auth::context::OpContext;
 use nexus_types::trust_quorum::{
     IsLrtqUpgrade, ProposedTrustQuorumConfig, TrustQuorumConfig,
 };
-use omicron_common::api::external::{Error, LookupType};
+use omicron_common::api::external::Error;
 use omicron_uuid_kinds::{GenericUuid, RackUuid, SledUuid};
 use sled_hardware_types::BaseboardId;
 use std::collections::BTreeSet;
@@ -95,11 +95,7 @@ impl super::Nexus {
         // Look up the sled to get its rack_id and baseboard_id
         let (.., sled) = self.sled_lookup(opctx, &sled_id)?.fetch().await?;
         let rack_id = RackUuid::from_untyped_uuid(sled.rack_id);
-        let authz_tq = authz::TrustQuorumConfig::new(authz::Rack::new(
-            authz::FLEET,
-            sled.rack_id,
-            LookupType::ById(sled.rack_id),
-        ));
+        let authz_tq = authz::TrustQuorumConfig::for_rack_id(rack_id);
         let sled_to_remove = BaseboardId {
             part_number: sled.part_number().to_string(),
             serial_number: sled.serial_number().to_string(),
@@ -163,11 +159,7 @@ impl super::Nexus {
         opctx: &OpContext,
         rack_id: RackUuid,
     ) -> Result<TrustQuorumConfig, Error> {
-        let authz_tq = authz::TrustQuorumConfig::new(authz::Rack::new(
-            authz::FLEET,
-            rack_id.into_untyped_uuid(),
-            LookupType::ById(rack_id.into_untyped_uuid()),
-        ));
+        let authz_tq = authz::TrustQuorumConfig::for_rack_id(rack_id);
         let Some(latest_config) = self
             .db_datastore
             .tq_get_latest_config(opctx, authz_tq.clone())
@@ -212,11 +204,7 @@ impl super::Nexus {
     ) -> Result<Epoch, Error> {
         // We are only operating on a single rack here.
         let rack_id = RackUuid::from_untyped_uuid(self.rack_id());
-        let authz_tq = authz::TrustQuorumConfig::new(authz::Rack::new(
-            authz::FLEET,
-            rack_id.into_untyped_uuid(),
-            LookupType::ById(rack_id.into_untyped_uuid()),
-        ));
+        let authz_tq = authz::TrustQuorumConfig::for_rack_id(rack_id);
 
         // Let's first see if a configuration exists.
         let new_epoch = if let Some(latest_config) = self

@@ -152,7 +152,6 @@ use omicron_common::api::external;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Generation;
 use omicron_common::api::external::InstanceState;
-use omicron_common::api::external::LookupType;
 use omicron_common::api::external::MacAddr;
 use omicron_uuid_kinds::CollectionUuid;
 use omicron_uuid_kinds::DatasetUuid;
@@ -8167,11 +8166,7 @@ async fn cmd_db_trust_quorum_list_configs(
     }
 
     let limit = fetch_opts.fetch_limit;
-    let authz_tq = authz::TrustQuorumConfig::new(authz::Rack::new(
-        authz::FLEET,
-        args.rack_id.into_untyped_uuid(),
-        LookupType::ById(args.rack_id.into_untyped_uuid()),
-    ));
+    let authz_tq = authz::TrustQuorumConfig::for_rack_id(args.rack_id);
     let configs = datastore
         .tq_list_config(opctx, authz_tq, &first_page::<i64>(limit))
         .await

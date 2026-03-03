@@ -23,7 +23,6 @@ use nexus_types::trust_quorum::{
     TrustQuorumMemberState,
 };
 use omicron_common::address::{Ipv6Subnet, RACK_PREFIX, get_64_subnet};
-use omicron_common::api::external::LookupType;
 use omicron_uuid_kinds::{GenericUuid, RackUuid, SledUuid};
 use parallel_task_set::ParallelTaskSet;
 use rand::seq::SliceRandom;
@@ -213,11 +212,7 @@ async fn drive_reconfiguration(
     rack_id: RackUuid,
     epoch: Epoch,
 ) -> Result<Status, Error> {
-    let authz_tq = authz::TrustQuorumConfig::new(authz::Rack::new(
-        authz::FLEET,
-        rack_id.into_untyped_uuid(),
-        LookupType::ById(rack_id.into_untyped_uuid()),
-    ));
+    let authz_tq = authz::TrustQuorumConfig::for_rack_id(rack_id);
     let Some(config) = datastore
         .tq_get_config(&opctx, authz_tq.clone(), epoch)
         .await
@@ -405,11 +400,8 @@ async fn commit(
 
     if !acked.is_empty() {
         // Write state back to DB
-        let authz_tq = authz::TrustQuorumConfig::new(authz::Rack::new(
-            authz::FLEET,
-            nexus_config.rack_id.into_untyped_uuid(),
-            LookupType::ById(nexus_config.rack_id.into_untyped_uuid()),
-        ));
+        let authz_tq =
+            authz::TrustQuorumConfig::for_rack_id(nexus_config.rack_id);
         let state = datastore
             .tq_update_commit_status(
                 &opctx,
@@ -488,11 +480,7 @@ async fn allocate_subnets_and_start_sled_agents(
 
     // Retrieve the last committed configuration so we can diff members and see
     // who was added.
-    let authz_tq = authz::TrustQuorumConfig::new(authz::Rack::new(
-        authz::FLEET,
-        rack_id.into_untyped_uuid(),
-        LookupType::ById(rack_id.into_untyped_uuid()),
-    ));
+    let authz_tq = authz::TrustQuorumConfig::for_rack_id(rack_id);
     let Some(last_committed_config) =
         datastore.tq_get_config(&opctx, authz_tq, last_committed_epoch).await?
     else {

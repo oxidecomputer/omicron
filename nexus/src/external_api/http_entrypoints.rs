@@ -92,7 +92,6 @@ use omicron_common::api::external::InstanceNetworkInterface;
 use omicron_common::api::external::InternalContext;
 use omicron_common::api::external::LldpLinkConfig;
 use omicron_common::api::external::LldpNeighbor;
-use omicron_common::api::external::LookupType;
 use omicron_common::api::external::LoopbackAddress;
 use omicron_common::api::external::NameOrId;
 use omicron_common::api::external::Probe;
@@ -6362,11 +6361,9 @@ impl NexusExternalApi for NexusExternalApiImpl {
         audit_and_time(&rqctx, |opctx, nexus| async move {
             let req = req.into_inner();
             let rack_id = path_params.into_inner().rack_id;
-            let authz_tq = authz::TrustQuorumConfig::new(authz::Rack::new(
-                authz::FLEET,
-                rack_id,
-                LookupType::ById(rack_id),
-            ));
+            let authz_tq = authz::TrustQuorumConfig::for_rack_id(
+                RackUuid::from_untyped_uuid(rack_id),
+            );
             let status =
                 nexus.tq_add_sleds(&opctx, authz_tq, req.sled_ids).await?;
             Ok(HttpResponseOk(status.into()))
@@ -6399,11 +6396,9 @@ impl NexusExternalApi for NexusExternalApiImpl {
         let handler = async {
             let opctx =
                 crate::context::op_context_for_external_api(&rqctx).await?;
-            let authz_tq = authz::TrustQuorumConfig::new(authz::Rack::new(
-                authz::FLEET,
-                path_params.rack_id,
-                LookupType::ById(path_params.rack_id),
-            ));
+            let authz_tq = authz::TrustQuorumConfig::for_rack_id(
+                RackUuid::from_untyped_uuid(path_params.rack_id),
+            );
             let status = if let Some(version) = version {
                 let epoch = Epoch(version.0);
                 nexus.datastore().tq_get_config(&opctx, authz_tq, epoch).await?

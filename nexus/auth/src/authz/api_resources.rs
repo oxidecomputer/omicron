@@ -42,6 +42,7 @@ use futures::future::BoxFuture;
 use nexus_db_fixed_data::FLEET_ID;
 use nexus_types::external_api::policy::{FleetRole, ProjectRole, SiloRole};
 use omicron_common::api::external::{Error, LookupType, ResourceType};
+use omicron_uuid_kinds::{GenericUuid, RackUuid};
 use oso::PolarClass;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -687,18 +688,20 @@ impl AuthorizedResource for Inventory {
 pub struct TrustQuorumConfig(Rack);
 
 impl TrustQuorumConfig {
+    pub fn for_rack_id(rack_id: RackUuid) -> TrustQuorumConfig {
+        Self::new(Rack::new(
+            FLEET,
+            rack_id.into_untyped_uuid(),
+            LookupType::ById(rack_id.into_untyped_uuid()),
+        ))
+    }
+
     pub fn new(rack: Rack) -> TrustQuorumConfig {
         TrustQuorumConfig(rack)
     }
 
     pub fn rack(&self) -> &Rack {
         &self.0
-    }
-
-    fn not_found(&self) -> Error {
-        // The information that we are preventing from leaking is anything
-        // having to do with a given rack.
-        LookupType::ById(self.0.id()).into_not_found(ResourceType::Rack)
     }
 }
 
@@ -737,21 +740,7 @@ impl AuthorizedResource for TrustQuorumConfig {
         actor: AnyActor,
         action: Action,
     ) -> Error {
-        if action == Action::Read {
-            return self.not_found();
-        }
-
-        // If the user failed an authz check, and they can't even read this
-        // resource, then we should produce a 404 rather than a 401/403.
-        match authz.is_allowed(&actor, Action::Read, self) {
-            Err(error) => Error::internal_error(&format!(
-                "failed to compute read authorization to determine visibility: \
-                {:#}",
-                error
-            )),
-            Ok(false) => self.not_found(),
-            Ok(true) => error,
-        }
+        self.rack().on_unauthorized(authz, error, actor, action)
     }
 
     fn polar_class(&self) -> oso::Class {

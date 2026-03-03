@@ -69,6 +69,7 @@ use omicron_common::api::external::UserId;
 use omicron_common::api::internal::shared::PrivateIpConfig;
 use omicron_common::bail_unless;
 use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::RackUuid;
 use omicron_uuid_kinds::SiloUserUuid;
 use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::ZpoolUuid;
@@ -979,11 +980,9 @@ impl DataStore {
 
                     // Insert the initial trust quorum configuration
                     if let Some(tq_config) = rack_init.initial_trust_quorum_configuration {
-                        let authz_tq = authz::TrustQuorumConfig::new(authz::Rack::new(
-                            authz::FLEET,
-                            rack_id,
-                            LookupType::ById(rack_id),
-                        ));
+                        let authz_tq = authz::TrustQuorumConfig::for_rack_id(
+                            RackUuid::from_untyped_uuid(rack_id),
+                        );
                         Self::tq_insert_rss_config_after_handoff(
                             opctx,
                             &conn,

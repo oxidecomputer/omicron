@@ -3,6 +3,9 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 //! Trust quorum related queries
+//!
+//! All methods that end with `_conn` in this module take a connection as a
+//! parameter that is already authorized, so there is no need to reauthorize.
 
 use super::DataStore;
 use crate::authz;
@@ -31,7 +34,6 @@ use nexus_types::trust_quorum::{
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::ListResultVec;
-use omicron_common::api::external::LookupType;
 use omicron_common::api::external::OptionalLookupResult;
 use omicron_common::bail_unless;
 use omicron_uuid_kinds::GenericUuid;
@@ -352,11 +354,7 @@ impl DataStore {
         opctx: &OpContext,
         proposed: ProposedTrustQuorumConfig,
     ) -> Result<(), Error> {
-        let authz_tq = authz::TrustQuorumConfig::new(authz::Rack::new(
-            authz::FLEET,
-            proposed.rack_id.into_untyped_uuid(),
-            LookupType::ById(proposed.rack_id.into_untyped_uuid()),
-        ));
+        let authz_tq = authz::TrustQuorumConfig::for_rack_id(proposed.rack_id);
         opctx.authorize(authz::Action::Modify, &authz_tq).await?;
         let conn = &*self.pool_connection_authorized(opctx).await?;
 
@@ -638,11 +636,7 @@ impl DataStore {
         config: trust_quorum_types::configuration::Configuration,
         acked_prepares: BTreeSet<BaseboardId>,
     ) -> Result<TrustQuorumConfigState, Error> {
-        let authz_tq = authz::TrustQuorumConfig::new(authz::Rack::new(
-            authz::FLEET,
-            config.rack_id.into_untyped_uuid(),
-            LookupType::ById(config.rack_id.into_untyped_uuid()),
-        ));
+        let authz_tq = authz::TrustQuorumConfig::for_rack_id(config.rack_id);
         opctx.authorize(authz::Action::Modify, &authz_tq).await?;
         let conn = &*self.pool_connection_authorized(opctx).await?;
 
@@ -1470,11 +1464,7 @@ mod tests {
     use uuid::Uuid;
 
     fn make_authz_tq(rack_id: RackUuid) -> authz::TrustQuorumConfig {
-        authz::TrustQuorumConfig::new(authz::Rack::new(
-            authz::FLEET,
-            rack_id.into_untyped_uuid(),
-            LookupType::ById(rack_id.into_untyped_uuid()),
-        ))
+        authz::TrustQuorumConfig::for_rack_id(rack_id)
     }
 
     async fn insert_hw_baseboard_ids(db: &TestDatabase) -> Vec<HwBaseboardId> {

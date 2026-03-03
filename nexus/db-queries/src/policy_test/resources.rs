@@ -10,6 +10,7 @@ use nexus_auth::authz;
 use omicron_common::api::external::LookupType;
 use omicron_uuid_kinds::AccessTokenKind;
 use omicron_uuid_kinds::PhysicalDiskUuid;
+use omicron_uuid_kinds::RackUuid;
 use omicron_uuid_kinds::SiloGroupUuid;
 use omicron_uuid_kinds::SiloUserUuid;
 use omicron_uuid_kinds::SupportBundleUuid;
@@ -231,7 +232,9 @@ fn make_rack(builder: &mut ResourceBuilder<'_>) {
     let rack =
         authz::Rack::new(authz::FLEET, rack_id, LookupType::ById(rack_id));
     builder.new_resource(rack.clone());
-    builder.new_resource(authz::TrustQuorumConfig::new(rack));
+    builder.new_resource(authz::TrustQuorumConfig::for_rack_id(
+        RackUuid::from_untyped_uuid(rack_id),
+    ));
 }
 
 /// Helper for `make_resources()` that constructs a small Silo hierarchy

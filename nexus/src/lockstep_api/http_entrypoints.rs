@@ -53,7 +53,6 @@ use nexus_types::trust_quorum::TrustQuorumConfig;
 use nexus_types_versions::latest::headers::RangeRequest;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::Instance;
-use omicron_common::api::external::LookupType;
 use omicron_common::api::external::http_pagination::PaginatedById;
 use omicron_common::api::external::http_pagination::PaginatedByTimeAndId;
 use omicron_common::api::external::http_pagination::ScanById;
@@ -1086,11 +1085,9 @@ impl NexusLockstepApi for NexusLockstepApiImpl {
         let handler = async {
             let opctx =
                 crate::context::op_context_for_internal_api(&rqctx).await;
-            let authz_tq = authz::TrustQuorumConfig::new(authz::Rack::new(
-                authz::FLEET,
-                path_params.rack_id,
-                LookupType::ById(path_params.rack_id),
-            ));
+            let authz_tq = authz::TrustQuorumConfig::for_rack_id(
+                RackUuid::from_untyped_uuid(path_params.rack_id),
+            );
             let config = if let Some(epoch) = epoch {
                 nexus.datastore().tq_get_config(&opctx, authz_tq, epoch).await?
             } else {
