@@ -1028,7 +1028,7 @@ enum BlueprintEditCommands {
     BumpNexusGeneration,
     /// Set a sleds measurements to the `unknown` state indicating we can't
     /// rely on the install dataset
-    SetSledMeasurementsUnknown {
+    SetMeasurementsUnknown {
         /// sled to set the field on
         sled_id: SledOpt,
     },
@@ -2744,7 +2744,7 @@ fn cmd_blueprint_edit(
             builder.pending_mgs_update_delete(baseboard_id);
             format!("deleted configured update for serial {serial}")
         }
-        BlueprintEditCommands::SetSledMeasurementsUnknown { sled_id } => {
+        BlueprintEditCommands::SetMeasurementsUnknown { sled_id } => {
             let sled_id = sled_id.to_sled_id(system.description())?;
             builder.sled_set_measurements(
                 sled_id,
