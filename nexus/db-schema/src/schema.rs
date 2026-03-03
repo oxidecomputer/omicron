@@ -9,7 +9,7 @@
 use diesel::{allow_tables_to_appear_in_same_query, joinable};
 
 /// Shadow of `diesel::table!` that also auto-registers table metadata
-/// into [`DIESEL_TABLES`](crate::DIESEL_TABLES) for test validation.
+/// into the test-only `DIESEL_TABLES` list for validation.
 macro_rules! table {
     // Variant: with primary key
     ($table_name:ident ($($pk:tt)*) {

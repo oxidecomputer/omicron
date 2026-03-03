@@ -38,7 +38,7 @@ use tufaceous_lib::Key;
 use tufaceous_lib::assemble::{ArtifactManifest, OmicronRepoAssembler};
 use tufaceous_lib::assemble::{DeserializedManifest, ManifestTweak};
 
-use crate::integration_tests::target_release::set_target_release;
+use crate::integration_tests::target_release::set_target_release_for_mupdate_recovery;
 
 const TRUST_ROOTS_URL: &str = "/v1/system/update/trust-roots";
 
@@ -747,7 +747,7 @@ async fn test_update_status() -> Result<()> {
         .execute()
         .await?;
     let v1 = Version::new(1, 0, 0);
-    set_target_release(client, &v1).await?;
+    set_target_release_for_mupdate_recovery(client, &v1).await?;
 
     let status: update::UpdateStatus =
         object_get(client, "/v1/system/update/status").await;
@@ -778,7 +778,7 @@ async fn test_update_status() -> Result<()> {
         .to_upload_request(client, StatusCode::OK)
         .execute()
         .await?;
-    set_target_release(client, &v2).await?;
+    set_target_release_for_mupdate_recovery(client, &v2).await?;
 
     let status: update::UpdateStatus =
         object_get(client, "/v1/system/update/status").await;

@@ -4,6 +4,7 @@
 
 //! Rack initialization types
 
+use super::early_networking::RackNetworkConfig;
 use crate::bootstrap_v1::rack_init::RecoverySiloConfig;
 use crate::impls::rack_init::default_allowed_source_ips;
 use crate::impls::rack_init::validate_external_dns;
@@ -11,10 +12,7 @@ use anyhow::Result;
 use camino::Utf8PathBuf;
 use omicron_common::{
     address::IpRange,
-    api::{
-        external::AllowedSourceIps,
-        internal::{nexus::Certificate, shared::RackNetworkConfig},
-    },
+    api::{external::AllowedSourceIps, internal::nexus::Certificate},
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};

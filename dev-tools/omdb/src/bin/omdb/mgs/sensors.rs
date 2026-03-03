@@ -512,7 +512,7 @@ fn sp_info_csv<R: std::io::Read>(
                                             "line {}: unrecognized value \
                                             \"{}\" in field {}",
                                             position.line(),
-                                            record[ndx + len].to_string(),
+                                            &record[ndx + len],
                                             ndx + len
                                         );
                                     }

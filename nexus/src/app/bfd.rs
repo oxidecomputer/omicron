@@ -6,7 +6,9 @@ use mg_admin_client::types::BfdPeerState;
 use nexus_db_queries::context::OpContext;
 use nexus_types::external_api::bfd;
 use nexus_types::external_api::networking;
-use omicron_common::api::{external::Error, internal::shared::SwitchLocation};
+use omicron_common::api::external::Error;
+use sled_agent_types::early_networking::BfdMode;
+use sled_agent_types::early_networking::SwitchLocation;
 
 impl super::Nexus {
     async fn mg_client_for_switch_location(
@@ -95,10 +97,10 @@ impl super::Nexus {
                     required_rx: info.config.required_rx,
                     mode: match info.config.mode {
                         mg_admin_client::types::SessionMode::SingleHop => {
-                            omicron_common::api::external::BfdMode::SingleHop
+                            BfdMode::SingleHop
                         }
                         mg_admin_client::types::SessionMode::MultiHop => {
-                            omicron_common::api::external::BfdMode::MultiHop
+                            BfdMode::MultiHop
                         }
                     },
                 })

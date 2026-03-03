@@ -10,13 +10,16 @@
 use api_identity::ObjectIdentity;
 use omicron_common::api::external;
 use omicron_common::api::external::{
-    AddressLotKind, BfdMode, IdentityMetadata, IdentityMetadataCreateParams,
-    ImportExportPolicy, LinkFec, LinkSpeed, Name, NameOrId, ObjectIdentity,
-    SwitchLocation,
+    AddressLotKind, IdentityMetadata, IdentityMetadataCreateParams, LinkFec,
+    LinkSpeed, Name, NameOrId, ObjectIdentity,
 };
 use oxnet::IpNet;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use sled_agent_types::early_networking::BfdMode;
+use sled_agent_types::early_networking::ImportExportPolicy;
+use sled_agent_types::early_networking::SwitchLocation;
+use sled_agent_types::early_networking::TxEqConfig;
 use std::collections::HashMap;
 use std::net::{IpAddr, Ipv4Addr};
 use uuid::Uuid;
@@ -205,36 +208,6 @@ pub struct LinkConfigCreate {
 
     /// Optional tx_eq settings.
     pub tx_eq: Option<TxEqConfig>,
-}
-
-/// Per-port tx-eq overrides.  This can be used to fine-tune the transceiver
-/// equalization settings to improve signal integrity.
-#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq)]
-pub struct TxEqConfig {
-    /// Pre-cursor tap1
-    pub pre1: Option<i32>,
-    /// Pre-cursor tap2
-    pub pre2: Option<i32>,
-    /// Main tap
-    pub main: Option<i32>,
-    /// Post-cursor tap2
-    pub post2: Option<i32>,
-    /// Post-cursor tap1
-    pub post1: Option<i32>,
-}
-
-impl From<omicron_common::api::internal::shared::TxEqConfig> for TxEqConfig {
-    fn from(
-        x: omicron_common::api::internal::shared::TxEqConfig,
-    ) -> TxEqConfig {
-        TxEqConfig {
-            pre1: x.pre1,
-            pre2: x.pre2,
-            main: x.main,
-            post2: x.post2,
-            post1: x.post1,
-        }
-    }
 }
 
 /// The LLDP configuration associated with a port.
@@ -732,7 +705,7 @@ pub struct BgpPeerStatus {
     pub state_duration_millis: u64,
 
     /// Switch with the peer session.
-    pub switch: external::SwitchLocation,
+    pub switch: SwitchLocation,
 }
 
 /// The current state of a BGP peer.

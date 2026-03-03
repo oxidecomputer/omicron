@@ -279,7 +279,6 @@ pub mod networking {
     pub use crate::v2025_11_20_00::networking::SwitchPortSettingsSelector;
     pub use crate::v2025_11_20_00::networking::SwitchVlanInterface;
     pub use crate::v2025_11_20_00::networking::SwtichPortSettingsGroupCreate;
-    pub use crate::v2025_11_20_00::networking::TxEqConfig;
 
     pub use crate::v2025_12_12_00::networking::BgpPeerState;
 

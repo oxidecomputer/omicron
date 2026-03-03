@@ -35,11 +35,11 @@ use omicron_common::address::MGD_PORT;
 use omicron_common::address::MGS_PORT;
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::Error;
-use omicron_common::api::internal::shared::SwitchLocation;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use oximeter_producer::Server as ProducerServer;
 use sagas::common_storage::PooledPantryClient;
 use sagas::common_storage::make_pantry_connection_pool;
+use sled_agent_types::early_networking::SwitchLocation;
 use slog::Logger;
 use slog_error_chain::InlineErrorChain;
 use std::collections::HashMap;
@@ -120,6 +120,7 @@ pub(crate) mod sagas;
 // TODO: When referring to API types, we should try to include
 // the prefix unless it is unambiguous.
 
+pub(crate) use self::deployment::SetTargetReleaseIntent;
 use crate::app::quiesce::NexusQuiesceHandle;
 pub(crate) use nexus_db_model::MAX_NICS_PER_INSTANCE;
 pub(crate) use nexus_db_queries::db::queries::disk::MAX_DISKS_PER_INSTANCE;

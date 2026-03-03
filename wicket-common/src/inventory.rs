@@ -10,11 +10,11 @@ pub use gateway_client::types::{
 };
 pub use gateway_types::component::SpType;
 pub use gateway_types::rot::RotSlot;
-use omicron_common::api::external::SwitchLocation;
 use omicron_common::snake_case_result;
 use omicron_common::snake_case_result::SnakeCaseResult;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use sled_agent_types::early_networking::SwitchLocation;
 use std::{collections::HashMap, time::Duration};
 use transceiver_controller::{
     Datapath, Monitors, PowerMode, VendorInfo, message::ExtendedStatus,
