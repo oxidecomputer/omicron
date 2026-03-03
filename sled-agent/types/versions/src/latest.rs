@@ -78,9 +78,9 @@ pub mod early_networking {
     pub use crate::v20::early_networking::UplinkAddressConfig;
     pub use crate::v20::early_networking::UplinkAddressConfigError;
 
-    pub use crate::v25::early_networking::EarlyNetworkConfigEnvelope;
     pub use crate::v25::early_networking::WriteNetworkConfigRequest;
 
+    pub use crate::impls::early_networking::EarlyNetworkConfigEnvelope;
     pub use crate::impls::early_networking::EarlyNetworkConfigEnvelopeError;
 }
 
