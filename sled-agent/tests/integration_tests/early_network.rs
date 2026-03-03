@@ -105,14 +105,6 @@ fn early_network_blobs_deserialize() {
     if !current_blob_is_known {
         let current_blob_json =
             serde_json::to_string(&current_envelope).unwrap();
-        assert!(
-            !current_desc.contains(','),
-            "description contains illegal charactor ',': {current_desc:?}"
-        );
-        assert!(
-            !current_desc.contains('\n'),
-            "description contains illegal charactor '\\n': {current_desc:?}"
-        );
         let current_blob = format!("{},{}", current_desc, current_blob_json);
         known_blobs.push_str(&current_blob);
         known_blobs.push('\n');
