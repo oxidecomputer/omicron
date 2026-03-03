@@ -4,8 +4,6 @@
 
 //! CockroachDB schema for Nexus.
 
-use linkme::distributed_slice;
-
 pub mod enums;
 pub mod schema;
 
