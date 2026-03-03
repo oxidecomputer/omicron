@@ -689,13 +689,18 @@ pub trait NexusExternalApi {
     async fn silo_user_list_v2025_11_20_00(
         rqctx: RequestContext<Self::Context>,
         query_params: Query<PaginatedById<latest::silo::SiloSelector>>,
-    ) -> Result<HttpResponseOk<ResultsPage<v2025_11_20_00::user::User>>, HttpError> {
-        Self::silo_user_list(rqctx, query_params).await.map(|HttpResponseOk(page)| {
-            HttpResponseOk(ResultsPage {
-                items: page.items.into_iter().map(Into::into).collect(),
-                next_page: page.next_page,
-            })
-        })
+    ) -> Result<
+        HttpResponseOk<ResultsPage<v2025_11_20_00::user::User>>,
+        HttpError,
+    > {
+        Self::silo_user_list(rqctx, query_params).await.map(
+            |HttpResponseOk(page)| {
+                HttpResponseOk(ResultsPage {
+                    items: page.items.into_iter().map(Into::into).collect(),
+                    next_page: page.next_page,
+                })
+            },
+        )
     }
 
     /// Fetch built-in (system) user
@@ -820,7 +825,8 @@ pub trait NexusExternalApi {
         rqctx: RequestContext<Self::Context>,
         query_params: Query<latest::silo::SiloSelector>,
         new_user_params: TypedBody<latest::user::UserCreate>,
-    ) -> Result<HttpResponseCreated<v2025_11_20_00::user::User>, HttpError> {
+    ) -> Result<HttpResponseCreated<v2025_11_20_00::user::User>, HttpError>
+    {
         Self::local_idp_user_create(rqctx, query_params, new_user_params)
             .await
             .map(|HttpResponseCreated(u)| HttpResponseCreated(u.into()))
@@ -6543,13 +6549,18 @@ pub trait NexusExternalApi {
     async fn user_list_v2025_11_20_00(
         rqctx: RequestContext<Self::Context>,
         query_params: Query<PaginatedById<latest::user::OptionalGroupSelector>>,
-    ) -> Result<HttpResponseOk<ResultsPage<v2025_11_20_00::user::User>>, HttpError> {
-        Self::user_list(rqctx, query_params).await.map(|HttpResponseOk(page)| {
-            HttpResponseOk(ResultsPage {
-                items: page.items.into_iter().map(Into::into).collect(),
-                next_page: page.next_page,
-            })
-        })
+    ) -> Result<
+        HttpResponseOk<ResultsPage<v2025_11_20_00::user::User>>,
+        HttpError,
+    > {
+        Self::user_list(rqctx, query_params).await.map(
+            |HttpResponseOk(page)| {
+                HttpResponseOk(ResultsPage {
+                    items: page.items.into_iter().map(Into::into).collect(),
+                    next_page: page.next_page,
+                })
+            },
+        )
     }
 
     /// Fetch user
@@ -6650,13 +6661,18 @@ pub trait NexusExternalApi {
     async fn group_list_v2025_11_20_00(
         rqctx: RequestContext<Self::Context>,
         query_params: Query<PaginatedById>,
-    ) -> Result<HttpResponseOk<ResultsPage<v2025_11_20_00::user::Group>>, HttpError> {
-        Self::group_list(rqctx, query_params).await.map(|HttpResponseOk(page)| {
-            HttpResponseOk(ResultsPage {
-                items: page.items.into_iter().map(Into::into).collect(),
-                next_page: page.next_page,
-            })
-        })
+    ) -> Result<
+        HttpResponseOk<ResultsPage<v2025_11_20_00::user::Group>>,
+        HttpError,
+    > {
+        Self::group_list(rqctx, query_params).await.map(
+            |HttpResponseOk(page)| {
+                HttpResponseOk(ResultsPage {
+                    items: page.items.into_iter().map(Into::into).collect(),
+                    next_page: page.next_page,
+                })
+            },
+        )
     }
 
     /// Fetch group
@@ -6735,7 +6751,8 @@ pub trait NexusExternalApi {
     }]
     async fn current_user_view_v2025_11_20_00(
         rqctx: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseOk<v2025_11_20_00::user::CurrentUser>, HttpError> {
+    ) -> Result<HttpResponseOk<v2025_11_20_00::user::CurrentUser>, HttpError>
+    {
         Self::current_user_view(rqctx)
             .await
             .map(|HttpResponseOk(u)| HttpResponseOk(u.into()))
@@ -6764,13 +6781,18 @@ pub trait NexusExternalApi {
     async fn current_user_groups_v2025_11_20_00(
         rqctx: RequestContext<Self::Context>,
         query_params: Query<PaginatedById>,
-    ) -> Result<HttpResponseOk<ResultsPage<v2025_11_20_00::user::Group>>, HttpError> {
-        Self::current_user_groups(rqctx, query_params).await.map(|HttpResponseOk(page)| {
-            HttpResponseOk(ResultsPage {
-                items: page.items.into_iter().map(Into::into).collect(),
-                next_page: page.next_page,
-            })
-        })
+    ) -> Result<
+        HttpResponseOk<ResultsPage<v2025_11_20_00::user::Group>>,
+        HttpError,
+    > {
+        Self::current_user_groups(rqctx, query_params).await.map(
+            |HttpResponseOk(page)| {
+                HttpResponseOk(ResultsPage {
+                    items: page.items.into_iter().map(Into::into).collect(),
+                    next_page: page.next_page,
+                })
+            },
+        )
     }
 
     // Per-user SSH public keys
