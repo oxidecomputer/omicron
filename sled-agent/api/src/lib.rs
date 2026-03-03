@@ -835,6 +835,9 @@ pub trait SledAgentApi {
     // latest version does _not_ use the `latest::*` type alias to be a gentle
     // stumbling block toward this comment.
     // -------------------------------------------------------------------------
+
+    // As described above, this must not forward to newer versions; sled-agent
+    // must implement this by faithfully serializing the requested version.
     #[endpoint {
         method = PUT,
         path = "/network-bootstore-config",
@@ -845,6 +848,8 @@ pub trait SledAgentApi {
         body: TypedBody<v24::early_networking::WriteNetworkConfigRequest>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
 
+    // As described above, this must not forward to newer versions; sled-agent
+    // must implement this by faithfully serializing the requested version.
     #[endpoint {
         method = PUT,
         path = "/network-bootstore-config",
@@ -855,6 +860,8 @@ pub trait SledAgentApi {
         body: TypedBody<v20::early_networking::EarlyNetworkConfig>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
 
+    // As described above, this must not forward to newer versions; sled-agent
+    // must implement this by faithfully serializing the requested version.
     #[endpoint {
         method = PUT,
         path = "/network-bootstore-config",

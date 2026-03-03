@@ -1025,9 +1025,7 @@ impl SledAgentApi for SledAgentImpl {
 
     // As explained in `sled-agent-api`, we must faithfully implement old
     // versions of `write_network_bootstore_config()` _without_ upconverting the
-    // request into the latest bootstore `NetworkConfig` we understand. Doing so
-    // opens a window where we could replicate a newer `NetworkConfig` to sleds
-    // that don't yet know how to deserialize it.
+    // request into the latest bootstore `NetworkConfig` we understand.
     async fn write_network_bootstore_config_v20(
         rqctx: RequestContext<Self::Context>,
         body: TypedBody<v20::early_networking::EarlyNetworkConfig>,
@@ -1047,6 +1045,9 @@ impl SledAgentApi for SledAgentImpl {
         Ok(HttpResponseUpdatedNoContent())
     }
 
+    // As explained in `sled-agent-api`, we must faithfully implement old
+    // versions of `write_network_bootstore_config()` _without_ upconverting the
+    // request into the latest bootstore `NetworkConfig` we understand.
     async fn write_network_bootstore_config_v1(
         rqctx: RequestContext<Self::Context>,
         body: TypedBody<v1::early_networking::EarlyNetworkConfig>,
