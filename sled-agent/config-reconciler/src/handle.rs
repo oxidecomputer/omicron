@@ -441,7 +441,7 @@ impl ConfigReconcilerHandle {
 
         let datasets = self
             .dataset_task
-            .inventory(zpools.iter().map(|&(name, _)| name).collect())
+            .inventory(zpools.iter().map(|&(name, _, _)| name).collect())
             .await??;
 
         let (reconciler_status, last_reconciliation) =
@@ -451,9 +451,10 @@ impl ConfigReconcilerHandle {
             disks: self.raw_disks_tx.to_inventory(),
             zpools: zpools
                 .into_iter()
-                .map(|(name, total_size)| InventoryZpool {
+                .map(|(name, total_size, health)| InventoryZpool {
                     id: name.id(),
                     total_size,
+                    health,
                 })
                 .collect(),
             datasets,

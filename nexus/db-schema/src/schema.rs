@@ -1953,6 +1953,7 @@ table! {
         id -> Uuid,
         sled_id -> Uuid,
         total_size -> Int8,
+        health -> crate::enums::InvZpoolHealthEnum,
     }
 }
 
