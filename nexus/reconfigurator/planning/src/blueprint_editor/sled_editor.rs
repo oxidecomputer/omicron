@@ -680,7 +680,6 @@ impl SledEditor {
                 // we are mupdating to will be correct as far as measurements
                 // goes.
                 //
-                // This could certainly use some more checks.
                 let prev_measurements = self.measurements_set_install_dataset();
 
                 Ok(EnsureMupdateOverrideAction::BpSetOverride {
