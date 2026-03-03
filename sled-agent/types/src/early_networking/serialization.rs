@@ -6,10 +6,10 @@
 //! [`EarlyNetworkConfigEnvelope`], as determined by the envelope's metadata
 //! (particularly, [`EarlyNetworkConfigEnvelope::schema_version`].
 
-use crate::latest::early_networking as latest;
-use crate::v20::early_networking as v20;
 use bootstore::schemes::v0 as bootstore;
 use serde::{Deserialize, Serialize};
+use sled_agent_types_versions::latest::early_networking as latest;
+use sled_agent_types_versions::v20::early_networking as v20;
 use slog_error_chain::SlogInlineError;
 
 #[derive(Debug, thiserror::Error, SlogInlineError)]

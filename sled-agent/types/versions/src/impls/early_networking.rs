@@ -17,13 +17,6 @@ use crate::latest::early_networking::{
     UplinkAddressConfig, UplinkAddressConfigError,
 };
 
-// Early network serialization/deserialization is complex enough we stash it off
-// in its own module.
-mod early_network_config_serialization;
-
-pub use early_network_config_serialization::EarlyNetworkConfigEnvelope;
-pub use early_network_config_serialization::EarlyNetworkConfigEnvelopeError;
-
 impl BgpPeerConfig {
     /// The default hold time for a BGP peer in seconds.
     pub const DEFAULT_HOLD_TIME: u64 = 6;
