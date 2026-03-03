@@ -97,9 +97,9 @@ impl NoopConvertInfo {
                 }
             };
 
-            // We can't treat a lack of measurement manifest as a hard error here. It's only
-            // an error if we're expecting to use the install dataset. We check that further
-            // down
+            // We can't treat a lack of measurement manifest as a hard error
+            // here. It's only an error if we're expecting to use the install
+            // dataset. We check that further down
             let (measurement_manifest, error_message) = match inv_sled
                 .file_source_resolver
                 .measurement_manifest
