@@ -2064,7 +2064,7 @@
         ]
       },
       "BlueprintArtifactMeasurements": {
-        "description": "This is a private inner type to ensure the measurment set is always non-empty",
+        "description": "This is a private inner type to ensure the measurement set is always non-empty",
         "type": "array",
         "items": {
           "$ref": "#/components/schemas/BlueprintSingleMeasurement"
