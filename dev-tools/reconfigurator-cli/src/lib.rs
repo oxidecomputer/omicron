@@ -3615,7 +3615,7 @@ fn cmd_load(
     let count = inputs.len();
     let plural = if count == 1 { "" } else { "s" };
     let loaded = UnstableReconfiguratorState::read_series(inputs.into_iter())
-        .context("loading {count} input{plural}")?;
+        .with_context(|| format!("loading {count} input{plural}"))?;
     for warning in loaded.warnings {
         swriteln!(s, "  {}", warning);
     }
