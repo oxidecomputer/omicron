@@ -2816,7 +2816,10 @@ mod test {
 
         let verification_result = client.batch_execute(&verify_sql).await;
         let err = verification_result.unwrap_err();
-        let err_msg = err.to_string();
+        let err_msg = err
+            .as_db_error()
+            .map(|db_err| db_err.message().to_string())
+            .unwrap_or_else(|| err.to_string());
         assert!(
             err_msg.contains("Schema change verification failed"),
             "Verification error should be our expected barrier message, \
@@ -3274,7 +3277,10 @@ mod test {
 
         let verification_result = client.batch_execute(&verify_sql).await;
         let err = verification_result.unwrap_err();
-        let err_msg = err.to_string();
+        let err_msg = err
+            .as_db_error()
+            .map(|db_err| db_err.message().to_string())
+            .unwrap_or_else(|| err.to_string());
         assert!(
             err_msg.contains("Schema change verification failed"),
             "Verification error should be our expected barrier \

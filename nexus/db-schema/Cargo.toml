@@ -18,3 +18,12 @@ diesel.workspace = true
 omicron-workspace-hack.workspace = true
 # See omicron-rpaths for more about the "pq-sys" dependency.
 pq-sys = "*"
+
+[dev-dependencies]
+camino.workspace = true
+linkme.workspace = true
+omicron-test-utils.workspace = true
+similar-asserts.workspace = true
+slog.workspace = true
+tokio.workspace = true
+tokio-postgres.workspace = true

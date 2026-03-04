@@ -15,6 +15,7 @@ use iddqd::id_ord_map::Entry;
 use iddqd::id_upcast;
 use illumos_utils::zfs::Zfs;
 use illumos_utils::zpool::Zpool;
+use illumos_utils::zpool::ZpoolHealth;
 use illumos_utils::zpool::ZpoolName;
 use key_manager::StorageKeyRequester;
 use omicron_common::api::external::ByteCount;
@@ -187,7 +188,7 @@ impl CurrentlyManagedZpoolsReceiver {
     pub(crate) async fn to_inventory(
         &self,
         log: &Logger,
-    ) -> Vec<(ZpoolName, ByteCount)> {
+    ) -> Vec<(ZpoolName, ByteCount, ZpoolHealth)> {
         let current_zpools = self.current();
 
         let zpool_futs =
@@ -225,7 +226,7 @@ impl CurrentlyManagedZpoolsReceiver {
                         return None;
                     }
                 };
-                Some((zpool_name, total_size))
+                Some((zpool_name, total_size, info.health()))
             })
             .collect()
     }
