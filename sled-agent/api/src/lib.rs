@@ -20,7 +20,8 @@ use omicron_common::api::internal::{
     },
 };
 use sled_agent_types_versions::{
-    latest, v1, v4, v6, v7, v9, v10, v11, v12, v14, v16, v17, v20, v22, v25, v26
+    latest, v1, v4, v6, v7, v9, v10, v11, v12, v14, v16, v17, v20, v22, v25,
+    v26,
 };
 use sled_diagnostics::SledDiagnosticsQueryOutput;
 

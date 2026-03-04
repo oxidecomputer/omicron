@@ -47,10 +47,10 @@
 //!    and handles conversion up to the latest via the `TryFrom<_>` impls
 //!    described above.
 
-use crate::{latest, v20, v26};
 use bootstore::schemes::v0 as bootstore;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
+use sled_agent_types_versions::{latest, v20, v26};
 use slog_error_chain::SlogInlineError;
 
 #[derive(Debug, thiserror::Error, SlogInlineError)]

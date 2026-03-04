@@ -79,9 +79,6 @@ pub mod early_networking {
 
     pub use crate::v26::early_networking::EarlyNetworkConfigBody;
     pub use crate::v26::early_networking::WriteNetworkConfigRequest;
-
-    pub use crate::impls::early_networking::EarlyNetworkConfigEnvelope;
-    pub use crate::impls::early_networking::EarlyNetworkConfigEnvelopeError;
 }
 
 pub mod firewall_rules {
