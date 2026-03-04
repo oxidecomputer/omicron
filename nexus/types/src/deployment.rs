@@ -3480,16 +3480,23 @@ impl UnstableReconfiguratorState {
                     });
                 }
                 std::collections::btree_map::Entry::Occupied(
-                    occupied_entry,
+                    _occupied_entry,
                 ) => {
-                    warnings.push(anyhow!(
-                        "input {:?}: has target blueprint {}, which is the \
-                         same as previous input {:?} (will ignore this file \
-                         in terms of figuring out which one is latest)",
-                        input.label,
-                        target_blueprint_id,
-                        occupied_entry.get().label,
-                    ));
+                    // This means we found an input file with the same target
+                    // blueprint as some other input file that we already
+                    // processed.  That's fine.  We'll ignore this file in terms
+                    // of figuring out which file contains the latest blueprint.
+                    //
+                    // This is unfortunately common.  What frequently happens is
+                    // that each of the three Nexus zones tries to plan a
+                    // blueprint, each one saves a Reconfigurator state file for
+                    // it's planning process, but only one of these will become
+                    // the next target blueprint.  (We could instead only save
+                    // the state file into the dropbox when we know it's become
+                    // the target, but that introduces the possibility that a
+                    // crash at the wrong time will mean we made it the target
+                    // but never wound up putting the state file into the
+                    // dropbox.)
                 }
             };
 
