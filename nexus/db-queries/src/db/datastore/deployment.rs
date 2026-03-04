@@ -3585,7 +3585,9 @@ mod tests {
                 BlueprintMeasurements::InstallDataset => {
                     panic!("Failed to pickup measurements")
                 }
-                BlueprintMeasurements::Artifacts { artifacts: found_artifacts } => {
+                BlueprintMeasurements::Artifacts {
+                    artifacts: found_artifacts,
+                } => {
                     assert_eq!(artifacts, found_artifacts);
                 }
                 BlueprintMeasurements::Unknown => {
