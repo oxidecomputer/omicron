@@ -3,7 +3,6 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use nexus_types::deployment::BlueprintArtifactMeasurements;
-/// Measurements??????
 use nexus_types::deployment::BlueprintArtifactVersion;
 use nexus_types::deployment::BlueprintMeasurements;
 use nexus_types::deployment::BlueprintSingleMeasurement;
