@@ -323,7 +323,8 @@ impl BlueprintPlanner {
         // this succeed.
         let debug_name =
             blueprint_debug_filename(blueprint_id, &blueprint.time_created);
-        self.debug_dropbox.deposit_file_str(&debug_name, &debug).await?;
+        let deposit =
+            self.debug_dropbox.deposit_file_str(&debug_name, &debug).await?;
 
         // Try to make it the current target.
         let target = BlueprintTarget {
@@ -361,6 +362,11 @@ impl BlueprintPlanner {
                         );
                     }
                 }
+
+                // Try to cancel the dropbox deposit.  This information is
+                // useless now.  It's not a problem if this doesn't work.
+                deposit.cancel_and_attempt_delete().await;
+
                 return Ok(BlueprintPlannerStatus::Planned {
                     parent_blueprint_id,
                     error: format!("{error}"),

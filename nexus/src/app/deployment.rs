@@ -155,15 +155,6 @@ impl super::Nexus {
             .assemble_state_for_new_target(opctx, new_target.clone())
             .await?;
 
-        self.db_datastore
-            .blueprint_target_set_current(opctx, new_target)
-            .await?;
-
-        // We have a new target: trigger the background task to load this
-        // blueprint.
-        self.background_tasks
-            .activate(&self.background_tasks.task_blueprint_loader);
-
         // Archive the Reconfigurator state file.
         // XXX-dap commonize filename construction with autoplanner
         let debug_name = format!(
@@ -171,7 +162,8 @@ impl super::Nexus {
             blueprint.time_created.format("%Y%m%dT%H%MZ"),
             blueprint.id
         );
-        self.debug_dropbox
+        let deposit = self
+            .debug_dropbox
             .deposit_file_str(&debug_name, &debug)
             .await
             .map_err(|error| {
@@ -180,6 +172,22 @@ impl super::Nexus {
                     InlineErrorChain::new(&error),
                 ))
             })?;
+
+        if let Err(error) = self
+            .db_datastore
+            .blueprint_target_set_current(opctx, new_target)
+            .await
+        {
+            // Try to cancel the dropbox deposit.  This information is
+            // useless now.  It's not a problem if this doesn't work.
+            deposit.cancel_and_attempt_delete().await;
+            return Err(error);
+        }
+
+        // We have a new target: trigger the background task to load this
+        // blueprint.
+        self.background_tasks
+            .activate(&self.background_tasks.task_blueprint_loader);
 
         Ok(new_target)
     }
@@ -317,8 +325,6 @@ impl super::Nexus {
             ))
         })?;
 
-        self.blueprint_add(&opctx, &blueprint).await?;
-
         // Archive the Reconfigurator state file.
         // XXX-dap commonize filename construction with autoplanner
         let debug_name = format!(
@@ -326,7 +332,8 @@ impl super::Nexus {
             blueprint.time_created.format("%Y%m%dT%H%MZ"),
             blueprint.id
         );
-        self.debug_dropbox
+        let deposit = self
+            .debug_dropbox
             .deposit_file_str(&debug_name, &debug)
             .await
             .map_err(|error| {
@@ -335,6 +342,13 @@ impl super::Nexus {
                     InlineErrorChain::new(&error),
                 ))
             })?;
+
+        if let Err(error) = self.blueprint_add(&opctx, &blueprint).await {
+            // Try to cancel the dropbox deposit.  This information is
+            // useless now.  It's not a problem if this doesn't work.
+            deposit.cancel_and_attempt_delete().await;
+            return Err(error);
+        }
 
         Ok(blueprint)
     }
