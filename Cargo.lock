@@ -2485,7 +2485,7 @@ dependencies = [
 [[package]]
 name = "ddm-admin-client"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/maghemite?rev=32bfdc1c4c071d287dbcb67b387c151fca8e6134#32bfdc1c4c071d287dbcb67b387c151fca8e6134"
+source = "git+https://github.com/oxidecomputer/maghemite?rev=0e2fea55db2208602885562b175f1aa28981f149#0e2fea55db2208602885562b175f1aa28981f149"
 dependencies = [
  "oxnet",
  "progenitor 0.11.2",
@@ -6421,7 +6421,7 @@ dependencies = [
 [[package]]
 name = "mg-admin-client"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/maghemite?rev=32bfdc1c4c071d287dbcb67b387c151fca8e6134#32bfdc1c4c071d287dbcb67b387c151fca8e6134"
+source = "git+https://github.com/oxidecomputer/maghemite?rev=0e2fea55db2208602885562b175f1aa28981f149#0e2fea55db2208602885562b175f1aa28981f149"
 dependencies = [
  "chrono",
  "colored 3.1.1",
@@ -11610,7 +11610,7 @@ dependencies = [
 [[package]]
 name = "rdb-types"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/maghemite?rev=32bfdc1c4c071d287dbcb67b387c151fca8e6134#32bfdc1c4c071d287dbcb67b387c151fca8e6134"
+source = "git+https://github.com/oxidecomputer/maghemite?rev=0e2fea55db2208602885562b175f1aa28981f149#0e2fea55db2208602885562b175f1aa28981f149"
 dependencies = [
  "oxnet",
  "schemars 0.8.22",
