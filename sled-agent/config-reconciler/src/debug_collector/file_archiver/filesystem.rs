@@ -74,18 +74,44 @@ impl FileLister for FilesystemLister {
         };
 
         entry_iter
-            .map(|entry| {
-                entry.context("reading directory entry").and_then(|entry| {
-                    // It should be impossible for this `try_from()` to fail,
-                    // but it's easy enough to handle gracefully.
-                    Filename::try_from(entry.file_name().to_owned())
-                        .with_context(|| {
-                            format!(
-                                "processing as a file name: {:?}",
-                                entry.file_name(),
-                            )
+            .filter_map(|entry| {
+                // entry: a Result<directory entry>
+                entry
+                    .context("reading directory entry")
+                    .and_then(|entry| {
+                        // entry: directory entry
+                        // Assemble both the filename and file type.
+                        let filename = entry.file_name().to_owned();
+                        entry
+                            .file_type()
+                            .map(|filetype| (filename, filetype))
+                            .with_context(|| {
+                                format!(
+                                    "determining file type of {:?}",
+                                    entry.file_name(),
+                                )
+                            })
+                    })
+                    // now a Result<(filename, filetype)>
+                    .map(|(filename, filetype)| {
+                        // Skip anything other than a regular file.
+                        if filetype.is_file() { Some(filename) } else { None }
+                    })
+                    // now a Result<Option<filename>>
+                    .transpose()
+                    // now an Option<Result<filename>>
+                    .map(|maybe_filename| {
+                        // maybe_filename: Result<filename>
+                        maybe_filename.and_then(|filename| {
+                            // It should be impossible for this `try_from()` to
+                            // fail, but it's easy enough to handle gracefully.
+                            Filename::try_from(filename)
+                                .context("processing file name")
                         })
-                })
+                        // now a Result<Filename>
+                    })
+                // now an Option<Result<Filename>>
+                // We'll filter only the Some values.
             })
             .collect()
     }
@@ -129,4 +155,6 @@ mod test {
         assert!(Filename::try_from(String::from("foo/")).is_err());
         assert!(Filename::try_from(String::from("/bar")).is_err());
     }
+
+    // XXX-dap TODO-coverage write a test for only collecting regular files
 }
