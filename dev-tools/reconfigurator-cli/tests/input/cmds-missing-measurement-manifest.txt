@@ -25,5 +25,6 @@ sled-update-install-dataset serial3 --to-target-release --with-measurement-manif
 inventory-generate
 blueprint-plan latest latest
 
-# This diff should show expected changes to the blueprint.
+# We expect to see all sleds successfully show measurements in the artifact
+# state including the sled with the measurement manifest error
 blueprint-diff latest
