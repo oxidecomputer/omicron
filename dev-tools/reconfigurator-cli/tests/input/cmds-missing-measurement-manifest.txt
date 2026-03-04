@@ -26,5 +26,5 @@ inventory-generate
 blueprint-plan latest latest
 
 # We expect to see all sleds successfully show measurements in the artifact
-# state including the sled with the measurement manifest error
+# state, including the sled with the measurement manifest error.
 blueprint-diff latest
