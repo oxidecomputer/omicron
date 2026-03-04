@@ -3488,7 +3488,7 @@ mod tests {
             artifacts: vec![
                 TufArtifactMeta {
                     id: ArtifactId {
-                        name: "measurment1".into(),
+                        name: "measurement1".into(),
                         version: ARTIFACT_VERSION_1,
                         kind: ArtifactKind::MEASUREMENT_CORPUS,
                     },
