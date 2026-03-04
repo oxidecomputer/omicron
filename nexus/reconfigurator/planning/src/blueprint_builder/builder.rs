@@ -915,7 +915,7 @@ impl<'a> BlueprintBuilder<'a> {
     ) -> Result<BlueprintMeasurements, Error> {
         let editor = self.sled_editors.get(&sled_id).ok_or_else(|| {
             Error::Planner(anyhow!(
-                "tried to get host phase 2 for unknown sled {sled_id}"
+                "tried to get measurements for unknown sled {sled_id}"
             ))
         })?;
         Ok(editor.measurements())
