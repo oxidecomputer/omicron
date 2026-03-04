@@ -1019,7 +1019,7 @@ enum BlueprintEditCommands {
     /// This initiates a handoff from the current generation of Nexus zones to
     /// the next generation of Nexus zones.
     BumpNexusGeneration,
-    /// Set a sleds measurements to the `unknown` state indicating we can't
+    /// Set a sled's measurements to the `unknown` state indicating we can't
     /// rely on the install dataset
     SetMeasurementsUnknown {
         /// sled to set the field on
