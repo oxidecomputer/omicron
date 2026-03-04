@@ -119,7 +119,7 @@ Measurement updates:
 
 
 > # We expect to see all sleds successfully show measurements in the artifact
-> # state including the sled with the measurement manifest error
+> # state, including the sled with the measurement manifest error.
 > blueprint-diff latest
 from: blueprint dbcbd3d6-41ff-48ae-ac0b-1becc9b2fd21
 to:   blueprint 8da82a8e-bf97-4fbd-8ddd-9f6462732cf1
