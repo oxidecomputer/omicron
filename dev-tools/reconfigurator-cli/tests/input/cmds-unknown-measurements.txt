@@ -20,7 +20,7 @@ sled-update-install-dataset serial2 --to-target-release
 sled-update-install-dataset serial3 --to-target-release
 
 # mark sled 2 with being 'unknown'
-blueprint-edit latest set-sled-measurements-unknown serial2
+blueprint-edit latest set-measurements-unknown serial2
 
 # Generate an inventory and run a blueprint planning step.
 inventory-generate

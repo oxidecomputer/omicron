@@ -82,7 +82,7 @@ sled aff6c093-197d-42c5-ad80-9f10ba051a34: install dataset updated: to target re
 
 
 > # mark sled 2 with being 'unknown'
-> blueprint-edit latest set-sled-measurements-unknown serial2
+> blueprint-edit latest set-measurements-unknown serial2
 blueprint 8da82a8e-bf97-4fbd-8ddd-9f6462732cf1 created from latest blueprint (dbcbd3d6-41ff-48ae-ac0b-1becc9b2fd21): set sled measurements to 'unknown' d81c6a84-79b8-4958-ae41-ea46c9b19763
 
 
