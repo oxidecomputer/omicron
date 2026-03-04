@@ -990,8 +990,6 @@ impl NoopConvertMeasurements {
     }
 
     fn log_to(&self, log: &slog::Logger) {
-        {
-            self.measurements.log_to(&log);
-        }
+        self.measurements.log_to(&log);
     }
 }
