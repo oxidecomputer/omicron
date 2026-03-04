@@ -2074,7 +2074,7 @@ pub enum BlueprintMeasurements {
     Artifacts { artifacts: BlueprintArtifactMeasurements },
 }
 
-/// This is a private inner type to ensure the measurment set is always non-empty
+/// This is a private inner type to ensure the measurement set is always non-empty
 #[derive(Clone, Debug, Serialize, JsonSchema, PartialEq, Diffable, Eq)]
 pub struct BlueprintArtifactMeasurements(BTreeSet<BlueprintSingleMeasurement>);
 
