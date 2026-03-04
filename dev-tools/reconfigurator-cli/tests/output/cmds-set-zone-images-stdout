@@ -690,7 +690,7 @@ Commands:
           debug commands that bypass normal checks
   bump-nexus-generation
           bumps the blueprint's Nexus generation
-  set-sled-measurements-unknown
+  set-measurements-unknown
           Set a sleds measurements to the `unknown` state indicating we can't rely on the install
           dataset
   help

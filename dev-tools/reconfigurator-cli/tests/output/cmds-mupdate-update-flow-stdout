@@ -967,66 +967,6 @@ Blocked on add/updates
 from: blueprint a5a8f242-ffa5-473c-8efd-2acf2dc0b736
 to:   blueprint 626487fa-7139-45ec-8416-902271fc730b
 
- MODIFIED SLEDS:
-
-  sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c (active, config generation 5 -> 6):
-
-    measurements:
-    ---------------------------
-    hash      version          
-    ---------------------------
-    unknown   (unknown version)
-
-
-    host phase 2 contents:
-    ------------------------
-    slot   boot image source
-    ------------------------
-    A      current contents 
-    B      current contents 
-
-
-    physical disks:
-    ------------------------------------------------------------------------------------
-    vendor        model        serial                                        disposition
-    ------------------------------------------------------------------------------------
-    fake-vendor   fake-model   serial-72c59873-31ff-4e36-8d76-ff834009349a   in service 
-
-
-    datasets:
-    -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-    dataset name                                                                                                   dataset id                             disposition   quota     reservation   compression
-    -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-    oxp_72c59873-31ff-4e36-8d76-ff834009349a/crucible                                                              49f8fbb6-5bac-4609-907f-6e3dfc206059   in service    none      none          off        
-    oxp_72c59873-31ff-4e36-8d76-ff834009349a/crypt/clickhouse                                                      3560dd69-3b23-4c69-807d-d673104cfc68   in service    none      none          off        
-    oxp_72c59873-31ff-4e36-8d76-ff834009349a/crypt/external_dns                                                    2ad1875a-92ac-472f-8c26-593309f0e4da   in service    none      none          off        
-    oxp_72c59873-31ff-4e36-8d76-ff834009349a/crypt/internal_dns                                                    841d5648-05f0-47b0-b446-92f6b60fe9a6   in service    none      none          off        
-    oxp_72c59873-31ff-4e36-8d76-ff834009349a/crypt/zone                                                            4829f422-aa31-41a8-ab73-95684ff1ef48   in service    none      none          off        
-    oxp_72c59873-31ff-4e36-8d76-ff834009349a/crypt/zone/oxz_clickhouse_353b3b65-20f7-48c3-88f7-495bd5d31545        09b9cc9b-3426-470b-a7bc-538f82dede03   in service    none      none          off        
-    oxp_72c59873-31ff-4e36-8d76-ff834009349a/crypt/zone/oxz_crucible_bd354eef-d8a6-4165-9124-283fb5e46d77          8e0bd2bd-23b7-4bc6-9e73-c4d4ebc0bc8c   in service    none      none          off        
-    oxp_72c59873-31ff-4e36-8d76-ff834009349a/crypt/zone/oxz_crucible_pantry_ad6a3a03-8d0f-4504-99a4-cbf73d69b973   8c4fa711-1d5d-4e93-85f0-d17bff47b063   in service    none      none          off        
-    oxp_72c59873-31ff-4e36-8d76-ff834009349a/crypt/zone/oxz_external_dns_6c3ae381-04f7-41ea-b0ac-74db387dbc3a      c31623de-c19b-4615-9f1d-5e1daa5d3bda   in service    none      none          off        
-    oxp_72c59873-31ff-4e36-8d76-ff834009349a/crypt/zone/oxz_internal_dns_99e2f30b-3174-40bf-a78a-90da8abba8ca      b46de15d-33e7-4cd0-aa7c-e7be2a61e71b   in service    none      none          off        
-    oxp_72c59873-31ff-4e36-8d76-ff834009349a/crypt/zone/oxz_nexus_466a9f29-62bf-4e63-924a-b9efdb86afec             3b66453b-7148-4c1b-84a9-499e43290ab4   in service    none      none          off        
-    oxp_72c59873-31ff-4e36-8d76-ff834009349a/crypt/zone/oxz_ntp_62620961-fc4a-481e-968b-f5acbac0dc63               318fae85-abcb-4259-b1b6-ac96d193f7b7   in service    none      none          off        
-    oxp_72c59873-31ff-4e36-8d76-ff834009349a/crypt/debug                                                           93957ca0-9ed1-4e7b-8c34-2ce07a69541c   in service    100 GiB   none          gzip-9     
-    oxp_72c59873-31ff-4e36-8d76-ff834009349a/crypt/local_storage                                                   2db6b7c1-0f46-4ced-a3ad-48872793360e   in service    none      none          off        
-    oxp_72c59873-31ff-4e36-8d76-ff834009349a/local_storage_unencrypted                                             775f9207-c42d-4af2-9186-27ffef67735e   in service    none      none          off        
-
-
-    omicron zones:
-    ---------------------------------------------------------------------------------------------------------------
-    zone type         zone id                                image source      disposition   underlay IP           
-    ---------------------------------------------------------------------------------------------------------------
-    clickhouse        353b3b65-20f7-48c3-88f7-495bd5d31545   install dataset   in service    fd00:1122:3344:102::23
-    crucible          bd354eef-d8a6-4165-9124-283fb5e46d77   install dataset   in service    fd00:1122:3344:102::26
-    crucible_pantry   ad6a3a03-8d0f-4504-99a4-cbf73d69b973   install dataset   in service    fd00:1122:3344:102::25
-    external_dns      6c3ae381-04f7-41ea-b0ac-74db387dbc3a   install dataset   in service    fd00:1122:3344:102::24
-    internal_dns      99e2f30b-3174-40bf-a78a-90da8abba8ca   install dataset   in service    fd00:1122:3344:1::1   
-    internal_ntp      62620961-fc4a-481e-968b-f5acbac0dc63   install dataset   in service    fd00:1122:3344:102::21
-    nexus             466a9f29-62bf-4e63-924a-b9efdb86afec   install dataset   in service    fd00:1122:3344:102::22
-
-
  COCKROACHDB SETTINGS:
     state fingerprint:::::::::::::::::   (none) (unchanged)
     cluster.preserve_downgrade_option:   (do not modify) (unchanged)
@@ -1175,64 +1115,6 @@ from: blueprint 626487fa-7139-45ec-8416-902271fc730b
 to:   blueprint c1a0d242-9160-40f4-96ae-61f8f40a0b1b
 
  MODIFIED SLEDS:
-
-  sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c (active, config generation 6 -> 7):
-
-    measurements:
-    ---------------------------
-    hash      version          
-    ---------------------------
-    unknown   (unknown version)
-
-
-    host phase 2 contents:
-    ------------------------
-    slot   boot image source
-    ------------------------
-    A      current contents 
-    B      current contents 
-
-
-    physical disks:
-    ------------------------------------------------------------------------------------
-    vendor        model        serial                                        disposition
-    ------------------------------------------------------------------------------------
-    fake-vendor   fake-model   serial-72c59873-31ff-4e36-8d76-ff834009349a   in service 
-
-
-    datasets:
-    -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-    dataset name                                                                                                   dataset id                             disposition   quota     reservation   compression
-    -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-    oxp_72c59873-31ff-4e36-8d76-ff834009349a/crucible                                                              49f8fbb6-5bac-4609-907f-6e3dfc206059   in service    none      none          off        
-    oxp_72c59873-31ff-4e36-8d76-ff834009349a/crypt/clickhouse                                                      3560dd69-3b23-4c69-807d-d673104cfc68   in service    none      none          off        
-    oxp_72c59873-31ff-4e36-8d76-ff834009349a/crypt/external_dns                                                    2ad1875a-92ac-472f-8c26-593309f0e4da   in service    none      none          off        
-    oxp_72c59873-31ff-4e36-8d76-ff834009349a/crypt/internal_dns                                                    841d5648-05f0-47b0-b446-92f6b60fe9a6   in service    none      none          off        
-    oxp_72c59873-31ff-4e36-8d76-ff834009349a/crypt/zone                                                            4829f422-aa31-41a8-ab73-95684ff1ef48   in service    none      none          off        
-    oxp_72c59873-31ff-4e36-8d76-ff834009349a/crypt/zone/oxz_clickhouse_353b3b65-20f7-48c3-88f7-495bd5d31545        09b9cc9b-3426-470b-a7bc-538f82dede03   in service    none      none          off        
-    oxp_72c59873-31ff-4e36-8d76-ff834009349a/crypt/zone/oxz_crucible_bd354eef-d8a6-4165-9124-283fb5e46d77          8e0bd2bd-23b7-4bc6-9e73-c4d4ebc0bc8c   in service    none      none          off        
-    oxp_72c59873-31ff-4e36-8d76-ff834009349a/crypt/zone/oxz_crucible_pantry_ad6a3a03-8d0f-4504-99a4-cbf73d69b973   8c4fa711-1d5d-4e93-85f0-d17bff47b063   in service    none      none          off        
-    oxp_72c59873-31ff-4e36-8d76-ff834009349a/crypt/zone/oxz_external_dns_6c3ae381-04f7-41ea-b0ac-74db387dbc3a      c31623de-c19b-4615-9f1d-5e1daa5d3bda   in service    none      none          off        
-    oxp_72c59873-31ff-4e36-8d76-ff834009349a/crypt/zone/oxz_internal_dns_99e2f30b-3174-40bf-a78a-90da8abba8ca      b46de15d-33e7-4cd0-aa7c-e7be2a61e71b   in service    none      none          off        
-    oxp_72c59873-31ff-4e36-8d76-ff834009349a/crypt/zone/oxz_nexus_466a9f29-62bf-4e63-924a-b9efdb86afec             3b66453b-7148-4c1b-84a9-499e43290ab4   in service    none      none          off        
-    oxp_72c59873-31ff-4e36-8d76-ff834009349a/crypt/zone/oxz_ntp_62620961-fc4a-481e-968b-f5acbac0dc63               318fae85-abcb-4259-b1b6-ac96d193f7b7   in service    none      none          off        
-    oxp_72c59873-31ff-4e36-8d76-ff834009349a/crypt/debug                                                           93957ca0-9ed1-4e7b-8c34-2ce07a69541c   in service    100 GiB   none          gzip-9     
-    oxp_72c59873-31ff-4e36-8d76-ff834009349a/crypt/local_storage                                                   2db6b7c1-0f46-4ced-a3ad-48872793360e   in service    none      none          off        
-    oxp_72c59873-31ff-4e36-8d76-ff834009349a/local_storage_unencrypted                                             775f9207-c42d-4af2-9186-27ffef67735e   in service    none      none          off        
-
-
-    omicron zones:
-    ---------------------------------------------------------------------------------------------------------------
-    zone type         zone id                                image source      disposition   underlay IP           
-    ---------------------------------------------------------------------------------------------------------------
-    clickhouse        353b3b65-20f7-48c3-88f7-495bd5d31545   install dataset   in service    fd00:1122:3344:102::23
-    crucible          bd354eef-d8a6-4165-9124-283fb5e46d77   install dataset   in service    fd00:1122:3344:102::26
-    crucible_pantry   ad6a3a03-8d0f-4504-99a4-cbf73d69b973   install dataset   in service    fd00:1122:3344:102::25
-    external_dns      6c3ae381-04f7-41ea-b0ac-74db387dbc3a   install dataset   in service    fd00:1122:3344:102::24
-    internal_dns      99e2f30b-3174-40bf-a78a-90da8abba8ca   install dataset   in service    fd00:1122:3344:1::1   
-    internal_ntp      62620961-fc4a-481e-968b-f5acbac0dc63   install dataset   in service    fd00:1122:3344:102::21
-    nexus             466a9f29-62bf-4e63-924a-b9efdb86afec   install dataset   in service    fd00:1122:3344:102::22
-
 
   sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 (active, config generation 6 -> 7):
 -   will remove mupdate override:   6123eac1-ec5b-42ba-b73f-9845105a9971 -> (none)
@@ -1436,7 +1318,7 @@ parent:    c1a0d242-9160-40f4-96ae-61f8f40a0b1b
 
   sled: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c
     state:::::::::::::   active
-    config generation:   8
+    config generation:   5
     subnet::::::::::::   fd00:1122:3344:102::/64
     last allocated IP:   fd00:1122:3344:102::26
 
@@ -1659,64 +1541,6 @@ to:   blueprint afb09faf-a586-4483-9289-04d4f1d8ba23
 
  MODIFIED SLEDS:
 
-  sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c (active, config generation 7 -> 8):
-
-    measurements:
-    ---------------------------
-    hash      version          
-    ---------------------------
-    unknown   (unknown version)
-
-
-    host phase 2 contents:
-    ------------------------
-    slot   boot image source
-    ------------------------
-    A      current contents 
-    B      current contents 
-
-
-    physical disks:
-    ------------------------------------------------------------------------------------
-    vendor        model        serial                                        disposition
-    ------------------------------------------------------------------------------------
-    fake-vendor   fake-model   serial-72c59873-31ff-4e36-8d76-ff834009349a   in service 
-
-
-    datasets:
-    -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-    dataset name                                                                                                   dataset id                             disposition   quota     reservation   compression
-    -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-    oxp_72c59873-31ff-4e36-8d76-ff834009349a/crucible                                                              49f8fbb6-5bac-4609-907f-6e3dfc206059   in service    none      none          off        
-    oxp_72c59873-31ff-4e36-8d76-ff834009349a/crypt/clickhouse                                                      3560dd69-3b23-4c69-807d-d673104cfc68   in service    none      none          off        
-    oxp_72c59873-31ff-4e36-8d76-ff834009349a/crypt/external_dns                                                    2ad1875a-92ac-472f-8c26-593309f0e4da   in service    none      none          off        
-    oxp_72c59873-31ff-4e36-8d76-ff834009349a/crypt/internal_dns                                                    841d5648-05f0-47b0-b446-92f6b60fe9a6   in service    none      none          off        
-    oxp_72c59873-31ff-4e36-8d76-ff834009349a/crypt/zone                                                            4829f422-aa31-41a8-ab73-95684ff1ef48   in service    none      none          off        
-    oxp_72c59873-31ff-4e36-8d76-ff834009349a/crypt/zone/oxz_clickhouse_353b3b65-20f7-48c3-88f7-495bd5d31545        09b9cc9b-3426-470b-a7bc-538f82dede03   in service    none      none          off        
-    oxp_72c59873-31ff-4e36-8d76-ff834009349a/crypt/zone/oxz_crucible_bd354eef-d8a6-4165-9124-283fb5e46d77          8e0bd2bd-23b7-4bc6-9e73-c4d4ebc0bc8c   in service    none      none          off        
-    oxp_72c59873-31ff-4e36-8d76-ff834009349a/crypt/zone/oxz_crucible_pantry_ad6a3a03-8d0f-4504-99a4-cbf73d69b973   8c4fa711-1d5d-4e93-85f0-d17bff47b063   in service    none      none          off        
-    oxp_72c59873-31ff-4e36-8d76-ff834009349a/crypt/zone/oxz_external_dns_6c3ae381-04f7-41ea-b0ac-74db387dbc3a      c31623de-c19b-4615-9f1d-5e1daa5d3bda   in service    none      none          off        
-    oxp_72c59873-31ff-4e36-8d76-ff834009349a/crypt/zone/oxz_internal_dns_99e2f30b-3174-40bf-a78a-90da8abba8ca      b46de15d-33e7-4cd0-aa7c-e7be2a61e71b   in service    none      none          off        
-    oxp_72c59873-31ff-4e36-8d76-ff834009349a/crypt/zone/oxz_nexus_466a9f29-62bf-4e63-924a-b9efdb86afec             3b66453b-7148-4c1b-84a9-499e43290ab4   in service    none      none          off        
-    oxp_72c59873-31ff-4e36-8d76-ff834009349a/crypt/zone/oxz_ntp_62620961-fc4a-481e-968b-f5acbac0dc63               318fae85-abcb-4259-b1b6-ac96d193f7b7   in service    none      none          off        
-    oxp_72c59873-31ff-4e36-8d76-ff834009349a/crypt/debug                                                           93957ca0-9ed1-4e7b-8c34-2ce07a69541c   in service    100 GiB   none          gzip-9     
-    oxp_72c59873-31ff-4e36-8d76-ff834009349a/crypt/local_storage                                                   2db6b7c1-0f46-4ced-a3ad-48872793360e   in service    none      none          off        
-    oxp_72c59873-31ff-4e36-8d76-ff834009349a/local_storage_unencrypted                                             775f9207-c42d-4af2-9186-27ffef67735e   in service    none      none          off        
-
-
-    omicron zones:
-    ---------------------------------------------------------------------------------------------------------------
-    zone type         zone id                                image source      disposition   underlay IP           
-    ---------------------------------------------------------------------------------------------------------------
-    clickhouse        353b3b65-20f7-48c3-88f7-495bd5d31545   install dataset   in service    fd00:1122:3344:102::23
-    crucible          bd354eef-d8a6-4165-9124-283fb5e46d77   install dataset   in service    fd00:1122:3344:102::26
-    crucible_pantry   ad6a3a03-8d0f-4504-99a4-cbf73d69b973   install dataset   in service    fd00:1122:3344:102::25
-    external_dns      6c3ae381-04f7-41ea-b0ac-74db387dbc3a   install dataset   in service    fd00:1122:3344:102::24
-    internal_dns      99e2f30b-3174-40bf-a78a-90da8abba8ca   install dataset   in service    fd00:1122:3344:1::1   
-    internal_ntp      62620961-fc4a-481e-968b-f5acbac0dc63   install dataset   in service    fd00:1122:3344:102::21
-    nexus             466a9f29-62bf-4e63-924a-b9efdb86afec   install dataset   in service    fd00:1122:3344:102::22
-
-
   sled d81c6a84-79b8-4958-ae41-ea46c9b19763 (active, config generation 4 -> 5):
 -   will remove mupdate override:   1c0ce176-6dc8-4a90-adea-d4a8000751da -> (none)
 
@@ -1876,7 +1700,7 @@ parent:    afb09faf-a586-4483-9289-04d4f1d8ba23
 
   sled: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c
     state:::::::::::::   active
-    config generation:   9
+    config generation:   5
     subnet::::::::::::   fd00:1122:3344:102::/64
     last allocated IP:   fd00:1122:3344:102::26
 
@@ -2099,64 +1923,6 @@ to:   blueprint ce365dff-2cdb-4f35-a186-b15e20e1e700
 
  MODIFIED SLEDS:
 
-  sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c (active, config generation 8 -> 9):
-
-    measurements:
-    ---------------------------
-    hash      version          
-    ---------------------------
-    unknown   (unknown version)
-
-
-    host phase 2 contents:
-    ------------------------
-    slot   boot image source
-    ------------------------
-    A      current contents 
-    B      current contents 
-
-
-    physical disks:
-    ------------------------------------------------------------------------------------
-    vendor        model        serial                                        disposition
-    ------------------------------------------------------------------------------------
-    fake-vendor   fake-model   serial-72c59873-31ff-4e36-8d76-ff834009349a   in service 
-
-
-    datasets:
-    -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-    dataset name                                                                                                   dataset id                             disposition   quota     reservation   compression
-    -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-    oxp_72c59873-31ff-4e36-8d76-ff834009349a/crucible                                                              49f8fbb6-5bac-4609-907f-6e3dfc206059   in service    none      none          off        
-    oxp_72c59873-31ff-4e36-8d76-ff834009349a/crypt/clickhouse                                                      3560dd69-3b23-4c69-807d-d673104cfc68   in service    none      none          off        
-    oxp_72c59873-31ff-4e36-8d76-ff834009349a/crypt/external_dns                                                    2ad1875a-92ac-472f-8c26-593309f0e4da   in service    none      none          off        
-    oxp_72c59873-31ff-4e36-8d76-ff834009349a/crypt/internal_dns                                                    841d5648-05f0-47b0-b446-92f6b60fe9a6   in service    none      none          off        
-    oxp_72c59873-31ff-4e36-8d76-ff834009349a/crypt/zone                                                            4829f422-aa31-41a8-ab73-95684ff1ef48   in service    none      none          off        
-    oxp_72c59873-31ff-4e36-8d76-ff834009349a/crypt/zone/oxz_clickhouse_353b3b65-20f7-48c3-88f7-495bd5d31545        09b9cc9b-3426-470b-a7bc-538f82dede03   in service    none      none          off        
-    oxp_72c59873-31ff-4e36-8d76-ff834009349a/crypt/zone/oxz_crucible_bd354eef-d8a6-4165-9124-283fb5e46d77          8e0bd2bd-23b7-4bc6-9e73-c4d4ebc0bc8c   in service    none      none          off        
-    oxp_72c59873-31ff-4e36-8d76-ff834009349a/crypt/zone/oxz_crucible_pantry_ad6a3a03-8d0f-4504-99a4-cbf73d69b973   8c4fa711-1d5d-4e93-85f0-d17bff47b063   in service    none      none          off        
-    oxp_72c59873-31ff-4e36-8d76-ff834009349a/crypt/zone/oxz_external_dns_6c3ae381-04f7-41ea-b0ac-74db387dbc3a      c31623de-c19b-4615-9f1d-5e1daa5d3bda   in service    none      none          off        
-    oxp_72c59873-31ff-4e36-8d76-ff834009349a/crypt/zone/oxz_internal_dns_99e2f30b-3174-40bf-a78a-90da8abba8ca      b46de15d-33e7-4cd0-aa7c-e7be2a61e71b   in service    none      none          off        
-    oxp_72c59873-31ff-4e36-8d76-ff834009349a/crypt/zone/oxz_nexus_466a9f29-62bf-4e63-924a-b9efdb86afec             3b66453b-7148-4c1b-84a9-499e43290ab4   in service    none      none          off        
-    oxp_72c59873-31ff-4e36-8d76-ff834009349a/crypt/zone/oxz_ntp_62620961-fc4a-481e-968b-f5acbac0dc63               318fae85-abcb-4259-b1b6-ac96d193f7b7   in service    none      none          off        
-    oxp_72c59873-31ff-4e36-8d76-ff834009349a/crypt/debug                                                           93957ca0-9ed1-4e7b-8c34-2ce07a69541c   in service    100 GiB   none          gzip-9     
-    oxp_72c59873-31ff-4e36-8d76-ff834009349a/crypt/local_storage                                                   2db6b7c1-0f46-4ced-a3ad-48872793360e   in service    none      none          off        
-    oxp_72c59873-31ff-4e36-8d76-ff834009349a/local_storage_unencrypted                                             775f9207-c42d-4af2-9186-27ffef67735e   in service    none      none          off        
-
-
-    omicron zones:
-    ---------------------------------------------------------------------------------------------------------------
-    zone type         zone id                                image source      disposition   underlay IP           
-    ---------------------------------------------------------------------------------------------------------------
-    clickhouse        353b3b65-20f7-48c3-88f7-495bd5d31545   install dataset   in service    fd00:1122:3344:102::23
-    crucible          bd354eef-d8a6-4165-9124-283fb5e46d77   install dataset   in service    fd00:1122:3344:102::26
-    crucible_pantry   ad6a3a03-8d0f-4504-99a4-cbf73d69b973   install dataset   in service    fd00:1122:3344:102::25
-    external_dns      6c3ae381-04f7-41ea-b0ac-74db387dbc3a   install dataset   in service    fd00:1122:3344:102::24
-    internal_dns      99e2f30b-3174-40bf-a78a-90da8abba8ca   install dataset   in service    fd00:1122:3344:1::1   
-    internal_ntp      62620961-fc4a-481e-968b-f5acbac0dc63   install dataset   in service    fd00:1122:3344:102::21
-    nexus             466a9f29-62bf-4e63-924a-b9efdb86afec   install dataset   in service    fd00:1122:3344:102::22
-
-
   sled d81c6a84-79b8-4958-ae41-ea46c9b19763 (active, config generation 5 -> 6):
 
     measurements:
@@ -2350,7 +2116,7 @@ parent:    8f2d1f39-7c88-4701-aa43-56bf281b28c1
 
   sled: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c
     state:::::::::::::   active
-    config generation:   10
+    config generation:   6
     subnet::::::::::::   fd00:1122:3344:102::/64
     last allocated IP:   fd00:1122:3344:102::26
 
@@ -2570,7 +2336,7 @@ to:   blueprint 12d602a6-5ab4-487a-b94e-eb30cdf30300
 
  MODIFIED SLEDS:
 
-  sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c (active, config generation 9 -> 10):
+  sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c (active, config generation 5 -> 6):
 
     measurements:
     ------------------------------------------------------------------------------------
@@ -2805,7 +2571,7 @@ parent:    12d602a6-5ab4-487a-b94e-eb30cdf30300
 
   sled: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c
     state:::::::::::::   active
-    config generation:   10
+    config generation:   6
     subnet::::::::::::   fd00:1122:3344:102::/64
     last allocated IP:   fd00:1122:3344:102::26
 
@@ -3156,7 +2922,7 @@ to:   blueprint 27e755bc-dc10-4647-853c-f89bb3a15a2c
 
  MODIFIED SLEDS:
 
-  sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c (active, config generation 10 -> 11):
+  sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c (active, config generation 6 -> 7):
 
     measurements:
     --------------------------------------------------------------------------------
