@@ -97,6 +97,7 @@ use super::tasks::blueprint_execution;
 use super::tasks::blueprint_load;
 use super::tasks::blueprint_load::LoadedTargetBlueprint;
 use super::tasks::blueprint_planner;
+use super::tasks::blueprint_pruner;
 use super::tasks::blueprint_rendezvous;
 use super::tasks::crdb_node_id_collector;
 use super::tasks::decommissioned_disk_cleaner;
@@ -235,6 +236,7 @@ impl BackgroundTasksInitializer {
             task_blueprint_planner: Activator::new(),
             task_blueprint_executor: Activator::new(),
             task_blueprint_rendezvous: Activator::new(),
+            task_blueprint_pruner: Activator::new(),
             task_crdb_node_id_collector: Activator::new(),
             task_service_zone_nat_tracker: Activator::new(),
             task_switch_port_settings_manager: Activator::new(),
@@ -326,6 +328,7 @@ impl BackgroundTasksInitializer {
             task_blueprint_planner,
             task_blueprint_executor,
             task_blueprint_rendezvous,
+            task_blueprint_pruner,
             task_crdb_node_id_collector,
             task_service_zone_nat_tracker,
             task_switch_port_settings_manager,
@@ -672,6 +675,18 @@ impl BackgroundTasksInitializer {
             opctx: opctx.child(BTreeMap::new()),
             watchers: vec![Box::new(inventory_load_watcher.clone())],
             activator: task_blueprint_rendezvous,
+        });
+
+        driver.register(TaskDefinition {
+            name: "blueprint_pruner",
+            description: "prunes old blueprints from the database",
+            period: config.blueprints.period_secs_prune,
+            task_impl: Box::new(blueprint_pruner::BlueprintPruner::new(
+                datastore.clone(),
+            )),
+            opctx: opctx.child(BTreeMap::new()),
+            watchers: vec![],
+            activator: task_blueprint_pruner,
         });
 
         driver.register(TaskDefinition {

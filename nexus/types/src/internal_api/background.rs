@@ -775,6 +775,74 @@ pub enum BlueprintPlannerStatus {
     },
 }
 
+/// High-level status of the blueprint pruner background task.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(tag = "status", rename_all = "snake_case")]
+pub enum BlueprintPrunerStatus {
+    /// The blueprint pruner is disabled.
+    Disabled {
+        /// The reason why the pruner is disabled.
+        reason: String,
+    },
+    /// The blueprint pruner is enabled and ran successfully.
+    Enabled(BlueprintPrunerDetails),
+}
+
+impl std::fmt::Display for BlueprintPrunerStatus {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            BlueprintPrunerStatus::Disabled { reason } => {
+                writeln!(f, "    status: disabled")?;
+                writeln!(f, "    reason: {}", reason)?;
+                Ok(())
+            }
+            BlueprintPrunerStatus::Enabled(details) => {
+                writeln!(f, "    status: enabled")?;
+                details.fmt(f)
+            }
+        }
+    }
+}
+
+/// The status of a `blueprint_pruner` background task activation.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct BlueprintPrunerDetails {
+    /// blueprints deleted
+    pub deleted: Vec<DeletedBlueprint>,
+    /// count of blueprints kept
+    pub nkept: u64,
+    /// warnings encountered while pruning
+    pub warnings: Vec<String>,
+}
+
+impl std::fmt::Display for BlueprintPrunerDetails {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        writeln!(f, "    blueprints kept: {}", self.nkept)?;
+        writeln!(f, "    blueprints deleted: {}", self.deleted.len())?;
+        for b in &self.deleted {
+            writeln!(
+                f,
+                "        {} (made target at {})\n",
+                b.id,
+                humantime::format_rfc3339_millis(b.time_made_target.into())
+            )?;
+        }
+        writeln!(f, "    warnings: {}", self.warnings.len())?;
+        for w in &self.warnings {
+            writeln!(f, "        {}", w)?;
+        }
+        Ok(())
+    }
+}
+
+/// Describes a blueprint that was deleted by the pruner task
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct DeletedBlueprint {
+    pub id: BlueprintUuid,
+    pub time_created: DateTime<Utc>,
+    pub time_made_target: DateTime<Utc>,
+}
+
 /// The status of a `alert_dispatcher` background task activation.
 #[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
 pub struct AlertDispatcherStatus {
@@ -978,6 +1046,9 @@ mod test {
     use super::TufRepoInfo;
     use super::TufRepoPrunerDetails;
     use super::TufRepoPrunerStatus;
+    use crate::internal_api::background::BlueprintPrunerDetails;
+    use crate::internal_api::background::BlueprintPrunerStatus;
+    use crate::internal_api::background::DeletedBlueprint;
     use expectorate::assert_contents;
     use iddqd::IdOrdMap;
 
@@ -1022,6 +1093,44 @@ mod test {
 
         assert_contents(
             "output/tuf_repo_pruner_status_disabled.out",
+            &status.to_string(),
+        );
+    }
+
+    #[test]
+    fn test_display_blueprint_pruner_status_enabled() {
+        let blueprint1 = DeletedBlueprint {
+            id: "4e8a87a0-3102-4014-99d3-e1bf486685bd".parse().unwrap(),
+            time_created: "2025-09-29T01:23:45Z".parse().unwrap(),
+            time_made_target: "2025-09-30T01:23:45Z".parse().unwrap(),
+        };
+        let blueprint2 = DeletedBlueprint {
+            id: "867e42ae-ed72-4dc3-abcd-508b875c9601".parse().unwrap(),
+            time_created: "2025-09-29T02:34:56Z".parse().unwrap(),
+            time_made_target: "2025-09-30T02:34:56Z".parse().unwrap(),
+        };
+
+        let details = BlueprintPrunerDetails {
+            deleted: vec![blueprint1, blueprint2],
+            nkept: 12,
+            warnings: vec![String::from("fake-oh problem-oh")],
+        };
+        let status = BlueprintPrunerStatus::Enabled(details);
+
+        assert_contents(
+            "output/blueprint_pruner_status_enabled.out",
+            &status.to_string(),
+        );
+    }
+
+    #[test]
+    fn test_display_blueprint_pruner_status_disabled() {
+        let status = BlueprintPrunerStatus::Disabled {
+            reason: "disabled in this test".to_string(),
+        };
+
+        assert_contents(
+            "output/blueprint_pruner_status_disabled.out",
             &status.to_string(),
         );
     }
