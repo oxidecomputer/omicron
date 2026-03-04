@@ -737,13 +737,6 @@ struct SledMupdateSource {
         requires = "sled-mupdate-valid-source"
     )]
     with_zone_error: Vec<String>,
-    /// simulator a measurement corpus error
-    #[clap(
-        long,
-        value_name = "ARTIFACT_ID_NAME",
-        requires = "sled-mupdate-valid-source"
-    )]
-    with_corpus_error: Vec<String>,
 }
 
 #[derive(Debug, Args)]
