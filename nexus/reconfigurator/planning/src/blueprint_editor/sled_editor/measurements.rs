@@ -28,14 +28,8 @@ impl MeasurementEditor {
         self.measurements.value().clone()
     }
 
-    pub fn delete_pending_measurements(&mut self) -> BlueprintMeasurements {
+    pub fn reset_to_parent_blueprint_measurements(&mut self) -> BlueprintMeasurements {
         self.measurements.reset_to_original().into_owned()
-    }
-
-    pub fn set_install_dataset(&mut self) -> BlueprintMeasurements {
-        self.measurements
-            .set_value_if_unchanged(BlueprintMeasurements::InstallDataset)
-            .into_owned()
     }
 
     pub fn set_measurements(

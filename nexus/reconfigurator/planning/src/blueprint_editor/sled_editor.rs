@@ -522,7 +522,7 @@ impl SledEditor {
     pub fn measurements_set_install_dataset(
         &mut self,
     ) -> BlueprintMeasurements {
-        self.measurements.set_install_dataset()
+        self.measurements.set_measurements(BlueprintMeasurements::InstallDataset)
     }
 
     pub fn set_measurements(
@@ -532,10 +532,10 @@ impl SledEditor {
         Ok(self.measurements.set_measurements(measurements))
     }
 
-    pub fn delete_pending_measurements(
+    pub fn reset_to_parent_blueprint_measurements(
         &mut self,
     ) -> Result<BlueprintMeasurements, SledEditError> {
-        Ok(self.measurements.delete_pending_measurements())
+        Ok(self.measurements.reset_to_parent_blueprint_measurements())
     }
 
     /// Sets the desired host phase 2 contents for this sled.
@@ -793,7 +793,7 @@ impl SledEditor {
                     BlueprintHostPhase2DesiredSlots::current_contents(),
                 );
 
-                let prev_measurements = self.delete_pending_measurements()?;
+                let prev_measurements = self.reset_to_parent_blueprint_measurements()?;
 
                 // Also update the cached value inside `noop_sled_info`.
                 if let NoopConvertSledInfoMut::Ok(mut info) = noop_sled_info {
