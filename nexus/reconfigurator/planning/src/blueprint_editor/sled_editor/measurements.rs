@@ -13,7 +13,7 @@ pub(super) struct MeasurementEditor {
 
 impl MeasurementEditor {
     pub fn new(measurements: BlueprintMeasurements) -> Self {
-        Self { measurements: ScalarEditor::new(measurements.clone()) }
+        Self { measurements: ScalarEditor::new(measurements)) }
     }
 
     pub fn edit_counts(&self) -> EditCounts {

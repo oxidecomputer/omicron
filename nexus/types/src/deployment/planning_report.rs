@@ -823,6 +823,7 @@ impl PlanningMeasurementUpdatesStepReport {
     pub fn new() -> Self {
         PlanningMeasurementUpdatesStepReport::Modified { count: 0 }
     }
+
     pub fn is_empty(&self) -> bool {
         match self {
             PlanningMeasurementUpdatesStepReport::Modified { count } => {
