@@ -40,8 +40,8 @@ impl SimTufRepoDescription {
         Self { source: Ok(source), measurement_error: None, message }
     }
 
-    /// Creates a new `SimTufRepoDescription` with a simulated error with
-    /// the measurement manifest but a valid zone manifest
+    /// Creates a new `SimTufRepoDescription` with a valid zone
+    /// manifest but a simulated error in the measurement manifest.
     pub fn new_measurement_error(
         source: SimTufRepoSource,
         measurement_error: String,
