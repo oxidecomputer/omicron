@@ -288,7 +288,7 @@ async fn fetch_transceivers_from_one_switch(
             Err(e) => error!(
                 log,
                 "failed to fetch transceiver state";
-                "interafce" => interface,
+                "interface" => interface,
                 "error" => %e,
             ),
         }
