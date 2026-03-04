@@ -438,6 +438,8 @@ async fn test_session_me(cptestctx: &ControlPlaneTestContext) {
     assert_eq!(priv_user.silo_name, DEFAULT_SILO.name().clone());
     assert!(priv_user.fleet_viewer);
     assert!(priv_user.silo_admin);
+    assert!(priv_user.user.time_created > chrono::DateTime::UNIX_EPOCH);
+    assert!(priv_user.user.time_modified >= priv_user.user.time_created);
 
     let unpriv_user = NexusRequest::object_get(testctx, "/v1/me")
         .authn_as(AuthnMode::UnprivilegedUser)

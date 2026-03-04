@@ -966,6 +966,11 @@ async fn test_silo_users_list(cptestctx: &ControlPlaneTestContext) {
             ),
         ]
     );
+    // Timestamps should be populated and sensible.
+    for u in &initial_silo_users {
+        assert!(u.time_created > chrono::DateTime::UNIX_EPOCH);
+        assert!(u.time_modified >= u.time_created);
+    }
 
     // Now create another user and make sure we can see them.  While we're at
     // it, use a small limit to check that pagination is really working.

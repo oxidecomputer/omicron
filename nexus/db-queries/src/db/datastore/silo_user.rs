@@ -21,8 +21,8 @@ use crate::db::pagination::paginated;
 use crate::db::update_and_check::UpdateAndCheck;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::DateTime;
-use chrono::Timelike;
 use chrono::Utc;
+use omicron_common::round_to_micros;
 use diesel::prelude::*;
 use nexus_db_errors::ErrorHandler;
 use nexus_db_errors::public_error_from_diesel;
@@ -225,12 +225,6 @@ impl From<SiloUserApiOnly> for SiloUser {
     fn from(u: SiloUserApiOnly) -> SiloUser {
         SiloUser::ApiOnly(u)
     }
-}
-
-fn round_to_micros(dt: DateTime<Utc>) -> DateTime<Utc> {
-    let nanos = dt.timestamp_subsec_nanos();
-    let micros = (nanos / 1000) * 1000;
-    dt.with_nanosecond(micros).unwrap()
 }
 
 impl From<SiloUserApiOnly> for user::User {

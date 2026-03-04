@@ -57,13 +57,22 @@ impl slog::KV for FileKv {
     }
 }
 
-/// Returns the current time, truncated to the previous microsecond.
+/// Returns the current time, truncated to microsecond precision.
 ///
-/// This exists because the database doesn't store nanosecond-precision, so if
-/// we store nanosecond-precision timestamps, then DateTime conversion is lossy
-/// when round-tripping through the database.  That's rather inconvenient.
+/// See [`round_to_micros`] for details.
 pub fn now_db_precision() -> chrono::DateTime<chrono::Utc> {
-    let ts = chrono::Utc::now();
+    round_to_micros(chrono::Utc::now())
+}
+
+/// Truncates a timestamp to microsecond precision.
+///
+/// CockroachDB stores timestamps with microsecond precision, so any
+/// nanoseconds beyond that are lost on a round-trip through the database.
+/// Use this when constructing timestamps that will be compared against
+/// values returned from the database.
+pub fn round_to_micros(
+    ts: chrono::DateTime<chrono::Utc>,
+) -> chrono::DateTime<chrono::Utc> {
     let nanosecs = ts.timestamp_subsec_nanos();
     let micros = ts.timestamp_subsec_micros();
     let only_nanos = nanosecs - micros * 1000;
