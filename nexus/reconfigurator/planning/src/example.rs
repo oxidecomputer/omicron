@@ -950,6 +950,7 @@ impl ExampleSystemBuilder {
                     )
                     .expect("sled is present in blueprint");
 
+                // Right now we expect a single measurement artifact
                 let measurement_artifact = artifacts_by_kind
                     .get(&ArtifactKind::MEASUREMENT_CORPUS)
                     .unwrap();
