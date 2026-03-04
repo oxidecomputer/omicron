@@ -26,35 +26,13 @@ impl<T> ScalarEditor<T> {
         }
     }
 
-    /// This is equivalent to `set_value(self.original)` without
-    /// having to expose the original value
+    /// Equivalent to `set_value(self.original)`, without
+    /// having to expose the original value.
     pub(crate) fn reset_to_original(&mut self) -> Cow<'_, T>
     where
         T: Clone,
     {
         self.set_value(self.original.clone())
-    }
-
-    /// This is the same as `set_value` but if the internal value is
-    /// still `Original` and `value` matches we will leave the
-    /// value as `Original`
-    pub(crate) fn set_value_if_unchanged(&mut self, value: T) -> Cow<'_, T>
-    where
-        T: Clone + PartialEq,
-    {
-        match &self.value {
-            EditValue::Original => {
-                if value == self.original {
-                    return Cow::Borrowed(&self.original);
-                }
-            }
-            _ => (),
-        }
-
-        match mem::replace(&mut self.value, EditValue::Edited(value)) {
-            EditValue::Original => Cow::Borrowed(&self.original),
-            EditValue::Edited(old_value) => Cow::Owned(old_value),
-        }
     }
 
     /// Set the value to a new one, returning the old value.

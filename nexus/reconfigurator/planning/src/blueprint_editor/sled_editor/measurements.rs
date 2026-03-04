@@ -13,7 +13,7 @@ pub(super) struct MeasurementEditor {
 
 impl MeasurementEditor {
     pub fn new(measurements: BlueprintMeasurements) -> Self {
-        Self { measurements: ScalarEditor::new(measurements)) }
+        Self { measurements: ScalarEditor::new(measurements) }
     }
 
     pub fn edit_counts(&self) -> EditCounts {
@@ -38,7 +38,7 @@ impl MeasurementEditor {
         &mut self,
         new: BlueprintMeasurements,
     ) -> BlueprintMeasurements {
-        self.measurements.set_value_if_unchanged(new).into_owned()
+        self.measurements.set_value(new).into_owned()
     }
 
     pub fn finalize(self) -> (BlueprintMeasurements, EditCounts) {
