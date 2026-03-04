@@ -3,8 +3,10 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use crate::health_checks::poll_smf_services_in_maintenance;
+use crate::health_checks::poll_smf_services_enabled_not_online;
 
 use illumos_utils::svcs::SvcsInMaintenanceResult;
+use illumos_utils::svcs::SvcsResult;
 use sled_agent_types::inventory::HealthMonitorInventory;
 use slog::Logger;
 use slog::info;
@@ -20,6 +22,8 @@ pub struct HealthMonitorHandle {
     // and this error cannot be cloned.
     pub smf_services_in_maintenance_rx:
         watch::Receiver<Result<SvcsInMaintenanceResult, String>>,
+    pub smf_services_enabled_not_online_rx:
+        watch::Receiver<Result<SvcsResult, String>>,
 }
 
 impl HealthMonitorHandle {
@@ -28,7 +32,9 @@ impl HealthMonitorHandle {
     pub fn stub() -> Self {
         let (_tx, smf_services_in_maintenance_rx) =
             watch::channel(Ok(SvcsInMaintenanceResult::new()));
-        Self { smf_services_in_maintenance_rx }
+        let (_tx, smf_services_enabled_not_online_rx) =
+            watch::channel(Ok(SvcsResult::new()));
+        Self { smf_services_in_maintenance_rx, smf_services_enabled_not_online_rx }
     }
 
     pub fn spawn(log: Logger) -> Self {
@@ -38,15 +44,29 @@ impl HealthMonitorHandle {
         let (smf_services_in_maintenance_tx, smf_services_in_maintenance_rx) =
             watch::channel(Ok(SvcsInMaintenanceResult::new()));
 
+        let log_2 = log.clone();
         tokio::spawn(async move {
             poll_smf_services_in_maintenance(
-                log,
+                log_2,
                 smf_services_in_maintenance_tx,
             )
             .await
         });
 
-        Self { smf_services_in_maintenance_rx }
+        let (smf_services_enabled_not_online_tx, smf_services_enabled_not_online_rx) =
+            watch::channel(Ok(SvcsResult::new()));
+
+        // TODO-K: remove this clone
+        let log_3 = log.clone();
+        tokio::spawn(async move {
+            poll_smf_services_enabled_not_online(
+                log_3,
+                smf_services_enabled_not_online_tx,
+            )
+            .await
+        });
+
+        Self { smf_services_in_maintenance_rx, smf_services_enabled_not_online_rx }
     }
 
     pub fn to_inventory(&self) -> HealthMonitorInventory {
