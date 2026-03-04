@@ -32,21 +32,32 @@ pub enum EarlyNetworkConfigEnvelopeError {
     UnknownSchemaVersion { schema_version: u32 },
 }
 
-/// Envelope containing a versioned JSON blob (an `EarlyNetworkConfigBody`).
+/// Envelope containing a versioned JSON blob (an [`EarlyNetworkConfigBody`]).
 ///
-/// A [`crate::latest::early_networking::WriteNetworkConfigRequest`] ultimately
-/// results in a new [`bootstore::NetworkConfig`] being written to the
+/// A [`WriteNetworkConfigRequest`] received by sled-agent (typically sent by
+/// Nexus) results in a new [`bootstore::NetworkConfig`] being written to the
 /// bootstore:
 ///
-/// * The `WriteNetworkConfigRequest::body` will be wrapped in an
+/// * The [`WriteNetworkConfigRequest::body`] will be wrapped in an
 ///   [`EarlyNetworkConfigEnvelope`]. `schema_version` records the
-///   `EarlyNetworkConfigBody::SCHEMA_VERSION` of the particular version of
-///   the body, and `body` contains the JSON-ified `EarlyNetworkConfigBody`
+///   [`EarlyNetworkConfigBody::SCHEMA_VERSION`] of the particular version of
+///   the body, and `body` contains the JSON-ified [`EarlyNetworkConfigBody`]
 ///   itself.
-/// * The `NetworkConfig::generation` will be set to the generation from the
-///   incoming `WriteNetworkConfigRequest::generation`. The
-///   `NetworkConfig::blob` contains the JSON-ified
+/// * The [`bootstore::NetworkConfig::generation`] will be set to the generation
+///   from the incoming [`WriteNetworkConfigRequest::generation`]. The
+///   [`bootstore::NetworkConfig::blob`] contains the JSON-ified
 ///   [`EarlyNetworkConfigEnvelope`] from the previous bullet.
+///
+/// [`EarlyNetworkConfigBody`]:
+/// sled_agent_types_versions::latest::early_networking::EarlyNetworkConfigBody
+/// [`EarlyNetworkConfigBody::SCHEMA_VERSION`]:
+/// sled_agent_types_versions::latest::early_networking::EarlyNetworkConfigBody::SCHEMA_VERSION
+/// [`WriteNetworkConfigRequest`]:
+/// sled_agent_types_versions::latest::early_networking::WriteNetworkConfigRequest
+/// [`WriteNetworkConfigRequest::body`]:
+/// sled_agent_types_versions::latest::early_networking::WriteNetworkConfigRequest::body
+/// [`WriteNetworkConfigRequest::generation`]:
+/// sled_agent_types_versions::latest::early_networking::WriteNetworkConfigRequest::generation
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
 pub struct EarlyNetworkConfigEnvelope {
     // Which version of `EarlyNetworkConfigBody` is serialized into `body`.
