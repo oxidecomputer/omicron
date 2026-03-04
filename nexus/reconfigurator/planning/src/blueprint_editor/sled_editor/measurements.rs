@@ -28,7 +28,9 @@ impl MeasurementEditor {
         self.measurements.value().clone()
     }
 
-    pub fn reset_to_parent_blueprint_measurements(&mut self) -> BlueprintMeasurements {
+    pub fn reset_to_parent_blueprint_measurements(
+        &mut self,
+    ) -> BlueprintMeasurements {
         self.measurements.reset_to_original().into_owned()
     }
 

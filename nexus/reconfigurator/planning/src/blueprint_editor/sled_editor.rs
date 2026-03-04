@@ -522,7 +522,8 @@ impl SledEditor {
     pub fn measurements_set_install_dataset(
         &mut self,
     ) -> BlueprintMeasurements {
-        self.measurements.set_measurements(BlueprintMeasurements::InstallDataset)
+        self.measurements
+            .set_measurements(BlueprintMeasurements::InstallDataset)
     }
 
     pub fn set_measurements(
@@ -793,7 +794,8 @@ impl SledEditor {
                     BlueprintHostPhase2DesiredSlots::current_contents(),
                 );
 
-                let prev_measurements = self.reset_to_parent_blueprint_measurements()?;
+                let prev_measurements =
+                    self.reset_to_parent_blueprint_measurements()?;
 
                 // Also update the cached value inside `noop_sled_info`.
                 if let NoopConvertSledInfoMut::Ok(mut info) = noop_sled_info {
