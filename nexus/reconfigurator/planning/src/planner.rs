@@ -300,6 +300,7 @@ impl<'a> Planner<'a> {
         let mut add = if add_update_blocked_reasons.is_empty()
             || add_zones_with_mupdate_override
             || target_release_generation_is_one
+            || measurement_updates.is_empty()
         {
             self.do_plan_add(&mgs_updates)?
         } else {
@@ -332,10 +333,9 @@ impl<'a> Planner<'a> {
             PlanningZoneUpdatesStepReport::waiting_on(
                 ZoneUpdatesWaitingOn::ZoneAddBlockers,
             )
-        } else if !target_release_generation_is_one
-            && !measurement_updates.is_empty()
+        } else if !measurement_updates.is_empty()
         {
-            // ... or if there are pending zone add blockers.
+            // ... or if there are pendin measurement updates
             PlanningZoneUpdatesStepReport::waiting_on(
                 ZoneUpdatesWaitingOn::Measurements,
             )
