@@ -148,8 +148,13 @@ impl SvcsResult {
     #[cfg_attr(not(target_os = "illumos"), allow(dead_code))]
     fn filter_enabled_not_online(mut self) -> Self {
         self.services.retain(|svc| {
-            // TODO-K: Add legacy run here?
-            !matches!(svc.state, SvcState::Online | SvcState::Disabled)
+            // legacy_run is included here because this state doesn't really say
+            // anythging about whether a service is running or not. It just
+            // states that this is a service that isn't managed by SMF
+            !matches!(
+                svc.state,
+                SvcState::Online | SvcState::Disabled | SvcState::LegacyRun
+            )
         });
         self
     }
@@ -520,7 +525,6 @@ disabled       svc:/network/tcpkey:default                      global
             vec![
                 mk_svc(2, SvcState::Offline),
                 mk_svc(3, SvcState::Degraded),
-                mk_svc(6, SvcState::LegacyRun),
                 mk_svc(7, SvcState::Unknown),
                 mk_svc(8, SvcState::Maintenance),
                 mk_svc(9, SvcState::Maintenance),

@@ -10,8 +10,8 @@ use slog::Logger;
 use slog::info;
 use tokio::sync::watch;
 
-// TODO-K: Pending feedback from omicron/#9876. Remove all of this and make the
-// call in-line during inventory collection.
+// TODO-K: Pending omicron/#9935. Remove all of this and make the call in-line
+// during inventory collection using the new mechanism.
 #[derive(Debug, Clone)]
 pub struct HealthMonitorHandle {
     // Return a String instead of a custom error type as inventory requires
@@ -51,8 +51,6 @@ impl HealthMonitorHandle {
         Self { smf_services_enabled_not_online_rx }
     }
 
-    // TODO-K: The more I see this the more I think this should be encapsulated
-    // in a type
     pub fn to_inventory(&self) -> Result<SvcsEnabledNotOnline, String> {
         match self.smf_services_enabled_not_online_rx.borrow().clone() {
             Ok(svcs) => {
