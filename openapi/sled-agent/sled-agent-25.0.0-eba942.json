@@ -7,7 +7,7 @@
       "url": "https://oxide.computer",
       "email": "api@oxide.computer"
     },
-    "version": "24.0.0"
+    "version": "25.0.0"
   },
   "paths": {
     "/artifacts": {
@@ -6133,12 +6133,12 @@
           "sled_role": {
             "$ref": "#/components/schemas/SledRole"
           },
-          "smf_services_in_maintenance": {
+          "smf_services_enabled_not_online": {
             "x-rust-type": {
               "crate": "std",
               "parameters": [
                 {
-                  "$ref": "#/components/schemas/SvcsInMaintenanceResult"
+                  "$ref": "#/components/schemas/SvcsEnabledNotOnline"
                 },
                 {
                   "type": "string"
@@ -6152,7 +6152,7 @@
                 "type": "object",
                 "properties": {
                   "ok": {
-                    "$ref": "#/components/schemas/SvcsInMaintenanceResult"
+                    "$ref": "#/components/schemas/SvcsEnabledNotOnline"
                   }
                 },
                 "required": [
@@ -6199,7 +6199,7 @@
           "sled_agent_address",
           "sled_id",
           "sled_role",
-          "smf_services_in_maintenance",
+          "smf_services_enabled_not_online",
           "usable_hardware_threads",
           "usable_physical_ram",
           "zpools"
@@ -9529,12 +9529,15 @@
         "type": "string",
         "format": "uuid"
       },
-      "SvcInMaintenance": {
+      "Svc": {
         "description": "Information about an SMF service that is enabled but not running",
         "type": "object",
         "properties": {
           "fmri": {
             "type": "string"
+          },
+          "state": {
+            "$ref": "#/components/schemas/SvcState"
           },
           "zone": {
             "type": "string"
@@ -9542,11 +9545,73 @@
         },
         "required": [
           "fmri",
+          "state",
           "zone"
         ]
       },
-      "SvcsInMaintenanceResult": {
-        "description": "Lists services in maintenance status if any, and the time the health check for SMF services ran",
+      "SvcState": {
+        "description": "Each service instance is always in a well-defined state based on its dependencies, the results of the execution of its methods, and its potential contracts events. See <https://illumos.org/man/7/smf> for more information.",
+        "oneOf": [
+          {
+            "description": "Initial state for all service instances.",
+            "type": "string",
+            "enum": [
+              "uninitialized"
+            ]
+          },
+          {
+            "description": "The instance is enabled, but not yet running or available to run.",
+            "type": "string",
+            "enum": [
+              "offline"
+            ]
+          },
+          {
+            "description": "The instance is enabled and running or is available to run.",
+            "type": "string",
+            "enum": [
+              "online"
+            ]
+          },
+          {
+            "description": "The instance is enabled and running or available to run. It is, however, functioning at a limited capacity in comparison to normal operation.",
+            "type": "string",
+            "enum": [
+              "degraded"
+            ]
+          },
+          {
+            "description": "The instance is enabled, but not able to run.",
+            "type": "string",
+            "enum": [
+              "maintenance"
+            ]
+          },
+          {
+            "description": "The instance is disabled.",
+            "type": "string",
+            "enum": [
+              "disabled"
+            ]
+          },
+          {
+            "description": "Represents a legacy instance that is not managed by the service management facility.",
+            "type": "string",
+            "enum": [
+              "legacy_run"
+            ]
+          },
+          {
+            "description": "We were unable to determine the state of the service instance.",
+            "type": "string",
+            "enum": [
+              "unknown"
+            ]
+          }
+        ]
+      },
+      "SvcsEnabledNotOnline": {
+        "description": "Lists services that are enabled but not in an online state if any, the time the sample was collected, and any errors that may have ocurred during the collection",
         "type": "object",
         "properties": {
           "errors": {
@@ -9558,18 +9623,18 @@
           "services": {
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/SvcInMaintenance"
+              "$ref": "#/components/schemas/Svc"
             }
           },
           "time_of_status": {
-            "nullable": true,
             "type": "string",
             "format": "date-time"
           }
         },
         "required": [
           "errors",
-          "services"
+          "services",
+          "time_of_status"
         ]
       },
       "SwitchLocation": {

@@ -844,7 +844,7 @@ pub trait SledAgentApi {
     #[endpoint {
         method = GET,
         path = "/inventory",
-        versions = VERSION_ADD_ZPOOL_HEALTH_TO_INVENTORY..,
+        versions = VERSION_MODIFY_SERVICES_IN_INVENTORY..,
     }]
     async fn inventory(
         rqctx: RequestContext<Self::Context>,
@@ -855,7 +855,7 @@ pub trait SledAgentApi {
         operation_id = "inventory",
         method = GET,
         path = "/inventory",
-        versions = VERSION_REMOVE_HEALTH_MONITOR_KEEP_CHECKS..VERSION_ADD_ZPOOL_HEALTH_TO_INVENTORY,
+        versions = VERSION_ADD_ZPOOL_HEALTH_TO_INVENTORY..VERSION_MODIFY_SERVICES_IN_INVENTORY,
     }]
     async fn inventory_v24(
         rqctx: RequestContext<Self::Context>,

@@ -171,6 +171,7 @@ impl SvcsResult {
     #[cfg_attr(not(target_os = "illumos"), allow(dead_code))]
     fn filter_enabled_not_online(mut self) -> Self {
         self.services.retain(|svc| {
+            // TODO-K: Add legacy run here?
             !matches!(svc.state, SvcState::Online | SvcState::Disabled)
         });
         self
@@ -347,16 +348,17 @@ pub struct Svc {
     state: SvcState,
 }
 
-impl Svc {
-    #[cfg_attr(not(target_os = "illumos"), allow(dead_code))]
-    fn new() -> Svc {
-        Svc {
-            fmri: String::new(),
-            zone: String::new(),
-            state: SvcState::Unknown,
-        }
-    }
-}
+// TODO-K: removeme?
+//impl Svc {
+//    #[cfg_attr(not(target_os = "illumos"), allow(dead_code))]
+//    fn new() -> Svc {
+//        Svc {
+//            fmri: String::new(),
+//            zone: String::new(),
+//            state: SvcState::Unknown,
+//        }
+//    }
+//}
 
 impl Display for Svc {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
