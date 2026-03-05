@@ -25,10 +25,10 @@ pub struct User {
     /// Uuid of the silo to which this user belongs
     pub silo_id: Uuid,
 
-    /// Timestamp of when this user was created
+    /// Timestamp when this user was created
     pub time_created: DateTime<Utc>,
 
-    /// Timestamp of when this user was last modified
+    /// Timestamp when this user was last modified
     pub time_modified: DateTime<Utc>,
 }
 
@@ -81,10 +81,10 @@ pub struct Group {
     /// Uuid of the silo to which this group belongs
     pub silo_id: Uuid,
 
-    /// Timestamp of when this group was created
+    /// Timestamp when this group was created
     pub time_created: DateTime<Utc>,
 
-    /// Timestamp of when this group was last modified
+    /// Timestamp when this group was last modified
     pub time_modified: DateTime<Utc>,
 }
 

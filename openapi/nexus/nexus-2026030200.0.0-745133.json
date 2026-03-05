@@ -18883,12 +18883,12 @@
             ]
           },
           "time_created": {
-            "description": "Timestamp of when this user was created",
+            "description": "Timestamp when this user was created",
             "type": "string",
             "format": "date-time"
           },
           "time_modified": {
-            "description": "Timestamp of when this user was last modified",
+            "description": "Timestamp when this user was last modified",
             "type": "string",
             "format": "date-time"
           }
@@ -21228,12 +21228,12 @@
             "format": "uuid"
           },
           "time_created": {
-            "description": "Timestamp of when this group was created",
+            "description": "Timestamp when this group was created",
             "type": "string",
             "format": "date-time"
           },
           "time_modified": {
-            "description": "Timestamp of when this group was last modified",
+            "description": "Timestamp when this group was last modified",
             "type": "string",
             "format": "date-time"
           }
@@ -29832,12 +29832,12 @@
             "format": "uuid"
           },
           "time_created": {
-            "description": "Timestamp of when this user was created",
+            "description": "Timestamp when this user was created",
             "type": "string",
             "format": "date-time"
           },
           "time_modified": {
-            "description": "Timestamp of when this user was last modified",
+            "description": "Timestamp when this user was last modified",
             "type": "string",
             "format": "date-time"
           }
