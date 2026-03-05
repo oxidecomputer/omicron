@@ -320,6 +320,7 @@ table! {
 
 table! {
     bgp_peer_view (switch_loc, port_name) {
+        switch_loc -> crate::enums::SwitchLocationEnum,
         port_name -> Text,
         addr -> Nullable<Inet>,
         asn -> Int8,
@@ -336,7 +337,6 @@ table! {
         enforce_first_as -> Bool,
         vlan_id -> Nullable<Int4>,
         router_lifetime -> Int4,
-        switch_loc -> crate::enums::SwitchLocationEnum,
     }
 }
 
