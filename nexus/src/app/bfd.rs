@@ -11,28 +11,6 @@ use sled_agent_types::early_networking::BfdMode;
 use sled_agent_types::early_networking::SwitchLocation;
 
 impl super::Nexus {
-    async fn mg_client_for_switch_location(
-        &self,
-        switch: SwitchLocation,
-    ) -> Result<mg_admin_client::Client, Error> {
-        let mg_client: mg_admin_client::Client = self
-            .mg_clients()
-            .await
-            .map_err(|e| {
-                Error::internal_error(&format!("failed to get mg clients: {e}"))
-            })?
-            .get(&switch)
-            .ok_or_else(|| {
-                Error::not_found_by_name(
-                    omicron_common::api::external::ResourceType::Switch,
-                    &switch.to_string().parse().unwrap(),
-                )
-            })?
-            .clone();
-
-        Ok(mg_client)
-    }
-
     pub async fn bfd_enable(
         &self,
         opctx: &OpContext,
@@ -69,9 +47,19 @@ impl super::Nexus {
     ) -> Result<Vec<bfd::BfdStatus>, Error> {
         // ask each rack switch about all its BFD sessions. This will need to
         // be updated for multirack.
+        let mg_clients = self.mg_clients().await.map_err(|err| {
+            Error::internal_error(&format!("failed to get mg clients: {err}"))
+        })?;
         let mut result = Vec::new();
         for s in &[SwitchLocation::Switch0, SwitchLocation::Switch1] {
-            let mg_client = self.mg_client_for_switch_location(*s).await?;
+            // If we only have one scrimlet, we won't have an entry in
+            // `mg_clients` for one of the switch locations. Log that, but
+            // continue so we can still report status from whichever switch we
+            // do have.
+            let Some(mg_client) = mg_clients.get(s) else {
+                warn!(self.log, "no mgd client found for switch location {s}");
+                continue;
+            };
             let status = mg_client
                 .get_bfd_peers()
                 .await
