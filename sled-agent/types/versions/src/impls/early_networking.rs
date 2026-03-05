@@ -14,10 +14,9 @@ use std::str::FromStr;
 
 use crate::latest::early_networking::{
     BgpPeerConfig, EarlyNetworkConfig, EarlyNetworkConfigBody, LldpAdminStatus,
-    MaxPathConfig, MaxPathConfigError, ParseLldpAdminStatusError,
-    ParseSwitchLocationError, PortFec, PortSpeed, RouterLifetimeConfig,
-    RouterLifetimeConfigError, SwitchLocation, UplinkAddressConfig,
-    UplinkAddressConfigError,
+    MaxPathConfig, MaxPathConfigError, ParseLldpAdminStatusError, PortFec,
+    PortSpeed, RouterLifetimeConfig, RouterLifetimeConfigError, SwitchLocation,
+    UplinkAddressConfig, UplinkAddressConfigError,
 };
 
 impl FromStr for EarlyNetworkConfig {
@@ -281,12 +280,6 @@ impl fmt::Display for SwitchLocation {
             SwitchLocation::Switch0 => write!(f, "switch0"),
             SwitchLocation::Switch1 => write!(f, "switch1"),
         }
-    }
-}
-
-impl std::fmt::Display for ParseSwitchLocationError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "parse switch location error: {}", self.0)
     }
 }
 
