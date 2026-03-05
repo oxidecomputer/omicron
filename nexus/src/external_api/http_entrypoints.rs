@@ -121,6 +121,7 @@ use propolis_client::support::tungstenite::protocol::{
 };
 use range_requests::PotentialRange;
 use ref_cast::RefCast;
+use sled_agent_types::early_networking::SwitchLocation;
 use trust_quorum_types::types::Epoch;
 
 type NexusApiDescription = ApiDescription<ApiContext>;
@@ -4000,12 +4001,19 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 "invalid ip address".into(),
             )),
         }?;
+        // TODO-correctness enum in external API
+        let switch_location: SwitchLocation =
+            path.switch_location.as_str().parse().map_err(|_| {
+                Error::invalid_request(
+                    "invalid switch location (expected `switch0` or `switch1`)",
+                )
+            })?;
         audit_and_time(&rqctx, |opctx, nexus| async move {
             nexus
                 .loopback_address_delete(
                     &opctx,
                     path.rack_id,
-                    path.switch_location.into(),
+                    switch_location,
                     addr.into(),
                 )
                 .await?;
@@ -4235,11 +4243,19 @@ impl NexusExternalApi for NexusExternalApiImpl {
             let path = path_params.into_inner();
             let opctx =
                 crate::context::op_context_for_external_api(&rqctx).await?;
+            // TODO-correctness enum in external API
+            let switch_location: SwitchLocation =
+                query.switch_location.as_str().parse().map_err(|_| {
+                    Error::invalid_request(
+                        "invalid switch location \
+                         (expected `switch0` or `switch1`)",
+                    )
+                })?;
             let settings = nexus
                 .lldp_config_get(
                     &opctx,
                     query.rack_id,
-                    query.switch_location,
+                    switch_location,
                     path.port,
                 )
                 .await?;
@@ -4262,11 +4278,19 @@ impl NexusExternalApi for NexusExternalApiImpl {
             let query = query_params.into_inner();
             let path = path_params.into_inner();
             let config = config.into_inner();
+            // TODO-correctness enum in external API
+            let switch_location: SwitchLocation =
+                query.switch_location.as_str().parse().map_err(|_| {
+                    Error::invalid_request(
+                        "invalid switch location \
+                         (expected `switch0` or `switch1`)",
+                    )
+                })?;
             nexus
                 .lldp_config_update(
                     &opctx,
                     query.rack_id,
-                    query.switch_location,
+                    switch_location,
                     path.port,
                     config,
                 )
@@ -4292,13 +4316,21 @@ impl NexusExternalApi for NexusExternalApiImpl {
             let nexus = &apictx.context.nexus;
             let opctx =
                 crate::context::op_context_for_external_api(&rqctx).await?;
+            // TODO-correctness enum in external API
+            let switch_location: SwitchLocation =
+                path.switch_location.as_str().parse().map_err(|_| {
+                    Error::invalid_request(
+                        "invalid switch location \
+                         (expected `switch0` or `switch1`)",
+                    )
+                })?;
             let neighbors = nexus
                 .lldp_neighbors_get(
                     &opctx,
                     &prev,
                     limit,
                     path.rack_id,
-                    &path.switch_location,
+                    switch_location,
                     &path.port,
                 )
                 .await?;

@@ -26,7 +26,7 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
         rack_id: Uuid,
-        switch_location: Name,
+        switch_location: SwitchLocation,
         port: Name,
     ) -> LookupResult<LldpLinkConfig> {
         opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
@@ -42,7 +42,7 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
         rack_id: Uuid,
-        switch_location: Name,
+        switch_location: SwitchLocation,
         port: Name,
         config: LldpLinkConfig,
     ) -> UpdateResult<()> {
@@ -65,17 +65,10 @@ impl super::Nexus {
         previous: &Option<Uuid>,
         limit: u32,
         rack_id: Uuid,
-        switch_location: &Name,
+        loc: SwitchLocation,
         port: &Name,
     ) -> Result<Vec<LldpNeighbor>, Error> {
         opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
-
-        let loc: SwitchLocation =
-            switch_location.as_str().parse().map_err(|e| {
-                Error::invalid_request(&format!(
-                    "invalid switch name {switch_location}: {e}"
-                ))
-            })?;
 
         let lldpd_clients = self.lldpd_clients(rack_id).await.map_err(|e| {
             Error::internal_error(&format!("lldpd clients get: {e}"))
@@ -83,7 +76,7 @@ impl super::Nexus {
 
         let lldpd =
             lldpd_clients.get(&loc).ok_or(Error::internal_error(&format!(
-                "no lldpd client for rack: {rack_id} switch {switch_location}"
+                "no lldpd client for rack: {rack_id} switch {loc}"
             )))?;
 
         let mut neighbors: Vec<Neighbor> = lldpd

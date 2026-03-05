@@ -180,16 +180,11 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
         rack_id: Uuid,
-        switch_location: Name,
+        switch_location: SwitchLocation,
         port: Name,
     ) -> CreateResult<SwitchPort> {
         self.db_datastore
-            .switch_port_create(
-                opctx,
-                rack_id,
-                switch_location.into(),
-                port.into(),
-            )
+            .switch_port_create(opctx, rack_id, switch_location, port.into())
             .await
     }
 
@@ -228,12 +223,19 @@ impl super::Nexus {
         settings: &networking::SwitchPortApplySettings,
     ) -> UpdateResult<()> {
         opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
+        // TODO-correctness enum in external API
+        let switch_location: SwitchLocation =
+            selector.switch_location.as_str().parse().map_err(|_| {
+                Error::invalid_request(
+                    "invalid switch location (expected `switch0` or `switch1`)",
+                )
+            })?;
         let switch_port_id = self
             .db_datastore
             .switch_port_get_id(
                 opctx,
                 selector.rack_id,
-                selector.switch_location.clone().into(),
+                switch_location,
                 port.clone().into(),
             )
             .await?;
@@ -269,12 +271,19 @@ impl super::Nexus {
         params: &networking::SwitchPortSelector,
     ) -> UpdateResult<()> {
         opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
+        // TODO-correctness enum in external API
+        let switch_location: SwitchLocation =
+            params.switch_location.as_str().parse().map_err(|_| {
+                Error::invalid_request(
+                    "invalid switch location (expected `switch0` or `switch1`)",
+                )
+            })?;
         let switch_port_id = self
             .db_datastore
             .switch_port_get_id(
                 opctx,
                 params.rack_id,
-                params.switch_location.clone().into(),
+                switch_location,
                 port.clone().into(),
             )
             .await?;
@@ -299,16 +308,11 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
         ports: &[Name],
-        switch: Name,
+        switch: SwitchLocation,
     ) -> CreateResult<()> {
         for port in ports {
             match self
-                .switch_port_create(
-                    opctx,
-                    self.rack_id,
-                    switch.clone(),
-                    port.clone(),
-                )
+                .switch_port_create(opctx, self.rack_id, switch, port.clone())
                 .await
             {
                 Ok(_) => {}

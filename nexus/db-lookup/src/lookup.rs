@@ -22,6 +22,7 @@ use nexus_auth::authz;
 use nexus_auth::context::OpContext;
 use nexus_db_errors::{ErrorHandler, public_error_from_diesel};
 use nexus_db_model::Name;
+use nexus_db_model::DbSwitchLocation;
 use nexus_types::identity::Asset;
 use nexus_types::identity::Resource;
 use omicron_common::api::external::Error;
@@ -354,14 +355,14 @@ impl<'a> LookupPath<'a> {
     pub fn loopback_address(
         self,
         rack_id: Uuid,
-        switch_location: Name,
+        switch_location: DbSwitchLocation,
         address: IpNetwork,
     ) -> LoopbackAddress<'a> {
         LoopbackAddress::PrimaryKey(
             Root { lookup_root: self },
             address,
             rack_id,
-            switch_location.to_string(),
+            switch_location,
         )
     }
 
@@ -879,7 +880,7 @@ lookup_resource! {
     primary_key_columns = [
         { column_name = "address", rust_type = IpNetwork },
         { column_name = "rack_id", rust_type = Uuid },
-        { column_name = "switch_location", rust_type = String }
+        { column_name = "switch_location", rust_type = DbSwitchLocation }
     ]
 }
 

@@ -177,20 +177,7 @@ impl SwitchPortSettingsManager {
     > {
         let mut changes = Vec::new();
         for port in port_list {
-            let location: SwitchLocation =
-                match port.switch_location.clone().parse() {
-                    Ok(location) => location,
-                    Err(e) => {
-                        error!(
-                            &log,
-                            "failed to parse switch location";
-                            "switch_location" => ?port.switch_location,
-                            "error" => ?e
-                        );
-                        continue;
-                    }
-                };
-
+            let location = SwitchLocation::from(port.switch_location);
             let id = match port.port_settings_id {
                 Some(id) => id,
                 _ => {
@@ -242,7 +229,6 @@ impl SwitchPortSettingsManager {
     async fn db_loopback_addresses(
         &mut self,
         opctx: &OpContext,
-        log: &slog::Logger,
     ) -> Result<
         HashSet<(SwitchLocation, IpAddr)>,
         omicron_common::api::external::Error,
@@ -256,20 +242,7 @@ impl SwitchPortSettingsManager {
 
         // TODO: are we doing anything special with anycast addresses at the moment?
         for LoopbackAddress { switch_location, address, .. } in values.iter() {
-            let location: SwitchLocation = match switch_location.parse() {
-                Ok(v) => v,
-                Err(e) => {
-                    error!(
-                        log,
-                        "failed to parse switch location for loopback address";
-                        "address" => %address,
-                        "location" => switch_location,
-                        "error" => ?e,
-                    );
-                    continue;
-                }
-            };
-            set.insert((location, address.ip()));
+            set.insert((SwitchLocation::from(*switch_location), address.ip()));
         }
 
         Ok(set)
@@ -477,7 +450,7 @@ impl BackgroundTask for SwitchPortSettingsManager {
                 //
 
                 info!(&log, "checking for changes to loopback addresses");
-                match self.db_loopback_addresses(opctx, &log).await {
+                match self.db_loopback_addresses(opctx).await {
                     Ok(desired_loopback_addresses) => {
                         let current_loopback_addresses = switch_loopback_addresses(&dpd_clients, &log).await;
 

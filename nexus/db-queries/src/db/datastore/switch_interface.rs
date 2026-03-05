@@ -24,6 +24,7 @@ use omicron_common::api::external::{
 };
 use omicron_uuid_kinds::LoopbackAddressKind;
 use omicron_uuid_kinds::TypedUuid;
+use sled_agent_types::early_networking::SwitchLocation;
 use uuid::Uuid;
 
 impl DataStore {
@@ -45,6 +46,13 @@ impl DataStore {
 
         let inet = IpNetwork::new(params.address, params.mask)
             .map_err(|_| Error::invalid_request("invalid address"))?;
+        // TODO-correctness enum in external API
+        let switch_location: SwitchLocation =
+            params.switch_location.as_str().parse().map_err(|_| {
+                Error::invalid_request(
+                    "invalid switch location (expected `switch0` or `switch1`)",
+                )
+            })?;
 
         let err = OptionalError::new();
 
@@ -77,7 +85,7 @@ impl DataStore {
                         block.id,
                         rsvd_block.id,
                         params.rack_id,
-                        params.switch_location.to_string(),
+                        switch_location,
                         inet,
                         params.anycast,
                     );

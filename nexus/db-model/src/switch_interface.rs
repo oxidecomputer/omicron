@@ -1,3 +1,4 @@
+use crate::DbSwitchLocation;
 // This Source Code Form is subject to the terms of the Mozilla Public
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
@@ -12,6 +13,7 @@ use omicron_common::api::external;
 use omicron_uuid_kinds::LoopbackAddressKind;
 use omicron_uuid_kinds::TypedUuid;
 use serde::{Deserialize, Serialize};
+use sled_agent_types::early_networking::SwitchLocation;
 use uuid::Uuid;
 
 impl_enum_type!(
@@ -113,7 +115,7 @@ pub struct LoopbackAddress {
     pub address_lot_block_id: Uuid,
     pub rsvd_address_lot_block_id: Uuid,
     pub rack_id: Uuid,
-    pub switch_location: String,
+    pub switch_location: DbSwitchLocation,
     pub address: IpNetwork,
     pub anycast: bool,
 }
@@ -124,7 +126,7 @@ impl LoopbackAddress {
         address_lot_block_id: Uuid,
         rsvd_address_lot_block_id: Uuid,
         rack_id: Uuid,
-        switch_location: String,
+        switch_location: SwitchLocation,
         address: IpNetwork,
         anycast: bool,
     ) -> Self {
@@ -135,7 +137,7 @@ impl LoopbackAddress {
             address_lot_block_id,
             rsvd_address_lot_block_id,
             rack_id,
-            switch_location,
+            switch_location: switch_location.into(),
             address,
             anycast,
         }
@@ -148,7 +150,9 @@ impl Into<external::LoopbackAddress> for LoopbackAddress {
             id: self.identity().id,
             address_lot_block_id: self.address_lot_block_id,
             rack_id: self.rack_id,
-            switch_location: self.switch_location.clone(),
+            // TODO-correctness enum in external API
+            switch_location: SwitchLocation::from(self.switch_location)
+                .to_string(),
             address: self.address.into(),
         }
     }

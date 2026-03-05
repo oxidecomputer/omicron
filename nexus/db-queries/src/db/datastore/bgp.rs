@@ -13,8 +13,7 @@ use ipnetwork::IpNetwork;
 use nexus_db_errors::OptionalError;
 use nexus_db_errors::{ErrorHandler, public_error_from_diesel};
 use nexus_db_model::{
-    BgpPeerView, SwitchPortBgpPeerConfigAllowExport,
-    SwitchPortBgpPeerConfigAllowImport, SwitchPortBgpPeerConfigCommunity,
+    BgpPeerView, DbSwitchLocation, SwitchPortBgpPeerConfigAllowExport, SwitchPortBgpPeerConfigAllowImport, SwitchPortBgpPeerConfigCommunity
 };
 use nexus_types::external_api::networking;
 use nexus_types::identity::Resource;
@@ -814,8 +813,9 @@ impl DataStore {
     ) -> ListResultVec<BgpPeerView> {
         use nexus_db_schema::schema::bgp_peer_view::dsl;
 
+        let switch = DbSwitchLocation::from(switch);
         let results = dsl::bgp_peer_view
-            .filter(dsl::switch_location.eq(switch.to_string()))
+            .filter(dsl::switch_location.eq(switch))
             .filter(dsl::port_name.eq(port))
             .select(BgpPeerView::as_select())
             .load_async(&*self.pool_connection_authorized(opctx).await?)

@@ -3506,6 +3506,11 @@ CREATE INDEX IF NOT EXISTS lookup_address_lot_rsvd_block_by_anycast ON omicron.p
     anycast
 );
 
+CREATE TYPE IF NOT EXISTS omicron.public.switch_location AS ENUM (
+    'switch0',
+    'switch1',
+);
+
 CREATE TABLE IF NOT EXISTS omicron.public.loopback_address (
     id UUID PRIMARY KEY,
     time_created TIMESTAMPTZ NOT NULL,
@@ -3513,9 +3518,9 @@ CREATE TABLE IF NOT EXISTS omicron.public.loopback_address (
     address_lot_block_id UUID NOT NULL,
     rsvd_address_lot_block_id UUID NOT NULL,
     rack_id UUID NOT NULL,
-    switch_location TEXT NOT NULL,
     address INET NOT NULL,
     anycast BOOL NOT NULL
+    switch_location omicron.public.switch_location NOT NULL,
 );
 
 /* TODO https://github.com/oxidecomputer/omicron/issues/3001 */
@@ -3527,9 +3532,9 @@ CREATE UNIQUE INDEX IF NOT EXISTS lookup_loopback_address ON omicron.public.loop
 CREATE TABLE IF NOT EXISTS omicron.public.switch_port (
     id UUID PRIMARY KEY,
     rack_id UUID,
-    switch_location TEXT,
     port_name TEXT,
     port_settings_id UUID,
+    switch_location omicron.public.switch_location NOT NULL,
 
     CONSTRAINT switch_port_rack_locaction_name_unique UNIQUE (
         rack_id, switch_location, port_name
