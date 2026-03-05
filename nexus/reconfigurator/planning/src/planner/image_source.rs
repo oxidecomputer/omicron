@@ -121,10 +121,10 @@ impl NoopConvertInfo {
                 &artifacts_by_hash,
             );
 
-            match measurements.measurements {
+            match measurements {
                 // A missing manifest when we are expecting the install dataset
                 // is a hard error
-                NoopConvertMeasurementContents::Ineligible(
+                NoopConvertMeasurements::Ineligible(
                     NoopConvertMeasurementsIneligibleReason::ManifestMissing,
                 ) => {
                     sleds
@@ -824,7 +824,7 @@ pub(crate) enum NoopConvertHostPhase2IneligibleReason {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub(crate) enum NoopConvertMeasurementContents {
+pub(crate) enum NoopConvertMeasurements {
     AlreadyArtifact,
     Ineligible(NoopConvertMeasurementsIneligibleReason),
     Eligible(BlueprintMeasurements),
@@ -844,21 +844,25 @@ pub(crate) enum NoopConvertMeasurementsIneligibleReason {
     FoundUnknown,
 }
 
-impl NoopConvertMeasurementContents {
+impl NoopConvertMeasurements {
     fn new(
         current: BlueprintMeasurements,
         measurement_manifest: Option<&ManifestBootInventory>,
         artifacts_by_hash: &HashMap<ArtifactHash, &TufArtifactMeta>,
     ) -> Self {
+        use NoopConvertMeasurementsIneligibleReason as IneligibleReason;
+
         match current {
             BlueprintMeasurements::InstallDataset => {
                 let mut artifacts = BTreeSet::new();
                 let measurement_manifest = match measurement_manifest {
-                Some(m) => m,
-                None => return Self::Ineligible(
-                    NoopConvertMeasurementsIneligibleReason::ManifestMissing,
-                ),
-            };
+                    Some(m) => m,
+                    None => {
+                        return Self::Ineligible(
+                            IneligibleReason::ManifestMissing,
+                        );
+                    }
+                };
                 for artifact in &measurement_manifest.artifacts {
                     if let Some(meta) =
                         artifacts_by_hash.get(&artifact.expected_hash)
@@ -871,26 +875,27 @@ impl NoopConvertMeasurementContents {
                         });
                     } else {
                         return Self::Ineligible(
-                        NoopConvertMeasurementsIneligibleReason::NotInTufRepo {
-                            expected_hash: artifact.expected_hash,
-                        },
-                    );
+                            IneligibleReason::NotInTufRepo {
+                                expected_hash: artifact.expected_hash,
+                            },
+                        );
                     }
                 }
-                let artifacts = match BlueprintArtifactMeasurements::new(
-                    artifacts,
-                ) {
-                    Some(m) => m,
-                    None => return Self::Ineligible(
-                        NoopConvertMeasurementsIneligibleReason::ManifestEmpty,
-                    ),
-                };
+                let artifacts =
+                    match BlueprintArtifactMeasurements::new(artifacts) {
+                        Some(m) => m,
+                        None => {
+                            return Self::Ineligible(
+                                IneligibleReason::ManifestEmpty,
+                            );
+                        }
+                    };
                 Self::Eligible(BlueprintMeasurements::Artifacts { artifacts })
             }
             BlueprintMeasurements::Artifacts { .. } => Self::AlreadyArtifact,
-            BlueprintMeasurements::Unknown => Self::Ineligible(
-                NoopConvertMeasurementsIneligibleReason::FoundUnknown,
-            ),
+            BlueprintMeasurements::Unknown => {
+                Self::Ineligible(IneligibleReason::FoundUnknown)
+            }
         }
     }
 
@@ -904,7 +909,7 @@ impl NoopConvertMeasurementContents {
 
     fn log_to(&self, log: &slog::Logger) {
         match self {
-            NoopConvertMeasurementContents::AlreadyArtifact => {
+            NoopConvertMeasurements::AlreadyArtifact => {
                 // Use debug to avoid spamming reconfigurator-cli output for
                 // this generally expected case.
                 debug!(
@@ -912,14 +917,14 @@ impl NoopConvertMeasurementContents {
                     "measurement has its image source set to Artifact already";
                 );
             }
-            NoopConvertMeasurementContents::Eligible(new_image_source) => {
+            NoopConvertMeasurements::Eligible(new_image_source) => {
                 info!(
                     log,
                     "measurement may be eligible for noop image source conversion";
                     "new_image_source" => %new_image_source,
                 );
             }
-            NoopConvertMeasurementContents::Ineligible(
+            NoopConvertMeasurements::Ineligible(
                 NoopConvertMeasurementsIneligibleReason::ManifestEmpty,
             ) => {
                 info!(
@@ -927,7 +932,7 @@ impl NoopConvertMeasurementContents {
                     "install dataset contained no entries in the measurement manifest";
                 );
             }
-            NoopConvertMeasurementContents::Ineligible(
+            NoopConvertMeasurements::Ineligible(
                 NoopConvertMeasurementsIneligibleReason::ManifestMissing,
             ) => {
                 info!(
@@ -935,7 +940,7 @@ impl NoopConvertMeasurementContents {
                     "measurement manifest missing when required by install dataset";
                 );
             }
-            NoopConvertMeasurementContents::Ineligible(
+            NoopConvertMeasurements::Ineligible(
                 NoopConvertMeasurementsIneligibleReason::FoundUnknown,
             ) => {
                 info!(
@@ -943,7 +948,7 @@ impl NoopConvertMeasurementContents {
                     "current sled measurements are in an unknown state";
                 );
             }
-            NoopConvertMeasurementContents::Ineligible(
+            NoopConvertMeasurements::Ineligible(
                 NoopConvertMeasurementsIneligibleReason::NotInTufRepo {
                     expected_hash,
                 },
@@ -962,34 +967,5 @@ impl NoopConvertMeasurementContents {
                 );
             }
         }
-    }
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub(crate) struct NoopConvertMeasurements {
-    pub(crate) measurements: NoopConvertMeasurementContents,
-}
-
-impl NoopConvertMeasurements {
-    fn new(
-        measurement: BlueprintMeasurements,
-        measurement_manifest: Option<&ManifestBootInventory>,
-        artifacts_by_hash: &HashMap<ArtifactHash, &TufArtifactMeta>,
-    ) -> Self {
-        Self {
-            measurements: NoopConvertMeasurementContents::new(
-                measurement,
-                measurement_manifest,
-                artifacts_by_hash,
-            ),
-        }
-    }
-
-    pub(crate) fn already_artifact(&self) -> bool {
-        self.measurements.is_already_artifact()
-    }
-
-    fn log_to(&self, log: &slog::Logger) {
-        self.measurements.log_to(&log);
     }
 }

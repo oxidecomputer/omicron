@@ -23,7 +23,7 @@ use crate::mgs_updates::MgsUpdatePlanner;
 use crate::mgs_updates::PlannedMgsUpdates;
 use crate::mgs_updates::UpdateableBoard;
 use crate::planner::image_source::NoopConvertHostPhase2Contents;
-use crate::planner::image_source::NoopConvertMeasurementContents;
+use crate::planner::image_source::NoopConvertMeasurements;
 use crate::planner::image_source::NoopConvertZoneStatus;
 use crate::planner::omicron_zone_placement::PlacementError;
 use iddqd::IdOrdMap;
@@ -333,8 +333,7 @@ impl<'a> Planner<'a> {
             PlanningZoneUpdatesStepReport::waiting_on(
                 ZoneUpdatesWaitingOn::ZoneAddBlockers,
             )
-        } else if !measurement_updates.is_empty()
-        {
+        } else if !measurement_updates.is_empty() {
             // ... or if there are pendin measurement updates
             PlanningZoneUpdatesStepReport::waiting_on(
                 ZoneUpdatesWaitingOn::Measurements,
@@ -759,7 +758,7 @@ impl<'a> Planner<'a> {
                 };
 
             let skipped_measurements =
-                if eligible.measurements.already_artifact() {
+                if eligible.measurements.is_already_artifact() {
                     report.sled_measurements_already_artifact(sled.sled_id);
                     true
                 } else {
@@ -774,7 +773,7 @@ impl<'a> Planner<'a> {
             if zone_counts.num_eligible > 0
                 || eligible.host_phase_2.slot_a.is_eligible()
                 || eligible.host_phase_2.slot_b.is_eligible()
-                || eligible.measurements.measurements.is_eligible()
+                || eligible.measurements.is_eligible()
             {
                 report.converted(
                     sled.sled_id,
@@ -782,22 +781,22 @@ impl<'a> Planner<'a> {
                     zone_counts.num_install_dataset(),
                     eligible.host_phase_2.slot_a.is_eligible(),
                     eligible.host_phase_2.slot_b.is_eligible(),
-                    eligible.measurements.measurements.is_eligible(),
+                    eligible.measurements.is_eligible(),
                 );
             }
 
-            match &eligible.measurements.measurements {
-                NoopConvertMeasurementContents::Eligible(contents) => {
+            match &eligible.measurements {
+                NoopConvertMeasurements::Eligible(contents) => {
                     self.blueprint.sled_set_measurements(
                         sled.sled_id,
                         contents.clone(),
                     )?;
                 }
-                NoopConvertMeasurementContents::AlreadyArtifact { .. }
-                | NoopConvertMeasurementContents::Ineligible(_) => {}
+                NoopConvertMeasurements::AlreadyArtifact { .. }
+                | NoopConvertMeasurements::Ineligible(_) => {}
             }
 
-            if eligible.measurements.measurements.is_eligible() {
+            if eligible.measurements.is_eligible() {
                 self.blueprint.record_operation(
                     Operation::SledNoopMeasurementsUpdated {
                         sled_id: sled.sled_id,
