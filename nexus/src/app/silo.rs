@@ -490,7 +490,7 @@ impl super::Nexus {
         )
         .await?;
 
-        Ok(db_silo_user.into())
+        Ok(db_silo_user)
     }
 
     /// Delete a user in a Silo's local identity provider
