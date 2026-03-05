@@ -20,7 +20,7 @@ use omicron_common::api::internal::{
     },
 };
 use sled_agent_types_versions::{
-    latest, v1, v4, v6, v7, v9, v10, v11, v12, v14, v16, v17, v20, v22,
+    latest, v1, v4, v6, v7, v9, v10, v11, v12, v14, v16, v17, v20, v22, v24,
 };
 use sled_diagnostics::SledDiagnosticsQueryOutput;
 
@@ -36,6 +36,7 @@ api_versions!([
     // |  example for the next person.
     // v
     // (next_int, IDENT),
+    (25, MODIFY_SERVICES_IN_INVENTORY),
     (24, ADD_ZPOOL_HEALTH_TO_INVENTORY),
     (23, REMOVE_READ_BOOTSTORE_CONFIG_CACHE),
     (22, REMOVE_HEALTH_MONITOR_KEEP_CHECKS),
@@ -856,10 +857,25 @@ pub trait SledAgentApi {
         path = "/inventory",
         versions = VERSION_REMOVE_HEALTH_MONITOR_KEEP_CHECKS..VERSION_ADD_ZPOOL_HEALTH_TO_INVENTORY,
     }]
+    async fn inventory_v24(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<v24::inventory::Inventory>, HttpError> {
+        Self::inventory(rqctx).await.map(|HttpResponseOk(inv)| {
+            HttpResponseOk(v24::inventory::Inventory::from(inv))
+        })
+    }
+
+    /// Fetch basic information about this sled
+    #[endpoint {
+        operation_id = "inventory",
+        method = GET,
+        path = "/inventory",
+        versions = VERSION_REMOVE_HEALTH_MONITOR_KEEP_CHECKS..VERSION_ADD_ZPOOL_HEALTH_TO_INVENTORY,
+    }]
     async fn inventory_v22(
         rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<v22::inventory::Inventory>, HttpError> {
-        Self::inventory(rqctx).await.map(|HttpResponseOk(inv)| {
+        Self::inventory_v24(rqctx).await.map(|HttpResponseOk(inv)| {
             HttpResponseOk(v22::inventory::Inventory::from(inv))
         })
     }

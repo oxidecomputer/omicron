@@ -81,19 +81,12 @@ impl Svcs {
 pub struct SvcsResult {
     pub services: Vec<Svc>,
     pub errors: Vec<String>,
-    // TODO-K: Remove this option
-    pub time_of_status: Option<DateTime<Utc>>,
+    pub time_of_status: DateTime<Utc>,
 }
 
 impl SvcsResult {
     pub fn new() -> Self {
-        Self { services: vec![], errors: vec![], time_of_status: None }
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.services.is_empty()
-            && self.errors.is_empty()
-            && self.time_of_status == None
+        Self { services: vec![], errors: vec![], time_of_status: Utc::now() }
     }
 
     #[cfg_attr(not(target_os = "illumos"), allow(dead_code))]
@@ -101,7 +94,7 @@ impl SvcsResult {
         let mut services = vec![];
         let mut errors = vec![];
         if data.is_empty() {
-            return Self { services, errors, time_of_status: Some(Utc::now()) };
+            return Self { services, errors, time_of_status: Utc::now() };
         }
 
         // Example of the reponse from running `svcs -Za -H -o state,fmri,zone`
@@ -172,16 +165,13 @@ impl SvcsResult {
                 }
             }
         }
-        Self { services, errors, time_of_status: Some(Utc::now()) }
+        Self { services, errors, time_of_status: Utc::now() }
     }
 
     #[cfg_attr(not(target_os = "illumos"), allow(dead_code))]
     fn filter_enabled_not_online(mut self) -> Self {
         self.services.retain(|svc| {
-            !matches!(
-                svc.state,
-                SvcState::Online | SvcState::Disabled
-            )
+            !matches!(svc.state, SvcState::Online | SvcState::Disabled)
         });
         self
     }
@@ -774,7 +764,7 @@ disabled       svc:/network/tcpkey:default                      global
         let result = SvcsResult {
             services,
             errors: vec!["some error".to_string()],
-            time_of_status: Some(Utc::now()),
+            time_of_status: Utc::now(),
         }
         .filter_enabled_not_online();
 

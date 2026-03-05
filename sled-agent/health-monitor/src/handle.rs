@@ -2,8 +2,8 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use crate::health_checks::poll_smf_services_in_maintenance;
 use crate::health_checks::poll_smf_services_enabled_not_online;
+use crate::health_checks::poll_smf_services_in_maintenance;
 
 use illumos_utils::svcs::SvcsInMaintenanceResult;
 use illumos_utils::svcs::SvcsResult;
@@ -34,7 +34,10 @@ impl HealthMonitorHandle {
             watch::channel(Ok(SvcsInMaintenanceResult::new()));
         let (_tx, smf_services_enabled_not_online_rx) =
             watch::channel(Ok(SvcsResult::new()));
-        Self { smf_services_in_maintenance_rx, smf_services_enabled_not_online_rx }
+        Self {
+            smf_services_in_maintenance_rx,
+            smf_services_enabled_not_online_rx,
+        }
     }
 
     pub fn spawn(log: Logger) -> Self {
@@ -53,8 +56,10 @@ impl HealthMonitorHandle {
             .await
         });
 
-        let (smf_services_enabled_not_online_tx, smf_services_enabled_not_online_rx) =
-            watch::channel(Ok(SvcsResult::new()));
+        let (
+            smf_services_enabled_not_online_tx,
+            smf_services_enabled_not_online_rx,
+        ) = watch::channel(Ok(SvcsResult::new()));
 
         // TODO-K: remove this clone
         let log_3 = log.clone();
@@ -66,7 +71,10 @@ impl HealthMonitorHandle {
             .await
         });
 
-        Self { smf_services_in_maintenance_rx, smf_services_enabled_not_online_rx }
+        Self {
+            smf_services_in_maintenance_rx,
+            smf_services_enabled_not_online_rx,
+        }
     }
 
     pub fn to_inventory(&self) -> HealthMonitorInventory {

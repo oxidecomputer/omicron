@@ -7,6 +7,7 @@ use std::fmt::{self, Write};
 use std::net::{IpAddr, Ipv6Addr};
 
 use camino::Utf8PathBuf;
+use chrono::Utc;
 use iddqd::IdOrdMap;
 use indent_write::fmt::IndentWriter;
 use omicron_common::api::external::Generation;
@@ -25,7 +26,8 @@ use crate::latest::inventory::{
     OmicronFileSourceResolverInventory, OmicronSledConfig, OmicronZoneConfig,
     OmicronZoneImageSource, OmicronZoneType, OmicronZonesConfig,
     RemoveMupdateOverrideBootSuccessInventory, RemoveMupdateOverrideInventory,
-    SingleMeasurementInventory, ZoneArtifactInventory, ZoneKind,
+    SingleMeasurementInventory, SvcsEnabledNotOnline, ZoneArtifactInventory,
+    ZoneKind,
 };
 
 impl ZoneKind {
@@ -578,6 +580,14 @@ impl MupdateOverrideInventory {
             boot_override: Ok(None),
             non_boot_status: IdOrdMap::new(),
         }
+    }
+}
+
+impl SvcsEnabledNotOnline {
+    /// Returns a fake empty inventory that shows all services as successful
+    /// for tests.
+    pub fn new_fake() -> Self {
+        Self { services: vec![], errors: vec![], time_of_status: Utc::now() }
     }
 }
 

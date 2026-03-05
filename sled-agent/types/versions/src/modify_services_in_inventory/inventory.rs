@@ -46,9 +46,9 @@ pub struct Inventory {
     pub file_source_resolver: OmicronFileSourceResolverInventory,
     #[serde(with = "snake_case_result")]
     #[schemars(
-        schema_with = "SnakeCaseResult::<SvcsEnabledNotOnlineResult, String>::json_schema"
+        schema_with = "SnakeCaseResult::<SvcsEnabledNotOnline, String>::json_schema"
     )]
-    pub smf_services_enabled_not_online: Result<SvcsEnabledNotOnlineResult, String>,
+    pub smf_services_enabled_not_online: Result<SvcsEnabledNotOnline, String>,
     pub reference_measurements: IdOrdMap<SingleMeasurementInventory>,
 }
 
@@ -89,7 +89,9 @@ impl From<Inventory> for v24::inventory::Inventory {
             reconciler_status,
             last_reconciliation,
             file_source_resolver,
-            smf_services_in_maintenance: Err("Unable to retrieve services in maintenance".to_string()),
+            smf_services_in_maintenance: Err(
+                "Unable to retrieve services in maintenance".to_string(),
+            ),
             reference_measurements,
         }
     }
@@ -100,9 +102,8 @@ impl From<Inventory> for v24::inventory::Inventory {
 /// collection
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
-pub struct SvcsEnabledNotOnlineResult {
+pub struct SvcsEnabledNotOnline {
     pub services: Vec<Svc>,
     pub errors: Vec<String>,
-    // TODO-K: Remove this option
-    pub time_of_status: Option<DateTime<Utc>>,
+    pub time_of_status: DateTime<Utc>,
 }

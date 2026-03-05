@@ -67,12 +67,16 @@ pub(crate) async fn poll_smf_services_enabled_not_online(
             // the health check status when an inventory request comes in. This
             // means we can safely use `send_modify` instead of
             // `send_if_modified()`.
-            Err(e) => smf_services_enabled_not_online_tx.send_modify(|status| {
-                *status = Err(e.to_string());
-            }),
-            Ok(svcs) => smf_services_enabled_not_online_tx.send_modify(|status| {
-                *status = Ok(svcs);
-            }),
+            Err(e) => {
+                smf_services_enabled_not_online_tx.send_modify(|status| {
+                    *status = Err(e.to_string());
+                })
+            }
+            Ok(svcs) => {
+                smf_services_enabled_not_online_tx.send_modify(|status| {
+                    *status = Ok(svcs);
+                })
+            }
         };
     }
 }
