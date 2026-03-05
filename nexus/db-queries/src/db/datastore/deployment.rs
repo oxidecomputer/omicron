@@ -3475,7 +3475,7 @@ mod tests {
         const MEASUREMENT_ARTIFACT_HASH_3: ArtifactHash = ArtifactHash([5; 32]);
 
         const SYSTEM_VERSION: semver::Version = semver::Version::new(0, 0, 1);
-        const SYSTEM_HASH: ArtifactHash = ArtifactHash([3; 32]);
+        const SYSTEM_HASH: ArtifactHash = ArtifactHash([6; 32]);
 
         let tuf_repo = TufRepoDescription {
             repo: TufRepoMeta {
