@@ -17,6 +17,7 @@ illumos-utils.workspace = true
 indent_write.workspace = true
 async-trait.workspace = true
 bootstore.workspace = true
+byte-wrapper.workspace = true
 omicron-common.workspace = true
 omicron-passwords.workspace = true
 omicron-uuid-kinds.workspace = true
@@ -28,7 +29,6 @@ proptest = { workspace = true, optional = true }
 schemars.workspace = true
 serde.workspace = true
 serde_with = { workspace = true, features = ["hex", "schemars_0_8"] }
-serde_human_bytes.workspace = true
 serde_json.workspace = true
 sha3.workspace = true
 sled-hardware-types.workspace = true
