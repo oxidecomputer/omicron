@@ -3527,7 +3527,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS lookup_loopback_address ON omicron.public.loop
 CREATE TABLE IF NOT EXISTS omicron.public.switch_port (
     id UUID PRIMARY KEY,
     rack_id UUID NOT NULL,
-    switch_location TEXT NOT NULL,
+    switch_location TEXT,
     port_name TEXT NOT NULL,
     port_settings_id UUID,
 
