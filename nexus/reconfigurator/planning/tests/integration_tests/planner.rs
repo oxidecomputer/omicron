@@ -3053,96 +3053,16 @@ fn create_measurement_artifacts_at_version(
     measurement_hash: ArtifactHash,
 ) -> Vec<TufArtifactMeta> {
     let zone_version = ArtifactVersion::new_static("0.0.1").unwrap();
-    vec![
-        // Omit `BoundaryNtp` because it has the same artifact name as
-        // `InternalNtp`.
-        fake_zone_artifact!(
-            Clickhouse,
-            zone_version.clone(),
-            ArtifactHash(hex_literal::hex!(
-                "0cc283162daad1dd9d63cd20a484f4e0157b6895c179defa8a99fd220323a6c5"
-            ))
-        ),
-        fake_zone_artifact!(
-            ClickhouseKeeper,
-            zone_version.clone(),
-            ArtifactHash(hex_literal::hex!(
-                "f27ef7d2ce10696c4583ea194cdf61c3907f2143f666af964b8ed3bee1346be0"
-            ))
-        ),
-        fake_zone_artifact!(
-            ClickhouseServer,
-            zone_version.clone(),
-            ArtifactHash(hex_literal::hex!(
-                "bc35f79e04956e284c230f324fe7475ad5cb2ede08e6b4a77addcd9e6f50d33b"
-            ))
-        ),
-        fake_zone_artifact!(
-            CockroachDb,
-            zone_version.clone(),
-            ArtifactHash(hex_literal::hex!(
-                "a1dc64b896b4bb5d0d295f63b5edeb82b3f945e1f830b06c32f96f9de30b93d1"
-            ))
-        ),
-        fake_zone_artifact!(
-            Crucible,
-            zone_version.clone(),
-            ArtifactHash(hex_literal::hex!(
-                "f3694b20fa1de79fb1f7c3a9f89f9f9eb5ebaaefc3caba7e1991e7e2b3191ed4"
-            ))
-        ),
-        fake_zone_artifact!(
-            CruciblePantry,
-            zone_version.clone(),
-            ArtifactHash(hex_literal::hex!(
-                "6055871bfa626d582162302bf027102d90a03a42866867df2582f8eba231fc6d"
-            ))
-        ),
-        fake_zone_artifact!(
-            ExternalDns,
-            zone_version.clone(),
-            ArtifactHash(hex_literal::hex!(
-                "584217eae459e4c2bd00621cf1910d06edb8258948a4832ab0329cf42067c0c7"
-            ))
-        ),
-        fake_zone_artifact!(
-            InternalDns,
-            zone_version.clone(),
-            ArtifactHash(hex_literal::hex!(
-                "c29c262c79d8f3fa4e0bbec221a286ca6e02b64719b6d35f32cc5e92e36b9173"
-            ))
-        ),
-        fake_zone_artifact!(
-            InternalNtp,
-            zone_version.clone(),
-            ArtifactHash(hex_literal::hex!(
-                "b661b5d1370f5ac593b4c15b5fcd22c904991cf33b6db32f886374bc022a3531"
-            ))
-        ),
-        fake_zone_artifact!(
-            Nexus,
-            zone_version.clone(),
-            ArtifactHash(hex_literal::hex!(
-                "5f0b97b090966bb754485c3d397d0918d54bf4ffdc6fa691b77f61686f2ac8cc"
-            ))
-        ),
-        fake_zone_artifact!(
-            Oximeter,
-            zone_version.clone(),
-            ArtifactHash(hex_literal::hex!(
-                "7cd830e1682d50620de0f5c24b8cca15937eb10d2a415ade6ad28c0d314408eb"
-            ))
-        ),
-        // We create artifacts with the versions (or hash) set to those of
-        // the example system to simulate an environment that does not need
-        // SP component updates.
+    let zones = create_zone_artifacts_at_version(&zone_version);
+
+    let corpus = vec![
         TufArtifactMeta {
             id: ArtifactId {
-                name: "host-os-phase-1".to_string(),
+                name: "measurement_corpus2".to_string(),
                 version: version.clone(),
-                kind: ArtifactKind::GIMLET_HOST_PHASE_1,
+                kind: ArtifactKind::MEASUREMENT_CORPUS,
             },
-            hash: ArtifactHash([1; 32]),
+            hash: MEASUREMENT_HASH_ALWAYS,
             size: 0,
             board: None,
             sign: None,
@@ -3158,64 +3078,9 @@ fn create_measurement_artifacts_at_version(
             board: None,
             sign: None,
         },
-        TufArtifactMeta {
-            id: ArtifactId {
-                name: "measurement_corpus2".to_string(),
-                version: version.clone(),
-                kind: ArtifactKind::MEASUREMENT_CORPUS,
-            },
-            hash: MEASUREMENT_HASH_ALWAYS,
-            size: 0,
-            board: None,
-            sign: None,
-        },
-        TufArtifactMeta {
-            id: ArtifactId {
-                name: "host-os-phase-2".to_string(),
-                version: version.clone(),
-                kind: ArtifactKind::HOST_PHASE_2,
-            },
-            hash: ArtifactHash(hex_literal::hex!(
-                "7cd830e1682d50620de0f5c24b8cca15937eb10d2a415ade6ad28c0d314408eb"
-            )),
-            size: 0,
-            board: None,
-            sign: None,
-        },
-        TufArtifactMeta {
-            id: ArtifactId {
-                name: sp_sim::SIM_GIMLET_BOARD.to_string(),
-                version: ArtifactVersion::new("0.0.1").unwrap(),
-                kind: KnownArtifactKind::GimletSp.into(),
-            },
-            hash: ArtifactHash([0; 32]),
-            size: 0,
-            board: Some(sp_sim::SIM_GIMLET_BOARD.to_string()),
-            sign: None,
-        },
-        TufArtifactMeta {
-            id: ArtifactId {
-                name: sp_sim::SIM_ROT_BOARD.to_string(),
-                version: ArtifactVersion::new("0.0.1").unwrap(),
-                kind: ArtifactKind::GIMLET_ROT_IMAGE_B,
-            },
-            hash: ArtifactHash([0; 32]),
-            size: 0,
-            board: Some(sp_sim::SIM_ROT_BOARD.to_string()),
-            sign: Some("sign-gimlet".into()),
-        },
-        TufArtifactMeta {
-            id: ArtifactId {
-                name: sp_sim::SIM_ROT_BOARD.to_string(),
-                version: ArtifactVersion::new("0.0.1").unwrap(),
-                kind: ArtifactKind::GIMLET_ROT_STAGE0,
-            },
-            hash: ArtifactHash([0; 32]),
-            size: 0,
-            board: Some(sp_sim::SIM_ROT_BOARD.to_string()),
-            sign: Some("sign-gimlet".into()),
-        },
-    ]
+    ];
+
+    zones.into_iter().chain(corpus.into_iter()).collect()
 }
 
 fn create_zone_artifacts_at_version(
@@ -4847,6 +4712,7 @@ fn test_simple_measurements() {
         };
         {
             let summary = &blueprint.diff_since_blueprint(&parent);
+
             if summary.total_measurements_added() == 0
                 && summary.total_measurements_removed() == 0
             {
@@ -4856,10 +4722,12 @@ fn test_simple_measurements() {
                 );
                 let (_, sled_config) =
                     blueprint.sleds.first_key_value().unwrap();
-                // We expect this to go from 2 -> 3
+                // We start at 2, our measurement change puts us to 3 and then
+                // the final step to check for nothing added nohting removed should be
+                // 4 because we plan a zone update
                 assert_eq!(
                     sled_config.sled_agent_generation,
-                    Generation::from_u32(3)
+                    Generation::from_u32(4)
                 );
                 println!("converted after {i} iterations");
                 logctx.cleanup_successful();
