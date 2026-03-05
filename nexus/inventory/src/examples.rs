@@ -63,7 +63,6 @@ use sled_agent_types::inventory::OrphanedDataset;
 use sled_agent_types::inventory::SingleMeasurementInventory;
 use sled_agent_types::inventory::SledCpuFamily;
 use sled_agent_types::inventory::SledRole;
-use sled_agent_types::inventory::SvcsEnabledNotOnline;
 use sled_agent_types::resolvable_files::MeasurementManifestStatus;
 use sled_agent_types::resolvable_files::MupdateOverrideNonBootInfo;
 use sled_agent_types::resolvable_files::MupdateOverrideNonBootMismatch;
@@ -1091,7 +1090,7 @@ pub fn sled_agent(
         // TODO-K: We'll want to have the functionality to add some services
         // here in a future PR. This will be more useful when we add this
         // information to the DB.
-        smf_services_enabled_not_online: Ok(SvcsEnabledNotOnline::new_fake()),
+        smf_services_enabled_not_online: None,
         reference_measurements,
     }
 }

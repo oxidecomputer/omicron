@@ -7,8 +7,8 @@ use chrono::Utc;
 use iddqd::IdOrdMap;
 use illumos_utils::svcs::Svc;
 use omicron_common::api::external::ByteCount;
-use omicron_common::snake_case_result;
-use omicron_common::snake_case_result::SnakeCaseResult;
+use omicron_common::snake_case_option_result;
+use omicron_common::snake_case_option_result::SnakeCaseOptionResult;
 use omicron_uuid_kinds::SledUuid;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -44,11 +44,12 @@ pub struct Inventory {
     pub reconciler_status: ConfigReconcilerInventoryStatus,
     pub last_reconciliation: Option<ConfigReconcilerInventory>,
     pub file_source_resolver: OmicronFileSourceResolverInventory,
-    #[serde(with = "snake_case_result")]
+    #[serde(with = "snake_case_option_result")]
     #[schemars(
-        schema_with = "SnakeCaseResult::<SvcsEnabledNotOnline, String>::json_schema"
+        schema_with = "SnakeCaseOptionResult::<SvcsEnabledNotOnline, String>::json_schema"
     )]
-    pub smf_services_enabled_not_online: Result<SvcsEnabledNotOnline, String>,
+    pub smf_services_enabled_not_online:
+        Option<Result<SvcsEnabledNotOnline, String>>,
     pub reference_measurements: IdOrdMap<SingleMeasurementInventory>,
 }
 

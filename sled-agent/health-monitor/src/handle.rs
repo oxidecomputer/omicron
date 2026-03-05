@@ -19,15 +19,14 @@ pub struct HealthMonitorHandle {
     // the failure to execute `svcs`, which is a `illumos_utils::ExecutionError`
     // and this error cannot be cloned.
     pub smf_services_enabled_not_online_rx:
-        watch::Receiver<Result<SvcsResult, String>>,
+        watch::Receiver<Option<Result<SvcsResult, String>>>,
 }
 
 impl HealthMonitorHandle {
     /// Returns a `HealthMonitorHandle` that doesn't monitor health and always
     /// reports no problems
     pub fn stub() -> Self {
-        let (_tx, smf_services_enabled_not_online_rx) =
-            watch::channel(Ok(SvcsResult::new()));
+        let (_tx, smf_services_enabled_not_online_rx) = watch::channel(None);
         Self { smf_services_enabled_not_online_rx }
     }
 
@@ -38,7 +37,7 @@ impl HealthMonitorHandle {
         let (
             smf_services_enabled_not_online_tx,
             smf_services_enabled_not_online_rx,
-        ) = watch::channel(Ok(SvcsResult::new()));
+        ) = watch::channel(None);
 
         tokio::spawn(async move {
             poll_smf_services_enabled_not_online(
@@ -51,13 +50,20 @@ impl HealthMonitorHandle {
         Self { smf_services_enabled_not_online_rx }
     }
 
-    pub fn to_inventory(&self) -> Result<SvcsEnabledNotOnline, String> {
+    pub fn to_inventory(&self) -> Option<Result<SvcsEnabledNotOnline, String>> {
         match self.smf_services_enabled_not_online_rx.borrow().clone() {
-            Ok(svcs) => {
-                let SvcsResult { services, errors, time_of_status } = svcs;
-                Ok(SvcsEnabledNotOnline { services, errors, time_of_status })
-            }
-            Err(e) => Err(e),
+            Some(result) => match result {
+                Ok(svcs) => {
+                    let SvcsResult { services, errors, time_of_status } = svcs;
+                    Some(Ok(SvcsEnabledNotOnline {
+                        services,
+                        errors,
+                        time_of_status,
+                    }))
+                }
+                Err(e) => Some(Err(e)),
+            },
+            None => None,
         }
     }
 }

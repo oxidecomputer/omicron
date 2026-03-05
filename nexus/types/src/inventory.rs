@@ -650,7 +650,8 @@ pub struct SledAgent {
     pub reconciler_status: ConfigReconcilerInventoryStatus,
     pub last_reconciliation: Option<ConfigReconcilerInventory>,
     pub file_source_resolver: OmicronFileSourceResolverInventory,
-    pub smf_services_enabled_not_online: Result<SvcsEnabledNotOnline, String>,
+    pub smf_services_enabled_not_online:
+        Option<Result<SvcsEnabledNotOnline, String>>,
     pub reference_measurements: IdOrdMap<SingleMeasurementInventory>,
 }
 

@@ -72,7 +72,6 @@ use sled_agent_types::inventory::OmicronFileSourceResolverInventory;
 use sled_agent_types::inventory::OmicronSledConfig;
 use sled_agent_types::inventory::SledCpuFamily;
 use sled_agent_types::inventory::SledRole;
-use sled_agent_types::inventory::SvcsEnabledNotOnline;
 use sled_agent_types::inventory::ZoneKind;
 use sled_hardware_types::BaseboardId;
 use sled_hardware_types::GIMLET_SLED_MODEL;
@@ -1473,9 +1472,7 @@ impl Sled {
                 // XXX: return something more reasonable here?
                 file_source_resolver:
                     OmicronFileSourceResolverInventory::new_fake(),
-                smf_services_enabled_not_online: Ok(
-                    SvcsEnabledNotOnline::new_fake(),
-                ),
+                smf_services_enabled_not_online: None,
                 reference_measurements: iddqd::IdOrdMap::new(),
             }
         };

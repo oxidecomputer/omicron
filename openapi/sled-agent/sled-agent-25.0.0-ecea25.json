@@ -6134,6 +6134,7 @@
             "$ref": "#/components/schemas/SledRole"
           },
           "smf_services_enabled_not_online": {
+            "nullable": true,
             "x-rust-type": {
               "crate": "std",
               "parameters": [

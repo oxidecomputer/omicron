@@ -15,7 +15,7 @@ use tokio::time::interval;
 pub(crate) async fn poll_smf_services_enabled_not_online(
     log: Logger,
     smf_services_enabled_not_online_tx: watch::Sender<
-        Result<SvcsResult, String>,
+        Option<Result<SvcsResult, String>>,
     >,
 ) {
     // We poll every minute to verify the health of all services. This interval
@@ -36,12 +36,12 @@ pub(crate) async fn poll_smf_services_enabled_not_online(
             // `send_if_modified()`.
             Err(e) => {
                 smf_services_enabled_not_online_tx.send_modify(|status| {
-                    *status = Err(e.to_string());
+                    *status = Some(Err(e.to_string()));
                 })
             }
             Ok(svcs) => {
                 smf_services_enabled_not_online_tx.send_modify(|status| {
-                    *status = Ok(svcs);
+                    *status = Some(Ok(svcs));
                 })
             }
         };

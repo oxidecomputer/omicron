@@ -1747,7 +1747,7 @@ mod test {
     use sled_agent_types::inventory::{
         Baseboard, ConfigReconcilerInventoryStatus, Inventory, InventoryDisk,
         OmicronFileSourceResolverInventory, OmicronZoneType, SledCpuFamily,
-        SledRole, SvcsEnabledNotOnline,
+        SledRole,
     };
     use sled_agent_types::rack_init::rack_initialize_request_test_config;
 
@@ -1793,9 +1793,7 @@ mod test {
                 last_reconciliation: None,
                 file_source_resolver:
                     OmicronFileSourceResolverInventory::new_fake(),
-                smf_services_enabled_not_online: Ok(
-                    SvcsEnabledNotOnline::new_fake(),
-                ),
+                smf_services_enabled_not_online: None,
                 reference_measurements: IdOrdMap::new(),
             },
             true,

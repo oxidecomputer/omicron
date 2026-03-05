@@ -250,7 +250,6 @@ mod api_impl {
     use sled_agent_types::inventory::OmicronSledConfig;
     use sled_agent_types::inventory::SledCpuFamily;
     use sled_agent_types::inventory::SledRole;
-    use sled_agent_types::inventory::SvcsEnabledNotOnline;
     use sled_agent_types::probes::ProbeSet;
     use sled_agent_types::sled::AddSledRequest;
     use sled_agent_types::support_bundle::RangeRequestHeaders;
@@ -398,9 +397,7 @@ mod api_impl {
                         non_boot_status: IdOrdMap::new(),
                     },
                 },
-                smf_services_enabled_not_online: Ok(
-                    SvcsEnabledNotOnline::new_fake(),
-                ),
+                smf_services_enabled_not_online: None,
                 reference_measurements: IdOrdMap::new(),
             }))
         }
