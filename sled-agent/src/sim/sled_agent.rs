@@ -852,7 +852,7 @@ impl SledAgent {
             storage.datasets_config_list().unwrap_or_default();
         let zones_config = self.fake_zones.lock().unwrap().clone();
         let smf_services_enabled_not_online =
-            self.health_monitor.to_svcs_inventory();
+            self.health_monitor.to_inventory();
 
         let sled_config = OmicronSledConfig {
             generation: zones_config.generation,

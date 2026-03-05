@@ -1200,7 +1200,7 @@ impl SledAgent {
             self.inner.services.zone_image_resolver().status().to_inventory();
 
         let smf_services_enabled_not_online =
-            self.inner.health_monitor.to_svcs_inventory();
+            self.inner.health_monitor.to_inventory();
 
         let ReconcilerInventory {
             disks,
