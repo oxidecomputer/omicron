@@ -275,7 +275,7 @@ impl<'a> Planner<'a> {
         };
 
         // Only plan MGS-based updates once we've finished updating our
-        // measurements. This should also account for
+        // measurements.
         let mgs_updates = if measurement_updates.is_empty() {
             self.do_plan_mgs_updates(&zone_safety_checks)?
         } else {
