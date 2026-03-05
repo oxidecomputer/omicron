@@ -1,2 +1,1 @@
-CREATE INDEX IF NOT EXISTS switch_port_id_and_name
-ON omicron.public.switch_port (port_settings_id, port_name) STORING (switch_loc);
+DROP INDEX IF EXISTS omicron.public.switch_port@switch_port_id_and_name;
