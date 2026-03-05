@@ -3028,19 +3028,6 @@ macro_rules! fake_zone_artifact {
             sign: None,
         }
     };
-    ($kind: ident, $version: expr, $hash: expr) => {
-        TufArtifactMeta {
-            id: ArtifactId {
-                name: ZoneKind::$kind.artifact_id_name().to_string(),
-                version: $version,
-                kind: ArtifactKind::from_known(KnownArtifactKind::Zone),
-            },
-            hash: $hash,
-            size: 0,
-            board: None,
-            sign: None,
-        }
-    };
 }
 
 const MEASUREMENT_HASH1: ArtifactHash = ArtifactHash([0xaa; 32]);
