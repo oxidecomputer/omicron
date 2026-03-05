@@ -60,7 +60,6 @@ use sled_agent_client::types::{
     UplinkAddressConfig,
 };
 use sled_agent_types::early_networking::ImportExportPolicy;
-use sled_agent_types::early_networking::ParseSwitchLocationError;
 use sled_agent_types::early_networking::SwitchLocation;
 use std::{
     collections::{HashMap, HashSet, hash_map::Entry},
@@ -287,17 +286,7 @@ impl SwitchPortSettingsManager {
                         sled_agent_client::types::BfdMode::MultiHop
                     }
                 },
-                switch: spec.switch.parse().map_err(
-                    |e: ParseSwitchLocationError| {
-                        omicron_common::api::external::Error::InternalError {
-                            internal_message: format!(
-                                "db_bfd_peer_configs: failed to parse switch \
-                                 name: {}: {:?}",
-                                spec.switch, e,
-                            ),
-                        }
-                    },
-                )?,
+                switch: spec.switch_location.into(),
             };
             result.push(config);
         }

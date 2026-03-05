@@ -344,7 +344,7 @@ impl super::Nexus {
                     self.populate_switch_ports(
                         &opctx,
                         &qsfp_ports,
-                        switch.to_string().parse().unwrap(),
+                        switch,
                     )
                     .await?;
                 }
@@ -359,7 +359,7 @@ impl super::Nexus {
                     self.populate_switch_ports(
                         &opctx,
                         &ports,
-                        switch.to_string().parse().unwrap(),
+                        switch,
                     )
                     .await?;
                 }

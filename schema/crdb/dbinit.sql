@@ -6041,12 +6041,13 @@ CREATE TABLE IF NOT EXISTS omicron.public.bfd_session (
     remote INET NOT NULL,
     detection_threshold INT8 NOT NULL,
     required_rx INT8 NOT NULL,
-    switch TEXT NOT NULL,
     mode  omicron.public.bfd_mode,
 
     time_created TIMESTAMPTZ NOT NULL,
     time_modified TIMESTAMPTZ NOT NULL,
-    time_deleted TIMESTAMPTZ
+    time_deleted TIMESTAMPTZ,
+
+    switch_location omicron.public.switch_location NOT NULL
 );
 
 CREATE UNIQUE INDEX IF NOT EXISTS lookup_bfd_session ON omicron.public.bfd_session (

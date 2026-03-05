@@ -2399,17 +2399,17 @@ table! {
 }
 
 table! {
-    bfd_session (remote, switch) {
+    bfd_session (id) {
         id -> Uuid,
         local -> Nullable<Inet>,
         remote -> Inet,
         detection_threshold -> Int8,
         required_rx -> Int8,
-        switch -> Text,
         mode -> crate::enums::BfdModeEnum,
         time_created -> Timestamptz,
         time_modified -> Timestamptz,
         time_deleted -> Nullable<Timestamptz>,
+        switch_location -> crate::enums::SwitchLocationEnum,
     }
 }
 
