@@ -810,7 +810,7 @@ pub struct BlueprintPrunerDetails {
     /// blueprints deleted
     pub deleted: Vec<DeletedBlueprint>,
     /// count of blueprints kept
-    pub nkept: u64,
+    pub nkept: usize,
     /// warnings encountered while pruning
     pub warnings: Vec<String>,
 }
@@ -822,7 +822,7 @@ impl std::fmt::Display for BlueprintPrunerDetails {
         for b in &self.deleted {
             writeln!(
                 f,
-                "        {} (made target at {})\n",
+                "        {} (made target at {})",
                 b.id,
                 humantime::format_rfc3339_millis(b.time_made_target.into())
             )?;
@@ -839,7 +839,6 @@ impl std::fmt::Display for BlueprintPrunerDetails {
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct DeletedBlueprint {
     pub id: BlueprintUuid,
-    pub time_created: DateTime<Utc>,
     pub time_made_target: DateTime<Utc>,
 }
 
@@ -1101,12 +1100,10 @@ mod test {
     fn test_display_blueprint_pruner_status_enabled() {
         let blueprint1 = DeletedBlueprint {
             id: "4e8a87a0-3102-4014-99d3-e1bf486685bd".parse().unwrap(),
-            time_created: "2025-09-29T01:23:45Z".parse().unwrap(),
             time_made_target: "2025-09-30T01:23:45Z".parse().unwrap(),
         };
         let blueprint2 = DeletedBlueprint {
             id: "867e42ae-ed72-4dc3-abcd-508b875c9601".parse().unwrap(),
-            time_created: "2025-09-29T02:34:56Z".parse().unwrap(),
             time_made_target: "2025-09-30T02:34:56Z".parse().unwrap(),
         };
 

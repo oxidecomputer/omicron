@@ -122,6 +122,7 @@ use thiserror::Error;
 use tufaceous_artifact::ArtifactKind;
 use tufaceous_artifact::KnownArtifactKind;
 use uuid::Uuid;
+use nexus_db_model::SqlU32;
 
 mod external_networking;
 
@@ -2363,6 +2364,36 @@ impl DataStore {
 
         Ok(current_target.into())
     }
+
+    /// List a page of rows from `bp_target`
+    ///
+    /// Generally, only the last `bp_target` row is meaningful.  You only want
+    /// this if you're explicitly looking at history for debugging, cleanup,
+    /// etc.
+    pub async fn bp_target_list_page(
+        &self,
+        opctx: &OpContext,
+        pagparams: &DataPageParams<'_, SqlU32>,
+    ) -> ListResultVec<BpTarget> {
+        // XXX-dap authz
+        use nexus_db_schema::schema::bp_target::dsl;
+        paginated(dsl::bp_target, dsl::version, pagparams)
+            .select(BpTarget::as_select())
+            .get_results_async(&*self.pool_connection_authorized(opctx).await?)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+    }
+
+    /// Delete `bp_target` rows older than the given version
+    pub async fn bp_target_delete_older(
+        &self,
+        opctx: &OpContext,
+        version: u32,
+    ) -> Result<u32, Error> {
+        // XXX-dap
+        todo!();
+    }
+
 }
 
 // Helper for reporting "should never happen" errors while inserting blueprints.
