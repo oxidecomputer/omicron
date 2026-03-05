@@ -264,17 +264,13 @@ impl Display for Svc {
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
+/// DEPRECATED: This type is kept for compatibility with older sled agent API
+/// versions.
+///
 /// Information about an SMF service that is enabled but not running
 pub struct SvcInMaintenance {
     fmri: String,
     zone: String,
-}
-
-impl SvcInMaintenance {
-    #[cfg_attr(not(target_os = "illumos"), allow(dead_code))]
-    fn new() -> SvcInMaintenance {
-        SvcInMaintenance { fmri: String::new(), zone: String::new() }
-    }
 }
 
 impl Display for SvcInMaintenance {
