@@ -341,12 +341,8 @@ impl super::Nexus {
                         "populating ports for {switch}: {qsfp_ports:#?}"
                     );
 
-                    self.populate_switch_ports(
-                        &opctx,
-                        &qsfp_ports,
-                        switch,
-                    )
-                    .await?;
+                    self.populate_switch_ports(&opctx, &qsfp_ports, switch)
+                        .await?;
                 }
             }
             // TODO: #3602 Eliminate need for static port mappings for switch ports
@@ -356,12 +352,7 @@ impl super::Nexus {
                     "Using static configuration for external switchports"
                 );
                 for (switch, ports) in port_mappings {
-                    self.populate_switch_ports(
-                        &opctx,
-                        &ports,
-                        switch,
-                    )
-                    .await?;
+                    self.populate_switch_ports(&opctx, &ports, switch).await?;
                 }
             }
         }

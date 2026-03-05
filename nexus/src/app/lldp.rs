@@ -74,10 +74,9 @@ impl super::Nexus {
             Error::internal_error(&format!("lldpd clients get: {e}"))
         })?;
 
-        let lldpd =
-            lldpd_clients.get(&loc).ok_or(Error::internal_error(&format!(
-                "no lldpd client for rack: {rack_id} switch {loc}"
-            )))?;
+        let lldpd = lldpd_clients.get(&loc).ok_or(Error::internal_error(
+            &format!("no lldpd client for rack: {rack_id} switch {loc}"),
+        ))?;
 
         let mut neighbors: Vec<Neighbor> = lldpd
             .get_neighbors_stream(&format!("{port}/0"), None)

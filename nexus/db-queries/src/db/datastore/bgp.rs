@@ -13,7 +13,8 @@ use ipnetwork::IpNetwork;
 use nexus_db_errors::OptionalError;
 use nexus_db_errors::{ErrorHandler, public_error_from_diesel};
 use nexus_db_model::{
-    BgpPeerView, DbSwitchLocation, SwitchPortBgpPeerConfigAllowExport, SwitchPortBgpPeerConfigAllowImport, SwitchPortBgpPeerConfigCommunity
+    BgpPeerView, DbSwitchLocation, SwitchPortBgpPeerConfigAllowExport,
+    SwitchPortBgpPeerConfigAllowImport, SwitchPortBgpPeerConfigCommunity,
 };
 use nexus_types::external_api::networking;
 use nexus_types::identity::Resource;
