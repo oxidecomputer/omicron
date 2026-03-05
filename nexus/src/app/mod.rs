@@ -43,6 +43,7 @@ use sled_agent_types::early_networking::SwitchLocation;
 use slog::Logger;
 use slog_error_chain::InlineErrorChain;
 use std::collections::HashMap;
+use std::net::SocketAddr;
 use std::net::SocketAddrV6;
 use std::net::{IpAddr, Ipv6Addr};
 use std::num::NonZeroU32;
@@ -1159,19 +1160,41 @@ impl Nexus {
         let resolver = self.resolver();
         let mappings =
             switch_zone_address_mappings(resolver, &self.log).await?;
-        let mut clients: Vec<(SwitchLocation, mg_admin_client::Client)> =
-            vec![];
-        for (location, addr) in &mappings {
-            let port = MGD_PORT;
-            let socketaddr =
-                std::net::SocketAddr::V6(SocketAddrV6::new(*addr, port, 0, 0));
-            let client = mg_admin_client::Client::new(
-                format!("http://{}", socketaddr).as_str(),
-                self.log.clone(),
+        let mgd_addrs = resolver
+            .lookup_all_socket_v6(ServiceName::Mgd)
+            .await
+            .map_err(|err| {
+            format!(
+                "failed to resolve mgd in DNS: {}",
+                InlineErrorChain::new(&err)
+            )
+        })?;
+        let mut clients = HashMap::new();
+        for (location, ip) in mappings {
+            let addr =
+                match mgd_addrs.iter().copied().find(|addr| *addr.ip() == ip) {
+                    Some(addr) => SocketAddr::V6(addr),
+                    None => {
+                        warn!(
+                            self.log,
+                            "no MGD DNS entry found matching switch location \
+                             IP address; assuming default port";
+                            "switch-location" => ?location,
+                            "switch-ip" => %ip,
+                            "mgd-dns-entries" => ?mgd_addrs,
+                        );
+                        SocketAddr::V6(SocketAddrV6::new(ip, MGD_PORT, 0, 0))
+                    }
+                };
+            clients.insert(
+                location,
+                mg_admin_client::Client::new(
+                    &format!("http://{addr}"),
+                    self.log.clone(),
+                ),
             );
-            clients.push((*location, client));
         }
-        Ok(clients.into_iter().collect::<HashMap<_, _>>())
+        Ok(clients)
     }
 
     pub(crate) fn demo_sagas(
