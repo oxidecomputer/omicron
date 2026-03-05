@@ -9216,6 +9216,7 @@ dependencies = [
  "miniz_oxide",
  "mio",
  "newtype-uuid",
+ "nix 0.31.1",
  "num-bigint-dig",
  "num-integer",
  "num-iter",
