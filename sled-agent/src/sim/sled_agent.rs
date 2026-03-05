@@ -169,9 +169,7 @@ impl SledAgent {
                 .await
                 .start(&log, &config.dropshot);
 
-        // TODO-K: uncomment and delete
-        // let health_monitor = HealthMonitorHandle::stub();
-        let health_monitor = HealthMonitorHandle::spawn(log.clone());
+        let health_monitor = HealthMonitorHandle::stub();
 
         Arc::new(SledAgent {
             id,
