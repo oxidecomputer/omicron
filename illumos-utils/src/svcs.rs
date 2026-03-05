@@ -348,18 +348,6 @@ pub struct Svc {
     state: SvcState,
 }
 
-// TODO-K: removeme?
-//impl Svc {
-//    #[cfg_attr(not(target_os = "illumos"), allow(dead_code))]
-//    fn new() -> Svc {
-//        Svc {
-//            fmri: String::new(),
-//            zone: String::new(),
-//            state: SvcState::Unknown,
-//        }
-//    }
-//}
-
 impl Display for Svc {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let Svc { fmri, zone, state } = self;
