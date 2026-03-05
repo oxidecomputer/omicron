@@ -817,6 +817,7 @@ impl IdOrdItem for BlockedMgsUpdate {
 pub enum PlanningMeasurementUpdatesStepReport {
     Modified { count: usize },
     BlockedAddUpdate,
+    EmptyMeasurements,
 }
 
 impl PlanningMeasurementUpdatesStepReport {
@@ -840,10 +841,16 @@ impl fmt::Display for PlanningMeasurementUpdatesStepReport {
             writeln!(f, "Measurement updates:")?;
             match self {
                 PlanningMeasurementUpdatesStepReport::BlockedAddUpdate => {
-                    writeln!(f, "Blocked on add/updates")?;
+                    writeln!(f, "Waiting on zone add/update blockers")?;
                 }
                 PlanningMeasurementUpdatesStepReport::Modified { count } => {
                     writeln!(f, "{count} modifications")?;
+                }
+                PlanningMeasurementUpdatesStepReport::EmptyMeasurements => {
+                    writeln!(
+                        f,
+                        "attempted to plan with a empty measurement set"
+                    )?;
                 }
             }
         }

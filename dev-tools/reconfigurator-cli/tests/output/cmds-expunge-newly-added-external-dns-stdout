@@ -1079,7 +1079,7 @@ planner config:
   * external_dns zone on sled 711ac7f8-d19e-4572-bdb9-e9b50f6e362a from source install dataset
 * zone updates waiting on discretionary zones
 Measurement updates:
-Blocked on add/updates
+Waiting on zone add/update blockers
 
 
 
@@ -1710,7 +1710,7 @@ planner config:
   * external_dns zone on sled 711ac7f8-d19e-4572-bdb9-e9b50f6e362a from source install dataset
 * zone updates waiting on discretionary zones
 Measurement updates:
-Blocked on add/updates
+Waiting on zone add/update blockers
 
 
 

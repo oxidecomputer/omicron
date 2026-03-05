@@ -8,107 +8,70 @@ use nexus_types::deployment::BlueprintMeasurements;
 use nexus_types::deployment::BlueprintSingleMeasurement;
 use nexus_types::deployment::TargetReleaseDescription;
 use omicron_common::api::external::TufRepoDescription;
-use omicron_uuid_kinds::SledUuid;
-use slog::error;
-use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use tufaceous_artifact::ArtifactKind;
 
-pub(crate) struct PendingMeasurements {
-    by_sled: BTreeMap<SledUuid, BlueprintMeasurements>,
+pub(crate) enum MeasurementPlanError {
+    EmptyMeasurementSet,
 }
 
-impl PendingMeasurements {
-    pub(super) fn empty() -> Self {
-        Self { by_sled: BTreeMap::new() }
-    }
+fn build_measurement_set(
+    artifacts: &TufRepoDescription,
+) -> BTreeSet<BlueprintSingleMeasurement> {
+    let mut measurements = Vec::new();
 
-    pub(crate) fn into_iter(
-        self,
-    ) -> impl Iterator<Item = (SledUuid, BlueprintMeasurements)> {
-        self.by_sled.into_iter()
-    }
-
-    // We need to insert both current and previous at the same time
-    // to avoid triggering the multiple change check
-    fn insert_all_measurements(
-        &mut self,
-        log: &slog::Logger,
-        sled_id: SledUuid,
-        current_artifacts: &TufRepoDescription,
-        previous_artifacts: Option<&TufRepoDescription>,
-    ) {
-        let mut measurements = Vec::new();
-
-        for artifact in &current_artifacts.artifacts {
-            if artifact.id.kind == ArtifactKind::MEASUREMENT_CORPUS {
-                measurements.push(artifact);
-            }
+    for artifact in &artifacts.artifacts {
+        if artifact.id.kind == ArtifactKind::MEASUREMENT_CORPUS {
+            measurements.push(artifact);
         }
-
-        if let Some(previous) = previous_artifacts {
-            for artifact in &previous.artifacts {
-                if artifact.id.kind == ArtifactKind::MEASUREMENT_CORPUS {
-                    measurements.push(artifact);
-                }
-            }
-        }
-
-        let artifacts = measurements
-            .into_iter()
-            .map(|artifact| BlueprintSingleMeasurement {
-                version: BlueprintArtifactVersion::Available {
-                    version: artifact.id.version.clone(),
-                },
-                hash: artifact.hash,
-            })
-            .collect();
-
-        let artifacts = match BlueprintArtifactMeasurements::new(artifacts) {
-            None => {
-                error!(log, "Found no measurement artifacts");
-                return;
-            }
-            Some(m) => m,
-        };
-
-        let contents = BlueprintMeasurements::Artifacts { artifacts };
-        let prev = self.by_sled.insert(sled_id, contents);
-        assert!(prev.is_none(), "recorded multiple changes for sled {sled_id}");
     }
+
+    measurements
+        .into_iter()
+        .map(|artifact| BlueprintSingleMeasurement {
+            version: BlueprintArtifactVersion::Available {
+                version: artifact.id.version.clone(),
+            },
+            hash: artifact.hash,
+        })
+        .collect()
 }
 
 pub(crate) fn plan_measurement_updates(
-    log: &slog::Logger,
-    sled_id: &BTreeSet<SledUuid>,
     current_artifacts: &TargetReleaseDescription,
     previous_artifacts: &TargetReleaseDescription,
-) -> PendingMeasurements {
-    let mut pending = PendingMeasurements::empty();
-
-    match (current_artifacts, previous_artifacts) {
+) -> Result<BlueprintMeasurements, MeasurementPlanError> {
+    let measurements = match (current_artifacts, previous_artifacts) {
         // Very first blueprint, we return an empty set indicating we are using the install dataset
         (
             TargetReleaseDescription::Initial,
             TargetReleaseDescription::Initial,
-        ) => {}
+        ) => BlueprintMeasurements::InstallDataset,
         // Second blueprint. It's okay to just take the current set
         (
             TargetReleaseDescription::TufRepo(c),
             TargetReleaseDescription::Initial,
         ) => {
-            for s in sled_id {
-                pending.insert_all_measurements(log, *s, &c, None);
-            }
+            let artifacts =
+                BlueprintArtifactMeasurements::new(build_measurement_set(&c))
+                    .ok_or(MeasurementPlanError::EmptyMeasurementSet)?;
+
+            BlueprintMeasurements::Artifacts { artifacts }
         }
         // Every other blueprint
         (
             TargetReleaseDescription::TufRepo(c),
             TargetReleaseDescription::TufRepo(p),
         ) => {
-            for s in sled_id {
-                pending.insert_all_measurements(log, *s, &c, Some(&p));
-            }
+            let artifacts = BlueprintArtifactMeasurements::new(
+                build_measurement_set(&c)
+                    .into_iter()
+                    .chain(build_measurement_set(&p).into_iter())
+                    .collect(),
+            )
+            .ok_or(MeasurementPlanError::EmptyMeasurementSet)?;
+
+            BlueprintMeasurements::Artifacts { artifacts }
         }
         // This should never happen
         (
@@ -119,5 +82,5 @@ pub(crate) fn plan_measurement_updates(
         }
     };
 
-    pending
+    Ok(measurements)
 }

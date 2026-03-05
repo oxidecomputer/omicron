@@ -11,7 +11,6 @@ use crate::blueprint_editor::ExternalNetworkingError;
 use crate::blueprint_editor::ExternalSnatNetworkingChoice;
 use crate::blueprint_editor::SledEditError;
 use crate::blueprint_editor::SledEditor;
-use crate::measurements::PendingMeasurements;
 use crate::mgs_updates::PendingHostPhase2Changes;
 use crate::planner::NoopConvertInfo;
 use crate::planner::NoopConvertSledIneligibleReason;
@@ -2133,17 +2132,6 @@ impl<'a> BlueprintBuilder<'a> {
         Ok(final_counts.difference_since(initial_counts))
     }
 
-    pub(crate) fn apply_pending_measurement_updates(
-        &mut self,
-        changes: PendingMeasurements,
-    ) -> Result<usize, Error> {
-        let mut cnt = 0;
-        for (sled_id, measurement) in changes.into_iter() {
-            cnt += self.sled_set_measurements(sled_id, measurement)?;
-        }
-        Ok(cnt)
-    }
-
     pub(crate) fn apply_pending_host_phase_2_changes(
         &mut self,
         changes: PendingHostPhase2Changes,
@@ -2179,9 +2167,7 @@ impl<'a> BlueprintBuilder<'a> {
             ))
         })?;
         let initial_counts = editor.edit_counts();
-        editor
-            .set_measurements(measurements)
-            .map_err(|err| Error::SledEditError { sled_id, err })?;
+        editor.set_measurements(measurements);
         let final_counts = editor.edit_counts();
         Ok(final_counts.difference_since(initial_counts).measurements.updated)
     }

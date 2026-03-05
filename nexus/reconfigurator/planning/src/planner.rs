@@ -699,22 +699,30 @@ impl<'a> Planner<'a> {
             .map(|(s, _)| s)
             .collect();
 
+        // Measurements reflect what we expect to be running on the
+        // system at any given time. In the course of an update
+        // we expect to be running a mixture of old and new code
+        // based on the blueprints. Running anything else means
+        // a modification happened outside of Nexus!
         let current_artifacts = self.input.tuf_repo().description();
         let previous_artifacts = self.input.old_repo().description();
 
-        let measurement_updates = plan_measurement_updates(
-            &self.log,
-            &included_sled_ids,
-            &current_artifacts,
-            &previous_artifacts,
-        );
-        let modifications = self
-            .blueprint
-            .apply_pending_measurement_updates(measurement_updates)?;
+        match plan_measurement_updates(&current_artifacts, &previous_artifacts)
+        {
+            Ok(m) => {
+                let mut count = 0;
+                for sled_id in included_sled_ids {
+                    count += self
+                        .blueprint
+                        .sled_set_measurements(sled_id, m.clone())?;
+                }
 
-        Ok(PlanningMeasurementUpdatesStepReport::Modified {
-            count: modifications,
-        })
+                Ok(PlanningMeasurementUpdatesStepReport::Modified { count })
+            }
+            Err(_) => {
+                Ok(PlanningMeasurementUpdatesStepReport::EmptyMeasurements)
+            }
+        }
     }
 
     fn do_plan_noop_image_source(

@@ -110,7 +110,7 @@ planning report:
 * zone updates waiting on zone add blockers
 * waiting to update top-level nexus_generation: some non-Nexus zone are not yet updated
 Measurement updates:
-Blocked on add/updates
+Waiting on zone add/update blockers
 
 
 
@@ -253,7 +253,7 @@ planning report:
 * zone updates waiting on zone add blockers
 * waiting to update top-level nexus_generation: some non-Nexus zone are not yet updated
 Measurement updates:
-Blocked on add/updates
+Waiting on zone add/update blockers
 
 
 
@@ -324,7 +324,7 @@ planner config:
 * zone updates waiting on discretionary zones
 * waiting to update top-level nexus_generation: some non-Nexus zone are not yet updated
 Measurement updates:
-Blocked on add/updates
+Waiting on zone add/update blockers
 
 
 
