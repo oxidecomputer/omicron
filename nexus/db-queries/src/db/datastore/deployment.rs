@@ -2389,7 +2389,9 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         version: u32,
-    ) -> Result<u32, Error> {
+    ) -> Result<usize, Error> {
+        // XXX-dap can this datastore function somehow predicate on this *NOT*
+        // being the max version?
         // XXX-dap
         todo!();
     }

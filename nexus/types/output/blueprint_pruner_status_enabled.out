@@ -1,8 +1,9 @@
     status: enabled
     blueprints kept: 12
+    bp_target rows that can be deleted: 18
+    bp_target rows deleted: 17
     blueprints deleted: 2
         4e8a87a0-3102-4014-99d3-e1bf486685bd (made target at 2025-09-30T01:23:45.000Z)
         867e42ae-ed72-4dc3-abcd-508b875c9601 (made target at 2025-09-30T02:34:56.000Z)
-
     warnings: 1
         fake-oh problem-oh

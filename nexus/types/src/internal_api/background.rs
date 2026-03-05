@@ -807,10 +807,14 @@ impl std::fmt::Display for BlueprintPrunerStatus {
 /// The status of a `blueprint_pruner` background task activation.
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct BlueprintPrunerDetails {
-    /// blueprints deleted
-    pub deleted: Vec<DeletedBlueprint>,
     /// count of blueprints kept
     pub nkept: usize,
+    /// blueprints deleted
+    pub deleted: Vec<DeletedBlueprint>,
+    /// count of `bp_target` rows that were determined to be removable
+    pub ntargets_removable: usize,
+    /// count of `bp_target` rows deleted
+    pub ntargets_deleted: usize,
     /// warnings encountered while pruning
     pub warnings: Vec<String>,
 }
@@ -818,6 +822,12 @@ pub struct BlueprintPrunerDetails {
 impl std::fmt::Display for BlueprintPrunerDetails {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         writeln!(f, "    blueprints kept: {}", self.nkept)?;
+        writeln!(
+            f,
+            "    bp_target rows that can be deleted: {}",
+            self.ntargets_removable
+        )?;
+        writeln!(f, "    bp_target rows deleted: {}", self.ntargets_deleted)?;
         writeln!(f, "    blueprints deleted: {}", self.deleted.len())?;
         for b in &self.deleted {
             writeln!(
@@ -832,6 +842,17 @@ impl std::fmt::Display for BlueprintPrunerDetails {
             writeln!(f, "        {}", w)?;
         }
         Ok(())
+    }
+}
+
+impl slog::KV for BlueprintPrunerDetails {
+    fn serialize(
+        &self,
+        _record: &slog::Record,
+        serializer: &mut dyn slog::Serializer,
+    ) -> slog::Result {
+        // XXX-dap
+        todo!();
     }
 }
 
@@ -1109,6 +1130,8 @@ mod test {
 
         let details = BlueprintPrunerDetails {
             deleted: vec![blueprint1, blueprint2],
+            ntargets_deleted: 17,
+            ntargets_removable: 18,
             nkept: 12,
             warnings: vec![String::from("fake-oh problem-oh")],
         };
