@@ -917,11 +917,11 @@ impl NoopConvertMeasurements {
                     "measurement has its image source set to Artifact already";
                 );
             }
-            NoopConvertMeasurements::Eligible(new_image_source) => {
+            NoopConvertMeasurements::Eligible(new_measurement_source) => {
                 info!(
                     log,
                     "measurement may be eligible for noop image source conversion";
-                    "new_image_source" => %new_image_source,
+                    "new_measurement_source" => %new_measurement_source,
                 );
             }
             NoopConvertMeasurements::Ineligible(
