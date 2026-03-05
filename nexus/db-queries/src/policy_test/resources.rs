@@ -9,6 +9,7 @@ use super::resource_builder::ResourceSet;
 use nexus_auth::authz;
 use omicron_common::api::external::LookupType;
 use omicron_uuid_kinds::AccessTokenKind;
+use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::RackUuid;
 use omicron_uuid_kinds::SiloGroupUuid;
