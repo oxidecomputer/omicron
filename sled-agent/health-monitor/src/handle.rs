@@ -23,8 +23,7 @@ pub struct HealthMonitorHandle {
 }
 
 impl HealthMonitorHandle {
-    /// Returns a `HealthMonitorHandle` that doesn't monitor health and always
-    /// reports no problems
+    /// Returns a `HealthMonitorHandle` that doesn't monitor health
     pub fn stub() -> Self {
         let (_tx, smf_services_enabled_not_online_rx) = watch::channel(None);
         Self { smf_services_enabled_not_online_rx }
@@ -51,19 +50,10 @@ impl HealthMonitorHandle {
     }
 
     pub fn to_inventory(&self) -> Option<Result<SvcsEnabledNotOnline, String>> {
-        match self.smf_services_enabled_not_online_rx.borrow().clone() {
-            Some(result) => match result {
-                Ok(svcs) => {
-                    let SvcsResult { services, errors, time_of_status } = svcs;
-                    Some(Ok(SvcsEnabledNotOnline {
-                        services,
-                        errors,
-                        time_of_status,
-                    }))
-                }
-                Err(e) => Some(Err(e)),
-            },
-            None => None,
-        }
+        self.smf_services_enabled_not_online_rx.borrow().clone().map(|result| {
+            result.map(|SvcsResult { services, errors, time_of_status }| {
+                SvcsEnabledNotOnline { services, errors, time_of_status }
+            })
+        })
     }
 }
