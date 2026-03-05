@@ -7,7 +7,7 @@
       "url": "https://oxide.computer",
       "email": "api@oxide.computer"
     },
-    "version": "2026022500.0.0"
+    "version": "2026030500.0.0"
   },
   "paths": {
     "/device/auth": {
@@ -15440,11 +15440,11 @@
         "type": "object",
         "properties": {
           "description": {
-            "description": "human-readable free-form text about a resource",
+            "description": "Human-readable free-form text about a resource",
             "type": "string"
           },
           "id": {
-            "description": "unique, immutable, system-controlled identifier for each resource",
+            "description": "Unique, immutable, system-controlled identifier for each resource",
             "type": "string",
             "format": "uuid"
           },
@@ -15457,7 +15457,7 @@
             ]
           },
           "name": {
-            "description": "unique, mutable, user-controlled identifier for each resource",
+            "description": "Unique, mutable, user-controlled identifier for each resource",
             "allOf": [
               {
                 "$ref": "#/components/schemas/Name"
@@ -15465,12 +15465,12 @@
             ]
           },
           "time_created": {
-            "description": "timestamp when this resource was created",
+            "description": "Timestamp when this resource was created",
             "type": "string",
             "format": "date-time"
           },
           "time_modified": {
-            "description": "timestamp when this resource was last modified",
+            "description": "Timestamp when this resource was last modified",
             "type": "string",
             "format": "date-time"
           }
@@ -15679,19 +15679,19 @@
         "type": "object",
         "properties": {
           "description": {
-            "description": "human-readable free-form text about a resource",
+            "description": "Human-readable free-form text about a resource",
             "type": "string"
           },
           "failure_domain": {
             "$ref": "#/components/schemas/FailureDomain"
           },
           "id": {
-            "description": "unique, immutable, system-controlled identifier for each resource",
+            "description": "Unique, immutable, system-controlled identifier for each resource",
             "type": "string",
             "format": "uuid"
           },
           "name": {
-            "description": "unique, mutable, user-controlled identifier for each resource",
+            "description": "Unique, mutable, user-controlled identifier for each resource",
             "allOf": [
               {
                 "$ref": "#/components/schemas/Name"
@@ -15706,12 +15706,12 @@
             "format": "uuid"
           },
           "time_created": {
-            "description": "timestamp when this resource was created",
+            "description": "Timestamp when this resource was created",
             "type": "string",
             "format": "date-time"
           },
           "time_modified": {
-            "description": "timestamp when this resource was last modified",
+            "description": "Timestamp when this resource was last modified",
             "type": "string",
             "format": "date-time"
           }
@@ -16125,11 +16125,11 @@
         "type": "object",
         "properties": {
           "description": {
-            "description": "human-readable free-form text about a resource",
+            "description": "Human-readable free-form text about a resource",
             "type": "string"
           },
           "id": {
-            "description": "unique, immutable, system-controlled identifier for each resource",
+            "description": "Unique, immutable, system-controlled identifier for each resource",
             "type": "string",
             "format": "uuid"
           },
@@ -16142,7 +16142,7 @@
             ]
           },
           "name": {
-            "description": "unique, mutable, user-controlled identifier for each resource",
+            "description": "Unique, mutable, user-controlled identifier for each resource",
             "allOf": [
               {
                 "$ref": "#/components/schemas/Name"
@@ -16157,12 +16157,12 @@
             }
           },
           "time_created": {
-            "description": "timestamp when this resource was created",
+            "description": "Timestamp when this resource was created",
             "type": "string",
             "format": "date-time"
           },
           "time_modified": {
-            "description": "timestamp when this resource was last modified",
+            "description": "Timestamp when this resource was last modified",
             "type": "string",
             "format": "date-time"
           }
@@ -16363,19 +16363,19 @@
         "type": "object",
         "properties": {
           "description": {
-            "description": "human-readable free-form text about a resource",
+            "description": "Human-readable free-form text about a resource",
             "type": "string"
           },
           "failure_domain": {
             "$ref": "#/components/schemas/FailureDomain"
           },
           "id": {
-            "description": "unique, immutable, system-controlled identifier for each resource",
+            "description": "Unique, immutable, system-controlled identifier for each resource",
             "type": "string",
             "format": "uuid"
           },
           "name": {
-            "description": "unique, mutable, user-controlled identifier for each resource",
+            "description": "Unique, mutable, user-controlled identifier for each resource",
             "allOf": [
               {
                 "$ref": "#/components/schemas/Name"
@@ -16390,12 +16390,12 @@
             "format": "uuid"
           },
           "time_created": {
-            "description": "timestamp when this resource was created",
+            "description": "Timestamp when this resource was created",
             "type": "string",
             "format": "date-time"
           },
           "time_modified": {
-            "description": "timestamp when this resource was last modified",
+            "description": "Timestamp when this resource was last modified",
             "type": "string",
             "format": "date-time"
           }
@@ -17049,16 +17049,16 @@
         "type": "object",
         "properties": {
           "description": {
-            "description": "human-readable free-form text about a resource",
+            "description": "Human-readable free-form text about a resource",
             "type": "string"
           },
           "id": {
-            "description": "unique, immutable, system-controlled identifier for each resource",
+            "description": "Unique, immutable, system-controlled identifier for each resource",
             "type": "string",
             "format": "uuid"
           },
           "name": {
-            "description": "unique, mutable, user-controlled identifier for each resource",
+            "description": "Unique, mutable, user-controlled identifier for each resource",
             "allOf": [
               {
                 "$ref": "#/components/schemas/Name"
@@ -17066,12 +17066,12 @@
             ]
           },
           "time_created": {
-            "description": "timestamp when this resource was created",
+            "description": "Timestamp when this resource was created",
             "type": "string",
             "format": "date-time"
           },
           "time_modified": {
-            "description": "timestamp when this resource was last modified",
+            "description": "Timestamp when this resource was last modified",
             "type": "string",
             "format": "date-time"
           }
@@ -17174,11 +17174,11 @@
             "minimum": 0
           },
           "description": {
-            "description": "human-readable free-form text about a resource",
+            "description": "Human-readable free-form text about a resource",
             "type": "string"
           },
           "id": {
-            "description": "unique, immutable, system-controlled identifier for each resource",
+            "description": "Unique, immutable, system-controlled identifier for each resource",
             "type": "string",
             "format": "uuid"
           },
@@ -17191,7 +17191,7 @@
             ]
           },
           "name": {
-            "description": "unique, mutable, user-controlled identifier for each resource",
+            "description": "Unique, mutable, user-controlled identifier for each resource",
             "allOf": [
               {
                 "$ref": "#/components/schemas/Name"
@@ -17199,12 +17199,12 @@
             ]
           },
           "time_created": {
-            "description": "timestamp when this resource was created",
+            "description": "Timestamp when this resource was created",
             "type": "string",
             "format": "date-time"
           },
           "time_modified": {
-            "description": "timestamp when this resource was last modified",
+            "description": "Timestamp when this resource was last modified",
             "type": "string",
             "format": "date-time"
           },
@@ -18630,16 +18630,16 @@
             "type": "string"
           },
           "description": {
-            "description": "human-readable free-form text about a resource",
+            "description": "Human-readable free-form text about a resource",
             "type": "string"
           },
           "id": {
-            "description": "unique, immutable, system-controlled identifier for each resource",
+            "description": "Unique, immutable, system-controlled identifier for each resource",
             "type": "string",
             "format": "uuid"
           },
           "name": {
-            "description": "unique, mutable, user-controlled identifier for each resource",
+            "description": "Unique, mutable, user-controlled identifier for each resource",
             "allOf": [
               {
                 "$ref": "#/components/schemas/Name"
@@ -18655,12 +18655,12 @@
             ]
           },
           "time_created": {
-            "description": "timestamp when this resource was created",
+            "description": "Timestamp when this resource was created",
             "type": "string",
             "format": "date-time"
           },
           "time_modified": {
-            "description": "timestamp when this resource was last modified",
+            "description": "Timestamp when this resource was last modified",
             "type": "string",
             "format": "date-time"
           }
@@ -19596,7 +19596,7 @@
             "$ref": "#/components/schemas/ByteCount"
           },
           "description": {
-            "description": "human-readable free-form text about a resource",
+            "description": "Human-readable free-form text about a resource",
             "type": "string"
           },
           "device_path": {
@@ -19606,7 +19606,7 @@
             "$ref": "#/components/schemas/DiskType"
           },
           "id": {
-            "description": "unique, immutable, system-controlled identifier for each resource",
+            "description": "Unique, immutable, system-controlled identifier for each resource",
             "type": "string",
             "format": "uuid"
           },
@@ -19617,7 +19617,7 @@
             "format": "uuid"
           },
           "name": {
-            "description": "unique, mutable, user-controlled identifier for each resource",
+            "description": "Unique, mutable, user-controlled identifier for each resource",
             "allOf": [
               {
                 "$ref": "#/components/schemas/Name"
@@ -19645,12 +19645,12 @@
             "$ref": "#/components/schemas/DiskState"
           },
           "time_created": {
-            "description": "timestamp when this resource was created",
+            "description": "Timestamp when this resource was created",
             "type": "string",
             "format": "date-time"
           },
           "time_modified": {
-            "description": "timestamp when this resource was last modified",
+            "description": "Timestamp when this resource was last modified",
             "type": "string",
             "format": "date-time"
           }
@@ -20317,11 +20317,11 @@
             "type": "object",
             "properties": {
               "description": {
-                "description": "human-readable free-form text about a resource",
+                "description": "Human-readable free-form text about a resource",
                 "type": "string"
               },
               "id": {
-                "description": "unique, immutable, system-controlled identifier for each resource",
+                "description": "Unique, immutable, system-controlled identifier for each resource",
                 "type": "string",
                 "format": "uuid"
               },
@@ -20348,7 +20348,7 @@
                 ]
               },
               "name": {
-                "description": "unique, mutable, user-controlled identifier for each resource",
+                "description": "Unique, mutable, user-controlled identifier for each resource",
                 "allOf": [
                   {
                     "$ref": "#/components/schemas/Name"
@@ -20361,12 +20361,12 @@
                 "format": "uuid"
               },
               "time_created": {
-                "description": "timestamp when this resource was created",
+                "description": "Timestamp when this resource was created",
                 "type": "string",
                 "format": "date-time"
               },
               "time_modified": {
-                "description": "timestamp when this resource was last modified",
+                "description": "Timestamp when this resource was last modified",
                 "type": "string",
                 "format": "date-time"
               }
@@ -20462,11 +20462,11 @@
         "type": "object",
         "properties": {
           "description": {
-            "description": "human-readable free-form text about a resource",
+            "description": "Human-readable free-form text about a resource",
             "type": "string"
           },
           "id": {
-            "description": "unique, immutable, system-controlled identifier for each resource",
+            "description": "Unique, immutable, system-controlled identifier for each resource",
             "type": "string",
             "format": "uuid"
           },
@@ -20477,7 +20477,7 @@
             "format": "uuid"
           },
           "name": {
-            "description": "unique, mutable, user-controlled identifier for each resource",
+            "description": "Unique, mutable, user-controlled identifier for each resource",
             "allOf": [
               {
                 "$ref": "#/components/schemas/Name"
@@ -20508,12 +20508,12 @@
             "format": "uuid"
           },
           "time_created": {
-            "description": "timestamp when this resource was created",
+            "description": "Timestamp when this resource was created",
             "type": "string",
             "format": "date-time"
           },
           "time_modified": {
-            "description": "timestamp when this resource was last modified",
+            "description": "Timestamp when this resource was last modified",
             "type": "string",
             "format": "date-time"
           }
@@ -21036,11 +21036,11 @@
         "type": "object",
         "properties": {
           "description": {
-            "description": "human-readable free-form text about a resource",
+            "description": "Human-readable free-form text about a resource",
             "type": "string"
           },
           "id": {
-            "description": "unique, immutable, system-controlled identifier for each resource",
+            "description": "Unique, immutable, system-controlled identifier for each resource",
             "type": "string",
             "format": "uuid"
           },
@@ -21061,7 +21061,7 @@
             "format": "uuid"
           },
           "name": {
-            "description": "unique, mutable, user-controlled identifier for each resource",
+            "description": "Unique, mutable, user-controlled identifier for each resource",
             "allOf": [
               {
                 "$ref": "#/components/schemas/Name"
@@ -21074,12 +21074,12 @@
             "format": "uuid"
           },
           "time_created": {
-            "description": "timestamp when this resource was created",
+            "description": "Timestamp when this resource was created",
             "type": "string",
             "format": "date-time"
           },
           "time_modified": {
-            "description": "timestamp when this resource was last modified",
+            "description": "Timestamp when this resource was last modified",
             "type": "string",
             "format": "date-time"
           }
@@ -22073,16 +22073,16 @@
         "type": "object",
         "properties": {
           "description": {
-            "description": "human-readable free-form text about a resource",
+            "description": "Human-readable free-form text about a resource",
             "type": "string"
           },
           "id": {
-            "description": "unique, immutable, system-controlled identifier for each resource",
+            "description": "Unique, immutable, system-controlled identifier for each resource",
             "type": "string",
             "format": "uuid"
           },
           "name": {
-            "description": "unique, mutable, user-controlled identifier for each resource",
+            "description": "Unique, mutable, user-controlled identifier for each resource",
             "allOf": [
               {
                 "$ref": "#/components/schemas/Name"
@@ -22098,12 +22098,12 @@
             ]
           },
           "time_created": {
-            "description": "timestamp when this resource was created",
+            "description": "Timestamp when this resource was created",
             "type": "string",
             "format": "date-time"
           },
           "time_modified": {
-            "description": "timestamp when this resource was last modified",
+            "description": "Timestamp when this resource was last modified",
             "type": "string",
             "format": "date-time"
           }
@@ -22210,7 +22210,7 @@
             ]
           },
           "description": {
-            "description": "human-readable free-form text about a resource",
+            "description": "Human-readable free-form text about a resource",
             "type": "string"
           },
           "digest": {
@@ -22223,12 +22223,12 @@
             ]
           },
           "id": {
-            "description": "unique, immutable, system-controlled identifier for each resource",
+            "description": "Unique, immutable, system-controlled identifier for each resource",
             "type": "string",
             "format": "uuid"
           },
           "name": {
-            "description": "unique, mutable, user-controlled identifier for each resource",
+            "description": "Unique, mutable, user-controlled identifier for each resource",
             "allOf": [
               {
                 "$ref": "#/components/schemas/Name"
@@ -22254,12 +22254,12 @@
             ]
           },
           "time_created": {
-            "description": "timestamp when this resource was created",
+            "description": "Timestamp when this resource was created",
             "type": "string",
             "format": "date-time"
           },
           "time_modified": {
-            "description": "timestamp when this resource was last modified",
+            "description": "Timestamp when this resource was last modified",
             "type": "string",
             "format": "date-time"
           },
@@ -22444,7 +22444,7 @@
           },
           "boot_disk_id": {
             "nullable": true,
-            "description": "the ID of the disk used to boot this Instance, if a specific one is assigned.",
+            "description": "The ID of the disk used to boot this instance, if a specific one is assigned",
             "type": "string",
             "format": "uuid"
           },
@@ -22458,20 +22458,20 @@
             ]
           },
           "description": {
-            "description": "human-readable free-form text about a resource",
+            "description": "Human-readable free-form text about a resource",
             "type": "string"
           },
           "hostname": {
-            "description": "RFC1035-compliant hostname for the Instance.",
+            "description": "RFC1035-compliant hostname for the instance",
             "type": "string"
           },
           "id": {
-            "description": "unique, immutable, system-controlled identifier for each resource",
+            "description": "Unique, immutable, system-controlled identifier for each resource",
             "type": "string",
             "format": "uuid"
           },
           "memory": {
-            "description": "memory allocated for this Instance",
+            "description": "Memory allocated for this instance",
             "allOf": [
               {
                 "$ref": "#/components/schemas/ByteCount"
@@ -22479,7 +22479,7 @@
             ]
           },
           "name": {
-            "description": "unique, mutable, user-controlled identifier for each resource",
+            "description": "Unique, mutable, user-controlled identifier for each resource",
             "allOf": [
               {
                 "$ref": "#/components/schemas/Name"
@@ -22487,7 +22487,7 @@
             ]
           },
           "ncpus": {
-            "description": "number of CPUs allocated for this Instance",
+            "description": "Number of CPUs allocated for this instance",
             "allOf": [
               {
                 "$ref": "#/components/schemas/InstanceCpuCount"
@@ -22495,7 +22495,7 @@
             ]
           },
           "project_id": {
-            "description": "id for the project containing this Instance",
+            "description": "ID for the project containing this instance",
             "type": "string",
             "format": "uuid"
           },
@@ -22503,7 +22503,7 @@
             "$ref": "#/components/schemas/InstanceState"
           },
           "time_created": {
-            "description": "timestamp when this resource was created",
+            "description": "Timestamp when this resource was created",
             "type": "string",
             "format": "date-time"
           },
@@ -22514,7 +22514,7 @@
             "format": "date-time"
           },
           "time_modified": {
-            "description": "timestamp when this resource was last modified",
+            "description": "Timestamp when this resource was last modified",
             "type": "string",
             "format": "date-time"
           },
@@ -22818,11 +22818,11 @@
         "type": "object",
         "properties": {
           "description": {
-            "description": "human-readable free-form text about a resource",
+            "description": "Human-readable free-form text about a resource",
             "type": "string"
           },
           "id": {
-            "description": "unique, immutable, system-controlled identifier for each resource",
+            "description": "Unique, immutable, system-controlled identifier for each resource",
             "type": "string",
             "format": "uuid"
           },
@@ -22848,7 +22848,7 @@
             ]
           },
           "name": {
-            "description": "unique, mutable, user-controlled identifier for each resource",
+            "description": "Unique, mutable, user-controlled identifier for each resource",
             "allOf": [
               {
                 "$ref": "#/components/schemas/Name"
@@ -22865,12 +22865,12 @@
             "format": "uuid"
           },
           "time_created": {
-            "description": "timestamp when this resource was created",
+            "description": "Timestamp when this resource was created",
             "type": "string",
             "format": "date-time"
           },
           "time_modified": {
-            "description": "timestamp when this resource was last modified",
+            "description": "Timestamp when this resource was last modified",
             "type": "string",
             "format": "date-time"
           },
@@ -23329,16 +23329,16 @@
         "type": "object",
         "properties": {
           "description": {
-            "description": "human-readable free-form text about a resource",
+            "description": "Human-readable free-form text about a resource",
             "type": "string"
           },
           "id": {
-            "description": "unique, immutable, system-controlled identifier for each resource",
+            "description": "Unique, immutable, system-controlled identifier for each resource",
             "type": "string",
             "format": "uuid"
           },
           "name": {
-            "description": "unique, mutable, user-controlled identifier for each resource",
+            "description": "Unique, mutable, user-controlled identifier for each resource",
             "allOf": [
               {
                 "$ref": "#/components/schemas/Name"
@@ -23346,12 +23346,12 @@
             ]
           },
           "time_created": {
-            "description": "timestamp when this resource was created",
+            "description": "Timestamp when this resource was created",
             "type": "string",
             "format": "date-time"
           },
           "time_modified": {
-            "description": "timestamp when this resource was last modified",
+            "description": "Timestamp when this resource was last modified",
             "type": "string",
             "format": "date-time"
           },
@@ -23396,11 +23396,11 @@
             "format": "ip"
           },
           "description": {
-            "description": "human-readable free-form text about a resource",
+            "description": "Human-readable free-form text about a resource",
             "type": "string"
           },
           "id": {
-            "description": "unique, immutable, system-controlled identifier for each resource",
+            "description": "Unique, immutable, system-controlled identifier for each resource",
             "type": "string",
             "format": "uuid"
           },
@@ -23410,7 +23410,7 @@
             "format": "uuid"
           },
           "name": {
-            "description": "unique, mutable, user-controlled identifier for each resource",
+            "description": "Unique, mutable, user-controlled identifier for each resource",
             "allOf": [
               {
                 "$ref": "#/components/schemas/Name"
@@ -23418,12 +23418,12 @@
             ]
           },
           "time_created": {
-            "description": "timestamp when this resource was created",
+            "description": "Timestamp when this resource was created",
             "type": "string",
             "format": "date-time"
           },
           "time_modified": {
-            "description": "timestamp when this resource was last modified",
+            "description": "Timestamp when this resource was last modified",
             "type": "string",
             "format": "date-time"
           }
@@ -23485,11 +23485,11 @@
         "type": "object",
         "properties": {
           "description": {
-            "description": "human-readable free-form text about a resource",
+            "description": "Human-readable free-form text about a resource",
             "type": "string"
           },
           "id": {
-            "description": "unique, immutable, system-controlled identifier for each resource",
+            "description": "Unique, immutable, system-controlled identifier for each resource",
             "type": "string",
             "format": "uuid"
           },
@@ -23504,7 +23504,7 @@
             "format": "uuid"
           },
           "name": {
-            "description": "unique, mutable, user-controlled identifier for each resource",
+            "description": "Unique, mutable, user-controlled identifier for each resource",
             "allOf": [
               {
                 "$ref": "#/components/schemas/Name"
@@ -23512,12 +23512,12 @@
             ]
           },
           "time_created": {
-            "description": "timestamp when this resource was created",
+            "description": "Timestamp when this resource was created",
             "type": "string",
             "format": "date-time"
           },
           "time_modified": {
-            "description": "timestamp when this resource was last modified",
+            "description": "Timestamp when this resource was last modified",
             "type": "string",
             "format": "date-time"
           }
@@ -23624,11 +23624,11 @@
         "type": "object",
         "properties": {
           "description": {
-            "description": "human-readable free-form text about a resource",
+            "description": "Human-readable free-form text about a resource",
             "type": "string"
           },
           "id": {
-            "description": "unique, immutable, system-controlled identifier for each resource",
+            "description": "Unique, immutable, system-controlled identifier for each resource",
             "type": "string",
             "format": "uuid"
           },
@@ -23641,7 +23641,7 @@
             ]
           },
           "name": {
-            "description": "unique, mutable, user-controlled identifier for each resource",
+            "description": "Unique, mutable, user-controlled identifier for each resource",
             "allOf": [
               {
                 "$ref": "#/components/schemas/Name"
@@ -23657,12 +23657,12 @@
             ]
           },
           "time_created": {
-            "description": "timestamp when this resource was created",
+            "description": "Timestamp when this resource was created",
             "type": "string",
             "format": "date-time"
           },
           "time_modified": {
-            "description": "timestamp when this resource was last modified",
+            "description": "Timestamp when this resource was last modified",
             "type": "string",
             "format": "date-time"
           }
@@ -24652,11 +24652,11 @@
         "type": "object",
         "properties": {
           "description": {
-            "description": "human-readable free-form text about a resource",
+            "description": "Human-readable free-form text about a resource",
             "type": "string"
           },
           "id": {
-            "description": "unique, immutable, system-controlled identifier for each resource",
+            "description": "Unique, immutable, system-controlled identifier for each resource",
             "type": "string",
             "format": "uuid"
           },
@@ -24678,7 +24678,7 @@
             "minimum": 0
           },
           "name": {
-            "description": "unique, mutable, user-controlled identifier for each resource",
+            "description": "Unique, mutable, user-controlled identifier for each resource",
             "allOf": [
               {
                 "$ref": "#/components/schemas/Name"
@@ -24698,12 +24698,12 @@
             "type": "string"
           },
           "time_created": {
-            "description": "timestamp when this resource was created",
+            "description": "Timestamp when this resource was created",
             "type": "string",
             "format": "date-time"
           },
           "time_modified": {
-            "description": "timestamp when this resource was last modified",
+            "description": "Timestamp when this resource was last modified",
             "type": "string",
             "format": "date-time"
           }
@@ -24767,11 +24767,11 @@
         "type": "object",
         "properties": {
           "description": {
-            "description": "human-readable free-form text about a resource",
+            "description": "Human-readable free-form text about a resource",
             "type": "string"
           },
           "id": {
-            "description": "unique, immutable, system-controlled identifier for each resource",
+            "description": "Unique, immutable, system-controlled identifier for each resource",
             "type": "string",
             "format": "uuid"
           },
@@ -24791,7 +24791,7 @@
             "format": "ip"
           },
           "name": {
-            "description": "unique, mutable, user-controlled identifier for each resource",
+            "description": "Unique, mutable, user-controlled identifier for each resource",
             "allOf": [
               {
                 "$ref": "#/components/schemas/Name"
@@ -24811,12 +24811,12 @@
             "type": "string"
           },
           "time_created": {
-            "description": "timestamp when this resource was created",
+            "description": "Timestamp when this resource was created",
             "type": "string",
             "format": "date-time"
           },
           "time_modified": {
-            "description": "timestamp when this resource was last modified",
+            "description": "Timestamp when this resource was last modified",
             "type": "string",
             "format": "date-time"
           }
@@ -25098,7 +25098,7 @@
             "$ref": "#/components/schemas/PhysicalDiskKind"
           },
           "id": {
-            "description": "unique, immutable, system-controlled identifier for each resource",
+            "description": "Unique, immutable, system-controlled identifier for each resource",
             "type": "string",
             "format": "uuid"
           },
@@ -25131,12 +25131,12 @@
             ]
           },
           "time_created": {
-            "description": "timestamp when this resource was created",
+            "description": "Timestamp when this resource was created",
             "type": "string",
             "format": "date-time"
           },
           "time_modified": {
-            "description": "timestamp when this resource was last modified",
+            "description": "Timestamp when this resource was last modified",
             "type": "string",
             "format": "date-time"
           },
@@ -25739,16 +25739,16 @@
         "type": "object",
         "properties": {
           "description": {
-            "description": "human-readable free-form text about a resource",
+            "description": "Human-readable free-form text about a resource",
             "type": "string"
           },
           "id": {
-            "description": "unique, immutable, system-controlled identifier for each resource",
+            "description": "Unique, immutable, system-controlled identifier for each resource",
             "type": "string",
             "format": "uuid"
           },
           "name": {
-            "description": "unique, mutable, user-controlled identifier for each resource",
+            "description": "Unique, mutable, user-controlled identifier for each resource",
             "allOf": [
               {
                 "$ref": "#/components/schemas/Name"
@@ -25760,12 +25760,12 @@
             "format": "uuid"
           },
           "time_created": {
-            "description": "timestamp when this resource was created",
+            "description": "Timestamp when this resource was created",
             "type": "string",
             "format": "date-time"
           },
           "time_modified": {
-            "description": "timestamp when this resource was last modified",
+            "description": "Timestamp when this resource was last modified",
             "type": "string",
             "format": "date-time"
           }
@@ -25906,16 +25906,16 @@
         "type": "object",
         "properties": {
           "description": {
-            "description": "human-readable free-form text about a resource",
+            "description": "Human-readable free-form text about a resource",
             "type": "string"
           },
           "id": {
-            "description": "unique, immutable, system-controlled identifier for each resource",
+            "description": "Unique, immutable, system-controlled identifier for each resource",
             "type": "string",
             "format": "uuid"
           },
           "name": {
-            "description": "unique, mutable, user-controlled identifier for each resource",
+            "description": "Unique, mutable, user-controlled identifier for each resource",
             "allOf": [
               {
                 "$ref": "#/components/schemas/Name"
@@ -25923,12 +25923,12 @@
             ]
           },
           "time_created": {
-            "description": "timestamp when this resource was created",
+            "description": "Timestamp when this resource was created",
             "type": "string",
             "format": "date-time"
           },
           "time_modified": {
-            "description": "timestamp when this resource was last modified",
+            "description": "Timestamp when this resource was last modified",
             "type": "string",
             "format": "date-time"
           }
@@ -26095,17 +26095,17 @@
         "type": "object",
         "properties": {
           "id": {
-            "description": "unique, immutable, system-controlled identifier for each resource",
+            "description": "Unique, immutable, system-controlled identifier for each resource",
             "type": "string",
             "format": "uuid"
           },
           "time_created": {
-            "description": "timestamp when this resource was created",
+            "description": "Timestamp when this resource was created",
             "type": "string",
             "format": "date-time"
           },
           "time_modified": {
-            "description": "timestamp when this resource was last modified",
+            "description": "Timestamp when this resource was last modified",
             "type": "string",
             "format": "date-time"
           }
@@ -26490,7 +26490,7 @@
         "type": "object",
         "properties": {
           "description": {
-            "description": "human-readable free-form text about a resource",
+            "description": "Human-readable free-form text about a resource",
             "type": "string"
           },
           "destination": {
@@ -26502,7 +26502,7 @@
             ]
           },
           "id": {
-            "description": "unique, immutable, system-controlled identifier for each resource",
+            "description": "Unique, immutable, system-controlled identifier for each resource",
             "type": "string",
             "format": "uuid"
           },
@@ -26515,7 +26515,7 @@
             ]
           },
           "name": {
-            "description": "unique, mutable, user-controlled identifier for each resource",
+            "description": "Unique, mutable, user-controlled identifier for each resource",
             "allOf": [
               {
                 "$ref": "#/components/schemas/Name"
@@ -26531,12 +26531,12 @@
             ]
           },
           "time_created": {
-            "description": "timestamp when this resource was created",
+            "description": "Timestamp when this resource was created",
             "type": "string",
             "format": "date-time"
           },
           "time_modified": {
-            "description": "timestamp when this resource was last modified",
+            "description": "Timestamp when this resource was last modified",
             "type": "string",
             "format": "date-time"
           },
@@ -26693,7 +26693,7 @@
             "type": "string"
           },
           "description": {
-            "description": "human-readable free-form text about a resource",
+            "description": "Human-readable free-form text about a resource",
             "type": "string"
           },
           "group_attribute_name": {
@@ -26702,7 +26702,7 @@
             "type": "string"
           },
           "id": {
-            "description": "unique, immutable, system-controlled identifier for each resource",
+            "description": "Unique, immutable, system-controlled identifier for each resource",
             "type": "string",
             "format": "uuid"
           },
@@ -26711,7 +26711,7 @@
             "type": "string"
           },
           "name": {
-            "description": "unique, mutable, user-controlled identifier for each resource",
+            "description": "Unique, mutable, user-controlled identifier for each resource",
             "allOf": [
               {
                 "$ref": "#/components/schemas/Name"
@@ -26736,12 +26736,12 @@
             "type": "string"
           },
           "time_created": {
-            "description": "timestamp when this resource was created",
+            "description": "Timestamp when this resource was created",
             "type": "string",
             "format": "date-time"
           },
           "time_modified": {
-            "description": "timestamp when this resource was last modified",
+            "description": "Timestamp when this resource was last modified",
             "type": "string",
             "format": "date-time"
           }
@@ -26922,7 +26922,7 @@
             "type": "string"
           },
           "description": {
-            "description": "human-readable free-form text about a resource",
+            "description": "Human-readable free-form text about a resource",
             "type": "string"
           },
           "discoverable": {
@@ -26930,7 +26930,7 @@
             "type": "boolean"
           },
           "id": {
-            "description": "unique, immutable, system-controlled identifier for each resource",
+            "description": "Unique, immutable, system-controlled identifier for each resource",
             "type": "string",
             "format": "uuid"
           },
@@ -26954,7 +26954,7 @@
             }
           },
           "name": {
-            "description": "unique, mutable, user-controlled identifier for each resource",
+            "description": "Unique, mutable, user-controlled identifier for each resource",
             "allOf": [
               {
                 "$ref": "#/components/schemas/Name"
@@ -26962,12 +26962,12 @@
             ]
           },
           "time_created": {
-            "description": "timestamp when this resource was created",
+            "description": "Timestamp when this resource was created",
             "type": "string",
             "format": "date-time"
           },
           "time_modified": {
-            "description": "timestamp when this resource was last modified",
+            "description": "Timestamp when this resource was last modified",
             "type": "string",
             "format": "date-time"
           }
@@ -27108,11 +27108,11 @@
         "type": "object",
         "properties": {
           "description": {
-            "description": "human-readable free-form text about a resource",
+            "description": "Human-readable free-form text about a resource",
             "type": "string"
           },
           "id": {
-            "description": "unique, immutable, system-controlled identifier for each resource",
+            "description": "Unique, immutable, system-controlled identifier for each resource",
             "type": "string",
             "format": "uuid"
           },
@@ -27129,7 +27129,7 @@
             "type": "boolean"
           },
           "name": {
-            "description": "unique, mutable, user-controlled identifier for each resource",
+            "description": "Unique, mutable, user-controlled identifier for each resource",
             "allOf": [
               {
                 "$ref": "#/components/schemas/Name"
@@ -27145,12 +27145,12 @@
             ]
           },
           "time_created": {
-            "description": "timestamp when this resource was created",
+            "description": "Timestamp when this resource was created",
             "type": "string",
             "format": "date-time"
           },
           "time_modified": {
-            "description": "timestamp when this resource was last modified",
+            "description": "Timestamp when this resource was last modified",
             "type": "string",
             "format": "date-time"
           }
@@ -27379,11 +27379,11 @@
         "type": "object",
         "properties": {
           "description": {
-            "description": "human-readable free-form text about a resource",
+            "description": "Human-readable free-form text about a resource",
             "type": "string"
           },
           "id": {
-            "description": "unique, immutable, system-controlled identifier for each resource",
+            "description": "Unique, immutable, system-controlled identifier for each resource",
             "type": "string",
             "format": "uuid"
           },
@@ -27400,7 +27400,7 @@
             "type": "boolean"
           },
           "name": {
-            "description": "unique, mutable, user-controlled identifier for each resource",
+            "description": "Unique, mutable, user-controlled identifier for each resource",
             "allOf": [
               {
                 "$ref": "#/components/schemas/Name"
@@ -27408,12 +27408,12 @@
             ]
           },
           "time_created": {
-            "description": "timestamp when this resource was created",
+            "description": "Timestamp when this resource was created",
             "type": "string",
             "format": "date-time"
           },
           "time_modified": {
-            "description": "timestamp when this resource was last modified",
+            "description": "Timestamp when this resource was last modified",
             "type": "string",
             "format": "date-time"
           }
@@ -27513,7 +27513,7 @@
             "$ref": "#/components/schemas/Baseboard"
           },
           "id": {
-            "description": "unique, immutable, system-controlled identifier for each resource",
+            "description": "Unique, immutable, system-controlled identifier for each resource",
             "type": "string",
             "format": "uuid"
           },
@@ -27539,12 +27539,12 @@
             ]
           },
           "time_created": {
-            "description": "timestamp when this resource was created",
+            "description": "Timestamp when this resource was created",
             "type": "string",
             "format": "date-time"
           },
           "time_modified": {
-            "description": "timestamp when this resource was last modified",
+            "description": "Timestamp when this resource was last modified",
             "type": "string",
             "format": "date-time"
           },
@@ -27584,7 +27584,7 @@
             "format": "uuid"
           },
           "id": {
-            "description": "unique, immutable, system-controlled identifier for each resource",
+            "description": "Unique, immutable, system-controlled identifier for each resource",
             "type": "string",
             "format": "uuid"
           },
@@ -27614,12 +27614,12 @@
             "$ref": "#/components/schemas/InstanceState"
           },
           "time_created": {
-            "description": "timestamp when this resource was created",
+            "description": "Timestamp when this resource was created",
             "type": "string",
             "format": "date-time"
           },
           "time_modified": {
-            "description": "timestamp when this resource was last modified",
+            "description": "Timestamp when this resource was last modified",
             "type": "string",
             "format": "date-time"
           }
@@ -27809,7 +27809,7 @@
         "type": "object",
         "properties": {
           "description": {
-            "description": "human-readable free-form text about a resource",
+            "description": "Human-readable free-form text about a resource",
             "type": "string"
           },
           "disk_id": {
@@ -27817,12 +27817,12 @@
             "format": "uuid"
           },
           "id": {
-            "description": "unique, immutable, system-controlled identifier for each resource",
+            "description": "Unique, immutable, system-controlled identifier for each resource",
             "type": "string",
             "format": "uuid"
           },
           "name": {
-            "description": "unique, mutable, user-controlled identifier for each resource",
+            "description": "Unique, mutable, user-controlled identifier for each resource",
             "allOf": [
               {
                 "$ref": "#/components/schemas/Name"
@@ -27840,12 +27840,12 @@
             "$ref": "#/components/schemas/SnapshotState"
           },
           "time_created": {
-            "description": "timestamp when this resource was created",
+            "description": "Timestamp when this resource was created",
             "type": "string",
             "format": "date-time"
           },
           "time_modified": {
-            "description": "timestamp when this resource was last modified",
+            "description": "Timestamp when this resource was last modified",
             "type": "string",
             "format": "date-time"
           }
@@ -27922,16 +27922,16 @@
         "type": "object",
         "properties": {
           "description": {
-            "description": "human-readable free-form text about a resource",
+            "description": "Human-readable free-form text about a resource",
             "type": "string"
           },
           "id": {
-            "description": "unique, immutable, system-controlled identifier for each resource",
+            "description": "Unique, immutable, system-controlled identifier for each resource",
             "type": "string",
             "format": "uuid"
           },
           "name": {
-            "description": "unique, mutable, user-controlled identifier for each resource",
+            "description": "Unique, mutable, user-controlled identifier for each resource",
             "allOf": [
               {
                 "$ref": "#/components/schemas/Name"
@@ -27948,12 +27948,12 @@
             "format": "uuid"
           },
           "time_created": {
-            "description": "timestamp when this resource was created",
+            "description": "Timestamp when this resource was created",
             "type": "string",
             "format": "date-time"
           },
           "time_modified": {
-            "description": "timestamp when this resource was last modified",
+            "description": "Timestamp when this resource was last modified",
             "type": "string",
             "format": "date-time"
           }
@@ -28015,11 +28015,11 @@
         "type": "object",
         "properties": {
           "description": {
-            "description": "human-readable free-form text about a resource",
+            "description": "Human-readable free-form text about a resource",
             "type": "string"
           },
           "id": {
-            "description": "unique, immutable, system-controlled identifier for each resource",
+            "description": "Unique, immutable, system-controlled identifier for each resource",
             "type": "string",
             "format": "uuid"
           },
@@ -28032,7 +28032,7 @@
             ]
           },
           "name": {
-            "description": "unique, mutable, user-controlled identifier for each resource",
+            "description": "Unique, mutable, user-controlled identifier for each resource",
             "allOf": [
               {
                 "$ref": "#/components/schemas/Name"
@@ -28040,12 +28040,12 @@
             ]
           },
           "time_created": {
-            "description": "timestamp when this resource was created",
+            "description": "Timestamp when this resource was created",
             "type": "string",
             "format": "date-time"
           },
           "time_modified": {
-            "description": "timestamp when this resource was last modified",
+            "description": "Timestamp when this resource was last modified",
             "type": "string",
             "format": "date-time"
           }
@@ -28453,7 +28453,7 @@
             "$ref": "#/components/schemas/Baseboard"
           },
           "id": {
-            "description": "unique, immutable, system-controlled identifier for each resource",
+            "description": "Unique, immutable, system-controlled identifier for each resource",
             "type": "string",
             "format": "uuid"
           },
@@ -28463,12 +28463,12 @@
             "format": "uuid"
           },
           "time_created": {
-            "description": "timestamp when this resource was created",
+            "description": "Timestamp when this resource was created",
             "type": "string",
             "format": "date-time"
           },
           "time_modified": {
-            "description": "timestamp when this resource was last modified",
+            "description": "Timestamp when this resource was last modified",
             "type": "string",
             "format": "date-time"
           }
@@ -29055,7 +29055,7 @@
             }
           },
           "description": {
-            "description": "human-readable free-form text about a resource",
+            "description": "Human-readable free-form text about a resource",
             "type": "string"
           },
           "groups": {
@@ -29066,7 +29066,7 @@
             }
           },
           "id": {
-            "description": "unique, immutable, system-controlled identifier for each resource",
+            "description": "Unique, immutable, system-controlled identifier for each resource",
             "type": "string",
             "format": "uuid"
           },
@@ -29085,7 +29085,7 @@
             }
           },
           "name": {
-            "description": "unique, mutable, user-controlled identifier for each resource",
+            "description": "Unique, mutable, user-controlled identifier for each resource",
             "allOf": [
               {
                 "$ref": "#/components/schemas/Name"
@@ -29108,12 +29108,12 @@
             }
           },
           "time_created": {
-            "description": "timestamp when this resource was created",
+            "description": "Timestamp when this resource was created",
             "type": "string",
             "format": "date-time"
           },
           "time_modified": {
-            "description": "timestamp when this resource was last modified",
+            "description": "Timestamp when this resource was last modified",
             "type": "string",
             "format": "date-time"
           },
@@ -29233,16 +29233,16 @@
         "type": "object",
         "properties": {
           "description": {
-            "description": "human-readable free-form text about a resource",
+            "description": "Human-readable free-form text about a resource",
             "type": "string"
           },
           "id": {
-            "description": "unique, immutable, system-controlled identifier for each resource",
+            "description": "Unique, immutable, system-controlled identifier for each resource",
             "type": "string",
             "format": "uuid"
           },
           "name": {
-            "description": "unique, mutable, user-controlled identifier for each resource",
+            "description": "Unique, mutable, user-controlled identifier for each resource",
             "allOf": [
               {
                 "$ref": "#/components/schemas/Name"
@@ -29250,12 +29250,12 @@
             ]
           },
           "time_created": {
-            "description": "timestamp when this resource was created",
+            "description": "Timestamp when this resource was created",
             "type": "string",
             "format": "date-time"
           },
           "time_modified": {
-            "description": "timestamp when this resource was last modified",
+            "description": "Timestamp when this resource was last modified",
             "type": "string",
             "format": "date-time"
           }
@@ -29819,16 +29819,16 @@
         "type": "object",
         "properties": {
           "description": {
-            "description": "human-readable free-form text about a resource",
+            "description": "Human-readable free-form text about a resource",
             "type": "string"
           },
           "id": {
-            "description": "unique, immutable, system-controlled identifier for each resource",
+            "description": "Unique, immutable, system-controlled identifier for each resource",
             "type": "string",
             "format": "uuid"
           },
           "name": {
-            "description": "unique, mutable, user-controlled identifier for each resource",
+            "description": "Unique, mutable, user-controlled identifier for each resource",
             "allOf": [
               {
                 "$ref": "#/components/schemas/Name"
@@ -29836,12 +29836,12 @@
             ]
           },
           "time_created": {
-            "description": "timestamp when this resource was created",
+            "description": "Timestamp when this resource was created",
             "type": "string",
             "format": "date-time"
           },
           "time_modified": {
-            "description": "timestamp when this resource was last modified",
+            "description": "Timestamp when this resource was last modified",
             "type": "string",
             "format": "date-time"
           }
@@ -30227,7 +30227,7 @@
         "type": "object",
         "properties": {
           "description": {
-            "description": "human-readable free-form text about a resource",
+            "description": "Human-readable free-form text about a resource",
             "type": "string"
           },
           "dns_name": {
@@ -30239,7 +30239,7 @@
             ]
           },
           "id": {
-            "description": "unique, immutable, system-controlled identifier for each resource",
+            "description": "Unique, immutable, system-controlled identifier for each resource",
             "type": "string",
             "format": "uuid"
           },
@@ -30252,7 +30252,7 @@
             ]
           },
           "name": {
-            "description": "unique, mutable, user-controlled identifier for each resource",
+            "description": "Unique, mutable, user-controlled identifier for each resource",
             "allOf": [
               {
                 "$ref": "#/components/schemas/Name"
@@ -30270,12 +30270,12 @@
             "format": "uuid"
           },
           "time_created": {
-            "description": "timestamp when this resource was created",
+            "description": "Timestamp when this resource was created",
             "type": "string",
             "format": "date-time"
           },
           "time_modified": {
-            "description": "timestamp when this resource was last modified",
+            "description": "Timestamp when this resource was last modified",
             "type": "string",
             "format": "date-time"
           }
@@ -30355,7 +30355,7 @@
             ]
           },
           "description": {
-            "description": "human-readable free-form text about a resource",
+            "description": "Human-readable free-form text about a resource",
             "type": "string"
           },
           "direction": {
@@ -30375,12 +30375,12 @@
             ]
           },
           "id": {
-            "description": "unique, immutable, system-controlled identifier for each resource",
+            "description": "Unique, immutable, system-controlled identifier for each resource",
             "type": "string",
             "format": "uuid"
           },
           "name": {
-            "description": "unique, mutable, user-controlled identifier for each resource",
+            "description": "Unique, mutable, user-controlled identifier for each resource",
             "allOf": [
               {
                 "$ref": "#/components/schemas/Name"
@@ -30409,12 +30409,12 @@
             }
           },
           "time_created": {
-            "description": "timestamp when this resource was created",
+            "description": "Timestamp when this resource was created",
             "type": "string",
             "format": "date-time"
           },
           "time_modified": {
-            "description": "timestamp when this resource was last modified",
+            "description": "Timestamp when this resource was last modified",
             "type": "string",
             "format": "date-time"
           },
@@ -30880,11 +30880,11 @@
         "type": "object",
         "properties": {
           "description": {
-            "description": "human-readable free-form text about a resource",
+            "description": "Human-readable free-form text about a resource",
             "type": "string"
           },
           "id": {
-            "description": "unique, immutable, system-controlled identifier for each resource",
+            "description": "Unique, immutable, system-controlled identifier for each resource",
             "type": "string",
             "format": "uuid"
           },
@@ -30892,7 +30892,7 @@
             "$ref": "#/components/schemas/VpcRouterKind"
           },
           "name": {
-            "description": "unique, mutable, user-controlled identifier for each resource",
+            "description": "Unique, mutable, user-controlled identifier for each resource",
             "allOf": [
               {
                 "$ref": "#/components/schemas/Name"
@@ -30900,12 +30900,12 @@
             ]
           },
           "time_created": {
-            "description": "timestamp when this resource was created",
+            "description": "Timestamp when this resource was created",
             "type": "string",
             "format": "date-time"
           },
           "time_modified": {
-            "description": "timestamp when this resource was last modified",
+            "description": "Timestamp when this resource was last modified",
             "type": "string",
             "format": "date-time"
           },
@@ -30998,11 +30998,11 @@
             "format": "uuid"
           },
           "description": {
-            "description": "human-readable free-form text about a resource",
+            "description": "Human-readable free-form text about a resource",
             "type": "string"
           },
           "id": {
-            "description": "unique, immutable, system-controlled identifier for each resource",
+            "description": "Unique, immutable, system-controlled identifier for each resource",
             "type": "string",
             "format": "uuid"
           },
@@ -31023,7 +31023,7 @@
             ]
           },
           "name": {
-            "description": "unique, mutable, user-controlled identifier for each resource",
+            "description": "Unique, mutable, user-controlled identifier for each resource",
             "allOf": [
               {
                 "$ref": "#/components/schemas/Name"
@@ -31031,12 +31031,12 @@
             ]
           },
           "time_created": {
-            "description": "timestamp when this resource was created",
+            "description": "Timestamp when this resource was created",
             "type": "string",
             "format": "date-time"
           },
           "time_modified": {
-            "description": "timestamp when this resource was last modified",
+            "description": "Timestamp when this resource was last modified",
             "type": "string",
             "format": "date-time"
           },
@@ -31309,7 +31309,7 @@
         "type": "object",
         "properties": {
           "description": {
-            "description": "human-readable free-form text about a resource",
+            "description": "Human-readable free-form text about a resource",
             "type": "string"
           },
           "endpoint": {
@@ -31318,12 +31318,12 @@
             "format": "uri"
           },
           "id": {
-            "description": "unique, immutable, system-controlled identifier for each resource",
+            "description": "Unique, immutable, system-controlled identifier for each resource",
             "type": "string",
             "format": "uuid"
           },
           "name": {
-            "description": "unique, mutable, user-controlled identifier for each resource",
+            "description": "Unique, mutable, user-controlled identifier for each resource",
             "allOf": [
               {
                 "$ref": "#/components/schemas/Name"
@@ -31345,12 +31345,12 @@
             }
           },
           "time_created": {
-            "description": "timestamp when this resource was created",
+            "description": "Timestamp when this resource was created",
             "type": "string",
             "format": "date-time"
           },
           "time_modified": {
-            "description": "timestamp when this resource was last modified",
+            "description": "Timestamp when this resource was last modified",
             "type": "string",
             "format": "date-time"
           }
@@ -31441,21 +31441,21 @@
         "description": "Supported set of sort modes for scanning by name or id",
         "oneOf": [
           {
-            "description": "sort in increasing order of \"name\"",
+            "description": "Sort in increasing order of \"name\"",
             "type": "string",
             "enum": [
               "name_ascending"
             ]
           },
           {
-            "description": "sort in decreasing order of \"name\"",
+            "description": "Sort in decreasing order of \"name\"",
             "type": "string",
             "enum": [
               "name_descending"
             ]
           },
           {
-            "description": "sort in increasing order of \"id\"",
+            "description": "Sort in increasing order of \"id\"",
             "type": "string",
             "enum": [
               "id_ascending"
@@ -31467,14 +31467,14 @@
         "description": "Supported set of sort modes for scanning by timestamp and ID",
         "oneOf": [
           {
-            "description": "sort in increasing order of timestamp and ID, i.e., earliest first",
+            "description": "Sort in increasing order of timestamp and ID, i.e., earliest first",
             "type": "string",
             "enum": [
               "time_and_id_ascending"
             ]
           },
           {
-            "description": "sort in increasing order of timestamp and ID, i.e., most recent first",
+            "description": "Sort in increasing order of timestamp and ID, i.e., most recent first",
             "type": "string",
             "enum": [
               "time_and_id_descending"
@@ -31486,7 +31486,7 @@
         "description": "Supported set of sort modes for scanning by id only.\n\nCurrently, we only support scanning in ascending order.",
         "oneOf": [
           {
-            "description": "sort in increasing order of \"id\"",
+            "description": "Sort in increasing order of \"id\"",
             "type": "string",
             "enum": [
               "id_ascending"
@@ -31533,7 +31533,7 @@
         "description": "Supported set of sort modes for scanning by name only\n\nCurrently, we only support scanning in ascending order.",
         "oneOf": [
           {
-            "description": "sort in increasing order of \"name\"",
+            "description": "Sort in increasing order of \"name\"",
             "type": "string",
             "enum": [
               "name_ascending"
