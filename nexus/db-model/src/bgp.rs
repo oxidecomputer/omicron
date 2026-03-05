@@ -143,6 +143,7 @@ impl Into<networking::BgpAnnouncement> for BgpAnnouncement {
 #[derive(Queryable, Selectable, Clone, Debug, Serialize, Deserialize)]
 #[diesel(table_name = bgp_peer_view)]
 pub struct BgpPeerView {
+    #[diesel(column_name = switch_loc)]
     pub switch_location: DbSwitchLocation,
     pub port_name: String,
     pub addr: Option<IpNetwork>,

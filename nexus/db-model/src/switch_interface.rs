@@ -115,9 +115,10 @@ pub struct LoopbackAddress {
     pub address_lot_block_id: Uuid,
     pub rsvd_address_lot_block_id: Uuid,
     pub rack_id: Uuid,
-    pub switch_location: DbSwitchLocation,
     pub address: IpNetwork,
     pub anycast: bool,
+    #[diesel(column_name = switch_loc)]
+    pub switch_location: DbSwitchLocation,
 }
 
 impl LoopbackAddress {

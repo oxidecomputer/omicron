@@ -816,7 +816,7 @@ impl DataStore {
 
         let switch = DbSwitchLocation::from(switch);
         let results = dsl::bgp_peer_view
-            .filter(dsl::switch_location.eq(switch))
+            .filter(dsl::switch_loc.eq(switch))
             .filter(dsl::port_name.eq(port))
             .select(BgpPeerView::as_select())
             .load_async(&*self.pool_connection_authorized(opctx).await?)

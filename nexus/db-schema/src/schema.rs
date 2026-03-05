@@ -140,7 +140,7 @@ table! {
         rack_id -> Uuid,
         port_name -> Text,
         port_settings_id -> Nullable<Uuid>,
-        switch_location -> crate::enums::SwitchLocationEnum,
+        switch_loc -> crate::enums::SwitchLocationEnum,
     }
 }
 
@@ -319,7 +319,7 @@ table! {
 }
 
 table! {
-    bgp_peer_view (switch_location, port_name) {
+    bgp_peer_view (switch_loc, port_name) {
         port_name -> Text,
         addr -> Nullable<Inet>,
         asn -> Int8,
@@ -336,7 +336,7 @@ table! {
         enforce_first_as -> Bool,
         vlan_id -> Nullable<Int4>,
         router_lifetime -> Int4,
-        switch_location -> crate::enums::SwitchLocationEnum,
+        switch_loc -> crate::enums::SwitchLocationEnum,
     }
 }
 
@@ -411,7 +411,7 @@ table! {
         rack_id -> Uuid,
         address -> Inet,
         anycast -> Bool,
-        switch_location -> crate::enums::SwitchLocationEnum,
+        switch_loc -> crate::enums::SwitchLocationEnum,
     }
 }
 
@@ -2409,7 +2409,7 @@ table! {
         time_created -> Timestamptz,
         time_modified -> Timestamptz,
         time_deleted -> Nullable<Timestamptz>,
-        switch_location -> crate::enums::SwitchLocationEnum,
+        switch_loc -> crate::enums::SwitchLocationEnum,
     }
 }
 

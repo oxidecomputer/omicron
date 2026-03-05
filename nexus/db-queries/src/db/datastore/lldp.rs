@@ -61,7 +61,7 @@ impl DataStore {
         let switch_location = DbSwitchLocation::from(switch_location);
         let port_settings_id: Uuid = switch_port_dsl::switch_port
             .filter(switch_port::rack_id.eq(rack_id))
-            .filter(switch_port::switch_location.eq(switch_location))
+            .filter(switch_port::switch_loc.eq(switch_location))
             .filter(switch_port::port_name.eq(port_name.to_string()))
             .select(switch_port::port_settings_id)
             .limit(1)

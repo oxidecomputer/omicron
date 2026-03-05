@@ -3520,7 +3520,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.loopback_address (
     rack_id UUID NOT NULL,
     address INET NOT NULL,
     anycast BOOL NOT NULL
-    switch_location omicron.public.switch_location NOT NULL,
+    switch_loc omicron.public.switch_location NOT NULL
 );
 
 /* TODO https://github.com/oxidecomputer/omicron/issues/3001 */
@@ -3534,7 +3534,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.switch_port (
     rack_id UUID,
     port_name TEXT,
     port_settings_id UUID,
-    switch_location omicron.public.switch_location NOT NULL,
+    switch_loc omicron.public.switch_location NOT NULL,
 
     CONSTRAINT switch_port_rack_locaction_name_unique UNIQUE (
         rack_id, switch_location, port_name
@@ -6047,7 +6047,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.bfd_session (
     time_modified TIMESTAMPTZ NOT NULL,
     time_deleted TIMESTAMPTZ,
 
-    switch_location omicron.public.switch_location NOT NULL
+    switch_loc omicron.public.switch_location NOT NULL
 );
 
 CREATE UNIQUE INDEX IF NOT EXISTS lookup_bfd_session ON omicron.public.bfd_session (
@@ -6174,7 +6174,7 @@ CREATE INDEX IF NOT EXISTS address_lot_names ON omicron.public.address_lot(name)
 CREATE VIEW IF NOT EXISTS omicron.public.bgp_peer_view
 AS
 SELECT
- sp.switch_location,
+ sp.switch_loc,
  sp.port_name,
  bpc.addr,
  bpc.hold_time,

@@ -44,6 +44,7 @@ pub struct BfdSession {
     pub time_created: DateTime<Utc>,
     pub time_modified: DateTime<Utc>,
     pub time_deleted: Option<DateTime<Utc>>,
+    #[diesel(column_name = switch_loc)]
     pub switch_location: DbSwitchLocation,
 }
 

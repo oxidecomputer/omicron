@@ -286,6 +286,7 @@ pub struct SwitchPort {
     pub rack_id: Uuid,
     pub port_name: Name,
     pub port_settings_id: Option<Uuid>,
+    #[diesel(column_name = switch_loc)]
     pub switch_location: DbSwitchLocation,
 }
 

@@ -880,7 +880,7 @@ lookup_resource! {
     primary_key_columns = [
         { column_name = "address", rust_type = IpNetwork },
         { column_name = "rack_id", rust_type = Uuid },
-        { column_name = "switch_location", rust_type = DbSwitchLocation }
+        { column_name = "switch_loc", rust_type = DbSwitchLocation }
     ]
 }
 

@@ -843,7 +843,7 @@ impl DataStore {
                     let port: SwitchPort = switch_port_dsl::switch_port
                         .filter(switch_port::rack_id.eq(params.rack_id))
                         .filter(
-                            switch_port::switch_location.eq(switch_location),
+                            switch_port::switch_loc.eq(switch_location),
                         )
                         .filter(switch_port::port_name.eq(port_name.clone()))
                         .select(SwitchPort::as_select())
@@ -953,7 +953,7 @@ impl DataStore {
                     // what switch are we adding a configuration to?
                     let switch = switch_port_dsl::switch_port
                         .filter(switch_port_dsl::id.eq(switch_port_id))
-                        .select(switch_port_dsl::switch_location)
+                        .select(switch_port_dsl::switch_loc)
                         .limit(1)
                         .first_async::<DbSwitchLocation>(&conn)
                         .await
@@ -1024,7 +1024,7 @@ impl DataStore {
                                 .inner_join(bgp_config_dsl::bgp_config.on(
                                     bgp_peer_dsl::bgp_config_id.eq(bgp_config_dsl::id),
                                 ))
-                                .filter(switch_port_dsl::switch_location.eq(switch))
+                                .filter(switch_port_dsl::switch_loc.eq(switch))
                                 .filter(switch_port_dsl::port_settings_id.is_not_null())
                                 .filter(bgp_config_dsl::asn.ne(config.asn))
                                 .select(BgpConfig::as_select())
@@ -1107,7 +1107,7 @@ impl DataStore {
         let switch_location = DbSwitchLocation::from(switch_location);
         let id: Uuid = switch_port_dsl::switch_port
             .filter(switch_port::rack_id.eq(rack_id))
-            .filter(switch_port::switch_location.eq(switch_location))
+            .filter(switch_port::switch_loc.eq(switch_location))
             .filter(switch_port::port_name.eq(port_name.to_string()))
             .select(switch_port::id)
             .limit(1)
