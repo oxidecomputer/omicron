@@ -8,6 +8,7 @@ use crate::health_checks::poll_smf_services_in_maintenance;
 use illumos_utils::svcs::SvcsInMaintenanceResult;
 use illumos_utils::svcs::SvcsResult;
 use sled_agent_types::inventory::HealthMonitorInventory;
+use sled_agent_types::inventory::SvcsEnabledNotOnline;
 use slog::Logger;
 use slog::info;
 use tokio::sync::watch;
@@ -83,6 +84,19 @@ impl HealthMonitorHandle {
                 .smf_services_in_maintenance_rx
                 .borrow()
                 .clone(),
+        }
+    }
+
+    // TODO-K: The more I see this the more I think this should be encapsulated
+    // in a type
+    // TODO-K: change name to to_inventory?
+    pub fn to_svcs_inventory(&self) -> Result<SvcsEnabledNotOnline, String> {
+        match self.smf_services_enabled_not_online_rx.borrow().clone() {
+            Ok(svcs) => {
+                let SvcsResult { services, errors, time_of_status } = svcs;
+                Ok(SvcsEnabledNotOnline { services, errors, time_of_status })
+            }
+            Err(e) => Err(e),
         }
     }
 }
