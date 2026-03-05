@@ -820,13 +820,9 @@ impl DataStore {
         let err = OptionalError::new();
 
         // TODO-correctness enum in external API
-        let switch_location: SwitchLocation =
-            params.switch_location.as_str().parse().map_err(|_| {
-                Error::invalid_request(
-                    "invalid switch location (expected `switch0` or `switch1`)",
-                )
-            })?;
-        let switch_location = DbSwitchLocation::from(switch_location);
+        let switch_location = DbSwitchLocation::from(
+            SwitchLocation::parse_from_external_api(&params.switch_location)?,
+        );
 
         let conn = self.pool_connection_authorized(opctx).await?;
 

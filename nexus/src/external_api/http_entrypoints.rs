@@ -4002,12 +4002,8 @@ impl NexusExternalApi for NexusExternalApiImpl {
             )),
         }?;
         // TODO-correctness enum in external API
-        let switch_location: SwitchLocation =
-            path.switch_location.as_str().parse().map_err(|_| {
-                Error::invalid_request(
-                    "invalid switch location (expected `switch0` or `switch1`)",
-                )
-            })?;
+        let switch_location =
+            SwitchLocation::parse_from_external_api(&path.switch_location)?;
         audit_and_time(&rqctx, |opctx, nexus| async move {
             nexus
                 .loopback_address_delete(
@@ -4180,15 +4176,14 @@ impl NexusExternalApi for NexusExternalApiImpl {
             let nexus = &apictx.context.nexus;
             let query = query_params.into_inner();
             let path = path_params.into_inner();
+            let switch_location = SwitchLocation::parse_from_external_api(
+                &query.switch_location,
+            )?;
             let opctx =
                 crate::context::op_context_for_external_api(&rqctx).await?;
             Ok(HttpResponseOk(
                 nexus
-                    .switch_port_status(
-                        &opctx,
-                        query.switch_location,
-                        path.port,
-                    )
+                    .switch_port_status(&opctx, switch_location, path.port)
                     .await?,
             ))
         };
@@ -4244,13 +4239,9 @@ impl NexusExternalApi for NexusExternalApiImpl {
             let opctx =
                 crate::context::op_context_for_external_api(&rqctx).await?;
             // TODO-correctness enum in external API
-            let switch_location: SwitchLocation =
-                query.switch_location.as_str().parse().map_err(|_| {
-                    Error::invalid_request(
-                        "invalid switch location \
-                         (expected `switch0` or `switch1`)",
-                    )
-                })?;
+            let switch_location = SwitchLocation::parse_from_external_api(
+                &query.switch_location,
+            )?;
             let settings = nexus
                 .lldp_config_get(
                     &opctx,
@@ -4279,13 +4270,9 @@ impl NexusExternalApi for NexusExternalApiImpl {
             let path = path_params.into_inner();
             let config = config.into_inner();
             // TODO-correctness enum in external API
-            let switch_location: SwitchLocation =
-                query.switch_location.as_str().parse().map_err(|_| {
-                    Error::invalid_request(
-                        "invalid switch location \
-                         (expected `switch0` or `switch1`)",
-                    )
-                })?;
+            let switch_location = SwitchLocation::parse_from_external_api(
+                &query.switch_location,
+            )?;
             nexus
                 .lldp_config_update(
                     &opctx,
@@ -4317,13 +4304,8 @@ impl NexusExternalApi for NexusExternalApiImpl {
             let opctx =
                 crate::context::op_context_for_external_api(&rqctx).await?;
             // TODO-correctness enum in external API
-            let switch_location: SwitchLocation =
-                path.switch_location.as_str().parse().map_err(|_| {
-                    Error::invalid_request(
-                        "invalid switch location \
-                         (expected `switch0` or `switch1`)",
-                    )
-                })?;
+            let switch_location =
+                SwitchLocation::parse_from_external_api(&path.switch_location)?;
             let neighbors = nexus
                 .lldp_neighbors_get(
                     &opctx,

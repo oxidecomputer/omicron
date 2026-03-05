@@ -16,7 +16,7 @@ use nexus_db_model::SqlU32;
 use nexus_types::external_api::networking;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::{
-    CreateResult, DeleteResult, Error, ListResultVec,
+    CreateResult, DeleteResult, ListResultVec,
 };
 use sled_agent_types::early_networking::SwitchLocation;
 use uuid::Uuid;
@@ -46,12 +46,8 @@ impl DataStore {
         let conn = self.pool_connection_authorized(opctx).await?;
 
         // TODO-correctness enum in external API
-        let switch_location: SwitchLocation =
-            config.switch.as_str().parse().map_err(|_| {
-                Error::invalid_request(
-                    "invalid switch location (expected `switch0` or `switch1`)",
-                )
-            })?;
+        let switch_location =
+            SwitchLocation::parse_from_external_api(&config.switch)?;
 
         let session = BfdSession {
             id: Uuid::new_v4(),
@@ -85,13 +81,9 @@ impl DataStore {
         let conn = self.pool_connection_authorized(opctx).await?;
 
         // TODO-correctness enum in external API
-        let switch_location: SwitchLocation =
-            config.switch.as_str().parse().map_err(|_| {
-                Error::invalid_request(
-                    "invalid switch location (expected `switch0` or `switch1`)",
-                )
-            })?;
-        let switch_location = DbSwitchLocation::from(switch_location);
+        let switch_location = DbSwitchLocation::from(
+            SwitchLocation::parse_from_external_api(&config.switch)?,
+        );
 
         diesel::update(dsl::bfd_session)
             .filter(dsl::remote.eq(IpNetwork::from(config.remote)))

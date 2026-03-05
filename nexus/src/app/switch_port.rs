@@ -224,12 +224,8 @@ impl super::Nexus {
     ) -> UpdateResult<()> {
         opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
         // TODO-correctness enum in external API
-        let switch_location: SwitchLocation =
-            selector.switch_location.as_str().parse().map_err(|_| {
-                Error::invalid_request(
-                    "invalid switch location (expected `switch0` or `switch1`)",
-                )
-            })?;
+        let switch_location =
+            SwitchLocation::parse_from_external_api(&selector.switch_location)?;
         let switch_port_id = self
             .db_datastore
             .switch_port_get_id(
@@ -272,12 +268,8 @@ impl super::Nexus {
     ) -> UpdateResult<()> {
         opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
         // TODO-correctness enum in external API
-        let switch_location: SwitchLocation =
-            params.switch_location.as_str().parse().map_err(|_| {
-                Error::invalid_request(
-                    "invalid switch location (expected `switch0` or `switch1`)",
-                )
-            })?;
+        let switch_location =
+            SwitchLocation::parse_from_external_api(&params.switch_location)?;
         let switch_port_id = self
             .db_datastore
             .switch_port_get_id(
@@ -328,16 +320,10 @@ impl super::Nexus {
     pub(crate) async fn switch_port_status(
         &self,
         opctx: &OpContext,
-        switch: Name,
+        switch: SwitchLocation,
         port: Name,
     ) -> Result<SwitchLinkState, Error> {
         opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
-
-        let loc: SwitchLocation = switch.as_str().parse().map_err(|e| {
-            Error::invalid_request(&format!(
-                "invalid switch name {switch}: {e}"
-            ))
-        })?;
 
         let port_id = PortId::Qsfp(port.as_str().parse().map_err(|e| {
             Error::invalid_request(&format!("invalid port name: {port} {e}"))
@@ -350,7 +336,7 @@ impl super::Nexus {
             Error::internal_error(&format!("dpd clients get: {e}"))
         })?;
 
-        let dpd = dpd_clients.get(&loc).ok_or(Error::internal_error(
+        let dpd = dpd_clients.get(&switch).ok_or(Error::internal_error(
             &format!("no client for switch {switch}"),
         ))?;
 

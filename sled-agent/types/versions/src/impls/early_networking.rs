@@ -290,15 +290,20 @@ impl std::fmt::Display for ParseSwitchLocationError {
     }
 }
 
-impl FromStr for SwitchLocation {
-    type Err = ParseSwitchLocationError;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s {
+impl SwitchLocation {
+    // TODO-correctness enum in external API
+    //
+    // We should remove this function after changing the external API to use
+    // `SwitchLocation` instead of `Name`.
+    pub fn parse_from_external_api(
+        name: &external::Name,
+    ) -> Result<Self, external::Error> {
+        match name.as_str() {
             "switch0" => Ok(Self::Switch0),
             "switch1" => Ok(Self::Switch1),
-            _ => Err(ParseSwitchLocationError(format!(
-                "not a valid location: {s}"
+            _ => Err(external::Error::invalid_request(format!(
+                "invalid switch location `{name}` \
+                 (expected `switch0` or `switch1`)",
             ))),
         }
     }
