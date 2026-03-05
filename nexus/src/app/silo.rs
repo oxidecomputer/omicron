@@ -31,11 +31,11 @@ use nexus_types::external_api::silo as silo_types;
 use nexus_types::external_api::user;
 use nexus_types::internal_api::params::DnsRecord;
 use nexus_types::silo::silo_dns_name;
+use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::UpdateResult;
 use omicron_common::api::external::http_pagination::PaginatedBy;
-use omicron_common::api::external::{CreateResult, LookupType};
 use omicron_common::api::external::{DataPageParams, ResourceType};
 use omicron_common::api::external::{DeleteResult, NameOrId};
 use omicron_common::api::external::{Error, InternalContext};
@@ -476,15 +476,10 @@ impl super::Nexus {
         );
 
         // TODO These two steps should happen in a transaction.
-        self.datastore()
+        let (authz_silo_user, db_silo_user) = self
+            .datastore()
             .silo_user_create(&authz_silo, silo_user.clone().into())
             .await?;
-
-        let authz_silo_user = authz::SiloUser::new(
-            authz_silo.clone(),
-            silo_user.id,
-            LookupType::by_id(silo_user.id),
-        );
 
         self.silo_user_password_set_internal(
             opctx,
@@ -495,7 +490,7 @@ impl super::Nexus {
         )
         .await?;
 
-        Ok(silo_user.into())
+        Ok(db_silo_user.into())
     }
 
     /// Delete a user in a Silo's local identity provider

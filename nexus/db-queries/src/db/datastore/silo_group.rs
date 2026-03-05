@@ -32,7 +32,6 @@ use omicron_common::api::external::InternalContext;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::UpdateResult;
-use omicron_common::round_to_micros;
 use omicron_uuid_kinds::SiloGroupUuid;
 use omicron_uuid_kinds::SiloUserUuid;
 use uuid::Uuid;
@@ -194,8 +193,8 @@ impl From<SiloGroupApiOnly> for user::Group {
             // TODO the use of external_id as display_name is temporary
             display_name: u.external_id,
             silo_id: u.silo_id,
-            time_created: round_to_micros(u.time_created),
-            time_modified: round_to_micros(u.time_modified),
+            time_created: u.time_created,
+            time_modified: u.time_modified,
         }
     }
 }
@@ -255,8 +254,8 @@ impl From<SiloGroupJit> for user::Group {
             // TODO the use of external_id as display_name is temporary
             display_name: u.external_id,
             silo_id: u.silo_id,
-            time_created: round_to_micros(u.time_created),
-            time_modified: round_to_micros(u.time_modified),
+            time_created: u.time_created,
+            time_modified: u.time_modified,
         }
     }
 }
@@ -324,8 +323,8 @@ impl From<SiloGroupScim> for user::Group {
             // TODO the use of display name as display_name is temporary
             display_name: u.display_name,
             silo_id: u.silo_id,
-            time_created: round_to_micros(u.time_created),
-            time_modified: round_to_micros(u.time_modified),
+            time_created: u.time_created,
+            time_modified: u.time_modified,
         }
     }
 }
