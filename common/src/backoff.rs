@@ -127,7 +127,12 @@ fn backoff_builder() -> ::backoff::ExponentialBackoffBuilder {
 fn backon_builder() -> ::backon::ExponentialBuilder {
     ::backon::ExponentialBuilder::default()
         .with_factor(2.0)
+        // backon 1.6.0 sets a max_times of 3 -- we need to override that
+        // because we want retry checks to run indefinitely.
         .without_max_times()
+        // backon 1.6.0 does not set a max total delay, but we set it explicitly
+        // in case upstream changes in the future.
+        .with_total_delay(None)
         .with_jitter()
 }
 
