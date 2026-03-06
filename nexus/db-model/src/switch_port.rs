@@ -311,8 +311,7 @@ impl Into<external::SwitchPort> for SwitchPort {
             id: self.id,
             rack_id: self.rack_id,
             // TODO-correctness enum in external API
-            switch_location: SwitchLocation::from(self.switch_slot)
-                .to_string(),
+            switch_location: SwitchLocation::from(self.switch_slot).to_string(),
             port_name: self.port_name.into(),
             port_settings_id: self.port_settings_id,
         }

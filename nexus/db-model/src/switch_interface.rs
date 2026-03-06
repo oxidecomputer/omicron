@@ -152,8 +152,7 @@ impl Into<external::LoopbackAddress> for LoopbackAddress {
             address_lot_block_id: self.address_lot_block_id,
             rack_id: self.rack_id,
             // TODO-correctness enum in external API
-            switch_location: SwitchLocation::from(self.switch_slot)
-                .to_string(),
+            switch_location: SwitchLocation::from(self.switch_slot).to_string(),
             address: self.address.into(),
         }
     }
