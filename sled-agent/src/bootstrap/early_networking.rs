@@ -17,7 +17,8 @@ use internal_dns_types::names::ServiceName;
 use mg_admin_client::Client as MgdClient;
 use mg_admin_client::types::{
     AddStaticRoute4Request, AddStaticRoute6Request, ApplyRequest,
-    CheckerSource, ImportExportPolicy4 as MgImportExportPolicy4,
+    BestpathFanoutRequest, CheckerSource,
+    ImportExportPolicy4 as MgImportExportPolicy4,
     ImportExportPolicy6 as MgImportExportPolicy6, JitterRange, ShaperSource,
     StaticRoute4, StaticRoute4List, StaticRoute6, StaticRoute6List,
 };
@@ -691,12 +692,25 @@ impl<'a> EarlyNetworkSetup<'a> {
                         .collect(),
                 };
 
+                let fanout = BestpathFanoutRequest {
+                    fanout: config.max_paths.as_nonzero_u8(),
+                };
+
                 if let Err(e) = mgd.bgp_apply_v2(&request).await {
                     error!(
                         self.log,
                         "BGP peer configuration failed";
                         "error" => ?e,
                         "configuration" => ?request,
+                    );
+                }
+
+                if let Err(e) = mgd.update_rib_bestpath_fanout(&fanout).await {
+                    error!(
+                        self.log,
+                        "error while updating bestpath fanout";
+                        "error" => ?e,
+                        "configuration" => ?fanout,
                     );
                 }
             }

@@ -7,7 +7,7 @@
       "url": "https://oxide.computer",
       "email": "api@oxide.computer"
     },
-    "version": "23.0.0"
+    "version": "24.0.0"
   },
   "paths": {
     "/artifacts": {
@@ -6323,6 +6323,9 @@
         "description": "Identifies information about zpools managed by the control plane",
         "type": "object",
         "properties": {
+          "health": {
+            "$ref": "#/components/schemas/ZpoolHealth"
+          },
           "id": {
             "$ref": "#/components/schemas/ZpoolUuid"
           },
@@ -6331,6 +6334,7 @@
           }
         },
         "required": [
+          "health",
           "id",
           "total_size"
         ]
@@ -10303,6 +10307,52 @@
           "id",
           "time_created",
           "version"
+        ]
+      },
+      "ZpoolHealth": {
+        "oneOf": [
+          {
+            "description": "The device is online and functioning.",
+            "type": "string",
+            "enum": [
+              "online"
+            ]
+          },
+          {
+            "description": "One or more components are degraded or faulted, but sufficient replicas exist to continue functioning.",
+            "type": "string",
+            "enum": [
+              "degraded"
+            ]
+          },
+          {
+            "description": "One or more components are degraded or faulted, and insufficient replicas exist to continue functioning.",
+            "type": "string",
+            "enum": [
+              "faulted"
+            ]
+          },
+          {
+            "description": "The device was explicitly taken offline by \"zpool offline\".",
+            "type": "string",
+            "enum": [
+              "offline"
+            ]
+          },
+          {
+            "description": "The device was physically removed.",
+            "type": "string",
+            "enum": [
+              "removed"
+            ]
+          },
+          {
+            "description": "The device could not be opened.",
+            "type": "string",
+            "enum": [
+              "unavailable"
+            ]
+          }
         ]
       },
       "ZpoolName": {
