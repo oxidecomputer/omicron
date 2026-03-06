@@ -6,6 +6,7 @@
 #: rust_toolchain = true
 #: output_rules = [
 #:	"=/work/package.tar.gz",
+#:  "%/var/tmp/ci-resource-usage.csv",
 #: ]
 #:
 
@@ -18,6 +19,9 @@ source .github/buildomat/ci-env.sh
 
 cargo --version
 rustc --version
+
+cargo build --release -p ci-resource-usage
+bmat process start ci-resource-usage target/release/ci-resource-usage /var/tmp/ci-resource-usage.csv
 
 WORK=/work
 pfexec mkdir -p $WORK && pfexec chown $USER $WORK

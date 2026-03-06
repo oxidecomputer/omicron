@@ -12,6 +12,7 @@
 #:	"=/work/incorporation.p5m",
 #:	"=/work/incorporation.p5p",
 #:	"%/work/*.log",
+#:  "%/var/tmp/ci-resource-usage.csv",
 #: ]
 #: access_repos = [
 #:	"oxidecomputer/amd-firmware",
@@ -60,6 +61,9 @@ source .github/buildomat/ci-env.sh
 
 cargo --version
 rustc --version
+
+cargo build --release -p ci-resource-usage
+bmat process start ci-resource-usage target/release/ci-resource-usage /var/tmp/ci-resource-usage.csv
 
 # Before we do _anything_, quickly check that Cargo.lock is properly locked.
 # Most of our tools (including releng!) eventually call `cargo xtask`, which
