@@ -130,3 +130,47 @@ fn backon_builder() -> ::backon::ExponentialBuilder {
         .without_max_times()
         .with_jitter()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use http::{HeaderMap, StatusCode};
+    use progenitor_extras::retry::{GoneCheckResult, retry_operation_while};
+    use std::convert::Infallible;
+
+    /// Test that `backon_retry_policy_internal_service` does not limit retries.
+    ///
+    /// We run a retry loop for 16384 attempts -- we assume that if it isn't
+    /// limited for those many attempts, it isn't limited at all.
+    #[tokio::test(start_paused = true)]
+    async fn test_backon_retry_policy_internal_service() {
+        let mut attempt = 0usize;
+        let result = retry_operation_while(
+            backon_retry_policy_internal_service(),
+            || {
+                let a = attempt;
+                attempt += 1;
+                async move {
+                    if a < 16384 {
+                        Err(progenitor_client::Error::ErrorResponse(
+                            progenitor_client::ResponseValue::new(
+                                (),
+                                StatusCode::SERVICE_UNAVAILABLE,
+                                HeaderMap::new(),
+                            ),
+                        ))
+                    } else {
+                        Ok(())
+                    }
+                }
+            },
+            || async { Ok::<_, Infallible>(GoneCheckResult::StillAvailable) },
+            |_| {},
+        )
+        .await;
+
+        result.expect("should succeed after 16384 retries");
+        // 1 initial attempt + 16384 retries = 16385 total calls.
+        assert_eq!(attempt, 16385);
+    }
+}
