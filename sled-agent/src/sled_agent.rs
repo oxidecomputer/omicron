@@ -632,7 +632,11 @@ impl SledAgent {
                 .bootstore
                 .get_network_config()
                 .await
-                .map_err(|err| BackoffError::transient(err.to_string()))?
+                .map_err(|err| {
+                    BackoffError::transient(
+                        InlineErrorChain::new(&err).to_string(),
+                    )
+                })?
                 .ok_or_else(|| {
                     BackoffError::transient(
                         "Missing early network config in bootstore".to_string(),
