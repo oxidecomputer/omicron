@@ -937,6 +937,12 @@ impl<'a> BlueprintBuilder<'a> {
             let EditedSled { config, edit_counts, scalar_edits } = edited_sled;
             sleds.insert(sled_id, config);
             if edit_counts.has_nonzero_counts() || scalar_edits.has_edits() {
+                let SledEditCounts {
+                    disks: disks_edits,
+                    datasets: datasets_edits,
+                    zones: zone_edits,
+                    measurements: measurement_edits,
+                } = edit_counts;
                 let EditedSledScalarEdits {
                     debug_force_generation_bump,
                     remove_mupdate_override,
@@ -945,9 +951,10 @@ impl<'a> BlueprintBuilder<'a> {
                     self.log, "sled modified in new blueprint";
                     "sled_id" => %sled_id,
                     "blueprint_id" => %blueprint_id,
-                    "disk_edits" => ?edit_counts.disks,
-                    "dataset_edits" => ?edit_counts.datasets,
-                    "zone_edits" => ?edit_counts.zones,
+                    "disk_edits" => ?disks_edits,
+                    "dataset_edits" => ?datasets_edits,
+                    "zone_edits" => ?zone_edits,
+                    "measurement_edits" => ?measurement_edits,
                     "debug_force_generation_bump" =>
                         debug_force_generation_bump,
                     "remove_mupdate_override_modified" =>
