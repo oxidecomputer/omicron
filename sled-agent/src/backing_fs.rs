@@ -32,16 +32,16 @@ use std::io;
 
 #[derive(Debug, thiserror::Error)]
 pub enum BackingFsError {
-    #[error("Error administering service: {0}")]
+    #[error("Error administering service")]
     Adm(#[from] smf::AdmError),
 
-    #[error("Error retrieving dataset property: {0}")]
+    #[error("Error retrieving dataset property")]
     DatasetProperty(#[from] GetValueError),
 
-    #[error("Error initializing dataset: {0}")]
+    #[error("Error initializing dataset")]
     Mount(#[from] EnsureDatasetError),
 
-    #[error("Failed to ensure subdirectory {0}")]
+    #[error("Failed to ensure subdirectory")]
     EnsureSubdir(#[from] io::Error),
 }
 
