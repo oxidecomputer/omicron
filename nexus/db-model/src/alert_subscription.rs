@@ -8,7 +8,7 @@ use crate::SemverVersion;
 use crate::typed_uuid::DbTypedUuid;
 use chrono::{DateTime, Utc};
 use nexus_db_schema::schema::{alert_glob, alert_subscription};
-use nexus_types::external_api::shared;
+use nexus_types::external_api::alert;
 use omicron_common::api::external::Error;
 use omicron_uuid_kinds::{AlertReceiverKind, AlertReceiverUuid};
 use serde::{Deserialize, Serialize};
@@ -96,7 +96,7 @@ impl AlertSubscriptionKind {
     }
 }
 
-impl TryFrom<AlertSubscriptionKind> for shared::AlertSubscription {
+impl TryFrom<AlertSubscriptionKind> for alert::AlertSubscription {
     type Error = Error;
     fn try_from(kind: AlertSubscriptionKind) -> Result<Self, Self::Error> {
         match kind {
@@ -113,10 +113,10 @@ impl TryFrom<AlertSubscriptionKind> for shared::AlertSubscription {
     }
 }
 
-impl TryFrom<shared::AlertSubscription> for AlertSubscriptionKind {
+impl TryFrom<alert::AlertSubscription> for AlertSubscriptionKind {
     type Error = Error;
     fn try_from(
-        subscription: shared::AlertSubscription,
+        subscription: alert::AlertSubscription,
     ) -> Result<Self, Self::Error> {
         Self::new(String::from(subscription))
     }

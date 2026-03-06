@@ -30,6 +30,7 @@ pub struct AllApiMetadata {
     deployment_units: BTreeMap<DeploymentUnitName, DeploymentUnitInfo>,
     dependency_rules: BTreeMap<ClientPackageName, Vec<DependencyFilterRule>>,
     ignored_non_clients: BTreeSet<ClientPackageName>,
+    intra_deployment_unit_only_edges: Vec<IntraDeploymentUnitOnlyEdge>,
 }
 
 impl AllApiMetadata {
@@ -71,6 +72,13 @@ impl AllApiMetadata {
     /// Progenitor-based clients
     pub fn ignored_non_clients(&self) -> &BTreeSet<ClientPackageName> {
         &self.ignored_non_clients
+    }
+
+    /// Returns the list of intra-deployment-unit-only edges
+    pub fn intra_deployment_unit_only_edges(
+        &self,
+    ) -> &[IntraDeploymentUnitOnlyEdge] {
+        &self.intra_deployment_unit_only_edges
     }
 
     /// Returns how we should filter the given dependency
@@ -138,6 +146,7 @@ struct RawApiMetadata {
     deployment_units: Vec<DeploymentUnitInfo>,
     dependency_filter_rules: Vec<DependencyFilterRule>,
     ignored_non_clients: Vec<ClientPackageName>,
+    intra_deployment_unit_only_edges: Vec<IntraDeploymentUnitOnlyEdge>,
 }
 
 impl TryFrom<RawApiMetadata> for AllApiMetadata {
@@ -188,8 +197,30 @@ impl TryFrom<RawApiMetadata> for AllApiMetadata {
         for client_pkg in raw.ignored_non_clients {
             if !ignored_non_clients.insert(client_pkg.clone()) {
                 bail!(
-                    "entry in ignored_non_clients appearead twice: {:?}",
+                    "entry in ignored_non_clients appeared twice: {:?}",
                     &client_pkg
+                );
+            }
+        }
+
+        // Validate that IDU-only edges reference only known server components
+        // and APIs.
+        let known_components: BTreeSet<_> =
+            deployment_units.values().flat_map(|u| u.packages.iter()).collect();
+        for edge in &raw.intra_deployment_unit_only_edges {
+            if !known_components.contains(&edge.server) {
+                bail!(
+                    "intra_deployment_unit_only_edges: \
+                     unknown server component {:?}",
+                    edge.server
+                );
+            }
+
+            if !apis.contains_key(&edge.client) {
+                bail!(
+                    "intra_deployment_unit_only_edges: \
+                     unknown client {:?}",
+                    edge.client,
                 );
             }
         }
@@ -199,6 +230,8 @@ impl TryFrom<RawApiMetadata> for AllApiMetadata {
             deployment_units,
             dependency_rules,
             ignored_non_clients,
+            intra_deployment_unit_only_edges: raw
+                .intra_deployment_unit_only_edges,
         })
     }
 }
@@ -415,4 +448,31 @@ pub enum Evaluation {
     NonDag,
     /// This dependency should be part of the update DAG
     Dag,
+}
+
+/// An edge that should be excluded from the deployment unit dependency graph
+/// because it represents communication that only happens locally within a
+/// single instance of a single deployment unit.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct IntraDeploymentUnitOnlyEdge {
+    /// The server component that consumes the API.
+    pub server: ServerComponentName,
+    /// The client package consumed.
+    pub client: ClientPackageName,
+    /// Explanation of why this edge is intra-deployment-unit-only.
+    pub note: String,
+    /// Permalinks to source code referenced by `note`
+    pub permalinks: Vec<String>,
+}
+
+impl IntraDeploymentUnitOnlyEdge {
+    /// Returns true if this rule matches the given (server, client) pair.
+    pub fn matches(
+        &self,
+        server: &ServerComponentName,
+        client: &ClientPackageName,
+    ) -> bool {
+        self.server == *server && self.client == *client
+    }
 }

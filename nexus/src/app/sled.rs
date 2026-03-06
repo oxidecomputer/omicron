@@ -4,7 +4,6 @@
 
 //! Sleds, and the hardware and services within them.
 
-use crate::external_api::params;
 use crate::internal_api::params::{
     PhysicalDiskPutRequest, SledAgentInfo, ZpoolPutRequest,
 };
@@ -15,9 +14,9 @@ use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db;
 use nexus_types::deployment::DiskFilter;
 use nexus_types::deployment::SledFilter;
-use nexus_types::external_api::views::PhysicalDiskPolicy;
-use nexus_types::external_api::views::SledPolicy;
-use nexus_types::external_api::views::SledProvisionPolicy;
+use nexus_types::external_api::path_params;
+use nexus_types::external_api::physical_disk::PhysicalDiskPolicy;
+use nexus_types::external_api::sled::{SledPolicy, SledProvisionPolicy};
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
@@ -28,10 +27,12 @@ use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::InstanceUuid;
 use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::PropolisUuid;
+use omicron_uuid_kinds::RackUuid;
 use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::ZpoolUuid;
 use sled_agent_client::Client as SledAgentClient;
 use sled_agent_types::inventory::SledRole;
+use sled_hardware_types::BaseboardId;
 use std::net::SocketAddrV6;
 use std::sync::Arc;
 use uuid::Uuid;
@@ -109,8 +110,45 @@ impl super::Nexus {
         sled_id: SledUuid,
     ) -> Result<SledPolicy, Error> {
         let sled_lookup = self.sled_lookup(opctx, &sled_id)?;
-        let (authz_sled,) =
-            sled_lookup.lookup_for(authz::Action::Modify).await?;
+        let (authz_sled, sled) =
+            sled_lookup.fetch_for(authz::Action::Modify).await?;
+
+        let rack_id = RackUuid::from_untyped_uuid(sled.rack_id);
+
+        // If the sled still exists in the latest committed trust quorum
+        // configuration, it cannot be expunged.
+        //
+        // This is just a sanity check. There is an inherent TOCTUO here, since
+        // we aren't combining the check with with the policy change inside
+        // a transaction. However, it is unlikely that an operator would be
+        // creating a different trust quorum configuration while trying to
+        // expunge this sled, since both have to be done from omdb by an oxide
+        // employee right now.
+        //
+        // When we add an external API, we'll probably want to come back and add
+        // some extra safeguards including checking that there are no ongoing
+        // configurations currently, as the last committed configuration can be
+        // different from the current configuration. However, if we checked that
+        // here we'd have to do yet more DB lookups to check that the state of
+        // the last configuration wasn't aborted. This is probably good enough
+        // for now given that the user already has to confirm a bunch of prompts
+        // before kicking off the operation.
+        let (tq_latest_committed_config, _) = self
+            .tq_load_latest_possible_committed_config(opctx, rack_id)
+            .await?;
+        let baseboard_id = BaseboardId {
+            part_number: sled.part_number().to_string(),
+            serial_number: sled.serial_number().to_string(),
+        };
+        if tq_latest_committed_config.members.contains_key(&baseboard_id) {
+            return Err(Error::conflict(format!(
+                "Cannot expunge sled {sled_id}, as its baseboard \
+                {baseboard_id} is still a member of the latest committed \
+                trust quorum configuration at epoch {} for rack {rack_id}",
+                tq_latest_committed_config.epoch
+            )));
+        }
+
         let prev_policy = self
             .db_datastore
             .sled_set_policy_to_expunged(opctx, &authz_sled)
@@ -214,7 +252,7 @@ impl super::Nexus {
     pub fn physical_disk_lookup<'a>(
         &'a self,
         opctx: &'a OpContext,
-        disk_selector: &params::PhysicalDiskPath,
+        disk_selector: &path_params::PhysicalDiskPath,
     ) -> Result<lookup::PhysicalDisk<'a>, Error> {
         // XXX how to do typed UUID as part of dropshot path?
         Ok(LookupPath::new(&opctx, &self.db_datastore).physical_disk(
@@ -302,7 +340,7 @@ impl super::Nexus {
     pub(crate) async fn physical_disk_expunge(
         &self,
         opctx: &OpContext,
-        disk: params::PhysicalDiskPath,
+        disk: path_params::PhysicalDiskPath,
     ) -> Result<(), Error> {
         let physical_disk_lookup = self.physical_disk_lookup(opctx, &disk)?;
         let (authz_disk,) =

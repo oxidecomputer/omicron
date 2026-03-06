@@ -14,8 +14,7 @@ use db_macros::{Asset, Resource};
 use nexus_db_schema::schema::{
     alert_glob, alert_receiver, alert_subscription, webhook_secret,
 };
-use nexus_types::external_api::shared;
-use nexus_types::external_api::views;
+use nexus_types::external_api::alert;
 use nexus_types::identity::Resource;
 use omicron_common::api::external::Error;
 use omicron_uuid_kinds::{
@@ -33,15 +32,15 @@ pub struct WebhookReceiverConfig {
     pub subscriptions: Vec<AlertSubscriptionKind>,
 }
 
-impl TryFrom<WebhookReceiverConfig> for views::WebhookReceiver {
+impl TryFrom<WebhookReceiverConfig> for alert::WebhookReceiver {
     type Error = Error;
     fn try_from(
         WebhookReceiverConfig { rx, secrets, subscriptions }: WebhookReceiverConfig,
-    ) -> Result<views::WebhookReceiver, Self::Error> {
-        let secrets = secrets.iter().map(views::WebhookSecret::from).collect();
+    ) -> Result<alert::WebhookReceiver, Self::Error> {
+        let secrets = secrets.iter().map(alert::WebhookSecret::from).collect();
         let subscriptions = subscriptions
             .into_iter()
-            .map(shared::AlertSubscription::try_from)
+            .map(alert::AlertSubscription::try_from)
             .collect::<Result<Vec<_>, _>>()?;
         let endpoint =
             rx.endpoint.parse().map_err(|e| Error::InternalError {
@@ -52,10 +51,10 @@ impl TryFrom<WebhookReceiverConfig> for views::WebhookReceiver {
                     rx.endpoint,
                 ),
             })?;
-        Ok(views::WebhookReceiver {
+        Ok(alert::WebhookReceiver {
             identity: rx.identity(),
             subscriptions,
-            config: views::WebhookReceiverConfig { secrets, endpoint },
+            config: alert::WebhookReceiverConfig { secrets, endpoint },
         })
     }
 }
@@ -153,7 +152,7 @@ impl WebhookSecret {
     }
 }
 
-impl From<&'_ WebhookSecret> for views::WebhookSecret {
+impl From<&'_ WebhookSecret> for alert::WebhookSecret {
     fn from(secret: &WebhookSecret) -> Self {
         Self {
             id: secret.identity.id.into_untyped_uuid(),
@@ -162,7 +161,7 @@ impl From<&'_ WebhookSecret> for views::WebhookSecret {
     }
 }
 
-impl From<WebhookSecret> for views::WebhookSecret {
+impl From<WebhookSecret> for alert::WebhookSecret {
     fn from(secret: WebhookSecret) -> Self {
         Self::from(&secret)
     }

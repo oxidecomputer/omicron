@@ -16,12 +16,15 @@ use headers::authorization::Credentials;
 use http::StatusCode;
 use http::method::Method;
 use httptest::{Expectation, ServerBuilder, matchers::*, responders::*};
+use illumos_utils::zpool::ZpoolHealth;
 use nexus_db_queries::authn::external::spoof;
 use nexus_test_utils::http_testing::AuthnMode;
 use nexus_test_utils::http_testing::NexusRequest;
 use nexus_test_utils::http_testing::RequestBuilder;
 use nexus_test_utils::http_testing::TestResponse;
 use nexus_test_utils::resource_helpers::TestDataset;
+use nexus_types::external_api::image;
+use nexus_types::external_api::snapshot;
 use omicron_common::disk::DatasetKind;
 use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::ZpoolUuid;
@@ -85,6 +88,7 @@ async fn test_unauthorized() {
                 },
             ],
             DiskTest::DEFAULT_ZPOOL_SIZE_GIB,
+            ZpoolHealth::Online,
         )
         .await;
     disk_test.propagate_datasets_to_sleds().await;
@@ -133,10 +137,35 @@ async fn test_unauthorized() {
             }
         };
 
-        setup_results.insert(url, result.clone());
+        setup_results.insert(*url, result.clone());
         id_routes.iter().for_each(|id_route| {
             setup_results.insert(id_route, result.clone());
         });
+    }
+
+    // Create an image from the snapshot we created. We have to create it using
+    // the ID, not the snapshot name.
+    {
+        let snapshot_url: &str = &DEMO_PROJECT_URL_SNAPSHOTS;
+        let snapshot = setup_results
+            .get(snapshot_url)
+            .unwrap()
+            .parsed_body::<snapshot::Snapshot>()
+            .unwrap();
+        let url = &*DEMO_PROJECT_IMAGES_URL;
+        let body = serde_json::to_value(image::ImageCreate {
+            source: image::ImageSource::Snapshot { id: snapshot.identity.id },
+            ..DEMO_IMAGE_CREATE.clone()
+        })
+        .unwrap();
+        let result = NexusRequest::objects_post(client, url, &body)
+            .authn_as(AuthnMode::PrivilegedUser)
+            .execute()
+            .await
+            .map_err(|e| panic!("Failed to POST to URL: {url}, {e}"))
+            .unwrap();
+        setup_results.insert(url, result.clone());
+        setup_results.insert("/v1/images/{id}", result);
     }
 
     // Special test data: upload a fake repository with the system release
@@ -463,12 +492,6 @@ static SETUP_REQUESTS: LazyLock<Vec<SetupReq>> = LazyLock::new(|| {
             body: serde_json::to_value(&*DEMO_SNAPSHOT_CREATE).unwrap(),
             id_routes: vec!["/by-id/snapshots/{id}"],
         },
-        // Create an Image in the Project
-        SetupReq::Post {
-            url: &DEMO_PROJECT_IMAGES_URL,
-            body: serde_json::to_value(&*DEMO_IMAGE_CREATE).unwrap(),
-            id_routes: vec!["/v1/images/{id}"],
-        },
         // Create a Floating IP in the project
         SetupReq::Post {
             url: &DEMO_PROJECT_URL_FIPS,
@@ -497,7 +520,7 @@ static SETUP_REQUESTS: LazyLock<Vec<SetupReq>> = LazyLock::new(|| {
         SetupReq::Post {
             url: &SUPPORT_BUNDLES_URL,
             body: serde_json::to_value(
-                &nexus_types::external_api::params::SupportBundleCreate {
+                &nexus_types::external_api::support_bundle::SupportBundleCreate {
                     user_comment: None,
                 },
             )

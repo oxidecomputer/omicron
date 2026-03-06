@@ -51,9 +51,8 @@ use omicron_common::api::external::{ByteCount, ByteCountRangeError, Vni};
 use omicron_common::api::internal::nexus::{DiskRuntimeState, SledVmmState};
 use omicron_common::api::internal::shared::DelegatedZvol;
 use omicron_common::api::internal::shared::{
-    ExternalIpGatewayMap, HostPortConfig, RackNetworkConfig,
-    ResolvedVpcFirewallRule, ResolvedVpcRouteSet, ResolvedVpcRouteState,
-    SledIdentifiers, VirtualNetworkInterfaceHost,
+    ExternalIpGatewayMap, ResolvedVpcFirewallRule, ResolvedVpcRouteSet,
+    ResolvedVpcRouteState, SledIdentifiers, VirtualNetworkInterfaceHost,
 };
 use omicron_common::backoff::{
     BackoffError, retry_notify, retry_policy_internal_service_aggressive,
@@ -63,6 +62,7 @@ use omicron_ddm_admin_client::Client as DdmAdminClient;
 use omicron_uuid_kinds::{
     GenericUuid, MupdateOverrideUuid, PropolisUuid, SledUuid,
 };
+use oximeter_instruments::http::LatencyTracker;
 use oxnet::IpNet;
 use sled_agent_config_reconciler::{
     ConfigReconcilerHandle, ConfigReconcilerSpawnToken, InternalDisks,
@@ -77,6 +77,7 @@ use sled_agent_types::dataset::LocalStorageDatasetDeleteRequest;
 use sled_agent_types::dataset::LocalStorageDatasetEnsureRequest;
 use sled_agent_types::disk::DiskStateRequested;
 use sled_agent_types::early_networking::EarlyNetworkConfig;
+use sled_agent_types::early_networking::RackNetworkConfig;
 use sled_agent_types::instance::{
     InstanceEnsureBody, InstanceExternalIpBody, InstanceMulticastBody,
     VmmPutStateResponse, VmmStateRequested, VmmUnregisterResponse,
@@ -88,6 +89,7 @@ use sled_agent_types::resolvable_files::{
 };
 use sled_agent_types::rot::Rot;
 use sled_agent_types::sled::StartSledAgentRequest;
+use sled_agent_types::uplink::HostPortConfig;
 use sled_agent_types::zone_bundle::{
     BundleUtilization, CleanupContext, CleanupCount, CleanupPeriod,
     PriorityOrder, StorageLimit, ZoneBundleMetadata,
@@ -394,7 +396,8 @@ struct SledAgentInner {
     bootstore: bootstore::NodeHandle,
 
     // A handle to the trust quorum.
-    /*trust_quorum: trust_quorum::NodeTaskHandle, */
+    trust_quorum: trust_quorum::NodeTaskHandle,
+
     // A handle to the hardware monitor.
     hardware_monitor: HardwareMonitorHandle,
 
@@ -402,7 +405,7 @@ struct SledAgentInner {
     health_monitor: HealthMonitorHandle,
 
     // Object handling production of metrics for oximeter.
-    _metrics_manager: MetricsManager,
+    metrics_manager: MetricsManager,
 
     // Component of Sled Agent responsible for managing instrumentation probes.
     probes: ProbeManager,
@@ -545,6 +548,18 @@ impl SledAgent {
             }
         }
 
+        // Start tracking CPU metrics.
+        match metrics_manager.request_queue().track_cpu() {
+            Ok(_) => {
+                debug!(log, "started tracking CPU metrics")
+            }
+            Err(e) => error!(
+                log,
+                "failed to track CPU metrics";
+                "error" => slog_error_chain::InlineErrorChain::new(&e),
+            ),
+        }
+
         // Create the PortManager to manage all the OPTE ports on the sled.
         let port_manager = PortManager::new(
             parent_log.new(o!("component" => "PortManager")),
@@ -644,6 +659,7 @@ impl SledAgent {
             SledAgentArtifactStoreWrapper(Arc::clone(
                 &long_running_task_handles.artifact_store,
             )),
+            long_running_task_handles.trust_quorum.committed_epoch_rx(),
             config_reconciler_spawn_token,
         );
 
@@ -711,14 +727,14 @@ impl SledAgent {
                 rack_network_config,
                 zone_bundler: long_running_task_handles.zone_bundler.clone(),
                 bootstore: long_running_task_handles.bootstore.clone(),
-                /* trust_quorum: long_running_task_handles.trust_quorum.clone(), */
+                trust_quorum: long_running_task_handles.trust_quorum.clone(),
                 hardware_monitor: long_running_task_handles
                     .hardware_monitor
                     .clone(),
                 health_monitor: long_running_task_handles
                     .health_monitor
                     .clone(),
-                _metrics_manager: metrics_manager,
+                metrics_manager,
                 repo_depot,
                 measurements: long_running_task_handles.measurements.clone(),
             }),
@@ -757,6 +773,10 @@ impl SledAgent {
 
     pub fn id(&self) -> SledUuid {
         self.inner.id
+    }
+
+    pub(crate) fn latencies(&self) -> &LatencyTracker {
+        &self.inner.metrics_manager.latencies
     }
 
     pub fn logger(&self) -> &Logger {
@@ -1084,11 +1104,9 @@ impl SledAgent {
         self.inner.bootstore.clone()
     }
 
-    /*
     pub fn trust_quorum(&self) -> trust_quorum::NodeTaskHandle {
         self.inner.trust_quorum.clone()
     }
-    */
 
     pub fn list_vpc_routes(&self) -> Vec<ResolvedVpcRouteState> {
         self.inner.port_manager.vpc_routes_list()
@@ -1181,7 +1199,11 @@ impl SledAgent {
         let file_source_resolver =
             self.inner.services.zone_image_resolver().status().to_inventory();
 
-        let health_monitor = self.inner.health_monitor.to_inventory();
+        let smf_services_in_maintenance = self
+            .inner
+            .health_monitor
+            .to_inventory()
+            .smf_services_in_maintenance;
 
         let ReconcilerInventory {
             disks,
@@ -1208,7 +1230,7 @@ impl SledAgent {
             reconciler_status,
             last_reconciliation,
             file_source_resolver,
-            health_monitor,
+            smf_services_in_maintenance,
             reference_measurements: self.inner.measurements.to_inventory(),
         })
     }

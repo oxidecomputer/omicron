@@ -53,8 +53,30 @@ pub mod disk {
 }
 
 pub mod early_networking {
-    pub use crate::v21::early_networking::EarlyNetworkConfig;
-    pub use crate::v21::early_networking::EarlyNetworkConfigBody;
+    pub use crate::v1::early_networking::BfdMode;
+    pub use crate::v1::early_networking::ImportExportPolicy;
+    pub use crate::v1::early_networking::LldpAdminStatus;
+    pub use crate::v1::early_networking::LldpPortConfig;
+    pub use crate::v1::early_networking::ParseLldpAdminStatusError;
+    pub use crate::v1::early_networking::ParseSwitchLocationError;
+    pub use crate::v1::early_networking::PortFec;
+    pub use crate::v1::early_networking::PortSpeed;
+    pub use crate::v1::early_networking::RouteConfig;
+    pub use crate::v1::early_networking::SwitchLocation;
+    pub use crate::v1::early_networking::TxEqConfig;
+
+    pub use crate::v20::early_networking::BgpConfig;
+    pub use crate::v20::early_networking::BgpPeerConfig;
+    pub use crate::v20::early_networking::EarlyNetworkConfig;
+    pub use crate::v20::early_networking::EarlyNetworkConfigBody;
+    pub use crate::v20::early_networking::MaxPathConfig;
+    pub use crate::v20::early_networking::MaxPathConfigError;
+    pub use crate::v20::early_networking::PortConfig;
+    pub use crate::v20::early_networking::RackNetworkConfig;
+    pub use crate::v20::early_networking::RouterLifetimeConfig;
+    pub use crate::v20::early_networking::RouterLifetimeConfigError;
+    pub use crate::v20::early_networking::UplinkAddressConfig;
+    pub use crate::v20::early_networking::UplinkAddressConfigError;
 }
 
 pub mod firewall_rules {
@@ -95,7 +117,6 @@ pub mod inventory {
     pub use crate::v1::inventory::HostPhase2DesiredSlots;
     pub use crate::v1::inventory::InventoryDataset;
     pub use crate::v1::inventory::InventoryDisk;
-    pub use crate::v1::inventory::InventoryZpool;
     pub use crate::v1::inventory::ManifestBootInventory;
     pub use crate::v1::inventory::ManifestInventory;
     pub use crate::v1::inventory::ManifestNonBootInventory;
@@ -125,8 +146,10 @@ pub mod inventory {
     pub use crate::v14::inventory::ReconciledSingleMeasurement;
 
     pub use crate::v16::inventory::ConfigReconcilerInventory;
-    pub use crate::v16::inventory::Inventory;
     pub use crate::v16::inventory::SingleMeasurementInventory;
+
+    pub use crate::v24::inventory::Inventory;
+    pub use crate::v24::inventory::InventoryZpool;
 
     pub use crate::impls::inventory::ManifestBootInventoryDisplay;
     pub use crate::impls::inventory::ManifestInventoryDisplay;
@@ -152,8 +175,6 @@ pub mod rack_init {
     pub use crate::v20::rack_init::RackInitializeRequest;
     pub use crate::v20::rack_init::RackInitializeRequestParams;
     pub use crate::v20::rack_init::RackInitializeRequestParseError;
-
-    pub use omicron_common::api::internal::shared::SwitchPorts;
 }
 
 pub mod rot {
@@ -193,6 +214,11 @@ pub mod trust_quorum {
     pub use crate::v13::trust_quorum::ProxyPrepareAndCommitRequest;
 
     pub use crate::v15::trust_quorum::TrustQuorumNetworkConfig;
+}
+
+pub mod uplink {
+    pub use crate::v20::uplink::HostPortConfig;
+    pub use crate::v20::uplink::SwitchPorts;
 }
 
 pub mod zone_bundle {

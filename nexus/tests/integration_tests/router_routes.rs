@@ -17,8 +17,7 @@ use nexus_test_utils::resource_helpers::object_put;
 use nexus_test_utils::resource_helpers::object_put_error;
 use nexus_test_utils::resource_helpers::objects_list_page_authz;
 use nexus_test_utils_macros::nexus_test;
-use nexus_types::external_api::params;
-use nexus_types::external_api::params::RouterRouteUpdate;
+use nexus_types::external_api::vpc::{RouterRouteCreate, RouterRouteUpdate};
 use omicron_common::api::external::SimpleIdentityOrName;
 use omicron_common::api::external::{
     IdentityMetadataCreateParams, IdentityMetadataUpdateParams,
@@ -174,7 +173,7 @@ async fn test_router_routes_crud_operations(
     let route_created: RouterRoute = NexusRequest::objects_post(
         client,
         get_routes_url(vpc_name, router_name).as_str(),
-        &params::RouterRouteCreate {
+        &RouterRouteCreate {
             identity: IdentityMetadataCreateParams {
                 name: route_name.parse().unwrap(),
                 description: "It's a route, what else can I say?".to_string(),
@@ -215,7 +214,7 @@ async fn test_router_routes_crud_operations(
     NexusRequest::object_put(
         client,
         route_url.as_str(),
-        Some(&params::RouterRouteUpdate {
+        Some(&RouterRouteUpdate {
             identity: IdentityMetadataUpdateParams {
                 name: Some(route_name.parse().unwrap()),
                 description: None,
@@ -574,7 +573,7 @@ pub async fn update_route_with_error(
             )
             .as_str(),
         )
-        .body(Some(&params::RouterRouteUpdate {
+        .body(Some(&RouterRouteUpdate {
             identity: IdentityMetadataUpdateParams {
                 name: None,
                 description: None,

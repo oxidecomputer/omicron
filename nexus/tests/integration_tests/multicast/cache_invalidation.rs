@@ -21,7 +21,7 @@ use nexus_test_utils::resource_helpers::{
 };
 use nexus_test_utils_macros::nexus_test;
 use nexus_types::deployment::SledFilter;
-use nexus_types::external_api::params;
+use nexus_types::external_api::sled;
 use nexus_types::inventory::SpType;
 use omicron_nexus::Server;
 use omicron_nexus::TestInterfaces;
@@ -553,7 +553,7 @@ async fn test_sled_expunge_removes_from_multicast_cache(
         .sled_set_provision_policy(
             &opctx,
             &authz_sled,
-            nexus_types::external_api::views::SledProvisionPolicy::NonProvisionable,
+            nexus_types::external_api::sled::SledProvisionPolicy::NonProvisionable,
         )
         .await
         .expect("set sled provision policy");
@@ -598,7 +598,7 @@ async fn test_sled_expunge_removes_from_multicast_cache(
         .make_request(
             Method::POST,
             "/sleds/expunge",
-            Some(params::SledSelector { sled: first_sled_id }),
+            Some(sled::SledSelector { sled: first_sled_id }),
             StatusCode::OK,
         )
         .await

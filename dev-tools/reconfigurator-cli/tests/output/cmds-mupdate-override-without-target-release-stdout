@@ -108,6 +108,13 @@ to:   blueprint 8da82a8e-bf97-4fbd-8ddd-9f6462732cf1
   sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 (active, config generation 2 -> 3):
 +   will remove mupdate override:   (none) -> 6123eac1-ec5b-42ba-b73f-9845105a9971
 
+    measurements:
+    ---------------------------
+    hash      version          
+    ---------------------------
+    unknown   (unknown version)
+
+
     host phase 2 contents:
     ------------------------
     slot   boot image source
@@ -253,6 +260,13 @@ to:   blueprint 58d5e830-0884-47d8-a7cd-b2b3751adeb4
 
   sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 (active, config generation 3 -> 4):
 -   will remove mupdate override:   6123eac1-ec5b-42ba-b73f-9845105a9971 -> (none)
+
+    measurements:
+    ---------------------------
+    hash      version          
+    ---------------------------
+    unknown   (unknown version)
+
 
     host phase 2 contents:
     ------------------------

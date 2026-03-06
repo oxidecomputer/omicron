@@ -7,6 +7,7 @@
 use camino::Utf8PathBuf;
 use clap::{Args, Parser, Subcommand};
 use futures::StreamExt;
+use gateway_client::ClientInfo as _;
 use gateway_test_utils::setup::DEFAULT_SP_SIM_CONFIG;
 use libc::SIGINT;
 use signal_hook_tokio::Signals;

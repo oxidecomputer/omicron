@@ -15,7 +15,9 @@ use nexus_db_lookup::LookupPath;
 use nexus_db_lookup::lookup;
 use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
-use nexus_types::external_api::{params, views};
+use nexus_types::external_api::external_subnet as external_subnet_types;
+use nexus_types::external_api::instance as instance_types;
+use nexus_types::external_api::project as project_types;
 use omicron_common::api::external::DeleteResult;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::InternalContext as _;
@@ -32,21 +34,24 @@ impl super::Nexus {
     pub(crate) fn external_subnet_lookup<'a>(
         &'a self,
         opctx: &'a OpContext,
-        selector: params::ExternalSubnetSelector,
+        selector: external_subnet_types::ExternalSubnetSelector,
     ) -> LookupResult<lookup::ExternalSubnet<'a>> {
         match selector {
-            params::ExternalSubnetSelector {
+            external_subnet_types::ExternalSubnetSelector {
                 external_subnet: NameOrId::Id(id),
                 project: None,
             } => Ok(LookupPath::new(opctx, self.datastore())
                 .external_subnet_id(ExternalSubnetUuid::from_untyped_uuid(id))),
-            params::ExternalSubnetSelector {
+            external_subnet_types::ExternalSubnetSelector {
                 external_subnet: NameOrId::Name(name),
                 project: Some(project),
             } => self
-                .project_lookup(opctx, params::ProjectSelector { project })
+                .project_lookup(
+                    opctx,
+                    project_types::ProjectSelector { project },
+                )
                 .map(|p| p.external_subnet_name_owned(name.into())),
-            params::ExternalSubnetSelector {
+            external_subnet_types::ExternalSubnetSelector {
                 external_subnet: NameOrId::Id(_),
                 project: Some(_),
             } => Err(Error::invalid_request(
@@ -65,7 +70,7 @@ impl super::Nexus {
         opctx: &OpContext,
         project_lookup: &lookup::Project<'_>,
         pagparams: &PaginatedBy<'_>,
-    ) -> ListResultVec<views::ExternalSubnet> {
+    ) -> ListResultVec<external_subnet_types::ExternalSubnet> {
         let (.., authz_project, _db_project) =
             project_lookup.fetch_for(authz::Action::ListChildren).await?;
         self.datastore()
@@ -78,8 +83,8 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
         project_lookup: &lookup::Project<'_>,
-        params: params::ExternalSubnetCreate,
-    ) -> Result<views::ExternalSubnet, Error> {
+        params: external_subnet_types::ExternalSubnetCreate,
+    ) -> Result<external_subnet_types::ExternalSubnet, Error> {
         let (authz_silo, authz_project, _db_project) =
             project_lookup.fetch_for(authz::Action::CreateChild).await?;
         self.datastore()
@@ -96,8 +101,8 @@ impl super::Nexus {
     pub(crate) async fn external_subnet_view(
         &self,
         opctx: &OpContext,
-        selector: params::ExternalSubnetSelector,
-    ) -> LookupResult<views::ExternalSubnet> {
+        selector: external_subnet_types::ExternalSubnetSelector,
+    ) -> LookupResult<external_subnet_types::ExternalSubnet> {
         let (.., db_subnet) = self
             .external_subnet_lookup(opctx, selector)?
             .fetch_for(authz::Action::Read)
@@ -108,9 +113,9 @@ impl super::Nexus {
     pub(crate) async fn external_subnet_update(
         &self,
         opctx: &OpContext,
-        selector: params::ExternalSubnetSelector,
-        params: params::ExternalSubnetUpdate,
-    ) -> UpdateResult<views::ExternalSubnet> {
+        selector: external_subnet_types::ExternalSubnetSelector,
+        params: external_subnet_types::ExternalSubnetUpdate,
+    ) -> UpdateResult<external_subnet_types::ExternalSubnet> {
         let (.., authz_subnet, _db_subnet) = self
             .external_subnet_lookup(opctx, selector)?
             .fetch_for(authz::Action::Modify)
@@ -124,7 +129,7 @@ impl super::Nexus {
     pub(crate) async fn external_subnet_delete(
         &self,
         opctx: &OpContext,
-        selector: params::ExternalSubnetSelector,
+        selector: external_subnet_types::ExternalSubnetSelector,
     ) -> DeleteResult {
         let (.., authz_subnet, _db_subnet) = self
             .external_subnet_lookup(opctx, selector)?
@@ -136,19 +141,19 @@ impl super::Nexus {
     pub(crate) async fn external_subnet_attach(
         &self,
         opctx: &OpContext,
-        selector: params::ExternalSubnetSelector,
-        attach: params::ExternalSubnetAttach,
-    ) -> UpdateResult<views::ExternalSubnet> {
+        selector: external_subnet_types::ExternalSubnetSelector,
+        attach: external_subnet_types::ExternalSubnetAttach,
+    ) -> UpdateResult<external_subnet_types::ExternalSubnet> {
         let (.., authz_project, authz_subnet, db_subnet) = self
             .external_subnet_lookup(opctx, selector)?
             .fetch_for(authz::Action::Modify)
             .await?;
         let instance_selector = match &attach.instance {
-            NameOrId::Id(id) => params::InstanceSelector {
+            NameOrId::Id(id) => instance_types::InstanceSelector {
                 project: None,
                 instance: NameOrId::Id(*id),
             },
-            NameOrId::Name(name) => params::InstanceSelector {
+            NameOrId::Name(name) => instance_types::InstanceSelector {
                 project: Some(NameOrId::Id(authz_project.id())),
                 instance: NameOrId::Name(name.clone()),
             },
@@ -173,7 +178,9 @@ impl super::Nexus {
             .saga_execute::<subnet_attach::SagaSubnetAttach>(params)
             .await?;
         output
-            .lookup_node_output::<views::ExternalSubnet>("output")
+            .lookup_node_output::<external_subnet_types::ExternalSubnet>(
+                "output",
+            )
             .map_err(|e| Error::internal_error(&format!("{e:#}")))
             .internal_context("looking up output from subnet attach saga")
     }
@@ -181,8 +188,8 @@ impl super::Nexus {
     pub(crate) async fn external_subnet_detach(
         &self,
         opctx: &OpContext,
-        selector: params::ExternalSubnetSelector,
-    ) -> UpdateResult<views::ExternalSubnet> {
+        selector: external_subnet_types::ExternalSubnetSelector,
+    ) -> UpdateResult<external_subnet_types::ExternalSubnet> {
         let (.., authz_subnet, db_subnet) = self
             .external_subnet_lookup(opctx, selector)?
             .fetch_for(authz::Action::Modify)
@@ -192,7 +199,7 @@ impl super::Nexus {
                 "External subnet is not attached to an instance",
             ));
         };
-        let instance_selector = params::InstanceSelector {
+        let instance_selector = instance_types::InstanceSelector {
             project: None,
             instance: NameOrId::Id(instance_id.into_untyped_uuid()),
         };
@@ -210,7 +217,9 @@ impl super::Nexus {
             .saga_execute::<subnet_detach::SagaSubnetDetach>(params)
             .await?;
         output
-            .lookup_node_output::<views::ExternalSubnet>("output")
+            .lookup_node_output::<external_subnet_types::ExternalSubnet>(
+                "output",
+            )
             .map_err(|e| Error::internal_error(&format!("{e:#}")))
             .internal_context("looking up output from subnet detach saga")
     }
@@ -219,7 +228,7 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
         instance_lookup: &lookup::Instance<'_>,
-    ) -> ListResultVec<views::ExternalSubnet> {
+    ) -> ListResultVec<external_subnet_types::ExternalSubnet> {
         let (.., authz_project, authz_instance) =
             instance_lookup.lookup_for(authz::Action::Read).await?;
 

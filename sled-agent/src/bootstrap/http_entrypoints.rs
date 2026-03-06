@@ -49,7 +49,7 @@ pub(crate) struct BootstrapServerContext {
     pub(crate) sled_reset_tx:
         mpsc::Sender<oneshot::Sender<Result<(), BootstrapError>>>,
     pub(crate) sprockets: SprocketsConfig,
-    /*    pub(crate) trust_quorum_handle: trust_quorum::NodeTaskHandle, */
+    pub(crate) trust_quorum_handle: trust_quorum::NodeTaskHandle,
     pub(crate) measurements: Arc<MeasurementsHandle>,
 }
 
@@ -65,7 +65,7 @@ impl BootstrapServerContext {
             &self.internal_disks_rx,
             self.measurements.clone(),
             &self.bootstore_node_handle,
-            /*&self.trust_quorum_handle, */
+            &self.trust_quorum_handle,
             request,
         )
     }

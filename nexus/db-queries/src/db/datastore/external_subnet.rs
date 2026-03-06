@@ -59,8 +59,8 @@ use nexus_db_model::SubnetPoolSiloLink;
 use nexus_db_model::SubnetPoolUpdate;
 use nexus_db_model::Vni;
 use nexus_db_model::to_db_typed_uuid;
-use nexus_types::external_api::params;
-use nexus_types::external_api::params::ExternalSubnetCreate;
+use nexus_types::external_api::external_subnet::ExternalSubnetCreate;
+use nexus_types::external_api::subnet_pool as subnet_pool_types;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::DeleteResult;
@@ -172,7 +172,7 @@ impl DataStore {
     pub async fn create_subnet_pool(
         &self,
         opctx: &OpContext,
-        params: params::SubnetPoolCreate,
+        params: subnet_pool_types::SubnetPoolCreate,
     ) -> CreateResult<SubnetPool> {
         opctx
             .authorize(authz::Action::CreateChild, &authz::SUBNET_POOL_LIST)
@@ -520,7 +520,7 @@ impl DataStore {
         opctx: &OpContext,
         authz_pool: &authz::SubnetPool,
         db_pool: &SubnetPool,
-        params: &params::SubnetPoolMemberAdd,
+        params: &subnet_pool_types::SubnetPoolMemberAdd,
     ) -> CreateResult<SubnetPoolMember> {
         opctx.authorize(authz::Action::CreateChild, authz_pool).await?;
 
@@ -644,10 +644,11 @@ impl DataStore {
         opctx: &OpContext,
         silo_id: &Uuid,
         authz_project: &authz::Project,
-        params: params::ExternalSubnetCreate,
+        params: ExternalSubnetCreate,
     ) -> CreateResult<ExternalSubnet> {
         opctx.authorize(authz::Action::CreateChild, authz_project).await?;
         let ExternalSubnetCreate { identity, allocator } = params;
+        let subnet_name = identity.name.to_string();
         let identity =
             ExternalSubnetIdentity::new(ExternalSubnetUuid::new_v4(), identity);
         insert_external_subnet_query(
@@ -664,6 +665,7 @@ impl DataStore {
                 silo_id,
                 authz_project,
                 &allocator,
+                &subnet_name,
             )
         })
     }
@@ -1404,12 +1406,12 @@ mod tests {
     use nexus_db_model::SubnetPoolMember;
     use nexus_db_model::SubnetPoolUpdate;
     use nexus_db_model::to_db_typed_uuid;
-    use nexus_types::external_api::params::ExternalSubnetAllocator;
-    use nexus_types::external_api::params::ExternalSubnetCreate;
-    use nexus_types::external_api::params::PoolSelector;
-    use nexus_types::external_api::params::ProjectCreate;
-    use nexus_types::external_api::params::SubnetPoolCreate;
-    use nexus_types::external_api::params::SubnetPoolMemberAdd;
+    use nexus_types::external_api::external_subnet::ExternalSubnetAllocator;
+    use nexus_types::external_api::external_subnet::ExternalSubnetCreate;
+    use nexus_types::external_api::ip_pool::PoolSelector;
+    use nexus_types::external_api::project::ProjectCreate;
+    use nexus_types::external_api::subnet_pool::SubnetPoolCreate;
+    use nexus_types::external_api::subnet_pool::SubnetPoolMemberAdd;
     use nexus_types::identity::Resource;
     use nexus_types::silo::DEFAULT_SILO_ID;
     use omicron_common::address::IpRange;

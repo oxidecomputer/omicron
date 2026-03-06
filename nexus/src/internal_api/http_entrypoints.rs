@@ -131,24 +131,16 @@ impl NexusInternalApi for NexusInternalApiImpl {
     }
 
     async fn cpapi_disks_put(
-        rqctx: RequestContext<Self::Context>,
-        path_params: Path<DiskPathParam>,
-        new_runtime_state: TypedBody<DiskRuntimeState>,
+        _rqctx: RequestContext<Self::Context>,
+        _path_params: Path<DiskPathParam>,
+        _new_runtime_state: TypedBody<DiskRuntimeState>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
-        let apictx = &rqctx.context().context;
-        let nexus = &apictx.nexus;
-        let path = path_params.into_inner();
-        let new_state = new_runtime_state.into_inner();
-        let handler = async {
-            let opctx =
-                crate::context::op_context_for_internal_api(&rqctx).await;
-            nexus.notify_disk_updated(&opctx, path.disk_id, &new_state).await?;
-            Ok(HttpResponseUpdatedNoContent())
-        };
-        apictx
-            .internal_latencies
-            .instrument_dropshot_handler(&rqctx, handler)
-            .await
+        // TODO: remove from the nexus-internal api trait when we can make new
+        // versions of it
+        Err(HttpError::for_bad_request(
+            None,
+            String::from("removed due to incorrect abstraction"),
+        ))
     }
 
     async fn cpapi_volume_remove_read_only_parent(

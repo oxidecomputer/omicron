@@ -21,11 +21,11 @@ use nexus_test_utils::sql::Row;
 use nexus_test_utils::sql::SqlEnum;
 use nexus_test_utils::sql::process_rows;
 use nexus_test_utils::{ControlPlaneStarter, load_test_config};
-use omicron_common::api::internal::shared::SwitchLocation;
 use omicron_test_utils::dev::db::{Client, CockroachInstance};
 use pretty_assertions::{assert_eq, assert_ne};
 use semver::Version;
 use similar_asserts;
+use sled_agent_types::early_networking::SwitchLocation;
 use slog::Logger;
 use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
@@ -116,6 +116,22 @@ async fn apply_update_as_transaction(
     }
 }
 
+// Applies an update without a transaction wrapper.
+//
+// Used for non-transactional schema updates.
+async fn apply_update_without_transaction(
+    client: &omicron_test_utils::dev::db::Client,
+    step: &SchemaUpgradeStep,
+) {
+    if let Err(err) = client.batch_execute(step.sql()).await {
+        panic!(
+            "Failed to execute non-transactional update step {}: {}",
+            step.label(),
+            InlineErrorChain::new(&err)
+        );
+    }
+}
+
 async fn apply_update(
     log: &Logger,
     crdb: &CockroachInstance,
@@ -153,11 +169,16 @@ async fn apply_update(
         info!(
             log,
             "Applying sql schema upgrade step";
-            "file" => step.label()
+            "file" => step.label(),
+            "non_transactional" => step.is_non_transactional(),
         );
 
         for _ in 0..times_to_apply {
-            apply_update_as_transaction(&log, &client, step).await;
+            if step.is_non_transactional() {
+                apply_update_without_transaction(&client, step).await;
+            } else {
+                apply_update_as_transaction(&log, &client, step).await;
+            }
 
             // The following is a set of "versions exempt from being
             // re-applied" multiple times. PLEASE AVOID ADDING TO THIS LIST.
@@ -172,6 +193,27 @@ async fn apply_update(
             if NOT_IDEMPOTENT_VERSIONS.contains(&version.semver()) {
                 break;
             }
+        }
+
+        // After applying the step, run its verification SQL (if any) in a
+        // separate transaction — just like the real Nexus startup path does.
+        // This confirms that async backfill operations (CREATE INDEX,
+        // ALTER COLUMN SET NOT NULL, ADD CONSTRAINT, ADD COLUMN with
+        // backfill) actually completed.
+        if let Some(verify_sql) = step.verification_sql() {
+            info!(
+                log,
+                "Verifying schema change";
+                "file" => step.label()
+            );
+            client.batch_execute(verify_sql).await.unwrap_or_else(|e| {
+                panic!(
+                    "Verification failed for {} in version {}: {}",
+                    step.label(),
+                    version.semver(),
+                    e
+                )
+            });
         }
     }
 
@@ -307,6 +349,43 @@ async fn crdb_column_ordering(
         result.entry(table_name).or_default().push(column_name);
     }
     result
+}
+
+/// Query explicitly persisted system settings.
+///
+/// Note this is different from SHOW CLUSTER SETTINGS, which includes all
+/// cluster settings, and only covers public settings. System settings only
+/// consists of overridden names and values, but also includes undocumented
+/// settings. (We care about one such setting,
+/// `bulkio.index_backfill.batch_size`.)
+///
+/// `system.settings` also contains CockroachDB-internal entries (like
+/// `cluster.secret` and `version`) that are set during cluster
+/// initialization and vary between instances.  We exclude those so we
+/// only compare settings that Omicron controls.
+async fn query_cluster_settings(
+    crdb: &CockroachInstance,
+) -> BTreeMap<String, String> {
+    let client = crdb.connect().await.expect("failed to connect");
+    let rows = client
+        .query(
+            "SELECT name, value FROM system.settings \
+             WHERE name NOT IN ('cluster.secret', 'version', \
+                                'diagnostics.reporting.enabled') \
+             ORDER BY name",
+            &[],
+        )
+        .await
+        .expect("failed to query cluster settings");
+    client.cleanup().await.expect("cleaning up after query");
+
+    rows.iter()
+        .map(|row| {
+            let name: String = row.get(0);
+            let value: String = row.get(1);
+            (name, value)
+        })
+        .collect()
 }
 
 fn read_all_schema_versions() -> AllSchemaVersions {
@@ -814,6 +893,7 @@ async fn dbinit_equals_sum_of_all_up() {
     // Query the newly constructed DB for information about its schema
     let observed_schema = InformationSchema::new(&crdb).await;
     let observed_data = observed_schema.query_all_tables(log, &crdb).await;
+    let observed_cluster_settings = query_cluster_settings(&crdb).await;
 
     db.terminate().await;
 
@@ -822,11 +902,23 @@ async fn dbinit_equals_sum_of_all_up() {
     let crdb = db.crdb();
     let expected_schema = InformationSchema::new(&crdb).await;
     let expected_data = expected_schema.query_all_tables(log, &crdb).await;
+    let expected_cluster_settings = query_cluster_settings(&crdb).await;
 
     // Validate that the schema is identical
     observed_schema.pretty_assert_eq(&expected_schema);
 
     assert_eq!(observed_data, expected_data);
+
+    // Validate that cluster settings match.  This catches cases where
+    // dbinit.sql sets a cluster setting but migrations don't (or vice versa).
+    similar_asserts::assert_eq!(
+        observed_cluster_settings,
+        expected_cluster_settings,
+        "Cluster settings do not match between migrations and dbinit.sql. \
+         If dbinit.sql contains a SET CLUSTER SETTING statement, there must \
+         be a corresponding migration (and vice versa)."
+    );
+
     db.terminate().await;
     logctx.cleanup_successful();
 }
@@ -1409,7 +1501,7 @@ fn at_current_101_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
             use async_bb8_diesel::AsyncRunQueryDsl;
             use nexus_db_model::Instance;
             use nexus_db_schema::schema::instance::dsl;
-            use nexus_types::external_api::params;
+            use nexus_types::external_api::instance;
             use omicron_common::api::external::IdentityMetadataCreateParams;
             use omicron_uuid_kinds::InstanceUuid;
 
@@ -1417,7 +1509,7 @@ fn at_current_101_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
                 .values(Instance::new(
                     InstanceUuid::new_v4(),
                     Uuid::new_v4(),
-                    &params::InstanceCreate {
+                    &instance::InstanceCreate {
                         identity: IdentityMetadataCreateParams {
                             name: "hello".parse().unwrap(),
                             description: "hello".to_string(),
@@ -1428,7 +1520,7 @@ fn at_current_101_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
                         user_data: vec![],
                         ssh_public_keys: None,
                         network_interfaces:
-                            params::InstanceNetworkInterfaceAttachment::DefaultIpv4,
+                            instance::InstanceNetworkInterfaceAttachment::DefaultIpv4,
                         external_ips: vec![],
                         boot_disk: None,
                         cpu_platform: None,
@@ -4129,11 +4221,18 @@ fn after_222_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
 // Migration 229 fixes column ordering in console_session and device_access_token.
 // The "id" column was added via ALTER TABLE in migration 145, placing it at the
 // end. This migration recreates the tables with "id" as the first column.
+// It also drops console sessions created more than 24 hours ago.
 const SESSION_229_ID: Uuid =
     Uuid::from_u128(0x22900001_0000_0000_0000_000000000001);
 const SESSION_229_TOKEN: &str = "tok-console-229-migration-test";
 const SESSION_229_SILO_USER: Uuid =
     Uuid::from_u128(0x22900001_0000_0000_0000_000000000002);
+
+const SESSION_229_OLD_ID: Uuid =
+    Uuid::from_u128(0x22900001_0000_0000_0000_000000000003);
+const SESSION_229_OLD_TOKEN: &str = "tok-console-229-old-session";
+const SESSION_229_OLD_SILO_USER: Uuid =
+    Uuid::from_u128(0x22900001_0000_0000_0000_000000000004);
 
 const DEVICE_229_ID: Uuid =
     Uuid::from_u128(0x22900002_0000_0000_0000_000000000001);
@@ -4148,6 +4247,8 @@ fn before_229_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
     Box::pin(async move {
         // Insert test data into console_session and device_access_token.
         // These tables currently have "id" as the last column (from migration 145).
+        // We insert two console sessions: one recent (should be kept) and one
+        // created over 24 hours ago (should be dropped).
         ctx.client
             .batch_execute(&format!(
                 "
@@ -4155,6 +4256,13 @@ fn before_229_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
                     (id, token, time_created, time_last_used, silo_user_id)
                 VALUES
                     ('{SESSION_229_ID}', '{SESSION_229_TOKEN}', now(), now(), '{SESSION_229_SILO_USER}');
+
+                INSERT INTO omicron.public.console_session
+                    (id, token, time_created, time_last_used, silo_user_id)
+                VALUES
+                    ('{SESSION_229_OLD_ID}', '{SESSION_229_OLD_TOKEN}',
+                     now() - INTERVAL '48 hours', now() - INTERVAL '48 hours',
+                     '{SESSION_229_OLD_SILO_USER}');
 
                 INSERT INTO omicron.public.device_access_token
                     (id, token, client_id, device_code, silo_user_id, time_requested, time_created)
@@ -4172,7 +4280,7 @@ fn after_229_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
     Box::pin(async move {
         // Verify data was preserved after the column reordering migration.
 
-        // Check console_session
+        // Check that the recent console_session was kept
         let rows = ctx
             .client
             .query(
@@ -4184,7 +4292,11 @@ fn after_229_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
             )
             .await
             .expect("failed to query post-migration console_session");
-        assert_eq!(rows.len(), 1, "console_session row should still exist");
+        assert_eq!(
+            rows.len(),
+            1,
+            "recent console_session row should still exist"
+        );
 
         let id: Uuid = rows[0].get("id");
         assert_eq!(id, SESSION_229_ID);
@@ -4192,6 +4304,26 @@ fn after_229_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
         assert_eq!(token, SESSION_229_TOKEN);
         let silo_user_id: Uuid = rows[0].get("silo_user_id");
         assert_eq!(silo_user_id, SESSION_229_SILO_USER);
+
+        // Check that the old (>24h) console_session was dropped
+        let rows = ctx
+            .client
+            .query(
+                &format!(
+                    "SELECT id FROM omicron.public.console_session
+                     WHERE id = '{SESSION_229_OLD_ID}'"
+                ),
+                &[],
+            )
+            .await
+            .expect(
+                "failed to query post-migration console_session for old row",
+            );
+        assert_eq!(
+            rows.len(),
+            0,
+            "console_session row older than 24h should have been dropped"
+        );
 
         // Check device_access_token
         let rows = ctx

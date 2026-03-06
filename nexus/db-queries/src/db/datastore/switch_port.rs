@@ -34,16 +34,16 @@ use nexus_db_model::{
     SwitchPortBgpPeerConfigAllowExport, SwitchPortBgpPeerConfigAllowImport,
     SwitchPortBgpPeerConfigCommunity,
 };
-use nexus_types::external_api::params;
+use nexus_types::external_api::networking;
 use nexus_types::identity::Resource;
 use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::{
-    self, CreateResult, DataPageParams, DeleteResult, Error,
-    ImportExportPolicy, ListResultVec, LookupResult, NameOrId, ResourceType,
-    SwitchPortAddressView, UpdateResult,
+    self, CreateResult, DataPageParams, DeleteResult, Error, ListResultVec,
+    LookupResult, NameOrId, ResourceType, SwitchPortAddressView, UpdateResult,
 };
 use ref_cast::RefCast;
 use serde::{Deserialize, Serialize};
+use sled_agent_types::early_networking::ImportExportPolicy;
 use uuid::Uuid;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -70,9 +70,9 @@ pub struct BgpPeerConfig {
     pub router_lifetime: SqlU16,
 }
 
-impl Into<external::BgpPeer> for BgpPeerConfig {
-    fn into(self) -> external::BgpPeer {
-        external::BgpPeer {
+impl Into<networking::BgpPeer> for BgpPeerConfig {
+    fn into(self) -> networking::BgpPeer {
+        networking::BgpPeer {
             bgp_config: self.bgp_config_id.into(),
             interface_name: self.interface_name.into(),
             addr: self.addr.map(|a| a.ip()),
@@ -131,9 +131,9 @@ impl SwitchPortSettingsCombinedResult {
     }
 }
 
-impl Into<external::SwitchPortSettings> for SwitchPortSettingsCombinedResult {
-    fn into(self) -> external::SwitchPortSettings {
-        external::SwitchPortSettings {
+impl Into<networking::SwitchPortSettings> for SwitchPortSettingsCombinedResult {
+    fn into(self) -> networking::SwitchPortSettings {
+        networking::SwitchPortSettings {
             identity: self.settings.identity(),
             port: self.port.into(),
             groups: self.groups.into_iter().map(Into::into).collect(),
@@ -220,7 +220,7 @@ impl DataStore {
     pub async fn switch_port_settings_create(
         &self,
         opctx: &OpContext,
-        params: &params::SwitchPortSettingsCreate,
+        params: &networking::SwitchPortSettingsCreate,
         id: Option<Uuid>,
     ) -> CreateResult<SwitchPortSettingsCombinedResult> {
         let err = OptionalError::new();
@@ -267,7 +267,7 @@ impl DataStore {
     pub async fn switch_port_settings_delete(
         &self,
         opctx: &OpContext,
-        params: &params::SwitchPortSettingsSelector,
+        params: &networking::SwitchPortSettingsSelector,
     ) -> DeleteResult {
         let conn = self.pool_connection_authorized(opctx).await?;
 
@@ -314,7 +314,7 @@ impl DataStore {
     pub async fn switch_port_settings_update(
         &self,
         opctx: &OpContext,
-        params: &params::SwitchPortSettingsCreate,
+        params: &networking::SwitchPortSettingsCreate,
         id: Uuid,
     ) -> UpdateResult<SwitchPortSettingsCombinedResult> {
         let delete_err = OptionalError::new();
@@ -808,7 +808,7 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         portname: &external::Name,
-        params: &params::SwitchPortSelector,
+        params: &networking::SwitchPortSelector,
     ) -> DeleteResult {
         #[derive(Debug)]
         enum SwitchPortDeleteError {
@@ -1195,7 +1195,7 @@ type SpsCreateError = SwitchPortSettingsCreateError;
 async fn do_switch_port_settings_create(
     conn: &Connection<DTraceConnection<PgConnection>>,
     id: Option<Uuid>,
-    params: &params::SwitchPortSettingsCreate,
+    params: &networking::SwitchPortSettingsCreate,
     err: OptionalError<SwitchPortSettingsCreateError>,
 ) -> Result<SwitchPortSettingsCombinedResult, diesel::result::Error> {
     use nexus_db_schema::schema::{
@@ -1355,7 +1355,7 @@ async fn do_switch_port_settings_create(
             i.kind.into(),
         );
         interface_config.push(ifx_config.clone());
-        if let params::SwitchInterfaceKind::Vlan(vlan_if) = i.kind {
+        if let networking::SwitchInterfaceKind::Vlan(vlan_if) = i.kind {
             vlan_interface_config.push(SwitchVlanInterfaceConfig::new(
                 ifx_config.id,
                 vlan_if.vid,
@@ -1398,7 +1398,7 @@ async fn do_switch_port_settings_create(
     .get_results_async(conn)
     .await?;
 
-    let mut peer_by_addr: BTreeMap<IpAddr, &external::BgpPeer> =
+    let mut peer_by_addr: BTreeMap<IpAddr, &networking::BgpPeer> =
         BTreeMap::new();
 
     let mut bgp_peer_config = Vec::new();
@@ -1868,15 +1868,15 @@ async fn do_switch_port_settings_delete(
 mod test {
     use crate::db::datastore::UpdatePrecondition;
     use crate::db::pub_test_utils::TestDatabase;
-    use nexus_types::external_api::params::{
-        BgpAnnounceSetCreate, BgpConfigCreate, BgpPeerConfig,
+    use nexus_types::external_api::networking::{
+        BgpAnnounceSetCreate, BgpConfigCreate, BgpPeer, BgpPeerConfig,
         SwitchPortConfigCreate, SwitchPortGeometry, SwitchPortSettingsCreate,
     };
     use omicron_common::api::external::{
-        BgpPeer, IdentityMetadataCreateParams, ImportExportPolicy, Name,
-        NameOrId,
+        IdentityMetadataCreateParams, Name, NameOrId,
     };
     use omicron_test_utils::dev;
+    use sled_agent_types::early_networking::ImportExportPolicy;
     use std::{collections::HashMap, str::FromStr};
     use uuid::Uuid;
 

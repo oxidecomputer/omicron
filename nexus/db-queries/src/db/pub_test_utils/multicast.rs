@@ -18,10 +18,10 @@ use nexus_db_model::{
     IncompleteIpPoolResource, IncompleteVpc, IpPool, IpPoolReservationType,
     IpPoolResourceType, IpVersion,
 };
-use nexus_types::external_api::params;
-use nexus_types::external_api::shared::{IpRange, Ipv4Range};
+use nexus_types::external_api::vpc;
 use nexus_types::identity::Resource;
 use nexus_types::multicast::MulticastGroupCreate;
+use omicron_common::address::{IpRange, Ipv4Range};
 use omicron_common::api::external::{IdentityMetadataCreateParams, LookupType};
 use omicron_uuid_kinds::{GenericUuid, MulticastGroupUuid, SledUuid};
 
@@ -73,7 +73,7 @@ pub async fn create_test_setup_with_range(
     let project_id = project.id();
 
     // Create VPC for multicast groups
-    let vpc_params = params::VpcCreate {
+    let vpc_params = vpc::VpcCreate {
         identity: IdentityMetadataCreateParams {
             name: format!("{}-vpc", project_name).parse().unwrap(),
             description: format!("Test VPC for project {}", project_name),

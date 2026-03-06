@@ -6,7 +6,30 @@
 //!
 //! NOTE: Should be kept up-to-date with dbinit.sql.
 
-use diesel::{allow_tables_to_appear_in_same_query, joinable, table};
+use diesel::{allow_tables_to_appear_in_same_query, joinable};
+
+/// Shadow of `diesel::table!` that also auto-registers table metadata
+/// into the test-only `DIESEL_TABLES` list for validation.
+macro_rules! table {
+    // Variant: with primary key
+    ($table_name:ident ($($pk:tt)*) {
+        $($col_name:ident -> $col_type:ty),* $(,)?
+    }) => {
+        diesel::table! {
+            $table_name ($($pk)*) { $($col_name -> $col_type,)* }
+        }
+        $crate::__register_table!($table_name; $($col_name),*);
+    };
+    // Variant: without primary key
+    ($table_name:ident {
+        $($col_name:ident -> $col_type:ty),* $(,)?
+    }) => {
+        diesel::table! {
+            $table_name { $($col_name -> $col_type,)* }
+        }
+        $crate::__register_table!($table_name; $($col_name),*);
+    };
+}
 
 table! {
     disk (id) {
@@ -389,24 +412,6 @@ table! {
         switch_location -> Text,
         address -> Inet,
         anycast -> Bool,
-    }
-}
-
-table! {
-    global_image (id) {
-        id -> Uuid,
-        name -> Text,
-        description -> Text,
-        time_created -> Timestamptz,
-        time_modified -> Timestamptz,
-        time_deleted -> Nullable<Timestamptz>,
-        volume_id -> Uuid,
-        url -> Nullable<Text>,
-        distribution -> Text,
-        version -> Text,
-        digest -> Nullable<Text>,
-        block_size -> crate::enums::BlockSizeEnum,
-        size_bytes -> Int8,
     }
 }
 
@@ -892,7 +897,6 @@ table! {
         external_id -> Nullable<Text>,
         user_provision_type -> crate::enums::UserProvisionTypeEnum,
         display_name -> Nullable<Text>,
-        active -> Nullable<Bool>,
     }
 }
 
@@ -1415,8 +1419,6 @@ table! {
 }
 
 table! {
-    use diesel::sql_types::*;
-
     vpc_firewall_rule (id) {
         id -> Uuid,
         name -> Text,
@@ -1570,7 +1572,6 @@ table! {
     tuf_trust_root (id) {
         id -> Uuid,
         time_created -> Timestamptz,
-        time_modified -> Timestamptz,
         time_deleted -> Nullable<Timestamptz>,
         root_role -> Jsonb,
     }
@@ -1842,19 +1843,6 @@ table! {
 }
 
 table! {
-    inv_last_reconciliation_measurements
-        (inv_collection_id, sled_id, file_name)
-    {
-        inv_collection_id -> Uuid,
-        sled_id -> Uuid,
-
-        file_name -> Text,
-        path -> Text,
-        error_message -> Nullable<Text>
-    }
-}
-
-table! {
     inv_last_reconciliation_orphaned_dataset
         (inv_collection_id, sled_id, pool_id, kind, zone_name)
     {
@@ -1973,6 +1961,7 @@ table! {
         id -> Uuid,
         sled_id -> Uuid,
         total_size -> Int8,
+        health -> crate::enums::InvZpoolHealthEnum,
     }
 }
 
@@ -2059,7 +2048,6 @@ table! {
     inv_omicron_sled_config_dataset (inv_collection_id, sled_config_id, id) {
         inv_collection_id -> Uuid,
         sled_config_id -> Uuid,
-        sled_id -> Uuid,
         id -> Uuid,
 
         pool_id -> Uuid,
@@ -2076,7 +2064,6 @@ table! {
     inv_omicron_sled_config_disk (inv_collection_id, sled_config_id, id) {
         inv_collection_id -> Uuid,
         sled_config_id -> Uuid,
-        sled_id -> Uuid,
         id -> Uuid,
 
         vendor -> Text,
@@ -2182,6 +2169,7 @@ table! {
 
         subnet -> Inet,
         last_allocated_ip_subnet_offset -> Int4,
+        measurements -> crate::enums::BpSledMeasurementsEnum,
     }
 }
 
@@ -2226,12 +2214,22 @@ table! {
 }
 
 table! {
+    bp_single_measurements (blueprint_id, sled_id, image_artifact_sha256) {
+        blueprint_id -> Uuid,
+        sled_id -> Uuid,
+
+        image_artifact_sha256 -> Text,
+    }
+}
+
+allow_tables_to_appear_in_same_query!(bp_single_measurements, tuf_artifact);
+
+table! {
     bp_omicron_zone (blueprint_id, id) {
         blueprint_id -> Uuid,
         sled_id -> Uuid,
 
         id -> Uuid,
-        underlay_address -> Inet,
         zone_type -> crate::enums::ZoneTypeEnum,
 
         primary_service_ip -> Inet,
@@ -2621,6 +2619,7 @@ allow_tables_to_appear_in_same_query!(
     affinity_group_instance_membership,
     bp_omicron_zone,
     bp_target,
+    bp_single_measurements,
     rendezvous_debug_dataset,
     crucible_dataset,
     disk,

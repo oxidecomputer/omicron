@@ -13,7 +13,7 @@ use nexus_lockstep_client::types::{
 use nexus_reconfigurator_planning::blueprint_builder::BlueprintBuilder;
 use nexus_reconfigurator_planning::planner::PlannerRng;
 use nexus_types::deployment::{Blueprint, BlueprintSource};
-use nexus_types::external_api::views::SledState;
+use nexus_types::external_api::sled::SledState;
 use nexus_types::inventory::Collection;
 use omicron_test_utils::dev::poll::{CondCheckError, wait_for_condition};
 use omicron_uuid_kinds::GenericUuid;

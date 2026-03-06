@@ -15,6 +15,16 @@ macro_rules! define_enums {
             #[diesel(postgres_type(name = $postgres_name, schema = "public"))]
             pub struct $enum_name;
         )*
+
+        /// Returns a mapping from CRDB enum type name to the Diesel
+        /// `type_name` string for every enum defined in this module.
+        pub fn crdb_to_diesel_enum_type_names()
+            -> Vec<(&'static str, &'static str)>
+        {
+            vec![
+                $(($postgres_name, std::any::type_name::<$enum_name>()),)*
+            ]
+        }
     };
 }
 
@@ -34,6 +44,7 @@ define_enums! {
     BpDatasetDispositionEnum => "bp_dataset_disposition",
     BpPhysicalDiskDispositionEnum => "bp_physical_disk_disposition",
     BpSourceEnum => "bp_source",
+    BpSledMeasurementsEnum => "bp_sled_measurements",
     BpZoneDispositionEnum => "bp_zone_disposition",
     BpZoneImageSourceEnum => "bp_zone_image_source",
     CabooseWhichEnum => "caboose_which",
@@ -59,6 +70,7 @@ define_enums! {
     InvConfigReconcilerStatusKindEnum => "inv_config_reconciler_status_kind",
     InvZoneImageSourceEnum => "inv_zone_image_source",
     InvZoneManifestSourceEnum => "inv_zone_manifest_source",
+    InvZpoolHealthEnum => "inv_zpool_health",
     IpAttachStateEnum => "ip_attach_state",
     IpKindEnum => "ip_kind",
     IpPoolReservationTypeEnum => "ip_pool_reservation_type",

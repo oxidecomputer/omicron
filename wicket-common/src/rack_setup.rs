@@ -5,18 +5,8 @@
 // Copyright 2024 Oxide Computer Company
 
 use omicron_common::address;
-use omicron_common::api::external::ImportExportPolicy;
 use omicron_common::api::external::Name;
-use omicron_common::api::external::SwitchLocation;
 use omicron_common::api::internal::shared::AllowedSourceIps;
-use omicron_common::api::internal::shared::BgpConfig;
-use omicron_common::api::internal::shared::BgpPeerConfig;
-use omicron_common::api::internal::shared::LldpPortConfig;
-use omicron_common::api::internal::shared::PortFec;
-use omicron_common::api::internal::shared::PortSpeed;
-use omicron_common::api::internal::shared::RouteConfig;
-use omicron_common::api::internal::shared::TxEqConfig;
-use omicron_common::api::internal::shared::UplinkAddressConfig;
 use owo_colors::OwoColorize;
 use owo_colors::Style;
 use oxnet::IpNet;
@@ -26,6 +16,16 @@ use serde::Serialize;
 use serde::Serializer;
 use sha2::Digest;
 use sha2::Sha256;
+use sled_agent_types::early_networking::BgpConfig;
+use sled_agent_types::early_networking::BgpPeerConfig;
+use sled_agent_types::early_networking::ImportExportPolicy;
+use sled_agent_types::early_networking::LldpPortConfig;
+use sled_agent_types::early_networking::PortFec;
+use sled_agent_types::early_networking::PortSpeed;
+use sled_agent_types::early_networking::RouteConfig;
+use sled_agent_types::early_networking::SwitchLocation;
+use sled_agent_types::early_networking::TxEqConfig;
+use sled_agent_types::early_networking::UplinkAddressConfig;
 use sled_hardware_types::Baseboard;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
@@ -93,8 +93,7 @@ pub struct BootstrapSledDescription {
     pub bootstrap_ip: Option<Ipv6Addr>,
 }
 
-/// User-specified parts of
-/// [`RackNetworkConfig`](omicron_common::api::internal::shared::RackNetworkConfig).
+/// User-specified parts of `RackNetworkConfig`.
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct UserSpecifiedRackNetworkConfig {
@@ -171,13 +170,11 @@ impl UserSpecifiedRackNetworkConfig {
     }
 }
 
-/// User-specified version of [`PortConfig`].
+/// User-specified version of `PortConfig`.
 ///
-/// All of [`PortConfig`] is user-specified. But we expect the port name to
-/// be a key, rather than a field as in [`PortConfig`]. So this has all of
+/// All of `PortConfig` is user-specified. But we expect the port name to
+/// be a key, rather than a field as in `PortConfig`. So this has all of
 /// the fields other than the port name.
-///
-/// [`PortConfig`]: omicron_common::api::internal::shared::PortConfig
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct UserSpecifiedPortConfig {
@@ -199,8 +196,6 @@ pub struct UserSpecifiedPortConfig {
 /// This is similar to [`BgpPeerConfig`], except it doesn't have the sensitive
 /// `md5_auth_key` parameter, instead requiring that the user provide the key
 /// separately.
-///
-/// [`BgpPeerConfig`]: omicron_common::api::internal::shared::BgpPeerConfig
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct UserSpecifiedBgpPeerConfig {

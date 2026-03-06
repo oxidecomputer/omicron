@@ -3,7 +3,7 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use crate::deployment::PlanningReport;
-use crate::external_api::views;
+use crate::external_api::alert;
 use chrono::DateTime;
 use chrono::Utc;
 use gateway_types::component::SpType;
@@ -11,7 +11,6 @@ use iddqd::IdOrdItem;
 use iddqd::IdOrdMap;
 use iddqd::id_upcast;
 use omicron_common::api::external::Generation;
-use omicron_common::api::external::SwitchLocation;
 use omicron_uuid_kinds::AlertReceiverUuid;
 use omicron_uuid_kinds::AlertUuid;
 use omicron_uuid_kinds::BlueprintUuid;
@@ -24,6 +23,7 @@ use omicron_uuid_kinds::WebhookDeliveryUuid;
 use semver::Version;
 use serde::Deserialize;
 use serde::Serialize;
+use sled_agent_types::early_networking::SwitchLocation;
 use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::collections::VecDeque;
@@ -833,7 +833,7 @@ pub struct WebhookDeliveryFailure {
     pub delivery_id: WebhookDeliveryUuid,
     pub alert_id: AlertUuid,
     pub attempt: usize,
-    pub result: views::WebhookDeliveryAttemptResult,
+    pub result: alert::WebhookDeliveryAttemptResult,
     pub response_status: Option<u16>,
     pub response_duration: Option<chrono::TimeDelta>,
 }

@@ -451,7 +451,7 @@ mod test {
     use crate::db::pagination::Paginator;
     use crate::db::pub_test_utils::TestDatabase;
     use crate::db::raw_query_builder::expectorate_query_contents;
-    use nexus_types::external_api::params;
+    use nexus_types::external_api::alert;
     use omicron_common::api::external::IdentityMetadataCreateParams;
     use omicron_test_utils::dev;
     use omicron_uuid_kinds::AlertUuid;
@@ -469,7 +469,7 @@ mod test {
         let rx = datastore
             .webhook_rx_create(
                 opctx,
-                params::WebhookCreate {
+                alert::WebhookCreate {
                     identity: IdentityMetadataCreateParams {
                         name: "test-webhook".parse().unwrap(),
                         description: String::new(),

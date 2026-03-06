@@ -444,6 +444,7 @@ mod test {
     use crate::app::background::tasks::support_bundle::request::BundleData;
     use crate::app::support_bundles::SupportBundleQueryType;
     use http_body_util::BodyExt;
+    use illumos_utils::zpool::ZpoolHealth;
     use nexus_db_model::PhysicalDisk;
     use nexus_db_model::PhysicalDiskKind;
     use nexus_db_model::RendezvousDebugDataset;
@@ -742,6 +743,7 @@ mod test {
                     zpool_id,
                     disk_id,
                     1 << 40,
+                    ZpoolHealth::Online,
                 );
                 disks.push(Self { zpool_id, dataset_id })
             }

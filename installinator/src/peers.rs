@@ -7,6 +7,7 @@ use std::{
     fmt,
     net::{AddrParseError, IpAddr, SocketAddr},
     str::FromStr,
+    sync::Mutex,
 };
 
 use anyhow::{Result, bail};
@@ -118,6 +119,21 @@ impl PeerAddresses {
     pub(crate) fn display(&self) -> impl fmt::Display + use<> {
         self.peers().iter().join(", ")
     }
+
+    /// Returns an iterator that yields the preferred peer first (if present in
+    /// the set), then the remaining peers in BTreeSet order.
+    pub(crate) fn iter_with_preferred(
+        &self,
+        preferred: Option<PeerAddress>,
+    ) -> impl Iterator<Item = &PeerAddress> {
+        // Look up the preferred peer in the set to get a reference with the
+        // right lifetime. (If it's not in the set, the correct behavior is to
+        // skip it.)
+        let preferred_ref = preferred.and_then(|p| self.peers.get(&p));
+        preferred_ref
+            .into_iter()
+            .chain(self.peers.iter().filter(move |&p| Some(p) != preferred_ref))
+    }
 }
 
 impl FromIterator<PeerAddress> for PeerAddresses {
@@ -155,5 +171,100 @@ impl FromStr for PeerAddress {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         let address = s.parse()?;
         Ok(Self { address })
+    }
+}
+
+/// Tracks the last peer that successfully delivered an artifact.
+///
+/// Created once per install session and shared across all artifact fetches, so
+/// that a peer discovered while fetching an earlier artifact is tried first for
+/// subsequent artifacts.
+#[derive(Debug)]
+pub(crate) struct LastKnownPeer {
+    inner: Mutex<Option<PeerAddress>>,
+}
+
+impl LastKnownPeer {
+    pub(crate) fn new() -> Self {
+        Self { inner: Mutex::new(None) }
+    }
+
+    pub(crate) fn get(&self) -> Option<PeerAddress> {
+        *self.inner.lock().expect("last known peer lock poisoned")
+    }
+
+    pub(crate) fn set(&self, peer: PeerAddress) {
+        *self.inner.lock().expect("last known peer lock poisoned") = Some(peer);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::net::{Ipv6Addr, SocketAddrV6};
+
+    /// Build a peer address from a distinguishing segment. Returns
+    /// `[::n]:8000`.
+    fn peer(last_segment: u16) -> PeerAddress {
+        PeerAddress::new(SocketAddr::V6(SocketAddrV6::new(
+            Ipv6Addr::new(0, 0, 0, 0, 0, 0, 0, last_segment),
+            8000,
+            0,
+            0,
+        )))
+    }
+
+    fn addrs(ns: &[u16]) -> PeerAddresses {
+        ns.iter().map(|&n| peer(n)).collect()
+    }
+
+    /// Collect the last segment of each peer address for easy comparison.
+    fn collect_last_segment(
+        peers: &PeerAddresses,
+        preferred: Option<PeerAddress>,
+    ) -> Vec<u16> {
+        peers
+            .iter_with_preferred(preferred)
+            .map(|p| match p.address() {
+                SocketAddr::V6(a) => a.ip().segments()[7],
+                SocketAddr::V4(_) => {
+                    unreachable!("we only use IPv6 addresses in these tests")
+                }
+            })
+            .collect()
+    }
+
+    #[test]
+    fn iter_no_preferred_preserves_btree_order() {
+        let peers = addrs(&[3, 1, 2]);
+        assert_eq!(collect_last_segment(&peers, None), vec![1, 2, 3]);
+    }
+
+    #[test]
+    fn last_known_peer_preferred() {
+        let peers = addrs(&[3, 1, 2]);
+        let lkp = LastKnownPeer::new();
+
+        // Initially no preferred peer: normal BTreeSet order.
+        assert_eq!(collect_last_segment(&peers, lkp.get()), vec![1, 2, 3]);
+
+        // Simulate a successful fetch from peer ::3.
+        lkp.set(peer(3));
+        assert_eq!(collect_last_segment(&peers, lkp.get()), vec![3, 1, 2]);
+
+        // Subsequent fetch succeeds from peer ::1 instead.
+        lkp.set(peer(1));
+        assert_eq!(collect_last_segment(&peers, lkp.get()), vec![1, 2, 3]);
+    }
+
+    #[test]
+    fn last_known_peer_stale() {
+        // The remembered peer may not appear in a later discovery round.
+        let lkp = LastKnownPeer::new();
+        lkp.set(peer(1));
+
+        let new_peers = addrs(&[2, 3]);
+        // peer(1) is gone; iteration should fall back to normal order.
+        assert_eq!(collect_last_segment(&new_peers, lkp.get()), vec![2, 3]);
     }
 }
