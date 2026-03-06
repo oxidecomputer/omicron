@@ -943,7 +943,7 @@ INFO no previous MGS update found, so no action taken as part of updating bluepr
 WARN no inventory found for in-service sled, phase: do_plan_mupdate_override, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6
 WARN skipped noop image source check on sled, sled_id: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c, reason: error retrieving mupdate override information: reconfigurator-cli simulated mupdate-override error
 INFO skipped noop image source check on sled, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, reason: sled not found in inventory
-INFO skipped noop image source check on sled, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, reason: remove_mupdate_override is set in the blueprint (203fa72c-85c1-466a-8ed3-338ee029530d)
+WARN skipped noop image source check on sled, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, reason: error retrieving zone manifest: measurement manifest contained no entries
 generated blueprint 626487fa-7139-45ec-8416-902271fc730b based on parent blueprint a5a8f242-ffa5-473c-8efd-2acf2dc0b736
 blueprint source: planner with report:
 planning report:
@@ -1078,7 +1078,7 @@ WARN skipped noop image source check on sled, sled_id: 2b8f0cb3-0295-4b3c-bc58-4
 INFO performed noop zone image source checks on sled, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, num_total: 6, num_already_artifact: 0, num_eligible: 6, num_ineligible: 0
 INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, slot: a, expected_hash: 0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a
 INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, slot: b, expected_hash: 0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b
-INFO measurement may be eligible for noop image source conversion, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, new_image_source: 8a0e23157bae655fceec7376926c9758efee6511c7b7ff8355bbb49545a2257f version 1.0.0
+INFO measurement may be eligible for noop image source conversion, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, new_measurement_source: 8a0e23157bae655fceec7376926c9758efee6511c7b7ff8355bbb49545a2257f version 1.0.0
 
 INFO skipped noop image source check on sled, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, reason: remove_mupdate_override is set in the blueprint (1c0ce176-6dc8-4a90-adea-d4a8000751da)
 generated blueprint c1a0d242-9160-40f4-96ae-61f8f40a0b1b based on parent blueprint 626487fa-7139-45ec-8416-902271fc730b
@@ -1674,7 +1674,7 @@ INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noo
 INFO performed noop zone image source checks on sled, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, num_total: 6, num_already_artifact: 0, num_eligible: 6, num_ineligible: 0
 INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, slot: a, expected_hash: 0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a
 INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, slot: b, expected_hash: 0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b
-INFO measurement may be eligible for noop image source conversion, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, new_image_source: a1a34c0ca4776c27d67a2a50b231acc96ccbc2645f5e8dd8c2bc27f0eab49855 version 2.0.0
+INFO measurement may be eligible for noop image source conversion, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, new_measurement_source: a1a34c0ca4776c27d67a2a50b231acc96ccbc2645f5e8dd8c2bc27f0eab49855 version 2.0.0
 
 generated blueprint ce365dff-2cdb-4f35-a186-b15e20e1e700 based on parent blueprint afb09faf-a586-4483-9289-04d4f1d8ba23
 blueprint source: planner with report:
