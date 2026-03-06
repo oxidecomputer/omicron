@@ -105,7 +105,8 @@ pub fn retry_policy_local() -> ::backoff::ExponentialBackoff {
 /// crate.
 ///
 /// This policy makes attempts to retry under one second, but backs off
-/// significantly to avoid overloading critical services.
+/// significantly to avoid overloading critical services. It also does not set a
+/// limit on the number of retries.
 ///
 /// The base delay is set to 167ms rather than 250ms to compensate for
 /// `backon`'s additive jitter, which distributes each delay `d` over
@@ -116,6 +117,7 @@ pub fn backon_retry_policy_internal_service() -> ::backon::ExponentialBuilder {
         .with_factor(2.0)
         .with_min_delay(Duration::from_millis(167))
         .with_max_delay(Duration::from_secs(60 * 3))
+        .without_max_times()
         .with_jitter()
 }
 
