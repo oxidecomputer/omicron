@@ -858,43 +858,37 @@ pub enum Error {
 
 impl From<Error> for HttpError {
     fn from(err: Error) -> HttpError {
+        let message = InlineErrorChain::new(&err).to_string();
         match err {
             // 4xx errors
             Error::HashMismatch { .. }
             | Error::InvalidPerSledConfig { .. }
             | Error::NoConfig
             | Error::NotInConfig { .. } => {
-                HttpError::for_bad_request(None, err.to_string())
+                HttpError::for_bad_request(None, message)
             }
-            Error::NotFound { .. } => {
-                HttpError::for_not_found(None, err.to_string())
-            }
+            Error::NotFound { .. } => HttpError::for_not_found(None, message),
             Error::GenerationConfig { .. } => HttpError::for_client_error(
                 Some("CONFIG_GENERATION".to_string()),
                 dropshot::ClientErrorStatusCode::CONFLICT,
-                err.to_string(),
+                message,
             ),
             Error::GenerationPut { .. } => HttpError::for_client_error(
                 None,
                 dropshot::ClientErrorStatusCode::CONFLICT,
-                err.to_string(),
+                message,
             ),
 
             // 5xx errors: ensure the error chain is logged
             Error::Body(inner) => inner,
-            Error::NoUpdateDataset => HttpError::for_unavail(
-                None,
-                InlineErrorChain::new(&err).to_string(),
-            ),
+            Error::NoUpdateDataset => HttpError::for_unavail(None, message),
             Error::DepotCopy { .. }
             | Error::File { .. }
             | Error::Join(_)
             | Error::LedgerCommit(_)
             | Error::LedgerChannel
             | Error::CannotValidateAgainstSledConfig(_) => {
-                HttpError::for_internal_error(
-                    InlineErrorChain::new(&err).to_string(),
-                )
+                HttpError::for_internal_error(message)
             }
         }
     }
