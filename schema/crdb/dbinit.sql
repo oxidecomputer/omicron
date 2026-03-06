@@ -2206,8 +2206,8 @@ CREATE TABLE IF NOT EXISTS omicron.public.internet_gateway_ip_pool (
     time_created TIMESTAMPTZ NOT NULL,
     time_modified TIMESTAMPTZ NOT NULL,
     time_deleted TIMESTAMPTZ,
-    internet_gateway_id UUID,
-    ip_pool_id UUID
+    internet_gateway_id UUID NOT NULL,
+    ip_pool_id UUID NOT NULL
 );
 
 CREATE INDEX IF NOT EXISTS lookup_internet_gateway_ip_pool_by_igw_id ON omicron.public.internet_gateway_ip_pool (
@@ -2222,8 +2222,8 @@ CREATE TABLE IF NOT EXISTS omicron.public.internet_gateway_ip_address (
     time_created TIMESTAMPTZ NOT NULL,
     time_modified TIMESTAMPTZ NOT NULL,
     time_deleted TIMESTAMPTZ,
-    internet_gateway_id UUID,
-    address INET
+    internet_gateway_id UUID NOT NULL,
+    address INET NOT NULL
 );
 
 CREATE UNIQUE INDEX IF NOT EXISTS lookup_internet_gateway_ip_address_by_igw_id ON omicron.public.internet_gateway_ip_address (
@@ -3516,9 +3516,9 @@ CREATE UNIQUE INDEX IF NOT EXISTS lookup_loopback_address ON omicron.public.loop
 
 CREATE TABLE IF NOT EXISTS omicron.public.switch_port (
     id UUID PRIMARY KEY,
-    rack_id UUID,
+    rack_id UUID NOT NULL,
     switch_location TEXT,
-    port_name TEXT,
+    port_name TEXT NOT NULL,
     port_settings_id UUID,
 
     CONSTRAINT switch_port_rack_locaction_name_unique UNIQUE (
@@ -3951,7 +3951,7 @@ CREATE INDEX IF NOT EXISTS inv_collectionby_time_done
 CREATE TABLE IF NOT EXISTS omicron.public.inv_collection_error (
     inv_collection_id UUID NOT NULL,
     idx INT4 NOT NULL,
-    message TEXT
+    message TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS errors_by_collection
     ON omicron.public.inv_collection_error (inv_collection_id, idx);
@@ -4480,10 +4480,10 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_nvme_disk_firmware (
     -- staged firmware slot to be active on reset
     next_active_slot INT2 CHECK (next_active_slot BETWEEN 1 AND 7),
     -- slot1 is distinct in the NVMe spec in the sense that it can be read only
-    slot1_is_read_only BOOLEAN,
+    slot1_is_read_only BOOLEAN NOT NULL,
     -- the firmware version string for each NVMe slot (0 indexed), a NULL means the
     -- slot exists but is empty
-    slot_firmware_versions STRING(8)[] CHECK (array_length(slot_firmware_versions, 1) BETWEEN 1 AND 7),
+    slot_firmware_versions STRING(8)[] NOT NULL CHECK (array_length(slot_firmware_versions, 1) BETWEEN 1 AND 7),
 
     -- PK consisting of:
     -- - Which collection this was
@@ -5847,7 +5847,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.vmm (
     propolis_ip INET NOT NULL,
     propolis_port INT4 NOT NULL CHECK (propolis_port BETWEEN 0 AND 65535) DEFAULT 12400,
     state omicron.public.vmm_state NOT NULL,
-    cpu_platform omicron.public.vmm_cpu_platform
+    cpu_platform omicron.public.vmm_cpu_platform NOT NULL
 );
 
 CREATE INDEX IF NOT EXISTS lookup_vmms_by_sled_id ON omicron.public.vmm (
@@ -6027,7 +6027,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.bfd_session (
     detection_threshold INT8 NOT NULL,
     required_rx INT8 NOT NULL,
     switch TEXT NOT NULL,
-    mode  omicron.public.bfd_mode,
+    mode  omicron.public.bfd_mode NOT NULL,
 
     time_created TIMESTAMPTZ NOT NULL,
     time_modified TIMESTAMPTZ NOT NULL,
@@ -7804,7 +7804,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.multicast_group_member (
     /* Empty array means any source is allowed (ASM) */
     /* Non-empty array enables source filtering (IGMPv3/MLDv2) */
     /* The group's source_ips in API views is the union of all active members */
-    source_ips INET[] DEFAULT ARRAY[]::INET[]
+    source_ips INET[] NOT NULL DEFAULT ARRAY[]::INET[]
 );
 
 /* External Multicast Group Indexes */
@@ -8231,7 +8231,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '235.0.0', NULL)
+    (TRUE, NOW(), NOW(), '236.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;
