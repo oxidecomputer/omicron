@@ -1557,7 +1557,7 @@ pub enum AddSledError {
     DdmAdminClient(#[source] omicron_ddm_admin_client::DdmError),
     #[error("Failed to learn bootstrap ip for {0:?}")]
     NotFound(BaseboardId),
-    #[error("Failed to initialize {sled_id}: {err}")]
+    #[error("Failed to initialize {sled_id}")]
     BootstrapTcpClient {
         sled_id: Baseboard,
         #[source]
