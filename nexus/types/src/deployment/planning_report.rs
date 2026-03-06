@@ -313,14 +313,6 @@ impl PlanningNoopImageSourceStepReport {
         self.sled_measurements_already_artifact.insert(sled_id);
     }
 
-    pub fn skip_sled_measurements(
-        &mut self,
-        sled_id: SledUuid,
-        reason: PlanningNoopImageSourceSkipSledMeasurementsReason,
-    ) {
-        self.skipped_sled_measurements.insert(sled_id, reason);
-    }
-
     pub fn skip_zone(
         &mut self,
         zone_id: OmicronZoneUuid,
