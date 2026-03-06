@@ -15,8 +15,6 @@ nat_version.is_called
 nat_version.last_value
 nat_version.log_cnt
 nat_version.value
-silo_group.user_provision_type
-silo_user.user_provision_type
 subnet_pool_member.first_address
 subnet_pool_member.last_address
 switch_port.port_name
