@@ -97,21 +97,11 @@ impl NoopConvertInfo {
                 }
             };
 
-            // We can't treat a lack of measurement manifest as a hard error
-            // here. It's only an error if we're expecting to use the install
-            // dataset. We check that further down
-            let (measurement_manifest, error_message) = match inv_sled
+            let measurement_manifest = inv_sled
                 .file_source_resolver
                 .measurement_manifest
                 .boot_inventory
-                .as_ref()
-            {
-                Ok(manifest) => (
-                    Some(manifest),
-                    "Unexpected error with measurement manifest".to_owned(),
-                ),
-                Err(message) => (None, message.to_owned()),
-            };
+                .as_ref();
 
             let measurements = blueprint.current_sled_measurements(sled_id)?;
 
@@ -121,25 +111,81 @@ impl NoopConvertInfo {
                 &artifacts_by_hash,
             );
 
+            // Errors with measurements are treated differently than other
+            // parts of the sytem because in many cases we can attempt to
+            // hobble alongbut if measurements are incorrect we will not be
+            // able to do anything. This means being stricter about which
+            // errors are global sled ineligible vs just measurement ineligible
+            //
+            // NOTE: as of this commit missing measurements are technically
+            // not hard enforced but it's easier if we can establish
+            // the conditions we want in the future (and this comment should
+            // get updated later)
             match measurements {
-                // A missing manifest when we are expecting the install dataset
+                // A missing manifest when we are requiring it is a hard error
                 // is a hard error
                 NoopConvertMeasurements::Ineligible(
-                    NoopConvertMeasurementsIneligibleReason::ManifestMissing,
+                    NoopConvertMeasurementsIneligibleReason::ManifestRequiredAndMissing { message },
                 ) => {
                     sleds
                         .insert_unique(NoopConvertSledInfo {
                             sled_id,
                             status: NoopConvertSledStatus::Ineligible(
                                 NoopConvertSledIneligibleReason::ManifestError {
-                                    message: error_message,
+                                    message,
                                 },
                             ),
                        })
                         .expect("sled IDs are unique");
                     continue;
                 }
-                _ => {}
+                // If we don't have any entries in the manifest that's the same as no
+                // manifest at all
+                NoopConvertMeasurements::Ineligible(
+                    NoopConvertMeasurementsIneligibleReason::ManifestEmpty,
+                ) => {
+                    sleds
+                        .insert_unique(NoopConvertSledInfo {
+                            sled_id,
+                            status: NoopConvertSledStatus::Ineligible(
+                                NoopConvertSledIneligibleReason::ManifestError {
+                                    message: "measurement manifest contained no entries".to_string(),
+                                },
+                            ),
+                       })
+                        .expect("sled IDs are unique");
+                    continue;
+                }
+                // If there's a known issue with an artifact we won't be able to boot
+                NoopConvertMeasurements::Ineligible(
+                    NoopConvertMeasurementsIneligibleReason::ArtifactError { hash, message },
+                ) => {
+                    sleds
+                        .insert_unique(NoopConvertSledInfo {
+                            sled_id,
+                            status: NoopConvertSledStatus::Ineligible(
+                                NoopConvertSledIneligibleReason::ManifestError {
+                                    message: format!("measurement artifact {hash} has error {message}"),
+                                },
+                            ),
+                       })
+                        .expect("sled IDs are unique");
+                    continue;
+                }
+                // There's a chance we can proceed, no need to make everything globally ineligible
+                NoopConvertMeasurements::Ineligible(
+                    NoopConvertMeasurementsIneligibleReason::NotInTufRepo { .. },
+                ) => {}
+                // This is _not_ a hard error. This means the current blueprint state is
+                // `unknown` meaning we can't rely on the install dataset but can continue
+                // to update normally
+                NoopConvertMeasurements::Ineligible(
+                    NoopConvertMeasurementsIneligibleReason::FoundUnknown,
+                ) => {}
+                // Nothing to do here
+                NoopConvertMeasurements::AlreadyArtifact => {}
+                // The good case
+                NoopConvertMeasurements::Eligible(_) => {}
             }
             // Out of these, which zones' hashes (as reported in the zone
             // manifest) match the corresponding ones in the TUF repo?
@@ -832,8 +878,8 @@ pub(crate) enum NoopConvertMeasurements {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) enum NoopConvertMeasurementsIneligibleReason {
-    /// No measurement manifest was available
-    ManifestMissing,
+    /// No measurement manifest was available when needed
+    ManifestRequiredAndMissing { message: String },
     /// Measurement manifest contained no entries
     ManifestEmpty,
     /// An artifact matching one of the measurements was not found in
@@ -842,12 +888,14 @@ pub(crate) enum NoopConvertMeasurementsIneligibleReason {
     /// Current measurement state is unknown, we can't rely on the
     /// install dataset
     FoundUnknown,
+    /// Error with the artifact in the manifest
+    ArtifactError { hash: ArtifactHash, message: String },
 }
 
 impl NoopConvertMeasurements {
     fn new(
         current: BlueprintMeasurements,
-        measurement_manifest: Option<&ManifestBootInventory>,
+        measurement_manifest: Result<&ManifestBootInventory, &String>,
         artifacts_by_hash: &HashMap<ArtifactHash, &TufArtifactMeta>,
     ) -> Self {
         use NoopConvertMeasurementsIneligibleReason as IneligibleReason;
@@ -856,10 +904,12 @@ impl NoopConvertMeasurements {
             BlueprintMeasurements::InstallDataset => {
                 let mut artifacts = BTreeSet::new();
                 let measurement_manifest = match measurement_manifest {
-                    Some(m) => m,
-                    None => {
+                    Ok(m) => m,
+                    Err(message) => {
                         return Self::Ineligible(
-                            IneligibleReason::ManifestMissing,
+                            IneligibleReason::ManifestRequiredAndMissing {
+                                message: message.to_owned(),
+                            },
                         );
                     }
                 };
@@ -880,6 +930,16 @@ impl NoopConvertMeasurements {
                             },
                         );
                     }
+
+                    if let Err(message) = &artifact.status {
+                        // The artifact is somehow invalid and corrupt.
+                        return Self::Ineligible(
+                            IneligibleReason::ArtifactError {
+                                hash: artifact.expected_hash,
+                                message: message.to_owned(),
+                            },
+                        );
+                    };
                 }
                 let artifacts =
                     match BlueprintArtifactMeasurements::new(artifacts) {
@@ -933,11 +993,12 @@ impl NoopConvertMeasurements {
                 );
             }
             NoopConvertMeasurements::Ineligible(
-                NoopConvertMeasurementsIneligibleReason::ManifestMissing,
+                NoopConvertMeasurementsIneligibleReason::ManifestRequiredAndMissing { message },
             ) => {
                 info!(
                     log,
                     "measurement manifest missing when required by install dataset";
+                    "error message" => %message
                 );
             }
             NoopConvertMeasurements::Ineligible(
@@ -946,6 +1007,16 @@ impl NoopConvertMeasurements {
                 info!(
                     log,
                     "current sled measurements are in an unknown state";
+                );
+            }
+            NoopConvertMeasurements::Ineligible(
+                NoopConvertMeasurementsIneligibleReason::ArtifactError { hash, message },
+            ) => {
+                info!(
+                    log,
+                    "error with an artifact in the measurement manifest";
+                    "hash" => %hash,
+                    "message" => %message,
                 );
             }
             NoopConvertMeasurements::Ineligible(
