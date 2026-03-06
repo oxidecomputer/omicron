@@ -17,11 +17,13 @@ use crate::blueprint_builder::Operation;
 use crate::blueprint_editor::DisksEditError;
 use crate::blueprint_editor::ExternalNetworkingAllocator;
 use crate::blueprint_editor::SledEditError;
+use crate::measurements::plan_measurement_updates;
 use crate::mgs_updates::ImpossibleUpdatePolicy;
 use crate::mgs_updates::MgsUpdatePlanner;
 use crate::mgs_updates::PlannedMgsUpdates;
 use crate::mgs_updates::UpdateableBoard;
 use crate::planner::image_source::NoopConvertHostPhase2Contents;
+use crate::planner::image_source::NoopConvertMeasurements;
 use crate::planner::image_source::NoopConvertZoneStatus;
 use crate::planner::omicron_zone_placement::PlacementError;
 use iddqd::IdOrdMap;
@@ -48,10 +50,11 @@ use nexus_types::deployment::ZpoolFilter;
 use nexus_types::deployment::{
     NexusGenerationBumpWaitingOn, PlanningAddStepReport,
     PlanningCockroachdbSettingsStepReport, PlanningDecommissionStepReport,
-    PlanningExpungeStepReport, PlanningMgsUpdatesStepReport,
-    PlanningNexusGenerationBumpReport, PlanningNoopImageSourceStepReport,
-    PlanningReport, PlanningZoneUpdatesStepReport, ZoneAddWaitingOn,
-    ZoneUpdatesWaitingOn, ZoneWaitingToExpunge,
+    PlanningExpungeStepReport, PlanningMeasurementUpdatesStepReport,
+    PlanningMgsUpdatesStepReport, PlanningNexusGenerationBumpReport,
+    PlanningNoopImageSourceStepReport, PlanningReport,
+    PlanningZoneUpdatesStepReport, ZoneAddWaitingOn, ZoneUpdatesWaitingOn,
+    ZoneWaitingToExpunge,
 };
 use nexus_types::external_api::physical_disk::PhysicalDiskPolicy;
 use nexus_types::external_api::sled::SledPolicy;
@@ -264,9 +267,16 @@ impl<'a> Planner<'a> {
         let add_update_blocked_reasons =
             self.should_plan_add_or_update(&actions_by_sled)?;
 
-        // Only plan MGS-based updates updates if there are no outstanding
-        // MUPdate overrides.
-        let mgs_updates = if add_update_blocked_reasons.is_empty() {
+        // We need to finish mupdate overrides before updating measurements
+        let measurement_updates = if add_update_blocked_reasons.is_empty() {
+            self.do_plan_measurements()?
+        } else {
+            PlanningMeasurementUpdatesStepReport::BlockedAddUpdate
+        };
+
+        // Only plan MGS-based updates once we've finished updating our
+        // measurements.
+        let mgs_updates = if measurement_updates.is_empty() {
             self.do_plan_mgs_updates(&zone_safety_checks)?
         } else {
             PlanningMgsUpdatesStepReport::new()
@@ -290,6 +300,7 @@ impl<'a> Planner<'a> {
         let mut add = if add_update_blocked_reasons.is_empty()
             || add_zones_with_mupdate_override
             || target_release_generation_is_one
+            || measurement_updates.is_empty()
         {
             self.do_plan_add(&mgs_updates)?
         } else {
@@ -322,6 +333,11 @@ impl<'a> Planner<'a> {
             PlanningZoneUpdatesStepReport::waiting_on(
                 ZoneUpdatesWaitingOn::ZoneAddBlockers,
             )
+        } else if !measurement_updates.is_empty() {
+            // ... or if there are pendin measurement updates
+            PlanningZoneUpdatesStepReport::waiting_on(
+                ZoneUpdatesWaitingOn::Measurements,
+            )
         } else {
             self.do_plan_zone_updates(&mgs_updates, &zone_safety_checks)?
         };
@@ -351,6 +367,7 @@ impl<'a> Planner<'a> {
             zone_updates,
             nexus_generation_bump,
             cockroachdb_settings,
+            measurement_updates,
         })
     }
 
@@ -670,6 +687,57 @@ impl<'a> Planner<'a> {
         Ok(())
     }
 
+    fn do_plan_measurements(
+        &mut self,
+    ) -> Result<PlanningMeasurementUpdatesStepReport, Error> {
+        // The measurements are a property of the sled agent which
+        // we look up via sled_id
+        let included_sled_ids: BTreeSet<_> = self
+            .input
+            .all_sleds(SledFilter::InService)
+            .map(|(s, _)| s)
+            .collect();
+
+        // We cannot proceed with planning measurement updates until
+        // all sleds have a sled config with measurements in artifact state
+        for sled_id in &included_sled_ids {
+            let Some(inv_sled) = self.inventory.sled_agents.get(sled_id) else {
+                return Ok(PlanningMeasurementUpdatesStepReport::NoSledAgentInInventory { sled_id: *sled_id });
+            };
+            let Some(ref sled_config) = inv_sled.ledgered_sled_config else {
+                return Ok(PlanningMeasurementUpdatesStepReport::NoSledConfig { sled_id: *sled_id });
+            };
+            if sled_config.measurements.is_empty() {
+                return Ok(PlanningMeasurementUpdatesStepReport::StillInstallDataset { sled_id: *sled_id });
+            }
+        }
+
+        // Measurements reflect what we expect to be running on the
+        // system at any given time. In the course of an update
+        // we expect to be running a mixture of old and new code
+        // based on the blueprints. Running anything else means
+        // a modification happened outside of Nexus!
+        let current_artifacts = self.input.tuf_repo().description();
+        let previous_artifacts = self.input.old_repo().description();
+
+        match plan_measurement_updates(&current_artifacts, &previous_artifacts)
+        {
+            Ok(m) => {
+                let mut count = 0;
+                for sled_id in included_sled_ids {
+                    count += self
+                        .blueprint
+                        .sled_set_measurements(sled_id, m.clone())?;
+                }
+
+                Ok(PlanningMeasurementUpdatesStepReport::Modified { count })
+            }
+            Err(_) => {
+                Ok(PlanningMeasurementUpdatesStepReport::EmptyMeasurements)
+            }
+        }
+    }
+
     fn do_plan_noop_image_source(
         &mut self,
         noop_info: NoopConvertInfo,
@@ -703,7 +771,15 @@ impl<'a> Planner<'a> {
                     false
                 };
 
-            if skipped_zones && skipped_host_phase_2 {
+            let skipped_measurements =
+                if eligible.measurements.is_already_artifact() {
+                    report.sled_measurements_already_artifact(sled.sled_id);
+                    true
+                } else {
+                    false
+                };
+
+            if skipped_zones && skipped_host_phase_2 && skipped_measurements {
                 // Nothing to do, continue to the next sled.
                 continue;
             }
@@ -711,6 +787,7 @@ impl<'a> Planner<'a> {
             if zone_counts.num_eligible > 0
                 || eligible.host_phase_2.slot_a.is_eligible()
                 || eligible.host_phase_2.slot_b.is_eligible()
+                || eligible.measurements.is_eligible()
             {
                 report.converted(
                     sled.sled_id,
@@ -718,6 +795,26 @@ impl<'a> Planner<'a> {
                     zone_counts.num_install_dataset(),
                     eligible.host_phase_2.slot_a.is_eligible(),
                     eligible.host_phase_2.slot_b.is_eligible(),
+                    eligible.measurements.is_eligible(),
+                );
+            }
+
+            match &eligible.measurements {
+                NoopConvertMeasurements::Eligible(contents) => {
+                    self.blueprint.sled_set_measurements(
+                        sled.sled_id,
+                        contents.clone(),
+                    )?;
+                }
+                NoopConvertMeasurements::AlreadyArtifact { .. }
+                | NoopConvertMeasurements::Ineligible(_) => {}
+            }
+
+            if eligible.measurements.is_eligible() {
+                self.blueprint.record_operation(
+                    Operation::SledNoopMeasurementsUpdated {
+                        sled_id: sled.sled_id,
+                    },
                 );
             }
 

@@ -13,11 +13,14 @@ use nexus_reconfigurator_planning::blueprint_editor::ExternalNetworkingAllocator
 use nexus_reconfigurator_simulation::BlueprintId;
 use nexus_reconfigurator_simulation::CollectionId;
 use nexus_types::deployment::Blueprint;
+use nexus_types::deployment::BlueprintArtifactMeasurements;
 use nexus_types::deployment::BlueprintArtifactVersion;
 use nexus_types::deployment::BlueprintDatasetDisposition;
 use nexus_types::deployment::BlueprintDiffSummary;
 use nexus_types::deployment::BlueprintExpungedZoneAccessReason;
+use nexus_types::deployment::BlueprintMeasurements;
 use nexus_types::deployment::BlueprintPhysicalDiskDisposition;
+use nexus_types::deployment::BlueprintSingleMeasurement;
 use nexus_types::deployment::BlueprintSource;
 use nexus_types::deployment::BlueprintZoneConfig;
 use nexus_types::deployment::BlueprintZoneDisposition;
@@ -3027,6 +3030,46 @@ macro_rules! fake_zone_artifact {
     };
 }
 
+const MEASUREMENT_HASH1: ArtifactHash = ArtifactHash([0xaa; 32]);
+const MEASUREMENT_HASH2: ArtifactHash = ArtifactHash([0xbb; 32]);
+// Always include this hash for test purposes
+const MEASUREMENT_HASH_ALWAYS: ArtifactHash = ArtifactHash([0xcc; 32]);
+
+fn create_measurement_artifacts_at_version(
+    version: &ArtifactVersion,
+    measurement_hash: ArtifactHash,
+) -> Vec<TufArtifactMeta> {
+    let zone_version = ArtifactVersion::new_static("0.0.1").unwrap();
+    let zones = create_zone_artifacts_at_version(&zone_version);
+
+    let corpus = vec![
+        TufArtifactMeta {
+            id: ArtifactId {
+                name: "measurement_corpus2".to_string(),
+                version: version.clone(),
+                kind: ArtifactKind::MEASUREMENT_CORPUS,
+            },
+            hash: MEASUREMENT_HASH_ALWAYS,
+            size: 0,
+            board: None,
+            sign: None,
+        },
+        TufArtifactMeta {
+            id: ArtifactId {
+                name: "measurement_corpus".to_string(),
+                version: version.clone(),
+                kind: ArtifactKind::MEASUREMENT_CORPUS,
+            },
+            hash: measurement_hash,
+            size: 0,
+            board: None,
+            sign: None,
+        },
+    ];
+
+    zones.into_iter().chain(corpus).collect()
+}
+
 fn create_zone_artifacts_at_version(
     version: &ArtifactVersion,
 ) -> Vec<TufArtifactMeta> {
@@ -4573,6 +4616,9 @@ fn test_update_all_zones() {
                 && summary.total_zones_modified() == 0
                 && summary.before.nexus_generation
                     == summary.after.nexus_generation
+                // We update all measurements before touching zones
+                && summary.total_measurements_added() == 0
+                && summary.total_measurements_removed() == 0
             {
                 assert!(
                     blueprint
@@ -4588,6 +4634,513 @@ fn test_update_all_zones() {
                 );
                 println!("planning converged after {i} iterations");
 
+                logctx.cleanup_successful();
+                return;
+            }
+        }
+        parent = blueprint;
+    }
+}
+
+#[test]
+fn test_simple_measurements() {
+    static TEST_NAME: &str = "simple_measurement";
+    let logctx = test_setup_log(TEST_NAME);
+
+    // Use our example system.
+    let mut sim = ReconfiguratorCliTestState::new(TEST_NAME, &logctx.log);
+    sim.load_example_customized(|builder| builder.with_target_release_0_0_1())
+        .expect("loaded example system");
+    let blueprint1 = sim.assert_latest_blueprint_is_blippy_clean();
+
+    //
+    //
+    // Manually specify a TUF repo with fake images for all zones.
+    // Only the name and kind of the artifacts matter.
+    let version = ArtifactVersion::new_static("2.0.0-freeform")
+        .expect("can't parse artifact version");
+    let fake_hash = ArtifactHash([0; 32]);
+    // We use generation 2 to represent the first generation with a TUF repo
+    // attached.
+    let description = TargetReleaseDescription::TufRepo(TufRepoDescription {
+        repo: TufRepoMeta {
+            hash: fake_hash,
+            targets_role_version: 0,
+            valid_until: Utc::now(),
+            system_version: Version::new(1, 0, 0),
+            file_name: String::from(""),
+        },
+        artifacts: create_measurement_artifacts_at_version(
+            &version,
+            MEASUREMENT_HASH1,
+        ),
+    });
+
+    sim.change_description("set new target release", |desc| {
+        desc.set_target_release(description);
+        Ok(())
+    })
+    .unwrap();
+
+    /// This should converge after one
+    const EXP_PLANNING_ITERATIONS: usize = 3;
+
+    /// Planning must not take more than this number of iterations.
+    const MAX_PLANNING_ITERATIONS: usize = 100;
+    assert!(EXP_PLANNING_ITERATIONS < MAX_PLANNING_ITERATIONS);
+
+    let mut parent = blueprint1;
+    for i in 2..=MAX_PLANNING_ITERATIONS {
+        sim_update_collection_from_blueprint(&mut sim, &parent);
+
+        let blueprint = sim.run_planner().expect("planning succeeded");
+        let BlueprintSource::Planner(_report) = &blueprint.source else {
+            panic!("unexpected source: {:?}", blueprint.source);
+        };
+        {
+            let summary = &blueprint.diff_since_blueprint(&parent);
+
+            if summary.total_measurements_added() == 0
+                && summary.total_measurements_removed() == 0
+            {
+                assert_eq!(
+                    i, EXP_PLANNING_ITERATIONS,
+                    "expected {EXP_PLANNING_ITERATIONS} iterations but converged in {i}"
+                );
+                let (_, sled_config) =
+                    blueprint.sleds.first_key_value().unwrap();
+                // We start at 2, our measurement change puts us to 3 and then
+                // the final step to check for nothing added nohting removed should be
+                // 4 because we plan a zone update
+                assert_eq!(
+                    sled_config.sled_agent_generation,
+                    Generation::from_u32(4)
+                );
+                println!("converted after {i} iterations");
+                logctx.cleanup_successful();
+                return;
+            }
+        }
+        parent = blueprint;
+    }
+    panic!("did not converge after {MAX_PLANNING_ITERATIONS} iterations");
+}
+
+// This test case was based on an error I hit while developing!
+#[test]
+fn test_subset_measurements() {
+    static TEST_NAME: &str = "subset_measurement";
+    let logctx = test_setup_log(TEST_NAME);
+
+    // Use our example system.
+    let mut sim = ReconfiguratorCliTestState::new(TEST_NAME, &logctx.log);
+    sim.load_example_customized(|builder| builder.with_target_release_0_0_1())
+        .expect("loaded example system");
+    let blueprint1 = sim.assert_latest_blueprint_is_blippy_clean();
+
+    // Manually specify a TUF repo with fake images for all zones.
+    // Only the name and kind of the artifacts matter.
+    let version = ArtifactVersion::new_static("2.0.0-freeform")
+        .expect("can't parse artifact version");
+    let fake_hash = ArtifactHash([0; 32]);
+    // We use generation 2 to represent the first generation with a TUF repo
+    // attached.
+    let description = TargetReleaseDescription::TufRepo(TufRepoDescription {
+        repo: TufRepoMeta {
+            hash: fake_hash,
+            targets_role_version: 0,
+            valid_until: Utc::now(),
+            system_version: Version::new(1, 0, 0),
+            file_name: String::from(""),
+        },
+        artifacts: create_measurement_artifacts_at_version(
+            &version,
+            MEASUREMENT_HASH1,
+        ),
+    });
+
+    let mut artifacts = BTreeSet::new();
+
+    // From our initial repo
+    artifacts.insert(BlueprintSingleMeasurement {
+        version: BlueprintArtifactVersion::Available {
+            version: ArtifactVersion::new_static("1.0.0").unwrap(),
+        },
+        hash: ArtifactHash(hex_literal::hex!(
+            "8a0e23157bae655fceec7376926c9758efee6511c7b7ff8355bbb49545a2257f"
+        )),
+    });
+    // From our new repo
+    artifacts.insert(BlueprintSingleMeasurement {
+        version: BlueprintArtifactVersion::Available {
+            version: ArtifactVersion::new_static("2.0.0-freeform").unwrap(),
+        },
+        hash: MEASUREMENT_HASH1,
+    });
+    artifacts.insert(BlueprintSingleMeasurement {
+        version: BlueprintArtifactVersion::Available {
+            version: ArtifactVersion::new_static("2.0.0-freeform").unwrap(),
+        },
+        hash: MEASUREMENT_HASH_ALWAYS,
+    });
+
+    let artifacts = BlueprintArtifactMeasurements::new(artifacts).unwrap();
+
+    let all_measurements = BlueprintMeasurements::Artifacts { artifacts };
+
+    sim.change_description("set new target release", |desc| {
+        desc.set_target_release(description);
+        Ok(())
+    })
+    .unwrap();
+
+    /// This should converge after one
+    const EXP_PLANNING_ITERATIONS: usize = 3;
+
+    /// Planning must not take more than this number of iterations.
+    const MAX_PLANNING_ITERATIONS: usize = 100;
+    assert!(EXP_PLANNING_ITERATIONS < MAX_PLANNING_ITERATIONS);
+
+    let mut timeout = true;
+    let mut parent = blueprint1;
+    for i in 2..=MAX_PLANNING_ITERATIONS {
+        sim_update_collection_from_blueprint(&mut sim, &parent);
+
+        let blueprint = sim.run_planner().expect("planning succeeded");
+        let BlueprintSource::Planner(_report) = &blueprint.source else {
+            panic!("unexpected source: {:?}", blueprint.source);
+        };
+        {
+            let summary = &blueprint.diff_since_blueprint(&parent);
+            if summary.total_measurements_added() == 0
+                && summary.total_measurements_removed() == 0
+            {
+                assert_eq!(
+                    i, EXP_PLANNING_ITERATIONS,
+                    "expected {EXP_PLANNING_ITERATIONS} iterations but converged in {i}"
+                );
+
+                for (_, s) in blueprint.active_sled_configs() {
+                    if s.measurements != all_measurements {
+                        panic!(
+                            "measurement differences expected:\n{} found:\n{}",
+                            all_measurements, s.measurements
+                        )
+                    }
+                }
+                timeout = false;
+                println!("converted after {i} iterations");
+                break;
+            }
+        }
+        parent = blueprint;
+    }
+    if timeout {
+        panic!("did not converge after {MAX_PLANNING_ITERATIONS} iterations");
+    }
+
+    let blueprint1 = sim.assert_latest_blueprint_is_blippy_clean();
+
+    // Manually specify a TUF repo with fake images for all zones.
+    // Only the name and kind of the artifacts matter.
+    let version = ArtifactVersion::new_static("3.0.0-freeform")
+        .expect("can't parse artifact version");
+    let fake_hash = ArtifactHash([1; 32]);
+    // We use generation 2 to represent the first generation with a TUF repo
+    // attached.
+    let description = TargetReleaseDescription::TufRepo(TufRepoDescription {
+        repo: TufRepoMeta {
+            hash: fake_hash,
+            targets_role_version: 0,
+            valid_until: Utc::now(),
+            system_version: Version::new(1, 0, 0),
+            file_name: String::from(""),
+        },
+        artifacts: create_zone_artifacts_at_version(&version)
+            .into_iter()
+            .chain(vec![TufArtifactMeta {
+                id: ArtifactId {
+                    name: "measurement_corpus2".to_string(),
+                    version: version.clone(),
+                    kind: ArtifactKind::MEASUREMENT_CORPUS,
+                },
+                hash: MEASUREMENT_HASH_ALWAYS,
+                size: 0,
+                board: None,
+                sign: None,
+            }])
+            .collect(),
+    });
+
+    sim.change_description("set new target release again", |desc| {
+        desc.set_target_release(description);
+        Ok(())
+    })
+    .unwrap();
+
+    let mut artifacts = BTreeSet::new();
+    // From our previous repo
+    artifacts.insert(BlueprintSingleMeasurement {
+        version: BlueprintArtifactVersion::Available {
+            version: ArtifactVersion::new_static("2.0.0-freeform").unwrap(),
+        },
+        hash: MEASUREMENT_HASH1,
+    });
+    artifacts.insert(BlueprintSingleMeasurement {
+        version: BlueprintArtifactVersion::Available {
+            version: ArtifactVersion::new_static("2.0.0-freeform").unwrap(),
+        },
+        hash: MEASUREMENT_HASH_ALWAYS,
+    });
+
+    // From our new repo
+    artifacts.insert(BlueprintSingleMeasurement {
+        version: BlueprintArtifactVersion::Available {
+            version: ArtifactVersion::new_static("3.0.0-freeform").unwrap(),
+        },
+        hash: MEASUREMENT_HASH_ALWAYS,
+    });
+
+    let artifacts = BlueprintArtifactMeasurements::new(artifacts).unwrap();
+
+    let all_measurements = BlueprintMeasurements::Artifacts { artifacts };
+
+    let mut parent = blueprint1;
+    for i in 2..=MAX_PLANNING_ITERATIONS {
+        sim_update_collection_from_blueprint(&mut sim, &parent);
+
+        let blueprint = sim.run_planner().expect("planning succeeded");
+        let BlueprintSource::Planner(_report) = &blueprint.source else {
+            panic!("unexpected source: {:?}", blueprint.source);
+        };
+        {
+            let summary = &blueprint.diff_since_blueprint(&parent);
+            if summary.total_measurements_added() == 0
+                && summary.total_measurements_removed() == 0
+            {
+                assert_eq!(
+                    i, EXP_PLANNING_ITERATIONS,
+                    "expected {EXP_PLANNING_ITERATIONS} iterations but converged in {i}"
+                );
+                println!("converted after {i} iterations");
+                for (_, s) in blueprint.active_sled_configs() {
+                    if s.measurements != all_measurements {
+                        panic!(
+                            "measurement differences expected:\n{} found:\n{}",
+                            all_measurements, s.measurements
+                        )
+                    }
+                }
+                logctx.cleanup_successful();
+                return;
+            }
+        }
+        parent = blueprint;
+    }
+
+    panic!("did not converge after {MAX_PLANNING_ITERATIONS} iterations");
+}
+
+#[test]
+fn test_multiple_measurements() {
+    static TEST_NAME: &str = "multiple_measurement";
+    let logctx = test_setup_log(TEST_NAME);
+
+    // Use our example system.
+    let mut sim = ReconfiguratorCliTestState::new(TEST_NAME, &logctx.log);
+    sim.load_example_customized(|builder| builder.with_target_release_0_0_1())
+        .expect("loaded example system");
+    let blueprint1 = sim.assert_latest_blueprint_is_blippy_clean();
+
+    // Manually specify a TUF repo with fake images for all zones.
+    // Only the name and kind of the artifacts matter.
+    let version = ArtifactVersion::new_static("2.0.0-freeform")
+        .expect("can't parse artifact version");
+    let fake_hash = ArtifactHash([0; 32]);
+    // We use generation 2 to represent the first generation with a TUF repo
+    // attached.
+    let description = TargetReleaseDescription::TufRepo(TufRepoDescription {
+        repo: TufRepoMeta {
+            hash: fake_hash,
+            targets_role_version: 0,
+            valid_until: Utc::now(),
+            system_version: Version::new(1, 0, 0),
+            file_name: String::from(""),
+        },
+        artifacts: create_measurement_artifacts_at_version(
+            &version,
+            MEASUREMENT_HASH1,
+        ),
+    });
+
+    let mut artifacts = BTreeSet::new();
+
+    // From our initial repo
+    artifacts.insert(BlueprintSingleMeasurement {
+        version: BlueprintArtifactVersion::Available {
+            version: ArtifactVersion::new_static("1.0.0").unwrap(),
+        },
+        hash: ArtifactHash(hex_literal::hex!(
+            "8a0e23157bae655fceec7376926c9758efee6511c7b7ff8355bbb49545a2257f"
+        )),
+    });
+    // From our new repo
+    artifacts.insert(BlueprintSingleMeasurement {
+        version: BlueprintArtifactVersion::Available {
+            version: ArtifactVersion::new_static("2.0.0-freeform").unwrap(),
+        },
+        hash: MEASUREMENT_HASH1,
+    });
+    artifacts.insert(BlueprintSingleMeasurement {
+        version: BlueprintArtifactVersion::Available {
+            version: ArtifactVersion::new_static("2.0.0-freeform").unwrap(),
+        },
+        hash: MEASUREMENT_HASH_ALWAYS,
+    });
+
+    let artifacts = BlueprintArtifactMeasurements::new(artifacts).unwrap();
+
+    let all_measurements = BlueprintMeasurements::Artifacts { artifacts };
+
+    sim.change_description("set new target release", |desc| {
+        desc.set_target_release(description);
+        Ok(())
+    })
+    .unwrap();
+
+    /// This should converge after one
+    const EXP_PLANNING_ITERATIONS: usize = 3;
+
+    /// Planning must not take more than this number of iterations.
+    const MAX_PLANNING_ITERATIONS: usize = 100;
+    assert!(EXP_PLANNING_ITERATIONS < MAX_PLANNING_ITERATIONS);
+
+    let mut timeout = true;
+    let mut parent = blueprint1;
+    for i in 2..=MAX_PLANNING_ITERATIONS {
+        sim_update_collection_from_blueprint(&mut sim, &parent);
+
+        let blueprint = sim.run_planner().expect("planning succeeded");
+        let BlueprintSource::Planner(_report) = &blueprint.source else {
+            panic!("unexpected source: {:?}", blueprint.source);
+        };
+        {
+            let summary = &blueprint.diff_since_blueprint(&parent);
+            if summary.total_measurements_added() == 0
+                && summary.total_measurements_removed() == 0
+            {
+                assert_eq!(
+                    i, EXP_PLANNING_ITERATIONS,
+                    "expected {EXP_PLANNING_ITERATIONS} iterations but converged in {i}"
+                );
+
+                for (_, s) in blueprint.active_sled_configs() {
+                    if s.measurements != all_measurements {
+                        panic!(
+                            "measurement differences expected:\n{} found:\n{}",
+                            all_measurements, s.measurements
+                        )
+                    }
+                }
+                timeout = false;
+                println!("converted after {i} iterations");
+                break;
+            }
+        }
+        parent = blueprint;
+    }
+    if timeout {
+        panic!("did not converge after {MAX_PLANNING_ITERATIONS} iterations");
+    }
+
+    let blueprint1 = sim.assert_latest_blueprint_is_blippy_clean();
+
+    // Manually specify a TUF repo with fake images for all zones.
+    // Only the name and kind of the artifacts matter.
+    let version = ArtifactVersion::new_static("3.0.0-freeform")
+        .expect("can't parse artifact version");
+    let fake_hash = ArtifactHash([1; 32]);
+    // We use generation 2 to represent the first generation with a TUF repo
+    // attached.
+    let description = TargetReleaseDescription::TufRepo(TufRepoDescription {
+        repo: TufRepoMeta {
+            hash: fake_hash,
+            targets_role_version: 0,
+            valid_until: Utc::now(),
+            system_version: Version::new(1, 0, 0),
+            file_name: String::from(""),
+        },
+        artifacts: create_measurement_artifacts_at_version(
+            &version,
+            MEASUREMENT_HASH2,
+        ),
+    });
+
+    sim.change_description("set new target release again", |desc| {
+        desc.set_target_release(description);
+        Ok(())
+    })
+    .unwrap();
+
+    let mut artifacts = BTreeSet::new();
+    // From our previous repo
+    artifacts.insert(BlueprintSingleMeasurement {
+        version: BlueprintArtifactVersion::Available {
+            version: ArtifactVersion::new_static("2.0.0-freeform").unwrap(),
+        },
+        hash: MEASUREMENT_HASH1,
+    });
+    artifacts.insert(BlueprintSingleMeasurement {
+        version: BlueprintArtifactVersion::Available {
+            version: ArtifactVersion::new_static("2.0.0-freeform").unwrap(),
+        },
+        hash: MEASUREMENT_HASH_ALWAYS,
+    });
+
+    // From our new repo
+    artifacts.insert(BlueprintSingleMeasurement {
+        version: BlueprintArtifactVersion::Available {
+            version: ArtifactVersion::new_static("3.0.0-freeform").unwrap(),
+        },
+        hash: MEASUREMENT_HASH2,
+    });
+    artifacts.insert(BlueprintSingleMeasurement {
+        version: BlueprintArtifactVersion::Available {
+            version: ArtifactVersion::new_static("3.0.0-freeform").unwrap(),
+        },
+        hash: MEASUREMENT_HASH_ALWAYS,
+    });
+
+    let artifacts = BlueprintArtifactMeasurements::new(artifacts).unwrap();
+
+    let all_measurements = BlueprintMeasurements::Artifacts { artifacts };
+
+    let mut parent = blueprint1;
+    for i in 2..=MAX_PLANNING_ITERATIONS {
+        sim_update_collection_from_blueprint(&mut sim, &parent);
+
+        let blueprint = sim.run_planner().expect("planning succeeded");
+        let BlueprintSource::Planner(_report) = &blueprint.source else {
+            panic!("unexpected source: {:?}", blueprint.source);
+        };
+        {
+            let summary = &blueprint.diff_since_blueprint(&parent);
+            if summary.total_measurements_added() == 0
+                && summary.total_measurements_removed() == 0
+            {
+                assert_eq!(
+                    i, EXP_PLANNING_ITERATIONS,
+                    "expected {EXP_PLANNING_ITERATIONS} iterations but converged in {i}"
+                );
+                println!("converted after {i} iterations");
+                for (_, s) in blueprint.active_sled_configs() {
+                    if s.measurements != all_measurements {
+                        panic!(
+                            "measurement differences expected:\n{} found:\n{}",
+                            all_measurements, s.measurements
+                        )
+                    }
+                }
                 logctx.cleanup_successful();
                 return;
             }
