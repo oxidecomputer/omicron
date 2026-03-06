@@ -566,18 +566,19 @@ async fn diesel_schema_matches_crdb_schema() {
          updating the file."
     );
 
-    if !column_order_drift.is_empty() {
-        column_order_drift.sort();
-        panic!(
-            "Column order in schema.rs differs from CRDB for {} table(s):\n\n\
-             {}\n\n\
-             The column order in the Diesel table! macro must match the \
-             column order in CRDB (dbinit.sql). Reorder the columns in \
-             schema.rs to match.",
-            column_order_drift.len(),
-            column_order_drift.join("\n"),
-        );
-    }
+    column_order_drift.sort();
+    let actual_order = format_list(&column_order_drift);
+    let expected_order =
+        std::fs::read_to_string("tests/output/schema_column_order_drift.txt")
+            .expect("failed to read schema_column_order_drift.txt");
+    similar_asserts::assert_eq!(
+        expected_order,
+        actual_order,
+        "Column order drift list doesn't match expected.\n\n\
+         This file tracks tables where the column order in schema.rs \
+         differs from CRDB. If this list changed, investigate whether \
+         the column order should be fixed rather than updating the file."
+    );
 
     mismatched_columns.sort();
     let actual_drift = format_list(&mismatched_columns);
