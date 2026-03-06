@@ -3067,7 +3067,7 @@ fn create_measurement_artifacts_at_version(
         },
     ];
 
-    zones.into_iter().chain(corpus.into_iter()).collect()
+    zones.into_iter().chain(corpus).collect()
 }
 
 fn create_zone_artifacts_at_version(
