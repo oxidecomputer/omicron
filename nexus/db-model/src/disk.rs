@@ -52,8 +52,11 @@ pub struct Disk {
     pub project_id: Uuid,
 
     /// runtime state of the Disk
-    #[diesel(embed)]
-    pub runtime_state: DiskRuntimeState,
+    pub disk_state: String,
+    pub attach_instance_id: Option<Uuid>,
+    /// generation number for this state
+    #[diesel(column_name = state_generation)]
+    pub state_generation: Generation,
 
     /// The PCI slot (within the bank of slots reserved to disks) to which this
     /// disk should be attached if its attached instance is started, or None
@@ -64,6 +67,10 @@ pub struct Disk {
     /// "main" disk struct and not the runtime state (even though the attachment
     /// state and slot assignment will often change together).
     pub slot: Option<SqlU8>,
+
+    /// timestamp for this information
+    #[diesel(column_name = time_state_updated)]
+    pub time_state_updated: DateTime<Utc>,
 
     /// size of the Disk
     #[diesel(column_name = size_bytes)]
@@ -96,8 +103,11 @@ impl Disk {
             identity,
             rcgen: external::Generation::new().into(),
             project_id,
-            runtime_state: runtime_initial,
+            disk_state: runtime_initial.disk_state,
+            attach_instance_id: runtime_initial.attach_instance_id,
+            state_generation: runtime_initial.generation,
             slot: None,
+            time_state_updated: runtime_initial.time_updated,
             size: params.size.into(),
             block_size,
             disk_type,
@@ -105,11 +115,22 @@ impl Disk {
     }
 
     pub fn state(&self) -> DiskState {
-        self.runtime_state.state()
+        DiskState::new(
+            external::DiskState::try_from((
+                self.disk_state.as_str(),
+                self.attach_instance_id,
+            ))
+            .unwrap(),
+        )
     }
 
     pub fn runtime(&self) -> DiskRuntimeState {
-        self.runtime_state.clone()
+        DiskRuntimeState {
+            disk_state: self.disk_state.clone(),
+            attach_instance_id: self.attach_instance_id,
+            generation: self.state_generation,
+            time_updated: self.time_state_updated,
+        }
     }
 
     pub fn id(&self) -> Uuid {
