@@ -519,13 +519,6 @@ impl SledEditor {
         Ok(self.zones.set_zone_image_source(zone_id, image_source)?)
     }
 
-    pub fn measurements_set_install_dataset(
-        &mut self,
-    ) -> BlueprintMeasurements {
-        self.measurements
-            .set_measurements(BlueprintMeasurements::InstallDataset)
-    }
-
     pub fn set_measurements(
         &mut self,
         measurements: BlueprintMeasurements,
@@ -681,7 +674,8 @@ impl SledEditor {
                 // we are mupdating to will be correct as far as measurements
                 // goes.
                 //
-                let prev_measurements = self.measurements_set_install_dataset();
+                let prev_measurements = self
+                    .set_measurements(BlueprintMeasurements::InstallDataset);
 
                 Ok(EnsureMupdateOverrideAction::BpSetOverride {
                     inv_override: inv_override.mupdate_override_id,
