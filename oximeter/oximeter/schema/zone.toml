@@ -1,0 +1,61 @@
+format_version = 1
+
+[target]
+name = "zone"
+description = "Metrics for a host zone"
+authz_scope = "fleet"
+
+versions = [
+    { version = 1, fields = [ "rack_id", "sled_id", "sled_model", "sled_revision", "sled_serial" ] },
+]
+
+[fields.rack_id]
+type = "uuid"
+description = "ID for the rack"
+
+[fields.sled_id]
+type = "uuid"
+description = "ID for the sled"
+
+[fields.sled_model]
+type = "string"
+description = "Model number of the sled"
+
+[fields.sled_revision]
+type = "u32"
+description = "Revision number of the sled"
+
+[fields.sled_serial]
+type = "string"
+description = "Serial number of the sled"
+
+[fields.zone_name]
+type = "string"
+description = "ID of the host zone"
+
+[[metrics]]
+name = "cpu_nsec_user"
+description = "Cumulative CPU nanoseconds spent in user mode"
+units = "nanoseconds"
+datum_type = "cumulative_u64"
+versions = [
+    { added_in = 1, fields = [ "zone_name" ] }
+]
+
+[[metrics]]
+name = "cpu_nsec_sys"
+description = "Cumulative CPU nanoseconds spent in sys mode"
+units = "nanoseconds"
+datum_type = "cumulative_u64"
+versions = [
+    { added_in = 1, fields = [ "zone_name" ] }
+]
+
+[[metrics]]
+name = "cpu_nsec_waitrq"
+description = "Cumulative nanoseconds spent waiting in the run queue"
+units = "nanoseconds"
+datum_type = "cumulative_u64"
+versions = [
+    { added_in = 1, fields = [ "zone_name" ] }
+]
