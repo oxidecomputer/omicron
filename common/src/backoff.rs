@@ -113,16 +113,20 @@ pub fn retry_policy_local() -> ::backoff::ExponentialBackoff {
 /// `[d, 2d)` (mean = 1.5d). With a 167ms base, the mean first retry
 /// delay is ~250ms.
 pub fn backon_retry_policy_internal_service() -> ::backon::ExponentialBuilder {
-    ::backon::ExponentialBuilder::default()
-        .with_factor(2.0)
+    backon_builder()
         .with_min_delay(Duration::from_millis(167))
         .with_max_delay(Duration::from_secs(60 * 3))
-        .without_max_times()
-        .with_jitter()
 }
 
 fn backoff_builder() -> ::backoff::ExponentialBackoffBuilder {
     let mut builder = ::backoff::ExponentialBackoffBuilder::new();
     builder.with_multiplier(2.0).with_max_elapsed_time(None);
     builder
+}
+
+fn backon_builder() -> ::backon::ExponentialBuilder {
+    ::backon::ExponentialBuilder::default()
+        .with_factor(2.0)
+        .without_max_times()
+        .with_jitter()
 }
