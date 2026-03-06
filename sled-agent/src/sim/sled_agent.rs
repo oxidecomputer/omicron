@@ -221,7 +221,7 @@ impl SledAgent {
         let ncpus = v1_spec.board.cpus;
         if ncpus > 16 {
             return Err(Error::internal_error(
-                &"could not allocate an instance: ran out of CPUs!",
+                "could not allocate an instance: ran out of CPUs!",
             ));
         };
 
