@@ -35,3 +35,13 @@ pub struct BfdSessionEnable {
     /// Select either single-hop (RFC 5881) or multi-hop (RFC 5883)
     pub mode: BfdMode,
 }
+
+/// Information needed to disable a BFD session
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
+pub struct BfdSessionDisable {
+    /// Address of the remote peer to disable a BFD session for.
+    pub remote: IpAddr,
+
+    /// The switch to enable this session on.
+    pub switch: SwitchSlot,
+}

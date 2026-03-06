@@ -1032,7 +1032,7 @@ pub static DEMO_BFD_ENABLE: LazyLock<networking::BfdSessionEnable> =
 pub static DEMO_BFD_DISABLE: LazyLock<networking::BfdSessionDisable> =
     LazyLock::new(|| networking::BfdSessionDisable {
         remote: "10.0.0.1".parse().unwrap(),
-        switch: "switch0".parse().unwrap(),
+        switch: SwitchSlot::Switch0,
     });
 
 // Project Images

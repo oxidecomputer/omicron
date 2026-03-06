@@ -247,7 +247,6 @@ pub mod networking {
     pub use crate::v2025_11_20_00::networking::AddressLotCreate;
     pub use crate::v2025_11_20_00::networking::AddressLotSelector;
     pub use crate::v2025_11_20_00::networking::AggregateBgpMessageHistory;
-    pub use crate::v2025_11_20_00::networking::BfdSessionDisable;
     pub use crate::v2025_11_20_00::networking::BgpAnnounceListSelector;
     pub use crate::v2025_11_20_00::networking::BgpAnnounceSet;
     pub use crate::v2025_11_20_00::networking::BgpAnnounceSetCreate;
@@ -292,6 +291,7 @@ pub mod networking {
     pub use crate::v2026_02_13_01::networking::SwitchPortSettingsCreate;
 
     pub use crate::v2026_03_06_01::networking::BfdSessionEnable;
+    pub use crate::v2026_03_06_01::networking::BfdSessionDisable;
 }
 
 pub mod oxql {

@@ -18,7 +18,6 @@ use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::{
     CreateResult, DeleteResult, ListResultVec,
 };
-use sled_agent_types::early_networking::SwitchSlot;
 use uuid::Uuid;
 
 impl DataStore {
@@ -76,14 +75,9 @@ impl DataStore {
         use nexus_db_schema::schema::bfd_session::dsl;
         let conn = self.pool_connection_authorized(opctx).await?;
 
-        // TODO-correctness enum in external API
-        let switch_slot = DbSwitchSlot::from(
-            SwitchSlot::parse_from_external_api(&config.switch)?,
-        );
-
         diesel::update(dsl::bfd_session)
             .filter(dsl::remote.eq(IpNetwork::from(config.remote)))
-            .filter(dsl::switch_slot.eq(switch_slot))
+            .filter(dsl::switch_slot.eq(DbSwitchSlot::from(config.switch)))
             .filter(dsl::time_deleted.is_null())
             .set(dsl::time_deleted.eq(chrono::Utc::now()))
             .execute_async(&*conn)
