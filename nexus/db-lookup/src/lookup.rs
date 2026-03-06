@@ -21,7 +21,7 @@ use nexus_auth::authn;
 use nexus_auth::authz;
 use nexus_auth::context::OpContext;
 use nexus_db_errors::{ErrorHandler, public_error_from_diesel};
-use nexus_db_model::DbSwitchLocation;
+use nexus_db_model::DbSwitchSlot;
 use nexus_db_model::Name;
 use nexus_types::identity::Asset;
 use nexus_types::identity::Resource;
@@ -355,14 +355,14 @@ impl<'a> LookupPath<'a> {
     pub fn loopback_address(
         self,
         rack_id: Uuid,
-        switch_location: DbSwitchLocation,
+        switch_slot: DbSwitchSlot,
         address: IpNetwork,
     ) -> LoopbackAddress<'a> {
         LoopbackAddress::PrimaryKey(
             Root { lookup_root: self },
             address,
             rack_id,
-            switch_location,
+            switch_slot,
         )
     }
 
@@ -880,7 +880,7 @@ lookup_resource! {
     primary_key_columns = [
         { column_name = "address", rust_type = IpNetwork },
         { column_name = "rack_id", rust_type = Uuid },
-        { column_name = "switch_loc", rust_type = DbSwitchLocation }
+        { column_name = "switch_slot", rust_type = DbSwitchSlot }
     ]
 }
 

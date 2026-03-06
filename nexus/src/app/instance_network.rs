@@ -286,7 +286,7 @@ pub(crate) async fn boundary_switches(
     let uplinks =
         switch_port::list_switch_ports_with_uplinks(datastore, opctx).await?;
     for uplink in &uplinks {
-        boundary_switches.insert(SwitchLocation::from(uplink.switch_location));
+        boundary_switches.insert(SwitchLocation::from(uplink.switch_slot));
     }
     Ok(boundary_switches)
 }

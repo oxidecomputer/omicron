@@ -3506,7 +3506,7 @@ CREATE INDEX IF NOT EXISTS lookup_address_lot_rsvd_block_by_anycast ON omicron.p
     anycast
 );
 
-CREATE TYPE IF NOT EXISTS omicron.public.switch_location AS ENUM (
+CREATE TYPE IF NOT EXISTS omicron.public.switch_slot AS ENUM (
     'switch0',
     'switch1'
 );
@@ -3520,13 +3520,13 @@ CREATE TABLE IF NOT EXISTS omicron.public.loopback_address (
     rack_id UUID NOT NULL,
     address INET NOT NULL,
     anycast BOOL NOT NULL,
-    switch_loc omicron.public.switch_location NOT NULL
+    switch_slot omicron.public.switch_slot NOT NULL
 );
 
 /* TODO https://github.com/oxidecomputer/omicron/issues/3001 */
 
 CREATE UNIQUE INDEX IF NOT EXISTS lookup_loopback_address ON omicron.public.loopback_address (
-    address, rack_id, switch_loc
+    address, rack_id, switch_slot
 );
 
 CREATE TABLE IF NOT EXISTS omicron.public.switch_port (
@@ -3534,10 +3534,10 @@ CREATE TABLE IF NOT EXISTS omicron.public.switch_port (
     rack_id UUID,
     port_name TEXT,
     port_settings_id UUID,
-    switch_loc omicron.public.switch_location NOT NULL,
+    switch_slot omicron.public.switch_slot NOT NULL,
 
     CONSTRAINT switch_port_rack_locaction_name_unique UNIQUE (
-        rack_id, switch_loc, port_name
+        rack_id, switch_slot, port_name
     )
 );
 
@@ -6047,12 +6047,12 @@ CREATE TABLE IF NOT EXISTS omicron.public.bfd_session (
     time_modified TIMESTAMPTZ NOT NULL,
     time_deleted TIMESTAMPTZ,
 
-    switch_loc omicron.public.switch_location NOT NULL
+    switch_slot omicron.public.switch_slot NOT NULL
 );
 
 CREATE UNIQUE INDEX IF NOT EXISTS lookup_bfd_session ON omicron.public.bfd_session (
     remote,
-    switch_loc
+    switch_slot
 ) WHERE time_deleted IS NULL;
 
 
@@ -6174,7 +6174,7 @@ CREATE INDEX IF NOT EXISTS address_lot_names ON omicron.public.address_lot(name)
 CREATE VIEW IF NOT EXISTS omicron.public.bgp_peer_view
 AS
 SELECT
- sp.switch_loc,
+ sp.switch_slot,
  sp.port_name,
  bpc.addr,
  bpc.hold_time,
@@ -6197,7 +6197,7 @@ ON sp.port_settings_id = bpc.port_settings_id
 JOIN omicron.public.bgp_config bc ON bc.id = bpc.bgp_config_id;
 
 CREATE INDEX IF NOT EXISTS switch_port_id_and_name
-ON omicron.public.switch_port (port_settings_id, port_name) STORING (switch_loc);
+ON omicron.public.switch_port (port_settings_id, port_name) STORING (switch_slot);
 
 CREATE INDEX IF NOT EXISTS switch_port_name ON omicron.public.switch_port (port_name);
 

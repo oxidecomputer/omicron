@@ -30,7 +30,7 @@ use nexus_db_errors::ErrorHandler;
 use nexus_db_errors::OptionalError;
 use nexus_db_errors::public_error_from_diesel;
 use nexus_db_model::{
-    AddressLot, BgpConfig, DbSwitchLocation, SqlU8, SqlU16, SqlU32,
+    AddressLot, BgpConfig, DbSwitchSlot, SqlU8, SqlU16, SqlU32,
     SwitchPortBgpPeerConfigAllowExport, SwitchPortBgpPeerConfigAllowImport,
     SwitchPortBgpPeerConfigCommunity,
 };
@@ -820,7 +820,7 @@ impl DataStore {
         let err = OptionalError::new();
 
         // TODO-correctness enum in external API
-        let switch_location = DbSwitchLocation::from(
+        let switch_slot = DbSwitchSlot::from(
             SwitchLocation::parse_from_external_api(&params.switch_location)?,
         );
 
@@ -839,7 +839,7 @@ impl DataStore {
                     let port: SwitchPort = switch_port_dsl::switch_port
                         .filter(switch_port::rack_id.eq(params.rack_id))
                         .filter(
-                            switch_port::switch_loc.eq(switch_location),
+                            switch_port::switch_slot.eq(switch_slot),
                         )
                         .filter(switch_port::port_name.eq(port_name.clone()))
                         .select(SwitchPort::as_select())
@@ -949,9 +949,9 @@ impl DataStore {
                     // what switch are we adding a configuration to?
                     let switch = switch_port_dsl::switch_port
                         .filter(switch_port_dsl::id.eq(switch_port_id))
-                        .select(switch_port_dsl::switch_loc)
+                        .select(switch_port_dsl::switch_slot)
                         .limit(1)
-                        .first_async::<DbSwitchLocation>(&conn)
+                        .first_async::<DbSwitchSlot>(&conn)
                         .await
                         .map_err(|e: diesel::result::Error| {
                             let msg = "failed to look up switch port by id";
@@ -1020,7 +1020,7 @@ impl DataStore {
                                 .inner_join(bgp_config_dsl::bgp_config.on(
                                     bgp_peer_dsl::bgp_config_id.eq(bgp_config_dsl::id),
                                 ))
-                                .filter(switch_port_dsl::switch_loc.eq(switch))
+                                .filter(switch_port_dsl::switch_slot.eq(switch))
                                 .filter(switch_port_dsl::port_settings_id.is_not_null())
                                 .filter(bgp_config_dsl::asn.ne(config.asn))
                                 .select(BgpConfig::as_select())
@@ -1100,10 +1100,10 @@ impl DataStore {
         use nexus_db_schema::schema::switch_port::dsl as switch_port_dsl;
 
         let conn = self.pool_connection_authorized(opctx).await?;
-        let switch_location = DbSwitchLocation::from(switch_location);
+        let switch_slot = DbSwitchSlot::from(switch_location);
         let id: Uuid = switch_port_dsl::switch_port
             .filter(switch_port::rack_id.eq(rack_id))
-            .filter(switch_port::switch_loc.eq(switch_location))
+            .filter(switch_port::switch_slot.eq(switch_slot))
             .filter(switch_port::port_name.eq(port_name.to_string()))
             .select(switch_port::id)
             .limit(1)

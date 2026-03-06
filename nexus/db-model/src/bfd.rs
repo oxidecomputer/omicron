@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use crate::DbSwitchLocation;
+use crate::DbSwitchSlot;
 use crate::{SqlU32, impl_enum_type};
 use chrono::DateTime;
 use chrono::Utc;
@@ -44,8 +44,7 @@ pub struct BfdSession {
     pub time_created: DateTime<Utc>,
     pub time_modified: DateTime<Utc>,
     pub time_deleted: Option<DateTime<Utc>>,
-    #[diesel(column_name = switch_loc)]
-    pub switch_location: DbSwitchLocation,
+    pub switch_slot: DbSwitchSlot,
 }
 
 impl From<sled_agent_types::early_networking::BfdMode> for BfdMode {

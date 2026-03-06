@@ -11,7 +11,7 @@ use ipnetwork::IpNetwork;
 use nexus_db_errors::ErrorHandler;
 use nexus_db_errors::public_error_from_diesel;
 use nexus_db_model::BfdSession;
-use nexus_db_model::DbSwitchLocation;
+use nexus_db_model::DbSwitchSlot;
 use nexus_db_model::SqlU32;
 use nexus_types::external_api::networking;
 use omicron_common::api::external::DataPageParams;
@@ -61,7 +61,7 @@ impl DataStore {
             time_created: chrono::Utc::now(),
             time_modified: chrono::Utc::now(),
             time_deleted: None,
-            switch_location: switch_location.into(),
+            switch_slot: switch_location.into(),
         };
 
         diesel::insert_into(dsl::bfd_session)
@@ -81,13 +81,13 @@ impl DataStore {
         let conn = self.pool_connection_authorized(opctx).await?;
 
         // TODO-correctness enum in external API
-        let switch_location = DbSwitchLocation::from(
+        let switch_slot = DbSwitchSlot::from(
             SwitchLocation::parse_from_external_api(&config.switch)?,
         );
 
         diesel::update(dsl::bfd_session)
             .filter(dsl::remote.eq(IpNetwork::from(config.remote)))
-            .filter(dsl::switch_loc.eq(switch_location))
+            .filter(dsl::switch_slot.eq(switch_slot))
             .filter(dsl::time_deleted.is_null())
             .set(dsl::time_deleted.eq(chrono::Utc::now()))
             .execute_async(&*conn)

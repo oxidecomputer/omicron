@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use crate::DbSwitchLocation;
+use crate::DbSwitchSlot;
 use crate::SqlU16;
 use crate::impl_enum_type;
 use db_macros::Asset;
@@ -118,8 +118,7 @@ pub struct LoopbackAddress {
     pub rack_id: Uuid,
     pub address: IpNetwork,
     pub anycast: bool,
-    #[diesel(column_name = switch_loc)]
-    pub switch_location: DbSwitchLocation,
+    pub switch_slot: DbSwitchSlot,
 }
 
 impl LoopbackAddress {
@@ -139,7 +138,7 @@ impl LoopbackAddress {
             address_lot_block_id,
             rsvd_address_lot_block_id,
             rack_id,
-            switch_location: switch_location.into(),
+            switch_slot: switch_location.into(),
             address,
             anycast,
         }
@@ -153,7 +152,7 @@ impl Into<external::LoopbackAddress> for LoopbackAddress {
             address_lot_block_id: self.address_lot_block_id,
             rack_id: self.rack_id,
             // TODO-correctness enum in external API
-            switch_location: SwitchLocation::from(self.switch_location)
+            switch_location: SwitchLocation::from(self.switch_slot)
                 .to_string(),
             address: self.address.into(),
         }

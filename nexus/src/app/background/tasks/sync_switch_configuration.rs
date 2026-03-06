@@ -176,7 +176,7 @@ impl SwitchPortSettingsManager {
     > {
         let mut changes = Vec::new();
         for port in port_list {
-            let location = SwitchLocation::from(port.switch_location);
+            let location = SwitchLocation::from(port.switch_slot);
             let id = match port.port_settings_id {
                 Some(id) => id,
                 _ => {
@@ -240,8 +240,8 @@ impl SwitchPortSettingsManager {
         let mut set: HashSet<(SwitchLocation, IpAddr)> = HashSet::new();
 
         // TODO: are we doing anything special with anycast addresses at the moment?
-        for LoopbackAddress { switch_location, address, .. } in values.iter() {
-            set.insert((SwitchLocation::from(*switch_location), address.ip()));
+        for LoopbackAddress { switch_slot, address, .. } in values.iter() {
+            set.insert((SwitchLocation::from(*switch_slot), address.ip()));
         }
 
         Ok(set)
@@ -286,7 +286,7 @@ impl SwitchPortSettingsManager {
                         sled_agent_client::types::BfdMode::MultiHop
                     }
                 },
-                switch: spec.switch_location.into(),
+                switch: spec.switch_slot.into(),
             };
             result.push(config);
         }

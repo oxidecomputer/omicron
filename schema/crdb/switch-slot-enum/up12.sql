@@ -1,7 +1,7 @@
 CREATE VIEW IF NOT EXISTS omicron.public.bgp_peer_view
 AS
 SELECT
- sp.switch_loc,
+ sp.switch_slot,
  sp.port_name,
  bpc.addr,
  bpc.hold_time,

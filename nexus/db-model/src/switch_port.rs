@@ -228,7 +228,7 @@ impl Into<external::SwitchPortGeometry> for SwitchPortGeometry {
 }
 
 impl_enum_type!(
-    SwitchLocationEnum:
+    SwitchSlotEnum:
 
     #[derive(
         Clone,
@@ -244,22 +244,22 @@ impl_enum_type!(
         Serialize,
         Deserialize,
     )]
-    pub enum DbSwitchLocation;
+    pub enum DbSwitchSlot;
 
     Switch0 => b"switch0"
     Switch1 => b"switch1"
 );
 
-impl From<DbSwitchLocation> for SwitchLocation {
-    fn from(value: DbSwitchLocation) -> Self {
+impl From<DbSwitchSlot> for SwitchLocation {
+    fn from(value: DbSwitchSlot) -> Self {
         match value {
-            DbSwitchLocation::Switch0 => Self::Switch0,
-            DbSwitchLocation::Switch1 => Self::Switch1,
+            DbSwitchSlot::Switch0 => Self::Switch0,
+            DbSwitchSlot::Switch1 => Self::Switch1,
         }
     }
 }
 
-impl From<SwitchLocation> for DbSwitchLocation {
+impl From<SwitchLocation> for DbSwitchSlot {
     fn from(value: SwitchLocation) -> Self {
         match value {
             SwitchLocation::Switch0 => Self::Switch0,
@@ -286,8 +286,7 @@ pub struct SwitchPort {
     pub rack_id: Uuid,
     pub port_name: Name,
     pub port_settings_id: Option<Uuid>,
-    #[diesel(column_name = switch_loc)]
-    pub switch_location: DbSwitchLocation,
+    pub switch_slot: DbSwitchSlot,
 }
 
 impl SwitchPort {
@@ -299,7 +298,7 @@ impl SwitchPort {
         Self {
             id: Uuid::new_v4(),
             rack_id,
-            switch_location: switch_location.into(),
+            switch_slot: switch_location.into(),
             port_name,
             port_settings_id: None,
         }
@@ -312,7 +311,7 @@ impl Into<external::SwitchPort> for SwitchPort {
             id: self.id,
             rack_id: self.rack_id,
             // TODO-correctness enum in external API
-            switch_location: SwitchLocation::from(self.switch_location)
+            switch_location: SwitchLocation::from(self.switch_slot)
                 .to_string(),
             port_name: self.port_name.into(),
             port_settings_id: self.port_settings_id,

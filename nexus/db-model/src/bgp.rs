@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use crate::DbSwitchLocation;
+use crate::DbSwitchSlot;
 use crate::{SqlU8, SqlU16, SqlU32};
 use db_macros::Resource;
 use ipnetwork::IpNetwork;
@@ -143,8 +143,7 @@ impl Into<networking::BgpAnnouncement> for BgpAnnouncement {
 #[derive(Queryable, Selectable, Clone, Debug, Serialize, Deserialize)]
 #[diesel(table_name = bgp_peer_view)]
 pub struct BgpPeerView {
-    #[diesel(column_name = switch_loc)]
-    pub switch_location: DbSwitchLocation,
+    pub switch_slot: DbSwitchSlot,
     pub port_name: String,
     pub addr: Option<IpNetwork>,
     pub asn: SqlU32,

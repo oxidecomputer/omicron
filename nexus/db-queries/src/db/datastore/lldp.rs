@@ -15,7 +15,7 @@ use diesel::SelectableHelper;
 use ipnetwork::IpNetwork;
 use nexus_db_errors::ErrorHandler;
 use nexus_db_errors::public_error_from_diesel;
-use nexus_db_model::DbSwitchLocation;
+use nexus_db_model::DbSwitchSlot;
 use omicron_common::api::external;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::LookupResult;
@@ -58,10 +58,10 @@ impl DataStore {
 
         let conn = self.pool_connection_authorized(opctx).await?;
 
-        let switch_location = DbSwitchLocation::from(switch_location);
+        let switch_slot = DbSwitchSlot::from(switch_location);
         let port_settings_id: Uuid = switch_port_dsl::switch_port
             .filter(switch_port::rack_id.eq(rack_id))
-            .filter(switch_port::switch_loc.eq(switch_location))
+            .filter(switch_port::switch_slot.eq(switch_slot))
             .filter(switch_port::port_name.eq(port_name.to_string()))
             .select(switch_port::port_settings_id)
             .limit(1)
