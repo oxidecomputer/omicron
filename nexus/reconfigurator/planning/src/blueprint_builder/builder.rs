@@ -1379,17 +1379,17 @@ impl<'a> BlueprintBuilder<'a> {
         debug_assert_eq!(
             disks,
             EditCounts::zeroes(),
-            "we only edited datasets"
+            "we only edited datasets but found disks with non-zero edit counts"
         );
         debug_assert_eq!(
             zones,
             EditCounts::zeroes(),
-            "we only edited datasets"
+            "we only edited datasets but zones with non-zero edit counts"
         );
         debug_assert_eq!(
             measurements,
             EditCounts::zeroes(),
-            "we only edited datasets"
+            "we only edited datasets but measurements with non-zero edit counts"
         );
         Ok(datasets.into())
     }
