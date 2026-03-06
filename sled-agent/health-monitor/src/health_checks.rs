@@ -5,17 +5,17 @@
 //! Helpers for running health checks from the sled agent
 
 use illumos_utils::svcs::Svcs;
-use illumos_utils::svcs::SvcsInMaintenanceResult;
+use illumos_utils::svcs::SvcsResult;
 use slog::Logger;
 use tokio::sync::watch;
 use tokio::time::Duration;
 use tokio::time::MissedTickBehavior;
 use tokio::time::interval;
 
-pub(crate) async fn poll_smf_services_in_maintenance(
+pub(crate) async fn poll_smf_services_enabled_not_online(
     log: Logger,
-    smf_services_in_maintenance_tx: watch::Sender<
-        Result<SvcsInMaintenanceResult, String>,
+    smf_services_enabled_not_online_tx: watch::Sender<
+        Option<Result<SvcsResult, String>>,
     >,
 ) {
     // We poll every minute to verify the health of all services. This interval
@@ -29,17 +29,21 @@ pub(crate) async fn poll_smf_services_in_maintenance(
 
     loop {
         interval.tick().await;
-        match Svcs::in_maintenance(&log).await {
+        match Svcs::enabled_not_online(&log).await {
             // There isn't anything waiting for changes because we only look at
             // the health check status when an inventory request comes in. This
             // means we can safely use `send_modify` instead of
             // `send_if_modified()`.
-            Err(e) => smf_services_in_maintenance_tx.send_modify(|status| {
-                *status = Err(e.to_string());
-            }),
-            Ok(svcs) => smf_services_in_maintenance_tx.send_modify(|status| {
-                *status = Ok(svcs);
-            }),
+            Err(e) => {
+                smf_services_enabled_not_online_tx.send_modify(|status| {
+                    *status = Some(Err(e.to_string()));
+                })
+            }
+            Ok(svcs) => {
+                smf_services_enabled_not_online_tx.send_modify(|status| {
+                    *status = Some(Ok(svcs));
+                })
+            }
         };
     }
 }

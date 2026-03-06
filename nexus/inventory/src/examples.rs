@@ -16,7 +16,6 @@ use gateway_client::types::SpComponentCaboose;
 use gateway_client::types::SpState;
 use gateway_types::rot::RotSlot;
 use iddqd::id_ord_map;
-use illumos_utils::svcs::SvcsInMaintenanceResult;
 use nexus_types::inventory::CabooseWhich;
 use nexus_types::inventory::InternalDnsGenerationStatus;
 use nexus_types::inventory::RotPage;
@@ -1091,7 +1090,7 @@ pub fn sled_agent(
         // TODO-K: We'll want to have the functionality to add some services
         // here in a future PR. This will be more useful when we add this
         // information to the DB.
-        smf_services_in_maintenance: Ok(SvcsInMaintenanceResult::new()),
+        smf_services_enabled_not_online: None,
         reference_measurements,
     }
 }

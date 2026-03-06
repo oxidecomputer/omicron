@@ -1737,7 +1737,6 @@ mod test {
     use super::*;
     use crate::rack_setup::plan::service::{Plan as ServicePlan, SledInfo};
     use iddqd::IdOrdMap;
-    use illumos_utils::svcs::SvcsInMaintenanceResult;
     use nexus_reconfigurator_blippy::{Blippy, BlippyReportSortKey};
     use omicron_common::{
         address::{Ipv6Subnet, SLED_PREFIX, get_sled_address},
@@ -1794,7 +1793,7 @@ mod test {
                 last_reconciliation: None,
                 file_source_resolver:
                     OmicronFileSourceResolverInventory::new_fake(),
-                smf_services_in_maintenance: Ok(SvcsInMaintenanceResult::new()),
+                smf_services_enabled_not_online: None,
                 reference_measurements: IdOrdMap::new(),
             },
             true,

@@ -27,6 +27,7 @@ pub mod ledger;
 pub mod policy;
 pub mod progenitor_operation_retry;
 pub mod resolvable_files;
+pub mod snake_case_option_result;
 pub mod snake_case_result;
 pub mod update;
 pub mod vlan;

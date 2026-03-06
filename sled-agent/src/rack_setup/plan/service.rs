@@ -1325,7 +1325,6 @@ impl ServicePortBuilder {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use illumos_utils::svcs::SvcsInMaintenanceResult;
     use omicron_common::address::IpRange;
     use omicron_common::api::external::ByteCount;
     use omicron_common::api::internal::shared::AllowedSourceIps;
@@ -1555,7 +1554,7 @@ mod tests {
                 last_reconciliation: None,
                 file_source_resolver:
                     OmicronFileSourceResolverInventory::new_fake(),
-                smf_services_in_maintenance: Ok(SvcsInMaintenanceResult::new()),
+                smf_services_enabled_not_online: None,
                 reference_measurements: IdOrdMap::new(),
             },
             is_scrimlet,

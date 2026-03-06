@@ -1199,11 +1199,8 @@ impl SledAgent {
         let file_source_resolver =
             self.inner.services.zone_image_resolver().status().to_inventory();
 
-        let smf_services_in_maintenance = self
-            .inner
-            .health_monitor
-            .to_inventory()
-            .smf_services_in_maintenance;
+        let smf_services_enabled_not_online =
+            self.inner.health_monitor.to_inventory();
 
         let ReconcilerInventory {
             disks,
@@ -1230,7 +1227,7 @@ impl SledAgent {
             reconciler_status,
             last_reconciliation,
             file_source_resolver,
-            smf_services_in_maintenance,
+            smf_services_enabled_not_online,
             reference_measurements: self.inner.measurements.to_inventory(),
         })
     }

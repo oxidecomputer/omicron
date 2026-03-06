@@ -27,7 +27,6 @@ use diesel::sql_types::Nullable;
 use futures::FutureExt;
 use futures::future::BoxFuture;
 use iddqd::{IdOrdItem, IdOrdMap, id_upcast};
-use illumos_utils::svcs::SvcsInMaintenanceResult;
 use nexus_db_errors::ErrorHandler;
 use nexus_db_errors::public_error_from_diesel;
 use nexus_db_errors::public_error_from_diesel_lookup;
@@ -4297,7 +4296,7 @@ impl DataStore {
                 file_source_resolver,
                 // TODO-K[omicron#9516]: Actually query the DB when there is
                 // something there
-                smf_services_in_maintenance: Ok(SvcsInMaintenanceResult::new()),
+                smf_services_enabled_not_online: None,
                 reference_measurements: last_reconciliation_measurements
                     .remove(&sled_id)
                     .unwrap_or_default(),

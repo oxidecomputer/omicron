@@ -21,7 +21,6 @@ pub use gateway_types::rot::RotSlot;
 use iddqd::IdOrdItem;
 use iddqd::IdOrdMap;
 use iddqd::id_upcast;
-use illumos_utils::svcs::SvcsInMaintenanceResult;
 use illumos_utils::zpool::ZpoolHealth;
 use omicron_common::api::external::ByteCount;
 pub use omicron_common::api::internal::shared::NetworkInterface;
@@ -37,6 +36,7 @@ use omicron_uuid_kinds::ZpoolUuid;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_with::serde_as;
+use sled_agent_types::inventory::SvcsEnabledNotOnline;
 use sled_agent_types_versions::latest::inventory::ConfigReconcilerInventory;
 use sled_agent_types_versions::latest::inventory::ConfigReconcilerInventoryResult;
 use sled_agent_types_versions::latest::inventory::ConfigReconcilerInventoryStatus;
@@ -650,7 +650,8 @@ pub struct SledAgent {
     pub reconciler_status: ConfigReconcilerInventoryStatus,
     pub last_reconciliation: Option<ConfigReconcilerInventory>,
     pub file_source_resolver: OmicronFileSourceResolverInventory,
-    pub smf_services_in_maintenance: Result<SvcsInMaintenanceResult, String>,
+    pub smf_services_enabled_not_online:
+        Option<Result<SvcsEnabledNotOnline, String>>,
     pub reference_measurements: IdOrdMap<SingleMeasurementInventory>,
 }
 

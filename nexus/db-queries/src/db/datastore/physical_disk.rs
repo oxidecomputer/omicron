@@ -340,7 +340,6 @@ mod test {
     use crate::db::pub_test_utils::helpers::SledUpdateBuilder;
     use dropshot::PaginationOrder;
     use iddqd::IdOrdMap;
-    use illumos_utils::svcs::SvcsInMaintenanceResult;
     use nexus_db_lookup::LookupPath;
     use nexus_types::identity::Asset;
     use omicron_common::api::external::ByteCount;
@@ -708,9 +707,7 @@ mod test {
                     last_reconciliation: None,
                     file_source_resolver:
                         OmicronFileSourceResolverInventory::new_fake(),
-                    smf_services_in_maintenance: Ok(
-                        SvcsInMaintenanceResult::new(),
-                    ),
+                    smf_services_enabled_not_online: None,
                     reference_measurements: IdOrdMap::new(),
                 },
             )

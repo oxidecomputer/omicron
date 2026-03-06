@@ -12,7 +12,6 @@ use clickhouse_admin_types::keeper::ClickhouseKeeperClusterMembership;
 use gateway_client::types::RotState;
 use gateway_client::types::SpComponentCaboose;
 use gateway_client::types::SpState;
-use illumos_utils::svcs::SvcsInMaintenanceResult;
 use illumos_utils::zpool::ZpoolHealth;
 use indexmap::IndexMap;
 use ipnet::Ipv6Net;
@@ -1473,7 +1472,7 @@ impl Sled {
                 // XXX: return something more reasonable here?
                 file_source_resolver:
                     OmicronFileSourceResolverInventory::new_fake(),
-                smf_services_in_maintenance: Ok(SvcsInMaintenanceResult::new()),
+                smf_services_enabled_not_online: None,
                 reference_measurements: iddqd::IdOrdMap::new(),
             }
         };
@@ -1653,7 +1652,9 @@ impl Sled {
             reconciler_status: inv_sled_agent.reconciler_status.clone(),
             last_reconciliation: inv_sled_agent.last_reconciliation.clone(),
             file_source_resolver: inv_sled_agent.file_source_resolver.clone(),
-            smf_services_in_maintenance: Ok(SvcsInMaintenanceResult::new()),
+            smf_services_enabled_not_online: inv_sled_agent
+                .smf_services_enabled_not_online
+                .clone(),
             reference_measurements: inv_sled_agent
                 .reference_measurements
                 .clone(),

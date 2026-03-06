@@ -13,7 +13,6 @@ use gateway_client::types::SpState;
 use gateway_types::rot::RotSlot;
 use iddqd::IdOrdItem;
 use iddqd::IdOrdMap;
-use illumos_utils::svcs::SvcsInMaintenanceResult;
 use nexus_types::deployment::BlueprintArtifactVersion;
 use nexus_types::deployment::BlueprintHostPhase2DesiredContents;
 use nexus_types::deployment::ExpectedVersion;
@@ -1371,9 +1370,7 @@ impl<'a> TestBoardCollectionBuilder<'a> {
                                 ConfigReconcilerInventoryStatus::NotYetRun,
                             file_source_resolver:
                                 OmicronFileSourceResolverInventory::new_fake(),
-                            smf_services_in_maintenance: Ok(
-                                SvcsInMaintenanceResult::new(),
-                            ),
+                            smf_services_enabled_not_online: None,
                             reference_measurements: IdOrdMap::new(),
                         },
                     )

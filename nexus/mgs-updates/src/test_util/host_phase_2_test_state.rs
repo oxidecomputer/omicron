@@ -198,7 +198,6 @@ mod api_impl {
     use dropshot::StreamingBody;
     use dropshot::TypedBody;
     use iddqd::IdOrdMap;
-    use illumos_utils::svcs::SvcsInMaintenanceResult;
     use omicron_common::api::external::Generation;
     use omicron_common::api::internal::nexus::DiskRuntimeState;
     use omicron_common::api::internal::nexus::SledVmmState;
@@ -398,7 +397,7 @@ mod api_impl {
                         non_boot_status: IdOrdMap::new(),
                     },
                 },
-                smf_services_in_maintenance: Ok(SvcsInMaintenanceResult::new()),
+                smf_services_enabled_not_online: None,
                 reference_measurements: IdOrdMap::new(),
             }))
         }
