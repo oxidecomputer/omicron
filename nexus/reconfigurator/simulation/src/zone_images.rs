@@ -26,9 +26,6 @@ pub struct SimTufRepoDescription {
     /// The description and manifest source, or a simulated error.
     pub source: Result<SimTufRepoSource, String>,
 
-    /// A simulated error for just the measurement manifest
-    pub measurement_error: Option<String>,
-
     /// A message describing the operation.
     pub message: String,
 }
@@ -37,27 +34,13 @@ impl SimTufRepoDescription {
     /// Creates a new `SimTufRepoDescription`.
     pub fn new(source: SimTufRepoSource) -> Self {
         let message = source.full_message();
-        Self { source: Ok(source), measurement_error: None, message }
-    }
-
-    /// Creates a new `SimTufRepoDescription` with a valid zone
-    /// manifest but a simulated error in the measurement manifest.
-    pub fn new_measurement_error(
-        source: SimTufRepoSource,
-        measurement_error: String,
-    ) -> Self {
-        let message = source.full_message();
-        Self {
-            source: Ok(source),
-            measurement_error: Some(measurement_error),
-            message,
-        }
+        Self { source: Ok(source), message }
     }
 
     /// Creates a new description with a simulated error reading the zone
     /// manifest.
     pub fn new_error(message: String) -> Self {
-        Self { source: Err(message.clone()), measurement_error: None, message }
+        Self { source: Err(message.clone()), message }
     }
 
     /// Generates a simulated [`ManifestBootInventory`] for zones or an error.
@@ -72,22 +55,25 @@ impl SimTufRepoDescription {
         }
     }
 
-    /// Generates a simulated [`ManifestBootInventory`] for measurements or an error.
+    /// Generates a simulated [`ManifestBootInventory`] for measurements or an
+    /// error.
     pub fn to_measurement_boot_inventory(
         &self,
     ) -> Result<ManifestBootInventory, String> {
         match &self.source {
-            Ok(source) => match &self.measurement_error {
-                None => Ok(source.to_measurement_boot_inventory()),
-                Some(error) => Err(format!(
-                    "reconfigurator-sim simulated measurement error: {error}"
-                )),
-            },
+            Ok(source) => source.to_measurement_boot_inventory(),
             Err(error) => {
                 Err(format!("reconfigurator-sim simulated error: {error}"))
             }
         }
     }
+}
+
+// Internal enum to allow simulated measurement manifest errors.
+#[derive(Clone, Debug)]
+enum MeasurementManifestSource {
+    Standard(OmicronInstallManifestSource),
+    Error(String),
 }
 
 /// The reconfigurator simulator's notion of a TUF repository where there wasn't
@@ -96,7 +82,7 @@ impl SimTufRepoDescription {
 pub struct SimTufRepoSource {
     description: TufRepoDescription,
     zone_manifest_source: OmicronInstallManifestSource,
-    measurement_manifest_source: OmicronInstallManifestSource,
+    measurement_manifest_source: MeasurementManifestSource,
     message: String,
     known_artifact_id_names: BTreeSet<String>,
     error_artifact_id_names: BTreeSet<String>,
@@ -145,7 +131,9 @@ impl SimTufRepoSource {
         Ok(Self {
             description,
             zone_manifest_source,
-            measurement_manifest_source,
+            measurement_manifest_source: MeasurementManifestSource::Standard(
+                measurement_manifest_source,
+            ),
             message,
             known_artifact_id_names: known,
             error_artifact_id_names: BTreeSet::new(),
@@ -180,8 +168,24 @@ impl SimTufRepoSource {
         Ok(())
     }
 
-    /// Generates a simulated [`ManifestBootInventory`] from the measurement manifest.
-    pub fn to_measurement_boot_inventory(&self) -> ManifestBootInventory {
+    /// Simulate an error in the measurement manifest.
+    pub fn simulate_measurement_error(&mut self, message: impl Into<String>) {
+        self.measurement_manifest_source =
+            MeasurementManifestSource::Error(message.into());
+    }
+
+    /// Generates a simulated [`ManifestBootInventory`] from the measurement
+    /// manifest, or returns the simulated error if
+    /// [`Self::simulate_measurement_error()`] has been called.
+    pub fn to_measurement_boot_inventory(
+        &self,
+    ) -> Result<ManifestBootInventory, String> {
+        let source = match &self.measurement_manifest_source {
+            MeasurementManifestSource::Standard(source) => *source,
+            MeasurementManifestSource::Error(message) => {
+                return Err(message.clone());
+            }
+        };
         let artifacts = self
             .description
             .artifacts
@@ -213,10 +217,7 @@ impl SimTufRepoSource {
                 })
             })
             .collect();
-        ManifestBootInventory {
-            source: self.measurement_manifest_source,
-            artifacts,
-        }
+        Ok(ManifestBootInventory { source, artifacts })
     }
 
     /// Generates a simulated [`ManifestBootInventory`] from the zone manifest.

@@ -3496,13 +3496,11 @@ fn mupdate_source_to_description(
         )?;
         sim_source.simulate_zone_errors(&source.with_zone_error)?;
         if source.with_measurement_manifest_error {
-            Ok(SimTufRepoDescription::new_measurement_error(
-                sim_source,
-                "simulated error with measurement manifest".to_owned(),
-            ))
-        } else {
-            Ok(SimTufRepoDescription::new(sim_source))
+            sim_source.simulate_measurement_error(
+                "simulated error with measurement manifest",
+            );
         }
+        Ok(SimTufRepoDescription::new(sim_source))
     } else if source.valid.to_target_release {
         let description = sim
             .current_state()
@@ -3526,13 +3524,11 @@ fn mupdate_source_to_description(
                 )?;
                 sim_source.simulate_zone_errors(&source.with_zone_error)?;
                 if source.with_measurement_manifest_error {
-                    Ok(SimTufRepoDescription::new_measurement_error(
-                        sim_source,
-                        "simulated error with measurement manifest".to_owned(),
-                    ))
-                } else {
-                    Ok(SimTufRepoDescription::new(sim_source))
+                    sim_source.simulate_measurement_error(
+                        "simulated error with measurement manifest",
+                    );
                 }
+                Ok(SimTufRepoDescription::new(sim_source))
             }
         }
     } else if source.with_manifest_error {
