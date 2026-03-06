@@ -92,10 +92,10 @@ use omicron_uuid_kinds::ZpoolUuid;
 use oximeter_collector::Oximeter;
 use oximeter_producer::LogConfig;
 use oximeter_producer::Server as ProducerServer;
-use sled_agent_client::types::EarlyNetworkConfig;
-use sled_agent_client::types::EarlyNetworkConfigBody;
-use sled_agent_client::types::RackNetworkConfig;
+use sled_agent_types::early_networking::EarlyNetworkConfigBody;
+use sled_agent_types::early_networking::RackNetworkConfig;
 use sled_agent_types::early_networking::SwitchLocation;
+use sled_agent_types::early_networking::WriteNetworkConfigRequest;
 use sled_agent_types::inventory::HostPhase2DesiredSlots;
 use sled_agent_types::inventory::OmicronSledConfig;
 use sled_agent_types::inventory::OmicronZoneDataset;
@@ -916,7 +916,7 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
     /// tell the other Sled Agents to report they have no zones configured, and
     /// write the early network config to all sleds.
     pub async fn configure_sled_agents(&mut self) {
-        let early_network_config = EarlyNetworkConfig {
+        let early_network_config = WriteNetworkConfigRequest {
             body: EarlyNetworkConfigBody {
                 ntp_servers: Vec::new(),
                 rack_network_config: Some(RackNetworkConfig {
@@ -929,7 +929,6 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
                 }),
             },
             generation: 1,
-            schema_version: 2,
         };
 
         macro_rules! from_clone {

@@ -357,7 +357,7 @@ pub struct DbFetchOptions {
 enum DbCommands {
     /// Launch `cockroach-sql`
     ///
-    /// This launches with the session variable `default_transcation_read_only`
+    /// This launches with the session variable `default_transaction_read_only`
     /// to on. Because this variable can be disabled, it is required to use
     /// `--destructive` with this command.
     Sql,
