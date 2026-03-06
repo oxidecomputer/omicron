@@ -477,7 +477,7 @@ digest = "0.10.7"
 dns-server = { path = "dns-server" }
 dns-server-api = { path = "dns-server-api" }
 dns-service-client = { path = "clients/dns-service-client" }
-dpd-client = { git = "https://github.com/oxidecomputer/dendrite", rev = "f20f786e67c86388dfaaf0ef3aa9d2693dfe1da4" }
+dpd-client = { git = "https://github.com/oxidecomputer/dendrite", rev = "258d2be18a97a77049637f010251c233365b1727", features = ["multicast"] }
 dropshot = { version = "0.16.6", features = [ "usdt-probes" ] }
 dropshot-api-manager = "0.5.2"
 dropshot-api-manager-types = "0.5.2"
