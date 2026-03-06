@@ -13,7 +13,7 @@ use nexus_db_queries::{authn, authz, db};
 use omicron_uuid_kinds::{GenericUuid, InstanceUuid};
 use serde::Deserialize;
 use serde::Serialize;
-use sled_agent_types::early_networking::SwitchLocation;
+use sled_agent_types::early_networking::SwitchSlot;
 use slog::{debug, info};
 use steno::ActionError;
 
@@ -24,7 +24,7 @@ pub struct Params {
     pub serialized_authn: authn::saga::Serialized,
     pub authz_instance: authz::Instance,
     pub instance: db::model::Instance,
-    pub boundary_switches: HashSet<SwitchLocation>,
+    pub boundary_switches: HashSet<SwitchSlot>,
 }
 
 // instance delete saga: actions
@@ -246,7 +246,7 @@ mod test {
     use omicron_common::api::external::{
         ByteCount, IdentityMetadataCreateParams, InstanceCpuCount,
     };
-    use sled_agent_types::early_networking::SwitchLocation;
+    use sled_agent_types::early_networking::SwitchSlot;
     use std::collections::HashSet;
     use uuid::Uuid;
 
@@ -280,7 +280,7 @@ mod test {
             serialized_authn: Serialized::for_opctx(&opctx),
             authz_instance,
             instance,
-            boundary_switches: HashSet::from([SwitchLocation::Switch0]),
+            boundary_switches: HashSet::from([SwitchSlot::Switch0]),
         }
     }
 

@@ -14,7 +14,7 @@ use omicron_common::api::external;
 use omicron_uuid_kinds::LoopbackAddressKind;
 use omicron_uuid_kinds::TypedUuid;
 use serde::{Deserialize, Serialize};
-use sled_agent_types::early_networking::SwitchLocation;
+use sled_agent_types::early_networking::SwitchSlot;
 use uuid::Uuid;
 
 impl_enum_type!(
@@ -127,7 +127,7 @@ impl LoopbackAddress {
         address_lot_block_id: Uuid,
         rsvd_address_lot_block_id: Uuid,
         rack_id: Uuid,
-        switch_location: SwitchLocation,
+        switch_slot: SwitchSlot,
         address: IpNetwork,
         anycast: bool,
     ) -> Self {
@@ -138,7 +138,7 @@ impl LoopbackAddress {
             address_lot_block_id,
             rsvd_address_lot_block_id,
             rack_id,
-            switch_slot: switch_location.into(),
+            switch_slot: switch_slot.into(),
             address,
             anycast,
         }
@@ -152,7 +152,7 @@ impl Into<external::LoopbackAddress> for LoopbackAddress {
             address_lot_block_id: self.address_lot_block_id,
             rack_id: self.rack_id,
             // TODO-correctness enum in external API
-            switch_location: SwitchLocation::from(self.switch_slot).to_string(),
+            switch_location: SwitchSlot::from(self.switch_slot).to_string(),
             address: self.address.into(),
         }
     }

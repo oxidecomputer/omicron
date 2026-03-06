@@ -16,7 +16,7 @@ use omicron_common::api::external::LldpNeighbor;
 use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::Name;
 use omicron_common::api::external::UpdateResult;
-use sled_agent_types::early_networking::SwitchLocation;
+use sled_agent_types::early_networking::SwitchSlot;
 use uuid::Uuid;
 
 impl super::Nexus {
@@ -26,12 +26,12 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
         rack_id: Uuid,
-        switch_location: SwitchLocation,
+        switch_slot: SwitchSlot,
         port: Name,
     ) -> LookupResult<LldpLinkConfig> {
         opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
         self.db_datastore
-            .lldp_config_get(opctx, rack_id, switch_location, port)
+            .lldp_config_get(opctx, rack_id, switch_slot, port)
             .await
     }
 
@@ -42,13 +42,13 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
         rack_id: Uuid,
-        switch_location: SwitchLocation,
+        switch_slot: SwitchSlot,
         port: Name,
         config: LldpLinkConfig,
     ) -> UpdateResult<()> {
         opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
         self.db_datastore
-            .lldp_config_update(opctx, rack_id, switch_location, port, config)
+            .lldp_config_update(opctx, rack_id, switch_slot, port, config)
             .await?;
 
         // eagerly propagate changes via rpw
@@ -65,7 +65,7 @@ impl super::Nexus {
         previous: &Option<Uuid>,
         limit: u32,
         rack_id: Uuid,
-        loc: SwitchLocation,
+        loc: SwitchSlot,
         port: &Name,
     ) -> Result<Vec<LldpNeighbor>, Error> {
         opctx.authorize(authz::Action::Read, &authz::FLEET).await?;

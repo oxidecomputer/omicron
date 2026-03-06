@@ -24,7 +24,7 @@ use omicron_common::api::external::{
     ResourceType,
 };
 use ref_cast::RefCast;
-use sled_agent_types::early_networking::SwitchLocation;
+use sled_agent_types::early_networking::SwitchSlot;
 use uuid::Uuid;
 
 impl DataStore {
@@ -809,7 +809,7 @@ impl DataStore {
     pub async fn bgp_peer_configs(
         &self,
         opctx: &OpContext,
-        switch: SwitchLocation,
+        switch: SwitchSlot,
         port: String,
     ) -> ListResultVec<BgpPeerView> {
         use nexus_db_schema::schema::bgp_peer_view::dsl;

@@ -44,7 +44,7 @@ use omicron_common::api::external::{
 use ref_cast::RefCast;
 use serde::{Deserialize, Serialize};
 use sled_agent_types::early_networking::ImportExportPolicy;
-use sled_agent_types::early_networking::SwitchLocation;
+use sled_agent_types::early_networking::SwitchSlot;
 use uuid::Uuid;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -734,7 +734,7 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         rack_id: Uuid,
-        switch_location: SwitchLocation,
+        switch_slot: SwitchSlot,
         port: Name,
     ) -> CreateResult<SwitchPort> {
         #[derive(Debug)]
@@ -745,8 +745,7 @@ impl DataStore {
         let err = OptionalError::new();
 
         let conn = self.pool_connection_authorized(opctx).await?;
-        let switch_port =
-            SwitchPort::new(rack_id, switch_location, port.clone());
+        let switch_port = SwitchPort::new(rack_id, switch_slot, port.clone());
 
         // TODO https://github.com/oxidecomputer/omicron/issues/2811
         // Audit external networking database transaction usage
@@ -797,7 +796,7 @@ impl DataStore {
                             ResourceType::SwitchPort,
                             &format!(
                                 "{}/{}/{}",
-                                rack_id, &switch_location, &port,
+                                rack_id, &switch_slot, &port,
                             ),
                         ),
                     )
@@ -821,7 +820,7 @@ impl DataStore {
 
         // TODO-correctness enum in external API
         let switch_slot = DbSwitchSlot::from(
-            SwitchLocation::parse_from_external_api(&params.switch_location)?,
+            SwitchSlot::parse_from_external_api(&params.switch_location)?,
         );
 
         let conn = self.pool_connection_authorized(opctx).await?;
@@ -1093,14 +1092,14 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         rack_id: Uuid,
-        switch_location: SwitchLocation,
+        switch_slot: SwitchSlot,
         port_name: Name,
     ) -> LookupResult<Uuid> {
         use nexus_db_schema::schema::switch_port;
         use nexus_db_schema::schema::switch_port::dsl as switch_port_dsl;
 
         let conn = self.pool_connection_authorized(opctx).await?;
-        let switch_slot = DbSwitchSlot::from(switch_location);
+        let switch_slot = DbSwitchSlot::from(switch_slot);
         let id: Uuid = switch_port_dsl::switch_port
             .filter(switch_port::rack_id.eq(rack_id))
             .filter(switch_port::switch_slot.eq(switch_slot))
@@ -1880,7 +1879,7 @@ mod test {
     };
     use omicron_test_utils::dev;
     use sled_agent_types::early_networking::ImportExportPolicy;
-    use sled_agent_types::early_networking::SwitchLocation;
+    use sled_agent_types::early_networking::SwitchSlot;
     use std::{collections::HashMap, str::FromStr};
     use uuid::Uuid;
 
@@ -1892,7 +1891,7 @@ mod test {
 
         let rack_id: Uuid =
             nexus_test_utils::RACK_UUID.parse().expect("parse uuid");
-        let switch0 = SwitchLocation::Switch0;
+        let switch0 = SwitchSlot::Switch0;
         let qsfp0: Name = "qsfp0".parse().expect("parse qsfp0");
 
         let port_result = datastore

@@ -13,7 +13,7 @@ use std::str::FromStr;
 use crate::latest::early_networking::{
     BgpPeerConfig, LldpAdminStatus, MaxPathConfig, MaxPathConfigError,
     ParseLldpAdminStatusError, PortFec, PortSpeed, RouterLifetimeConfig,
-    RouterLifetimeConfigError, SwitchLocation, UplinkAddressConfig,
+    RouterLifetimeConfigError, SwitchSlot, UplinkAddressConfig,
     UplinkAddressConfigError,
 };
 
@@ -218,30 +218,30 @@ impl FromStr for LldpAdminStatus {
     }
 }
 
-impl SwitchLocation {
+impl SwitchSlot {
     /// Return the location of the other switch, not ourself.
     pub const fn other(&self) -> Self {
         match self {
-            SwitchLocation::Switch0 => SwitchLocation::Switch1,
-            SwitchLocation::Switch1 => SwitchLocation::Switch0,
+            SwitchSlot::Switch0 => SwitchSlot::Switch1,
+            SwitchSlot::Switch1 => SwitchSlot::Switch0,
         }
     }
 }
 
-impl fmt::Display for SwitchLocation {
+impl fmt::Display for SwitchSlot {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            SwitchLocation::Switch0 => write!(f, "switch0"),
-            SwitchLocation::Switch1 => write!(f, "switch1"),
+            SwitchSlot::Switch0 => write!(f, "switch0"),
+            SwitchSlot::Switch1 => write!(f, "switch1"),
         }
     }
 }
 
-impl SwitchLocation {
+impl SwitchSlot {
     // TODO-correctness enum in external API
     //
     // We should remove this function after changing the external API to use
-    // `SwitchLocation` instead of `Name`.
+    // `SwitchSlot` instead of `Name`.
     pub fn parse_from_external_api(
         name: &external::Name,
     ) -> Result<Self, external::Error> {

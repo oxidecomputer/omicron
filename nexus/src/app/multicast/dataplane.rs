@@ -62,7 +62,7 @@ use nexus_types::identity::Resource;
 use omicron_common::address::is_ssm_address;
 use omicron_common::api::external::Error;
 use omicron_common::vlan::VlanID;
-use sled_agent_types::early_networking::SwitchLocation;
+use sled_agent_types::early_networking::SwitchSlot;
 
 use crate::app::dpd_clients;
 
@@ -141,7 +141,7 @@ pub(crate) type MulticastDataplaneResult<T> = Result<T, Error>;
 ///   underlay groups
 /// - Integration with existing `switch_ports_with_uplinks()` for port discovery
 pub(crate) struct MulticastDataplaneClient {
-    dpd_clients: HashMap<SwitchLocation, dpd_client::Client>,
+    dpd_clients: HashMap<SwitchSlot, dpd_client::Client>,
     log: Logger,
 }
 
@@ -179,7 +179,7 @@ impl MulticastDataplaneClient {
     /// for consistency across invocations.
     fn select_one_switch(
         &self,
-    ) -> MulticastDataplaneResult<(&SwitchLocation, &dpd_client::Client)> {
+    ) -> MulticastDataplaneResult<(&SwitchSlot, &dpd_client::Client)> {
         let mut switches: Vec<_> = self.dpd_clients.iter().collect();
         switches.sort_by_key(|(loc, _)| *loc);
         switches
@@ -193,7 +193,7 @@ impl MulticastDataplaneClient {
         client: &dpd_client::Client,
         ip: UnderlayMulticastIpv6,
         tag: &str,
-        switch: &SwitchLocation,
+        switch: &SwitchSlot,
     ) -> MulticastDataplaneResult<MulticastGroupUnderlayResponse> {
         let create = MulticastGroupCreateUnderlayEntry {
             group_ip: ip.clone(),
@@ -246,7 +246,7 @@ impl MulticastDataplaneClient {
         &self,
         client: &dpd_client::Client,
         create: &MulticastGroupCreateExternalEntry,
-        switch: &SwitchLocation,
+        switch: &SwitchSlot,
     ) -> MulticastDataplaneResult<MulticastGroupExternalResponse> {
         match client.multicast_group_create_external(create).await {
             Ok(r) => Ok(r.into_inner()),
@@ -297,7 +297,7 @@ impl MulticastDataplaneClient {
         tag: &MulticastTag,
         update: &MulticastGroupUpdateExternalEntry,
         create: &MulticastGroupCreateExternalEntry,
-        switch: &SwitchLocation,
+        switch: &SwitchSlot,
     ) -> MulticastDataplaneResult<MulticastGroupExternalResponse> {
         match client
             .multicast_group_update_external(&group_ip, tag, update)
@@ -452,7 +452,7 @@ impl MulticastDataplaneClient {
         };
 
         let create_operations =
-            dpd_clients.into_iter().map(|(switch_location, client)| {
+            dpd_clients.into_iter().map(|(switch_slot, client)| {
                 let tag = tag.clone();
                 let nat_target = nat_target.clone();
                 let sources = sources_dpd.clone();
@@ -464,7 +464,7 @@ impl MulticastDataplaneClient {
                             client,
                             underlay_ip_admin,
                             &tag,
-                            switch_location,
+                            switch_slot,
                         )
                         .await?;
 
@@ -482,12 +482,12 @@ impl MulticastDataplaneClient {
                         .dpd_ensure_external_created(
                             client,
                             &external_entry,
-                            switch_location,
+                            switch_slot,
                         )
                         .await?;
 
                     Ok::<_, Error>((
-                        switch_location,
+                        switch_slot,
                         underlay_response,
                         external_response,
                     ))
@@ -513,7 +513,7 @@ impl MulticastDataplaneClient {
         })?;
 
         // Collect results
-        let programmed_switches: Vec<SwitchLocation> =
+        let programmed_switches: Vec<SwitchSlot> =
             results.iter().map(|(loc, _, _)| **loc).collect();
         let (_, underlay_last, external_last) =
             results.into_iter().last().ok_or_else(|| {
@@ -617,7 +617,7 @@ impl MulticastDataplaneClient {
         };
 
         let update_operations =
-            dpd_clients.into_iter().map(|(switch_location, client)| {
+            dpd_clients.into_iter().map(|(switch_slot, client)| {
                 let new_name = new_name_str.clone();
                 let nat_target = nat_target.clone();
                 let sources = sources_dpd.clone();
@@ -651,7 +651,7 @@ impl MulticastDataplaneClient {
                                     client,
                                     underlay_ip_admin.clone(),
                                     db_tag,
-                                    switch_location,
+                                    switch_slot,
                                 )
                                 .await?;
                             (created.members, created.tag)
@@ -661,7 +661,7 @@ impl MulticastDataplaneClient {
                                 self.log,
                                 "failed to fetch underlay for update";
                                 "underlay_ip" => %underlay_ip_admin,
-                                "switch" => %switch_location,
+                                "switch" => %switch_slot,
                                 "error" => %e
                             );
                             return Err(Error::internal_error(
@@ -692,7 +692,7 @@ impl MulticastDataplaneClient {
                                 self.log,
                                 "failed to update underlay";
                                 "underlay_ip" => %underlay_ip_admin,
-                                "switch" => %switch_location,
+                                "switch" => %switch_slot,
                                 "error" => %e
                             );
                             Error::internal_error("failed to update underlay")
@@ -723,12 +723,12 @@ impl MulticastDataplaneClient {
                             &tag,
                             &update_entry,
                             &create_entry,
-                            switch_location,
+                            switch_slot,
                         )
                         .await?;
 
                     Ok::<_, Error>((
-                        switch_location,
+                        switch_slot,
                         underlay_response.into_inner(),
                         external_response,
                     ))
@@ -789,7 +789,7 @@ impl MulticastDataplaneClient {
         let dpd_clients = &self.dpd_clients;
         let operation_name = operation_name.to_string();
 
-        let modify_ops = dpd_clients.iter().map(|(location, client)| {
+        let modify_ops = dpd_clients.iter().map(|(switch_slot, client)| {
             let underlay_ip = underlay_group.multicast_ip.ip();
             let member = member.clone();
             let log = self.log.clone();
@@ -819,7 +819,7 @@ impl MulticastDataplaneClient {
                             log,
                             "underlay group not found, creating before member operation";
                             "underlay_ip" => %underlay_ip,
-                            "switch" => %location,
+                            "switch" => %switch_slot,
                             "operation" => %operation_name,
                             "dpd_operation" => "modify_group_membership_recreate"
                         );
@@ -847,7 +847,7 @@ impl MulticastDataplaneClient {
                                     log,
                                     "underlay group created by concurrent request, fetching";
                                     "underlay_ip" => %underlay_ip,
-                                    "switch" => %location,
+                                    "switch" => %switch_slot,
                                     "dpd_operation" => "modify_group_membership_recreate"
                                 );
 
@@ -859,12 +859,12 @@ impl MulticastDataplaneClient {
                                             log,
                                             "underlay re-fetch after conflict failed";
                                             "underlay_ip" => %underlay_ip,
-                                            "switch" => %location,
+                                            "switch" => %switch_slot,
                                             "error" => %e,
                                             "dpd_operation" => "modify_group_membership_recreate"
                                         );
                                         Error::internal_error(&format!(
-                                            "underlay re-fetch after conflict failed on {location}: {e}"
+                                            "underlay re-fetch after conflict failed on {switch_slot}: {e}"
                                         ))
                                     })?
                                     .into_inner();
@@ -876,12 +876,12 @@ impl MulticastDataplaneClient {
                                     log,
                                     "underlay recreate failed";
                                     "underlay_ip" => %underlay_ip,
-                                    "switch" => %location,
+                                    "switch" => %switch_slot,
                                     "error" => %e,
                                     "dpd_operation" => "modify_group_membership_recreate"
                                 );
                                 return Err(Error::internal_error(&format!(
-                                    "underlay recreate failed on {location}: {e}"
+                                    "underlay recreate failed on {switch_slot}: {e}"
                                 )));
                             }
                         }
@@ -891,12 +891,12 @@ impl MulticastDataplaneClient {
                             log,
                             "underlay get failed";
                             "underlay_ip" => %underlay_ip,
-                            "switch" => %location,
+                            "switch" => %switch_slot,
                             "error" => %e,
                             "dpd_operation" => "modify_group_membership_get"
                         );
                         return Err(Error::internal_error(&format!(
-                            "underlay get failed on {location}: {e}"
+                            "underlay get failed on {switch_slot}: {e}"
                         )));
                     }
                 };
@@ -942,7 +942,7 @@ impl MulticastDataplaneClient {
                             log,
                             "underlay update failed, attempting delete+recreate";
                             "underlay_ip" => %underlay_ip,
-                            "switch" => %location,
+                            "switch" => %switch_slot,
                             "operation" => %operation_name,
                             "status" => %resp.status(),
                             "dpd_operation" => "modify_group_membership_recreate"
@@ -970,7 +970,7 @@ impl MulticastDataplaneClient {
                                 "underlay delete failed, resetting all \
                                  groups by tag for clean ASIC state";
                                 "underlay_ip" => %underlay_ip,
-                                "switch" => %location,
+                                "switch" => %switch_slot,
                                 "delete_error" => %del_err,
                                 "dpd_operation" => "modify_group_membership_recreate"
                             );
@@ -983,7 +983,7 @@ impl MulticastDataplaneClient {
                                     log,
                                     "tag reset also failed during recovery";
                                     "underlay_ip" => %underlay_ip,
-                                    "switch" => %location,
+                                    "switch" => %switch_slot,
                                     "error" => %reset_err,
                                     "dpd_operation" => "modify_group_membership_recreate"
                                 );
@@ -993,7 +993,7 @@ impl MulticastDataplaneClient {
                             // Drift correction will recreate the groups
                             // with clean ASIC state on the next pass.
                             return Err(Error::internal_error(&format!(
-                                "underlay group recovery on {location}: \
+                                "underlay group recovery on {switch_slot}: \
                                  reset by tag after delete failed ({del_err})"
                             )));
                         }
@@ -1013,12 +1013,12 @@ impl MulticastDataplaneClient {
                                     log,
                                     "underlay recreate with members failed";
                                     "underlay_ip" => %underlay_ip,
-                                    "switch" => %location,
+                                    "switch" => %switch_slot,
                                     "error" => %e,
                                     "dpd_operation" => "modify_group_membership_recreate"
                                 );
                                 Error::internal_error(&format!(
-                                    "underlay recreate with members failed on {location}: {e}"
+                                    "underlay recreate with members failed on {switch_slot}: {e}"
                                 ))
                             })?;
                     }
@@ -1028,12 +1028,12 @@ impl MulticastDataplaneClient {
                             "underlay member modify failed";
                             "operation_name" => %operation_name,
                             "underlay_ip" => %underlay_ip,
-                            "switch" => %location,
+                            "switch" => %switch_slot,
                             "error" => %e,
                             "dpd_operation" => "modify_group_membership_update"
                         );
                         return Err(Error::internal_error(&format!(
-                            "underlay member modify failed on {location}: {e}"
+                            "underlay member modify failed on {switch_slot}: {e}"
                         )));
                     }
                 }
@@ -1046,7 +1046,7 @@ impl MulticastDataplaneClient {
                     "member_port_id" => %member_port_id,
                     "member_link_id" => %member_link_id,
                     "member_direction" => ?member_direction,
-                    "switch_location" => %location,
+                    "switch_slot" => %switch_slot,
                     "dpd_operation" => %dpd_operation_done
                 );
 
@@ -1140,10 +1140,10 @@ impl MulticastDataplaneClient {
     fn log_drift_issues<'a>(
         &self,
         group_ip: IpAddr,
-        first_location: &SwitchLocation,
+        first_location: &SwitchSlot,
         first_config: &MulticastGroupResponse,
         found_results: &[&'a (
-            &'a SwitchLocation,
+            &'a SwitchSlot,
             Option<MulticastGroupResponse>,
         )],
         not_found_count: usize,
@@ -1168,13 +1168,13 @@ impl MulticastDataplaneClient {
             .iter()
             .filter_map(|(loc, resp)| resp.as_ref().map(|r| (loc, r)))
             .filter(|(_, cfg)| *cfg != first_config)
-            .for_each(|(location, _)| {
+            .for_each(|(switch_slot, _)| {
                 error!(
                     self.log,
                     "cross-switch drift detected: different configs on switches";
                     "group_ip" => %group_ip,
                     "first_switch" => %first_location,
-                    "mismatched_switch" => %location,
+                    "mismatched_switch" => %switch_slot,
                     "dpd_operation" => "fetch_external_group_for_drift_check"
                 );
             });
@@ -1198,12 +1198,12 @@ impl MulticastDataplaneClient {
             "dpd_operation" => "fetch_external_group_for_drift_check"
         );
 
-        let fetch_ops = self.dpd_clients.iter().map(|(location, client)| {
+        let fetch_ops = self.dpd_clients.iter().map(|(switch_slot, client)| {
             let log = self.log.clone();
             async move {
                 match client.multicast_group_get(&group_ip).await {
                     Ok(response) => {
-                        Ok((location, Some(response.into_inner())))
+                        Ok((switch_slot, Some(response.into_inner())))
                     }
                     Err(DpdError::ErrorResponse(resp))
                         if resp.status() == reqwest::StatusCode::NOT_FOUND =>
@@ -1212,17 +1212,17 @@ impl MulticastDataplaneClient {
                             log,
                             "external group not found on switch";
                             "group_ip" => %group_ip,
-                            "switch" => %location,
+                            "switch" => %switch_slot,
                             "dpd_operation" => "fetch_external_group_for_drift_check"
                         );
-                        Ok((location, None))
+                        Ok((switch_slot, None))
                     }
                     Err(e) => {
                         error!(
                             log,
                             "external group fetch failed";
                             "group_ip" => %group_ip,
-                            "switch" => %location,
+                            "switch" => %switch_slot,
                             "error" => %e,
                             "dpd_operation" => "fetch_external_group_for_drift_check"
                         );
@@ -1296,12 +1296,12 @@ impl MulticastDataplaneClient {
             dpd_client::types::BackplaneLink,
         >,
     > {
-        let (switch_location, client) = self.select_one_switch()?;
+        let (switch_slot, client) = self.select_one_switch()?;
 
         debug!(
             self.log,
             "fetching backplane map from DPD for topology validation";
-            "switch" => %switch_location,
+            "switch" => %switch_slot,
             "query_scope" => "single_switch",
             "dpd_operation" => "fetch_backplane_map"
         );
@@ -1334,7 +1334,7 @@ impl MulticastDataplaneClient {
                 debug!(
                     self.log,
                     "backplane map fetched from DPD";
-                    "switch" => %switch_location,
+                    "switch" => %switch_slot,
                     "port_count" => backplane_map.len(),
                     "dpd_operation" => "fetch_backplane_map"
                 );
@@ -1344,7 +1344,7 @@ impl MulticastDataplaneClient {
                 error!(
                     self.log,
                     "backplane map fetch failed";
-                    "switch" => %switch_location,
+                    "switch" => %switch_slot,
                     "error" => %e,
                     "dpd_operation" => "fetch_backplane_map"
                 );
@@ -1367,13 +1367,13 @@ impl MulticastDataplaneClient {
         &self,
         underlay_ip: IpAddr,
     ) -> MulticastDataplaneResult<Option<Vec<MulticastGroupMember>>> {
-        let (switch_location, client) = self.select_one_switch()?;
+        let (switch_slot, client) = self.select_one_switch()?;
 
         debug!(
             self.log,
             "fetching underlay group members from DPD for drift detection";
             "underlay_ip" => %underlay_ip,
-            "switch" => %switch_location,
+            "switch" => %switch_slot,
             "dpd_operation" => "fetch_underlay_members"
         );
 
@@ -1389,7 +1389,7 @@ impl MulticastDataplaneClient {
                     self.log,
                     "underlay group members fetched from DPD";
                     "underlay_ip" => %underlay_ip,
-                    "switch" => %switch_location,
+                    "switch" => %switch_slot,
                     "member_count" => members.len(),
                     "dpd_operation" => "fetch_underlay_members"
                 );
@@ -1402,7 +1402,7 @@ impl MulticastDataplaneClient {
                     self.log,
                     "underlay group not found on switch";
                     "underlay_ip" => %underlay_ip,
-                    "switch" => %switch_location,
+                    "switch" => %switch_slot,
                     "dpd_operation" => "fetch_underlay_members"
                 );
                 Ok(None)
@@ -1412,7 +1412,7 @@ impl MulticastDataplaneClient {
                     self.log,
                     "underlay group fetch failed";
                     "underlay_ip" => %underlay_ip,
-                    "switch" => %switch_location,
+                    "switch" => %switch_slot,
                     "error" => %e,
                     "dpd_operation" => "fetch_underlay_members"
                 );
@@ -1439,7 +1439,7 @@ impl MulticastDataplaneClient {
             .map_err(|_| Error::internal_error("invalid multicast tag"))?;
 
         // Execute cleanup operations on all switches in parallel
-        let cleanup_ops = dpd_clients.iter().map(|(location, client)| {
+        let cleanup_ops = dpd_clients.iter().map(|(switch_slot, client)| {
             let log = self.log.clone();
             let dpd_tag = dpd_tag.clone();
             async move {
@@ -1448,7 +1448,7 @@ impl MulticastDataplaneClient {
                         debug!(
                             log,
                             "cleaned up multicast groups";
-                            "switch" => %location,
+                            "switch" => %switch_slot,
                             "tag" => %tag
                         );
                         Ok::<(), Error>(())
@@ -1460,7 +1460,7 @@ impl MulticastDataplaneClient {
                         debug!(
                             log,
                             "no multicast groups found with tag on switch (expected)";
-                            "switch" => %location,
+                            "switch" => %switch_slot,
                             "tag" => %tag
                         );
                         Ok::<(), Error>(())
@@ -1469,7 +1469,7 @@ impl MulticastDataplaneClient {
                         error!(
                             log,
                             "failed to clean up multicast groups by tag";
-                            "switch" => %location,
+                            "switch" => %switch_slot,
                             "tag" => %tag,
                             "error" => %e,
                             "dpd_operation" => "remove_groups"

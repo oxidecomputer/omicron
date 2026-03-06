@@ -5,7 +5,7 @@
 //! Fetching transceiver state from the SP.
 
 use gateway_client::types::SpIdentifier;
-use sled_agent_types::early_networking::SwitchLocation;
+use sled_agent_types::early_networking::SwitchSlot;
 use slog::{Logger, debug, error};
 use std::{
     collections::HashMap,
@@ -23,7 +23,7 @@ use transceiver_controller::{SpRequest, message::ExtendedStatus};
 use wicket_common::inventory::{SpType, Transceiver};
 
 /// Type alias for a map of all transceivers on each switch.
-pub type TransceiverMap = HashMap<SwitchLocation, Vec<Transceiver>>;
+pub type TransceiverMap = HashMap<SwitchSlot, Vec<Transceiver>>;
 
 // Queue size for passing messages between transceiver fetch task.
 const CHANNEL_CAPACITY: usize = 4;
@@ -55,7 +55,7 @@ pub enum GetTransceiversResponse {
 
 /// Handle for interacting with the transceiver manager.
 pub struct Handle {
-    switch_location_tx: watch::Sender<Option<SwitchLocation>>,
+    switch_slot_tx: watch::Sender<Option<SwitchSlot>>,
     transceivers: Arc<Mutex<GetTransceiversResponse>>,
 }
 
@@ -70,13 +70,13 @@ impl Handle {
         let SpIdentifier { slot, type_: SpType::Switch } = switch else {
             panic!("Should only be called with SpType::Switch");
         };
-        let loc = match slot {
-            0 => SwitchLocation::Switch0,
-            1 => SwitchLocation::Switch1,
+        let slot = match slot {
+            0 => SwitchSlot::Switch0,
+            1 => SwitchSlot::Switch1,
             _ => unreachable!(),
         };
-        self.switch_location_tx
-            .send(Some(loc))
+        self.switch_slot_tx
+            .send(Some(slot))
             .expect("Should always have a receiver");
     }
 
@@ -88,8 +88,8 @@ impl Handle {
 
 pub struct Manager {
     log: Logger,
-    switch_location_tx: watch::Sender<Option<SwitchLocation>>,
-    switch_location_rx: watch::Receiver<Option<SwitchLocation>>,
+    switch_slot_tx: watch::Sender<Option<SwitchSlot>>,
+    switch_slot_rx: watch::Receiver<Option<SwitchSlot>>,
     transceivers: Arc<Mutex<GetTransceiversResponse>>,
 }
 
@@ -97,15 +97,15 @@ impl Manager {
     pub(crate) fn new(log: &Logger) -> Self {
         let log =
             log.new(slog::o!("component" => "wicketd TransceiverManager"));
-        let (switch_location_tx, switch_location_rx) = watch::channel(None);
+        let (switch_slot_tx, switch_slot_rx) = watch::channel(None);
         let transceivers =
             Arc::new(Mutex::new(GetTransceiversResponse::Unavailable));
-        Self { log, transceivers, switch_location_tx, switch_location_rx }
+        Self { log, transceivers, switch_slot_tx, switch_slot_rx }
     }
 
     pub(crate) fn get_handle(&self) -> Handle {
         Handle {
-            switch_location_tx: self.switch_location_tx.clone(),
+            switch_slot_tx: self.switch_slot_tx.clone(),
             transceivers: self.transceivers.clone(),
         }
     }
@@ -117,8 +117,8 @@ impl Manager {
         // We've never called any other borrowing method between the creation
         // and here, so changed() will wait until we get something new.
         debug!(self.log, "waiting to learn our switch location");
-        let our_switch_location = loop {
-            if self.switch_location_rx.changed().await.is_err() {
+        let our_switch_slot = loop {
+            if self.switch_slot_rx.changed().await.is_err() {
                 slog::warn!(
                     self.log,
                     "failed to wait for new switch location change \
@@ -126,17 +126,17 @@ impl Manager {
                 );
                 return;
             };
-            match *self.switch_location_rx.borrow_and_update() {
+            match *self.switch_slot_rx.borrow_and_update() {
                 Some(loc) => break loc,
                 None => continue,
             }
         };
-        let other_switch_location = our_switch_location.other();
+        let other_switch_slot = our_switch_slot.other();
         debug!(
             self.log,
             "determined our switch locations, spawning transceiver fetch tasks";
-            "our_switch" => %our_switch_location,
-            "other_switch" => %other_switch_location,
+            "our_switch" => %our_switch_slot,
+            "other_switch" => %other_switch_slot,
         );
 
         // Now, spawn a task for each switch.
@@ -148,13 +148,13 @@ impl Manager {
         tokio::spawn(fetch_transceivers_from_one_switch(
             self.log.clone(),
             tx.clone(),
-            our_switch_location,
+            our_switch_slot,
             LOCAL_SWITCH_SP_INTERFACE,
         ));
         tokio::spawn(fetch_transceivers_from_one_switch(
             self.log.clone(),
             tx.clone(),
-            other_switch_location,
+            other_switch_slot,
             OTHER_SWITCH_SP_INTERFACE,
         ));
 
@@ -196,7 +196,7 @@ impl Manager {
 // An update from one of the transceiver fetching tasks about the transceivers
 // it has seen.
 struct TransceiverUpdate {
-    location: SwitchLocation,
+    location: SwitchSlot,
     transceivers: Vec<Transceiver>,
     updated_at: Instant,
 }
@@ -205,7 +205,7 @@ struct TransceiverUpdate {
 async fn fetch_transceivers_from_one_switch(
     log: Logger,
     tx: mpsc::Sender<TransceiverUpdate>,
-    location: SwitchLocation,
+    location: SwitchSlot,
     interface: &'static str,
 ) {
     let mut check_interval = tokio::time::interval(TRANSCEIVER_POLL_INTERVAL);

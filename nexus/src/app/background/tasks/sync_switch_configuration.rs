@@ -62,7 +62,7 @@ use sled_agent_types::early_networking::MaxPathConfig;
 use sled_agent_types::early_networking::PortConfig;
 use sled_agent_types::early_networking::RackNetworkConfig;
 use sled_agent_types::early_networking::RouteConfig as SledRouteConfig;
-use sled_agent_types::early_networking::SwitchLocation;
+use sled_agent_types::early_networking::SwitchSlot;
 use sled_agent_types::early_networking::TxEqConfig;
 use sled_agent_types::early_networking::UplinkAddressConfig;
 use sled_agent_types::early_networking::WriteNetworkConfigRequest;
@@ -171,12 +171,12 @@ impl SwitchPortSettingsManager {
         opctx: &OpContext,
         log: &slog::Logger,
     ) -> Result<
-        Vec<(SwitchLocation, nexus_db_model::SwitchPort, PortSettingsChange)>,
+        Vec<(SwitchSlot, nexus_db_model::SwitchPort, PortSettingsChange)>,
         serde_json::Value,
     > {
         let mut changes = Vec::new();
         for port in port_list {
-            let location = SwitchLocation::from(port.switch_slot);
+            let location = SwitchSlot::from(port.switch_slot);
             let id = match port.port_settings_id {
                 Some(id) => id,
                 _ => {
@@ -229,7 +229,7 @@ impl SwitchPortSettingsManager {
         &mut self,
         opctx: &OpContext,
     ) -> Result<
-        HashSet<(SwitchLocation, IpAddr)>,
+        HashSet<(SwitchSlot, IpAddr)>,
         omicron_common::api::external::Error,
     > {
         let values = self
@@ -237,11 +237,11 @@ impl SwitchPortSettingsManager {
             .loopback_address_list(opctx, &DataPageParams::max_page())
             .await?;
 
-        let mut set: HashSet<(SwitchLocation, IpAddr)> = HashSet::new();
+        let mut set: HashSet<(SwitchSlot, IpAddr)> = HashSet::new();
 
         // TODO: are we doing anything special with anycast addresses at the moment?
         for LoopbackAddress { switch_slot, address, .. } in values.iter() {
-            set.insert((SwitchLocation::from(*switch_slot), address.ip()));
+            set.insert((SwitchSlot::from(*switch_slot), address.ip()));
         }
 
         Ok(set)
@@ -433,11 +433,11 @@ impl BackgroundTask for SwitchPortSettingsManager {
                     Ok(desired_loopback_addresses) => {
                         let current_loopback_addresses = switch_loopback_addresses(&dpd_clients, &log).await;
 
-                        let loopbacks_to_add: Vec<(SwitchLocation, IpAddr)> = desired_loopback_addresses
+                        let loopbacks_to_add: Vec<(SwitchSlot, IpAddr)> = desired_loopback_addresses
                             .difference(&current_loopback_addresses)
                             .map(|i| (i.0, i.1))
                             .collect();
-                        let loopbacks_to_del: Vec<(SwitchLocation, IpAddr)> = current_loopback_addresses
+                        let loopbacks_to_del: Vec<(SwitchSlot, IpAddr)> = current_loopback_addresses
                             .difference(&desired_loopback_addresses)
                             .map(|i| (i.0, i.1))
                             .collect();
@@ -504,11 +504,11 @@ impl BackgroundTask for SwitchPortSettingsManager {
 
                 // build a list of desired settings for each switch
                 let mut desired_bgp_configs: HashMap<
-                        SwitchLocation, (ApplyRequest, BestpathFanoutRequest)
+                        SwitchSlot, (ApplyRequest, BestpathFanoutRequest)
                         > = HashMap::new();
 
                 // we currently only support one bgp config per switch
-                let mut switch_bgp_config: HashMap<SwitchLocation, (Uuid, BgpConfig)> = HashMap::new();
+                let mut switch_bgp_config: HashMap<SwitchSlot, (Uuid, BgpConfig)> = HashMap::new();
 
                 // Prefixes are associated to BgpConfig via the config id
                 let mut bgp_announce_prefixes: HashMap<Uuid, Vec<Prefix>> = HashMap::new();
@@ -1581,8 +1581,8 @@ async fn ensure_loopback_deleted(
 }
 
 async fn add_loopback_addresses_to_switch(
-    loopbacks_to_add: &[(SwitchLocation, IpAddr)],
-    dpd_clients: HashMap<SwitchLocation, dpd_client::Client>,
+    loopbacks_to_add: &[(SwitchSlot, IpAddr)],
+    dpd_clients: HashMap<SwitchSlot, dpd_client::Client>,
     log: &slog::Logger,
 ) {
     for (location, address) in loopbacks_to_add {
@@ -1604,8 +1604,8 @@ async fn add_loopback_addresses_to_switch(
 }
 
 async fn delete_loopback_addresses_from_switch(
-    loopbacks_to_del: &[(SwitchLocation, IpAddr)],
-    dpd_clients: &HashMap<SwitchLocation, dpd_client::Client>,
+    loopbacks_to_del: &[(SwitchSlot, IpAddr)],
+    dpd_clients: &HashMap<SwitchSlot, dpd_client::Client>,
     log: &slog::Logger,
 ) {
     for (location, address) in loopbacks_to_del {
@@ -1624,10 +1624,10 @@ async fn delete_loopback_addresses_from_switch(
 }
 
 async fn switch_loopback_addresses(
-    dpd_clients: &HashMap<SwitchLocation, dpd_client::Client>,
+    dpd_clients: &HashMap<SwitchSlot, dpd_client::Client>,
     log: &slog::Logger,
-) -> HashSet<(SwitchLocation, IpAddr)> {
-    let mut current_loopback_addresses: HashSet<(SwitchLocation, IpAddr)> =
+) -> HashSet<(SwitchSlot, IpAddr)> {
+    let mut current_loopback_addresses: HashSet<(SwitchSlot, IpAddr)> =
         HashSet::new();
 
     for (location, client) in dpd_clients {
@@ -1672,14 +1672,9 @@ async fn switch_loopback_addresses(
 }
 
 fn uplinks(
-    changes: &[(
-        SwitchLocation,
-        nexus_db_model::SwitchPort,
-        PortSettingsChange,
-    )],
-) -> HashMap<SwitchLocation, Vec<HostPortConfig>> {
-    let mut uplinks: HashMap<SwitchLocation, Vec<HostPortConfig>> =
-        HashMap::new();
+    changes: &[(SwitchSlot, nexus_db_model::SwitchPort, PortSettingsChange)],
+) -> HashMap<SwitchSlot, Vec<HostPortConfig>> {
+    let mut uplinks: HashMap<SwitchSlot, Vec<HostPortConfig>> = HashMap::new();
     for (location, port, change) in changes {
         let PortSettingsChange::Apply(config) = change else {
             continue;
@@ -1750,10 +1745,10 @@ fn uplinks(
 }
 
 fn build_sled_agent_clients(
-    mappings: &HashMap<SwitchLocation, std::net::Ipv6Addr>,
+    mappings: &HashMap<SwitchSlot, std::net::Ipv6Addr>,
     log: &slog::Logger,
-) -> HashMap<SwitchLocation, sled_agent_client::Client> {
-    let sled_agent_clients: HashMap<SwitchLocation, sled_agent_client::Client> =
+) -> HashMap<SwitchSlot, sled_agent_client::Client> {
+    let sled_agent_clients: HashMap<SwitchSlot, sled_agent_client::Client> =
         mappings
             .iter()
             .map(|(location, addr)| {
@@ -1794,16 +1789,15 @@ enum SwitchStaticRoute {
 type SwitchStaticRoutes = HashSet<SwitchStaticRoute>;
 
 fn static_routes_to_del(
-    current_static_routes: HashMap<SwitchLocation, SwitchStaticRoutes>,
-    desired_static_routes: HashMap<SwitchLocation, SwitchStaticRoutes>,
-) -> HashMap<SwitchLocation, DeleteStaticRouteRequest> {
-    let mut routes_to_del: HashMap<SwitchLocation, DeleteStaticRouteRequest> =
+    current_static_routes: HashMap<SwitchSlot, SwitchStaticRoutes>,
+    desired_static_routes: HashMap<SwitchSlot, SwitchStaticRoutes>,
+) -> HashMap<SwitchSlot, DeleteStaticRouteRequest> {
+    let mut routes_to_del: HashMap<SwitchSlot, DeleteStaticRouteRequest> =
         HashMap::new();
 
     // find routes to remove
-    for (switch_location, routes_on_switch) in &current_static_routes {
-        if let Some(routes_wanted) = desired_static_routes.get(switch_location)
-        {
+    for (switch_slot, routes_on_switch) in &current_static_routes {
+        if let Some(routes_wanted) = desired_static_routes.get(switch_slot) {
             let mut result = DeleteStaticRouteRequest::default();
             // if it's on the switch but not desired (in our db), it should be removed
             let stale_routes = routes_on_switch.difference(routes_wanted);
@@ -1827,7 +1821,7 @@ fn static_routes_to_del(
                     }
                 }
             }
-            routes_to_del.insert(*switch_location, result);
+            routes_to_del.insert(*switch_slot, result);
         } else {
             // if no desired routes are present, all routes on this switch should be deleted
             let mut result = DeleteStaticRouteRequest::default();
@@ -1851,7 +1845,7 @@ fn static_routes_to_del(
                     }
                 }
             }
-            routes_to_del.insert(*switch_location, result);
+            routes_to_del.insert(*switch_slot, result);
         };
     }
 
@@ -1869,23 +1863,22 @@ fn static_routes_to_del(
 
 #[allow(clippy::type_complexity)]
 fn static_routes_to_add(
-    desired_static_routes: &HashMap<SwitchLocation, SwitchStaticRoutes>,
-    current_static_routes: &HashMap<SwitchLocation, SwitchStaticRoutes>,
+    desired_static_routes: &HashMap<SwitchSlot, SwitchStaticRoutes>,
+    current_static_routes: &HashMap<SwitchSlot, SwitchStaticRoutes>,
     log: &slog::Logger,
-) -> HashMap<SwitchLocation, AddStaticRouteRequest> {
-    let mut routes_to_add: HashMap<SwitchLocation, AddStaticRouteRequest> =
+) -> HashMap<SwitchSlot, AddStaticRouteRequest> {
+    let mut routes_to_add: HashMap<SwitchSlot, AddStaticRouteRequest> =
         HashMap::new();
 
     // find routes to add
-    for (switch_location, routes_wanted) in desired_static_routes {
-        let routes_on_switch = match current_static_routes.get(&switch_location)
-        {
+    for (switch_slot, routes_wanted) in desired_static_routes {
+        let routes_on_switch = match current_static_routes.get(&switch_slot) {
             Some(routes) => routes,
             None => {
                 warn!(
                     &log,
                     "no discovered routes from switch. it is possible that an earlier api call failed.";
-                    "switch_location" => ?switch_location,
+                    "switch_slot" => ?switch_slot,
                 );
                 continue;
             }
@@ -1913,7 +1906,7 @@ fn static_routes_to_add(
             }
         }
 
-        routes_to_add.insert(*switch_location, result);
+        routes_to_add.insert(*switch_slot, result);
     }
 
     // filter out switches with no routes to add
@@ -1930,13 +1923,9 @@ fn static_routes_to_add(
 
 fn static_routes_in_db(
     log: &Logger,
-    changes: &[(
-        SwitchLocation,
-        nexus_db_model::SwitchPort,
-        PortSettingsChange,
-    )],
-) -> HashMap<SwitchLocation, SwitchStaticRoutes> {
-    let mut routes_from_db: HashMap<SwitchLocation, SwitchStaticRoutes> =
+    changes: &[(SwitchSlot, nexus_db_model::SwitchPort, PortSettingsChange)],
+) -> HashMap<SwitchSlot, SwitchStaticRoutes> {
+    let mut routes_from_db: HashMap<SwitchSlot, SwitchStaticRoutes> =
         HashMap::new();
 
     for (location, _port, change) in changes {
@@ -2013,12 +2002,8 @@ fn static_routes_in_db(
 // apply changes for each port
 // if we encounter an error, we log it and keep going instead of bailing
 async fn apply_switch_port_changes(
-    dpd_clients: &HashMap<SwitchLocation, dpd_client::Client>,
-    changes: &[(
-        SwitchLocation,
-        nexus_db_model::SwitchPort,
-        PortSettingsChange,
-    )],
+    dpd_clients: &HashMap<SwitchSlot, dpd_client::Client>,
+    changes: &[(SwitchSlot, nexus_db_model::SwitchPort, PortSettingsChange)],
     log: &slog::Logger,
 ) {
     for (location, switch_port, change) in changes {
@@ -2175,9 +2160,9 @@ async fn apply_switch_port_changes(
 }
 
 async fn static_routes_on_switch(
-    mgd_clients: &HashMap<SwitchLocation, mg_admin_client::Client>,
+    mgd_clients: &HashMap<SwitchSlot, mg_admin_client::Client>,
     log: &slog::Logger,
-) -> HashMap<SwitchLocation, SwitchStaticRoutes> {
+) -> HashMap<SwitchSlot, SwitchStaticRoutes> {
     let mut routes_on_switch = HashMap::new();
 
     for (location, client) in mgd_clients {
@@ -2258,18 +2243,18 @@ async fn static_routes_on_switch(
 }
 
 async fn delete_static_routes(
-    mgd_clients: &HashMap<SwitchLocation, mg_admin_client::Client>,
-    routes_to_del: HashMap<SwitchLocation, DeleteStaticRouteRequest>,
+    mgd_clients: &HashMap<SwitchSlot, mg_admin_client::Client>,
+    routes_to_del: HashMap<SwitchSlot, DeleteStaticRouteRequest>,
     log: &slog::Logger,
 ) {
-    for (switch_location, request) in routes_to_del {
-        let client = match mgd_clients.get(&switch_location) {
+    for (switch_slot, request) in routes_to_del {
+        let client = match mgd_clients.get(&switch_slot) {
             Some(client) => client,
             None => {
                 error!(
                     &log,
                     "mgd client not found for switch location";
-                    "switch_location" => ?switch_location,
+                    "switch_slot" => ?switch_slot,
                 );
                 continue;
             }
@@ -2278,14 +2263,14 @@ async fn delete_static_routes(
         info!(
             &log,
             "removing static routes";
-            "switch_location" => ?switch_location,
+            "switch_slot" => ?switch_slot,
             "request" => ?request,
         );
         if let Err(e) = client.static_remove_v4_route(&request.v4).await {
             error!(
                 &log,
                 "failed to delete v4 routes from mgd";
-                "switch_location" => ?switch_location,
+                "switch_slot" => ?switch_slot,
                 "request" => ?request,
                 "error" => format!("{:#}", e)
             );
@@ -2294,7 +2279,7 @@ async fn delete_static_routes(
             error!(
                 &log,
                 "failed to delete v6 routes from mgd";
-                "switch_location" => ?switch_location,
+                "switch_slot" => ?switch_slot,
                 "request" => ?request,
                 "error" => format!("{:#}", e)
             );
@@ -2303,18 +2288,18 @@ async fn delete_static_routes(
 }
 
 async fn add_static_routes(
-    mgd_clients: &HashMap<SwitchLocation, mg_admin_client::Client>,
-    routes_to_add: HashMap<SwitchLocation, AddStaticRouteRequest>,
+    mgd_clients: &HashMap<SwitchSlot, mg_admin_client::Client>,
+    routes_to_add: HashMap<SwitchSlot, AddStaticRouteRequest>,
     log: &slog::Logger,
 ) {
-    for (switch_location, request) in routes_to_add {
-        let client = match mgd_clients.get(&switch_location) {
+    for (switch_slot, request) in routes_to_add {
+        let client = match mgd_clients.get(&switch_slot) {
             Some(client) => client,
             None => {
                 error!(
                     &log,
                     "mgd client not found for switch location";
-                    "switch_location" => ?switch_location,
+                    "switch_slot" => ?switch_slot,
                 );
                 continue;
             }
@@ -2323,14 +2308,14 @@ async fn add_static_routes(
         info!(
             &log,
             "adding static routes";
-            "switch_location" => ?switch_location,
+            "switch_slot" => ?switch_slot,
             "request" => ?request,
         );
         if let Err(e) = client.static_add_v4_route(&request.v4).await {
             error!(
                 &log,
                 "failed to add v4 routes to mgd";
-                "switch_location" => ?switch_location,
+                "switch_slot" => ?switch_slot,
                 "request" => ?request,
                 "error" => format!("{:#}", e)
             );
@@ -2339,7 +2324,7 @@ async fn add_static_routes(
             error!(
                 &log,
                 "failed to add v6 routes to mgd";
-                "switch_location" => ?switch_location,
+                "switch_slot" => ?switch_slot,
                 "request" => ?request,
                 "error" => format!("{:#}", e)
             );

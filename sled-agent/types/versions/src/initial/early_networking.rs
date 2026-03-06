@@ -159,7 +159,7 @@ pub struct BfdPeerConfig {
     pub detection_threshold: u8,
     pub required_rx: u64,
     pub mode: BfdMode,
-    pub switch: SwitchLocation,
+    pub switch: SwitchSlot,
 }
 
 #[derive(
@@ -271,7 +271,7 @@ pub struct PortConfig {
     /// This port's addresses and optional vlan IDs
     pub addresses: Vec<UplinkAddressConfig>,
     /// Switch the port belongs to.
-    pub switch: SwitchLocation,
+    pub switch: SwitchSlot,
     /// Nmae of the port this config applies to.
     pub port: String,
     /// Port speed.
@@ -304,7 +304,7 @@ pub struct PortConfig {
     Ord,
 )]
 #[serde(rename_all = "snake_case")]
-pub enum SwitchLocation {
+pub enum SwitchSlot {
     /// Switch in upper slot
     Switch0,
     /// Switch in lower slot

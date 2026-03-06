@@ -37,6 +37,7 @@ api_versions!([
     // |  example for the next person.
     // v
     // (next_int, IDENT),
+    (27, RENAME_SWITCH_LOCATION_TO_SWITCH_SLOT),
     (26, RACK_NETWORK_CONFIG_NOT_OPTIONAL),
     (25, BOOTSTORE_VERSIONING),
     (24, ADD_ZPOOL_HEALTH_TO_INVENTORY),

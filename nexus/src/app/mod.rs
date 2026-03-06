@@ -39,7 +39,7 @@ use omicron_uuid_kinds::OmicronZoneUuid;
 use oximeter_producer::Server as ProducerServer;
 use sagas::common_storage::PooledPantryClient;
 use sagas::common_storage::make_pantry_connection_pool;
-use sled_agent_types::early_networking::SwitchLocation;
+use sled_agent_types::early_networking::SwitchSlot;
 use slog::Logger;
 use slog_error_chain::InlineErrorChain;
 use std::collections::HashMap;
@@ -1140,7 +1140,7 @@ impl Nexus {
 
     pub(crate) async fn dpd_clients(
         &self,
-    ) -> Result<HashMap<SwitchLocation, dpd_client::Client>, String> {
+    ) -> Result<HashMap<SwitchSlot, dpd_client::Client>, String> {
         let resolver = self.resolver();
         dpd_clients(resolver, &self.log).await
     }
@@ -1148,19 +1148,18 @@ impl Nexus {
     pub(crate) async fn lldpd_clients(
         &self,
         rack_id: Uuid,
-    ) -> Result<HashMap<SwitchLocation, lldpd_client::Client>, String> {
+    ) -> Result<HashMap<SwitchSlot, lldpd_client::Client>, String> {
         let resolver = self.resolver();
         lldpd_clients(resolver, rack_id, &self.log).await
     }
 
     pub(crate) async fn mg_clients(
         &self,
-    ) -> Result<HashMap<SwitchLocation, mg_admin_client::Client>, String> {
+    ) -> Result<HashMap<SwitchSlot, mg_admin_client::Client>, String> {
         let resolver = self.resolver();
         let mappings =
             switch_zone_address_mappings(resolver, &self.log).await?;
-        let mut clients: Vec<(SwitchLocation, mg_admin_client::Client)> =
-            vec![];
+        let mut clients: Vec<(SwitchSlot, mg_admin_client::Client)> = vec![];
         for (location, addr) in &mappings {
             let port = MGD_PORT;
             let socketaddr =
@@ -1232,11 +1231,11 @@ pub enum Unimpl {
 
 /// Returns a mapping of clients for the Dendrite daemons of reachable switch zones.
 /// If we are unable to communicate with the switch zone and determine the mapping
-/// of SwitchLocation -> Zone Underlay Address, we omit an entry for that client.
+/// of SwitchSlot -> Zone Underlay Address, we omit an entry for that client.
 pub(crate) async fn dpd_clients(
     resolver: &internal_dns_resolver::Resolver,
     log: &slog::Logger,
-) -> Result<HashMap<SwitchLocation, dpd_client::Client>, String> {
+) -> Result<HashMap<SwitchSlot, dpd_client::Client>, String> {
     let dpd_socketaddrs = match resolver
         .lookup_all_socket_v6(ServiceName::Dendrite)
         .await
@@ -1267,8 +1266,7 @@ pub(crate) async fn dpd_clients(
         })
         .collect();
 
-    let mut mappings: HashMap<SwitchLocation, dpd_client::Client> =
-        HashMap::new();
+    let mut mappings: HashMap<SwitchSlot, dpd_client::Client> = HashMap::new();
 
     for (addr, client) in clients {
         let switch_slot = match client.switch_identifiers().await {
@@ -1285,8 +1283,8 @@ pub(crate) async fn dpd_clients(
         };
 
         let location = match switch_slot {
-            0 => SwitchLocation::Switch0,
-            1 => SwitchLocation::Switch1,
+            0 => SwitchSlot::Switch0,
+            1 => SwitchSlot::Switch1,
             _ => {
                 warn!(log, "unexpected value for switch slot: {switch_slot}");
                 continue;
@@ -1306,16 +1304,16 @@ pub(crate) async fn dpd_clients(
 //
 /// Returns a mapping of clients for the LLDP daemons of reachable switch zones.
 /// If we are unable to communicate with the switch zone and determine the mapping
-/// of SwitchLocation -> Zone Underlay Address, we omit an entry for that client.
+/// of SwitchSlot -> Zone Underlay Address, we omit an entry for that client.
 pub(crate) async fn lldpd_clients(
     resolver: &internal_dns_resolver::Resolver,
     _rack_id: Uuid,
     log: &slog::Logger,
-) -> Result<HashMap<SwitchLocation, lldpd_client::Client>, String> {
+) -> Result<HashMap<SwitchSlot, lldpd_client::Client>, String> {
     let mappings = switch_zone_address_mappings(resolver, log).await?;
     let log = log.new(o!( "component" => "LldpdClient"));
     let port = lldpd_client::default_port();
-    let clients: HashMap<SwitchLocation, lldpd_client::Client> = mappings
+    let clients: HashMap<SwitchSlot, lldpd_client::Client> = mappings
         .iter()
         .map(|(location, addr)| {
             let lldpd_client = lldpd_client::Client::new(
@@ -1329,7 +1327,7 @@ pub(crate) async fn lldpd_clients(
 }
 
 /// Look up Dendrite addresses in DNS then determine the switch location of
-/// any addresses we're able to resolve the SwitchLocation for. If a switch
+/// any addresses we're able to resolve the SwitchSlot for. If a switch
 /// zone is down, the resolution process will fail and the entry will be
 /// missing from the result.
 ///
@@ -1339,7 +1337,7 @@ pub(crate) async fn lldpd_clients(
 async fn switch_zone_address_mappings(
     resolver: &internal_dns_resolver::Resolver,
     log: &slog::Logger,
-) -> Result<HashMap<SwitchLocation, Ipv6Addr>, String> {
+) -> Result<HashMap<SwitchSlot, Ipv6Addr>, String> {
     let switch_zone_addresses = match resolver
         .lookup_all_ipv6(ServiceName::Dendrite)
         .await
@@ -1368,14 +1366,14 @@ async fn switch_zone_address_mappings(
 /// combination.
 ///
 /// We return whatever we're able to successfully resolve. In the event of
-/// a communication timeout or other failure with MGS, the SwitchLocation -> Ipv6Addr
+/// a communication timeout or other failure with MGS, the SwitchSlot -> Ipv6Addr
 /// mapping will be missing from the returned HashMap. Callers will need to inspect
 /// the contents to ensure what they expect to be there is actually there.
 async fn map_switch_zone_addrs(
     log: &Logger,
     switch_zone_addresses: Vec<Ipv6Addr>,
     resolver: &internal_dns_resolver::Resolver,
-) -> HashMap<SwitchLocation, Ipv6Addr> {
+) -> HashMap<SwitchSlot, Ipv6Addr> {
     use gateway_client::Client as MgsClient;
     info!(log, "Determining switch slots managed by switch zones");
     let mut switch_zone_addrs = HashMap::new();
@@ -1428,10 +1426,10 @@ async fn map_switch_zone_addrs(
 
         match switch_slot {
             0 => {
-                switch_zone_addrs.insert(SwitchLocation::Switch0, addr);
+                switch_zone_addrs.insert(SwitchSlot::Switch0, addr);
             }
             1 => {
-                switch_zone_addrs.insert(SwitchLocation::Switch1, addr);
+                switch_zone_addrs.insert(SwitchSlot::Switch1, addr);
             }
             _ => {
                 warn!(

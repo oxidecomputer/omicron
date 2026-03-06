@@ -18,7 +18,7 @@ use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::{
     CreateResult, DeleteResult, ListResultVec,
 };
-use sled_agent_types::early_networking::SwitchLocation;
+use sled_agent_types::early_networking::SwitchSlot;
 use uuid::Uuid;
 
 impl DataStore {
@@ -46,8 +46,7 @@ impl DataStore {
         let conn = self.pool_connection_authorized(opctx).await?;
 
         // TODO-correctness enum in external API
-        let switch_location =
-            SwitchLocation::parse_from_external_api(&config.switch)?;
+        let switch_slot = SwitchSlot::parse_from_external_api(&config.switch)?;
 
         let session = BfdSession {
             id: Uuid::new_v4(),
@@ -61,7 +60,7 @@ impl DataStore {
             time_created: chrono::Utc::now(),
             time_modified: chrono::Utc::now(),
             time_deleted: None,
-            switch_slot: switch_location.into(),
+            switch_slot: switch_slot.into(),
         };
 
         diesel::insert_into(dsl::bfd_session)
@@ -82,7 +81,7 @@ impl DataStore {
 
         // TODO-correctness enum in external API
         let switch_slot = DbSwitchSlot::from(
-            SwitchLocation::parse_from_external_api(&config.switch)?,
+            SwitchSlot::parse_from_external_api(&config.switch)?,
         );
 
         diesel::update(dsl::bfd_session)

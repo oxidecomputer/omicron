@@ -19,7 +19,7 @@ use omicron_common::api::external::{
     self, CreateResult, DataPageParams, DeleteResult, Error, ListResultVec,
     LookupResult, Name, NameOrId, UpdateResult,
 };
-use sled_agent_types::early_networking::SwitchLocation;
+use sled_agent_types::early_networking::SwitchSlot;
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -180,11 +180,11 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
         rack_id: Uuid,
-        switch_location: SwitchLocation,
+        switch_slot: SwitchSlot,
         port: Name,
     ) -> CreateResult<SwitchPort> {
         self.db_datastore
-            .switch_port_create(opctx, rack_id, switch_location, port.into())
+            .switch_port_create(opctx, rack_id, switch_slot, port.into())
             .await
     }
 
@@ -224,14 +224,14 @@ impl super::Nexus {
     ) -> UpdateResult<()> {
         opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
         // TODO-correctness enum in external API
-        let switch_location =
-            SwitchLocation::parse_from_external_api(&selector.switch_location)?;
+        let switch_slot =
+            SwitchSlot::parse_from_external_api(&selector.switch_location)?;
         let switch_port_id = self
             .db_datastore
             .switch_port_get_id(
                 opctx,
                 selector.rack_id,
-                switch_location,
+                switch_slot,
                 port.clone().into(),
             )
             .await?;
@@ -268,14 +268,14 @@ impl super::Nexus {
     ) -> UpdateResult<()> {
         opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
         // TODO-correctness enum in external API
-        let switch_location =
-            SwitchLocation::parse_from_external_api(&params.switch_location)?;
+        let switch_slot =
+            SwitchSlot::parse_from_external_api(&params.switch_location)?;
         let switch_port_id = self
             .db_datastore
             .switch_port_get_id(
                 opctx,
                 params.rack_id,
-                switch_location,
+                switch_slot,
                 port.clone().into(),
             )
             .await?;
@@ -300,7 +300,7 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
         ports: &[Name],
-        switch: SwitchLocation,
+        switch: SwitchSlot,
     ) -> CreateResult<()> {
         for port in ports {
             match self
@@ -320,7 +320,7 @@ impl super::Nexus {
     pub(crate) async fn switch_port_status(
         &self,
         opctx: &OpContext,
-        switch: SwitchLocation,
+        switch: SwitchSlot,
         port: Name,
     ) -> Result<SwitchLinkState, Error> {
         opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
