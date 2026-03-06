@@ -15,8 +15,8 @@ use omicron_common::api::external::LldpLinkConfig;
 use omicron_common::api::external::LldpNeighbor;
 use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::Name;
-use omicron_common::api::external::SwitchLocation;
 use omicron_common::api::external::UpdateResult;
+use sled_agent_types::early_networking::SwitchLocation;
 use uuid::Uuid;
 
 impl super::Nexus {

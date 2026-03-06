@@ -21,9 +21,10 @@ use nexus_types::identity::Resource;
 use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::{
     CreateResult, DeleteResult, Error, ListResultVec, LookupResult, NameOrId,
-    ResourceType, SwitchLocation,
+    ResourceType,
 };
 use ref_cast::RefCast;
+use sled_agent_types::early_networking::SwitchLocation;
 use uuid::Uuid;
 
 impl DataStore {

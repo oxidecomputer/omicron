@@ -913,7 +913,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.silo_user (
     -- contain a value
     external_id TEXT,
 
-    user_provision_type omicron.public.user_provision_type,
+    user_provision_type omicron.public.user_provision_type NOT NULL,
 
     -- if the user provision type is 'scim' then this field must contain a value
     user_name TEXT,
@@ -921,11 +921,6 @@ CREATE TABLE IF NOT EXISTS omicron.public.silo_user (
     -- if user provision type is 'scim', this field _may_ contain a value: it
     -- is not mandatory that the SCIM provisioning client support this field.
     active BOOL,
-
-    CONSTRAINT user_provision_type_required_for_non_deleted CHECK (
-      (user_provision_type IS NOT NULL AND time_deleted IS NULL)
-      OR (time_deleted IS NOT NULL)
-    ),
 
     CONSTRAINT external_id_consistency CHECK (
         CASE user_provision_type
@@ -982,15 +977,10 @@ CREATE TABLE IF NOT EXISTS omicron.public.silo_group (
     -- contain a value
     external_id TEXT,
 
-    user_provision_type omicron.public.user_provision_type,
+    user_provision_type omicron.public.user_provision_type NOT NULL,
 
     -- if the user provision type is 'scim' then this field must contain a value
     display_name TEXT,
-
-    CONSTRAINT user_provision_type_required_for_non_deleted CHECK (
-      (user_provision_type IS NOT NULL AND time_deleted IS NULL)
-      OR (time_deleted IS NOT NULL)
-    ),
 
     CONSTRAINT external_id_consistency CHECK (
         CASE user_provision_type
@@ -4502,6 +4492,23 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_nvme_disk_firmware (
     PRIMARY KEY (inv_collection_id, sled_id, slot)
 );
 
+CREATE TYPE IF NOT EXISTS omicron.public.inv_zpool_health AS ENUM (
+    -- The device is online and functioning.
+    'online',
+    -- One or more components are degraded or faulted, but sufficient replicas
+    -- exist to continue functioning.
+    'degraded',
+    -- One or more components are degraded or faulted, and insufficient replicas
+    -- exist to continue functioning.
+    'faulted',
+    -- The device was explicitly taken offline by "zpool offline".
+    'offline',
+    -- The device was physically removed.
+    'removed',
+    -- The device could not be opened.
+    'unavailable'
+);
+
 CREATE TABLE IF NOT EXISTS omicron.public.inv_zpool (
     -- where this observation came from
     -- (foreign key into `inv_collection` table)
@@ -4513,6 +4520,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_zpool (
     id UUID NOT NULL,
     sled_id UUID NOT NULL,
     total_size INT NOT NULL,
+    health omicron.public.inv_zpool_health NOT NULL,
 
     -- PK consisting of:
     -- - Which collection this was
@@ -8223,7 +8231,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '233.0.0', NULL)
+    (TRUE, NOW(), NOW(), '235.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

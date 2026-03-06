@@ -43,14 +43,14 @@ use omicron_common::FileKv;
 use omicron_common::address::IpRange;
 use omicron_common::api::external::Error;
 use omicron_common::api::internal::nexus::{ProducerEndpoint, ProducerKind};
-use omicron_common::api::internal::shared::{
-    AllowedSourceIps, RackNetworkConfig, SwitchLocation,
-};
+use omicron_common::api::internal::shared::AllowedSourceIps;
 use omicron_common::disk::DatasetKind;
 use omicron_uuid_kinds::BlueprintUuid;
 use omicron_uuid_kinds::DatasetUuid;
 use oximeter::types::ProducerRegistry;
 use oximeter_producer::Server as ProducerServer;
+use sled_agent_types::early_networking::RackNetworkConfig;
+use sled_agent_types::early_networking::SwitchLocation;
 use sled_hardware_types::BaseboardId;
 use slog::Logger;
 use std::collections::BTreeSet;

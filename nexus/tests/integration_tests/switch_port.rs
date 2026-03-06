@@ -18,12 +18,14 @@ use nexus_types::external_api::networking::{
     SwitchPortSettings, SwitchPortSettingsCreate,
 };
 use nexus_types::external_api::rack::Rack;
+use omicron_common::api::external::Name;
 use omicron_common::api::external::{
     self, AddressLotKind, IdentityMetadataCreateParams, LinkFec, LinkSpeed,
-    NameOrId, SwitchLocation, SwitchPort,
+    NameOrId, SwitchPort,
 };
-use omicron_common::api::external::{ImportExportPolicy, Name};
 use oxnet::IpNet;
+use sled_agent_types::early_networking::ImportExportPolicy;
+use sled_agent_types::early_networking::SwitchLocation;
 
 type ControlPlaneTestContext =
     nexus_test_utils::ControlPlaneTestContext<omicron_nexus::Server>;

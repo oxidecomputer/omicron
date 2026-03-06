@@ -15,8 +15,8 @@ use futures::future::BoxFuture;
 use internal_dns_resolver::Resolver;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
-use omicron_common::api::internal::shared::SwitchLocation;
 use serde_json::json;
+use sled_agent_types::early_networking::SwitchLocation;
 use std::sync::Arc;
 
 /// Background task that periodically prunes soft-deleted entries

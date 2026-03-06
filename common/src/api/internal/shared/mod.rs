@@ -32,7 +32,6 @@ use uuid::Uuid;
 
 pub mod external_ip;
 pub mod network_interface;
-pub mod rack_init;
 
 // Re-export latest version of all NIC-related types.
 pub use network_interface::NetworkInterfaceKind;
@@ -48,24 +47,6 @@ pub use external_ip::SourceNatConfigError;
 pub use external_ip::SourceNatConfigGeneric;
 pub use external_ip::SourceNatConfigV4;
 pub use external_ip::SourceNatConfigV6;
-
-// Re-export latest version of rack_init types.
-pub use rack_init::BfdPeerConfig;
-pub use rack_init::BgpConfig;
-pub use rack_init::BgpPeerConfig;
-pub use rack_init::LldpAdminStatus;
-pub use rack_init::LldpPortConfig;
-pub use rack_init::ParseLldpAdminStatusError;
-pub use rack_init::ParseSwitchLocationError;
-pub use rack_init::PortConfig;
-pub use rack_init::PortFec;
-pub use rack_init::PortSpeed;
-pub use rack_init::RackNetworkConfig;
-pub use rack_init::RouteConfig;
-pub use rack_init::SwitchLocation;
-pub use rack_init::TxEqConfig;
-pub use rack_init::UplinkAddressConfig;
-pub use rack_init::UplinkAddressConfigError;
 
 /// Description of source IPs allowed to reach rack services.
 #[derive(Clone, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
