@@ -931,7 +931,7 @@ pub static DEMO_LOOPBACK_CREATE: LazyLock<networking::LoopbackAddressCreate> =
     LazyLock::new(|| networking::LoopbackAddressCreate {
         address_lot: NameOrId::Name("parkinglot".parse().unwrap()),
         rack_id: uuid::Uuid::new_v4(),
-        switch_location: "switch0".parse().unwrap(),
+        switch_location: SwitchSlot::Switch0,
         address: "203.0.113.99".parse().unwrap(),
         mask: 24,
         anycast: false,

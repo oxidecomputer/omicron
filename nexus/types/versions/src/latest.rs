@@ -260,7 +260,6 @@ pub mod networking {
     pub use crate::v2025_11_20_00::networking::LinkConfigCreate;
     pub use crate::v2025_11_20_00::networking::LldpLinkConfigCreate;
     pub use crate::v2025_11_20_00::networking::LldpPortPathSelector;
-    pub use crate::v2025_11_20_00::networking::LoopbackAddressCreate;
     pub use crate::v2025_11_20_00::networking::LoopbackAddressPath;
     pub use crate::v2025_11_20_00::networking::Route;
     pub use crate::v2025_11_20_00::networking::RouteConfig;
@@ -290,8 +289,9 @@ pub mod networking {
     pub use crate::v2026_02_13_01::networking::SwitchPortSettings;
     pub use crate::v2026_02_13_01::networking::SwitchPortSettingsCreate;
 
-    pub use crate::v2026_03_06_01::networking::BfdSessionEnable;
     pub use crate::v2026_03_06_01::networking::BfdSessionDisable;
+    pub use crate::v2026_03_06_01::networking::BfdSessionEnable;
+    pub use crate::v2026_03_06_01::networking::LoopbackAddressCreate;
 }
 
 pub mod oxql {

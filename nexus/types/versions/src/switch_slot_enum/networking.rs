@@ -2,11 +2,41 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+use omicron_common::api::external::NameOrId;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use sled_agent_types::early_networking::BfdMode;
 use sled_agent_types::early_networking::SwitchSlot;
 use std::net::IpAddr;
+use uuid::Uuid;
+
+// ADDRESS LOT
+
+/// Parameters for creating a loopback address on a particular rack switch.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct LoopbackAddressCreate {
+    /// The name or id of the address lot this loopback address will pull an
+    /// address from.
+    pub address_lot: NameOrId,
+
+    /// The rack containing the switch this loopback address will be configured on.
+    pub rack_id: Uuid,
+
+    /// The slot of the switch within the rack this loopback address will be
+    /// configured on.
+    pub switch_location: SwitchSlot,
+
+    /// The address to create.
+    pub address: IpAddr,
+
+    /// The subnet mask to use for the address.
+    pub mask: u8,
+
+    /// Address is an anycast address.
+    ///
+    /// This allows the address to be assigned to multiple locations simultaneously.
+    pub anycast: bool,
+}
 
 // BFD
 
