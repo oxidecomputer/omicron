@@ -67,6 +67,7 @@ use omicron_common::api::external::VpcFirewallRuleUpdateParams;
 use omicron_test_utils::certificates::CertificateChain;
 use semver::Version;
 use sled_agent_types::early_networking::BfdMode;
+use sled_agent_types::early_networking::SwitchSlot;
 use std::collections::BTreeSet;
 use std::net::IpAddr;
 use std::net::Ipv4Addr;
@@ -1024,7 +1025,7 @@ pub static DEMO_BFD_ENABLE: LazyLock<networking::BfdSessionEnable> =
         remote: "10.0.0.1".parse().unwrap(),
         detection_threshold: 3,
         required_rx: 1000000,
-        switch: "switch0".parse().unwrap(),
+        switch: SwitchSlot::Switch0,
         mode: BfdMode::MultiHop,
     });
 

@@ -45,9 +45,6 @@ impl DataStore {
         use nexus_db_schema::schema::bfd_session::dsl;
         let conn = self.pool_connection_authorized(opctx).await?;
 
-        // TODO-correctness enum in external API
-        let switch_slot = SwitchSlot::parse_from_external_api(&config.switch)?;
-
         let session = BfdSession {
             id: Uuid::new_v4(),
             local: config.local.map(Into::into),
@@ -60,7 +57,7 @@ impl DataStore {
             time_created: chrono::Utc::now(),
             time_modified: chrono::Utc::now(),
             time_deleted: None,
-            switch_slot: switch_slot.into(),
+            switch_slot: config.switch.into(),
         };
 
         diesel::insert_into(dsl::bfd_session)
