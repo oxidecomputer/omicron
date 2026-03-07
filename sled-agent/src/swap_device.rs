@@ -9,8 +9,8 @@ use zeroize::Zeroize;
 
 #[derive(Debug, thiserror::Error)]
 pub enum SwapDeviceError {
-    #[error("Error running ZFS command: {0}")]
-    Zfs(illumos_utils::ExecutionError),
+    #[error("Error running ZFS command")]
+    Zfs(#[source] illumos_utils::ExecutionError),
 
     #[error("Error listing swap devices: {0}")]
     ListDevices(String),

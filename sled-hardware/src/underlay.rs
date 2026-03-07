@@ -17,24 +17,22 @@ use illumos_utils::zone::Zones;
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
-    #[error(
-        "Failed to create an IPv6 link-local address for underlay devices: {0}"
-    )]
+    #[error("Failed to create an IPv6 link-local address for underlay devices")]
     UnderlayDeviceAddress(#[from] illumos_utils::ExecutionError),
 
     #[error(transparent)]
     BadAddrObj(#[from] addrobj::ParseError),
 
-    #[error("Could not determine if host is an Oxide sled: {0}")]
+    #[error("Could not determine if host is an Oxide sled")]
     SystemDetection(#[source] anyhow::Error),
 
-    #[error("Could not enumerate physical links: {0}")]
+    #[error("Could not enumerate physical links")]
     FindLinks(#[from] FindPhysicalLinkError),
 
-    #[error("Could not set linkprop: {0}")]
+    #[error("Could not set linkprop")]
     SetLinkprop(#[from] SetLinkpropError),
 
-    #[error("Could not get linkprop: {0}")]
+    #[error("Could not get linkprop")]
     GetLinkprop(#[from] GetLinkpropError),
 }
 

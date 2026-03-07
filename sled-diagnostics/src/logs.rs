@@ -21,6 +21,7 @@ use oxlog::SvcLogs;
 use rand::{Rng, distr::Alphanumeric};
 use regex::Regex;
 use slog::Logger;
+use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
 use zip::{result::ZipError, write::FullFileOptions};
 
@@ -350,9 +351,10 @@ impl LogsHandle {
                         "Found a ZFS snapshot with a name reserved for
                         sled diagnostics, but which does not have the \
                         sled-diagnostics-specific property. Bailing out, \
-                        rather than risking deletion of user data: {e}";
+                        rather than risking deletion of user data";
                         "snap_name" => &name,
-                        "property" => SLED_DIAGNOSTICS_ZFS_PROPERTY_VALUE
+                        "property" => SLED_DIAGNOSTICS_ZFS_PROPERTY_VALUE,
+                        InlineErrorChain::new(&e),
                     );
                     continue;
                 }
