@@ -10,6 +10,7 @@ use fs_err::tokio as fs;
 use fs_err::tokio::File;
 use serde::Deserialize;
 use slog::Logger;
+use std::path::Path;
 use tokio::io::AsyncWriteExt;
 use tokio::io::BufWriter;
 
@@ -23,7 +24,7 @@ const MANIFEST_PATH: &str = "incorporation.p5m";
 const REPO_PATH: &str = "incorporation";
 pub const ARCHIVE_PATH: &str = "incorporation.p5p";
 
-pub const PUBLISHER: &str = "helios-dev";
+pub const PUBLISHER: &str = "helios";
 
 pub(crate) enum Action {
     Generate { version: String },
@@ -119,9 +120,25 @@ async fn generate_incorporation_manifest(
         fmri: String,
     }
 
+    let stdout = Command::new("pkg")
+        .args([
+            "list",
+            "-H",
+            "-o",
+            "branch",
+            "-n",
+            "-g",
+            HELIOS_PKGREPO,
+            "release/name",
+        ])
+        .ensure_stdout(&logger)
+        .await?;
+
+    let branch = stdout.trim();
+
     let mut manifest = BufWriter::new(File::create(path).await?);
     let preamble = format!(
-        r#"set name=pkg.fmri value=pkg://{PUBLISHER}/{INCORP_NAME}@{version},5.11
+        r#"set name=pkg.fmri value=pkg://{PUBLISHER}/{INCORP_NAME}@{version}-{branch},5.11
 set name=pkg.summary value="Incorporation to constrain software delivered in Omicron Release V{version} images"
 set name=info.classification value="org.opensolaris.category.2008:Meta Packages/Incorporations"
 set name=variant.opensolaris.zone value=global value=nonglobal
