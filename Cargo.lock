@@ -8622,6 +8622,7 @@ dependencies = [
  "ereport-types",
  "expectorate",
  "fatfs",
+ "flate2",
  "futures",
  "gateway-client",
  "gateway-messages",
