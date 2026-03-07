@@ -42,6 +42,7 @@ use futures::future::BoxFuture;
 use nexus_db_fixed_data::FLEET_ID;
 use nexus_types::external_api::policy::{FleetRole, ProjectRole, SiloRole};
 use omicron_common::api::external::{Error, LookupType, ResourceType};
+use omicron_uuid_kinds::{GenericUuid, RackUuid};
 use oso::PolarClass;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -674,6 +675,72 @@ impl AuthorizedResource for Inventory {
         _: Action,
     ) -> Error {
         error
+    }
+
+    fn polar_class(&self) -> oso::Class {
+        Self::get_polar_class()
+    }
+}
+
+/// Synthetic resource to model accessing trust quorum configurations for a
+/// given rack
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct TrustQuorumConfig(Rack);
+
+impl TrustQuorumConfig {
+    pub fn for_rack_id(rack_id: RackUuid) -> TrustQuorumConfig {
+        Self::new(Rack::new(
+            FLEET,
+            rack_id.into_untyped_uuid(),
+            LookupType::ById(rack_id.into_untyped_uuid()),
+        ))
+    }
+
+    pub fn new(rack: Rack) -> TrustQuorumConfig {
+        TrustQuorumConfig(rack)
+    }
+
+    pub fn rack(&self) -> &Rack {
+        &self.0
+    }
+}
+
+impl oso::PolarClass for TrustQuorumConfig {
+    fn get_polar_class_builder() -> oso::ClassBuilder<Self> {
+        oso::Class::builder()
+            .with_equality_check()
+            .add_attribute_getter("rack", |config: &TrustQuorumConfig| {
+                config.0.clone()
+            })
+    }
+}
+
+impl AuthorizedResource for TrustQuorumConfig {
+    fn load_roles<'fut>(
+        &'fut self,
+        opctx: &'fut OpContext,
+        authn: &'fut authn::Context,
+        roleset: &'fut mut RoleSet,
+    ) -> futures::future::BoxFuture<'fut, Result<(), Error>> {
+        // There are no roles on this resource, but we still need to walk the
+        // tree to get to the `fleet`.
+        self.rack().load_roles(opctx, authn, roleset)
+    }
+
+    // We want the trust quorum config to have the same visibility as the rack
+    // it is a part of.
+    //
+    // In a multirack world, we'll probably end up providing roles for racks.
+    // For now though, we just ensure that unauthorized users cannot know that a
+    // rack id exists, in the same manner as is done for an [`ApiResource`].
+    fn on_unauthorized(
+        &self,
+        authz: &Authz,
+        error: Error,
+        actor: AnyActor,
+        action: Action,
+    ) -> Error {
+        self.rack().on_unauthorized(authz, error, actor, action)
     }
 
     fn polar_class(&self) -> oso::Class {
