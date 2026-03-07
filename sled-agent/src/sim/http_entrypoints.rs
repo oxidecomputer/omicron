@@ -775,6 +775,7 @@ impl SledAgentApi for SledAgentSimImpl {
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
         let sa = rqctx.context();
 
+        sa.check_local_storage_error()?;
         sa.ensure_local_storage_dataset(body.into_inner());
 
         Ok(HttpResponseUpdatedNoContent())
@@ -794,6 +795,7 @@ impl SledAgentApi for SledAgentSimImpl {
             encrypted_at_rest: _,
         } = body.into_inner();
 
+        sa.check_local_storage_error()?;
         sa.drop_dataset(
             ZpoolUuid::from_untyped_uuid(zpool_id.into_untyped_uuid()),
             dataset_id,

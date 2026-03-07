@@ -13,6 +13,7 @@ use nexus_db_queries::authn;
 use nexus_db_queries::db;
 use nexus_db_queries::db::datastore;
 use omicron_common::api::external::DiskState;
+use omicron_common::api::external::Error;
 use omicron_common::backoff::backon_retry_policy_internal_service;
 use progenitor_extras::retry::{GoneCheckResult, retry_operation_while};
 use serde::Deserialize;
@@ -272,10 +273,10 @@ async fn sdd_delete_local_storage(
     )
     .await
     .map_err(|e| {
-        ActionError::action_failed(format!(
+        ActionError::action_failed(Error::internal_error(&format!(
             "failed to delete local storage: {}",
             InlineErrorChain::new(&e)
-        ))
+        )))
     })?;
 
     Ok(())
