@@ -75,3 +75,13 @@ pub struct BfdSessionDisable {
     /// The switch to enable this session on.
     pub switch: SwitchSlot,
 }
+
+/// Select switch ports by rack id and location.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
+pub struct SwitchPortSelector {
+    /// A rack id to use when selecting switch ports.
+    pub rack_id: Uuid,
+
+    /// A switch location to use when selecting switch ports.
+    pub switch_location: SwitchSlot,
+}

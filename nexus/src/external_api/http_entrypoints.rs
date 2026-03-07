@@ -4176,13 +4176,15 @@ impl NexusExternalApi for NexusExternalApiImpl {
             let nexus = &apictx.context.nexus;
             let query = query_params.into_inner();
             let path = path_params.into_inner();
-            let switch_slot =
-                SwitchSlot::parse_from_external_api(&query.switch_location)?;
             let opctx =
                 crate::context::op_context_for_external_api(&rqctx).await?;
             Ok(HttpResponseOk(
                 nexus
-                    .switch_port_status(&opctx, switch_slot, path.port)
+                    .switch_port_status(
+                        &opctx,
+                        query.switch_location,
+                        path.port,
+                    )
                     .await?,
             ))
         };
@@ -4237,11 +4239,13 @@ impl NexusExternalApi for NexusExternalApiImpl {
             let path = path_params.into_inner();
             let opctx =
                 crate::context::op_context_for_external_api(&rqctx).await?;
-            // TODO-correctness enum in external API
-            let switch_slot =
-                SwitchSlot::parse_from_external_api(&query.switch_location)?;
             let settings = nexus
-                .lldp_config_get(&opctx, query.rack_id, switch_slot, path.port)
+                .lldp_config_get(
+                    &opctx,
+                    query.rack_id,
+                    query.switch_location,
+                    path.port,
+                )
                 .await?;
             Ok(HttpResponseOk(settings))
         };
@@ -4262,14 +4266,11 @@ impl NexusExternalApi for NexusExternalApiImpl {
             let query = query_params.into_inner();
             let path = path_params.into_inner();
             let config = config.into_inner();
-            // TODO-correctness enum in external API
-            let switch_slot =
-                SwitchSlot::parse_from_external_api(&query.switch_location)?;
             nexus
                 .lldp_config_update(
                     &opctx,
                     query.rack_id,
-                    switch_slot,
+                    query.switch_location,
                     path.port,
                     config,
                 )

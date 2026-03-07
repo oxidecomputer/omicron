@@ -223,15 +223,12 @@ impl super::Nexus {
         settings: &networking::SwitchPortApplySettings,
     ) -> UpdateResult<()> {
         opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
-        // TODO-correctness enum in external API
-        let switch_slot =
-            SwitchSlot::parse_from_external_api(&selector.switch_location)?;
         let switch_port_id = self
             .db_datastore
             .switch_port_get_id(
                 opctx,
                 selector.rack_id,
-                switch_slot,
+                selector.switch_location,
                 port.clone().into(),
             )
             .await?;
@@ -267,15 +264,12 @@ impl super::Nexus {
         params: &networking::SwitchPortSelector,
     ) -> UpdateResult<()> {
         opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
-        // TODO-correctness enum in external API
-        let switch_slot =
-            SwitchSlot::parse_from_external_api(&params.switch_location)?;
         let switch_port_id = self
             .db_datastore
             .switch_port_get_id(
                 opctx,
                 params.rack_id,
-                switch_slot,
+                params.switch_location,
                 port.clone().into(),
             )
             .await?;

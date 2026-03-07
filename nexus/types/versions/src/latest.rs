@@ -271,7 +271,6 @@ pub mod networking {
     pub use crate::v2025_11_20_00::networking::SwitchPortGeometry;
     pub use crate::v2025_11_20_00::networking::SwitchPortPageSelector;
     pub use crate::v2025_11_20_00::networking::SwitchPortPathSelector;
-    pub use crate::v2025_11_20_00::networking::SwitchPortSelector;
     pub use crate::v2025_11_20_00::networking::SwitchPortSettingsInfoSelector;
     pub use crate::v2025_11_20_00::networking::SwitchPortSettingsSelector;
     pub use crate::v2025_11_20_00::networking::SwitchVlanInterface;
@@ -292,6 +291,7 @@ pub mod networking {
     pub use crate::v2026_03_06_01::networking::BfdSessionDisable;
     pub use crate::v2026_03_06_01::networking::BfdSessionEnable;
     pub use crate::v2026_03_06_01::networking::LoopbackAddressCreate;
+    pub use crate::v2026_03_06_01::networking::SwitchPortSelector;
 }
 
 pub mod oxql {
