@@ -214,6 +214,12 @@ impl Server {
         // (but a different port) as the `internal` server. The latter is
         // available for proxied connections via the tech port in the event the
         // rack has lost connectivity (see RFD 431).
+        let external_dropshot_config = {
+            let mut c = config.deployment.dropshot_external.dropshot.clone();
+            c.compression = dropshot::CompressionConfig::Gzip;
+            c
+        };
+
         let techport_server_bind_addr = {
             let mut addr = http_server_internal.local_addr();
             addr.set_port(config.deployment.techport_external_server_port);
@@ -221,7 +227,7 @@ impl Server {
         };
         let techport_server_config = ConfigDropshot {
             bind_address: techport_server_bind_addr,
-            ..config.deployment.dropshot_external.dropshot.clone()
+            ..external_dropshot_config.clone()
         };
 
         let http_server_external = {
@@ -230,7 +236,7 @@ impl Server {
                 apictx.for_external(),
                 log.new(o!("component" => "dropshot_external")),
             )
-            .config(config.deployment.dropshot_external.dropshot.clone())
+            .config(external_dropshot_config.clone())
             .version_policy(dropshot::VersionPolicy::Dynamic(Box::new(
                 dropshot::ClientSpecifiesVersionInHeader::new(
                     omicron_common::api::VERSION_HEADER,

@@ -2316,7 +2316,7 @@ impl PantryServer {
             // - bulk writes into disks
             default_request_body_max_bytes: 8192 * 1024,
             default_handler_task_mode: HandlerTaskMode::Detached,
-            log_headers: vec![],
+            ..Default::default()
         })
         .start()
         .expect("Could not initialize pantry server");
