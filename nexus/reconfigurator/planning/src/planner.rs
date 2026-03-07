@@ -698,6 +698,20 @@ impl<'a> Planner<'a> {
             .map(|(s, _)| s)
             .collect();
 
+        // We cannot proceed with planning measurement updates until
+        // all sleds have a sled config with measurements in artifact state
+        for sled_id in &included_sled_ids {
+            let Some(inv_sled) = self.inventory.sled_agents.get(sled_id) else {
+                return Ok(PlanningMeasurementUpdatesStepReport::NoSledAgentInInventory { sled_id: *sled_id });
+            };
+            let Some(ref sled_config) = inv_sled.ledgered_sled_config else {
+                return Ok(PlanningMeasurementUpdatesStepReport::NoSledConfig { sled_id: *sled_id });
+            };
+            if sled_config.measurements.is_empty() {
+                return Ok(PlanningMeasurementUpdatesStepReport::StillInstallDataset { sled_id: *sled_id });
+            }
+        }
+
         // Measurements reflect what we expect to be running on the
         // system at any given time. In the course of an update
         // we expect to be running a mixture of old and new code

@@ -810,6 +810,9 @@ pub enum PlanningMeasurementUpdatesStepReport {
     Modified { count: usize },
     BlockedAddUpdate,
     EmptyMeasurements,
+    NoSledAgentInInventory { sled_id: SledUuid },
+    NoSledConfig { sled_id: SledUuid },
+    StillInstallDataset { sled_id: SledUuid },
 }
 
 impl PlanningMeasurementUpdatesStepReport {
@@ -843,6 +846,21 @@ impl fmt::Display for PlanningMeasurementUpdatesStepReport {
                         f,
                         "attempted to plan with a empty measurement set"
                     )?;
+                }
+                PlanningMeasurementUpdatesStepReport::NoSledAgentInInventory { sled_id }=> {
+                    writeln!(
+                        f,
+                        "missing sled agent inventory for sled {sled_id}")?;
+                }
+                PlanningMeasurementUpdatesStepReport::NoSledConfig { sled_id } => {
+                    writeln!(
+                        f,
+                        "No reconciled sled config for sled {sled_id}")?;
+                }
+                PlanningMeasurementUpdatesStepReport::StillInstallDataset { sled_id } => {
+                    writeln!(
+                        f,
+                        "Sled {sled_id} still using install dataset measurements")?;
                 }
             }
         }
