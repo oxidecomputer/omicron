@@ -135,7 +135,7 @@ impl Server {
             bind_address: SocketAddr::V6(args.address),
             default_request_body_max_bytes: 8 * 1024 * 1024,
             default_handler_task_mode: HandlerTaskMode::Detached,
-            log_headers: vec![],
+            ..Default::default()
         };
 
         let mgs_manager = MgsManager::new(&log, args.mgs_address);

@@ -478,7 +478,7 @@ dns-server = { path = "dns-server" }
 dns-server-api = { path = "dns-server-api" }
 dns-service-client = { path = "clients/dns-service-client" }
 dpd-client = { git = "https://github.com/oxidecomputer/dendrite", rev = "f20f786e67c86388dfaaf0ef3aa9d2693dfe1da4" }
-dropshot = { version = "0.16.6", features = [ "usdt-probes" ] }
+dropshot = { git = "https://github.com/oxidecomputer/dropshot", rev = "d707f541", features = [ "usdt-probes" ] }
 dropshot-api-manager = "0.5.2"
 dropshot-api-manager-types = "0.5.2"
 dyn-clone = "1.0.20"
@@ -1040,6 +1040,8 @@ opt-level = 3
 # drift = { path = "../drift" }
 # dropshot = { path = "../dropshot/dropshot" }
 # dropshot_endpoint = { path = "../dropshot/dropshot_endpoint" }
+dropshot = { git = "https://github.com/oxidecomputer/dropshot", rev = "d707f541" }
+dropshot_endpoint = { git = "https://github.com/oxidecomputer/dropshot", rev = "d707f541" }
 # dropshot-api-manager = { path = "../dropshot-api-manager/crates/dropshot-api-manager" }
 # dropshot-api-manager-types = { path = "../dropshot-api-manager/crates/dropshot-api-manager-types" }
 # progenitor = { path = "../progenitor/progenitor" }
