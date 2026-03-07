@@ -78,6 +78,7 @@ api_versions!([
     // |  date-based version should be at the top of the list.
     // v
     // (next_yyyy_mm_dd_nn, IDENT),
+    (2026_03_10_00, MULTICAST_DROP_MVLAN),
     (2026_03_06_00, RENAME_SWITCH_LOCATION_TO_SWITCH_SLOT),
     (2026_03_02_00, ADD_TIME_FIELDS_TO_USERS),
     (2026_02_25_00, SET_TARGET_RELEASE_UPDATE_RECOVERY),
@@ -2894,7 +2895,7 @@ pub trait NexusExternalApi {
         method = GET,
         path = "/v1/multicast-groups",
         tags = ["experimental"],
-        versions = VERSION_MULTICAST_IMPLICIT_LIFECYCLE_UPDATES..,
+        versions = VERSION_MULTICAST_DROP_MVLAN..,
     }]
     async fn multicast_group_list(
         rqctx: RequestContext<Self::Context>,
@@ -2903,6 +2904,33 @@ pub trait NexusExternalApi {
         HttpResponseOk<ResultsPage<latest::multicast::MulticastGroup>>,
         HttpError,
     >;
+
+    /// List multicast groups
+    ///
+    /// Response includes the mvlan field (always null)
+    #[endpoint {
+        method = GET,
+        path = "/v1/multicast-groups",
+        tags = ["experimental"],
+        operation_id = "multicast_group_list",
+        versions = VERSION_MULTICAST_IMPLICIT_LIFECYCLE_UPDATES..VERSION_MULTICAST_DROP_MVLAN,
+    }]
+    async fn multicast_group_list_v2026_01_08_00(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<PaginatedByNameOrId>,
+    ) -> Result<
+        HttpResponseOk<ResultsPage<v2026_01_08_00::multicast::MulticastGroup>>,
+        HttpError,
+    > {
+        Self::multicast_group_list(rqctx, query_params).await.map(
+            |HttpResponseOk(page)| {
+                HttpResponseOk(ResultsPage {
+                    items: page.items.into_iter().map(Into::into).collect(),
+                    next_page: page.next_page,
+                })
+            },
+        )
+    }
 
     /// List multicast groups
     #[endpoint {
@@ -2919,14 +2947,14 @@ pub trait NexusExternalApi {
         HttpResponseOk<ResultsPage<v2025_11_20_00::multicast::MulticastGroup>>,
         HttpError,
     > {
-        Self::multicast_group_list(rqctx, query_params).await.map(
-            |HttpResponseOk(page)| {
+        Self::multicast_group_list_v2026_01_08_00(rqctx, query_params)
+            .await
+            .map(|HttpResponseOk(page)| {
                 HttpResponseOk(ResultsPage {
                     items: page.items.into_iter().map(Into::into).collect(),
                     next_page: page.next_page,
                 })
-            },
-        )
+            })
     }
 
     /// Create a multicast group
@@ -2965,12 +2993,34 @@ pub trait NexusExternalApi {
         method = GET,
         path = "/v1/multicast-groups/{multicast_group}",
         tags = ["experimental"],
-        versions = VERSION_MULTICAST_IMPLICIT_LIFECYCLE_UPDATES..,
+        versions = VERSION_MULTICAST_DROP_MVLAN..,
     }]
     async fn multicast_group_view(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<latest::multicast::MulticastGroupPath>,
     ) -> Result<HttpResponseOk<latest::multicast::MulticastGroup>, HttpError>;
+
+    /// Fetch multicast group
+    ///
+    /// Response includes the mvlan field (always null)
+    #[endpoint {
+        method = GET,
+        path = "/v1/multicast-groups/{multicast_group}",
+        tags = ["experimental"],
+        operation_id = "multicast_group_view",
+        versions = VERSION_MULTICAST_IMPLICIT_LIFECYCLE_UPDATES..VERSION_MULTICAST_DROP_MVLAN,
+    }]
+    async fn multicast_group_view_v2026_01_08_00(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<v2026_01_08_00::multicast::MulticastGroupPath>,
+    ) -> Result<
+        HttpResponseOk<v2026_01_08_00::multicast::MulticastGroup>,
+        HttpError,
+    > {
+        Self::multicast_group_view(rqctx, path_params)
+            .await
+            .map(|resp| resp.map(Into::into))
+    }
 
     /// Fetch a multicast group
     ///
@@ -2990,7 +3040,7 @@ pub trait NexusExternalApi {
         HttpError,
     > {
         let path = path_params.map(Into::into);
-        Self::multicast_group_view(rqctx, path)
+        Self::multicast_group_view_v2026_01_08_00(rqctx, path)
             .await
             .map(|resp| resp.map(Into::into))
     }
@@ -3172,7 +3222,7 @@ pub trait NexusExternalApi {
         HttpError,
     > {
         let path = path_params.map(Into::into);
-        Self::multicast_group_view(rqctx, path)
+        Self::multicast_group_view_v2026_01_08_00(rqctx, path)
             .await
             .map(|resp| resp.map(Into::into))
     }

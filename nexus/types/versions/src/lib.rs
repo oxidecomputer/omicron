@@ -69,3 +69,5 @@ pub mod v2026_01_31_00;
 pub mod v2026_02_13_01;
 #[path = "add_time_fields_to_users/mod.rs"]
 pub mod v2026_03_02_00;
+#[path = "multicast_drop_mvlan/mod.rs"]
+pub mod v2026_03_10_00;
