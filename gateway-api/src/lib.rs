@@ -24,6 +24,7 @@ api_versions!([
     // |  example for the next person.
     // v
     // (next_int, IDENT),
+    (4, DROPSHOT_WEBSOCKET_SPEC_CHANGE),
     (3, NEWTYPE_UUID_BUMP),
     (2, COSMO),
     (1, INITIAL),
