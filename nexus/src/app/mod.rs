@@ -434,7 +434,7 @@ impl Nexus {
             .connect_timeout(std::time::Duration::from_secs(15))
             .timeout(std::time::Duration::from_secs(15))
             .build()
-            .map_err(|e| e.to_string())?;
+            .map_err(|e| InlineErrorChain::new(&e).to_string())?;
 
         // reqwest 0.12 client for cross-repo dependencies still on reqwest
         // 0.12. Remove once all rev pins are updated.
@@ -442,7 +442,7 @@ impl Nexus {
             .connect_timeout(std::time::Duration::from_secs(15))
             .timeout(std::time::Duration::from_secs(15))
             .build()
-            .map_err(|e| e.to_string())?;
+            .map_err(|e| InlineErrorChain::new(&e).to_string())?;
 
         // Client to the ClickHouse database.
         let timeseries_client = match &config.pkg.timeseries_db.address {
@@ -501,7 +501,10 @@ impl Nexus {
                 &external_resolver,
             );
             webhook::delivery_client(builder).map_err(|e| {
-                format!("failed to build webhook delivery client: {e}")
+                format!(
+                    "failed to build webhook delivery client: {}",
+                    InlineErrorChain::new(&e)
+                )
             })?
         };
 

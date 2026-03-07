@@ -33,6 +33,7 @@ use slog::error;
 use slog::info;
 use slog::o;
 use slog::warn;
+use slog_error_chain::InlineErrorChain;
 use std::net::SocketAddr;
 use std::net::SocketAddrV6;
 use std::path::Path;
@@ -479,9 +480,17 @@ impl Oximeter {
                 })
                 .send()
                 .await
-                .map_err(|e| backoff::BackoffError::transient(e.to_string()))?
+                .map_err(|e| {
+                    backoff::BackoffError::transient(
+                        InlineErrorChain::new(&e).to_string(),
+                    )
+                })?
                 .error_for_status()
-                .map_err(|e| backoff::BackoffError::transient(e.to_string()))
+                .map_err(|e| {
+                    backoff::BackoffError::transient(
+                        InlineErrorChain::new(&e).to_string(),
+                    )
+                })
         };
         let log_notification_failure = |error, delay| {
             warn!(

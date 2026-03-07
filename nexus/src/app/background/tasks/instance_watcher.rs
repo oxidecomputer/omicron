@@ -29,6 +29,7 @@ use omicron_uuid_kinds::SledUuid;
 use oximeter::types::ProducerRegistry;
 use parallel_task_set::ParallelTaskSet;
 use sled_agent_client::Client as SledAgentClient;
+use slog_error_chain::InlineErrorChain;
 use std::borrow::Cow;
 use std::collections::BTreeMap;
 use std::collections::VecDeque;
@@ -210,7 +211,7 @@ impl InstanceWatcher {
                         // also ask the VMM directly when the sled-agent is
                         // unreachable. We should start doing that here at some
                         // point.
-                        slog::info!(opctx.log, "sled agent is unreachable"; "error" => ?e);
+                        slog::info!(opctx.log, "sled agent is unreachable"; InlineErrorChain::new(&e));
                         check.result = Err(Incomplete::SledAgentUnreachable);
                         return check;
                     }

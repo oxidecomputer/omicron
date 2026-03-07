@@ -19,6 +19,7 @@ use futures::stream::FuturesUnordered;
 use nexus_db_model::Sled;
 use nexus_networking;
 use nexus_types::identity::Asset;
+use slog_error_chain::InlineErrorChain;
 use tokio::io::AsyncWriteExt;
 
 pub async fn spawn_query_all_sleds(
@@ -283,7 +284,10 @@ async fn save_zone_log_zip_or_error(
                 )?;
 
             let stream = bytestream.into_inner().map(|chunk| {
-                chunk.map_err(|e| std::io::Error::other(e.to_string()))
+                // TODO: switch this to a source error after fixing all handling of io::Error
+                chunk.map_err(|e| {
+                    std::io::Error::other(InlineErrorChain::new(&e).to_string())
+                })
             });
             let mut reader = tokio_util::io::StreamReader::new(stream);
             let _nbytes = tokio::io::copy(&mut reader, &mut file).await?;
