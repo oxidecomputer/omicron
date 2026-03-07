@@ -154,7 +154,7 @@ impl TransientServer {
                 bind_address: "[::1]:0".parse().unwrap(),
                 default_request_body_max_bytes: 4 * 1024 * 1024,
                 default_handler_task_mode: dropshot::HandlerTaskMode::Detached,
-                log_headers: vec![],
+                ..Default::default()
             },
         )
         .await?;

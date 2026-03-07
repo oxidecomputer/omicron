@@ -168,6 +168,7 @@ camino-tempfile.workspace = true
 criterion.workspace = true
 diesel.workspace = true
 dns-server.workspace = true
+flate2.workspace = true
 expectorate.workspace = true
 gateway-messages.workspace = true
 gateway-test-utils.workspace = true
