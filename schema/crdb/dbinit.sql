@@ -554,7 +554,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS lookup_certificate_by_silo ON omicron.public.c
 CREATE TABLE IF NOT EXISTS omicron.public.virtual_provisioning_collection (
     -- Should match the UUID of the corresponding collection.
     id UUID PRIMARY KEY,
-    time_modified TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    time_modified TIMESTAMPTZ NOT NULL,
 
     -- Identifies the type of the collection.
     collection_type STRING(63) NOT NULL,
@@ -587,7 +587,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.virtual_provisioning_collection (
 CREATE TABLE IF NOT EXISTS omicron.public.virtual_provisioning_resource (
     -- Should match the UUID of the corresponding collection.
     id UUID PRIMARY KEY,
-    time_modified TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    time_modified TIMESTAMPTZ NOT NULL,
 
     -- Identifies the type of the resource.
     resource_type STRING(63) NOT NULL,
@@ -8231,7 +8231,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '235.0.0', NULL)
+    (TRUE, NOW(), NOW(), '236.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;
