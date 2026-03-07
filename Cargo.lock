@@ -285,6 +285,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "async-compression"
+version = "0.4.41"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d0f9ee0f6e02ffd7ad5816e9464499fba7b3effd01123b515c41d1697c43dad1"
+dependencies = [
+ "compression-codecs",
+ "compression-core",
+ "pin-project-lite",
+ "tokio",
+]
+
+[[package]]
 name = "async-lock"
 version = "3.4.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1773,6 +1785,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "compression-codecs"
+version = "0.4.37"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "eb7b51a7d9c967fc26773061ba86150f19c50c0d65c887cb1fbe295fd16619b7"
+dependencies = [
+ "compression-core",
+ "flate2",
+ "memchr",
+]
+
+[[package]]
+name = "compression-core"
+version = "0.4.31"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "75984efb6ed102a0d42db99afb6c1948f0380d1d91808d5529916e6c08b49d8d"
+
+[[package]]
 name = "concurrent-queue"
 version = "2.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3109,9 +3138,9 @@ dependencies = [
 [[package]]
 name = "dropshot"
 version = "0.16.7"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d69fd85c8dfc67252d02f260595f6b62b5abceb1b88b4b9722369d27936e5fa4"
+source = "git+https://github.com/oxidecomputer/dropshot?rev=d707f541#d707f541f1f26326177f7bd64cf897001b657ec9"
 dependencies = [
+ "async-compression",
  "async-stream",
  "async-trait",
  "base64 0.22.1",
@@ -3150,7 +3179,8 @@ dependencies = [
  "thiserror 2.0.18",
  "tokio",
  "tokio-rustls 0.25.0",
- "toml 0.9.12+spec-1.1.0",
+ "tokio-util",
+ "toml 1.0.3+spec-1.1.0",
  "usdt 0.6.0",
  "uuid",
  "version_check",
@@ -3206,8 +3236,7 @@ dependencies = [
 [[package]]
 name = "dropshot_endpoint"
 version = "0.16.7"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "67d106478e4a4782556981d028a667f41c4845cdaa6e2d3a9f58c5d15e725401"
+source = "git+https://github.com/oxidecomputer/dropshot?rev=d707f541#d707f541f1f26326177f7bd64cf897001b657ec9"
 dependencies = [
  "heck 0.5.0",
  "proc-macro2",
@@ -8492,6 +8521,7 @@ dependencies = [
  "ereport-types",
  "expectorate",
  "fatfs",
+ "flate2",
  "futures",
  "gateway-client",
  "gateway-messages",
