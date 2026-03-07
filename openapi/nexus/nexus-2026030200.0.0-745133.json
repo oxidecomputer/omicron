@@ -7,7 +7,7 @@
       "url": "https://oxide.computer",
       "email": "api@oxide.computer"
     },
-    "version": "2026022500.0.0"
+    "version": "2026030200.0.0"
   },
   "paths": {
     "/device/auth": {
@@ -18881,6 +18881,16 @@
                 "$ref": "#/components/schemas/Name"
               }
             ]
+          },
+          "time_created": {
+            "description": "Timestamp when this user was created",
+            "type": "string",
+            "format": "date-time"
+          },
+          "time_modified": {
+            "description": "Timestamp when this user was last modified",
+            "type": "string",
+            "format": "date-time"
           }
         },
         "required": [
@@ -18889,7 +18899,9 @@
           "id",
           "silo_admin",
           "silo_id",
-          "silo_name"
+          "silo_name",
+          "time_created",
+          "time_modified"
         ]
       },
       "Datum": {
@@ -21214,12 +21226,24 @@
             "description": "Uuid of the silo to which this group belongs",
             "type": "string",
             "format": "uuid"
+          },
+          "time_created": {
+            "description": "Timestamp when this group was created",
+            "type": "string",
+            "format": "date-time"
+          },
+          "time_modified": {
+            "description": "Timestamp when this group was last modified",
+            "type": "string",
+            "format": "date-time"
           }
         },
         "required": [
           "display_name",
           "id",
-          "silo_id"
+          "silo_id",
+          "time_created",
+          "time_modified"
         ]
       },
       "GroupResultsPage": {
@@ -29806,12 +29830,24 @@
             "description": "Uuid of the silo to which this user belongs",
             "type": "string",
             "format": "uuid"
+          },
+          "time_created": {
+            "description": "Timestamp when this user was created",
+            "type": "string",
+            "format": "date-time"
+          },
+          "time_modified": {
+            "description": "Timestamp when this user was last modified",
+            "type": "string",
+            "format": "date-time"
           }
         },
         "required": [
           "display_name",
           "id",
-          "silo_id"
+          "silo_id",
+          "time_created",
+          "time_modified"
         ]
       },
       "UserBuiltin": {

@@ -918,15 +918,14 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
     pub async fn configure_sled_agents(&mut self) {
         let early_network_config = WriteNetworkConfigRequest {
             body: EarlyNetworkConfigBody {
-                ntp_servers: Vec::new(),
-                rack_network_config: Some(RackNetworkConfig {
+                rack_network_config: RackNetworkConfig {
                     bfd: Vec::new(),
                     bgp: Vec::new(),
                     infra_ip_first: "192.0.2.10".parse().unwrap(),
                     infra_ip_last: "192.0.2.100".parse().unwrap(),
                     ports: Vec::new(),
                     rack_subnet: "fd00:1122:3344:0100::/56".parse().unwrap(),
-                }),
+                },
             },
             generation: 1,
         };

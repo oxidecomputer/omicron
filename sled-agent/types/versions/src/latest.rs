@@ -67,7 +67,6 @@ pub mod early_networking {
 
     pub use crate::v20::early_networking::BgpConfig;
     pub use crate::v20::early_networking::BgpPeerConfig;
-    pub use crate::v20::early_networking::EarlyNetworkConfigBody;
     pub use crate::v20::early_networking::MaxPathConfig;
     pub use crate::v20::early_networking::MaxPathConfigError;
     pub use crate::v20::early_networking::PortConfig;
@@ -77,7 +76,8 @@ pub mod early_networking {
     pub use crate::v20::early_networking::UplinkAddressConfig;
     pub use crate::v20::early_networking::UplinkAddressConfigError;
 
-    pub use crate::v25::early_networking::WriteNetworkConfigRequest;
+    pub use crate::v26::early_networking::EarlyNetworkConfigBody;
+    pub use crate::v26::early_networking::WriteNetworkConfigRequest;
 }
 
 pub mod firewall_rules {
