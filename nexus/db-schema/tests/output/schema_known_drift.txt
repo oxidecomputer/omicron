@@ -19,7 +19,6 @@ subnet_pool_member.first_address
 subnet_pool_member.last_address
 switch_port.port_name
 switch_port.rack_id
-switch_port.switch_location
 switch_port_settings_bgp_peer_config.connect_retry
 switch_port_settings_bgp_peer_config.delay_open
 switch_port_settings_bgp_peer_config.hold_time
