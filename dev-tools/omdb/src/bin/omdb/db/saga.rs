@@ -322,6 +322,7 @@ You should only do this if:
 
     // Inject an error for those nodes, which will cause the saga to unwind
     for node in incomplete_nodes {
+        #[expect(clippy::disallowed_methods)]
         let action_error = ActionError::action_failed(String::from(
             "error injected with omdb",
         ));

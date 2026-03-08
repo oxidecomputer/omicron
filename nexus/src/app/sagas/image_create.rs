@@ -10,6 +10,7 @@ use crate::app::sagas::declare_saga_actions;
 use crate::app::{authn, authz, db};
 use nexus_db_lookup::LookupPath;
 use nexus_types::external_api::image;
+use nexus_types::saga::saga_action_failed;
 use omicron_common::api::external;
 use omicron_common::api::external::Error;
 use omicron_uuid_kinds::VolumeUuid;
@@ -130,16 +131,14 @@ async fn simc_get_source_volume(
                     .snapshot_id(*id)
                     .fetch()
                     .await
-                    .map_err(ActionError::action_failed)?;
+                    .map_err(saga_action_failed)?;
 
             if let ImageType::Project { authz_project, .. } = &params.image_type
             {
                 if db_snapshot.project_id != authz_project.id() {
-                    return Err(ActionError::action_failed(
-                        Error::invalid_request(
-                            "snapshot does not belong to this project",
-                        ),
-                    ));
+                    return Err(saga_action_failed(Error::invalid_request(
+                        "snapshot does not belong to this project",
+                    )));
                 }
             }
 
@@ -159,7 +158,7 @@ async fn simc_get_source_volume(
                     db::datastore::VolumeCheckoutReason::ReadOnlyCopy,
                 )
                 .await
-                .map_err(ActionError::action_failed)?;
+                .map_err(saga_action_failed)?;
 
             Ok(SourceVolume {
                 volume_id: dest_volume_id,
@@ -222,20 +221,20 @@ async fn simc_create_image_record(
             .project_image_create(
                 &opctx,
                 &authz_project,
-                record.try_into().map_err(ActionError::action_failed)?,
+                record.try_into().map_err(saga_action_failed)?,
             )
             .await
-            .map_err(ActionError::action_failed),
+            .map_err(saga_action_failed),
 
         ImageType::Silo { authz_silo, .. } => osagactx
             .datastore()
             .silo_image_create(
                 &opctx,
                 &authz_silo,
-                record.try_into().map_err(ActionError::action_failed)?,
+                record.try_into().map_err(saga_action_failed)?,
             )
             .await
-            .map_err(ActionError::action_failed),
+            .map_err(saga_action_failed),
     }
 }
 

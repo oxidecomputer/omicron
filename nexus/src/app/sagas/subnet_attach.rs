@@ -24,6 +24,7 @@ use nexus_db_queries::db::datastore::ExternalSubnetBeginOpResult;
 use nexus_db_queries::db::datastore::ExternalSubnetCompleteOpResult;
 use nexus_types::external_api::external_subnet;
 use nexus_types::identity::Resource;
+use nexus_types::saga::saga_action_failed;
 use serde::Deserialize;
 use serde::Serialize;
 use steno::ActionError;
@@ -89,7 +90,7 @@ async fn ssa_begin_attach_subnet(
             params.ip_version,
         )
         .await
-        .map_err(ActionError::action_failed)
+        .map_err(saga_action_failed)
 }
 
 async fn ssa_begin_attach_subnet_undo(
@@ -118,7 +119,7 @@ async fn ssa_begin_attach_subnet_undo(
             IpAttachState::Detached,
         )
         .await
-        .map_err(ActionError::action_failed)
+        .map_err(saga_action_failed)
     {
         Ok(ExternalSubnetCompleteOpResult::Modified(_)) => Ok(()),
         Ok(ExternalSubnetCompleteOpResult::NoChanges) => {
@@ -226,7 +227,7 @@ async fn ssa_complete_attach(
             warn!(log, "ssa_complete_attach ran more than once");
             Ok(subnet.into())
         }
-        Err(e) => Err(ActionError::action_failed(e)),
+        Err(e) => Err(saga_action_failed(e)),
     }
 }
 
