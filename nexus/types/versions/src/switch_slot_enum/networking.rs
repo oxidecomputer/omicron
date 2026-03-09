@@ -36,6 +36,19 @@ pub struct LoopbackAddress {
     pub address: oxnet::IpNet,
 }
 
+impl From<LoopbackAddress> for v2025_11_20_00::networking::LoopbackAddress {
+    fn from(value: LoopbackAddress) -> Self {
+        Self {
+            id: value.id,
+            address_lot_block_id: value.address_lot_block_id,
+            rack_id: value.rack_id,
+            switch_location: format_switch_slot_as_str(value.switch_location)
+                .to_owned(),
+            address: value.address,
+        }
+    }
+}
+
 /// Parameters for creating a loopback address on a particular rack switch.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct LoopbackAddressCreate {
@@ -210,6 +223,19 @@ pub struct SwitchPort {
     pub port_settings_id: Option<Uuid>,
 }
 
+impl From<SwitchPort> for v2025_11_20_00::networking::SwitchPort {
+    fn from(value: SwitchPort) -> Self {
+        Self {
+            id: value.id,
+            rack_id: value.rack_id,
+            switch_location: format_switch_slot_as_str(value.switch_location)
+                .to_owned(),
+            port_name: value.port_name,
+            port_settings_id: value.port_settings_id,
+        }
+    }
+}
+
 /// Select switch ports by rack id and location.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
 pub struct SwitchPortSelector {
@@ -261,7 +287,7 @@ impl TryFrom<v2025_11_20_00::networking::LldpPortPathSelector>
     }
 }
 
-// Helper for converting old switch slot arguments (all `Name`s).
+/// Helper for converting old switch slot arguments (all `Name`s).
 fn parse_name_as_switch_slot(name: &Name) -> Result<SwitchSlot, Error> {
     match name.as_str() {
         "switch0" => Ok(SwitchSlot::Switch0),
@@ -270,5 +296,14 @@ fn parse_name_as_switch_slot(name: &Name) -> Result<SwitchSlot, Error> {
             "invalid switch location `{name}` \
              (expected `switch0` or `switch1`)",
         ))),
+    }
+}
+
+/// Helper for converting switch slots to old API types that reported them as
+/// strings or `Name`s.
+fn format_switch_slot_as_str(switch_slot: SwitchSlot) -> &'static str {
+    match switch_slot {
+        SwitchSlot::Switch0 => "switch0",
+        SwitchSlot::Switch1 => "switch1",
     }
 }

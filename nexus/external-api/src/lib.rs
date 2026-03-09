@@ -4385,13 +4385,14 @@ pub trait NexusExternalApi {
             v2025_11_20_00::networking::LoopbackAddressCreate,
         >,
     ) -> Result<
-        HttpResponseCreated<latest::networking::LoopbackAddress>,
+        HttpResponseCreated<v2025_11_20_00::networking::LoopbackAddress>,
         HttpError,
     > {
         let new_loopback_address =
             new_loopback_address.try_map(TryInto::try_into)?;
         Self::networking_loopback_address_create(rqctx, new_loopback_address)
             .await
+            .map(|response| response.map(From::from))
     }
 
     /// Delete loopback address
@@ -4427,6 +4428,7 @@ pub trait NexusExternalApi {
         method = GET,
         path = "/v1/system/networking/loopback-address",
         tags = ["system/networking"],
+        versions = VERSION_SWITCH_SLOT_ENUM..,
     }]
     async fn networking_loopback_address_list(
         rqctx: RequestContext<Self::Context>,
@@ -4435,6 +4437,33 @@ pub trait NexusExternalApi {
         HttpResponseOk<ResultsPage<latest::networking::LoopbackAddress>>,
         HttpError,
     >;
+
+    /// List loopback addresses
+    #[endpoint {
+        operation_id = "networking_loopback_address_list",
+        method = GET,
+        path = "/v1/system/networking/loopback-address",
+        tags = ["system/networking"],
+        versions = ..VERSION_SWITCH_SLOT_ENUM,
+    }]
+    async fn networking_loopback_address_list_v2025_11_20_00(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<PaginatedById>,
+    ) -> Result<
+        HttpResponseOk<
+            ResultsPage<v2025_11_20_00::networking::LoopbackAddress>,
+        >,
+        HttpError,
+    > {
+        Self::networking_loopback_address_list(rqctx, query_params).await.map(
+            |response| {
+                response.map(|page| ResultsPage {
+                    next_page: page.next_page,
+                    items: page.items.into_iter().map(From::from).collect(),
+                })
+            },
+        )
+    }
 
     /// Create switch port settings
     #[endpoint {
@@ -4550,6 +4579,7 @@ pub trait NexusExternalApi {
         method = GET,
         path = "/v1/system/hardware/switch-port",
         tags = ["system/hardware"],
+        versions = VERSION_SWITCH_SLOT_ENUM..,
     }]
     async fn networking_switch_port_list(
         rqctx: RequestContext<Self::Context>,
@@ -4560,6 +4590,33 @@ pub trait NexusExternalApi {
         HttpResponseOk<ResultsPage<latest::networking::SwitchPort>>,
         HttpError,
     >;
+
+    /// List switch ports
+    #[endpoint {
+        operation_id = "networking_switch_port_list",
+        method = GET,
+        path = "/v1/system/hardware/switch-port",
+        tags = ["system/hardware"],
+        versions = ..VERSION_SWITCH_SLOT_ENUM,
+    }]
+    async fn networking_switch_port_list_v2025_11_20_00(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<
+            PaginatedById<latest::networking::SwitchPortPageSelector>,
+        >,
+    ) -> Result<
+        HttpResponseOk<ResultsPage<v2025_11_20_00::networking::SwitchPort>>,
+        HttpError,
+    > {
+        Self::networking_switch_port_list(rqctx, query_params).await.map(
+            |response| {
+                response.map(|page| ResultsPage {
+                    next_page: page.next_page,
+                    items: page.items.into_iter().map(From::from).collect(),
+                })
+            },
+        )
+    }
 
     /// Get switch port status
     #[endpoint {

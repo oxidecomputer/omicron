@@ -24470,7 +24470,11 @@
           },
           "switch_location": {
             "description": "Switch location where this loopback address is assigned.",
-            "type": "string"
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SwitchSlot"
+              }
+            ]
           }
         },
         "required": [
@@ -28718,7 +28722,11 @@
           },
           "switch_location": {
             "description": "The switch location of this switch port.",
-            "type": "string"
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SwitchSlot"
+              }
+            ]
           }
         },
         "required": [
