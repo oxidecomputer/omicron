@@ -2,8 +2,9 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use super::parse_str_as_switch_slot;
 use super::format_switch_slot_as_str;
+use super::parse_str_as_switch_slot;
+use crate::v2025_11_20_00;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::Name;
 use omicron_common::api::external::NameOrId;
@@ -13,7 +14,6 @@ use sled_agent_types::early_networking::BfdMode;
 use sled_agent_types::early_networking::SwitchSlot;
 use std::net::IpAddr;
 use uuid::Uuid;
-use crate::v2025_11_20_00;
 
 // ADDRESS LOT
 

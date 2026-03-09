@@ -290,9 +290,9 @@ pub mod networking {
     pub use crate::v2026_03_06_01::networking::BfdSessionEnable;
     pub use crate::v2026_03_06_01::networking::LldpPortPathSelector;
     pub use crate::v2026_03_06_01::networking::LoopbackAddress;
-    pub use crate::v2026_03_06_01::networking::SwitchPort;
     pub use crate::v2026_03_06_01::networking::LoopbackAddressCreate;
     pub use crate::v2026_03_06_01::networking::LoopbackAddressPath;
+    pub use crate::v2026_03_06_01::networking::SwitchPort;
     pub use crate::v2026_03_06_01::networking::SwitchPortSelector;
 }
 
