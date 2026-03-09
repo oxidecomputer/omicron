@@ -212,9 +212,6 @@ pub enum LldpAdminStatus {
     TxOnly,
 }
 
-#[derive(Debug, PartialEq, Eq, Deserialize, Serialize)]
-pub struct ParseLldpAdminStatusError(pub(crate) String);
-
 /// Per-port LLDP configuration settings.  Only the "status" setting is
 /// mandatory.  All other fields have natural defaults or may be inherited from
 /// the switch.

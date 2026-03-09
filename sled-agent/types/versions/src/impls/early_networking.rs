@@ -11,10 +11,9 @@ use std::net::Ipv6Addr;
 use std::str::FromStr;
 
 use crate::latest::early_networking::{
-    BgpPeerConfig, LldpAdminStatus, MaxPathConfig, MaxPathConfigError,
-    ParseLldpAdminStatusError, PortFec, PortSpeed, RouterLifetimeConfig,
-    RouterLifetimeConfigError, SwitchLocation, UplinkAddressConfig,
-    UplinkAddressConfigError,
+    BgpPeerConfig, LldpAdminStatus, MaxPathConfig, MaxPathConfigError, PortFec,
+    PortSpeed, RouterLifetimeConfig, RouterLifetimeConfigError, SwitchLocation,
+    UplinkAddressConfig, UplinkAddressConfigError,
 };
 
 impl BgpPeerConfig {
@@ -185,35 +184,14 @@ impl FromStr for UplinkAddressConfig {
     }
 }
 
-impl fmt::Display for LldpAdminStatus {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+impl LldpAdminStatus {
+    /// Format `self` appropriately for passing to `lldpd`'s SMF properties.
+    pub fn to_lldpd_smf_property(&self) -> &'static str {
         match self {
-            LldpAdminStatus::Enabled => write!(f, "enabled"),
-            LldpAdminStatus::Disabled => write!(f, "disabled"),
-            LldpAdminStatus::RxOnly => write!(f, "rx_only"),
-            LldpAdminStatus::TxOnly => write!(f, "tx_only"),
-        }
-    }
-}
-
-impl std::fmt::Display for ParseLldpAdminStatusError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "LLDP admin status error: {}", self.0)
-    }
-}
-
-impl FromStr for LldpAdminStatus {
-    type Err = ParseLldpAdminStatusError;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s.to_lowercase().as_str() {
-            "enabled" => Ok(Self::Enabled),
-            "disabled" => Ok(Self::Disabled),
-            "rxonly" | "rx_only" => Ok(Self::RxOnly),
-            "txonly" | "tx_only" => Ok(Self::TxOnly),
-            _ => Err(ParseLldpAdminStatusError(format!(
-                "not a valid admin status: {s}"
-            ))),
+            LldpAdminStatus::Enabled => "enabled",
+            LldpAdminStatus::Disabled => "disabled",
+            LldpAdminStatus::RxOnly => "rx_only",
+            LldpAdminStatus::TxOnly => "tx_only",
         }
     }
 }
