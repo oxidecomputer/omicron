@@ -44,7 +44,7 @@ pub const OPTE_LINK_PREFIX: &str = "opte";
 /// Errors returned from [`Dladm::find_physical`].
 #[derive(thiserror::Error, Debug)]
 pub enum FindPhysicalLinkError {
-    #[error("Failed to find physical link: {0}")]
+    #[error("Failed to find physical link")]
     Execution(#[from] ExecutionError),
 
     #[error("No Physical Link devices found")]
