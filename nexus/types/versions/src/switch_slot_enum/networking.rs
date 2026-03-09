@@ -16,6 +16,26 @@ use crate::v2025_11_20_00;
 
 // ADDRESS LOT
 
+/// A loopback address is an address that is assigned to a rack switch but is
+/// not associated with any particular port.
+#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq)]
+pub struct LoopbackAddress {
+    /// The id of the loopback address.
+    pub id: Uuid,
+
+    /// The address lot block this address came from.
+    pub address_lot_block_id: Uuid,
+
+    /// The id of the rack where this loopback address is assigned.
+    pub rack_id: Uuid,
+
+    /// Switch location where this loopback address is assigned.
+    pub switch_location: SwitchSlot,
+
+    /// The loopback IP address and prefix length.
+    pub address: oxnet::IpNet,
+}
+
 /// Parameters for creating a loopback address on a particular rack switch.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct LoopbackAddressCreate {
