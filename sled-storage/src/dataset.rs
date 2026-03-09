@@ -149,21 +149,23 @@ impl ExpectedDataset {
 
 #[derive(Debug, thiserror::Error)]
 pub enum DatasetError {
-    #[error("Cannot open {path} due to {error}")]
-    IoError { path: Utf8PathBuf, error: std::io::Error },
+    #[error("Cannot open {path}")]
+    IoError {
+        path: Utf8PathBuf,
+        #[source]
+        error: std::io::Error,
+    },
     #[error(transparent)]
     DestroyFilesystem(#[from] illumos_utils::zfs::DestroyDatasetError),
     #[error(transparent)]
     EnsureDataset(#[from] illumos_utils::zfs::EnsureDatasetError),
-    #[error("KeyManager error: {0}")]
+    #[error("KeyManager error")]
     KeyManager(#[from] key_manager::Error),
     #[error("Missing StorageKeyRequester when creating U.2 disk")]
     MissingStorageKeyRequester,
     #[error("Encrypted filesystem '{0}' missing 'oxide:epoch' property")]
     CannotParseEpochProperty(String),
-    #[error(
-        "Encrypted dataset '{dataset}' cannot set 'oxide:agent' property: {err}"
-    )]
+    #[error("Encrypted dataset '{dataset}' cannot set 'oxide:agent' property")]
     CannotSetAgentProperty {
         dataset: String,
         #[source]
