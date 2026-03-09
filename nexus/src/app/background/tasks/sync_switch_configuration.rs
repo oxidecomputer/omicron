@@ -59,7 +59,6 @@ use sled_agent_types::early_networking::ImportExportPolicy;
 use sled_agent_types::early_networking::LldpAdminStatus;
 use sled_agent_types::early_networking::LldpPortConfig;
 use sled_agent_types::early_networking::MaxPathConfig;
-use sled_agent_types::early_networking::ParseSwitchLocationError;
 use sled_agent_types::early_networking::PortConfig;
 use sled_agent_types::early_networking::RackNetworkConfig;
 use sled_agent_types::early_networking::RouteConfig as SledRouteConfig;
@@ -177,20 +176,7 @@ impl SwitchPortSettingsManager {
     > {
         let mut changes = Vec::new();
         for port in port_list {
-            let location: SwitchLocation =
-                match port.switch_location.clone().parse() {
-                    Ok(location) => location,
-                    Err(e) => {
-                        error!(
-                            &log,
-                            "failed to parse switch location";
-                            "switch_location" => ?port.switch_location,
-                            "error" => ?e
-                        );
-                        continue;
-                    }
-                };
-
+            let location = SwitchLocation::from(port.switch_slot);
             let id = match port.port_settings_id {
                 Some(id) => id,
                 _ => {
@@ -242,7 +228,6 @@ impl SwitchPortSettingsManager {
     async fn db_loopback_addresses(
         &mut self,
         opctx: &OpContext,
-        log: &slog::Logger,
     ) -> Result<
         HashSet<(SwitchLocation, IpAddr)>,
         omicron_common::api::external::Error,
@@ -255,21 +240,8 @@ impl SwitchPortSettingsManager {
         let mut set: HashSet<(SwitchLocation, IpAddr)> = HashSet::new();
 
         // TODO: are we doing anything special with anycast addresses at the moment?
-        for LoopbackAddress { switch_location, address, .. } in values.iter() {
-            let location: SwitchLocation = match switch_location.parse() {
-                Ok(v) => v,
-                Err(e) => {
-                    error!(
-                        log,
-                        "failed to parse switch location for loopback address";
-                        "address" => %address,
-                        "location" => switch_location,
-                        "error" => ?e,
-                    );
-                    continue;
-                }
-            };
-            set.insert((location, address.ip()));
+        for LoopbackAddress { switch_slot, address, .. } in values.iter() {
+            set.insert((SwitchLocation::from(*switch_slot), address.ip()));
         }
 
         Ok(set)
@@ -304,17 +276,7 @@ impl SwitchPortSettingsManager {
                     })?,
                 required_rx: spec.required_rx.0.into(),
                 mode: spec.mode.into(),
-                switch: spec.switch.parse().map_err(
-                    |e: ParseSwitchLocationError| {
-                        omicron_common::api::external::Error::InternalError {
-                            internal_message: format!(
-                                "db_bfd_peer_configs: failed to parse switch \
-                                 name: {}: {:?}",
-                                spec.switch, e,
-                            ),
-                        }
-                    },
-                )?,
+                switch: spec.switch_slot.into(),
             };
             result.push(config);
         }
@@ -467,7 +429,7 @@ impl BackgroundTask for SwitchPortSettingsManager {
                 //
 
                 info!(&log, "checking for changes to loopback addresses");
-                match self.db_loopback_addresses(opctx, &log).await {
+                match self.db_loopback_addresses(opctx).await {
                     Ok(desired_loopback_addresses) => {
                         let current_loopback_addresses = switch_loopback_addresses(&dpd_clients, &log).await;
 

@@ -311,9 +311,6 @@ pub enum SwitchLocation {
     Switch1,
 }
 
-#[derive(Debug, PartialEq, Eq, Deserialize, Serialize)]
-pub struct ParseSwitchLocationError(pub(crate) String);
-
 /// Switchport Speed options
 #[derive(
     Copy, Clone, Debug, Deserialize, Serialize, PartialEq, Eq, JsonSchema, Hash,

@@ -138,9 +138,9 @@ table! {
     switch_port (id) {
         id -> Uuid,
         rack_id -> Uuid,
-        switch_location -> Text,
         port_name -> Text,
         port_settings_id -> Nullable<Uuid>,
+        switch_slot -> crate::enums::SwitchSlotEnum,
     }
 }
 
@@ -319,8 +319,8 @@ table! {
 }
 
 table! {
-    bgp_peer_view (switch_location, port_name) {
-        switch_location -> Text,
+    bgp_peer_view (switch_slot, port_name) {
+        switch_slot -> crate::enums::SwitchSlotEnum,
         port_name -> Text,
         addr -> Nullable<Inet>,
         asn -> Int8,
@@ -330,7 +330,7 @@ table! {
         idle_hold_time -> Int8,
         keepalive -> Int8,
         remote_asn -> Nullable<Int8>,
-        min_ttl -> Nullable<Int8>,
+        min_ttl -> Nullable<Int2>,
         md5_auth_key -> Nullable<Text>,
         multi_exit_discriminator -> Nullable<Int8>,
         local_pref -> Nullable<Int8>,
@@ -409,9 +409,9 @@ table! {
         address_lot_block_id -> Uuid,
         rsvd_address_lot_block_id -> Uuid,
         rack_id -> Uuid,
-        switch_location -> Text,
         address -> Inet,
         anycast -> Bool,
+        switch_slot -> crate::enums::SwitchSlotEnum,
     }
 }
 
@@ -2391,17 +2391,17 @@ table! {
 }
 
 table! {
-    bfd_session (remote, switch) {
+    bfd_session (id) {
         id -> Uuid,
         local -> Nullable<Inet>,
         remote -> Inet,
         detection_threshold -> Int8,
         required_rx -> Int8,
-        switch -> Text,
         mode -> crate::enums::BfdModeEnum,
         time_created -> Timestamptz,
         time_modified -> Timestamptz,
         time_deleted -> Nullable<Timestamptz>,
+        switch_slot -> crate::enums::SwitchSlotEnum,
     }
 }
 

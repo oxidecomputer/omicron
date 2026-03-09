@@ -286,14 +286,7 @@ pub(crate) async fn boundary_switches(
     let uplinks =
         switch_port::list_switch_ports_with_uplinks(datastore, opctx).await?;
     for uplink in &uplinks {
-        let location: SwitchLocation =
-            uplink.switch_location.parse().map_err(|_| {
-                Error::internal_error(&format!(
-                    "invalid switch location in uplink config: {}",
-                    uplink.switch_location
-                ))
-            })?;
-        boundary_switches.insert(location);
+        boundary_switches.insert(SwitchLocation::from(uplink.switch_slot));
     }
     Ok(boundary_switches)
 }

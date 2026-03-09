@@ -12,6 +12,7 @@ use crate::app::sagas::volume_delete;
 use nexus_db_queries::authn;
 use nexus_db_queries::db;
 use nexus_db_queries::db::datastore;
+use nexus_types::saga::saga_action_failed;
 use omicron_common::api::external::DiskState;
 use omicron_common::api::external::Error;
 use omicron_common::backoff::backon_retry_policy_internal_service;
@@ -135,7 +136,7 @@ async fn sdd_delete_disk_record(
             &[DiskState::Detached, DiskState::Faulted],
         )
         .await
-        .map_err(ActionError::action_failed)?;
+        .map_err(saga_action_failed)?;
 
     Ok(disk)
 }
@@ -150,7 +151,7 @@ async fn sdd_delete_disk_record_undo(
         .datastore()
         .project_undelete_disk_set_faulted_no_auth(&params.disk.id())
         .await
-        .map_err(ActionError::action_failed)?;
+        .map_err(saga_action_failed)?;
 
     Ok(())
 }
@@ -175,7 +176,7 @@ async fn sdd_account_space(
             deleted_disk.size,
         )
         .await
-        .map_err(ActionError::action_failed)?;
+        .map_err(saga_action_failed)?;
     Ok(())
 }
 
@@ -199,7 +200,7 @@ async fn sdd_account_space_undo(
             deleted_disk.size,
         )
         .await
-        .map_err(ActionError::action_failed)?;
+        .map_err(saga_action_failed)?;
     Ok(())
 }
 
@@ -239,7 +240,7 @@ async fn sdd_delete_local_storage(
         .nexus()
         .sled_client(&sled_id)
         .await
-        .map_err(ActionError::action_failed)?;
+        .map_err(saga_action_failed)?;
 
     // Ensure that the local storage is deleted
 
@@ -273,7 +274,7 @@ async fn sdd_delete_local_storage(
     )
     .await
     .map_err(|e| {
-        ActionError::action_failed(Error::internal_error(&format!(
+        saga_action_failed(Error::internal_error(&format!(
             "failed to delete local storage: {}",
             InlineErrorChain::new(&e)
         )))
@@ -303,7 +304,7 @@ async fn sdd_deallocate_local_storage(
         .datastore()
         .delete_local_storage_dataset_allocations(&opctx, &disk)
         .await
-        .map_err(ActionError::action_failed)?;
+        .map_err(saga_action_failed)?;
 
     Ok(())
 }

@@ -74,7 +74,7 @@ impl Eq for BfdSessionKey {}
 impl From<BfdSession> for BfdSessionKey {
     fn from(value: BfdSession) -> Self {
         Self {
-            switch: value.switch.parse().unwrap(), //TODO unwrap
+            switch: value.switch_slot.into(),
             remote: value.remote.ip(),
             local: value.local.map(|x| x.ip()),
             detection_threshold: value
