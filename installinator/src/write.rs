@@ -595,9 +595,13 @@ impl ArtifactsToWrite<'_> {
             cx,
         )
         .await
-        .map_err(|error| {
-            info!(log, "{error:?}"; "artifact_id" => ?self.host_phase_2_id);
-            error
+        .inspect_err(|error| {
+            info!(
+                log,
+                "Failed to write host phase 2 image";
+                "artifact_id" => ?self.host_phase_2_id,
+                InlineErrorChain::new(&error),
+            );
         })?;
 
         StepSuccess::new(block_size).into()
