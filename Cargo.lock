@@ -4043,6 +4043,7 @@ dependencies = [
  "omicron-workspace-hack",
  "qorb",
  "slog",
+ "slog-error-chain",
  "sp-sim",
  "tokio",
  "uuid",

@@ -17,6 +17,7 @@ use omicron_test_utils::dev::poll::CondCheckError;
 use qorb::resolver::AllBackends;
 use qorb::resolver::Resolver;
 use qorb::resolvers::fixed::FixedResolver;
+use slog_error_chain::InlineErrorChain;
 use sp_sim::SimRack;
 use sp_sim::SimulatedSp;
 use std::collections::HashSet;
@@ -66,7 +67,10 @@ pub fn load_test_config(
     let config_path = manifest_dir.join("configs/config.test.toml");
     let server_config = omicron_gateway::Config::from_file(&config_path)
         .unwrap_or_else(|e| {
-            panic!("failed to load MGS config from {config_path}: {e}")
+            panic!(
+                "failed to load MGS config from {config_path}: {}",
+                InlineErrorChain::new(&e)
+            )
         });
 
     let sp_sim_config = match sp_sim::Config::from_file(sp_sim_config_file) {
