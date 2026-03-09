@@ -60,10 +60,10 @@ pub enum GetMacError {
     #[error("Mac Address cannot be looked up; Link not found: {0:?}")]
     NotFound(PhysicalLink),
 
-    #[error("Failed to get MAC address: {0}")]
+    #[error("Failed to get MAC address")]
     Execution(#[from] ExecutionError),
 
-    #[error("Failed to parse MAC: {0}")]
+    #[error("Failed to parse MAC")]
     ParseMac(#[from] macaddr::ParseError),
 }
 
