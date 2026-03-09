@@ -8403,6 +8403,7 @@ dependencies = [
  "serde",
  "serde_json",
  "slog",
+ "slog-error-chain",
  "thiserror 2.0.18",
  "tokio",
 ]
