@@ -340,11 +340,16 @@ impl PruneOp {
 
     // XXX-dap add check that rows are sequential in `version` and larger than
     // last version deleted so far
-    fn found_batch(self, rows: VecDeque<BpTarget>) -> PruneOpBatch {
+    // XXX-dap handle error
+    fn found_batch(
+        self,
+        maybe_rows: Result<VecDeque<BpTarget>, Error>,
+    ) -> PruneOpBatch {
         PruneOpBatch {
             pop: self,
             rows,
             highest_version_deleted: self.highest_version_deleted,
+            ntargets_removable: 0,
         }
     }
 
@@ -357,27 +362,41 @@ struct PruneOpBatch {
     pop: PruneOp,
     rows: VecDeque<BpTarget>,
     highest_version_deleted: Option<u32>,
+    ntargets_removable: u32,
 }
 
 impl PruneOpBatch {
-    fn next_step(mut self) -> PruneOpStep {
+    fn next_blueprint(&mut self) -> Option<PruneOpBlueprint> {
         match self.rows.pop_front() {
-            Some(row) => PruneOpStep::DeleteBlueprint { batch: self, row },
-            None => match self.highest_version_deleted {
-                Some(v) => {
-                    PruneOpStep::DeleteTargets { batch: self, version: v }
-                }
-                None => PruneOpStep::Done { batch: self },
-            },
+            Some(row) => Some(PruneOpBlueprint { batch: &self, row }),
+            None => None,
         }
+    }
+
+    fn highest_version_deleted(&self) -> Option<u32> {
+        self.highest_version_deleted
+    }
+
+    fn record_targets_deleted(self, Result<u32, Error>) {
+        // XXX-dap record error
     }
 }
 
-enum PruneOpStep {
-    // XXX-dap `batch` should be private in all of these
-    DeleteBlueprint { batch: PruneOpBatch, row: BpTarget },
-    DeleteTargets { batch: PruneOpBatch, version: u32 },
-    Done { batch: PruneOpBatch },
+struct PruneOpBlueprint<'a> {
+    batch: &'a mut PruneOpBatch,
+    row: BpTarget,
+}
+
+impl PruneOpBlueprint {
+    fn blueprint_id(&self) -> BlueprintUuid {
+        self.row.blueprint_id.into()
+    }
+
+    fn record_blueprint_removal(mut self, error: Result<(), Error>) {
+        // XXX-dap handle error
+        self.batch.highest_version_deleted = Some(self.row.version);
+        self.batch.ntargets_removable += 1;
+    }
 }
 
 /// Prune both blueprints and `bp_target` rows up to `bp_target` version
@@ -430,10 +449,7 @@ enum BatchStopReason {
 /// Stop on any error or when `pargs.max_delete_attempts` deletes have been
 /// attempted.
 /// This keeps `details` updated with work done and errors encountered.
-async fn prune_batch(
-    pargs: &PruneArgs<'_>,
-    pop: PruneOp,
-) -> PruneOp {
+async fn prune_batch(pargs: &PruneArgs<'_>, pop: PruneOp) -> PruneOp {
     let PruneArgs { opctx, datastore, log, .. } = pargs;
 
     // Fetch a page worth of the oldest `bp_target` rows
@@ -442,24 +458,24 @@ async fn prune_batch(
         direction: dropshot::PaginationOrder::Ascending,
         limit: SQL_BATCH_SIZE,
     };
-    candidates = match datastore
+    candidates = datastore
         .bp_target_list_page(opctx, &firstpageparams)
         .await
         .context("fetching page of bp_target rows for cleanup");
 
-    // XXX-dap working here
     let mut pop_batch = pop.found_batch(candidates);
-    loop {
-        match pop_batch.next_step() {
-            PruneOpStep::DeleteBlueprint { row, .. } => {
-            }
-            PruneOpStep::DeleteTargets { version, .. } => {
-            },
-            PruneOpStep::Done { batch } => {
-                pop_batch = batch
-            }
-        }
+    while let Some(next_blueprint) = pop_batch.next_blueprint() {
+        let blueprint_id = next_blueprint.row.blueprint_id();
+        let authz_blueprint = authz::Blueprint::new(
+            authz::FLEET,
+            blueprint_id.into_untyped_uuid(),
+            LookupType::ById(blueprint_id.into_untyped_uuid()),
+        );
+        let result = datastore.blueprint_delete(opctx, blueprint_id).await;
+        next_blueprint.record_blueprint_removal(result);
     }
+
+    // XXX-dap working here
 
     // Prune as many blueprints as we can from that page.  If we deleted no
     // blueprints, then there's nothing else to do here.
