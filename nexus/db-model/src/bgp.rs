@@ -172,8 +172,6 @@ pub struct BgpPeerView {
 pub enum BgpPeerConfigDataError {
     #[error("database contains illegal router lifetime value")]
     RouterLifetime(#[source] RouterLifetimeConfigError),
-    #[error("database contains illegal min_ttl value: {0}")]
-    MinTtl(u8),
 }
 
 impl TryFrom<BgpPeerView> for BgpPeerConfig {
