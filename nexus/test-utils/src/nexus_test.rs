@@ -389,3 +389,46 @@ pub async fn omicron_dev_setup_with_config<N: NexusServer>(
     )
     .await)
 }
+
+/// Setup routine to use for `omicron-dev`. Use [`ControlPlaneBuilder`] for
+/// tests.
+///
+/// The main difference from tests is that this routine ensures the seed tarball
+/// exists (or creates a seed tarball if it doesn't exist). For tests, this
+/// should be done in the `crdb-seed` setup script. This function also creates
+/// peer `mgd` routers for testing router configuration.
+#[cfg(feature = "omicron-dev")]
+pub async fn omicron_dev_setup_with_config_and_peer_routers<N: NexusServer>(
+    config: &mut NexusConfig,
+    extra_sled_agents: u16,
+    gateway_config_file: Utf8PathBuf,
+) -> Result<ControlPlaneTestContext<N>> {
+    let starter = ControlPlaneStarter::<N>::new("omicron-dev", config);
+
+    let log = &starter.logctx.log;
+    debug!(log, "Ensuring seed tarball exists");
+
+    // Start up a ControlPlaneTestContext, which tautologically sets up
+    // everything needed for a simulated control plane.
+    let why_invalidate =
+        omicron_test_utils::dev::seed::should_invalidate_seed();
+    let (seed_tar, status) =
+        omicron_test_utils::dev::seed::ensure_seed_tarball_exists(
+            log,
+            why_invalidate,
+        )
+        .await
+        .context("error ensuring seed tarball exists")?;
+    status.log(log, &seed_tar);
+
+    Ok(setup_with_config_impl(
+        starter,
+        PopulateCrdb::FromSeed { input_tar: seed_tar },
+        sim::SimMode::Auto,
+        None,
+        extra_sled_agents,
+        gateway_config_file,
+        true,
+    )
+    .await)
+}

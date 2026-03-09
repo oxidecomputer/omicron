@@ -38,7 +38,6 @@ impl OmicronDevApp {
         match &self.command {
             OmicronDevCmd::RunAll(args) => args.exec().await,
             OmicronDevCmd::RunMultiple(args) => args.exec().await,
-            OmicronDevCmd::Topology(args) => args.exec().await,
         }
     }
 }
@@ -49,8 +48,6 @@ enum OmicronDevCmd {
     RunAll(RunAllArgs),
     /// Run multiple simulated control planes
     RunMultiple(RunMultipleArgs),
-    /// Create an simulated topolgy from a file
-    Topology(TopologyArgs),
 }
 
 #[derive(Clone, Debug, Args)]
@@ -255,6 +252,9 @@ struct RunMultipleArgs {
     /// Number of "racks" to launch
     #[clap(long, default_value_t = 1)]
     count: u8,
+    /// Launch peer router mgd instances
+    #[clap(long)]
+    peer_routers: bool
 }
 
 impl Configurable for RunMultipleArgs {
@@ -292,12 +292,19 @@ impl RunMultipleArgs {
             config.deployment.techport_external_server_port = 0;
 
             println!("\nomicron-dev: setting up all services for rack {n}... ");
-            let cptestctx =
+            let cptestctx = if self.peer_routers {
+                 nexus_test_utils::omicron_dev_setup_with_config_and_peer_routers::<
+                    omicron_nexus::Server,
+                >(&mut config, 1, self.gateway_config.clone())
+                .await
+                .context("error setting up services")?
+            } else {
                 nexus_test_utils::omicron_dev_setup_with_config::<
                     omicron_nexus::Server,
                 >(&mut config, 1, self.gateway_config.clone())
                 .await
-                .context("error setting up services")?;
+                .context("error setting up services")?
+            };
 
             println!("omicron-dev: Adding disks to first sled agent");
 
@@ -427,36 +434,5 @@ impl RunMultipleArgs {
         }
 
         Ok(())
-    }
-}
-
-#[derive(Clone, Debug, Args)]
-struct TopologyArgs {
-    /// Override the gateway server configuration file.
-    #[clap(long, default_value = DEFAULT_SP_SIM_CONFIG)]
-    gateway_config: Utf8PathBuf,
-    /// Override the nexus configuration file.
-    #[clap(long, default_value = DEFAULT_NEXUS_CONFIG)]
-    nexus_config: Utf8PathBuf,
-    /// Number of "racks" to launch
-    #[clap(long)]
-    file: Utf8PathBuf,
-}
-
-impl Configurable for TopologyArgs {
-    fn nexus_config(&self) -> &Utf8PathBuf {
-        &self.nexus_config
-    }
-}
-
-impl TopologyArgs {
-    async fn exec(&self) -> Result<(), anyhow::Error> {
-        // Start a stream listening for SIGINT
-        // let mut signal_stream = start_stream();
-
-        // Read configuration.
-        // let mut config = read_config(self)?;
-
-        unimplemented!()
     }
 }

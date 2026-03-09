@@ -30,6 +30,8 @@ pub use nexus_test::ControlPlaneTestContext;
 pub use nexus_test::load_test_config;
 #[cfg(feature = "omicron-dev")]
 pub use nexus_test::omicron_dev_setup_with_config;
+#[cfg(feature = "omicron-dev")]
+pub use nexus_test::omicron_dev_setup_with_config_and_peer_routers;
 pub use starter::ControlPlaneStarter;
 pub use starter::ControlPlaneTestContextSledAgent;
 pub use starter::register_test_producer;
