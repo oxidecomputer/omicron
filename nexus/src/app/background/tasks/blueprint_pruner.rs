@@ -114,6 +114,7 @@ use serde_json::json;
 use slog::Logger;
 use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeSet;
+use std::collections::VecDeque;
 use std::sync::Arc;
 
 /// Background task that prunes old blueprints from the database
@@ -308,6 +309,77 @@ struct PruneArgs<'a> {
     max_delete_attempts: usize,
 }
 
+/// Manages the overall state of a prune operation
+struct PruneOp {
+    last_stop_reason: BatchStopReason,
+    ntargets_removable: u32,
+    ntargets_deleted: u32,
+    deleted: Vec<DeletedBlueprint>,
+    errors: Vec<String>,
+    highest_version_deleted: Option<u32>,
+}
+
+impl PruneOp {
+    fn new() -> PruneOp {
+        PruneOp {
+            last_stop_reason: BatchStopReason::EndOfBatch, // XXX-dap
+            ntargets_removable: 0,
+            ntargets_deleted: 0,
+            deleted: vec![],
+        }
+    }
+
+    fn do_continue(&self) -> bool {
+        match self.last_stop_reason {
+            BatchStopReason::EndOfBatch => true,
+            BatchStopReason::OutOfPruneable
+            | BatchStopReason::DeleteLimit
+            | BatchStopReason::Error => false,
+        }
+    }
+
+    // XXX-dap add check that rows are sequential in `version` and larger than
+    // last version deleted so far
+    fn found_batch(self, rows: VecDeque<BpTarget>) -> PruneOpBatch {
+        PruneOpBatch {
+            pop: self,
+            rows,
+            highest_version_deleted: self.highest_version_deleted,
+        }
+    }
+
+    fn into_details(self) -> PruneOpDetails {
+        todo!(); // XXX-dap
+    }
+}
+
+struct PruneOpBatch {
+    pop: PruneOp,
+    rows: VecDeque<BpTarget>,
+    highest_version_deleted: Option<u32>,
+}
+
+impl PruneOpBatch {
+    fn next_step(mut self) -> PruneOpStep {
+        match self.rows.pop_front() {
+            Some(row) => PruneOpStep::DeleteBlueprint { batch: self, row },
+            None => match self.highest_version_deleted {
+                Some(v) => {
+                    PruneOpStep::DeleteTargets { batch: self, version: v }
+                }
+                None => PruneOpStep::Done { batch: self },
+            },
+        }
+    }
+}
+
+enum PruneOpStep {
+    // XXX-dap `batch` should be private in all of these
+    DeleteBlueprint { batch: PruneOpBatch, row: BpTarget },
+    DeleteTargets { batch: PruneOpBatch, version: u32 },
+    Done { batch: PruneOpBatch },
+}
+
 /// Prune both blueprints and `bp_target` rows up to `bp_target` version
 /// `pargs.keep_version`.
 ///
@@ -318,44 +390,25 @@ struct PruneArgs<'a> {
 async fn prune_blueprints_up_to(
     pargs: &PruneArgs<'_>,
 ) -> BlueprintPrunerDetails {
-    let mut details = BlueprintPrunerDetails {
-        deleted: vec![],
-        ntargets_removable: 0,
-        ntargets_deleted: 0,
-        // XXX-dap at the very least, `nkept` needs to be filled in correctly,
-        // maybe by having the caller provide it.
-        //
-        // But something else I'm considering at this point is building a helper
-        // struct (maybe pass that around *instead* of `details` everywhere)
-        // that tracks `nkept` as well as the first version to keep so that we
-        // can use this later in the helpers to record things like "blueprint
-        // deleted" or "bp_target rows deleted up to this point".  In that case,
-        // maybe I'd have the caller create that with `nkeep` and pass that down
-        // here and then at the end it could be converted into the details
-        // struct that we need.
-        nkept: 0,
-        warnings: vec![],
-    };
+    // XXX-dap at the very least, `nkept` needs to be filled in correctly,
+    // maybe by having the caller provide it.
+    //
+    // But something else I'm considering at this point is building a helper
+    // struct (maybe pass that around *instead* of `details` everywhere)
+    // that tracks `nkept` as well as the first version to keep so that we
+    // can use this later in the helpers to record things like "blueprint
+    // deleted" or "bp_target rows deleted up to this point".  In that case,
+    // maybe I'd have the caller create that with `nkeep` and pass that down
+    // here and then at the end it could be converted into the details
+    // struct that we need.
+    let nkept = 0;
 
-    // Walk through the `bp_target` table and clean up as much of it as we can.
-    // We're walking through the rows in increasing order of `version` and we
-    // will stop as soon as we find one that we can't prune, either because it's
-    // one we want to keep or because we run into some database problem.  Thus:
-    // we don't need a paginator here.  We're always looking at the first page.
-    loop {
-        let stop_reason = prune_batch(pargs, &mut details).await;
-        info!(pargs.log, "pruned batch"; &details, "stop_reason" => ?stop_reason);
-        match stop_reason {
-            BatchStopReason::EndOfBatch => (),
-            BatchStopReason::OutOfPruneable
-            | BatchStopReason::DeleteLimit
-            | BatchStopReason::Error => {
-                break;
-            }
-        }
+    let mut pop = PruneOp::new();
+    while pop.do_continue() {
+        pop = prune_batch(pargs, pop).await;
     }
 
-    details
+    pop.into_details()
 }
 
 /// what happened after we finished trying to prune a batch of `bp_target` rows
@@ -379,8 +432,8 @@ enum BatchStopReason {
 /// This keeps `details` updated with work done and errors encountered.
 async fn prune_batch(
     pargs: &PruneArgs<'_>,
-    details: &mut BlueprintPrunerDetails,
-) -> BatchStopReason {
+    pop: PruneOp,
+) -> PruneOp {
     let PruneArgs { opctx, datastore, log, .. } = pargs;
 
     // Fetch a page worth of the oldest `bp_target` rows
@@ -389,17 +442,24 @@ async fn prune_batch(
         direction: dropshot::PaginationOrder::Ascending,
         limit: SQL_BATCH_SIZE,
     };
-    let candidates = match datastore
+    candidates = match datastore
         .bp_target_list_page(opctx, &firstpageparams)
         .await
-        .context("fetching page of bp_target rows for cleanup")
-    {
-        Ok(candidates) => candidates,
-        Err(error) => {
-            details.warnings.push(InlineErrorChain::new(&*error).to_string());
-            return BatchStopReason::Error;
+        .context("fetching page of bp_target rows for cleanup");
+
+    // XXX-dap working here
+    let mut pop_batch = pop.found_batch(candidates);
+    loop {
+        match pop_batch.next_step() {
+            PruneOpStep::DeleteBlueprint { row, .. } => {
+            }
+            PruneOpStep::DeleteTargets { version, .. } => {
+            },
+            PruneOpStep::Done { batch } => {
+                pop_batch = batch
+            }
         }
-    };
+    }
 
     // Prune as many blueprints as we can from that page.  If we deleted no
     // blueprints, then there's nothing else to do here.
