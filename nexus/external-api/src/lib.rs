@@ -4366,7 +4366,10 @@ pub trait NexusExternalApi {
         new_loopback_address: TypedBody<
             latest::networking::LoopbackAddressCreate,
         >,
-    ) -> Result<HttpResponseCreated<LoopbackAddress>, HttpError>;
+    ) -> Result<
+        HttpResponseCreated<latest::networking::LoopbackAddress>,
+        HttpError,
+    >;
 
     /// Create loopback address
     #[endpoint {
@@ -4381,7 +4384,10 @@ pub trait NexusExternalApi {
         new_loopback_address: TypedBody<
             v2025_11_20_00::networking::LoopbackAddressCreate,
         >,
-    ) -> Result<HttpResponseCreated<LoopbackAddress>, HttpError> {
+    ) -> Result<
+        HttpResponseCreated<latest::networking::LoopbackAddress>,
+        HttpError,
+    > {
         let new_loopback_address =
             new_loopback_address.try_map(TryInto::try_into)?;
         Self::networking_loopback_address_create(rqctx, new_loopback_address)
@@ -4425,7 +4431,10 @@ pub trait NexusExternalApi {
     async fn networking_loopback_address_list(
         rqctx: RequestContext<Self::Context>,
         query_params: Query<PaginatedById>,
-    ) -> Result<HttpResponseOk<ResultsPage<LoopbackAddress>>, HttpError>;
+    ) -> Result<
+        HttpResponseOk<ResultsPage<latest::networking::LoopbackAddress>>,
+        HttpError,
+    >;
 
     /// Create switch port settings
     #[endpoint {
@@ -4547,7 +4556,10 @@ pub trait NexusExternalApi {
         query_params: Query<
             PaginatedById<latest::networking::SwitchPortPageSelector>,
         >,
-    ) -> Result<HttpResponseOk<ResultsPage<SwitchPort>>, HttpError>;
+    ) -> Result<
+        HttpResponseOk<ResultsPage<latest::networking::SwitchPort>>,
+        HttpError,
+    >;
 
     /// Get switch port status
     #[endpoint {

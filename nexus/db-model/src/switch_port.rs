@@ -305,9 +305,9 @@ impl SwitchPort {
     }
 }
 
-impl Into<external::SwitchPort> for SwitchPort {
-    fn into(self) -> external::SwitchPort {
-        external::SwitchPort {
+impl Into<networking_types::SwitchPort> for SwitchPort {
+    fn into(self) -> networking_types::SwitchPort {
+        networking_types::SwitchPort {
             id: self.id,
             rack_id: self.rack_id,
             // TODO-correctness enum in external API

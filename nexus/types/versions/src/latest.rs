@@ -259,11 +259,13 @@ pub mod networking {
     pub use crate::v2025_11_20_00::networking::BgpStatusSelector;
     pub use crate::v2025_11_20_00::networking::LinkConfigCreate;
     pub use crate::v2025_11_20_00::networking::LldpLinkConfigCreate;
+    pub use crate::v2025_11_20_00::networking::LoopbackAddress;
     pub use crate::v2025_11_20_00::networking::Route;
     pub use crate::v2025_11_20_00::networking::RouteConfig;
     pub use crate::v2025_11_20_00::networking::SwitchBgpHistory;
     pub use crate::v2025_11_20_00::networking::SwitchInterfaceConfigCreate;
     pub use crate::v2025_11_20_00::networking::SwitchInterfaceKind;
+    pub use crate::v2025_11_20_00::networking::SwitchPort;
     pub use crate::v2025_11_20_00::networking::SwitchPortApplySettings;
     pub use crate::v2025_11_20_00::networking::SwitchPortConfigCreate;
     pub use crate::v2025_11_20_00::networking::SwitchPortGeometry;

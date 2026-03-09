@@ -85,13 +85,11 @@ use omicron_common::api::external::InstanceNetworkInterface;
 use omicron_common::api::external::InternalContext;
 use omicron_common::api::external::LldpLinkConfig;
 use omicron_common::api::external::LldpNeighbor;
-use omicron_common::api::external::LoopbackAddress;
 use omicron_common::api::external::NameOrId;
 use omicron_common::api::external::Probe;
 use omicron_common::api::external::RouterRoute;
 use omicron_common::api::external::RouterRouteKind;
 use omicron_common::api::external::ServiceIcmpConfig;
-use omicron_common::api::external::SwitchPort;
 use omicron_common::api::external::SwitchPortSettingsIdentity;
 use omicron_common::api::external::VpcFirewallRuleUpdateParams;
 use omicron_common::api::external::VpcFirewallRules;
@@ -3978,11 +3976,12 @@ impl NexusExternalApi for NexusExternalApiImpl {
     async fn networking_loopback_address_create(
         rqctx: RequestContext<ApiContext>,
         new_loopback_address: TypedBody<networking::LoopbackAddressCreate>,
-    ) -> Result<HttpResponseCreated<LoopbackAddress>, HttpError> {
+    ) -> Result<HttpResponseCreated<networking::LoopbackAddress>, HttpError>
+    {
         audit_and_time(&rqctx, |opctx, nexus| async move {
             let params = new_loopback_address.into_inner();
             let result = nexus.loopback_address_create(&opctx, params).await?;
-            let addr: LoopbackAddress = result.into();
+            let addr: networking::LoopbackAddress = result.into();
             Ok(HttpResponseCreated(addr))
         })
         .await
@@ -4017,7 +4016,10 @@ impl NexusExternalApi for NexusExternalApiImpl {
     async fn networking_loopback_address_list(
         rqctx: RequestContext<ApiContext>,
         query_params: Query<PaginatedById>,
-    ) -> Result<HttpResponseOk<ResultsPage<LoopbackAddress>>, HttpError> {
+    ) -> Result<
+        HttpResponseOk<ResultsPage<networking::LoopbackAddress>>,
+        HttpError,
+    > {
         let apictx = rqctx.context();
         let handler = async {
             let nexus = &apictx.context.nexus;
@@ -4035,7 +4037,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
             Ok(HttpResponseOk(ScanById::results_page(
                 &query,
                 addrs,
-                &|_, x: &LoopbackAddress| x.id,
+                &|_, x: &networking::LoopbackAddress| x.id,
             )?))
         };
         apictx
@@ -4134,7 +4136,8 @@ impl NexusExternalApi for NexusExternalApiImpl {
     async fn networking_switch_port_list(
         rqctx: RequestContext<ApiContext>,
         query_params: Query<PaginatedById<networking::SwitchPortPageSelector>>,
-    ) -> Result<HttpResponseOk<ResultsPage<SwitchPort>>, HttpError> {
+    ) -> Result<HttpResponseOk<ResultsPage<networking::SwitchPort>>, HttpError>
+    {
         let apictx = rqctx.context();
         let handler = async {
             let nexus = &apictx.context.nexus;
@@ -4152,7 +4155,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
             Ok(HttpResponseOk(ScanById::results_page(
                 &query,
                 addrs,
-                &|_, x: &SwitchPort| x.id,
+                &|_, x: &networking::SwitchPort| x.id,
             )?))
         };
         apictx
