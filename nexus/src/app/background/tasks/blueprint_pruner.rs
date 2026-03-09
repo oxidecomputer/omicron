@@ -411,7 +411,8 @@ async fn prune_batch(
         // can now delete these rows.
         //
         // It's okay to do this even if `prune_batch_blueprints` ran into an
-        // error.
+        // error because its contract is that there were no errors up through
+        // `highest_deleted`.
         match datastore.bp_target_delete_older(opctx, deleted_up_to).await {
             Ok(count) => {
                 info!(
