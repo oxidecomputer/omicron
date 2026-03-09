@@ -597,8 +597,8 @@ impl DebugCollectorWorker {
                     Err(err) => {
                         error!(
                             self.log,
-                            "Could not query zfs properties of debug dump dir: \
-                             {err:?}"
+                            "Could not query zfs properties of debug dump dir";
+                             err
                         );
                         // deprioritize anything we get errors querying.
                         (usize::MAX, u64::MAX, mountpoint.clone())
@@ -667,8 +667,8 @@ impl DebugCollectorWorker {
                         error!(
                             self.log,
                             "Previously-chosen debug/dump dir {x:?} couldn't \
-                             be queried for zfs properties!  Choosing another. \
-                             {err:?}"
+                             be queried for zfs properties!  Choosing another.";
+                             err
                         );
                         self.chosen_debug_dir = None;
                     }
