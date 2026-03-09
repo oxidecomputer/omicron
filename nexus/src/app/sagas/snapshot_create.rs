@@ -2206,7 +2206,6 @@ mod test {
             .vmm()
             .as_ref()
             .expect("running instance should have a sled")
-            .runtime
             .state;
 
         assert_eq!(new_state, nexus_db_model::VmmState::Running);

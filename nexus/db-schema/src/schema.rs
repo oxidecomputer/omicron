@@ -475,13 +475,13 @@ table! {
         time_created -> Timestamptz,
         time_deleted -> Nullable<Timestamptz>,
         instance_id -> Uuid,
+        time_state_updated -> Timestamptz,
+        state_generation -> Int8,
         sled_id -> Uuid,
         propolis_ip -> Inet,
         propolis_port -> Int4,
-        cpu_platform -> crate::enums::VmmCpuPlatformEnum,
-        time_state_updated -> Timestamptz,
-        state_generation -> Int8,
         state -> crate::enums::VmmStateEnum,
+        cpu_platform -> crate::enums::VmmCpuPlatformEnum,
     }
 }
 joinable!(vmm -> sled (sled_id));

@@ -804,7 +804,7 @@ mod tests {
                     // unwinding saga, that VMM must be in the `SagaUnwound` state.
                     if let Some(target_vmm) = new_state.target_vmm {
                         assert_eq!(
-                            target_vmm.runtime.state,
+                            target_vmm.state,
                             db::model::VmmState::SagaUnwound
                         );
                     }

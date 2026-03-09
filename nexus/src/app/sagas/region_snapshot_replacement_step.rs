@@ -459,7 +459,7 @@ async fn rsrss_notify_upstairs(
         return Ok(());
     };
 
-    let state = vmm.runtime.state;
+    let state = vmm.state;
 
     info!(
         log,
