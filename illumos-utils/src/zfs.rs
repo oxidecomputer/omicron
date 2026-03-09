@@ -140,7 +140,7 @@ enum MountpointError {
 
 #[derive(thiserror::Error, Debug)]
 enum EnsureDatasetErrorRaw {
-    #[error("ZFS execution error: {0}")]
+    #[error("ZFS execution error")]
     Execution(#[from] crate::ExecutionError),
 
     #[error("Unexpected output from ZFS commands: {0}")]
