@@ -204,7 +204,7 @@ async fn prune_blueprints(
     // We won't return an error after this point because even if we run into
     // problems, we may have done some work, too.  So we'll return success with
     // a status struct that reflects both the work done and any errors.
-    let details = prune_blueprints_up_to(&PruneContext {
+    let details = prune_blueprints_up_to(&PruneArgs {
         opctx,
         datastore,
         log,
@@ -300,7 +300,7 @@ async fn determine_bp_target_rows_to_keep(
 }
 
 /// Combines a bunch of state used by a bunch of the helpers below
-struct PruneContext<'a> {
+struct PruneArgs<'a> {
     opctx: &'a OpContext,
     datastore: &'a DataStore,
     log: &'a Logger,
@@ -309,14 +309,14 @@ struct PruneContext<'a> {
 }
 
 /// Prune both blueprints and `bp_target` rows up to `bp_target` version
-/// `ctx.keep_version`.
+/// `pargs.keep_version`.
 ///
 /// This prunes them in increasing order of `bp_target` `version` and stops upon
 /// any error or when running into the specified version.  Both the work done
 /// and any errors encountered are reported in the returned
 /// `BlueprintPrunerDetails`.
 async fn prune_blueprints_up_to(
-    ctx: &PruneContext<'_>,
+    pargs: &PruneArgs<'_>,
 ) -> BlueprintPrunerDetails {
     let mut details = BlueprintPrunerDetails {
         deleted: vec![],
@@ -343,8 +343,8 @@ async fn prune_blueprints_up_to(
     // one we want to keep or because we run into some database problem.  Thus:
     // we don't need a paginator here.  We're always looking at the first page.
     loop {
-        let stop_reason = prune_batch(ctx, &mut details).await;
-        info!(ctx.log, "pruned batch"; &details, "stop_reason" => ?stop_reason);
+        let stop_reason = prune_batch(pargs, &mut details).await;
+        info!(pargs.log, "pruned batch"; &details, "stop_reason" => ?stop_reason);
         match stop_reason {
             BatchStopReason::EndOfBatch => (),
             BatchStopReason::OutOfPruneable
@@ -374,14 +374,14 @@ enum BatchStopReason {
 
 /// Query for the oldest `bp_target` rows and prune both blueprints and
 /// `bp_target` rows up through (and not including) version `keep_version`.
-/// Stop on any error or when `ctx.max_delete_attempts` deletes have been
+/// Stop on any error or when `pargs.max_delete_attempts` deletes have been
 /// attempted.
 /// This keeps `details` updated with work done and errors encountered.
 async fn prune_batch(
-    ctx: &PruneContext<'_>,
+    pargs: &PruneArgs<'_>,
     details: &mut BlueprintPrunerDetails,
 ) -> BatchStopReason {
-    let PruneContext { opctx, datastore, log, .. } = ctx;
+    let PruneArgs { opctx, datastore, log, .. } = pargs;
 
     // Fetch a page worth of the oldest `bp_target` rows
     let firstpageparams = DataPageParams {
@@ -403,7 +403,7 @@ async fn prune_batch(
 
     // Prune as many blueprints as we can from that page.  If we deleted no
     // blueprints, then there's nothing else to do here.
-    let batch_result = prune_batch_blueprints(ctx, details, candidates).await;
+    let batch_result = prune_batch_blueprints(pargs, details, candidates).await;
 
     if let Some(deleted_up_to) = batch_result.highest_deleted {
         // At this point, we know that the blueprints associated with
@@ -451,8 +451,8 @@ struct BatchPruneResult {
 /// Prunes as many blueprints as possible referenced by the given `bp_target`
 /// rows until either:
 ///
-/// - we find a row with version at least `ctx.keep_version`
-/// - we reach `ctx.max_delete_attempts` total rows deleted
+/// - we find a row with version at least `pargs.keep_version`
+/// - we reach `pargs.max_delete_attempts` total rows deleted
 /// - we run into an error
 ///
 /// Keeps `details` updated with work done.
@@ -460,20 +460,20 @@ struct BatchPruneResult {
 /// If any blueprints were deleted, returns the highest-numbered `version` of
 /// any blueprint that was deleted.  Otherwise, returns `None`.
 async fn prune_batch_blueprints(
-    ctx: &PruneContext<'_>,
+    pargs: &PruneArgs<'_>,
     details: &mut BlueprintPrunerDetails,
     bp_target_rows: Vec<BpTarget>,
 ) -> BatchPruneResult {
-    let PruneContext { opctx, datastore, log, .. } = ctx;
+    let PruneArgs { opctx, datastore, log, .. } = pargs;
     let mut highest_deleted = None;
     let mut stop_reason = BatchStopReason::EndOfBatch;
     for row in bp_target_rows {
-        if *row.version >= ctx.keep_version {
+        if *row.version >= pargs.keep_version {
             stop_reason = BatchStopReason::OutOfPruneable;
             break;
         }
 
-        if details.ntargets_removable >= ctx.max_delete_attempts {
+        if details.ntargets_removable >= pargs.max_delete_attempts {
             stop_reason = BatchStopReason::DeleteLimit;
             break;
         }
