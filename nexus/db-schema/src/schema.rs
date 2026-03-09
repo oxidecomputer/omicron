@@ -492,13 +492,13 @@ table! {
         name -> Text,
         silo_name -> Text,
         project_name -> Text,
+        active_sled_id -> Uuid,
         time_created -> Timestamptz,
         time_modified -> Timestamptz,
-        state -> crate::enums::VmmStateEnum,
-        active_sled_id -> Uuid,
         migration_id -> Nullable<Uuid>,
         ncpus -> Int8,
         memory -> Int8,
+        state -> crate::enums::VmmStateEnum,
     }
 }
 

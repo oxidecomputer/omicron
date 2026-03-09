@@ -1,4 +1,3 @@
 disk
 instance
-sled_instance
 vmm
