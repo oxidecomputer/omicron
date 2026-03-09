@@ -716,7 +716,8 @@ impl DebugCollectorWorker {
                         error!(
                             self.log,
                             "Couldn't configure process core dump directory to \
-                            {core_dir:?}: {err:?}"
+                            {core_dir:?}";
+                            err,
                         );
                     }
                 }
@@ -804,7 +805,8 @@ impl DebugCollectorWorker {
                                     warn!(
                                         self.log,
                                         "Could not configure {dump_slice:?} as \
-                                         dump device: {err:?}"
+                                         dump device";
+                                         err,
                                     );
                                 }
                             }
@@ -857,7 +859,8 @@ impl DebugCollectorWorker {
                                 self.log,
                                 "Could not configure {dump_slice:?} as dump \
                                  device with {debug_dir:?} as savecore \
-                                 destination: {err:?}"
+                                 destination";
+                                 err,
                             );
                         }
                     }
@@ -875,8 +878,8 @@ impl DebugCollectorWorker {
                     {
                         error!(
                             self.log,
-                            "Could not restore dump slice to {dump_slice:?}: \
-                             {err:?}"
+                            "Could not restore dump slice to {dump_slice:?}";
+                            err,
                         );
                     }
                 }

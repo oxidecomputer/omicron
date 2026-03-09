@@ -1493,7 +1493,9 @@ impl SledAgent {
                 DestroyDatasetErrorVariant::NotFound => Ok(()),
 
                 DestroyDatasetErrorVariant::Other(e) => {
-                    Err(HttpError::for_internal_error(e.to_string()))
+                    Err(HttpError::for_internal_error(
+                        InlineErrorChain::new(&e).to_string(),
+                    ))
                 }
             },
         }
