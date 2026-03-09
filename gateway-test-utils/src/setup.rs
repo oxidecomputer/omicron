@@ -75,7 +75,10 @@ pub fn load_test_config(
 
     let sp_sim_config = match sp_sim::Config::from_file(sp_sim_config_file) {
         Ok(config) => config,
-        Err(e) => panic!("failed to load SP simulator config: {e}"),
+        Err(e) => panic!(
+            "failed to load SP simulator config: {}",
+            InlineErrorChain::new(&e)
+        ),
     };
     (server_config, sp_sim_config)
 }
