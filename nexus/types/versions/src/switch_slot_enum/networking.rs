@@ -3,6 +3,7 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use omicron_common::api::external::NameOrId;
+use omicron_common::api::external::Name;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use sled_agent_types::early_networking::BfdMode;
@@ -102,4 +103,17 @@ pub struct SwitchPortSelector {
 
     /// A switch location to use when selecting switch ports.
     pub switch_location: SwitchSlot,
+}
+
+/// Select an LLDP endpoint by rack/switch/port
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
+pub struct LldpPortPathSelector {
+    /// A rack id to use when selecting switch ports.
+    pub rack_id: Uuid,
+
+    /// A switch location to use when selecting switch ports.
+    pub switch_location: SwitchSlot,
+
+    /// A name to use when selecting switch ports.
+    pub port: Name,
 }

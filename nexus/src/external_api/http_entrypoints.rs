@@ -121,7 +121,6 @@ use propolis_client::support::tungstenite::protocol::{
 };
 use range_requests::PotentialRange;
 use ref_cast::RefCast;
-use sled_agent_types::early_networking::SwitchSlot;
 use trust_quorum_types::types::Epoch;
 
 type NexusApiDescription = ApiDescription<ApiContext>;
@@ -4293,16 +4292,13 @@ impl NexusExternalApi for NexusExternalApiImpl {
             let nexus = &apictx.context.nexus;
             let opctx =
                 crate::context::op_context_for_external_api(&rqctx).await?;
-            // TODO-correctness enum in external API
-            let switch_slot =
-                SwitchSlot::parse_from_external_api(&path.switch_location)?;
             let neighbors = nexus
                 .lldp_neighbors_get(
                     &opctx,
                     &prev,
                     limit,
                     path.rack_id,
-                    switch_slot,
+                    path.switch_location,
                     &path.port,
                 )
                 .await?;

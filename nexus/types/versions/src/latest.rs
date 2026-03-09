@@ -259,7 +259,6 @@ pub mod networking {
     pub use crate::v2025_11_20_00::networking::BgpStatusSelector;
     pub use crate::v2025_11_20_00::networking::LinkConfigCreate;
     pub use crate::v2025_11_20_00::networking::LldpLinkConfigCreate;
-    pub use crate::v2025_11_20_00::networking::LldpPortPathSelector;
     pub use crate::v2025_11_20_00::networking::Route;
     pub use crate::v2025_11_20_00::networking::RouteConfig;
     pub use crate::v2025_11_20_00::networking::SwitchBgpHistory;
@@ -289,6 +288,7 @@ pub mod networking {
 
     pub use crate::v2026_03_06_01::networking::BfdSessionDisable;
     pub use crate::v2026_03_06_01::networking::BfdSessionEnable;
+    pub use crate::v2026_03_06_01::networking::LldpPortPathSelector;
     pub use crate::v2026_03_06_01::networking::LoopbackAddressCreate;
     pub use crate::v2026_03_06_01::networking::LoopbackAddressPath;
     pub use crate::v2026_03_06_01::networking::SwitchPortSelector;
