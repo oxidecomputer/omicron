@@ -12,6 +12,7 @@ use omicron_uuid_kinds::ZpoolUuid;
 use serde::{Deserialize, Serialize};
 use slog::Logger;
 use slog::{info, warn};
+use slog_error_chain::SlogInlineError;
 
 cfg_if::cfg_if! {
     if #[cfg(target_os = "illumos")] {
@@ -21,12 +22,20 @@ cfg_if::cfg_if! {
     }
 }
 
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug, thiserror::Error, SlogInlineError)]
 pub enum PooledDiskError {
-    #[error("Cannot open {path} due to {error}")]
-    IoError { path: Utf8PathBuf, error: std::io::Error },
-    #[error("Failed to open partition at {path} due to {error}")]
-    Gpt { path: Utf8PathBuf, error: anyhow::Error },
+    #[error("Cannot open {path}")]
+    IoError {
+        path: Utf8PathBuf,
+        #[source]
+        error: std::io::Error,
+    },
+    #[error("Failed to open partition at {path}")]
+    Gpt {
+        path: Utf8PathBuf,
+        #[source]
+        error: anyhow::Error,
+    },
     #[error("Unexpected partition layout at {path}: {why}")]
     BadPartitionLayout { path: Utf8PathBuf, why: String },
     #[error("Requested partition {partition:?} not found on device {path}")]
@@ -43,8 +52,8 @@ pub enum PooledDiskError {
     ZpoolDoesNotExist,
     #[error(transparent)]
     ZpoolCreate(#[from] illumos_utils::zpool::CreateError),
-    #[error("Cannot import zpool: {0}")]
-    ZpoolImport(illumos_utils::zpool::Error),
+    #[error("Cannot import zpool")]
+    ZpoolImport(#[source] illumos_utils::zpool::Error),
     #[error("Cannot format {path}: missing a '/dev' path")]
     CannotFormatMissingDevPath { path: Utf8PathBuf },
     #[error("Formatting M.2 devices is not yet implemented")]

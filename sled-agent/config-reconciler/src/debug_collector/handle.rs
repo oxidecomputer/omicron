@@ -78,8 +78,8 @@ impl DebugCollector {
                             Err(err) => {
                                 warn!(
                                     log,
-                                    "Error getting dump device devfs path: \
-                                     {err:?}"
+                                    "Error getting dump device devfs path";
+                                     err
                                 );
                             }
                         }
