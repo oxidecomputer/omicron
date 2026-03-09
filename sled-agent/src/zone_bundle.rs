@@ -803,7 +803,7 @@ async fn cleanup_zfs_snapshots(log: &Logger, snapshots: &[Snapshot]) {
                 log,
                 "failed to destroy zone bundle ZFS snapshot";
                 "snapshot" => %snapshot,
-                "error" => ?e,
+                e,
             ),
         }
     }

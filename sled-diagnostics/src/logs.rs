@@ -210,7 +210,7 @@ impl DiagnosticsSnapshot {
                     self.log,
                     "failed to destroy sled-diagnostics ZFS snapshot";
                     "snapshot" => %self.snapshot,
-                    "error" => ?e,
+                    e,
                 );
             })?;
             self.destroyed = true;
@@ -389,8 +389,9 @@ impl LogsHandle {
                 ),
                 Err(e) => error!(
                     self.log,
-                    "failed to destroy pre-existing snapshot on cleanup: {e}";
+                    "failed to destroy pre-existing snapshot on cleanup";
                     "snapshot" => %snapshot,
+                    e,
                 ),
             }
         }

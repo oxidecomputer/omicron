@@ -255,11 +255,12 @@ pub struct CreateSnapshotError {
     err: crate::ExecutionError,
 }
 
-#[derive(Debug, thiserror::Error)]
-#[error("Failed to delete snapshot '{filesystem}@{snap_name}': {err}")]
+#[derive(Debug, thiserror::Error, SlogInlineError)]
+#[error("Failed to delete snapshot '{filesystem}@{snap_name}'")]
 pub struct DestroySnapshotError {
     filesystem: String,
     snap_name: String,
+    #[source]
     err: crate::ExecutionError,
 }
 
