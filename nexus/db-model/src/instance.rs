@@ -347,8 +347,6 @@ pub struct InstanceRuntimeState {
     pub time_last_auto_restarted: Option<DateTime<Utc>>,
 }
 
-
-
 /// Configuration for automatic instance restarts.
 #[derive(
     Clone,
