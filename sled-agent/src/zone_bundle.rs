@@ -31,6 +31,7 @@ use sled_agent_config_reconciler::AvailableDatasetsReceiver;
 use sled_agent_config_reconciler::InternalDisksReceiver;
 use sled_agent_types::zone_bundle::*;
 use slog::Logger;
+use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::io::Cursor;
@@ -983,7 +984,7 @@ async fn create(
         );
         let output = match zone.run_cmd(cmd) {
             Ok(s) => s,
-            Err(e) => format!("{}", e),
+            Err(e) => InlineErrorChain::new(&e).to_string(),
         };
         let contents = format!("Command: {:?}\n{}", cmd, output).into_bytes();
         if let Err(e) = insert_data(&mut builder, cmd[0], &contents) {
@@ -1076,7 +1077,7 @@ async fn create(
             );
             let output = match zone.run_cmd(args) {
                 Ok(s) => s,
-                Err(e) => format!("{}", e),
+                Err(e) => InlineErrorChain::new(&e).to_string(),
             };
             let contents =
                 format!("Command: {:?}\n{}", args, output).into_bytes();

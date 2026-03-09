@@ -45,7 +45,7 @@ pub enum ServiceError {
 
 /// Errors returned from [`RunningZone::run_cmd`].
 #[derive(thiserror::Error, Debug)]
-#[error("Error running command in zone '{zone}': {err}")]
+#[error("Error running command in zone '{zone}'")]
 pub struct RunCommandError {
     zone: String,
     #[source]
