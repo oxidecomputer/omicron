@@ -246,11 +246,12 @@ pub struct UnloadKeyError {
 
 #[derive(Debug, thiserror::Error)]
 #[error(
-    "Failed to create snapshot '{snap_name}' from filesystem '{filesystem}': {err}"
+    "Failed to create snapshot '{snap_name}' from filesystem '{filesystem}'"
 )]
 pub struct CreateSnapshotError {
     filesystem: String,
     snap_name: String,
+    #[source]
     err: crate::ExecutionError,
 }
 
