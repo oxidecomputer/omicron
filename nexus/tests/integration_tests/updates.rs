@@ -1083,6 +1083,12 @@ async fn test_request_without_api_version(cptestctx: &ControlPlaneTestContext) {
     let server_addr = cptestctx.server.get_http_server_external_address();
     let test_cx =
         ClientTestContext::new(server_addr, cptestctx.logctx.log.clone());
+
+    // During high contention the inventory might not be ready yet, which will
+    // cause the call to /v1/system/update/status to 500. We thus query the
+    // database to make sure we have an inventory before proceeding.
+    wait_for_inventory(cptestctx).await;
+
     let req_builder = RequestBuilder::new(
         &test_cx,
         http::Method::GET,
