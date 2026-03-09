@@ -173,11 +173,12 @@ pub struct EnsureDatasetError {
 }
 
 /// Error returned by [`Zfs::set_oxide_value`]
-#[derive(thiserror::Error, Debug)]
-#[error("Failed to set values '{values}' on filesystem {filesystem}: {err}")]
+#[derive(thiserror::Error, Debug, SlogInlineError)]
+#[error("Failed to set values '{values}' on filesystem {filesystem}")]
 pub struct SetValueError {
     filesystem: String,
     values: String,
+    #[source]
     err: crate::ExecutionError,
 }
 

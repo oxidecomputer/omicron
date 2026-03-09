@@ -814,7 +814,7 @@ async fn recover_epoch_by_trial_decryption(
                      (dataset will work but recovery may be needed again)";
                     "dataset" => dataset_name,
                     "epoch" => epoch,
-                    "error" => %e,
+                    e,
                 );
             }
 
