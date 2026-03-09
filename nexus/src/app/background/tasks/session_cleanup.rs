@@ -35,9 +35,7 @@ impl SessionCleanup {
     ) -> SessionCleanupStatus {
         let cutoff = Utc::now() - self.absolute_timeout;
         let limit = self.max_delete_per_activation;
-        let mut errors = Vec::new();
-
-        let deleted = match self
+        let (deleted, error) = match self
             .datastore
             .session_cleanup_batch(opctx, cutoff, limit)
             .await
@@ -57,17 +55,16 @@ impl SessionCleanup {
                         "cutoff" => %cutoff,
                     );
                 }
-                deleted
+                (deleted, None)
             }
             Err(err) => {
                 let msg = format!("session cleanup failed: {err:#}");
-                slog::error!(&opctx.log, "{}", msg);
-                errors.push(msg);
-                0
+                slog::error!(&opctx.log, "{msg}");
+                (0, Some(msg))
             }
         };
 
-        SessionCleanupStatus { deleted, cutoff, limit, errors }
+        SessionCleanupStatus { deleted, cutoff, limit, error }
     }
 }
 
@@ -145,13 +142,13 @@ mod tests {
 
         let status = task.actually_activate(opctx).await;
         assert_eq!(status.deleted, 1);
-        assert!(status.errors.is_empty());
+        assert!(status.error.is_none());
         assert_eq!(status.limit, 10_000);
 
         // Second activation should find nothing
         let status = task.actually_activate(opctx).await;
         assert_eq!(status.deleted, 0);
-        assert!(status.errors.is_empty());
+        assert!(status.error.is_none());
 
         // The recent session should still exist
         let (_, fetched) = datastore

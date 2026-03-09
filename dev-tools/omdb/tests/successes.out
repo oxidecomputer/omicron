@@ -859,8 +859,8 @@ task: "session_cleanup"
   last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     deleted: 0
-    cutoff: <REDACTED_TIMESTAMP>
-    limit: 10000
+    cutoff:  <REDACTED_TIMESTAMP>
+    limit:   10000
 
 task: "sp_ereport_ingester"
   configured period: every <REDACTED_DURATION>s
@@ -1454,8 +1454,8 @@ task: "session_cleanup"
   last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     deleted: 0
-    cutoff: <REDACTED_TIMESTAMP>
-    limit: 10000
+    cutoff:  <REDACTED_TIMESTAMP>
+    limit:   10000
 
 task: "sp_ereport_ingester"
   configured period: every <REDACTED_DURATION>s

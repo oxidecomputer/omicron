@@ -2673,17 +2673,21 @@ fn print_task_session_cleanup(details: &serde_json::Value) {
             error, details
         ),
         Ok(status) => {
-            println!("    deleted: {}", status.deleted);
+            const DELETED: &str = "deleted:";
+            const CUTOFF: &str = "cutoff:";
+            const LIMIT: &str = "limit:";
+            const ERROR: &str = "error:";
+            const WIDTH: usize =
+                const_max_len(&[DELETED, CUTOFF, LIMIT, ERROR]) + 1;
+
+            println!("    {DELETED:<WIDTH$}{}", status.deleted);
             println!(
-                "    cutoff: {}",
+                "    {CUTOFF:<WIDTH$}{}",
                 status.cutoff.to_rfc3339_opts(SecondsFormat::AutoSi, true),
             );
-            println!("    limit: {}", status.limit);
-            if !status.errors.is_empty() {
-                println!("    errors:");
-                for e in &status.errors {
-                    println!("      {e}");
-                }
+            println!("    {LIMIT:<WIDTH$}{}", status.limit);
+            if let Some(error) = &status.error {
+                println!("    {ERROR:<WIDTH$}{error}");
             }
         }
     };

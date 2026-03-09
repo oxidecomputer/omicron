@@ -983,7 +983,7 @@ pub struct SessionCleanupStatus {
     /// The per-activation delete limit.
     pub limit: u32,
     /// Errors encountered during this activation.
-    pub errors: Vec<String>,
+    pub error: Option<String>,
 }
 
 #[cfg(test)]
