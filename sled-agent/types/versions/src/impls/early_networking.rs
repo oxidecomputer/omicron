@@ -237,25 +237,6 @@ impl fmt::Display for SwitchSlot {
     }
 }
 
-impl SwitchSlot {
-    // TODO-correctness enum in external API
-    //
-    // We should remove this function after changing the external API to use
-    // `SwitchSlot` instead of `Name`.
-    pub fn parse_from_external_api(
-        name: &external::Name,
-    ) -> Result<Self, external::Error> {
-        match name.as_str() {
-            "switch0" => Ok(Self::Switch0),
-            "switch1" => Ok(Self::Switch1),
-            _ => Err(external::Error::invalid_request(format!(
-                "invalid switch location `{name}` \
-                 (expected `switch0` or `switch1`)",
-            ))),
-        }
-    }
-}
-
 impl fmt::Display for PortSpeed {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
