@@ -408,7 +408,7 @@ pub async fn ensure_zpool_exists(
         }
     };
     Zpool::import(&zpool_name).await.map_err(|e| {
-        warn!(log, "Failed to import zpool {zpool_name}: {e}");
+        warn!(log, "Failed to import zpool {zpool_name}"; &e);
         PooledDiskError::ZpoolImport(e)
     })?;
 
@@ -420,7 +420,7 @@ pub async fn ensure_zpool_imported(
     zpool_name: &ZpoolName,
 ) -> Result<(), PooledDiskError> {
     Zpool::import(&zpool_name).await.map_err(|e| {
-        warn!(log, "Failed to import zpool {zpool_name}: {e}");
+        warn!(log, "Failed to import zpool {zpool_name}"; &e);
         PooledDiskError::ZpoolImport(e)
     })?;
     Ok(())
@@ -440,7 +440,7 @@ pub async fn ensure_zpool_failmode_is_continue(
     Zpool::set_failmode_continue(&zpool_name).await.map_err(|e| {
         warn!(
             log,
-            "Failed to set failmode=continue on zpool {zpool_name}: {e}"
+            "Failed to set failmode=continue on zpool {zpool_name}"; &e
         );
         PooledDiskError::ZpoolImport(e)
     })?;
