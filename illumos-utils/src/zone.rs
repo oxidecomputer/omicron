@@ -95,7 +95,7 @@ impl AdmError {
 
 /// Errors which may be encountered when deleting addresses.
 #[derive(thiserror::Error, Debug)]
-#[error("Failed to delete address '{addrobj}' in zone '{zone}': {err}")]
+#[error("Failed to delete address '{addrobj}' in zone '{zone}'")]
 pub struct DeleteAddressError {
     zone: String,
     addrobj: AddrObject,
