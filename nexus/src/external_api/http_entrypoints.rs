@@ -4001,15 +4001,12 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 "invalid ip address".into(),
             )),
         }?;
-        // TODO-correctness enum in external API
-        let switch_slot =
-            SwitchSlot::parse_from_external_api(&path.switch_location)?;
         audit_and_time(&rqctx, |opctx, nexus| async move {
             nexus
                 .loopback_address_delete(
                     &opctx,
                     path.rack_id,
-                    switch_slot,
+                    path.switch_location,
                     addr.into(),
                 )
                 .await?;

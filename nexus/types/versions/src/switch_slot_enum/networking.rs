@@ -38,6 +38,24 @@ pub struct LoopbackAddressCreate {
     pub anycast: bool,
 }
 
+#[derive(Serialize, Deserialize, JsonSchema)]
+pub struct LoopbackAddressPath {
+    /// The rack to use when selecting the loopback address.
+    pub rack_id: Uuid,
+
+    /// The switch location to use when selecting the loopback address.
+    pub switch_location: SwitchSlot,
+
+    /// The IP address and subnet mask to use when selecting the loopback
+    /// address.
+    pub address: IpAddr,
+
+    /// The IP address and subnet mask to use when selecting the loopback
+    /// address.
+    pub subnet_mask: u8,
+}
+
+
 // BFD
 
 /// Information about a bidirectional forwarding detection (BFD) session.
