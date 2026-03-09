@@ -1388,7 +1388,9 @@ impl SledAgent {
             additional_options: None,
         })
         .await
-        .map_err(|e| HttpError::for_internal_error(e.to_string()))?;
+        .map_err(|e| {
+            HttpError::for_internal_error(InlineErrorChain::new(&e).to_string())
+        })?;
 
         Zfs::ensure_dataset_volume(DatasetVolumeEnsureArgs {
             name: &delegated_zvol.volume_name(),

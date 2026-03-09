@@ -165,7 +165,7 @@ enum EnsureDatasetErrorRaw {
 
 /// Error returned by [`Zfs::ensure_dataset`].
 #[derive(thiserror::Error, Debug)]
-#[error("Failed to ensure filesystem '{name}': {err}")]
+#[error("Failed to ensure filesystem '{name}'")]
 pub struct EnsureDatasetError {
     name: String,
     #[source]
