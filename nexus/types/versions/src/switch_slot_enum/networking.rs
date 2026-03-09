@@ -2,6 +2,8 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+use super::parse_str_as_switch_slot;
+use super::format_switch_slot_as_str;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::Name;
 use omicron_common::api::external::NameOrId;
@@ -11,7 +13,6 @@ use sled_agent_types::early_networking::BfdMode;
 use sled_agent_types::early_networking::SwitchSlot;
 use std::net::IpAddr;
 use uuid::Uuid;
-
 use crate::v2025_11_20_00;
 
 // ADDRESS LOT
@@ -84,7 +85,7 @@ impl TryFrom<v2025_11_20_00::networking::LoopbackAddressCreate>
         value: v2025_11_20_00::networking::LoopbackAddressCreate,
     ) -> Result<Self, Self::Error> {
         let switch_location =
-            parse_name_as_switch_slot(&value.switch_location)?;
+            parse_str_as_switch_slot(value.switch_location.as_str())?;
         Ok(Self {
             address_lot: value.address_lot,
             rack_id: value.rack_id,
@@ -122,7 +123,7 @@ impl TryFrom<v2025_11_20_00::networking::LoopbackAddressPath>
         value: v2025_11_20_00::networking::LoopbackAddressPath,
     ) -> Result<Self, Self::Error> {
         let switch_location =
-            parse_name_as_switch_slot(&value.switch_location)?;
+            parse_str_as_switch_slot(value.switch_location.as_str())?;
         Ok(Self {
             rack_id: value.rack_id,
             switch_location,
@@ -168,7 +169,7 @@ impl TryFrom<v2025_11_20_00::networking::BfdSessionEnable>
     fn try_from(
         value: v2025_11_20_00::networking::BfdSessionEnable,
     ) -> Result<Self, Self::Error> {
-        let switch = parse_name_as_switch_slot(&value.switch)?;
+        let switch = parse_str_as_switch_slot(value.switch.as_str())?;
         Ok(Self {
             local: value.local,
             remote: value.remote,
@@ -198,7 +199,7 @@ impl TryFrom<v2025_11_20_00::networking::BfdSessionDisable>
     fn try_from(
         value: v2025_11_20_00::networking::BfdSessionDisable,
     ) -> Result<Self, Self::Error> {
-        let switch = parse_name_as_switch_slot(&value.switch)?;
+        let switch = parse_str_as_switch_slot(value.switch.as_str())?;
         Ok(Self { remote: value.remote, switch })
     }
 }
@@ -255,7 +256,7 @@ impl TryFrom<v2025_11_20_00::networking::SwitchPortSelector>
         value: v2025_11_20_00::networking::SwitchPortSelector,
     ) -> Result<Self, Self::Error> {
         let switch_location =
-            parse_name_as_switch_slot(&value.switch_location)?;
+            parse_str_as_switch_slot(value.switch_location.as_str())?;
         Ok(Self { rack_id: value.rack_id, switch_location })
     }
 }
@@ -282,28 +283,7 @@ impl TryFrom<v2025_11_20_00::networking::LldpPortPathSelector>
         value: v2025_11_20_00::networking::LldpPortPathSelector,
     ) -> Result<Self, Self::Error> {
         let switch_location =
-            parse_name_as_switch_slot(&value.switch_location)?;
+            parse_str_as_switch_slot(value.switch_location.as_str())?;
         Ok(Self { rack_id: value.rack_id, switch_location, port: value.port })
-    }
-}
-
-/// Helper for converting old switch slot arguments (all `Name`s).
-fn parse_name_as_switch_slot(name: &Name) -> Result<SwitchSlot, Error> {
-    match name.as_str() {
-        "switch0" => Ok(SwitchSlot::Switch0),
-        "switch1" => Ok(SwitchSlot::Switch1),
-        _ => Err(Error::invalid_request(format!(
-            "invalid switch location `{name}` \
-             (expected `switch0` or `switch1`)",
-        ))),
-    }
-}
-
-/// Helper for converting switch slots to old API types that reported them as
-/// strings or `Name`s.
-fn format_switch_slot_as_str(switch_slot: SwitchSlot) -> &'static str {
-    match switch_slot {
-        SwitchSlot::Switch0 => "switch0",
-        SwitchSlot::Switch1 => "switch1",
     }
 }
