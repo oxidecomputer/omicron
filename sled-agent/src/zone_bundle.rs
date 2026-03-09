@@ -727,7 +727,7 @@ async fn create_zfs_snapshots(
                                     log,
                                     "failed to list datasets, will \
                                     unwind any previously created snapshots";
-                                    "error" => ?e,
+                                    &e,
                                 );
                                 assert!(
                                     maybe_err

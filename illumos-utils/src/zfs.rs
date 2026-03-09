@@ -20,6 +20,7 @@ use omicron_common::disk::DiskIdentity;
 use omicron_common::disk::SharedDatasetConfig;
 use omicron_uuid_kinds::DatasetUuid;
 use rustix::fd::AsRawFd;
+use slog_error_chain::SlogInlineError;
 use std::collections::BTreeMap;
 use std::fmt;
 
@@ -46,8 +47,8 @@ pub const ZFS: &str = "/usr/sbin/zfs";
 pub const KEYPATH_ROOT: &str = "/var/run/oxide/";
 
 /// Error returned by [`Zfs::list_datasets`].
-#[derive(thiserror::Error, Debug)]
-#[error("Could not list datasets within zpool {name}: {err}")]
+#[derive(thiserror::Error, Debug, SlogInlineError)]
+#[error("Could not list datasets within zpool {name}")]
 pub struct ListDatasetsError {
     name: String,
     #[source]
