@@ -35,7 +35,7 @@ pub enum Error {
 }
 
 #[derive(thiserror::Error, Debug)]
-#[error("Failed to create zpool: {err}")]
+#[error("Failed to create zpool")]
 pub struct CreateError {
     #[from]
     err: Error,
