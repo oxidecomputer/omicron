@@ -6,6 +6,9 @@
 
 use crate::{ExecutionError, PFEXEC, execute_async};
 use camino::{Utf8Path, Utf8PathBuf};
+use schemars::JsonSchema;
+use serde::{Deserialize, Serialize};
+use std::fmt::Display;
 use std::str::FromStr;
 use tokio::process::Command;
 
@@ -60,7 +63,10 @@ pub struct GetInfoError {
     err: Error,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(
+    Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema,
+)]
+#[serde(rename_all = "snake_case")]
 pub enum ZpoolHealth {
     /// The device is online and functioning.
     Online,
@@ -91,6 +97,20 @@ impl FromStr for ZpoolHealth {
             "UNAVAIL" => Ok(ZpoolHealth::Unavailable),
             _ => Err(ParseError(format!("Unrecognized zpool 'health': {}", s))),
         }
+    }
+}
+
+impl Display for ZpoolHealth {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let s = match self {
+            ZpoolHealth::Online => "online",
+            ZpoolHealth::Degraded => "degraded",
+            ZpoolHealth::Faulted => "faulted",
+            ZpoolHealth::Offline => "offline",
+            ZpoolHealth::Removed => "removed",
+            ZpoolHealth::Unavailable => "unavailable",
+        };
+        write!(f, "{s}")
     }
 }
 

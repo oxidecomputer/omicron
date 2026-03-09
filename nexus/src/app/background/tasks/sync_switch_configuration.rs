@@ -45,26 +45,32 @@ use nexus_types::identity::{Asset, Resource};
 use omicron_common::OMICRON_DPD_TAG;
 use omicron_common::{
     address::{Ipv6Subnet, get_sled_address},
-    api::{
-        external::{DataPageParams, ImportExportPolicy, SwitchLocation},
-        internal::shared::ParseSwitchLocationError,
-    },
+    api::external::DataPageParams,
 };
 use rdb_types::{Prefix, Prefix4, Prefix6};
 use serde_json::json;
-use sled_agent_client::types::{
-    BgpConfig as SledBgpConfig, BgpPeerConfig as SledBgpPeerConfig,
-    EarlyNetworkConfig, EarlyNetworkConfigBody, HostPortConfig,
-    LldpAdminStatus, LldpPortConfig, PortConfig, RackNetworkConfig,
-    RouteConfig as SledRouteConfig,
-    RouterLifetimeConfig as SledRouterLifetimeConfig, TxEqConfig,
-    UplinkAddressConfig,
-};
+use sled_agent_client::types::HostPortConfig;
+use sled_agent_types::early_networking::BfdPeerConfig;
+use sled_agent_types::early_networking::BgpConfig as SledBgpConfig;
+use sled_agent_types::early_networking::BgpPeerConfig as SledBgpPeerConfig;
+use sled_agent_types::early_networking::EarlyNetworkConfigBody;
+use sled_agent_types::early_networking::EarlyNetworkConfigEnvelope;
+use sled_agent_types::early_networking::ImportExportPolicy;
+use sled_agent_types::early_networking::LldpAdminStatus;
+use sled_agent_types::early_networking::LldpPortConfig;
+use sled_agent_types::early_networking::MaxPathConfig;
+use sled_agent_types::early_networking::PortConfig;
+use sled_agent_types::early_networking::RackNetworkConfig;
+use sled_agent_types::early_networking::RouteConfig as SledRouteConfig;
+use sled_agent_types::early_networking::SwitchLocation;
+use sled_agent_types::early_networking::TxEqConfig;
+use sled_agent_types::early_networking::UplinkAddressConfig;
+use sled_agent_types::early_networking::WriteNetworkConfigRequest;
+use slog_error_chain::InlineErrorChain;
 use std::{
     collections::{HashMap, HashSet, hash_map::Entry},
     hash::Hash,
     net::{IpAddr, Ipv4Addr, Ipv6Addr},
-    num::NonZeroU8,
     str::FromStr,
     sync::Arc,
 };
@@ -170,20 +176,7 @@ impl SwitchPortSettingsManager {
     > {
         let mut changes = Vec::new();
         for port in port_list {
-            let location: SwitchLocation =
-                match port.switch_location.clone().parse() {
-                    Ok(location) => location,
-                    Err(e) => {
-                        error!(
-                            &log,
-                            "failed to parse switch location";
-                            "switch_location" => ?port.switch_location,
-                            "error" => ?e
-                        );
-                        continue;
-                    }
-                };
-
+            let location = SwitchLocation::from(port.switch_slot);
             let id = match port.port_settings_id {
                 Some(id) => id,
                 _ => {
@@ -235,7 +228,6 @@ impl SwitchPortSettingsManager {
     async fn db_loopback_addresses(
         &mut self,
         opctx: &OpContext,
-        log: &slog::Logger,
     ) -> Result<
         HashSet<(SwitchLocation, IpAddr)>,
         omicron_common::api::external::Error,
@@ -248,21 +240,8 @@ impl SwitchPortSettingsManager {
         let mut set: HashSet<(SwitchLocation, IpAddr)> = HashSet::new();
 
         // TODO: are we doing anything special with anycast addresses at the moment?
-        for LoopbackAddress { switch_location, address, .. } in values.iter() {
-            let location: SwitchLocation = match switch_location.parse() {
-                Ok(v) => v,
-                Err(e) => {
-                    error!(
-                        log,
-                        "failed to parse switch location for loopback address";
-                        "address" => %address,
-                        "location" => switch_location,
-                        "error" => ?e,
-                    );
-                    continue;
-                }
-            };
-            set.insert((location, address.ip()));
+        for LoopbackAddress { switch_slot, address, .. } in values.iter() {
+            set.insert((SwitchLocation::from(*switch_slot), address.ip()));
         }
 
         Ok(set)
@@ -271,10 +250,7 @@ impl SwitchPortSettingsManager {
     async fn bfd_peer_configs_from_db(
         &mut self,
         opctx: &OpContext,
-    ) -> Result<
-        Vec<sled_agent_client::types::BfdPeerConfig>,
-        omicron_common::api::external::Error,
-    > {
+    ) -> Result<Vec<BfdPeerConfig>, omicron_common::api::external::Error> {
         let db_data = self
             .datastore
             .bfd_session_list(opctx, &DataPageParams::max_page())
@@ -282,7 +258,7 @@ impl SwitchPortSettingsManager {
 
         let mut result = Vec::new();
         for spec in db_data.into_iter() {
-            let config = sled_agent_client::types::BfdPeerConfig {
+            let config = BfdPeerConfig {
                 local: spec.local.map(|x| x.ip()),
                 remote: spec.remote.ip(),
                 detection_threshold: spec
@@ -299,25 +275,8 @@ impl SwitchPortSettingsManager {
                         }
                     })?,
                 required_rx: spec.required_rx.0.into(),
-                mode: match spec.mode {
-                    nexus_db_model::BfdMode::SingleHop => {
-                        sled_agent_client::types::BfdMode::SingleHop
-                    }
-                    nexus_db_model::BfdMode::MultiHop => {
-                        sled_agent_client::types::BfdMode::MultiHop
-                    }
-                },
-                switch: spec.switch.parse().map_err(
-                    |e: ParseSwitchLocationError| {
-                        omicron_common::api::external::Error::InternalError {
-                            internal_message: format!(
-                                "db_bfd_peer_configs: failed to parse switch \
-                                 name: {}: {:?}",
-                                spec.switch, e,
-                            ),
-                        }
-                    },
-                )?,
+                mode: spec.mode.into(),
+                switch: spec.switch_slot.into(),
             };
             result.push(config);
         }
@@ -470,7 +429,7 @@ impl BackgroundTask for SwitchPortSettingsManager {
                 //
 
                 info!(&log, "checking for changes to loopback addresses");
-                match self.db_loopback_addresses(opctx, &log).await {
+                match self.db_loopback_addresses(opctx).await {
                     Ok(desired_loopback_addresses) => {
                         let current_loopback_addresses = switch_loopback_addresses(&dpd_clients, &log).await;
 
@@ -1027,47 +986,6 @@ impl BackgroundTask for SwitchPortSettingsManager {
                 // calculate and apply bootstore changes
                 //
 
-                // TODO: #5232 Make ntp servers w/ generation tracking first-class citizens in the db
-                // We're using the latest bootstore config from the sled agents to get the ntp
-                // servers. We should instead be pulling this information from the db. However, it
-                // seems that we're currently not storing the ntp servers in the db as a first-class
-                // citizen, so we'll need to add that first.
-
-                // find the active sled-agent bootstore config with the highest generation
-                let mut latest_sled_agent_bootstore_config: Option<EarlyNetworkConfig> = None;
-
-                // Since we update the first scrimlet we can reach (we failover to the second one
-                // if updating the first one fails) we need to check them both.
-                for (_location, client) in &scrimlet_sled_agent_clients {
-                    let scrimlet_cfg  = match client.read_network_bootstore_config_cache().await {
-                        Ok(config) => config,
-                        Err(e) => {
-                            error!(log, "unable to read bootstore config from scrimlet"; "error" => ?e);
-                            continue;
-                        }
-                    };
-                    if let Some(other_config) = latest_sled_agent_bootstore_config.as_mut() {
-                        if other_config.generation < scrimlet_cfg.generation {
-                            *other_config = scrimlet_cfg.clone();
-                        }
-                    } else {
-                        latest_sled_agent_bootstore_config = Some(scrimlet_cfg.clone());
-                    }
-                }
-
-                // TODO: this will also be removed once the above is resolved
-                // Move on to the next rack if neither scrimlet is reachable.
-                // if both scrimlets are unreachable we probably have bigger problems on this rack
-                let ntp_servers = match latest_sled_agent_bootstore_config {
-                    Some(config) => {
-                        config.body.ntp_servers.clone()
-                    },
-                    None => {
-                        error!(log, "both scrimlets are unreachable, cannot update bootstore");
-                        continue;
-                    }
-                };
-
                 // build the desired bootstore config from the records we've fetched
                 let subnet = match rack.rack_subnet {
                     Some(IpNetwork::V6(subnet)) => subnet.into(),
@@ -1102,14 +1020,19 @@ impl BackgroundTask for SwitchPortSettingsManager {
                             }
                         }).collect();
 
-                    let Some(max_paths) = NonZeroU8::new(*config.max_paths) else {
-                        // This should be impossible - our db constraint
-                        // requires this column to be nonzero.
-                        error!(
-                            log,
-                            "database contains illegal max_paths value 0"
-                        );
-                        return None;
+                    let max_paths = match MaxPathConfig::new(*config.max_paths)
+                    {
+                        Ok(max_paths) => max_paths,
+                        Err(err) => {
+                            // This should be impossible - our db constraints
+                            // should ensure legal values.
+                            error!(
+                                log,
+                                "database contains illegal max_paths value";
+                                InlineErrorChain::new(&err),
+                            );
+                            return None;
+                        }
                     };
 
                     Some(SledBgpConfig {
@@ -1117,9 +1040,7 @@ impl BackgroundTask for SwitchPortSettingsManager {
                         originate: announcements,
                         checker: config.checker.clone(),
                         shaper: config.shaper.clone(),
-                        max_paths: sled_agent_client::types::MaxPathConfig(
-                            max_paths,
-                        ),
+                        max_paths,
                     })
                 }).collect();
 
@@ -1159,6 +1080,23 @@ impl BackgroundTask for SwitchPortSettingsManager {
                         None
                     };
 
+                    let bgp_peers = match peer_configs
+                        .into_iter()
+                        .map(SledBgpPeerConfig::try_from)
+                        .collect::<Result<_, _>>()
+                    {
+                        Ok(bgp_peers) => bgp_peers,
+                        Err(err) => {
+                            error!(
+                                log,
+                                "failed to convert database peer configs to \
+                                 API peer configs";
+                                InlineErrorChain::new(&err),
+                            );
+                            continue;
+                        }
+                    };
+
                     let mut port_config = PortConfig {
                         addresses: info
                             .addresses
@@ -1174,35 +1112,7 @@ impl BackgroundTask for SwitchPortSettingsManager {
                             .get(0) //TODO breakout support
                             .map(|l| l.autoneg)
                             .unwrap_or(false),
-                        bgp_peers: peer_configs.into_iter()
-                            // For unnumbered peers (addr is None), use UNSPECIFIED
-                            .map(|c| match c.addr {
-                                None => (c, IpAddr::V6(Ipv6Addr::UNSPECIFIED)),
-                                Some(addr) => (c, addr.ip()),
-                            })
-                            .map(|(c, addr)| {
-                                SledBgpPeerConfig {
-                                    asn: *c.asn,
-                                    port: c.port_name,
-                                    addr,
-                                    hold_time: Some(c.hold_time.0.into()),
-                                    idle_hold_time: Some(c.idle_hold_time.0.into()),
-                                    delay_open: Some(c.delay_open.0.into()),
-                                    connect_retry: Some(c.connect_retry.0.into()),
-                                    keepalive: Some(c.keepalive.0.into()),
-                                    enforce_first_as: c.enforce_first_as,
-                                    local_pref: c.local_pref.map(|x| x.into()),
-                                    md5_auth_key: c.md5_auth_key,
-                                    min_ttl: c.min_ttl.map(|x| x.0),
-                                    multi_exit_discriminator: c.multi_exit_discriminator.map(|x| x.into()),
-                                    remote_asn: c.remote_asn.map(|x| x.into()),
-                                    communities: Vec::new(),
-                                    allowed_export: ImportExportPolicy::NoFiltering,
-                                    allowed_import: ImportExportPolicy::NoFiltering,
-                                    vlan_id: c.vlan_id.map(|x| x.0),
-                                    router_lifetime: SledRouterLifetimeConfig(c.router_lifetime.0),
-                                }
-                        }).collect(),
+                        bgp_peers,
                         port: port.port_name.to_string(),
                         routes: info
                             .routes
@@ -1358,72 +1268,61 @@ impl BackgroundTask for SwitchPortSettingsManager {
                     }
                 };
 
-                let mut desired_config = EarlyNetworkConfig {
-                    generation: 0,
-                    schema_version: 2,
-                    body: EarlyNetworkConfigBody {
-                        ntp_servers,
-                        rack_network_config: Some(RackNetworkConfig {
-                            rack_subnet: subnet,
-                            infra_ip_first,
-                            infra_ip_last,
-                            ports,
-                            bgp,
-                            bfd,
-                        }),
+                let desired_config = EarlyNetworkConfigBody {
+                    rack_network_config: RackNetworkConfig {
+                        rack_subnet: subnet,
+                        infra_ip_first,
+                        infra_ip_last,
+                        ports,
+                        bgp,
+                        bfd,
                     },
                 };
 
-                // bootstore_needs_update is a boolean value that determines whether or not we need to
-                // increment the bootstore version and push a new config to the sled agents.
+                // bootstore_needs_update is a boolean value that determines
+                // whether or not we need to increment the bootstore version and
+                // push a new config to the sled agents.
                 //
-                // * If the config we've built from the switchport configuration information is
-                //   different from the last config we've cached in the db, we update the config,
+                // * If the config we've built from the switchport configuration
+                //   information is different from the last config we've cached
+                //   in the db, we update the config, cache it in the db, and
+                //   apply it.
+                // * If the last cached config cannot be succesfully
+                //   deserialized into our current bootstore format, we assume
+                //   that it is an older format and update the config,
                 //   cache it in the db, and apply it.
-                // * If the last cached config cannot be succesfully deserialized into our current
-                //   bootstore format, we assume that it is an older format and update the config,
-                //   cache it in the db, and apply it.
-                // * If there is no last cached config, we assume that this is the first time this
-                //   rpw has run for the given rack, so we update the config, cache it in the db,
-                //   and apply it.
-                // * If we cannot fetch the latest version due to a db error, something is broken
-                //   so we don't do anything.
-                let bootstore_needs_update = match self.datastore.get_latest_bootstore_config(opctx, NETWORK_KEY.into()).await {
+                // * If there is no last cached config, we assume that this is
+                //   the first time this rpw has run for the given rack, so we
+                //   update the config, cache it in the db, and apply it.
+                // * If we cannot fetch the latest version due to a db error,
+                //   something is broken so we don't do anything.
+                let bootstore_needs_update = match self
+                    .datastore
+                    .get_latest_bootstore_config(opctx, NETWORK_KEY.into())
+                    .await
+                {
                     Ok(Some(BootstoreConfig { data, .. })) => {
-                        match serde_json::from_value::<EarlyNetworkConfig>(data.clone()) {
+                        match EarlyNetworkConfigEnvelope::deserialize_from_value(data.clone())
+                            .and_then(|envelope| envelope.deserialize_body())
+                        {
                             Ok(config) => {
-                                let current_ntp_servers: HashSet<String> = config.body.ntp_servers.clone().into_iter().collect();
-                                let desired_ntp_servers: HashSet<String> = desired_config.body.ntp_servers.clone().into_iter().collect();
-
-                                let rnc_differs = match (config.body.rack_network_config.clone(), desired_config.body.rack_network_config.clone()) {
-                                    (Some(current_rnc), Some(desired_rnc)) => {
-                                        !hashset_eq(current_rnc.bgp.clone(), desired_rnc.bgp.clone()) ||
-                                        !hashset_eq(current_rnc.bfd.clone(), desired_rnc.bfd.clone()) ||
-                                        !hashset_eq(current_rnc.ports.clone(), desired_rnc.ports.clone()) ||
-                                        current_rnc.rack_subnet != desired_rnc.rack_subnet ||
-                                        current_rnc.infra_ip_first != desired_rnc.infra_ip_first ||
-                                        current_rnc.infra_ip_last != desired_rnc.infra_ip_last
-                                    },
-                                    (None, Some(_)) => true,
-                                    _ => {
-                                        todo!("error")
-                                    }
+                                let current_rnc = &config.rack_network_config;
+                                let desired_rnc = &desired_config.rack_network_config;
+                                let rnc_differs = {
+                                    !hashset_eq(current_rnc.bgp.clone(), desired_rnc.bgp.clone()) ||
+                                    !hashset_eq(current_rnc.bfd.clone(), desired_rnc.bfd.clone()) ||
+                                    !hashset_eq(current_rnc.ports.clone(), desired_rnc.ports.clone()) ||
+                                    current_rnc.rack_subnet != desired_rnc.rack_subnet ||
+                                    current_rnc.infra_ip_first != desired_rnc.infra_ip_first ||
+                                    current_rnc.infra_ip_last != desired_rnc.infra_ip_last
                                 };
 
-                                if current_ntp_servers != desired_ntp_servers {
-                                    info!(
-                                        log,
-                                        "ntp servers have changed";
-                                        "old" => ?current_ntp_servers,
-                                        "new" => ?desired_ntp_servers,
-                                    );
-                                    true
-                                } else if rnc_differs {
+                                if rnc_differs {
                                     info!(
                                         log,
                                         "rack network config has changed";
-                                        "old" => ?config.body.rack_network_config,
-                                        "new" => ?desired_config.body.rack_network_config,
+                                        "old" => ?config.rack_network_config,
+                                        "new" => ?desired_config.rack_network_config,
                                     );
                                     true
                                 } else {
@@ -1433,7 +1332,8 @@ impl BackgroundTask for SwitchPortSettingsManager {
                             Err(e) => {
                                 error!(
                                     log,
-                                    "bootstore config does not deserialized to current EarlyNetworkConfig format";
+                                    "bootstore config failed to deserialize \
+                                     to current EarlyNetworkConfig format";
                                     "key" => %NETWORK_KEY,
                                     "value" => %data,
                                     "error" => %e,
@@ -1486,36 +1386,54 @@ impl BackgroundTask for SwitchPortSettingsManager {
                 if bootstore_needs_update {
                     let generation = match self.datastore
                         .bump_bootstore_generation(opctx, NETWORK_KEY.into())
-                        .await {
+                        .await
+                    {
                         Ok(value) => value,
-                            Err(e) => {
-                                error!(
-                                    log,
-                                    "error while fetching next bootstore generation from db";
-                                    "key" => %NETWORK_KEY,
-                                    "error" => %e,
-                                );
-                                continue;
-                            },
-                        };
+                        Err(e) => {
+                            error!(
+                                log,
+                                "error while fetching next bootstore generation from db";
+                                "key" => %NETWORK_KEY,
+                                "error" => %e,
+                            );
+                            continue;
+                        },
+                    };
 
-                    desired_config.generation = generation as u64;
                     info!(
                         &log,
                         "updating bootstore config";
                         "config" => ?desired_config,
                     );
 
+                    let write_request = {
+                        let generation = match u64::try_from(generation) {
+                            Ok(generation) => generation,
+                            Err(_) => {
+                                error!(
+                                    log,
+                                    "got negative generation from db";
+                                    "generation" => generation,
+                                );
+                                continue;
+                            }
+                        };
+                        WriteNetworkConfigRequest {
+                            generation,
+                            body: desired_config,
+                        }
+                    };
+
                     // push the updates to both scrimlets
                     // if both scrimlets are down, bootstore updates aren't happening anyway
                     let mut one_succeeded = false;
                     for (location, client) in &scrimlet_sled_agent_clients {
-                        if let Err(e) = client.write_network_bootstore_config(&desired_config).await {
+                        if let Err(e) = client.write_network_bootstore_config(&write_request).await {
                             error!(
                                 log,
                                 "error updating bootstore";
                                 "location" => %location,
-                                "config" => ?desired_config,
+                                "request" => ?write_request,
                                 "error" => %e,
                             )
                         } else {
@@ -1525,10 +1443,21 @@ impl BackgroundTask for SwitchPortSettingsManager {
 
                     // if at least one succeeded, record this update in the db
                     if one_succeeded {
+                        // Wrap the new config in an envelope to attach the
+                        // current body schema version.
+                        let envelope = EarlyNetworkConfigEnvelope::from(
+                            &write_request.body,
+                        );
                         let config = BootstoreConfig {
                             key: NETWORK_KEY.into(),
-                            generation: desired_config.generation as i64,
-                            data: serde_json::to_value(&desired_config).unwrap(),
+                            generation,
+                            // We're serializing an envelope (guaranteed to be
+                            // representable as JSON) to JSON in memory, so this
+                            // can't fail.
+                            data: serde_json::to_value(&envelope).expect(
+                                "EarlyNetworkConfigEnvelope can be serialized \
+                                 as JSON",
+                            ),
                             time_created: chrono::Utc::now(),
                             time_deleted: None,
                         };

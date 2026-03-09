@@ -19,11 +19,14 @@
 use crate::v2025_12_12_00::networking::BgpPeerState;
 use api_identity::ObjectIdentity;
 use omicron_common::api::external::{
-    self, IdentityMetadata, IdentityMetadataCreateParams, MaxPathConfig, Name,
-    NameOrId, ObjectIdentity, SwitchLocation,
+    self, IdentityMetadata, IdentityMetadataCreateParams, Name, NameOrId,
+    ObjectIdentity,
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use sled_agent_types::early_networking::ImportExportPolicy;
+use sled_agent_types::early_networking::MaxPathConfig;
+use sled_agent_types::early_networking::SwitchLocation;
 use std::net::IpAddr;
 
 /// A base BGP configuration.
@@ -167,10 +170,10 @@ pub struct BgpPeer {
     pub enforce_first_as: bool,
 
     /// Define import policy for a peer.
-    pub allowed_import: external::ImportExportPolicy,
+    pub allowed_import: ImportExportPolicy,
 
     /// Define export policy for a peer.
-    pub allowed_export: external::ImportExportPolicy,
+    pub allowed_export: ImportExportPolicy,
 
     /// Associate a VLAN ID with a peer.
     pub vlan_id: Option<u16>,

@@ -22,9 +22,11 @@ use nexus_db_schema::schema::{
 use nexus_types::external_api::networking as networking_types;
 use nexus_types::identity::Resource;
 use omicron_common::api::external;
-use omicron_common::api::external::ImportExportPolicy;
-use omicron_common::api::internal::shared::{PortFec, PortSpeed};
 use serde::{Deserialize, Serialize};
+use sled_agent_types::early_networking::ImportExportPolicy;
+use sled_agent_types::early_networking::PortFec;
+use sled_agent_types::early_networking::PortSpeed;
+use sled_agent_types::early_networking::SwitchLocation;
 use uuid::Uuid;
 
 impl_enum_type!(
@@ -225,6 +227,47 @@ impl Into<external::SwitchPortGeometry> for SwitchPortGeometry {
     }
 }
 
+impl_enum_type!(
+    SwitchSlotEnum:
+
+    #[derive(
+        Clone,
+        Copy,
+        Debug,
+        AsExpression,
+        FromSqlRow,
+        PartialEq,
+        Eq,
+        Hash,
+        PartialOrd,
+        Ord,
+        Serialize,
+        Deserialize,
+    )]
+    pub enum DbSwitchSlot;
+
+    Switch0 => b"switch0"
+    Switch1 => b"switch1"
+);
+
+impl From<DbSwitchSlot> for SwitchLocation {
+    fn from(value: DbSwitchSlot) -> Self {
+        match value {
+            DbSwitchSlot::Switch0 => Self::Switch0,
+            DbSwitchSlot::Switch1 => Self::Switch1,
+        }
+    }
+}
+
+impl From<SwitchLocation> for DbSwitchSlot {
+    fn from(value: SwitchLocation) -> Self {
+        match value {
+            SwitchLocation::Switch0 => Self::Switch0,
+            SwitchLocation::Switch1 => Self::Switch1,
+        }
+    }
+}
+
 #[derive(
     Queryable,
     Insertable,
@@ -241,23 +284,21 @@ impl Into<external::SwitchPortGeometry> for SwitchPortGeometry {
 pub struct SwitchPort {
     pub id: Uuid,
     pub rack_id: Uuid,
-    // TODO: #3594 Correctness
-    // Change this field to a `SwitchLocation` type.
-    pub switch_location: String,
     pub port_name: Name,
     pub port_settings_id: Option<Uuid>,
+    pub switch_slot: DbSwitchSlot,
 }
 
 impl SwitchPort {
     pub fn new(
         rack_id: Uuid,
-        switch_location: String,
+        switch_location: SwitchLocation,
         port_name: Name,
     ) -> Self {
         Self {
             id: Uuid::new_v4(),
             rack_id,
-            switch_location,
+            switch_slot: switch_location.into(),
             port_name,
             port_settings_id: None,
         }
@@ -269,7 +310,8 @@ impl Into<external::SwitchPort> for SwitchPort {
         external::SwitchPort {
             id: self.id,
             rack_id: self.rack_id,
-            switch_location: self.switch_location,
+            // TODO-correctness enum in external API
+            switch_location: SwitchLocation::from(self.switch_slot).to_string(),
             port_name: self.port_name.into(),
             port_settings_id: self.port_settings_id,
         }

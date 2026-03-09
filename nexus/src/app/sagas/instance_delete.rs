@@ -10,10 +10,10 @@ use super::NexusSaga;
 use crate::app::sagas::declare_saga_actions;
 use nexus_db_lookup::LookupPath;
 use nexus_db_queries::{authn, authz, db};
-use omicron_common::api::internal::shared::SwitchLocation;
 use omicron_uuid_kinds::{GenericUuid, InstanceUuid};
 use serde::Deserialize;
 use serde::Serialize;
+use sled_agent_types::early_networking::SwitchLocation;
 use slog::{debug, info};
 use steno::ActionError;
 
@@ -246,7 +246,7 @@ mod test {
     use omicron_common::api::external::{
         ByteCount, IdentityMetadataCreateParams, InstanceCpuCount,
     };
-    use omicron_common::api::internal::shared::SwitchLocation;
+    use sled_agent_types::early_networking::SwitchLocation;
     use std::collections::HashSet;
     use uuid::Uuid;
 

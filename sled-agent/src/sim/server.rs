@@ -225,7 +225,12 @@ impl Server {
                 },
             );
 
-            sled_agent.create_zpool(zpool_id, physical_disk_id, zpool.size);
+            sled_agent.create_zpool(
+                zpool_id,
+                physical_disk_id,
+                zpool.size,
+                zpool.health,
+            );
             let dataset_id = DatasetUuid::new_v4();
             let address =
                 sled_agent.create_crucible_dataset(zpool_id, dataset_id);

@@ -77,7 +77,6 @@ use omicron_common::api::internal::shared::NetworkInterface;
 use omicron_common::api::internal::shared::NetworkInterfaceKind;
 use omicron_common::api::internal::shared::PrivateIpConfig;
 use omicron_common::api::internal::shared::SourceNatConfigGeneric;
-use omicron_common::api::internal::shared::SwitchLocation;
 use omicron_common::disk::CompressionAlgorithm;
 use omicron_common::zpool_name::ZpoolName;
 use omicron_sled_agent::sim;
@@ -93,9 +92,10 @@ use omicron_uuid_kinds::ZpoolUuid;
 use oximeter_collector::Oximeter;
 use oximeter_producer::LogConfig;
 use oximeter_producer::Server as ProducerServer;
-use sled_agent_client::types::EarlyNetworkConfig;
-use sled_agent_client::types::EarlyNetworkConfigBody;
-use sled_agent_client::types::RackNetworkConfig;
+use sled_agent_types::early_networking::EarlyNetworkConfigBody;
+use sled_agent_types::early_networking::RackNetworkConfig;
+use sled_agent_types::early_networking::SwitchLocation;
+use sled_agent_types::early_networking::WriteNetworkConfigRequest;
 use sled_agent_types::inventory::HostPhase2DesiredSlots;
 use sled_agent_types::inventory::OmicronSledConfig;
 use sled_agent_types::inventory::OmicronZoneDataset;
@@ -916,20 +916,18 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
     /// tell the other Sled Agents to report they have no zones configured, and
     /// write the early network config to all sleds.
     pub async fn configure_sled_agents(&mut self) {
-        let early_network_config = EarlyNetworkConfig {
+        let early_network_config = WriteNetworkConfigRequest {
             body: EarlyNetworkConfigBody {
-                ntp_servers: Vec::new(),
-                rack_network_config: Some(RackNetworkConfig {
+                rack_network_config: RackNetworkConfig {
                     bfd: Vec::new(),
                     bgp: Vec::new(),
                     infra_ip_first: "192.0.2.10".parse().unwrap(),
                     infra_ip_last: "192.0.2.100".parse().unwrap(),
                     ports: Vec::new(),
                     rack_subnet: "fd00:1122:3344:0100::/56".parse().unwrap(),
-                }),
+                },
             },
             generation: 1,
-            schema_version: 2,
         };
 
         macro_rules! from_clone {

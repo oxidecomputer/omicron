@@ -1996,3 +1996,182 @@ async fn test_scim_user_admin_group_priv_conflict(
     .await
     .expect("expected 200");
 }
+
+// Test that time_modified is updated when a SCIM user or group is modified
+#[nexus_test]
+async fn test_time_modified_updated_on_scim_user_and_group_update(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+    let nexus = &cptestctx.server.server_context().nexus;
+    let opctx = OpContext::for_tests(
+        cptestctx.logctx.log.new(o!()),
+        nexus.datastore().clone(),
+    );
+
+    const SILO_NAME: &str = "saml-scim-silo";
+    create_silo(&client, SILO_NAME, true, silo::SiloIdentityMode::SamlScim)
+        .await;
+
+    grant_iam(
+        client,
+        &format!("/v1/system/silos/{SILO_NAME}"),
+        policy::SiloRole::Admin,
+        opctx.authn.actor().unwrap().silo_user_id().unwrap(),
+        AuthnMode::PrivilegedUser,
+    )
+    .await;
+
+    let created_token: scim::ScimClientBearerTokenValue =
+        object_create_no_body(
+            client,
+            &format!("/v1/system/scim/tokens?silo={}", SILO_NAME),
+        )
+        .await;
+
+    // Create a user and capture time_modified from the SCIM meta.
+
+    let created_user: serde_json::Value = NexusRequest::new(
+        RequestBuilder::new(client, Method::POST, "/scim/v2/Users")
+            .header(http::header::CONTENT_TYPE, "application/scim+json")
+            .header(
+                http::header::AUTHORIZATION,
+                format!("Bearer {}", created_token.bearer_token),
+            )
+            .allow_non_dropshot_errors()
+            .raw_body(Some(
+                serde_json::to_string(&serde_json::json!({
+                    "userName": "mscott",
+                    "externalId": "mscott@dundermifflin.com",
+                }))
+                .unwrap(),
+            ))
+            .expect_status(Some(StatusCode::CREATED)),
+    )
+    .execute()
+    .await
+    .expect("expected 201")
+    .parsed_body()
+    .expect("created user");
+
+    let user_id = created_user["id"].as_str().unwrap().to_string();
+    let user_time_modified_at_creation: chrono::DateTime<chrono::Utc> =
+        created_user["meta"]["lastModified"].as_str().unwrap().parse().unwrap();
+
+    // Update the user with a different userName and confirm time_modified
+    // advances.
+
+    let updated_user: serde_json::Value = NexusRequest::new(
+        RequestBuilder::new(
+            client,
+            Method::PUT,
+            &format!("/scim/v2/Users/{}", user_id),
+        )
+        .header(http::header::CONTENT_TYPE, "application/scim+json")
+        .header(
+            http::header::AUTHORIZATION,
+            format!("Bearer {}", created_token.bearer_token),
+        )
+        .allow_non_dropshot_errors()
+        .raw_body(Some(
+            serde_json::to_string(&serde_json::json!({
+                "userName": "michael.scott",
+                "externalId": "mscott@dundermifflin.com",
+            }))
+            .unwrap(),
+        ))
+        .expect_status(Some(StatusCode::OK)),
+    )
+    .execute()
+    .await
+    .expect("expected 200")
+    .parsed_body()
+    .expect("updated user");
+
+    let user_time_modified_after_update: chrono::DateTime<chrono::Utc> =
+        updated_user["meta"]["lastModified"].as_str().unwrap().parse().unwrap();
+
+    assert!(
+        user_time_modified_after_update > user_time_modified_at_creation,
+        "time_modified should advance after user update: \
+        before={user_time_modified_at_creation}, \
+        after={user_time_modified_after_update}",
+    );
+
+    // Create a group and capture time_modified from the SCIM meta.
+
+    let created_group: serde_json::Value = NexusRequest::new(
+        RequestBuilder::new(client, Method::POST, "/scim/v2/Groups")
+            .header(http::header::CONTENT_TYPE, "application/scim+json")
+            .header(
+                http::header::AUTHORIZATION,
+                format!("Bearer {}", created_token.bearer_token),
+            )
+            .allow_non_dropshot_errors()
+            .raw_body(Some(
+                serde_json::to_string(&serde_json::json!({
+                    "displayName": "Sales",
+                    "externalId": "sales@dundermifflin.com",
+                }))
+                .unwrap(),
+            ))
+            .expect_status(Some(StatusCode::CREATED)),
+    )
+    .execute()
+    .await
+    .expect("expected 201")
+    .parsed_body()
+    .expect("created group");
+
+    let group_id = created_group["id"].as_str().unwrap().to_string();
+    let group_time_modified_at_creation: chrono::DateTime<chrono::Utc> =
+        created_group["meta"]["lastModified"]
+            .as_str()
+            .unwrap()
+            .parse()
+            .unwrap();
+
+    // Update the group with a different displayName and confirm time_modified
+    // advances.
+
+    let updated_group: serde_json::Value = NexusRequest::new(
+        RequestBuilder::new(
+            client,
+            Method::PUT,
+            &format!("/scim/v2/Groups/{}", group_id),
+        )
+        .header(http::header::CONTENT_TYPE, "application/scim+json")
+        .header(
+            http::header::AUTHORIZATION,
+            format!("Bearer {}", created_token.bearer_token),
+        )
+        .allow_non_dropshot_errors()
+        .raw_body(Some(
+            serde_json::to_string(&serde_json::json!({
+                "displayName": "Sales Department",
+                "externalId": "sales@dundermifflin.com",
+            }))
+            .unwrap(),
+        ))
+        .expect_status(Some(StatusCode::OK)),
+    )
+    .execute()
+    .await
+    .expect("expected 200")
+    .parsed_body()
+    .expect("updated group");
+
+    let group_time_modified_after_update: chrono::DateTime<chrono::Utc> =
+        updated_group["meta"]["lastModified"]
+            .as_str()
+            .unwrap()
+            .parse()
+            .unwrap();
+
+    assert!(
+        group_time_modified_after_update > group_time_modified_at_creation,
+        "time_modified should advance after group update: \
+        before={group_time_modified_at_creation}, \
+        after={group_time_modified_after_update}",
+    );
+}

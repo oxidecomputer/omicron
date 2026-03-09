@@ -34,7 +34,7 @@ async fn main_impl() -> Result<(), anyhow::Error> {
 
     let falcon_dir = tempdir()?;
     info!(log, "Setting falcon directory to {}", falcon_dir.path());
-    d.falcon_dir = falcon_dir.path().into();
+    d.set_falcon_dir(Some(falcon_dir.path().to_string()));
 
     let cargo_bay = tempdir()?;
     info!(log, "Set cargo-bay to {} on host machine", cargo_bay.path());

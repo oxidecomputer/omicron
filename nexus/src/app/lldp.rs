@@ -15,8 +15,8 @@ use omicron_common::api::external::LldpLinkConfig;
 use omicron_common::api::external::LldpNeighbor;
 use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::Name;
-use omicron_common::api::external::SwitchLocation;
 use omicron_common::api::external::UpdateResult;
+use sled_agent_types::early_networking::SwitchLocation;
 use uuid::Uuid;
 
 impl super::Nexus {
@@ -26,7 +26,7 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
         rack_id: Uuid,
-        switch_location: Name,
+        switch_location: SwitchLocation,
         port: Name,
     ) -> LookupResult<LldpLinkConfig> {
         opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
@@ -42,7 +42,7 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
         rack_id: Uuid,
-        switch_location: Name,
+        switch_location: SwitchLocation,
         port: Name,
         config: LldpLinkConfig,
     ) -> UpdateResult<()> {
@@ -65,26 +65,18 @@ impl super::Nexus {
         previous: &Option<Uuid>,
         limit: u32,
         rack_id: Uuid,
-        switch_location: &Name,
+        loc: SwitchLocation,
         port: &Name,
     ) -> Result<Vec<LldpNeighbor>, Error> {
         opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
-
-        let loc: SwitchLocation =
-            switch_location.as_str().parse().map_err(|e| {
-                Error::invalid_request(&format!(
-                    "invalid switch name {switch_location}: {e}"
-                ))
-            })?;
 
         let lldpd_clients = self.lldpd_clients(rack_id).await.map_err(|e| {
             Error::internal_error(&format!("lldpd clients get: {e}"))
         })?;
 
-        let lldpd =
-            lldpd_clients.get(&loc).ok_or(Error::internal_error(&format!(
-                "no lldpd client for rack: {rack_id} switch {switch_location}"
-            )))?;
+        let lldpd = lldpd_clients.get(&loc).ok_or(Error::internal_error(
+            &format!("no lldpd client for rack: {rack_id} switch {loc}"),
+        ))?;
 
         let mut neighbors: Vec<Neighbor> = lldpd
             .get_neighbors_stream(&format!("{port}/0"), None)

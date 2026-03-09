@@ -92,7 +92,6 @@ use ntp_admin_client::{
 };
 use omicron_common::address::{COCKROACH_ADMIN_PORT, NTP_ADMIN_PORT};
 use omicron_common::api::external::Generation;
-use omicron_common::api::internal::shared::LldpAdminStatus;
 use omicron_common::backoff::{
     BackoffError, retry_notify, retry_policy_internal_service_aggressive,
 };
@@ -108,7 +107,7 @@ use sled_agent_client::{
 };
 use sled_agent_config_reconciler::InternalDisksReceiver;
 use sled_agent_types::early_networking::{
-    EarlyNetworkConfig, EarlyNetworkConfigBody,
+    EarlyNetworkConfigBody, EarlyNetworkConfigEnvelope, LldpAdminStatus,
 };
 use sled_agent_types::inventory::{
     ConfigReconcilerInventoryResult, HostPhase2DesiredSlots, OmicronSledConfig,
@@ -897,11 +896,9 @@ impl ServiceInner {
                                 vlan_id: a.vlan_id,
                             })
                             .collect(),
-                        switch: config.switch.into(),
-                        uplink_port_speed: config.uplink_port_speed.into(),
-                        uplink_port_fec: config
-                            .uplink_port_fec
-                            .map(|fec| fec.into()),
+                        switch: config.switch,
+                        uplink_port_speed: config.uplink_port_speed,
+                        uplink_port_fec: config.uplink_port_fec,
                         autoneg: config.autoneg,
                         bgp_peers: config
                             .bgp_peers
@@ -985,22 +982,13 @@ impl ServiceInner {
                 bfd: config
                     .bfd
                     .iter()
-                    .map(|spec| {
-                        NexusTypes::BfdPeerConfig {
-                    detection_threshold: spec.detection_threshold,
-                    local: spec.local,
-                    mode: match spec.mode {
-                        omicron_common::api::external::BfdMode::SingleHop => {
-                            NexusTypes::BfdMode::SingleHop
-                        }
-                        omicron_common::api::external::BfdMode::MultiHop => {
-                            NexusTypes::BfdMode::MultiHop
-                        }
-                    },
-                    remote: spec.remote,
-                    required_rx: spec.required_rx,
-                    switch: spec.switch.into(),
-                }
+                    .map(|spec| NexusTypes::BfdPeerConfig {
+                        detection_threshold: spec.detection_threshold,
+                        local: spec.local,
+                        mode: spec.mode,
+                        remote: spec.remote,
+                        required_rx: spec.required_rx,
+                        switch: spec.switch,
                     })
                     .collect(),
             }
@@ -1327,17 +1315,14 @@ impl ServiceInner {
         // TODO: In future releases, we will get rid of the bootstore entirely,
         // and early_network_config will be replicated by the trust quorum
         // nodes.
-        let early_network_config = EarlyNetworkConfig {
-            generation: 1,
-            schema_version: 2,
-            body: EarlyNetworkConfigBody {
-                ntp_servers: config.ntp_servers.clone(),
-                rack_network_config: Some(config.rack_network_config.clone()),
-            },
-        };
+        let early_network_config =
+            EarlyNetworkConfigEnvelope::from(&EarlyNetworkConfigBody {
+                rack_network_config: config.rack_network_config.clone(),
+            })
+            .serialize_to_bootstore_with_generation(1);
         info!(self.log, "Writing Rack Network Configuration to bootstore");
         rss_step.update(RssStep::NetworkConfigUpdate);
-        bootstore.update_network_config(early_network_config.into()).await?;
+        bootstore.update_network_config(early_network_config).await?;
 
         rss_step.update(RssStep::SledInit);
         // Forward the sled initialization requests to our sled-agent.

@@ -17,11 +17,11 @@ use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
 use omicron_common::api::external::Error;
 use omicron_common::api::internal::shared::NetworkInterface;
-use omicron_common::api::internal::shared::SwitchLocation;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::InstanceUuid;
 use oxnet::IpNet;
 use oxnet::Ipv6Net;
+use sled_agent_types::early_networking::SwitchLocation;
 use slog_error_chain::InlineErrorChain;
 use std::collections::HashSet;
 use std::str::FromStr;
@@ -286,14 +286,7 @@ pub(crate) async fn boundary_switches(
     let uplinks =
         switch_port::list_switch_ports_with_uplinks(datastore, opctx).await?;
     for uplink in &uplinks {
-        let location: SwitchLocation =
-            uplink.switch_location.parse().map_err(|_| {
-                Error::internal_error(&format!(
-                    "invalid switch location in uplink config: {}",
-                    uplink.switch_location
-                ))
-            })?;
-        boundary_switches.insert(location);
+        boundary_switches.insert(SwitchLocation::from(uplink.switch_slot));
     }
     Ok(boundary_switches)
 }

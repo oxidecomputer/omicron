@@ -18,8 +18,9 @@ use mg_admin_client::ClientInfo;
 use mg_admin_client::types::{BfdPeerConfig, SessionMode};
 use nexus_db_model::{BfdMode, BfdSession};
 use nexus_db_queries::{context::OpContext, db::DataStore};
-use omicron_common::api::external::{DataPageParams, SwitchLocation};
+use omicron_common::api::external::DataPageParams;
 use serde_json::json;
+use sled_agent_types::early_networking::SwitchLocation;
 use std::{
     collections::HashSet,
     hash::Hash,
@@ -73,7 +74,7 @@ impl Eq for BfdSessionKey {}
 impl From<BfdSession> for BfdSessionKey {
     fn from(value: BfdSession) -> Self {
         Self {
-            switch: value.switch.parse().unwrap(), //TODO unwrap
+            switch: value.switch_slot.into(),
             remote: value.remote.ip(),
             local: value.local.map(|x| x.ip()),
             detection_threshold: value

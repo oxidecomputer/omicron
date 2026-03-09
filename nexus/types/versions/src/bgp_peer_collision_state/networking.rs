@@ -7,9 +7,9 @@
 //! This version adds `ConnectionCollision` to `BgpPeerState` but does not
 //! include the `peer_id` field on `BgpPeerStatus`.
 
-use omicron_common::api::external::SwitchLocation;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use sled_agent_types::early_networking::SwitchLocation;
 use std::net::IpAddr;
 
 /// The current status of a BGP peer (with `ConnectionCollision` state,

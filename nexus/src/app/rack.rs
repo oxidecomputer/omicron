@@ -40,13 +40,13 @@ use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::Name;
 use omicron_common::api::external::NameOrId;
 use omicron_common::api::external::ResourceType;
-use omicron_common::api::internal::shared::LldpAdminStatus;
 use omicron_uuid_kinds::SledUuid;
 use oxnet::IpNet;
 use oxnet::Ipv6Net;
 use sled_agent_client::types::AddSledRequest;
 use sled_agent_client::types::StartSledAgentRequest;
 use sled_agent_client::types::StartSledAgentRequestBody;
+use sled_agent_types::early_networking::LldpAdminStatus;
 use sled_hardware_types::BaseboardId;
 
 use slog_error_chain::InlineErrorChain;
@@ -341,12 +341,8 @@ impl super::Nexus {
                         "populating ports for {switch}: {qsfp_ports:#?}"
                     );
 
-                    self.populate_switch_ports(
-                        &opctx,
-                        &qsfp_ports,
-                        switch.to_string().parse().unwrap(),
-                    )
-                    .await?;
+                    self.populate_switch_ports(&opctx, &qsfp_ports, switch)
+                        .await?;
                 }
             }
             // TODO: #3602 Eliminate need for static port mappings for switch ports
@@ -356,12 +352,7 @@ impl super::Nexus {
                     "Using static configuration for external switchports"
                 );
                 for (switch, ports) in port_mappings {
-                    self.populate_switch_ports(
-                        &opctx,
-                        &ports,
-                        switch.to_string().parse().unwrap(),
-                    )
-                    .await?;
+                    self.populate_switch_ports(&opctx, &ports, switch).await?;
                 }
             }
         }
@@ -527,13 +518,6 @@ impl super::Nexus {
 
         for (idx, uplink_config) in rack_network_config.ports.iter().enumerate()
         {
-            let switch = uplink_config.switch.to_string();
-            let switch_location = Name::from_str(&switch).map_err(|e| {
-                Error::internal_error(&format!(
-                    "unable to use {switch} as Name: {e}"
-                ))
-            })?;
-
             let uplink_name = format!("default-uplink{idx}");
             let name = Name::from_str(&uplink_name).unwrap();
 
@@ -658,7 +642,7 @@ impl super::Nexus {
                 speed: uplink_config.uplink_port_speed.into(),
                 autoneg: uplink_config.autoneg,
                 lldp,
-                tx_eq: uplink_config.tx_eq.map(|t| t.into()),
+                tx_eq: uplink_config.tx_eq,
             };
 
             port_settings_params.links.push(link);
@@ -685,7 +669,7 @@ impl super::Nexus {
                 .switch_port_get_id(
                     opctx,
                     rack_id,
-                    switch_location.into(),
+                    uplink_config.switch,
                     Name::from_str(&uplink_config.port).unwrap().into(),
                 )
                 .await?;

@@ -16,13 +16,13 @@ pub use omicron_common::address::MIN_VPC_IPV4_SUBNET_PREFIX;
 use omicron_common::address::NEXUS_TECHPORT_EXTERNAL_PORT;
 pub use omicron_common::address::NUM_INITIAL_RESERVED_IP_ADDRESSES;
 use omicron_common::address::RACK_PREFIX;
-use omicron_common::api::internal::shared::SwitchLocation;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_with::DisplayFromStr;
 use serde_with::DurationSeconds;
 use serde_with::serde_as;
+use sled_agent_types::early_networking::SwitchLocation;
 use std::collections::HashMap;
 use std::fmt;
 use std::net::IpAddr;
@@ -1052,7 +1052,6 @@ mod test {
     use omicron_common::address::{
         CLICKHOUSE_TCP_PORT, Ipv6Subnet, RACK_PREFIX,
     };
-    use omicron_common::api::internal::shared::SwitchLocation;
 
     use camino::{Utf8Path, Utf8PathBuf};
     use dropshot::ConfigDropshot;

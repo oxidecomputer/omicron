@@ -18,12 +18,14 @@ use crate::support_bundle::storage::SupportBundleQueryType;
 use crate::updates::UpdateManager;
 use anyhow::Context;
 use anyhow::bail;
+use bootstore::schemes::v0 as bootstore;
 use bytes::Bytes;
 use chrono::Utc;
 use dropshot::Body;
 use dropshot::HttpError;
 use futures::Stream;
 use iddqd::IdOrdMap;
+use illumos_utils::zpool::ZpoolHealth;
 use omicron_common::api::external::{
     ByteCount, Error, Generation, ResourceType,
 };
@@ -31,9 +33,8 @@ use omicron_common::api::internal::nexus::{
     DiskRuntimeState, MigrationRuntimeState, MigrationState, SledVmmState,
 };
 use omicron_common::api::internal::shared::{
-    RackNetworkConfig, ResolvedVpcRoute, ResolvedVpcRouteSet,
-    ResolvedVpcRouteState, RouterId, RouterKind, RouterVersion,
-    VirtualNetworkInterfaceHost,
+    ResolvedVpcRoute, ResolvedVpcRouteSet, ResolvedVpcRouteState, RouterId,
+    RouterKind, RouterVersion, VirtualNetworkInterfaceHost,
 };
 use omicron_common::disk::{
     DatasetsConfig, DatasetsManagementResult, DiskIdentity, DiskVariant,
@@ -54,8 +55,9 @@ use sled_agent_health_monitor::HealthMonitorHandle;
 use sled_agent_types::attached_subnet::{AttachedSubnet, AttachedSubnets};
 use sled_agent_types::dataset::LocalStorageDatasetEnsureRequest;
 use sled_agent_types::disk::DiskStateRequested;
+use sled_agent_types::early_networking::RackNetworkConfig;
 use sled_agent_types::early_networking::{
-    EarlyNetworkConfig, EarlyNetworkConfigBody,
+    EarlyNetworkConfigBody, EarlyNetworkConfigEnvelope,
 };
 use sled_agent_types::instance::{
     InstanceEnsureBody, InstanceExternalIpBody, InstanceMulticastMembership,
@@ -112,7 +114,7 @@ pub struct SledAgent {
     config: Config,
     fake_zones: Mutex<OmicronZonesConfig>,
     instance_ensure_state_error: Mutex<Option<Error>>,
-    pub bootstore_network_config: Mutex<EarlyNetworkConfig>,
+    pub bootstore_network_config: Mutex<bootstore::NetworkConfig>,
     pub(super) repo_depot:
         dropshot::HttpServer<ArtifactStore<SimArtifactStorage>>,
     pub log: Logger,
@@ -137,12 +139,9 @@ impl SledAgent {
         let instance_log = log.new(o!("kind" => "instances"));
         let storage_log = log.new(o!("kind" => "storage"));
 
-        let bootstore_network_config = Mutex::new(EarlyNetworkConfig {
-            generation: 0,
-            schema_version: 1,
-            body: EarlyNetworkConfigBody {
-                ntp_servers: Vec::new(),
-                rack_network_config: Some(RackNetworkConfig {
+        let bootstore_network_config = Mutex::new(
+            EarlyNetworkConfigEnvelope::from(&EarlyNetworkConfigBody {
+                rack_network_config: RackNetworkConfig {
                     rack_subnet: Ipv6Net::new(Ipv6Addr::UNSPECIFIED, 56)
                         .unwrap(),
                     infra_ip_first: IpAddr::V4(Ipv4Addr::UNSPECIFIED),
@@ -150,9 +149,10 @@ impl SledAgent {
                     ports: Vec::new(),
                     bgp: Vec::new(),
                     bfd: Vec::new(),
-                }),
-            },
-        });
+                },
+            })
+            .serialize_to_bootstore_with_generation(0),
+        );
 
         let storage = Storage::new(
             id.into_untyped_uuid(),
@@ -564,8 +564,9 @@ impl SledAgent {
         id: ZpoolUuid,
         physical_disk_id: PhysicalDiskUuid,
         size: u64,
+        health: ZpoolHealth,
     ) {
-        self.storage.lock().insert_zpool(id, physical_disk_id, size);
+        self.storage.lock().insert_zpool(id, physical_disk_id, size, health);
     }
 
     pub fn has_zpool(&self, id: ZpoolUuid) -> bool {
@@ -911,6 +912,7 @@ impl SledAgent {
                     Ok(InventoryZpool {
                         id: *id,
                         total_size: ByteCount::try_from(zpool.total_size())?,
+                        health: zpool.health(),
                     })
                 })
                 .collect::<Result<Vec<_>, anyhow::Error>>()?,

@@ -11,8 +11,6 @@ mod error;
 pub mod http_pagination;
 pub use crate::address::IpVersion;
 pub use crate::api::internal::shared::AllowedSourceIps;
-pub use crate::api::internal::shared::SwitchLocation;
-pub use crate::api::internal::shared::rack_init::MaxPathConfig;
 use crate::update::ArtifactId;
 use anyhow::Context;
 use api_identity::ObjectIdentity;
@@ -2977,38 +2975,6 @@ pub enum LinkFec {
     Rs,
 }
 
-impl From<crate::api::internal::shared::PortFec> for LinkFec {
-    fn from(x: crate::api::internal::shared::PortFec) -> LinkFec {
-        match x {
-            crate::api::internal::shared::PortFec::Firecode => Self::Firecode,
-            crate::api::internal::shared::PortFec::None => Self::None,
-            crate::api::internal::shared::PortFec::Rs => Self::Rs,
-        }
-    }
-}
-
-impl From<crate::api::internal::shared::PortSpeed> for LinkSpeed {
-    fn from(x: crate::api::internal::shared::PortSpeed) -> Self {
-        match x {
-            crate::api::internal::shared::PortSpeed::Speed0G => Self::Speed0G,
-            crate::api::internal::shared::PortSpeed::Speed1G => Self::Speed1G,
-            crate::api::internal::shared::PortSpeed::Speed10G => Self::Speed10G,
-            crate::api::internal::shared::PortSpeed::Speed25G => Self::Speed25G,
-            crate::api::internal::shared::PortSpeed::Speed40G => Self::Speed40G,
-            crate::api::internal::shared::PortSpeed::Speed50G => Self::Speed50G,
-            crate::api::internal::shared::PortSpeed::Speed100G => {
-                Self::Speed100G
-            }
-            crate::api::internal::shared::PortSpeed::Speed200G => {
-                Self::Speed200G
-            }
-            crate::api::internal::shared::PortSpeed::Speed400G => {
-                Self::Speed400G
-            }
-        }
-    }
-}
-
 /// A link configuration for a port settings object.
 #[derive(Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq)]
 pub struct SwitchPortLinkConfig {
@@ -3246,25 +3212,6 @@ pub struct SwitchPortAddressView {
     pub interface_name: Name,
 }
 
-/// BFD connection mode.
-#[derive(
-    Clone,
-    Copy,
-    Debug,
-    Deserialize,
-    Serialize,
-    JsonSchema,
-    PartialEq,
-    Eq,
-    Ord,
-    PartialOrd,
-)]
-#[serde(rename_all = "snake_case")]
-pub enum BfdMode {
-    SingleHop,
-    MultiHop,
-}
-
 /// Configuration of inbound ICMP allowed by API services.
 #[derive(
     Clone,
@@ -3374,27 +3321,6 @@ pub struct Probe {
 
     #[schemars(with = "Uuid")]
     pub sled: SledUuid,
-}
-
-/// Define policy relating to the import and export of prefixes from a BGP
-/// peer.
-#[derive(
-    Default,
-    Debug,
-    Serialize,
-    Deserialize,
-    Clone,
-    JsonSchema,
-    Eq,
-    PartialEq,
-    Hash,
-)]
-#[serde(rename_all = "snake_case", tag = "type", content = "value")]
-pub enum ImportExportPolicy {
-    /// Do not perform any filtering.
-    #[default]
-    NoFiltering,
-    Allow(Vec<oxnet::IpNet>),
 }
 
 /// Use instead of Option in API request body structs to get a field that can
