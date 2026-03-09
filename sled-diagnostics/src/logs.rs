@@ -318,7 +318,7 @@ impl LogsHandle {
                 error!(
                     self.log,
                     "Failed to list ZFS snapshots when attempting to cleanup \
-                    old sled-diagnostics snapshots: {e}";
+                    old sled-diagnostics snapshots"; e
                 );
 
                 return;

@@ -204,8 +204,8 @@ pub struct GetValueError {
     err: GetValueErrorRaw,
 }
 
-#[derive(Debug, thiserror::Error)]
-#[error("Failed to list snapshots: {0}")]
+#[derive(Debug, thiserror::Error, SlogInlineError)]
+#[error("Failed to list snapshots")]
 pub struct ListSnapshotsError(#[from] crate::ExecutionError);
 
 /// Error returned by [`Zfs::change_key`].
