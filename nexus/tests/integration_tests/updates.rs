@@ -39,6 +39,8 @@ use tufaceous_lib::assemble::{ArtifactManifest, OmicronRepoAssembler};
 use tufaceous_lib::assemble::{DeserializedManifest, ManifestTweak};
 
 use crate::integration_tests::target_release::set_target_release_for_mupdate_recovery;
+use omicron_test_utils::dev::poll::CondCheckError;
+use omicron_test_utils::dev::poll::wait_for_condition;
 
 const TRUST_ROOTS_URL: &str = "/v1/system/update/trust-roots";
 
@@ -171,6 +173,25 @@ impl TestRepo {
         self.0.close().unwrap();
         request
     }
+}
+
+async fn wait_for_inventory(cptestctx: &ControlPlaneTestContext) {
+    let log = cptestctx.logctx.log.new(o!());
+    let datastore = cptestctx.server.server_context().nexus.datastore();
+    let opctx = OpContext::for_tests(log, datastore.clone());
+    wait_for_condition(
+        || async {
+            datastore
+                .inventory_get_latest_collection(&opctx)
+                .await
+                .expect("failed to get inventory collection")
+                .ok_or(CondCheckError::<()>::NotYet)
+        },
+        &std::time::Duration::from_millis(100),
+        &std::time::Duration::from_secs(30),
+    )
+    .await
+    .expect("no inventory collection available");
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -720,6 +741,13 @@ async fn test_update_status() -> Result<()> {
             .await;
     let client = &cptestctx.external_client;
     let logctx = &cptestctx.logctx;
+
+    // During high contention the inventory might not be ready yet, which will
+    // cause the call to /v1/system/update/status to 500. We thus query the
+    // database to make sure we have an inventory before proceeding.
+    //
+    // Flaky test issue: https://github.com/oxidecomputer/omicron/issues/9316
+    wait_for_inventory(&cptestctx).await;
 
     // initial status
     let status: update::UpdateStatus =
