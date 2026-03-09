@@ -1049,7 +1049,7 @@ impl DebugCollectorWorker {
                     error!(
                         self.log,
                         "Couldn't delete {path} from debug dataset, skipping \
-                         {dir:?}. {err:?}"
+                         {dir:?}"; InlineErrorChain::new(&err)
                     );
                     continue 'next_debug_dir;
                 }
@@ -1103,7 +1103,7 @@ impl DebugCollectorWorker {
                     warn!(
                         self.log,
                         "Debug auto-cleaner could not read metadata from path";
-                        "err" => %err,
+                        InlineErrorChain::new(&err),
                         "path" => %path
                     );
                     return Err(err.into());

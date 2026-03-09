@@ -1210,6 +1210,7 @@ mod test {
     use crate::dev::db::process_exited;
     use crate::dev::poll;
     use crate::dev::process_running;
+    use slog_error_chain::InlineErrorChain;
     use std::collections::BTreeMap;
     use std::env;
     use std::path::Path;
@@ -1384,9 +1385,9 @@ mod test {
 
         fs::remove_dir_all(&directory).await.unwrap_or_else(|e| {
             panic!(
-                "failed to remove temporary directory {}: {:?}",
+                "failed to remove temporary directory {}: {}",
                 directory.display(),
-                e
+                InlineErrorChain::new(&e)
             )
         });
     }

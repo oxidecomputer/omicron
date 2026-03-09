@@ -474,7 +474,7 @@ impl LogsHandle {
                             self.log,
                             "Failed to read dir ent while processing \
                             sled-diagnostics current log files";
-                            "error" => %err
+                            InlineErrorChain::new(&err)
                         );
                     }
 
@@ -507,7 +507,7 @@ impl LogsHandle {
                         let system_mtime =
                             f.metadata().and_then(|m| m.modified()).inspect_err(|e| {
                                 warn!(&self.log, "sled-diagnostic failed to get mtime of logfile";
-                                    "error" => %e,
+                                    InlineErrorChain::new(&e),
                                     "logfile" => %logfile,
                                 );
                             }).ok();
@@ -762,9 +762,10 @@ fn write_log_to_zip<W: Write + Seek>(
         // are able to grab as many logs as possible for debugging purposes.
         error!(
             logger,
-            "Failed to write service log to zip file: {e}";
+            "Failed to write service log to zip file";
             "service" => %service,
             "log" => %snapshot_logfile,
+            InlineErrorChain::new(&e)
         );
     };
 

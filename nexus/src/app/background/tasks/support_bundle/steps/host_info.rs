@@ -307,7 +307,7 @@ async fn save_zone_log_zip_or_error(
                 error!(
                     logger,
                     "failed to cleanup temporary logs zip file";
-                    "error" => %e,
+                    InlineErrorChain::new(&e),
                     "file" => %output_path,
 
                 );

@@ -1194,11 +1194,9 @@ impl Zfs {
         //
         // If one or more dataset doesn't exist, we can still read stdout to
         // see about the ones that do exist.
-        let output = cmd.output().await.map_err(|err| {
-            anyhow!(
-                "Failed to get dataset properties for {datasets:?}: {err:?}"
-            )
-        })?;
+        let output = cmd.output().await.context(format!(
+            "Failed to get dataset properties for {datasets:?}"
+        ))?;
         let stdout = String::from_utf8(output.stdout)?;
 
         DatasetProperties::parse_many(&stdout)

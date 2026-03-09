@@ -775,7 +775,7 @@ async fn recover_epoch_by_trial_decryption(
                         log,
                         "Failed to create keyfile for trial decryption";
                         "epoch" => epoch,
-                        "error" => %e,
+                        InlineErrorChain::new(&e),
                     );
                     continue;
                 }
@@ -791,7 +791,7 @@ async fn recover_epoch_by_trial_decryption(
                 log,
                 "Failed to clean up keyfile after trial decryption attempt";
                 "epoch" => epoch,
-                "error" => %e,
+                InlineErrorChain::new(&e),
             );
         }
 

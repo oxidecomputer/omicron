@@ -158,8 +158,9 @@ impl SledAgentApi for SledAgentImpl {
                 };
                 let f = tokio::fs::File::open(&path).await.map_err(|e| {
                     HttpError::for_internal_error(format!(
-                        "failed to open zone bundle file at {}: {:?}",
-                        path, e,
+                        "failed to open zone bundle file at \"{}\": {}",
+                        path,
+                        InlineErrorChain::new(&e),
                     ))
                 })?;
                 let file_access =
@@ -206,7 +207,8 @@ impl SledAgentApi for SledAgentImpl {
                 for path in paths.into_iter() {
                     tokio::fs::remove_file(&path).await.map_err(|e| {
                         HttpError::for_internal_error(format!(
-                            "Failed to delete zone bundle: {e}"
+                            "Failed to delete zone bundle: {}",
+                            InlineErrorChain::new(&e),
                         ))
                     })?;
                 }

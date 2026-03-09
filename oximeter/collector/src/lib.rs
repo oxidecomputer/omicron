@@ -187,8 +187,9 @@ impl Config {
     /// Load configuration for an Oximeter server from a file.
     pub fn from_file<P: AsRef<Path>>(path: P) -> Result<Config, Error> {
         let path = path.as_ref();
-        let contents = std::fs::read_to_string(path)
-            .map_err(|e| Error::Server(e.to_string()))?;
+        let contents = std::fs::read_to_string(path).map_err(|e| {
+            Error::Server(InlineErrorChain::new(&e).to_string())
+        })?;
         toml::from_str(&contents).map_err(|e| Error::Server(e.to_string()))
     }
 }
@@ -234,10 +235,9 @@ impl Oximeter {
         config: &Config,
         args: &OximeterArguments,
     ) -> Result<Self, Error> {
-        let log = config
-            .log
-            .to_logger("oximeter")
-            .map_err(|msg| Error::Server(msg.to_string()))?;
+        let log = config.log.to_logger("oximeter").map_err(|msg| {
+            Error::Server(InlineErrorChain::new(&msg).to_string())
+        })?;
         Self::with_logger(config, args, log).await
     }
 
