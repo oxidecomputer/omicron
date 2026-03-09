@@ -26,6 +26,7 @@ use omicron_common::resolvable_files::ResolvableFileSource;
 use omicron_uuid_kinds::OmicronZoneUuid;
 pub use oxlog::is_oxide_smf_log_file;
 use slog::{Logger, error, info, o, warn};
+use slog_error_chain::SlogInlineError;
 use std::net::Ipv6Addr;
 use std::sync::Arc;
 #[cfg(target_os = "illumos")]
@@ -69,14 +70,15 @@ pub enum BootError {
 }
 
 /// Errors returned from [`RunningZone::ensure_address`].
-#[derive(thiserror::Error, Debug)]
+#[derive(thiserror::Error, Debug, SlogInlineError)]
 pub enum EnsureAddressError {
     #[error(
-        "Failed ensuring address {request:?} in {zone}: could not construct addrobj name: {err}"
+        "Failed ensuring address {request:?} in {zone}: could not construct addrobj name"
     )]
     AddrObject {
         request: AddressRequest,
         zone: String,
+        #[source]
         err: crate::addrobj::ParseError,
     },
 
@@ -86,8 +88,12 @@ pub enum EnsureAddressError {
     #[error(transparent)]
     GetAddressesError(#[from] crate::zone::GetAddressesError),
 
-    #[error("Failed ensuring link-local address in {zone}: {err}")]
-    LinkLocal { zone: String, err: crate::ExecutionError },
+    #[error("Failed ensuring link-local address in {zone}")]
+    LinkLocal {
+        zone: String,
+        #[source]
+        err: crate::ExecutionError,
+    },
 
     #[error("Failed to find non-link-local address in {zone}")]
     NoDhcpV6Addr { zone: String },
@@ -456,7 +462,7 @@ impl RunningZone {
                         self.inner.log,
                         "No non link-local address yet (retrying in {:?})",
                         delay;
-                        "error" => ?error
+                        error
                     );
                 },
             )
