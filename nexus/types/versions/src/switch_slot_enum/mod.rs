@@ -40,5 +40,5 @@ fn format_switch_slot_as_str(switch_slot: SwitchSlot) -> &'static str {
 fn format_switch_slot_as_name(switch_slot: SwitchSlot) -> Name {
     format_switch_slot_as_str(switch_slot)
         .parse()
-        .expect("switch slots form valid `Name`s")
+        .expect("stringified switch slots have valid `Name`s")
 }

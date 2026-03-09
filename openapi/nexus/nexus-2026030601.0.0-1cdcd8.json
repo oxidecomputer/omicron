@@ -17032,7 +17032,7 @@
             "$ref": "#/components/schemas/BfdState"
           },
           "switch": {
-            "$ref": "#/components/schemas/Name"
+            "$ref": "#/components/schemas/SwitchSlot"
           }
         },
         "required": [

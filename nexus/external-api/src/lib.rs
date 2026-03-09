@@ -5164,10 +5164,29 @@ pub trait NexusExternalApi {
         method = GET,
         path = "/v1/system/networking/bfd-status",
         tags = ["system/networking"],
+        versions = VERSION_SWITCH_SLOT_ENUM..,
     }]
     async fn networking_bfd_status(
         rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<Vec<latest::bfd::BfdStatus>>, HttpError>;
+
+    /// Get BFD status
+    #[endpoint {
+        operation_id = "networking_bfd_status",
+        method = GET,
+        path = "/v1/system/networking/bfd-status",
+        tags = ["system/networking"],
+        versions = ..VERSION_SWITCH_SLOT_ENUM,
+    }]
+    async fn networking_bfd_status_v2025_11_20_00(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<Vec<v2025_11_20_00::bfd::BfdStatus>>, HttpError>
+    {
+        Self::networking_bfd_status(rqctx).await.map(|response| {
+            response
+                .map(|statuses| statuses.into_iter().map(From::from).collect())
+        })
+    }
 
     /// Get user-facing services IP allowlist
     #[endpoint {
