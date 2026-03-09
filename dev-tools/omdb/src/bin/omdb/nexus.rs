@@ -2264,8 +2264,8 @@ fn print_task_attached_subnet_manager_status(details: &serde_json::Value) {
             if dendrite.is_empty() {
                 println!("   no dendrite instances found");
             } else {
-                for (loc, details) in dendrite.iter() {
-                    println!("   dendrite instance on switch {loc}");
+                for (switch_slot, details) in dendrite.iter() {
+                    println!("   dendrite instance on switch {switch_slot:?}");
                     println!(
                         "     n_subnets_removed={}",
                         details.n_subnets_removed

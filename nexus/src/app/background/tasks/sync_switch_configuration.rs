@@ -476,7 +476,7 @@ impl BackgroundTask for SwitchPortSettingsManager {
                         match scrimlet_sled_agent_clients.get(switch_slot) {
                             Some(client) => client,
                             None => {
-                                error!(log, "sled-agent client is missing, cannot send updates"; "switch_slot" => %switch_slot);
+                                error!(log, "sled-agent client is missing, cannot send updates"; "switch_slot" => ?switch_slot);
                                 continue;
                             },
                         };
@@ -496,7 +496,7 @@ impl BackgroundTask for SwitchPortSettingsManager {
                         error!(
                             log,
                             "error while applying smf updates to switch zone";
-                            "switch_slot" => %switch_slot,
+                            "switch_slot" => ?switch_slot,
                             "error" => %DisplayErrorChain::new(&e)
                         );
                     }
@@ -560,7 +560,7 @@ impl BackgroundTask for SwitchPortSettingsManager {
                                         error!(
                                             log,
                                             "error while fetching bgp peer config from db";
-                                            "switch_slot" => %switch_slot,
+                                            "switch_slot" => ?switch_slot,
                                             "port_name" => %port.port_name,
                                             "error" => %DisplayErrorChain::new(&e)
                                         );
@@ -597,7 +597,7 @@ impl BackgroundTask for SwitchPortSettingsManager {
                                     error!(
                                         log,
                                         "error while fetching bgp announcements from db";
-                                        "switch_slot" => %switch_slot,
+                                        "switch_slot" => ?switch_slot,
                                         "bgp_announce_set_id" => %bgp_config.bgp_announce_set_id,
                                         "error" => %DisplayErrorChain::new(&e)
                                     );
@@ -1436,7 +1436,7 @@ impl BackgroundTask for SwitchPortSettingsManager {
                             error!(
                                 log,
                                 "error updating bootstore";
-                                "switch_slot" => %switch_slot,
+                                "switch_slot" => ?switch_slot,
                                 "request" => ?write_request,
                                 "error" => %e,
                             )
@@ -1593,7 +1593,7 @@ async fn add_loopback_addresses_to_switch(
         let client = match dpd_clients.get(switch_slot) {
             Some(v) => v,
             None => {
-                error!(log, "dpd_client is missing, cannot create loopback addresses"; "switch_slot" => %switch_slot);
+                error!(log, "dpd_client is missing, cannot create loopback addresses"; "switch_slot" => ?switch_slot);
                 continue;
             }
         };
@@ -1616,7 +1616,7 @@ async fn delete_loopback_addresses_from_switch(
         let client = match dpd_clients.get(switch_slot) {
             Some(v) => v,
             None => {
-                error!(log, "dpd_client is missing, cannot delete loopback addresses"; "switch_slot" => %switch_slot);
+                error!(log, "dpd_client is missing, cannot delete loopback addresses"; "switch_slot" => ?switch_slot);
                 continue;
             }
         };
@@ -1641,7 +1641,7 @@ async fn switch_loopback_addresses(
                 error!(
                     log,
                     "error fetching ipv4 loopback addresses from switch";
-                    "switch_slot" => %switch_slot,
+                    "switch_slot" => ?switch_slot,
                     "error" => %e,
                 );
                 continue;
@@ -1654,7 +1654,7 @@ async fn switch_loopback_addresses(
                 error!(
                     log,
                     "error fetching ipv6 loopback addresses from switch";
-                    "switch_slot" => %switch_slot,
+                    "switch_slot" => ?switch_slot,
                     "error" => %e,
                 );
                 continue;

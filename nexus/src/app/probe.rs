@@ -100,7 +100,7 @@ impl super::Nexus {
 
             let dpd_client = dpd_clients.get(switch).ok_or_else(|| {
                 Error::internal_error(&format!(
-                    "could not find dpd client for {switch}"
+                    "could not find dpd client for {switch:?}"
                 ))
             })?;
 

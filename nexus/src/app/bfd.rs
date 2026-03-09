@@ -23,10 +23,13 @@ impl super::Nexus {
             })?
             .get(&switch)
             .ok_or_else(|| {
-                Error::not_found_by_name(
-                    omicron_common::api::external::ResourceType::Switch,
-                    &switch.to_string().parse().unwrap(),
-                )
+                // TODO-correctness Only having one switch shouldn't be an
+                // error; this will be fixed by
+                // <https://github.com/oxidecomputer/omicron/pull/9979> or
+                // <https://github.com/oxidecomputer/omicron/pull/9533>.
+                Error::internal_error(&format!(
+                    "failed to find switch {switch:?}"
+                ))
             })?
             .clone();
 
