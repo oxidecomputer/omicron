@@ -1,4 +1,3 @@
-bgp_peer_view.min_ttl
 external_subnet.first_address
 external_subnet.last_address
 inv_collection_error.rowid
