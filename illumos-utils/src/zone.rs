@@ -43,7 +43,7 @@ pub fn zone_name(prefix: &str, id: Option<OmicronZoneUuid>) -> String {
 
 #[derive(thiserror::Error, Debug)]
 enum Error {
-    #[error("Zone execution error: {0}")]
+    #[error("Zone execution error")]
     Execution(#[from] crate::ExecutionError),
 
     #[error(transparent)]
