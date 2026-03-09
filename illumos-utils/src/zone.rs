@@ -122,7 +122,7 @@ pub enum GetControlInterfaceError {
 /// Error which may be returned accessing the bootstrap interface of a zone.
 #[derive(thiserror::Error, Debug)]
 pub enum GetBootstrapInterfaceError {
-    #[error("Failed to query zone '{zone}' for control interface: {err}")]
+    #[error("Failed to query zone '{zone}' for control interface")]
     Execution {
         zone: String,
         #[source]
