@@ -55,7 +55,7 @@ pub struct RunCommandError {
 /// Errors returned from [`RunningZone::boot`].
 #[derive(thiserror::Error, Debug)]
 pub enum BootError {
-    #[error("Error booting zone: {0}")]
+    #[error("Error booting zone")]
     Booting(#[from] crate::zone::AdmError),
 
     #[error("Zone booted, but timed out waiting for {service} in {zone}")]
@@ -64,7 +64,7 @@ pub enum BootError {
     #[error("Zone booted, but failed to find zone ID for zone {zone}")]
     NoZoneId { zone: String },
 
-    #[error("Zone booted, but running a command experienced an error: {0}")]
+    #[error("Zone booted, but running a command experienced an error")]
     RunCommandError(#[from] RunCommandError),
 }
 
