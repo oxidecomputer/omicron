@@ -65,7 +65,7 @@ impl super::Nexus {
         previous: &Option<Uuid>,
         limit: u32,
         rack_id: Uuid,
-        loc: SwitchSlot,
+        switch_slot: SwitchSlot,
         port: &Name,
     ) -> Result<Vec<LldpNeighbor>, Error> {
         opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
@@ -74,9 +74,11 @@ impl super::Nexus {
             Error::internal_error(&format!("lldpd clients get: {e}"))
         })?;
 
-        let lldpd = lldpd_clients.get(&loc).ok_or(Error::internal_error(
-            &format!("no lldpd client for rack: {rack_id} switch {loc}"),
-        ))?;
+        let lldpd = lldpd_clients.get(&switch_slot).ok_or(
+            Error::internal_error(&format!(
+                "no lldpd client for rack: {rack_id} switch {switch_slot}"
+            )),
+        )?;
 
         let mut neighbors: Vec<Neighbor> = lldpd
             .get_neighbors_stream(&format!("{port}/0"), None)
@@ -84,7 +86,7 @@ impl super::Nexus {
             .await
             .map_err(|e| {
                 Error::internal_error(&format!(
-                    "failed to get neighbor list for {loc}/{port}: {e}"
+                    "failed to get neighbor list for {switch_slot}/{port}: {e}"
                 ))
             })?;
 

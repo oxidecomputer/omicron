@@ -60,7 +60,7 @@ pub struct Handle {
 }
 
 impl Handle {
-    /// Notify the transceiver manager that we've learned our switch location.
+    /// Notify the transceiver manager that we've learned our switch slot.
     ///
     /// # Panics
     ///
@@ -111,17 +111,17 @@ impl Manager {
     }
 
     pub(crate) async fn run(mut self) {
-        // First, we need to wait until we know the switch location.
+        // First, we need to wait until we know the switch slot.
         //
         // The watch Receiver was created with `None`, which is considered seen.
         // We've never called any other borrowing method between the creation
         // and here, so changed() will wait until we get something new.
-        debug!(self.log, "waiting to learn our switch location");
+        debug!(self.log, "waiting to learn our switch slot");
         let our_switch_slot = loop {
             if self.switch_slot_rx.changed().await.is_err() {
                 slog::warn!(
                     self.log,
-                    "failed to wait for new switch location change \
+                    "failed to wait for new switch slot change \
                     notification, exiting";
                 );
                 return;
@@ -162,7 +162,7 @@ impl Manager {
         // populate our own view of the transceivers from it.
         loop {
             let Some(TransceiverUpdate {
-                location,
+                switch_slot,
                 transceivers: these_transceivers,
                 updated_at,
             }) = rx.recv().await
@@ -176,12 +176,12 @@ impl Manager {
                     transceivers,
                     transceivers_last_seen,
                 } => {
-                    transceivers.insert(location, these_transceivers);
+                    transceivers.insert(switch_slot, these_transceivers);
                     *transceivers_last_seen = updated_at.elapsed();
                 }
                 GetTransceiversResponse::Unavailable => {
                     let mut all_transceivers = TransceiverMap::new();
-                    all_transceivers.insert(location, these_transceivers);
+                    all_transceivers.insert(switch_slot, these_transceivers);
                     *transceivers_by_switch =
                         GetTransceiversResponse::Response {
                             transceivers: all_transceivers,
@@ -196,7 +196,7 @@ impl Manager {
 // An update from one of the transceiver fetching tasks about the transceivers
 // it has seen.
 struct TransceiverUpdate {
-    location: SwitchSlot,
+    switch_slot: SwitchSlot,
     transceivers: Vec<Transceiver>,
     updated_at: Instant,
 }
@@ -205,7 +205,7 @@ struct TransceiverUpdate {
 async fn fetch_transceivers_from_one_switch(
     log: Logger,
     tx: mpsc::Sender<TransceiverUpdate>,
-    location: SwitchSlot,
+    switch_slot: SwitchSlot,
     interface: &'static str,
 ) {
     let mut check_interval = tokio::time::interval(TRANSCEIVER_POLL_INTERVAL);
@@ -274,7 +274,7 @@ async fn fetch_transceivers_from_one_switch(
                     "state" => ?transceivers,
                 );
                 let update = TransceiverUpdate {
-                    location,
+                    switch_slot,
                     transceivers,
                     updated_at: Instant::now(),
                 };

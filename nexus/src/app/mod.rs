@@ -1160,7 +1160,7 @@ impl Nexus {
         let mappings =
             switch_zone_address_mappings(resolver, &self.log).await?;
         let mut clients: Vec<(SwitchSlot, mg_admin_client::Client)> = vec![];
-        for (location, addr) in &mappings {
+        for (switch_slot, addr) in &mappings {
             let port = MGD_PORT;
             let socketaddr =
                 std::net::SocketAddr::V6(SocketAddrV6::new(*addr, port, 0, 0));
@@ -1168,7 +1168,7 @@ impl Nexus {
                 format!("http://{}", socketaddr).as_str(),
                 self.log.clone(),
             );
-            clients.push((*location, client));
+            clients.push((*switch_slot, client));
         }
         Ok(clients.into_iter().collect::<HashMap<_, _>>())
     }

@@ -22,7 +22,7 @@ pub(crate) async fn build_mgd_clients(
     resolver: &internal_dns_resolver::Resolver,
 ) -> HashMap<SwitchSlot, mg_admin_client::Client> {
     let mut clients: Vec<(SwitchSlot, mg_admin_client::Client)> = vec![];
-    for (location, addr) in &mappings {
+    for (switch_slot, addr) in &mappings {
         let port = match resolver.lookup_all_socket_v6(ServiceName::Mgd).await {
             Ok(addrs) => {
                 let port_map: HashMap<Ipv6Addr, u16> = addrs
@@ -44,7 +44,7 @@ pub(crate) async fn build_mgd_clients(
             format!("http://{}", socketaddr).as_str(),
             log.clone(),
         );
-        clients.push((*location, client));
+        clients.push((*switch_slot, client));
     }
     clients.into_iter().collect::<HashMap<_, _>>()
 }
