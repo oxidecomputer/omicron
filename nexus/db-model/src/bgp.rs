@@ -159,7 +159,7 @@ pub struct BgpPeerView {
     pub idle_hold_time: SqlU32,
     pub keepalive: SqlU32,
     pub remote_asn: Option<SqlU32>,
-    pub min_ttl: Option<SqlU32>,
+    pub min_ttl: Option<SqlU8>,
     pub md5_auth_key: Option<String>,
     pub multi_exit_discriminator: Option<SqlU32>,
     pub local_pref: Option<SqlU32>,
@@ -172,8 +172,6 @@ pub struct BgpPeerView {
 pub enum BgpPeerConfigDataError {
     #[error("database contains illegal router lifetime value")]
     RouterLifetime(#[source] RouterLifetimeConfigError),
-    #[error("database contains illegal min_ttl value: {0}")]
-    MinTtl(u32),
 }
 
 impl TryFrom<BgpPeerView> for BgpPeerConfig {
@@ -191,13 +189,7 @@ impl TryFrom<BgpPeerView> for BgpPeerConfig {
         let router_lifetime =
             RouterLifetimeConfig::new(value.router_lifetime.0)
                 .map_err(BgpPeerConfigDataError::RouterLifetime)?;
-        let min_ttl = value
-            .min_ttl
-            .map(|val| {
-                u8::try_from(*val)
-                    .map_err(|_| BgpPeerConfigDataError::MinTtl(*val))
-            })
-            .transpose()?;
+        let min_ttl = value.min_ttl.map(|val| val.0);
 
         Ok(Self {
             asn: *value.asn,
