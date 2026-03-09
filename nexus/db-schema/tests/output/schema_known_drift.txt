@@ -8,7 +8,6 @@ nat_version.log_cnt
 nat_version.value
 subnet_pool_member.first_address
 subnet_pool_member.last_address
-switch_port.switch_location
 switch_port_settings_bgp_peer_config.connect_retry
 switch_port_settings_bgp_peer_config.delay_open
 switch_port_settings_bgp_peer_config.hold_time

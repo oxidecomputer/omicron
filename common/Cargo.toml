@@ -60,6 +60,7 @@ tufaceous-artifact.workspace = true
 camino-tempfile.workspace = true
 expectorate.workspace = true
 libc.workspace = true
+progenitor-extras.workspace = true
 proptest.workspace = true
 regress.workspace = true
 serde_urlencoded.workspace = true

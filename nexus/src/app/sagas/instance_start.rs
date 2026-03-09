@@ -1319,7 +1319,7 @@ mod test {
             .switch_port_get_id(
                 &opctx,
                 rack_id,
-                Name::try_from("switch0".to_string()).unwrap().into(),
+                SwitchLocation::Switch0,
                 Name::try_from("qsfp0".to_string()).unwrap().into(),
             )
             .await
@@ -1329,7 +1329,7 @@ mod test {
             .switch_port_get_id(
                 &opctx,
                 rack_id,
-                Name::try_from("switch1".to_string()).unwrap().into(),
+                SwitchLocation::Switch1,
                 Name::try_from("qsfp0".to_string()).unwrap().into(),
             )
             .await

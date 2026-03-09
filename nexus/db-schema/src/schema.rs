@@ -138,9 +138,9 @@ table! {
     switch_port (id) {
         id -> Uuid,
         rack_id -> Uuid,
-        switch_location -> Text,
         port_name -> Text,
         port_settings_id -> Nullable<Uuid>,
+        switch_slot -> crate::enums::SwitchSlotEnum,
     }
 }
 
@@ -319,8 +319,8 @@ table! {
 }
 
 table! {
-    bgp_peer_view (switch_location, port_name) {
-        switch_location -> Text,
+    bgp_peer_view (switch_slot, port_name) {
+        switch_slot -> crate::enums::SwitchSlotEnum,
         port_name -> Text,
         addr -> Nullable<Inet>,
         asn -> Int8,
@@ -409,9 +409,9 @@ table! {
         address_lot_block_id -> Uuid,
         rsvd_address_lot_block_id -> Uuid,
         rack_id -> Uuid,
-        switch_location -> Text,
         address -> Inet,
         anycast -> Bool,
+        switch_slot -> crate::enums::SwitchSlotEnum,
     }
 }
 
@@ -1166,11 +1166,7 @@ table! {
 table! {
     virtual_provisioning_collection {
         id -> Uuid,
-        // This type isn't actually "Nullable" - it's just handy to use the
-        // same type for insertion and querying, and doing so requires this
-        // field to appear optional so we can let this (default) field appear
-        // optional.
-        time_modified -> Nullable<Timestamptz>,
+        time_modified -> Timestamptz,
         collection_type -> Text,
         virtual_disk_bytes_provisioned -> Int8,
         cpus_provisioned -> Int8,
@@ -1181,11 +1177,7 @@ table! {
 table! {
     virtual_provisioning_resource {
         id -> Uuid,
-        // This type isn't actually "Nullable" - it's just handy to use the
-        // same type for insertion and querying, and doing so requires this
-        // field to appear optional so we can let this (default) field appear
-        // optional.
-        time_modified -> Nullable<Timestamptz>,
+        time_modified -> Timestamptz,
         resource_type -> Text,
         virtual_disk_bytes_provisioned -> Int8,
         cpus_provisioned -> Int8,
@@ -2399,17 +2391,17 @@ table! {
 }
 
 table! {
-    bfd_session (remote, switch) {
+    bfd_session (id) {
         id -> Uuid,
         local -> Nullable<Inet>,
         remote -> Inet,
         detection_threshold -> Int8,
         required_rx -> Int8,
-        switch -> Text,
         mode -> crate::enums::BfdModeEnum,
         time_created -> Timestamptz,
         time_modified -> Timestamptz,
         time_deleted -> Nullable<Timestamptz>,
+        switch_slot -> crate::enums::SwitchSlotEnum,
     }
 }
 
