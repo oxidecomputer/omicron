@@ -170,6 +170,26 @@ impl TryFrom<v2025_11_20_00::networking::BfdSessionDisable>
     }
 }
 
+/// A switch port represents a physical external port on a rack switch.
+#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq)]
+pub struct SwitchPort {
+    /// The id of the switch port.
+    pub id: Uuid,
+
+    /// The rack this switch port belongs to.
+    pub rack_id: Uuid,
+
+    /// The switch location of this switch port.
+    pub switch_location: SwitchSlot,
+
+    /// The name of this switch port.
+    pub port_name: Name,
+
+    /// The primary settings group of this switch port. Will be `None` until
+    /// this switch port is configured.
+    pub port_settings_id: Option<Uuid>,
+}
+
 /// Select switch ports by rack id and location.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
 pub struct SwitchPortSelector {
