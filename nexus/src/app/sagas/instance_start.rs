@@ -25,6 +25,7 @@ use nexus_db_queries::db::datastore::LocalStorageAllocation;
 use nexus_db_queries::db::datastore::LocalStorageDisk;
 use nexus_db_queries::db::identity::Resource;
 use nexus_db_queries::{authn, authz, db};
+use nexus_types::saga::saga_action_failed;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::http_pagination::PaginatedBy;
@@ -290,10 +291,10 @@ async fn sis_create_vmm_record(
             let (.., sled) = osagactx
                 .nexus()
                 .sled_lookup(&osagactx.nexus().opctx_alloc, &sled_id)
-                .map_err(ActionError::action_failed)?
+                .map_err(saga_action_failed)?
                 .fetch()
                 .await
-                .map_err(ActionError::action_failed)?;
+                .map_err(saga_action_failed)?;
 
             sled.cpu_family.minimum_compatible_platform()
         };
@@ -388,11 +389,11 @@ async fn sis_move_to_starting(
         .instance_id(instance_id.into_untyped_uuid())
         .fetch_for(authz::Action::Modify)
         .await
-        .map_err(ActionError::action_failed)?;
+        .map_err(saga_action_failed)?;
     let state = datastore
         .instance_fetch_with_vmm(&opctx, &authz_instance)
         .await
-        .map_err(ActionError::action_failed)?;
+        .map_err(saga_action_failed)?;
 
     let db_instance = state.instance();
 
@@ -422,7 +423,7 @@ async fn sis_move_to_starting(
         // If the instance has a different Propolis ID, a competing start saga
         // must have started the instance already, so unwind.
         Some(_) => {
-            return Err(ActionError::action_failed(Error::conflict(
+            return Err(saga_action_failed(Error::conflict(
                 "instance changed state before it could be started",
             )));
         }
@@ -459,9 +460,9 @@ async fn sis_move_to_starting(
         .datastore()
         .instance_update_runtime(&instance_id, &new_runtime)
         .await
-        .map_err(ActionError::action_failed)?
+        .map_err(saga_action_failed)?
     {
-        return Err(ActionError::action_failed(Error::conflict(
+        return Err(saga_action_failed(Error::conflict(
             "instance changed state before it could be started",
         )));
     }
@@ -528,7 +529,7 @@ async fn sis_account_virtual_resources(
             nexus_db_model::ByteCount(*params.db_instance.memory),
         )
         .await
-        .map_err(ActionError::action_failed)?;
+        .map_err(saga_action_failed)?;
     Ok(())
 }
 
@@ -554,7 +555,7 @@ async fn sis_account_virtual_resources_undo(
             nexus_db_model::ByteCount(*params.db_instance.memory),
         )
         .await
-        .map_err(ActionError::action_failed)?;
+        .map_err(saga_action_failed)?;
     Ok(())
 }
 
@@ -578,7 +579,7 @@ async fn sis_list_local_storage(
         .instance_id(instance_id.into_untyped_uuid())
         .fetch_for(authz::Action::Read)
         .await
-        .map_err(ActionError::action_failed)?;
+        .map_err(saga_action_failed)?;
 
     let disks = datastore
         .instance_list_disks(
@@ -592,7 +593,7 @@ async fn sis_list_local_storage(
             }),
         )
         .await
-        .map_err(ActionError::action_failed)?;
+        .map_err(saga_action_failed)?;
 
     let records = disks
         .into_iter()
@@ -638,19 +639,19 @@ async fn sis_ensure_local_storage(
     // here.
 
     if disk.block_size.to_bytes() != 4096 {
-        return Err(ActionError::action_failed(format!(
+        return Err(saga_action_failed(Error::internal_error(&format!(
             "local storage record {} has block size {}!",
             which,
             disk.block_size.to_bytes(),
-        )));
+        ))));
     }
 
     // Make sure this was a complete allocation.
 
     let Some(allocation) = local_storage_dataset_allocation else {
-        return Err(ActionError::action_failed(format!(
+        return Err(saga_action_failed(Error::internal_error(&format!(
             "local storage record {which} has a None unencrypted allocation!",
-        )));
+        ))));
     };
 
     // Ensure that the local storage is created
@@ -674,9 +675,9 @@ async fn sis_ensure_local_storage(
             // This enum variant has been left in pending an investigation of
             // how we're going to support encryption at rest, but right now we
             // don't support this yet.
-            return Err(ActionError::action_failed(format!(
+            return Err(saga_action_failed(Error::internal_error(&format!(
                 "local storage record {which} has a encrypted allocation!",
-            )));
+            ))));
         }
     };
 
@@ -684,7 +685,7 @@ async fn sis_ensure_local_storage(
         .nexus()
         .sled_client(&sled_id)
         .await
-        .map_err(ActionError::action_failed)?;
+        .map_err(saga_action_failed)?;
 
     let ensure_operation = || async {
         sled_agent_client.local_storage_dataset_ensure(&ensure_request).await
@@ -716,10 +717,10 @@ async fn sis_ensure_local_storage(
     )
     .await
     .map_err(|e| {
-        ActionError::action_failed(format!(
+        saga_action_failed(Error::internal_error(&format!(
             "failed to ensure local storage: {}",
             InlineErrorChain::new(&e)
-        ))
+        )))
     })?;
 
     Ok(())
@@ -759,7 +760,7 @@ async fn sis_dpd_ensure(
         .sled_id(sled_uuid)
         .fetch()
         .await
-        .map_err(ActionError::action_failed)?;
+        .map_err(saga_action_failed)?;
 
     osagactx
         .nexus()
@@ -770,7 +771,7 @@ async fn sis_dpd_ensure(
             InstanceNetworkFilters::all(),
         )
         .await
-        .map_err(ActionError::action_failed)?;
+        .map_err(saga_action_failed)?;
 
     Ok(())
 }
@@ -795,7 +796,7 @@ async fn sis_dpd_ensure_undo(
         .instance_id(instance_id)
         .lookup_for(authz::Action::Modify)
         .await
-        .map_err(ActionError::action_failed)?;
+        .map_err(saga_action_failed)?;
 
     osagactx
         .nexus()
@@ -849,7 +850,7 @@ async fn sis_ensure_registered(
             .instance_id(instance_id)
             .lookup_for(authz::Action::Modify)
             .await
-            .map_err(ActionError::action_failed)?;
+            .map_err(saga_action_failed)?;
 
     osagactx
         .nexus()
@@ -879,7 +880,7 @@ async fn sis_ensure_registered(
                 // the saga to unwind and restore the instance to the Stopped
                 // state (matching what would happen if there were a failure
                 // prior to this point).
-                ActionError::action_failed(Error::from(inner))
+                saga_action_failed(Error::from(inner))
             }
             InstanceStateChangeError::Other(inner) => {
                 info!(osagactx.log(),
@@ -887,7 +888,7 @@ async fn sis_ensure_registered(
                       "instance_id" => %instance_id,
                       "error" => ?inner,
                       "start_reason" => ?params.reason);
-                ActionError::action_failed(inner)
+                saga_action_failed(inner)
             }
         })
 }
@@ -919,7 +920,7 @@ async fn sis_ensure_registered_undo(
         .instance_id(instance_id.into_untyped_uuid())
         .fetch()
         .await
-        .map_err(ActionError::action_failed)?;
+        .map_err(saga_action_failed)?;
 
     // If the sled successfully unregistered the instance, allow the rest of
     // saga unwind to restore the instance record to its prior state (without
@@ -1037,7 +1038,7 @@ async fn sis_update_multicast_sled_id(
             Some(sled_id.into()),
         )
         .await
-        .map_err(ActionError::action_failed)?;
+        .map_err(saga_action_failed)?;
 
     Ok(())
 }
@@ -1115,7 +1116,7 @@ async fn sis_ensure_running(
             // the saga to unwind and restore the instance to the Stopped
             // state (matching what would happen if there were a failure
             // prior to this point).
-            Err(ActionError::action_failed(Error::from(inner)))
+            Err(saga_action_failed(Error::from(inner)))
         }
         Err(InstanceStateChangeError::Other(inner)) => {
             info!(osagactx.log(),
@@ -1124,7 +1125,7 @@ async fn sis_ensure_running(
                   "start_reason" => ?params.reason,
                   "error" => ?inner);
 
-            Err(ActionError::action_failed(inner))
+            Err(saga_action_failed(inner))
         }
     }
 }

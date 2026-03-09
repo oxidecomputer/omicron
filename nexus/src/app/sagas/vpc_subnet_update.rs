@@ -8,6 +8,7 @@ use super::NexusSaga;
 use crate::app::sagas::declare_saga_actions;
 use nexus_db_model::VpcSubnet;
 use nexus_db_queries::{authn, authz, db};
+use nexus_types::saga::saga_action_failed;
 use serde::Deserialize;
 use serde::Serialize;
 use steno::ActionError;
@@ -79,7 +80,7 @@ async fn svsu_do_update(
             update,
         )
         .await
-        .map_err(ActionError::action_failed)
+        .map_err(saga_action_failed)
 }
 
 async fn svsu_notify_rpw(
@@ -96,7 +97,7 @@ async fn svsu_notify_rpw(
         .datastore()
         .vpc_increment_rpw_version(&opctx, params.authz_vpc.id())
         .await
-        .map_err(ActionError::action_failed)
+        .map_err(saga_action_failed)
 }
 
 #[cfg(test)]

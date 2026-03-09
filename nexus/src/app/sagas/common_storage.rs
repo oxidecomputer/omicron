@@ -15,6 +15,7 @@ use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db;
 use nexus_db_queries::db::datastore::CrucibleDisk;
+use nexus_types::saga::saga_action_failed;
 use omicron_common::api::external::Error;
 use omicron_common::progenitor_operation_retry::ProgenitorOperationRetry;
 use omicron_common::progenitor_operation_retry::ProgenitorOperationRetryError;
@@ -33,10 +34,10 @@ pub(crate) async fn get_pantry_address(
     nexus: &Nexus,
 ) -> Result<SocketAddrV6, ActionError> {
     let client = nexus.pantry_connection_pool().claim().await.map_err(|e| {
-        ActionError::action_failed(format!(
+        saga_action_failed(Error::internal_error(&format!(
             "failed to claim pantry client from pool: {}",
             InlineErrorChain::new(&e)
-        ))
+        )))
     })?;
     Ok(client.address())
 }
@@ -85,7 +86,7 @@ pub(crate) async fn call_pantry_attach_for_disk(
         .disk_id(disk.id())
         .fetch_for(authz::Action::Modify)
         .await
-        .map_err(ActionError::action_failed)?;
+        .map_err(saga_action_failed)?;
 
     let disk_volume = nexus
         .datastore()
@@ -94,11 +95,11 @@ pub(crate) async fn call_pantry_attach_for_disk(
             db::datastore::VolumeCheckoutReason::Pantry,
         )
         .await
-        .map_err(ActionError::action_failed)?;
+        .map_err(saga_action_failed)?;
 
     let volume_construction_request: VolumeConstructionRequest =
         serde_json::from_str(&disk_volume.data()).map_err(|e| {
-            ActionError::action_failed(Error::internal_error(&format!(
+            saga_action_failed(Error::internal_error(&format!(
                 "failed to deserialize disk {} volume data: {}",
                 disk.id(),
                 e,
@@ -142,10 +143,10 @@ pub(crate) async fn call_pantry_attach_for_volume(
         .run(log)
         .await
         .map_err(|e| {
-            ActionError::action_failed(format!(
+            saga_action_failed(Error::internal_error(&format!(
                 "pantry attach failed: {}",
                 InlineErrorChain::new(&e)
-            ))
+            )))
         })?;
 
     Ok(())
