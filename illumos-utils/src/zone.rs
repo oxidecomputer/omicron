@@ -107,7 +107,7 @@ pub struct DeleteAddressError {
 /// Error which may be returned accessing the control interface of a zone.
 #[derive(thiserror::Error, Debug)]
 pub enum GetControlInterfaceError {
-    #[error("Failed to query zone '{zone}' for control interface: {err}")]
+    #[error("Failed to query zone '{zone}' for control interface")]
     Execution {
         zone: String,
         #[source]
