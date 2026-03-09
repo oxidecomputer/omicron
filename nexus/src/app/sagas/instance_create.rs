@@ -1637,7 +1637,6 @@ pub mod test {
             )
             .await
             .unwrap()
-            .runtime_state
             .disk_state
             == "detached"
     }
