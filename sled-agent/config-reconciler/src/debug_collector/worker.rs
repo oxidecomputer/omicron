@@ -751,7 +751,7 @@ impl DebugCollectorWorker {
                             debug!(
                                 self.log,
                                 "Dump slice {dump_slice:?} appears to be \
-                                 unused: {err:?}"
+                                 unused"; err
                             );
                         }
                     }
@@ -821,7 +821,7 @@ impl DebugCollectorWorker {
                             debug!(
                                 self.log,
                                 "Dump slice {dump_slice:?} appears to be \
-                                 unused : {err:?}",
+                                 unused"; err
                             );
                         }
                     }
