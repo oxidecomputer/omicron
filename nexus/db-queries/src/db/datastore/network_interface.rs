@@ -893,10 +893,10 @@ impl DataStore {
                     let err = err.clone();
                     let update_target_query = update_target_query.clone();
                     async move {
-                        let instance_runtime =
-                            instance_query.get_result_async(&conn).await?.runtime_state;
-                        if instance_runtime.propolis_id.is_some()
-                            || instance_runtime.nexus_state != stopped
+                        let instance =
+                            instance_query.get_result_async(&conn).await?;
+                        if instance.propolis_id.is_some()
+                            || instance.nexus_state != stopped
                         {
                             return Err(err.bail(NetworkInterfaceUpdateError::InstanceNotStopped));
                         }
@@ -980,10 +980,10 @@ impl DataStore {
                     let err = err.clone();
                     let update_target_query = update_target_query.clone();
                     async move {
-                        let instance_state =
-                            instance_query.get_result_async(&conn).await?.runtime_state;
-                        if instance_state.propolis_id.is_some()
-                            || instance_state.nexus_state != stopped
+                        let instance =
+                            instance_query.get_result_async(&conn).await?;
+                        if instance.propolis_id.is_some()
+                            || instance.nexus_state != stopped
                         {
                             return Err(err.bail(NetworkInterfaceUpdateError::InstanceNotStopped));
                         }

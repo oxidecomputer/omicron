@@ -1138,13 +1138,13 @@ impl DataStore {
                         // why we did not attach.
                         api::external::DiskState::Creating
                         | api::external::DiskState::Detached => {
-                            if collection.runtime_state.propolis_id.is_some() {
+                            if collection.propolis_id.is_some() {
                                 return Err(Error::invalid_request(
                                     "cannot attach disk: instance is not \
                                         fully stopped",
                                 ));
                             }
-                            match collection.runtime_state.nexus_state.state() {
+                            match collection.nexus_state.state() {
                                 // Ok-to-be-attached instance states:
                                 api::external::InstanceState::Creating
                                 | api::external::InstanceState::Stopped => {
@@ -1203,10 +1203,7 @@ impl DataStore {
                                         &format!(
                                             "cannot attach disk to instance in \
                                             {} state",
-                                            collection
-                                                .runtime_state
-                                                .nexus_state
-                                                .state(),
+                                            collection.nexus_state.state(),
                                         ),
                                     ));
                                 }
@@ -1329,7 +1326,7 @@ impl DataStore {
                         // Ok-to-detach disk states: Inspect the state to infer
                         // why we did not detach.
                         api::external::DiskState::Attached(id) if id == authz_instance.id() => {
-                            if collection.runtime_state.propolis_id.is_some() {
+                            if collection.propolis_id.is_some() {
                                 return Err(
                                     Error::invalid_request(
                                         "cannot detach disk: instance is not \
@@ -1337,7 +1334,7 @@ impl DataStore {
                                     )
                                 );
                             }
-                            match collection.runtime_state.nexus_state.state() {
+                            match collection.nexus_state.state() {
                                 // Ok-to-be-detached instance states:
                                 api::external::InstanceState::Creating |
                                 api::external::InstanceState::Stopped => {
@@ -1357,7 +1354,7 @@ impl DataStore {
                                 _ => {
                                     Err(Error::invalid_request(&format!(
                                         "cannot detach disk from instance in {} state",
-                                        collection.runtime_state.nexus_state.state(),
+                                        collection.nexus_state.state(),
                                     )))
                                 }
                             }

@@ -3102,7 +3102,7 @@ mod tests {
     fn test_instance_start_allowed_when_no_vmm() {
         let logctx = test_setup_log("test_instance_start_allowed_when_no_vmm");
         let (mut instance, _vmm) = make_instance_and_vmm();
-        instance.runtime_state.nexus_state = DbInstanceState::NoVmm;
+        instance.nexus_state = DbInstanceState::NoVmm;
         let state = InstanceAndActiveVmm::from((instance, None));
         assert!(
             instance_start_allowed(
@@ -3121,8 +3121,8 @@ mod tests {
             "test_instance_start_allowed_when_vmm_in_saga_unwound",
         );
         let (mut instance, mut vmm) = make_instance_and_vmm();
-        instance.runtime_state.nexus_state = DbInstanceState::Vmm;
-        instance.runtime_state.propolis_id = Some(vmm.id);
+        instance.nexus_state = DbInstanceState::Vmm;
+        instance.propolis_id = Some(vmm.id);
         vmm.runtime.state = DbVmmState::SagaUnwound;
         let state = InstanceAndActiveVmm::from((instance, Some(vmm)));
         assert!(
@@ -3141,7 +3141,7 @@ mod tests {
         let logctx =
             test_setup_log("test_instance_start_forbidden_while_creating");
         let (mut instance, _vmm) = make_instance_and_vmm();
-        instance.runtime_state.nexus_state = DbInstanceState::Creating;
+        instance.nexus_state = DbInstanceState::Creating;
         let state = InstanceAndActiveVmm::from((instance, None));
         assert!(
             instance_start_allowed(
@@ -3158,8 +3158,8 @@ mod tests {
     fn test_instance_start_idempotent_if_active() {
         let logctx = test_setup_log("test_instance_start_idempotent_if_active");
         let (mut instance, mut vmm) = make_instance_and_vmm();
-        instance.runtime_state.nexus_state = DbInstanceState::Vmm;
-        instance.runtime_state.propolis_id = Some(vmm.id);
+        instance.nexus_state = DbInstanceState::Vmm;
+        instance.propolis_id = Some(vmm.id);
         vmm.runtime.state = DbVmmState::Starting;
         let state =
             InstanceAndActiveVmm::from((instance.clone(), Some(vmm.clone())));

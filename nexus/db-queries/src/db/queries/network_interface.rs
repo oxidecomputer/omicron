@@ -2097,8 +2097,8 @@ mod tests {
         let new_runtime = model::InstanceRuntimeState {
             nexus_state: state,
             propolis_id,
-            generation: instance.runtime_state.generation.next().into(),
-            ..instance.runtime_state.clone()
+            generation: instance.state_generation.next().into(),
+            ..instance.runtime()
         };
         let res = db_datastore
             .instance_update_runtime(
@@ -2107,7 +2107,14 @@ mod tests {
             )
             .await;
         assert!(matches!(res, Ok(true)), "Failed to change instance state");
-        instance.runtime_state = new_runtime;
+        instance.nexus_state = new_runtime.nexus_state;
+        instance.propolis_id = new_runtime.propolis_id;
+        instance.dst_propolis_id = new_runtime.dst_propolis_id;
+        instance.migration_id = new_runtime.migration_id;
+        instance.state_generation = new_runtime.generation;
+        instance.time_state_updated = new_runtime.time_updated;
+        instance.time_last_auto_restarted =
+            new_runtime.time_last_auto_restarted;
         instance
     }
 

@@ -466,20 +466,21 @@ mod test {
             .await
             .expect("SagaUnwound VMM should be inserted");
         let vmm_id = vmm.id;
-        let prev_state = datastore
+        let prev_instance = datastore
             .instance_refetch(&opctx, &authz_instance)
             .await
-            .expect("instance must exist")
-            .runtime_state;
+            .expect("instance must exist");
         let updated = datastore
             .instance_update_runtime(
                 &instance_id,
                 &InstanceRuntimeState {
                     time_updated: Utc::now(),
-                    generation: Generation(prev_state.generation.next()),
+                    generation: Generation(
+                        prev_instance.state_generation.next(),
+                    ),
                     nexus_state: InstanceState::Vmm,
                     propolis_id: Some(vmm_id),
-                    ..prev_state
+                    ..prev_instance.runtime()
                 },
             )
             .await
@@ -507,13 +508,12 @@ mod test {
             .lookup_for(authz::Action::Modify)
             .await
             .expect("instance must exist");
-        let prev_state = datastore
+        let prev_instance = datastore
             .instance_refetch(&opctx, &authz_instance)
             .await
-            .expect("instance must exist")
-            .runtime_state;
+            .expect("instance must exist");
         let propolis_id = if state == InstanceState::Vmm {
-            prev_state.propolis_id
+            prev_instance.propolis_id
         } else {
             None
         };
@@ -524,8 +524,10 @@ mod test {
                     time_updated: Utc::now(),
                     nexus_state: state,
                     propolis_id,
-                    generation: Generation(prev_state.generation.next()),
-                    ..prev_state
+                    generation: Generation(
+                        prev_instance.state_generation.next(),
+                    ),
+                    ..prev_instance.runtime()
                 },
             )
             .await

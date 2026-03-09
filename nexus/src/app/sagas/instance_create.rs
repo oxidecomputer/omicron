@@ -1448,9 +1448,9 @@ async fn sic_move_to_stopped(
     let new_state = db::model::InstanceRuntimeState {
         nexus_state: db::model::InstanceState::NoVmm,
         generation: db::model::Generation::from(
-            instance_record.runtime_state.generation.next(),
+            instance_record.state_generation.next(),
         ),
-        ..instance_record.runtime_state
+        ..instance_record.runtime()
     };
 
     // If this node is being replayed, this instance may already have been
