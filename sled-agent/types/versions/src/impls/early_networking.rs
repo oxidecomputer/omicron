@@ -4,17 +4,22 @@
 
 //! Implementations for early networking types.
 
+use crate::latest::early_networking::BgpPeerConfig;
+use crate::latest::early_networking::LldpAdminStatus;
+use crate::latest::early_networking::MaxPathConfig;
+use crate::latest::early_networking::MaxPathConfigError;
+use crate::latest::early_networking::PortFec;
+use crate::latest::early_networking::PortSpeed;
+use crate::latest::early_networking::RouterLifetimeConfig;
+use crate::latest::early_networking::RouterLifetimeConfigError;
+use crate::latest::early_networking::SwitchSlot;
+use crate::latest::early_networking::UplinkAddressConfig;
+use crate::latest::early_networking::UplinkAddressConfigError;
 use omicron_common::api::external;
 use std::fmt;
 use std::net::IpAddr;
 use std::net::Ipv6Addr;
 use std::str::FromStr;
-
-use crate::latest::early_networking::{
-    BgpPeerConfig, LldpAdminStatus, MaxPathConfig, MaxPathConfigError, PortFec,
-    PortSpeed, RouterLifetimeConfig, RouterLifetimeConfigError, SwitchSlot,
-    UplinkAddressConfig, UplinkAddressConfigError,
-};
 
 impl BgpPeerConfig {
     /// The default hold time for a BGP peer in seconds.
