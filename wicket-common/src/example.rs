@@ -208,7 +208,7 @@ impl ExampleRackSetupData {
             switch0: btreemap! {
                 "port0".to_owned() => UserSpecifiedPortConfig {
                     addresses: vec![UplinkAddressConfig::without_vlan(
-                        Some("172.30.0.1/24".parse().unwrap()),
+                        "172.30.0.1/24".parse().unwrap(),
                     )],
                     routes: vec![RouteConfig {
                         destination: "0.0.0.0/0".parse().unwrap(),
@@ -230,7 +230,7 @@ impl ExampleRackSetupData {
                 // collide.
                 "port0".to_owned() => UserSpecifiedPortConfig {
                     addresses: vec![UplinkAddressConfig::without_vlan(
-                        Some("172.32.0.1/24".parse().unwrap()),
+                        "172.32.0.1/24".parse().unwrap(),
                     )],
                     routes: vec![RouteConfig {
                         destination: "0.0.0.0/0".parse().unwrap(),
