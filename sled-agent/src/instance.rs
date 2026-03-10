@@ -2933,6 +2933,7 @@ mod tests {
     use camino_tempfile::Utf8TempDir;
     use dns_server::TransientServer;
     use dropshot::HttpServer;
+    use gateway_client::ClientInfo;
     use internal_dns_resolver::Resolver;
     use omicron_common::FileKv;
     use omicron_common::api::external::{Generation, Hostname};
