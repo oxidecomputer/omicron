@@ -24,6 +24,7 @@ omicron-workspace-hack.workspace = true
 oxnet.workspace = true
 slog.workspace = true
 propolis_api_types.workspace = true
+propolis-api-types-versions.workspace = true
 proptest = { workspace = true, optional = true }
 schemars.workspace = true
 serde.workspace = true
