@@ -25,7 +25,7 @@ use omicron_common::api::external::{
 };
 use oxnet::IpNet;
 use sled_agent_types::early_networking::ImportExportPolicy;
-use sled_agent_types::early_networking::SwitchLocation;
+use sled_agent_types::early_networking::SwitchSlot;
 
 type ControlPlaneTestContext =
     nexus_test_utils::ControlPlaneTestContext<omicron_nexus::Server>;
@@ -618,7 +618,7 @@ async fn test_port_settings_basic_v6_crud(ctx: &ControlPlaneTestContext) {
     assert_eq!(route.dst, IpNet::from_str("2000::/64").unwrap());
     assert_eq!(&route.gw.to_string(), "2000::1");
 
-    let mgd = &ctx.mgd[&SwitchLocation::Switch0];
+    let mgd = &ctx.mgd[&SwitchSlot::Switch0];
     let mgd_client = mg_admin_client::Client::new(
         &format!("http://[::1]:{}", mgd.port),
         ctx.logctx.log.clone(),

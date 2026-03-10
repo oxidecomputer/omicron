@@ -29,7 +29,7 @@ use serde_json::json;
 use sled_agent_client::types::AttachedSubnet;
 use sled_agent_client::types::AttachedSubnetKind;
 use sled_agent_client::types::AttachedSubnets;
-use sled_agent_types::early_networking::SwitchLocation;
+use sled_agent_types::early_networking::SwitchSlot;
 use slog::Logger;
 use slog::debug;
 use slog::error;
@@ -55,9 +55,9 @@ impl Manager {
     async fn send_attachments_to_dendrite(
         &self,
         log: &Logger,
-        clients: &HashMap<SwitchLocation, dpd_client::Client>,
+        clients: &HashMap<SwitchSlot, dpd_client::Client>,
         attachments: &[shared::AttachedSubnet],
-    ) -> HashMap<SwitchLocation, DendriteSubnetDetails> {
+    ) -> HashMap<SwitchSlot, DendriteSubnetDetails> {
         // Dendrite provides an API to list all attached subnets, and to delete /
         // put one at a time, rather than putting an entire _set_ of mappings.
         // That means we have to do the diff on the client side, to compute the

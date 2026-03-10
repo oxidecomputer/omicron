@@ -2687,7 +2687,7 @@ impl DataStore {
                 dropshot::PaginationOrder::Ascending,
             );
             while let Some(p) = paginator.next() {
-                let mut batch = paginated(
+                let batch = paginated(
                     dsl::inv_sled_agent,
                     dsl::sled_id,
                     &p.current_pagparams(),
@@ -2700,7 +2700,7 @@ impl DataStore {
                     public_error_from_diesel(e, ErrorHandler::Server)
                 })?;
                 paginator = p.found_batch(&batch, &|row| row.sled_id);
-                rows.append(&mut batch);
+                rows.extend(batch);
             }
 
             rows
@@ -3382,7 +3382,7 @@ impl DataStore {
                 dropshot::PaginationOrder::Ascending,
             );
             while let Some(p) = paginator.next() {
-                let mut batch = paginated(
+                let batch = paginated(
                     dsl::inv_omicron_sled_config_zone,
                     dsl::id,
                     &p.current_pagparams(),
@@ -3395,7 +3395,7 @@ impl DataStore {
                     public_error_from_diesel(e, ErrorHandler::Server)
                 })?;
                 paginator = p.found_batch(&batch, &|row| row.id);
-                zones.append(&mut batch);
+                zones.extend(batch);
             }
 
             zones
