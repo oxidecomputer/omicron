@@ -273,6 +273,11 @@ task: "attached_subnet_manager"
     distributes attached subnets to sleds and switch
 
 
+task: "audit_log_timeout_incomplete"
+    transitions stale incomplete audit log entries to timeout status so they
+    become visible in the audit log
+
+
 task: "bfd_manager"
     Manages bidirectional fowarding detection (BFD) configuration on rack
     switches
@@ -587,6 +592,14 @@ task: "attached_subnet_manager"
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
    no dendrite instances found
    no sleds found
+
+task: "audit_log_timeout_incomplete"
+  configured period: every <REDACTED_DURATION>m
+  last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    timed_out:                 0
+    cutoff:                    <REDACTED_TIMESTAMP>
+    max_update_per_activation: 1000
 
 task: "bfd_manager"
   configured period: every <REDACTED_DURATION>s
@@ -1182,6 +1195,14 @@ task: "attached_subnet_manager"
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
    no dendrite instances found
    no sleds found
+
+task: "audit_log_timeout_incomplete"
+  configured period: every <REDACTED_DURATION>m
+  last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    timed_out:                 0
+    cutoff:                    <REDACTED_TIMESTAMP>
+    max_update_per_activation: 1000
 
 task: "bfd_manager"
   configured period: every <REDACTED_DURATION>s

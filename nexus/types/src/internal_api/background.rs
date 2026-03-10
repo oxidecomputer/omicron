@@ -973,6 +973,19 @@ pub struct SledSubnetDetails {
     pub errors: Vec<String>,
 }
 
+/// The status of an `audit_log_timeout_incomplete` background task activation.
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+pub struct AuditLogTimeoutIncompleteStatus {
+    /// Number of audit log entries timed out in this activation.
+    pub timed_out: usize,
+    /// The cutoff time used: entries started before this were eligible.
+    pub cutoff: DateTime<Utc>,
+    /// Configured max rows to time out in this activation.
+    pub max_update_per_activation: u32,
+    /// Error encountered during this activation, if any.
+    pub error: Option<String>,
+}
+
 /// The status of a `session_cleanup` background task activation.
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 pub struct SessionCleanupStatus {

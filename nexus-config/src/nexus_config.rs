@@ -437,6 +437,8 @@ pub struct BackgroundTaskConfig {
     pub attached_subnet_manager: AttachedSubnetManagerConfig,
     /// configuration for console session cleanup task
     pub session_cleanup: SessionCleanupConfig,
+    /// configuration for audit log incomplete timeout task
+    pub audit_log_timeout_incomplete: AuditLogTimeoutIncompleteConfig,
 }
 
 #[serde_as]
@@ -448,6 +450,21 @@ pub struct SessionCleanupConfig {
 
     /// maximum rows hard-deleted per activation
     pub max_delete_per_activation: u32,
+}
+
+#[serde_as]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct AuditLogTimeoutIncompleteConfig {
+    /// period (in seconds) for periodic activations of this task
+    #[serde_as(as = "DurationSeconds<u64>")]
+    pub period_secs: Duration,
+
+    /// how old an incomplete entry must be before it is timed out
+    #[serde_as(as = "DurationSeconds<u64>")]
+    pub timeout_secs: Duration,
+
+    /// max rows per SQL statement
+    pub max_update_per_activation: u32,
 }
 
 #[serde_as]
@@ -1267,6 +1284,9 @@ mod test {
             attached_subnet_manager.period_secs = 60
             session_cleanup.period_secs = 300
             session_cleanup.max_delete_per_activation = 10000
+            audit_log_timeout_incomplete.period_secs = 600
+            audit_log_timeout_incomplete.timeout_secs = 14400
+            audit_log_timeout_incomplete.max_update_per_activation = 1000
             [default_region_allocation_strategy]
             type = "random"
             seed = 0
@@ -1534,6 +1554,12 @@ mod test {
                             period_secs: Duration::from_secs(300),
                             max_delete_per_activation: 10_000,
                         },
+                        audit_log_timeout_incomplete:
+                            AuditLogTimeoutIncompleteConfig {
+                                period_secs: Duration::from_secs(600),
+                                timeout_secs: Duration::from_secs(14400),
+                                max_update_per_activation: 1000,
+                            },
                     },
                     multicast: MulticastConfig { enabled: false },
                     default_region_allocation_strategy:
@@ -1641,6 +1667,9 @@ mod test {
             attached_subnet_manager.period_secs = 60
             session_cleanup.period_secs = 300
             session_cleanup.max_delete_per_activation = 10000
+            audit_log_timeout_incomplete.period_secs = 600
+            audit_log_timeout_incomplete.timeout_secs = 14400
+            audit_log_timeout_incomplete.max_update_per_activation = 1000
 
             [default_region_allocation_strategy]
             type = "random"

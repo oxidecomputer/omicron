@@ -37,6 +37,7 @@ pub struct BackgroundTasks {
     pub task_instance_reincarnation: Activator,
     pub task_service_firewall_propagation: Activator,
     pub task_abandoned_vmm_reaper: Activator,
+    pub task_audit_log_timeout_incomplete: Activator,
     pub task_vpc_route_manager: Activator,
     pub task_saga_recovery: Activator,
     pub task_lookup_region_port: Activator,

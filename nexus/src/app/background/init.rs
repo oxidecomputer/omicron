@@ -92,6 +92,7 @@ use super::driver::TaskDefinition;
 use super::tasks::abandoned_vmm_reaper;
 use super::tasks::alert_dispatcher::AlertDispatcher;
 use super::tasks::attached_subnets;
+use super::tasks::audit_log_timeout_incomplete;
 use super::tasks::bfd;
 use super::tasks::blueprint_execution;
 use super::tasks::blueprint_load;
@@ -246,6 +247,7 @@ impl BackgroundTasksInitializer {
             task_instance_reincarnation: Activator::new(),
             task_service_firewall_propagation: Activator::new(),
             task_abandoned_vmm_reaper: Activator::new(),
+            task_audit_log_timeout_incomplete: Activator::new(),
             task_vpc_route_manager: Activator::new(),
             task_saga_recovery: Activator::new(),
             task_lookup_region_port: Activator::new(),
@@ -359,6 +361,7 @@ impl BackgroundTasksInitializer {
             task_trust_quorum_manager,
             task_attached_subnet_manager,
             task_session_cleanup,
+            task_audit_log_timeout_incomplete,
             // Add new background tasks here.  Be sure to use this binding in a
             // call to `Driver::register()` below.  That's what actually wires
             // up the Activator to the corresponding background task.
@@ -1177,13 +1180,32 @@ impl BackgroundTasksInitializer {
                  absolute timeout",
             period: config.session_cleanup.period_secs,
             task_impl: Box::new(session_cleanup::SessionCleanup::new(
-                datastore,
+                datastore.clone(),
                 args.console_session_absolute_timeout,
                 config.session_cleanup.max_delete_per_activation,
             )),
             opctx: opctx.child(BTreeMap::new()),
             watchers: vec![],
             activator: task_session_cleanup,
+        });
+
+        driver.register(TaskDefinition {
+            name: "audit_log_timeout_incomplete",
+            description: "transitions stale incomplete audit log entries to \
+                 timeout status so they become visible in the audit log",
+            period: config.audit_log_timeout_incomplete.period_secs,
+            task_impl: Box::new(
+                audit_log_timeout_incomplete::AuditLogTimeoutIncomplete::new(
+                    datastore,
+                    config.audit_log_timeout_incomplete.timeout_secs,
+                    config
+                        .audit_log_timeout_incomplete
+                        .max_update_per_activation,
+                ),
+            ),
+            opctx: opctx.child(BTreeMap::new()),
+            watchers: vec![],
+            activator: task_audit_log_timeout_incomplete,
         });
 
         driver
