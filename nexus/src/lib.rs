@@ -29,6 +29,7 @@ use lockstep_api::http_entrypoints::lockstep_api;
 use nexus_config::NexusConfig;
 use nexus_db_model::HwBaseboardId;
 use nexus_db_model::RendezvousDebugDataset;
+use nexus_db_model::RendezvousLocalStorageUnencryptedDataset;
 use nexus_db_queries::db;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::BlueprintZoneType;
@@ -566,6 +567,22 @@ impl nexus_test_interface::NexusServer for Server {
                     .debug_dataset_insert_if_not_exists(
                         &opctx,
                         RendezvousDebugDataset::new(
+                            dataset_id,
+                            zpool_id,
+                            BlueprintUuid::new_v4(),
+                        ),
+                    )
+                    .await
+                    .unwrap();
+            }
+            DatasetKind::LocalStorageUnencrypted => {
+                self.apictx
+                    .context
+                    .nexus
+                    .datastore()
+                    .local_storage_unencrypted_dataset_insert_if_not_exists(
+                        &opctx,
+                        RendezvousLocalStorageUnencryptedDataset::new(
                             dataset_id,
                             zpool_id,
                             BlueprintUuid::new_v4(),
