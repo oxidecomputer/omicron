@@ -164,9 +164,9 @@ fn current_config_example() -> (&'static str, EarlyNetworkConfigEnvelope) {
                 },
                 PortConfig {
                     routes: vec![],
-                    addresses: vec![UplinkAddressConfig::without_vlan(Some(
+                    addresses: vec![UplinkAddressConfig::without_vlan(
                         "172.20.15.53/29".parse().unwrap(),
-                    ))],
+                    )],
                     switch: SwitchSlot::Switch1,
                     port: "qsfp18".to_owned(),
                     uplink_port_speed: PortSpeed::Speed100G,
@@ -209,9 +209,9 @@ fn current_config_example() -> (&'static str, EarlyNetworkConfigEnvelope) {
                 },
                 PortConfig {
                     routes: vec![],
-                    addresses: vec![UplinkAddressConfig::without_vlan(Some(
+                    addresses: vec![UplinkAddressConfig::without_vlan(
                         "172.20.15.45/29".parse().unwrap(),
-                    ))],
+                    )],
                     switch: SwitchSlot::Switch0,
                     port: "qsfp18".to_owned(),
                     uplink_port_speed: PortSpeed::Speed100G,

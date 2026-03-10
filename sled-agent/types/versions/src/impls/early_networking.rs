@@ -116,9 +116,12 @@ impl std::fmt::Display for RouterLifetimeConfig {
 
 impl UplinkAddressConfig {
     /// Construct an `UplinkAddressConfig` with no VLAN ID.
-    ///
-    /// Use an address of `None` for an Ipv6 Link Local address.
-    pub fn without_vlan(address: Option<IpNet>) -> Self {
+    pub fn without_vlan(address: IpNet) -> Self {
+        // TODO-cleanup Squash unspecified addresses down to `None`. We want
+        // better types here:
+        // <https://github.com/oxidecomputer/omicron/issues/9832>.
+        let address =
+            if address.addr().is_unspecified() { None } else { Some(address) };
         Self { address, vlan_id: None }
     }
 
