@@ -973,6 +973,19 @@ pub struct SledSubnetDetails {
     pub errors: Vec<String>,
 }
 
+/// The status of a `session_cleanup` background task activation.
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+pub struct SessionCleanupStatus {
+    /// Number of sessions deleted in this activation.
+    pub deleted: usize,
+    /// The cutoff time used: sessions created before this were eligible.
+    pub cutoff: DateTime<Utc>,
+    /// The per-activation delete limit.
+    pub limit: u32,
+    /// Errors encountered during this activation.
+    pub error: Option<String>,
+}
+
 #[cfg(test)]
 mod test {
     use super::TufRepoInfo;
