@@ -6,6 +6,7 @@
 #: rust_toolchain = true
 #: output_rules = [
 #:  "/out/*",
+#:  "%/var/tmp/ci-resource-usage.csv",
 #: ]
 
 # Run the check-features `xtask` on illumos, testing compilation of feature combinations.
@@ -19,6 +20,9 @@ source .github/buildomat/ci-env.sh
 
 cargo --version
 rustc --version
+
+cargo build --release -p ci-resource-usage
+bmat process start ci-resource-usage target/release/ci-resource-usage /var/tmp/ci-resource-usage.csv
 
 #
 # Set up our PATH for use with this workspace.
