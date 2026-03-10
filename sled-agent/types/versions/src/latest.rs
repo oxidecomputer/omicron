@@ -73,7 +73,6 @@ pub mod early_networking {
     pub use crate::v20::early_networking::RouterLifetimeConfig;
     pub use crate::v20::early_networking::RouterLifetimeConfigError;
     pub use crate::v20::early_networking::UplinkAddressConfig;
-    pub use crate::v20::early_networking::UplinkAddressConfigError;
 
     pub use crate::v26::early_networking::EarlyNetworkConfigBody;
     pub use crate::v26::early_networking::WriteNetworkConfigRequest;

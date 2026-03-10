@@ -188,9 +188,6 @@ pub struct UplinkAddressConfig {
     pub vlan_id: Option<u16>,
 }
 
-#[derive(Debug, PartialEq, Eq, Deserialize, Serialize)]
-pub struct UplinkAddressConfigError(pub(crate) String);
-
 #[derive(
     Clone,
     Debug,
