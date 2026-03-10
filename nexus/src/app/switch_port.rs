@@ -228,7 +228,7 @@ impl super::Nexus {
             .switch_port_get_id(
                 opctx,
                 selector.rack_id,
-                selector.switch_location,
+                selector.switch_slot,
                 port.clone().into(),
             )
             .await?;
@@ -269,7 +269,7 @@ impl super::Nexus {
             .switch_port_get_id(
                 opctx,
                 params.rack_id,
-                params.switch_location,
+                params.switch_slot,
                 port.clone().into(),
             )
             .await?;

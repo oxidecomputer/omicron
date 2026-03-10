@@ -310,7 +310,7 @@ impl Into<networking_types::SwitchPort> for SwitchPort {
         networking_types::SwitchPort {
             id: self.id,
             rack_id: self.rack_id,
-            switch_location: self.switch_slot.into(),
+            switch_slot: self.switch_slot.into(),
             port_name: self.port_name.into(),
             port_settings_id: self.port_settings_id,
         }

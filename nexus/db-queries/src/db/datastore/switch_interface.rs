@@ -77,7 +77,7 @@ impl DataStore {
                         block.id,
                         rsvd_block.id,
                         params.rack_id,
-                        params.switch_location,
+                        params.switch_slot,
                         inet,
                         params.anycast,
                     );

@@ -107,7 +107,7 @@ pub struct LoopbackAddressPath {
     pub rack_id: Uuid,
 
     /// The switch location to use when selecting the loopback address.
-    pub switch_location: Name,
+    pub switch_slot: Name,
 
     /// The IP address and subnet mask to use when selecting the loopback
     /// address.
@@ -718,7 +718,7 @@ pub struct LldpPortPathSelector {
     pub rack_id: Uuid,
 
     /// A switch location to use when selecting switch ports.
-    pub switch_location: Name,
+    pub switch_slot: Name,
 
     /// A name to use when selecting switch ports.
     pub port: Name,

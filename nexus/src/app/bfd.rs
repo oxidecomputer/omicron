@@ -70,8 +70,8 @@ impl super::Nexus {
         // ask each rack switch about all its BFD sessions. This will need to
         // be updated for multirack.
         let mut result = Vec::new();
-        for switch in [SwitchSlot::Switch0, SwitchSlot::Switch1] {
-            let mg_client = self.mg_client_for_switch_slot(switch).await?;
+        for switch_slot in [SwitchSlot::Switch0, SwitchSlot::Switch1] {
+            let mg_client = self.mg_client_for_switch_slot(switch_slot).await?;
             let status = mg_client
                 .get_bfd_peers()
                 .await
@@ -91,7 +91,7 @@ impl super::Nexus {
                         BfdPeerState::Init => bfd::BfdState::Init,
                         BfdPeerState::AdminDown => bfd::BfdState::AdminDown,
                     },
-                    switch,
+                    switch_slot,
                     local: Some(info.config.listen),
                     detection_threshold: info.config.detection_threshold,
                     required_rx: info.config.required_rx,

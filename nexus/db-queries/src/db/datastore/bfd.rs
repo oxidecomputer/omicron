@@ -56,7 +56,7 @@ impl DataStore {
             time_created: chrono::Utc::now(),
             time_modified: chrono::Utc::now(),
             time_deleted: None,
-            switch_slot: config.switch.into(),
+            switch_slot: config.switch_slot.into(),
         };
 
         diesel::insert_into(dsl::bfd_session)
@@ -77,7 +77,7 @@ impl DataStore {
 
         diesel::update(dsl::bfd_session)
             .filter(dsl::remote.eq(IpNetwork::from(config.remote)))
-            .filter(dsl::switch_slot.eq(DbSwitchSlot::from(config.switch)))
+            .filter(dsl::switch_slot.eq(DbSwitchSlot::from(config.switch_slot)))
             .filter(dsl::time_deleted.is_null())
             .set(dsl::time_deleted.eq(chrono::Utc::now()))
             .execute_async(&*conn)

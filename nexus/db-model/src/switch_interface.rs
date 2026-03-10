@@ -151,7 +151,7 @@ impl Into<networking_types::LoopbackAddress> for LoopbackAddress {
             id: self.identity().id,
             address_lot_block_id: self.address_lot_block_id,
             rack_id: self.rack_id,
-            switch_location: self.switch_slot.into(),
+            switch_slot: self.switch_slot.into(),
             address: self.address.into(),
         }
     }

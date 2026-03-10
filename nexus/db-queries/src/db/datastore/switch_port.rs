@@ -830,7 +830,7 @@ impl DataStore {
 
                     let port_name = portname.to_string();
                     let switch_slot = DbSwitchSlot::from(
-                        params.switch_location,
+                        params.switch_slot,
                     );
                     let port: SwitchPort = switch_port_dsl::switch_port
                         .filter(switch_port::rack_id.eq(params.rack_id))

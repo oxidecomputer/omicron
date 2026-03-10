@@ -30,8 +30,9 @@ pub struct LoopbackAddress {
     /// The id of the rack where this loopback address is assigned.
     pub rack_id: Uuid,
 
-    /// Switch location where this loopback address is assigned.
-    pub switch_location: SwitchSlot,
+    /// The slot of the switch within the rack where this loopback address is
+    /// assigned.
+    pub switch_slot: SwitchSlot,
 
     /// The loopback IP address and prefix length.
     pub address: oxnet::IpNet,
@@ -43,7 +44,7 @@ impl From<LoopbackAddress> for v2025_11_20_00::networking::LoopbackAddress {
             id: value.id,
             address_lot_block_id: value.address_lot_block_id,
             rack_id: value.rack_id,
-            switch_location: format_switch_slot_as_str(value.switch_location)
+            switch_location: format_switch_slot_as_str(value.switch_slot)
                 .to_owned(),
             address: value.address,
         }
@@ -62,7 +63,7 @@ pub struct LoopbackAddressCreate {
 
     /// The slot of the switch within the rack this loopback address will be
     /// configured on.
-    pub switch_location: SwitchSlot,
+    pub switch_slot: SwitchSlot,
 
     /// The address to create.
     pub address: IpAddr,
@@ -84,12 +85,12 @@ impl TryFrom<v2025_11_20_00::networking::LoopbackAddressCreate>
     fn try_from(
         value: v2025_11_20_00::networking::LoopbackAddressCreate,
     ) -> Result<Self, Self::Error> {
-        let switch_location =
+        let switch_slot =
             parse_str_as_switch_slot(value.switch_location.as_str())?;
         Ok(Self {
             address_lot: value.address_lot,
             rack_id: value.rack_id,
-            switch_location,
+            switch_slot,
             address: value.address,
             mask: value.mask,
             anycast: value.anycast,
@@ -102,8 +103,9 @@ pub struct LoopbackAddressPath {
     /// The rack to use when selecting the loopback address.
     pub rack_id: Uuid,
 
-    /// The switch location to use when selecting the loopback address.
-    pub switch_location: SwitchSlot,
+    /// The slot of the switch within the rack to use when selecting the
+    /// loopback address.
+    pub switch_slot: SwitchSlot,
 
     /// The IP address and subnet mask to use when selecting the loopback
     /// address.
@@ -122,11 +124,10 @@ impl TryFrom<v2025_11_20_00::networking::LoopbackAddressPath>
     fn try_from(
         value: v2025_11_20_00::networking::LoopbackAddressPath,
     ) -> Result<Self, Self::Error> {
-        let switch_location =
-            parse_str_as_switch_slot(value.switch_location.as_str())?;
+        let switch_slot = parse_str_as_switch_slot(value.switch_slot.as_str())?;
         Ok(Self {
             rack_id: value.rack_id,
-            switch_location,
+            switch_slot,
             address: value.address,
             subnet_mask: value.subnet_mask,
         })
@@ -154,8 +155,8 @@ pub struct BfdSessionEnable {
     /// Control packets that this system requires
     pub required_rx: u64,
 
-    /// The switch to enable this session on.
-    pub switch: SwitchSlot,
+    /// The slot of the switch within the rack to enable this session on.
+    pub switch_slot: SwitchSlot,
 
     /// Select either single-hop (RFC 5881) or multi-hop (RFC 5883)
     pub mode: BfdMode,
@@ -169,13 +170,13 @@ impl TryFrom<v2025_11_20_00::networking::BfdSessionEnable>
     fn try_from(
         value: v2025_11_20_00::networking::BfdSessionEnable,
     ) -> Result<Self, Self::Error> {
-        let switch = parse_str_as_switch_slot(value.switch.as_str())?;
+        let switch_slot = parse_str_as_switch_slot(value.switch.as_str())?;
         Ok(Self {
             local: value.local,
             remote: value.remote,
             detection_threshold: value.detection_threshold,
             required_rx: value.required_rx,
-            switch,
+            switch_slot,
             mode: value.mode,
         })
     }
@@ -187,8 +188,8 @@ pub struct BfdSessionDisable {
     /// Address of the remote peer to disable a BFD session for.
     pub remote: IpAddr,
 
-    /// The switch to enable this session on.
-    pub switch: SwitchSlot,
+    /// The slot of the switch within the rack to disable this session on.
+    pub switch_slot: SwitchSlot,
 }
 
 impl TryFrom<v2025_11_20_00::networking::BfdSessionDisable>
@@ -199,8 +200,8 @@ impl TryFrom<v2025_11_20_00::networking::BfdSessionDisable>
     fn try_from(
         value: v2025_11_20_00::networking::BfdSessionDisable,
     ) -> Result<Self, Self::Error> {
-        let switch = parse_str_as_switch_slot(value.switch.as_str())?;
-        Ok(Self { remote: value.remote, switch })
+        let switch_slot = parse_str_as_switch_slot(value.switch.as_str())?;
+        Ok(Self { remote: value.remote, switch_slot })
     }
 }
 
@@ -213,8 +214,8 @@ pub struct SwitchPort {
     /// The rack this switch port belongs to.
     pub rack_id: Uuid,
 
-    /// The switch location of this switch port.
-    pub switch_location: SwitchSlot,
+    /// The slot of the switch within the rack of this switch port.
+    pub switch_slot: SwitchSlot,
 
     /// The name of this switch port.
     pub port_name: Name,
@@ -229,7 +230,7 @@ impl From<SwitchPort> for v2025_11_20_00::networking::SwitchPort {
         Self {
             id: value.id,
             rack_id: value.rack_id,
-            switch_location: format_switch_slot_as_str(value.switch_location)
+            switch_location: format_switch_slot_as_str(value.switch_slot)
                 .to_owned(),
             port_name: value.port_name,
             port_settings_id: value.port_settings_id,
@@ -243,8 +244,9 @@ pub struct SwitchPortSelector {
     /// A rack id to use when selecting switch ports.
     pub rack_id: Uuid,
 
-    /// A switch location to use when selecting switch ports.
-    pub switch_location: SwitchSlot,
+    /// The slot of the switch within the rack to use when selecting switch
+    /// ports.
+    pub switch_slot: SwitchSlot,
 }
 
 impl TryFrom<v2025_11_20_00::networking::SwitchPortSelector>
@@ -255,9 +257,9 @@ impl TryFrom<v2025_11_20_00::networking::SwitchPortSelector>
     fn try_from(
         value: v2025_11_20_00::networking::SwitchPortSelector,
     ) -> Result<Self, Self::Error> {
-        let switch_location =
+        let switch_slot =
             parse_str_as_switch_slot(value.switch_location.as_str())?;
-        Ok(Self { rack_id: value.rack_id, switch_location })
+        Ok(Self { rack_id: value.rack_id, switch_slot })
     }
 }
 
@@ -267,8 +269,9 @@ pub struct LldpPortPathSelector {
     /// A rack id to use when selecting switch ports.
     pub rack_id: Uuid,
 
-    /// A switch location to use when selecting switch ports.
-    pub switch_location: SwitchSlot,
+    /// The slot of the switch within the rack to use when selecting switch
+    /// ports.
+    pub switch_slot: SwitchSlot,
 
     /// A name to use when selecting switch ports.
     pub port: Name,
@@ -282,8 +285,7 @@ impl TryFrom<v2025_11_20_00::networking::LldpPortPathSelector>
     fn try_from(
         value: v2025_11_20_00::networking::LldpPortPathSelector,
     ) -> Result<Self, Self::Error> {
-        let switch_location =
-            parse_str_as_switch_slot(value.switch_location.as_str())?;
-        Ok(Self { rack_id: value.rack_id, switch_location, port: value.port })
+        let switch_slot = parse_str_as_switch_slot(value.switch_slot.as_str())?;
+        Ok(Self { rack_id: value.rack_id, switch_slot, port: value.port })
     }
 }

@@ -4398,7 +4398,7 @@ pub trait NexusExternalApi {
     /// Delete loopback address
     #[endpoint {
         method = DELETE,
-        path = "/v1/system/networking/loopback-address/{rack_id}/{switch_location}/{address}/{subnet_mask}",
+        path = "/v1/system/networking/loopback-address/{rack_id}/{switch_slot}/{address}/{subnet_mask}",
         tags = ["system/networking"],
         versions = VERSION_SWITCH_SLOT_ENUM..,
     }]
@@ -4411,7 +4411,7 @@ pub trait NexusExternalApi {
     #[endpoint {
         operation_id = "networking_loopback_address_delete",
         method = DELETE,
-        path = "/v1/system/networking/loopback-address/{rack_id}/{switch_location}/{address}/{subnet_mask}",
+        path = "/v1/system/networking/loopback-address/{rack_id}/{switch_slot}/{address}/{subnet_mask}",
         tags = ["system/networking"],
         versions = ..VERSION_SWITCH_SLOT_ENUM,
     }]
@@ -4799,7 +4799,7 @@ pub trait NexusExternalApi {
     /// Fetch the LLDP neighbors seen on a switch port
     #[endpoint {
         method = GET,
-        path = "/v1/system/hardware/rack-switch-port/{rack_id}/{switch_location}/{port}/lldp/neighbors",
+        path = "/v1/system/hardware/rack-switch-port/{rack_id}/{switch_slot}/{port}/lldp/neighbors",
         tags = ["system/networking"],
         versions = VERSION_SWITCH_SLOT_ENUM..,
     }]
@@ -4813,7 +4813,7 @@ pub trait NexusExternalApi {
     #[endpoint {
         operation_id = "networking_switch_port_lldp_neighbors",
         method = GET,
-        path = "/v1/system/hardware/rack-switch-port/{rack_id}/{switch_location}/{port}/lldp/neighbors",
+        path = "/v1/system/hardware/rack-switch-port/{rack_id}/{switch_slot}/{port}/lldp/neighbors",
         tags = ["system/networking"],
         versions = ..VERSION_SWITCH_SLOT_ENUM,
     }]

@@ -26,7 +26,7 @@ use std::net::IpAddr;
 pub struct BfdStatus {
     pub peer: IpAddr,
     pub state: BfdState,
-    pub switch: SwitchSlot,
+    pub switch_slot: SwitchSlot,
     pub local: Option<IpAddr>,
     pub detection_threshold: u8,
     pub required_rx: u64,
@@ -35,7 +35,7 @@ pub struct BfdStatus {
 
 impl From<BfdStatus> for v2025_11_20_00::bfd::BfdStatus {
     fn from(value: BfdStatus) -> Self {
-        let switch = format_switch_slot_as_name(value.switch);
+        let switch = format_switch_slot_as_name(value.switch_slot);
         Self {
             peer: value.peer,
             state: value.state,

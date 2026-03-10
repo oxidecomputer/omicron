@@ -490,7 +490,7 @@ async fn test_port_settings_basic_crud(ctx: &ControlPlaneTestContext) {
         RequestBuilder::new(
             client,
             Method::POST,
-            &format!("/v1/system/hardware/switch-port/qsfp0/settings?rack_id={rack_id}&switch_location=switch0"),
+            &format!("/v1/system/hardware/switch-port/qsfp0/settings?rack_id={rack_id}&switch_slot=switch0"),
         )
         .body(Some(&apply_settings))
         .expect_status(Some(StatusCode::NO_CONTENT)),
@@ -506,7 +506,7 @@ async fn test_port_settings_basic_crud(ctx: &ControlPlaneTestContext) {
         RequestBuilder::new(
             client,
             Method::DELETE,
-            &format!("/v1/system/hardware/switch-port/qsfp0/settings?rack_id={rack_id}&switch_location=switch0"),
+            &format!("/v1/system/hardware/switch-port/qsfp0/settings?rack_id={rack_id}&switch_slot=switch0"),
         )
         .expect_status(Some(StatusCode::NO_CONTENT)),
     )
@@ -642,7 +642,7 @@ async fn test_port_settings_basic_v6_crud(ctx: &ControlPlaneTestContext) {
         RequestBuilder::new(
             client,
             Method::POST,
-            &format!("/v1/system/hardware/switch-port/qsfp0/settings?rack_id={rack_id}&switch_location=switch0"),
+            &format!("/v1/system/hardware/switch-port/qsfp0/settings?rack_id={rack_id}&switch_slot=switch0"),
         )
         .body(Some(&apply_settings))
         .expect_status(Some(StatusCode::NO_CONTENT)),

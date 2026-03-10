@@ -4004,7 +4004,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 .loopback_address_delete(
                     &opctx,
                     path.rack_id,
-                    path.switch_location,
+                    path.switch_slot,
                     addr.into(),
                 )
                 .await?;
@@ -4179,11 +4179,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 crate::context::op_context_for_external_api(&rqctx).await?;
             Ok(HttpResponseOk(
                 nexus
-                    .switch_port_status(
-                        &opctx,
-                        query.switch_location,
-                        path.port,
-                    )
+                    .switch_port_status(&opctx, query.switch_slot, path.port)
                     .await?,
             ))
         };
@@ -4242,7 +4238,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 .lldp_config_get(
                     &opctx,
                     query.rack_id,
-                    query.switch_location,
+                    query.switch_slot,
                     path.port,
                 )
                 .await?;
@@ -4269,7 +4265,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 .lldp_config_update(
                     &opctx,
                     query.rack_id,
-                    query.switch_location,
+                    query.switch_slot,
                     path.port,
                     config,
                 )
@@ -4301,7 +4297,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
                     &prev,
                     limit,
                     path.rack_id,
-                    path.switch_location,
+                    path.switch_slot,
                     &path.port,
                 )
                 .await?;
