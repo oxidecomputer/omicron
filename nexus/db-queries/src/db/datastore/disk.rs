@@ -1583,7 +1583,7 @@ impl DataStore {
                 } else if !ok_to_delete_states.contains(disk_state.state()) {
                     return Err(Error::invalid_request(format!(
                         "disk cannot be deleted in state \"{}\"",
-                        disk.runtime_state.disk_state
+                        disk.disk_state
                     )));
                 } else if disk_state.is_attached() {
                     return Err(Error::invalid_request("disk is attached"));
