@@ -18,6 +18,7 @@ use crate::latest::early_networking::SwitchSlot;
 use crate::latest::early_networking::UnspecifiedIpError;
 use crate::latest::early_networking::UplinkAddress;
 use crate::latest::early_networking::UplinkAddressConfig;
+use crate::latest::early_networking::RouterPeerAddress;
 use omicron_common::api::external;
 use oxnet::IpNet;
 use oxnet::IpNetParseError;
@@ -175,6 +176,22 @@ impl FromStr for SpecifiedIpAddr {
     }
 }
 
+impl RouterPeerAddress {
+    /// Convert an arbitrary [`IpAddr`] into a [`RouterPeerAddress`] by
+    /// converting an unspecified IP to [`RouterPeerAddress::Unnumbered`].
+    ///
+    /// Uses of this function probably indicate places where we could consider
+    /// using stronger types.
+    pub fn from_ip_treating_unspecified_as_unnumbered(
+        ip: IpAddr,
+    ) -> Self {
+        match SpecifiedIpAddr::try_from(ip) {
+            Ok(ip) => Self::Numbered { ip },
+            Err(UnspecifiedIpError) => Self::Unnumbered,
+        }
+    }
+}
+
 impl UplinkAddress {
     /// Squash this address down to a flat IP address by converting
     /// [`UplinkAddress::LinkLocal`] to `::`.
@@ -202,6 +219,19 @@ impl UplinkAddress {
         }
     }
 
+    /// Convert an arbitrary [`IpNet`] into an [`UplinkAddress`] by converting
+    /// an unspecified IP to [`UplinkAddress::LinkLocal`].
+    ///
+    /// Uses of this function probably indicate places where we could consider
+    /// using stronger types.
+    pub fn from_ip_net_treating_unspecified_as_link_local(
+        ip_net: IpNet,
+    ) -> Self {
+        match SpecifiedIpNet::try_from(ip_net) {
+            Ok(ip_net) => Self::Address { ip_net },
+            Err(UnspecifiedIpError) => Self::LinkLocal,
+        }
+    }
 }
 
 impl UplinkAddressConfig {

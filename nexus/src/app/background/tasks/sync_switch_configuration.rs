@@ -50,6 +50,7 @@ use omicron_common::{
 use rdb_types::{Prefix, Prefix4, Prefix6};
 use serde_json::json;
 use sled_agent_client::types::HostPortConfig;
+use sled_agent_types::early_networking::BfdPeerConfig;
 use sled_agent_types::early_networking::EarlyNetworkConfigBody;
 use sled_agent_types::early_networking::EarlyNetworkConfigEnvelope;
 use sled_agent_types::early_networking::ImportExportPolicy;
@@ -63,12 +64,11 @@ use sled_agent_types::early_networking::SwitchSlot;
 use sled_agent_types::early_networking::TxEqConfig;
 use sled_agent_types::early_networking::UplinkAddressConfig;
 use sled_agent_types::early_networking::WriteNetworkConfigRequest;
-use sled_agent_types::early_networking::{BfdPeerConfig, SpecifiedIpNet};
 use sled_agent_types::early_networking::{
     BgpConfig as SledBgpConfig, UplinkAddress,
 };
 use sled_agent_types::early_networking::{
-    BgpPeerConfig as SledBgpPeerConfig, RouterPeerAddress, UnspecifiedIpError,
+    BgpPeerConfig as SledBgpPeerConfig, RouterPeerAddress,
 };
 use slog_error_chain::InlineErrorChain;
 use std::{
@@ -1109,20 +1109,13 @@ impl BackgroundTask for SwitchPortSettingsManager {
                         addresses: info
                             .addresses
                             .iter()
-                            .map(|a|
+                            .map(|a| {
+                                 let address = UplinkAddress::from_ip_net_treating_unspecified_as_link_local(a.address);
                                  UplinkAddressConfig {
-                                     // TODO-john stronger type on a.address?
-                                     address: match SpecifiedIpNet::try_from(a.address) {
-                                         Ok(ip_net) => UplinkAddress::Address {
-                                             ip_net,
-                                         },
-                                         Err(UnspecifiedIpError) => {
-                                             UplinkAddress::LinkLocal
-                                         }
-                                     },
+                                     address,
                                      vlan_id: a.vlan_id
                                  }
-                            ).collect(),
+                            }).collect(),
                         autoneg: info
                             .links
                             .get(0) //TODO breakout support
@@ -1174,7 +1167,8 @@ impl BackgroundTask for SwitchPortSettingsManager {
                     for peer in port_config.bgp_peers.iter_mut() {
                         // For unnumbered peers, pass None
                         //
-                        // TODO-john stronger type?
+                        // TODO-cleanup Push `RouterPeerAddress` down to all the
+                        // datastore methods below instead of an `Option`.
                         let peer_addr_for_lookup = match peer.addr {
                             RouterPeerAddress::Unnumbered => None,
                             RouterPeerAddress::Numbered { ip } => {
@@ -1738,13 +1732,9 @@ fn uplinks(
             addrs: config
                 .addresses
                 .iter()
-                .map(|a| UplinkAddressConfig {
-                    // TODO-john stronger type on a.address?
-                    address: match SpecifiedIpNet::try_from(a.address) {
-                        Ok(ip_net) => UplinkAddress::Address { ip_net },
-                        Err(UnspecifiedIpError) => UplinkAddress::LinkLocal,
-                    },
-                    vlan_id: a.vlan_id,
+                .map(|a| {
+                     let address = UplinkAddress::from_ip_net_treating_unspecified_as_link_local(a.address);
+                    UplinkAddressConfig { address, vlan_id: a.vlan_id }
                 })
                 .collect(),
             lldp,
