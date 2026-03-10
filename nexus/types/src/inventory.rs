@@ -56,6 +56,7 @@ use std::net::SocketAddrV6;
 use std::sync::Arc;
 use strum::EnumIter;
 use tufaceous_artifact::ArtifactHash;
+use uuid::Uuid;
 
 mod display;
 
@@ -185,11 +186,10 @@ pub struct Collection {
     /// The generation status of internal DNS servers
     pub internal_dns_generation_status: IdOrdMap<InternalDnsGenerationStatus>,
 
-    // TODO-K: Call these stale sagas?
-    // TODO-K: Use BtreeMap probably, indexing based on the nexus zone they're
-    // tied to
-    /// A list of sagas that have been running for an extended period
-    pub long_running_sagas: Vec<String>,
+    // TODO-K: Use IdOrdMap probably, indexing based on the nexus zone they were
+    // created by
+    /// A list of sagas that have been active for an extended period
+    pub stale_sagas: Vec<InventorySaga>,
 }
 
 impl Collection {
@@ -710,4 +710,25 @@ impl IdOrdItem for InternalDnsGenerationStatus {
         self.zone_id
     }
     id_upcast!();
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+pub enum SagaState {
+    Running,
+    Unwinding,
+    Done,
+    Abandoned,
+}
+
+// TODO-K: I may just be able to use the one for the DB
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+pub struct InventorySaga {
+    // TODO-K: Use own Uuid types
+    pub creator: Uuid,
+    pub current_sec: Option<Uuid>,
+    pub name: String,
+    pub saga_id: Uuid,
+    pub state: SagaState,
+    pub time_created: DateTime<Utc>,
+    pub time_collected: DateTime<Utc>,
 }

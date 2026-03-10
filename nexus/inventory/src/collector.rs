@@ -10,6 +10,8 @@ use crate::builder::InventoryError;
 use anyhow::Context;
 use anyhow::anyhow;
 use async_bb8_diesel::AsyncRunQueryDsl;
+use chrono::TimeDelta;
+use chrono::Utc;
 use clickhouse_admin_keeper_client::ClientInfo as _;
 use diesel::prelude::*;
 use gateway_client::types::GetCfpaParams;
@@ -25,6 +27,7 @@ use nexus_db_queries::db::pagination::paginated;
 use nexus_types::inventory::CabooseWhich;
 use nexus_types::inventory::Collection;
 use nexus_types::inventory::InternalDnsGenerationStatus;
+use nexus_types::inventory::InventorySaga;
 use nexus_types::inventory::RotPage;
 use nexus_types::inventory::RotPageWhich;
 use nexus_types::inventory::SpType;
@@ -41,9 +44,14 @@ use std::net::SocketAddrV6;
 use std::time::Duration;
 use strum::IntoEnumIterator;
 use tufaceous_artifact::ArtifactHash;
+use uuid::Uuid;
 
 /// connection and request timeout used for Sled Agent HTTP client
 const SLED_AGENT_TIMEOUT: Duration = Duration::from_secs(60);
+
+/// Threshold at which we consider an active saga stale
+// TODO-K: Change back to 15 minutes
+const STALE_SAGA_THRESHOLD: TimeDelta = TimeDelta::minutes(1);
 
 /// Collect all inventory data from an Oxide system
 pub struct Collector<'a> {
@@ -53,7 +61,7 @@ pub struct Collector<'a> {
     cockroach_admin_client: &'a CockroachClusterAdminClient,
     sled_agent_lister: &'a (dyn SledAgentEnumerator + Send + Sync),
     in_progress: CollectionBuilder,
-    // TODO-K: D Nexus client instead?
+    // TODO-K: D Nexus client instead? Or how can I get to the DB from here?
     datastore: &'a DataStore,
 }
 
@@ -104,7 +112,7 @@ impl<'a> Collector<'a> {
         // or they'll see an empty set of services.
         self.collect_all_timesync().await;
         self.collect_all_dns_generations().await;
-        self.collect_all_long_running_sagas().await;
+        self.collect_all_stale_sagas().await;
         // TODO-K: Add long running sagas here
 
         debug!(&self.log, "finished collection");
@@ -507,7 +515,7 @@ impl<'a> Collector<'a> {
 
     // TODO-K: Add a saga collector here
     /// Collect long running sagas from all nexus instances
-    async fn collect_all_long_running_sagas(&mut self) {
+    async fn collect_all_stale_sagas(&mut self) {
         // TODO-K: Actually connect to the DB and retrieve information
 
         // TODO-K: Use a real connection
@@ -547,13 +555,32 @@ impl<'a> Collector<'a> {
         sagas.reverse();
 
         // TODO-K: Use the saga object or something else
+        //
         let mut s = vec![];
+        let time_collected = Utc::now();
         for saga in sagas {
-            s.push(format!("{:?}", saga));
+            let is_stale =
+                (time_collected - saga.time_created) > STALE_SAGA_THRESHOLD;
+            let state = SagaState::from(saga.saga_state);
+            let is_active =
+                state == SagaState::Running || state == SagaState::Unwinding;
+
+            if is_stale && is_active {
+                let inv_saga = InventorySaga {
+                    creator: saga.creator.into(),
+                    current_sec: saga.current_sec.map(|s| s.0),
+                    name: saga.name,
+                    saga_id: Uuid::from(saga.id.0),
+                    state: saga.saga_state.into(),
+                    time_created: saga.time_created,
+                    time_collected,
+                };
+                s.push(inv_saga);
+            };
         }
 
         // Do printline here w datsource info
-        self.in_progress.found_long_running_sagas(s)
+        self.in_progress.found_stale_sagas(s)
         // TODO-K: Add some error handling
     }
 

@@ -473,10 +473,10 @@ impl DataStore {
             .map_err(|e| Error::internal_error(&e.to_string()))?;
 
         // TODO-K: Make nicer and actually the same as the others
-        let inv_long_running_sagas = &collection.long_running_sagas;
+        let inv_stale_sagas = &collection.stale_sagas;
         println!("SAGAS!");
-        for saga in inv_long_running_sagas {
-            println!("{saga}");
+        for saga in inv_stale_sagas {
+            println!("{saga:?}");
         }
 
         // This implementation inserts all records associated with the
@@ -4424,7 +4424,7 @@ impl DataStore {
             ntp_timesync,
             internal_dns_generation_status,
             // TODO-K: Fill in once there is something in the DB
-            long_running_sagas: vec![],
+            stale_sagas: vec![],
         })
     }
 
