@@ -3525,7 +3525,7 @@ impl ServiceManager {
         for port_config in &our_ports {
             for addr in &port_config.addrs {
                 usmfh.addpropvalue_type(
-                    &format!("uplinks/{}_0", port_config.port,),
+                    &format!("uplinks/{}_0", port_config.port),
                     &addr.to_string(),
                     "astring",
                 )?;
@@ -3539,7 +3539,9 @@ impl ServiceManager {
                 apv(
                     &lsmfh,
                     &format!("{group_name}/status"),
-                    &Some(lldp_config.status.to_string()),
+                    &Some(
+                        lldp_config.status.to_lldpd_smf_property().to_owned(),
+                    ),
                 )?;
                 apv(
                     &lsmfh,

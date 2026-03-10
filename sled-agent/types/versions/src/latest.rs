@@ -58,7 +58,6 @@ pub mod early_networking {
     pub use crate::v1::early_networking::ImportExportPolicy;
     pub use crate::v1::early_networking::LldpAdminStatus;
     pub use crate::v1::early_networking::LldpPortConfig;
-    pub use crate::v1::early_networking::ParseLldpAdminStatusError;
     pub use crate::v1::early_networking::PortFec;
     pub use crate::v1::early_networking::PortSpeed;
     pub use crate::v1::early_networking::RouteConfig;

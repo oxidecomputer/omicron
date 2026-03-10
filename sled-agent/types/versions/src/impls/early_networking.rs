@@ -4,18 +4,22 @@
 
 //! Implementations for early networking types.
 
+use crate::latest::early_networking::BgpPeerConfig;
+use crate::latest::early_networking::LldpAdminStatus;
+use crate::latest::early_networking::MaxPathConfig;
+use crate::latest::early_networking::MaxPathConfigError;
+use crate::latest::early_networking::PortFec;
+use crate::latest::early_networking::PortSpeed;
+use crate::latest::early_networking::RouterLifetimeConfig;
+use crate::latest::early_networking::RouterLifetimeConfigError;
+use crate::latest::early_networking::SwitchSlot;
+use crate::latest::early_networking::UplinkAddressConfig;
+use crate::latest::early_networking::UplinkAddressConfigError;
 use omicron_common::api::external;
 use std::fmt;
 use std::net::IpAddr;
 use std::net::Ipv6Addr;
 use std::str::FromStr;
-
-use crate::latest::early_networking::{
-    BgpPeerConfig, LldpAdminStatus, MaxPathConfig, MaxPathConfigError,
-    ParseLldpAdminStatusError, PortFec, PortSpeed, RouterLifetimeConfig,
-    RouterLifetimeConfigError, SwitchSlot, UplinkAddressConfig,
-    UplinkAddressConfigError,
-};
 
 impl BgpPeerConfig {
     /// The default hold time for a BGP peer in seconds.
@@ -185,35 +189,14 @@ impl FromStr for UplinkAddressConfig {
     }
 }
 
-impl fmt::Display for LldpAdminStatus {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+impl LldpAdminStatus {
+    /// Format `self` appropriately for passing to `lldpd`'s SMF properties.
+    pub fn to_lldpd_smf_property(&self) -> &'static str {
         match self {
-            LldpAdminStatus::Enabled => write!(f, "enabled"),
-            LldpAdminStatus::Disabled => write!(f, "disabled"),
-            LldpAdminStatus::RxOnly => write!(f, "rx_only"),
-            LldpAdminStatus::TxOnly => write!(f, "tx_only"),
-        }
-    }
-}
-
-impl std::fmt::Display for ParseLldpAdminStatusError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "LLDP admin status error: {}", self.0)
-    }
-}
-
-impl FromStr for LldpAdminStatus {
-    type Err = ParseLldpAdminStatusError;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s.to_lowercase().as_str() {
-            "enabled" => Ok(Self::Enabled),
-            "disabled" => Ok(Self::Disabled),
-            "rxonly" | "rx_only" => Ok(Self::RxOnly),
-            "txonly" | "tx_only" => Ok(Self::TxOnly),
-            _ => Err(ParseLldpAdminStatusError(format!(
-                "not a valid admin status: {s}"
-            ))),
+            LldpAdminStatus::Enabled => "enabled",
+            LldpAdminStatus::Disabled => "disabled",
+            LldpAdminStatus::RxOnly => "rx_only",
+            LldpAdminStatus::TxOnly => "tx_only",
         }
     }
 }
