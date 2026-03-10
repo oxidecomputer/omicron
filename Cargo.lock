@@ -936,6 +936,19 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5d20789868f4b01b2f2caec9f5c4e0213b41e3e5702a50157d699ae31ced2fcb"
 
 [[package]]
+name = "byte-wrapper"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "86b041d2328ab2041b4e9d8f21e3b0b5b8bb61e9a23bb9171387771c314ea340"
+dependencies = [
+ "base64 0.22.1",
+ "hex",
+ "schemars 0.8.22",
+ "serde_core",
+ "serde_json",
+]
+
+[[package]]
 name = "bytecount"
 version = "0.6.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -8239,7 +8252,6 @@ dependencies = [
  "schemars 0.8.22",
  "semver 1.0.27",
  "serde",
- "serde_human_bytes",
  "serde_json",
  "serde_urlencoded",
  "serde_with",
@@ -9040,7 +9052,6 @@ dependencies = [
  "schemars 0.8.22",
  "secrecy 0.10.3",
  "serde",
- "serde_human_bytes",
  "serde_json",
  "sha2",
  "sha3",
@@ -13407,6 +13418,7 @@ dependencies = [
  "anyhow",
  "async-trait",
  "bootstore",
+ "byte-wrapper",
  "camino",
  "camino-tempfile",
  "chrono",
@@ -13421,7 +13433,6 @@ dependencies = [
  "rcgen",
  "schemars 0.8.22",
  "serde",
- "serde_human_bytes",
  "serde_json",
  "sled-agent-types-versions",
  "sled-hardware-types",
@@ -13443,6 +13454,7 @@ dependencies = [
  "anyhow",
  "async-trait",
  "bootstore",
+ "byte-wrapper",
  "camino",
  "chrono",
  "daft",
@@ -13459,7 +13471,6 @@ dependencies = [
  "proptest",
  "schemars 0.8.22",
  "serde",
- "serde_human_bytes",
  "serde_json",
  "serde_with",
  "sha3",
@@ -15456,6 +15467,7 @@ dependencies = [
 name = "trust-quorum-types-versions"
 version = "0.1.0"
 dependencies = [
+ "byte-wrapper",
  "daft",
  "derive_more 0.99.20",
  "gfss",
@@ -15465,7 +15477,6 @@ dependencies = [
  "rand 0.9.2",
  "schemars 0.8.22",
  "serde",
- "serde_human_bytes",
  "serde_with",
  "sled-hardware-types",
  "slog",
