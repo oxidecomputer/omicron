@@ -40,7 +40,7 @@ use omicron_uuid_kinds::{
     GenericUuid, InstanceUuid, OmicronZoneUuid, PropolisUuid,
 };
 use oxnet::IpNet;
-use propolis_api_types::ErrorCode as PropolisErrorCode;
+use propolis_api_types::instance::ErrorCode as PropolisErrorCode;
 use propolis_client::Client as PropolisClient;
 use propolis_client::instance_spec::{
     ComponentV0, InstanceSpec, InstanceSpecV0, SpecKey,
@@ -417,7 +417,7 @@ impl InstanceMonitorRunner {
 
             // Update the state generation for the next poll.
             if let InstanceMonitorUpdate::State(ref state) = update {
-                generation = state.r#gen + 1;
+                generation = state.gen_ + 1;
             }
 
             // Now that we have the response from Propolis' HTTP server, we
@@ -444,7 +444,7 @@ impl InstanceMonitorRunner {
             .client
             .instance_state_monitor()
             .body(propolis_client::types::InstanceStateMonitorRequest {
-                r#gen: generation,
+                gen_: generation,
             })
             .send()
             .await;
@@ -2626,9 +2626,7 @@ impl InstanceRunner {
 
         // We use a custom client builder here because the default progenitor
         // one has a timeout of 15s but we want to be able to wait indefinitely.
-        // Use reqwest012 because the rev-pinned propolis-client is still on
-        // reqwest 0.12.
-        let reqwest_client = reqwest012::ClientBuilder::new().build().unwrap();
+        let reqwest_client = reqwest::ClientBuilder::new().build().unwrap();
         let client = Arc::new(PropolisClient::new_with_client(
             &format!("http://{}", &self.propolis_addr),
             reqwest_client,
@@ -3885,7 +3883,7 @@ mod tests {
             .send(InstanceMonitorMessage {
                 update: InstanceMonitorUpdate::State(
                     InstanceStateMonitorResponse {
-                        r#gen: 5,
+                        gen_: 5,
                         migration: InstanceMigrateStatusResponse {
                             migration_in: None,
                             migration_out: None,
