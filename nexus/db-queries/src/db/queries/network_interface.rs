@@ -2107,14 +2107,7 @@ mod tests {
             )
             .await;
         assert!(matches!(res, Ok(true)), "Failed to change instance state");
-        instance.nexus_state = new_runtime.nexus_state;
-        instance.propolis_id = new_runtime.propolis_id;
-        instance.dst_propolis_id = new_runtime.dst_propolis_id;
-        instance.migration_id = new_runtime.migration_id;
-        instance.state_generation = new_runtime.generation;
-        instance.time_state_updated = new_runtime.time_updated;
-        instance.time_last_auto_restarted =
-            new_runtime.time_last_auto_restarted;
+        instance.set_runtime(new_runtime);
         instance
     }
 

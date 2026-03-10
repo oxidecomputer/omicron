@@ -201,6 +201,17 @@ impl Instance {
         }
     }
 
+    /// Sets the runtime state of this instance.
+    pub fn set_runtime(&mut self, new_runtime: InstanceRuntimeState) {
+        self.time_state_updated = new_runtime.time_updated;
+        self.state_generation = new_runtime.generation;
+        self.propolis_id = new_runtime.propolis_id;
+        self.dst_propolis_id = new_runtime.dst_propolis_id;
+        self.migration_id = new_runtime.migration_id;
+        self.nexus_state = new_runtime.nexus_state;
+        self.time_last_auto_restarted = new_runtime.time_last_auto_restarted;
+    }
+
     /// Returns an instance's karmic status.
     pub fn auto_restart_status(
         &self,

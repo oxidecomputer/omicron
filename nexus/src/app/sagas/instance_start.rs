@@ -475,13 +475,7 @@ async fn sis_move_to_starting(
     }
 
     let mut new_record = db_instance.clone();
-    new_record.nexus_state = new_runtime.nexus_state;
-    new_record.propolis_id = new_runtime.propolis_id;
-    new_record.dst_propolis_id = new_runtime.dst_propolis_id;
-    new_record.migration_id = new_runtime.migration_id;
-    new_record.state_generation = new_runtime.generation;
-    new_record.time_state_updated = new_runtime.time_updated;
-    new_record.time_last_auto_restarted = new_runtime.time_last_auto_restarted;
+    new_record.set_runtime(new_runtime);
     Ok(new_record)
 }
 
