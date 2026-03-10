@@ -55,7 +55,6 @@ pub struct Disk {
     pub disk_state: String,
     pub attach_instance_id: Option<Uuid>,
     /// generation number for this state
-    #[diesel(column_name = state_generation)]
     pub state_generation: Generation,
 
     /// The PCI slot (within the bank of slots reserved to disks) to which this
@@ -69,7 +68,6 @@ pub struct Disk {
     pub slot: Option<SqlU8>,
 
     /// timestamp for this information
-    #[diesel(column_name = time_state_updated)]
     pub time_state_updated: DateTime<Utc>,
 
     /// size of the Disk
@@ -115,13 +113,7 @@ impl Disk {
     }
 
     pub fn state(&self) -> DiskState {
-        DiskState::new(
-            external::DiskState::try_from((
-                self.disk_state.as_str(),
-                self.attach_instance_id,
-            ))
-            .unwrap(),
-        )
+        self.runtime().state()
     }
 
     pub fn runtime(&self) -> DiskRuntimeState {
@@ -256,7 +248,7 @@ impl DiskRuntimeState {
                 self.disk_state.as_str(),
                 self.attach_instance_id,
             ))
-            .unwrap(),
+            .expect("database state should have been parseable"),
         )
     }
 
