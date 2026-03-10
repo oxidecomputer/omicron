@@ -10996,9 +10996,9 @@ dependencies = [
 
 [[package]]
 name = "progenitor-extras"
-version = "0.1.0"
+version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a45781b778d14632b8f2f0c7ca158a22517ff9a39ca9249c91c5031cc8d893fe"
+checksum = "e3bf56b338efdf90f218a4d6b3316a9c56faac4b7133bb8ecdc56d5db930d7ff"
 dependencies = [
  "backon",
  "http",
@@ -13806,7 +13806,7 @@ version = "0.8.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c1c97747dbf44bb1ca44a561ece23508e99cb592e862f22222dcf42f51d1e451"
 dependencies = [
- "heck 0.4.1",
+ "heck 0.5.0",
  "proc-macro2",
  "quote",
  "syn 2.0.117",

@@ -111,7 +111,9 @@ use omicron_common::{
     api::external, backoff::backon_retry_policy_internal_service,
 };
 use omicron_uuid_kinds::{GenericUuid, PropolisUuid, VolumeUuid};
-use progenitor_extras::retry::{GoneCheckResult, retry_operation_while};
+use progenitor_extras::retry::{
+    GoneCheckResult, retry_operation_while_indefinitely,
+};
 use rand::{RngCore, SeedableRng, rngs::StdRng};
 use serde::Deserialize;
 use serde::Serialize;
@@ -872,7 +874,7 @@ async fn ssc_send_snapshot_request_to_sled_agent(
     };
 
     let notify_log = log.clone();
-    retry_operation_while(
+    retry_operation_while_indefinitely(
         backon_retry_policy_internal_service(),
         snapshot_operation,
         gone_check,
