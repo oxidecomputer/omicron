@@ -362,6 +362,7 @@ use chrono::Utc;
 use nexus_db_lookup::LookupPath;
 use nexus_db_queries::{authn, authz};
 use nexus_types::identity::Resource;
+use nexus_types::saga::saga_action_failed;
 use omicron_common::api::external::Error;
 use omicron_common::api::internal::nexus::SledVmmState;
 use omicron_uuid_kinds::GenericUuid;
@@ -984,7 +985,17 @@ async fn siu_become_updater(
             saga_id,
         )
         .await
-        .map_err(ActionError::action_failed)?;
+        .map_err(|e| match e {
+            // The `AlreadyLocked` variant must be serialized as
+            // `UpdaterLockError` so that the parent `start-instance-update`
+            // saga can identify this specific failure mode and handle it
+            // gracefully.
+            #[expect(clippy::disallowed_methods)]
+            instance::UpdaterLockError::AlreadyLocked => {
+                ActionError::action_failed(e)
+            }
+            instance::UpdaterLockError::Query(err) => saga_action_failed(err),
+        })?;
 
     info!(
         log,
@@ -1047,7 +1058,7 @@ async fn siu_update_network_config(
             nexus
                 .instance_delete_dpd_config(&opctx, authz_instance)
                 .await
-                .map_err(ActionError::action_failed)?;
+                .map_err(saga_action_failed)?;
         }
         NetworkConfigUpdate::Update { active_propolis_id, new_sled_id } => {
             info!(
@@ -1062,7 +1073,7 @@ async fn siu_update_network_config(
                 .sled_id(new_sled_id)
                 .fetch()
                 .await
-                .map_err(ActionError::action_failed)?;
+                .map_err(saga_action_failed)?;
 
             nexus
                 .instance_ensure_dpd_config(
@@ -1072,7 +1083,7 @@ async fn siu_update_network_config(
                     InstanceNetworkFilters::all(),
                 )
                 .await
-                .map_err(ActionError::action_failed)?;
+                .map_err(saga_action_failed)?;
         }
     }
 
@@ -1089,12 +1100,11 @@ async fn siu_release_virtual_provisioning(
     let Some(Deprovision { project_id, cpus_diff, ram_diff }) =
         update.deprovision
     else {
-        return Err(ActionError::action_failed(
+        return Err(saga_action_failed(Error::internal_error(
             "a `siu_release_virtual_provisioning` action should never have \
              been added to the DAG if the update does not contain virtual \
-             resources to deprovision"
-                .to_string(),
-        ));
+             resources to deprovision",
+        )));
     };
     let instance_id = InstanceUuid::from_untyped_uuid(authz_instance.id());
 
@@ -1132,7 +1142,7 @@ async fn siu_release_virtual_provisioning(
                 "instance_id" => %instance_id,
             );
         }
-        Err(err) => return Err(ActionError::action_failed(err)),
+        Err(err) => return Err(saga_action_failed(err)),
     };
 
     Ok(())
@@ -1161,7 +1171,7 @@ async fn siu_unassign_oximeter_producer(
         &authz_instance.id(),
     )
     .await
-    .map_err(ActionError::action_failed)
+    .map_err(saga_action_failed)
 }
 
 async fn siu_commit_instance_updates(
@@ -1198,7 +1208,7 @@ async fn siu_commit_instance_updates(
             update.new_intent,
         )
         .await
-        .map_err(ActionError::action_failed)?;
+        .map_err(saga_action_failed)?;
 
     info!(
         log,

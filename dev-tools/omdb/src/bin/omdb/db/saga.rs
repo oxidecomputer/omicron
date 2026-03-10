@@ -41,6 +41,8 @@ use std::sync::Arc;
 use tabled::Tabled;
 use uuid::Uuid;
 
+use nexus_types::saga::saga_action_failed;
+use omicron_common::api::external::Error;
 use steno::ActionError;
 use steno::SagaNodeEventType;
 
@@ -322,7 +324,7 @@ You should only do this if:
 
     // Inject an error for those nodes, which will cause the saga to unwind
     for node in incomplete_nodes {
-        let action_error = ActionError::action_failed(String::from(
+        let action_error = saga_action_failed(Error::internal_error(
             "error injected with omdb",
         ));
 

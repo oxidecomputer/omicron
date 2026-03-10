@@ -21,6 +21,7 @@ use omicron_common::api::internal::{
 };
 use sled_agent_types_versions::{
     latest, v1, v4, v6, v7, v9, v10, v11, v12, v14, v16, v17, v20, v22, v25,
+    v26,
 };
 use sled_diagnostics::SledDiagnosticsQueryOutput;
 
@@ -36,6 +37,8 @@ api_versions!([
     // |  example for the next person.
     // v
     // (next_int, IDENT),
+    (27, RENAME_SWITCH_LOCATION_TO_SWITCH_SLOT),
+    (26, RACK_NETWORK_CONFIG_NOT_OPTIONAL),
     (25, BOOTSTORE_VERSIONING),
     (24, ADD_ZPOOL_HEALTH_TO_INVENTORY),
     (23, REMOVE_READ_BOOTSTORE_CONFIG_CACHE),
@@ -842,8 +845,20 @@ pub trait SledAgentApi {
     #[endpoint {
         method = PUT,
         path = "/network-bootstore-config",
-        versions = VERSION_BOOTSTORE_VERSIONING..,
+        versions = VERSION_RACK_NETWORK_CONFIG_NOT_OPTIONAL..,
         operation_id = "write_network_bootstore_config",
+    }]
+    async fn write_network_bootstore_config_v26(
+        rqctx: RequestContext<Self::Context>,
+        body: TypedBody<v26::early_networking::WriteNetworkConfigRequest>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
+
+    // As described above, this must not forward to newer versions; sled-agent
+    // must implement this by faithfully serializing the requested version.
+    #[endpoint {
+        method = PUT,
+        path = "/network-bootstore-config",
+        versions = VERSION_BOOTSTORE_VERSIONING..VERSION_RACK_NETWORK_CONFIG_NOT_OPTIONAL,
     }]
     async fn write_network_bootstore_config_v25(
         rqctx: RequestContext<Self::Context>,

@@ -5018,9 +5018,7 @@ async fn cmd_db_instance_info(
                 println!("    {VCPUS:>WIDTH$}: {cpus_provisioned}");
                 println!("    {RAM:>WIDTH$}: {ram}");
                 println!("    {DISK:>WIDTH$}: {disk}");
-                if let Some(modified) = time_modified {
-                    println!("    {LAST_UPDATED:>WIDTH$}: {modified}")
-                }
+                println!("    {LAST_UPDATED:>WIDTH$}: {time_modified}");
             }
         }
     }

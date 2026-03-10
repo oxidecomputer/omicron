@@ -2,6 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+use crate::DbSwitchSlot;
 use crate::{SqlU8, SqlU16, SqlU32};
 use db_macros::Resource;
 use ipnetwork::IpNetwork;
@@ -148,7 +149,7 @@ impl Into<networking::BgpAnnouncement> for BgpAnnouncement {
 #[derive(Queryable, Selectable, Clone, Debug, Serialize, Deserialize)]
 #[diesel(table_name = bgp_peer_view)]
 pub struct BgpPeerView {
-    pub switch_location: String,
+    pub switch_slot: DbSwitchSlot,
     pub port_name: String,
     pub addr: Option<IpNetwork>,
     pub asn: SqlU32,
@@ -158,7 +159,7 @@ pub struct BgpPeerView {
     pub idle_hold_time: SqlU32,
     pub keepalive: SqlU32,
     pub remote_asn: Option<SqlU32>,
-    pub min_ttl: Option<SqlU32>,
+    pub min_ttl: Option<SqlU8>,
     pub md5_auth_key: Option<String>,
     pub multi_exit_discriminator: Option<SqlU32>,
     pub local_pref: Option<SqlU32>,
@@ -171,8 +172,6 @@ pub struct BgpPeerView {
 pub enum BgpPeerConfigDataError {
     #[error("database contains illegal router lifetime value")]
     RouterLifetime(#[source] RouterLifetimeConfigError),
-    #[error("database contains illegal min_ttl value: {0}")]
-    MinTtl(u32),
 }
 
 impl TryFrom<BgpPeerView> for BgpPeerConfig {
@@ -190,13 +189,7 @@ impl TryFrom<BgpPeerView> for BgpPeerConfig {
         let router_lifetime =
             RouterLifetimeConfig::new(value.router_lifetime.0)
                 .map_err(BgpPeerConfigDataError::RouterLifetime)?;
-        let min_ttl = value
-            .min_ttl
-            .map(|val| {
-                u8::try_from(*val)
-                    .map_err(|_| BgpPeerConfigDataError::MinTtl(*val))
-            })
-            .transpose()?;
+        let min_ttl = value.min_ttl.map(|val| val.0);
 
         Ok(Self {
             asn: *value.asn,
