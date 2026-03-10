@@ -7,7 +7,7 @@
       "url": "https://oxide.computer",
       "email": "api@oxide.computer"
     },
-    "version": "26.0.0"
+    "version": "27.0.0"
   },
   "paths": {
     "/artifacts": {
@@ -5939,7 +5939,7 @@
           "nics"
         ]
       },
-      "InstanceSpecV0": {
+      "InstanceSpec": {
         "type": "object",
         "properties": {
           "board": {
@@ -9841,7 +9841,7 @@
         "description": "Specifies the virtual hardware configuration of a new Propolis VMM in the form of a Propolis instance specification.",
         "allOf": [
           {
-            "$ref": "#/components/schemas/InstanceSpecV0"
+            "$ref": "#/components/schemas/InstanceSpec"
           }
         ]
       },

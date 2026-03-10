@@ -85,7 +85,7 @@ use omicron_common::api::internal::shared::NetworkInterface;
 use sled_agent_client::types::{
     BlobStorageBackend, Board, BootOrderEntry, BootSettings, Chipset,
     ComponentV0, Cpuid, CpuidVendor, CrucibleStorageBackend,
-    FileStorageBackend, I440Fx, InstanceSpecV0, NvmeDisk, PciPath, QemuPvpanic,
+    FileStorageBackend, I440Fx, InstanceSpec, NvmeDisk, PciPath, QemuPvpanic,
     SerialPort, SerialPortNumber, SpecKey, VirtioDisk, VirtioNetworkBackend,
     VirtioNic, VmmSpec,
 };
@@ -548,7 +548,7 @@ impl super::Nexus {
         components.add_nics(nics)?;
         components.add_cloud_init(instance, ssh_keys)?;
 
-        let spec = InstanceSpecV0 {
+        let spec = InstanceSpec {
             board: Board {
                 chipset: Chipset::I440Fx(I440Fx { enable_pcie: false }),
                 cpuid: cpuid_from_vmm_cpu_platform(vmm.cpu_platform),
