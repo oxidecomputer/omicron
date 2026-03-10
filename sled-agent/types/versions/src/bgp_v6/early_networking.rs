@@ -305,7 +305,7 @@ pub struct PortConfig {
     /// This port's addresses and optional vlan IDs
     pub addresses: Vec<UplinkAddressConfig>,
     /// Switch the port belongs to.
-    pub switch: v1::SwitchLocation,
+    pub switch: v1::SwitchSlot,
     /// Nmae of the port this config applies to.
     pub port: String,
     /// Port speed.
@@ -347,9 +347,6 @@ impl From<v1::UplinkAddressConfig> for UplinkAddressConfig {
         Self { address, vlan_id: value.vlan_id }
     }
 }
-
-#[derive(Debug, PartialEq, Eq, Deserialize, Serialize)]
-pub struct UplinkAddressConfigError(pub(crate) String);
 
 #[derive(
     Clone, Debug, Deserialize, Serialize, PartialEq, Eq, Hash, JsonSchema,

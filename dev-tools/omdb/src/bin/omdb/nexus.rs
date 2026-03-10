@@ -69,6 +69,7 @@ use nexus_types::internal_api::background::RegionSnapshotReplacementFinishStatus
 use nexus_types::internal_api::background::RegionSnapshotReplacementGarbageCollectStatus;
 use nexus_types::internal_api::background::RegionSnapshotReplacementStartStatus;
 use nexus_types::internal_api::background::RegionSnapshotReplacementStepStatus;
+use nexus_types::internal_api::background::SessionCleanupStatus;
 use nexus_types::internal_api::background::SitrepGcStatus;
 use nexus_types::internal_api::background::SitrepLoadStatus;
 use nexus_types::internal_api::background::SupportBundleCleanupReport;
@@ -1293,6 +1294,9 @@ fn print_task_details(bgtask: &BackgroundTask, details: &serde_json::Value) {
         }
         "service_firewall_rule_propagation" => {
             print_task_service_firewall_rule_propagation(details);
+        }
+        "session_cleanup" => {
+            print_task_session_cleanup(details);
         }
         "sp_ereport_ingester" => {
             print_task_sp_ereport_ingester(details);
@@ -2660,6 +2664,33 @@ fn print_task_saga_recovery(details: &serde_json::Value) {
             }
         }
     }
+}
+
+fn print_task_session_cleanup(details: &serde_json::Value) {
+    match serde_json::from_value::<SessionCleanupStatus>(details.clone()) {
+        Err(error) => eprintln!(
+            "warning: failed to interpret task details: {:?}: {:?}",
+            error, details
+        ),
+        Ok(status) => {
+            const DELETED: &str = "deleted:";
+            const CUTOFF: &str = "cutoff:";
+            const LIMIT: &str = "limit:";
+            const ERROR: &str = "error:";
+            const WIDTH: usize =
+                const_max_len(&[DELETED, CUTOFF, LIMIT, ERROR]) + 1;
+
+            println!("    {DELETED:<WIDTH$}{}", status.deleted);
+            println!(
+                "    {CUTOFF:<WIDTH$}{}",
+                status.cutoff.to_rfc3339_opts(SecondsFormat::AutoSi, true),
+            );
+            println!("    {LIMIT:<WIDTH$}{}", status.limit);
+            if let Some(error) = &status.error {
+                println!("    {ERROR:<WIDTH$}{error}");
+            }
+        }
+    };
 }
 
 fn print_task_service_firewall_rule_propagation(details: &serde_json::Value) {
