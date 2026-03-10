@@ -254,7 +254,7 @@ struct RunMultipleArgs {
     count: u8,
     /// Launch peer router mgd instances
     #[clap(long)]
-    peer_routers: bool
+    peer_routers: bool,
 }
 
 impl Configurable for RunMultipleArgs {
@@ -293,7 +293,7 @@ impl RunMultipleArgs {
 
             println!("\nomicron-dev: setting up all services for rack {n}... ");
             let cptestctx = if self.peer_routers {
-                 nexus_test_utils::omicron_dev_setup_with_config_and_peer_routers::<
+                nexus_test_utils::omicron_dev_setup_with_config_and_peer_routers::<
                     omicron_nexus::Server,
                 >(&mut config, 1, self.gateway_config.clone())
                 .await

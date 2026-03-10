@@ -26,6 +26,9 @@ pub struct MgdInstance {
     /// Port number the mgd instance is listening on. This can be provided
     /// manually, or dynamically determined if a value of 0 is provided.
     pub port: u16,
+    /// Port number that the mgd bgp dispatcher is listening on. This can be provided
+    /// manually, or dynamically determined if a value of 0 is provided.
+    pub dispatcher_port: u16,
     /// Arguments provided to the `mgd` cli command.
     pub args: Vec<String>,
     /// Child process spawned by running `mgd`
@@ -38,6 +41,7 @@ pub struct MgdInstance {
 impl MgdInstance {
     pub async fn start(
         mut port: u16,
+        mut dispatcher_port: u16,
         mgs_address: Option<SocketAddr>,
     ) -> Result<Self, anyhow::Error> {
         let temp_dir = TempDir::new()?;
@@ -55,6 +59,8 @@ impl MgdInstance {
             uuid::Uuid::new_v4().to_string(),
             "--sled-uuid".into(),
             uuid::Uuid::new_v4().to_string(),
+            "--bgp-dispatcher-addr".into(),
+            format!("[::1]:{dispatcher_port}"),
         ];
 
         if let Some(socket_addr) = mgs_address {
@@ -88,7 +94,26 @@ impl MgdInstance {
             })?;
         }
 
-        Ok(Self { port, args, child, data_dir: Some(temp_dir) })
+        if dispatcher_port == 0 {
+            dispatcher_port = discover_bgp_dispatcher_port(
+                temp_dir.join("mgd_stdout").display().to_string(),
+            )
+            .await
+            .with_context(|| {
+                format!(
+                    "failed to discover mgd port from files in {}",
+                    temp_dir.display()
+                )
+            })?;
+        }
+
+        Ok(Self {
+            port,
+            dispatcher_port,
+            args,
+            child,
+            data_dir: Some(temp_dir),
+        })
     }
 
     pub async fn cleanup(&mut self) -> Result<(), anyhow::Error> {
@@ -145,11 +170,38 @@ async fn discover_port(logfile: String) -> Result<u16, anyhow::Error> {
         .context("time out while discovering mgd port number")?
 }
 
+async fn discover_bgp_dispatcher_port(
+    logfile: String,
+) -> Result<u16, anyhow::Error> {
+    let timeout = Instant::now() + MGD_TIMEOUT;
+    tokio::time::timeout_at(
+        timeout,
+        find_mgd_bgp_dispatcher_port_in_log(logfile),
+    )
+    .await
+    .context("time out while discovering mgd port number")?
+}
+
 async fn find_mgd_port_in_log(logfile: String) -> Result<u16, anyhow::Error> {
     let re = regex::Regex::new(r#""local_addr":"\[::1?\]:([0-9]+)""#).unwrap();
+    find_pattern_in_logfile(logfile, re).await
+}
+
+async fn find_mgd_bgp_dispatcher_port_in_log(
+    logfile: String,
+) -> Result<u16, anyhow::Error> {
+    let re = regex::Regex::new(r#"TcpListener \{ addr: \[::1?\]:([0-9]+)"#)
+        .unwrap();
+    find_pattern_in_logfile(logfile, re).await
+}
+
+async fn find_pattern_in_logfile(
+    logfile: String,
+    re: regex::Regex,
+) -> Result<u16, anyhow::Error> {
     let mut reader = BufReader::new(File::open(&logfile).await?);
     let mut lines = reader.lines();
-    loop {
+    let result = loop {
         match lines.next_line().await? {
             Some(line) => {
                 if let Some(cap) = re.captures(&line) {
@@ -157,7 +209,7 @@ async fn find_mgd_port_in_log(logfile: String) -> Result<u16, anyhow::Error> {
                     // `None` if there are no matches found
                     let port = cap.get(1).unwrap();
                     let result = port.as_str().parse::<u16>()?;
-                    return Ok(result);
+                    break result;
                 }
             }
             None => {
@@ -169,12 +221,13 @@ async fn find_mgd_port_in_log(logfile: String) -> Result<u16, anyhow::Error> {
                 lines = reader.lines();
             }
         }
-    }
+    };
+    Ok(result)
 }
 
 #[cfg(test)]
 mod tests {
-    use super::find_mgd_port_in_log;
+    use super::{discover_port, discover_bgp_dispatcher_port};
     use std::io::Write;
     use std::process::Stdio;
     use tempfile::NamedTempFile;
@@ -204,9 +257,30 @@ mod tests {
         file.flush().unwrap();
 
         assert_eq!(
-            find_mgd_port_in_log(file.path().display().to_string())
+            discover_port(file.path().display().to_string())
                 .await
                 .unwrap(),
+            EXPECTED_PORT
+        );
+    }
+
+    #[tokio::test]
+    async fn test_discover_bgp_dispatcher_port() {
+        // Write some data to a fake log file
+        // This line is representative of the kind of output that mgd currently logs
+        let line = r#"msg":"TcpListener created","v":0,"name":"slog-rs","level":30,"time":"2026-03-09T22:00:02.987824162Z","hostname":"sled01","pid":3605,"unit":"dispatcher","module":"neighbor","component":"bgp","listener":"TcpListener { addr: [::]:4676, fd: 10 }"#;
+        let mut file = NamedTempFile::new().unwrap();
+        writeln!(file, "A garbage line").unwrap();
+        writeln!(file, "{}", line).unwrap();
+        writeln!(file, "Another garbage line").unwrap();
+        file.flush().unwrap();
+
+        assert_eq!(
+            discover_bgp_dispatcher_port(
+                file.path().display().to_string()
+            )
+            .await
+            .unwrap(),
             EXPECTED_PORT
         );
     }

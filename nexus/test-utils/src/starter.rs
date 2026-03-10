@@ -482,7 +482,7 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
             SocketAddrV6::new(Ipv6Addr::LOCALHOST, mgs.port, 0, 0).into();
 
         // Set up an instance of mgd
-        let mgd = dev::maghemite::MgdInstance::start(0, Some(mgs_addr))
+        let mgd = dev::maghemite::MgdInstance::start(0, 0, Some(mgs_addr))
             .await
             .unwrap();
         let port = mgd.port;
@@ -491,7 +491,10 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
 
         debug!(log, "mgd port is {port}");
 
-        let config = MgdConfig { address: std::net::SocketAddr::V6(address) };
+        let config = MgdConfig {
+            address: std::net::SocketAddr::V6(address),
+            // peering_address: todo!(),
+        };
         self.config.pkg.mgd.insert(switch_location, config);
     }
 
@@ -1576,6 +1579,7 @@ pub(crate) async fn setup_with_config_impl<N: NexusServer>(
     extra_sled_agents: u16,
     gateway_config_file: Utf8PathBuf,
     second_nexus: bool,
+    // peer_routers: bool,
 ) -> ControlPlaneTestContext<N> {
     const STEP_TIMEOUT: Duration = Duration::from_secs(600);
 
