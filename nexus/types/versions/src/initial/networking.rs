@@ -18,7 +18,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use sled_agent_types::early_networking::BfdMode;
 use sled_agent_types::early_networking::ImportExportPolicy;
-use sled_agent_types::early_networking::SwitchLocation;
+use sled_agent_types::early_networking::SwitchSlot;
 use sled_agent_types::early_networking::TxEqConfig;
 use std::collections::HashMap;
 use std::net::{IpAddr, Ipv4Addr};
@@ -64,7 +64,7 @@ pub struct LoopbackAddressCreate {
     /// The rack containing the switch this loopback address will be configured on.
     pub rack_id: Uuid,
 
-    // TODO: #3604 Consider using `SwitchLocation` type instead of `Name` for `LoopbackAddressCreate.switch_location`
+    // TODO: #3604 Consider using `SwitchSlot` type instead of `Name` for `LoopbackAddressCreate.switch_location`
     /// The location of the switch within the rack this loopback address will be
     /// configured on.
     pub switch_location: Name,
@@ -549,7 +549,7 @@ impl JsonSchema for BgpMessageHistory {
 #[derive(Clone, Debug, Deserialize, JsonSchema, Serialize)]
 pub struct SwitchBgpHistory {
     /// Switch this message history is associated with.
-    pub switch: SwitchLocation,
+    pub switch: SwitchSlot,
 
     /// Message history indexed by peer address.
     pub history: HashMap<String, BgpMessageHistory>,
@@ -705,7 +705,7 @@ pub struct BgpPeerStatus {
     pub state_duration_millis: u64,
 
     /// Switch with the peer session.
-    pub switch: SwitchLocation,
+    pub switch: SwitchSlot,
 }
 
 /// The current state of a BGP peer.
@@ -751,7 +751,7 @@ pub struct BgpImportedRouteIpv4 {
     pub id: u32,
 
     /// Switch the route is imported into.
-    pub switch: SwitchLocation,
+    pub switch: SwitchSlot,
 }
 
 // BGP EXPORTED (old HashMap-based type)

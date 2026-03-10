@@ -44,6 +44,7 @@ pub mod region_snapshot_replacement_start;
 pub mod region_snapshot_replacement_step;
 pub mod saga_recovery;
 pub mod service_firewall_rules;
+pub mod session_cleanup;
 pub mod support_bundle;
 pub mod support_bundle_collector;
 pub mod sync_service_zone_nat;

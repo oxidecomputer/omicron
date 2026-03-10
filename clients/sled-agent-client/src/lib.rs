@@ -104,7 +104,7 @@ progenitor::generate_api!(
         Sha3_256Digest = sled_agent_types_versions::latest::rot::Sha3_256Digest,
         SledRole = sled_agent_types_versions::latest::inventory::SledRole,
         SourceNatConfigGeneric = omicron_common::api::internal::shared::SourceNatConfigGeneric,
-        SwitchLocation = sled_agent_types_versions::latest::early_networking::SwitchLocation,
+        SwitchSlot = sled_agent_types_versions::latest::early_networking::SwitchSlot,
         Threshold = trust_quorum_types::types::Threshold,
         TxEqConfig = sled_agent_types_versions::latest::early_networking::TxEqConfig,
         UplinkAddressConfig = sled_agent_types_versions::latest::early_networking::UplinkAddressConfig,

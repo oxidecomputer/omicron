@@ -26,9 +26,12 @@ use nexus_types::deployment::BlueprintHostPhase2DesiredContents;
 use nexus_types::deployment::BlueprintZoneImageSource;
 use nexus_types::external_api::update;
 use nexus_types::external_api::update::SetTargetReleaseParams;
+use omicron_test_utils::dev::poll::CondCheckError;
+use omicron_test_utils::dev::poll::wait_for_condition;
 use omicron_uuid_kinds::{BlueprintUuid, GenericUuid};
 use semver::Version;
 use std::sync::Arc;
+use std::time::Duration;
 use tufaceous_artifact::ArtifactKind;
 use tufaceous_artifact::{ArtifactVersion, KnownArtifactKind};
 use tufaceous_lib::assemble::ManifestTweak;
@@ -43,6 +46,28 @@ async fn get_set_target_release() -> Result<()> {
             .await;
     let client = &ctx.external_client;
     let logctx = &ctx.logctx;
+
+    // During high contention the inventory might not be ready yet, which will
+    // cause the call to /v1/system/update/status to 500. We thus query the
+    // database to make sure we have an inventory before proceeding.
+    {
+        let datastore = ctx.server.server_context().nexus.datastore();
+        let opctx =
+            OpContext::for_tests(logctx.log.new(o!()), datastore.clone());
+        wait_for_condition(
+            || async {
+                datastore
+                    .inventory_get_latest_collection(&opctx)
+                    .await
+                    .expect("failed to get inventory collection")
+                    .ok_or(CondCheckError::<()>::NotYet)
+            },
+            &Duration::from_millis(100),
+            &Duration::from_secs(30),
+        )
+        .await
+        .expect("no inventory collection available");
+    }
 
     // There is no target release before one has ever been specified
     let status: update::UpdateStatus =

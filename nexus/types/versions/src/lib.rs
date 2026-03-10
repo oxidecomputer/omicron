@@ -67,3 +67,5 @@ pub mod v2026_01_30_01;
 pub mod v2026_01_31_00;
 #[path = "bgp_unnumbered_peers/mod.rs"]
 pub mod v2026_02_13_01;
+#[path = "add_time_fields_to_users/mod.rs"]
+pub mod v2026_03_02_00;

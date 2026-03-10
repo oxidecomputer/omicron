@@ -33,6 +33,7 @@ use ratatui::widgets::BorderType;
 use ratatui::widgets::Borders;
 use ratatui::widgets::Paragraph;
 use sled_agent_types::early_networking::BgpConfig;
+use sled_agent_types::early_networking::LldpAdminStatus;
 use sled_agent_types::early_networking::LldpPortConfig;
 use sled_agent_types::early_networking::RouteConfig;
 use std::borrow::Cow;
@@ -1125,11 +1126,18 @@ fn rss_config_text<'a>(
                     management_addrs,
                 } = lp;
 
+                let status_description = match status {
+                    LldpAdminStatus::Enabled => "enabled",
+                    LldpAdminStatus::Disabled => "disabled",
+                    LldpAdminStatus::RxOnly => "rx only",
+                    LldpAdminStatus::TxOnly => "tx only",
+                };
+
                 let mut lldp = vec![
                     vec![Span::styled("  • LLDP port settings: ", label_style)],
                     vec![
                         Span::styled("    • Admin status      : ", label_style),
-                        Span::styled(status.to_string(), ok_style),
+                        Span::styled(status_description, ok_style),
                     ],
                 ];
 

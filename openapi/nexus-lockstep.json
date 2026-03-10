@@ -1687,7 +1687,7 @@
             "minimum": 0
           },
           "switch": {
-            "$ref": "#/components/schemas/SwitchLocation"
+            "$ref": "#/components/schemas/SwitchSlot"
           }
         },
         "required": [
@@ -7555,7 +7555,7 @@
             "description": "Switch the port belongs to.",
             "allOf": [
               {
-                "$ref": "#/components/schemas/SwitchLocation"
+                "$ref": "#/components/schemas/SwitchSlot"
               }
             ]
           },
@@ -9024,7 +9024,7 @@
           }
         }
       },
-      "SwitchLocation": {
+      "SwitchSlot": {
         "description": "Identifies switch physical location",
         "oneOf": [
           {

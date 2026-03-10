@@ -58,17 +58,14 @@ pub mod early_networking {
     pub use crate::v1::early_networking::ImportExportPolicy;
     pub use crate::v1::early_networking::LldpAdminStatus;
     pub use crate::v1::early_networking::LldpPortConfig;
-    pub use crate::v1::early_networking::ParseLldpAdminStatusError;
-    pub use crate::v1::early_networking::ParseSwitchLocationError;
     pub use crate::v1::early_networking::PortFec;
     pub use crate::v1::early_networking::PortSpeed;
     pub use crate::v1::early_networking::RouteConfig;
-    pub use crate::v1::early_networking::SwitchLocation;
+    pub use crate::v1::early_networking::SwitchSlot;
     pub use crate::v1::early_networking::TxEqConfig;
 
     pub use crate::v20::early_networking::BgpConfig;
     pub use crate::v20::early_networking::BgpPeerConfig;
-    pub use crate::v20::early_networking::EarlyNetworkConfigBody;
     pub use crate::v20::early_networking::MaxPathConfig;
     pub use crate::v20::early_networking::MaxPathConfigError;
     pub use crate::v20::early_networking::PortConfig;
@@ -76,9 +73,9 @@ pub mod early_networking {
     pub use crate::v20::early_networking::RouterLifetimeConfig;
     pub use crate::v20::early_networking::RouterLifetimeConfigError;
     pub use crate::v20::early_networking::UplinkAddressConfig;
-    pub use crate::v20::early_networking::UplinkAddressConfigError;
 
-    pub use crate::v25::early_networking::WriteNetworkConfigRequest;
+    pub use crate::v26::early_networking::EarlyNetworkConfigBody;
+    pub use crate::v26::early_networking::WriteNetworkConfigRequest;
 }
 
 pub mod firewall_rules {
