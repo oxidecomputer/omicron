@@ -6,7 +6,7 @@
 
 use anyhow::{Context as _, Result, bail};
 use serde::{Deserialize, Serialize};
-use sled_agent_types::early_networking::SwitchLocation;
+use sled_agent_types::early_networking::SwitchSlot;
 use std::collections::BTreeMap;
 use std::fmt::Display;
 use std::iter::Iterator;
@@ -78,8 +78,8 @@ impl Inventory {
                 SpType::Switch => {
                     // Insert the switch's transceivers.
                     let switch_id = match i {
-                        0 => SwitchLocation::Switch0,
-                        1 => SwitchLocation::Switch1,
+                        0 => SwitchSlot::Switch0,
+                        1 => SwitchSlot::Switch1,
                         _ => unreachable!(),
                     };
                     let transceivers = transceiver_inventory

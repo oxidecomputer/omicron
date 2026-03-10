@@ -11,6 +11,7 @@ use nexus_db_queries::{authn, authz, db};
 use nexus_defaults as defaults;
 use nexus_types::external_api::{project, vpc};
 use nexus_types::identity::Resource;
+use nexus_types::saga::saga_action_failed;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use serde::Deserialize;
 use serde::Serialize;
@@ -87,7 +88,7 @@ async fn spc_create_record(
         .datastore()
         .project_create(&opctx, db_project)
         .await
-        .map_err(ActionError::action_failed)
+        .map_err(saga_action_failed)
 }
 
 async fn spc_create_record_undo(
@@ -127,10 +128,8 @@ async fn spc_create_vpc_params(
 
     let (authz_project, _project) =
         sagactx.lookup::<(authz::Project, db::model::Project)>("project")?;
-    let ipv6_prefix = Some(
-        defaults::random_vpc_ipv6_prefix()
-            .map_err(ActionError::action_failed)?,
-    );
+    let ipv6_prefix =
+        Some(defaults::random_vpc_ipv6_prefix().map_err(saga_action_failed)?);
 
     let vpc_create = vpc::VpcCreate {
         identity: IdentityMetadataCreateParams {

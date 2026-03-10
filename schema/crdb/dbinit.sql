@@ -554,7 +554,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS lookup_certificate_by_silo ON omicron.public.c
 CREATE TABLE IF NOT EXISTS omicron.public.virtual_provisioning_collection (
     -- Should match the UUID of the corresponding collection.
     id UUID PRIMARY KEY,
-    time_modified TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    time_modified TIMESTAMPTZ NOT NULL,
 
     -- Identifies the type of the collection.
     collection_type STRING(63) NOT NULL,
@@ -587,7 +587,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.virtual_provisioning_collection (
 CREATE TABLE IF NOT EXISTS omicron.public.virtual_provisioning_resource (
     -- Should match the UUID of the corresponding collection.
     id UUID PRIMARY KEY,
-    time_modified TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    time_modified TIMESTAMPTZ NOT NULL,
 
     -- Identifies the type of the resource.
     resource_type STRING(63) NOT NULL,
@@ -913,7 +913,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.silo_user (
     -- contain a value
     external_id TEXT,
 
-    user_provision_type omicron.public.user_provision_type,
+    user_provision_type omicron.public.user_provision_type NOT NULL,
 
     -- if the user provision type is 'scim' then this field must contain a value
     user_name TEXT,
@@ -921,11 +921,6 @@ CREATE TABLE IF NOT EXISTS omicron.public.silo_user (
     -- if user provision type is 'scim', this field _may_ contain a value: it
     -- is not mandatory that the SCIM provisioning client support this field.
     active BOOL,
-
-    CONSTRAINT user_provision_type_required_for_non_deleted CHECK (
-      (user_provision_type IS NOT NULL AND time_deleted IS NULL)
-      OR (time_deleted IS NOT NULL)
-    ),
 
     CONSTRAINT external_id_consistency CHECK (
         CASE user_provision_type
@@ -982,15 +977,10 @@ CREATE TABLE IF NOT EXISTS omicron.public.silo_group (
     -- contain a value
     external_id TEXT,
 
-    user_provision_type omicron.public.user_provision_type,
+    user_provision_type omicron.public.user_provision_type NOT NULL,
 
     -- if the user provision type is 'scim' then this field must contain a value
     display_name TEXT,
-
-    CONSTRAINT user_provision_type_required_for_non_deleted CHECK (
-      (user_provision_type IS NOT NULL AND time_deleted IS NULL)
-      OR (time_deleted IS NOT NULL)
-    ),
 
     CONSTRAINT external_id_consistency CHECK (
         CASE user_provision_type
@@ -3506,6 +3496,11 @@ CREATE INDEX IF NOT EXISTS lookup_address_lot_rsvd_block_by_anycast ON omicron.p
     anycast
 );
 
+CREATE TYPE IF NOT EXISTS omicron.public.switch_slot AS ENUM (
+    'switch0',
+    'switch1'
+);
+
 CREATE TABLE IF NOT EXISTS omicron.public.loopback_address (
     id UUID PRIMARY KEY,
     time_created TIMESTAMPTZ NOT NULL,
@@ -3513,26 +3508,26 @@ CREATE TABLE IF NOT EXISTS omicron.public.loopback_address (
     address_lot_block_id UUID NOT NULL,
     rsvd_address_lot_block_id UUID NOT NULL,
     rack_id UUID NOT NULL,
-    switch_location TEXT NOT NULL,
     address INET NOT NULL,
-    anycast BOOL NOT NULL
+    anycast BOOL NOT NULL,
+    switch_slot omicron.public.switch_slot NOT NULL
 );
 
 /* TODO https://github.com/oxidecomputer/omicron/issues/3001 */
 
 CREATE UNIQUE INDEX IF NOT EXISTS lookup_loopback_address ON omicron.public.loopback_address (
-    address, rack_id, switch_location
+    address, rack_id, switch_slot
 );
 
 CREATE TABLE IF NOT EXISTS omicron.public.switch_port (
     id UUID PRIMARY KEY,
     rack_id UUID,
-    switch_location TEXT,
     port_name TEXT,
     port_settings_id UUID,
+    switch_slot omicron.public.switch_slot NOT NULL,
 
     CONSTRAINT switch_port_rack_locaction_name_unique UNIQUE (
-        rack_id, switch_location, port_name
+        rack_id, switch_slot, port_name
     )
 );
 
@@ -6036,17 +6031,18 @@ CREATE TABLE IF NOT EXISTS omicron.public.bfd_session (
     remote INET NOT NULL,
     detection_threshold INT8 NOT NULL,
     required_rx INT8 NOT NULL,
-    switch TEXT NOT NULL,
     mode  omicron.public.bfd_mode,
 
     time_created TIMESTAMPTZ NOT NULL,
     time_modified TIMESTAMPTZ NOT NULL,
-    time_deleted TIMESTAMPTZ
+    time_deleted TIMESTAMPTZ,
+
+    switch_slot omicron.public.switch_slot NOT NULL
 );
 
 CREATE UNIQUE INDEX IF NOT EXISTS lookup_bfd_session ON omicron.public.bfd_session (
     remote,
-    switch
+    switch_slot
 ) WHERE time_deleted IS NULL;
 
 
@@ -6168,7 +6164,7 @@ CREATE INDEX IF NOT EXISTS address_lot_names ON omicron.public.address_lot(name)
 CREATE VIEW IF NOT EXISTS omicron.public.bgp_peer_view
 AS
 SELECT
- sp.switch_location,
+ sp.switch_slot,
  sp.port_name,
  bpc.addr,
  bpc.hold_time,
@@ -6191,7 +6187,7 @@ ON sp.port_settings_id = bpc.port_settings_id
 JOIN omicron.public.bgp_config bc ON bc.id = bpc.bgp_config_id;
 
 CREATE INDEX IF NOT EXISTS switch_port_id_and_name
-ON omicron.public.switch_port (port_settings_id, port_name) STORING (switch_location);
+ON omicron.public.switch_port (port_settings_id, port_name) STORING (switch_slot);
 
 CREATE INDEX IF NOT EXISTS switch_port_name ON omicron.public.switch_port (port_name);
 
@@ -8241,7 +8237,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '234.0.0', NULL)
+    (TRUE, NOW(), NOW(), '237.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

@@ -573,7 +573,7 @@ In this example we'll update the recovery silo so we can provision instances dir
 [source, console]
 ----
 $ oxide silo quotas update \
-    --silo fa12b74d-30f8-4d5a-bc0e-4d229f13c6e5 \
+    --silo recovery \
     --cpus 9999999999 \
     --memory 999999999999999999 \
     --storage 999999999999999999
@@ -594,13 +594,15 @@ An IP pool is needed to provide external connectivity to Instances.  The address
 Here we will first create an ip pool for the recovery silo:
 [source,console]
 ----
-$ oxide ip-pool create --name "default" --description "default ip-pool"
+$ oxide system networking ip-pool create --name "default" --description "default ip-pool"
 
 # example response
 {
   "description": "default ip-pool",
   "id": "1c3dfa5c-7b00-46ff-987a-4e59e512b250",
+  "ip_version": "v4",
   "name": "default",
+  "pool_type": "unicast",
   "time_created": "2024-01-16T22:51:54.679751Z",
   "time_modified": "2024-01-16T22:51:54.679751Z"
 }
@@ -609,13 +611,13 @@ $ oxide ip-pool create --name "default" --description "default ip-pool"
 Now we will associate (link) the pool with the recovery silo.
 [source,console]
 ----
-$ oxide ip-pool silo link --pool default --is-default true --silo recovery
+$ oxide system networking ip-pool silo link --pool default --is-default true --silo recovery
 
 # example response
 {
   "ip_pool_id": "1c3dfa5c-7b00-46ff-987a-4e59e512b250",
   "is_default": true,
-  "silo_id": "5c0aca09-d7ee-4be6-b7b1-060655659f74"
+  "silo_id": "fa12b74d-30f8-4d5a-bc0e-4d229f13c6e5",
 }
 ----
 
@@ -623,7 +625,7 @@ Now we will add an address range to the recovery silo:
 
 [source,console]
 ----
-oxide ip-pool range add --pool default --first $IP_POOL_START --last $IP_POOL_END
+oxide system networking ip-pool range add --pool default --first $IP_POOL_START --last $IP_POOL_END
 
 # example response
 {
@@ -637,51 +639,48 @@ oxide ip-pool range add --pool default --first $IP_POOL_START --last $IP_POOL_EN
 }
 ----
 
-=== Create a Project and Image
+=== Create a Project
 
-First, create a Project:
-
-[source,console]
-----
-$ oxide project create --name=myproj --description demo
-----
-
-Create a Project Image that will be used as initial disk contents.
-
-This can be the alpine.iso image that ships with propolis:
+Create a project:
 
 [source,console]
 ----
-$ oxide api /v1/images?project=myproj --method POST --input - <<EOF
-{
-  "name": "alpine",
-  "description": "boot from propolis zone blob!",
-  "os": "linux",
-  "version": "1",
-  "source": {
-    "type": "you_can_boot_anything_as_long_as_its_alpine"
-  }
-}
-EOF
+$ oxide project create --name=oxide --description "An Oxide project."
 ----
 
-Or an ISO / raw disk image / etc hosted at a URL:
+=== Create a Project Image
+
+You'll need an operating system image to boot an instance on Oxide.
+
+Download an image (e.g., link:https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-amd64.img[Ubuntu 24.04 LTS]):
 
 [source,console]
 ----
-$ oxide api /v1/images --method POST --input - <<EOF
-{
-  "name": "crucible-tester-sparse",
-  "description": "boot from a url!",
-  "os": "debian",
-  "version": "9",
-  "source": {
-    "type": "url",
-    "url": "http://[fd00:1122:3344:101::15]/crucible-tester-sparse.img",
-    "block_size": 512
-  }
-}
-EOF
+curl -L -o ubuntu-24-04.img https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-amd64.img
+----
+
+Convert the image to raw format:
+
+[source,console]
+----
+qemu-img convert -f qcow2 -O raw ./ubuntu-24-04.img ./ubuntu-24-04.raw
+----
+
+Upload the image to Oxide as a project image:
+
+[source,console]
+----
+oxide disk import \
+    --project "oxide" \
+    --path "./ubuntu-24-04.raw" \
+    --disk "ubuntu-24-04" \
+    --disk-block-size 512 \
+    --description "Ubuntu 24.04." \
+    --snapshot "ubuntu-24-04" \
+    --image "ubuntu-24-04" \
+    --image-description "Ubuntu 24.04." \
+    --image-os "Ubuntu" \
+    --image-version "24.04"
 ----
 
 === Provision an instance using the CLI

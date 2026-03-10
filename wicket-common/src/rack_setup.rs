@@ -23,7 +23,7 @@ use sled_agent_types::early_networking::LldpPortConfig;
 use sled_agent_types::early_networking::PortFec;
 use sled_agent_types::early_networking::PortSpeed;
 use sled_agent_types::early_networking::RouteConfig;
-use sled_agent_types::early_networking::SwitchLocation;
+use sled_agent_types::early_networking::SwitchSlot;
 use sled_agent_types::early_networking::TxEqConfig;
 use sled_agent_types::early_networking::UplinkAddressConfig;
 use sled_hardware_types::Baseboard;
@@ -120,11 +120,11 @@ impl UserSpecifiedRackNetworkConfig {
     /// Returns the port map for a particular switch location.
     pub fn port_map(
         &self,
-        switch: SwitchLocation,
+        switch: SwitchSlot,
     ) -> &BTreeMap<String, UserSpecifiedPortConfig> {
         match switch {
-            SwitchLocation::Switch0 => &self.switch0,
-            SwitchLocation::Switch1 => &self.switch1,
+            SwitchSlot::Switch0 => &self.switch0,
+            SwitchSlot::Switch1 => &self.switch1,
         }
     }
 
@@ -136,17 +136,17 @@ impl UserSpecifiedRackNetworkConfig {
     /// Returns an iterator over all uplinks -- (switch, port, config) triples.
     pub fn iter_uplinks(
         &self,
-    ) -> impl Iterator<Item = (SwitchLocation, &str, &UserSpecifiedPortConfig)>
+    ) -> impl Iterator<Item = (SwitchSlot, &str, &UserSpecifiedPortConfig)>
     {
         let iter0 = self
             .switch0
             .iter()
-            .map(|(port, cfg)| (SwitchLocation::Switch0, port.as_str(), cfg));
+            .map(|(port, cfg)| (SwitchSlot::Switch0, port.as_str(), cfg));
 
         let iter1 = self
             .switch1
             .iter()
-            .map(|(port, cfg)| (SwitchLocation::Switch1, port.as_str(), cfg));
+            .map(|(port, cfg)| (SwitchSlot::Switch1, port.as_str(), cfg));
 
         iter0.chain(iter1)
     }
@@ -154,17 +154,17 @@ impl UserSpecifiedRackNetworkConfig {
     /// Returns a mutable iterator over all uplinks -- (switch, port, config) triples.
     pub fn iter_uplinks_mut(
         &mut self,
-    ) -> impl Iterator<Item = (SwitchLocation, &str, &mut UserSpecifiedPortConfig)>
+    ) -> impl Iterator<Item = (SwitchSlot, &str, &mut UserSpecifiedPortConfig)>
     {
         let iter0 = self
             .switch0
             .iter_mut()
-            .map(|(port, cfg)| (SwitchLocation::Switch0, port.as_str(), cfg));
+            .map(|(port, cfg)| (SwitchSlot::Switch0, port.as_str(), cfg));
 
         let iter1 = self
             .switch1
             .iter_mut()
-            .map(|(port, cfg)| (SwitchLocation::Switch1, port.as_str(), cfg));
+            .map(|(port, cfg)| (SwitchSlot::Switch1, port.as_str(), cfg));
 
         iter0.chain(iter1)
     }

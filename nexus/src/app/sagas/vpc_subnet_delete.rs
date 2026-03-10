@@ -7,6 +7,7 @@ use super::NexusActionContext;
 use super::NexusSaga;
 use crate::app::sagas::declare_saga_actions;
 use nexus_db_queries::{authn, authz, db};
+use nexus_types::saga::saga_action_failed;
 use omicron_common::api::external;
 use serde::Deserialize;
 use serde::Serialize;
@@ -80,7 +81,7 @@ async fn svsd_delete_subnet(
 
     match res {
         Ok(_) | Err(external::Error::ObjectNotFound { .. }) => Ok(()),
-        Err(e) => Err(ActionError::action_failed(e)),
+        Err(e) => Err(saga_action_failed(e)),
     }
 }
 
@@ -98,7 +99,7 @@ async fn svsd_delete_route(
         .datastore()
         .vpc_delete_subnet_route(&opctx, &params.authz_subnet)
         .await
-        .map_err(ActionError::action_failed)
+        .map_err(saga_action_failed)
 }
 
 async fn svsd_notify_rpw(
@@ -115,7 +116,7 @@ async fn svsd_notify_rpw(
         .datastore()
         .vpc_increment_rpw_version(&opctx, params.authz_vpc.id())
         .await
-        .map_err(ActionError::action_failed)
+        .map_err(saga_action_failed)
 }
 
 #[cfg(test)]
