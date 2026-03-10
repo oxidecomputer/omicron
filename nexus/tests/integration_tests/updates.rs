@@ -745,8 +745,6 @@ async fn test_update_status() -> Result<()> {
     // During high contention the inventory might not be ready yet, which will
     // cause the call to /v1/system/update/status to 500. We thus query the
     // database to make sure we have an inventory before proceeding.
-    //
-    // Flaky test issue: https://github.com/oxidecomputer/omicron/issues/9316
     wait_for_inventory(&cptestctx).await;
 
     // initial status
