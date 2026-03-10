@@ -3160,8 +3160,7 @@ dependencies = [
 [[package]]
 name = "dropshot-api-manager"
 version = "0.5.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c38a99616a680fafd8b7a03cc300aab80b0bbf0fb17c6baac53431d9d12b64b5"
+source = "git+https://github.com/oxidecomputer/dropshot-api-manager?branch=sunshowers%2Fspr%2Fdropshot-api-manager-add-support-for-non-colocated-jj-repos#4324b26963c07991f265aa899f1b98f4bfbacb07"
 dependencies = [
  "anyhow",
  "atomicwrites",
@@ -3193,8 +3192,7 @@ dependencies = [
 [[package]]
 name = "dropshot-api-manager-types"
 version = "0.5.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f5116e3d69b975bb89824a721d0326707b8643e4fd3ba69ca880de1aada768cf"
+source = "git+https://github.com/oxidecomputer/dropshot-api-manager?branch=sunshowers%2Fspr%2Fdropshot-api-manager-add-support-for-non-colocated-jj-repos#4324b26963c07991f265aa899f1b98f4bfbacb07"
 dependencies = [
  "anyhow",
  "camino",

@@ -220,14 +220,11 @@ pub mod metrics {
 }
 
 pub mod multicast {
-    pub use crate::v2025_11_20_00::multicast::MulticastGroupCreate;
     pub use crate::v2025_11_20_00::multicast::MulticastGroupIpLookupPath;
     pub use crate::v2025_11_20_00::multicast::MulticastGroupMemberRemove;
-    pub use crate::v2025_11_20_00::multicast::MulticastGroupUpdate;
 
     pub use crate::v2026_01_08_00::multicast::InstanceMulticastGroupJoin;
     pub use crate::v2026_01_08_00::multicast::InstanceMulticastGroupPath;
-    pub use crate::v2026_01_08_00::multicast::MulticastGroup;
     pub use crate::v2026_01_08_00::multicast::MulticastGroupIdentifier;
     pub use crate::v2026_01_08_00::multicast::MulticastGroupJoinSpec;
     pub use crate::v2026_01_08_00::multicast::MulticastGroupMember;
@@ -235,6 +232,11 @@ pub mod multicast {
     pub use crate::v2026_01_08_00::multicast::MulticastGroupMemberPath;
     pub use crate::v2026_01_08_00::multicast::MulticastGroupPath;
     pub use crate::v2026_01_08_00::multicast::MulticastGroupSelector;
+
+    // Types from MULTICAST_DROP_MVLAN (mvlan field removed).
+    pub use crate::v2026_03_10_00::multicast::MulticastGroup;
+    pub use crate::v2026_03_10_00::multicast::MulticastGroupCreate;
+    pub use crate::v2026_03_10_00::multicast::MulticastGroupUpdate;
 
     pub use crate::impls::multicast::validate_multicast_ip;
     pub use crate::impls::multicast::validate_source_ip;
