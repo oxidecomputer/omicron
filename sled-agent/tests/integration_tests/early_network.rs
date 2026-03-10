@@ -10,7 +10,7 @@ use sled_agent_types::early_networking::{
     BgpConfig, BgpPeerConfig, EarlyNetworkConfigBody,
     EarlyNetworkConfigEnvelope, ImportExportPolicy, LldpAdminStatus,
     LldpPortConfig, MaxPathConfig, PortConfig, PortFec, PortSpeed,
-    RackNetworkConfig, SwitchLocation,
+    RackNetworkConfig, SwitchSlot,
 };
 
 const BLOB_PATH: &str = "tests/data/early_network_blobs.txt";
@@ -133,7 +133,7 @@ fn current_config_example() -> (&'static str, EarlyNetworkConfigEnvelope) {
                 PortConfig {
                     routes: vec![],
                     addresses: vec![],
-                    switch: SwitchLocation::Switch1,
+                    switch: SwitchSlot::Switch1,
                     port: "qsfp0".to_owned(),
                     uplink_port_speed: PortSpeed::Speed100G,
                     uplink_port_fec: None,
@@ -145,7 +145,7 @@ fn current_config_example() -> (&'static str, EarlyNetworkConfigEnvelope) {
                 PortConfig {
                     routes: vec![],
                     addresses: vec![],
-                    switch: SwitchLocation::Switch1,
+                    switch: SwitchSlot::Switch1,
                     port: "qsfp26".to_owned(),
                     uplink_port_speed: PortSpeed::Speed100G,
                     uplink_port_fec: Some(PortFec::Rs),
@@ -165,7 +165,7 @@ fn current_config_example() -> (&'static str, EarlyNetworkConfigEnvelope) {
                 PortConfig {
                     routes: vec![],
                     addresses: vec!["172.20.15.53/29".parse().unwrap()],
-                    switch: SwitchLocation::Switch1,
+                    switch: SwitchSlot::Switch1,
                     port: "qsfp18".to_owned(),
                     uplink_port_speed: PortSpeed::Speed100G,
                     uplink_port_fec: Some(PortFec::Rs),
@@ -208,7 +208,7 @@ fn current_config_example() -> (&'static str, EarlyNetworkConfigEnvelope) {
                 PortConfig {
                     routes: vec![],
                     addresses: vec!["172.20.15.45/29".parse().unwrap()],
-                    switch: SwitchLocation::Switch0,
+                    switch: SwitchSlot::Switch0,
                     port: "qsfp18".to_owned(),
                     uplink_port_speed: PortSpeed::Speed100G,
                     uplink_port_fec: Some(PortFec::Rs),
@@ -251,7 +251,7 @@ fn current_config_example() -> (&'static str, EarlyNetworkConfigEnvelope) {
                 PortConfig {
                     routes: vec![],
                     addresses: vec![],
-                    switch: SwitchLocation::Switch0,
+                    switch: SwitchSlot::Switch0,
                     port: "qsfp0".to_owned(),
                     uplink_port_speed: PortSpeed::Speed100G,
                     uplink_port_fec: None,
@@ -263,7 +263,7 @@ fn current_config_example() -> (&'static str, EarlyNetworkConfigEnvelope) {
                 PortConfig {
                     routes: vec![],
                     addresses: vec![],
-                    switch: SwitchLocation::Switch0,
+                    switch: SwitchSlot::Switch0,
                     port: "qsfp26".to_owned(),
                     uplink_port_speed: PortSpeed::Speed100G,
                     uplink_port_fec: Some(PortFec::Rs),

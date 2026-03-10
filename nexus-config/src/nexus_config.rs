@@ -22,7 +22,7 @@ use serde::{Deserialize, Serialize};
 use serde_with::DisplayFromStr;
 use serde_with::DurationSeconds;
 use serde_with::serde_as;
-use sled_agent_types::early_networking::SwitchLocation;
+use sled_agent_types::early_networking::SwitchSlot;
 use std::collections::HashMap;
 use std::fmt;
 use std::net::IpAddr;
@@ -1000,10 +1000,10 @@ pub struct PackageConfig {
     pub tunables: Tunables,
     /// `Dendrite` dataplane daemon configuration
     #[serde(default)]
-    pub dendrite: HashMap<SwitchLocation, DpdConfig>,
+    pub dendrite: HashMap<SwitchSlot, DpdConfig>,
     /// Maghemite mgd daemon configuration
     #[serde(default)]
-    pub mgd: HashMap<SwitchLocation, MgdConfig>,
+    pub mgd: HashMap<SwitchSlot, MgdConfig>,
     /// Initial reconfigurator config
     ///
     /// We use this hook to disable reconfigurator automation in the test suite
@@ -1335,14 +1335,14 @@ mod test {
                         load_timeout: None
                     },
                     dendrite: HashMap::from([(
-                        SwitchLocation::Switch0,
+                        SwitchSlot::Switch0,
                         DpdConfig {
                             address: SocketAddr::from_str("[::1]:12224")
                                 .unwrap(),
                         }
                     )]),
                     mgd: HashMap::from([(
-                        SwitchLocation::Switch0,
+                        SwitchSlot::Switch0,
                         MgdConfig {
                             address: SocketAddr::from_str("[::1]:4676")
                                 .unwrap(),

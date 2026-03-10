@@ -50,7 +50,7 @@ use omicron_uuid_kinds::DatasetUuid;
 use oximeter::types::ProducerRegistry;
 use oximeter_producer::Server as ProducerServer;
 use sled_agent_types::early_networking::RackNetworkConfig;
-use sled_agent_types::early_networking::SwitchLocation;
+use sled_agent_types::early_networking::SwitchSlot;
 use sled_hardware_types::BaseboardId;
 use slog::Logger;
 use std::collections::BTreeSet;
@@ -435,11 +435,11 @@ impl nexus_test_interface::NexusServer for Server {
                     external_port_count: ExternalPortDiscovery::Static(
                         HashMap::from([
                             (
-                                SwitchLocation::Switch0,
+                                SwitchSlot::Switch0,
                                 vec!["qsfp0".parse().unwrap()],
                             ),
                             (
-                                SwitchLocation::Switch1,
+                                SwitchSlot::Switch1,
                                 vec!["qsfp0".parse().unwrap()],
                             ),
                         ]),

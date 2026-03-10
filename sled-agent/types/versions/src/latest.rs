@@ -62,7 +62,7 @@ pub mod early_networking {
     pub use crate::v1::early_networking::PortFec;
     pub use crate::v1::early_networking::PortSpeed;
     pub use crate::v1::early_networking::RouteConfig;
-    pub use crate::v1::early_networking::SwitchLocation;
+    pub use crate::v1::early_networking::SwitchSlot;
     pub use crate::v1::early_networking::TxEqConfig;
 
     pub use crate::v20::early_networking::BgpConfig;

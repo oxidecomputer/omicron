@@ -305,7 +305,7 @@ pub struct PortConfig {
     /// This port's addresses and optional vlan IDs
     pub addresses: Vec<UplinkAddressConfig>,
     /// Switch the port belongs to.
-    pub switch: v1::SwitchLocation,
+    pub switch: v1::SwitchSlot,
     /// Nmae of the port this config applies to.
     pub port: String,
     /// Port speed.

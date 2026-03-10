@@ -26,7 +26,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use sled_agent_types::early_networking::ImportExportPolicy;
 use sled_agent_types::early_networking::MaxPathConfig;
-use sled_agent_types::early_networking::SwitchLocation;
+use sled_agent_types::early_networking::SwitchSlot;
 use std::net::IpAddr;
 
 /// A base BGP configuration.
@@ -284,7 +284,7 @@ pub struct BgpPeerStatus {
     pub state_duration_millis: u64,
 
     /// Switch with the peer session.
-    pub switch: SwitchLocation,
+    pub switch: SwitchSlot,
 }
 
 impl From<BgpPeerStatus> for crate::v2025_12_12_00::networking::BgpPeerStatus {
@@ -441,7 +441,7 @@ pub struct BgpExported {
     pub peer_id: String,
 
     /// Switch the route is exported from.
-    pub switch: SwitchLocation,
+    pub switch: SwitchSlot,
 
     /// The destination network prefix.
     pub prefix: oxnet::IpNet,
@@ -484,7 +484,7 @@ pub struct BgpImported {
     pub id: u32,
 
     /// Switch the route is imported into.
-    pub switch: SwitchLocation,
+    pub switch: SwitchSlot,
 }
 
 impl TryFrom<BgpImported>

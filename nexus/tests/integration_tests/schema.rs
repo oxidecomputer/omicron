@@ -25,7 +25,7 @@ use omicron_test_utils::dev::db::{Client, CockroachInstance};
 use pretty_assertions::{assert_eq, assert_ne};
 use semver::Version;
 use similar_asserts;
-use sled_agent_types::early_networking::SwitchLocation;
+use sled_agent_types::early_networking::SwitchSlot;
 use slog::Logger;
 use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
@@ -55,12 +55,12 @@ async fn test_setup<'a>(
     starter.start_internal_dns().await;
     starter.start_external_dns().await;
     let sp_conf: Utf8PathBuf = DEFAULT_SP_SIM_CONFIG.into();
-    starter.start_gateway(SwitchLocation::Switch0, None, sp_conf.clone()).await;
-    starter.start_gateway(SwitchLocation::Switch1, None, sp_conf).await;
-    starter.start_dendrite(SwitchLocation::Switch0).await;
-    starter.start_dendrite(SwitchLocation::Switch1).await;
-    starter.start_mgd(SwitchLocation::Switch0).await;
-    starter.start_mgd(SwitchLocation::Switch1).await;
+    starter.start_gateway(SwitchSlot::Switch0, None, sp_conf.clone()).await;
+    starter.start_gateway(SwitchSlot::Switch1, None, sp_conf).await;
+    starter.start_dendrite(SwitchSlot::Switch0).await;
+    starter.start_dendrite(SwitchSlot::Switch1).await;
+    starter.start_mgd(SwitchSlot::Switch0).await;
+    starter.start_mgd(SwitchSlot::Switch1).await;
     starter.populate_internal_dns().await;
     starter
 }
