@@ -33,7 +33,7 @@ use omicron_uuid_kinds::{
 use ref_cast::RefCast;
 use serde::Deserialize;
 use serde::Serialize;
-use sled_agent_types::early_networking::SwitchLocation;
+use sled_agent_types::early_networking::SwitchSlot;
 use slog::{info, warn};
 use std::collections::HashSet;
 use std::convert::TryFrom;
@@ -50,7 +50,7 @@ pub(crate) struct Params {
     pub serialized_authn: authn::saga::Serialized,
     pub project_id: Uuid,
     pub create_params: instance::InstanceCreate,
-    pub boundary_switches: HashSet<SwitchLocation>,
+    pub boundary_switches: HashSet<SwitchSlot>,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -1495,7 +1495,7 @@ pub mod test {
         ByteCount, IdentityMetadataCreateParams, InstanceCpuCount,
     };
     use omicron_sled_agent::sim::SledAgent;
-    use sled_agent_types::early_networking::SwitchLocation;
+    use sled_agent_types::early_networking::SwitchSlot;
     use std::collections::HashSet;
     use uuid::Uuid;
 
@@ -1549,7 +1549,7 @@ pub mod test {
                 anti_affinity_groups: Vec::new(),
                 multicast_groups: Vec::new(),
             },
-            boundary_switches: HashSet::from([SwitchLocation::Switch0]),
+            boundary_switches: HashSet::from([SwitchSlot::Switch0]),
         }
     }
 

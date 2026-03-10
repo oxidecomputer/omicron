@@ -7,7 +7,7 @@
       "url": "https://oxide.computer",
       "email": "api@oxide.computer"
     },
-    "version": "2026030200.0.0"
+    "version": "2026030600.0.0"
   },
   "paths": {
     "/device/auth": {
@@ -17310,7 +17310,7 @@
             "description": "Switch the route is exported from.",
             "allOf": [
               {
-                "$ref": "#/components/schemas/SwitchLocation"
+                "$ref": "#/components/schemas/SwitchSlot"
               }
             ]
           }
@@ -17348,7 +17348,7 @@
             "description": "Switch the route is imported into.",
             "allOf": [
               {
-                "$ref": "#/components/schemas/SwitchLocation"
+                "$ref": "#/components/schemas/SwitchSlot"
               }
             ]
           }
@@ -17635,7 +17635,7 @@
             "description": "Switch with the peer session.",
             "allOf": [
               {
-                "$ref": "#/components/schemas/SwitchLocation"
+                "$ref": "#/components/schemas/SwitchSlot"
               }
             ]
           }
@@ -28520,7 +28520,7 @@
             "description": "Switch this message history is associated with.",
             "allOf": [
               {
-                "$ref": "#/components/schemas/SwitchLocation"
+                "$ref": "#/components/schemas/SwitchSlot"
               }
             ]
           }
@@ -28688,25 +28688,6 @@
         ]
       },
       "SwitchLinkState": {},
-      "SwitchLocation": {
-        "description": "Identifies switch physical location",
-        "oneOf": [
-          {
-            "description": "Switch in upper slot",
-            "type": "string",
-            "enum": [
-              "switch0"
-            ]
-          },
-          {
-            "description": "Switch in lower slot",
-            "type": "string",
-            "enum": [
-              "switch1"
-            ]
-          }
-        ]
-      },
       "SwitchPort": {
         "description": "A switch port represents a physical external port on a rack switch.",
         "type": "object",
@@ -29332,6 +29313,25 @@
         },
         "required": [
           "items"
+        ]
+      },
+      "SwitchSlot": {
+        "description": "Identifies switch physical location",
+        "oneOf": [
+          {
+            "description": "Switch in upper slot",
+            "type": "string",
+            "enum": [
+              "switch0"
+            ]
+          },
+          {
+            "description": "Switch in lower slot",
+            "type": "string",
+            "enum": [
+              "switch1"
+            ]
+          }
         ]
       },
       "SwitchVlanInterfaceConfig": {

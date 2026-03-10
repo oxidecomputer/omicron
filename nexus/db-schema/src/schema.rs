@@ -330,7 +330,7 @@ table! {
         idle_hold_time -> Int8,
         keepalive -> Int8,
         remote_asn -> Nullable<Int8>,
-        min_ttl -> Nullable<Int8>,
+        min_ttl -> Nullable<Int2>,
         md5_auth_key -> Nullable<Text>,
         multi_exit_discriminator -> Nullable<Int8>,
         local_pref -> Nullable<Int8>,

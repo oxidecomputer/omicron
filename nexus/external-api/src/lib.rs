@@ -78,6 +78,7 @@ api_versions!([
     // |  date-based version should be at the top of the list.
     // v
     // (next_yyyy_mm_dd_nn, IDENT),
+    (2026_03_06_00, RENAME_SWITCH_LOCATION_TO_SWITCH_SLOT),
     (2026_03_02_00, ADD_TIME_FIELDS_TO_USERS),
     (2026_02_25_00, SET_TARGET_RELEASE_UPDATE_RECOVERY),
     (2026_02_19_00, REMOVE_SLED_ADD),

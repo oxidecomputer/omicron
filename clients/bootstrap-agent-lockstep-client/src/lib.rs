@@ -27,6 +27,7 @@ progenitor::generate_api!(
         AllowedSourceIps = omicron_common::api::external::AllowedSourceIps,
         Baseboard = sled_hardware_types::Baseboard,
         ImportExportPolicy = sled_agent_types::early_networking::ImportExportPolicy,
+        SwitchSlot = sled_agent_types::early_networking::SwitchSlot,
     },
 );
 

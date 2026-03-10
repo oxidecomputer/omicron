@@ -14,7 +14,7 @@ use omicron_common::api::external::{
     CreateResult, DataPageParams, DeleteResult, ListResultVec,
 };
 use oxnet::IpNet;
-use sled_agent_types::early_networking::SwitchLocation;
+use sled_agent_types::early_networking::SwitchSlot;
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -23,12 +23,12 @@ impl super::Nexus {
         &'a self,
         opctx: &'a OpContext,
         rack_id: Uuid,
-        switch_location: SwitchLocation,
+        switch_slot: SwitchSlot,
         address: IpNet,
     ) -> LookupResult<lookup::LoopbackAddress<'a>> {
         Ok(LookupPath::new(opctx, &self.db_datastore).loopback_address(
             rack_id,
-            switch_location.into(),
+            switch_slot.into(),
             address.into(),
         ))
     }
@@ -65,13 +65,13 @@ impl super::Nexus {
         self: &Arc<Self>,
         opctx: &OpContext,
         rack_id: Uuid,
-        switch_location: SwitchLocation,
+        switch_slot: SwitchSlot,
         address: IpNet,
     ) -> DeleteResult {
         let loopback_address_lookup = self.loopback_address_lookup(
             &opctx,
             rack_id,
-            switch_location,
+            switch_slot,
             address,
         )?;
 

@@ -26,7 +26,7 @@ use serde::{Deserialize, Serialize};
 use sled_agent_types::early_networking::ImportExportPolicy;
 use sled_agent_types::early_networking::PortFec;
 use sled_agent_types::early_networking::PortSpeed;
-use sled_agent_types::early_networking::SwitchLocation;
+use sled_agent_types::early_networking::SwitchSlot;
 use uuid::Uuid;
 
 impl_enum_type!(
@@ -250,7 +250,7 @@ impl_enum_type!(
     Switch1 => b"switch1"
 );
 
-impl From<DbSwitchSlot> for SwitchLocation {
+impl From<DbSwitchSlot> for SwitchSlot {
     fn from(value: DbSwitchSlot) -> Self {
         match value {
             DbSwitchSlot::Switch0 => Self::Switch0,
@@ -259,11 +259,11 @@ impl From<DbSwitchSlot> for SwitchLocation {
     }
 }
 
-impl From<SwitchLocation> for DbSwitchSlot {
-    fn from(value: SwitchLocation) -> Self {
+impl From<SwitchSlot> for DbSwitchSlot {
+    fn from(value: SwitchSlot) -> Self {
         match value {
-            SwitchLocation::Switch0 => Self::Switch0,
-            SwitchLocation::Switch1 => Self::Switch1,
+            SwitchSlot::Switch0 => Self::Switch0,
+            SwitchSlot::Switch1 => Self::Switch1,
         }
     }
 }
@@ -292,13 +292,13 @@ pub struct SwitchPort {
 impl SwitchPort {
     pub fn new(
         rack_id: Uuid,
-        switch_location: SwitchLocation,
+        switch_slot: SwitchSlot,
         port_name: Name,
     ) -> Self {
         Self {
             id: Uuid::new_v4(),
             rack_id,
-            switch_slot: switch_location.into(),
+            switch_slot: switch_slot.into(),
             port_name,
             port_settings_id: None,
         }
@@ -311,7 +311,7 @@ impl Into<external::SwitchPort> for SwitchPort {
             id: self.id,
             rack_id: self.rack_id,
             // TODO-correctness enum in external API
-            switch_location: SwitchLocation::from(self.switch_slot).to_string(),
+            switch_location: SwitchSlot::from(self.switch_slot).to_string(),
             port_name: self.port_name.into(),
             port_settings_id: self.port_settings_id,
         }

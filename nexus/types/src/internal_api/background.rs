@@ -23,7 +23,7 @@ use omicron_uuid_kinds::WebhookDeliveryUuid;
 use semver::Version;
 use serde::Deserialize;
 use serde::Serialize;
-use sled_agent_types::early_networking::SwitchLocation;
+use sled_agent_types::early_networking::SwitchSlot;
 use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::collections::VecDeque;
@@ -945,7 +945,7 @@ pub struct AttachedSubnetManagerStatus {
     /// Error reaching the database to fetch attached subnets.
     pub db_error: Option<String>,
     /// Details about attached subnets sent to Dendrite instances.
-    pub dendrite: HashMap<SwitchLocation, DendriteSubnetDetails>,
+    pub dendrite: HashMap<SwitchSlot, DendriteSubnetDetails>,
     /// Details about attached subnets sent to sleds.
     pub sled: HashMap<SledUuid, SledSubnetDetails>,
 }

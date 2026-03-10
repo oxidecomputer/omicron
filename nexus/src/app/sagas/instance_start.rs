@@ -1148,7 +1148,7 @@ mod test {
         ByteCount, IdentityMetadataCreateParams, InstanceCpuCount, Name,
     };
     use omicron_test_utils::dev::poll;
-    use sled_agent_types::early_networking::SwitchLocation;
+    use sled_agent_types::early_networking::SwitchSlot;
     use uuid::Uuid;
 
     use super::*;
@@ -1320,7 +1320,7 @@ mod test {
             .switch_port_get_id(
                 &opctx,
                 rack_id,
-                SwitchLocation::Switch0,
+                SwitchSlot::Switch0,
                 Name::try_from("qsfp0".to_string()).unwrap().into(),
             )
             .await
@@ -1330,7 +1330,7 @@ mod test {
             .switch_port_get_id(
                 &opctx,
                 rack_id,
-                SwitchLocation::Switch1,
+                SwitchSlot::Switch1,
                 Name::try_from("qsfp0".to_string()).unwrap().into(),
             )
             .await
@@ -1361,7 +1361,7 @@ mod test {
             .dendrite
             .write()
             .unwrap()
-            .remove(&SwitchLocation::Switch0)
+            .remove(&SwitchSlot::Switch0)
             .expect("there should be at least one dendrite running");
 
         let switch0_port = switch0_dpd.port;
@@ -1414,7 +1414,7 @@ mod test {
         let port = {
             let dendrite_guard = cptestctx.dendrite.read().unwrap();
             dendrite_guard
-                .get(&SwitchLocation::Switch1)
+                .get(&SwitchSlot::Switch1)
                 .expect("two dendrites should be present in test context")
                 .port
         };
@@ -1467,7 +1467,7 @@ mod test {
 
         // Reuse the port number from the removed Switch0 to start a new dendrite instance
         let nexus_address = cptestctx.internal_client.bind_address;
-        let mgs = cptestctx.gateway.get(&SwitchLocation::Switch0).unwrap();
+        let mgs = cptestctx.gateway.get(&SwitchSlot::Switch0).unwrap();
         let mgs_address =
             SocketAddrV6::new(Ipv6Addr::LOCALHOST, mgs.port, 0, 0).into();
 
@@ -1486,7 +1486,7 @@ mod test {
             .dendrite
             .write()
             .unwrap()
-            .insert(SwitchLocation::Switch0, new_switch0);
+            .insert(SwitchSlot::Switch0, new_switch0);
 
         // Ensure that the nat entry for the address has made it onto the new switch0 dendrite.
         // This might take some time while the new dendrite comes online.

@@ -7,7 +7,7 @@
       "url": "https://oxide.computer",
       "email": "api@oxide.computer"
     },
-    "version": "26.0.0"
+    "version": "27.0.0"
   },
   "paths": {
     "/artifacts": {
@@ -3277,7 +3277,7 @@
             "minimum": 0
           },
           "switch": {
-            "$ref": "#/components/schemas/SwitchLocation"
+            "$ref": "#/components/schemas/SwitchSlot"
           }
         },
         "required": [
@@ -8089,7 +8089,7 @@
             "description": "Switch the port belongs to.",
             "allOf": [
               {
-                "$ref": "#/components/schemas/SwitchLocation"
+                "$ref": "#/components/schemas/SwitchSlot"
               }
             ]
           },
@@ -9536,7 +9536,22 @@
           "services"
         ]
       },
-      "SwitchLocation": {
+      "SwitchPorts": {
+        "description": "A set of switch uplinks.",
+        "type": "object",
+        "properties": {
+          "uplinks": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/HostPortConfig"
+            }
+          }
+        },
+        "required": [
+          "uplinks"
+        ]
+      },
+      "SwitchSlot": {
         "description": "Identifies switch physical location",
         "oneOf": [
           {
@@ -9553,21 +9568,6 @@
               "switch1"
             ]
           }
-        ]
-      },
-      "SwitchPorts": {
-        "description": "A set of switch uplinks.",
-        "type": "object",
-        "properties": {
-          "uplinks": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/HostPortConfig"
-            }
-          }
-        },
-        "required": [
-          "uplinks"
         ]
       },
       "TrustQuorumNetworkConfig": {
