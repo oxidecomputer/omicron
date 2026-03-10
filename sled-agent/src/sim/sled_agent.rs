@@ -77,6 +77,7 @@ use std::collections::{HashMap, HashSet};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::sync::Arc;
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::Duration;
 use tufaceous_artifact::ArtifactHash;
 use uuid::Uuid;
@@ -114,6 +115,10 @@ pub struct SledAgent {
     config: Config,
     fake_zones: Mutex<OmicronZonesConfig>,
     instance_ensure_state_error: Mutex<Option<Error>>,
+    /// Number of remaining local storage operation failures to inject.
+    /// When > 0, local storage ensure/delete operations decrement this
+    /// counter and return 503 Service Unavailable.
+    local_storage_error_count: AtomicU32,
     pub bootstore_network_config: Mutex<bootstore::NetworkConfig>,
     pub(super) repo_depot:
         dropshot::HttpServer<ArtifactStore<SimArtifactStorage>>,
@@ -194,6 +199,7 @@ impl SledAgent {
                 zones: vec![],
             }),
             instance_ensure_state_error: Mutex::new(None),
+            local_storage_error_count: AtomicU32::new(0),
             repo_depot,
             log,
             bootstore_network_config,
@@ -502,6 +508,42 @@ impl SledAgent {
 
     pub async fn set_instance_ensure_state_error(&self, error: Option<Error>) {
         *self.instance_ensure_state_error.lock().unwrap() = error;
+    }
+
+    /// Set the number of times local storage operations should fail with 503
+    /// before succeeding. Each failure decrements the counter.
+    pub fn set_local_storage_error_count(&self, count: u32) {
+        self.local_storage_error_count.store(count, Ordering::Relaxed);
+    }
+
+    /// Returns the number of remaining local storage errors to inject.
+    pub fn local_storage_error_remaining(&self) -> u32 {
+        self.local_storage_error_count.load(Ordering::Relaxed)
+    }
+
+    pub(super) fn check_local_storage_error(&self) -> Result<(), HttpError> {
+        let prev = self.local_storage_error_count.fetch_update(
+            Ordering::Relaxed,
+            Ordering::Relaxed,
+            |n| {
+                // checked_sub returns None if there's an underflow, which only
+                // happens if the counter was already 0.
+                n.checked_sub(1)
+            },
+        );
+        // fetch_update returns Ok(prev) if the value was updated.
+        if let Ok(prev) = prev {
+            // prev was at least 1.
+            let remaining = prev - 1;
+            return Err(HttpError::for_unavail(
+                None,
+                format!(
+                    "injected local storage error ({} remaining after this)",
+                    remaining
+                ),
+            ));
+        }
+        Ok(())
     }
 
     pub async fn disk_ensure(
