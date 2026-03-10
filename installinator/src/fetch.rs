@@ -194,21 +194,6 @@ impl FetchArtifactBackend {
                 })
                 .await;
 
-            // In production we'll immediately loop back around and continue to
-            // spawn attempts to connect to peers, until either we hit
-            // MAX_CONCURRENT_PEERS or we successfully connect (at which point
-            // we'll pause and call `handle_fetch_result_from_peer()` below,
-            // then resume this loop if we fail to get an artifact).
-            //
-            // However, in tests, we need to disable all concurrency entirely;
-            // we have very precise proptests that assume serial peer connection
-            // ordering.
-            #[cfg(test)]
-            let previous_result = {
-                assert!(previous_result.is_none());
-                tasks.join_next().await
-            };
-
             if let Some((start, peer, result)) = previous_result {
                 if let Some(artifact_bytes) = self
                     .handle_fetch_result_from_peer(
