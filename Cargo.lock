@@ -7046,6 +7046,7 @@ name = "nexus-inventory"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "async-bb8-diesel",
  "base64 0.22.1",
  "camino",
  "chrono",
@@ -7053,7 +7054,9 @@ dependencies = [
  "clickhouse-admin-server-client",
  "clickhouse-admin-types",
  "cockroach-admin-types",
+ "diesel",
  "dns-service-client",
+ "dropshot",
  "expectorate",
  "futures",
  "gateway-client",
@@ -7065,6 +7068,9 @@ dependencies = [
  "illumos-utils",
  "itertools 0.14.0",
  "nexus-client",
+ "nexus-db-model",
+ "nexus-db-queries",
+ "nexus-db-schema",
  "nexus-types",
  "ntp-admin-client",
  "omicron-cockroach-metrics",

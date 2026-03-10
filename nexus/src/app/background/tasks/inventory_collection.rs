@@ -211,6 +211,7 @@ async fn inventory_activate(
     // Run a collection.
     let inventory = nexus_inventory::Collector::new(
         creator,
+        datastore,
         mgs_clients,
         keeper_admin_clients,
         cockroach_admin_client,
@@ -219,6 +220,8 @@ async fn inventory_activate(
     );
     let collection =
         inventory.collect_all().await.context("collecting inventory")?;
+
+    // TODO-K: print sagas here
 
     // Write it to the database.
     datastore

@@ -9,11 +9,19 @@ use crate::builder::CollectionBuilder;
 use crate::builder::InventoryError;
 use anyhow::Context;
 use anyhow::anyhow;
+use async_bb8_diesel::AsyncRunQueryDsl;
 use clickhouse_admin_keeper_client::ClientInfo as _;
+use diesel::prelude::*;
 use gateway_client::types::GetCfpaParams;
 use gateway_client::types::RotCfpaSlot;
 use gateway_messages::SpComponent;
 use itertools::Itertools;
+use nexus_db_model::Saga;
+use nexus_db_model::SagaState;
+use nexus_db_queries::db::DataStore;
+use nexus_db_queries::db::datastore::SQL_BATCH_SIZE;
+use nexus_db_queries::db::pagination::Paginator;
+use nexus_db_queries::db::pagination::paginated;
 use nexus_types::inventory::CabooseWhich;
 use nexus_types::inventory::Collection;
 use nexus_types::inventory::InternalDnsGenerationStatus;
@@ -45,11 +53,14 @@ pub struct Collector<'a> {
     cockroach_admin_client: &'a CockroachClusterAdminClient,
     sled_agent_lister: &'a (dyn SledAgentEnumerator + Send + Sync),
     in_progress: CollectionBuilder,
+    // TODO-K: D Nexus client instead?
+    datastore: &'a DataStore,
 }
 
 impl<'a> Collector<'a> {
     pub fn new(
         creator: &str,
+        datastore: &'a DataStore,
         mgs_clients: Vec<gateway_client::Client>,
         keeper_admin_clients: Vec<clickhouse_admin_keeper_client::Client>,
         cockroach_admin_client: &'a CockroachClusterAdminClient,
@@ -63,6 +74,7 @@ impl<'a> Collector<'a> {
             cockroach_admin_client,
             sled_agent_lister,
             in_progress: CollectionBuilder::new(creator),
+            datastore,
         }
     }
 
@@ -92,6 +104,8 @@ impl<'a> Collector<'a> {
         // or they'll see an empty set of services.
         self.collect_all_timesync().await;
         self.collect_all_dns_generations().await;
+        self.collect_all_long_running_sagas().await;
+        // TODO-K: Add long running sagas here
 
         debug!(&self.log, "finished collection");
 
@@ -489,6 +503,58 @@ impl<'a> Collector<'a> {
         };
 
         self.in_progress.found_sled_inventory(&sled_agent_url, inventory)
+    }
+
+    // TODO-K: Add a saga collector here
+    /// Collect long running sagas from all nexus instances
+    async fn collect_all_long_running_sagas(&mut self) {
+        // TODO-K: Actually connect to the DB and retrieve information
+
+        // TODO-K: Use a real connection
+        let conn = match self.datastore.pool_connection_for_tests().await {
+            Err(e) => panic!("OHONO: {}", e),
+            Ok(conn) => conn,
+        };
+
+        // TODO-K: clean up
+        let mut sagas = Vec::new();
+        let mut paginator = Paginator::new(
+            SQL_BATCH_SIZE,
+            dropshot::PaginationOrder::Ascending,
+        );
+        while let Some(p) = paginator.next() {
+            use nexus_db_schema::schema::saga::dsl;
+            let records_batch =
+                match paginated(dsl::saga, dsl::id, &p.current_pagparams())
+                    .filter(dsl::saga_state.eq(SagaState::Running))
+                    .select(Saga::as_select())
+                    .load_async(&*conn)
+                    .await
+                    .context("fetching sagas")
+                {
+                    Ok(saga) => saga,
+                    // TODO-K: Use found_errors:
+                    Err(e) => panic!("OHNO filtering: {}", e),
+                };
+
+            paginator = p.found_batch(&records_batch, &|s: &Saga| s.id);
+
+            sagas.extend(records_batch);
+        }
+
+        // Sort them by creation time (equivalently: how long they've been running)
+        sagas.sort_by_key(|s| s.time_created);
+        sagas.reverse();
+
+        // TODO-K: Use the saga object or something else
+        let mut s = vec![];
+        for saga in sagas {
+            s.push(format!("{:?}", saga));
+        }
+
+        // Do printline here w datsource info
+        self.in_progress.found_long_running_sagas(s)
+        // TODO-K: Add some error handling
     }
 
     /// Collect timesync status from all sleds

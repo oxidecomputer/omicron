@@ -131,6 +131,7 @@ pub struct CollectionBuilder {
     cockroach_status: BTreeMap<InternalNodeId, CockroachStatus>,
     ntp_timesync: IdOrdMap<TimeSync>,
     internal_dns_generation_status: IdOrdMap<InternalDnsGenerationStatus>,
+    long_running_sagas: Vec<String>,
     // CollectionBuilderRng is taken by value, rather than passed in as a
     // mutable ref, to encourage a tree-like structure where each RNG is
     // generally independent.
@@ -165,6 +166,7 @@ impl CollectionBuilder {
             cockroach_status: BTreeMap::new(),
             ntp_timesync: IdOrdMap::new(),
             internal_dns_generation_status: IdOrdMap::new(),
+            long_running_sagas: vec![],
             rng: CollectionBuilderRng::from_entropy(),
         }
     }
@@ -192,6 +194,7 @@ impl CollectionBuilder {
             cockroach_status: self.cockroach_status,
             ntp_timesync: self.ntp_timesync,
             internal_dns_generation_status: self.internal_dns_generation_status,
+            long_running_sagas: self.long_running_sagas,
         }
     }
 
@@ -694,6 +697,13 @@ impl CollectionBuilder {
         membership: ClickhouseKeeperClusterMembership,
     ) {
         self.clickhouse_keeper_cluster_membership.insert(membership);
+    }
+
+    /// Record information about long running sagas
+    // TODO-K: Will probably have to remove mut
+    pub fn found_long_running_sagas(&mut self, mut sagas: Vec<String>) {
+        // TODO-K: Actually connect to the DB and retrieve information
+        self.long_running_sagas.append(&mut sagas);
     }
 
     /// Record information about timesync

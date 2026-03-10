@@ -184,6 +184,12 @@ pub struct Collection {
     pub ntp_timesync: IdOrdMap<TimeSync>,
     /// The generation status of internal DNS servers
     pub internal_dns_generation_status: IdOrdMap<InternalDnsGenerationStatus>,
+
+    // TODO-K: Call these stale sagas?
+    // TODO-K: Use BtreeMap probably, indexing based on the nexus zone they're
+    // tied to
+    /// A list of sagas that have been running for an extended period
+    pub long_running_sagas: Vec<String>,
 }
 
 impl Collection {
