@@ -4,8 +4,7 @@
 
 use crate::latest::instance::{VmmSpec, VmmStateRequested};
 use propolis_api_types::instance_spec::{
-    Component,
-    SpecKey,
+    Component, SpecKey,
     components::backends::{
         CrucibleStorageBackend, FileStorageBackend, VirtioNetworkBackend,
     },
