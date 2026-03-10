@@ -1271,6 +1271,9 @@ fn print_task_details(bgtask: &BackgroundTask, details: &serde_json::Value) {
         "read_only_region_replacement_start" => {
             print_task_read_only_region_replacement_start(details);
         }
+        "reconfigurator_config_watcher" => {
+            print_task_reconfigurator_config_watcher(details);
+        }
         "region_replacement" => {
             print_task_region_replacement(details);
         }
@@ -2315,6 +2318,16 @@ fn print_task_read_only_region_replacement_start(details: &serde_json::Value) {
                 println!("    > {line}");
             }
         }
+    }
+}
+
+fn print_task_reconfigurator_config_watcher(details: &serde_json::Value) {
+    match details.get("config_updated").and_then(|v| v.as_bool()) {
+        Some(updated) => println!("    config updated: {updated}"),
+        None => eprintln!(
+            "warning: failed to interpret task details: {:?}",
+            details
+        ),
     }
 }
 

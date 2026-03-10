@@ -771,7 +771,7 @@ task: "reconfigurator_config_watcher"
   configured period: every <REDACTED_DURATION>s
   last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
-warning: unknown background task: "reconfigurator_config_watcher" (don't know how to interpret details: Object {"config_updated": Bool(false)})
+    config updated: <CONFIG_UPDATED_REDACTED>
 
 task: "region_replacement"
   configured period: every <REDACTED_DURATION>days <REDACTED_DURATION>h <REDACTED_DURATION>m <REDACTED_DURATION>s
@@ -1366,7 +1366,7 @@ task: "reconfigurator_config_watcher"
   configured period: every <REDACTED_DURATION>s
   last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
-warning: unknown background task: "reconfigurator_config_watcher" (don't know how to interpret details: Object {"config_updated": Bool(false)})
+    config updated: <CONFIG_UPDATED_REDACTED>
 
 task: "region_replacement"
   configured period: every <REDACTED_DURATION>days <REDACTED_DURATION>h <REDACTED_DURATION>m <REDACTED_DURATION>s
