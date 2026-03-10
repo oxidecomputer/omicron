@@ -3525,8 +3525,8 @@ impl ServiceManager {
         for port_config in &our_ports {
             for addr in &port_config.addrs {
                 usmfh.addpropvalue_type(
-                    &format!("uplinks/{}_0", port_config.port),
-                    &addr.to_string(),
+                    format!("uplinks/{}_0", port_config.port),
+                    addr.to_uplinkd_smf_property(),
                     "astring",
                 )?;
             }

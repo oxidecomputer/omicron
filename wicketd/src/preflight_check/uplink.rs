@@ -335,7 +335,7 @@ fn add_steps_for_single_local_uplink_preflight_check<'a>(
                     .count();
 
                     // This includes the VLAN ID, if any
-                    let uplink_cfg = addr.to_string();
+                    let uplink_cfg = addr.to_uplinkd_smf_property();
                     if let Err(err) = execute_command(&[
                         SVCCFG,
                         "-s",
@@ -461,7 +461,7 @@ fn add_steps_for_single_local_uplink_preflight_check<'a>(
                                 )),
                                 format!(
                                     "timed out waiting for `uplink` to \
-                                 create {addr}"
+                                     create {uplink_cfg}"
                                 ),
                             )
                             .into();

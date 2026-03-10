@@ -14,8 +14,8 @@ use crate::latest::early_networking::RouterLifetimeConfig;
 use crate::latest::early_networking::RouterLifetimeConfigError;
 use crate::latest::early_networking::SwitchSlot;
 use crate::latest::early_networking::UplinkAddressConfig;
-use crate::latest::early_networking::UplinkAddressConfigError;
 use omicron_common::api::external;
+use oxnet::IpNet;
 use std::fmt;
 use std::net::IpAddr;
 use std::net::Ipv6Addr;
@@ -115,16 +115,25 @@ impl std::fmt::Display for RouterLifetimeConfig {
 }
 
 impl UplinkAddressConfig {
+    /// Construct an `UplinkAddressConfig` with no VLAN ID.
+    pub fn without_vlan(address: IpNet) -> Self {
+        // TODO-cleanup Squash unspecified addresses down to `None`. We want
+        // better types here:
+        // <https://github.com/oxidecomputer/omicron/issues/9832>.
+        let address =
+            if address.addr().is_unspecified() { None } else { Some(address) };
+        Self { address, vlan_id: None }
+    }
+
     pub fn addr(&self) -> IpAddr {
         match self.address {
             Some(ipaddr) => ipaddr.addr(),
             None => IpAddr::V6(Ipv6Addr::UNSPECIFIED),
         }
     }
-}
 
-impl std::fmt::Display for UplinkAddressConfig {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    /// Format `self` appropriately for passing to `uplinkd`'s SMF properties.
+    pub fn to_uplinkd_smf_property(&self) -> String {
         fn addr_string(addr: &oxnet::IpNet) -> String {
             if addr.addr().is_unspecified() {
                 "link-local".into()
@@ -133,59 +142,15 @@ impl std::fmt::Display for UplinkAddressConfig {
             }
         }
 
+        // TODO-cleanup for now, squash address values of both `None` and
+        // `Some(UNSPECIFIED)` down to "link-local". We want better types here:
+        // <https://github.com/oxidecomputer/omicron/issues/9832>.
         match (&self.address, self.vlan_id) {
-            (Some(addr), None) => write!(f, "{}", addr_string(addr)),
-            (Some(addr), Some(v)) => write!(f, "{};{v}", addr_string(addr)),
-            (None, None) => write!(f, "link-local"),
-            (None, Some(v)) => write!(f, "link-local;{v}"),
+            (Some(addr), None) => addr_string(addr),
+            (Some(addr), Some(v)) => format!("{};{v}", addr_string(addr)),
+            (None, None) => "link-local".to_string(),
+            (None, Some(v)) => format!("link-local;{v}"),
         }
-    }
-}
-
-impl std::fmt::Display for UplinkAddressConfigError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "parse switch location error: {}", self.0)
-    }
-}
-
-/// Convert a string into an UplinkAddressConfig.
-/// 192.168.1.1/24 => UplinkAddressConfig { Some(192.168.1.1/24), None }
-/// 192.168.1.1/24;200 => UplinkAddressConfig { Some(192.168.1.1/24), Some(200) }
-/// link-local => UplinkAddressConfig { None, None }
-/// link-local;200 => UplinkAddressConfig { None, Some(200) }
-impl FromStr for UplinkAddressConfig {
-    type Err = UplinkAddressConfigError;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let fields: Vec<&str> = s.split(';').collect();
-        let (address_str, vlan_id) = match fields.len() {
-            1 => Ok((fields[0], None)),
-            2 => Ok((fields[0], Some(fields[1]))),
-            _ => Err(UplinkAddressConfigError(format!(
-                "not a valid uplink address: {s}"
-            ))),
-        }?;
-        let address = if address_str == "link-local" {
-            None
-        } else {
-            Some(address_str.parse().map_err(|_| {
-                UplinkAddressConfigError(format!(
-                    "not a valid ip address: {address_str}"
-                ))
-            })?)
-        };
-        let vlan_id = match vlan_id {
-            None => Ok(None),
-            Some(v) => match v.parse() {
-                Err(_) => Err(format!("invalid vlan id: {v}")),
-                Ok(vlan_id) if vlan_id > 1 && vlan_id < 4096 => {
-                    Ok(Some(vlan_id))
-                }
-                Ok(vlan_id) => Err(format!("vlan id out of range: {vlan_id}")),
-            },
-        }
-        .map_err(|e| UplinkAddressConfigError(e))?;
-        Ok(UplinkAddressConfig { address, vlan_id })
     }
 }
 
