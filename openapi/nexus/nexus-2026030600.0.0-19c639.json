@@ -7,7 +7,7 @@
       "url": "https://oxide.computer",
       "email": "api@oxide.computer"
     },
-    "version": "2026022500.0.0"
+    "version": "2026030600.0.0"
   },
   "paths": {
     "/device/auth": {
@@ -17310,7 +17310,7 @@
             "description": "Switch the route is exported from.",
             "allOf": [
               {
-                "$ref": "#/components/schemas/SwitchLocation"
+                "$ref": "#/components/schemas/SwitchSlot"
               }
             ]
           }
@@ -17348,7 +17348,7 @@
             "description": "Switch the route is imported into.",
             "allOf": [
               {
-                "$ref": "#/components/schemas/SwitchLocation"
+                "$ref": "#/components/schemas/SwitchSlot"
               }
             ]
           }
@@ -17635,7 +17635,7 @@
             "description": "Switch with the peer session.",
             "allOf": [
               {
-                "$ref": "#/components/schemas/SwitchLocation"
+                "$ref": "#/components/schemas/SwitchSlot"
               }
             ]
           }
@@ -18881,6 +18881,16 @@
                 "$ref": "#/components/schemas/Name"
               }
             ]
+          },
+          "time_created": {
+            "description": "Timestamp when this user was created",
+            "type": "string",
+            "format": "date-time"
+          },
+          "time_modified": {
+            "description": "Timestamp when this user was last modified",
+            "type": "string",
+            "format": "date-time"
           }
         },
         "required": [
@@ -18889,7 +18899,9 @@
           "id",
           "silo_admin",
           "silo_id",
-          "silo_name"
+          "silo_name",
+          "time_created",
+          "time_modified"
         ]
       },
       "Datum": {
@@ -21214,12 +21226,24 @@
             "description": "Uuid of the silo to which this group belongs",
             "type": "string",
             "format": "uuid"
+          },
+          "time_created": {
+            "description": "Timestamp when this group was created",
+            "type": "string",
+            "format": "date-time"
+          },
+          "time_modified": {
+            "description": "Timestamp when this group was last modified",
+            "type": "string",
+            "format": "date-time"
           }
         },
         "required": [
           "display_name",
           "id",
-          "silo_id"
+          "silo_id",
+          "time_created",
+          "time_modified"
         ]
       },
       "GroupResultsPage": {
@@ -28496,7 +28520,7 @@
             "description": "Switch this message history is associated with.",
             "allOf": [
               {
-                "$ref": "#/components/schemas/SwitchLocation"
+                "$ref": "#/components/schemas/SwitchSlot"
               }
             ]
           }
@@ -28664,25 +28688,6 @@
         ]
       },
       "SwitchLinkState": {},
-      "SwitchLocation": {
-        "description": "Identifies switch physical location",
-        "oneOf": [
-          {
-            "description": "Switch in upper slot",
-            "type": "string",
-            "enum": [
-              "switch0"
-            ]
-          },
-          {
-            "description": "Switch in lower slot",
-            "type": "string",
-            "enum": [
-              "switch1"
-            ]
-          }
-        ]
-      },
       "SwitchPort": {
         "description": "A switch port represents a physical external port on a rack switch.",
         "type": "object",
@@ -29310,6 +29315,25 @@
           "items"
         ]
       },
+      "SwitchSlot": {
+        "description": "Identifies switch physical location",
+        "oneOf": [
+          {
+            "description": "Switch in upper slot",
+            "type": "string",
+            "enum": [
+              "switch0"
+            ]
+          },
+          {
+            "description": "Switch in lower slot",
+            "type": "string",
+            "enum": [
+              "switch1"
+            ]
+          }
+        ]
+      },
       "SwitchVlanInterfaceConfig": {
         "description": "A switch port VLAN interface configuration for a port settings object.",
         "type": "object",
@@ -29806,12 +29830,24 @@
             "description": "Uuid of the silo to which this user belongs",
             "type": "string",
             "format": "uuid"
+          },
+          "time_created": {
+            "description": "Timestamp when this user was created",
+            "type": "string",
+            "format": "date-time"
+          },
+          "time_modified": {
+            "description": "Timestamp when this user was last modified",
+            "type": "string",
+            "format": "date-time"
           }
         },
         "required": [
           "display_name",
           "id",
-          "silo_id"
+          "silo_id",
+          "time_created",
+          "time_modified"
         ]
       },
       "UserBuiltin": {

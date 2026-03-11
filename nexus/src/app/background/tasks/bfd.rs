@@ -20,7 +20,7 @@ use nexus_db_model::{BfdMode, BfdSession};
 use nexus_db_queries::{context::OpContext, db::DataStore};
 use omicron_common::api::external::DataPageParams;
 use serde_json::json;
-use sled_agent_types::early_networking::SwitchLocation;
+use sled_agent_types::early_networking::SwitchSlot;
 use std::{
     collections::HashSet,
     hash::Hash,
@@ -40,7 +40,7 @@ impl BfdManager {
 }
 
 struct BfdSessionKey {
-    switch: SwitchLocation,
+    switch: SwitchSlot,
     local: Option<IpAddr>,
     remote: IpAddr,
     detection_threshold: u8,
@@ -74,7 +74,7 @@ impl Eq for BfdSessionKey {}
 impl From<BfdSession> for BfdSessionKey {
     fn from(value: BfdSession) -> Self {
         Self {
-            switch: value.switch.parse().unwrap(), //TODO unwrap
+            switch: value.switch_slot.into(),
             remote: value.remote.ip(),
             local: value.local.map(|x| x.ip()),
             detection_threshold: value

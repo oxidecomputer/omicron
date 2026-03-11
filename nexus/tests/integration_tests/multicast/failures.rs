@@ -47,7 +47,7 @@ use nexus_types::external_api::multicast::{
 };
 use omicron_common::api::external::InstanceState;
 use omicron_uuid_kinds::{InstanceUuid, MulticastGroupUuid};
-use sled_agent_types::early_networking::SwitchLocation;
+use sled_agent_types::early_networking::SwitchSlot;
 
 use super::*;
 use crate::integration_tests::instances as instance_helpers;
@@ -79,7 +79,7 @@ async fn test_dpd_failure_during_creating_state(
     create_instance(client, project_name, instance_name).await;
 
     // Stop DPD before implicit creation
-    cptestctx.stop_dendrite(SwitchLocation::Switch0).await;
+    cptestctx.stop_dendrite(SwitchSlot::Switch0).await;
 
     // Add instance to multicast group via instance-centric API
     multicast_group_attach(cptestctx, project_name, instance_name, group_name)
@@ -109,7 +109,7 @@ async fn test_dpd_failure_during_creating_state(
     );
 
     // Recovery: restart DPD and verify group/member recover
-    cptestctx.restart_dendrite(SwitchLocation::Switch0).await;
+    cptestctx.restart_dendrite(SwitchSlot::Switch0).await;
     activate_multicast_reconciler(&cptestctx.lockstep_client).await;
     wait_for_group_active(client, group_name).await;
     wait_for_member_state(
@@ -177,7 +177,7 @@ async fn test_dpd_failure_during_active_state(
     assert_eq!(active_group.state, "Active");
 
     // Now stop DPD while group is Active
-    cptestctx.stop_dendrite(SwitchLocation::Switch0).await;
+    cptestctx.stop_dendrite(SwitchSlot::Switch0).await;
 
     // Wait for reconciler to process
     wait_for_multicast_reconciler(&cptestctx.lockstep_client).await;
@@ -205,7 +205,7 @@ async fn test_dpd_failure_during_active_state(
     multicast_group_detach(client, project_name, instance_name, group_name)
         .await;
     wait_for_multicast_reconciler(&cptestctx.lockstep_client).await;
-    cptestctx.restart_dendrite(SwitchLocation::Switch0).await;
+    cptestctx.restart_dendrite(SwitchSlot::Switch0).await;
     cleanup_instances(cptestctx, client, project_name, &[instance_name]).await;
 }
 
@@ -240,7 +240,7 @@ async fn test_dpd_failure_during_deleting_state(
     wait_for_group_active(client, group_name).await;
 
     // Stop DPD before triggering deletion
-    cptestctx.stop_dendrite(SwitchLocation::Switch0).await;
+    cptestctx.stop_dendrite(SwitchSlot::Switch0).await;
 
     // Remove member to trigger implicit deletion
     multicast_group_detach(client, project_name, instance_name, group_name)
@@ -295,7 +295,7 @@ async fn test_dpd_failure_during_deleting_state(
     }
 
     // Restart DPD and activate reconciler to complete deletion
-    cptestctx.restart_dendrite(SwitchLocation::Switch0).await;
+    cptestctx.restart_dendrite(SwitchSlot::Switch0).await;
     activate_multicast_reconciler(&cptestctx.lockstep_client).await;
     cleanup_instances(cptestctx, client, project_name, &[instance_name]).await;
     wait_for_group_deleted(cptestctx, group_name).await;
@@ -322,7 +322,7 @@ async fn test_multicast_group_members_during_dpd_failure(
     let instance = create_instance(client, project_name, instance_name).await;
 
     // Stop DPD to test member operations during failure
-    cptestctx.stop_dendrite(SwitchLocation::Switch0).await;
+    cptestctx.stop_dendrite(SwitchSlot::Switch0).await;
 
     // Add instance to multicast group via instance-centric API
     multicast_group_attach(cptestctx, project_name, instance_name, group_name)
@@ -430,7 +430,7 @@ async fn test_implicit_deletion_with_dpd_failure(
     let created_group: MulticastGroup = object_get(client, &group_url).await;
 
     // Now stop DPD before removing the last member
-    cptestctx.stop_dendrite(SwitchLocation::Switch0).await;
+    cptestctx.stop_dendrite(SwitchSlot::Switch0).await;
 
     // Remove the last member (should trigger implicit deletion)
     multicast_group_detach(client, project_name, instance_name, group_name)
@@ -463,7 +463,7 @@ async fn test_implicit_deletion_with_dpd_failure(
         assert_eq!(group.identity.id, created_group.identity.id);
 
         // Restart DPD and verify cleanup completes
-        cptestctx.restart_dendrite(SwitchLocation::Switch0).await;
+        cptestctx.restart_dendrite(SwitchSlot::Switch0).await;
         activate_multicast_reconciler(&cptestctx.lockstep_client).await;
 
         // Both group and orphaned members should be cleaned up
@@ -811,7 +811,7 @@ async fn test_drift_correction_missing_group_in_dpd(
 
     // Simulate drift: restart DPD (clears its state)
     // This leaves the group "Active" in DB but missing from DPD
-    cptestctx.restart_dendrite(SwitchLocation::Switch0).await;
+    cptestctx.restart_dendrite(SwitchSlot::Switch0).await;
 
     // Verify group is missing from DPD after restart (drift exists)
     let dpd_client = nexus_test_utils::dpd_client(cptestctx);
@@ -876,7 +876,7 @@ async fn test_member_joining_to_left_on_instance_stop(
     let instance_id = InstanceUuid::from_untyped_uuid(instance.identity.id);
 
     // Stop DPD to prevent member from transitioning to "Joined"
-    cptestctx.stop_dendrite(SwitchLocation::Switch0).await;
+    cptestctx.stop_dendrite(SwitchSlot::Switch0).await;
 
     // Add instance to group - member will be stuck in "Joining" since DPD is down
     multicast_group_attach(cptestctx, project_name, instance_name, group_name)
@@ -978,7 +978,7 @@ async fn test_left_member_waits_for_group_active(
     let instance_id = InstanceUuid::from_untyped_uuid(instance.identity.id);
 
     // Stop DPD to keep group in "Creating" state
-    cptestctx.stop_dendrite(SwitchLocation::Switch0).await;
+    cptestctx.stop_dendrite(SwitchSlot::Switch0).await;
 
     // Add stopped instance to group - member will be in "Left" state
     // Uses instance-centric API: PUT /v1/instances/{instance}/multicast-groups/{group}
@@ -1091,7 +1091,7 @@ async fn test_multicast_group_underlay_collision_retry(
     .await;
 
     // Stop DPD to control when groups transition to "Active"
-    cptestctx.stop_dendrite(SwitchLocation::Switch0).await;
+    cptestctx.stop_dendrite(SwitchSlot::Switch0).await;
 
     // Create group A by joining instance to IP address (implicit group creation)
     multicast_group_attach(
@@ -1146,7 +1146,7 @@ async fn test_multicast_group_underlay_collision_retry(
     let group_b = get_multicast_group(client, group_b_ip).await;
 
     // Restart DPD and run reconciler, triggering collision detection
-    cptestctx.restart_dendrite(SwitchLocation::Switch0).await;
+    cptestctx.restart_dendrite(SwitchSlot::Switch0).await;
     activate_multicast_reconciler(&cptestctx.lockstep_client).await;
 
     // Fetch group B after reconciliation

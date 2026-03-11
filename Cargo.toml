@@ -477,10 +477,10 @@ digest = "0.10.7"
 dns-server = { path = "dns-server" }
 dns-server-api = { path = "dns-server-api" }
 dns-service-client = { path = "clients/dns-service-client" }
-dpd-client = { git = "https://github.com/oxidecomputer/dendrite", rev = "258d2be18a97a77049637f010251c233365b1727", features = ["multicast"] }
+dpd-client = { git = "https://github.com/oxidecomputer/dendrite", rev = "e8a68118b5c2333f586d9bdcc4a1f63f2db98631", features = ["multicast"] }
 dropshot = { version = "0.16.6", features = [ "usdt-probes" ] }
-dropshot-api-manager = "0.5.2"
-dropshot-api-manager-types = "0.5.2"
+dropshot-api-manager = "0.6.0"
+dropshot-api-manager-types = "0.6.0"
 dyn-clone = "1.0.20"
 either = "1.15.0"
 ereport-types = { path = "ereport/types" }
@@ -693,7 +693,7 @@ prettyplease = { version = "0.2.36", features = ["verbatim"] }
 proc-macro2 = "1.0"
 progenitor = "0.13.0"
 progenitor-client = "0.13.0"
-progenitor-extras = "0.1.0"
+progenitor-extras = "0.1.1"
 progenitor-client010 = { package = "progenitor-client", version = "0.10.0" }
 # NOTE: if you change the pinned revision of the `bhyve_api` and propolis
 # dependencies, you must also update the references in package-manifest.toml to

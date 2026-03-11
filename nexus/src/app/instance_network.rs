@@ -21,7 +21,7 @@ use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::InstanceUuid;
 use oxnet::IpNet;
 use oxnet::Ipv6Net;
-use sled_agent_types::early_networking::SwitchLocation;
+use sled_agent_types::early_networking::SwitchSlot;
 use slog_error_chain::InlineErrorChain;
 use std::collections::HashSet;
 use std::str::FromStr;
@@ -77,7 +77,7 @@ impl Nexus {
     pub(crate) async fn boundary_switches(
         &self,
         opctx: &OpContext,
-    ) -> Result<HashSet<SwitchLocation>, Error> {
+    ) -> Result<HashSet<SwitchSlot>, Error> {
         boundary_switches(&self.db_datastore, opctx).await
     }
 
@@ -281,19 +281,12 @@ impl Nexus {
 pub(crate) async fn boundary_switches(
     datastore: &DataStore,
     opctx: &OpContext,
-) -> Result<HashSet<SwitchLocation>, Error> {
-    let mut boundary_switches: HashSet<SwitchLocation> = HashSet::new();
+) -> Result<HashSet<SwitchSlot>, Error> {
+    let mut boundary_switches: HashSet<SwitchSlot> = HashSet::new();
     let uplinks =
         switch_port::list_switch_ports_with_uplinks(datastore, opctx).await?;
     for uplink in &uplinks {
-        let location: SwitchLocation =
-            uplink.switch_location.parse().map_err(|_| {
-                Error::internal_error(&format!(
-                    "invalid switch location in uplink config: {}",
-                    uplink.switch_location
-                ))
-            })?;
-        boundary_switches.insert(location);
+        boundary_switches.insert(SwitchSlot::from(uplink.switch_slot));
     }
     Ok(boundary_switches)
 }
@@ -818,8 +811,7 @@ async fn delete_attached_subnets_from_dendrite_inner(
     // thing as "both" switches, since (1) we have only a single rack and (2) we
     // don't list the switches (per-rack or otherwise) in the database. See
     // https://github.com/oxidecomputer/omicron/issues/6394 for that one.
-    let switches =
-        HashSet::from([SwitchLocation::Switch0, SwitchLocation::Switch1]);
+    let switches = HashSet::from([SwitchSlot::Switch0, SwitchSlot::Switch1]);
     let clients = super::dpd_clients(resolver, log).await.map_err(|e| {
         Error::internal_error(&format!("failed to get dpd clients: {e}"))
     })?;

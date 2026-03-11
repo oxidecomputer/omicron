@@ -24,7 +24,7 @@ use omicron_common::address::Ipv4Range;
 use omicron_common::address::Ipv6Range;
 use omicron_common::api::external::AllowedSourceIps;
 use oxnet::Ipv6Net;
-use sled_agent_types::early_networking::SwitchLocation;
+use sled_agent_types::early_networking::SwitchSlot;
 use sled_hardware_types::Baseboard;
 use slog::debug;
 use slog::warn;
@@ -744,7 +744,7 @@ pub fn validate_rack_subnet(
 ///
 /// Assumes that all auth keys are present in `bgp_auth_keys`.
 fn build_port_config(
-    switch: SwitchLocation,
+    switch: SwitchSlot,
     port: &str,
     config: &UserSpecifiedPortConfig,
     bgp_auth_keys: &BTreeMap<BgpAuthKeyId, Option<BgpAuthKey>>,
@@ -756,7 +756,6 @@ fn build_port_config(
     use bootstrap_agent_lockstep_client::types::PortSpeed as BaPortSpeed;
     use bootstrap_agent_lockstep_client::types::RouteConfig as BaRouteConfig;
     use bootstrap_agent_lockstep_client::types::RouterLifetimeConfig as BaRouterLifetimeConfig;
-    use bootstrap_agent_lockstep_client::types::SwitchLocation as BaSwitchLocation;
     use bootstrap_agent_lockstep_client::types::TxEqConfig as BaTxEqConfig;
     use bootstrap_agent_lockstep_client::types::UplinkAddressConfig as BaUplinkAddressConfig;
     use sled_agent_types::early_networking::LldpAdminStatus;
@@ -831,10 +830,7 @@ fn build_port_config(
                 }
             })
             .collect(),
-        switch: match switch {
-            SwitchLocation::Switch0 => BaSwitchLocation::Switch0,
-            SwitchLocation::Switch1 => BaSwitchLocation::Switch1,
-        },
+        switch,
         uplink_port_speed: match config.uplink_port_speed {
             PortSpeed::Speed0G => BaPortSpeed::Speed0G,
             PortSpeed::Speed1G => BaPortSpeed::Speed1G,

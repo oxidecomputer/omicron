@@ -111,6 +111,7 @@ define_enums! {
     SwitchLinkFecEnum => "switch_link_fec",
     SwitchLinkSpeedEnum => "switch_link_speed",
     SwitchPortGeometryEnum => "switch_port_geometry",
+    SwitchSlotEnum => "switch_slot",
     TargetReleaseSourceEnum => "target_release_source",
     TrustQuorumConfigurationStateEnum => "trust_quorum_configuration_state",
     TrustQuorumMemberStateEnum => "trust_quorum_member_state",
