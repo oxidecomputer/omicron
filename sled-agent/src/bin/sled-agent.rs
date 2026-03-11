@@ -64,11 +64,6 @@ async fn do_run() -> Result<(), CmdError> {
             let config = SledConfig::from_file(&config_path)
                 .map_err(|e| CmdError::Failure(anyhow!(e)))?;
 
-            // /!\ REMOVE BEFORE FLIGHT REMOVE BEFORE FLIGHT /!\
-            tokio::spawn(async {
-                wiggle().await.expect("should be able to wiggle");
-            });
-
             // - Sled agent starts with the normal config file - typically
             // called "config.toml".
             // - Thing-flinger likes allowing "sled-specific" configs to arrive
@@ -125,16 +120,5 @@ async fn do_run() -> Result<(), CmdError> {
                 .map_err(|err| CmdError::Failure(anyhow!(err)))?;
             Ok(())
         }
-    }
-}
-
-// /!\ REMOVE BEFORE FLIGHT REMOVE BEFORE FLIGHT /!\
-async fn wiggle() -> anyhow::Result<()> {
-    let mut tick = tokio::time::interval(std::time::Duration::from_millis(20));
-    let mut cmd = tokio::process::Command::new("echo");
-    cmd.arg("hi");
-    loop {
-        cmd.spawn()?.wait().await?;
-        tick.tick().await;
     }
 }
