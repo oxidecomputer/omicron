@@ -165,31 +165,6 @@ impl SvcsResult {
     }
 }
 
-/// DEPRECATED: This type is kept for compatibility with older sled agent API
-/// versions.
-///
-/// Lists services in maintenance status if any, and the time the health check
-/// for SMF services ran
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
-#[serde(rename_all = "snake_case")]
-pub struct SvcsInMaintenanceResult {
-    pub services: Vec<SvcInMaintenance>,
-    pub errors: Vec<String>,
-    pub time_of_status: Option<DateTime<Utc>>,
-}
-
-impl SvcsInMaintenanceResult {
-    pub fn new() -> Self {
-        Self { services: vec![], errors: vec![], time_of_status: None }
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.services.is_empty()
-            && self.errors.is_empty()
-            && self.time_of_status == None
-    }
-}
-
 /// Each service instance is always in a well-defined state based on its
 /// dependencies, the results of the execution of its methods, and its potential
 /// contracts events. See <https://illumos.org/man/7/smf> for more information.
@@ -257,25 +232,6 @@ pub struct Svc {
     fmri: String,
     zone: String,
     state: SvcState,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
-#[serde(rename_all = "snake_case")]
-/// DEPRECATED: This type is kept for compatibility with older sled agent API
-/// versions.
-///
-/// Information about an SMF service that is enabled but not running
-pub struct SvcInMaintenance {
-    fmri: String,
-    zone: String,
-}
-
-impl Display for SvcInMaintenance {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let SvcInMaintenance { fmri, zone } = self;
-
-        writeln!(f, "FMRI: {} zone: {}", fmri, zone)
-    }
 }
 
 #[cfg(test)]
