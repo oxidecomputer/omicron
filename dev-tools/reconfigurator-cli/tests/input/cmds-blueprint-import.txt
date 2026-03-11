@@ -1,0 +1,23 @@
+# Load example system.
+load-example --nsleds 3 --ndisks-per-sled 3
+
+# Make an edit to the latest blueprint.
+blueprint-edit latest add-nexus serial0 1
+blueprint-diff 8da82a8e-bf97-4fbd-8ddd-9f6462732cf1
+
+# Save the blueprint to disk.
+blueprint-save latest blueprint-import-test.json
+
+# Importing should fail: we already have this blueprint ID in our state.
+blueprint-import blueprint-import-test.json
+
+# Start over; this puts us back in the original state before we created the
+# edited blueprint.
+wipe all
+load-example --nsleds 3 --ndisks-per-sled 3
+
+# Now we can import the blueprint we saved above.
+blueprint-import blueprint-import-test.json
+
+# This diff should be identical to the one above.
+blueprint-diff 8da82a8e-bf97-4fbd-8ddd-9f6462732cf1
