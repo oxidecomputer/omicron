@@ -65,6 +65,8 @@ pub mod v24;
 pub mod v25;
 #[path = "rack_network_config_not_optional/mod.rs"]
 pub mod v26;
+#[path = "add_vsock_component/mod.rs"]
+pub mod v28;
 #[path = "add_switch_zone_operator_policy/mod.rs"]
 pub mod v3;
 #[path = "add_nexus_lockstep_port_to_inventory/mod.rs"]
