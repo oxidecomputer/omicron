@@ -1252,12 +1252,18 @@ impl SledAgentApi for SledAgentImpl {
 
     async fn support_nvmeadm_info(
         request_context: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseOk<SledDiagnosticsQueryOutput>, HttpError> {
+    ) -> Result<HttpResponseOk<Vec<SledDiagnosticsQueryOutput>>, HttpError>
+    {
         let sa = request_context.context();
         sa.latencies()
             .instrument_dropshot_handler(&request_context, async {
-                let res = sa.support_nvmeadm_info().await;
-                Ok(HttpResponseOk(res.get_output()))
+                let res = sa
+                    .support_nvmeadm_info()
+                    .await
+                    .into_iter()
+                    .map(|cmd| cmd.get_output())
+                    .collect::<Vec<_>>();
+                Ok(HttpResponseOk(res))
             })
             .await
     }

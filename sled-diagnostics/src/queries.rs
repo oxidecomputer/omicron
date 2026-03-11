@@ -248,6 +248,17 @@ pub fn nvmeadm_list() -> Command {
     cmd
 }
 
+pub fn nvmeadm_logpage_health(nvme_num: u32) -> Command {
+    let mut cmd = std::process::Command::new(PFEXEC);
+    cmd.env_clear()
+        .arg(NVMEADM)
+        .arg("-v")
+        .arg("get-logpage")
+        .arg(&format!("nvme{nvme_num}"))
+        .arg("health");
+    cmd
+}
+
 pub fn pargs_process(pid: i32) -> Command {
     let mut cmd = std::process::Command::new(PFEXEC);
     cmd.env_clear().arg(PARGS).arg("-ae").arg(pid.to_string());

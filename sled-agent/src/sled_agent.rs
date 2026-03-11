@@ -1255,7 +1255,7 @@ impl SledAgent {
 
     pub(crate) async fn support_nvmeadm_info(
         &self,
-    ) -> Result<SledDiagnosticsCmdOutput, SledDiagnosticsCmdError> {
+    ) -> Vec<Result<SledDiagnosticsCmdOutput, SledDiagnosticsCmdError>> {
         sled_diagnostics::nvmeadm_info().await
     }
 
