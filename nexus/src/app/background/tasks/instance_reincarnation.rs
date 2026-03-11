@@ -330,7 +330,6 @@ mod test {
     use nexus_db_model::InstanceState;
     use nexus_db_model::Vmm;
     use nexus_db_model::VmmCpuPlatform;
-    use nexus_db_model::VmmRuntimeState;
     use nexus_db_model::VmmState;
     use nexus_db_queries::authz;
     use nexus_test_utils::resource_helpers::{
@@ -456,11 +455,9 @@ mod test {
                     propolis_ip: "10.1.9.42".parse().unwrap(),
                     propolis_port: 420.into(),
                     cpu_platform: VmmCpuPlatform::SledDefault,
-                    runtime: VmmRuntimeState {
-                        time_state_updated: Utc::now(),
-                        generation: Generation::new(),
-                        state: VmmState::SagaUnwound,
-                    },
+                    time_state_updated: Utc::now(),
+                    generation: Generation::new(),
+                    state: VmmState::SagaUnwound,
                 },
             )
             .await

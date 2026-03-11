@@ -5095,12 +5095,9 @@ async fn cmd_db_instance_info(
                     cpu_platform: _,
                     time_created,
                     time_deleted,
-                    runtime:
-                        db::model::VmmRuntimeState {
-                            time_state_updated: _,
-                            generation,
-                            state,
-                        },
+                    time_state_updated: _,
+                    generation,
+                    state,
                 } = vmm;
                 VmmRow {
                     state: VmmStateRow {
@@ -7733,8 +7730,9 @@ fn prettyprint_vmm(
         propolis_ip,
         propolis_port,
         cpu_platform,
-        runtime:
-            db::model::VmmRuntimeState { state, generation, time_state_updated },
+        state,
+        generation,
+        time_state_updated,
     } = vmm;
 
     println!("{indent}{ID:>width$}: {id}");
@@ -7837,12 +7835,9 @@ async fn cmd_db_vmm_list(
                 propolis_ip: _,
                 propolis_port: _,
                 cpu_platform: _,
-                runtime:
-                    db::model::VmmRuntimeState {
-                        state,
-                        generation,
-                        time_state_updated: _,
-                    },
+                time_state_updated: _,
+                generation,
+                state,
             } = vmm;
             let sled = match sled {
                 Some(sled) => sled.serial_number(),
@@ -7884,7 +7879,7 @@ async fn cmd_db_vmm_list(
                 sled_id,
                 propolis_ip,
                 propolis_port,
-                ref runtime,
+                time_state_updated,
                 ..
             } = it.0;
             VerboseVmmRow {
@@ -7895,7 +7890,7 @@ async fn cmd_db_vmm_list(
                     propolis_port.into(),
                 ),
                 time_created,
-                time_updated: runtime.time_state_updated,
+                time_updated: time_state_updated,
             }
         }
     }
