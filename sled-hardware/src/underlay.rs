@@ -2,11 +2,15 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! Finding the underlay network physical links and address objects.
+//! Finding the underlay network physical links and address objects,
+//! and deriving bootstrap IP addresses.
+
+use std::net::Ipv6Addr;
 
 use crate::is_oxide_sled;
 use illumos_utils::addrobj;
 use illumos_utils::addrobj::AddrObject;
+use illumos_utils::dladm;
 use illumos_utils::dladm::CHELSIO_LINK_PREFIX;
 use illumos_utils::dladm::Dladm;
 use illumos_utils::dladm::FindPhysicalLinkError;
@@ -14,6 +18,14 @@ use illumos_utils::dladm::GetLinkpropError;
 use illumos_utils::dladm::PhysicalLink;
 use illumos_utils::dladm::SetLinkpropError;
 use illumos_utils::zone::Zones;
+use omicron_common::api::external::MacAddr;
+
+#[doc(inline)]
+pub use sled_hardware_types::underlay::BOOTSTRAP_MASK;
+#[doc(inline)]
+pub use sled_hardware_types::underlay::BOOTSTRAP_PREFIX;
+#[doc(inline)]
+pub use sled_hardware_types::underlay::BootstrapInterface;
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
@@ -98,4 +110,48 @@ pub async fn ensure_links_have_global_zone_link_local_v6_addresses(
     }
 
     Ok(addr_objs)
+}
+
+// TODO(https://github.com/oxidecomputer/omicron/issues/945): This address
+// could be randomly generated when it no longer needs to be durable.
+/// Derive the bootstrap IP address for the given interface by reading
+/// the MAC address of the given physical link.
+pub async fn bootstrap_ip(
+    interface: BootstrapInterface,
+    link: &PhysicalLink,
+) -> Result<Ipv6Addr, dladm::GetMacError> {
+    let mac = Dladm::get_mac(link).await?;
+    Ok(mac_to_bootstrap_ip(mac, interface.interface_id()))
+}
+
+fn mac_to_bootstrap_ip(mac: MacAddr, interface_id: u64) -> Ipv6Addr {
+    let mac_bytes = mac.into_array();
+    assert_eq!(6, mac_bytes.len());
+
+    Ipv6Addr::new(
+        BOOTSTRAP_PREFIX,
+        (u16::from(mac_bytes[0]) << 8) | u16::from(mac_bytes[1]),
+        (u16::from(mac_bytes[2]) << 8) | u16::from(mac_bytes[3]),
+        (u16::from(mac_bytes[4]) << 8) | u16::from(mac_bytes[5]),
+        ((interface_id >> 48) & 0xffff).try_into().unwrap(),
+        ((interface_id >> 32) & 0xffff).try_into().unwrap(),
+        ((interface_id >> 16) & 0xffff).try_into().unwrap(),
+        (interface_id & 0xfff).try_into().unwrap(),
+    )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use macaddr::MacAddr6;
+
+    #[test]
+    fn test_mac_to_bootstrap_ip() {
+        let mac = MacAddr("a8:40:25:10:00:01".parse::<MacAddr6>().unwrap());
+
+        assert_eq!(
+            mac_to_bootstrap_ip(mac, 1),
+            "fdb0:a840:2510:1::1".parse::<Ipv6Addr>().unwrap(),
+        );
+    }
 }

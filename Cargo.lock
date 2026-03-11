@@ -13563,9 +13563,6 @@ name = "sled-hardware-types"
 version = "0.1.0"
 dependencies = [
  "daft",
- "illumos-utils",
- "macaddr",
- "omicron-common",
  "omicron-workspace-hack",
  "proptest",
  "schemars 0.8.22",
