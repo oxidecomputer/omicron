@@ -1015,6 +1015,8 @@ enum BlueprintEditCommands {
     /// This initiates a handoff from the current generation of Nexus zones to
     /// the next generation of Nexus zones.
     BumpNexusGeneration,
+    /// make a new blueprint from an existing one without any changes
+    Noop,
 }
 
 #[derive(Debug, Subcommand)]
@@ -2788,6 +2790,7 @@ fn cmd_blueprint_edit(
             builder.debug_sled_force_generation_bump(sled_id)?;
             format!("debug: forced sled {sled_id} generation bump")
         }
+        BlueprintEditCommands::Noop => "noop".to_owned(),
     };
 
     let new_blueprint = builder.build(BlueprintSource::ReconfiguratorCliEdit);

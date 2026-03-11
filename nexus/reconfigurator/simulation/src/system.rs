@@ -520,7 +520,9 @@ impl SimSystemBuilder {
 
         let system_res =
             self.inner.load_serialized_inner(state, primary_collection_id, res);
-        self.log.push(SimSystemLogEntry::LoadSerialized(system_res.clone()));
+        self.log.push(SimSystemLogEntry::LoadSerialized(Box::new(
+            system_res.clone(),
+        )));
         system_res
     }
 
@@ -704,7 +706,7 @@ pub enum SimSystemLogEntry {
         internal_dns_version: Generation,
         external_dns_version: Generation,
     },
-    LoadSerialized(LoadSerializedSystemResult),
+    LoadSerialized(Box<LoadSerializedSystemResult>),
     AddCollection(CollectionUuid),
     AddBlueprint(BlueprintUuid),
     AddInternalDns(Generation),

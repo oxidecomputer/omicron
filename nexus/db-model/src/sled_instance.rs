@@ -1,33 +1,35 @@
 use crate::Name;
 use crate::VmmState;
-use chrono::{DateTime, Utc};
+use db_macros::Asset;
 use nexus_db_schema::schema::sled_instance;
 use nexus_types::external_api::sled;
+use nexus_types::identity::Asset;
 use serde::Deserialize;
 use serde::Serialize;
 use uuid::Uuid;
 
 /// An operator view of an instance as exposed by the sled API.
-#[derive(Queryable, Debug, Selectable, Serialize, Deserialize)]
+#[derive(Queryable, Debug, Selectable, Asset, Serialize, Deserialize)]
 #[diesel(table_name = sled_instance)]
 pub struct SledInstance {
-    pub id: Uuid,
+    #[diesel(embed)]
+    identity: SledInstanceIdentity,
+    active_sled_id: Uuid,
+    pub migration_id: Option<Uuid>,
+
     pub name: Name,
     pub silo_name: Name,
     pub project_name: Name,
-    pub active_sled_id: Uuid,
-    pub time_created: DateTime<Utc>,
-    pub time_modified: DateTime<Utc>,
-    pub migration_id: Option<Uuid>,
+
+    pub state: VmmState,
     pub ncpus: i64,
     pub memory: i64,
-    pub state: VmmState,
 }
 
 impl From<SledInstance> for sled::SledInstance {
     fn from(sled_instance: SledInstance) -> Self {
         Self {
-            identity: nexus_types::identity::Asset::identity(&sled_instance),
+            identity: sled_instance.identity(),
             name: sled_instance.name.into(),
             active_sled_id: sled_instance.active_sled_id,
             silo_name: sled_instance.silo_name.into(),
@@ -40,21 +42,8 @@ impl From<SledInstance> for sled::SledInstance {
     }
 }
 
-impl nexus_types::identity::Asset for SledInstance {
-    type IdType = Uuid;
-    fn id(&self) -> Uuid {
-        self.id
-    }
-    fn time_created(&self) -> DateTime<Utc> {
-        self.time_created
-    }
-    fn time_modified(&self) -> DateTime<Utc> {
-        self.time_modified
-    }
-}
-
 impl SledInstance {
     pub fn instance_id(&self) -> Uuid {
-        self.id
+        self.identity.id
     }
 }

@@ -13,8 +13,8 @@ set cockroachdb-settings --preserve-downgrade 22.1
 blueprint-plan latest
 blueprint-diff latest
 
-# Run blueprint-edit and verify CRDB settings are preserved (not reset).
-blueprint-edit latest add-cockroach 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c
+# Run blueprint-edit and verify CRDB settings are preserved.
+blueprint-edit latest noop
 blueprint-diff latest
 
 # Save and reload to verify round-trip preservation.
