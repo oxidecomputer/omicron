@@ -440,6 +440,7 @@ execute even if it is abandoned. You should only proceed if:
 }
 
 // helper functions
+
 async fn get_all_sagas_in_state(
     conn: &DataStoreConnection,
     state: SagaState,
