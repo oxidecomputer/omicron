@@ -818,7 +818,7 @@ dependencies = [
  "derive_more 0.99.20",
  "hex",
  "hkdf",
- "omicron-common",
+ "omicron-ledger",
  "omicron-workspace-hack",
  "proptest",
  "rand 0.8.5",
@@ -8224,6 +8224,7 @@ dependencies = [
  "itertools 0.14.0",
  "libc",
  "macaddr",
+ "omicron-ledger",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
  "oxnet",
@@ -8400,6 +8401,22 @@ dependencies = [
  "tufaceous-artifact",
  "uuid",
  "zip 4.6.1",
+]
+
+[[package]]
+name = "omicron-ledger"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "camino",
+ "camino-tempfile",
+ "dropshot",
+ "omicron-workspace-hack",
+ "serde",
+ "serde_json",
+ "slog",
+ "thiserror 2.0.18",
+ "tokio",
 ]
 
 [[package]]
@@ -9014,6 +9031,7 @@ dependencies = [
  "ntp-admin-client",
  "omicron-common",
  "omicron-ddm-admin-client",
+ "omicron-ledger",
  "omicron-test-utils",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
@@ -13282,6 +13300,7 @@ dependencies = [
  "key-manager-types",
  "ntp-admin-client",
  "omicron-common",
+ "omicron-ledger",
  "omicron-test-utils",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
@@ -13450,6 +13469,7 @@ dependencies = [
  "illumos-utils",
  "indent_write",
  "omicron-common",
+ "omicron-ledger",
  "omicron-passwords",
  "omicron-test-utils",
  "omicron-uuid-kinds",
@@ -15350,7 +15370,7 @@ dependencies = [
  "hex",
  "hkdf",
  "iddqd",
- "omicron-common",
+ "omicron-ledger",
  "omicron-test-utils",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
