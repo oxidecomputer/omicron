@@ -359,6 +359,10 @@ impl SystemDescription {
         self
     }
 
+    pub fn get_cockroachdb_settings(&self) -> &CockroachDbSettings {
+        &self.cockroachdb_settings
+    }
+
     pub fn set_cockroachdb_settings(
         &mut self,
         settings: CockroachDbSettings,
