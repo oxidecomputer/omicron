@@ -217,7 +217,6 @@ async fn inventory_activate(
         keeper_admin_clients,
         cockroach_admin_client,
         &sled_enum,
-        opctx.log.clone(),
     );
     let collection =
         inventory.collect_all().await.context("collecting inventory")?;

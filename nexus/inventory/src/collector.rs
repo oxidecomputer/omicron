@@ -50,7 +50,6 @@ const STALE_SAGA_THRESHOLD: TimeDelta = TimeDelta::minutes(1);
 
 /// Collect all inventory data from an Oxide system
 pub struct Collector<'a> {
-    log: slog::Logger,
     mgs_clients: Vec<gateway_client::Client>,
     keeper_admin_clients: Vec<clickhouse_admin_keeper_client::Client>,
     cockroach_admin_client: &'a CockroachClusterAdminClient,
@@ -69,11 +68,8 @@ impl<'a> Collector<'a> {
         keeper_admin_clients: Vec<clickhouse_admin_keeper_client::Client>,
         cockroach_admin_client: &'a CockroachClusterAdminClient,
         sled_agent_lister: &'a (dyn SledAgentEnumerator + Send + Sync),
-        // TODO-K: I think I can get rid of log if I just use context
-        log: slog::Logger,
     ) -> Self {
         Collector {
-            log,
             mgs_clients,
             keeper_admin_clients,
             cockroach_admin_client,
@@ -99,7 +95,7 @@ impl<'a> Collector<'a> {
         // downstream services.  So we just do one step at a time.  This also
         // keeps the code simpler.
 
-        debug!(&self.log, "begin collection");
+        debug!(&self.opctx.log, "begin collection");
 
         self.collect_all_mgs().await;
         self.collect_all_sled_agents().await;
@@ -112,7 +108,7 @@ impl<'a> Collector<'a> {
         self.collect_all_dns_generations().await;
         self.collect_all_stale_sagas().await;
 
-        debug!(&self.log, "finished collection");
+        debug!(&self.opctx.log, "finished collection");
 
         Ok(self.in_progress.build())
     }
@@ -120,8 +116,12 @@ impl<'a> Collector<'a> {
     /// Collect inventory from all MGS instances
     async fn collect_all_mgs(&mut self) {
         for client in &self.mgs_clients {
-            Self::collect_one_mgs(client, &self.log, &mut self.in_progress)
-                .await;
+            Self::collect_one_mgs(
+                client,
+                &self.opctx.log,
+                &mut self.in_progress,
+            )
+            .await;
         }
     }
 
@@ -464,7 +464,7 @@ impl<'a> Collector<'a> {
         };
 
         for url in urls {
-            let log = self.log.new(o!("SledAgent" => url.clone()));
+            let log = self.opctx.log.new(o!("SledAgent" => url.clone()));
             let reqwest_client = reqwest::ClientBuilder::new()
                 .connect_timeout(SLED_AGENT_TIMEOUT)
                 .timeout(SLED_AGENT_TIMEOUT)
@@ -478,7 +478,7 @@ impl<'a> Collector<'a> {
 
             if let Err(error) = self.collect_one_sled_agent(&client).await {
                 error!(
-                    &self.log,
+                    &self.opctx.log,
                     "sled agent {:?}: {:#}",
                     client.baseurl(),
                     error
@@ -492,7 +492,7 @@ impl<'a> Collector<'a> {
         client: &sled_agent_client::Client,
     ) -> Result<(), anyhow::Error> {
         let sled_agent_url = client.baseurl();
-        debug!(&self.log, "begin collection from Sled Agent";
+        debug!(&self.opctx.log, "begin collection from Sled Agent";
             "sled_agent_url" => client.baseurl()
         );
 
@@ -578,7 +578,8 @@ impl<'a> Collector<'a> {
                 let ip = cfg.zone_type.underlay_ip();
                 let addr = SocketAddrV6::new(ip, NTP_ADMIN_PORT, 0, 0);
                 let url = format!("http://{addr}");
-                let log = self.log.new(o!("ntp_admin_url" => url.clone()));
+                let log =
+                    self.opctx.log.new(o!("ntp_admin_url" => url.clone()));
 
                 (cfg.id, ntp_admin_client::Client::new(&url, log))
             })
@@ -586,7 +587,7 @@ impl<'a> Collector<'a> {
 
         for (zone_id, client) in ntp_admin_clients {
             if let Err(err) = Self::collect_one_timesync(
-                &self.log,
+                &self.opctx.log,
                 zone_id,
                 &client,
                 &mut self.in_progress,
@@ -594,7 +595,7 @@ impl<'a> Collector<'a> {
             .await
             {
                 error!(
-                    &self.log,
+                    &self.opctx.log,
                     "timesync collection error";
                     "zone_id" => ?zone_id,
                     slog_error_chain::InlineErrorChain::new(err.as_ref())
@@ -635,15 +636,19 @@ impl<'a> Collector<'a> {
     /// Collect inventory from about keepers from all `ClickhouseAdminKeeper`
     /// clients
     async fn collect_all_keepers(&mut self) {
-        debug!(self.log, "begin collecting all keepers";
+        debug!(self.opctx.log, "begin collecting all keepers";
             "nkeeper_admin_clients" => self.keeper_admin_clients.len());
 
         for client in &self.keeper_admin_clients {
-            Self::collect_one_keeper(&client, &self.log, &mut self.in_progress)
-                .await;
+            Self::collect_one_keeper(
+                &client,
+                &self.opctx.log,
+                &mut self.in_progress,
+            )
+            .await;
         }
 
-        debug!(self.log, "end collecting all keepers";
+        debug!(self.opctx.log, "end collecting all keepers";
             "nkeeper_admin_clients" => self.keeper_admin_clients.len());
     }
 
@@ -680,7 +685,7 @@ impl<'a> Collector<'a> {
 
     /// Collect inventory from CockroachDB nodes
     async fn collect_all_cockroach(&mut self) {
-        debug!(&self.log, "begin collection from CockroachDB nodes");
+        debug!(&self.opctx.log, "begin collection from CockroachDB nodes");
 
         // Fetch metrics from all nodes
         let metrics_results = self
@@ -703,7 +708,7 @@ impl<'a> Collector<'a> {
 
     /// Collect DNS generation status from all internal DNS servers
     async fn collect_all_dns_generations(&mut self) {
-        debug!(&self.log, "begin collection from internal DNS servers");
+        debug!(&self.opctx.log, "begin collection from internal DNS servers");
         let internal_dns_clients: Vec<_> = self
             .in_progress
             .ledgered_zones_of_kind(ZoneKind::InternalDns)
@@ -724,7 +729,8 @@ impl<'a> Collector<'a> {
                     panic!("Unexpected zone type returned");
                 };
                 let url = format!("http://{http_address}");
-                let log = self.log.new(o!("internal_dns_url" => url.clone()));
+                let log =
+                    self.opctx.log.new(o!("internal_dns_url" => url.clone()));
 
                 (cfg.id, dns_service_client::Client::new(&url, log))
             })
@@ -732,7 +738,7 @@ impl<'a> Collector<'a> {
 
         for (zone_id, client) in internal_dns_clients {
             if let Err(err) = Self::collect_one_dns_generation(
-                &self.log,
+                &self.opctx.log,
                 zone_id,
                 &client,
                 &mut self.in_progress,
@@ -740,7 +746,7 @@ impl<'a> Collector<'a> {
             .await
             {
                 error!(
-                    &self.log,
+                    &self.opctx.log,
                     "DNS generation collection error";
                     "zone_id" => ?zone_id,
                     "error" => ?err,
@@ -748,7 +754,10 @@ impl<'a> Collector<'a> {
             }
         }
 
-        debug!(&self.log, "finished collection from internal DNS servers");
+        debug!(
+            &self.opctx.log,
+            "finished collection from internal DNS servers"
+        );
     }
 
     async fn collect_one_dns_generation(
@@ -1206,7 +1215,6 @@ mod test {
             keeper_clients,
             &crdb_cluster,
             &sled_enum,
-            log.clone(),
         );
         let collection = collector
             .collect_all()
@@ -1292,7 +1300,6 @@ mod test {
             keeper_clients,
             &crdb_cluster,
             &sled_enum,
-            log.clone(),
         );
         let collection = collector
             .collect_all()
@@ -1347,7 +1354,6 @@ mod test {
             keeper_clients,
             &crdb_cluster,
             &sled_enum,
-            log.clone(),
         );
         let collection = collector
             .collect_all()
@@ -1410,7 +1416,6 @@ mod test {
             keeper_clients,
             &crdb_cluster,
             &sled_enum,
-            log.clone(),
         );
         let collection = collector
             .collect_all()
