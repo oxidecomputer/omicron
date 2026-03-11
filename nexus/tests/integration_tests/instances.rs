@@ -8756,7 +8756,7 @@ pub async fn instance_wait_for_vmm_registration(
                 }
             };
 
-            if vmm.runtime.state == nexus_db_model::VmmState::Creating {
+            if vmm.state == nexus_db_model::VmmState::Creating {
                 debug!(
                     log,
                     "instance's active VMM is still Creating";
@@ -8769,7 +8769,7 @@ pub async fn instance_wait_for_vmm_registration(
                     "instance's active VMM is no longer Creating";
                     "instance_id" => %instance_id,
                     "vmm_id" => %vmm.id,
-                    "vmm_state" => ?vmm.runtime.state,
+                    "vmm_state" => ?vmm.state,
                 );
                 Ok(())
             }

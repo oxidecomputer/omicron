@@ -209,8 +209,7 @@ pub(super) async fn networking_resource_instance_state(
         .await
         .map_err(saga_action_failed)?;
 
-    let found_vmm_state =
-        inst_and_vmm.vmm().as_ref().map(|vmm| vmm.runtime.state);
+    let found_vmm_state = inst_and_vmm.vmm().as_ref().map(|vmm| vmm.state);
     let found_instance_state = inst_and_vmm.instance().nexus_state;
     let mut propolis_and_sled_id =
         inst_and_vmm.vmm().as_ref().map(|vmm| VmmAndSledIds {

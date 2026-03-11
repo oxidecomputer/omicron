@@ -242,7 +242,7 @@ impl Instance {
                     // Note that we *don't* reincarnate instances with `Failed` active
                     // VMMs; in that case, an instance-update saga must first run to
                     // move the *instance* record to the `Failed` state.
-                    vmm.runtime.state == VmmState::SagaUnwound
+                    vmm.state == VmmState::SagaUnwound
                 }
                 _ => false,
             };

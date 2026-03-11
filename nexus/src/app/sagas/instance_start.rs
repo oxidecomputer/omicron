@@ -418,7 +418,7 @@ async fn sis_move_to_starting(
         // If the instance has a Propolis ID, but the Propolis was left behind
         // by a previous start saga unwinding, that's fine, we can just clear it
         // out and proceed as though there was no Propolis ID here.
-        Some(vmm) if vmm.runtime.state == db::model::VmmState::SagaUnwound => {
+        Some(vmm) if vmm.state == db::model::VmmState::SagaUnwound => {
             abandoned_unwound_vmm = true;
         }
 
@@ -1232,7 +1232,6 @@ mod test {
             .vmm()
             .as_ref()
             .expect("running instance should have a vmm")
-            .runtime
             .state;
 
         assert_eq!(vmm_state, nexus_db_model::VmmState::Running);
@@ -1408,7 +1407,6 @@ mod test {
             .vmm()
             .as_ref()
             .expect("running instance should have a vmm")
-            .runtime
             .state;
 
         assert_eq!(vmm_state, nexus_db_model::VmmState::Running);
@@ -1618,7 +1616,6 @@ mod test {
             .vmm()
             .as_ref()
             .expect("running instance should have a vmm")
-            .runtime
             .state;
 
         assert_eq!(vmm_state, nexus_db_model::VmmState::Running);

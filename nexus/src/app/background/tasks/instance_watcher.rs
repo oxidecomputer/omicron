@@ -130,7 +130,7 @@ impl InstanceWatcher {
                 // code path as `mark_instance_failed`...
                 SledVmmState {
                     vmm_state: nexus::VmmRuntimeState {
-                        generation: vmm.runtime.generation.0.next(),
+                        generation: vmm.generation.0.next(),
                         state: nexus::VmmState::Failed,
                         time_updated: chrono::Utc::now(),
                     },
@@ -169,7 +169,7 @@ impl InstanceWatcher {
                         // code path as `mark_instance_failed`...
                         SledVmmState {
                             vmm_state: nexus::VmmRuntimeState {
-                                generation: vmm.runtime.generation.0.next(),
+                                generation: vmm.generation.0.next(),
                                 state: nexus::VmmState::Failed,
                                 time_updated: chrono::Utc::now(),
                             },
