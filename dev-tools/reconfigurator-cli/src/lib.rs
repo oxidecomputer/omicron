@@ -455,7 +455,6 @@ fn process_command(
         Commands::BlueprintList => cmd_blueprint_list(sim),
         Commands::BlueprintBlippy(args) => cmd_blueprint_blippy(sim, args),
         Commands::BlueprintEdit(args) => cmd_blueprint_edit(sim, args),
-        Commands::BlueprintNoop(args) => cmd_blueprint_noop(sim, args),
         Commands::BlueprintPlan(args) => cmd_blueprint_plan(sim, args),
         Commands::BlueprintShow(args) => cmd_blueprint_show(sim, args),
         Commands::BlueprintDiff(args) => cmd_blueprint_diff(sim, args),
@@ -544,8 +543,6 @@ enum Commands {
     BlueprintPlan(BlueprintPlanArgs),
     /// edit contents of a blueprint directly
     BlueprintEdit(BlueprintEditArgs),
-    /// make a new blueprint from an existing one without any changes
-    BlueprintNoop(BlueprintNoopArgs),
     /// show details about a blueprint
     BlueprintShow(BlueprintArgs),
     /// show differences between two blueprints
@@ -917,16 +914,6 @@ struct BlueprintEditArgs {
     edit_command: BlueprintEditCommands,
 }
 
-#[derive(Debug, Args)]
-struct BlueprintNoopArgs {
-    /// id of the blueprint on which this one will be based, "latest", or
-    /// "target"
-    parent_blueprint_id: BlueprintIdOpt,
-    /// "creator" field for the new blueprint
-    #[arg(long)]
-    creator: Option<String>,
-}
-
 #[derive(Debug, Subcommand)]
 enum BlueprintEditCommands {
     /// add a Nexus instance to a particular sled
@@ -1027,6 +1014,8 @@ enum BlueprintEditCommands {
     /// This initiates a handoff from the current generation of Nexus zones to
     /// the next generation of Nexus zones.
     BumpNexusGeneration,
+    /// make a new blueprint from an existing one without any changes
+    Noop,
 }
 
 #[derive(Debug, Subcommand)]
@@ -2754,6 +2743,7 @@ fn cmd_blueprint_edit(
             builder.debug_sled_force_generation_bump(sled_id)?;
             format!("debug: forced sled {sled_id} generation bump")
         }
+        BlueprintEditCommands::Noop => "noop".to_owned(),
     };
 
     let mut new_blueprint =
@@ -2775,45 +2765,6 @@ fn cmd_blueprint_edit(
     system.add_blueprint(new_blueprint)?;
 
     sim.commit_and_bump("reconfigurator-cli blueprint-edit".to_owned(), state);
-    Ok(Some(rv))
-}
-
-fn cmd_blueprint_noop(
-    sim: &mut ReconfiguratorSim,
-    args: BlueprintNoopArgs,
-) -> anyhow::Result<Option<String>> {
-    let BlueprintNoopArgs { parent_blueprint_id, creator } = args;
-
-    let mut state = sim.current_state().to_mut();
-    let rng = state.rng_mut().next_planner_rng();
-    let system = state.system_mut();
-
-    let resolved_id = system.resolve_blueprint_id(parent_blueprint_id.into());
-    let blueprint = system.get_blueprint(&resolved_id)?;
-    let creator = creator.as_deref().unwrap_or("reconfigurator-cli");
-
-    let builder =
-        BlueprintBuilder::new_based_on(&sim.log, blueprint, creator, rng)
-            .context("creating blueprint builder")?;
-    let mut new_blueprint =
-        builder.build(BlueprintSource::ReconfiguratorCliNoop);
-
-    // Normally `builder.build()` would construct the cockroach fingerprint
-    // based on what we read from CRDB and put into the planning input, but
-    // since we don't have a CRDB we had to make something up for our planning
-    // input's CRDB fingerprint. In the absense of a better alternative, we'll
-    // just copy our parent's CRDB fingerprint and carry it forward.
-    new_blueprint
-        .cockroachdb_fingerprint
-        .clone_from(&blueprint.cockroachdb_fingerprint);
-
-    let rv = format!(
-        "noop blueprint {} created from {}",
-        new_blueprint.id, resolved_id
-    );
-    system.add_blueprint(new_blueprint)?;
-
-    sim.commit_and_bump("reconfigurator-cli blueprint-noop".to_owned(), state);
     Ok(Some(rv))
 }
 
