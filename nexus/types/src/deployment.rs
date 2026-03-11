@@ -896,6 +896,9 @@ pub enum BlueprintSource {
     /// This blueprint was created by one of `reconfigurator-cli`'s blueprint
     /// editing subcommands.
     ReconfiguratorCliEdit,
+    /// This blueprint was created by `reconfigurator-cli`'s `blueprint-noop`
+    /// subcommand.
+    ReconfiguratorCliNoop,
     /// This blueprint was constructed by hand by an automated test.
     Test,
 }
@@ -912,6 +915,9 @@ impl fmt::Display for BlueprintSource {
             }
             Self::ReconfiguratorCliEdit => {
                 writeln!(f, "edited directly with reconfigurator-cli")
+            }
+            Self::ReconfiguratorCliNoop => {
+                writeln!(f, "created directly with reconfigurator-cli (noop)")
             }
             Self::Test => writeln!(f, "constructed by an automated test"),
         }

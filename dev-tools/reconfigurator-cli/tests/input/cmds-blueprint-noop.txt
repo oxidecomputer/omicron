@@ -1,0 +1,8 @@
+# Load example system.
+load-example --nsleds 3 --ndisks-per-sled 3
+
+# Create a new blueprint without any changes.
+blueprint-noop latest
+
+# Diff the new blueprint against its parent.
+blueprint-diff latest

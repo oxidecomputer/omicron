@@ -1,0 +1,43 @@
+using provided RNG seed: reconfigurator-cli-test
+> # Load example system.
+> load-example --nsleds 3 --ndisks-per-sled 3
+loaded example system with:
+- collection: f45ba181-4b56-42cc-a762-874d90184a43
+- blueprint: dbcbd3d6-41ff-48ae-ac0b-1becc9b2fd21
+
+
+> # Create a new blueprint without any changes.
+> blueprint-noop latest
+noop blueprint 8da82a8e-bf97-4fbd-8ddd-9f6462732cf1 created from latest blueprint (dbcbd3d6-41ff-48ae-ac0b-1becc9b2fd21)
+
+
+> # Diff the new blueprint against its parent.
+> blueprint-diff latest
+from: blueprint dbcbd3d6-41ff-48ae-ac0b-1becc9b2fd21
+to:   blueprint 8da82a8e-bf97-4fbd-8ddd-9f6462732cf1
+
+ COCKROACHDB SETTINGS:
+    state fingerprint:::::::::::::::::   (none) (unchanged)
+    cluster.preserve_downgrade_option:   (do not modify) (unchanged)
+
+ METADATA:
+    internal DNS version:::   1 (unchanged)
+    external DNS version:::   1 (unchanged)
+    target release min gen:   1 (unchanged)
+    nexus gen::::::::::::::   1 (unchanged)
+
+ OXIMETER SETTINGS:
+    generation:   1 (unchanged)
+    read from::   SingleNode (unchanged)
+
+
+internal DNS:
+  DNS zone: "control-plane.oxide.internal" (unchanged)
+    unchanged names: 52 (records: 68)
+
+external DNS:
+  DNS zone: "oxide.example" (unchanged)
+    unchanged names: 5 (records: 9)
+
+
+
