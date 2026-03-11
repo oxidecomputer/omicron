@@ -986,6 +986,19 @@ pub struct AuditLogTimeoutIncompleteStatus {
     pub error: Option<String>,
 }
 
+/// The status of an `audit_log_cleanup` background task activation.
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+pub struct AuditLogCleanupStatus {
+    /// Number of completed audit log entries deleted in this activation.
+    pub rows_deleted: usize,
+    /// The cutoff time used: completed entries older than this were eligible.
+    pub cutoff: DateTime<Utc>,
+    /// Configured max rows to delete in this activation.
+    pub max_delete_per_activation: u32,
+    /// Error encountered during this activation, if any.
+    pub error: Option<String>,
+}
+
 /// The status of a `session_cleanup` background task activation.
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 pub struct SessionCleanupStatus {
