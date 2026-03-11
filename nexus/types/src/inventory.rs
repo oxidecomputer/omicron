@@ -720,7 +720,6 @@ pub enum SagaState {
     Abandoned,
 }
 
-// TODO-K: I may just be able to use the one for the DB
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
 pub struct InventorySaga {
     // TODO-K: Use own Uuid types

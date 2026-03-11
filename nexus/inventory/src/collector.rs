@@ -9,21 +9,16 @@ use crate::builder::CollectionBuilder;
 use crate::builder::InventoryError;
 use anyhow::Context;
 use anyhow::anyhow;
-use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::TimeDelta;
 use chrono::Utc;
 use clickhouse_admin_keeper_client::ClientInfo as _;
-use diesel::prelude::*;
 use gateway_client::types::GetCfpaParams;
 use gateway_client::types::RotCfpaSlot;
 use gateway_messages::SpComponent;
 use itertools::Itertools;
-use nexus_db_model::Saga;
 use nexus_db_model::SagaState;
+use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
-use nexus_db_queries::db::datastore::SQL_BATCH_SIZE;
-use nexus_db_queries::db::pagination::Paginator;
-use nexus_db_queries::db::pagination::paginated;
 use nexus_types::inventory::CabooseWhich;
 use nexus_types::inventory::Collection;
 use nexus_types::inventory::InternalDnsGenerationStatus;
@@ -61,18 +56,20 @@ pub struct Collector<'a> {
     cockroach_admin_client: &'a CockroachClusterAdminClient,
     sled_agent_lister: &'a (dyn SledAgentEnumerator + Send + Sync),
     in_progress: CollectionBuilder,
-    // TODO-K: D Nexus client instead? Or how can I get to the DB from here?
     datastore: &'a DataStore,
+    opctx: &'a OpContext,
 }
 
 impl<'a> Collector<'a> {
     pub fn new(
         creator: &str,
         datastore: &'a DataStore,
+        opctx: &'a OpContext,
         mgs_clients: Vec<gateway_client::Client>,
         keeper_admin_clients: Vec<clickhouse_admin_keeper_client::Client>,
         cockroach_admin_client: &'a CockroachClusterAdminClient,
         sled_agent_lister: &'a (dyn SledAgentEnumerator + Send + Sync),
+        // TODO-K: I think I can get rid of log if I just use context
         log: slog::Logger,
     ) -> Self {
         Collector {
@@ -83,6 +80,7 @@ impl<'a> Collector<'a> {
             sled_agent_lister,
             in_progress: CollectionBuilder::new(creator),
             datastore,
+            opctx,
         }
     }
 
@@ -113,7 +111,6 @@ impl<'a> Collector<'a> {
         self.collect_all_timesync().await;
         self.collect_all_dns_generations().await;
         self.collect_all_stale_sagas().await;
-        // TODO-K: Add long running sagas here
 
         debug!(&self.log, "finished collection");
 
@@ -513,59 +510,34 @@ impl<'a> Collector<'a> {
         self.in_progress.found_sled_inventory(&sled_agent_url, inventory)
     }
 
-    // TODO-K: Add a saga collector here
     /// Collect long running sagas from all nexus instances
     async fn collect_all_stale_sagas(&mut self) {
-        // TODO-K: Actually connect to the DB and retrieve information
-
-        // TODO-K: Use a real connection
-        let conn = match self.datastore.pool_connection_for_tests().await {
-            Err(e) => panic!("OHONO: {}", e),
-            Ok(conn) => conn,
+        let mut sagas = match self
+            .datastore
+            .saga_list_by_states_batched(
+                self.opctx,
+                vec![SagaState::Running, SagaState::Unwinding],
+            )
+            .await
+        {
+            Ok(sagas) => sagas,
+            Err(e) => {
+                self.in_progress.found_error(InventoryError::from(anyhow!(e)));
+                return;
+            }
         };
-
-        // TODO-K: clean up
-        let mut sagas = Vec::new();
-        let mut paginator = Paginator::new(
-            SQL_BATCH_SIZE,
-            dropshot::PaginationOrder::Ascending,
-        );
-        while let Some(p) = paginator.next() {
-            use nexus_db_schema::schema::saga::dsl;
-            let records_batch =
-                match paginated(dsl::saga, dsl::id, &p.current_pagparams())
-                    .filter(dsl::saga_state.eq(SagaState::Running))
-                    .select(Saga::as_select())
-                    .load_async(&*conn)
-                    .await
-                    .context("fetching sagas")
-                {
-                    Ok(saga) => saga,
-                    // TODO-K: Use found_errors:
-                    Err(e) => panic!("OHNO filtering: {}", e),
-                };
-
-            paginator = p.found_batch(&records_batch, &|s: &Saga| s.id);
-
-            sagas.extend(records_batch);
-        }
 
         // Sort them by creation time (equivalently: how long they've been running)
         sagas.sort_by_key(|s| s.time_created);
         sagas.reverse();
 
-        // TODO-K: Use the saga object or something else
-        //
         let mut s = vec![];
         let time_collected = Utc::now();
         for saga in sagas {
             let is_stale =
                 (time_collected - saga.time_created) > STALE_SAGA_THRESHOLD;
-            let state = SagaState::from(saga.saga_state);
-            let is_active =
-                state == SagaState::Running || state == SagaState::Unwinding;
 
-            if is_stale && is_active {
+            if is_stale {
                 let inv_saga = InventorySaga {
                     creator: saga.creator.into(),
                     current_sec: saga.current_sec.map(|s| s.0),
@@ -579,9 +551,7 @@ impl<'a> Collector<'a> {
             };
         }
 
-        // Do printline here w datsource info
         self.in_progress.found_stale_sagas(s)
-        // TODO-K: Add some error handling
     }
 
     /// Collect timesync status from all sleds
@@ -815,6 +785,7 @@ mod test {
     use gateway_messages::SpPort;
     use iddqd::IdOrdMap;
     use iddqd::id_ord_map;
+    use nexus_db_queries::db::pub_test_utils::TestDatabase;
     use nexus_types::inventory::Collection;
     use omicron_cockroach_metrics::CockroachClusterAdminClient;
     use omicron_common::api::external::Generation;
@@ -1189,6 +1160,10 @@ mod test {
                 .await;
         let log = &gwtestctx.logctx.log;
 
+        let db = TestDatabase::new_with_datastore(&log).await;
+        let datastore = db.datastore();
+        let optctx = db.opctx();
+
         let simulated_upstairs =
             Arc::new(sim::SimulatedUpstairs::new(log.new(o!(
                 "component" => "omicron_sled_agent::sim::SimulatedUpstairs",
@@ -1225,6 +1200,8 @@ mod test {
         crdb_cluster.update_backends(&[*crdb_admin_server.address()]).await;
         let collector = Collector::new(
             "test-suite",
+            datastore,
+            optctx,
             vec![mgs_client],
             keeper_clients,
             &crdb_cluster,
@@ -1266,6 +1243,10 @@ mod test {
         .await;
         let log = &gwtestctx1.logctx.log;
 
+        let db = TestDatabase::new_with_datastore(&log).await;
+        let datastore = db.datastore();
+        let optctx = db.opctx();
+
         let simulated_upstairs =
             Arc::new(sim::SimulatedUpstairs::new(log.new(o!(
                 "component" => "omicron_sled_agent::sim::SimulatedUpstairs",
@@ -1305,6 +1286,8 @@ mod test {
         crdb_cluster.update_backends(&[*crdb_admin_server.address()]).await;
         let collector = Collector::new(
             "test-suite",
+            datastore,
+            optctx,
             mgs_clients,
             keeper_clients,
             &crdb_cluster,
@@ -1345,6 +1328,9 @@ mod test {
         };
         let mgs_clients = vec![bad_client, real_client];
         let sled_enum = StaticSledAgentEnumerator::empty();
+        let db = TestDatabase::new_with_datastore(&log).await;
+        let datastore = db.datastore();
+        let optctx = db.opctx();
         // We don't have any mocks for this, and it's unclear how much value
         // there would be in providing them at this juncture.
         let keeper_clients = Vec::new();
@@ -1355,6 +1341,8 @@ mod test {
         crdb_cluster.update_backends(&[*crdb_admin_server.address()]).await;
         let collector = Collector::new(
             "test-suite",
+            datastore,
+            optctx,
             mgs_clients,
             keeper_clients,
             &crdb_cluster,
@@ -1384,6 +1372,10 @@ mod test {
         .await;
         let log = &gwtestctx.logctx.log;
 
+        let db = TestDatabase::new_with_datastore(&log).await;
+        let datastore = db.datastore();
+        let optctx = db.opctx();
+
         let simulated_upstairs =
             Arc::new(sim::SimulatedUpstairs::new(log.new(o!(
                 "component" => "omicron_sled_agent::sim::SimulatedUpstairs",
@@ -1412,6 +1404,8 @@ mod test {
         crdb_cluster.update_backends(&[*crdb_admin_server.address()]).await;
         let collector = Collector::new(
             "test-suite",
+            datastore,
+            optctx,
             vec![mgs_client],
             keeper_clients,
             &crdb_cluster,

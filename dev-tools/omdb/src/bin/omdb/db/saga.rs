@@ -137,7 +137,6 @@ impl SagaArgs {
     }
 }
 
-// TODO-K: I want something like this!
 async fn cmd_sagas_running(
     _opctx: &OpContext,
     datastore: &DataStore,
@@ -441,7 +440,6 @@ execute even if it is abandoned. You should only proceed if:
 }
 
 // helper functions
-// TODO-K: Use something like this
 async fn get_all_sagas_in_state(
     conn: &DataStoreConnection,
     state: SagaState,
