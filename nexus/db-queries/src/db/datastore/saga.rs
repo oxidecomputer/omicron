@@ -258,6 +258,36 @@ impl DataStore {
         .await
         .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
+
+    pub async fn saga_list_by_states_batched(
+        &self,
+        opctx: &OpContext,
+        states: Vec<SagaState>,
+    ) -> Result<Vec<db::saga_types::Saga>, Error> {
+        let mut sagas = vec![];
+        let mut paginator = Paginator::new(
+            SQL_BATCH_SIZE,
+            dropshot::PaginationOrder::Ascending,
+        );
+        let conn = self.pool_connection_authorized(opctx).await?;
+        while let Some(p) = paginator.next() {
+            use nexus_db_schema::schema::saga::dsl;
+
+            let mut batch =
+                paginated(dsl::saga, dsl::id, &p.current_pagparams())
+                    .filter(dsl::saga_state.eq_any(states.clone()))
+                    .select(db::saga_types::Saga::as_select())
+                    .load_async(&*conn)
+                    .await
+                    .map_err(|e| {
+                        public_error_from_diesel(e, ErrorHandler::Server)
+                    })?;
+
+            paginator = p.found_batch(&batch, &|row| row.id);
+            sagas.append(&mut batch);
+        }
+        Ok(sagas)
+    }
 }
 
 #[cfg(test)]
@@ -563,6 +593,28 @@ mod test {
             db::model::saga_types::Saga::new(self.sec_id, params)
         }
 
+        fn new_unwinding_db_saga(&self) -> db::model::saga_types::Saga {
+            let params = steno::SagaCreateParams {
+                id: self.saga_id,
+                name: steno::SagaName::new("test saga"),
+                dag: serde_json::value::Value::Null,
+                state: steno::SagaCachedState::Unwinding,
+            };
+
+            db::model::saga_types::Saga::new(self.sec_id, params)
+        }
+
+        fn new_done_db_saga(&self) -> db::model::saga_types::Saga {
+            let params = steno::SagaCreateParams {
+                id: self.saga_id,
+                name: steno::SagaName::new("test saga"),
+                dag: serde_json::value::Value::Null,
+                state: steno::SagaCachedState::Done,
+            };
+
+            db::model::saga_types::Saga::new(self.sec_id, params)
+        }
+
         fn new_abandoned_db_saga(&self) -> db::model::saga_types::Saga {
             let params = steno::SagaCreateParams {
                 id: self.saga_id,
@@ -736,6 +788,89 @@ mod test {
             .await
             .expect("failed to re-assign sagas");
         assert_eq!(nreassigned, 0);
+
+        // Test cleanup
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_list_sagas_by_states() {
+        // Test setup
+        let logctx = dev::test_setup_log("test_list_sagas_by_states");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+        let sec_id = db::SecId(uuid::Uuid::new_v4());
+        let sec_id2 = db::SecId(uuid::Uuid::new_v4());
+
+        // Insert one saga in each state, plus an additional running saga.
+        let running = SagaTestContext::new(sec_id).new_running_db_saga();
+        let running2 = SagaTestContext::new(sec_id2).new_running_db_saga();
+        let unwinding = SagaTestContext::new(sec_id).new_unwinding_db_saga();
+        let done = SagaTestContext::new(sec_id).new_done_db_saga();
+        let abandoned = SagaTestContext::new(sec_id).new_abandoned_db_saga();
+
+        let conn = datastore.pool_connection_for_tests().await.unwrap();
+        diesel::insert_into(nexus_db_schema::schema::saga::dsl::saga)
+            .values(vec![
+                running.clone(),
+                running2.clone(),
+                unwinding.clone(),
+                done.clone(),
+                abandoned.clone(),
+            ])
+            .execute_async(&*conn)
+            .await
+            .expect("Failed to insert test setup data");
+
+        let sanitize_timestamps = |sagas: &mut Vec<db::saga_types::Saga>| {
+            for saga in sagas {
+                saga.time_created = chrono::DateTime::UNIX_EPOCH;
+                saga.adopt_time = chrono::DateTime::UNIX_EPOCH;
+            }
+        };
+
+        // Querying for Running and Unwinding should return exactly those three.
+        let mut observed_sagas = datastore
+            .saga_list_by_states_batched(
+                &opctx,
+                vec![SagaState::Running, SagaState::Unwinding],
+            )
+            .await
+            .expect("Failed to list sagas by states");
+
+        let mut expected_sagas =
+            vec![running.clone(), running2.clone(), unwinding.clone()];
+        expected_sagas.sort_by(|a, b| a.id.cmp(&b.id));
+        sanitize_timestamps(&mut observed_sagas);
+        sanitize_timestamps(&mut expected_sagas);
+
+        assert_eq!(
+            observed_sagas, expected_sagas,
+            "Should return the Running and Unwinding sagas"
+        );
+
+        // Querying for Done should return only the Done saga.
+        let mut observed_done = datastore
+            .saga_list_by_states_batched(&opctx, vec![SagaState::Done])
+            .await
+            .expect("Failed to list Done sagas");
+
+        let mut expected_done = vec![done.clone()];
+        sanitize_timestamps(&mut observed_done);
+        sanitize_timestamps(&mut expected_done);
+
+        assert_eq!(observed_done, expected_done, "Should return the Done saga");
+
+        // Querying for an empty state list should return nothing.
+        let observed_empty = datastore
+            .saga_list_by_states_batched(&opctx, vec![])
+            .await
+            .expect("Failed to list sagas with empty state filter");
+        assert!(
+            observed_empty.is_empty(),
+            "Empty state filter should return no sagas"
+        );
 
         // Test cleanup
         db.terminate().await;
