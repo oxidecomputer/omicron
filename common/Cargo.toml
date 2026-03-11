@@ -31,6 +31,7 @@ ipnetwork.workspace = true
 itertools.workspace = true
 lldp_protocol.workspace = true
 macaddr.workspace = true
+omicron-ledger.workspace = true
 omicron-uuid-kinds.workspace = true
 oxnet.workspace = true
 proptest = { workspace = true, optional = true }

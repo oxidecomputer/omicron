@@ -1,0 +1,24 @@
+[package]
+name = "omicron-ledger"
+version = "0.1.0"
+edition.workspace = true
+license = "MPL-2.0"
+description = "Dual-path JSON ledger for persisting configuration with generation numbers"
+
+[lints]
+workspace = true
+
+[dependencies]
+async-trait.workspace = true
+camino.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+slog.workspace = true
+thiserror.workspace = true
+tokio = { workspace = true, features = ["fs"] }
+omicron-workspace-hack.workspace = true
+
+[dev-dependencies]
+camino-tempfile.workspace = true
+dropshot.workspace = true
+tokio = { workspace = true, features = ["full", "test-util"] }

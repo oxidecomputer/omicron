@@ -76,6 +76,7 @@ members = [
     "ipcc",
     "key-manager",
     "key-manager/types",
+    "ledger",
     "live-tests",
     "live-tests/macros",
     "nexus",
@@ -253,6 +254,7 @@ default-members = [
     "ipcc",
     "key-manager",
     "key-manager/types",
+    "ledger",
     "live-tests",
     "live-tests/macros",
     "nexus",
@@ -630,6 +632,7 @@ omicron-cockroach-admin = { path = "cockroach-admin" }
 omicron-cockroach-metrics = { path = "cockroach-metrics" }
 omicron-common = { path = "common" }
 omicron-dev-lib = { path = "dev-tools/omicron-dev-lib" }
+omicron-ledger = { path = "ledger" }
 omicron-gateway = { path = "gateway" }
 omicron-nexus = { path = "nexus" }
 omicron-ntp-admin = { path = "ntp-admin" }

@@ -34,7 +34,7 @@ use dropshot::{
 use futures::{Stream, TryStreamExt};
 use omicron_common::address::REPO_DEPOT_PORT;
 use omicron_common::api::external::Generation;
-use omicron_common::ledger::Ledger;
+use omicron_ledger::Ledger;
 use repo_depot_api::*;
 use sha2::{Digest, Sha256};
 use sled_agent_config_reconciler::ConfigReconcilerHandle;
@@ -836,7 +836,7 @@ pub enum Error {
     Join(#[source] tokio::task::JoinError),
 
     #[error("Failed to commit ledger")]
-    LedgerCommit(#[from] omicron_common::ledger::Error),
+    LedgerCommit(#[from] omicron_ledger::Error),
 
     #[error("Ledger manager task dropped its end of the channel")]
     LedgerChannel,
