@@ -136,7 +136,7 @@ fn mac_to_bootstrap_ip(mac: MacAddr, interface_id: u64) -> Ipv6Addr {
         ((interface_id >> 48) & 0xffff).try_into().unwrap(),
         ((interface_id >> 32) & 0xffff).try_into().unwrap(),
         ((interface_id >> 16) & 0xffff).try_into().unwrap(),
-        (interface_id & 0xfff).try_into().unwrap(),
+        (interface_id & 0xffff).try_into().unwrap(),
     )
 }
 
