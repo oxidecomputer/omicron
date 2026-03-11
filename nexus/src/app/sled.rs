@@ -114,6 +114,7 @@ impl super::Nexus {
             sled_lookup.fetch_for(authz::Action::Modify).await?;
 
         let rack_id = RackUuid::from_untyped_uuid(sled.rack_id);
+        let authz_tq = authz::TrustQuorumConfig::for_rack_id(rack_id);
 
         // If the sled still exists in the latest committed trust quorum
         // configuration, it cannot be expunged.
@@ -134,7 +135,7 @@ impl super::Nexus {
         // for now given that the user already has to confirm a bunch of prompts
         // before kicking off the operation.
         let (tq_latest_committed_config, _) = self
-            .tq_load_latest_possible_committed_config(opctx, rack_id)
+            .tq_load_latest_possible_committed_config(opctx, authz_tq)
             .await?;
         let baseboard_id = BaseboardId {
             part_number: sled.part_number().to_string(),
