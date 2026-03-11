@@ -37,7 +37,7 @@ impl Svcs {
         info!(log, "Retrieving SMF services");
         let output = execute_async(cmd).await?;
         let svcs_result =
-            SvcsResult::parse(log, &output.stdout).filter_enabled_not_online();
+            SvcsResult::parse(log, &output.stdout).retain_enabled_not_online();
         info!(log, "Successfully retrieved SMF services");
         Ok(svcs_result)
     }
@@ -145,8 +145,13 @@ impl SvcsResult {
         Self { services, errors, time_of_status: Utc::now() }
     }
 
+    // This small method is only a wrapper for retaining the services that are
+    // in a state that is enabled but not online. It is currently not possible
+    // to test the `enabled_not_online()` method directly because it runs the
+    // `svcs` command on the machine it is running on, so we split this small
+    // part out to test that we are retaining the correct services
     #[cfg_attr(not(target_os = "illumos"), allow(dead_code))]
-    fn filter_enabled_not_online(mut self) -> Self {
+    fn retain_enabled_not_online(mut self) -> Self {
         self.services.retain(|svc| {
             // legacy_run is included here because this state doesn't really say
             // anythging about whether a service is running or not. It just
@@ -252,14 +257,6 @@ pub struct Svc {
     fmri: String,
     zone: String,
     state: SvcState,
-}
-
-impl Display for Svc {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let Svc { fmri, zone, state } = self;
-
-        writeln!(f, "FMRI: {} zone: {} state: {}", fmri, zone, state)
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
@@ -488,7 +485,7 @@ disabled       svc:/network/tcpkey:default                      global
     }
 
     #[test]
-    fn test_filter_enabled_not_online() {
+    fn test_retain_enabled_not_online() {
         let mk_svc = |i: usize, state: SvcState| Svc {
             fmri: format!("svc:/site/fake-service-{i}:default"),
             zone: "global".to_string(),
@@ -513,7 +510,7 @@ disabled       svc:/network/tcpkey:default                      global
             errors: vec!["some error".to_string()],
             time_of_status: Utc::now(),
         }
-        .filter_enabled_not_online();
+        .retain_enabled_not_online();
 
         assert_eq!(result.errors, vec!["some error".to_string()]);
         assert_eq!(

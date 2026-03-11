@@ -619,7 +619,8 @@ fn display_sleds(
             reconciler_status,
             last_reconciliation,
             file_source_resolver,
-            // TODO-K: This is hidden until the types are added to the DB
+            // TODO-K[omicron#9516]: This is temporarily hidden until we add the
+            // smf_services_enabled_not_online data to the DB in a follow up PR.
             smf_services_enabled_not_online: _,
             reference_measurements,
         } = sled;
