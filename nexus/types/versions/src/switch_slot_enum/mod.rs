@@ -38,7 +38,32 @@ fn format_switch_slot_as_str(switch_slot: SwitchSlot) -> &'static str {
 }
 
 fn format_switch_slot_as_name(switch_slot: SwitchSlot) -> Name {
+    // We don't expect `Name` parsing to ever make these values invalid, but we
+    // have unit tests below that double-check them.
     format_switch_slot_as_str(switch_slot)
         .parse()
         .expect("stringified switch slots have valid `Name`s")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use strum::IntoEnumIterator;
+
+    #[test]
+    fn test_switch_slot_to_string_and_back_again() {
+        for switch_slot in SwitchSlot::iter() {
+            // Test that we can convert every switch slot to a string or a
+            // `Name`...
+            let string = format_switch_slot_as_str(switch_slot);
+            let name = format_switch_slot_as_name(switch_slot);
+
+            // ... and that both are the same ...
+            assert_eq!(string, name.as_str());
+
+            // ... and that parsing them back gives us the switch slot we
+            // started with.
+            assert_eq!(switch_slot, parse_str_as_switch_slot(string).unwrap());
+        }
+    }
 }
