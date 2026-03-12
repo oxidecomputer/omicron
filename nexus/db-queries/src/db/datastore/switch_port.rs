@@ -817,12 +817,6 @@ impl DataStore {
         }
 
         let err = OptionalError::new();
-
-        // TODO-correctness enum in external API
-        let switch_slot = DbSwitchSlot::from(
-            SwitchSlot::parse_from_external_api(&params.switch_location)?,
-        );
-
         let conn = self.pool_connection_authorized(opctx).await?;
 
         // TODO https://github.com/oxidecomputer/omicron/issues/2811
@@ -835,11 +829,12 @@ impl DataStore {
                     use nexus_db_schema::schema::switch_port::dsl as switch_port_dsl;
 
                     let port_name = portname.to_string();
+                    let switch_slot = DbSwitchSlot::from(
+                        params.switch_slot,
+                    );
                     let port: SwitchPort = switch_port_dsl::switch_port
                         .filter(switch_port::rack_id.eq(params.rack_id))
-                        .filter(
-                            switch_port::switch_slot.eq(switch_slot),
-                        )
+                        .filter(switch_port::switch_slot.eq(switch_slot))
                         .filter(switch_port::port_name.eq(port_name.clone()))
                         .select(SwitchPort::as_select())
                         .limit(1)
