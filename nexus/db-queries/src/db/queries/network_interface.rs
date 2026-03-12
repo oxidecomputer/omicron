@@ -1981,6 +1981,7 @@ fn decode_delete_network_interface_database_error(
 #[cfg(test)]
 mod tests {
     use super::DeleteError;
+    use super::DeleteQuery;
     use super::InsertError;
     use super::MAX_NICS_PER_INSTANCE;
     use super::NUM_INITIAL_RESERVED_IP_ADDRESSES;
@@ -2000,6 +2001,7 @@ mod tests {
     use crate::db::queries::network_interface::first_available_ipv6_address;
     use crate::db::queries::network_interface::last_available_ipv4_address;
     use crate::db::queries::network_interface::last_available_ipv6_address;
+    use crate::db::raw_query_builder::expectorate_query_contents;
     use async_bb8_diesel::AsyncRunQueryDsl;
     use dropshot::test_util::LogContext;
     use model::NetworkInterfaceKind;
@@ -2260,6 +2262,21 @@ mod tests {
                 )
                 .await
                 .expect("Failed to delete NICs");
+        }
+    }
+
+    #[tokio::test]
+    async fn expectorate_query() {
+        for (kind, kind_description) in [
+            (NetworkInterfaceKind::Service, "service"),
+            (NetworkInterfaceKind::Instance, "instance"),
+            (NetworkInterfaceKind::Probe, "probe"),
+        ] {
+            let path = format!(
+                "tests/output/delete_vnic_{kind_description}_query.sql"
+            );
+            let query = DeleteQuery::new(kind, Uuid::nil(), Uuid::nil());
+            expectorate_query_contents(&query, &path).await;
         }
     }
 
