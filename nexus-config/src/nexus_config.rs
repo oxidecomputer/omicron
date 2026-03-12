@@ -1309,7 +1309,7 @@ mod test {
             audit_log_timeout_incomplete.timeout_secs = 14400
             audit_log_timeout_incomplete.max_update_per_activation = 1000
             audit_log_cleanup.period_secs = 600
-            audit_log_cleanup.retention_days = 7
+            audit_log_cleanup.retention_days = 30
             audit_log_cleanup.max_delete_per_activation = 10000
             [default_region_allocation_strategy]
             type = "random"
@@ -1586,7 +1586,7 @@ mod test {
                             },
                         audit_log_cleanup: AuditLogCleanupConfig {
                             period_secs: Duration::from_secs(600),
-                            retention_days: NonZeroU32::new(7).unwrap(),
+                            retention_days: NonZeroU32::new(30).unwrap(),
                             max_delete_per_activation: 10_000,
                         },
                     },
@@ -1700,7 +1700,7 @@ mod test {
             audit_log_timeout_incomplete.timeout_secs = 14400
             audit_log_timeout_incomplete.max_update_per_activation = 1000
             audit_log_cleanup.period_secs = 600
-            audit_log_cleanup.retention_days = 7
+            audit_log_cleanup.retention_days = 30
             audit_log_cleanup.max_delete_per_activation = 10000
 
             [default_region_allocation_strategy]
