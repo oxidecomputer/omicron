@@ -2597,13 +2597,23 @@ impl NexusExternalApi for NexusExternalApiImpl {
         .await
     }
 
+    // We do not audit log this endpoint despite it being a POST because it's
+    // called hundreds or thousands of times while uploading an image and
+    // provides no extra value over the many other operations involved in disk
+    // upload before and after -- disk create, putting the disk in the importing
+    // state, finalizing, creating snapshot, etc. Before this was excluded from
+    // logging, this operation alone was about 90% of the audit log on dogfood.
     async fn disk_bulk_write_import(
         rqctx: RequestContext<ApiContext>,
         path_params: Path<path_params::DiskPath>,
         query_params: Query<project::OptionalProjectSelector>,
         import_params: TypedBody<disk::ImportBlocksBulkWrite>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
-        audit_and_time(&rqctx, |opctx, nexus| async move {
+        let apictx = rqctx.context();
+        let handler = async {
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+            let nexus = &apictx.context.nexus;
             let path = path_params.into_inner();
             let query = query_params.into_inner();
             let import_params = import_params.into_inner();
@@ -2614,8 +2624,12 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 .disk_manual_import(&opctx, &disk_lookup, import_params)
                 .await?;
             Ok(HttpResponseUpdatedNoContent())
-        })
-        .await
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
     }
 
     async fn disk_bulk_write_import_stop(

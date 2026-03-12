@@ -1,4 +1,5 @@
 Mutating endpoints without audit logging:
+disk_bulk_write_import                       (post   "/v1/disks/{disk}/bulk-write")
 system_timeseries_query                      (post   "/v1/system/timeseries/query")
 timeseries_query                             (post   "/v1/timeseries/query")
 
