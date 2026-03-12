@@ -48,8 +48,7 @@ use nexus_db_queries::db::model::WebhookDeliveryAttempt;
 use nexus_db_queries::db::model::WebhookDeliveryAttemptResult;
 use nexus_db_queries::db::model::WebhookReceiverConfig;
 use nexus_db_queries::db::model::WebhookSecret;
-use nexus_types::external_api::params;
-use nexus_types::external_api::views;
+use nexus_types::external_api::alert;
 use nexus_types::identity::Asset;
 use nexus_types::identity::Resource;
 use omicron_common::api::external::CreateResult;
@@ -74,7 +73,7 @@ impl Nexus {
     pub fn webhook_secret_lookup<'a>(
         &'a self,
         opctx: &'a OpContext,
-        secret_selector: params::WebhookSecretSelector,
+        secret_selector: alert::WebhookSecretSelector,
     ) -> LookupResult<lookup::WebhookSecret<'a>> {
         let lookup = LookupPath::new(&opctx, self.datastore())
             .webhook_secret_id(WebhookSecretUuid::from_untyped_uuid(
@@ -86,7 +85,7 @@ impl Nexus {
     pub async fn webhook_receiver_create(
         &self,
         opctx: &OpContext,
-        params: params::WebhookCreate,
+        params: alert::WebhookCreate,
     ) -> CreateResult<WebhookReceiverConfig> {
         self.datastore().webhook_rx_create(&opctx, params).await
     }
@@ -95,7 +94,7 @@ impl Nexus {
         &self,
         opctx: &OpContext,
         rx: lookup::AlertReceiver<'_>,
-        params: params::WebhookReceiverUpdate,
+        params: alert::WebhookReceiverUpdate,
     ) -> UpdateResult<()> {
         let (authz_rx,) = rx.lookup_for(authz::Action::Modify).await?;
         let _ = self
@@ -132,7 +131,7 @@ impl Nexus {
         opctx: &OpContext,
         rx: lookup::AlertReceiver<'_>,
         secret: String,
-    ) -> Result<views::WebhookSecret, Error> {
+    ) -> Result<alert::WebhookSecret, Error> {
         let (authz_rx,) = rx.lookup_for(authz::Action::CreateChild).await?;
         let secret = WebhookSecret::new(authz_rx.id(), secret);
         let secret = self
@@ -176,8 +175,8 @@ impl Nexus {
         &self,
         opctx: &OpContext,
         rx: lookup::AlertReceiver<'_>,
-        params: params::AlertReceiverProbe,
-    ) -> Result<views::AlertProbeResult, Error> {
+        params: alert::AlertReceiverProbe,
+    ) -> Result<alert::AlertProbeResult, Error> {
         let (authz_rx, rx) = rx.fetch_for(authz::Action::ListChildren).await?;
         let rx_id = authz_rx.id();
         let datastore = self.datastore();
@@ -302,7 +301,7 @@ impl Nexus {
             None
         };
 
-        Ok(views::AlertProbeResult {
+        Ok(alert::AlertProbeResult {
             probe: delivery.to_api_delivery(CLASS, &[attempt]),
             resends_started,
         })
@@ -404,7 +403,7 @@ impl<'a> ReceiverClient<'a> {
             id: WebhookDeliveryUuid,
             receiver_id: AlertReceiverUuid,
             sent_at: &'a str,
-            trigger: views::AlertDeliveryTrigger,
+            trigger: alert::AlertDeliveryTrigger,
         }
 
         // okay, actually do the thing...

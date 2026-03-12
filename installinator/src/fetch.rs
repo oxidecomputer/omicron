@@ -127,6 +127,7 @@ pub(crate) struct FetchArtifactBackend {
     log: slog::Logger,
     imp: Box<dyn FetchArtifactImpl>,
     read_timeout: Duration,
+    preferred_peer: Option<PeerAddress>,
 }
 
 impl FetchArtifactBackend {
@@ -134,9 +135,10 @@ impl FetchArtifactBackend {
         log: &slog::Logger,
         imp: Box<dyn FetchArtifactImpl>,
         read_timeout: Duration,
+        preferred_peer: Option<PeerAddress>,
     ) -> Self {
         let log = log.new(slog::o!("component" => "Peers"));
-        Self { log, imp, read_timeout }
+        Self { log, imp, read_timeout, preferred_peer }
     }
 
     pub(crate) async fn fetch_artifact(
@@ -154,7 +156,7 @@ impl FetchArtifactBackend {
 
         slog::debug!(log, "start fetch from peers"; "remaining_peers" => remaining_peers);
 
-        for &peer in peers.peers() {
+        for &peer in peers.iter_with_preferred(self.preferred_peer) {
             remaining_peers -= 1;
 
             slog::debug!(

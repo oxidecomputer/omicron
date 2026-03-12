@@ -269,6 +269,10 @@ task: "alert_dispatcher"
     dispatches queued alerts to receivers
 
 
+task: "attached_subnet_manager"
+    distributes attached subnets to sleds and switch
+
+
 task: "bfd_manager"
     Manages bidirectional fowarding detection (BFD) configuration on rack
     switches
@@ -444,6 +448,10 @@ task: "service_zone_nat_tracker"
     ensures service zone nat records are recorded in NAT RPW table
 
 
+task: "session_cleanup"
+    hard-deletes expired console sessions based on absolute timeout
+
+
 task: "sp_ereport_ingester"
     collects error reports from service processors
 
@@ -577,6 +585,13 @@ task: "alert_dispatcher"
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     alerts dispatched:                            0
     alerts with no receivers subscribed:          0
+
+task: "attached_subnet_manager"
+  configured period: every <REDACTED_DURATION>m
+  last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+   no dendrite instances found
+   no sleds found
 
 task: "bfd_manager"
   configured period: every <REDACTED_DURATION>s
@@ -849,6 +864,14 @@ task: "service_zone_nat_tracker"
   last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     last completion reported error: inventory collection is None
+
+task: "session_cleanup"
+  configured period: every <REDACTED_DURATION>m
+  last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    deleted: 0
+    cutoff:  <REDACTED_TIMESTAMP>
+    limit:   10000
 
 task: "sp_ereport_ingester"
   configured period: every <REDACTED_DURATION>s
@@ -1164,6 +1187,13 @@ task: "alert_dispatcher"
     alerts dispatched:                            0
     alerts with no receivers subscribed:          0
 
+task: "attached_subnet_manager"
+  configured period: every <REDACTED_DURATION>m
+  last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+   no dendrite instances found
+   no sleds found
+
 task: "bfd_manager"
   configured period: every <REDACTED_DURATION>s
   last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
@@ -1436,6 +1466,14 @@ task: "service_zone_nat_tracker"
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     last completion reported error: inventory collection is None
 
+task: "session_cleanup"
+  configured period: every <REDACTED_DURATION>m
+  last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    deleted: 0
+    cutoff:  <REDACTED_TIMESTAMP>
+    limit:   10000
+
 task: "sp_ereport_ingester"
   configured period: every <REDACTED_DURATION>s
   last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
@@ -1611,6 +1649,13 @@ parent:    <none>
     B      current contents 
 
 
+    measurements:
+    ------------------------------
+    hash              version     
+    ------------------------------
+    install dataset   (no version)
+
+
     physical disks:
     -----------------------------------------------------------------
     vendor        model              serial               disposition
@@ -1652,6 +1697,13 @@ parent:    <none>
     ------------------------
     A      current contents 
     B      current contents 
+
+
+    measurements:
+    ------------------------------
+    hash              version     
+    ------------------------------
+    install dataset   (no version)
 
 
     physical disks:
@@ -1743,6 +1795,13 @@ parent:    <none>
     B      current contents 
 
 
+    measurements:
+    ------------------------------
+    hash              version     
+    ------------------------------
+    install dataset   (no version)
+
+
     physical disks:
     -----------------------------------------------------------------
     vendor        model              serial               disposition
@@ -1784,6 +1843,13 @@ parent:    <none>
     ------------------------
     A      current contents 
     B      current contents 
+
+
+    measurements:
+    ------------------------------
+    hash              version     
+    ------------------------------
+    install dataset   (no version)
 
 
     physical disks:

@@ -4,134 +4,213 @@
 
 //! Implementations for early networking types.
 
+use crate::latest::early_networking::BgpPeerConfig;
+use crate::latest::early_networking::LldpAdminStatus;
+use crate::latest::early_networking::MaxPathConfig;
+use crate::latest::early_networking::MaxPathConfigError;
+use crate::latest::early_networking::PortFec;
+use crate::latest::early_networking::PortSpeed;
+use crate::latest::early_networking::RouterLifetimeConfig;
+use crate::latest::early_networking::RouterLifetimeConfigError;
+use crate::latest::early_networking::SwitchSlot;
+use crate::latest::early_networking::UplinkAddressConfig;
+use omicron_common::api::external;
+use oxnet::IpNet;
+use std::fmt;
+use std::net::IpAddr;
+use std::net::Ipv6Addr;
 use std::str::FromStr;
 
-use bootstore::schemes::v0 as bootstore;
-use slog::{Logger, warn};
+impl BgpPeerConfig {
+    /// The default hold time for a BGP peer in seconds.
+    pub const DEFAULT_HOLD_TIME: u64 = 6;
 
-use crate::latest::early_networking::{
-    EarlyNetworkConfig, EarlyNetworkConfigBody,
-};
-// This is an exception to the rule that we only use the latest version, since
-// the back_compat module is only defined for v1.
-use crate::v1::early_networking::back_compat;
+    /// The default idle hold time for a BGP peer in seconds.
+    pub const DEFAULT_IDLE_HOLD_TIME: u64 = 3;
 
-impl FromStr for EarlyNetworkConfig {
-    type Err = String;
+    /// The default delay open time for a BGP peer in seconds.
+    pub const DEFAULT_DELAY_OPEN: u64 = 0;
 
-    fn from_str(value: &str) -> Result<Self, Self::Err> {
-        #[derive(serde::Deserialize)]
-        struct ShadowConfig {
-            generation: u64,
-            schema_version: u32,
-            body: EarlyNetworkConfigBody,
-        }
+    /// The default connect retry time for a BGP peer in seconds.
+    pub const DEFAULT_CONNECT_RETRY: u64 = 3;
 
-        let v2_err = match serde_json::from_str::<ShadowConfig>(&value) {
-            Ok(cfg) => {
-                return Ok(EarlyNetworkConfig {
-                    generation: cfg.generation,
-                    schema_version: cfg.schema_version,
-                    body: cfg.body,
-                });
-            }
-            Err(e) => format!("unable to parse EarlyNetworkConfig: {e:?}"),
-        };
-        // If we fail to parse the config as any known version, we return the
-        // error corresponding to the parse failure of the newest schema.
-        serde_json::from_str::<back_compat::EarlyNetworkConfigV1>(&value)
-            .map(|v1| EarlyNetworkConfig {
-                generation: v1.generation,
-                schema_version: Self::schema_version(),
-                body: v1.body.into(),
-            })
-            .map_err(|_| v2_err)
+    /// The default keepalive time for a BGP peer in seconds.
+    pub const DEFAULT_KEEPALIVE: u64 = 2;
+
+    pub fn hold_time(&self) -> u64 {
+        self.hold_time.unwrap_or(Self::DEFAULT_HOLD_TIME)
+    }
+
+    pub fn idle_hold_time(&self) -> u64 {
+        self.idle_hold_time.unwrap_or(Self::DEFAULT_IDLE_HOLD_TIME)
+    }
+
+    pub fn delay_open(&self) -> u64 {
+        self.delay_open.unwrap_or(Self::DEFAULT_DELAY_OPEN)
+    }
+
+    pub fn connect_retry(&self) -> u64 {
+        self.connect_retry.unwrap_or(Self::DEFAULT_CONNECT_RETRY)
+    }
+
+    pub fn keepalive(&self) -> u64 {
+        self.keepalive.unwrap_or(Self::DEFAULT_KEEPALIVE)
     }
 }
 
-impl EarlyNetworkConfig {
-    pub fn schema_version() -> u32 {
-        2
+impl From<PortFec> for external::LinkFec {
+    fn from(x: PortFec) -> Self {
+        match x {
+            PortFec::Firecode => Self::Firecode,
+            PortFec::None => Self::None,
+            PortFec::Rs => Self::Rs,
+        }
+    }
+}
+
+impl From<PortSpeed> for external::LinkSpeed {
+    fn from(x: PortSpeed) -> Self {
+        match x {
+            PortSpeed::Speed0G => Self::Speed0G,
+            PortSpeed::Speed1G => Self::Speed1G,
+            PortSpeed::Speed10G => Self::Speed10G,
+            PortSpeed::Speed25G => Self::Speed25G,
+            PortSpeed::Speed40G => Self::Speed40G,
+            PortSpeed::Speed50G => Self::Speed50G,
+            PortSpeed::Speed100G => Self::Speed100G,
+            PortSpeed::Speed200G => Self::Speed200G,
+            PortSpeed::Speed400G => Self::Speed400G,
+        }
+    }
+}
+
+impl FromStr for MaxPathConfig {
+    type Err = MaxPathConfigError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let v: u8 = s.parse()?;
+        Self::new(v)
+    }
+}
+
+impl std::fmt::Display for MaxPathConfig {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.as_u8())
+    }
+}
+
+impl FromStr for RouterLifetimeConfig {
+    type Err = RouterLifetimeConfigError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let v: u16 = s.parse()?;
+        Self::new(v)
+    }
+}
+
+impl std::fmt::Display for RouterLifetimeConfig {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.as_u16())
+    }
+}
+
+impl UplinkAddressConfig {
+    /// Construct an `UplinkAddressConfig` with no VLAN ID.
+    pub fn without_vlan(address: IpNet) -> Self {
+        // TODO-cleanup Squash unspecified addresses down to `None`. We want
+        // better types here:
+        // <https://github.com/oxidecomputer/omicron/issues/9832>.
+        let address =
+            if address.addr().is_unspecified() { None } else { Some(address) };
+        Self { address, vlan_id: None }
     }
 
-    // Note: This currently only converts between v0 and v1 or deserializes v1 of
-    // `EarlyNetworkConfig`.
-    pub fn deserialize_bootstore_config(
-        log: &Logger,
-        config: &bootstore::NetworkConfig,
-    ) -> Result<Self, serde_json::Error> {
-        // Try to deserialize the latest version of the data structure (v2). If
-        // that succeeds we are done.
-        let v2_error =
-            match serde_json::from_slice::<EarlyNetworkConfig>(&config.blob) {
-                Ok(val) => return Ok(val),
-                Err(error) => {
-                    // Log this error and continue trying to deserialize older
-                    // versions.
-                    warn!(
-                        log,
-                        "Failed to deserialize EarlyNetworkConfig \
-                         as v2, trying next as v1: {}",
-                        error,
-                    );
-                    error
-                }
-            };
+    pub fn addr(&self) -> IpAddr {
+        match self.address {
+            Some(ipaddr) => ipaddr.addr(),
+            None => IpAddr::V6(Ipv6Addr::UNSPECIFIED),
+        }
+    }
 
-        match serde_json::from_slice::<back_compat::EarlyNetworkConfigV1>(
-            &config.blob,
-        ) {
-            Ok(v1) => {
-                // Convert from v1 to v2
-                return Ok(EarlyNetworkConfig {
-                    generation: v1.generation,
-                    schema_version: EarlyNetworkConfig::schema_version(),
-                    body: v1.body.into(),
-                });
+    /// Format `self` appropriately for passing to `uplinkd`'s SMF properties.
+    pub fn to_uplinkd_smf_property(&self) -> String {
+        fn addr_string(addr: &oxnet::IpNet) -> String {
+            if addr.addr().is_unspecified() {
+                "link-local".into()
+            } else {
+                addr.to_string()
             }
-            Err(error) => {
-                // Log this error.
-                warn!(
-                    log,
-                    "Failed to deserialize EarlyNetworkConfig \
-                         as v1, trying next as v0: {}",
-                    error
-                );
-            }
-        };
+        }
 
-        match serde_json::from_slice::<back_compat::EarlyNetworkConfigV0>(
-            &config.blob,
-        ) {
-            Ok(val) => {
-                // Convert from v0 to v2
-                return Ok(EarlyNetworkConfig {
-                    generation: val.generation,
-                    schema_version: 2,
-                    body: EarlyNetworkConfigBody {
-                        ntp_servers: val.ntp_servers,
-                        rack_network_config: val.rack_network_config.map(
-                            |v0_config| {
-                                back_compat::RackNetworkConfigV0::to_v2(
-                                    val.rack_subnet,
-                                    v0_config,
-                                )
-                            },
-                        ),
-                    },
-                });
-            }
-            Err(error) => {
-                // Log this error.
-                warn!(
-                    log,
-                    "Failed to deserialize EarlyNetworkConfig as v0: {}", error,
-                );
-            }
-        };
+        // TODO-cleanup for now, squash address values of both `None` and
+        // `Some(UNSPECIFIED)` down to "link-local". We want better types here:
+        // <https://github.com/oxidecomputer/omicron/issues/9832>.
+        match (&self.address, self.vlan_id) {
+            (Some(addr), None) => addr_string(addr),
+            (Some(addr), Some(v)) => format!("{};{v}", addr_string(addr)),
+            (None, None) => "link-local".to_string(),
+            (None, Some(v)) => format!("link-local;{v}"),
+        }
+    }
+}
 
-        // If we fail to parse the config as any known version, we return the
-        // error corresponding to the parse failure of the newest schema.
-        Err(v2_error)
+impl LldpAdminStatus {
+    /// Format `self` appropriately for passing to `lldpd`'s SMF properties.
+    pub fn to_lldpd_smf_property(&self) -> &'static str {
+        match self {
+            LldpAdminStatus::Enabled => "enabled",
+            LldpAdminStatus::Disabled => "disabled",
+            LldpAdminStatus::RxOnly => "rx_only",
+            LldpAdminStatus::TxOnly => "tx_only",
+        }
+    }
+}
+
+impl SwitchSlot {
+    /// Return the slot of the other switch, not ourself.
+    pub const fn other(&self) -> Self {
+        match self {
+            SwitchSlot::Switch0 => SwitchSlot::Switch1,
+            SwitchSlot::Switch1 => SwitchSlot::Switch0,
+        }
+    }
+}
+
+// Customize `Debug` so we get lower-cased variants. We used to have a `Display`
+// impl used in a variety of logging and error message contexts; we've switched
+// that over to using this `Debug` impl, but it's nice for the capitalization to
+// remain consistent.
+impl fmt::Debug for SwitchSlot {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            SwitchSlot::Switch0 => write!(f, "switch0"),
+            SwitchSlot::Switch1 => write!(f, "switch1"),
+        }
+    }
+}
+
+impl fmt::Display for PortSpeed {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            PortSpeed::Speed0G => write!(f, "0G"),
+            PortSpeed::Speed1G => write!(f, "1G"),
+            PortSpeed::Speed10G => write!(f, "10G"),
+            PortSpeed::Speed25G => write!(f, "25G"),
+            PortSpeed::Speed40G => write!(f, "40G"),
+            PortSpeed::Speed50G => write!(f, "50G"),
+            PortSpeed::Speed100G => write!(f, "100G"),
+            PortSpeed::Speed200G => write!(f, "200G"),
+            PortSpeed::Speed400G => write!(f, "400G"),
+        }
+    }
+}
+
+impl fmt::Display for PortFec {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            PortFec::Firecode => write!(f, "Firecode R-FEC"),
+            PortFec::None => write!(f, "None"),
+            PortFec::Rs => write!(f, "RS-FEC"),
+        }
     }
 }

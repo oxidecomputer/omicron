@@ -43,7 +43,6 @@ use nexus_lockstep_client::types::LastResult;
 use nexus_lockstep_client::types::PhysicalDiskPath;
 use nexus_lockstep_client::types::SagaState;
 use nexus_lockstep_client::types::SledSelector;
-use nexus_lockstep_client::types::UninitializedSledId;
 use nexus_saga_recovery::LastPass;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::ClickhouseMode;
@@ -52,6 +51,7 @@ use nexus_types::deployment::OximeterReadMode;
 use nexus_types::deployment::OximeterReadPolicy;
 use nexus_types::fm;
 use nexus_types::internal_api::background::AbandonedVmmReaperStatus;
+use nexus_types::internal_api::background::AttachedSubnetManagerStatus;
 use nexus_types::internal_api::background::BlueprintPlannerStatus;
 use nexus_types::internal_api::background::BlueprintRendezvousStats;
 use nexus_types::internal_api::background::BlueprintRendezvousStatus;
@@ -71,6 +71,7 @@ use nexus_types::internal_api::background::RegionSnapshotReplacementFinishStatus
 use nexus_types::internal_api::background::RegionSnapshotReplacementGarbageCollectStatus;
 use nexus_types::internal_api::background::RegionSnapshotReplacementStartStatus;
 use nexus_types::internal_api::background::RegionSnapshotReplacementStepStatus;
+use nexus_types::internal_api::background::SessionCleanupStatus;
 use nexus_types::internal_api::background::SitrepGcStatus;
 use nexus_types::internal_api::background::SitrepLoadStatus;
 use nexus_types::internal_api::background::SupportBundleCleanupReport;
@@ -509,8 +510,6 @@ struct SledsArgs {
 enum SledsCommands {
     /// List all uninitialized sleds
     ListUninitialized,
-    /// Add an uninitialized sled
-    Add(SledAddArgs),
     /// Expunge a sled (DANGEROUS)
     Expunge(SledExpungeArgs),
     /// Expunge a disk (DANGEROUS)
@@ -581,15 +580,26 @@ struct TrustQuorumArgs {
 }
 
 #[derive(Debug, Subcommand)]
+#[allow(clippy::large_enum_variant)]
 enum TrustQuorumCommands {
     GetConfig(TrustQuorumConfigArgs),
     LrtqUpgrade,
+    RemoveSled(TrustQuorumRemoveSledArgs),
 }
 
 #[derive(Debug, Clone, Copy, Args)]
 struct TrustQuorumConfigArgs {
     rack_id: RackUuid,
     epoch: TrustQuorumEpochOrLatest,
+}
+
+#[derive(Debug, Args)]
+struct TrustQuorumRemoveSledArgs {
+    // remove is _extremely_ dangerous, so we also require a database
+    // connection to perform some safety checks
+    #[clap(flatten)]
+    db_url_opts: DbUrlOptions,
+    sled_id: SledUuid,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -860,12 +870,6 @@ impl NexusArgs {
                 command: SledsCommands::ListUninitialized,
             }) => cmd_nexus_sleds_list_uninitialized(&client).await,
             NexusCommands::Sleds(SledsArgs {
-                command: SledsCommands::Add(args),
-            }) => {
-                let token = omdb.check_allow_destructive()?;
-                cmd_nexus_sled_add(&client, args, token).await
-            }
-            NexusCommands::Sleds(SledsArgs {
                 command: SledsCommands::Expunge(args),
             }) => {
                 let token = omdb.check_allow_destructive()?;
@@ -913,6 +917,15 @@ impl NexusArgs {
             }) => {
                 let token = omdb.check_allow_destructive()?;
                 cmd_nexus_trust_quorum_lrtq_upgrade(&client, token).await
+            }
+            NexusCommands::TrustQuorum(TrustQuorumArgs {
+                command: TrustQuorumCommands::RemoveSled(args),
+            }) => {
+                let token = omdb.check_allow_destructive()?;
+                cmd_nexus_trust_quorum_remove_sled(
+                    &client, args, omdb, log, token,
+                )
+                .await
             }
             NexusCommands::UpdateStatus(args) => {
                 cmd_nexus_update_status(&client, args).await
@@ -1206,6 +1219,9 @@ fn print_task_details(bgtask: &BackgroundTask, details: &serde_json::Value) {
         "abandoned_vmm_reaper" => {
             print_task_abandoned_vmm_reaper(details);
         }
+        "attached_subnet_manager" => {
+            print_task_attached_subnet_manager_status(details);
+        }
         "blueprint_planner" => {
             print_task_blueprint_planner(details);
         }
@@ -1280,6 +1296,9 @@ fn print_task_details(bgtask: &BackgroundTask, details: &serde_json::Value) {
         }
         "service_firewall_rule_propagation" => {
             print_task_service_firewall_rule_propagation(details);
+        }
+        "session_cleanup" => {
+            print_task_session_cleanup(details);
         }
         "sp_ereport_ingester" => {
             print_task_sp_ereport_ingester(details);
@@ -2233,6 +2252,51 @@ fn print_task_probe_distributor(details: &serde_json::Value) {
     };
 }
 
+fn print_task_attached_subnet_manager_status(details: &serde_json::Value) {
+    match serde_json::from_value::<AttachedSubnetManagerStatus>(details.clone())
+    {
+        Err(error) => eprintln!(
+            "warning: failed to interpret task details: {:?}: {:?}",
+            error, details
+        ),
+        Ok(AttachedSubnetManagerStatus { db_error, dendrite, sled }) => {
+            if let Some(err) = db_error {
+                println!(
+                    "  error accessing database to list attached subnets:"
+                );
+                println!("    {err}");
+            }
+            if dendrite.is_empty() {
+                println!("   no dendrite instances found");
+            } else {
+                for (switch_slot, details) in dendrite.iter() {
+                    println!("   dendrite instance on switch {switch_slot:?}");
+                    println!(
+                        "     n_subnets_removed={}",
+                        details.n_subnets_removed
+                    );
+                    println!(
+                        "     n_subnets_added={}",
+                        details.n_subnets_added
+                    );
+                    println!(
+                        "     n_subnets_total={}",
+                        details.n_total_subnets
+                    );
+                }
+            }
+            if sled.is_empty() {
+                println!("   no sleds found");
+            } else {
+                for (sled_id, details) in sled.iter() {
+                    println!("   sled {sled_id}");
+                    println!("     n_subnets={}", details.n_subnets);
+                }
+            }
+        }
+    };
+}
+
 fn print_task_read_only_region_replacement_start(details: &serde_json::Value) {
     match serde_json::from_value::<ReadOnlyRegionReplacementStartStatus>(
         details.clone(),
@@ -2607,6 +2671,33 @@ fn print_task_saga_recovery(details: &serde_json::Value) {
     }
 }
 
+fn print_task_session_cleanup(details: &serde_json::Value) {
+    match serde_json::from_value::<SessionCleanupStatus>(details.clone()) {
+        Err(error) => eprintln!(
+            "warning: failed to interpret task details: {:?}: {:?}",
+            error, details
+        ),
+        Ok(status) => {
+            const DELETED: &str = "deleted:";
+            const CUTOFF: &str = "cutoff:";
+            const LIMIT: &str = "limit:";
+            const ERROR: &str = "error:";
+            const WIDTH: usize =
+                const_max_len(&[DELETED, CUTOFF, LIMIT, ERROR]) + 1;
+
+            println!("    {DELETED:<WIDTH$}{}", status.deleted);
+            println!(
+                "    {CUTOFF:<WIDTH$}{}",
+                status.cutoff.to_rfc3339_opts(SecondsFormat::AutoSi, true),
+            );
+            println!("    {LIMIT:<WIDTH$}{}", status.limit);
+            if let Some(error) = &status.error {
+                println!("    {ERROR:<WIDTH$}{error}");
+            }
+        }
+    };
+}
+
 fn print_task_service_firewall_rule_propagation(details: &serde_json::Value) {
     match serde_json::from_value::<serde_json::Value>(details.clone()) {
         Err(error) => eprintln!(
@@ -2965,7 +3056,7 @@ fn print_task_alert_dispatcher(details: &serde_json::Value) {
     }
 }
 fn print_task_webhook_deliverator(details: &serde_json::Value) {
-    use nexus_types::external_api::views::WebhookDeliveryAttemptResult;
+    use nexus_types::external_api::alert::WebhookDeliveryAttemptResult;
     use nexus_types::internal_api::background::WebhookDeliveratorStatus;
     use nexus_types::internal_api::background::WebhookDeliveryFailure;
     use nexus_types::internal_api::background::WebhookRxDeliveryStatus;
@@ -4272,25 +4363,6 @@ async fn cmd_nexus_sleds_list_uninitialized(
     Ok(())
 }
 
-/// Runs `omdb nexus sleds add`
-async fn cmd_nexus_sled_add(
-    client: &nexus_lockstep_client::Client,
-    args: &SledAddArgs,
-    _destruction_token: DestructiveOperationToken,
-) -> Result<(), anyhow::Error> {
-    let sled_id = client
-        .sled_add(&UninitializedSledId {
-            part: args.part.clone(),
-            serial: args.serial.clone(),
-        })
-        .await
-        .context("adding sled")?
-        .into_inner()
-        .id;
-    eprintln!("added sled {} ({}): {sled_id}", args.serial, args.part);
-    Ok(())
-}
-
 /// Runs `omdb nexus sleds expunge`
 async fn cmd_nexus_sled_expunge(
     client: &nexus_lockstep_client::Client,
@@ -4381,6 +4453,13 @@ async fn cmd_nexus_sled_expunge_with_datastore(
             );
         }
     }
+
+    eprintln!(
+        "WARNING: Are you sure that you have removed this sled from the latest \
+        trust quorum configuration for rack {}?. Please double check with: \
+        `omdb nexus trust-quorum get-config <RACK_ID> latest`\n",
+        sled.rack_id
+    );
 
     eprintln!(
         "WARNING: This operation will PERMANENTLY and IRRECOVABLY mark sled \
@@ -4620,6 +4699,108 @@ async fn cmd_nexus_trust_quorum_lrtq_upgrade(
         .into_inner();
 
     println!("Started LRTQ upgrade at epoch {epoch}");
+
+    Ok(())
+}
+
+async fn cmd_nexus_trust_quorum_remove_sled(
+    client: &nexus_lockstep_client::Client,
+    args: &TrustQuorumRemoveSledArgs,
+    omdb: &Omdb,
+    log: &slog::Logger,
+    destruction_token: DestructiveOperationToken,
+) -> Result<(), anyhow::Error> {
+    let datastore = args.db_url_opts.connect(omdb, log).await?;
+    let result = cmd_nexus_trust_quorum_remove_sled_with_datastore(
+        &datastore,
+        client,
+        args,
+        log,
+        destruction_token,
+    )
+    .await;
+    datastore.terminate().await;
+    result
+}
+
+// `omdb nexus trust-quorum remove-sled`, but borrowing a datastore
+async fn cmd_nexus_trust_quorum_remove_sled_with_datastore(
+    datastore: &Arc<DataStore>,
+    client: &nexus_lockstep_client::Client,
+    args: &TrustQuorumRemoveSledArgs,
+    log: &slog::Logger,
+    _destruction_token: DestructiveOperationToken,
+) -> Result<(), anyhow::Error> {
+    use nexus_db_queries::context::OpContext;
+    let opctx = OpContext::for_tests(log.clone(), datastore.clone());
+    let opctx = &opctx;
+
+    // First, we need to look up the sled so we know its serial number.
+    let (_authz_sled, sled) = LookupPath::new(opctx, datastore)
+        .sled_id(args.sled_id)
+        .fetch()
+        .await
+        .with_context(|| format!("failed to find sled {}", args.sled_id))?;
+
+    // Helper to get confirmation messages from the user.
+    let mut prompt = ConfirmationPrompt::new();
+
+    println!(
+        "WARNING: This is step 1 of the process to expunge a sled. If you \
+        remove a sled from the trust quorum and reboot it, it will not be able \
+        to unlock its storage and participate in the control plane. However, \
+        the Reconfigurator will not yet know the sled is expunged and may \
+        still try to use it."
+    );
+
+    println!(
+        "Therefore, you must treat this action in conjunction with a reboot as \
+        the software equivalent of physically removing the sled from the rack \
+        before expungement."
+    );
+
+    println!(
+        "After this sled is removed from the trust quorum, you must reboot it \
+        and expunge it to complete the process."
+    );
+
+    println!(
+        "WARNING: This operation will PERMANENTLY and IRRECOVABLY remove sled \
+        {} ({}) from the trust-quorum for rack {}. To proceed, type the \
+        sled's serial number.",
+        args.sled_id,
+        sled.serial_number(),
+        sled.rack_id
+    );
+    prompt.read_and_validate("sled serial number", sled.serial_number())?;
+
+    println!(
+        "About to start the trust quorum reconfiguration to remove the sled."
+    );
+
+    println!(
+        "If this operation fails with a timeout, please check the latest trust \
+        quorum configuration to see whether or not to proceed with rack reboot \
+        and expungement."
+    );
+
+    println!(
+        "You can poll the trust quorum reconfiguration with \
+        `omdb nexus trust-quorum get-config <RACK_ID> <EPOCH | latest>`\n"
+    );
+
+    println!(
+        "Once the trust quorum configuration is committed, please reboot \
+        the sled and proceed to call `omdb nexus sled expunge`.\n"
+    );
+
+    let epoch = client
+        .trust_quorum_remove_sled(&args.sled_id.into_untyped_uuid())
+        .await
+        .context("trust quorum remove sled")?
+        .into_inner();
+
+    println!("Started trust quorum reconfiguration at epoch {epoch}\n");
 
     Ok(())
 }

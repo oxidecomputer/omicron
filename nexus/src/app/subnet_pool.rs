@@ -13,11 +13,15 @@
 
 use crate::app::Unimpl;
 use nexus_auth::authz;
+use nexus_db_lookup::lookup;
+use nexus_db_model::SubnetPool;
+use nexus_db_model::SubnetPoolSiloLink;
 use nexus_db_queries::context::OpContext;
-use nexus_types::external_api::{params, views};
+use nexus_types::external_api::subnet_pool as subnet_pool_types;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::DeleteResult;
 use omicron_common::api::external::Error;
+use omicron_common::api::external::InternalContext;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::NameOrId;
@@ -44,7 +48,7 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
         pagparams: &PaginatedBy<'_>,
-    ) -> ListResultVec<views::SubnetPool> {
+    ) -> ListResultVec<subnet_pool_types::SubnetPool> {
         self.datastore()
             .list_subnet_pools(opctx, pagparams)
             .await
@@ -54,8 +58,8 @@ impl super::Nexus {
     pub(crate) async fn subnet_pool_create(
         &self,
         opctx: &OpContext,
-        pool_params: params::SubnetPoolCreate,
-    ) -> Result<views::SubnetPool, Error> {
+        pool_params: subnet_pool_types::SubnetPoolCreate,
+    ) -> Result<subnet_pool_types::SubnetPool, Error> {
         self.datastore()
             .create_subnet_pool(opctx, pool_params)
             .await
@@ -66,7 +70,7 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
         pool: &NameOrId,
-    ) -> LookupResult<views::SubnetPool> {
+    ) -> LookupResult<subnet_pool_types::SubnetPool> {
         self.datastore()
             .lookup_subnet_pool(opctx, pool)
             .fetch()
@@ -78,8 +82,8 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
         pool: &NameOrId,
-        params: params::SubnetPoolUpdate,
-    ) -> UpdateResult<views::SubnetPool> {
+        params: subnet_pool_types::SubnetPoolUpdate,
+    ) -> UpdateResult<subnet_pool_types::SubnetPool> {
         let (authz_pool, _db_pool) = self
             .datastore()
             .lookup_subnet_pool(opctx, pool)
@@ -111,7 +115,7 @@ impl super::Nexus {
         opctx: &OpContext,
         pool: &NameOrId,
         pagparams: &DataPageParams<'_, IpNet>,
-    ) -> ListResultVec<views::SubnetPoolMember> {
+    ) -> ListResultVec<subnet_pool_types::SubnetPoolMember> {
         let (authz_pool, _db_pool) = self
             .datastore()
             .lookup_subnet_pool(opctx, pool)
@@ -140,8 +144,8 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
         pool: &NameOrId,
-        params: &params::SubnetPoolMemberAdd,
-    ) -> Result<views::SubnetPoolMember, Error> {
+        params: &subnet_pool_types::SubnetPoolMemberAdd,
+    ) -> Result<subnet_pool_types::SubnetPoolMember, Error> {
         let (authz_pool, db_pool) = self
             .datastore()
             .lookup_subnet_pool(opctx, pool)
@@ -157,7 +161,7 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
         pool: &NameOrId,
-        params: &params::SubnetPoolMemberRemove,
+        params: &subnet_pool_types::SubnetPoolMemberRemove,
     ) -> DeleteResult {
         let (authz_pool, _db_pool) = self
             .datastore()
@@ -176,7 +180,7 @@ impl super::Nexus {
         opctx: &OpContext,
         pool: &NameOrId,
         pagparams: &DataPageParams<'_, Uuid>,
-    ) -> ListResultVec<views::SubnetPoolSiloLink> {
+    ) -> ListResultVec<subnet_pool_types::SubnetPoolSiloLink> {
         let (authz_pool, _db_pool) = self
             .datastore()
             .lookup_subnet_pool(opctx, pool)
@@ -188,13 +192,73 @@ impl super::Nexus {
             .map(|items| items.into_iter().map(Into::into).collect())
     }
 
+    pub(crate) async fn silo_subnet_pool_list(
+        &self,
+        opctx: &OpContext,
+        silo_lookup: &lookup::Silo<'_>,
+        pagparams: &PaginatedBy<'_>,
+    ) -> ListResultVec<(SubnetPool, SubnetPoolSiloLink)> {
+        let (.., authz_silo) =
+            silo_lookup.lookup_for(authz::Action::Read).await?;
+
+        // check ability to list pools in general
+        opctx
+            .authorize(authz::Action::ListChildren, &authz::SUBNET_POOL_LIST)
+            .await?;
+
+        self.datastore()
+            .silo_subnet_pool_list(opctx, &authz_silo, pagparams)
+            .await
+    }
+
+    /// List Subnet Pools linked to the user's current silo.
+    pub(crate) async fn current_silo_subnet_pool_list(
+        &self,
+        opctx: &OpContext,
+        pagparams: &PaginatedBy<'_>,
+    ) -> ListResultVec<(SubnetPool, SubnetPoolSiloLink)> {
+        let authz_silo = opctx
+            .authn
+            .silo_required()
+            .internal_context("listing subnet pools")?;
+
+        // From the developer user's point of view, we treat Subnet Pools linked
+        // to their silo as silo resources, so they can list them if they can
+        // list silo children.
+        opctx.authorize(authz::Action::ListChildren, &authz_silo).await?;
+
+        self.datastore()
+            .silo_subnet_pool_list(opctx, &authz_silo, pagparams)
+            .await
+    }
+
+    /// Look up a subnet pool linked to the current silo. Returns 404 if the
+    /// pool exists but isn't linked to the current silo.
+    ///
+    /// Authorization comes from the silo link: if the pool is linked to the
+    /// caller's silo, they can view it; otherwise they get a 404. This is
+    /// the same pattern used by `silo_ip_pool_fetch` for IP pools.
+    pub(crate) async fn silo_subnet_pool_fetch(
+        &self,
+        opctx: &OpContext,
+        pool: &NameOrId,
+    ) -> LookupResult<(SubnetPool, SubnetPoolSiloLink)> {
+        let authz_silo = opctx
+            .authn
+            .silo_required()
+            .internal_context("fetching subnet pool")?;
+        opctx.authorize(authz::Action::ListChildren, &authz_silo).await?;
+
+        self.datastore().silo_subnet_pool_fetch(opctx, &authz_silo, pool).await
+    }
+
     pub(crate) async fn subnet_pool_silo_link(
         &self,
         opctx: &OpContext,
         pool: &NameOrId,
-        params: params::SubnetPoolLinkSilo,
-    ) -> Result<views::SubnetPoolSiloLink, Error> {
-        let params::SubnetPoolLinkSilo { silo, is_default } = params;
+        params: subnet_pool_types::SubnetPoolLinkSilo,
+    ) -> Result<subnet_pool_types::SubnetPoolSiloLink, Error> {
+        let subnet_pool_types::SubnetPoolLinkSilo { silo, is_default } = params;
         let (authz_pool, _db_pool) = self
             .datastore()
             .lookup_subnet_pool(opctx, pool)
@@ -220,9 +284,9 @@ impl super::Nexus {
         opctx: &OpContext,
         pool: NameOrId,
         silo: NameOrId,
-        params: params::SubnetPoolSiloUpdate,
-    ) -> UpdateResult<views::SubnetPoolSiloLink> {
-        let params::SubnetPoolSiloUpdate { is_default } = params;
+        params: subnet_pool_types::SubnetPoolSiloUpdate,
+    ) -> UpdateResult<subnet_pool_types::SubnetPoolSiloLink> {
+        let subnet_pool_types::SubnetPoolSiloUpdate { is_default } = params;
         let (authz_pool, _db_pool) = self
             .datastore()
             .lookup_subnet_pool(opctx, &pool)
@@ -275,7 +339,7 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
         pool: &NameOrId,
-    ) -> LookupResult<views::SubnetPoolUtilization> {
+    ) -> LookupResult<subnet_pool_types::SubnetPoolUtilization> {
         let not_found = not_found_error(pool, ResourceType::SubnetPool);
         Err(self
             .unimplemented_todo(opctx, Unimpl::ProtectedLookup(not_found))

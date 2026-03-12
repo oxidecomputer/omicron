@@ -2,8 +2,6 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use crate::external_api::params;
-use crate::external_api::shared::SwitchLinkState;
 use db::datastore::SwitchPortSettingsCombinedResult;
 use dpd_client::types::LinkId;
 use dpd_client::types::PortId;
@@ -14,12 +12,14 @@ use nexus_db_queries::db;
 use nexus_db_queries::db::DataStore;
 use nexus_db_queries::db::datastore::UpdatePrecondition;
 use nexus_db_queries::db::model::{SwitchPort, SwitchPortSettings};
-use omicron_common::api::external::SwitchLocation;
+use nexus_types::external_api::networking;
+use nexus_types::external_api::switch::SwitchLinkState;
 use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::{
     self, CreateResult, DataPageParams, DeleteResult, Error, ListResultVec,
     LookupResult, Name, NameOrId, UpdateResult,
 };
+use sled_agent_types::early_networking::SwitchSlot;
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -27,7 +27,7 @@ impl super::Nexus {
     pub(crate) async fn switch_port_settings_post(
         self: &Arc<Self>,
         opctx: &OpContext,
-        params: params::SwitchPortSettingsCreate,
+        params: networking::SwitchPortSettingsCreate,
     ) -> CreateResult<SwitchPortSettingsCombinedResult> {
         opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
         Self::switch_port_settings_validate(&params)?;
@@ -57,17 +57,23 @@ impl super::Nexus {
 
     // TODO: more validation wanted
     fn switch_port_settings_validate(
-        params: &params::SwitchPortSettingsCreate,
+        params: &networking::SwitchPortSettingsCreate,
     ) -> CreateResult<()> {
         for x in &params.bgp_peers {
             for p in x.peers.iter() {
                 if let Some(ref key) = p.md5_auth_key {
+                    let peer_id = match p.addr {
+                        Some(addr) => format!("peer {}", addr),
+                        None => {
+                            format!("unnumbered peer on {}", p.interface_name)
+                        }
+                    };
                     if key.len() > 80 {
                         return Err(Error::invalid_value(
                             "md5_auth_key",
                             format!(
                                 "md5 auth key for {} is longer than 80 characters",
-                                p.addr
+                                peer_id
                             ),
                         ));
                     }
@@ -77,7 +83,7 @@ impl super::Nexus {
                                 "md5_auth_key",
                                 format!(
                                     "md5 auth key for {} must be printable ascii",
-                                    p.addr
+                                    peer_id
                                 ),
                             ));
                         }
@@ -91,7 +97,7 @@ impl super::Nexus {
     pub async fn switch_port_settings_create(
         self: &Arc<Self>,
         opctx: &OpContext,
-        params: params::SwitchPortSettingsCreate,
+        params: networking::SwitchPortSettingsCreate,
         id: Option<Uuid>,
     ) -> CreateResult<SwitchPortSettingsCombinedResult> {
         let result = self
@@ -110,7 +116,7 @@ impl super::Nexus {
         self: &Arc<Self>,
         opctx: &OpContext,
         switch_port_settings_id: Uuid,
-        new_settings: params::SwitchPortSettingsCreate,
+        new_settings: networking::SwitchPortSettingsCreate,
     ) -> CreateResult<SwitchPortSettingsCombinedResult> {
         let result = self
             .db_datastore
@@ -146,7 +152,7 @@ impl super::Nexus {
     pub(crate) async fn switch_port_settings_delete(
         &self,
         opctx: &OpContext,
-        params: &params::SwitchPortSettingsSelector,
+        params: &networking::SwitchPortSettingsSelector,
     ) -> DeleteResult {
         opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
         self.db_datastore.switch_port_settings_delete(opctx, params).await
@@ -174,16 +180,11 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
         rack_id: Uuid,
-        switch_location: Name,
+        switch_slot: SwitchSlot,
         port: Name,
     ) -> CreateResult<SwitchPort> {
         self.db_datastore
-            .switch_port_create(
-                opctx,
-                rack_id,
-                switch_location.into(),
-                port.into(),
-            )
+            .switch_port_create(opctx, rack_id, switch_slot, port.into())
             .await
     }
 
@@ -218,8 +219,8 @@ impl super::Nexus {
         self: &Arc<Self>,
         opctx: &OpContext,
         port: &Name,
-        selector: &params::SwitchPortSelector,
-        settings: &params::SwitchPortApplySettings,
+        selector: &networking::SwitchPortSelector,
+        settings: &networking::SwitchPortApplySettings,
     ) -> UpdateResult<()> {
         opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
         let switch_port_id = self
@@ -227,7 +228,7 @@ impl super::Nexus {
             .switch_port_get_id(
                 opctx,
                 selector.rack_id,
-                selector.switch_location.clone().into(),
+                selector.switch_slot,
                 port.clone().into(),
             )
             .await?;
@@ -260,7 +261,7 @@ impl super::Nexus {
         self: &Arc<Self>,
         opctx: &OpContext,
         port: &Name,
-        params: &params::SwitchPortSelector,
+        params: &networking::SwitchPortSelector,
     ) -> UpdateResult<()> {
         opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
         let switch_port_id = self
@@ -268,7 +269,7 @@ impl super::Nexus {
             .switch_port_get_id(
                 opctx,
                 params.rack_id,
-                params.switch_location.clone().into(),
+                params.switch_slot,
                 port.clone().into(),
             )
             .await?;
@@ -293,16 +294,11 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
         ports: &[Name],
-        switch: Name,
+        switch: SwitchSlot,
     ) -> CreateResult<()> {
         for port in ports {
             match self
-                .switch_port_create(
-                    opctx,
-                    self.rack_id,
-                    switch.clone(),
-                    port.clone(),
-                )
+                .switch_port_create(opctx, self.rack_id, switch, port.clone())
                 .await
             {
                 Ok(_) => {}
@@ -318,16 +314,10 @@ impl super::Nexus {
     pub(crate) async fn switch_port_status(
         &self,
         opctx: &OpContext,
-        switch: Name,
+        switch: SwitchSlot,
         port: Name,
     ) -> Result<SwitchLinkState, Error> {
         opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
-
-        let loc: SwitchLocation = switch.as_str().parse().map_err(|e| {
-            Error::invalid_request(&format!(
-                "invalid switch name {switch}: {e}"
-            ))
-        })?;
 
         let port_id = PortId::Qsfp(port.as_str().parse().map_err(|e| {
             Error::invalid_request(&format!("invalid port name: {port} {e}"))
@@ -340,8 +330,8 @@ impl super::Nexus {
             Error::internal_error(&format!("dpd clients get: {e}"))
         })?;
 
-        let dpd = dpd_clients.get(&loc).ok_or(Error::internal_error(
-            &format!("no client for switch {switch}"),
+        let dpd = dpd_clients.get(&switch).ok_or(Error::internal_error(
+            &format!("no client for switch {switch:?}"),
         ))?;
 
         let status = dpd

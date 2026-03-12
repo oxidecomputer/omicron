@@ -16,13 +16,13 @@ pub use omicron_common::address::MIN_VPC_IPV4_SUBNET_PREFIX;
 use omicron_common::address::NEXUS_TECHPORT_EXTERNAL_PORT;
 pub use omicron_common::address::NUM_INITIAL_RESERVED_IP_ADDRESSES;
 use omicron_common::address::RACK_PREFIX;
-use omicron_common::api::internal::shared::SwitchLocation;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_with::DisplayFromStr;
 use serde_with::DurationSeconds;
 use serde_with::serde_as;
+use sled_agent_types::early_networking::SwitchSlot;
 use std::collections::HashMap;
 use std::fmt;
 use std::net::IpAddr;
@@ -433,6 +433,21 @@ pub struct BackgroundTaskConfig {
     pub multicast_reconciler: MulticastGroupReconcilerConfig,
     /// configuration for trust quorum manager task
     pub trust_quorum: TrustQuorumConfig,
+    /// configuration for the attached subnet manager
+    pub attached_subnet_manager: AttachedSubnetManagerConfig,
+    /// configuration for console session cleanup task
+    pub session_cleanup: SessionCleanupConfig,
+}
+
+#[serde_as]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct SessionCleanupConfig {
+    /// period (in seconds) for periodic activations of the session cleanup task
+    #[serde_as(as = "DurationSeconds<u64>")]
+    pub period_secs: Duration,
+
+    /// maximum rows hard-deleted per activation
+    pub max_delete_per_activation: u32,
 }
 
 #[serde_as]
@@ -1006,10 +1021,10 @@ pub struct PackageConfig {
     pub tunables: Tunables,
     /// `Dendrite` dataplane daemon configuration
     #[serde(default)]
-    pub dendrite: HashMap<SwitchLocation, DpdConfig>,
+    pub dendrite: HashMap<SwitchSlot, DpdConfig>,
     /// Maghemite mgd daemon configuration
     #[serde(default)]
-    pub mgd: HashMap<SwitchLocation, MgdConfig>,
+    pub mgd: HashMap<SwitchSlot, MgdConfig>,
     /// Initial reconfigurator config
     ///
     /// We use this hook to disable reconfigurator automation in the test suite
@@ -1022,6 +1037,15 @@ pub struct PackageConfig {
     pub multicast: MulticastConfig,
     /// Default Crucible region allocation strategy
     pub default_region_allocation_strategy: RegionAllocationStrategy,
+}
+
+#[serde_as]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct AttachedSubnetManagerConfig {
+    /// period (in seconds) for periodic activations of the background task that
+    /// pushes attached subnets to the switches and sleds.
+    #[serde_as(as = "DurationSeconds<u64>")]
+    pub period_secs: Duration,
 }
 
 // Re-export SchemeName from nexus-types for use in config parsing.
@@ -1049,7 +1073,6 @@ mod test {
     use omicron_common::address::{
         CLICKHOUSE_TCP_PORT, Ipv6Subnet, RACK_PREFIX,
     };
-    use omicron_common::api::internal::shared::SwitchLocation;
 
     use camino::{Utf8Path, Utf8PathBuf};
     use dropshot::ConfigDropshot;
@@ -1250,6 +1273,9 @@ mod test {
             multicast_reconciler.period_secs = 60
             fm.rendezvous_period_secs = 51
             trust_quorum.period_secs = 60
+            attached_subnet_manager.period_secs = 60
+            session_cleanup.period_secs = 300
+            session_cleanup.max_delete_per_activation = 10000
             [default_region_allocation_strategy]
             type = "random"
             seed = 0
@@ -1333,14 +1359,14 @@ mod test {
                         load_timeout: None
                     },
                     dendrite: HashMap::from([(
-                        SwitchLocation::Switch0,
+                        SwitchSlot::Switch0,
                         DpdConfig {
                             address: SocketAddr::from_str("[::1]:12224")
                                 .unwrap(),
                         }
                     )]),
                     mgd: HashMap::from([(
-                        SwitchLocation::Switch0,
+                        SwitchSlot::Switch0,
                         MgdConfig {
                             address: SocketAddr::from_str("[::1]:4676")
                                 .unwrap(),
@@ -1511,6 +1537,13 @@ mod test {
                         trust_quorum: TrustQuorumConfig {
                             period_secs: Duration::from_secs(60),
                         },
+                        attached_subnet_manager: AttachedSubnetManagerConfig {
+                            period_secs: Duration::from_secs(60),
+                        },
+                        session_cleanup: SessionCleanupConfig {
+                            period_secs: Duration::from_secs(300),
+                            max_delete_per_activation: 10_000,
+                        },
                     },
                     multicast: MulticastConfig { enabled: false },
                     default_region_allocation_strategy:
@@ -1616,6 +1649,9 @@ mod test {
             fm.rendezvous_period_secs = 48
             multicast_reconciler.period_secs = 60
             trust_quorum.period_secs = 60
+            attached_subnet_manager.period_secs = 60
+            session_cleanup.period_secs = 300
+            session_cleanup.max_delete_per_activation = 10000
 
             [default_region_allocation_strategy]
             type = "random"

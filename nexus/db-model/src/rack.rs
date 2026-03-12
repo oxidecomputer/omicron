@@ -5,7 +5,8 @@
 use db_macros::Asset;
 use ipnetwork::IpNetwork;
 use nexus_db_schema::schema::rack;
-use nexus_types::{external_api::views, identity::Asset};
+use nexus_types::external_api::rack as rack_types;
+use nexus_types::identity::Asset;
 use uuid::Uuid;
 
 /// Information about a local rack.
@@ -30,7 +31,7 @@ impl Rack {
     }
 }
 
-impl From<Rack> for views::Rack {
+impl From<Rack> for rack_types::Rack {
     fn from(rack: Rack) -> Self {
         Self { identity: rack.identity() }
     }

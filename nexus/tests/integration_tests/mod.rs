@@ -70,5 +70,6 @@ mod vpc_subnets;
 mod vpcs;
 mod webhooks;
 
-// This module is used only for shared data, not test cases.
+// These modules are used only for shared data/utilities, not test cases.
+mod endpoint_coverage;
 mod endpoints;

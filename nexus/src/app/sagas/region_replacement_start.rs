@@ -55,6 +55,7 @@ use crate::app::sagas::common_storage::find_only_new_region;
 use crate::app::sagas::declare_saga_actions;
 use crate::app::{authn, db};
 use nexus_db_queries::db::datastore::REGION_REDUNDANCY_THRESHOLD;
+use nexus_types::saga::saga_action_failed;
 use omicron_common::api::external::Error;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::VolumeUuid;
@@ -183,7 +184,7 @@ async fn srrs_set_saga_id(
         .datastore()
         .set_region_replacement_allocating(&opctx, params.request.id, saga_id)
         .await
-        .map_err(ActionError::action_failed)?;
+        .map_err(saga_action_failed)?;
 
     Ok(())
 }
@@ -223,11 +224,11 @@ async fn srrs_get_existing_datasets_and_regions(
         .datastore()
         .get_region(params.request.old_region_id)
         .await
-        .map_err(ActionError::action_failed)?;
+        .map_err(saga_action_failed)?;
 
     // XXX for now, bail out if requesting the replacement of a read-only region
     if db_region.read_only() {
-        return Err(ActionError::action_failed(String::from(
+        return Err(saga_action_failed(Error::internal_error(
             "replacing read-only region currently unsupported",
         )));
     }
@@ -237,7 +238,7 @@ async fn srrs_get_existing_datasets_and_regions(
         .datastore()
         .get_allocated_regions(db_region.volume_id())
         .await
-        .map_err(ActionError::action_failed)?;
+        .map_err(saga_action_failed)?;
 
     Ok(datasets_and_regions)
 }
@@ -259,7 +260,7 @@ async fn srrs_alloc_new_region(
         .datastore()
         .get_region(params.request.old_region_id)
         .await
-        .map_err(ActionError::action_failed)?;
+        .map_err(saga_action_failed)?;
 
     // Request an additional region for this volume: THRESHOLD + 1 is required
     // in order to have the proper redundancy. It's important _not_ to delete
@@ -284,7 +285,7 @@ async fn srrs_alloc_new_region(
             REGION_REDUNDANCY_THRESHOLD + 1,
         )
         .await
-        .map_err(ActionError::action_failed)?;
+        .map_err(saga_action_failed)?;
 
     Ok(datasets_and_regions)
 }
@@ -341,12 +342,10 @@ async fn srrs_find_new_region(
     );
 
     let Some(dataset_and_region) = maybe_dataset_and_region else {
-        return Err(ActionError::action_failed(Error::internal_error(
-            &format!(
-                "expected dataset and region, saw {:?}!",
-                maybe_dataset_and_region,
-            ),
-        )));
+        return Err(saga_action_failed(Error::internal_error(&format!(
+            "expected dataset and region, saw {:?}!",
+            maybe_dataset_and_region,
+        ))));
     };
 
     Ok(dataset_and_region)
@@ -374,15 +373,13 @@ async fn srrs_new_region_ensure(
         .nexus()
         .ensure_all_datasets_and_regions(&log, vec![new_dataset_and_region])
         .await
-        .map_err(ActionError::action_failed)?;
+        .map_err(saga_action_failed)?;
 
     if ensured_dataset_and_region.len() != 1 {
-        return Err(ActionError::action_failed(Error::internal_error(
-            &format!(
-                "expected 1 dataset and region, saw {}!",
-                ensured_dataset_and_region.len()
-            ),
-        )));
+        return Err(saga_action_failed(Error::internal_error(&format!(
+            "expected 1 dataset and region, saw {}!",
+            ensured_dataset_and_region.len()
+        ))));
     }
 
     Ok(ensured_dataset_and_region.pop().unwrap())
@@ -422,7 +419,7 @@ async fn srrs_get_old_region_volume_id(
         .datastore()
         .get_region(params.request.old_region_id)
         .await
-        .map_err(ActionError::action_failed)?;
+        .map_err(saga_action_failed)?;
 
     Ok(db_region.volume_id())
 }
@@ -463,7 +460,7 @@ async fn srrs_get_old_region_address(
                 .datastore()
                 .get_region(params.request.old_region_id)
                 .await
-                .map_err(ActionError::action_failed)?;
+                .map_err(saga_action_failed)?;
 
             let targets = osagactx
                 .datastore()
@@ -473,7 +470,7 @@ async fn srrs_get_old_region_address(
                     db_region.volume_id(),
                 )
                 .await
-                .map_err(ActionError::action_failed)?;
+                .map_err(saga_action_failed)?;
 
             if targets.len() == 1 {
                 // If there's a single RW region in the volume that matches this
@@ -482,16 +479,16 @@ async fn srrs_get_old_region_address(
             } else {
                 // Otherwise, Nexus cannot know the region's port. Return an
                 // error.
-                Err(ActionError::action_failed(format!(
+                Err(saga_action_failed(Error::internal_error(&format!(
                     "{} regions match dataset {} in volume {}",
                     targets.len(),
                     db_region.dataset_id(),
                     db_region.volume_id(),
-                )))
+                ))))
             }
         }
 
-        Err(e) => Err(ActionError::action_failed(e)),
+        Err(e) => Err(saga_action_failed(e)),
     }
 }
 
@@ -506,7 +503,7 @@ async fn srrs_replace_region_in_volume(
         .datastore()
         .get_region(params.request.old_region_id)
         .await
-        .map_err(ActionError::action_failed)?;
+        .map_err(saga_action_failed)?;
 
     let new_volume_id = sagactx.lookup::<VolumeUuid>("new_volume_id")?;
     let old_region_address =
@@ -554,7 +551,7 @@ async fn srrs_replace_region_in_volume(
             },
         )
         .await
-        .map_err(ActionError::action_failed)?;
+        .map_err(saga_action_failed)?;
 
     match volume_replace_region_result {
         VolumeReplaceResult::AlreadyHappened | VolumeReplaceResult::Done => {
@@ -573,7 +570,7 @@ async fn srrs_replace_region_in_volume(
             // this saga. The associated background task will transition this
             // request's state to Completed.
 
-            Err(ActionError::action_failed(Error::conflict(format!(
+            Err(saga_action_failed(Error::conflict(format!(
                 "existing volume {} deleted",
                 old_volume_id
             ))))
@@ -601,7 +598,7 @@ async fn srrs_replace_region_in_volume_undo(
         .datastore()
         .get_region(params.request.old_region_id)
         .await
-        .map_err(ActionError::action_failed)?;
+        .map_err(saga_action_failed)?;
 
     let new_volume_id = sagactx.lookup::<VolumeUuid>("new_volume_id")?;
     let old_region_address =
@@ -704,7 +701,7 @@ async fn srrs_create_fake_volume(
         .datastore()
         .volume_create(new_volume_id, volume_construction_request)
         .await
-        .map_err(ActionError::action_failed)?;
+        .map_err(saga_action_failed)?;
 
     Ok(())
 }
@@ -755,7 +752,7 @@ async fn srrs_update_request_record(
             old_region_volume_id,
         )
         .await
-        .map_err(ActionError::action_failed)?;
+        .map_err(saga_action_failed)?;
 
     Ok(())
 }

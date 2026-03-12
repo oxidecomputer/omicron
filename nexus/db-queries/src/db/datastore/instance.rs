@@ -84,7 +84,7 @@ impl<'s> InstanceStateComputer<'s> {
         Self {
             instance_state: &instance.runtime_state.nexus_state,
             migration_id: instance.runtime_state.migration_id.as_ref(),
-            vmm_state: vmm.as_ref().map(|vmm| &vmm.runtime.state),
+            vmm_state: vmm.as_ref().map(|vmm| &vmm.state),
         }
     }
 
@@ -213,7 +213,7 @@ impl From<InstanceAndActiveVmm> for external::Instance {
         let time_run_state_updated = value
             .vmm
             .as_ref()
-            .map(|vmm| vmm.runtime.time_state_updated)
+            .map(|vmm| vmm.time_state_updated)
             .unwrap_or(value.instance.runtime_state.time_updated);
         let auto_restart_status = {
             let cooldown_expiration =
@@ -2312,7 +2312,8 @@ mod tests {
     use nexus_db_model::VmmCpuPlatform;
     use nexus_db_model::VmmRuntimeState;
     use nexus_db_model::VmmState;
-    use nexus_types::external_api::params;
+    use nexus_types::external_api::instance as instance_types;
+    use nexus_types::external_api::project;
     use nexus_types::identity::Asset;
     use nexus_types::silo::DEFAULT_SILO_ID;
     use omicron_common::api::external;
@@ -2332,7 +2333,7 @@ mod tests {
                 Project::new_with_id(
                     project_id,
                     silo_id,
-                    params::ProjectCreate {
+                    project::ProjectCreate {
                         identity: IdentityMetadataCreateParams {
                             name: "stuff".parse().unwrap(),
                             description: "Where I keep my stuff".into(),
@@ -2359,7 +2360,7 @@ mod tests {
                 Instance::new(
                     instance_id,
                     authz_project.id(),
-                    &params::InstanceCreate {
+                    &instance_types::InstanceCreate {
                         identity: IdentityMetadataCreateParams {
                             name: name.parse().unwrap(),
                             description: "It's an instance".into(),
@@ -2369,7 +2370,7 @@ mod tests {
                         hostname: "myhostname".try_into().unwrap(),
                         user_data: Vec::new(),
                         network_interfaces:
-                            params::InstanceNetworkInterfaceAttachment::None,
+                            instance_types::InstanceNetworkInterfaceAttachment::None,
                         external_ips: Vec::new(),
                         disks: Vec::new(),
                         boot_disk: None,
@@ -2990,11 +2991,9 @@ mod tests {
                     propolis_ip: "10.1.9.32".parse().unwrap(),
                     propolis_port: 420.into(),
                     cpu_platform: VmmCpuPlatform::SledDefault,
-                    runtime: VmmRuntimeState {
-                        time_state_updated: Utc::now(),
-                        generation: Generation::new(),
-                        state: VmmState::Running,
-                    },
+                    time_state_updated: Utc::now(),
+                    generation: Generation::new(),
+                    state: VmmState::Running,
                 },
             )
             .await
@@ -3053,11 +3052,9 @@ mod tests {
                     propolis_ip: "10.1.9.42".parse().unwrap(),
                     propolis_port: 666.into(),
                     cpu_platform: VmmCpuPlatform::SledDefault,
-                    runtime: VmmRuntimeState {
-                        time_state_updated: Utc::now(),
-                        generation: Generation::new(),
-                        state: VmmState::Running,
-                    },
+                    time_state_updated: Utc::now(),
+                    generation: Generation::new(),
+                    state: VmmState::Running,
                 },
             )
             .await
@@ -3151,11 +3148,9 @@ mod tests {
                     propolis_ip: "10.1.9.32".parse().unwrap(),
                     propolis_port: 420.into(),
                     cpu_platform: VmmCpuPlatform::SledDefault,
-                    runtime: VmmRuntimeState {
-                        time_state_updated: Utc::now(),
-                        generation: Generation::new(),
-                        state: VmmState::Stopped,
-                    },
+                    time_state_updated: Utc::now(),
+                    generation: Generation::new(),
+                    state: VmmState::Stopped,
                 },
             )
             .await
@@ -3194,11 +3189,9 @@ mod tests {
                     propolis_ip: "10.1.9.42".parse().unwrap(),
                     propolis_port: 420.into(),
                     cpu_platform: VmmCpuPlatform::SledDefault,
-                    runtime: VmmRuntimeState {
-                        time_state_updated: Utc::now(),
-                        generation: Generation::new(),
-                        state: VmmState::Running,
-                    },
+                    time_state_updated: Utc::now(),
+                    generation: Generation::new(),
+                    state: VmmState::Running,
                 },
             )
             .await
@@ -3235,9 +3228,7 @@ mod tests {
                     &PropolisUuid::from_untyped_uuid(vmm1.id),
                     &VmmRuntimeState {
                         time_state_updated: Utc::now(),
-                        generation: Generation(
-                            vmm2.runtime.generation.0.next()
-                        ),
+                        generation: Generation(vmm2.generation.0.next()),
                         state: VmmState::Running,
                     },
                 )
@@ -3299,11 +3290,9 @@ mod tests {
                     propolis_ip: "10.1.9.42".parse().unwrap(),
                     propolis_port: 420.into(),
                     cpu_platform: VmmCpuPlatform::SledDefault,
-                    runtime: VmmRuntimeState {
-                        time_state_updated: Utc::now(),
-                        generation: Generation::new(),
-                        state: VmmState::Running,
-                    },
+                    time_state_updated: Utc::now(),
+                    generation: Generation::new(),
+                    state: VmmState::Running,
                 },
             )
             .await
@@ -3338,9 +3327,7 @@ mod tests {
                     &PropolisUuid::from_untyped_uuid(vmm2.id),
                     &VmmRuntimeState {
                         time_state_updated: Utc::now(),
-                        generation: Generation(
-                            vmm2.runtime.generation.0.next().next()
-                        ),
+                        generation: Generation(vmm2.generation.0.next().next()),
                         state: VmmState::SagaUnwound,
                     },
                 )
@@ -3448,11 +3435,9 @@ mod tests {
                             propolis_ip: "10.1.9.42".parse().unwrap(),
                             propolis_port: 420.into(),
                             cpu_platform: VmmCpuPlatform::SledDefault,
-                            runtime: VmmRuntimeState {
-                                time_state_updated: Utc::now(),
-                                generation: Generation::new(),
-                                state: VmmState::Running,
-                            },
+                            time_state_updated: Utc::now(),
+                            generation: Generation::new(),
+                            state: VmmState::Running,
                         },
                     )
                     .await

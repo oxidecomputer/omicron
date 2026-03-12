@@ -586,6 +586,9 @@ mod tests {
                 .arg("[::1]:0")
                 .arg("--http-addr")
                 .arg("[::1]:0")
+                // See https://github.com/oxidecomputer/omicron-9874-findings for
+                // why we set the max SQL memory to be 256MiB.
+                .arg("--max-sql-memory=256MiB")
                 .arg("--join")
                 .arg("[::1]:0");
 

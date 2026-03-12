@@ -16,6 +16,7 @@ use crate::nexus::{
     NexusClient, NexusNotifierHandle, NexusNotifierInput, NexusNotifierTask,
 };
 use crate::probe_manager::ProbeManager;
+use crate::rot::{RotAttestationHandle, RotAttestationTask};
 use crate::services::{self, ServiceManager, UnderlayInfo};
 use crate::support_bundle::logs::SupportBundleLogs;
 use crate::support_bundle::storage::SupportBundleManager;
@@ -34,6 +35,9 @@ use illumos_utils::opte::PortManager;
 use illumos_utils::running_zone::RunningZone;
 use illumos_utils::zfs::CanMount;
 use illumos_utils::zfs::DatasetEnsureArgs;
+use illumos_utils::zfs::DatasetVolumeDeleteArgs;
+use illumos_utils::zfs::DatasetVolumeEnsureArgs;
+use illumos_utils::zfs::DestroyDatasetErrorVariant;
 use illumos_utils::zfs::Mountpoint;
 use illumos_utils::zfs::SizeDetails;
 use illumos_utils::zfs::Zfs;
@@ -47,9 +51,8 @@ use omicron_common::api::external::{ByteCount, ByteCountRangeError, Vni};
 use omicron_common::api::internal::nexus::{DiskRuntimeState, SledVmmState};
 use omicron_common::api::internal::shared::DelegatedZvol;
 use omicron_common::api::internal::shared::{
-    ExternalIpGatewayMap, HostPortConfig, RackNetworkConfig,
-    ResolvedVpcFirewallRule, ResolvedVpcRouteSet, ResolvedVpcRouteState,
-    SledIdentifiers, VirtualNetworkInterfaceHost,
+    ExternalIpGatewayMap, ResolvedVpcFirewallRule, ResolvedVpcRouteSet,
+    ResolvedVpcRouteState, SledIdentifiers, VirtualNetworkInterfaceHost,
 };
 use omicron_common::backoff::{
     BackoffError, retry_notify, retry_policy_internal_service_aggressive,
@@ -59,6 +62,8 @@ use omicron_ddm_admin_client::Client as DdmAdminClient;
 use omicron_uuid_kinds::{
     GenericUuid, MupdateOverrideUuid, PropolisUuid, SledUuid,
 };
+use oximeter_instruments::http::LatencyTracker;
+use oxnet::IpNet;
 use sled_agent_config_reconciler::{
     ConfigReconcilerHandle, ConfigReconcilerSpawnToken, InternalDisks,
     InternalDisksReceiver, LedgerNewConfigError, LedgerTaskError,
@@ -66,10 +71,13 @@ use sled_agent_config_reconciler::{
 };
 use sled_agent_health_monitor::handle::HealthMonitorHandle;
 use sled_agent_measurements::MeasurementsHandle;
+use sled_agent_types::attached_subnet::AttachedSubnet;
+use sled_agent_types::attached_subnet::AttachedSubnets;
 use sled_agent_types::dataset::LocalStorageDatasetDeleteRequest;
 use sled_agent_types::dataset::LocalStorageDatasetEnsureRequest;
 use sled_agent_types::disk::DiskStateRequested;
-use sled_agent_types::early_networking::EarlyNetworkConfig;
+use sled_agent_types::early_networking::EarlyNetworkConfigEnvelope;
+use sled_agent_types::early_networking::RackNetworkConfig;
 use sled_agent_types::instance::{
     InstanceEnsureBody, InstanceExternalIpBody, InstanceMulticastBody,
     VmmPutStateResponse, VmmStateRequested, VmmUnregisterResponse,
@@ -79,7 +87,9 @@ use sled_agent_types::probes::ProbeCreate;
 use sled_agent_types::resolvable_files::{
     PreparedOmicronZone, RemoveMupdateOverrideResult, ResolverStatus,
 };
+use sled_agent_types::rot::Rot;
 use sled_agent_types::sled::StartSledAgentRequest;
+use sled_agent_types::uplink::HostPortConfig;
 use sled_agent_types::zone_bundle::{
     BundleUtilization, CleanupContext, CleanupCount, CleanupPeriod,
     PriorityOrder, StorageLimit, ZoneBundleMetadata,
@@ -181,6 +191,9 @@ pub enum Error {
 
     #[error("Time not yet synchronized")]
     TimeNotSynchronized,
+
+    #[error(transparent)]
+    Rot(#[from] crate::rot::RotError),
 }
 
 impl From<Error> for omicron_common::api::external::Error {
@@ -203,6 +216,7 @@ impl From<Error> for dropshot::HttpError {
 
         const NO_SUCH_INSTANCE: &str = "NO_SUCH_INSTANCE";
         const INSTANCE_CHANNEL_FULL: &str = "INSTANCE_CHANNEL_FULL";
+        const SUBNET_ALREADY_ATTACHED: &str = "SUBNET_ALREADY_ATTACHED";
         match err {
             Error::Instance(crate::instance_manager::Error::Instance(
                 instance_error,
@@ -256,6 +270,13 @@ impl From<Error> for dropshot::HttpError {
                             Some(NO_SUCH_INSTANCE.to_string()),
                             ClientErrorStatusCode::GONE,
                             instance_error.to_string(),
+                        )
+                    }
+                    err @ crate::instance::Error::SubnetAlreadyAttached(_) => {
+                        HttpError::for_client_error(
+                            Some(SUBNET_ALREADY_ATTACHED.to_string()),
+                            ClientErrorStatusCode::CONFLICT,
+                            err.to_string(),
                         )
                     }
                     e => HttpError::for_internal_error(e.to_string()),
@@ -362,8 +383,11 @@ struct SledAgentInner {
     // A mechanism for notifiying nexus about sled-agent updates
     nexus_notifier: NexusNotifierHandle,
 
+    // A handle to the RoT for attestation requests.
+    rot_attestor: RotAttestationHandle,
+
     // The rack network config provided at RSS time.
-    rack_network_config: Option<RackNetworkConfig>,
+    rack_network_config: RackNetworkConfig,
 
     // Object managing zone bundles.
     zone_bundler: zone_bundle::ZoneBundler,
@@ -381,7 +405,7 @@ struct SledAgentInner {
     health_monitor: HealthMonitorHandle,
 
     // Object handling production of metrics for oximeter.
-    _metrics_manager: MetricsManager,
+    metrics_manager: MetricsManager,
 
     // Component of Sled Agent responsible for managing instrumentation probes.
     probes: ProbeManager,
@@ -524,6 +548,18 @@ impl SledAgent {
             }
         }
 
+        // Start tracking CPU metrics.
+        match metrics_manager.request_queue().track_cpu() {
+            Ok(_) => {
+                debug!(log, "started tracking CPU metrics")
+            }
+            Err(e) => error!(
+                log,
+                "failed to track CPU metrics";
+                "error" => slog_error_chain::InlineErrorChain::new(&e),
+            ),
+        }
+
         // Create the PortManager to manage all the OPTE ports on the sled.
         let port_manager = PortManager::new(
             parent_log.new(o!("component" => "PortManager")),
@@ -586,15 +622,15 @@ impl SledAgent {
                 })?;
 
             let early_network_config =
-                EarlyNetworkConfig::deserialize_bootstore_config(
-                    &log,
+                EarlyNetworkConfigEnvelope::deserialize_from_bootstore(
                     &serialized_config,
                 )
+                .and_then(|envelope| envelope.deserialize_body())
                 .map_err(|err| BackoffError::transient(err.to_string()))?;
 
-            Ok(early_network_config.body.rack_network_config)
+            Ok(early_network_config.rack_network_config)
         };
-        let rack_network_config: Option<RackNetworkConfig> =
+        let rack_network_config: RackNetworkConfig =
             retry_notify::<_, String, _, _, _, _>(
                 retry_policy_internal_service_aggressive(),
                 get_network_config,
@@ -623,6 +659,7 @@ impl SledAgent {
             SledAgentArtifactStoreWrapper(Arc::clone(
                 &long_running_task_handles.artifact_store,
             )),
+            long_running_task_handles.trust_quorum.committed_epoch_rx(),
             config_reconciler_spawn_token,
         );
 
@@ -659,6 +696,10 @@ impl SledAgent {
             nexus_notifier_task.run().await;
         });
 
+        // Spawn a background task for handling RoT attestation operations
+        let rot_attest_handle =
+            RotAttestationTask::launch(&log, &config.sprockets.attest)?;
+
         let currently_managed_zpools_rx =
             config_reconciler.currently_managed_zpools_rx().clone();
         let probes = ProbeManager::new(
@@ -682,6 +723,7 @@ impl SledAgent {
                 port_manager,
                 services,
                 nexus_notifier: nexus_notifier_handle,
+                rot_attestor: rot_attest_handle,
                 rack_network_config,
                 zone_bundler: long_running_task_handles.zone_bundler.clone(),
                 bootstore: long_running_task_handles.bootstore.clone(),
@@ -692,7 +734,7 @@ impl SledAgent {
                 health_monitor: long_running_task_handles
                     .health_monitor
                     .clone(),
-                _metrics_manager: metrics_manager,
+                metrics_manager,
                 repo_depot,
                 measurements: long_running_task_handles.measurements.clone(),
             }),
@@ -733,6 +775,10 @@ impl SledAgent {
         self.inner.id
     }
 
+    pub(crate) fn latencies(&self) -> &LatencyTracker {
+        &self.inner.metrics_manager.latencies
+    }
+
     pub fn logger(&self) -> &Logger {
         &self.log
     }
@@ -747,6 +793,12 @@ impl SledAgent {
 
     pub(crate) fn hardware_monitor(&self) -> &HardwareMonitorHandle {
         &self.inner.hardware_monitor
+    }
+
+    pub(crate) fn rot_attestor(&self, rot: Rot) -> &RotAttestationHandle {
+        // We currently only support the LPC55 RoT
+        let Rot::Oxide = rot;
+        &self.inner.rot_attestor
     }
 
     /// Trigger a request to Nexus informing it that the current sled exists,
@@ -1147,7 +1199,11 @@ impl SledAgent {
         let file_source_resolver =
             self.inner.services.zone_image_resolver().status().to_inventory();
 
-        let health_monitor = self.inner.health_monitor.to_inventory();
+        let smf_services_in_maintenance = self
+            .inner
+            .health_monitor
+            .to_inventory()
+            .smf_services_in_maintenance;
 
         let ReconcilerInventory {
             disks,
@@ -1174,7 +1230,7 @@ impl SledAgent {
             reconciler_status,
             last_reconciliation,
             file_source_resolver,
-            health_monitor,
+            smf_services_in_maintenance,
             reference_measurements: self.inner.measurements.to_inventory(),
         })
     }
@@ -1315,13 +1371,22 @@ impl SledAgent {
         .await
         .map_err(|e| HttpError::for_internal_error(e.to_string()))?;
 
-        Zfs::ensure_dataset_volume(
-            delegated_zvol.volume_name(),
-            volume_size,
-            delegated_zvol.volblocksize(),
-        )
+        Zfs::ensure_dataset_volume(DatasetVolumeEnsureArgs {
+            name: &delegated_zvol.volume_name(),
+            size: volume_size,
+            raw: true,
+            // Set the volblocksize (read: the allocation size for the zvol,
+            // _not_ the actual block size!) to 128k
+            volblocksize: Some(131072),
+        })
         .await
-        .map_err(|e| HttpError::for_internal_error(e.to_string()))?;
+        .map_err(|e| {
+            if e.is_not_ready() {
+                HttpError::for_unavail(None, e.to_string())
+            } else {
+                HttpError::for_internal_error(e.to_string())
+            }
+        })?;
 
         Ok(())
     }
@@ -1391,11 +1456,77 @@ impl SledAgent {
             DelegatedZvol::LocalStorageUnencrypted { zpool_id, dataset_id }
         };
 
-        Zfs::destroy_dataset(&delegated_zvol.parent_dataset_name())
-            .await
-            .map_err(|e| HttpError::for_internal_error(e.to_string()))?;
+        Zfs::delete_dataset_volume(DatasetVolumeDeleteArgs {
+            name: &delegated_zvol.volume_name(),
+            raw: true,
+        })
+        .await
+        .map_err(|e| HttpError::for_internal_error(e.to_string()))?;
 
-        Ok(())
+        match Zfs::destroy_dataset(&delegated_zvol.parent_dataset_name()).await
+        {
+            Ok(()) => Ok(()),
+
+            Err(e) => match e.err {
+                // This is called from a saga, so it has to be idempotent
+                DestroyDatasetErrorVariant::NotFound => Ok(()),
+
+                DestroyDatasetErrorVariant::Other(e) => {
+                    Err(HttpError::for_internal_error(e.to_string()))
+                }
+            },
+        }
+    }
+
+    /// Update the set of subnets attached to an instance.
+    pub(crate) async fn instance_put_attached_subnets(
+        &self,
+        propolis_id: PropolisUuid,
+        subnets: AttachedSubnets,
+    ) -> Result<(), Error> {
+        self.inner
+            .instances
+            .set_attached_subnets(propolis_id, subnets)
+            .await
+            .map_err(|e| Error::Instance(e))
+    }
+
+    /// Delete the set of subnets attached to an instance.
+    pub(crate) async fn instance_delete_attached_subnets(
+        &self,
+        propolis_id: PropolisUuid,
+    ) -> Result<(), Error> {
+        self.inner
+            .instances
+            .clear_attached_subnets(propolis_id)
+            .await
+            .map_err(|e| Error::Instance(e))
+    }
+
+    /// Attach a subnet to an instance.
+    pub(crate) async fn instance_attach_subnet(
+        &self,
+        propolis_id: PropolisUuid,
+        subnet: AttachedSubnet,
+    ) -> Result<(), Error> {
+        self.inner
+            .instances
+            .attach_subnet(propolis_id, subnet)
+            .await
+            .map_err(|e| Error::Instance(e))
+    }
+
+    /// Detach a subnet from an instance
+    pub(crate) async fn instance_detach_subnet(
+        &self,
+        propolis_id: PropolisUuid,
+        subnet: IpNet,
+    ) -> Result<(), Error> {
+        self.inner
+            .instances
+            .detach_subnet(propolis_id, subnet)
+            .await
+            .map_err(|e| Error::Instance(e))
     }
 }
 

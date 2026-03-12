@@ -4,8 +4,6 @@
 
 //! Silos, Users, and SSH Keys.
 
-use crate::external_api::params;
-use crate::external_api::shared;
 use anyhow::Context;
 use chrono::TimeDelta;
 use nexus_db_lookup::LookupPath;
@@ -27,13 +25,17 @@ use nexus_db_queries::db::datastore::SiloUserLookup;
 use nexus_db_queries::db::identity::Resource;
 use nexus_db_queries::{authn, authz};
 use nexus_types::deployment::execution::blueprint_nexus_external_ips;
+use nexus_types::external_api::identity_provider;
+use nexus_types::external_api::policy;
+use nexus_types::external_api::silo as silo_types;
+use nexus_types::external_api::user;
 use nexus_types::internal_api::params::DnsRecord;
 use nexus_types::silo::silo_dns_name;
+use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::UpdateResult;
 use omicron_common::api::external::http_pagination::PaginatedBy;
-use omicron_common::api::external::{CreateResult, LookupType};
 use omicron_common::api::external::{DataPageParams, ResourceType};
 use omicron_common::api::external::{DeleteResult, NameOrId};
 use omicron_common::api::external::{Error, InternalContext};
@@ -98,7 +100,7 @@ impl super::Nexus {
     pub(crate) async fn silo_create(
         &self,
         opctx: &OpContext,
-        new_silo_params: params::SiloCreate,
+        new_silo_params: silo_types::SiloCreate,
     ) -> CreateResult<db::model::Silo> {
         // Silo creation involves several operations that ordinary users cannot
         // generally do, like reading and modifying the fleet-wide external DNS
@@ -203,7 +205,7 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
         silo_lookup: &lookup::Silo<'_>,
-    ) -> LookupResult<shared::Policy<shared::SiloRole>> {
+    ) -> LookupResult<policy::Policy<policy::SiloRole>> {
         let (.., authz_silo) =
             silo_lookup.lookup_for(authz::Action::ReadPolicy).await?;
         let role_assignments = self
@@ -214,15 +216,15 @@ impl super::Nexus {
             .map(|r| r.try_into().context("parsing database role assignment"))
             .collect::<Result<Vec<_>, _>>()
             .map_err(|error| Error::internal_error(&format!("{:#}", error)))?;
-        Ok(shared::Policy { role_assignments })
+        Ok(policy::Policy { role_assignments })
     }
 
     pub(crate) async fn silo_update_policy(
         &self,
         opctx: &OpContext,
         silo_lookup: &lookup::Silo<'_>,
-        policy: &shared::Policy<shared::SiloRole>,
-    ) -> UpdateResult<shared::Policy<shared::SiloRole>> {
+        new_policy: &policy::Policy<policy::SiloRole>,
+    ) -> UpdateResult<policy::Policy<policy::SiloRole>> {
         let (.., authz_silo) =
             silo_lookup.lookup_for(authz::Action::ModifyPolicy).await?;
 
@@ -231,14 +233,14 @@ impl super::Nexus {
             .role_assignment_replace_visible(
                 opctx,
                 &authz_silo,
-                &policy.role_assignments,
+                &new_policy.role_assignments,
             )
             .await?
             .into_iter()
             .map(|r| r.try_into())
             .collect::<Result<Vec<_>, _>>()?;
 
-        Ok(shared::Policy { role_assignments })
+        Ok(policy::Policy { role_assignments })
     }
 
     pub(crate) async fn silo_fetch_auth_settings(
@@ -255,7 +257,7 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
         silo_lookup: &lookup::Silo<'_>,
-        settings: &params::SiloAuthSettingsUpdate,
+        settings: &silo_types::SiloAuthSettingsUpdate,
     ) -> UpdateResult<SiloAuthSettings> {
         // TODO: modify seems fine, but look into why policy has its own
         // separate permission
@@ -456,7 +458,7 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
         silo_lookup: &lookup::Silo<'_>,
-        new_user_params: params::UserCreate,
+        new_user_params: user::UserCreate,
     ) -> CreateResult<SiloUser> {
         let (authz_silo, db_silo) =
             self.local_idp_fetch_silo(silo_lookup).await?;
@@ -474,15 +476,10 @@ impl super::Nexus {
         );
 
         // TODO These two steps should happen in a transaction.
-        self.datastore()
+        let (authz_silo_user, db_silo_user) = self
+            .datastore()
             .silo_user_create(&authz_silo, silo_user.clone().into())
             .await?;
-
-        let authz_silo_user = authz::SiloUser::new(
-            authz_silo.clone(),
-            silo_user.id,
-            LookupType::by_id(silo_user.id),
-        );
 
         self.silo_user_password_set_internal(
             opctx,
@@ -493,7 +490,7 @@ impl super::Nexus {
         )
         .await?;
 
-        Ok(silo_user.into())
+        Ok(db_silo_user)
     }
 
     /// Delete a user in a Silo's local identity provider
@@ -699,7 +696,7 @@ impl super::Nexus {
         opctx: &OpContext,
         silo_lookup: &lookup::Silo<'_>,
         silo_user_id: SiloUserUuid,
-        password_value: params::UserPassword,
+        password_value: user::UserPassword,
     ) -> UpdateResult<()> {
         let (authz_silo, db_silo) =
             self.local_idp_fetch_silo(silo_lookup).await?;
@@ -742,11 +739,11 @@ impl super::Nexus {
         db_silo: &db::model::Silo,
         authz_silo_user: &authz::SiloUser,
         silo_user: &SiloUserApiOnly,
-        password_value: params::UserPassword,
+        password_value: user::UserPassword,
     ) -> UpdateResult<()> {
         let password_hash = match password_value {
-            params::UserPassword::LoginDisallowed => None,
-            params::UserPassword::Password(password) => {
+            user::UserPassword::LoginDisallowed => None,
+            user::UserPassword::Password(password) => {
                 let mut hasher = omicron_passwords::Hasher::default();
                 let password_hash = hasher
                     .create_password(password.as_ref())
@@ -821,7 +818,7 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
         silo_lookup: &lookup::Silo<'_>,
-        credentials: params::UsernamePasswordCredentials,
+        credentials: user::UsernamePasswordCredentials,
     ) -> Result<SiloUser, Error> {
         let (authz_silo, _) = self.local_idp_fetch_silo(silo_lookup).await?;
 
@@ -922,10 +919,10 @@ impl super::Nexus {
     pub fn saml_identity_provider_lookup<'a>(
         &'a self,
         opctx: &'a OpContext,
-        saml_identity_provider_selector: params::SamlIdentityProviderSelector,
+        saml_identity_provider_selector: identity_provider::SamlIdentityProviderSelector,
     ) -> LookupResult<lookup::SamlIdentityProvider<'a>> {
         match saml_identity_provider_selector {
-            params::SamlIdentityProviderSelector {
+            identity_provider::SamlIdentityProviderSelector {
                 saml_identity_provider: NameOrId::Id(id),
                 silo: None,
             } => {
@@ -933,7 +930,7 @@ impl super::Nexus {
                     .saml_identity_provider_id(id);
                 Ok(saml_provider)
             }
-            params::SamlIdentityProviderSelector {
+            identity_provider::SamlIdentityProviderSelector {
                 saml_identity_provider: NameOrId::Name(name),
                 silo: Some(silo),
             } => {
@@ -942,7 +939,7 @@ impl super::Nexus {
                     .saml_identity_provider_name_owned(name.into());
                 Ok(saml_provider)
             }
-            params::SamlIdentityProviderSelector {
+            identity_provider::SamlIdentityProviderSelector {
                 saml_identity_provider: NameOrId::Id(_),
                 silo: _,
             } => Err(Error::invalid_request(
@@ -974,7 +971,7 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
         silo_lookup: &lookup::Silo<'_>,
-        params: params::SamlIdentityProviderCreate,
+        idp_params: identity_provider::SamlIdentityProviderCreate,
     ) -> CreateResult<db::model::SamlIdentityProvider> {
         // TODO-security: This should likely be fetch_for CreateChild on the silo
         let (authz_silo, db_silo) = silo_lookup.fetch().await?;
@@ -1011,8 +1008,9 @@ impl super::Nexus {
             )));
         }
 
-        let idp_metadata_document_string = match &params.idp_metadata_source {
-            params::IdpMetadataSource::Url { url } => {
+        let idp_metadata_document_string = match &idp_params.idp_metadata_source
+        {
+            identity_provider::IdpMetadataSource::Url { url } => {
                 // Download the SAML IdP descriptor, and write it into the DB.
                 // This is so that it can be deserialized later.
                 //
@@ -1054,7 +1052,7 @@ impl super::Nexus {
                 })?
             }
 
-            params::IdpMetadataSource::Base64EncodedXml { data } => {
+            identity_provider::IdpMetadataSource::Base64EncodedXml { data } => {
                 let bytes = base64::Engine::decode(
                     &base64::engine::general_purpose::STANDARD,
                     data,
@@ -1125,27 +1123,27 @@ impl super::Nexus {
         let provider = db::model::SamlIdentityProvider {
             identity: db::model::SamlIdentityProviderIdentity::new(
                 Uuid::new_v4(),
-                params.identity,
+                idp_params.identity,
             ),
             silo_id: db_silo.id(),
 
             idp_metadata_document_string,
 
-            idp_entity_id: params.idp_entity_id,
-            sp_client_id: params.sp_client_id,
-            acs_url: params.acs_url,
-            slo_url: params.slo_url,
-            technical_contact_email: params.technical_contact_email,
-            public_cert: params
+            idp_entity_id: idp_params.idp_entity_id,
+            sp_client_id: idp_params.sp_client_id,
+            acs_url: idp_params.acs_url,
+            slo_url: idp_params.slo_url,
+            technical_contact_email: idp_params.technical_contact_email,
+            public_cert: idp_params
                 .signing_keypair
                 .as_ref()
                 .map(|x| x.public_cert.clone()),
-            private_key: params
+            private_key: idp_params
                 .signing_keypair
                 .as_ref()
                 .map(|x| x.private_key.clone()),
 
-            group_attribute_name: params.group_attribute_name.clone(),
+            group_attribute_name: idp_params.group_attribute_name.clone(),
         };
 
         let _authn_provider: authn::silos::SamlIdentityProvider =

@@ -5,6 +5,13 @@ to:   blueprint 4ebbcbb6-a8f3-439e-ae8d-663ac21dcb3a
 
   sled ec61eded-c34f-443d-a580-dadf757529c4 (active, config generation 2 -> 3):
 
+    measurements:
+    ---------------------------
+    hash      version          
+    ---------------------------
+    unknown   (unknown version)
+
+
     host phase 2 contents:
     ------------------------
     slot   boot image source

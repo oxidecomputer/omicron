@@ -8,6 +8,7 @@ use super::NexusSaga;
 use crate::app::sagas::declare_saga_actions;
 use nexus_db_model::VpcSubnet;
 use nexus_db_queries::{authn, authz, db};
+use nexus_types::saga::saga_action_failed;
 use serde::Deserialize;
 use serde::Serialize;
 use steno::ActionError;
@@ -79,7 +80,7 @@ async fn svsu_do_update(
             update,
         )
         .await
-        .map_err(ActionError::action_failed)
+        .map_err(saga_action_failed)
 }
 
 async fn svsu_notify_rpw(
@@ -96,7 +97,7 @@ async fn svsu_notify_rpw(
         .datastore()
         .vpc_increment_rpw_version(&opctx, params.authz_vpc.id())
         .await
-        .map_err(ActionError::action_failed)
+        .map_err(saga_action_failed)
 }
 
 #[cfg(test)]
@@ -106,7 +107,6 @@ pub(crate) mod test {
     use crate::{
         app::sagas::vpc_subnet_update::Params,
         app::sagas::vpc_subnet_update::SagaVpcSubnetUpdate,
-        external_api::params,
     };
     use chrono::Utc;
     use dropshot::test_util::ClientTestContext;
@@ -116,6 +116,7 @@ pub(crate) mod test {
     use nexus_test_utils::resource_helpers::create_project;
     use nexus_test_utils::resource_helpers::create_router;
     use nexus_test_utils_macros::nexus_test;
+    use nexus_types::external_api::vpc;
     use omicron_common::api::external::NameOrId;
     use uuid::Uuid;
 
@@ -152,7 +153,7 @@ pub(crate) mod test {
         let (.., authz_vpc, authz_subnet, _) = nexus
             .vpc_subnet_lookup(
                 &opctx,
-                params::SubnetSelector {
+                vpc::SubnetSelector {
                     project: Some(project_id.into()),
                     vpc: Some(NameOrId::Name("default".parse().unwrap())),
                     subnet: NameOrId::Name("default".parse().unwrap()),
@@ -166,7 +167,7 @@ pub(crate) mod test {
         let (.., custom_router, _) = nexus
             .vpc_router_lookup(
                 &opctx,
-                params::RouterSelector {
+                vpc::RouterSelector {
                     project: None,
                     vpc: None,
                     router: NameOrId::Id(router_id),

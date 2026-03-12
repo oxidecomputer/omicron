@@ -21,6 +21,7 @@ use qorb::resolver::{AllBackends, Resolver};
 use slog::Logger;
 use std::backtrace::Backtrace;
 use std::collections::BTreeMap;
+use std::net::SocketAddr;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use tokio::sync::watch;
@@ -125,6 +126,36 @@ impl Pool {
         let policy = Policy::default();
         let inner = match qorb::pool::Pool::new(
             "crdb-single-host".to_string(),
+            resolver,
+            connector,
+            policy,
+        ) {
+            Ok(pool) => {
+                debug!(log, "registered USDT probes");
+                pool
+            }
+            Err(err) => {
+                error!(log, "failed to register USDT probes");
+                err.into_inner()
+            }
+        };
+        Self::new_common(inner, log.clone())
+    }
+
+    /// Creates a new qorb-backed connection pool to a fixed set of database
+    /// addresses.
+    ///
+    /// Unlike [`Self::new_single_host`], this constructor accepts multiple
+    /// addresses and will connect to whichever backend is healthy. This is
+    /// intended for tools like `omdb` that may resolve multiple CockroachDB
+    /// addresses via DNS, and which don't necessarily want to re-resolve.
+    pub fn new_fixed_hosts(log: &Logger, addresses: Vec<SocketAddr>) -> Self {
+        let resolver: qorb::resolver::BoxedResolver =
+            Box::new(qorb::resolvers::fixed::FixedResolver::new(addresses));
+        let connector = make_postgres_connector(log);
+        let policy = Policy::default();
+        let inner = match qorb::pool::Pool::new(
+            "crdb-fixed-hosts".to_string(),
             resolver,
             connector,
             policy,

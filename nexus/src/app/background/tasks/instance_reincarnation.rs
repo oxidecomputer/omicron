@@ -322,7 +322,6 @@ impl InstanceReincarnation {
 mod test {
     use super::*;
     use crate::app::sagas::test_helpers;
-    use crate::external_api::params;
     use chrono::Utc;
     use nexus_db_lookup::LookupPath;
     use nexus_db_model::Generation;
@@ -331,13 +330,13 @@ mod test {
     use nexus_db_model::InstanceState;
     use nexus_db_model::Vmm;
     use nexus_db_model::VmmCpuPlatform;
-    use nexus_db_model::VmmRuntimeState;
     use nexus_db_model::VmmState;
     use nexus_db_queries::authz;
     use nexus_test_utils::resource_helpers::{
         create_default_ip_pools, create_project, object_create,
     };
     use nexus_test_utils_macros::nexus_test;
+    use nexus_types::external_api::instance;
     use omicron_common::api::external::ByteCount;
     use omicron_common::api::external::IdentityMetadataCreateParams;
     use omicron_common::api::external::InstanceAutoRestartPolicy;
@@ -385,7 +384,7 @@ mod test {
             object_create::<_, omicron_common::api::external::Instance>(
                 &cptestctx.external_client,
                 &instances_url,
-                &params::InstanceCreate {
+                &instance::InstanceCreate {
                     identity: IdentityMetadataCreateParams {
                         name,
                         description: "It's an instance".into(),
@@ -401,7 +400,7 @@ mod test {
                     hostname: "myhostname".try_into().unwrap(),
                     user_data: Vec::new(),
                     network_interfaces:
-                        params::InstanceNetworkInterfaceAttachment::None,
+                        instance::InstanceNetworkInterfaceAttachment::None,
                     external_ips: Vec::new(),
                     disks: Vec::new(),
                     boot_disk: None,
@@ -456,11 +455,9 @@ mod test {
                     propolis_ip: "10.1.9.42".parse().unwrap(),
                     propolis_port: 420.into(),
                     cpu_platform: VmmCpuPlatform::SledDefault,
-                    runtime: VmmRuntimeState {
-                        time_state_updated: Utc::now(),
-                        generation: Generation::new(),
-                        state: VmmState::SagaUnwound,
-                    },
+                    time_state_updated: Utc::now(),
+                    generation: Generation::new(),
+                    state: VmmState::SagaUnwound,
                 },
             )
             .await

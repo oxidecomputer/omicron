@@ -34,11 +34,11 @@ use nexus_types::deployment::TargetReleaseDescription;
 use nexus_types::deployment::ZoneRunningStatus;
 use nexus_types::deployment::blueprint_zone_type;
 use nexus_types::deployment::blueprint_zone_type::InternalDns;
-use nexus_types::external_api::views::PhysicalDiskPolicy;
-use nexus_types::external_api::views::PhysicalDiskState;
-use nexus_types::external_api::views::SledPolicy;
-use nexus_types::external_api::views::SledProvisionPolicy;
-use nexus_types::external_api::views::SledState;
+use nexus_types::external_api::physical_disk::PhysicalDiskPolicy;
+use nexus_types::external_api::physical_disk::PhysicalDiskState;
+use nexus_types::external_api::sled::SledPolicy;
+use nexus_types::external_api::sled::SledProvisionPolicy;
+use nexus_types::external_api::sled::SledState;
 use nexus_types::inventory::CockroachStatus;
 use nexus_types::inventory::Collection;
 use nexus_types::inventory::InternalDnsGenerationStatus;
@@ -3158,7 +3158,7 @@ fn test_update_crucible_pantry_before_nexus() {
         artifacts,
     });
     sim.change_description("set new target release", |desc| {
-        desc.set_target_release_and_old_repo(description);
+        desc.set_target_release(description);
         Ok(())
     })
     .unwrap();
@@ -3530,7 +3530,7 @@ fn test_update_cockroach() {
         artifacts,
     });
     sim.change_description("set new target release", |desc| {
-        desc.set_target_release_and_old_repo(description);
+        desc.set_target_release(description);
         Ok(())
     })
     .unwrap();
@@ -3900,7 +3900,7 @@ fn test_update_boundary_ntp() {
         artifacts,
     });
     sim.change_description("set new target release", |desc| {
-        desc.set_target_release_and_old_repo(description);
+        desc.set_target_release(description);
         Ok(())
     })
     .unwrap();
@@ -4290,7 +4290,7 @@ fn test_update_internal_dns() {
         artifacts,
     });
     sim.change_description("set new target release", |desc| {
-        desc.set_target_release_and_old_repo(description);
+        desc.set_target_release(description);
         Ok(())
     })
     .unwrap();
@@ -4539,7 +4539,7 @@ fn test_update_all_zones() {
     });
 
     sim.change_description("set new target release", |desc| {
-        desc.set_target_release_and_old_repo(description);
+        desc.set_target_release(description);
         Ok(())
     })
     .unwrap();

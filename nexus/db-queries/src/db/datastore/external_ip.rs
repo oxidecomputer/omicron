@@ -570,6 +570,7 @@ impl DataStore {
             .into_boxed()
             .filter(nic_dsl::parent_id.eq(instance_id.into_untyped_uuid()))
             .filter(nic_dsl::time_deleted.is_null())
+            .filter(nic_dsl::is_primary.eq(true))
             .filter(nic_dsl::kind.eq(NetworkInterfaceKind::Instance));
         let has_matching_ip_stack = match ip_version {
             IpVersion::V4 => base_nic_query.select(nic_dsl::ip.is_not_null()),
@@ -1333,11 +1334,12 @@ mod tests {
     use nexus_db_model::{IpPool, VpcSubnetIdentity};
     use nexus_types::deployment::OmicronZoneExternalFloatingIp;
     use nexus_types::deployment::OmicronZoneExternalSnatIp;
-    use nexus_types::external_api::params::{self, PrivateIpStackCreate};
-    use nexus_types::external_api::shared::IpRange;
-    use nexus_types::external_api::shared::Ipv4Range;
+    use nexus_types::external_api::instance::PrivateIpStackCreate;
+    use nexus_types::external_api::vpc;
     use nexus_types::identity::Resource;
     use nexus_types::inventory::SourceNatConfigGeneric;
+    use omicron_common::address::IpRange;
+    use omicron_common::address::Ipv4Range;
     use omicron_common::address::NUM_SOURCE_NAT_PORTS;
     use omicron_common::api::external::{
         self, IdentityMetadataCreateParams, LookupType,
@@ -1626,7 +1628,7 @@ mod tests {
                     Uuid::new_v4(),
                     project.id(),
                     Uuid::new_v4(),
-                    params::VpcCreate {
+                    vpc::VpcCreate {
                         identity: IdentityMetadataCreateParams {
                             name: "default".parse().unwrap(),
                             description: String::new(),

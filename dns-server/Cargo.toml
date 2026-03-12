@@ -41,6 +41,9 @@ toml.workspace = true
 uuid.workspace = true
 omicron-workspace-hack.workspace = true
 
+[build-dependencies]
+git-stub-vcs.workspace = true
+
 [dev-dependencies]
 camino-tempfile.workspace = true
 expectorate.workspace = true

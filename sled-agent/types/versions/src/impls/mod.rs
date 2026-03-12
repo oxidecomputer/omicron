@@ -5,8 +5,10 @@
 //! Functional code for the latest versions of the types in this crate.
 
 mod disk;
-mod early_networking;
+pub(crate) mod early_networking;
 mod instance;
 pub(crate) mod inventory;
+pub(crate) mod rack_init;
 mod sled;
+mod uplink;
 mod zone_bundle;

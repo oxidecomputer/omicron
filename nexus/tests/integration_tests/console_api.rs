@@ -22,11 +22,12 @@ use nexus_test_utils::resource_helpers::{
     create_silo, grant_iam, object_create,
 };
 use nexus_test_utils_macros::nexus_test;
-use nexus_types::external_api::params::{self, ProjectCreate};
-use nexus_types::external_api::shared::{
-    FleetRole, SiloIdentityMode, SiloRole,
-};
-use nexus_types::external_api::{shared, views};
+use nexus_types::external_api::identity_provider;
+use nexus_types::external_api::policy;
+use nexus_types::external_api::policy::{FleetRole, SiloRole};
+use nexus_types::external_api::project::ProjectCreate;
+use nexus_types::external_api::silo::SiloIdentityMode;
+use nexus_types::external_api::user;
 use omicron_common::api::external::{Error, IdentityMetadataCreateParams};
 use omicron_test_utils::dev::poll::{CondCheckError, wait_for_condition};
 
@@ -80,7 +81,7 @@ async fn test_sessions(cptestctx: &ControlPlaneTestContext) {
     // We'll remove that privilege afterwards.
     let silo_url = format!("/v1/system/silos/{}", DEFAULT_SILO.identity().name);
     let policy_url = format!("{}/policy", silo_url);
-    let initial_policy: shared::Policy<SiloRole> =
+    let initial_policy: policy::Policy<SiloRole> =
         NexusRequest::object_get(testctx, &policy_url)
             .authn_as(AuthnMode::PrivilegedUser)
             .execute()
@@ -425,44 +426,35 @@ async fn test_session_me(cptestctx: &ControlPlaneTestContext) {
         .execute()
         .await
         .expect("failed to get current user")
-        .parsed_body::<views::CurrentUser>()
+        .parsed_body::<user::CurrentUser>()
         .unwrap();
 
+    assert_eq!(priv_user.user.id, USER_TEST_PRIVILEGED.id());
     assert_eq!(
-        priv_user,
-        views::CurrentUser {
-            user: views::User {
-                id: USER_TEST_PRIVILEGED.id(),
-                display_name: USER_TEST_PRIVILEGED.external_id.clone().unwrap(),
-                silo_id: DEFAULT_SILO.id(),
-            },
-            silo_name: DEFAULT_SILO.name().clone(),
-            fleet_viewer: true,
-            silo_admin: true,
-        }
+        priv_user.user.display_name,
+        USER_TEST_PRIVILEGED.external_id.clone().unwrap()
     );
+    assert_eq!(priv_user.user.silo_id, DEFAULT_SILO.id());
+    assert_eq!(priv_user.silo_name, DEFAULT_SILO.name().clone());
+    assert!(priv_user.fleet_viewer);
+    assert!(priv_user.silo_admin);
+    assert!(priv_user.user.time_created > chrono::DateTime::UNIX_EPOCH);
+    assert!(priv_user.user.time_modified >= priv_user.user.time_created);
 
     let unpriv_user = NexusRequest::object_get(testctx, "/v1/me")
         .authn_as(AuthnMode::UnprivilegedUser)
-        .execute_and_parse_unwrap::<views::CurrentUser>()
+        .execute_and_parse_unwrap::<user::CurrentUser>()
         .await;
 
+    assert_eq!(unpriv_user.user.id, USER_TEST_UNPRIVILEGED.id());
     assert_eq!(
-        unpriv_user,
-        views::CurrentUser {
-            user: views::User {
-                id: USER_TEST_UNPRIVILEGED.id(),
-                display_name: USER_TEST_UNPRIVILEGED
-                    .external_id
-                    .clone()
-                    .unwrap(),
-                silo_id: DEFAULT_SILO.id(),
-            },
-            silo_name: DEFAULT_SILO.name().clone(),
-            fleet_viewer: false,
-            silo_admin: false,
-        }
+        unpriv_user.user.display_name,
+        USER_TEST_UNPRIVILEGED.external_id.clone().unwrap()
     );
+    assert_eq!(unpriv_user.user.silo_id, DEFAULT_SILO.id());
+    assert_eq!(unpriv_user.silo_name, DEFAULT_SILO.name().clone());
+    assert!(!unpriv_user.fleet_viewer);
+    assert!(!unpriv_user.silo_admin);
 
     // now make unpriv user silo admin and see it change
     grant_iam(
@@ -476,7 +468,7 @@ async fn test_session_me(cptestctx: &ControlPlaneTestContext) {
 
     let unpriv_user = NexusRequest::object_get(testctx, "/v1/me")
         .authn_as(AuthnMode::UnprivilegedUser)
-        .execute_and_parse_unwrap::<views::CurrentUser>()
+        .execute_and_parse_unwrap::<user::CurrentUser>()
         .await;
     assert!(!unpriv_user.fleet_viewer);
     assert!(unpriv_user.silo_admin);
@@ -493,7 +485,7 @@ async fn test_session_me(cptestctx: &ControlPlaneTestContext) {
 
     let unpriv_user = NexusRequest::object_get(testctx, "/v1/me")
         .authn_as(AuthnMode::UnprivilegedUser)
-        .execute_and_parse_unwrap::<views::CurrentUser>()
+        .execute_and_parse_unwrap::<user::CurrentUser>()
         .await;
     assert!(unpriv_user.fleet_viewer);
     assert!(unpriv_user.silo_admin);
@@ -530,7 +522,7 @@ async fn test_session_me_groups(cptestctx: &ControlPlaneTestContext) {
         .execute()
         .await
         .expect("failed to get current user")
-        .parsed_body::<ResultsPage<views::Group>>()
+        .parsed_body::<ResultsPage<user::Group>>()
         .unwrap();
 
     assert_eq!(priv_user_groups.items, vec![]);
@@ -540,7 +532,7 @@ async fn test_session_me_groups(cptestctx: &ControlPlaneTestContext) {
         .execute()
         .await
         .expect("failed to get current user")
-        .parsed_body::<ResultsPage<views::Group>>()
+        .parsed_body::<ResultsPage<user::Group>>()
         .unwrap();
 
     assert_eq!(unpriv_user_groups.items, vec![]);
@@ -629,7 +621,7 @@ async fn test_login_redirect_multiple_silos(
         let nidps = i + 1;
         for j in 0..nidps {
             let idp_name = format!("idp{}", j);
-            let idp_params = params::SamlIdentityProviderCreate {
+            let idp_params = identity_provider::SamlIdentityProviderCreate {
                 identity: IdentityMetadataCreateParams {
                     name: idp_name.parse().unwrap(),
                     description: format!(
@@ -639,7 +631,7 @@ async fn test_login_redirect_multiple_silos(
                 },
 
                 idp_metadata_source:
-                    params::IdpMetadataSource::Base64EncodedXml {
+                    identity_provider::IdpMetadataSource::Base64EncodedXml {
                         data: base64::engine::general_purpose::STANDARD
                             .encode(SAML_RESPONSE_IDP_DESCRIPTOR),
                     },
@@ -658,7 +650,7 @@ async fn test_login_redirect_multiple_silos(
                 "/v1/system/identity-providers/saml?silo={}",
                 &silo.identity.name
             );
-            let _: views::SamlIdentityProvider =
+            let _: identity_provider::SamlIdentityProvider =
                 object_create(client, &idp_create_url, &idp_params).await;
         }
     }

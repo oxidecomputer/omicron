@@ -137,11 +137,11 @@ use nexus_types::deployment::BlueprintZoneDisposition;
 use nexus_types::deployment::BlueprintZoneType;
 use nexus_types::deployment::DiskFilter;
 use nexus_types::deployment::SledFilter;
-use nexus_types::external_api::params;
-use nexus_types::external_api::views::PhysicalDiskPolicy;
-use nexus_types::external_api::views::PhysicalDiskState;
-use nexus_types::external_api::views::SledPolicy;
-use nexus_types::external_api::views::SledState;
+use nexus_types::external_api::disk::BlockSize;
+use nexus_types::external_api::physical_disk::{
+    PhysicalDiskPolicy, PhysicalDiskState,
+};
+use nexus_types::external_api::sled::{SledPolicy, SledState};
 use nexus_types::identity::Resource;
 use nexus_types::internal_api::params::DnsRecord;
 use nexus_types::internal_api::params::Srv;
@@ -161,6 +161,7 @@ use omicron_uuid_kinds::InstanceUuid;
 use omicron_uuid_kinds::ParseError;
 use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::PropolisUuid;
+use omicron_uuid_kinds::RackUuid;
 use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::VolumeUuid;
 use omicron_uuid_kinds::ZpoolUuid;
@@ -298,9 +299,8 @@ impl DbUrlOptions {
         let db_url = self.resolve_pg_url(omdb, log).await?;
         eprintln!("note: using database URL {}", &db_url);
 
-        let db_config = db::Config { url: db_url.clone() };
-        let pool =
-            Arc::new(db::Pool::new_single_host(&log.clone(), &db_config));
+        let addrs = db_url.all_addresses()?;
+        let pool = Arc::new(db::Pool::new_fixed_hosts(log, addrs));
 
         // Being a dev tool, we want to try this operation even if the schema
         // doesn't match what we expect.  So we use `DataStore::new_unchecked()`
@@ -357,7 +357,7 @@ pub struct DbFetchOptions {
 enum DbCommands {
     /// Launch `cockroach-sql`
     ///
-    /// This launches with the session variable `default_transcation_read_only`
+    /// This launches with the session variable `default_transaction_read_only`
     /// to on. Because this variable can be disabled, it is required to use
     /// `--destructive` with this command.
     Sql,
@@ -435,6 +435,8 @@ enum DbCommands {
     /// More precisely, `omdb db whatis` reports tables containing a unique UUID
     /// column with the specified value.
     Whatis(whatis::WhatisArgs),
+    /// Print information about trust quorum configurations
+    TrustQuorum(TrustQuorumArgs),
 }
 
 #[derive(Debug, Args, Clone)]
@@ -1162,6 +1164,25 @@ struct SetStorageBufferArgs {
     storage_buffer: i64,
 }
 
+#[derive(Debug, Args, Clone)]
+struct TrustQuorumArgs {
+    #[command(subcommand)]
+    command: TrustQuorumCommands,
+}
+
+#[derive(Debug, Subcommand, Clone)]
+enum TrustQuorumCommands {
+    /// List trust quorum configurations for a rack
+    ListConfigs(TrustQuorumListConfigsArgs),
+}
+
+#[derive(Debug, Args, Clone)]
+struct TrustQuorumListConfigsArgs {
+    /// Rack ID to list configurations for
+    #[arg(long)]
+    rack_id: RackUuid,
+}
+
 impl DbArgs {
     /// Run a `omdb db` subcommand.
     ///
@@ -1531,6 +1552,11 @@ impl DbArgs {
                     }
                     DbCommands::Whatis(args) => {
                         whatis::cmd_db_whatis(&datastore, args).await
+                    }
+                    DbCommands::TrustQuorum(TrustQuorumArgs {
+                        command: TrustQuorumCommands::ListConfigs(args),
+                    }) => {
+                        cmd_db_trust_quorum_list_configs(&opctx, &datastore, &fetch_opts, &args).await
                     }
                 }
             }
@@ -4060,7 +4086,7 @@ async fn cmd_db_dry_run_region_allocation(
     };
 
     let size: external::ByteCount = args.size.try_into()?;
-    let block_size: params::BlockSize = args.block_size.try_into()?;
+    let block_size: BlockSize = args.block_size.try_into()?;
 
     let (blocks_per_extent, extent_count) = DataStore::get_crucible_allocation(
         &block_size.try_into().unwrap(),
@@ -4992,9 +5018,7 @@ async fn cmd_db_instance_info(
                 println!("    {VCPUS:>WIDTH$}: {cpus_provisioned}");
                 println!("    {RAM:>WIDTH$}: {ram}");
                 println!("    {DISK:>WIDTH$}: {disk}");
-                if let Some(modified) = time_modified {
-                    println!("    {LAST_UPDATED:>WIDTH$}: {modified}")
-                }
+                println!("    {LAST_UPDATED:>WIDTH$}: {time_modified}");
             }
         }
     }
@@ -5071,12 +5095,9 @@ async fn cmd_db_instance_info(
                     cpu_platform: _,
                     time_created,
                     time_deleted,
-                    runtime:
-                        db::model::VmmRuntimeState {
-                            time_state_updated: _,
-                            generation,
-                            state,
-                        },
+                    time_state_updated: _,
+                    generation,
+                    state,
                 } = vmm;
                 VmmRow {
                     state: VmmStateRow {
@@ -7709,8 +7730,9 @@ fn prettyprint_vmm(
         propolis_ip,
         propolis_port,
         cpu_platform,
-        runtime:
-            db::model::VmmRuntimeState { state, generation, time_state_updated },
+        state,
+        generation,
+        time_state_updated,
     } = vmm;
 
     println!("{indent}{ID:>width$}: {id}");
@@ -7813,12 +7835,9 @@ async fn cmd_db_vmm_list(
                 propolis_ip: _,
                 propolis_port: _,
                 cpu_platform: _,
-                runtime:
-                    db::model::VmmRuntimeState {
-                        state,
-                        generation,
-                        time_state_updated: _,
-                    },
+                time_state_updated: _,
+                generation,
+                state,
             } = vmm;
             let sled = match sled {
                 Some(sled) => sled.serial_number(),
@@ -7860,7 +7879,7 @@ async fn cmd_db_vmm_list(
                 sled_id,
                 propolis_ip,
                 propolis_port,
-                ref runtime,
+                time_state_updated,
                 ..
             } = it.0;
             VerboseVmmRow {
@@ -7871,7 +7890,7 @@ async fn cmd_db_vmm_list(
                     propolis_port.into(),
                 ),
                 time_created,
-                time_updated: runtime.time_state_updated,
+                time_updated: time_state_updated,
             }
         }
     }
@@ -8105,6 +8124,72 @@ async fn cmd_db_zpool_set_storage_buffer(
         "set pool {} control plane storage buffer bytes to {}",
         args.id, args.storage_buffer,
     );
+
+    Ok(())
+}
+
+/// Run `omdb db trust-quorum list-configs`.
+async fn cmd_db_trust_quorum_list_configs(
+    opctx: &OpContext,
+    datastore: &DataStore,
+    fetch_opts: &DbFetchOptions,
+    args: &TrustQuorumListConfigsArgs,
+) -> Result<(), anyhow::Error> {
+    #[derive(Tabled)]
+    #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
+    struct TqConfigRow {
+        epoch: i64,
+        #[tabled(display_with = "option_impl_display")]
+        last_committed_epoch: Option<i64>,
+        state: String,
+        threshold: u8,
+        commit_crash_tolerance: u8,
+        coordinator_hardware_baseboard_id: Uuid,
+        #[tabled(display_with = "datetime_rfc3339_concise")]
+        time_created: DateTime<Utc>,
+        #[tabled(display_with = "option_datetime_rfc3339_concise")]
+        time_committing: Option<DateTime<Utc>>,
+        #[tabled(display_with = "option_datetime_rfc3339_concise")]
+        time_committed: Option<DateTime<Utc>>,
+        #[tabled(display_with = "option_datetime_rfc3339_concise")]
+        time_aborted: Option<DateTime<Utc>>,
+        #[tabled(display_with = "display_option_blank")]
+        abort_reason: Option<String>,
+    }
+
+    let limit = fetch_opts.fetch_limit;
+    let configs = datastore
+        .tq_list_config(opctx, args.rack_id, &first_page::<i64>(limit))
+        .await
+        .context("listing trust quorum configurations")?;
+
+    check_limit(&configs, limit, || {
+        String::from("listing trust quorum configurations")
+    });
+
+    let rows: Vec<TqConfigRow> = configs
+        .into_iter()
+        .map(|config| TqConfigRow {
+            epoch: config.epoch,
+            last_committed_epoch: config.last_committed_epoch,
+            state: format!("{:?}", config.state),
+            threshold: config.threshold.into(),
+            commit_crash_tolerance: config.commit_crash_tolerance.into(),
+            coordinator_hardware_baseboard_id: config.coordinator,
+            time_created: config.time_created,
+            time_committing: config.time_committing,
+            time_committed: config.time_committed,
+            time_aborted: config.time_aborted,
+            abort_reason: config.abort_reason,
+        })
+        .collect();
+
+    let table = tabled::Table::new(rows)
+        .with(tabled::settings::Style::empty())
+        .with(tabled::settings::Padding::new(0, 1, 0, 0))
+        .to_string();
+
+    println!("{}", table);
 
     Ok(())
 }

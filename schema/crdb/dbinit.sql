@@ -22,6 +22,17 @@
  *    sparingly."
  */
 
+/*
+ * Reduce the index backfill batch size from the default of 50,000 to 5,000.
+ * This prevents OOM failures during CREATE INDEX migrations on large tables.
+ * See https://github.com/oxidecomputer/omicron/issues/9874 and
+ * https://github.com/oxidecomputer/omicron-9874-findings for details.
+ *
+ * This must be outside the transaction because SET CLUSTER SETTING cannot be
+ * used inside a transaction.
+ */
+SET CLUSTER SETTING bulkio.index_backfill.batch_size = 5000;
+
 BEGIN;
 
 /*
@@ -543,7 +554,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS lookup_certificate_by_silo ON omicron.public.c
 CREATE TABLE IF NOT EXISTS omicron.public.virtual_provisioning_collection (
     -- Should match the UUID of the corresponding collection.
     id UUID PRIMARY KEY,
-    time_modified TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    time_modified TIMESTAMPTZ NOT NULL,
 
     -- Identifies the type of the collection.
     collection_type STRING(63) NOT NULL,
@@ -576,7 +587,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.virtual_provisioning_collection (
 CREATE TABLE IF NOT EXISTS omicron.public.virtual_provisioning_resource (
     -- Should match the UUID of the corresponding collection.
     id UUID PRIMARY KEY,
-    time_modified TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    time_modified TIMESTAMPTZ NOT NULL,
 
     -- Identifies the type of the resource.
     resource_type STRING(63) NOT NULL,
@@ -902,7 +913,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.silo_user (
     -- contain a value
     external_id TEXT,
 
-    user_provision_type omicron.public.user_provision_type,
+    user_provision_type omicron.public.user_provision_type NOT NULL,
 
     -- if the user provision type is 'scim' then this field must contain a value
     user_name TEXT,
@@ -910,11 +921,6 @@ CREATE TABLE IF NOT EXISTS omicron.public.silo_user (
     -- if user provision type is 'scim', this field _may_ contain a value: it
     -- is not mandatory that the SCIM provisioning client support this field.
     active BOOL,
-
-    CONSTRAINT user_provision_type_required_for_non_deleted CHECK (
-      (user_provision_type IS NOT NULL AND time_deleted IS NULL)
-      OR (time_deleted IS NOT NULL)
-    ),
 
     CONSTRAINT external_id_consistency CHECK (
         CASE user_provision_type
@@ -971,15 +977,10 @@ CREATE TABLE IF NOT EXISTS omicron.public.silo_group (
     -- contain a value
     external_id TEXT,
 
-    user_provision_type omicron.public.user_provision_type,
+    user_provision_type omicron.public.user_provision_type NOT NULL,
 
     -- if the user provision type is 'scim' then this field must contain a value
     display_name TEXT,
-
-    CONSTRAINT user_provision_type_required_for_non_deleted CHECK (
-      (user_provision_type IS NOT NULL AND time_deleted IS NULL)
-      OR (time_deleted IS NOT NULL)
-    ),
 
     CONSTRAINT external_id_consistency CHECK (
         CASE user_provision_type
@@ -3495,6 +3496,11 @@ CREATE INDEX IF NOT EXISTS lookup_address_lot_rsvd_block_by_anycast ON omicron.p
     anycast
 );
 
+CREATE TYPE IF NOT EXISTS omicron.public.switch_slot AS ENUM (
+    'switch0',
+    'switch1'
+);
+
 CREATE TABLE IF NOT EXISTS omicron.public.loopback_address (
     id UUID PRIMARY KEY,
     time_created TIMESTAMPTZ NOT NULL,
@@ -3502,26 +3508,26 @@ CREATE TABLE IF NOT EXISTS omicron.public.loopback_address (
     address_lot_block_id UUID NOT NULL,
     rsvd_address_lot_block_id UUID NOT NULL,
     rack_id UUID NOT NULL,
-    switch_location TEXT NOT NULL,
     address INET NOT NULL,
-    anycast BOOL NOT NULL
+    anycast BOOL NOT NULL,
+    switch_slot omicron.public.switch_slot NOT NULL
 );
 
 /* TODO https://github.com/oxidecomputer/omicron/issues/3001 */
 
 CREATE UNIQUE INDEX IF NOT EXISTS lookup_loopback_address ON omicron.public.loopback_address (
-    address, rack_id, switch_location
+    address, rack_id, switch_slot
 );
 
 CREATE TABLE IF NOT EXISTS omicron.public.switch_port (
     id UUID PRIMARY KEY,
     rack_id UUID,
-    switch_location TEXT,
     port_name TEXT,
     port_settings_id UUID,
+    switch_slot omicron.public.switch_slot NOT NULL,
 
     CONSTRAINT switch_port_rack_locaction_name_unique UNIQUE (
-        rack_id, switch_location, port_name
+        rack_id, switch_slot, port_name
     )
 );
 
@@ -3686,14 +3692,31 @@ CREATE TABLE IF NOT EXISTS omicron.public.switch_port_settings_bgp_peer_config (
     allow_import_list_active BOOLEAN NOT NULL DEFAULT false,
     allow_export_list_active BOOLEAN NOT NULL DEFAULT false,
     vlan_id INT4,
+    id UUID NOT NULL,
+    router_lifetime INT4 NOT NULL DEFAULT 0,
 
-    /* TODO https://github.com/oxidecomputer/omicron/issues/3013 */
-    PRIMARY KEY (port_settings_id, interface_name, addr)
+    PRIMARY KEY (id)
 );
+
+-- Unique constraint for numbered BGP peers (those with an address)
+CREATE UNIQUE INDEX IF NOT EXISTS switch_port_settings_bgp_peer_config_numbered_unique
+    ON omicron.public.switch_port_settings_bgp_peer_config (port_settings_id, interface_name, addr)
+    WHERE addr IS NOT NULL;
+
+-- Unique constraint for unnumbered BGP peers (one per interface)
+CREATE UNIQUE INDEX IF NOT EXISTS switch_port_settings_bgp_peer_config_unnumbered_unique
+    ON omicron.public.switch_port_settings_bgp_peer_config (port_settings_id, interface_name)
+    WHERE addr IS NULL;
 
 CREATE INDEX IF NOT EXISTS lookup_sps_bgp_peer_config_by_bgp_config_id on omicron.public.switch_port_settings_bgp_peer_config(
     bgp_config_id
 );
+
+-- Index for looking up BGP peers by port_settings_id.
+-- This is needed because the partial indexes (for numbered and unnumbered peers)
+-- don't cover all rows when filtering only by port_settings_id.
+CREATE INDEX IF NOT EXISTS lookup_sps_bgp_peer_config_by_port_settings_id
+    ON omicron.public.switch_port_settings_bgp_peer_config (port_settings_id);
 
 CREATE TABLE IF NOT EXISTS omicron.public.switch_port_settings_bgp_peer_config_communities (
     port_settings_id UUID NOT NULL,
@@ -3733,7 +3756,8 @@ CREATE TABLE IF NOT EXISTS omicron.public.bgp_config (
     vrf TEXT,
     bgp_announce_set_id UUID NOT NULL,
     shaper TEXT,
-    checker TEXT
+    checker TEXT,
+    max_paths INT2 NOT NULL CHECK (max_paths > 0 AND max_paths <= 32)
 );
 
 CREATE UNIQUE INDEX IF NOT EXISTS lookup_bgp_config_by_name ON omicron.public.bgp_config (
@@ -4473,6 +4497,23 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_nvme_disk_firmware (
     PRIMARY KEY (inv_collection_id, sled_id, slot)
 );
 
+CREATE TYPE IF NOT EXISTS omicron.public.inv_zpool_health AS ENUM (
+    -- The device is online and functioning.
+    'online',
+    -- One or more components are degraded or faulted, but sufficient replicas
+    -- exist to continue functioning.
+    'degraded',
+    -- One or more components are degraded or faulted, and insufficient replicas
+    -- exist to continue functioning.
+    'faulted',
+    -- The device was explicitly taken offline by "zpool offline".
+    'offline',
+    -- The device was physically removed.
+    'removed',
+    -- The device could not be opened.
+    'unavailable'
+);
+
 CREATE TABLE IF NOT EXISTS omicron.public.inv_zpool (
     -- where this observation came from
     -- (foreign key into `inv_collection` table)
@@ -4484,6 +4525,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_zpool (
     id UUID NOT NULL,
     sled_id UUID NOT NULL,
     total_size INT NOT NULL,
+    health omicron.public.inv_zpool_health NOT NULL,
 
     -- PK consisting of:
     -- - Which collection this was
@@ -5167,6 +5209,13 @@ CREATE TABLE IF NOT EXISTS omicron.public.bp_target (
     time_made_target TIMESTAMPTZ NOT NULL
 );
 
+
+CREATE TYPE IF NOT EXISTS omicron.public.bp_sled_measurements AS ENUM (
+    'unknown',
+    'install_dataset',
+    'artifacts'
+);
+
 -- metadata associated with a single sled in a blueprint
 CREATE TABLE IF NOT EXISTS omicron.public.bp_sled_metadata (
     -- foreign key into `blueprint` table
@@ -5192,7 +5241,20 @@ CREATE TABLE IF NOT EXISTS omicron.public.bp_sled_metadata (
         CHECK (last_allocated_ip_subnet_offset BETWEEN 0 AND 65535)
         NOT NULL,
 
+    -- the measurements for this sled
+    measurements omicron.public.bp_sled_measurements NOT NULL,
+
     PRIMARY KEY (blueprint_id, sled_id)
+);
+
+-- description of measurements specified in a blueprint
+CREATE TABLE IF NOT EXISTS omicron.public.bp_single_measurements (
+    -- foreign key into the `blueprint` table
+    blueprint_id UUID NOT NULL,
+    sled_id UUID NOT NULL,
+
+    image_artifact_sha256 STRING(64) NOT NULL,
+    PRIMARY KEY (blueprint_id, sled_id, image_artifact_sha256)
 );
 
 -- description of omicron physical disks specified in a blueprint.
@@ -5969,17 +6031,18 @@ CREATE TABLE IF NOT EXISTS omicron.public.bfd_session (
     remote INET NOT NULL,
     detection_threshold INT8 NOT NULL,
     required_rx INT8 NOT NULL,
-    switch TEXT NOT NULL,
     mode  omicron.public.bfd_mode,
 
     time_created TIMESTAMPTZ NOT NULL,
     time_modified TIMESTAMPTZ NOT NULL,
-    time_deleted TIMESTAMPTZ
+    time_deleted TIMESTAMPTZ,
+
+    switch_slot omicron.public.switch_slot NOT NULL
 );
 
 CREATE UNIQUE INDEX IF NOT EXISTS lookup_bfd_session ON omicron.public.bfd_session (
     remote,
-    switch
+    switch_slot
 ) WHERE time_deleted IS NULL;
 
 
@@ -6101,7 +6164,7 @@ CREATE INDEX IF NOT EXISTS address_lot_names ON omicron.public.address_lot(name)
 CREATE VIEW IF NOT EXISTS omicron.public.bgp_peer_view
 AS
 SELECT
- sp.switch_location,
+ sp.switch_slot,
  sp.port_name,
  bpc.addr,
  bpc.hold_time,
@@ -6116,6 +6179,7 @@ SELECT
  bpc.local_pref,
  bpc.enforce_first_as,
  bpc.vlan_id,
+ bpc.router_lifetime,
  bc.asn
 FROM omicron.public.switch_port sp
 JOIN omicron.public.switch_port_settings_bgp_peer_config bpc
@@ -6123,7 +6187,7 @@ ON sp.port_settings_id = bpc.port_settings_id
 JOIN omicron.public.bgp_config bc ON bc.id = bpc.bgp_config_id;
 
 CREATE INDEX IF NOT EXISTS switch_port_id_and_name
-ON omicron.public.switch_port (port_settings_id, port_name) STORING (switch_location);
+ON omicron.public.switch_port (port_settings_id, port_name) STORING (switch_slot);
 
 CREATE INDEX IF NOT EXISTS switch_port_name ON omicron.public.switch_port (port_name);
 
@@ -8215,7 +8279,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '229.0.0', NULL)
+    (TRUE, NOW(), NOW(), '237.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

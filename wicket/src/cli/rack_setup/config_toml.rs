@@ -7,11 +7,11 @@
 
 use omicron_common::address::IpRange;
 use omicron_common::api::external::AllowedSourceIps;
-use omicron_common::api::internal::shared::BgpConfig;
-use omicron_common::api::internal::shared::LldpPortConfig;
-use omicron_common::api::internal::shared::RouteConfig;
-use omicron_common::api::internal::shared::UplinkAddressConfig;
 use serde::Serialize;
+use sled_agent_types::early_networking::BgpConfig;
+use sled_agent_types::early_networking::LldpPortConfig;
+use sled_agent_types::early_networking::RouteConfig;
+use sled_agent_types::early_networking::UplinkAddressConfig;
 use sled_hardware_types::Baseboard;
 use std::borrow::Cow;
 use std::collections::BTreeSet;
@@ -304,8 +304,13 @@ fn populate_network_table(
                     // This style ensures that if a new field is added, this
                     // fails at compile time.
                     // XXX: shaper and checker are going to go away
-                    let BgpConfig { asn, originate, shaper: _, checker: _ } =
-                        cfg;
+                    let BgpConfig {
+                        asn,
+                        originate,
+                        shaper: _,
+                        checker: _,
+                        max_paths,
+                    } = cfg;
 
                     let mut bgp = Table::new();
                     bgp.insert("asn", i64_item(i64::from(*asn)));
@@ -318,6 +323,12 @@ fn populate_network_table(
                         "originate",
                         Item::Value(Value::Array(originate_out)),
                     );
+
+                    bgp.insert(
+                        "max_paths",
+                        i64_item(i64::from(max_paths.as_u8())),
+                    );
+
                     bgp
                 })
                 .collect();
@@ -362,7 +373,9 @@ fn populate_uplink_table(cfg: &UserSpecifiedPortConfig) -> Table {
     for a in addresses {
         let UplinkAddressConfig { address, vlan_id } = a;
         let mut x = InlineTable::new();
-        x.insert("address", string_value(address));
+        if let Some(address) = address {
+            x.insert("address", string_value(address));
+        }
         if let Some(vlan_id) = vlan_id {
             x.insert("vlan_id", i64_value(i64::from(*vlan_id)));
         }
@@ -407,6 +420,7 @@ fn populate_uplink_table(cfg: &UserSpecifiedPortConfig) -> Table {
             allowed_import,
             allowed_export,
             vlan_id,
+            router_lifetime,
         } = p;
 
         let mut peer = Table::new();
@@ -418,7 +432,9 @@ fn populate_uplink_table(cfg: &UserSpecifiedPortConfig) -> Table {
         peer.insert("port", string_item(port));
 
         // addr = ""
-        peer.insert("addr", string_item(addr));
+        if let Some(x) = addr {
+            peer.insert("addr", string_item(x));
+        }
 
         // hold_time
         if let Some(x) = hold_time {
@@ -497,6 +513,14 @@ fn populate_uplink_table(cfg: &UserSpecifiedPortConfig) -> Table {
             peer.insert("vlan_id", i64_item(i64::from(*x)));
         }
 
+        // router_lifetime
+        if *router_lifetime != 0 {
+            peer.insert(
+                "router_lifetime",
+                i64_item(i64::from(*router_lifetime)),
+            );
+        }
+
         // local_pref
         if let Some(x) = local_pref {
             peer.insert("local_pref", i64_item(i64::from(*x)));
@@ -521,7 +545,7 @@ fn populate_uplink_table(cfg: &UserSpecifiedPortConfig) -> Table {
             management_addrs,
         } = l;
         let mut lldp = Table::new();
-        lldp.insert("status", string_item(status));
+        lldp.insert("status", string_item(enum_to_toml_string(&status)));
         if let Some(x) = chassis_id {
             lldp.insert("chassis_id", string_item(x));
         }

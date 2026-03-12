@@ -355,12 +355,14 @@ use crate::app::db::model::InstanceState;
 use crate::app::db::model::MigrationState;
 use crate::app::db::model::Vmm;
 use crate::app::db::model::VmmState;
+use crate::app::instance_network::InstanceNetworkFilters;
 use crate::app::sagas::declare_saga_actions;
 use anyhow::Context;
 use chrono::Utc;
 use nexus_db_lookup::LookupPath;
 use nexus_db_queries::{authn, authz};
 use nexus_types::identity::Resource;
+use nexus_types::saga::saga_action_failed;
 use omicron_common::api::external::Error;
 use omicron_common::api::internal::nexus::SledVmmState;
 use omicron_uuid_kinds::GenericUuid;
@@ -525,7 +527,7 @@ impl UpdatesRequired {
         // Has the active VMM been destroyed?
         let destroy_active_vmm =
             snapshot.active_vmm.as_ref().and_then(|active_vmm| {
-                if active_vmm.runtime.state.is_terminal() {
+                if active_vmm.state.is_terminal() {
                     let id = PropolisUuid::from_untyped_uuid(active_vmm.id);
                     // Unlink the active VMM ID. If the active VMM was destroyed
                     // because a migration out completed, the next block, which
@@ -536,7 +538,7 @@ impl UpdatesRequired {
 
                     // If the active VMM's state is `Failed`, move the
                     // instance's new state to `Failed` rather than to `NoVmm`.
-                    if active_vmm.runtime.state == VmmState::Failed {
+                    if active_vmm.state == VmmState::Failed {
                         active_vmm_failed = true;
                     } else if snapshot.instance.intended_state
                         == InstanceIntendedState::Running
@@ -567,7 +569,7 @@ impl UpdatesRequired {
             snapshot.target_vmm.as_ref().and_then(|target_vmm| {
                 // XXX(eliza): AFAIK, target VMMs don't go to `Failed` until
                 // they become active, but...IDK. double-check that.
-                if target_vmm.runtime.state.is_terminal() {
+                if target_vmm.state.is_terminal() {
                     // Unlink the target VMM ID.
                     new_runtime.dst_propolis_id = None;
                     update_required = true;
@@ -983,7 +985,17 @@ async fn siu_become_updater(
             saga_id,
         )
         .await
-        .map_err(ActionError::action_failed)?;
+        .map_err(|e| match e {
+            // The `AlreadyLocked` variant must be serialized as
+            // `UpdaterLockError` so that the parent `start-instance-update`
+            // saga can identify this specific failure mode and handle it
+            // gracefully.
+            #[expect(clippy::disallowed_methods)]
+            instance::UpdaterLockError::AlreadyLocked => {
+                ActionError::action_failed(e)
+            }
+            instance::UpdaterLockError::Query(err) => saga_action_failed(err),
+        })?;
 
     info!(
         log,
@@ -1046,7 +1058,7 @@ async fn siu_update_network_config(
             nexus
                 .instance_delete_dpd_config(&opctx, authz_instance)
                 .await
-                .map_err(ActionError::action_failed)?;
+                .map_err(saga_action_failed)?;
         }
         NetworkConfigUpdate::Update { active_propolis_id, new_sled_id } => {
             info!(
@@ -1061,17 +1073,17 @@ async fn siu_update_network_config(
                 .sled_id(new_sled_id)
                 .fetch()
                 .await
-                .map_err(ActionError::action_failed)?;
+                .map_err(saga_action_failed)?;
 
             nexus
                 .instance_ensure_dpd_config(
                     &opctx,
                     instance_id,
                     &sled.address(),
-                    None,
+                    InstanceNetworkFilters::all(),
                 )
                 .await
-                .map_err(ActionError::action_failed)?;
+                .map_err(saga_action_failed)?;
         }
     }
 
@@ -1088,12 +1100,11 @@ async fn siu_release_virtual_provisioning(
     let Some(Deprovision { project_id, cpus_diff, ram_diff }) =
         update.deprovision
     else {
-        return Err(ActionError::action_failed(
+        return Err(saga_action_failed(Error::internal_error(
             "a `siu_release_virtual_provisioning` action should never have \
              been added to the DAG if the update does not contain virtual \
-             resources to deprovision"
-                .to_string(),
-        ));
+             resources to deprovision",
+        )));
     };
     let instance_id = InstanceUuid::from_untyped_uuid(authz_instance.id());
 
@@ -1131,7 +1142,7 @@ async fn siu_release_virtual_provisioning(
                 "instance_id" => %instance_id,
             );
         }
-        Err(err) => return Err(ActionError::action_failed(err)),
+        Err(err) => return Err(saga_action_failed(err)),
     };
 
     Ok(())
@@ -1160,7 +1171,7 @@ async fn siu_unassign_oximeter_producer(
         &authz_instance.id(),
     )
     .await
-    .map_err(ActionError::action_failed)
+    .map_err(saga_action_failed)
 }
 
 async fn siu_commit_instance_updates(
@@ -1197,7 +1208,7 @@ async fn siu_commit_instance_updates(
             update.new_intent,
         )
         .await
-        .map_err(ActionError::action_failed)?;
+        .map_err(saga_action_failed)?;
 
     info!(
         log,
@@ -1539,7 +1550,6 @@ mod test {
     use crate::app::db::model::VmmRuntimeState;
     use crate::app::saga::create_saga_dag;
     use crate::app::sagas::test_helpers;
-    use crate::external_api::params;
     use chrono::Utc;
     use dropshot::test_util::ClientTestContext;
     use nexus_db_lookup::LookupPath;
@@ -1548,6 +1558,7 @@ mod test {
         create_default_ip_pools, create_project, object_create,
     };
     use nexus_test_utils_macros::nexus_test;
+    use nexus_types::external_api::instance as instance_types;
     use nexus_types::internal_api::params::InstanceMigrateRequest;
     use omicron_common::api::internal::nexus::{
         MigrationRuntimeState, MigrationState, Migrations,
@@ -1600,7 +1611,7 @@ mod test {
         object_create(
             client,
             &instances_url,
-            &params::InstanceCreate {
+            &instance_types::InstanceCreate {
                 identity: IdentityMetadataCreateParams {
                     name: INSTANCE_NAME.parse().unwrap(),
                     description: format!("instance {:?}", INSTANCE_NAME),
@@ -1611,7 +1622,7 @@ mod test {
                 user_data: b"#cloud-config".to_vec(),
                 ssh_public_keys: Some(Vec::new()),
                 network_interfaces:
-                    params::InstanceNetworkInterfaceAttachment::None,
+                    instance_types::InstanceNetworkInterfaceAttachment::None,
                 external_ips: vec![],
                 disks: vec![],
                 boot_disk: None,
@@ -1958,7 +1969,7 @@ mod test {
                 &vmm_id,
                 &VmmRuntimeState {
                     time_state_updated: Utc::now(),
-                    generation: Generation(vmm.runtime.generation.0.next()),
+                    generation: Generation(vmm.generation.0.next()),
                     state: VmmState::Destroyed,
                 },
             )
@@ -2618,7 +2629,7 @@ mod test {
             let vmm_id = PropolisUuid::from_untyped_uuid(src_vmm.id);
             let new_runtime = nexus_db_model::VmmRuntimeState {
                 time_state_updated: Utc::now(),
-                generation: Generation(src_vmm.runtime.generation.0.next()),
+                generation: Generation(src_vmm.generation.0.next()),
                 state: vmm_state,
             };
 
@@ -2675,7 +2686,7 @@ mod test {
             let vmm_id = PropolisUuid::from_untyped_uuid(target_vmm.id);
             let new_runtime = nexus_db_model::VmmRuntimeState {
                 time_state_updated: Utc::now(),
-                generation: Generation(target_vmm.runtime.generation.0.next()),
+                generation: Generation(target_vmm.generation.0.next()),
                 state: vmm_state,
             };
 

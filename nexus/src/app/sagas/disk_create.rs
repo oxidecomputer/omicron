@@ -11,9 +11,10 @@ use super::{
 };
 use crate::app::sagas::declare_saga_actions;
 use crate::app::{authn, authz, db};
-use crate::external_api::params;
 use nexus_db_lookup::LookupPath;
 use nexus_db_queries::db::identity::{Asset, Resource};
+use nexus_types::external_api::disk;
+use nexus_types::saga::saga_action_failed;
 use omicron_common::api::external::DiskState;
 use omicron_common::api::external::Error;
 use omicron_uuid_kinds::VolumeUuid;
@@ -34,7 +35,7 @@ use uuid::Uuid;
 pub(crate) struct Params {
     pub serialized_authn: authn::saga::Serialized,
     pub project_id: Uuid,
-    pub create_params: params::DiskCreate,
+    pub create_params: disk::DiskCreate,
 }
 
 // disk create saga: actions
@@ -114,10 +115,10 @@ impl NexusSaga for SagaDiskCreate {
         builder.append(space_account_action());
 
         match &params.create_params.disk_backend {
-            params::DiskBackend::Distributed {
+            disk::DiskBackend::Distributed {
                 disk_source:
-                    params::DiskSource::Snapshot { read_only: true, .. }
-                    | params::DiskSource::Image { read_only: true, .. },
+                    disk::DiskSource::Snapshot { read_only: true, .. }
+                    | disk::DiskSource::Image { read_only: true, .. },
             } => {
                 builder.append(create_readonly_disk_records_action());
 
@@ -126,7 +127,7 @@ impl NexusSaga for SagaDiskCreate {
                 return Ok(builder.build()?);
             }
 
-            params::DiskBackend::Distributed { .. } => {
+            disk::DiskBackend::Distributed { .. } => {
                 builder.append(create_crucible_disk_record_action());
                 builder.append(regions_alloc_action());
                 builder.append(regions_ensure_undo_action());
@@ -134,7 +135,7 @@ impl NexusSaga for SagaDiskCreate {
                 builder.append(create_volume_record_action());
             }
 
-            params::DiskBackend::Local {} => {
+            disk::DiskBackend::Local {} => {
                 builder.append(create_local_storage_disk_record_action());
             }
         }
@@ -142,26 +143,25 @@ impl NexusSaga for SagaDiskCreate {
         builder.append(finalize_disk_record_action());
 
         match &params.create_params.disk_backend {
-            params::DiskBackend::Distributed { disk_source } => {
-                match disk_source {
-                    params::DiskSource::ImportingBlocks { .. } => {
-                        builder.append(get_pantry_address_action());
-                        builder.append(call_pantry_attach_for_disk_action());
-                    }
-
-                    params::DiskSource::Snapshot {
-                        read_only: true, ..
-                    } => {
-                        unreachable!(
-                            "the previous match should have returned early if \
-                             the disk is readonly and created from a snapshot",
-                        )
-                    }
-                    _ => {}
+            disk::DiskBackend::Distributed { disk_source } => match disk_source
+            {
+                disk::DiskSource::ImportingBlocks { .. } => {
+                    builder.append(get_pantry_address_action());
+                    builder.append(call_pantry_attach_for_disk_action());
                 }
-            }
 
-            params::DiskBackend::Local {} => {
+                disk::DiskSource::Snapshot { read_only: true, .. }
+                | disk::DiskSource::Image { read_only: true, .. } => {
+                    unreachable!(
+                        "the previous match should have returned early if \
+                         the disk is readonly and created from a snapshot or image",
+                    )
+                }
+
+                _ => {}
+            },
+
+            disk::DiskBackend::Local {} => {
                 // nothing to do!
             }
         }
@@ -189,63 +189,57 @@ async fn sdc_create_crucible_disk_record(
     );
 
     let disk_source = match &params.create_params.disk_backend {
-        params::DiskBackend::Distributed { disk_source } => disk_source,
+        disk::DiskBackend::Distributed { disk_source } => disk_source,
 
-        params::DiskBackend::Local {} => {
+        disk::DiskBackend::Local {} => {
             // This should be unreachable given the match performed in
             // `make_saga_dag`!
-            return Err(ActionError::action_failed(Error::internal_error(
+            return Err(saga_action_failed(Error::internal_error(
                 "wrong DiskBackend variant!",
             )));
         }
     };
 
     let block_size: db::model::BlockSize = match &disk_source {
-        params::DiskSource::Blank { block_size } => {
+        disk::DiskSource::Blank { block_size } => {
             db::model::BlockSize::try_from(*block_size).map_err(|e| {
-                ActionError::action_failed(Error::internal_error(
-                    &e.to_string(),
-                ))
+                saga_action_failed(Error::internal_error(&e.to_string()))
             })?
         }
-        params::DiskSource::Snapshot { snapshot_id, read_only: false } => {
+        disk::DiskSource::Snapshot { snapshot_id, read_only: false } => {
             let (.., db_snapshot) =
                 LookupPath::new(&opctx, osagactx.datastore())
                     .snapshot_id(*snapshot_id)
                     .fetch()
                     .await
                     .map_err(|e| {
-                        ActionError::action_failed(Error::internal_error(
+                        saga_action_failed(Error::internal_error(
                             &e.to_string(),
                         ))
                     })?;
 
             db_snapshot.block_size
         }
-        params::DiskSource::Image { image_id, read_only: false } => {
+        disk::DiskSource::Image { image_id, read_only: false } => {
             let (.., image) = LookupPath::new(&opctx, osagactx.datastore())
                 .image_id(*image_id)
                 .fetch()
                 .await
                 .map_err(|e| {
-                    ActionError::action_failed(Error::internal_error(
-                        &e.to_string(),
-                    ))
+                    saga_action_failed(Error::internal_error(&e.to_string()))
                 })?;
 
             image.block_size
         }
-        params::DiskSource::Image { read_only: true, .. }
-        | params::DiskSource::Snapshot { read_only: true, .. } => {
-            return Err(ActionError::action_failed(Error::internal_error(
+        disk::DiskSource::Image { read_only: true, .. }
+        | disk::DiskSource::Snapshot { read_only: true, .. } => {
+            return Err(saga_action_failed(Error::internal_error(
                 NOT_NEEDED_FOR_READONLY,
             )));
         }
-        params::DiskSource::ImportingBlocks { block_size } => {
+        disk::DiskSource::ImportingBlocks { block_size } => {
             db::model::BlockSize::try_from(*block_size).map_err(|e| {
-                ActionError::action_failed(Error::internal_error(
-                    &e.to_string(),
-                ))
+                saga_action_failed(Error::internal_error(&e.to_string()))
             })?
         }
     };
@@ -275,7 +269,7 @@ async fn sdc_create_crucible_disk_record(
         .project_id(params.project_id)
         .lookup_for(authz::Action::CreateChild)
         .await
-        .map_err(ActionError::action_failed)?;
+        .map_err(saga_action_failed)?;
 
     osagactx
         .datastore()
@@ -285,7 +279,7 @@ async fn sdc_create_crucible_disk_record(
             db::datastore::Disk::Crucible(crucible_disk.clone()),
         )
         .await
-        .map_err(ActionError::action_failed)?;
+        .map_err(saga_action_failed)?;
 
     Ok(crucible_disk)
 }
@@ -322,15 +316,15 @@ async fn sdc_create_local_storage_disk_record(
     );
 
     let block_size = match &params.create_params.disk_backend {
-        params::DiskBackend::Distributed { .. } => {
+        disk::DiskBackend::Distributed { .. } => {
             // This should be unreachable given the match performed in
             // `make_saga_dag`!
-            return Err(ActionError::action_failed(Error::internal_error(
+            return Err(saga_action_failed(Error::internal_error(
                 "wrong DiskBackend variant!",
             )));
         }
 
-        params::DiskBackend::Local {} => {
+        disk::DiskBackend::Local {} => {
             // All LocalStorage disks have a block size of 4k
             db::model::BlockSize::AdvancedFormat
         }
@@ -349,7 +343,7 @@ async fn sdc_create_local_storage_disk_record(
         disk_id,
         params.create_params.size,
     )
-    .map_err(ActionError::action_failed)?;
+    .map_err(|e| saga_action_failed(Error::internal_error(&e.to_string())))?;
 
     let local_storage_disk =
         db::datastore::LocalStorageDisk::new(disk, disk_type_local_storage);
@@ -358,7 +352,7 @@ async fn sdc_create_local_storage_disk_record(
         .project_id(params.project_id)
         .lookup_for(authz::Action::CreateChild)
         .await
-        .map_err(ActionError::action_failed)?;
+        .map_err(saga_action_failed)?;
 
     osagactx
         .datastore()
@@ -368,7 +362,7 @@ async fn sdc_create_local_storage_disk_record(
             db::datastore::Disk::LocalStorage(local_storage_disk.clone()),
         )
         .await
-        .map_err(ActionError::action_failed)?;
+        .map_err(saga_action_failed)?;
 
     Ok(local_storage_disk)
 }
@@ -399,12 +393,12 @@ async fn sdc_alloc_regions(
     let strategy = &osagactx.nexus().default_region_allocation_strategy;
 
     let disk_source = match &params.create_params.disk_backend {
-        params::DiskBackend::Distributed { disk_source } => disk_source,
+        disk::DiskBackend::Distributed { disk_source } => disk_source,
 
-        params::DiskBackend::Local {} => {
+        disk::DiskBackend::Local {} => {
             // This should be unreachable given the match performed in
             // `make_saga_dag`!
-            return Err(ActionError::action_failed(Error::internal_error(
+            return Err(saga_action_failed(Error::internal_error(
                 "wrong DiskBackend variant!",
             )));
         }
@@ -420,7 +414,7 @@ async fn sdc_alloc_regions(
             &strategy,
         )
         .await
-        .map_err(ActionError::action_failed)?;
+        .map_err(saga_action_failed)?;
     Ok(datasets_and_regions)
 }
 
@@ -462,7 +456,7 @@ async fn sdc_account_space(
             params.create_params.size.into(),
         )
         .await
-        .map_err(ActionError::action_failed)?;
+        .map_err(saga_action_failed)?;
     Ok(())
 }
 
@@ -486,7 +480,7 @@ async fn sdc_account_space_undo(
             params.create_params.size.into(),
         )
         .await
-        .map_err(ActionError::action_failed)?;
+        .map_err(saga_action_failed)?;
     Ok(())
 }
 
@@ -512,7 +506,7 @@ async fn sdc_regions_ensure(
                 )?,
         )
         .await
-        .map_err(ActionError::action_failed)?;
+        .map_err(saga_action_failed)?;
 
     let block_size = datasets_and_regions[0].1.block_size;
     let blocks_per_extent = datasets_and_regions[0].1.extent_size;
@@ -527,12 +521,12 @@ async fn sdc_regions_ensure(
     );
 
     let disk_source = match &params.create_params.disk_backend {
-        params::DiskBackend::Distributed { disk_source } => disk_source,
+        disk::DiskBackend::Distributed { disk_source } => disk_source,
 
-        params::DiskBackend::Local {} => {
+        disk::DiskBackend::Local {} => {
             // This should be unreachable given the match performed in
             // `make_saga_dag`!
-            return Err(ActionError::action_failed(Error::internal_error(
+            return Err(saga_action_failed(Error::internal_error(
                 "wrong DiskBackend variant!",
             )));
         }
@@ -540,15 +534,15 @@ async fn sdc_regions_ensure(
 
     let mut read_only_parent: Option<Box<VolumeConstructionRequest>> =
         match disk_source {
-            params::DiskSource::Blank { block_size: _ } => None,
-            params::DiskSource::Snapshot { read_only: true, .. }
-            | params::DiskSource::Image { read_only: true, .. } => {
-                return Err(ActionError::action_failed(Error::internal_error(
+            disk::DiskSource::Blank { block_size: _ } => None,
+            disk::DiskSource::Snapshot { read_only: true, .. }
+            | disk::DiskSource::Image { read_only: true, .. } => {
+                return Err(saga_action_failed(Error::internal_error(
                     NOT_NEEDED_FOR_READONLY,
                 )));
             }
 
-            params::DiskSource::Snapshot { snapshot_id, read_only: false } => {
+            disk::DiskSource::Snapshot { snapshot_id, read_only: false } => {
                 debug!(log, "grabbing snapshot {}", snapshot_id);
 
                 let (.., db_snapshot) =
@@ -556,7 +550,7 @@ async fn sdc_regions_ensure(
                         .snapshot_id(*snapshot_id)
                         .fetch()
                         .await
-                        .map_err(ActionError::action_failed)?;
+                        .map_err(saga_action_failed)?;
 
                 debug!(
                     log,
@@ -572,7 +566,7 @@ async fn sdc_regions_ensure(
                         db::datastore::VolumeCheckoutReason::ReadOnlyCopy,
                     )
                     .await
-                    .map_err(ActionError::action_failed)?;
+                    .map_err(saga_action_failed)?;
 
                 debug!(
                     log,
@@ -583,23 +577,21 @@ async fn sdc_regions_ensure(
 
                 Some(Box::new(serde_json::from_str(volume.data()).map_err(
                     |e| {
-                        ActionError::action_failed(Error::internal_error(
-                            &format!(
-                                "failed to deserialize volume data: {}",
-                                e,
-                            ),
-                        ))
+                        saga_action_failed(Error::internal_error(&format!(
+                            "failed to deserialize volume data: {}",
+                            e,
+                        )))
                     },
                 )?))
             }
-            params::DiskSource::Image { image_id, read_only: false } => {
+            disk::DiskSource::Image { image_id, read_only: false } => {
                 debug!(log, "grabbing image {}", image_id);
 
                 let (.., image) = LookupPath::new(&opctx, osagactx.datastore())
                     .image_id(*image_id)
                     .fetch()
                     .await
-                    .map_err(ActionError::action_failed)?;
+                    .map_err(saga_action_failed)?;
 
                 debug!(log, "retrieved project image {}", image.id());
 
@@ -617,7 +609,7 @@ async fn sdc_regions_ensure(
                         db::datastore::VolumeCheckoutReason::ReadOnlyCopy,
                     )
                     .await
-                    .map_err(ActionError::action_failed)?;
+                    .map_err(saga_action_failed)?;
 
                 debug!(
                     log,
@@ -628,16 +620,14 @@ async fn sdc_regions_ensure(
 
                 Some(Box::new(serde_json::from_str(volume.data()).map_err(
                     |e| {
-                        ActionError::action_failed(Error::internal_error(
-                            &format!(
-                                "failed to deserialize volume data: {}",
-                                e,
-                            ),
-                        ))
+                        saga_action_failed(Error::internal_error(&format!(
+                            "failed to deserialize volume data: {}",
+                            e,
+                        )))
                     },
                 )?))
             }
-            params::DiskSource::ImportingBlocks { block_size: _ } => None,
+            disk::DiskSource::ImportingBlocks { block_size: _ } => None,
         };
 
     // Each ID should be unique to this disk
@@ -645,7 +635,7 @@ async fn sdc_regions_ensure(
         **read_only_parent =
             randomize_volume_construction_request_ids(&read_only_parent)
                 .map_err(|e| {
-                    ActionError::action_failed(Error::internal_error(&format!(
+                    saga_action_failed(Error::internal_error(&format!(
                         "failed to randomize ids: {}",
                         e,
                     )))
@@ -751,7 +741,7 @@ async fn sdc_regions_ensure_undo(
                 .disk_id(disk_id)
                 .fetch_for(authz::Action::Modify)
                 .await
-                .map_err(ActionError::action_failed)?;
+                .map_err(saga_action_failed)?;
 
             datastore
                 .disk_update_runtime(
@@ -785,7 +775,7 @@ async fn sdc_create_volume_record(
         .datastore()
         .volume_create(volume_id, volume_data)
         .await
-        .map_err(ActionError::action_failed)?;
+        .map_err(saga_action_failed)?;
 
     Ok(())
 }
@@ -823,7 +813,7 @@ async fn sdc_finalize_disk_record(
         .disk_id(disk_id)
         .lookup_for(authz::Action::Modify)
         .await
-        .map_err(ActionError::action_failed)?;
+        .map_err(saga_action_failed)?;
 
     // TODO-security Review whether further actions in this node can ever fail
     // an authz check.  We don't want this to ever fail the authz check here --
@@ -837,14 +827,14 @@ async fn sdc_finalize_disk_record(
     // It would be better if this were better guaranteed.
 
     match params.create_params.disk_backend {
-        params::DiskBackend::Distributed { disk_source } => {
+        disk::DiskBackend::Distributed { disk_source } => {
             let disk_created = db::datastore::Disk::Crucible(
                 sagactx
                     .lookup::<db::datastore::CrucibleDisk>("crucible_disk")?,
             );
 
             match disk_source {
-                params::DiskSource::ImportingBlocks { .. } => {
+                disk::DiskSource::ImportingBlocks { .. } => {
                     datastore
                         .disk_update_runtime(
                             &opctx,
@@ -852,7 +842,7 @@ async fn sdc_finalize_disk_record(
                             &disk_created.runtime().import_ready(),
                         )
                         .await
-                        .map_err(ActionError::action_failed)?;
+                        .map_err(saga_action_failed)?;
                 }
 
                 _ => {
@@ -863,14 +853,14 @@ async fn sdc_finalize_disk_record(
                             &disk_created.runtime().detach(),
                         )
                         .await
-                        .map_err(ActionError::action_failed)?;
+                        .map_err(saga_action_failed)?;
                 }
             }
 
             Ok(disk_created)
         }
 
-        params::DiskBackend::Local {} => {
+        disk::DiskBackend::Local {} => {
             let disk_created = db::datastore::Disk::LocalStorage(
                 sagactx.lookup::<db::datastore::LocalStorageDisk>(
                     "local_storage_disk",
@@ -884,7 +874,7 @@ async fn sdc_finalize_disk_record(
                     &disk_created.runtime().detach(),
                 )
                 .await
-                .map_err(ActionError::action_failed)?;
+                .map_err(saga_action_failed)?;
 
             Ok(disk_created)
         }
@@ -918,12 +908,12 @@ async fn sdc_get_pantry_address(
         .disk_id(disk_id)
         .lookup_for(authz::Action::Modify)
         .await
-        .map_err(ActionError::action_failed)?;
+        .map_err(saga_action_failed)?;
 
     datastore
         .disk_set_pantry(&opctx, &authz_disk, pantry_address)
         .await
-        .map_err(ActionError::action_failed)?;
+        .map_err(saga_action_failed)?;
 
     Ok(pantry_address)
 }
@@ -982,10 +972,10 @@ async fn sdc_create_readonly_disk_records(
     let params = sagactx.saga_params::<Params>()?;
     let create_params = &params.create_params;
 
-    let params::DiskBackend::Distributed { ref disk_source } =
+    let disk::DiskBackend::Distributed { ref disk_source } =
         create_params.disk_backend
     else {
-        return Err(ActionError::action_failed(Error::internal_error(
+        return Err(saga_action_failed(Error::internal_error(
             "wrong DiskBackend variant!",
         )));
     };
@@ -1001,7 +991,7 @@ async fn sdc_create_readonly_disk_records(
         .project_id(params.project_id)
         .lookup_for(authz::Action::CreateChild)
         .await
-        .map_err(ActionError::action_failed)?;
+        .map_err(saga_action_failed)?;
 
     info!(
         log,
@@ -1019,7 +1009,7 @@ async fn sdc_create_readonly_disk_records(
             &create_params,
         )
         .await
-        .map_err(ActionError::action_failed)
+        .map_err(saga_action_failed)
 }
 
 // helper functions
@@ -1073,8 +1063,7 @@ fn randomize_volume_construction_request_ids(
 pub(crate) mod test {
     use crate::{
         app::saga::create_saga_dag, app::sagas::disk_create::Params,
-        app::sagas::disk_create::SagaDiskCreate, external_api::params,
-        external_api::views,
+        app::sagas::disk_create::SagaDiskCreate,
     };
     use async_bb8_diesel::{AsyncRunQueryDsl, AsyncSimpleConnection};
     use diesel::{
@@ -1087,6 +1076,8 @@ pub(crate) mod test {
     use nexus_test_utils::resource_helpers;
     use nexus_test_utils::resource_helpers::create_project;
     use nexus_test_utils_macros::nexus_test;
+    use nexus_types::external_api::disk;
+    use nexus_types::external_api::snapshot;
     use omicron_common::api::external::ByteCount;
     use omicron_common::api::external::IdentityMetadataCreateParams;
     use omicron_common::api::external::Name;
@@ -1101,15 +1092,15 @@ pub(crate) mod test {
     const DISK_NAME: &str = "my-disk";
     const PROJECT_NAME: &str = "springfield-squidport";
 
-    pub fn new_disk_create_params() -> params::DiskCreate {
-        params::DiskCreate {
+    pub fn new_disk_create_params() -> disk::DiskCreate {
+        disk::DiskCreate {
             identity: IdentityMetadataCreateParams {
                 name: DISK_NAME.parse().expect("Invalid disk name"),
                 description: "My disk".to_string(),
             },
-            disk_backend: params::DiskBackend::Distributed {
-                disk_source: params::DiskSource::Blank {
-                    block_size: params::BlockSize(512),
+            disk_backend: disk::DiskBackend::Distributed {
+                disk_source: disk::DiskSource::Blank {
+                    block_size: disk::BlockSize(512),
                 },
             },
             size: ByteCount::from_gibibytes_u32(1),
@@ -1119,15 +1110,15 @@ pub(crate) mod test {
     fn new_readonly_disk_create_params(
         opctx: &OpContext,
         project_id: Uuid,
-        snapshot: &views::Snapshot,
+        snapshot: &snapshot::Snapshot,
     ) -> Params {
-        let create_params = params::DiskCreate {
+        let create_params = disk::DiskCreate {
             identity: IdentityMetadataCreateParams {
                 name: DISK_NAME.parse().expect("Invalid disk name"),
                 description: "My disk".to_string(),
             },
-            disk_backend: params::DiskBackend::Distributed {
-                disk_source: params::DiskSource::Snapshot {
+            disk_backend: disk::DiskBackend::Distributed {
+                disk_source: disk::DiskSource::Snapshot {
                     read_only: true,
                     snapshot_id: snapshot.identity.id,
                 },
@@ -1581,7 +1572,7 @@ pub(crate) mod test {
     async fn destroy_disk(cptestctx: &ControlPlaneTestContext) {
         let nexus = &cptestctx.server.server_context().nexus;
         let opctx = test_opctx(&cptestctx);
-        let disk_selector = params::DiskSelector {
+        let disk_selector = disk::DiskSelector {
             project: Some(
                 Name::try_from(PROJECT_NAME.to_string()).unwrap().into(),
             ),

@@ -338,6 +338,7 @@ mod test {
     use nexus_test_utils_macros::nexus_test;
     use nexus_types::deployment::Blueprint;
     use nexus_types::deployment::BlueprintHostPhase2DesiredSlots;
+    use nexus_types::deployment::BlueprintMeasurements;
     use nexus_types::deployment::BlueprintSledConfig;
     use nexus_types::deployment::BlueprintSource;
     use nexus_types::deployment::BlueprintTarget;
@@ -354,11 +355,10 @@ mod test {
     use nexus_types::deployment::OximeterReadMode;
     use nexus_types::deployment::PendingMgsUpdates;
     use nexus_types::deployment::blueprint_zone_type;
-    use nexus_types::external_api::params;
-    use nexus_types::external_api::shared;
-    use nexus_types::external_api::views::SledPolicy;
-    use nexus_types::external_api::views::SledProvisionPolicy;
-    use nexus_types::external_api::views::SledState;
+    use nexus_types::external_api::silo;
+    use nexus_types::external_api::sled::SledPolicy;
+    use nexus_types::external_api::sled::SledProvisionPolicy;
+    use nexus_types::external_api::sled::SledState;
     use nexus_types::identity::Resource;
     use nexus_types::internal_api::params::DnsConfigParams;
     use nexus_types::internal_api::params::DnsConfigZone;
@@ -705,6 +705,7 @@ mod test {
                     remove_mupdate_override: None,
                     host_phase_2:
                         BlueprintHostPhase2DesiredSlots::current_contents(),
+                    measurements: BlueprintMeasurements::InstallDataset,
                 },
             );
         }
@@ -1066,14 +1067,14 @@ mod test {
         blueprint.internal_dns_version = Generation::new();
         blueprint.external_dns_version = Generation::new();
 
-        let my_silo = Silo::new(params::SiloCreate {
+        let my_silo = Silo::new(silo::SiloCreate {
             identity: IdentityMetadataCreateParams {
                 name: "my-silo".parse().unwrap(),
                 description: String::new(),
             },
-            quotas: params::SiloQuotasCreate::empty(),
+            quotas: silo::SiloQuotasCreate::empty(),
             discoverable: false,
-            identity_mode: shared::SiloIdentityMode::SamlJit,
+            identity_mode: silo::SiloIdentityMode::SamlJit,
             admin_group_name: None,
             tls_certificates: vec![],
             mapped_fleet_roles: Default::default(),
@@ -1758,7 +1759,7 @@ mod test {
             &cptestctx.external_client,
             silo_name,
             false,
-            shared::SiloIdentityMode::SamlJit,
+            silo::SiloIdentityMode::SamlJit,
         )
         .await;
 

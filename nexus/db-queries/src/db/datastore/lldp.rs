@@ -15,12 +15,14 @@ use diesel::SelectableHelper;
 use ipnetwork::IpNetwork;
 use nexus_db_errors::ErrorHandler;
 use nexus_db_errors::public_error_from_diesel;
+use nexus_db_model::DbSwitchSlot;
 use omicron_common::api::external;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::Name;
 use omicron_common::api::external::ResourceType;
 use omicron_common::api::external::UpdateResult;
+use sled_agent_types::early_networking::SwitchSlot;
 use uuid::Uuid;
 
 // The LLDP configuration has been defined as a leaf of the switch-port-settings
@@ -46,7 +48,7 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         rack_id: Uuid,
-        switch_location: Name,
+        switch_slot: SwitchSlot,
         port_name: Name,
     ) -> LookupResult<Uuid> {
         use nexus_db_schema::schema::switch_port;
@@ -56,11 +58,10 @@ impl DataStore {
 
         let conn = self.pool_connection_authorized(opctx).await?;
 
+        let switch_slot = DbSwitchSlot::from(switch_slot);
         let port_settings_id: Uuid = switch_port_dsl::switch_port
             .filter(switch_port::rack_id.eq(rack_id))
-            .filter(
-                switch_port::switch_location.eq(switch_location.to_string()),
-            )
+            .filter(switch_port::switch_slot.eq(switch_slot))
             .filter(switch_port::port_name.eq(port_name.to_string()))
             .select(switch_port::port_settings_id)
             .limit(1)
@@ -102,14 +103,14 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         rack_id: Uuid,
-        switch_location: Name,
+        switch_slot: SwitchSlot,
         port_name: Name,
     ) -> LookupResult<external::LldpLinkConfig> {
         use nexus_db_schema::schema::lldp_link_config;
         use nexus_db_schema::schema::lldp_link_config::dsl;
 
         let id = self
-            .lldp_config_id_get(opctx, rack_id, switch_location, port_name)
+            .lldp_config_id_get(opctx, rack_id, switch_slot, port_name)
             .await?;
 
         let conn = self.pool_connection_authorized(opctx).await?;
@@ -142,14 +143,14 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         rack_id: Uuid,
-        switch_location: Name,
+        switch_slot: SwitchSlot,
         port_name: Name,
         config: external::LldpLinkConfig,
     ) -> UpdateResult<()> {
         use nexus_db_schema::schema::lldp_link_config::dsl;
 
         let id = self
-            .lldp_config_id_get(opctx, rack_id, switch_location, port_name)
+            .lldp_config_id_get(opctx, rack_id, switch_slot, port_name)
             .await?;
         if id != config.id {
             return Err(external::Error::invalid_request(&format!(

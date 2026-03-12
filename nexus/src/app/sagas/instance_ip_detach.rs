@@ -4,16 +4,17 @@
 
 use super::instance_common::{
     ModifyStateForExternalIp, VmmAndSledIds, instance_ip_add_nat,
-    instance_ip_add_opte, instance_ip_get_instance_state,
-    instance_ip_move_state, instance_ip_remove_nat, instance_ip_remove_opte,
+    instance_ip_add_opte, instance_ip_move_state, instance_ip_remove_nat,
+    instance_ip_remove_opte, networking_resource_instance_state,
 };
 use super::{ActionRegistry, NexusActionContext, NexusSaga};
 use crate::app::sagas::declare_saga_actions;
 use crate::app::{authn, authz, db};
-use crate::external_api::params;
 use nexus_db_lookup::LookupPath;
 use nexus_db_model::IpAttachState;
-use nexus_types::external_api::views;
+use nexus_types::external_api::external_ip;
+use nexus_types::external_api::instance;
+use nexus_types::saga::saga_action_failed;
 use omicron_common::api::external::{Error, NameOrId};
 use omicron_uuid_kinds::{GenericUuid, InstanceUuid};
 use ref_cast::RefCast;
@@ -53,7 +54,7 @@ declare_saga_actions! {
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct Params {
-    pub delete_params: params::ExternalIpDetach,
+    pub delete_params: instance::ExternalIpDetach,
     pub authz_instance: authz::Instance,
     pub project_id: Uuid,
     /// Authentication context to use to fetch the instance's current state from
@@ -75,11 +76,11 @@ async fn siid_begin_detach_ip(
     let instance_id =
         InstanceUuid::from_untyped_uuid(params.authz_instance.id());
     match &params.delete_params {
-        params::ExternalIpDetach::Ephemeral { ip_version } => {
+        instance::ExternalIpDetach::Ephemeral { ip_version } => {
             let eph_ips = datastore
                 .instance_lookup_ephemeral_ips(&opctx, instance_id)
                 .await
-                .map_err(ActionError::action_failed)?;
+                .map_err(saga_action_failed)?;
 
             let eip = match ip_version {
                 Some(v) => eph_ips.get((*v).into()),
@@ -88,7 +89,7 @@ async fn siid_begin_detach_ip(
                     (None, None) => None,
                     // Says "two" because that's the max (one per IP version).
                     (Some(_), Some(_)) => {
-                        return Err(ActionError::action_failed(
+                        return Err(saga_action_failed(
                             Error::invalid_request(
                                 "instance has two ephemeral IPs; \
                                  specify ip_version to select which to detach",
@@ -106,7 +107,7 @@ async fn siid_begin_detach_ip(
                         instance_id,
                     )
                     .await
-                    .map_err(ActionError::action_failed)
+                    .map_err(saga_action_failed)
                     .map(|external_ip| ModifyStateForExternalIp {
                         do_saga: external_ip.is_some(),
                         external_ip,
@@ -118,7 +119,7 @@ async fn siid_begin_detach_ip(
                 })
             }
         }
-        params::ExternalIpDetach::Floating { floating_ip } => {
+        instance::ExternalIpDetach::Floating { floating_ip } => {
             let (.., authz_fip) = match floating_ip {
                 NameOrId::Name(name) => LookupPath::new(&opctx, datastore)
                     .project_id(params.project_id)
@@ -129,7 +130,7 @@ async fn siid_begin_detach_ip(
             }
             .lookup_for(authz::Action::Modify)
             .await
-            .map_err(ActionError::action_failed)?;
+            .map_err(saga_action_failed)?;
 
             datastore
                 .floating_ip_begin_detach(
@@ -139,7 +140,7 @@ async fn siid_begin_detach_ip(
                     false,
                 )
                 .await
-                .map_err(ActionError::action_failed)
+                .map_err(saga_action_failed)
                 .map(|(external_ip, do_saga)| ModifyStateForExternalIp {
                     external_ip: Some(external_ip),
                     do_saga,
@@ -174,7 +175,7 @@ async fn siid_get_instance_state(
     sagactx: NexusActionContext,
 ) -> Result<Option<VmmAndSledIds>, ActionError> {
     let params = sagactx.saga_params::<Params>()?;
-    instance_ip_get_instance_state(
+    networking_resource_instance_state(
         &sagactx,
         &params.serialized_authn,
         &params.authz_instance,
@@ -244,7 +245,7 @@ async fn siid_update_opte_undo(
 
 async fn siid_complete_detach(
     sagactx: NexusActionContext,
-) -> Result<Option<views::ExternalIp>, ActionError> {
+) -> Result<Option<external_ip::ExternalIp>, ActionError> {
     let log = sagactx.user_data().log();
     let params = sagactx.saga_params::<Params>()?;
     let target_ip = sagactx.lookup::<ModifyStateForExternalIp>("target_ip")?;
@@ -268,7 +269,7 @@ async fn siid_complete_detach(
         .external_ip
         .map(TryInto::try_into)
         .transpose()
-        .map_err(ActionError::action_failed)
+        .map_err(saga_action_failed)
 }
 
 #[derive(Debug)]
@@ -331,11 +332,11 @@ pub(crate) mod test {
         use_floating: bool,
     ) -> Params {
         let delete_params = if use_floating {
-            params::ExternalIpDetach::Floating {
+            instance::ExternalIpDetach::Floating {
                 floating_ip: FIP_NAME.parse::<Name>().unwrap().into(),
             }
         } else {
-            params::ExternalIpDetach::Ephemeral { ip_version: None }
+            instance::ExternalIpDetach::Ephemeral { ip_version: None }
         };
 
         let (.., authz_project, authz_instance) =

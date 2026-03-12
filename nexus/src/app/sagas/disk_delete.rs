@@ -12,8 +12,13 @@ use crate::app::sagas::volume_delete;
 use nexus_db_queries::authn;
 use nexus_db_queries::db;
 use nexus_db_queries::db::datastore;
+use nexus_types::saga::saga_action_failed;
 use omicron_common::api::external::DiskState;
-use omicron_common::progenitor_operation_retry::ProgenitorOperationRetry;
+use omicron_common::api::external::Error;
+use omicron_common::backoff::backon_retry_policy_internal_service;
+use progenitor_extras::retry::{
+    GoneCheckResult, retry_operation_while_indefinitely,
+};
 use serde::Deserialize;
 use serde::Serialize;
 use sled_agent_client::types::LocalStorageDatasetDeleteRequest;
@@ -133,7 +138,7 @@ async fn sdd_delete_disk_record(
             &[DiskState::Detached, DiskState::Faulted],
         )
         .await
-        .map_err(ActionError::action_failed)?;
+        .map_err(saga_action_failed)?;
 
     Ok(disk)
 }
@@ -148,7 +153,7 @@ async fn sdd_delete_disk_record_undo(
         .datastore()
         .project_undelete_disk_set_faulted_no_auth(&params.disk.id())
         .await
-        .map_err(ActionError::action_failed)?;
+        .map_err(saga_action_failed)?;
 
     Ok(())
 }
@@ -173,7 +178,7 @@ async fn sdd_account_space(
             deleted_disk.size,
         )
         .await
-        .map_err(ActionError::action_failed)?;
+        .map_err(saga_action_failed)?;
     Ok(())
 }
 
@@ -197,7 +202,7 @@ async fn sdd_account_space_undo(
             deleted_disk.size,
         )
         .await
-        .map_err(ActionError::action_failed)?;
+        .map_err(saga_action_failed)?;
     Ok(())
 }
 
@@ -237,7 +242,7 @@ async fn sdd_delete_local_storage(
         .nexus()
         .sled_client(&sled_id)
         .await
-        .map_err(ActionError::action_failed)?;
+        .map_err(saga_action_failed)?;
 
     // Ensure that the local storage is deleted
 
@@ -245,23 +250,37 @@ async fn sdd_delete_local_storage(
         sled_agent_client.local_storage_dataset_delete(&request).await
     };
 
+    // `check_sled_in_service` returns an error if the sled is no longer in
+    // service; if it succeeds, the sled is not gone.
     let gone_check = || async {
-        osagactx.datastore().check_sled_in_service(&opctx, sled_id).await?;
-
-        // `check_sled_in_service` returns an error if the sled is no longer in
-        // service; if it succeeds, the sled is not gone.
-        Ok(false)
+        osagactx
+            .datastore()
+            .check_sled_in_service(&opctx, sled_id)
+            .await
+            .map(|()| GoneCheckResult::StillAvailable)
     };
 
-    ProgenitorOperationRetry::new(delete_operation, gone_check)
-        .run(osagactx.log())
-        .await
-        .map_err(|e| {
-            ActionError::action_failed(format!(
-                "failed to delete local storage: {}",
-                InlineErrorChain::new(&e)
-            ))
-        })?;
+    let log = osagactx.log().clone();
+    retry_operation_while_indefinitely(
+        backon_retry_policy_internal_service(),
+        delete_operation,
+        gone_check,
+        |notification| {
+            slog::warn!(
+                log,
+                "failed to delete local storage dataset, retrying in {:?}",
+                notification.delay;
+                InlineErrorChain::new(&notification.error),
+            );
+        },
+    )
+    .await
+    .map_err(|e| {
+        saga_action_failed(Error::internal_error(&format!(
+            "failed to delete local storage: {}",
+            InlineErrorChain::new(&e)
+        )))
+    })?;
 
     Ok(())
 }
@@ -287,7 +306,7 @@ async fn sdd_deallocate_local_storage(
         .datastore()
         .delete_local_storage_dataset_allocations(&opctx, &disk)
         .await
-        .map_err(ActionError::action_failed)?;
+        .map_err(saga_action_failed)?;
 
     Ok(())
 }
@@ -304,7 +323,7 @@ pub(crate) mod test {
     use nexus_test_utils::resource_helpers::DiskTest;
     use nexus_test_utils::resource_helpers::create_project;
     use nexus_test_utils_macros::nexus_test;
-    use nexus_types::external_api::params;
+    use nexus_types::external_api::project;
     use omicron_common::api::external::Name;
 
     type ControlPlaneTestContext =
@@ -323,7 +342,7 @@ pub(crate) mod test {
         let nexus = &cptestctx.server.server_context().nexus;
         let opctx = test_opctx(&cptestctx);
 
-        let project_selector = params::ProjectSelector {
+        let project_selector = project::ProjectSelector {
             project: Name::try_from(PROJECT_NAME.to_string()).unwrap().into(),
         };
 

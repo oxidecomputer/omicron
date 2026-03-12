@@ -27,6 +27,7 @@ use slog::error;
 use slog::o;
 use slog::trace;
 use slog::warn;
+use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::collections::btree_map::Entry;
@@ -434,7 +435,7 @@ impl KstatSamplerWorker {
                         error!(
                             self.log,
                             "failed to prune creation times";
-                            "error" => ?e,
+                            InlineErrorChain::new(&e),
                         );
                     }
                 }
@@ -520,11 +521,10 @@ impl KstatSamplerWorker {
                         );
                         match reply_tx.send(Ok(id)) {
                             Ok(_) => trace!(self.log, "sent reply"),
-                            Err(e) => error!(
+                            Err(_) => error!(
                                 self.log,
-                                "failed to send reply";
+                                "failed to send reply (channel closed)";
                                 "id" => ?id,
-                                "error" => ?e,
                             ),
                         }
                         Some(Operation::Add(YieldIdAfter::new(
@@ -536,14 +536,13 @@ impl KstatSamplerWorker {
                         error!(
                             self.log,
                             "failed to add target";
-                            "error" => ?e,
+                            InlineErrorChain::new(&e),
                         );
                         match reply_tx.send(Err(e)) {
                             Ok(_) => trace!(self.log, "sent reply"),
-                            Err(e) => error!(
+                            Err(_) => error!(
                                 self.log,
-                                "failed to send reply";
-                                "error" => ?e,
+                                "failed to send reply (channel closed)";
                             ),
                         }
                         None
@@ -561,11 +560,10 @@ impl KstatSamplerWorker {
                         );
                         match reply_tx.send(Ok(id)) {
                             Ok(_) => trace!(self.log, "sent reply"),
-                            Err(e) => error!(
+                            Err(_) => error!(
                                 self.log,
-                                "failed to send reply";
+                                "failed to send reply (channel closed)";
                                 "id" => ?id,
-                                "error" => ?e,
                             ),
                         }
                         Some(Operation::Update((id, details.interval)))
@@ -574,14 +572,13 @@ impl KstatSamplerWorker {
                         error!(
                             self.log,
                             "failed to update target";
-                            "error" => ?e,
+                            InlineErrorChain::new(&e),
                         );
                         match reply_tx.send(Err(e)) {
                             Ok(_) => trace!(self.log, "sent reply"),
-                            Err(e) => error!(
+                            Err(_) => error!(
                                 self.log,
-                                "failed to send reply";
-                                "error" => ?e,
+                                "failed to send reply (channel closed)";
                             ),
                         }
                         None
@@ -604,10 +601,9 @@ impl KstatSamplerWorker {
                 }
                 match reply_tx.send(Ok(())) {
                     Ok(_) => trace!(self.log, "sent reply"),
-                    Err(e) => error!(
+                    Err(_) => error!(
                         self.log,
-                        "failed to send reply";
-                        "error" => ?e,
+                        "failed to send reply (channel closed)";
                     ),
                 }
                 if do_remove { Some(Operation::Remove(id)) } else { None }
@@ -633,11 +629,10 @@ impl KstatSamplerWorker {
                 };
                 match reply_tx.send(response) {
                     Ok(_) => trace!(self.log, "sent reply"),
-                    Err(e) => error!(
+                    Err(_) => error!(
                         self.log,
-                        "failed to send reply";
+                        "failed to send reply (channel closed)";
                         "id" => ?id,
-                        "error" => ?e,
                     ),
                 }
                 None
@@ -749,7 +744,7 @@ impl KstatSamplerWorker {
                     "expiring kstat after too many failures";
                     "id" => ?id,
                     "reason" => ?expiration.reason,
-                    "error" => ?expiration.error,
+                    InlineErrorChain::new(&expiration.error),
                 );
                 let _ =
                     self.targets.insert(id, SampledObject::Expired(expiration));
@@ -761,7 +756,7 @@ impl KstatSamplerWorker {
                     self.log,
                     "failed to sample kstat target, requeueing";
                     "id" => ?id,
-                    "error" => ?e,
+                    InlineErrorChain::new(&e),
                 );
                 Some(YieldIdAfter::new(id, interval))
             }
@@ -941,7 +936,7 @@ impl KstatSamplerWorker {
                     error!(
                         self.log,
                         "could not generate sample for dropped sample counter";
-                        "error" => ?e,
+                        InlineErrorChain::new(&e),
                     );
                     return;
                 }
@@ -970,7 +965,7 @@ impl KstatSamplerWorker {
                     error!(
                         self.log,
                         "could not generate sample for expired target counter";
-                        "error" => ?e,
+                        InlineErrorChain::new(&e),
                     );
                     return;
                 }
@@ -980,7 +975,7 @@ impl KstatSamplerWorker {
                 Err(e) => error!(
                     self.log,
                     "failed to send target counter to self stat queue";
-                    "error" => ?e,
+                    InlineErrorChain::new(&e),
                 ),
             }
         } else {
@@ -1113,8 +1108,8 @@ impl KstatSamplerWorker {
                     "replacing expired kstat target";
                     "id" => ?id,
                     "expiration_reason" => ?e.reason,
-                    "error" => ?e.error,
                     "expired_at" => ?e.expired_at,
+                    InlineErrorChain::new(&e.error),
                 );
             }
             None => {}
@@ -1138,8 +1133,8 @@ impl KstatSamplerWorker {
                     "replacing expired kstat target";
                     "id" => ?id,
                     "expiration_reason" => ?e.reason,
-                    "error" => ?e.error,
                     "expired_at" => ?e.expired_at,
+                    InlineErrorChain::new(&e.error),
                 );
             }
             Some(_) => {}

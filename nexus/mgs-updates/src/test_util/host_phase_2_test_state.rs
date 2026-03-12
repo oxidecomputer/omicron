@@ -177,7 +177,6 @@ impl HostPhase2SledAgentContext {
 struct HostPhase2SledAgentImpl;
 
 mod api_impl {
-
     use super::HostPhase2SledAgentContext;
     use super::HostPhase2SledAgentImpl;
     use camino::Utf8PathBuf;
@@ -198,6 +197,7 @@ mod api_impl {
     use dropshot::StreamingBody;
     use dropshot::TypedBody;
     use iddqd::IdOrdMap;
+    use illumos_utils::svcs::SvcsInMaintenanceResult;
     use omicron_common::api::external::Generation;
     use omicron_common::api::internal::nexus::DiskRuntimeState;
     use omicron_common::api::internal::nexus::SledVmmState;
@@ -205,7 +205,7 @@ mod api_impl {
     use omicron_common::api::internal::shared::SledIdentifiers;
     use omicron_common::api::internal::shared::VirtualNetworkInterfaceHost;
     use omicron_common::api::internal::shared::{
-        ResolvedVpcRouteSet, ResolvedVpcRouteState, SwitchPorts,
+        ResolvedVpcRouteSet, ResolvedVpcRouteState,
     };
     use sled_agent_types::artifact::ArtifactConfig;
     use sled_agent_types::artifact::ArtifactCopyFromDepotBody;
@@ -223,7 +223,6 @@ mod api_impl {
     use sled_agent_types::diagnostics::SledDiagnosticsLogsDownloadQueryParam;
     use sled_agent_types::disk::DiskEnsureBody;
     use sled_agent_types::disk::DiskPathParam;
-    use sled_agent_types::early_networking::EarlyNetworkConfig;
     use sled_agent_types::firewall_rules::VpcFirewallRulesEnsureBody;
     use sled_agent_types::instance::InstanceEnsureBody;
     use sled_agent_types::instance::InstanceExternalIpBody;
@@ -241,7 +240,6 @@ mod api_impl {
     use sled_agent_types::inventory::BootPartitionDetails;
     use sled_agent_types::inventory::ConfigReconcilerInventory;
     use sled_agent_types::inventory::ConfigReconcilerInventoryStatus;
-    use sled_agent_types::inventory::HealthMonitorInventory;
     use sled_agent_types::inventory::HostPhase2DesiredContents;
     use sled_agent_types::inventory::HostPhase2DesiredSlots;
     use sled_agent_types::inventory::Inventory;
@@ -260,6 +258,7 @@ mod api_impl {
     use sled_agent_types::support_bundle::SupportBundleMetadata;
     use sled_agent_types::support_bundle::SupportBundlePathParam;
     use sled_agent_types::support_bundle::SupportBundleTransferQueryParams;
+    use sled_agent_types::uplink::SwitchPorts;
     use sled_agent_types::zone_bundle::BundleUtilization;
     use sled_agent_types::zone_bundle::CleanupContext;
     use sled_agent_types::zone_bundle::CleanupContextUpdate;
@@ -268,6 +267,10 @@ mod api_impl {
     use sled_agent_types::zone_bundle::ZoneBundleId;
     use sled_agent_types::zone_bundle::ZoneBundleMetadata;
     use sled_agent_types::zone_bundle::ZonePathParam;
+    use sled_agent_types_versions::v1;
+    use sled_agent_types_versions::v20;
+    use sled_agent_types_versions::v25;
+    use sled_agent_types_versions::v26;
     use sled_diagnostics::SledDiagnosticsQueryOutput;
     use std::collections::BTreeMap;
     use std::collections::BTreeSet;
@@ -397,7 +400,7 @@ mod api_impl {
                         non_boot_status: IdOrdMap::new(),
                     },
                 },
-                health_monitor: HealthMonitorInventory::new(),
+                smf_services_in_maintenance: Ok(SvcsInMaintenanceResult::new()),
                 reference_measurements: IdOrdMap::new(),
             }))
         }
@@ -760,13 +763,37 @@ mod api_impl {
 
         async fn read_network_bootstore_config_cache(
             _rqctx: RequestContext<Self::Context>,
-        ) -> Result<HttpResponseOk<EarlyNetworkConfig>, HttpError> {
+        ) -> Result<
+            HttpResponseOk<v20::early_networking::EarlyNetworkConfig>,
+            HttpError,
+        > {
             unimplemented!()
         }
 
-        async fn write_network_bootstore_config(
+        async fn write_network_bootstore_config_v26(
             _rqctx: RequestContext<Self::Context>,
-            _body: TypedBody<EarlyNetworkConfig>,
+            _body: TypedBody<v26::early_networking::WriteNetworkConfigRequest>,
+        ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+            unimplemented!()
+        }
+
+        async fn write_network_bootstore_config_v25(
+            _rqctx: RequestContext<Self::Context>,
+            _body: TypedBody<v25::early_networking::WriteNetworkConfigRequest>,
+        ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+            unimplemented!()
+        }
+
+        async fn write_network_bootstore_config_v20(
+            _rqctx: RequestContext<Self::Context>,
+            _body: TypedBody<v20::early_networking::EarlyNetworkConfig>,
+        ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+            unimplemented!()
+        }
+
+        async fn write_network_bootstore_config_v1(
+            _rqctx: RequestContext<Self::Context>,
+            _body: TypedBody<v1::early_networking::EarlyNetworkConfig>,
         ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
             unimplemented!()
         }
@@ -1051,6 +1078,69 @@ mod api_impl {
                 sled_agent_types::trust_quorum::TrustQuorumNetworkConfig,
             >,
         ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+            unimplemented!()
+        }
+
+        async fn vmm_put_attached_subnets(
+            _request_context: RequestContext<Self::Context>,
+            _path_params: Path<sled_agent_types::instance::VmmPathParam>,
+            _body: TypedBody<
+                sled_agent_types::attached_subnet::AttachedSubnets,
+            >,
+        ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+            unimplemented!()
+        }
+
+        async fn vmm_delete_attached_subnets(
+            _request_context: RequestContext<Self::Context>,
+            _path_params: Path<sled_agent_types::instance::VmmPathParam>,
+        ) -> Result<HttpResponseDeleted, HttpError> {
+            unimplemented!()
+        }
+
+        async fn vmm_post_attached_subnet(
+            _request_context: RequestContext<Self::Context>,
+            _path_params: Path<sled_agent_types::instance::VmmPathParam>,
+            _body: TypedBody<sled_agent_types::attached_subnet::AttachedSubnet>,
+        ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+            unimplemented!()
+        }
+
+        async fn vmm_delete_attached_subnet(
+            _request_context: RequestContext<Self::Context>,
+            _path_params: Path<
+                sled_agent_types::attached_subnet::VmmSubnetPathParam,
+            >,
+        ) -> Result<HttpResponseDeleted, HttpError> {
+            unimplemented!()
+        }
+
+        async fn rot_measurement_log(
+            _request_context: RequestContext<Self::Context>,
+            _path_params: Path<sled_agent_types::rot::RotPathParams>,
+        ) -> Result<
+            HttpResponseOk<sled_agent_types::rot::MeasurementLog>,
+            HttpError,
+        > {
+            unimplemented!()
+        }
+
+        async fn rot_certificate_chain(
+            _request_context: RequestContext<Self::Context>,
+            _path_params: Path<sled_agent_types::rot::RotPathParams>,
+        ) -> Result<
+            HttpResponseOk<sled_agent_types::rot::CertificateChain>,
+            HttpError,
+        > {
+            unimplemented!()
+        }
+
+        async fn rot_attest(
+            _request_context: RequestContext<Self::Context>,
+            _path_params: Path<sled_agent_types::rot::RotPathParams>,
+            _body: TypedBody<sled_agent_types::rot::Nonce>,
+        ) -> Result<HttpResponseOk<sled_agent_types::rot::Attestation>, HttpError>
+        {
             unimplemented!()
         }
     }

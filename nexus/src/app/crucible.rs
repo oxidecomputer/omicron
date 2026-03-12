@@ -74,9 +74,11 @@ impl super::Nexus {
         &self,
         dataset: &db::model::CrucibleDataset,
     ) -> CrucibleAgentClient {
+        // Use reqwest012_client because the rev-pinned crucible-agent-client
+        // is still on reqwest 0.12.
         CrucibleAgentClient::new_with_client(
             &format!("http://{}", dataset.address()),
-            self.reqwest_client.clone(),
+            self.reqwest012_client.clone(),
         )
     }
 

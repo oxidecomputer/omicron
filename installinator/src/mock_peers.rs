@@ -837,6 +837,7 @@ mod tests {
                     &log,
                     Box::new(peers),
                     read_timeout,
+                    None,
                 )),
                 Some(Err(error)) => {
                     future::err(DiscoverPeersError::Retry(error))

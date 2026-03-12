@@ -20,8 +20,11 @@ use omicron_common::api::external::ByteCount;
 use omicron_common::api::internal::nexus::SledVmmState;
 use omicron_common::api::internal::shared::SledIdentifiers;
 use omicron_uuid_kinds::PropolisUuid;
+use oxnet::IpNet;
 use sled_agent_config_reconciler::AvailableDatasetsReceiver;
 use sled_agent_config_reconciler::CurrentlyManagedZpoolsReceiver;
+use sled_agent_types::attached_subnet::AttachedSubnet;
+use sled_agent_types::attached_subnet::AttachedSubnets;
 use sled_agent_types::instance::*;
 use sled_agent_types::instance::{InstanceEnsureBody, InstanceMulticastBody};
 use slog::Logger;
@@ -356,6 +359,80 @@ impl InstanceManager {
             .map_err(|_| Error::FailedSendInstanceManagerClosed)?;
         rx.await?
     }
+
+    /// Update the set of attached subnets for an instance.
+    pub(crate) async fn set_attached_subnets(
+        &self,
+        propolis_id: PropolisUuid,
+        subnets: AttachedSubnets,
+    ) -> Result<(), Error> {
+        let (tx, rx) = oneshot::channel();
+        self.inner
+            .tx
+            .send(InstanceManagerRequest::SetAttachedSubnets {
+                propolis_id,
+                subnets,
+                tx,
+            })
+            .await
+            .map_err(|_| Error::FailedSendInstanceManagerClosed)?;
+        rx.await?
+    }
+
+    /// Delete the set of attached subnets for an instance.
+    pub(crate) async fn clear_attached_subnets(
+        &self,
+        propolis_id: PropolisUuid,
+    ) -> Result<(), Error> {
+        let (tx, rx) = oneshot::channel();
+        self.inner
+            .tx
+            .send(InstanceManagerRequest::ClearAttachedSubnets {
+                propolis_id,
+                tx,
+            })
+            .await
+            .map_err(|_| Error::FailedSendInstanceManagerClosed)?;
+        rx.await?
+    }
+
+    /// Attach a subnet to an instance.
+    pub(crate) async fn attach_subnet(
+        &self,
+        propolis_id: PropolisUuid,
+        subnet: AttachedSubnet,
+    ) -> Result<(), Error> {
+        let (tx, rx) = oneshot::channel();
+        self.inner
+            .tx
+            .send(InstanceManagerRequest::AttachSubnet {
+                propolis_id,
+                subnet,
+                tx,
+            })
+            .await
+            .map_err(|_| Error::FailedSendInstanceManagerClosed)?;
+        rx.await?
+    }
+
+    /// Detach a subnet from an instance
+    pub(crate) async fn detach_subnet(
+        &self,
+        propolis_id: PropolisUuid,
+        subnet: IpNet,
+    ) -> Result<(), Error> {
+        let (tx, rx) = oneshot::channel();
+        self.inner
+            .tx
+            .send(InstanceManagerRequest::DetachSubnet {
+                propolis_id,
+                subnet,
+                tx,
+            })
+            .await
+            .map_err(|_| Error::FailedSendInstanceManagerClosed)?;
+        rx.await?
+    }
 }
 
 // Most requests that can be sent to the "InstanceManagerRunner" task.
@@ -419,6 +496,25 @@ enum InstanceManagerRequest {
     GetState {
         propolis_id: PropolisUuid,
         tx: oneshot::Sender<Result<SledVmmState, Error>>,
+    },
+    SetAttachedSubnets {
+        propolis_id: PropolisUuid,
+        subnets: AttachedSubnets,
+        tx: oneshot::Sender<Result<(), Error>>,
+    },
+    ClearAttachedSubnets {
+        propolis_id: PropolisUuid,
+        tx: oneshot::Sender<Result<(), Error>>,
+    },
+    AttachSubnet {
+        propolis_id: PropolisUuid,
+        subnet: AttachedSubnet,
+        tx: oneshot::Sender<Result<(), Error>>,
+    },
+    DetachSubnet {
+        propolis_id: PropolisUuid,
+        subnet: IpNet,
+        tx: oneshot::Sender<Result<(), Error>>,
     },
 }
 
@@ -549,6 +645,18 @@ impl InstanceManagerRunner {
                             // the state...
                             self.get_instance_state(tx, propolis_id)
                         },
+                        Some(SetAttachedSubnets { propolis_id, subnets, tx }) => {
+                            self.set_attached_subnets(tx, propolis_id, subnets)
+                        }
+                        Some(ClearAttachedSubnets { propolis_id, tx }) =>{
+                            self.clear_attached_subnets(tx, propolis_id)
+                        }
+                        Some(AttachSubnet { propolis_id, subnet, tx }) => {
+                            self.attach_subnet(tx, propolis_id, subnet)
+                        }
+                        Some(DetachSubnet { propolis_id, subnet, tx }) =>{
+                            self.detach_subnet(tx, propolis_id, subnet)
+                        }
                         None => {
                             warn!(self.log, "InstanceManager's request channel closed; shutting down");
                             break;
@@ -888,6 +996,53 @@ impl InstanceManagerRunner {
                 }
             }
         }
+    }
+
+    fn set_attached_subnets(
+        &self,
+        tx: oneshot::Sender<Result<(), Error>>,
+        propolis_id: PropolisUuid,
+        subnets: AttachedSubnets,
+    ) -> Result<(), Error> {
+        let Some(instance) = self.get_propolis(propolis_id) else {
+            return Err(Error::NoSuchVmm(propolis_id));
+        };
+        instance.set_attached_subnets(tx, subnets).map_err(Error::from)
+    }
+
+    fn clear_attached_subnets(
+        &self,
+        tx: oneshot::Sender<Result<(), Error>>,
+        propolis_id: PropolisUuid,
+    ) -> Result<(), Error> {
+        let Some(instance) = self.get_propolis(propolis_id) else {
+            return Err(Error::NoSuchVmm(propolis_id));
+        };
+        instance.clear_attached_subnets(tx).map_err(Error::from)
+    }
+
+    fn attach_subnet(
+        &self,
+        tx: oneshot::Sender<Result<(), Error>>,
+        propolis_id: PropolisUuid,
+        subnet: AttachedSubnet,
+    ) -> Result<(), Error> {
+        let Some(instance) = self.get_propolis(propolis_id) else {
+            return Err(Error::NoSuchVmm(propolis_id));
+        };
+        instance.attach_subnet(tx, subnet).map_err(Error::from)
+    }
+
+    fn detach_subnet(
+        &self,
+        tx: oneshot::Sender<Result<(), Error>>,
+        propolis_id: PropolisUuid,
+        subnet: IpNet,
+    ) -> Result<(), Error> {
+        let Some(instance) = self.get_propolis(propolis_id) else {
+            return Err(Error::NoSuchVmm(propolis_id));
+        };
+        instance.detach_subnet(tx, subnet).map_err(Error::from)
     }
 }
 

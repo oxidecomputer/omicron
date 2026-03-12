@@ -16,7 +16,13 @@ use nexus_test_utils::http_testing::NexusRequest;
 use nexus_test_utils::http_testing::RequestBuilder;
 use nexus_test_utils::resource_helpers;
 use nexus_test_utils_macros::nexus_test;
-use nexus_types::external_api::{params, shared, views};
+use nexus_types::external_api::alert::{
+    AlertDelivery, AlertDeliveryAttempts, AlertDeliveryId, AlertDeliveryState,
+    AlertDeliveryTrigger, AlertProbeResult, AlertReceiver, AlertSubscription,
+    AlertSubscriptionCreate, AlertSubscriptionCreated, WebhookCreate,
+    WebhookDeliveryAttemptResult, WebhookReceiver, WebhookSecret,
+    WebhookSecretCreate, WebhookSecrets,
+};
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::NameOrId;
 use omicron_uuid_kinds::AlertReceiverUuid;
@@ -36,12 +42,13 @@ const SECRETS_BASE_PATH: &str = "/v1/webhook-secrets";
 
 async fn webhook_create(
     ctx: &ControlPlaneTestContext,
-    params: &params::WebhookCreate,
-) -> views::WebhookReceiver {
-    resource_helpers::object_create::<
-        params::WebhookCreate,
-        views::WebhookReceiver,
-    >(&ctx.external_client, WEBHOOK_RECEIVERS_BASE_PATH, params)
+    params: &WebhookCreate,
+) -> WebhookReceiver {
+    resource_helpers::object_create::<WebhookCreate, WebhookReceiver>(
+        &ctx.external_client,
+        WEBHOOK_RECEIVERS_BASE_PATH,
+        params,
+    )
     .await
 }
 
@@ -53,7 +60,7 @@ fn alert_rx_url(name_or_id: impl Into<NameOrId>) -> String {
 async fn alert_rx_get(
     client: &ClientTestContext,
     webhook_url: &str,
-) -> views::AlertReceiver {
+) -> AlertReceiver {
     alert_rx_get_as(client, webhook_url, AuthnMode::PrivilegedUser).await
 }
 
@@ -61,7 +68,7 @@ async fn alert_rx_get_as(
     client: &ClientTestContext,
     webhook_url: &str,
     authn_as: AuthnMode,
-) -> views::AlertReceiver {
+) -> AlertReceiver {
     NexusRequest::object_get(client, &webhook_url)
         .authn_as(authn_as)
         .execute()
@@ -71,10 +78,8 @@ async fn alert_rx_get_as(
         .unwrap()
 }
 
-async fn alert_rx_list(
-    client: &ClientTestContext,
-) -> Vec<views::AlertReceiver> {
-    resource_helpers::objects_list_page_authz::<views::AlertReceiver>(
+async fn alert_rx_list(client: &ClientTestContext) -> Vec<AlertReceiver> {
+    resource_helpers::objects_list_page_authz::<AlertReceiver>(
         client,
         ALERT_RECEIVERS_BASE_PATH,
     )
@@ -85,7 +90,7 @@ async fn alert_rx_list(
 async fn webhook_secrets_get(
     client: &ClientTestContext,
     webhook_name_or_id: impl Into<NameOrId>,
-) -> views::WebhookSecrets {
+) -> WebhookSecrets {
     let name_or_id = webhook_name_or_id.into();
     NexusRequest::object_get(
         client,
@@ -110,7 +115,7 @@ fn resend_url(
 async fn alert_deliveries_list(
     client: &ClientTestContext,
     webhook_name_or_id: impl Into<NameOrId>,
-) -> Collection<views::AlertDelivery> {
+) -> Collection<AlertDelivery> {
     let mut rx_url = alert_rx_url(webhook_name_or_id);
     rx_url.push_str("/deliveries");
     NexusRequest::iter_collection_authn(client, &rx_url, "", None)
@@ -122,7 +127,7 @@ async fn alert_delivery_resend(
     client: &ClientTestContext,
     webhook_name_or_id: impl Into<NameOrId>,
     alert_id: AlertUuid,
-) -> views::AlertDeliveryId {
+) -> AlertDeliveryId {
     let req = RequestBuilder::new(
         client,
         http::Method::POST,
@@ -161,10 +166,8 @@ async fn webhook_delivery_resend_error(
         .unwrap()
 }
 
-fn my_great_webhook_params(
-    mock: &httpmock::MockServer,
-) -> params::WebhookCreate {
-    params::WebhookCreate {
+fn my_great_webhook_params(mock: &httpmock::MockServer) -> WebhookCreate {
+    WebhookCreate {
         identity: my_great_webhook_identity(),
         endpoint: mock
             .url("/webhooks")
@@ -187,12 +190,9 @@ const MY_COOL_SECRET: &str = "my cool secret";
 async fn secret_add(
     ctx: &ControlPlaneTestContext,
     webhook_id: AlertReceiverUuid,
-    params: &params::WebhookSecretCreate,
-) -> views::WebhookSecret {
-    resource_helpers::object_create::<
-        params::WebhookSecretCreate,
-        views::WebhookSecret,
-    >(
+    params: &WebhookSecretCreate,
+) -> WebhookSecret {
+    resource_helpers::object_create::<WebhookSecretCreate, WebhookSecret>(
         &ctx.external_client,
         &format!("{SECRETS_BASE_PATH}/?receiver={webhook_id}"),
         params,
@@ -203,12 +203,12 @@ async fn secret_add(
 async fn subscription_add(
     ctx: &ControlPlaneTestContext,
     webhook_id: AlertReceiverUuid,
-    subscription: &shared::AlertSubscription,
-) -> views::AlertSubscriptionCreated {
+    subscription: &AlertSubscription,
+) -> AlertSubscriptionCreated {
     resource_helpers::object_create(
         &ctx.external_client,
         &format!("{ALERT_RECEIVERS_BASE_PATH}/{webhook_id}/subscriptions"),
-        &params::AlertSubscriptionCreate { subscription: subscription.clone() },
+        &AlertSubscriptionCreate { subscription: subscription.clone() },
     )
     .await
 }
@@ -216,7 +216,7 @@ async fn subscription_add(
 async fn subscription_remove(
     ctx: &ControlPlaneTestContext,
     webhook_id: AlertReceiverUuid,
-    subscription: &shared::AlertSubscription,
+    subscription: &AlertSubscription,
 ) {
     resource_helpers::object_delete(
         &ctx.external_client,
@@ -227,7 +227,7 @@ async fn subscription_remove(
 
 fn subscription_remove_url(
     webhook_id: AlertReceiverUuid,
-    subscription: &shared::AlertSubscription,
+    subscription: &AlertSubscription,
 ) -> String {
     format!(
         "{ALERT_RECEIVERS_BASE_PATH}/{webhook_id}/subscriptions/{subscription}"
@@ -239,7 +239,7 @@ async fn alert_receiver_send_probe(
     webhook_id: &AlertReceiverUuid,
     resend: bool,
     status: http::StatusCode,
-) -> views::AlertProbeResult {
+) -> AlertProbeResult {
     let pathparams = if resend { "?resend=true" } else { "" };
     let path =
         format!("{ALERT_RECEIVERS_BASE_PATH}/{webhook_id}/probe{pathparams}");
@@ -258,7 +258,7 @@ async fn alert_receiver_send_probe(
 }
 
 fn is_valid_for_webhook(
-    webhook: &views::WebhookReceiver,
+    webhook: &WebhookReceiver,
 ) -> impl FnOnce(httpmock::When) -> httpmock::When + use<> {
     let path = webhook.config.endpoint.path().to_string();
     let id = webhook.identity.id.to_string();
@@ -323,7 +323,7 @@ fn signature_verifies(
 }
 
 struct ExpectAttempt {
-    result: views::WebhookDeliveryAttemptResult,
+    result: WebhookDeliveryAttemptResult,
     status: Option<u16>,
 }
 
@@ -331,10 +331,10 @@ struct ExpectAttempt {
 /// such as timestamps, which are variable.
 #[track_caller]
 fn expect_delivery_attempts(
-    actual: &views::AlertDeliveryAttempts,
+    actual: &AlertDeliveryAttempts,
     expected: &[ExpectAttempt],
 ) {
-    let views::AlertDeliveryAttempts::Webhook(actual) = actual;
+    let AlertDeliveryAttempts::Webhook(actual) = actual;
     assert_eq!(
         actual.len(),
         expected.len(),
@@ -358,7 +358,7 @@ async fn test_webhook_receiver_get(cptestctx: &ControlPlaneTestContext) {
     // Create a webhook receiver.
     let created_webhook = webhook_create(
         &cptestctx,
-        &params::WebhookCreate {
+        &WebhookCreate {
             identity: my_great_webhook_identity(),
             endpoint: "https://example.com/webhooks"
                 .parse()
@@ -390,7 +390,7 @@ async fn test_webhook_receiver_create_delete(
     // Create a webhook receiver.
     let created_webhook = webhook_create(
         &cptestctx,
-        &params::WebhookCreate {
+        &WebhookCreate {
             identity: my_great_webhook_identity(),
             endpoint: "https://example.com/webhooks"
                 .parse()
@@ -423,7 +423,7 @@ async fn test_webhook_receiver_names_are_unique(
     // Create a webhook receiver.
     let created_webhook = webhook_create(
         &cptestctx,
-        &params::WebhookCreate {
+        &WebhookCreate {
             identity: my_great_webhook_identity(),
             endpoint: "https://example.com/webhooks"
                 .parse()
@@ -438,7 +438,7 @@ async fn test_webhook_receiver_names_are_unique(
     let error = resource_helpers::object_create_error(
         &client,
         WEBHOOK_RECEIVERS_BASE_PATH,
-        &params::WebhookCreate {
+        &WebhookCreate {
             identity: my_great_webhook_identity(),
             endpoint: "https://example.com/more-webhooks"
                 .parse()
@@ -462,7 +462,7 @@ async fn test_cannot_subscribe_to_probes(cptestctx: &ControlPlaneTestContext) {
     let error = resource_helpers::object_create_error(
         &client,
         WEBHOOK_RECEIVERS_BASE_PATH,
-        &params::WebhookCreate {
+        &WebhookCreate {
             identity: my_great_webhook_identity(),
             endpoint: "https://example.com/webhooks"
                 .parse()
@@ -569,7 +569,7 @@ async fn test_multiple_secrets(cptestctx: &ControlPlaneTestContext) {
     // Create a webhook receiver.
     let webhook = webhook_create(
         &cptestctx,
-        &params::WebhookCreate {
+        &WebhookCreate {
             identity: IdentityMetadataCreateParams {
                 name: "my-great-webhook".parse().unwrap(),
                 description: String::from("my great webhook"),
@@ -605,7 +605,7 @@ async fn test_multiple_secrets(cptestctx: &ControlPlaneTestContext) {
         secret_add(
             &cptestctx,
             rx_id,
-            &params::WebhookSecretCreate { secret: SECRET2.to_string() },
+            &WebhookSecretCreate { secret: SECRET2.to_string() },
         )
         .await
     )
@@ -617,7 +617,7 @@ async fn test_multiple_secrets(cptestctx: &ControlPlaneTestContext) {
         secret_add(
             &cptestctx,
             rx_id,
-            &params::WebhookSecretCreate { secret: SECRET3.to_string() },
+            &WebhookSecretCreate { secret: SECRET3.to_string() },
         )
         .await
     )
@@ -682,20 +682,19 @@ async fn test_multiple_receivers(cptestctx: &ControlPlaneTestContext) {
     let bar_alert_id = AlertUuid::new_v4();
     let baz_alert_id = AlertUuid::new_v4();
 
-    let assert_webhook_rx_list_matches =
-        |mut expected: Vec<views::AlertReceiver>| async move {
-            let mut actual = alert_rx_list(client).await;
-            actual.sort_by_key(|rx| rx.identity.id);
-            expected.sort_by_key(|rx| rx.identity.id);
-            assert_eq!(expected, actual);
-        };
+    let assert_webhook_rx_list_matches = |mut expected: Vec<AlertReceiver>| async move {
+        let mut actual = alert_rx_list(client).await;
+        actual.sort_by_key(|rx| rx.identity.id);
+        expected.sort_by_key(|rx| rx.identity.id);
+        assert_eq!(expected, actual);
+    };
 
     // Create three webhook receivers
     let srv_bar = httpmock::MockServer::start_async().await;
     const BAR_SECRET: &str = "this is bar's secret";
     let rx_bar = webhook_create(
         &cptestctx,
-        &params::WebhookCreate {
+        &WebhookCreate {
             identity: IdentityMetadataCreateParams {
                 name: "webhooked-on-phonics".parse().unwrap(),
                 description: String::from("webhooked on phonics"),
@@ -732,7 +731,7 @@ async fn test_multiple_receivers(cptestctx: &ControlPlaneTestContext) {
     const BAZ_SECRET: &str = "this is baz's secret";
     let rx_baz = webhook_create(
         &cptestctx,
-        &params::WebhookCreate {
+        &WebhookCreate {
             identity: IdentityMetadataCreateParams {
                 name: "webhook-line-and-sinker".parse().unwrap(),
                 description: String::from("webhook, line, and sinker"),
@@ -773,7 +772,7 @@ async fn test_multiple_receivers(cptestctx: &ControlPlaneTestContext) {
     const STAR_SECRET: &str = "this is star's secret";
     let rx_star = webhook_create(
         &cptestctx,
-        &params::WebhookCreate {
+        &WebhookCreate {
             identity: IdentityMetadataCreateParams {
                 name: "globulated".parse().unwrap(),
                 description: String::from("this one has globs"),
@@ -929,12 +928,12 @@ async fn test_retry_backoff(cptestctx: &ControlPlaneTestContext) {
     assert_eq!(delivery.receiver_id.into_untyped_uuid(), webhook.identity.id);
     assert_eq!(delivery.alert_id, id);
     assert_eq!(delivery.alert_class, "test.foo");
-    assert_eq!(delivery.state, views::AlertDeliveryState::Pending);
+    assert_eq!(delivery.state, AlertDeliveryState::Pending);
     expect_delivery_attempts(
         &delivery.attempts,
         &[ExpectAttempt {
             status: Some(500),
-            result: views::WebhookDeliveryAttemptResult::FailedHttpError,
+            result: WebhookDeliveryAttemptResult::FailedHttpError,
         }],
     );
 
@@ -1003,17 +1002,17 @@ async fn test_retry_backoff(cptestctx: &ControlPlaneTestContext) {
     assert_eq!(delivery.receiver_id.into_untyped_uuid(), webhook.identity.id);
     assert_eq!(delivery.alert_id, id);
     assert_eq!(delivery.alert_class, "test.foo");
-    assert_eq!(delivery.state, views::AlertDeliveryState::Pending);
+    assert_eq!(delivery.state, AlertDeliveryState::Pending);
     expect_delivery_attempts(
         &delivery.attempts,
         &[
             ExpectAttempt {
                 status: Some(500),
-                result: views::WebhookDeliveryAttemptResult::FailedHttpError,
+                result: WebhookDeliveryAttemptResult::FailedHttpError,
             },
             ExpectAttempt {
                 status: Some(503),
-                result: views::WebhookDeliveryAttemptResult::FailedHttpError,
+                result: WebhookDeliveryAttemptResult::FailedHttpError,
             },
         ],
     );
@@ -1072,21 +1071,21 @@ async fn test_retry_backoff(cptestctx: &ControlPlaneTestContext) {
     assert_eq!(delivery.receiver_id.into_untyped_uuid(), webhook.identity.id);
     assert_eq!(delivery.alert_id, id);
     assert_eq!(delivery.alert_class, "test.foo");
-    assert_eq!(delivery.state, views::AlertDeliveryState::Delivered);
+    assert_eq!(delivery.state, AlertDeliveryState::Delivered);
     expect_delivery_attempts(
         &delivery.attempts,
         &[
             ExpectAttempt {
                 status: Some(500),
-                result: views::WebhookDeliveryAttemptResult::FailedHttpError,
+                result: WebhookDeliveryAttemptResult::FailedHttpError,
             },
             ExpectAttempt {
                 status: Some(503),
-                result: views::WebhookDeliveryAttemptResult::FailedHttpError,
+                result: WebhookDeliveryAttemptResult::FailedHttpError,
             },
             ExpectAttempt {
                 status: Some(200),
-                result: views::WebhookDeliveryAttemptResult::Succeeded,
+                result: WebhookDeliveryAttemptResult::Succeeded,
             },
         ],
     );
@@ -1150,13 +1149,13 @@ async fn test_probe(cptestctx: &ControlPlaneTestContext) {
     expect_delivery_attempts(
         &probe1.probe.attempts,
         &[ExpectAttempt {
-            result: views::WebhookDeliveryAttemptResult::FailedTimeout,
+            result: WebhookDeliveryAttemptResult::FailedTimeout,
             status: None,
         }],
     );
     assert_eq!(probe1.probe.alert_class, "probe");
-    assert_eq!(probe1.probe.trigger, views::AlertDeliveryTrigger::Probe);
-    assert_eq!(probe1.probe.state, views::AlertDeliveryState::Failed);
+    assert_eq!(probe1.probe.trigger, AlertDeliveryTrigger::Probe);
+    assert_eq!(probe1.probe.state, AlertDeliveryState::Failed);
     assert_eq!(
         probe1.resends_started, None,
         "we did not request events be resent"
@@ -1195,13 +1194,13 @@ async fn test_probe(cptestctx: &ControlPlaneTestContext) {
     expect_delivery_attempts(
         &probe2.probe.attempts,
         &[ExpectAttempt {
-            result: views::WebhookDeliveryAttemptResult::FailedHttpError,
+            result: WebhookDeliveryAttemptResult::FailedHttpError,
             status: Some(503),
         }],
     );
     assert_eq!(probe2.probe.alert_class, "probe");
-    assert_eq!(probe2.probe.trigger, views::AlertDeliveryTrigger::Probe);
-    assert_eq!(probe2.probe.state, views::AlertDeliveryState::Failed);
+    assert_eq!(probe2.probe.trigger, AlertDeliveryTrigger::Probe);
+    assert_eq!(probe2.probe.state, AlertDeliveryState::Failed);
     assert_ne!(
         probe2.probe.id, probe1.probe.id,
         "a new delivery ID should be assigned to each probe"
@@ -1244,13 +1243,13 @@ async fn test_probe(cptestctx: &ControlPlaneTestContext) {
     expect_delivery_attempts(
         &probe3.probe.attempts,
         &[ExpectAttempt {
-            result: views::WebhookDeliveryAttemptResult::Succeeded,
+            result: WebhookDeliveryAttemptResult::Succeeded,
             status: Some(200),
         }],
     );
     assert_eq!(probe3.probe.alert_class, "probe");
-    assert_eq!(probe3.probe.trigger, views::AlertDeliveryTrigger::Probe);
-    assert_eq!(probe3.probe.state, views::AlertDeliveryState::Delivered);
+    assert_eq!(probe3.probe.trigger, AlertDeliveryTrigger::Probe);
+    assert_eq!(probe3.probe.state, AlertDeliveryState::Delivered);
     assert_ne!(
         probe3.probe.id, probe1.probe.id,
         "a new delivery ID should be assigned to each probe"
@@ -1409,7 +1408,7 @@ async fn test_probe_resends_failed_deliveries(
     dbg!(&probe);
     probe_mock.assert_async().await;
     probe_mock.delete_async().await;
-    assert_eq!(probe.probe.state, views::AlertDeliveryState::Delivered);
+    assert_eq!(probe.probe.state, AlertDeliveryState::Delivered);
     assert_eq!(probe.resends_started, Some(2));
 
     // Both events should be resent.
@@ -1627,7 +1626,7 @@ async fn subscription_add_test(
 
     let rx_id = AlertReceiverUuid::from_untyped_uuid(webhook.identity.id);
     let new_subscription =
-        new_subscription.parse::<shared::AlertSubscription>().unwrap();
+        new_subscription.parse::<AlertSubscription>().unwrap();
     dbg!(subscription_add(&cptestctx, rx_id, &new_subscription).await);
 
     // The new subscription should be there.
@@ -1692,15 +1691,14 @@ async fn subscription_remove_test(
     let id2 = AlertUuid::new_v4();
     let id3 = AlertUuid::new_v4();
 
-    let other_subscription =
-        "test.foo".parse::<shared::AlertSubscription>().unwrap();
+    let other_subscription = "test.foo".parse::<AlertSubscription>().unwrap();
     let deleted_subscription =
-        deleted_subscription.parse::<shared::AlertSubscription>().unwrap();
+        deleted_subscription.parse::<AlertSubscription>().unwrap();
 
     // Create a webhook receiver.
     let webhook = webhook_create(
         &cptestctx,
-        &params::WebhookCreate {
+        &WebhookCreate {
             subscriptions: vec![
                 other_subscription.clone(),
                 deleted_subscription.clone(),

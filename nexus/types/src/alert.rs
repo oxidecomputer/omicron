@@ -95,7 +95,7 @@ impl AlertClass {
     pub const ALL_CLASSES: &[Self] = <Self as strum::VariantArray>::VARIANTS;
 }
 
-impl From<AlertClass> for crate::external_api::views::AlertClass {
+impl From<AlertClass> for crate::external_api::alert::AlertClass {
     fn from(class: AlertClass) -> Self {
         Self {
             name: class.to_string(),

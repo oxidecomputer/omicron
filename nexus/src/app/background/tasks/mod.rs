@@ -6,6 +6,7 @@
 
 pub mod abandoned_vmm_reaper;
 pub mod alert_dispatcher;
+pub mod attached_subnets;
 pub mod bfd;
 pub mod blueprint_execution;
 pub mod blueprint_load;
@@ -44,6 +45,7 @@ pub mod region_snapshot_replacement_start;
 pub mod region_snapshot_replacement_step;
 pub mod saga_recovery;
 pub mod service_firewall_rules;
+pub mod session_cleanup;
 pub mod support_bundle;
 pub mod support_bundle_collector;
 pub mod sync_service_zone_nat;

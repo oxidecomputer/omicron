@@ -98,17 +98,22 @@ use super::{
 };
 use crate::app::sagas::declare_saga_actions;
 use crate::app::{authn, authz, db};
-use crate::external_api::params;
 use anyhow::anyhow;
 use nexus_db_lookup::LookupPath;
 use nexus_db_model::Generation;
 use nexus_db_queries::db::identity::{Asset, Resource};
+use nexus_types::external_api::{disk, snapshot};
+use nexus_types::saga::saga_action_failed;
 use omicron_common::api::external::Error;
+use omicron_common::progenitor_operation_retry::ProgenitorOperationRetry;
 use omicron_common::progenitor_operation_retry::ProgenitorOperationRetryError;
 use omicron_common::{
-    api::external, progenitor_operation_retry::ProgenitorOperationRetry,
+    api::external, backoff::backon_retry_policy_internal_service,
 };
 use omicron_uuid_kinds::{GenericUuid, PropolisUuid, VolumeUuid};
+use progenitor_extras::retry::{
+    GoneCheckResult, retry_operation_while_indefinitely,
+};
 use rand::{RngCore, SeedableRng, rngs::StdRng};
 use serde::Deserialize;
 use serde::Serialize;
@@ -137,7 +142,7 @@ pub(crate) struct Params {
     pub disk: db::datastore::CrucibleDisk,
     pub attach_instance_id: Option<Uuid>,
     pub use_the_pantry: bool,
-    pub create_params: params::SnapshotCreate,
+    pub create_params: snapshot::SnapshotCreate,
 }
 
 // snapshot create saga: actions
@@ -231,6 +236,13 @@ impl NexusSaga for SagaSnapshotCreate {
         params: &Self::Params,
         mut builder: steno::DagBuilder,
     ) -> Result<steno::Dag, SagaInitError> {
+        if params.disk.is_read_only() {
+            return Err(SagaInitError::InvalidParameter(format!(
+                "cannot snapshot read-only disk {}!",
+                params.disk.id(),
+            )));
+        }
+
         // Generate IDs
         builder.append(Node::action(
             "snapshot_id",
@@ -388,7 +400,7 @@ async fn ssc_take_volume_lock(
         .datastore()
         .volume_repair_lock(&opctx, params.disk.volume_id(), lock_id)
         .await
-        .map_err(ActionError::action_failed)?;
+        .map_err(saga_action_failed)?;
 
     Ok(())
 }
@@ -441,7 +453,7 @@ async fn ssc_alloc_regions(
         .disk_id(params.disk.id())
         .fetch()
         .await
-        .map_err(ActionError::action_failed)?;
+        .map_err(saga_action_failed)?;
 
     let strategy = &osagactx.nexus().default_region_allocation_strategy;
 
@@ -450,17 +462,19 @@ async fn ssc_alloc_regions(
         .disk_region_allocate(
             &opctx,
             destination_volume_id,
-            &params::DiskSource::Blank {
-                block_size: params::BlockSize::try_from(
+            &disk::DiskSource::Blank {
+                block_size: disk::BlockSize::try_from(
                     disk.block_size.to_bytes(),
                 )
-                .map_err(|e| ActionError::action_failed(e.to_string()))?,
+                .map_err(|e| {
+                    saga_action_failed(Error::internal_error(&e.to_string()))
+                })?,
             },
             external::ByteCount::from(disk.size),
             &strategy,
         )
         .await
-        .map_err(ActionError::action_failed)?;
+        .map_err(saga_action_failed)?;
 
     Ok(datasets_and_regions)
 }
@@ -501,7 +515,7 @@ async fn ssc_regions_ensure(
                 )?,
         )
         .await
-        .map_err(ActionError::action_failed)?;
+        .map_err(saga_action_failed)?;
 
     let block_size = datasets_and_regions[0].1.block_size;
     let blocks_per_extent = datasets_and_regions[0].1.extent_size;
@@ -600,7 +614,7 @@ async fn ssc_create_destination_volume_record(
         .datastore()
         .volume_create(destination_volume_id, destination_volume_data)
         .await
-        .map_err(ActionError::action_failed)?;
+        .map_err(saga_action_failed)?;
 
     Ok(())
 }
@@ -653,7 +667,7 @@ async fn ssc_create_snapshot_record(
         .disk_id(params.disk.id())
         .fetch()
         .await
-        .map_err(ActionError::action_failed)?;
+        .map_err(saga_action_failed)?;
 
     info!(log, "creating snapshot {} from disk {}", snapshot_id, disk.id());
 
@@ -678,13 +692,13 @@ async fn ssc_create_snapshot_record(
         .project_id(params.project_id)
         .lookup_for(authz::Action::CreateChild)
         .await
-        .map_err(ActionError::action_failed)?;
+        .map_err(saga_action_failed)?;
 
     let snapshot_created = osagactx
         .datastore()
         .project_ensure_snapshot(&opctx, &authz_project, snapshot)
         .await
-        .map_err(ActionError::action_failed)?;
+        .map_err(saga_action_failed)?;
 
     info!(log, "created snapshot {} ok", snapshot_id);
 
@@ -710,7 +724,7 @@ async fn ssc_create_snapshot_record_undo(
             .snapshot_id(snapshot_id)
             .fetch_for(authz::Action::Delete)
             .await
-            .map_err(ActionError::action_failed)?;
+            .map_err(saga_action_failed)?;
 
     osagactx
         .datastore()
@@ -750,7 +764,7 @@ async fn ssc_account_space(
             snapshot_created.size,
         )
         .await
-        .map_err(ActionError::action_failed)?;
+        .map_err(saga_action_failed)?;
     Ok(())
 }
 
@@ -793,7 +807,7 @@ async fn ssc_send_snapshot_request_to_sled_agent(
     // the disk detached, and resumed running on the same sled) while the saga
     // was executing.
     let Some(attach_instance_id) = params.attach_instance_id else {
-        return Err(ActionError::action_failed(Error::internal_error(
+        return Err(saga_action_failed(Error::internal_error(
             "attach instance id is None!",
         )));
     };
@@ -807,13 +821,13 @@ async fn ssc_send_snapshot_request_to_sled_agent(
         .instance_id(attach_instance_id)
         .lookup_for(authz::Action::Read)
         .await
-        .map_err(ActionError::action_failed)?;
+        .map_err(saga_action_failed)?;
 
     let instance_and_vmm = osagactx
         .datastore()
         .instance_fetch_with_vmm(&opctx, &authz_instance)
         .await
-        .map_err(ActionError::action_failed)?;
+        .map_err(saga_action_failed)?;
 
     let vmm = instance_and_vmm.vmm();
 
@@ -823,7 +837,7 @@ async fn ssc_send_snapshot_request_to_sled_agent(
     let Some((propolis_id, sled_id)) =
         vmm.as_ref().map(|vmm| (vmm.id, vmm.sled_id()))
     else {
-        return Err(ActionError::action_failed(Error::unavail(
+        return Err(saga_action_failed(Error::unavail(
             "instance no longer has an active VMM!",
         )));
     };
@@ -838,7 +852,7 @@ async fn ssc_send_snapshot_request_to_sled_agent(
         .nexus()
         .sled_client(&sled_id)
         .await
-        .map_err(ActionError::action_failed)?;
+        .map_err(saga_action_failed)?;
 
     let snapshot_operation = || async {
         sled_agent_client
@@ -849,22 +863,37 @@ async fn ssc_send_snapshot_request_to_sled_agent(
             )
             .await
     };
+    // `check_sled_in_service` returns an error if the sled is no longer in
+    // service; if it succeeds, the sled is not gone.
     let gone_check = || async {
-        osagactx.datastore().check_sled_in_service(&opctx, sled_id).await?;
-        // `check_sled_in_service` returns an error if the sled is no longer in
-        // service; if it succeeds, the sled is not gone.
-        Ok(false)
+        osagactx
+            .datastore()
+            .check_sled_in_service(&opctx, sled_id)
+            .await
+            .map(|()| GoneCheckResult::StillAvailable)
     };
 
-    ProgenitorOperationRetry::new(snapshot_operation, gone_check)
-        .run(log)
-        .await
-        .map_err(|e| {
-            ActionError::action_failed(format!(
-                "failed to issue VMM disk snapshot request: {}",
-                InlineErrorChain::new(&e)
-            ))
-        })?;
+    let notify_log = log.clone();
+    retry_operation_while_indefinitely(
+        backon_retry_policy_internal_service(),
+        snapshot_operation,
+        gone_check,
+        |notification| {
+            slog::warn!(
+                notify_log,
+                "failed to issue VMM disk snapshot request, retrying in {:?}",
+                notification.delay;
+                InlineErrorChain::new(&notification.error),
+            );
+        },
+    )
+    .await
+    .map_err(|e| {
+        saga_action_failed(Error::internal_error(&format!(
+            "failed to issue VMM disk snapshot request: {}",
+            InlineErrorChain::new(&e)
+        )))
+    })?;
 
     Ok(())
 }
@@ -918,7 +947,7 @@ async fn ssc_get_pantry_address(
         .datastore()
         .disk_get(&opctx, params.disk.id())
         .await
-        .map_err(ActionError::action_failed)?
+        .map_err(saga_action_failed)?
     {
         db::datastore::Disk::Crucible(disk) => disk,
 
@@ -967,7 +996,7 @@ async fn ssc_attach_disk_to_pantry(
             .disk_id(params.disk.id())
             .fetch_for(authz::Action::Modify)
             .await
-            .map_err(ActionError::action_failed)?;
+            .map_err(saga_action_failed)?;
 
     // Query the fetched disk's runtime to see if changed after the saga
     // execution started. This can happen if it's attached to an instance, or if
@@ -988,7 +1017,7 @@ async fn ssc_attach_disk_to_pantry(
                     &db_disk.runtime().maintenance(),
                 )
                 .await
-                .map_err(ActionError::action_failed)?;
+                .map_err(saga_action_failed)?;
         }
 
         external::DiskState::Finalizing => {
@@ -1010,14 +1039,12 @@ async fn ssc_attach_disk_to_pantry(
 
         _ => {
             // Return a 503 indicating that the user should retry
-            return Err(ActionError::action_failed(
-                Error::ServiceUnavailable {
-                    internal_message: format!(
-                        "disk is in state {:?}",
-                        db_disk.state(),
-                    ),
-                },
-            ));
+            return Err(saga_action_failed(Error::ServiceUnavailable {
+                internal_message: format!(
+                    "disk is in state {:?}",
+                    db_disk.state(),
+                ),
+            }));
         }
     }
 
@@ -1028,7 +1055,7 @@ async fn ssc_attach_disk_to_pantry(
         .disk_id(params.disk.id())
         .fetch_for(authz::Action::Read)
         .await
-        .map_err(ActionError::action_failed)?;
+        .map_err(saga_action_failed)?;
 
     Ok(db_disk.runtime().generation)
 }
@@ -1049,7 +1076,7 @@ async fn ssc_attach_disk_to_pantry_undo(
             .disk_id(params.disk.id())
             .fetch_for(authz::Action::Modify)
             .await
-            .map_err(ActionError::action_failed)?;
+            .map_err(saga_action_failed)?;
 
     match db_disk.state().into() {
         external::DiskState::Maintenance => {
@@ -1067,7 +1094,7 @@ async fn ssc_attach_disk_to_pantry_undo(
                     &db_disk.runtime().detach(),
                 )
                 .await
-                .map_err(ActionError::action_failed)?;
+                .map_err(saga_action_failed)?;
         }
 
         external::DiskState::Detached => {
@@ -1219,7 +1246,7 @@ async fn ssc_call_pantry_snapshot_for_disk(
         .run(log)
         .await
         .map_err(|e| {
-            ActionError::action_failed(Error::internal_error(&e.to_string()))
+            saga_action_failed(Error::internal_error(&e.to_string()))
         })?;
 
     Ok(())
@@ -1276,10 +1303,10 @@ async fn ssc_call_pantry_detach_for_disk(
         )
         .await
         .map_err(|e| {
-            ActionError::action_failed(format!(
+            saga_action_failed(Error::internal_error(&format!(
                 "pantry detach failed: {}",
                 InlineErrorChain::new(&e)
-            ))
+            )))
         })?;
     }
 
@@ -1302,7 +1329,7 @@ async fn ssc_detach_disk_from_pantry(
             .disk_id(params.disk.id())
             .fetch_for(authz::Action::Modify)
             .await
-            .map_err(ActionError::action_failed)?;
+            .map_err(saga_action_failed)?;
 
     match db_disk.state().into() {
         external::DiskState::Maintenance => {
@@ -1333,7 +1360,7 @@ async fn ssc_detach_disk_from_pantry(
                         &db_disk.runtime().detach(),
                     )
                     .await
-                    .map_err(ActionError::action_failed)?;
+                    .map_err(saga_action_failed)?;
             } else {
                 info!(
                     log,
@@ -1377,7 +1404,7 @@ async fn ssc_start_running_snapshot(
         .datastore()
         .get_allocated_regions(params.disk.volume_id())
         .await
-        .map_err(ActionError::action_failed)?;
+        .map_err(saga_action_failed)?;
 
     let mut map: ReplaceSocketsMap = BTreeMap::new();
 
@@ -1394,8 +1421,9 @@ async fn ssc_start_running_snapshot(
                 snapshot_id,
             )
             .await
-            .map_err(|e| e.to_string())
-            .map_err(ActionError::action_failed)?;
+            .map_err(|e| {
+                saga_action_failed(Error::internal_error(&e.to_string()))
+            })?;
 
         info!(
             log,
@@ -1435,7 +1463,7 @@ async fn ssc_start_running_snapshot(
                 deleting: false,
             })
             .await
-            .map_err(ActionError::action_failed)?;
+            .map_err(saga_action_failed)?;
     }
 
     Ok(map)
@@ -1496,13 +1524,13 @@ async fn ssc_create_volume_record(
             db::datastore::VolumeCheckoutReason::CopyAndModify,
         )
         .await
-        .map_err(ActionError::action_failed)?;
+        .map_err(saga_action_failed)?;
 
     info!(log, "disk volume construction request {}", disk_volume.data());
 
     let disk_volume_construction_request =
         serde_json::from_str(&disk_volume.data()).map_err(|e| {
-            ActionError::action_failed(Error::internal_error(&format!(
+            saga_action_failed(Error::internal_error(&format!(
                 "failed to deserialize disk {} volume data: {}",
                 params.disk.id(),
                 e,
@@ -1520,7 +1548,7 @@ async fn ssc_create_volume_record(
             &replace_sockets_map,
         )
         .map_err(|e| {
-            ActionError::action_failed(Error::internal_error(&e.to_string()))
+            saga_action_failed(Error::internal_error(&e.to_string()))
         })?;
 
     // Insert volume record into the DB
@@ -1535,7 +1563,7 @@ async fn ssc_create_volume_record(
         .datastore()
         .volume_create(volume_id, snapshot_volume_construction_request)
         .await
-        .map_err(ActionError::action_failed)?;
+        .map_err(saga_action_failed)?;
 
     info!(log, "volume {} created ok", volume_id);
 
@@ -1581,7 +1609,7 @@ async fn ssc_finalize_snapshot_record(
             .snapshot_id(snapshot_id)
             .fetch_for(authz::Action::Modify)
             .await
-            .map_err(ActionError::action_failed)?;
+            .map_err(saga_action_failed)?;
 
     info!(log, "snapshot final lookup ok");
 
@@ -1594,7 +1622,7 @@ async fn ssc_finalize_snapshot_record(
             db::model::SnapshotState::Ready,
         )
         .await
-        .map_err(ActionError::action_failed)?;
+        .map_err(saga_action_failed)?;
 
     info!(log, "snapshot finalized!");
 
@@ -1617,7 +1645,7 @@ async fn ssc_release_volume_lock(
         .datastore()
         .volume_repair_unlock(&opctx, params.disk.volume_id(), lock_id)
         .await
-        .map_err(ActionError::action_failed)?;
+        .map_err(saga_action_failed)?;
 
     Ok(())
 }
@@ -1737,7 +1765,7 @@ mod test {
     use nexus_test_utils::resource_helpers::delete_disk;
     use nexus_test_utils::resource_helpers::object_create;
     use nexus_test_utils_macros::nexus_test;
-    use nexus_types::external_api::params::InstanceDiskAttachment;
+    use nexus_types::external_api::instance as instance_types;
     use omicron_common::api::external::ByteCount;
     use omicron_common::api::external::IdentityMetadataCreateParams;
     use omicron_common::api::external::Instance;
@@ -1978,7 +2006,7 @@ mod test {
             disk: db_disk,
             attach_instance_id,
             use_the_pantry,
-            create_params: params::SnapshotCreate {
+            create_params: snapshot::SnapshotCreate {
                 identity: IdentityMetadataCreateParams {
                     name: "my-snapshot".parse().expect("Invalid disk name"),
                     description: "My snapshot".to_string(),
@@ -2108,18 +2136,19 @@ mod test {
     async fn setup_test_instance(
         cptestctx: &ControlPlaneTestContext,
         client: &ClientTestContext,
-        disks_to_attach: Vec<InstanceDiskAttachment>,
+        disks_to_attach: Vec<instance_types::InstanceDiskAttachment>,
     ) -> InstanceAndActiveVmm {
         let instances_url = format!("/v1/instances?project={}", PROJECT_NAME,);
 
         let mut disks_iter = disks_to_attach.into_iter();
         let boot_disk = disks_iter.next();
-        let data_disks: Vec<InstanceDiskAttachment> = disks_iter.collect();
+        let data_disks: Vec<instance_types::InstanceDiskAttachment> =
+            disks_iter.collect();
 
         let instance: Instance = object_create(
             client,
             &instances_url,
-            &params::InstanceCreate {
+            &instance_types::InstanceCreate {
                 identity: IdentityMetadataCreateParams {
                     name: INSTANCE_NAME.parse().unwrap(),
                     description: format!("instance {:?}", INSTANCE_NAME),
@@ -2132,7 +2161,7 @@ mod test {
                         .to_vec(),
                 ssh_public_keys:  Some(Vec::new()),
                 network_interfaces:
-                    params::InstanceNetworkInterfaceAttachment::None,
+                    instance_types::InstanceNetworkInterfaceAttachment::None,
                 boot_disk,
                 cpu_platform: None,
                 disks: data_disks,
@@ -2181,7 +2210,6 @@ mod test {
             .vmm()
             .as_ref()
             .expect("running instance should have a sled")
-            .runtime
             .state;
 
         assert_eq!(new_state, nexus_db_model::VmmState::Running);
@@ -2264,8 +2292,8 @@ mod test {
                             let state = setup_test_instance(
                                 cptestctx,
                                 client,
-                                vec![params::InstanceDiskAttachment::Attach(
-                                    params::InstanceDiskAttach {
+                                vec![instance_types::InstanceDiskAttachment::Attach(
+                                    instance_types::InstanceDiskAttach {
                                         name: Name::from_str(DISK_NAME)
                                             .unwrap(),
                                     },
@@ -2415,8 +2443,8 @@ mod test {
         let _instance_and_vmm = setup_test_instance(
             &cptestctx,
             &client,
-            vec![params::InstanceDiskAttachment::Attach(
-                params::InstanceDiskAttach {
+            vec![instance_types::InstanceDiskAttachment::Attach(
+                instance_types::InstanceDiskAttach {
                     name: Name::from_str(DISK_NAME).unwrap(),
                 },
             )],
@@ -2566,8 +2594,8 @@ mod test {
         let instance_state = setup_test_instance(
             cptestctx,
             client,
-            vec![params::InstanceDiskAttachment::Attach(
-                params::InstanceDiskAttach {
+            vec![instance_types::InstanceDiskAttachment::Attach(
+                instance_types::InstanceDiskAttach {
                     name: Name::from_str(DISK_NAME).unwrap(),
                 },
             )],

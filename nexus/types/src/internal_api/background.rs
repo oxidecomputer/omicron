@@ -3,7 +3,7 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use crate::deployment::PlanningReport;
-use crate::external_api::views;
+use crate::external_api::alert;
 use chrono::DateTime;
 use chrono::Utc;
 use gateway_types::component::SpType;
@@ -23,6 +23,7 @@ use omicron_uuid_kinds::WebhookDeliveryUuid;
 use semver::Version;
 use serde::Deserialize;
 use serde::Serialize;
+use sled_agent_types::early_networking::SwitchSlot;
 use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::collections::VecDeque;
@@ -832,7 +833,7 @@ pub struct WebhookDeliveryFailure {
     pub delivery_id: WebhookDeliveryUuid,
     pub alert_id: AlertUuid,
     pub attempt: usize,
-    pub result: views::WebhookDeliveryAttemptResult,
+    pub result: alert::WebhookDeliveryAttemptResult,
     pub response_status: Option<u16>,
     pub response_duration: Option<chrono::TimeDelta>,
 }
@@ -937,6 +938,52 @@ pub struct ProbeDistributorStatus {
 pub enum TrustQuorumManagerStatus {
     PerRackStatus { statuses: Vec<String>, errors: Vec<String> },
     Error(String),
+}
+
+#[derive(Default, Deserialize, Serialize)]
+pub struct AttachedSubnetManagerStatus {
+    /// Error reaching the database to fetch attached subnets.
+    pub db_error: Option<String>,
+    /// Details about attached subnets sent to Dendrite instances.
+    pub dendrite: HashMap<SwitchSlot, DendriteSubnetDetails>,
+    /// Details about attached subnets sent to sleds.
+    pub sled: HashMap<SledUuid, SledSubnetDetails>,
+}
+
+/// Details about attached subnets sent to a single Dendrite instance.
+#[derive(Default, Deserialize, Serialize)]
+pub struct DendriteSubnetDetails {
+    /// Number of new subnets added.
+    pub n_subnets_added: usize,
+    /// Number of existing subnets removed.
+    pub n_subnets_removed: usize,
+    /// Total number of subnets on the instance after the operation is
+    /// completed.
+    pub n_total_subnets: usize,
+    /// Errors encountered when sending attached subnets.
+    pub errors: Vec<String>,
+}
+
+/// Details about attached subnets sent to a single sled.
+#[derive(Default, Deserialize, Serialize)]
+pub struct SledSubnetDetails {
+    /// Total number of subnets, across all instances on the sled.
+    pub n_subnets: usize,
+    /// Errors encountered when sending attached subnets.
+    pub errors: Vec<String>,
+}
+
+/// The status of a `session_cleanup` background task activation.
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+pub struct SessionCleanupStatus {
+    /// Number of sessions deleted in this activation.
+    pub deleted: usize,
+    /// The cutoff time used: sessions created before this were eligible.
+    pub cutoff: DateTime<Utc>,
+    /// The per-activation delete limit.
+    pub limit: u32,
+    /// Errors encountered during this activation.
+    pub error: Option<String>,
 }
 
 #[cfg(test)]

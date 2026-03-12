@@ -210,6 +210,9 @@ multicast_reconciler.period_secs = 60
 multicast_reconciler.sled_cache_ttl_secs = 60
 multicast_reconciler.backplane_cache_ttl_secs = 120
 trust_quorum.period_secs = 60
+attached_subnet_manager.period_secs = 60
+session_cleanup.period_secs = 300
+session_cleanup.max_delete_per_activation = 10000
 
 [multicast]
 # Enable multicast functionality for tests (disabled by default in production)

@@ -15,15 +15,17 @@ use dropshot_api_manager_types::api_versions;
 use omicron_uuid_kinds::{RackInitUuid, RackResetUuid};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use sled_agent_types::{
-    rack_init::RackInitializeRequest, rack_ops::RackOperationStatus,
-};
+use sled_agent_types::rack_ops::RackOperationStatus;
+use sled_agent_types_versions::v1::rack_init::RackInitializeRequest;
 use sled_hardware_types::Baseboard;
 use tufaceous_artifact::ArtifactVersion;
 
 api_versions!([
     // Do not create new versions of this client-side versioned API.
-    // https://github.com/oxidecomputer/omicron/issues/9290
+    // See https://github.com/oxidecomputer/omicron/issues/9290
+
+    // Remove rack initialization endpoints moved to bootstrap-agent-lockstep-api.
+    (2, REMOVE_RACK_INIT_ENDPOINTS),
     (1, INITIAL),
 ]);
 
@@ -53,18 +55,24 @@ pub trait BootstrapAgentApi {
     ) -> Result<HttpResponseOk<Vec<Component>>, HttpError>;
 
     /// Get the current status of rack initialization or reset.
+    ///
+    /// Deprecated. Do not use. Moved to bootstrap agent lockstep API.
     #[endpoint {
         method = GET,
         path = "/rack-initialize",
+        versions = VERSION_INITIAL..VERSION_REMOVE_RACK_INIT_ENDPOINTS,
     }]
     async fn rack_initialization_status(
         rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<RackOperationStatus>, HttpError>;
 
     /// Initialize the rack with the provided configuration.
+    ///
+    /// Deprecated. Do not use. Moved to bootstrap agent lockstep API.
     #[endpoint {
         method = POST,
         path = "/rack-initialize",
+        versions = VERSION_INITIAL..VERSION_REMOVE_RACK_INIT_ENDPOINTS,
     }]
     async fn rack_initialize(
         rqctx: RequestContext<Self::Context>,
@@ -72,9 +80,12 @@ pub trait BootstrapAgentApi {
     ) -> Result<HttpResponseOk<RackInitUuid>, HttpError>;
 
     /// Reset the rack to an unconfigured state.
+    ///
+    /// Deprecated. Do not use. Moved to bootstrap agent lockstep API.
     #[endpoint {
         method = DELETE,
         path = "/rack-initialize",
+        versions = VERSION_INITIAL..VERSION_REMOVE_RACK_INIT_ENDPOINTS,
     }]
     async fn rack_reset(
         rqctx: RequestContext<Self::Context>,
