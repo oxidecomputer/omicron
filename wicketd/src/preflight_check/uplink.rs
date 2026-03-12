@@ -27,7 +27,7 @@ use omicron_common::address::DENDRITE_PORT;
 use oxnet::IpNet;
 use sled_agent_types::early_networking::PortFec as OmicronPortFec;
 use sled_agent_types::early_networking::PortSpeed as OmicronPortSpeed;
-use sled_agent_types::early_networking::SwitchLocation;
+use sled_agent_types::early_networking::SwitchSlot;
 use slog::Logger;
 use slog::error;
 use slog::o;
@@ -74,7 +74,7 @@ pub(super) async fn run_local_uplink_preflight_check(
     network_config: UserSpecifiedRackNetworkConfig,
     dns_servers: Vec<IpAddr>,
     ntp_servers: Vec<String>,
-    our_switch_location: SwitchLocation,
+    our_switch_slot: SwitchSlot,
     dns_name_to_query: Option<String>,
     event_buffer: Arc<Mutex<Option<EventBuffer>>>,
     log: &Logger,
@@ -91,7 +91,7 @@ pub(super) async fn run_local_uplink_preflight_check(
     let (sender, mut receiver) = update_engine::channel();
     let mut engine = UpdateEngine::new(log, sender);
 
-    for (port, uplink) in network_config.port_map(our_switch_location) {
+    for (port, uplink) in network_config.port_map(our_switch_slot) {
         add_steps_for_single_local_uplink_preflight_check(
             &mut engine,
             &dpd_client,
@@ -335,7 +335,7 @@ fn add_steps_for_single_local_uplink_preflight_check<'a>(
                     .count();
 
                     // This includes the VLAN ID, if any
-                    let uplink_cfg = addr.to_string();
+                    let uplink_cfg = addr.to_uplinkd_smf_property();
                     if let Err(err) = execute_command(&[
                         SVCCFG,
                         "-s",
@@ -461,7 +461,7 @@ fn add_steps_for_single_local_uplink_preflight_check<'a>(
                                 )),
                                 format!(
                                     "timed out waiting for `uplink` to \
-                                 create {addr}"
+                                     create {uplink_cfg}"
                                 ),
                             )
                             .into();

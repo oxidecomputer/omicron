@@ -2,7 +2,7 @@
 #:
 #: name = "build-and-test (ubuntu-22.04)"
 #: variety = "basic"
-#: target = "ubuntu-22.04"
+#: target = "ubuntu-22.04-large"
 #: rust_toolchain = true
 #: output_rules = [
 #:	"%/work/*",

@@ -44,8 +44,8 @@ table! {
         disk_state -> Text,
         attach_instance_id -> Nullable<Uuid>,
         state_generation -> Int8,
-        time_state_updated -> Timestamptz,
         slot -> Nullable<Int2>,
+        time_state_updated -> Timestamptz,
         size_bytes -> Int8,
         block_size -> crate::enums::BlockSizeEnum,
         disk_type -> crate::enums::DiskTypeEnum,
@@ -138,9 +138,9 @@ table! {
     switch_port (id) {
         id -> Uuid,
         rack_id -> Uuid,
-        switch_location -> Text,
         port_name -> Text,
         port_settings_id -> Nullable<Uuid>,
+        switch_slot -> crate::enums::SwitchSlotEnum,
     }
 }
 
@@ -203,10 +203,10 @@ table! {
         chassis_id -> Nullable<Text>,
         system_name -> Nullable<Text>,
         system_description -> Nullable<Text>,
-        management_ip -> Nullable<Inet>,
         time_created -> Timestamptz,
         time_modified -> Timestamptz,
         time_deleted -> Nullable<Timestamptz>,
+        management_ip -> Nullable<Inet>,
     }
 }
 
@@ -310,8 +310,8 @@ table! {
         time_modified -> Timestamptz,
         time_deleted -> Nullable<Timestamptz>,
         asn -> Int8,
-        bgp_announce_set_id -> Uuid,
         vrf -> Nullable<Text>,
+        bgp_announce_set_id -> Uuid,
         shaper -> Nullable<Text>,
         checker -> Nullable<Text>,
         max_paths -> Int2,
@@ -319,24 +319,24 @@ table! {
 }
 
 table! {
-    bgp_peer_view (switch_location, port_name) {
-        switch_location -> Text,
+    bgp_peer_view (switch_slot, port_name) {
+        switch_slot -> crate::enums::SwitchSlotEnum,
         port_name -> Text,
         addr -> Nullable<Inet>,
-        asn -> Int8,
-        connect_retry -> Int8,
-        delay_open -> Int8,
         hold_time -> Int8,
         idle_hold_time -> Int8,
+        delay_open -> Int8,
+        connect_retry -> Int8,
         keepalive -> Int8,
         remote_asn -> Nullable<Int8>,
-        min_ttl -> Nullable<Int8>,
+        min_ttl -> Nullable<Int2>,
         md5_auth_key -> Nullable<Text>,
         multi_exit_discriminator -> Nullable<Int8>,
         local_pref -> Nullable<Int8>,
         enforce_first_as -> Bool,
         vlan_id -> Nullable<Int4>,
         router_lifetime -> Int4,
+        asn -> Int8,
     }
 }
 
@@ -409,9 +409,9 @@ table! {
         address_lot_block_id -> Uuid,
         rsvd_address_lot_block_id -> Uuid,
         rack_id -> Uuid,
-        switch_location -> Text,
         address -> Inet,
         anycast -> Bool,
+        switch_slot -> crate::enums::SwitchSlotEnum,
     }
 }
 
@@ -475,13 +475,13 @@ table! {
         time_created -> Timestamptz,
         time_deleted -> Nullable<Timestamptz>,
         instance_id -> Uuid,
+        time_state_updated -> Timestamptz,
+        state_generation -> Int8,
         sled_id -> Uuid,
         propolis_ip -> Inet,
         propolis_port -> Int4,
-        cpu_platform -> crate::enums::VmmCpuPlatformEnum,
-        time_state_updated -> Timestamptz,
-        state_generation -> Int8,
         state -> crate::enums::VmmStateEnum,
+        cpu_platform -> crate::enums::VmmCpuPlatformEnum,
     }
 }
 joinable!(vmm -> sled (sled_id));
@@ -492,13 +492,13 @@ table! {
         name -> Text,
         silo_name -> Text,
         project_name -> Text,
+        active_sled_id -> Uuid,
         time_created -> Timestamptz,
         time_modified -> Timestamptz,
-        state -> crate::enums::VmmStateEnum,
-        active_sled_id -> Uuid,
         migration_id -> Nullable<Uuid>,
         ncpus -> Int8,
         memory -> Int8,
+        state -> crate::enums::VmmStateEnum,
     }
 }
 
@@ -572,13 +572,13 @@ table! {
     silo_utilization(silo_id) {
         silo_id -> Uuid,
         silo_name -> Text,
-        silo_discoverable -> Bool,
         cpus_provisioned -> Int8,
         memory_provisioned -> Int8,
         storage_provisioned -> Int8,
         cpus_allocated -> Int8,
         memory_allocated -> Int8,
         storage_allocated -> Int8,
+        silo_discoverable -> Bool,
     }
 }
 
@@ -608,11 +608,11 @@ table! {
         // original name of `ip` because renaming columns is not idempotent in
         // CRDB as of today.
         ip -> Nullable<Inet>,
-        ipv6 -> Nullable<Inet>,
         slot -> Int2,
         is_primary -> Bool,
         // NOTE: These are the IPv4 transit IPs specifically.
         transit_ips -> Array<Inet>,
+        ipv6 -> Nullable<Inet>,
         transit_ips_v6 -> Array<Inet>,
     }
 }
@@ -666,8 +666,8 @@ table! {
         time_created -> Timestamptz,
         time_modified -> Timestamptz,
         time_deleted -> Nullable<Timestamptz>,
-        ip_version -> crate::enums::IpVersionEnum,
         rcgen -> Int8,
+        ip_version -> crate::enums::IpVersionEnum,
         reservation_type -> crate::enums::IpPoolReservationTypeEnum,
         pool_type -> crate::enums::IpPoolTypeEnum,
     }
@@ -980,9 +980,9 @@ table! {
         id -> Uuid,
         time_created -> Timestamptz,
         time_modified -> Timestamptz,
-        time_expunged -> Nullable<Timestamptz>,
         ip -> Inet,
         port -> Int4,
+        time_expunged -> Nullable<Timestamptz>,
     }
 }
 
@@ -1104,11 +1104,11 @@ table! {
 }
 
 table! {
-    sled_underlay_subnet_allocation (rack_id, sled_id) {
+    sled_underlay_subnet_allocation (hw_baseboard_id, sled_id) {
+        hw_baseboard_id -> Uuid,
         rack_id -> Uuid,
         sled_id -> Uuid,
         subnet_octet -> Int2,
-        hw_baseboard_id -> Uuid,
     }
 }
 allow_tables_to_appear_in_same_query!(rack, sled_underlay_subnet_allocation);
@@ -1141,9 +1141,9 @@ table! {
         model -> Text,
 
         variant -> crate::enums::PhysicalDiskKindEnum,
+        sled_id -> Uuid,
         disk_policy -> crate::enums::PhysicalDiskPolicyEnum,
         disk_state -> crate::enums::PhysicalDiskStateEnum,
-        sled_id -> Uuid,
     }
 }
 
@@ -1166,11 +1166,7 @@ table! {
 table! {
     virtual_provisioning_collection {
         id -> Uuid,
-        // This type isn't actually "Nullable" - it's just handy to use the
-        // same type for insertion and querying, and doing so requires this
-        // field to appear optional so we can let this (default) field appear
-        // optional.
-        time_modified -> Nullable<Timestamptz>,
+        time_modified -> Timestamptz,
         collection_type -> Text,
         virtual_disk_bytes_provisioned -> Int8,
         cpus_provisioned -> Int8,
@@ -1181,11 +1177,7 @@ table! {
 table! {
     virtual_provisioning_resource {
         id -> Uuid,
-        // This type isn't actually "Nullable" - it's just handy to use the
-        // same type for insertion and querying, and doing so requires this
-        // field to appear optional so we can let this (default) field appear
-        // optional.
-        time_modified -> Nullable<Timestamptz>,
+        time_modified -> Timestamptz,
         resource_type -> Text,
         virtual_disk_bytes_provisioned -> Int8,
         cpus_provisioned -> Int8,
@@ -1323,9 +1315,9 @@ table! {
         time_deleted -> Nullable<Timestamptz>,
         project_id -> Uuid,
         system_router_id -> Uuid,
+        dns_name -> Text,
         vni -> Int4,
         ipv6_prefix -> Inet,
-        dns_name -> Text,
         firewall_gen -> Int8,
         subnet_gen -> Int8,
     }
@@ -1370,8 +1362,8 @@ table! {
         time_created -> Timestamptz,
         time_modified -> Timestamptz,
         time_deleted -> Nullable<Timestamptz>,
-        kind -> crate::enums::RouterRouteKindEnum,
         vpc_router_id -> Uuid,
+        kind -> crate::enums::RouterRouteKindEnum,
         target -> Text,
         destination -> Text,
         vpc_subnet_id -> Nullable<Uuid>,
@@ -1504,17 +1496,17 @@ table! {
 
 table! {
     role_assignment (
-        identity_type,
-        identity_id,
-        resource_type,
         resource_id,
-        role_name
+        resource_type,
+        role_name,
+        identity_id,
+        identity_type
     ) {
-        identity_type -> crate::enums::IdentityTypeEnum,
-        identity_id -> Uuid,
         resource_type -> Text,
         role_name -> Text,
         resource_id -> Uuid,
+        identity_id -> Uuid,
+        identity_type -> crate::enums::IdentityTypeEnum,
     }
 }
 
@@ -1746,7 +1738,6 @@ table! {
         sled_role -> crate::enums::SledRoleEnum,
         usable_hardware_threads -> Int8,
         usable_physical_ram -> Int8,
-        cpu_family -> crate::enums::SledCpuFamilyEnum,
         reservoir_size -> Int8,
 
         ledgered_sled_config -> Nullable<Uuid>,
@@ -1760,14 +1751,16 @@ table! {
         zone_manifest_mupdate_id -> Nullable<Uuid>,
         zone_manifest_boot_disk_error -> Nullable<Text>,
 
+        mupdate_override_boot_disk_path -> Text,
+        mupdate_override_id -> Nullable<Uuid>,
+        mupdate_override_boot_disk_error -> Nullable<Text>,
+
+        cpu_family -> crate::enums::SledCpuFamilyEnum,
+
         measurement_manifest_boot_disk_path -> Text,
         measurement_manifest_source -> Nullable<crate::enums::InvZoneManifestSourceEnum>,
         measurement_manifest_mupdate_id -> Nullable<Uuid>,
         measurement_manifest_boot_disk_error -> Nullable<Text>,
-
-        mupdate_override_boot_disk_path -> Text,
-        mupdate_override_id -> Nullable<Uuid>,
-        mupdate_override_boot_disk_error -> Nullable<Text>,
     }
 }
 
@@ -2248,11 +2241,11 @@ table! {
         snat_ip -> Nullable<Inet>,
         snat_first_port -> Nullable<Int4>,
         snat_last_port -> Nullable<Int4>,
+        external_ip_id -> Nullable<Uuid>,
+        filesystem_pool -> Uuid,
         disposition -> crate::enums::BpZoneDispositionEnum,
         disposition_expunged_as_of_generation -> Nullable<Int8>,
         disposition_expunged_ready_for_cleanup -> Bool,
-        external_ip_id -> Nullable<Uuid>,
-        filesystem_pool -> Uuid,
         image_source -> crate::enums::BpZoneImageSourceEnum,
         image_artifact_sha256 -> Nullable<Text>,
         nexus_generation -> Nullable<Int8>,
@@ -2399,17 +2392,17 @@ table! {
 }
 
 table! {
-    bfd_session (remote, switch) {
+    bfd_session (id) {
         id -> Uuid,
         local -> Nullable<Inet>,
         remote -> Inet,
         detection_threshold -> Int8,
         required_rx -> Int8,
-        switch -> Text,
         mode -> crate::enums::BfdModeEnum,
         time_created -> Timestamptz,
         time_modified -> Timestamptz,
         time_deleted -> Nullable<Timestamptz>,
+        switch_slot -> crate::enums::SwitchSlotEnum,
     }
 }
 

@@ -6,7 +6,7 @@
 
 use async_trait::async_trait;
 use omicron_common::address::{Ipv6Subnet, SLED_PREFIX};
-use omicron_common::ledger::Ledgerable;
+use omicron_ledger::Ledgerable;
 use omicron_uuid_kinds::SledUuid;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};

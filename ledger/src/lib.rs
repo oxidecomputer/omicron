@@ -2,7 +2,13 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! Utilities to help reading/writing json files from/to multiple paths
+//! Dual-path JSON ledger for persisting configuration with generation numbers.
+//!
+//! The [`Ledger`] struct manages serialization and deserialization of
+//! configuration data to multiple filesystem paths (typically two M.2
+//! devices). It tracks generation numbers to determine which copy is
+//! newest, and uses atomic writes (write-to-temp then rename) to avoid
+//! corruption.
 
 use async_trait::async_trait;
 use camino::{Utf8Path, Utf8PathBuf};
@@ -36,14 +42,6 @@ pub enum Error {
 impl Error {
     fn io_path(path: &Utf8Path, err: std::io::Error) -> Self {
         Self::Io { message: format!("Error accessing {}", path), err }
-    }
-}
-
-impl From<Error> for crate::api::external::Error {
-    fn from(err: Error) -> Self {
-        crate::api::external::Error::InternalError {
-            internal_message: err.to_string(),
-        }
     }
 }
 
@@ -218,9 +216,8 @@ mod test {
     use dropshot::ConfigLoggingLevel;
     pub use dropshot::test_util::LogContext;
 
-    // Copied from `omicron-test-utils` to avoid a circular dependency where
-    // `omicron-common` depends on `omicron-test-utils` which depends on
-    // `omicron-common`.
+    // Copied from `omicron-test-utils` to avoid adding a dependency on
+    // that crate just for test logging setup.
     /// Set up a [`dropshot::test_util::LogContext`] appropriate for a test named
     /// `test_name`
     ///

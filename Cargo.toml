@@ -76,6 +76,7 @@ members = [
     "ipcc",
     "key-manager",
     "key-manager/types",
+    "ledger",
     "live-tests",
     "live-tests/macros",
     "nexus",
@@ -253,6 +254,7 @@ default-members = [
     "ipcc",
     "key-manager",
     "key-manager/types",
+    "ledger",
     "live-tests",
     "live-tests/macros",
     "nexus",
@@ -477,10 +479,10 @@ digest = "0.10.7"
 dns-server = { path = "dns-server" }
 dns-server-api = { path = "dns-server-api" }
 dns-service-client = { path = "clients/dns-service-client" }
-dpd-client = { git = "https://github.com/oxidecomputer/dendrite", rev = "f20f786e67c86388dfaaf0ef3aa9d2693dfe1da4" }
+dpd-client = { git = "https://github.com/oxidecomputer/dendrite", rev = "c0bf0a3b536baab0393c96fec3204b32e4f9368b" }
 dropshot = { version = "0.16.6", features = [ "usdt-probes" ] }
-dropshot-api-manager = "0.5.2"
-dropshot-api-manager-types = "0.5.2"
+dropshot-api-manager = "0.6.0"
+dropshot-api-manager-types = "0.6.0"
 dyn-clone = "1.0.20"
 either = "1.15.0"
 ereport-types = { path = "ereport/types" }
@@ -619,7 +621,7 @@ nexus-test-utils-macros = { path = "nexus/test-utils-macros" }
 nexus-test-utils = { path = "nexus/test-utils" }
 nexus-types = { path = "nexus/types" }
 nexus-types-versions = { path = "nexus/types/versions" }
-nix = { version = "0.30", features = ["fs", "net"] }
+nix = { version = "0.31", features = ["fs", "net"] }
 nom = "7.1.3"
 nonempty = "0.12.0"
 num-integer = "0.1.46"
@@ -630,6 +632,7 @@ omicron-cockroach-admin = { path = "cockroach-admin" }
 omicron-cockroach-metrics = { path = "cockroach-metrics" }
 omicron-common = { path = "common" }
 omicron-dev-lib = { path = "dev-tools/omicron-dev-lib" }
+omicron-ledger = { path = "ledger" }
 omicron-gateway = { path = "gateway" }
 omicron-nexus = { path = "nexus" }
 omicron-ntp-admin = { path = "ntp-admin" }
@@ -693,7 +696,7 @@ prettyplease = { version = "0.2.36", features = ["verbatim"] }
 proc-macro2 = "1.0"
 progenitor = "0.13.0"
 progenitor-client = "0.13.0"
-progenitor-extras = "0.1.0"
+progenitor-extras = "0.1.1"
 progenitor-client010 = { package = "progenitor-client", version = "0.10.0" }
 # NOTE: if you change the pinned revision of the `bhyve_api` and propolis
 # dependencies, you must also update the references in package-manifest.toml to

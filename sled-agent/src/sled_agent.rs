@@ -76,7 +76,7 @@ use sled_agent_types::attached_subnet::AttachedSubnets;
 use sled_agent_types::dataset::LocalStorageDatasetDeleteRequest;
 use sled_agent_types::dataset::LocalStorageDatasetEnsureRequest;
 use sled_agent_types::disk::DiskStateRequested;
-use sled_agent_types::early_networking::EarlyNetworkConfig;
+use sled_agent_types::early_networking::EarlyNetworkConfigEnvelope;
 use sled_agent_types::early_networking::RackNetworkConfig;
 use sled_agent_types::instance::{
     InstanceEnsureBody, InstanceExternalIpBody, InstanceMulticastBody,
@@ -387,7 +387,7 @@ struct SledAgentInner {
     rot_attestor: RotAttestationHandle,
 
     // The rack network config provided at RSS time.
-    rack_network_config: Option<RackNetworkConfig>,
+    rack_network_config: RackNetworkConfig,
 
     // Object managing zone bundles.
     zone_bundler: zone_bundle::ZoneBundler,
@@ -622,15 +622,15 @@ impl SledAgent {
                 })?;
 
             let early_network_config =
-                EarlyNetworkConfig::deserialize_bootstore_config(
-                    &log,
+                EarlyNetworkConfigEnvelope::deserialize_from_bootstore(
                     &serialized_config,
                 )
+                .and_then(|envelope| envelope.deserialize_body())
                 .map_err(|err| BackoffError::transient(err.to_string()))?;
 
-            Ok(early_network_config.body.rack_network_config)
+            Ok(early_network_config.rack_network_config)
         };
-        let rack_network_config: Option<RackNetworkConfig> =
+        let rack_network_config: RackNetworkConfig =
             retry_notify::<_, String, _, _, _, _>(
                 retry_policy_internal_service_aggressive(),
                 get_network_config,

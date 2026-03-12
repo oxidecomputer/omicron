@@ -9,7 +9,7 @@
 
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use sled_agent_types::early_networking::SwitchLocation;
+use sled_agent_types::early_networking::SwitchSlot;
 use std::net::IpAddr;
 
 /// The current status of a BGP peer (with `ConnectionCollision` state,
@@ -32,7 +32,7 @@ pub struct BgpPeerStatus {
     pub state_duration_millis: u64,
 
     /// Switch with the peer session.
-    pub switch: SwitchLocation,
+    pub switch: SwitchSlot,
 }
 
 impl From<crate::v2025_11_20_00::networking::BgpPeerStatus> for BgpPeerStatus {

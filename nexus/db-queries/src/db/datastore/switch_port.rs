@@ -30,7 +30,7 @@ use nexus_db_errors::ErrorHandler;
 use nexus_db_errors::OptionalError;
 use nexus_db_errors::public_error_from_diesel;
 use nexus_db_model::{
-    AddressLot, BgpConfig, SqlU8, SqlU16, SqlU32,
+    AddressLot, BgpConfig, DbSwitchSlot, SqlU8, SqlU16, SqlU32,
     SwitchPortBgpPeerConfigAllowExport, SwitchPortBgpPeerConfigAllowImport,
     SwitchPortBgpPeerConfigCommunity,
 };
@@ -44,6 +44,7 @@ use omicron_common::api::external::{
 use ref_cast::RefCast;
 use serde::{Deserialize, Serialize};
 use sled_agent_types::early_networking::ImportExportPolicy;
+use sled_agent_types::early_networking::SwitchSlot;
 use uuid::Uuid;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -733,7 +734,7 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         rack_id: Uuid,
-        switch_location: Name,
+        switch_slot: SwitchSlot,
         port: Name,
     ) -> CreateResult<SwitchPort> {
         #[derive(Debug)]
@@ -744,8 +745,7 @@ impl DataStore {
         let err = OptionalError::new();
 
         let conn = self.pool_connection_authorized(opctx).await?;
-        let switch_port =
-            SwitchPort::new(rack_id, switch_location.to_string(), port.clone());
+        let switch_port = SwitchPort::new(rack_id, switch_slot, port.clone());
 
         // TODO https://github.com/oxidecomputer/omicron/issues/2811
         // Audit external networking database transaction usage
@@ -794,10 +794,7 @@ impl DataStore {
                         e,
                         ErrorHandler::Conflict(
                             ResourceType::SwitchPort,
-                            &format!(
-                                "{}/{}/{}",
-                                rack_id, &switch_location, &port,
-                            ),
+                            &format!("{rack_id}/{switch_slot:?}/{port}"),
                         ),
                     )
                 }
@@ -817,7 +814,6 @@ impl DataStore {
         }
 
         let err = OptionalError::new();
-
         let conn = self.pool_connection_authorized(opctx).await?;
 
         // TODO https://github.com/oxidecomputer/omicron/issues/2811
@@ -829,14 +825,13 @@ impl DataStore {
                     use nexus_db_schema::schema::switch_port;
                     use nexus_db_schema::schema::switch_port::dsl as switch_port_dsl;
 
-                    let switch_location = params.switch_location.to_string();
                     let port_name = portname.to_string();
+                    let switch_slot = DbSwitchSlot::from(
+                        params.switch_slot,
+                    );
                     let port: SwitchPort = switch_port_dsl::switch_port
                         .filter(switch_port::rack_id.eq(params.rack_id))
-                        .filter(
-                            switch_port::switch_location
-                                .eq(switch_location.clone()),
-                        )
+                        .filter(switch_port::switch_slot.eq(switch_slot))
                         .filter(switch_port::port_name.eq(port_name.clone()))
                         .select(SwitchPort::as_select())
                         .limit(1)
@@ -945,9 +940,9 @@ impl DataStore {
                     // what switch are we adding a configuration to?
                     let switch = switch_port_dsl::switch_port
                         .filter(switch_port_dsl::id.eq(switch_port_id))
-                        .select(switch_port_dsl::switch_location)
+                        .select(switch_port_dsl::switch_slot)
                         .limit(1)
-                        .first_async::<String>(&conn)
+                        .first_async::<DbSwitchSlot>(&conn)
                         .await
                         .map_err(|e: diesel::result::Error| {
                             let msg = "failed to look up switch port by id";
@@ -1016,7 +1011,7 @@ impl DataStore {
                                 .inner_join(bgp_config_dsl::bgp_config.on(
                                     bgp_peer_dsl::bgp_config_id.eq(bgp_config_dsl::id),
                                 ))
-                                .filter(switch_port_dsl::switch_location.eq(switch))
+                                .filter(switch_port_dsl::switch_slot.eq(switch))
                                 .filter(switch_port_dsl::port_settings_id.is_not_null())
                                 .filter(bgp_config_dsl::asn.ne(config.asn))
                                 .select(BgpConfig::as_select())
@@ -1089,18 +1084,17 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         rack_id: Uuid,
-        switch_location: Name,
+        switch_slot: SwitchSlot,
         port_name: Name,
     ) -> LookupResult<Uuid> {
         use nexus_db_schema::schema::switch_port;
         use nexus_db_schema::schema::switch_port::dsl as switch_port_dsl;
 
         let conn = self.pool_connection_authorized(opctx).await?;
+        let switch_slot = DbSwitchSlot::from(switch_slot);
         let id: Uuid = switch_port_dsl::switch_port
             .filter(switch_port::rack_id.eq(rack_id))
-            .filter(
-                switch_port::switch_location.eq(switch_location.to_string()),
-            )
+            .filter(switch_port::switch_slot.eq(switch_slot))
             .filter(switch_port::port_name.eq(port_name.to_string()))
             .select(switch_port::id)
             .limit(1)
@@ -1877,6 +1871,7 @@ mod test {
     };
     use omicron_test_utils::dev;
     use sled_agent_types::early_networking::ImportExportPolicy;
+    use sled_agent_types::early_networking::SwitchSlot;
     use std::{collections::HashMap, str::FromStr};
     use uuid::Uuid;
 
@@ -1888,11 +1883,11 @@ mod test {
 
         let rack_id: Uuid =
             nexus_test_utils::RACK_UUID.parse().expect("parse uuid");
-        let switch0: Name = "switch0".parse().expect("parse switch location");
+        let switch0 = SwitchSlot::Switch0;
         let qsfp0: Name = "qsfp0".parse().expect("parse qsfp0");
 
         let port_result = datastore
-            .switch_port_create(&opctx, rack_id, switch0.into(), qsfp0.into())
+            .switch_port_create(&opctx, rack_id, switch0, qsfp0.into())
             .await
             .expect("switch port create");
 

@@ -96,8 +96,8 @@ use omicron_common::backoff::{
     BackoffError, retry_notify, retry_policy_internal_service_aggressive,
 };
 use omicron_common::disk::DatasetKind;
-use omicron_common::ledger::{self, Ledger, Ledgerable};
 use omicron_ddm_admin_client::{Client as DdmAdminClient, DdmError};
+use omicron_ledger::{self as ledger, Ledger, Ledgerable};
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::RackUuid;
 use omicron_uuid_kinds::ZpoolUuid;
@@ -107,7 +107,7 @@ use sled_agent_client::{
 };
 use sled_agent_config_reconciler::InternalDisksReceiver;
 use sled_agent_types::early_networking::{
-    EarlyNetworkConfig, EarlyNetworkConfigBody, LldpAdminStatus,
+    EarlyNetworkConfigBody, EarlyNetworkConfigEnvelope, LldpAdminStatus,
 };
 use sled_agent_types::inventory::{
     ConfigReconcilerInventoryResult, HostPhase2DesiredSlots, OmicronSledConfig,
@@ -1315,17 +1315,14 @@ impl ServiceInner {
         // TODO: In future releases, we will get rid of the bootstore entirely,
         // and early_network_config will be replicated by the trust quorum
         // nodes.
-        let early_network_config = EarlyNetworkConfig {
-            generation: 1,
-            schema_version: 2,
-            body: EarlyNetworkConfigBody {
-                ntp_servers: config.ntp_servers.clone(),
-                rack_network_config: Some(config.rack_network_config.clone()),
-            },
-        };
+        let early_network_config =
+            EarlyNetworkConfigEnvelope::from(&EarlyNetworkConfigBody {
+                rack_network_config: config.rack_network_config.clone(),
+            })
+            .serialize_to_bootstore_with_generation(1);
         info!(self.log, "Writing Rack Network Configuration to bootstore");
         rss_step.update(RssStep::NetworkConfigUpdate);
-        bootstore.update_network_config(early_network_config.into()).await?;
+        bootstore.update_network_config(early_network_config).await?;
 
         rss_step.update(RssStep::SledInit);
         // Forward the sled initialization requests to our sled-agent.

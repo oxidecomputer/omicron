@@ -1845,6 +1845,10 @@ impl<'a, N: NexusServer> DiskTest<'a, N> {
                     id: DatasetUuid::new_v4(),
                     kind: DatasetKind::Debug,
                 },
+                TestDataset {
+                    id: DatasetUuid::new_v4(),
+                    kind: DatasetKind::LocalStorageUnencrypted,
+                },
             ],
             gibibytes,
             ZpoolHealth::Online,
