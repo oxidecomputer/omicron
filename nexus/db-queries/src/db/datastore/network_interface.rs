@@ -12,6 +12,7 @@ use crate::db;
 use crate::db::collection_insert::AsyncInsertError;
 use crate::db::collection_insert::DatastoreCollection;
 use crate::db::cte_utils::BoxedQuery;
+use crate::db::datastore::SoftDeleteResult;
 use crate::db::model::IncompleteNetworkInterface;
 use crate::db::model::Instance;
 use crate::db::model::InstanceNetworkInterface;
@@ -535,6 +536,8 @@ impl DataStore {
                     .map_err(network_interface::DeleteError::External)?,
             )
             .await
+            // Treat "not found" as an error
+            .and_then(SoftDeleteResult::into_did_soft_delete_bool)
             .map_err(|e| network_interface::DeleteError::from_diesel(e, &query))
     }
 
@@ -555,7 +558,10 @@ impl DataStore {
         conn: &async_bb8_diesel::Connection<DbConnection>,
         service_id: Uuid,
         network_interface_id: Uuid,
-    ) -> Result<bool, TransactionError<network_interface::DeleteError>> {
+    ) -> Result<
+        SoftDeleteResult,
+        TransactionError<network_interface::DeleteError>,
+    > {
         let query = network_interface::DeleteQuery::new(
             NetworkInterfaceKind::Service,
             service_id,

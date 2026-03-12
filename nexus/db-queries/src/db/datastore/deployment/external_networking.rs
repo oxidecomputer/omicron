@@ -7,6 +7,7 @@
 
 use crate::context::OpContext;
 use crate::db::DataStore;
+use crate::db::datastore::SoftDeleteResult;
 use crate::db::fixed_data::vpc_subnet::DNS_VPC_SUBNET;
 use crate::db::fixed_data::vpc_subnet::NEXUS_VPC_SUBNET;
 use crate::db::fixed_data::vpc_subnet::NTP_VPC_SUBNET;
@@ -175,10 +176,28 @@ impl DataStore {
                 )
                 .await
                 .map_err(|txn_err| txn_err.map(|err| err.into_external()))?;
-            if deleted_nic {
-                info!(log, "successfully deleted Omicron zone vNIC");
-            } else {
-                debug!(log, "Omicron zone vNIC already deleted");
+            match deleted_nic {
+                SoftDeleteResult::SoftDeleteApplied => {
+                    info!(log, "successfully deleted Omicron zone vNIC");
+                }
+                SoftDeleteResult::AlreadySoftDeleted => {
+                    debug!(log, "Omicron zone vNIC already deleted");
+                }
+                SoftDeleteResult::NotFound => {
+                    // Attempting to delete a nonexistent interface should
+                    // succeed. This is unusual but not illegal. For example, we
+                    // could have a target blueprint that adds a service zone
+                    // with a NIC followed by a child target blueprint that
+                    // expunges that zone. If we never executed the first
+                    // blueprint, executing the second will attempt to delete a
+                    // NIC that was never created, and that should be fine.
+                    // (This happened in the field: omicron#10025.)
+                    debug!(
+                        log,
+                        "Skipped soft-deletion of Omicron zone vNIC \
+                         (vNIC does not exist)"
+                    );
+                }
             }
         }
 
