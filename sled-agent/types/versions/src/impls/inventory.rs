@@ -26,8 +26,8 @@ use crate::latest::inventory::{
     OmicronFileSourceResolverInventory, OmicronSledConfig, OmicronZoneConfig,
     OmicronZoneImageSource, OmicronZoneType, OmicronZonesConfig,
     RemoveMupdateOverrideBootSuccessInventory, RemoveMupdateOverrideInventory,
-    SingleMeasurementInventory, SvcsEnabledNotOnline, ZoneArtifactInventory,
-    ZoneKind,
+    SingleMeasurementInventory, SvcsEnabledNotOnline, SvcsError,
+    ZoneArtifactInventory, ZoneKind,
 };
 
 impl ZoneKind {
@@ -881,6 +881,26 @@ impl From<illumos_utils::svcs::SvcsResult> for SvcsEnabledNotOnline {
             time_of_status,
         } = value;
         Self { services, errors, time_of_status }
+    }
+}
+
+impl From<illumos_utils::ExecutionError> for SvcsError {
+    fn from(e: illumos_utils::ExecutionError) -> Self {
+        match e {
+            illumos_utils::ExecutionError::ExecutionStart { command, err } => {
+                Self::ExecutionStart { command, err: err.to_string() }
+            }
+            illumos_utils::ExecutionError::CommandFailure(e) => {
+                Self::CommandFailure(e.to_string())
+            }
+            illumos_utils::ExecutionError::ContractFailure { msg, err } => {
+                Self::ContractFailure { msg, err: err.to_string() }
+            }
+            illumos_utils::ExecutionError::ParseFailure(e) => {
+                Self::ParseFailure(e)
+            }
+            illumos_utils::ExecutionError::NotRunning => Self::NotRunning,
+        }
     }
 }
 

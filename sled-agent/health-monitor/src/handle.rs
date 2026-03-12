@@ -13,10 +13,6 @@ use tokio::sync::watch;
 // during inventory collection using the new mechanism.
 #[derive(Debug, Clone)]
 pub struct HealthMonitorHandle {
-    // Return a String instead of a custom error type as inventory requires
-    // all types to be cloneable. The only error that could happen here is
-    // the failure to execute `svcs`, which is a `illumos_utils::ExecutionError`
-    // and this error cannot be cloned.
     pub smf_services_enabled_not_online_rx:
         watch::Receiver<SvcsEnabledNotOnlineResult>,
 }

@@ -36,9 +36,8 @@ pub(crate) async fn poll_smf_services_enabled_not_online(
             // `send_if_modified()`.
             Err(e) => {
                 smf_services_enabled_not_online_tx.send_modify(|status| {
-                    // TODO-K: can I do execution error?
                     *status =
-                        SvcsEnabledNotOnlineResult::SvcsCmdError(e.to_string());
+                        SvcsEnabledNotOnlineResult::SvcsCmdError(e.into());
                 })
             }
             Ok(svcs) => {

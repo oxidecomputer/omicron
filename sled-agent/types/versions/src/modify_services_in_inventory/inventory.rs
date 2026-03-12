@@ -106,7 +106,18 @@ pub struct SvcsEnabledNotOnline {
 #[serde(tag = "type", content = "value", rename_all = "snake_case")]
 pub enum SvcsEnabledNotOnlineResult {
     SvcsEnabledNotOnline(SvcsEnabledNotOnline),
-    // TODO-K: Put some other error?
-    SvcsCmdError(String),
+    SvcsCmdError(SvcsError),
     DataUnavailable,
+}
+
+/// Error that is a one to one mapping of `illumos_utils::ExecutionError`, which
+/// uses a String for any type in `ExecutionError` that is not cloneable.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
+#[serde(tag = "type", content = "value", rename_all = "snake_case")]
+pub enum SvcsError {
+    ExecutionStart { command: String, err: String },
+    CommandFailure(String),
+    ContractFailure { msg: String, err: String },
+    ParseFailure(String),
+    NotRunning,
 }
