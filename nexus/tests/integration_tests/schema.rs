@@ -21,11 +21,11 @@ use nexus_test_utils::sql::Row;
 use nexus_test_utils::sql::SqlEnum;
 use nexus_test_utils::sql::process_rows;
 use nexus_test_utils::{ControlPlaneStarter, load_test_config};
-use omicron_common::api::internal::shared::SwitchLocation;
 use omicron_test_utils::dev::db::{Client, CockroachInstance};
 use pretty_assertions::{assert_eq, assert_ne};
 use semver::Version;
 use similar_asserts;
+use sled_agent_types::early_networking::SwitchSlot;
 use slog::Logger;
 use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
@@ -55,12 +55,12 @@ async fn test_setup<'a>(
     starter.start_internal_dns().await;
     starter.start_external_dns().await;
     let sp_conf: Utf8PathBuf = DEFAULT_SP_SIM_CONFIG.into();
-    starter.start_gateway(SwitchLocation::Switch0, None, sp_conf.clone()).await;
-    starter.start_gateway(SwitchLocation::Switch1, None, sp_conf).await;
-    starter.start_dendrite(SwitchLocation::Switch0).await;
-    starter.start_dendrite(SwitchLocation::Switch1).await;
-    starter.start_mgd(SwitchLocation::Switch0).await;
-    starter.start_mgd(SwitchLocation::Switch1).await;
+    starter.start_gateway(SwitchSlot::Switch0, None, sp_conf.clone()).await;
+    starter.start_gateway(SwitchSlot::Switch1, None, sp_conf).await;
+    starter.start_dendrite(SwitchSlot::Switch0).await;
+    starter.start_dendrite(SwitchSlot::Switch1).await;
+    starter.start_mgd(SwitchSlot::Switch0).await;
+    starter.start_mgd(SwitchSlot::Switch1).await;
     starter.populate_internal_dns().await;
     starter
 }
@@ -193,6 +193,27 @@ async fn apply_update(
             if NOT_IDEMPOTENT_VERSIONS.contains(&version.semver()) {
                 break;
             }
+        }
+
+        // After applying the step, run its verification SQL (if any) in a
+        // separate transaction — just like the real Nexus startup path does.
+        // This confirms that async backfill operations (CREATE INDEX,
+        // ALTER COLUMN SET NOT NULL, ADD CONSTRAINT, ADD COLUMN with
+        // backfill) actually completed.
+        if let Some(verify_sql) = step.verification_sql() {
+            info!(
+                log,
+                "Verifying schema change";
+                "file" => step.label()
+            );
+            client.batch_execute(verify_sql).await.unwrap_or_else(|e| {
+                panic!(
+                    "Verification failed for {} in version {}: {}",
+                    step.label(),
+                    version.semver(),
+                    e
+                )
+            });
         }
     }
 

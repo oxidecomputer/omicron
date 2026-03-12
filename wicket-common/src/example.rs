@@ -10,13 +10,11 @@ use gateway_types::component::SpType;
 use maplit::{btreemap, btreeset};
 use omicron_common::{
     address::{IpRange, Ipv4Range},
-    api::{
-        external::AllowedSourceIps,
-        internal::shared::{
-            BgpConfig, BgpPeerConfig, LldpAdminStatus, LldpPortConfig, PortFec,
-            PortSpeed, RouteConfig, TxEqConfig, rack_init::MaxPathConfig,
-        },
-    },
+    api::external::AllowedSourceIps,
+};
+use sled_agent_types::early_networking::{
+    BgpConfig, BgpPeerConfig, LldpAdminStatus, LldpPortConfig, MaxPathConfig,
+    PortFec, PortSpeed, RouteConfig, TxEqConfig, UplinkAddressConfig,
 };
 use sled_hardware_types::Baseboard;
 
@@ -209,7 +207,9 @@ impl ExampleRackSetupData {
             #[rustfmt::skip]
             switch0: btreemap! {
                 "port0".to_owned() => UserSpecifiedPortConfig {
-                    addresses: vec!["172.30.0.1/24".parse().unwrap()],
+                    addresses: vec![UplinkAddressConfig::without_vlan(
+                        "172.30.0.1/24".parse().unwrap(),
+                    )],
                     routes: vec![RouteConfig {
                         destination: "0.0.0.0/0".parse().unwrap(),
                         nexthop: "172.30.0.10".parse().unwrap(),
@@ -229,7 +229,9 @@ impl ExampleRackSetupData {
                 // Use the same port name as in switch0 to test that it doesn't
                 // collide.
                 "port0".to_owned() => UserSpecifiedPortConfig {
-                    addresses: vec!["172.32.0.1/24".parse().unwrap()],
+                    addresses: vec![UplinkAddressConfig::without_vlan(
+                        "172.32.0.1/24".parse().unwrap(),
+                    )],
                     routes: vec![RouteConfig {
                         destination: "0.0.0.0/0".parse().unwrap(),
                         nexthop: "172.33.0.10".parse().unwrap(),

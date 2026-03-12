@@ -25,12 +25,16 @@ use nexus_db_queries::db::datastore::LocalStorageAllocation;
 use nexus_db_queries::db::datastore::LocalStorageDisk;
 use nexus_db_queries::db::identity::Resource;
 use nexus_db_queries::{authn, authz, db};
+use nexus_types::saga::saga_action_failed;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::http_pagination::PaginatedBy;
-use omicron_common::progenitor_operation_retry::ProgenitorOperationRetry;
+use omicron_common::backoff::backon_retry_policy_internal_service;
 use omicron_uuid_kinds::{GenericUuid, InstanceUuid, PropolisUuid, SledUuid};
 use paste::paste;
+use progenitor_extras::retry::{
+    GoneCheckResult, retry_operation_while_indefinitely,
+};
 use seq_macro::seq;
 use serde::{Deserialize, Serialize};
 use sled_agent_client::types::LocalStorageDatasetEnsureRequest;
@@ -289,10 +293,10 @@ async fn sis_create_vmm_record(
             let (.., sled) = osagactx
                 .nexus()
                 .sled_lookup(&osagactx.nexus().opctx_alloc, &sled_id)
-                .map_err(ActionError::action_failed)?
+                .map_err(saga_action_failed)?
                 .fetch()
                 .await
-                .map_err(ActionError::action_failed)?;
+                .map_err(saga_action_failed)?;
 
             sled.cpu_family.minimum_compatible_platform()
         };
@@ -387,11 +391,11 @@ async fn sis_move_to_starting(
         .instance_id(instance_id.into_untyped_uuid())
         .fetch_for(authz::Action::Modify)
         .await
-        .map_err(ActionError::action_failed)?;
+        .map_err(saga_action_failed)?;
     let state = datastore
         .instance_fetch_with_vmm(&opctx, &authz_instance)
         .await
-        .map_err(ActionError::action_failed)?;
+        .map_err(saga_action_failed)?;
 
     let db_instance = state.instance();
 
@@ -414,14 +418,14 @@ async fn sis_move_to_starting(
         // If the instance has a Propolis ID, but the Propolis was left behind
         // by a previous start saga unwinding, that's fine, we can just clear it
         // out and proceed as though there was no Propolis ID here.
-        Some(vmm) if vmm.runtime.state == db::model::VmmState::SagaUnwound => {
+        Some(vmm) if vmm.state == db::model::VmmState::SagaUnwound => {
             abandoned_unwound_vmm = true;
         }
 
         // If the instance has a different Propolis ID, a competing start saga
         // must have started the instance already, so unwind.
         Some(_) => {
-            return Err(ActionError::action_failed(Error::conflict(
+            return Err(saga_action_failed(Error::conflict(
                 "instance changed state before it could be started",
             )));
         }
@@ -458,9 +462,9 @@ async fn sis_move_to_starting(
         .datastore()
         .instance_update_runtime(&instance_id, &new_runtime)
         .await
-        .map_err(ActionError::action_failed)?
+        .map_err(saga_action_failed)?
     {
-        return Err(ActionError::action_failed(Error::conflict(
+        return Err(saga_action_failed(Error::conflict(
             "instance changed state before it could be started",
         )));
     }
@@ -527,7 +531,7 @@ async fn sis_account_virtual_resources(
             nexus_db_model::ByteCount(*params.db_instance.memory),
         )
         .await
-        .map_err(ActionError::action_failed)?;
+        .map_err(saga_action_failed)?;
     Ok(())
 }
 
@@ -553,7 +557,7 @@ async fn sis_account_virtual_resources_undo(
             nexus_db_model::ByteCount(*params.db_instance.memory),
         )
         .await
-        .map_err(ActionError::action_failed)?;
+        .map_err(saga_action_failed)?;
     Ok(())
 }
 
@@ -577,7 +581,7 @@ async fn sis_list_local_storage(
         .instance_id(instance_id.into_untyped_uuid())
         .fetch_for(authz::Action::Read)
         .await
-        .map_err(ActionError::action_failed)?;
+        .map_err(saga_action_failed)?;
 
     let disks = datastore
         .instance_list_disks(
@@ -591,7 +595,7 @@ async fn sis_list_local_storage(
             }),
         )
         .await
-        .map_err(ActionError::action_failed)?;
+        .map_err(saga_action_failed)?;
 
     let records = disks
         .into_iter()
@@ -637,19 +641,19 @@ async fn sis_ensure_local_storage(
     // here.
 
     if disk.block_size.to_bytes() != 4096 {
-        return Err(ActionError::action_failed(format!(
+        return Err(saga_action_failed(Error::internal_error(&format!(
             "local storage record {} has block size {}!",
             which,
             disk.block_size.to_bytes(),
-        )));
+        ))));
     }
 
     // Make sure this was a complete allocation.
 
     let Some(allocation) = local_storage_dataset_allocation else {
-        return Err(ActionError::action_failed(format!(
+        return Err(saga_action_failed(Error::internal_error(&format!(
             "local storage record {which} has a None unencrypted allocation!",
-        )));
+        ))));
     };
 
     // Ensure that the local storage is created
@@ -673,9 +677,9 @@ async fn sis_ensure_local_storage(
             // This enum variant has been left in pending an investigation of
             // how we're going to support encryption at rest, but right now we
             // don't support this yet.
-            return Err(ActionError::action_failed(format!(
+            return Err(saga_action_failed(Error::internal_error(&format!(
                 "local storage record {which} has a encrypted allocation!",
-            )));
+            ))));
         }
     };
 
@@ -683,29 +687,43 @@ async fn sis_ensure_local_storage(
         .nexus()
         .sled_client(&sled_id)
         .await
-        .map_err(ActionError::action_failed)?;
+        .map_err(saga_action_failed)?;
 
     let ensure_operation = || async {
         sled_agent_client.local_storage_dataset_ensure(&ensure_request).await
     };
 
+    // `check_sled_in_service` returns an error if the sled is no longer in
+    // service; if it succeeds, the sled is not gone.
     let gone_check = || async {
-        osagactx.datastore().check_sled_in_service(&opctx, sled_id).await?;
-
-        // `check_sled_in_service` returns an error if the sled is no longer in
-        // service; if it succeeds, the sled is not gone.
-        Ok(false)
+        osagactx
+            .datastore()
+            .check_sled_in_service(&opctx, sled_id)
+            .await
+            .map(|()| GoneCheckResult::StillAvailable)
     };
 
-    ProgenitorOperationRetry::new(ensure_operation, gone_check)
-        .run(osagactx.log())
-        .await
-        .map_err(|e| {
-            ActionError::action_failed(format!(
-                "failed to ensure local storage: {}",
-                InlineErrorChain::new(&e)
-            ))
-        })?;
+    let log = osagactx.log().clone();
+    retry_operation_while_indefinitely(
+        backon_retry_policy_internal_service(),
+        ensure_operation,
+        gone_check,
+        |notification| {
+            slog::warn!(
+                log,
+                "failed to ensure local storage dataset, retrying in {:?}",
+                notification.delay;
+                InlineErrorChain::new(&notification.error),
+            );
+        },
+    )
+    .await
+    .map_err(|e| {
+        saga_action_failed(Error::internal_error(&format!(
+            "failed to ensure local storage: {}",
+            InlineErrorChain::new(&e)
+        )))
+    })?;
 
     Ok(())
 }
@@ -744,7 +762,7 @@ async fn sis_dpd_ensure(
         .sled_id(sled_uuid)
         .fetch()
         .await
-        .map_err(ActionError::action_failed)?;
+        .map_err(saga_action_failed)?;
 
     osagactx
         .nexus()
@@ -755,7 +773,7 @@ async fn sis_dpd_ensure(
             InstanceNetworkFilters::all(),
         )
         .await
-        .map_err(ActionError::action_failed)?;
+        .map_err(saga_action_failed)?;
 
     Ok(())
 }
@@ -780,7 +798,7 @@ async fn sis_dpd_ensure_undo(
         .instance_id(instance_id)
         .lookup_for(authz::Action::Modify)
         .await
-        .map_err(ActionError::action_failed)?;
+        .map_err(saga_action_failed)?;
 
     osagactx
         .nexus()
@@ -834,7 +852,7 @@ async fn sis_ensure_registered(
             .instance_id(instance_id)
             .lookup_for(authz::Action::Modify)
             .await
-            .map_err(ActionError::action_failed)?;
+            .map_err(saga_action_failed)?;
 
     osagactx
         .nexus()
@@ -864,7 +882,7 @@ async fn sis_ensure_registered(
                 // the saga to unwind and restore the instance to the Stopped
                 // state (matching what would happen if there were a failure
                 // prior to this point).
-                ActionError::action_failed(Error::from(inner))
+                saga_action_failed(Error::from(inner))
             }
             InstanceStateChangeError::Other(inner) => {
                 info!(osagactx.log(),
@@ -872,7 +890,7 @@ async fn sis_ensure_registered(
                       "instance_id" => %instance_id,
                       "error" => ?inner,
                       "start_reason" => ?params.reason);
-                ActionError::action_failed(inner)
+                saga_action_failed(inner)
             }
         })
 }
@@ -904,7 +922,7 @@ async fn sis_ensure_registered_undo(
         .instance_id(instance_id.into_untyped_uuid())
         .fetch()
         .await
-        .map_err(ActionError::action_failed)?;
+        .map_err(saga_action_failed)?;
 
     // If the sled successfully unregistered the instance, allow the rest of
     // saga unwind to restore the instance record to its prior state (without
@@ -1022,7 +1040,7 @@ async fn sis_update_multicast_sled_id(
             Some(sled_id.into()),
         )
         .await
-        .map_err(ActionError::action_failed)?;
+        .map_err(saga_action_failed)?;
 
     Ok(())
 }
@@ -1100,7 +1118,7 @@ async fn sis_ensure_running(
             // the saga to unwind and restore the instance to the Stopped
             // state (matching what would happen if there were a failure
             // prior to this point).
-            Err(ActionError::action_failed(Error::from(inner)))
+            Err(saga_action_failed(Error::from(inner)))
         }
         Err(InstanceStateChangeError::Other(inner)) => {
             info!(osagactx.log(),
@@ -1109,7 +1127,7 @@ async fn sis_ensure_running(
                   "start_reason" => ?params.reason,
                   "error" => ?inner);
 
-            Err(ActionError::action_failed(inner))
+            Err(saga_action_failed(inner))
         }
     }
 }
@@ -1131,8 +1149,8 @@ mod test {
     use omicron_common::api::external::{
         ByteCount, IdentityMetadataCreateParams, InstanceCpuCount, Name,
     };
-    use omicron_common::api::internal::shared::SwitchLocation;
     use omicron_test_utils::dev::poll;
+    use sled_agent_types::early_networking::SwitchSlot;
     use uuid::Uuid;
 
     use super::*;
@@ -1214,7 +1232,6 @@ mod test {
             .vmm()
             .as_ref()
             .expect("running instance should have a vmm")
-            .runtime
             .state;
 
         assert_eq!(vmm_state, nexus_db_model::VmmState::Running);
@@ -1304,7 +1321,7 @@ mod test {
             .switch_port_get_id(
                 &opctx,
                 rack_id,
-                Name::try_from("switch0".to_string()).unwrap().into(),
+                SwitchSlot::Switch0,
                 Name::try_from("qsfp0".to_string()).unwrap().into(),
             )
             .await
@@ -1314,7 +1331,7 @@ mod test {
             .switch_port_get_id(
                 &opctx,
                 rack_id,
-                Name::try_from("switch1".to_string()).unwrap().into(),
+                SwitchSlot::Switch1,
                 Name::try_from("qsfp0".to_string()).unwrap().into(),
             )
             .await
@@ -1345,7 +1362,7 @@ mod test {
             .dendrite
             .write()
             .unwrap()
-            .remove(&SwitchLocation::Switch0)
+            .remove(&SwitchSlot::Switch0)
             .expect("there should be at least one dendrite running");
 
         let switch0_port = switch0_dpd.port;
@@ -1390,7 +1407,6 @@ mod test {
             .vmm()
             .as_ref()
             .expect("running instance should have a vmm")
-            .runtime
             .state;
 
         assert_eq!(vmm_state, nexus_db_model::VmmState::Running);
@@ -1398,7 +1414,7 @@ mod test {
         let port = {
             let dendrite_guard = cptestctx.dendrite.read().unwrap();
             dendrite_guard
-                .get(&SwitchLocation::Switch1)
+                .get(&SwitchSlot::Switch1)
                 .expect("two dendrites should be present in test context")
                 .port
         };
@@ -1451,7 +1467,7 @@ mod test {
 
         // Reuse the port number from the removed Switch0 to start a new dendrite instance
         let nexus_address = cptestctx.internal_client.bind_address;
-        let mgs = cptestctx.gateway.get(&SwitchLocation::Switch0).unwrap();
+        let mgs = cptestctx.gateway.get(&SwitchSlot::Switch0).unwrap();
         let mgs_address =
             SocketAddrV6::new(Ipv6Addr::LOCALHOST, mgs.port, 0, 0).into();
 
@@ -1470,7 +1486,7 @@ mod test {
             .dendrite
             .write()
             .unwrap()
-            .insert(SwitchLocation::Switch0, new_switch0);
+            .insert(SwitchSlot::Switch0, new_switch0);
 
         // Ensure that the nat entry for the address has made it onto the new switch0 dendrite.
         // This might take some time while the new dendrite comes online.
@@ -1600,7 +1616,6 @@ mod test {
             .vmm()
             .as_ref()
             .expect("running instance should have a vmm")
-            .runtime
             .state;
 
         assert_eq!(vmm_state, nexus_db_model::VmmState::Running);

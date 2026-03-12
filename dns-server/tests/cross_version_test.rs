@@ -28,7 +28,10 @@ mod v1_client {
     use std::collections::HashMap;
 
     progenitor::generate_api!(
-        spec = "../openapi/dns-server/dns-server-1.0.0-49359e.json",
+        spec = {
+            path = "git-stub-vcs/openapi/dns-server/dns-server-1.0.0-49359e.json",
+            relative_to = OutDir,
+        },
         interface = Positional,
         inner_type = slog::Logger,
         derives = [schemars::JsonSchema, Clone, Eq, PartialEq],

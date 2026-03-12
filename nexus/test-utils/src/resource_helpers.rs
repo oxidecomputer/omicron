@@ -14,6 +14,7 @@ use dropshot::Method;
 use dropshot::test_util::ClientTestContext;
 use http::StatusCode;
 use http::header;
+use illumos_utils::zpool::ZpoolHealth;
 use nexus_db_queries::db::fixed_data::silo::DEFAULT_SILO;
 use nexus_test_interface::NexusServer;
 use nexus_types::deployment::Blueprint;
@@ -817,28 +818,26 @@ pub async fn delete_snapshot(
     object_delete(client, &url).await
 }
 
-pub async fn create_alpine_project_image(
+pub async fn create_project_image(
     client: &ClientTestContext,
     project_name: &str,
     image_name: &str,
 ) -> image::Image {
-    let images_url = format!("/v1/images?project={}", project_name);
-    object_create(
+    let disk_name = image_name;
+    create_disk(client, project_name, disk_name).await;
+    let snapshot_name = image_name;
+    let snapshot =
+        create_snapshot(client, project_name, disk_name, snapshot_name).await;
+    let image = create_project_image_from_snapshot(
         client,
-        &images_url,
-        &image::ImageCreate {
-            identity: IdentityMetadataCreateParams {
-                name: image_name.parse().unwrap(),
-                description: String::from(
-                    "you can boot any image, as long as it's alpine",
-                ),
-            },
-            source: image::ImageSource::YouCanBootAnythingAsLongAsItsAlpine,
-            os: "alpine".to_string(),
-            version: "edge".to_string(),
-        },
+        project_name,
+        image_name,
+        snapshot.identity.id,
     )
-    .await
+    .await;
+    delete_disk(client, project_name, disk_name).await;
+    delete_snapshot(client, project_name, snapshot_name).await;
+    image
 }
 
 pub async fn create_project_image_from_snapshot(
@@ -869,7 +868,7 @@ pub async fn delete_image(
     project_name: &str,
     image_name: &str,
 ) {
-    let url = format!("/v1/image/{}?project={}", image_name, project_name);
+    let url = format!("/v1/images/{}?project={}", image_name, project_name);
     object_delete(client, &url).await
 }
 
@@ -1581,6 +1580,7 @@ pub struct TestZpool {
     pub id: ZpoolUuid,
     pub size: ByteCount,
     datasets: Vec<TestDataset>,
+    pub health: ZpoolHealth,
 }
 
 impl TestZpool {
@@ -1800,6 +1800,7 @@ impl<'a, N: NexusServer> DiskTest<'a, N> {
                         kind: DatasetKind::Crucible,
                     }],
                     Self::DEFAULT_ZPOOL_SIZE_GIB,
+                    ZpoolHealth::Online,
                 )
                 .await;
             }
@@ -1844,8 +1845,13 @@ impl<'a, N: NexusServer> DiskTest<'a, N> {
                     id: DatasetUuid::new_v4(),
                     kind: DatasetKind::Debug,
                 },
+                TestDataset {
+                    id: DatasetUuid::new_v4(),
+                    kind: DatasetKind::LocalStorageUnencrypted,
+                },
             ],
             gibibytes,
+            ZpoolHealth::Online,
         )
         .await
     }
@@ -1939,6 +1945,7 @@ impl<'a, N: NexusServer> DiskTest<'a, N> {
         zpool_id: ZpoolUuid,
         datasets: Vec<TestDataset>,
         gibibytes: u32,
+        zpool_health: ZpoolHealth,
     ) {
         let cptestctx = self.cptestctx;
 
@@ -1948,6 +1955,7 @@ impl<'a, N: NexusServer> DiskTest<'a, N> {
             id: zpool_id,
             size: ByteCount::from_gibibytes_u32(gibibytes),
             datasets,
+            health: zpool_health,
         };
 
         let disk_identity = DiskIdentity {
@@ -2004,6 +2012,7 @@ impl<'a, N: NexusServer> DiskTest<'a, N> {
             zpool.id,
             physical_disk_id,
             zpool.size.to_bytes(),
+            zpool.health,
         );
 
         for dataset in &zpool.datasets {

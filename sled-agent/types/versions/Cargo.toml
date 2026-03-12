@@ -18,6 +18,7 @@ indent_write.workspace = true
 async-trait.workspace = true
 bootstore.workspace = true
 omicron-common.workspace = true
+omicron-ledger.workspace = true
 omicron-passwords.workspace = true
 omicron-uuid-kinds.workspace = true
 omicron-workspace-hack.workspace = true
@@ -32,6 +33,7 @@ serde_human_bytes.workspace = true
 serde_json.workspace = true
 sha3.workspace = true
 sled-hardware-types.workspace = true
+slog-error-chain.workspace = true
 strum.workspace = true
 test-strategy = { workspace = true, optional = true }
 thiserror.workspace = true

@@ -12,18 +12,20 @@ use nexus_test_utils::http_testing::{AuthnMode, NexusRequest, RequestBuilder};
 use nexus_test_utils_macros::nexus_test;
 use nexus_types::external_api::networking::{
     Address, AddressConfig, AddressLotBlockCreate, AddressLotCreate,
-    BgpAnnounceSetCreate, BgpAnnouncementCreate, BgpConfigCreate,
+    BgpAnnounceSetCreate, BgpAnnouncementCreate, BgpConfigCreate, BgpPeer,
     BgpPeerConfig, LinkConfigCreate, LldpLinkConfigCreate, Route, RouteConfig,
     SwitchInterfaceConfigCreate, SwitchInterfaceKind, SwitchPortApplySettings,
-    SwitchPortSettingsCreate,
+    SwitchPortSettings, SwitchPortSettingsCreate,
 };
 use nexus_types::external_api::rack::Rack;
+use omicron_common::api::external::Name;
 use omicron_common::api::external::{
-    self, AddressLotKind, BgpPeer, IdentityMetadataCreateParams, LinkFec,
-    LinkSpeed, NameOrId, SwitchLocation, SwitchPort, SwitchPortSettings,
+    self, AddressLotKind, IdentityMetadataCreateParams, LinkFec, LinkSpeed,
+    NameOrId, SwitchPort,
 };
-use omicron_common::api::external::{ImportExportPolicy, Name};
 use oxnet::IpNet;
+use sled_agent_types::early_networking::ImportExportPolicy;
+use sled_agent_types::early_networking::SwitchSlot;
 
 type ControlPlaneTestContext =
     nexus_test_utils::ControlPlaneTestContext<omicron_nexus::Server>;
@@ -616,7 +618,7 @@ async fn test_port_settings_basic_v6_crud(ctx: &ControlPlaneTestContext) {
     assert_eq!(route.dst, IpNet::from_str("2000::/64").unwrap());
     assert_eq!(&route.gw.to_string(), "2000::1");
 
-    let mgd = &ctx.mgd[&SwitchLocation::Switch0];
+    let mgd = &ctx.mgd[&SwitchSlot::Switch0];
     let mgd_client = mg_admin_client::Client::new(
         &format!("http://[::1]:{}", mgd.port),
         ctx.logctx.log.clone(),

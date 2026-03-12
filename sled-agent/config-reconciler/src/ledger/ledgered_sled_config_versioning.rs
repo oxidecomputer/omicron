@@ -5,8 +5,8 @@
 //! Module for converting older formats of the sled configuration files.
 
 use camino::Utf8PathBuf;
-use omicron_common::ledger::Ledger;
-use omicron_common::ledger::Ledgerable;
+use omicron_ledger::Ledger;
+use omicron_ledger::Ledgerable;
 use serde::Deserialize;
 use serde::Serialize;
 use sled_agent_types::inventory::OmicronSledConfig;

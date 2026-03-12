@@ -29,17 +29,7 @@ progenitor::generate_api!(
     }),
     derives = [schemars::JsonSchema, PartialEq],
     patch = {
-        BfdPeerConfig = { derives = [Eq, Hash] },
-        BgpConfig = { derives = [Eq, Hash] },
-        BgpPeerConfig = { derives = [Eq, Hash] },
-        MaxPathConfig = { derives = [Eq, Hash] },
-        LldpPortConfig = { derives = [Eq, Hash, PartialOrd, Ord] },
-        TxEqConfig = { derives = [Eq, Hash] },
         OmicronPhysicalDiskConfig = { derives = [Eq, Hash, PartialOrd, Ord] },
-        PortConfig = { derives = [Eq, Hash] },
-        RouteConfig = { derives = [Eq, Hash] },
-        RouterLifetimeConfig = { derives = [Eq, Hash] },
-        UplinkAddressConfig = { derives = [Eq, Hash] },
         VirtualNetworkInterfaceHost = { derives = [Eq, Hash] },
     },
     crates = {
@@ -50,6 +40,9 @@ progenitor::generate_api!(
         Attestation = sled_agent_types_versions::latest::rot::Attestation,
         Baseboard = sled_agent_types_versions::latest::inventory::Baseboard,
         BaseboardId = sled_hardware_types::BaseboardId,
+        BfdPeerConfig = sled_agent_types_versions::latest::early_networking::BfdPeerConfig,
+        BgpConfig = sled_agent_types_versions::latest::early_networking::BgpConfig,
+        BgpPeerConfig = sled_agent_types_versions::latest::early_networking::BgpPeerConfig,
         ByteCount = omicron_common::api::external::ByteCount,
         CertificateChain = sled_agent_types_versions::latest::rot::CertificateChain,
         CommitRequest = trust_quorum_types::messages::CommitRequest,
@@ -62,6 +55,7 @@ progenitor::generate_api!(
         DiskManagementStatus = omicron_common::disk::DiskManagementStatus,
         DiskManagementError = omicron_common::disk::DiskManagementError,
         DiskVariant = omicron_common::disk::DiskVariant,
+        EarlyNetworkConfigBody = sled_agent_types_versions::latest::early_networking::EarlyNetworkConfigBody,
         Epoch = trust_quorum_types::types::Epoch,
         ExternalIpGatewayMap = omicron_common::api::internal::shared::ExternalIpGatewayMap,
         ExternalIpConfig = omicron_common::api::internal::shared::ExternalIpConfig,
@@ -69,12 +63,15 @@ progenitor::generate_api!(
         ExternalIpv6Config = omicron_common::api::internal::shared::ExternalIpv6Config,
         Generation = omicron_common::api::external::Generation,
         Hostname = omicron_common::api::external::Hostname,
-        ImportExportPolicy = omicron_common::api::external::ImportExportPolicy,
+        ImportExportPolicy = sled_agent_types_versions::latest::early_networking::ImportExportPolicy,
         Inventory = sled_agent_types_versions::latest::inventory::Inventory,
         InventoryDisk = sled_agent_types_versions::latest::inventory::InventoryDisk,
         InventoryZpool = sled_agent_types_versions::latest::inventory::InventoryZpool,
+        LldpAdminStatus = sled_agent_types_versions::latest::early_networking::LldpAdminStatus,
+        LldpPortConfig = sled_agent_types_versions::latest::early_networking::LldpPortConfig,
         LrtqUpgradeMsg = trust_quorum_types::messages::LrtqUpgradeMsg,
         MacAddr = omicron_common::api::external::MacAddr,
+        MaxPathConfig = sled_agent_types_versions::latest::early_networking::MaxPathConfig,
         Measurement = sled_agent_types_versions::latest::rot::Measurement,
         MeasurementLog = sled_agent_types_versions::latest::rot::MeasurementLog,
         MupdateOverrideBootInventory = sled_agent_types_versions::latest::inventory::MupdateOverrideBootInventory,
@@ -89,24 +86,31 @@ progenitor::generate_api!(
         OmicronZoneImageSource = sled_agent_types_versions::latest::inventory::OmicronZoneImageSource,
         OmicronZoneType = sled_agent_types_versions::latest::inventory::OmicronZoneType,
         OmicronZonesConfig = sled_agent_types_versions::latest::inventory::OmicronZonesConfig,
-        PortFec = omicron_common::api::internal::shared::PortFec,
-        PortSpeed = omicron_common::api::internal::shared::PortSpeed,
+        PortConfig = sled_agent_types_versions::latest::early_networking::PortConfig,
+        PortFec = sled_agent_types_versions::latest::early_networking::PortFec,
+        PortSpeed = sled_agent_types_versions::latest::early_networking::PortSpeed,
         PrepareAndCommitRequest = trust_quorum_types::messages::PrepareAndCommitRequest,
+        RackNetworkConfig = sled_agent_types_versions::latest::early_networking::RackNetworkConfig,
         ReconfigureMsg = trust_quorum_types::messages::ReconfigureMsg,
         ResolvedVpcFirewallRule = omicron_common::api::internal::shared::ResolvedVpcFirewallRule,
         ResolvedVpcRoute = omicron_common::api::internal::shared::ResolvedVpcRoute,
         ResolvedVpcRouteSet = omicron_common::api::internal::shared::ResolvedVpcRouteSet,
         Rot = sled_agent_types_versions::latest::rot::Rot,
+        RouteConfig = sled_agent_types_versions::latest::early_networking::RouteConfig,
         RouterId = omicron_common::api::internal::shared::RouterId,
+        RouterLifetimeConfig = sled_agent_types_versions::latest::early_networking::RouterLifetimeConfig,
         RouterTarget = omicron_common::api::internal::shared::RouterTarget,
         RouterVersion = omicron_common::api::internal::shared::RouterVersion,
         Sha3_256Digest = sled_agent_types_versions::latest::rot::Sha3_256Digest,
         SledRole = sled_agent_types_versions::latest::inventory::SledRole,
         SourceNatConfigGeneric = omicron_common::api::internal::shared::SourceNatConfigGeneric,
-        SwitchLocation = omicron_common::api::external::SwitchLocation,
+        SwitchSlot = sled_agent_types_versions::latest::early_networking::SwitchSlot,
         Threshold = trust_quorum_types::types::Threshold,
+        TxEqConfig = sled_agent_types_versions::latest::early_networking::TxEqConfig,
+        UplinkAddressConfig = sled_agent_types_versions::latest::early_networking::UplinkAddressConfig,
         Vni = omicron_common::api::external::Vni,
         VpcFirewallIcmpFilter = omicron_common::api::external::VpcFirewallIcmpFilter,
+        WriteNetworkConfigRequest = sled_agent_types_versions::latest::early_networking::WriteNetworkConfigRequest,
         ZpoolKind = omicron_common::zpool_name::ZpoolKind,
         ZpoolName = omicron_common::zpool_name::ZpoolName,
     }
@@ -156,7 +160,7 @@ impl From<types::VmmRuntimeState>
     fn from(s: types::VmmRuntimeState) -> Self {
         Self {
             state: s.state.into(),
-            generation: s.r#gen,
+            generation: s.gen_,
             time_updated: s.time_updated,
         }
     }
@@ -181,7 +185,7 @@ impl From<types::MigrationRuntimeState>
         Self {
             migration_id: s.migration_id,
             state: s.state.into(),
-            generation: s.r#gen,
+            generation: s.gen_,
             time_updated: s.time_updated,
         }
     }
@@ -316,7 +320,6 @@ pub trait TestInterfaces {
         id: PropolisUuid,
         params: SimulateMigrationSource,
     );
-    async fn disk_finish_transition(&self, id: Uuid);
 }
 
 #[async_trait]
@@ -327,7 +330,7 @@ impl TestInterfaces for Client {
         let url = format!("{}/vmms/{}/poke-single-step", baseurl, id);
         client
             .post(url)
-            .api_version_header(self.api_version())
+            .api_version_header(Client::api_version())
             .send()
             .await
             .expect("instance_single_step() failed unexpectedly");
@@ -346,20 +349,12 @@ impl TestInterfaces for Client {
         let baseurl = self.baseurl();
         let client = self.client();
         let url = format!("{}/vmms/{}/poke", baseurl, id);
-        client.post(url).api_version_header(self.api_version()).send().await?;
-        Ok(())
-    }
-
-    async fn disk_finish_transition(&self, id: Uuid) {
-        let baseurl = self.baseurl();
-        let client = self.client();
-        let url = format!("{}/disks/{}/poke", baseurl, id);
         client
             .post(url)
-            .api_version_header(self.api_version())
+            .api_version_header(Client::api_version())
             .send()
-            .await
-            .expect("disk_finish_transition() failed unexpectedly");
+            .await?;
+        Ok(())
     }
 
     async fn vmm_simulate_migration_source(
@@ -372,7 +367,7 @@ impl TestInterfaces for Client {
         let url = format!("{baseurl}/vmms/{id}/sim-migration-source");
         client
             .post(url)
-            .api_version_header(self.api_version())
+            .api_version_header(Client::api_version())
             .json(&params)
             .send()
             .await

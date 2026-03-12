@@ -622,6 +622,7 @@ mod test {
     use chrono::{Duration, Utc};
     use futures::StreamExt;
     use futures::stream;
+    use illumos_utils::zpool::ZpoolHealth;
     use nexus_config::RegionAllocationStrategy;
     use nexus_db_fixed_data::silo::DEFAULT_SILO;
     use nexus_db_lookup::LookupPath;
@@ -854,6 +855,74 @@ mod test {
         logctx.cleanup_successful();
     }
 
+    #[tokio::test]
+    async fn test_session_cleanup_batch() {
+        let logctx = dev::test_setup_log("test_session_cleanup_batch");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+        let authn_opctx = OpContext::for_background(
+            logctx.log.new(o!("component" => "TestExternalAuthn")),
+            Arc::new(authz::Authz::new(&logctx.log)),
+            authn::Context::external_authn(),
+            Arc::clone(&datastore) as Arc<dyn nexus_auth::storage::Storage>,
+        );
+
+        let silo_user_id = SiloUserUuid::new_v4();
+        let now = Utc::now();
+
+        // Create 3 old sessions and 1 recent session
+        for i in 0..3 {
+            let session = ConsoleSession::new_with_times(
+                format!("old_{i}"),
+                silo_user_id,
+                now - Duration::hours(48 + i),
+                now - Duration::hours(48 + i),
+            );
+            datastore.session_create(&authn_opctx, session).await.unwrap();
+        }
+        let recent = ConsoleSession::new_with_times(
+            "recent".to_string(),
+            silo_user_id,
+            now - Duration::hours(1),
+            now - Duration::hours(1),
+        );
+        datastore.session_create(&authn_opctx, recent).await.unwrap();
+
+        let cutoff = now - Duration::hours(24);
+
+        // A cutoff in the distant past deletes nothing
+        let deleted = datastore
+            .session_cleanup_batch(opctx, now - Duration::hours(1000), 100)
+            .await
+            .unwrap();
+        assert_eq!(deleted, 0);
+
+        // Limit is respected: ask to delete at most 2
+        let deleted =
+            datastore.session_cleanup_batch(opctx, cutoff, 2).await.unwrap();
+        assert_eq!(deleted, 2);
+
+        // One old session remains
+        let deleted =
+            datastore.session_cleanup_batch(opctx, cutoff, 100).await.unwrap();
+        assert_eq!(deleted, 1);
+
+        // Nothing left to delete
+        let deleted =
+            datastore.session_cleanup_batch(opctx, cutoff, 100).await.unwrap();
+        assert_eq!(deleted, 0);
+
+        // The recent session is still there
+        let (_, fetched) = datastore
+            .session_lookup_by_token(&authn_opctx, "recent".to_string())
+            .await
+            .unwrap();
+        assert_eq!(fetched.token, "recent");
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
     // Creates a test sled, returns its UUID.
     async fn create_test_sled(datastore: &DataStore) -> SledUuid {
         let sled_id = SledUuid::new_v4();
@@ -864,6 +933,10 @@ mod test {
 
     fn test_zpool_size() -> ByteCount {
         ByteCount::from_gibibytes_u32(100)
+    }
+
+    fn test_zpool_default_health() -> ZpoolHealth {
+        ZpoolHealth::Online
     }
 
     const TEST_VENDOR: &str = "test-vendor";
@@ -952,6 +1025,7 @@ mod test {
             id: zpool_id.into(),
             sled_id: to_db_typed_uuid(sled_id),
             total_size: test_zpool_size().into(),
+            health: test_zpool_default_health().into(),
         };
         diesel::insert_into(dsl::inv_zpool)
             .values(inv_pool)

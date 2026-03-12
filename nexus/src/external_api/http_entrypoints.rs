@@ -5,6 +5,7 @@
 //! Handler functions (entrypoints) for external HTTP APIs
 
 use super::console_api;
+use crate::app::SetTargetReleaseIntent;
 use crate::app::external_endpoints::authority_for_request;
 use crate::app::support_bundles::SupportBundleQueryType;
 use crate::context::{ApiContext, audit_and_time};
@@ -32,7 +33,6 @@ use http::{Response, StatusCode, header};
 use ipnetwork::IpNetwork;
 use nexus_db_lookup::lookup::ImageLookup;
 use nexus_db_lookup::lookup::ImageParentLookup;
-use nexus_db_model::TargetReleaseSource;
 use nexus_db_queries::authn::external::session_cookie::{self, SessionStore};
 use nexus_db_queries::authz;
 use nexus_db_queries::db;
@@ -76,14 +76,7 @@ use omicron_common::api::external::AddressLotBlock;
 use omicron_common::api::external::AddressLotCreateResponse;
 use omicron_common::api::external::AddressLotViewResponse;
 use omicron_common::api::external::AffinityGroupMember;
-use omicron_common::api::external::AggregateBgpMessageHistory;
 use omicron_common::api::external::AntiAffinityGroupMember;
-use omicron_common::api::external::BgpAnnounceSet;
-use omicron_common::api::external::BgpAnnouncement;
-use omicron_common::api::external::BgpConfig;
-use omicron_common::api::external::BgpExported;
-use omicron_common::api::external::BgpImported;
-use omicron_common::api::external::BgpPeerStatus;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Disk;
 use omicron_common::api::external::Error;
@@ -99,7 +92,6 @@ use omicron_common::api::external::RouterRoute;
 use omicron_common::api::external::RouterRouteKind;
 use omicron_common::api::external::ServiceIcmpConfig;
 use omicron_common::api::external::SwitchPort;
-use omicron_common::api::external::SwitchPortSettings;
 use omicron_common::api::external::SwitchPortSettingsIdentity;
 use omicron_common::api::external::VpcFirewallRuleUpdateParams;
 use omicron_common::api::external::VpcFirewallRules;
@@ -129,6 +121,7 @@ use propolis_client::support::tungstenite::protocol::{
 };
 use range_requests::PotentialRange;
 use ref_cast::RefCast;
+use sled_agent_types::early_networking::SwitchSlot;
 use trust_quorum_types::types::Epoch;
 
 type NexusApiDescription = ApiDescription<ApiContext>;
@@ -1222,10 +1215,10 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 project::ProjectSelector { project: path.project };
             let project_lookup =
                 nexus.project_lookup(&opctx, project_selector)?;
-            nexus
+            let policy = nexus
                 .project_update_policy(&opctx, &project_lookup, &new_policy)
                 .await?;
-            Ok(HttpResponseOk(new_policy))
+            Ok(HttpResponseOk(policy))
         })
         .await
     }
@@ -4008,12 +4001,15 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 "invalid ip address".into(),
             )),
         }?;
+        // TODO-correctness enum in external API
+        let switch_slot =
+            SwitchSlot::parse_from_external_api(&path.switch_location)?;
         audit_and_time(&rqctx, |opctx, nexus| async move {
             nexus
                 .loopback_address_delete(
                     &opctx,
                     path.rack_id,
-                    path.switch_location.into(),
+                    switch_slot,
                     addr.into(),
                 )
                 .await?;
@@ -4056,12 +4052,13 @@ impl NexusExternalApi for NexusExternalApiImpl {
     async fn networking_switch_port_settings_create(
         rqctx: RequestContext<ApiContext>,
         new_settings: TypedBody<networking::SwitchPortSettingsCreate>,
-    ) -> Result<HttpResponseCreated<SwitchPortSettings>, HttpError> {
+    ) -> Result<HttpResponseCreated<networking::SwitchPortSettings>, HttpError>
+    {
         audit_and_time(&rqctx, |opctx, nexus| async move {
             let params = new_settings.into_inner();
             let result =
                 nexus.switch_port_settings_post(&opctx, params).await?;
-            let settings: SwitchPortSettings = result.into();
+            let settings: networking::SwitchPortSettings = result.into();
             Ok(HttpResponseCreated(settings))
         })
         .await
@@ -4120,7 +4117,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
     async fn networking_switch_port_settings_view(
         rqctx: RequestContext<ApiContext>,
         path_params: Path<networking::SwitchPortSettingsInfoSelector>,
-    ) -> Result<HttpResponseOk<SwitchPortSettings>, HttpError> {
+    ) -> Result<HttpResponseOk<networking::SwitchPortSettings>, HttpError> {
         let apictx = rqctx.context();
         let handler = async {
             let nexus = &apictx.context.nexus;
@@ -4179,15 +4176,13 @@ impl NexusExternalApi for NexusExternalApiImpl {
             let nexus = &apictx.context.nexus;
             let query = query_params.into_inner();
             let path = path_params.into_inner();
+            let switch_slot =
+                SwitchSlot::parse_from_external_api(&query.switch_location)?;
             let opctx =
                 crate::context::op_context_for_external_api(&rqctx).await?;
             Ok(HttpResponseOk(
                 nexus
-                    .switch_port_status(
-                        &opctx,
-                        query.switch_location,
-                        path.port,
-                    )
+                    .switch_port_status(&opctx, switch_slot, path.port)
                     .await?,
             ))
         };
@@ -4242,13 +4237,11 @@ impl NexusExternalApi for NexusExternalApiImpl {
             let path = path_params.into_inner();
             let opctx =
                 crate::context::op_context_for_external_api(&rqctx).await?;
+            // TODO-correctness enum in external API
+            let switch_slot =
+                SwitchSlot::parse_from_external_api(&query.switch_location)?;
             let settings = nexus
-                .lldp_config_get(
-                    &opctx,
-                    query.rack_id,
-                    query.switch_location,
-                    path.port,
-                )
+                .lldp_config_get(&opctx, query.rack_id, switch_slot, path.port)
                 .await?;
             Ok(HttpResponseOk(settings))
         };
@@ -4269,11 +4262,14 @@ impl NexusExternalApi for NexusExternalApiImpl {
             let query = query_params.into_inner();
             let path = path_params.into_inner();
             let config = config.into_inner();
+            // TODO-correctness enum in external API
+            let switch_slot =
+                SwitchSlot::parse_from_external_api(&query.switch_location)?;
             nexus
                 .lldp_config_update(
                     &opctx,
                     query.rack_id,
-                    query.switch_location,
+                    switch_slot,
                     path.port,
                     config,
                 )
@@ -4299,13 +4295,16 @@ impl NexusExternalApi for NexusExternalApiImpl {
             let nexus = &apictx.context.nexus;
             let opctx =
                 crate::context::op_context_for_external_api(&rqctx).await?;
+            // TODO-correctness enum in external API
+            let switch_slot =
+                SwitchSlot::parse_from_external_api(&path.switch_location)?;
             let neighbors = nexus
                 .lldp_neighbors_get(
                     &opctx,
                     &prev,
                     limit,
                     path.rack_id,
-                    &path.switch_location,
+                    switch_slot,
                     &path.port,
                 )
                 .await?;
@@ -4326,11 +4325,11 @@ impl NexusExternalApi for NexusExternalApiImpl {
     async fn networking_bgp_config_create(
         rqctx: RequestContext<ApiContext>,
         config: TypedBody<networking::BgpConfigCreate>,
-    ) -> Result<HttpResponseCreated<BgpConfig>, HttpError> {
+    ) -> Result<HttpResponseCreated<networking::BgpConfig>, HttpError> {
         audit_and_time(&rqctx, |opctx, nexus| async move {
             let config = config.into_inner();
             let result = nexus.bgp_config_create(&opctx, &config).await?;
-            Ok(HttpResponseCreated::<BgpConfig>(result.try_into()?))
+            Ok(HttpResponseCreated::<networking::BgpConfig>(result.try_into()?))
         })
         .await
     }
@@ -4338,7 +4337,8 @@ impl NexusExternalApi for NexusExternalApiImpl {
     async fn networking_bgp_config_list(
         rqctx: RequestContext<ApiContext>,
         query_params: Query<PaginatedByNameOrId>,
-    ) -> Result<HttpResponseOk<ResultsPage<BgpConfig>>, HttpError> {
+    ) -> Result<HttpResponseOk<ResultsPage<networking::BgpConfig>>, HttpError>
+    {
         let apictx = rqctx.context();
         let handler = async {
             let nexus = &apictx.context.nexus;
@@ -4371,7 +4371,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
     //TODO pagination? the normal by-name/by-id stuff does not work here
     async fn networking_bgp_status(
         rqctx: RequestContext<ApiContext>,
-    ) -> Result<HttpResponseOk<Vec<BgpPeerStatus>>, HttpError> {
+    ) -> Result<HttpResponseOk<Vec<networking::BgpPeerStatus>>, HttpError> {
         let apictx = rqctx.context();
         let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
         let handler = async {
@@ -4388,7 +4388,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
 
     async fn networking_bgp_exported(
         rqctx: RequestContext<ApiContext>,
-    ) -> Result<HttpResponseOk<Vec<BgpExported>>, HttpError> {
+    ) -> Result<HttpResponseOk<Vec<networking::BgpExported>>, HttpError> {
         let apictx = rqctx.context();
         let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
         let handler = async {
@@ -4406,14 +4406,17 @@ impl NexusExternalApi for NexusExternalApiImpl {
     async fn networking_bgp_message_history(
         rqctx: RequestContext<ApiContext>,
         query_params: Query<networking::BgpRouteSelector>,
-    ) -> Result<HttpResponseOk<AggregateBgpMessageHistory>, HttpError> {
+    ) -> Result<HttpResponseOk<networking::AggregateBgpMessageHistory>, HttpError>
+    {
         let apictx = rqctx.context();
         let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
         let handler = async {
             let nexus = &apictx.context.nexus;
             let sel = query_params.into_inner();
             let result = nexus.bgp_message_history(&opctx, &sel).await?;
-            Ok(HttpResponseOk(AggregateBgpMessageHistory::new(result)))
+            Ok(HttpResponseOk(networking::AggregateBgpMessageHistory::new(
+                result,
+            )))
         };
         apictx
             .context
@@ -4450,7 +4453,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
     async fn networking_bgp_imported(
         rqctx: RequestContext<ApiContext>,
         query_params: Query<networking::BgpRouteSelector>,
-    ) -> Result<HttpResponseOk<Vec<BgpImported>>, HttpError> {
+    ) -> Result<HttpResponseOk<Vec<networking::BgpImported>>, HttpError> {
         let apictx = rqctx.context();
         let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
         let handler = async {
@@ -4481,11 +4484,11 @@ impl NexusExternalApi for NexusExternalApiImpl {
     async fn networking_bgp_announce_set_update(
         rqctx: RequestContext<ApiContext>,
         config: TypedBody<networking::BgpAnnounceSetCreate>,
-    ) -> Result<HttpResponseOk<BgpAnnounceSet>, HttpError> {
+    ) -> Result<HttpResponseOk<networking::BgpAnnounceSet>, HttpError> {
         audit_and_time(&rqctx, |opctx, nexus| async move {
             let config = config.into_inner();
             let result = nexus.bgp_update_announce_set(&opctx, &config).await?;
-            Ok(HttpResponseOk::<BgpAnnounceSet>(result.0.into()))
+            Ok(HttpResponseOk::<networking::BgpAnnounceSet>(result.0.into()))
         })
         .await
     }
@@ -4493,7 +4496,8 @@ impl NexusExternalApi for NexusExternalApiImpl {
     async fn networking_bgp_announce_set_list(
         rqctx: RequestContext<ApiContext>,
         query_params: Query<PaginatedByNameOrId>,
-    ) -> Result<HttpResponseOk<Vec<BgpAnnounceSet>>, HttpError> {
+    ) -> Result<HttpResponseOk<Vec<networking::BgpAnnounceSet>>, HttpError>
+    {
         let apictx = rqctx.context();
         let handler = async {
             let nexus = &apictx.context.nexus;
@@ -4533,7 +4537,8 @@ impl NexusExternalApi for NexusExternalApiImpl {
     async fn networking_bgp_announcement_list(
         rqctx: RequestContext<ApiContext>,
         path_params: Path<networking::BgpAnnounceSetSelector>,
-    ) -> Result<HttpResponseOk<Vec<BgpAnnouncement>>, HttpError> {
+    ) -> Result<HttpResponseOk<Vec<networking::BgpAnnouncement>>, HttpError>
+    {
         let apictx = rqctx.context();
         let handler = async {
             let nexus = &apictx.context.nexus;
@@ -7144,70 +7149,29 @@ impl NexusExternalApi for NexusExternalApiImpl {
         body: TypedBody<update::SetTargetReleaseParams>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
         audit_and_time(&rqctx, |opctx, nexus| async move {
-            let params = body.into_inner();
-            let system_version = params.system_version;
-
-            // We don't need a transaction for the following queries because
-            // (1) the generation numbers provide optimistic concurrency control:
-            // if another request were to successfully update the target release
-            // between when we fetch it here and when we try to update it below,
-            // our update would fail because the next generation number would
-            // would already be taken; and
-            // (2) we assume that TUF repo depot records are immutable, i.e.,
-            // system version X.Y.Z won't designate different repos over time.
-            let current_target_release =
-                nexus.datastore().target_release_get_current(&opctx).await?;
-            let current_target_release_source = current_target_release
-                .release_source()
-                .map_err(|err| Error::internal_error(&format!("{err:#}")))?;
-
-            match current_target_release_source {
-                TargetReleaseSource::Unspecified => {
-                    // There is no current target release; it's always fine to
-                    // set the first one.
-                }
-                TargetReleaseSource::SystemVersion(tuf_repo_id) => {
-                    // Disallow downgrades.
-                    let current_version = nexus
-                        .datastore()
-                        .tuf_repo_get_version(&opctx, &tuf_repo_id)
-                        .await?;
-                    if !is_new_target_release_version_allowed(
-                        &current_version,
-                        &system_version,
-                    ) {
-                        return Err(Error::invalid_request(format!(
-                            "Requested target release ({system_version}) \
-                             must not be older than current target release \
-                             ({current_version})."
-                        ))
-                        .into());
-                    }
-
-                    // Ensure we don't change the target release mid-update.
-                    nexus
-                        .validate_target_release_change_allowed(
-                            &opctx,
-                            &current_version,
-                        )
-                        .await?;
-                }
-            }
-
-            // Fetch the TUF repo metadata and update the target release.
-            let tuf_repo_id = nexus
-                .datastore()
-                .tuf_repo_get_by_version(&opctx, system_version.into())
-                .await?
-                .id;
-            let next_target_release =
-                nexus_db_model::TargetRelease::new_system_version(
-                    &current_target_release,
-                    tuf_repo_id,
-                );
             nexus
-                .datastore()
-                .target_release_insert(&opctx, next_target_release)
+                .target_release_update(
+                    &opctx,
+                    body.into_inner(),
+                    SetTargetReleaseIntent::Update,
+                )
+                .await?;
+            Ok(HttpResponseUpdatedNoContent())
+        })
+        .await
+    }
+
+    async fn system_update_recovery_finish(
+        rqctx: RequestContext<Self::Context>,
+        body: TypedBody<update::SetTargetReleaseParams>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        audit_and_time(&rqctx, |opctx, nexus| async move {
+            nexus
+                .target_release_update(
+                    &opctx,
+                    body.into_inner(),
+                    SetTargetReleaseIntent::RecoverFromMupdate,
+                )
                 .await?;
             Ok(HttpResponseUpdatedNoContent())
         })
@@ -8954,63 +8918,5 @@ impl NexusExternalApi for NexusExternalApiImpl {
             }))
         })
         .await
-    }
-}
-
-fn is_new_target_release_version_allowed(
-    current_version: &semver::Version,
-    proposed_new_version: &semver::Version,
-) -> bool {
-    let mut current_version = current_version.clone();
-    let mut proposed_new_version = proposed_new_version.clone();
-
-    // Strip out the build metadata; this allows upgrading from one commit on
-    // the same major/minor/release/patch to another. This isn't always right -
-    // we shouldn't allow downgrading to an earlier commit - but we don't have
-    // enough information in the version strings today to determine that. See
-    // <https://github.com/oxidecomputer/omicron/issues/9071>.
-    current_version.build = semver::BuildMetadata::EMPTY;
-    proposed_new_version.build = semver::BuildMetadata::EMPTY;
-
-    proposed_new_version >= current_version
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_is_new_target_release_version_allowed() {
-        // Updating between versions that differ only in build metadata should
-        // be allowed in both directions.
-        let v1: semver::Version = "16.0.0-0.ci+git544f608e05a".parse().unwrap();
-        let v2: semver::Version = "16.0.0-0.ci+git8571be38c0b".parse().unwrap();
-        assert!(is_new_target_release_version_allowed(&v1, &v2));
-        assert!(is_new_target_release_version_allowed(&v2, &v1));
-
-        // Updating from a version to itself is always allowed. (This is
-        // important for clearing mupdate overrides.)
-        assert!(is_new_target_release_version_allowed(&v1, &v1));
-        assert!(is_new_target_release_version_allowed(&v2, &v2));
-
-        // We should be able to upgrade but not downgrade if the versions differ
-        // in major/minor/patch/prerelease.
-        for (v1, v2) in [
-            ("15.0.0-0.ci+git12345", "16.0.0-0.ci+git12345"),
-            ("16.0.0-0.ci+git12345", "16.1.0-0.ci+git12345"),
-            ("16.1.0-0.ci+git12345", "16.1.1-0.ci+git12345"),
-            ("16.1.1-0.ci+git12345", "16.1.1-1.ci+git12345"),
-        ] {
-            let v1: semver::Version = v1.parse().unwrap();
-            let v2: semver::Version = v2.parse().unwrap();
-            assert!(
-                is_new_target_release_version_allowed(&v1, &v2),
-                "should be allowed to upgrade from {v1} to {v2}"
-            );
-            assert!(
-                !is_new_target_release_version_allowed(&v2, &v1),
-                "should not be allowed to upgrade from {v1} to {v2}"
-            );
-        }
     }
 }

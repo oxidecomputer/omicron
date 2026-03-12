@@ -41,8 +41,7 @@ pub fn is_retryable(error: &DnsError) -> bool {
         | DnsError::UnexpectedResponse(_)
         | DnsError::InvalidUpgrade(_)
         | DnsError::ResponseBodyError(_)
-        | DnsError::PreHookError(_)
-        | DnsError::PostHookError(_) => return false,
+        | DnsError::Custom(_) => return false,
         DnsError::ErrorResponse(response_value) => response_value,
     };
 

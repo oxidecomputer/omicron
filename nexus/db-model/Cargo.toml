@@ -23,6 +23,7 @@ hex.workspace = true
 iddqd.workspace = true
 ipnetwork.workspace = true
 itertools.workspace = true
+illumos-utils.workspace = true
 macaddr.workspace = true
 newtype_derive.workspace = true
 omicron-cockroach-metrics.workspace = true
@@ -64,6 +65,7 @@ tufaceous-artifact.workspace = true
 [dev-dependencies]
 camino-tempfile.workspace = true
 expectorate.workspace = true
-regex.workspace = true
 proptest.workspace = true
+regex.workspace = true
+sqlparser.workspace = true
 test-strategy.workspace = true

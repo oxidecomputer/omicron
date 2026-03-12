@@ -20,6 +20,7 @@ pub use ::backoff::future::{retry, retry_notify};
 pub use ::backoff::{
     ExponentialBackoff, ExponentialBackoffBuilder, Notify, backoff::Backoff,
 };
+use progenitor_extras::retry::IndefiniteBackoffParams;
 
 /// A helper function which modifies what information is tracked within the
 /// callback of the notify function.
@@ -99,6 +100,25 @@ pub fn retry_policy_local() -> ::backoff::ExponentialBackoff {
         .with_initial_interval(Duration::from_millis(50))
         .with_max_interval(Duration::from_secs(1))
         .build()
+}
+
+/// Return an indefinite backoff policy for querying internal services.
+///
+/// This policy makes attempts to retry under one second, but backs off
+/// significantly to avoid overloading critical services. It retries transient
+/// failures indefinitely.
+///
+/// The base delay is set to 167ms rather than 250ms to compensate for
+/// `backon`'s additive jitter, which distributes each delay `d` over
+/// `[d, 2d)` (mean = 1.5d). With a 167ms base, the mean first retry
+/// delay is ~250ms.
+pub fn backon_retry_policy_internal_service() -> IndefiniteBackoffParams {
+    IndefiniteBackoffParams {
+        factor: 2.0,
+        min_delay: Duration::from_millis(167),
+        max_delay: Duration::from_secs(60 * 3),
+        jitter: true,
+    }
 }
 
 fn backoff_builder() -> ::backoff::ExponentialBackoffBuilder {

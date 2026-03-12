@@ -23,9 +23,9 @@ use dropshot::RequestContext;
 use dropshot::StreamingBody;
 use dropshot::TypedBody;
 use internal_dns_resolver::Resolver;
-use omicron_common::api::internal::shared::SwitchLocation;
 use omicron_uuid_kinds::RackInitUuid;
 use omicron_uuid_kinds::RackResetUuid;
+use sled_agent_types::early_networking::SwitchSlot;
 use sled_hardware_types::Baseboard;
 use slog::o;
 use std::collections::BTreeMap;
@@ -792,10 +792,10 @@ impl WicketdApi for WicketdApiImpl {
         let rqctx = rqctx.context();
         let options = body.into_inner();
 
-        let our_switch_location = match rqctx.local_switch_id().await {
+        let our_switch_slot = match rqctx.local_switch_id().await {
             Some(SpIdentifier { slot, type_: SpType::Switch }) => match slot {
-                0 => SwitchLocation::Switch0,
-                1 => SwitchLocation::Switch1,
+                0 => SwitchSlot::Switch0,
+                1 => SwitchSlot::Switch1,
                 _ => {
                     return Err(HttpError::for_internal_error(format!(
                         "unexpected switch slot {slot}"
@@ -809,8 +809,8 @@ impl WicketdApi for WicketdApiImpl {
             }
             None => {
                 return Err(HttpError::for_unavail(
-                    Some("UnknownSwitchLocation".to_string()),
-                    "local switch location not yet determined".to_string(),
+                    Some("UnknownSwitchSlot".to_string()),
+                    "local switch slot not yet determined".to_string(),
                 ));
             }
         };
@@ -843,7 +843,7 @@ impl WicketdApi for WicketdApiImpl {
                 network_config,
                 dns_servers,
                 ntp_servers,
-                our_switch_location,
+                our_switch_slot,
                 options.dns_name_to_query,
             )
             .await

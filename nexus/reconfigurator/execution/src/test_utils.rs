@@ -99,25 +99,20 @@ pub fn overridables_for_test(
         omicron_nexus::Server,
     >,
 ) -> Overridables {
-    use omicron_common::api::external::SwitchLocation;
+    use sled_agent_types::early_networking::SwitchSlot;
 
     let mut overrides = Overridables::default();
     let scrimlets = [
-        (nexus_test_utils::SLED_AGENT_UUID, SwitchLocation::Switch0),
-        (nexus_test_utils::SLED_AGENT2_UUID, SwitchLocation::Switch1),
+        (nexus_test_utils::SLED_AGENT_UUID, SwitchSlot::Switch0),
+        (nexus_test_utils::SLED_AGENT2_UUID, SwitchSlot::Switch1),
     ];
-    for (id_str, switch_location) in scrimlets {
+    for (id_str, switch_slot) in scrimlets {
         let sled_id = id_str.parse().unwrap();
         let ip = Ipv6Addr::LOCALHOST;
-        let mgs_port = cptestctx.gateway.get(&switch_location).unwrap().port;
-        let dendrite_port = cptestctx
-            .dendrite
-            .read()
-            .unwrap()
-            .get(&switch_location)
-            .unwrap()
-            .port;
-        let mgd_port = cptestctx.mgd.get(&switch_location).unwrap().port;
+        let mgs_port = cptestctx.gateway.get(&switch_slot).unwrap().port;
+        let dendrite_port =
+            cptestctx.dendrite.read().unwrap().get(&switch_slot).unwrap().port;
+        let mgd_port = cptestctx.mgd.get(&switch_slot).unwrap().port;
         overrides.override_switch_zone_ip(sled_id, ip);
         overrides.override_dendrite_port(sled_id, dendrite_port);
         overrides.override_mgs_port(sled_id, mgs_port);

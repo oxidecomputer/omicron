@@ -4,10 +4,10 @@
 
 //! Uplink-related types for the Sled Agent API.
 
+use super::early_networking::UplinkAddressConfig;
 use crate::v1;
-use omicron_common::api::internal::shared::rack_init::v1::LldpPortConfig;
-use omicron_common::api::internal::shared::rack_init::v1::TxEqConfig;
-use omicron_common::api::internal::shared::rack_init::v2::UplinkAddressConfig;
+use crate::v1::early_networking::LldpPortConfig;
+use crate::v1::early_networking::TxEqConfig;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 

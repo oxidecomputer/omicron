@@ -6,6 +6,7 @@
 
 use futures::Future;
 use gateway_client::Client;
+use gateway_client::ClientInfo as _;
 use gateway_client::HostPhase1HashError;
 use gateway_client::types::SpComponentResetError;
 use slog::Logger;

@@ -21,6 +21,8 @@ pub use gateway_types::rot::RotSlot;
 use iddqd::IdOrdItem;
 use iddqd::IdOrdMap;
 use iddqd::id_upcast;
+use illumos_utils::svcs::SvcsInMaintenanceResult;
+use illumos_utils::zpool::ZpoolHealth;
 use omicron_common::api::external::ByteCount;
 pub use omicron_common::api::internal::shared::NetworkInterface;
 pub use omicron_common::api::internal::shared::NetworkInterfaceKind;
@@ -38,7 +40,6 @@ use serde_with::serde_as;
 use sled_agent_types_versions::latest::inventory::ConfigReconcilerInventory;
 use sled_agent_types_versions::latest::inventory::ConfigReconcilerInventoryResult;
 use sled_agent_types_versions::latest::inventory::ConfigReconcilerInventoryStatus;
-use sled_agent_types_versions::latest::inventory::HealthMonitorInventory;
 use sled_agent_types_versions::latest::inventory::InventoryDataset;
 use sled_agent_types_versions::latest::inventory::InventoryDisk;
 use sled_agent_types_versions::latest::inventory::InventoryZpool;
@@ -568,11 +569,17 @@ pub struct Zpool {
     pub time_collected: DateTime<Utc>,
     pub id: ZpoolUuid,
     pub total_size: ByteCount,
+    pub health: ZpoolHealth,
 }
 
 impl Zpool {
     pub fn new(time_collected: DateTime<Utc>, pool: InventoryZpool) -> Zpool {
-        Zpool { time_collected, id: pool.id, total_size: pool.total_size }
+        Zpool {
+            time_collected,
+            id: pool.id,
+            total_size: pool.total_size,
+            health: pool.health,
+        }
     }
 }
 
@@ -643,7 +650,7 @@ pub struct SledAgent {
     pub reconciler_status: ConfigReconcilerInventoryStatus,
     pub last_reconciliation: Option<ConfigReconcilerInventory>,
     pub file_source_resolver: OmicronFileSourceResolverInventory,
-    pub health_monitor: HealthMonitorInventory,
+    pub smf_services_in_maintenance: Result<SvcsInMaintenanceResult, String>,
     pub reference_measurements: IdOrdMap<SingleMeasurementInventory>,
 }
 

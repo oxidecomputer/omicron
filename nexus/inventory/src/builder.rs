@@ -675,7 +675,7 @@ impl CollectionBuilder {
             reconciler_status: inventory.reconciler_status,
             last_reconciliation: inventory.last_reconciliation,
             file_source_resolver: inventory.file_source_resolver,
-            health_monitor: inventory.health_monitor,
+            smf_services_in_maintenance: inventory.smf_services_in_maintenance,
             reference_measurements: inventory.reference_measurements,
         };
 

@@ -11,7 +11,6 @@ use iddqd::IdOrdItem;
 use iddqd::IdOrdMap;
 use iddqd::id_upcast;
 use omicron_common::api::external::Generation;
-use omicron_common::api::external::SwitchLocation;
 use omicron_uuid_kinds::AlertReceiverUuid;
 use omicron_uuid_kinds::AlertUuid;
 use omicron_uuid_kinds::BlueprintUuid;
@@ -24,6 +23,7 @@ use omicron_uuid_kinds::WebhookDeliveryUuid;
 use semver::Version;
 use serde::Deserialize;
 use serde::Serialize;
+use sled_agent_types::early_networking::SwitchSlot;
 use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::collections::VecDeque;
@@ -945,7 +945,7 @@ pub struct AttachedSubnetManagerStatus {
     /// Error reaching the database to fetch attached subnets.
     pub db_error: Option<String>,
     /// Details about attached subnets sent to Dendrite instances.
-    pub dendrite: HashMap<SwitchLocation, DendriteSubnetDetails>,
+    pub dendrite: HashMap<SwitchSlot, DendriteSubnetDetails>,
     /// Details about attached subnets sent to sleds.
     pub sled: HashMap<SledUuid, SledSubnetDetails>,
 }
@@ -971,6 +971,19 @@ pub struct SledSubnetDetails {
     pub n_subnets: usize,
     /// Errors encountered when sending attached subnets.
     pub errors: Vec<String>,
+}
+
+/// The status of a `session_cleanup` background task activation.
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+pub struct SessionCleanupStatus {
+    /// Number of sessions deleted in this activation.
+    pub deleted: usize,
+    /// The cutoff time used: sessions created before this were eligible.
+    pub cutoff: DateTime<Utc>,
+    /// The per-activation delete limit.
+    pub limit: u32,
+    /// Errors encountered during this activation.
+    pub error: Option<String>,
 }
 
 #[cfg(test)]
