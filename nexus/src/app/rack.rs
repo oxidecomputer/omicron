@@ -326,7 +326,11 @@ impl super::Nexus {
                             Error::internal_error(&format!("encountered error while discovering ports for {switch:#?}: {e}"))
                         })?;
 
-                    info!(log, "discovered ports for {switch}: {all_ports:#?}");
+                    info!(
+                        log, "discovered ports for switch";
+                        "switch_slot" => ?switch,
+                        "all_ports" => #?all_ports,
+                    );
 
                     let qsfp_ports: Vec<Name> = all_ports
                         .iter()
@@ -337,8 +341,9 @@ impl super::Nexus {
                         .collect();
 
                     info!(
-                        log,
-                        "populating ports for {switch}: {qsfp_ports:#?}"
+                        log, "populating ports for switch";
+                        "switch_slot" => ?switch,
+                        "qsfp_ports" => #?qsfp_ports,
                     );
 
                     self.populate_switch_ports(&opctx, &qsfp_ports, switch)

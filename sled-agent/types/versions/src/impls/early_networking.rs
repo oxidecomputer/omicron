@@ -167,7 +167,7 @@ impl LldpAdminStatus {
 }
 
 impl SwitchSlot {
-    /// Return the location of the other switch, not ourself.
+    /// Return the slot of the other switch, not ourself.
     pub const fn other(&self) -> Self {
         match self {
             SwitchSlot::Switch0 => SwitchSlot::Switch1,
@@ -176,7 +176,11 @@ impl SwitchSlot {
     }
 }
 
-impl fmt::Display for SwitchSlot {
+// Customize `Debug` so we get lower-cased variants. We used to have a `Display`
+// impl used in a variety of logging and error message contexts; we've switched
+// that over to using this `Debug` impl, but it's nice for the capitalization to
+// remain consistent.
+impl fmt::Debug for SwitchSlot {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             SwitchSlot::Switch0 => write!(f, "switch0"),

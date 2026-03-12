@@ -421,7 +421,7 @@ impl<'a> EarlyNetworkSetup<'a> {
 
         if uplink_configuration_errors.len() == our_ports.len() {
             let message =
-                format!("unable to configure any uplinks for {switch_slot}");
+                format!("unable to configure any uplinks for {switch_slot:?}");
             return Err(EarlyNetworkSetupError::Dendrite(message));
         }
 

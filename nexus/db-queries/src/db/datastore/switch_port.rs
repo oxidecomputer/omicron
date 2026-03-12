@@ -794,10 +794,7 @@ impl DataStore {
                         e,
                         ErrorHandler::Conflict(
                             ResourceType::SwitchPort,
-                            &format!(
-                                "{}/{}/{}",
-                                rack_id, &switch_slot, &port,
-                            ),
+                            &format!("{rack_id}/{switch_slot:?}/{port}"),
                         ),
                     )
                 }

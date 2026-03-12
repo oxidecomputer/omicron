@@ -331,7 +331,7 @@ impl super::Nexus {
         })?;
 
         let dpd = dpd_clients.get(&switch).ok_or(Error::internal_error(
-            &format!("no client for switch {switch}"),
+            &format!("no client for switch {switch:?}"),
         ))?;
 
         let status = dpd

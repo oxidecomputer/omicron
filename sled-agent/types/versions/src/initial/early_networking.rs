@@ -287,7 +287,6 @@ pub struct PortConfig {
 #[derive(
     Clone,
     Copy,
-    Debug,
     Deserialize,
     Serialize,
     PartialEq,
