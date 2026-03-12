@@ -92,7 +92,6 @@ pub mod instance {
     pub use crate::v1::instance::VmmPathParam;
     pub use crate::v1::instance::VmmPutStateBody;
     pub use crate::v1::instance::VmmPutStateResponse;
-    pub use crate::v1::instance::VmmSpec;
     pub use crate::v1::instance::VmmStateRequested;
     pub use crate::v1::instance::VmmUnregisterResponse;
     pub use crate::v1::instance::VpcPathParam;
@@ -100,8 +99,10 @@ pub mod instance {
     pub use crate::v7::instance::InstanceMulticastBody;
     pub use crate::v7::instance::InstanceMulticastMembership;
 
-    pub use crate::v18::instance::InstanceEnsureBody;
     pub use crate::v18::instance::InstanceSledLocalConfig;
+
+    pub use crate::v28::instance::InstanceEnsureBody;
+    pub use crate::v28::instance::VmmSpec;
 
     pub use omicron_common::api::internal::shared::ResolvedVpcFirewallRule;
 }
