@@ -4,8 +4,7 @@
 
 use crate::health_checks::poll_smf_services_enabled_not_online;
 
-use illumos_utils::svcs::SvcsResult;
-use sled_agent_types::inventory::SvcsEnabledNotOnline;
+use sled_agent_types::inventory::SvcsEnabledNotOnlineResult;
 use slog::Logger;
 use slog::info;
 use tokio::sync::watch;
@@ -19,13 +18,14 @@ pub struct HealthMonitorHandle {
     // the failure to execute `svcs`, which is a `illumos_utils::ExecutionError`
     // and this error cannot be cloned.
     pub smf_services_enabled_not_online_rx:
-        watch::Receiver<Option<Result<SvcsResult, String>>>,
+        watch::Receiver<SvcsEnabledNotOnlineResult>,
 }
 
 impl HealthMonitorHandle {
     /// Returns a `HealthMonitorHandle` that doesn't monitor health
     pub fn stub() -> Self {
-        let (_tx, smf_services_enabled_not_online_rx) = watch::channel(None);
+        let (_tx, smf_services_enabled_not_online_rx) =
+            watch::channel(SvcsEnabledNotOnlineResult::DataUnavailable);
         Self { smf_services_enabled_not_online_rx }
     }
 
@@ -36,7 +36,7 @@ impl HealthMonitorHandle {
         let (
             smf_services_enabled_not_online_tx,
             smf_services_enabled_not_online_rx,
-        ) = watch::channel(None);
+        ) = watch::channel(SvcsEnabledNotOnlineResult::DataUnavailable);
 
         tokio::spawn(async move {
             poll_smf_services_enabled_not_online(
@@ -49,11 +49,7 @@ impl HealthMonitorHandle {
         Self { smf_services_enabled_not_online_rx }
     }
 
-    pub fn to_inventory(&self) -> Option<Result<SvcsEnabledNotOnline, String>> {
-        self.smf_services_enabled_not_online_rx.borrow().clone().map(|result| {
-            result.map(|SvcsResult { services, errors, time_of_status }| {
-                SvcsEnabledNotOnline { services, errors, time_of_status }
-            })
-        })
+    pub fn to_inventory(&self) -> SvcsEnabledNotOnlineResult {
+        self.smf_services_enabled_not_online_rx.borrow().clone()
     }
 }

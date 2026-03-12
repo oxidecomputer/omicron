@@ -5,7 +5,7 @@
 //! Helpers for running health checks from the sled agent
 
 use illumos_utils::svcs::Svcs;
-use illumos_utils::svcs::SvcsResult;
+use sled_agent_types::inventory::SvcsEnabledNotOnlineResult;
 use slog::Logger;
 use tokio::sync::watch;
 use tokio::time::Duration;
@@ -15,7 +15,7 @@ use tokio::time::interval;
 pub(crate) async fn poll_smf_services_enabled_not_online(
     log: Logger,
     smf_services_enabled_not_online_tx: watch::Sender<
-        Option<Result<SvcsResult, String>>,
+        SvcsEnabledNotOnlineResult,
     >,
 ) {
     // We poll every minute to verify the health of all services. This interval
@@ -36,12 +36,16 @@ pub(crate) async fn poll_smf_services_enabled_not_online(
             // `send_if_modified()`.
             Err(e) => {
                 smf_services_enabled_not_online_tx.send_modify(|status| {
-                    *status = Some(Err(e.to_string()));
+                    // TODO-K: can I do execution error?
+                    *status =
+                        SvcsEnabledNotOnlineResult::SvcsCmdError(e.to_string());
                 })
             }
             Ok(svcs) => {
                 smf_services_enabled_not_online_tx.send_modify(|status| {
-                    *status = Some(Ok(svcs));
+                    *status = SvcsEnabledNotOnlineResult::SvcsEnabledNotOnline(
+                        svcs.into(),
+                    );
                 })
             }
         };

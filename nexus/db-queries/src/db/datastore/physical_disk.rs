@@ -349,6 +349,7 @@ mod test {
     use sled_agent_types::inventory::{
         Baseboard, ConfigReconcilerInventoryStatus, Inventory, InventoryDisk,
         OmicronFileSourceResolverInventory, SledCpuFamily, SledRole,
+        SvcsEnabledNotOnlineResult,
     };
     use std::num::NonZeroU32;
 
@@ -707,7 +708,8 @@ mod test {
                     last_reconciliation: None,
                     file_source_resolver:
                         OmicronFileSourceResolverInventory::new_fake(),
-                    smf_services_enabled_not_online: None,
+                    smf_services_enabled_not_online:
+                        SvcsEnabledNotOnlineResult::DataUnavailable,
                     reference_measurements: IdOrdMap::new(),
                 },
             )

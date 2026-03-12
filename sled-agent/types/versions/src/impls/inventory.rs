@@ -873,6 +873,17 @@ impl HostPhase2DesiredSlots {
     }
 }
 
+impl From<illumos_utils::svcs::SvcsResult> for SvcsEnabledNotOnline {
+    fn from(value: illumos_utils::svcs::SvcsResult) -> Self {
+        let illumos_utils::svcs::SvcsResult {
+            services,
+            errors,
+            time_of_status,
+        } = value;
+        Self { services, errors, time_of_status }
+    }
+}
+
 impl Default for OmicronSledConfig {
     fn default() -> Self {
         Self {

@@ -117,6 +117,7 @@ use sled_agent_types::inventory::MupdateOverrideNonBootInventory;
 use sled_agent_types::inventory::OmicronSledConfig;
 use sled_agent_types::inventory::OrphanedDataset;
 use sled_agent_types::inventory::SingleMeasurementInventory;
+use sled_agent_types::inventory::SvcsEnabledNotOnlineResult;
 use sled_agent_types::inventory::ZoneArtifactInventory;
 use sled_hardware_types::BaseboardId;
 use slog_error_chain::InlineErrorChain;
@@ -4296,7 +4297,8 @@ impl DataStore {
                 file_source_resolver,
                 // TODO-K[omicron#9516]: Actually query the DB when there is
                 // something there
-                smf_services_enabled_not_online: None,
+                smf_services_enabled_not_online:
+                    SvcsEnabledNotOnlineResult::DataUnavailable,
                 reference_measurements: last_reconciliation_measurements
                     .remove(&sled_id)
                     .unwrap_or_default(),
