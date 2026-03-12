@@ -12,7 +12,7 @@ use std::fmt;
 /// classes as an enum.
 ///
 /// Note that this type is distinct from the
-/// [`shared::AlertSubscription`](crate::external_api::shared::AlertSubscription)
+/// [`external_api::alert::AlertSubscription`](crate::external_api::alert::AlertSubscription)
 /// type, which represents an alert *subscription* rather than a single alert
 /// class. A subscription may be to a single alert class, *or* to a glob pattern
 /// that matches multiple alert classes. The
