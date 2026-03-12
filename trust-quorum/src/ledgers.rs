@@ -5,13 +5,13 @@
 //! Persistent storage for the trust quorum task
 //!
 //! We write two pieces of data to M.2 devices in production via
-//! [`omicron_common::ledger::Ledger`]:
+//! [`omicron_ledger::Ledger`]:
 //!
 //!    1. [`trust_quorum_protocol::PersistentState`] for trust quorum state
 //!    2. A network config blob required for pre-rack-unlock configuration
 
 use camino::Utf8PathBuf;
-use omicron_common::ledger::{Ledger, Ledgerable};
+use omicron_ledger::{Ledger, Ledgerable};
 use serde::{Deserialize, Serialize};
 use slog::{Logger, info};
 use trust_quorum_protocol::PersistentState;

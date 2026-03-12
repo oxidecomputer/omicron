@@ -96,8 +96,8 @@ use omicron_common::backoff::{
     BackoffError, retry_notify, retry_policy_internal_service_aggressive,
 };
 use omicron_common::disk::DatasetKind;
-use omicron_common::ledger::{self, Ledger, Ledgerable};
 use omicron_ddm_admin_client::{Client as DdmAdminClient, DdmError};
+use omicron_ledger::{self as ledger, Ledger, Ledgerable};
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::RackUuid;
 use omicron_uuid_kinds::ZpoolUuid;

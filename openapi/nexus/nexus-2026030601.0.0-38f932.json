@@ -7,7 +7,7 @@
       "url": "https://oxide.computer",
       "email": "api@oxide.computer"
     },
-    "version": "2026030600.0.0"
+    "version": "2026030601.0.0"
   },
   "paths": {
     "/device/auth": {
@@ -7793,7 +7793,7 @@
         }
       }
     },
-    "/v1/system/hardware/rack-switch-port/{rack_id}/{switch_location}/{port}/lldp/neighbors": {
+    "/v1/system/hardware/rack-switch-port/{rack_id}/{switch_slot}/{port}/lldp/neighbors": {
       "get": {
         "tags": [
           "system/networking"
@@ -7822,11 +7822,11 @@
           },
           {
             "in": "path",
-            "name": "switch_location",
-            "description": "A switch location to use when selecting switch ports.",
+            "name": "switch_slot",
+            "description": "The slot of the switch within the rack to use when selecting switch ports.",
             "required": true,
             "schema": {
-              "$ref": "#/components/schemas/Name"
+              "$ref": "#/components/schemas/SwitchSlot"
             }
           },
           {
@@ -8548,11 +8548,11 @@
           },
           {
             "in": "query",
-            "name": "switch_location",
-            "description": "A switch location to use when selecting switch ports.",
+            "name": "switch_slot",
+            "description": "The slot of the switch within the rack to use when selecting switch ports.",
             "required": true,
             "schema": {
-              "$ref": "#/components/schemas/Name"
+              "$ref": "#/components/schemas/SwitchSlot"
             }
           }
         ],
@@ -8603,11 +8603,11 @@
           },
           {
             "in": "query",
-            "name": "switch_location",
-            "description": "A switch location to use when selecting switch ports.",
+            "name": "switch_slot",
+            "description": "The slot of the switch within the rack to use when selecting switch ports.",
             "required": true,
             "schema": {
-              "$ref": "#/components/schemas/Name"
+              "$ref": "#/components/schemas/SwitchSlot"
             }
           }
         ],
@@ -8663,11 +8663,11 @@
           },
           {
             "in": "query",
-            "name": "switch_location",
-            "description": "A switch location to use when selecting switch ports.",
+            "name": "switch_slot",
+            "description": "The slot of the switch within the rack to use when selecting switch ports.",
             "required": true,
             "schema": {
-              "$ref": "#/components/schemas/Name"
+              "$ref": "#/components/schemas/SwitchSlot"
             }
           }
         ],
@@ -8721,11 +8721,11 @@
           },
           {
             "in": "query",
-            "name": "switch_location",
-            "description": "A switch location to use when selecting switch ports.",
+            "name": "switch_slot",
+            "description": "The slot of the switch within the rack to use when selecting switch ports.",
             "required": true,
             "schema": {
-              "$ref": "#/components/schemas/Name"
+              "$ref": "#/components/schemas/SwitchSlot"
             }
           }
         ],
@@ -8771,11 +8771,11 @@
           },
           {
             "in": "query",
-            "name": "switch_location",
-            "description": "A switch location to use when selecting switch ports.",
+            "name": "switch_slot",
+            "description": "The slot of the switch within the rack to use when selecting switch ports.",
             "required": true,
             "schema": {
-              "$ref": "#/components/schemas/Name"
+              "$ref": "#/components/schemas/SwitchSlot"
             }
           }
         ],
@@ -11026,7 +11026,7 @@
         }
       }
     },
-    "/v1/system/networking/loopback-address/{rack_id}/{switch_location}/{address}/{subnet_mask}": {
+    "/v1/system/networking/loopback-address/{rack_id}/{switch_slot}/{address}/{subnet_mask}": {
       "delete": {
         "tags": [
           "system/networking"
@@ -11067,11 +11067,11 @@
           },
           {
             "in": "path",
-            "name": "switch_location",
-            "description": "The switch location to use when selecting the loopback address.",
+            "name": "switch_slot",
+            "description": "The slot of the switch within the rack to use when selecting the loopback address.",
             "required": true,
             "schema": {
-              "$ref": "#/components/schemas/Name"
+              "$ref": "#/components/schemas/SwitchSlot"
             }
           }
         ],
@@ -16905,18 +16905,18 @@
             "type": "string",
             "format": "ip"
           },
-          "switch": {
-            "description": "The switch to enable this session on. Must be `switch0` or `switch1`.",
+          "switch_slot": {
+            "description": "The slot of the switch within the rack to disable this session on.",
             "allOf": [
               {
-                "$ref": "#/components/schemas/Name"
+                "$ref": "#/components/schemas/SwitchSlot"
               }
             ]
           }
         },
         "required": [
           "remote",
-          "switch"
+          "switch_slot"
         ]
       },
       "BfdSessionEnable": {
@@ -16954,11 +16954,11 @@
             "format": "uint64",
             "minimum": 0
           },
-          "switch": {
-            "description": "The switch to enable this session on. Must be `switch0` or `switch1`.",
+          "switch_slot": {
+            "description": "The slot of the switch within the rack to enable this session on.",
             "allOf": [
               {
-                "$ref": "#/components/schemas/Name"
+                "$ref": "#/components/schemas/SwitchSlot"
               }
             ]
           }
@@ -16968,7 +16968,7 @@
           "mode",
           "remote",
           "required_rx",
-          "switch"
+          "switch_slot"
         ]
       },
       "BfdState": {
@@ -17031,8 +17031,8 @@
           "state": {
             "$ref": "#/components/schemas/BfdState"
           },
-          "switch": {
-            "$ref": "#/components/schemas/Name"
+          "switch_slot": {
+            "$ref": "#/components/schemas/SwitchSlot"
           }
         },
         "required": [
@@ -17041,7 +17041,7 @@
           "peer",
           "required_rx",
           "state",
-          "switch"
+          "switch_slot"
         ]
       },
       "BgpAnnounceSet": {
@@ -24468,9 +24468,13 @@
             "type": "string",
             "format": "uuid"
           },
-          "switch_location": {
-            "description": "Switch location where this loopback address is assigned.",
-            "type": "string"
+          "switch_slot": {
+            "description": "The slot of the switch within the rack where this loopback address is assigned.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SwitchSlot"
+              }
+            ]
           }
         },
         "required": [
@@ -24478,7 +24482,7 @@
           "address_lot_block_id",
           "id",
           "rack_id",
-          "switch_location"
+          "switch_slot"
         ]
       },
       "LoopbackAddressCreate": {
@@ -24513,11 +24517,11 @@
             "type": "string",
             "format": "uuid"
           },
-          "switch_location": {
-            "description": "The location of the switch within the rack this loopback address will be configured on.",
+          "switch_slot": {
+            "description": "The slot of the switch within the rack this loopback address will be configured on.",
             "allOf": [
               {
-                "$ref": "#/components/schemas/Name"
+                "$ref": "#/components/schemas/SwitchSlot"
               }
             ]
           }
@@ -24528,7 +24532,7 @@
           "anycast",
           "mask",
           "rack_id",
-          "switch_location"
+          "switch_slot"
         ]
       },
       "LoopbackAddressResultsPage": {
@@ -28716,16 +28720,20 @@
             "type": "string",
             "format": "uuid"
           },
-          "switch_location": {
-            "description": "The switch location of this switch port.",
-            "type": "string"
+          "switch_slot": {
+            "description": "The slot of the switch within the rack of this switch port.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SwitchSlot"
+              }
+            ]
           }
         },
         "required": [
           "id",
           "port_name",
           "rack_id",
-          "switch_location"
+          "switch_slot"
         ]
       },
       "SwitchPortAddressView": {

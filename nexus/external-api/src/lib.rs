@@ -78,6 +78,7 @@ api_versions!([
     // |  date-based version should be at the top of the list.
     // v
     // (next_yyyy_mm_dd_nn, IDENT),
+    (2026_03_06_01, SWITCH_SLOT_ENUM),
     (2026_03_06_00, RENAME_SWITCH_LOCATION_TO_SWITCH_SLOT),
     (2026_03_02_00, ADD_TIME_FIELDS_TO_USERS),
     (2026_02_25_00, SET_TARGET_RELEASE_UPDATE_RECOVERY),
@@ -4358,35 +4359,111 @@ pub trait NexusExternalApi {
         method = POST,
         path = "/v1/system/networking/loopback-address",
         tags = ["system/networking"],
+        versions = VERSION_SWITCH_SLOT_ENUM..,
     }]
     async fn networking_loopback_address_create(
         rqctx: RequestContext<Self::Context>,
         new_loopback_address: TypedBody<
             latest::networking::LoopbackAddressCreate,
         >,
-    ) -> Result<HttpResponseCreated<LoopbackAddress>, HttpError>;
+    ) -> Result<
+        HttpResponseCreated<latest::networking::LoopbackAddress>,
+        HttpError,
+    >;
+
+    /// Create loopback address
+    #[endpoint {
+        operation_id = "networking_loopback_address_create",
+        method = POST,
+        path = "/v1/system/networking/loopback-address",
+        tags = ["system/networking"],
+        versions = ..VERSION_SWITCH_SLOT_ENUM,
+    }]
+    async fn networking_loopback_address_create_v2025_11_20_00(
+        rqctx: RequestContext<Self::Context>,
+        new_loopback_address: TypedBody<
+            v2025_11_20_00::networking::LoopbackAddressCreate,
+        >,
+    ) -> Result<
+        HttpResponseCreated<v2025_11_20_00::networking::LoopbackAddress>,
+        HttpError,
+    > {
+        let new_loopback_address =
+            new_loopback_address.try_map(TryInto::try_into)?;
+        Self::networking_loopback_address_create(rqctx, new_loopback_address)
+            .await
+            .map(|response| response.map(From::from))
+    }
 
     /// Delete loopback address
     #[endpoint {
         method = DELETE,
-        path = "/v1/system/networking/loopback-address/{rack_id}/{switch_location}/{address}/{subnet_mask}",
+        path = "/v1/system/networking/loopback-address/{rack_id}/{switch_slot}/{address}/{subnet_mask}",
         tags = ["system/networking"],
+        versions = VERSION_SWITCH_SLOT_ENUM..,
     }]
     async fn networking_loopback_address_delete(
         rqctx: RequestContext<Self::Context>,
         path: Path<latest::networking::LoopbackAddressPath>,
     ) -> Result<HttpResponseDeleted, HttpError>;
 
+    /// Delete loopback address
+    #[endpoint {
+        operation_id = "networking_loopback_address_delete",
+        method = DELETE,
+        path = "/v1/system/networking/loopback-address/{rack_id}/{switch_slot}/{address}/{subnet_mask}",
+        tags = ["system/networking"],
+        versions = ..VERSION_SWITCH_SLOT_ENUM,
+    }]
+    async fn networking_loopback_address_delete_v2025_11_20_00(
+        rqctx: RequestContext<Self::Context>,
+        path: Path<v2025_11_20_00::networking::LoopbackAddressPath>,
+    ) -> Result<HttpResponseDeleted, HttpError> {
+        let path = path.try_map(TryInto::try_into)?;
+        Self::networking_loopback_address_delete(rqctx, path).await
+    }
+
     /// List loopback addresses
     #[endpoint {
         method = GET,
         path = "/v1/system/networking/loopback-address",
         tags = ["system/networking"],
+        versions = VERSION_SWITCH_SLOT_ENUM..,
     }]
     async fn networking_loopback_address_list(
         rqctx: RequestContext<Self::Context>,
         query_params: Query<PaginatedById>,
-    ) -> Result<HttpResponseOk<ResultsPage<LoopbackAddress>>, HttpError>;
+    ) -> Result<
+        HttpResponseOk<ResultsPage<latest::networking::LoopbackAddress>>,
+        HttpError,
+    >;
+
+    /// List loopback addresses
+    #[endpoint {
+        operation_id = "networking_loopback_address_list",
+        method = GET,
+        path = "/v1/system/networking/loopback-address",
+        tags = ["system/networking"],
+        versions = ..VERSION_SWITCH_SLOT_ENUM,
+    }]
+    async fn networking_loopback_address_list_v2025_11_20_00(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<PaginatedById>,
+    ) -> Result<
+        HttpResponseOk<
+            ResultsPage<v2025_11_20_00::networking::LoopbackAddress>,
+        >,
+        HttpError,
+    > {
+        Self::networking_loopback_address_list(rqctx, query_params).await.map(
+            |response| {
+                response.map(|page| ResultsPage {
+                    next_page: page.next_page,
+                    items: page.items.into_iter().map(From::from).collect(),
+                })
+            },
+        )
+    }
 
     /// Create switch port settings
     #[endpoint {
@@ -4502,19 +4579,51 @@ pub trait NexusExternalApi {
         method = GET,
         path = "/v1/system/hardware/switch-port",
         tags = ["system/hardware"],
+        versions = VERSION_SWITCH_SLOT_ENUM..,
     }]
     async fn networking_switch_port_list(
         rqctx: RequestContext<Self::Context>,
         query_params: Query<
             PaginatedById<latest::networking::SwitchPortPageSelector>,
         >,
-    ) -> Result<HttpResponseOk<ResultsPage<SwitchPort>>, HttpError>;
+    ) -> Result<
+        HttpResponseOk<ResultsPage<latest::networking::SwitchPort>>,
+        HttpError,
+    >;
+
+    /// List switch ports
+    #[endpoint {
+        operation_id = "networking_switch_port_list",
+        method = GET,
+        path = "/v1/system/hardware/switch-port",
+        tags = ["system/hardware"],
+        versions = ..VERSION_SWITCH_SLOT_ENUM,
+    }]
+    async fn networking_switch_port_list_v2025_11_20_00(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<
+            PaginatedById<latest::networking::SwitchPortPageSelector>,
+        >,
+    ) -> Result<
+        HttpResponseOk<ResultsPage<v2025_11_20_00::networking::SwitchPort>>,
+        HttpError,
+    > {
+        Self::networking_switch_port_list(rqctx, query_params).await.map(
+            |response| {
+                response.map(|page| ResultsPage {
+                    next_page: page.next_page,
+                    items: page.items.into_iter().map(From::from).collect(),
+                })
+            },
+        )
+    }
 
     /// Get switch port status
     #[endpoint {
         method = GET,
         path = "/v1/system/hardware/switch-port/{port}/status",
         tags = ["system/hardware"],
+        versions = VERSION_SWITCH_SLOT_ENUM..,
     }]
     async fn networking_switch_port_status(
         rqctx: RequestContext<Self::Context>,
@@ -4522,11 +4631,31 @@ pub trait NexusExternalApi {
         query_params: Query<latest::networking::SwitchPortSelector>,
     ) -> Result<HttpResponseOk<latest::switch::SwitchLinkState>, HttpError>;
 
+    /// Get switch port status
+    #[endpoint {
+        operation_id = "networking_switch_port_status",
+        method = GET,
+        path = "/v1/system/hardware/switch-port/{port}/status",
+        tags = ["system/hardware"],
+        versions = ..VERSION_SWITCH_SLOT_ENUM,
+    }]
+    async fn networking_switch_port_status_v2025_11_20_00(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::networking::SwitchPortPathSelector>,
+        query_params: Query<v2025_11_20_00::networking::SwitchPortSelector>,
+    ) -> Result<HttpResponseOk<latest::switch::SwitchLinkState>, HttpError>
+    {
+        let query_params = query_params.try_map(TryInto::try_into)?;
+        Self::networking_switch_port_status(rqctx, path_params, query_params)
+            .await
+    }
+
     /// Apply switch port settings
     #[endpoint {
         method = POST,
         path = "/v1/system/hardware/switch-port/{port}/settings",
         tags = ["system/hardware"],
+        versions = VERSION_SWITCH_SLOT_ENUM..,
     }]
     async fn networking_switch_port_apply_settings(
         rqctx: RequestContext<Self::Context>,
@@ -4535,11 +4664,36 @@ pub trait NexusExternalApi {
         settings_body: TypedBody<latest::networking::SwitchPortApplySettings>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
 
+    /// Apply switch port settings
+    #[endpoint {
+        operation_id = "networking_switch_port_apply_settings",
+        method = POST,
+        path = "/v1/system/hardware/switch-port/{port}/settings",
+        tags = ["system/hardware"],
+        versions = ..VERSION_SWITCH_SLOT_ENUM,
+    }]
+    async fn networking_switch_port_apply_settings_v2025_11_20_00(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::networking::SwitchPortPathSelector>,
+        query_params: Query<v2025_11_20_00::networking::SwitchPortSelector>,
+        settings_body: TypedBody<latest::networking::SwitchPortApplySettings>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        let query_params = query_params.try_map(TryInto::try_into)?;
+        Self::networking_switch_port_apply_settings(
+            rqctx,
+            path_params,
+            query_params,
+            settings_body,
+        )
+        .await
+    }
+
     /// Clear switch port settings
     #[endpoint {
         method = DELETE,
         path = "/v1/system/hardware/switch-port/{port}/settings",
         tags = ["system/hardware"],
+        versions = VERSION_SWITCH_SLOT_ENUM..,
     }]
     async fn networking_switch_port_clear_settings(
         rqctx: RequestContext<Self::Context>,
@@ -4547,11 +4701,34 @@ pub trait NexusExternalApi {
         query_params: Query<latest::networking::SwitchPortSelector>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
 
+    /// Clear switch port settings
+    #[endpoint {
+        operation_id = "networking_switch_port_clear_settings",
+        method = DELETE,
+        path = "/v1/system/hardware/switch-port/{port}/settings",
+        tags = ["system/hardware"],
+        versions = ..VERSION_SWITCH_SLOT_ENUM,
+    }]
+    async fn networking_switch_port_clear_settings_v2025_11_20_00(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::networking::SwitchPortPathSelector>,
+        query_params: Query<v2025_11_20_00::networking::SwitchPortSelector>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        let query_params = query_params.try_map(TryInto::try_into)?;
+        Self::networking_switch_port_clear_settings(
+            rqctx,
+            path_params,
+            query_params,
+        )
+        .await
+    }
+
     /// Fetch the LLDP configuration for a switch port
     #[endpoint {
         method = GET,
         path = "/v1/system/hardware/switch-port/{port}/lldp/config",
         tags = ["system/networking"],
+        versions = VERSION_SWITCH_SLOT_ENUM..,
     }]
     async fn networking_switch_port_lldp_config_view(
         rqctx: RequestContext<Self::Context>,
@@ -4559,11 +4736,34 @@ pub trait NexusExternalApi {
         query_params: Query<latest::networking::SwitchPortSelector>,
     ) -> Result<HttpResponseOk<LldpLinkConfig>, HttpError>;
 
+    /// Fetch the LLDP configuration for a switch port
+    #[endpoint {
+        operation_id = "networking_switch_port_lldp_config_view",
+        method = GET,
+        path = "/v1/system/hardware/switch-port/{port}/lldp/config",
+        tags = ["system/networking"],
+        versions = ..VERSION_SWITCH_SLOT_ENUM,
+    }]
+    async fn networking_switch_port_lldp_config_view_v2025_11_20_00(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::networking::SwitchPortPathSelector>,
+        query_params: Query<v2025_11_20_00::networking::SwitchPortSelector>,
+    ) -> Result<HttpResponseOk<LldpLinkConfig>, HttpError> {
+        let query_params = query_params.try_map(TryInto::try_into)?;
+        Self::networking_switch_port_lldp_config_view(
+            rqctx,
+            path_params,
+            query_params,
+        )
+        .await
+    }
+
     /// Update the LLDP configuration for a switch port
     #[endpoint {
         method = POST,
         path = "/v1/system/hardware/switch-port/{port}/lldp/config",
         tags = ["system/networking"],
+        versions = VERSION_SWITCH_SLOT_ENUM..,
     }]
     async fn networking_switch_port_lldp_config_update(
         rqctx: RequestContext<Self::Context>,
@@ -4572,17 +4772,64 @@ pub trait NexusExternalApi {
         config: TypedBody<LldpLinkConfig>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
 
+    /// Update the LLDP configuration for a switch port
+    #[endpoint {
+        operation_id = "networking_switch_port_lldp_config_update",
+        method = POST,
+        path = "/v1/system/hardware/switch-port/{port}/lldp/config",
+        tags = ["system/networking"],
+        versions = ..VERSION_SWITCH_SLOT_ENUM,
+    }]
+    async fn networking_switch_port_lldp_config_update_v2025_11_20_00(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<latest::networking::SwitchPortPathSelector>,
+        query_params: Query<v2025_11_20_00::networking::SwitchPortSelector>,
+        config: TypedBody<LldpLinkConfig>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        let query_params = query_params.try_map(TryInto::try_into)?;
+        Self::networking_switch_port_lldp_config_update(
+            rqctx,
+            path_params,
+            query_params,
+            config,
+        )
+        .await
+    }
+
     /// Fetch the LLDP neighbors seen on a switch port
     #[endpoint {
         method = GET,
-        path = "/v1/system/hardware/rack-switch-port/{rack_id}/{switch_location}/{port}/lldp/neighbors",
+        path = "/v1/system/hardware/rack-switch-port/{rack_id}/{switch_slot}/{port}/lldp/neighbors",
         tags = ["system/networking"],
+        versions = VERSION_SWITCH_SLOT_ENUM..,
     }]
     async fn networking_switch_port_lldp_neighbors(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<latest::networking::LldpPortPathSelector>,
         query_params: Query<PaginatedById>,
     ) -> Result<HttpResponseOk<ResultsPage<LldpNeighbor>>, HttpError>;
+
+    /// Fetch the LLDP neighbors seen on a switch port
+    #[endpoint {
+        operation_id = "networking_switch_port_lldp_neighbors",
+        method = GET,
+        path = "/v1/system/hardware/rack-switch-port/{rack_id}/{switch_slot}/{port}/lldp/neighbors",
+        tags = ["system/networking"],
+        versions = ..VERSION_SWITCH_SLOT_ENUM,
+    }]
+    async fn networking_switch_port_lldp_neighbors_v2025_11_20_00(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<v2025_11_20_00::networking::LldpPortPathSelector>,
+        query_params: Query<PaginatedById>,
+    ) -> Result<HttpResponseOk<ResultsPage<LldpNeighbor>>, HttpError> {
+        let path_params = path_params.try_map(TryInto::try_into)?;
+        Self::networking_switch_port_lldp_neighbors(
+            rqctx,
+            path_params,
+            query_params,
+        )
+        .await
+    }
 
     /// Create new BGP configuration
     #[endpoint {
@@ -4861,32 +5108,85 @@ pub trait NexusExternalApi {
         method = POST,
         path = "/v1/system/networking/bfd-enable",
         tags = ["system/networking"],
+        versions = VERSION_SWITCH_SLOT_ENUM..,
     }]
     async fn networking_bfd_enable(
         rqctx: RequestContext<Self::Context>,
         session: TypedBody<latest::networking::BfdSessionEnable>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
 
+    /// Enable BFD session
+    #[endpoint {
+        operation_id = "networking_bfd_enable",
+        method = POST,
+        path = "/v1/system/networking/bfd-enable",
+        tags = ["system/networking"],
+        versions = ..VERSION_SWITCH_SLOT_ENUM,
+    }]
+    async fn networking_bfd_enable_v2025_11_20_00(
+        rqctx: RequestContext<Self::Context>,
+        session: TypedBody<v2025_11_20_00::networking::BfdSessionEnable>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        let session = session.try_map(TryInto::try_into)?;
+        Self::networking_bfd_enable(rqctx, session).await
+    }
+
     /// Disable BFD session
     #[endpoint {
         method = POST,
         path = "/v1/system/networking/bfd-disable",
         tags = ["system/networking"],
+        versions = VERSION_SWITCH_SLOT_ENUM..,
     }]
     async fn networking_bfd_disable(
         rqctx: RequestContext<Self::Context>,
         session: TypedBody<latest::networking::BfdSessionDisable>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
 
+    /// Disable BFD session
+    #[endpoint {
+        operation_id = "networking_bfd_disable",
+        method = POST,
+        path = "/v1/system/networking/bfd-disable",
+        tags = ["system/networking"],
+        versions = ..VERSION_SWITCH_SLOT_ENUM,
+    }]
+    async fn networking_bfd_disable_v2025_11_20_00(
+        rqctx: RequestContext<Self::Context>,
+        session: TypedBody<v2025_11_20_00::networking::BfdSessionDisable>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        let session = session.try_map(TryInto::try_into)?;
+        Self::networking_bfd_disable(rqctx, session).await
+    }
+
     /// Get BFD status
     #[endpoint {
         method = GET,
         path = "/v1/system/networking/bfd-status",
         tags = ["system/networking"],
+        versions = VERSION_SWITCH_SLOT_ENUM..,
     }]
     async fn networking_bfd_status(
         rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<Vec<latest::bfd::BfdStatus>>, HttpError>;
+
+    /// Get BFD status
+    #[endpoint {
+        operation_id = "networking_bfd_status",
+        method = GET,
+        path = "/v1/system/networking/bfd-status",
+        tags = ["system/networking"],
+        versions = ..VERSION_SWITCH_SLOT_ENUM,
+    }]
+    async fn networking_bfd_status_v2025_11_20_00(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<Vec<v2025_11_20_00::bfd::BfdStatus>>, HttpError>
+    {
+        Self::networking_bfd_status(rqctx).await.map(|response| {
+            response
+                .map(|statuses| statuses.into_iter().map(From::from).collect())
+        })
+    }
 
     /// Get user-facing services IP allowlist
     #[endpoint {
