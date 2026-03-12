@@ -818,7 +818,7 @@ dependencies = [
  "derive_more 0.99.20",
  "hex",
  "hkdf",
- "omicron-common",
+ "omicron-ledger",
  "omicron-workspace-hack",
  "proptest",
  "rand 0.8.5",
@@ -3159,9 +3159,9 @@ dependencies = [
 
 [[package]]
 name = "dropshot-api-manager"
-version = "0.5.2"
+version = "0.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c38a99616a680fafd8b7a03cc300aab80b0bbf0fb17c6baac53431d9d12b64b5"
+checksum = "bf576868db63e888512129acd5f59e36e61b7d1ac285239e76ed40dc43d7b2e8"
 dependencies = [
  "anyhow",
  "atomicwrites",
@@ -3192,9 +3192,9 @@ dependencies = [
 
 [[package]]
 name = "dropshot-api-manager-types"
-version = "0.5.2"
+version = "0.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f5116e3d69b975bb89824a721d0326707b8643e4fd3ba69ca880de1aada768cf"
+checksum = "a04cc5bc280e21332f33acfd180705a9e8ace302e9eb08000786135d27497731"
 dependencies = [
  "anyhow",
  "camino",
@@ -8224,6 +8224,7 @@ dependencies = [
  "itertools 0.14.0",
  "libc",
  "macaddr",
+ "omicron-ledger",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
  "oxnet",
@@ -8400,6 +8401,22 @@ dependencies = [
  "tufaceous-artifact",
  "uuid",
  "zip 4.6.1",
+]
+
+[[package]]
+name = "omicron-ledger"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "camino",
+ "camino-tempfile",
+ "dropshot",
+ "omicron-workspace-hack",
+ "serde",
+ "serde_json",
+ "slog",
+ "thiserror 2.0.18",
+ "tokio",
 ]
 
 [[package]]
@@ -9014,6 +9031,7 @@ dependencies = [
  "ntp-admin-client",
  "omicron-common",
  "omicron-ddm-admin-client",
+ "omicron-ledger",
  "omicron-test-utils",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
@@ -10996,9 +11014,9 @@ dependencies = [
 
 [[package]]
 name = "progenitor-extras"
-version = "0.1.0"
+version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a45781b778d14632b8f2f0c7ca158a22517ff9a39ca9249c91c5031cc8d893fe"
+checksum = "e3bf56b338efdf90f218a4d6b3316a9c56faac4b7133bb8ecdc56d5db930d7ff"
 dependencies = [
  "backon",
  "http",
@@ -13282,6 +13300,7 @@ dependencies = [
  "key-manager-types",
  "ntp-admin-client",
  "omicron-common",
+ "omicron-ledger",
  "omicron-test-utils",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
@@ -13450,6 +13469,7 @@ dependencies = [
  "illumos-utils",
  "indent_write",
  "omicron-common",
+ "omicron-ledger",
  "omicron-passwords",
  "omicron-test-utils",
  "omicron-uuid-kinds",
@@ -13543,9 +13563,6 @@ name = "sled-hardware-types"
 version = "0.1.0"
 dependencies = [
  "daft",
- "illumos-utils",
- "macaddr",
- "omicron-common",
  "omicron-workspace-hack",
  "proptest",
  "schemars 0.8.22",
@@ -13806,7 +13823,7 @@ version = "0.8.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c1c97747dbf44bb1ca44a561ece23508e99cb592e862f22222dcf42f51d1e451"
 dependencies = [
- "heck 0.4.1",
+ "heck 0.5.0",
  "proc-macro2",
  "quote",
  "syn 2.0.117",
@@ -15350,7 +15367,7 @@ dependencies = [
  "hex",
  "hkdf",
  "iddqd",
- "omicron-common",
+ "omicron-ledger",
  "omicron-test-utils",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",

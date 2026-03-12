@@ -18,6 +18,7 @@ indent_write.workspace = true
 async-trait.workspace = true
 bootstore.workspace = true
 omicron-common.workspace = true
+omicron-ledger.workspace = true
 omicron-passwords.workspace = true
 omicron-uuid-kinds.workspace = true
 omicron-workspace-hack.workspace = true

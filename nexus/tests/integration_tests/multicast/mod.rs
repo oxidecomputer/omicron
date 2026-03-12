@@ -695,7 +695,7 @@ pub(crate) async fn wait_for_instance_sled_assignment(
                         "instance VMM found, checking sled assignment";
                         "instance_id" => %instance_id,
                         "vmm_id" => %vmm.id,
-                        "vmm_state" => ?vmm.runtime.state,
+                        "vmm_state" => ?vmm.state,
                         "sled_id" => %vmm.sled_id
                     );
 
