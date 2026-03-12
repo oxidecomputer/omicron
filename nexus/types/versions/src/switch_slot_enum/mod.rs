@@ -24,7 +24,7 @@ fn parse_str_as_switch_slot(switch_slot: &str) -> Result<SwitchSlot, Error> {
         "switch0" => Ok(SwitchSlot::Switch0),
         "switch1" => Ok(SwitchSlot::Switch1),
         _ => Err(Error::invalid_request(format!(
-            "invalid switch location `{switch_slot}` \
+            "invalid value for `switch_slot`: `{switch_slot}` \
              (expected `switch0` or `switch1`)",
         ))),
     }
