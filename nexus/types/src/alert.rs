@@ -16,7 +16,7 @@ use std::fmt;
 /// type, which represents an alert *subscription* rather than a single alert
 /// class. A subscription may be to a single alert class, *or* to a glob pattern
 /// that matches multiple alert classes. The
-/// [`external_api::views::AlertClass`](crate::external_api::views::AlertClass)
+/// [`external_api::alert::AlertClass`](crate::external_api::alert::AlertClass)
 /// type represents the response message to the alert class view API and
 /// contains a human-readable description of that alert class.
 #[derive(
