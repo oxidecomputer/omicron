@@ -621,7 +621,7 @@ nexus-test-utils-macros = { path = "nexus/test-utils-macros" }
 nexus-test-utils = { path = "nexus/test-utils" }
 nexus-types = { path = "nexus/types" }
 nexus-types-versions = { path = "nexus/types/versions" }
-nix = { version = "0.30", features = ["fs", "net"] }
+nix = { version = "0.31", features = ["fs", "net"] }
 nom = "7.1.3"
 nonempty = "0.12.0"
 num-integer = "0.1.46"
