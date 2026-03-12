@@ -167,7 +167,7 @@ impl LldpAdminStatus {
 }
 
 impl SwitchSlot {
-    /// Return the location of the other switch, not ourself.
+    /// Return the slot of the other switch, not ourself.
     pub const fn other(&self) -> Self {
         match self {
             SwitchSlot::Switch0 => SwitchSlot::Switch1,
@@ -176,30 +176,15 @@ impl SwitchSlot {
     }
 }
 
-impl fmt::Display for SwitchSlot {
+// Customize `Debug` so we get lower-cased variants. We used to have a `Display`
+// impl used in a variety of logging and error message contexts; we've switched
+// that over to using this `Debug` impl, but it's nice for the capitalization to
+// remain consistent.
+impl fmt::Debug for SwitchSlot {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             SwitchSlot::Switch0 => write!(f, "switch0"),
             SwitchSlot::Switch1 => write!(f, "switch1"),
-        }
-    }
-}
-
-impl SwitchSlot {
-    // TODO-correctness enum in external API
-    //
-    // We should remove this function after changing the external API to use
-    // `SwitchSlot` instead of `Name`.
-    pub fn parse_from_external_api(
-        name: &external::Name,
-    ) -> Result<Self, external::Error> {
-        match name.as_str() {
-            "switch0" => Ok(Self::Switch0),
-            "switch1" => Ok(Self::Switch1),
-            _ => Err(external::Error::invalid_request(format!(
-                "invalid switch location `{name}` \
-                 (expected `switch0` or `switch1`)",
-            ))),
         }
     }
 }

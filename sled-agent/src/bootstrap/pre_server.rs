@@ -39,7 +39,7 @@ use sled_agent_config_reconciler::ConfigReconcilerSpawnToken;
 use sled_hardware::DendriteAsic;
 use sled_hardware::SledMode;
 use sled_hardware::underlay;
-use sled_hardware_types::underlay::BootstrapInterface;
+use sled_hardware::underlay::BootstrapInterface;
 use slog::Drain;
 use slog::Logger;
 use std::net::IpAddr;
@@ -348,10 +348,12 @@ impl BootstrapNetworking {
     async fn setup(config: &Config) -> Result<Self, StartError> {
         let link_for_mac =
             config.get_link().await.map_err(StartError::ConfigLink)?;
-        let global_zone_bootstrap_ip = BootstrapInterface::GlobalZone
-            .ip(&link_for_mac)
-            .await
-            .map_err(StartError::BootstrapLinkMac)?;
+        let global_zone_bootstrap_ip = underlay::bootstrap_ip(
+            BootstrapInterface::GlobalZone,
+            &link_for_mac,
+        )
+        .await
+        .map_err(StartError::BootstrapLinkMac)?;
 
         let bootstrap_etherstub =
             Dladm::ensure_etherstub(dladm::BOOTSTRAP_ETHERSTUB_NAME)
@@ -388,10 +390,12 @@ impl BootstrapNetworking {
                 IpAddr::V6(addr) => addr,
             };
 
-        let switch_zone_bootstrap_ip = BootstrapInterface::SwitchZone
-            .ip(&link_for_mac)
-            .await
-            .map_err(StartError::BootstrapLinkMac)?;
+        let switch_zone_bootstrap_ip = underlay::bootstrap_ip(
+            BootstrapInterface::SwitchZone,
+            &link_for_mac,
+        )
+        .await
+        .map_err(StartError::BootstrapLinkMac)?;
 
         let underlay_etherstub =
             Dladm::ensure_etherstub(dladm::UNDERLAY_ETHERSTUB_NAME)
