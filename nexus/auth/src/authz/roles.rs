@@ -34,7 +34,8 @@
 //! request, and we don't want that thread to block while we hit the database.
 //! Both of these issues could be addressed with considerably more work.
 
-use super::api_resources::ApiResource;
+use super::api_resources::ApiResourceWithParent;
+use super::context::AuthorizedResource;
 use crate::authn;
 use crate::context::OpContext;
 use omicron_common::api::external::Error;
@@ -91,7 +92,7 @@ pub async fn load_roles_for_resource_tree<R>(
     roleset: &mut RoleSet,
 ) -> Result<(), Error>
 where
-    R: ApiResource,
+    R: ApiResourceWithParent,
 {
     // If roles can be assigned directly on this resource, load them.
     if let Some(with_roles) = resource.as_resource_with_roles() {
