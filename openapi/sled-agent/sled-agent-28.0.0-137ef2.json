@@ -7,7 +7,7 @@
       "url": "https://oxide.computer",
       "email": "api@oxide.computer"
     },
-    "version": "27.0.0"
+    "version": "28.0.0"
   },
   "paths": {
     "/artifacts": {
@@ -766,7 +766,11 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/SledDiagnosticsQueryOutput"
+                  "title": "Array_of_SledDiagnosticsQueryOutput",
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/SledDiagnosticsQueryOutput"
+                  }
                 }
               }
             }

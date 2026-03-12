@@ -37,6 +37,7 @@ api_versions!([
     // |  example for the next person.
     // v
     // (next_int, IDENT),
+    (28, MORE_NVMEADM_OUTPUT),
     (27, RENAME_SWITCH_LOCATION_TO_SWITCH_SLOT),
     (26, RACK_NETWORK_CONFIG_NOT_OPTIONAL),
     (25, BOOTSTORE_VERSIONING),
@@ -1103,10 +1104,31 @@ pub trait SledAgentApi {
     #[endpoint {
         method = GET,
         path = "/support/nvmeadm-info",
+        versions = VERSION_MORE_NVMEADM_OUTPUT..,
     }]
     async fn support_nvmeadm_info(
         request_context: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseOk<SledDiagnosticsQueryOutput>, HttpError>;
+    ) -> Result<HttpResponseOk<Vec<SledDiagnosticsQueryOutput>>, HttpError>;
+
+    #[endpoint {
+        operation_id = "support_nvmeadm_info",
+        method = GET,
+        path = "/support/nvmeadm-info",
+        versions = ..VERSION_MORE_NVMEADM_OUTPUT,
+    }]
+    async fn support_nvmeadm_info_v27(
+        request_context: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<SledDiagnosticsQueryOutput>, HttpError> {
+        Self::support_nvmeadm_info(request_context).await.map(
+            |HttpResponseOk(items)| {
+                HttpResponseOk(items.into_iter().next().unwrap_or(
+                    SledDiagnosticsQueryOutput::Failure {
+                        error: String::from("no nvmeadm output available"),
+                    },
+                ))
+            },
+        )
+    }
 
     #[endpoint {
         method = GET,

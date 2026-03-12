@@ -34,6 +34,9 @@ use queries::*;
 /// Max number of ptool commands to run in parallel
 const MAX_PTOOL_PARALLELISM: usize = 50;
 
+/// Number of NVMe drives on a sled.
+const NUM_NVME_DRIVES: u32 = 12;
+
 /// List all zones on a sled.
 pub async fn zoneadm_info()
 -> Result<SledDiagnosticsCmdOutput, SledDiagnosticsCmdError> {
@@ -83,8 +86,25 @@ pub async fn dladm_info()
 }
 
 pub async fn nvmeadm_info()
--> Result<SledDiagnosticsCmdOutput, SledDiagnosticsCmdError> {
-    execute_command_with_timeout(nvmeadm_list(), DEFAULT_TIMEOUT).await
+-> Vec<Result<SledDiagnosticsCmdOutput, SledDiagnosticsCmdError>> {
+    let mut results = Vec::new();
+
+    // Run these serially so that the disk log pages are listed in order in the
+    // output.
+    let res =
+        execute_command_with_timeout(nvmeadm_list(), DEFAULT_TIMEOUT).await;
+    results.push(res);
+
+    for disk_num in 0..NUM_NVME_DRIVES {
+        let res = execute_command_with_timeout(
+            nvmeadm_logpage_health(disk_num),
+            DEFAULT_TIMEOUT,
+        )
+        .await;
+        results.push(res);
+    }
+
+    results
 }
 
 pub async fn pargs_oxide_processes(

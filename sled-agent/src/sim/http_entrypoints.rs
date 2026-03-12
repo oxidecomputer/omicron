@@ -919,7 +919,8 @@ impl SledAgentApi for SledAgentSimImpl {
 
     async fn support_nvmeadm_info(
         _request_context: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseOk<SledDiagnosticsQueryOutput>, HttpError> {
+    ) -> Result<HttpResponseOk<Vec<SledDiagnosticsQueryOutput>>, HttpError>
+    {
         method_unimplemented()
     }
 
