@@ -1020,15 +1020,15 @@ pub enum ResourceType {
 /// Identity-related metadata that's included in nearly all public API objects
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize, JsonSchema)]
 pub struct IdentityMetadata {
-    /// unique, immutable, system-controlled identifier for each resource
+    /// Unique, immutable, system-controlled identifier for each resource
     pub id: Uuid,
-    /// unique, mutable, user-controlled identifier for each resource
+    /// Unique, mutable, user-controlled identifier for each resource
     pub name: Name,
-    /// human-readable free-form text about a resource
+    /// Human-readable free-form text about a resource
     pub description: String,
-    /// timestamp when this resource was created
+    /// Timestamp when this resource was created
     pub time_created: DateTime<Utc>,
-    /// timestamp when this resource was last modified
+    /// Timestamp when this resource was last modified
     pub time_modified: DateTime<Utc>,
 }
 
@@ -1199,17 +1199,17 @@ pub struct Instance {
     #[serde(flatten)]
     pub identity: IdentityMetadata,
 
-    /// id for the project containing this Instance
+    /// ID for the project containing this instance
     pub project_id: Uuid,
 
-    /// number of CPUs allocated for this Instance
+    /// Number of CPUs allocated for this instance
     pub ncpus: InstanceCpuCount,
-    /// memory allocated for this Instance
+    /// Memory allocated for this instance
     pub memory: ByteCount,
-    /// RFC1035-compliant hostname for the Instance.
+    /// RFC1035-compliant hostname for the instance
     pub hostname: String,
 
-    /// the ID of the disk used to boot this Instance, if a specific one is assigned.
+    /// The ID of the disk used to boot this instance, if a specific one is assigned
     pub boot_disk_id: Option<Uuid>,
 
     #[serde(flatten)]
