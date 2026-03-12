@@ -702,11 +702,29 @@ mod tests {
     // collections which fail in the "unreachability" test below.
     const N_COLLECTIONS: u64 = 5;
 
-    // Period these tests wait using `tokio::time::advance()` before checking
-    // their test conditions.
-    const TEST_WAIT_PERIOD: Duration = Duration::from_millis(
-        COLLECTION_INTERVAL.as_millis() as u64 * N_COLLECTIONS,
-    );
+    /// Advance paused tokio time in small increments until a condition is met.
+    ///
+    /// This avoids the flakiness of blindly advancing time for a fixed
+    /// duration, which can cause the collection task's bounded channel to
+    /// overflow if the task doesn't get scheduled between timer firings.
+    /// Instead, we advance time in small increments and check a condition
+    /// each iteration, giving the runtime a chance to process pending work.
+    async fn advance_until(condition: impl Fn() -> bool) {
+        // This loop works in terms of simulated time (tokio::time::Instant),
+        // so the timeout is measured in how far we advance the clock, not
+        // wall-clock time.
+        const TIMEOUT: Duration = Duration::from_secs(60);
+
+        let now = Instant::now();
+        while !condition() {
+            assert!(
+                now.elapsed() < TIMEOUT,
+                "condition not met after {:?} of simulated time",
+                now.elapsed(),
+            );
+            tokio::time::advance(TICK_INTERVAL).await;
+        }
+    }
 
     #[derive(
         Clone,
@@ -803,16 +821,14 @@ mod tests {
         };
         collector.register_producer(endpoint);
 
-        // Step time for a few collections.
-        //
-        // Due to scheduling variations, we don't verify the number of
-        // collections we expect based on time, but we instead check that every
-        // collection that _has_ occurred bumps the counter.
+        // Advance time until the server has received the expected number of
+        // collections. We wait on the condition rather than advancing for a
+        // fixed duration to avoid overflowing the collection task's bounded
+        // request channel on slow/loaded machines.
         tokio::time::pause();
-        let now = Instant::now();
-        while now.elapsed() < TEST_WAIT_PERIOD {
-            tokio::time::advance(TICK_INTERVAL).await;
-        }
+        let target = N_COLLECTIONS as usize;
+        advance_until(|| collection_count.load(Ordering::SeqCst) >= target)
+            .await;
 
         // Request the statistics from the task itself.
         let rx = collector
@@ -868,14 +884,20 @@ mod tests {
             )),
             interval: COLLECTION_INTERVAL,
         };
+        let id = endpoint.id;
         collector.register_producer(endpoint);
 
-        // Step time until there has been exactly `N_COLLECTIONS` collections.
+        // Advance time until the expected number of failed collections have
+        // been recorded, rather than advancing for a fixed duration.
         tokio::time::pause();
-        let now = Instant::now();
-        while now.elapsed() < TEST_WAIT_PERIOD {
-            tokio::time::advance(TICK_INTERVAL).await;
-        }
+        let target = N_COLLECTIONS;
+        advance_until(|| {
+            collector
+                .producer_details(id)
+                .map(|d| d.n_failures >= target)
+                .unwrap_or(false)
+        })
+        .await;
 
         // Request the statistics from the task itself.
         let rx = collector
@@ -938,16 +960,12 @@ mod tests {
         };
         collector.register_producer(endpoint);
 
-        // Step time for a few collections.
-        //
-        // Due to scheduling variations, we don't verify the number of
-        // collections we expect based on time, but we instead check that every
-        // collection that _has_ occurred bumps the counter.
+        // Advance time until the server has received the expected number of
+        // collection attempts, rather than advancing for a fixed duration.
         tokio::time::pause();
-        let now = Instant::now();
-        while now.elapsed() < TEST_WAIT_PERIOD {
-            tokio::time::advance(TICK_INTERVAL).await;
-        }
+        let target = N_COLLECTIONS as usize;
+        advance_until(|| collection_count.load(Ordering::SeqCst) >= target)
+            .await;
 
         // Request the statistics from the task itself.
         let rx = collector
@@ -1163,11 +1181,19 @@ mod tests {
             same UUID",
         );
 
-        // We should eventually collect from it again.
-        let now = Instant::now();
-        while now.elapsed() < TEST_WAIT_PERIOD {
-            tokio::time::advance(TICK_INTERVAL).await;
-        }
+        // We should eventually collect from it again. Wait for the new
+        // server to receive a collection request. We also need the
+        // collection task to have finished processing the response before
+        // we check details, so wait for n_collections to reflect it.
+        let n_before = collector.producer_details(id).unwrap().n_collections;
+        advance_until(|| {
+            collection_count.load(Ordering::SeqCst) >= 1
+                && collector
+                    .producer_details(id)
+                    .map(|d| d.n_collections > n_before)
+                    .unwrap_or(false)
+        })
+        .await;
         let details = collector.producer_details(id).unwrap();
         println!("{details:#?}");
         assert_eq!(details.id, id);
