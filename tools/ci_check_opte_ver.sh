@@ -93,9 +93,9 @@ fi
 
 # Also check that the buildomat deploy job is using the same version
 BUILDOMAT_DEPLOY_TARGET=$(cat .github/buildomat/jobs/deploy.sh | sed -n 's/#:[ ]*target[ ]*=[ ]*"\(.*\)"/\1/p')
-if [ "lab-3.0-opte-0.$API_VER" != "$BUILDOMAT_DEPLOY_TARGET" ]; then
+if [ "lab-3.0-gimlet-opte-0.$API_VER" != "$BUILDOMAT_DEPLOY_TARGET" ]; then
     echo "OPTE version mismatch:"
     echo "Cargo.toml: $OPTE_REV ($OPTE_VER)"
-    echo "buildomat deploy job: $BUILDOMAT_DEPLOY_TARGET (expected lab-3.0-opte-0.$API_VER)"
+    echo "buildomat deploy job: $BUILDOMAT_DEPLOY_TARGET (expected lab-3.0-gimlet-opte-0.$API_VER)"
     exit 1
 fi
