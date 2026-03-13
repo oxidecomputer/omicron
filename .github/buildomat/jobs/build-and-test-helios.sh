@@ -29,8 +29,8 @@
 #:
 #: [[publish]]
 #: series = "build-info-helios"
-#: name = "crate-build-timings.json"
-#: from_output = "/work/crate-build-timings.json"
+#: name = "cargo-timing.html"
+#: from_output = "/work/cargo-timing.html"
 #:
 #: [[publish]]
 #: series = "live-tests"
