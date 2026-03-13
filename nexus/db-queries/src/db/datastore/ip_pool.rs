@@ -2113,10 +2113,17 @@ fn extract_uuid_cast_sentinel(msg: &str) -> Option<&str> {
 // Pool and a Silo. It maintains the invariant that a pool can be reserved for
 // Oxide internal usage XOR linked to customer silos. It also checks that the
 // pool and silo still exist when the query is run.
+//
+// See `tests/output/ip_pool_external_silo_link.sql` for the full generated SQL.
 fn link_ip_pool_to_external_silo_query(
     ip_pool_resource: &IncompleteIpPoolResource,
 ) -> TypedSqlQuery<SelectableSql<IpPoolResource>> {
     let mut builder = QueryBuilder::new();
+    // `ip_pool` CTE: select the pool by ID, ensuring it still exists.
+    // Fail with a 'bad-link-type' sentinel (via CAST-to-UUID trick) if
+    // the pool is reserved for Oxide rather than external silos.
+    // Also selects pool_type and ip_version for denormalization into
+    // ip_pool_resource (needed for a partial index constraint on defaults).
     builder
         .sql("WITH ip_pool AS (SELECT CAST(IF(reservation_type != ")
         .param()
@@ -2131,16 +2138,22 @@ fn link_ip_pool_to_external_silo_query(
         .sql(") AS UUID) AS id, pool_type, ip_version FROM ip_pool WHERE id = ")
         .param()
         .bind::<sql_types::Uuid, _>(ip_pool_resource.ip_pool_id)
-        .sql(
-            " \
-            AND time_deleted IS NULL), \
-            silo AS (SELECT id FROM silo WHERE id = ",
-        )
+        .sql(" AND time_deleted IS NULL), ");
+
+    // `silo` CTE: select the silo by ID, ensuring it still exists.
+    builder
+        .sql("silo AS (SELECT id FROM silo WHERE id = ")
         .param()
         .bind::<sql_types::Uuid, _>(ip_pool_resource.resource_id)
+        .sql(" AND time_deleted IS NULL) ");
+
+    // Use COALESCE(CAST(id AS STRING), '<sentinel>') to detect missing
+    // pool/silo: if the CTE returned no rows the LEFT JOIN produces NULL,
+    // COALESCE substitutes the sentinel, and CAST-to-UUID fails at runtime
+    // with a recognizable error message.
+    builder
         .sql(
-            " AND time_deleted IS NULL) \
-            INSERT INTO ip_pool_resource (\
+            "INSERT INTO ip_pool_resource (\
                 ip_pool_id, \
                 resource_type, \
                 resource_id, \

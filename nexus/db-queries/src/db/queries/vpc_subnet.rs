@@ -30,6 +30,8 @@ use uuid::Uuid;
 /// other modification or alteration. If callers care, they can inspect the
 /// record to make sure it's what they expected, though that's usually a fraught
 /// endeavor.
+///
+/// See `tests/output/insert_vpc_subnet_query.sql` for the full generated SQL.
 #[derive(Clone, Debug)]
 pub struct InsertVpcSubnetQuery {
     /// The subnet to insert
@@ -59,6 +61,12 @@ impl QueryFragment<Pg> for InsertVpcSubnetQuery {
         &'a self,
         mut out: AstPass<'_, 'a, Pg>,
     ) -> diesel::QueryResult<()> {
+        // The `overlap` CTE selects any live records in the same VPC with
+        // overlapping IP blocks. It generates a casting error if any overlap
+        // is found: CAST(IF(<ipv4 overlaps>, 'ipv4', 'ipv6') AS BOOL) always
+        // fails, but *how* it fails tells us which IP family overlapped.
+        // The `id != <id>` filter ignores the existing identical record, so
+        // that re-inserting the same row (idempotency) doesn't flag as overlap.
         out.push_sql("WITH overlap AS MATERIALIZED (SELECT CAST(IF((");
         out.push_identifier(dsl::ipv4_block::NAME)?;
         out.push_sql(" && ");
@@ -128,6 +136,9 @@ impl QueryFragment<Pg> for InsertVpcSubnetQuery {
         out.push_bind_param::<sql_types::Nullable<sql_types::Uuid>, _>(
             &self.subnet.custom_router_id,
         )?;
+        // ON CONFLICT: perform a no-op update (set id = id) so that
+        // RETURNING * gives back the actual DB row whether it was newly
+        // inserted or already existed. This is what makes the query idempotent.
         out.push_sql(") ON CONFLICT (");
         out.push_identifier(dsl::id::NAME)?;
         out.push_sql(") DO UPDATE SET ");

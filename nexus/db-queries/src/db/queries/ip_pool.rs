@@ -31,6 +31,8 @@ use uuid::Uuid;
 /// to help with the scalability of the query. An `OR` means the database cannot use the indexes we've supplied on the
 /// `first_address` and `last_address` columns, and must resort to a full table
 /// scan.
+///
+/// See `tests/output/filter_overlapping_ip_ranges.sql` for the full generated SQL.
 #[derive(Debug, Clone)]
 pub struct FilterOverlappingIpRanges {
     pub range: IpPoolRange,
