@@ -101,7 +101,8 @@ impl PlanningReport {
             && self.zone_updates.is_empty()
             && self.nexus_generation_bump.is_empty()
             && self.cockroachdb_settings.is_empty()
-            && self.measurement_updates.is_empty()
+            // This is equivalent to empty i.e. nothing more to do
+            && self.measurement_updates.all_sleds_updated()
     }
 }
 
@@ -798,8 +799,10 @@ impl PlanningMeasurementUpdatesStepReport {
         PlanningMeasurementUpdatesStepReport::Modified { count: 0 }
     }
 
-    pub fn is_empty(&self) -> bool {
+    pub fn all_sleds_updated(&self) -> bool {
         match self {
+            // This is only returned once we have checked that our planned
+            // measurements match our inventory
             PlanningMeasurementUpdatesStepReport::MatchesInventory => true,
             _ => false,
         }
@@ -808,7 +811,8 @@ impl PlanningMeasurementUpdatesStepReport {
 
 impl fmt::Display for PlanningMeasurementUpdatesStepReport {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        if !self.is_empty() {
+        // Skip displaying anything if there's nothing to do
+        if !self.all_sleds_updated() {
             writeln!(f, "Measurement updates:")?;
             match self {
                 PlanningMeasurementUpdatesStepReport::BlockedAddUpdate => {

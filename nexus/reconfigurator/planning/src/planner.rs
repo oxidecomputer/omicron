@@ -280,7 +280,7 @@ impl<'a> Planner<'a> {
 
         // Only plan MGS-based updates once we've finished updating our
         // measurements.
-        let mgs_updates = if measurement_updates.is_empty() {
+        let mgs_updates = if measurement_updates.all_sleds_updated() {
             self.do_plan_mgs_updates(&zone_safety_checks)?
         } else {
             PlanningMgsUpdatesStepReport::new()
@@ -304,7 +304,7 @@ impl<'a> Planner<'a> {
         let mut add = if add_update_blocked_reasons.is_empty()
             || add_zones_with_mupdate_override
             || target_release_generation_is_one
-            || measurement_updates.is_empty()
+            || measurement_updates.all_sleds_updated()
         {
             self.do_plan_add(&mgs_updates)?
         } else {
@@ -337,7 +337,7 @@ impl<'a> Planner<'a> {
             PlanningZoneUpdatesStepReport::waiting_on(
                 ZoneUpdatesWaitingOn::ZoneAddBlockers,
             )
-        } else if !measurement_updates.is_empty() {
+        } else if !measurement_updates.all_sleds_updated() {
             // ... or if there are pending measurement updates
             PlanningZoneUpdatesStepReport::waiting_on(
                 ZoneUpdatesWaitingOn::Measurements,
