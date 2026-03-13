@@ -122,7 +122,7 @@ source.type = "local"
 source.rust.binary_names = ["nexus", "schema-updater"]
 source.rust.release = true
 source.paths = [
-  { from = "/opt/ooce/pgsql-13/lib/amd64", to = "/opt/ooce/pgsql-13/lib/amd64" },
+  { from = "/opt/ooce/pgsql-18/lib/amd64", to = "/opt/ooce/pgsql-18/lib/amd64" },
   { from = "smf/nexus/manifest.xml", to = "/var/svc/manifest/site/nexus/manifest.xml" },
   { from = "smf/nexus/{{rack-topology}}", to = "/var/svc/manifest/site/nexus" },
   { from = "out/console-assets", to = "/var/nexus/static" },
@@ -132,7 +132,8 @@ source.paths = [
 output.type = "zone"
 setup_hint = """
 - Run `cargo xtask download console` to download the web console assets
-- Run `pkg install library/postgresql-13` to download Postgres libraries
+- Run `pkg install library/postgresql-18` to download Postgres libraries
+- Run `pkg set-mediator -V 18 postgresql` to select the library version
 """
 output.intermediate_only = true
 
@@ -528,10 +529,14 @@ source.type = "local"
 source.paths = [
   { from = "smf/switch_zone_setup/manifest.xml", to = "/var/svc/manifest/site/switch_zone_setup/manifest.xml" },
   { from = "smf/switch_zone_setup/support_authorized_keys", to = "/opt/oxide/support/authorized_keys" },
-  { from = "/opt/ooce/pgsql-13/lib/amd64", to = "/opt/ooce/pgsql-13/lib/amd64" },
+  { from = "/opt/ooce/pgsql-18/lib/amd64", to = "/opt/ooce/pgsql-18/lib/amd64" },
 ]
 output.type = "zone"
 output.intermediate_only = true
+setup_hint = """
+- Run `pkg install library/postgresql-18` to download Postgres libraries
+- Run `pkg set-mediator -V 18 postgresql` to select the library version
+"""
 
 [package.sp-sim]
 service_name = "sp-sim"
