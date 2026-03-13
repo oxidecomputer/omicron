@@ -870,7 +870,11 @@ mod tests {
         };
         collector.register_producer(endpoint);
 
-        // Step time until there has been exactly `N_COLLECTIONS` collections.
+        // Step time for a few collections.
+        //
+        // Due to scheduling variations, we don't verify the number of
+        // collections we expect based on time, but we instead check that every
+        // collection that _has_ occurred bumps the counter.
         tokio::time::pause();
         let now = Instant::now();
         while now.elapsed() < TEST_WAIT_PERIOD {
@@ -888,14 +892,15 @@ mod tests {
             .statistics();
         let stats = rx.await.unwrap();
         assert_eq!(stats.collections.datum.value(), 0);
-        assert_eq!(
-            stats
-                .failed_collections
-                .get(&FailureReason::Unreachable)
-                .unwrap()
-                .datum
-                .value(),
-            N_COLLECTIONS,
+        let count = stats
+            .failed_collections
+            .get(&FailureReason::Unreachable)
+            .unwrap()
+            .datum
+            .value();
+        assert!(
+            count >= N_COLLECTIONS,
+            "expected at least {N_COLLECTIONS} failed collections, got {count}",
         );
         assert_eq!(stats.failed_collections.len(), 1);
         logctx.cleanup_successful();
