@@ -28,9 +28,9 @@ use uuid::Uuid;
 ///
 /// The query uses multiple separate `NOT EXISTS` subqueries rather than a
 /// single subquery with `OR` clauses. That's a lot of duplication, but it's
-/// to help with the scalability of the query. An `OR` means the database cannot use the indexes we've supplied on the
-/// `first_address` and `last_address` columns, and must resort to a full table
-/// scan.
+/// to help with the scalability of the query. An `OR` means the database
+/// cannot use the indexes we've supplied on the `first_address` and
+/// `last_address` columns, and must resort to a full table scan.
 ///
 /// See `tests/output/filter_overlapping_ip_ranges.sql` for the full generated SQL.
 #[derive(Debug, Clone)]
