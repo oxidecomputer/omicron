@@ -121,7 +121,7 @@ session_cleanup.period_secs = 300
 session_cleanup.max_delete_per_activation = 10000
 audit_log_timeout_incomplete.period_secs = 600
 audit_log_timeout_incomplete.timeout_secs = 14400
-audit_log_timeout_incomplete.max_update_per_activation = 1000
+audit_log_timeout_incomplete.max_timed_out_per_activation = 1000
 
 [default_region_allocation_strategy]
 # by default, allocate without requirement for distinct sleds.

@@ -1200,7 +1200,7 @@ impl BackgroundTasksInitializer {
                     config.audit_log_timeout_incomplete.timeout_secs,
                     config
                         .audit_log_timeout_incomplete
-                        .max_update_per_activation,
+                        .max_timed_out_per_activation,
                 ),
             ),
             opctx: opctx.child(BTreeMap::new()),

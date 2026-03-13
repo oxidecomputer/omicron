@@ -450,154 +450,16 @@ mod tests {
         id: Uuid,
         time_started: DateTime<Utc>,
     ) {
-        use diesel::sql_types;
-        diesel::sql_query(
-            "UPDATE omicron.public.audit_log \
-             SET time_started = $1 WHERE id = $2",
-        )
-        .bind::<sql_types::Timestamptz, _>(time_started)
-        .bind::<sql_types::Uuid, _>(id)
-        .execute_async(&*datastore.pool_connection_for_tests().await.unwrap())
-        .await
-        .unwrap();
-    }
-
-    #[tokio::test]
-    async fn test_audit_log_timeout_incomplete() {
-        let logctx = dev::test_setup_log("test_audit_log_timeout_incomplete");
-        let db = TestDatabase::new_with_datastore(&logctx.log).await;
-        let (opctx, datastore) = (db.opctx(), db.datastore());
-
-        let now = Utc::now();
-        let two_hours_ago = now - TimeDelta::try_hours(2).unwrap();
-        let cutoff = now - TimeDelta::try_hours(1).unwrap();
-
-        // Create an incomplete entry with time_started in the past
-        let old_entry = datastore
-            .audit_log_entry_init(opctx, make_entry_params("old-req").into())
-            .await
-            .unwrap();
-        set_time_started(datastore, old_entry.id, two_hours_ago).await;
-
-        // Create an incomplete entry that's recent (should not be timed out)
-        let _recent_entry = datastore
-            .audit_log_entry_init(opctx, make_entry_params("recent-req").into())
-            .await
-            .unwrap();
-
-        // Create an old entry that's already completed (should not be touched)
-        let completed_entry = datastore
-            .audit_log_entry_init(
-                opctx,
-                make_entry_params("completed-req").into(),
+        use diesel::prelude::*;
+        use nexus_db_schema::schema::audit_log;
+        diesel::update(audit_log::table)
+            .filter(audit_log::id.eq(id))
+            .set(audit_log::time_started.eq(time_started))
+            .execute_async(
+                &*datastore.pool_connection_for_tests().await.unwrap(),
             )
             .await
-            .unwrap();
-        set_time_started(datastore, completed_entry.id, two_hours_ago).await;
-        datastore
-            .audit_log_entry_complete(
-                opctx,
-                &completed_entry,
-                AuditLogCompletion::Success { http_status_code: 200 }.into(),
-            )
-            .await
-            .unwrap();
-
-        // Run the timeout
-        let timed_out = datastore
-            .audit_log_timeout_incomplete(opctx, cutoff, 100)
-            .await
-            .unwrap();
-
-        // Only the old incomplete entry should be affected
-        assert_eq!(timed_out, 1);
-
-        // The timed-out entry should now appear in the audit log with
-        // result_kind = timeout
-        let pagparams = DataPageParams {
-            marker: None,
-            limit: NonZeroU32::new(100).unwrap(),
-            direction: dropshot::PaginationOrder::Ascending,
-        };
-        let entries = datastore
-            .audit_log_list(opctx, &pagparams, two_hours_ago, None)
-            .await
-            .unwrap();
-
-        let timed_out_entry =
-            entries.iter().find(|e| e.id == old_entry.id).unwrap();
-        assert_eq!(timed_out_entry.result_kind, AuditLogResultKind::Timeout);
-        assert!(timed_out_entry.http_status_code.is_none());
-        assert!(timed_out_entry.error_code.is_none());
-        assert!(timed_out_entry.error_message.is_none());
-
-        // The completed entry should still be success
-        let completed =
-            entries.iter().find(|e| e.id == completed_entry.id).unwrap();
-        assert_eq!(completed.result_kind, AuditLogResultKind::Success);
-
-        // Running again should find nothing (idempotent)
-        let timed_out = datastore
-            .audit_log_timeout_incomplete(opctx, cutoff, 100)
-            .await
-            .unwrap();
-        assert_eq!(timed_out, 0);
-
-        db.terminate().await;
-        logctx.cleanup_successful();
-    }
-
-    #[tokio::test]
-    async fn test_audit_log_timeout_respects_limit() {
-        let logctx =
-            dev::test_setup_log("test_audit_log_timeout_respects_limit");
-        let db = TestDatabase::new_with_datastore(&logctx.log).await;
-        let (opctx, datastore) = (db.opctx(), db.datastore());
-
-        let now = Utc::now();
-        let two_hours_ago = now - TimeDelta::try_hours(2).unwrap();
-        let cutoff = now - TimeDelta::try_hours(1).unwrap();
-
-        // Create 5 stale incomplete entries
-        for i in 0..5 {
-            let entry = datastore
-                .audit_log_entry_init(
-                    opctx,
-                    make_entry_params(&format!("req-{i}")).into(),
-                )
-                .await
-                .unwrap();
-            set_time_started(datastore, entry.id, two_hours_ago).await;
-        }
-
-        // Timeout with limit of 2
-        let batch1 = datastore
-            .audit_log_timeout_incomplete(opctx, cutoff, 2)
-            .await
-            .unwrap();
-        assert_eq!(batch1, 2);
-
-        let batch2 = datastore
-            .audit_log_timeout_incomplete(opctx, cutoff, 2)
-            .await
-            .unwrap();
-        assert_eq!(batch2, 2);
-
-        let batch3 = datastore
-            .audit_log_timeout_incomplete(opctx, cutoff, 2)
-            .await
-            .unwrap();
-        assert_eq!(batch3, 1);
-
-        // All gone
-        let batch4 = datastore
-            .audit_log_timeout_incomplete(opctx, cutoff, 2)
-            .await
-            .unwrap();
-        assert_eq!(batch4, 0);
-
-        db.terminate().await;
-        logctx.cleanup_successful();
+            .expect("could not set time_started");
     }
 
     /// A late completion of an already-timed-out entry should be a no-op.

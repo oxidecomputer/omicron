@@ -981,7 +981,7 @@ pub struct AuditLogTimeoutIncompleteStatus {
     /// The cutoff time used: entries started before this were eligible.
     pub cutoff: DateTime<Utc>,
     /// Configured max rows to time out in this activation.
-    pub max_update_per_activation: u32,
+    pub max_timed_out_per_activation: u32,
     /// Error encountered during this activation, if any.
     pub error: Option<String>,
 }

@@ -464,7 +464,7 @@ pub struct AuditLogTimeoutIncompleteConfig {
     pub timeout_secs: Duration,
 
     /// max rows per SQL statement
-    pub max_update_per_activation: u32,
+    pub max_timed_out_per_activation: u32,
 }
 
 #[serde_as]
@@ -1286,7 +1286,7 @@ mod test {
             session_cleanup.max_delete_per_activation = 10000
             audit_log_timeout_incomplete.period_secs = 600
             audit_log_timeout_incomplete.timeout_secs = 14400
-            audit_log_timeout_incomplete.max_update_per_activation = 1000
+            audit_log_timeout_incomplete.max_timed_out_per_activation = 1000
             [default_region_allocation_strategy]
             type = "random"
             seed = 0
@@ -1558,7 +1558,7 @@ mod test {
                             AuditLogTimeoutIncompleteConfig {
                                 period_secs: Duration::from_secs(600),
                                 timeout_secs: Duration::from_secs(14400),
-                                max_update_per_activation: 1000,
+                                max_timed_out_per_activation: 1000,
                             },
                     },
                     multicast: MulticastConfig { enabled: false },
@@ -1669,7 +1669,7 @@ mod test {
             session_cleanup.max_delete_per_activation = 10000
             audit_log_timeout_incomplete.period_secs = 600
             audit_log_timeout_incomplete.timeout_secs = 14400
-            audit_log_timeout_incomplete.max_update_per_activation = 1000
+            audit_log_timeout_incomplete.max_timed_out_per_activation = 1000
 
             [default_region_allocation_strategy]
             type = "random"

@@ -2694,7 +2694,7 @@ fn print_task_audit_log_timeout_incomplete(details: &serde_json::Value) {
         Ok(status) => {
             const TIMED_OUT: &str = "timed_out:";
             const CUTOFF: &str = "cutoff:";
-            const MAX_UPDATE: &str = "max_update_per_activation:";
+            const MAX_UPDATE: &str = "max_timed_out_per_activation:";
             const ERROR: &str = "error:";
             const WIDTH: usize =
                 const_max_len(&[TIMED_OUT, CUTOFF, MAX_UPDATE, ERROR]) + 1;
@@ -2706,7 +2706,7 @@ fn print_task_audit_log_timeout_incomplete(details: &serde_json::Value) {
             );
             println!(
                 "    {MAX_UPDATE:<WIDTH$}{}",
-                status.max_update_per_activation
+                status.max_timed_out_per_activation
             );
             if let Some(error) = &status.error {
                 println!("    {ERROR:<WIDTH$}{error}");
