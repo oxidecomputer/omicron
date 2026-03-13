@@ -4401,7 +4401,7 @@ async fn cmd_nexus_sled_expunge_with_datastore(
     //    most recent inventory collection
     use nexus_db_queries::context::OpContext;
 
-    let opctx = OpContext::for_tests(log.clone(), datastore.clone());
+    let opctx = OpContext::for_omdb(log.clone(), datastore.clone());
     let opctx = &opctx;
 
     // First, we need to look up the sled so we know its serial number.
@@ -4511,7 +4511,7 @@ async fn cmd_nexus_sled_expunge_disk_with_datastore(
 ) -> Result<(), anyhow::Error> {
     use nexus_db_queries::context::OpContext;
 
-    let opctx = OpContext::for_tests(log.clone(), datastore.clone());
+    let opctx = OpContext::for_omdb(log.clone(), datastore.clone());
     let opctx = &opctx;
 
     // First, we need to look up the disk so we can lookup identity information.
@@ -4732,7 +4732,7 @@ async fn cmd_nexus_trust_quorum_remove_sled_with_datastore(
     _destruction_token: DestructiveOperationToken,
 ) -> Result<(), anyhow::Error> {
     use nexus_db_queries::context::OpContext;
-    let opctx = OpContext::for_tests(log.clone(), datastore.clone());
+    let opctx = OpContext::for_omdb(log.clone(), datastore.clone());
     let opctx = &opctx;
 
     // First, we need to look up the sled so we know its serial number.
