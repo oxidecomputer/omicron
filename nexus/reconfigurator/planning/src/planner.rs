@@ -756,9 +756,7 @@ impl<'a> Planner<'a> {
                         return Ok(PlanningMeasurementUpdatesStepReport::WaitingOnInventory);
                     }
                 }
-                return Ok(
-                    PlanningMeasurementUpdatesStepReport::MatchesInventory,
-                );
+                Ok(PlanningMeasurementUpdatesStepReport::MatchesInventory)
             }
             Err(e) => Err(Error::Planner(e.into())),
         }
