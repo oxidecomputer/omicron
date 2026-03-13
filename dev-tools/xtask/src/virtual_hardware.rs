@@ -145,7 +145,7 @@ pub fn run_cmd(args: Args) -> Result<()> {
         }
     };
 
-    let smf_path = "smf/sled-agent/non-gimlet/config.toml";
+    let smf_path = "smf/sled-agent/gimlet-standalone/config.toml";
     let sled_agent_config = workspace_root.join(smf_path);
     if !sled_agent_config.exists() {
         bail!("Could not find {smf_path}. We need it to configure vdevs");
