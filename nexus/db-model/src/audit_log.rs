@@ -224,7 +224,7 @@ impl From<AuditLogEntryInitParams> for AuditLogEntryInit {
 
 /// `audit_log_complete` is a view on `audit_log` filtering for rows with
 /// non-null `time_completed`, not its own table.
-#[derive(Queryable, Selectable, Clone, Debug)]
+#[derive(Queryable, Selectable, Clone, Debug, PartialEq)]
 #[diesel(table_name = audit_log_complete)]
 pub struct AuditLogEntry {
     pub id: Uuid,

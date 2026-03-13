@@ -25,7 +25,7 @@ Create the task module. The struct holds whatever state it needs (typically `Arc
 
 Logging conventions: `debug` when there's nothing to do, `info` when routine work was done, `warn` when the work done indicates something is wrong (e.g., cleaning up after a crash), `error` on failure.
 
-Include unit tests in the same file using `TestDatabase::new_with_datastore`. Tests call `actually_activate` directly.
+Include a unit test in the same file using `TestDatabase::new_with_datastore` that calls `actually_activate` directly. If the task has a datastore method, a single test exercising the task end-to-end (including the limit/batching behavior) is sufficient — don't add a redundant test for the datastore method separately unless it has complex logic worth testing in isolation.
 
 ### 3. Register the module (`nexus/src/app/background/tasks/mod.rs`)
 
@@ -37,7 +37,7 @@ Add `pub task_<name>: Activator` to the `BackgroundTasks` struct, maintaining al
 
 ### 5. Config (`nexus-config/src/nexus_config.rs`)
 
-Add a config struct (e.g., `YourTaskConfig`) with at minimum `period_secs: Duration` (using `#[serde_as(as = "DurationSeconds<u64>")]`). If the task does bounded work per activation, name the limit field `max_<verb>_per_activation` (e.g., `max_delete_per_activation`, `max_update_per_activation`) to match existing conventions. Add the field to `BackgroundTaskConfig`. Update the test config literal and expected parse output at the bottom of the file.
+Add a config struct (e.g., `YourTaskConfig`) with at minimum `period_secs: Duration` (using `#[serde_as(as = "DurationSeconds<u64>")]`). If the task does bounded work per activation, name the limit field `max_<past_tense_verb>_per_activation` (e.g., `max_deleted_per_activation`, `max_timed_out_per_activation`) to match existing conventions. Add the field to `BackgroundTaskConfig`. Update the test config literal and expected parse output at the bottom of the file.
 
 ### 6. Config files
 
@@ -62,7 +62,7 @@ If the task needs a new index or schema change to support its query, add a migra
 
 ### 9. Datastore method (if needed)
 
-If the task needs a new query, add it in the appropriate `nexus/db-queries/src/db/datastore/` file. Add a test in the same file or in `nexus/db-queries/src/db/datastore/mod.rs`.
+If the task needs a new query, add it in the appropriate `nexus/db-queries/src/db/datastore/` file. Prefer the Diesel typed DSL over raw SQL (`diesel::sql_query`) for queries and test helpers. Only fall back to raw SQL when the DSL genuinely can't express the query.
 
 If the task modifies rows that other code paths also modify, think about races: what happens if both run concurrently on the same row? Both paths should typically guard their writes so only one succeeds.
 
