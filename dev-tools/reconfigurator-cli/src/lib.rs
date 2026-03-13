@@ -34,6 +34,7 @@ use nexus_reconfigurator_simulation::{
 };
 use nexus_reconfigurator_simulation::{SimStateBuilder, SimTufRepoSource};
 use nexus_reconfigurator_simulation::{SimTufRepoDescription, Simulator};
+use nexus_types::deployment::CockroachDbSettings;
 use nexus_types::deployment::ExpectedVersion;
 use nexus_types::deployment::execution::blueprint_external_dns_config;
 use nexus_types::deployment::execution::blueprint_internal_dns_config;
@@ -1537,6 +1538,8 @@ enum SetArgs {
     IgnoreImpossibleMgsUpdatesSince {
         since: SetIgnoreImpossibleMgsUpdatesSinceArgs,
     },
+    /// CockroachDB settings
+    CockroachdbSettings(SetCockroachdbSettingsArgs),
 }
 
 #[derive(Debug, Clone)]
@@ -1580,6 +1583,50 @@ impl PlannerConfigOpts {
             add_zones_with_mupdate_override: self
                 .add_zones_with_mupdate_override
                 .unwrap_or(current.add_zones_with_mupdate_override),
+        };
+        (new != *current).then_some(new)
+    }
+}
+
+#[derive(Debug, Args)]
+struct SetCockroachdbSettingsArgs {
+    #[clap(flatten)]
+    opts: CockroachdbSettingsOpts,
+}
+
+#[derive(Debug, Clone, Args)]
+#[group(required = true, multiple = true)]
+struct CockroachdbSettingsOpts {
+    /// state fingerprint (a 40-hex-digit hash)
+    #[clap(long)]
+    fingerprint: Option<String>,
+    /// cluster version (e.g. "22.1")
+    #[clap(long)]
+    version: Option<String>,
+    /// cluster.preserve_downgrade_option value (e.g. "22.1", empty string
+    /// means unset)
+    #[clap(long)]
+    preserve_downgrade: Option<String>,
+}
+
+impl CockroachdbSettingsOpts {
+    fn update_if_modified(
+        &self,
+        current: &CockroachDbSettings,
+    ) -> Option<CockroachDbSettings> {
+        let new = CockroachDbSettings {
+            state_fingerprint: self
+                .fingerprint
+                .clone()
+                .unwrap_or_else(|| current.state_fingerprint.clone()),
+            version: self
+                .version
+                .clone()
+                .unwrap_or_else(|| current.version.clone()),
+            preserve_downgrade: self
+                .preserve_downgrade
+                .clone()
+                .unwrap_or_else(|| current.preserve_downgrade.clone()),
         };
         (new != *current).then_some(new)
     }
@@ -2755,17 +2802,7 @@ fn cmd_blueprint_edit(
         BlueprintEditCommands::Noop => "noop".to_owned(),
     };
 
-    let mut new_blueprint =
-        builder.build(BlueprintSource::ReconfiguratorCliEdit);
-
-    // Normally `builder.build()` would construct the cockroach fingerprint
-    // based on what we read from CRDB and put into the planning input, but
-    // since we don't have a CRDB we had to make something up for our planning
-    // input's CRDB fingerprint. In the absense of a better alternative, we'll
-    // just copy our parent's CRDB fingerprint and carry it forward.
-    new_blueprint
-        .cockroachdb_fingerprint
-        .clone_from(&blueprint.cockroachdb_fingerprint);
+    let new_blueprint = builder.build(BlueprintSource::ReconfiguratorCliEdit);
 
     let rv = format!(
         "blueprint {} created from {}: {}",
@@ -3361,6 +3398,13 @@ fn cmd_show(sim: &mut ReconfiguratorSim) -> anyhow::Result<Option<String>> {
         swriteln!(s, "not-yet nexus zones: inferred from generation");
     }
 
+    swriteln!(s, "cockroachdb settings:");
+    swrite!(
+        s,
+        "{}",
+        state.system().description().get_cockroachdb_settings().display()
+    );
+
     swriteln!(s, "planner config:");
     // No need for swriteln! here because .display() adds its own newlines at
     // the end.
@@ -3480,6 +3524,29 @@ fn cmd_set(
                 "ignoring impossible MGS updates since {}",
                 humantime::format_rfc3339_millis(since.0.into())
             )
+        }
+        SetArgs::CockroachdbSettings(args) => {
+            let current = state
+                .system_mut()
+                .description()
+                .get_cockroachdb_settings()
+                .clone();
+            if let Some(new) = args.opts.update_if_modified(&current) {
+                let rv = format!(
+                    "cockroachdb settings updated:\n{}",
+                    current.diff(&new).display()
+                );
+                state
+                    .system_mut()
+                    .description_mut()
+                    .set_cockroachdb_settings(new);
+                rv
+            } else {
+                format!(
+                    "no changes to cockroachdb settings:\n{}",
+                    current.display()
+                )
+            }
         }
     };
 

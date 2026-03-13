@@ -11,6 +11,11 @@ use super::BlueprintZoneImageSource;
 use super::OmicronZoneExternalIp;
 use super::OmicronZoneNetworkResources;
 use super::OmicronZoneNic;
+use super::blueprint_display::BpDiffState;
+use super::blueprint_display::KvList;
+use super::blueprint_display::KvPair;
+use super::blueprint_display::linear_table_modified;
+use super::blueprint_display::linear_table_unchanged;
 use crate::deployment::PlannerConfig;
 use crate::external_api::physical_disk::PhysicalDiskPolicy;
 use crate::external_api::physical_disk::PhysicalDiskState;
@@ -422,7 +427,7 @@ pub enum SledLookupErrorKind {
 
 /// Describes the current values for any CockroachDB settings that we care
 /// about.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Diffable, Serialize, Deserialize)]
 pub struct CockroachDbSettings {
     /// A fingerprint representing the current state of the cluster. This must
     /// be recorded in a blueprint and passed to the `DataStore` function when
@@ -447,6 +452,116 @@ impl CockroachDbSettings {
             preserve_downgrade: String::new(),
         }
     }
+
+    pub fn display(&self) -> CockroachDbSettingsDisplay<'_> {
+        CockroachDbSettingsDisplay { settings: self }
+    }
+}
+
+pub struct CockroachDbSettingsDisplay<'a> {
+    settings: &'a CockroachDbSettings,
+}
+
+impl fmt::Display for CockroachDbSettingsDisplay<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let list = KvList::new(
+            None,
+            vec![
+                KvPair::new_unchanged(
+                    "state fingerprint",
+                    display_none_if_empty(&self.settings.state_fingerprint),
+                ),
+                KvPair::new_unchanged(
+                    "version",
+                    display_none_if_empty(&self.settings.version),
+                ),
+                KvPair::new_unchanged(
+                    "preserve downgrade",
+                    display_not_set_if_empty(&self.settings.preserve_downgrade),
+                ),
+            ],
+        );
+        write!(f, "{list}")
+    }
+}
+
+impl fmt::Display for CockroachDbSettings {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "fingerprint = {}, version = {}, preserve downgrade = {}",
+            display_none_if_empty(&self.state_fingerprint),
+            display_none_if_empty(&self.version),
+            display_not_set_if_empty(&self.preserve_downgrade),
+        )
+    }
+}
+
+impl<'a> CockroachDbSettingsDiff<'a> {
+    pub fn display<'b>(&'b self) -> CockroachDbSettingsDiffDisplay<'a, 'b> {
+        CockroachDbSettingsDiffDisplay { diff: self }
+    }
+}
+
+pub struct CockroachDbSettingsDiffDisplay<'a, 'b> {
+    diff: &'b CockroachDbSettingsDiff<'a>,
+}
+
+impl fmt::Display for CockroachDbSettingsDiffDisplay<'_, '_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        macro_rules! diff_row {
+            ($diff:expr, $label:expr, $display_fn:expr) => {
+                if $diff.before == $diff.after {
+                    KvPair::new(
+                        BpDiffState::Unchanged,
+                        $label,
+                        linear_table_unchanged(&$display_fn($diff.before)),
+                    )
+                } else {
+                    KvPair::new(
+                        BpDiffState::Modified,
+                        $label,
+                        linear_table_modified(
+                            &$display_fn($diff.before),
+                            &$display_fn($diff.after),
+                        ),
+                    )
+                }
+            };
+        }
+
+        let CockroachDbSettingsDiff {
+            state_fingerprint,
+            version,
+            preserve_downgrade,
+        } = self.diff;
+
+        let list = KvList::new(
+            None,
+            vec![
+                diff_row!(
+                    state_fingerprint,
+                    "state fingerprint",
+                    display_none_if_empty
+                ),
+                diff_row!(version, "version", display_none_if_empty),
+                diff_row!(
+                    preserve_downgrade,
+                    "preserve downgrade",
+                    display_not_set_if_empty
+                ),
+            ],
+        );
+        write!(f, "{list}")
+    }
+}
+
+fn display_none_if_empty(s: &str) -> &str {
+    if s.is_empty() { "(none)" } else { s }
+}
+
+fn display_not_set_if_empty(s: &str) -> &str {
+    if s.is_empty() { "(not set)" } else { s }
 }
 
 /// CockroachDB cluster versions we are aware of.
