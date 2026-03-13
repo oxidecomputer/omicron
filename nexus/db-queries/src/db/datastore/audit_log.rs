@@ -6,6 +6,7 @@ use super::DataStore;
 use crate::authz;
 use crate::context::OpContext;
 use crate::db;
+use crate::db::model::AuditLogCompletion;
 use crate::db::model::AuditLogCompletionUpdate;
 use crate::db::model::AuditLogEntry;
 use crate::db::model::AuditLogEntryInit;
@@ -106,7 +107,14 @@ impl DataStore {
             })
     }
 
-    // set duration and result on an existing entry
+    /// Complete an audit log entry with the request's outcome.
+    ///
+    /// The `time_completed IS NULL` filter is critical: once an entry has been
+    /// completed — whether by the normal request path or by the background
+    /// timeout task — it is part of the immutable audit log. Overwriting it
+    /// would change its `time_completed` timestamp, shifting its position in
+    /// the `(time_completed, id)` pagination order and violating the guarantee
+    /// that past query results are stable.
     pub async fn audit_log_entry_complete(
         &self,
         opctx: &OpContext,
@@ -115,13 +123,62 @@ impl DataStore {
     ) -> UpdateResult<()> {
         use nexus_db_schema::schema::audit_log;
         opctx.authorize(authz::Action::CreateChild, &authz::AUDIT_LOG).await?;
-        diesel::update(audit_log::table)
+        let rows = diesel::update(audit_log::table)
             .filter(audit_log::id.eq(entry.id))
+            .filter(audit_log::time_completed.is_null())
             .set(completion)
             .execute_async(&*self.pool_connection_authorized(opctx).await?)
             .await
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+        if rows == 0 {
+            warn!(
+                opctx.log,
+                "audit log entry already completed \
+                 (likely timed out by background task)";
+                "entry_id" => %entry.id,
+            );
+        }
         Ok(())
+    }
+
+    /// Transition stale incomplete audit log rows to `result_kind = timeout`.
+    ///
+    /// Finds up to `limit` rows where `time_completed IS NULL` and
+    /// `time_started < cutoff`, atomically sets them to the timeout
+    /// completion state, and returns the number of rows updated.
+    pub async fn audit_log_timeout_incomplete(
+        &self,
+        opctx: &OpContext,
+        cutoff: DateTime<Utc>,
+        limit: u32,
+    ) -> Result<usize, omicron_common::api::external::Error> {
+        use nexus_db_schema::schema::audit_log;
+        opctx.authorize(authz::Action::CreateChild, &authz::AUDIT_LOG).await?;
+
+        // Diesel's ValidSubselect doesn't allow a subquery from the same
+        // table being updated, so we alias audit_log for the subquery.
+        let audit_log_sub =
+            diesel::alias!(nexus_db_schema::schema::audit_log as audit_log_sub);
+
+        let subquery = audit_log_sub
+            .filter(audit_log_sub.field(audit_log::time_completed).is_null())
+            .filter(audit_log_sub.field(audit_log::time_started).lt(cutoff))
+            .order((
+                audit_log_sub.field(audit_log::time_started),
+                audit_log_sub.field(audit_log::id),
+            ))
+            .limit(i64::from(limit))
+            .select(audit_log_sub.field(audit_log::id));
+
+        let completion: AuditLogCompletionUpdate =
+            AuditLogCompletion::Timeout.into();
+
+        diesel::update(audit_log::table)
+            .filter(audit_log::id.eq_any(subquery))
+            .set(completion)
+            .execute_async(&*self.pool_connection_authorized(opctx).await?)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 }
 
@@ -130,8 +187,9 @@ mod tests {
     use super::*;
     use crate::db::pub_test_utils::TestDatabase;
     use assert_matches::assert_matches;
+    use chrono::TimeDelta;
     use nexus_db_model::{
-        AuditLogActor, AuditLogCompletion, AuditLogEntryInitParams,
+        AuditLogActor, AuditLogEntryInitParams, AuditLogResultKind,
     };
     use omicron_common::api::external::Error;
     use omicron_test_utils::dev;
@@ -367,6 +425,106 @@ mod tests {
         assert_eq!(audit_log[1].id.to_string(), id3);
         assert_eq!(audit_log[2].id.to_string(), id2);
         assert_eq!(audit_log[3].id.to_string(), id1);
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    fn make_entry_params(request_id: &str) -> AuditLogEntryInitParams {
+        AuditLogEntryInitParams {
+            request_id: request_id.to_string(),
+            operation_id: "project_create".to_string(),
+            request_uri: "/v1/projects".to_string(),
+            source_ip: "1.1.1.1".parse().unwrap(),
+            user_agent: None,
+            actor: AuditLogActor::Unauthenticated,
+            auth_method: None,
+            credential_id: None,
+        }
+    }
+
+    /// Force time_started into the past for an audit log entry so we can
+    /// test the timeout logic without waiting.
+    async fn set_time_started(
+        datastore: &DataStore,
+        id: Uuid,
+        time_started: DateTime<Utc>,
+    ) {
+        use diesel::prelude::*;
+        use nexus_db_schema::schema::audit_log;
+        diesel::update(audit_log::table)
+            .filter(audit_log::id.eq(id))
+            .set(audit_log::time_started.eq(time_started))
+            .execute_async(
+                &*datastore.pool_connection_for_tests().await.unwrap(),
+            )
+            .await
+            .expect("could not set time_started");
+    }
+
+    /// A late completion of an already-timed-out entry should be a no-op.
+    /// Once an entry is timed out and visible in the audit log, it's part
+    /// of the immutable record. Overwriting it would change its timestamp
+    /// and violate the guarantee that the past doesn't change.
+    #[tokio::test]
+    async fn test_audit_log_timeout_then_late_completion() {
+        let logctx =
+            dev::test_setup_log("test_audit_log_timeout_then_late_completion");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        let now = Utc::now();
+        let two_hours_ago = now - TimeDelta::try_hours(2).unwrap();
+        let cutoff = now - TimeDelta::try_hours(1).unwrap();
+
+        let entry = datastore
+            .audit_log_entry_init(opctx, make_entry_params("late-req").into())
+            .await
+            .unwrap();
+        set_time_started(datastore, entry.id, two_hours_ago).await;
+
+        // Timeout the entry
+        let timed_out = datastore
+            .audit_log_timeout_incomplete(opctx, cutoff, 100)
+            .await
+            .unwrap();
+        assert_eq!(timed_out, 1);
+
+        // Record the timed-out state
+        let pagparams = DataPageParams {
+            marker: None,
+            limit: NonZeroU32::new(100).unwrap(),
+            direction: dropshot::PaginationOrder::Ascending,
+        };
+        let entries = datastore
+            .audit_log_list(opctx, &pagparams, two_hours_ago, None)
+            .await
+            .unwrap();
+        let timed_out_entry =
+            entries.iter().find(|e| e.id == entry.id).unwrap();
+        assert_eq!(timed_out_entry.result_kind, AuditLogResultKind::Timeout);
+        let timeout_completed_at = timed_out_entry.time_completed;
+
+        // Now a late completion arrives — it should be a no-op because
+        // the entry is already completed (as timeout)
+        datastore
+            .audit_log_entry_complete(
+                opctx,
+                &entry,
+                AuditLogCompletion::Success { http_status_code: 200 }.into(),
+            )
+            .await
+            .expect("late completion should not error");
+
+        // The entry should still show as timeout, unchanged
+        let entries = datastore
+            .audit_log_list(opctx, &pagparams, two_hours_ago, None)
+            .await
+            .unwrap();
+        let found = entries.iter().find(|e| e.id == entry.id).unwrap();
+        assert_eq!(found.result_kind, AuditLogResultKind::Timeout);
+        assert_eq!(found.time_completed, timeout_completed_at);
+        assert!(found.http_status_code.is_none());
 
         db.terminate().await;
         logctx.cleanup_successful();
