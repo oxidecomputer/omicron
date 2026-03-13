@@ -212,7 +212,7 @@ session_cleanup.max_delete_per_activation = 10000
 audit_log_timeout_incomplete.period_secs = 600
 audit_log_timeout_incomplete.timeout_secs = 14400
 audit_log_cleanup.period_secs = 600
-audit_log_cleanup.retention_days = 30
+audit_log_cleanup.retention_days = 90
 audit_log_cleanup.max_deleted_per_activation = 10000
 audit_log_timeout_incomplete.max_timed_out_per_activation = 1000
 
