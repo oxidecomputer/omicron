@@ -9,12 +9,12 @@ use nexus_types::deployment::TargetReleaseDescription;
 use omicron_common::api::external::TufRepoDescription;
 use std::collections::BTreeSet;
 use thiserror::Error;
-use tufaceous_artifact::ArtifactKind;
+use tufaceous_artifact::{ArtifactHash, ArtifactKind};
 
 #[derive(Debug, Error)]
 pub(crate) enum MeasurementPlanError {
-    #[error("TUF repo contained no measurements")]
-    EmptyMeasurementSet,
+    #[error("TUF repo {0} contained no measurements")]
+    EmptyMeasurementSet(ArtifactHash),
     #[error("Attempted to plan measurements on an initial blueprint")]
     PlanningInitial,
     #[error("Found initial blueprint when there should be a TUF repo")]
@@ -60,7 +60,9 @@ pub(crate) fn plan_measurement_updates(
         ) => {
             let artifacts =
                 BlueprintArtifactMeasurements::new(build_measurement_set(&c))
-                    .ok_or(MeasurementPlanError::EmptyMeasurementSet)?;
+                    .ok_or(MeasurementPlanError::EmptyMeasurementSet(
+                    c.repo.hash,
+                ))?;
 
             Ok(artifacts)
         }
@@ -69,13 +71,22 @@ pub(crate) fn plan_measurement_updates(
             TargetReleaseDescription::TufRepo(c),
             TargetReleaseDescription::TufRepo(p),
         ) => {
+            let current = build_measurement_set(&c);
+            if current.is_empty() {
+                return Err(MeasurementPlanError::EmptyMeasurementSet(
+                    c.repo.hash,
+                ));
+            }
+            let previous = build_measurement_set(&p);
+            if previous.is_empty() {
+                return Err(MeasurementPlanError::EmptyMeasurementSet(
+                    p.repo.hash,
+                ));
+            }
             let artifacts = BlueprintArtifactMeasurements::new(
-                build_measurement_set(&c)
-                    .into_iter()
-                    .chain(build_measurement_set(&p).into_iter())
-                    .collect(),
+                current.into_iter().chain(previous.into_iter()).collect(),
             )
-            .ok_or(MeasurementPlanError::EmptyMeasurementSet)?;
+            .expect("we already checked both sets were non-empty");
 
             Ok(artifacts)
         }
