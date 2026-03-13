@@ -2694,9 +2694,9 @@ fn print_task_audit_log_cleanup(details: &serde_json::Value) {
             error, details
         ),
         Ok(status) => {
-            const DELETED: &str = "rows_deleted:";
+            const DELETED: &str = "rows deleted:";
             const CUTOFF: &str = "cutoff:";
-            const MAX_DELETE: &str = "max_delete_per_activation:";
+            const MAX_DELETE: &str = "max deleted per activation:";
             const ERROR: &str = "error:";
             const WIDTH: usize =
                 const_max_len(&[DELETED, CUTOFF, MAX_DELETE, ERROR]) + 1;
@@ -2708,7 +2708,7 @@ fn print_task_audit_log_cleanup(details: &serde_json::Value) {
             );
             println!(
                 "    {MAX_DELETE:<WIDTH$}{}",
-                status.max_delete_per_activation
+                status.max_deleted_per_activation
             );
             if let Some(error) = &status.error {
                 println!("    {ERROR:<WIDTH$}{error}");

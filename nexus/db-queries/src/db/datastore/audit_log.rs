@@ -487,16 +487,14 @@ mod tests {
         id: Uuid,
         time_started: DateTime<Utc>,
     ) {
-        use diesel::sql_types;
-        diesel::sql_query(
-            "UPDATE omicron.public.audit_log \
-             SET time_started = $1 WHERE id = $2",
-        )
-        .bind::<sql_types::Timestamptz, _>(time_started)
-        .bind::<sql_types::Uuid, _>(id)
-        .execute_async(&*datastore.pool_connection_for_tests().await.unwrap())
-        .await
-        .unwrap();
+        use nexus_db_schema::schema::audit_log;
+        let pool = &*datastore.pool_connection_for_tests().await.unwrap();
+        diesel::update(audit_log::table)
+            .filter(audit_log::id.eq(id))
+            .set(audit_log::time_started.eq(time_started))
+            .execute_async(pool)
+            .await
+            .expect("could not set time_started");
     }
 
     #[tokio::test]
@@ -700,146 +698,6 @@ mod tests {
         assert_eq!(found.result_kind, AuditLogResultKind::Timeout);
         assert_eq!(found.time_completed, timeout_completed_at);
         assert!(found.http_status_code.is_none());
-
-        db.terminate().await;
-        logctx.cleanup_successful();
-    }
-
-    /// Force time_completed into the past for an audit log entry so we can
-    /// test the cleanup logic without waiting.
-    async fn set_time_completed(
-        datastore: &DataStore,
-        id: Uuid,
-        time_completed: DateTime<Utc>,
-    ) {
-        use diesel::sql_types;
-        diesel::sql_query(
-            "UPDATE omicron.public.audit_log \
-             SET time_completed = $1 WHERE id = $2",
-        )
-        .bind::<sql_types::Timestamptz, _>(time_completed)
-        .bind::<sql_types::Uuid, _>(id)
-        .execute_async(&*datastore.pool_connection_for_tests().await.unwrap())
-        .await
-        .unwrap();
-    }
-
-    #[tokio::test]
-    async fn test_audit_log_cleanup() {
-        let logctx = dev::test_setup_log("test_audit_log_cleanup");
-        let db = TestDatabase::new_with_datastore(&logctx.log).await;
-        let (opctx, datastore) = (db.opctx(), db.datastore());
-
-        let now = Utc::now();
-        let eight_days_ago = now - TimeDelta::try_days(8).unwrap();
-        let cutoff = now - TimeDelta::try_days(7).unwrap();
-
-        // Create 3 old completed entries (should be deleted)
-        for i in 0..3 {
-            let entry = datastore
-                .audit_log_entry_init(
-                    opctx,
-                    make_entry_params(&format!("old-{i}")).into(),
-                )
-                .await
-                .unwrap();
-            datastore
-                .audit_log_entry_complete(
-                    opctx,
-                    &entry,
-                    AuditLogCompletion::Success { http_status_code: 200 }
-                        .into(),
-                )
-                .await
-                .unwrap();
-            set_time_completed(datastore, entry.id, eight_days_ago).await;
-        }
-
-        // Create a recent completed entry (should NOT be deleted)
-        let recent_entry = datastore
-            .audit_log_entry_init(
-                opctx,
-                make_entry_params("recent-completed").into(),
-            )
-            .await
-            .unwrap();
-        datastore
-            .audit_log_entry_complete(
-                opctx,
-                &recent_entry,
-                AuditLogCompletion::Success { http_status_code: 200 }.into(),
-            )
-            .await
-            .unwrap();
-
-        // Create an incomplete entry (should NOT be deleted)
-        let _incomplete = datastore
-            .audit_log_entry_init(opctx, make_entry_params("incomplete").into())
-            .await
-            .unwrap();
-
-        let deleted =
-            datastore.audit_log_cleanup(opctx, cutoff, 100).await.unwrap();
-        assert_eq!(deleted, 3);
-
-        // Running again should find nothing
-        let deleted =
-            datastore.audit_log_cleanup(opctx, cutoff, 100).await.unwrap();
-        assert_eq!(deleted, 0);
-
-        db.terminate().await;
-        logctx.cleanup_successful();
-    }
-
-    #[tokio::test]
-    async fn test_audit_log_cleanup_respects_limit() {
-        let logctx =
-            dev::test_setup_log("test_audit_log_cleanup_respects_limit");
-        let db = TestDatabase::new_with_datastore(&logctx.log).await;
-        let (opctx, datastore) = (db.opctx(), db.datastore());
-
-        let now = Utc::now();
-        let eight_days_ago = now - TimeDelta::try_days(8).unwrap();
-        let cutoff = now - TimeDelta::try_days(7).unwrap();
-
-        // Create 5 old completed entries
-        for i in 0..5 {
-            let entry = datastore
-                .audit_log_entry_init(
-                    opctx,
-                    make_entry_params(&format!("old-{i}")).into(),
-                )
-                .await
-                .unwrap();
-            datastore
-                .audit_log_entry_complete(
-                    opctx,
-                    &entry,
-                    AuditLogCompletion::Success { http_status_code: 200 }
-                        .into(),
-                )
-                .await
-                .unwrap();
-            set_time_completed(datastore, entry.id, eight_days_ago).await;
-        }
-
-        // Delete with limit of 2
-        let batch1 =
-            datastore.audit_log_cleanup(opctx, cutoff, 2).await.unwrap();
-        assert_eq!(batch1, 2);
-
-        let batch2 =
-            datastore.audit_log_cleanup(opctx, cutoff, 2).await.unwrap();
-        assert_eq!(batch2, 2);
-
-        let batch3 =
-            datastore.audit_log_cleanup(opctx, cutoff, 2).await.unwrap();
-        assert_eq!(batch3, 1);
-
-        // All gone
-        let batch4 =
-            datastore.audit_log_cleanup(opctx, cutoff, 2).await.unwrap();
-        assert_eq!(batch4, 0);
 
         db.terminate().await;
         logctx.cleanup_successful();

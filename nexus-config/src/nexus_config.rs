@@ -485,7 +485,7 @@ pub struct AuditLogCleanupConfig {
     pub retention_days: NonZeroU32,
 
     /// maximum rows hard-deleted per activation
-    pub max_delete_per_activation: u32,
+    pub max_deleted_per_activation: u32,
 }
 
 #[serde_as]
@@ -1310,7 +1310,7 @@ mod test {
             audit_log_timeout_incomplete.max_update_per_activation = 1000
             audit_log_cleanup.period_secs = 600
             audit_log_cleanup.retention_days = 30
-            audit_log_cleanup.max_delete_per_activation = 10000
+            audit_log_cleanup.max_deleted_per_activation = 10000
             [default_region_allocation_strategy]
             type = "random"
             seed = 0
@@ -1587,7 +1587,7 @@ mod test {
                         audit_log_cleanup: AuditLogCleanupConfig {
                             period_secs: Duration::from_secs(600),
                             retention_days: NonZeroU32::new(30).unwrap(),
-                            max_delete_per_activation: 10_000,
+                            max_deleted_per_activation: 10_000,
                         },
                     },
                     multicast: MulticastConfig { enabled: false },
@@ -1701,7 +1701,7 @@ mod test {
             audit_log_timeout_incomplete.max_update_per_activation = 1000
             audit_log_cleanup.period_secs = 600
             audit_log_cleanup.retention_days = 30
-            audit_log_cleanup.max_delete_per_activation = 10000
+            audit_log_cleanup.max_deleted_per_activation = 10000
 
             [default_region_allocation_strategy]
             type = "random"
@@ -1831,7 +1831,7 @@ mod test {
             r##"
             period_secs = 600
             retention_days = 0
-            max_delete_per_activation = 10000
+            max_deleted_per_activation = 10000
             "##,
         )
         .expect_err("retention_days = 0 should be rejected");

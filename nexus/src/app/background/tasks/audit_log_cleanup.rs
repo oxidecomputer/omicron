@@ -19,16 +19,16 @@ use std::sync::Arc;
 pub struct AuditLogCleanup {
     datastore: Arc<DataStore>,
     retention_days: NonZeroU32,
-    max_delete_per_activation: u32,
+    max_deleted_per_activation: u32,
 }
 
 impl AuditLogCleanup {
     pub fn new(
         datastore: Arc<DataStore>,
         retention_days: NonZeroU32,
-        max_delete_per_activation: u32,
+        max_deleted_per_activation: u32,
     ) -> Self {
-        Self { datastore, retention_days, max_delete_per_activation }
+        Self { datastore, retention_days, max_deleted_per_activation }
     }
 
     pub(crate) async fn actually_activate(
@@ -42,7 +42,7 @@ impl AuditLogCleanup {
 
         let rows_deleted = match self
             .datastore
-            .audit_log_cleanup(opctx, cutoff, self.max_delete_per_activation)
+            .audit_log_cleanup(opctx, cutoff, self.max_deleted_per_activation)
             .await
         {
             Ok(count) => count,
@@ -52,7 +52,7 @@ impl AuditLogCleanup {
                 return AuditLogCleanupStatus {
                     rows_deleted: 0,
                     cutoff,
-                    max_delete_per_activation: self.max_delete_per_activation,
+                    max_deleted_per_activation: self.max_deleted_per_activation,
                     error: Some(msg),
                 };
             }
@@ -63,7 +63,7 @@ impl AuditLogCleanup {
                 &opctx.log,
                 "audit log cleanup: deleted {rows_deleted} old entries";
                 "cutoff" => %cutoff,
-                "limit" => self.max_delete_per_activation,
+                "limit" => self.max_deleted_per_activation,
             );
         } else {
             slog::debug!(
@@ -76,7 +76,7 @@ impl AuditLogCleanup {
         AuditLogCleanupStatus {
             rows_deleted,
             cutoff,
-            max_delete_per_activation: self.max_delete_per_activation,
+            max_deleted_per_activation: self.max_deleted_per_activation,
             error: None,
         }
     }
@@ -101,10 +101,11 @@ impl BackgroundTask for AuditLogCleanup {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeSet;
+
     use super::*;
     use chrono::TimeDelta;
     use chrono::Utc;
-    use diesel::sql_types;
     use nexus_db_model::{
         AuditLogActor, AuditLogCompletion, AuditLogEntryInitParams,
     };
@@ -112,7 +113,24 @@ mod tests {
     use omicron_test_utils::dev;
     use uuid::Uuid;
 
-    fn make_entry_params(request_id: &str) -> AuditLogEntryInitParams {
+    async fn get_audit_log_ids(datastore: &DataStore) -> BTreeSet<Uuid> {
+        use async_bb8_diesel::AsyncRunQueryDsl;
+        use diesel::prelude::*;
+        use nexus_db_schema::schema::audit_log;
+        audit_log::table
+            // fake filter required to get around the table scan rule
+            .filter(audit_log::id.ne(uuid::Uuid::nil()))
+            .select(audit_log::id)
+            .load_async::<Uuid>(
+                &*datastore.pool_connection_for_tests().await.unwrap(),
+            )
+            .await
+            .expect("could not load audit log ids")
+            .into_iter()
+            .collect()
+    }
+
+    fn make_entry(request_id: &str) -> AuditLogEntryInitParams {
         AuditLogEntryInitParams {
             request_id: request_id.to_string(),
             operation_id: "project_create".to_string(),
@@ -131,15 +149,16 @@ mod tests {
         time_completed: chrono::DateTime<Utc>,
     ) {
         use async_bb8_diesel::AsyncRunQueryDsl;
-        diesel::sql_query(
-            "UPDATE omicron.public.audit_log \
-             SET time_completed = $1 WHERE id = $2",
-        )
-        .bind::<sql_types::Timestamptz, _>(time_completed)
-        .bind::<sql_types::Uuid, _>(id)
-        .execute_async(&*datastore.pool_connection_for_tests().await.unwrap())
-        .await
-        .unwrap();
+        use diesel::prelude::*;
+        use nexus_db_schema::schema::audit_log;
+        diesel::update(audit_log::table)
+            .filter(audit_log::id.eq(id))
+            .set(audit_log::time_completed.eq(Some(time_completed)))
+            .execute_async(
+                &*datastore.pool_connection_for_tests().await.unwrap(),
+            )
+            .await
+            .expect("could not set time_completed");
     }
 
     #[tokio::test]
@@ -151,12 +170,14 @@ mod tests {
         let now = Utc::now();
         let eight_days_ago = now - TimeDelta::try_days(8).unwrap();
 
-        // Create 3 old completed entries
-        for i in 0..3 {
+        let completion = AuditLogCompletion::Success { http_status_code: 200 };
+
+        // Create 5 old completed entries (should be deleted)
+        for i in 0..5 {
             let entry = datastore
                 .audit_log_entry_init(
                     opctx,
-                    make_entry_params(&format!("req-{i}")).into(),
+                    make_entry(&format!("req-{i}")).into(),
                 )
                 .await
                 .unwrap();
@@ -164,8 +185,7 @@ mod tests {
                 .audit_log_entry_complete(
                     opctx,
                     &entry,
-                    AuditLogCompletion::Success { http_status_code: 200 }
-                        .into(),
+                    completion.clone().into(),
                 )
                 .await
                 .unwrap();
@@ -174,96 +194,52 @@ mod tests {
 
         // Create 1 recent completed entry (should not be deleted)
         let recent = datastore
-            .audit_log_entry_init(opctx, make_entry_params("recent-req").into())
+            .audit_log_entry_init(opctx, make_entry("recent-req").into())
             .await
             .unwrap();
         datastore
-            .audit_log_entry_complete(
-                opctx,
-                &recent,
-                AuditLogCompletion::Success { http_status_code: 200 }.into(),
-            )
+            .audit_log_entry_complete(opctx, &recent, completion.into())
             .await
             .unwrap();
 
         // Create 1 incomplete entry (should not be deleted)
-        datastore
-            .audit_log_entry_init(
-                opctx,
-                make_entry_params("incomplete-req").into(),
-            )
+        let incomplete = datastore
+            .audit_log_entry_init(opctx, make_entry("incomplete-req").into())
             .await
             .unwrap();
 
+        let expected_survivors: BTreeSet<Uuid> =
+            [recent.id, incomplete.id].into();
+
+        assert_eq!(get_audit_log_ids(&datastore).await.len(), 7);
+
+        // max_deleted_per_activation = 3, so it takes two activations to
+        // delete all 5 old entries
         let mut task = AuditLogCleanup::new(
             datastore.clone(),
             NonZeroU32::new(7).unwrap(),
-            100,
+            3,
         );
 
+        // first activation deletes 3 old, leaves 2 old and 2 new
         let status = task.actually_activate(opctx).await;
         assert_eq!(status.rows_deleted, 3);
         assert!(status.error.is_none());
+        let remaining = get_audit_log_ids(&datastore).await;
+        assert_eq!(remaining.len(), 4);
+        assert!(expected_survivors.is_subset(&remaining));
 
-        // Second activation should find nothing
+        // second activation deletes remaining 2
+        let status = task.actually_activate(opctx).await;
+        assert_eq!(status.rows_deleted, 2);
+        assert!(status.error.is_none());
+        assert_eq!(get_audit_log_ids(&datastore).await, expected_survivors);
+
+        // third activation does nothing
         let status = task.actually_activate(opctx).await;
         assert_eq!(status.rows_deleted, 0);
         assert!(status.error.is_none());
-
-        db.terminate().await;
-        logctx.cleanup_successful();
-    }
-
-    #[tokio::test]
-    async fn test_audit_log_cleanup_respects_max_delete_per_activation() {
-        let logctx = dev::test_setup_log(
-            "test_audit_log_cleanup_respects_max_delete_per_activation",
-        );
-        let db = TestDatabase::new_with_datastore(&logctx.log).await;
-        let (opctx, datastore) = (db.opctx(), db.datastore());
-
-        let now = Utc::now();
-        let eight_days_ago = now - TimeDelta::try_days(8).unwrap();
-
-        // Create 5 old completed entries
-        for i in 0..5 {
-            let entry = datastore
-                .audit_log_entry_init(
-                    opctx,
-                    make_entry_params(&format!("req-{i}")).into(),
-                )
-                .await
-                .unwrap();
-            datastore
-                .audit_log_entry_complete(
-                    opctx,
-                    &entry,
-                    AuditLogCompletion::Success { http_status_code: 200 }
-                        .into(),
-                )
-                .await
-                .unwrap();
-            set_time_completed(datastore, entry.id, eight_days_ago).await;
-        }
-
-        // max_delete_per_activation = 2
-        let mut task = AuditLogCleanup::new(
-            datastore.clone(),
-            NonZeroU32::new(7).unwrap(),
-            2,
-        );
-
-        let status = task.actually_activate(opctx).await;
-        assert_eq!(status.rows_deleted, 2);
-        assert!(status.error.is_none());
-
-        let status = task.actually_activate(opctx).await;
-        assert_eq!(status.rows_deleted, 2);
-        assert!(status.error.is_none());
-
-        let status = task.actually_activate(opctx).await;
-        assert_eq!(status.rows_deleted, 1);
-        assert!(status.error.is_none());
+        assert_eq!(get_audit_log_ids(&datastore).await, expected_survivors);
 
         db.terminate().await;
         logctx.cleanup_successful();

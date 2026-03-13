@@ -994,7 +994,7 @@ pub struct AuditLogCleanupStatus {
     /// The cutoff time used: completed entries older than this were eligible.
     pub cutoff: DateTime<Utc>,
     /// Configured max rows to delete in this activation.
-    pub max_delete_per_activation: u32,
+    pub max_deleted_per_activation: u32,
     /// Error encountered during this activation, if any.
     pub error: Option<String>,
 }

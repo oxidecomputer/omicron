@@ -601,9 +601,9 @@ task: "audit_log_cleanup"
   configured period: every <REDACTED_DURATION>m
   last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
-    rows_deleted:              0
-    cutoff:                    <REDACTED_TIMESTAMP>
-    max_delete_per_activation: 10000
+    rows deleted:               0
+    cutoff:                     <REDACTED_TIMESTAMP>
+    max deleted per activation: 10000
 
 task: "audit_log_timeout_incomplete"
   configured period: every <REDACTED_DURATION>m
@@ -1212,9 +1212,9 @@ task: "audit_log_cleanup"
   configured period: every <REDACTED_DURATION>m
   last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
-    rows_deleted:              0
-    cutoff:                    <REDACTED_TIMESTAMP>
-    max_delete_per_activation: 10000
+    rows deleted:               0
+    cutoff:                     <REDACTED_TIMESTAMP>
+    max deleted per activation: 10000
 
 task: "audit_log_timeout_incomplete"
   configured period: every <REDACTED_DURATION>m

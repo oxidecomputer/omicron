@@ -1219,7 +1219,7 @@ impl BackgroundTasksInitializer {
             task_impl: Box::new(audit_log_cleanup::AuditLogCleanup::new(
                 datastore,
                 config.audit_log_cleanup.retention_days,
-                config.audit_log_cleanup.max_delete_per_activation,
+                config.audit_log_cleanup.max_deleted_per_activation,
             )),
             opctx: opctx.child(BTreeMap::new()),
             watchers: vec![],

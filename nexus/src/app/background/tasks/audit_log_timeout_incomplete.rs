@@ -120,7 +120,6 @@ mod tests {
     use super::*;
     use chrono::TimeDelta;
     use chrono::Utc;
-    use diesel::sql_types;
     use nexus_db_model::{AuditLogActor, AuditLogEntryInitParams};
     use nexus_db_queries::db::pub_test_utils::TestDatabase;
     use omicron_test_utils::dev;
@@ -145,15 +144,16 @@ mod tests {
         time_started: chrono::DateTime<Utc>,
     ) {
         use async_bb8_diesel::AsyncRunQueryDsl;
-        diesel::sql_query(
-            "UPDATE omicron.public.audit_log \
-             SET time_started = $1 WHERE id = $2",
-        )
-        .bind::<sql_types::Timestamptz, _>(time_started)
-        .bind::<sql_types::Uuid, _>(id)
-        .execute_async(&*datastore.pool_connection_for_tests().await.unwrap())
-        .await
-        .unwrap();
+        use diesel::prelude::*;
+        use nexus_db_schema::schema::audit_log;
+        diesel::update(audit_log::table)
+            .filter(audit_log::id.eq(id))
+            .set(audit_log::time_started.eq(time_started))
+            .execute_async(
+                &*datastore.pool_connection_for_tests().await.unwrap(),
+            )
+            .await
+            .expect("could not set time_started");
     }
 
     #[tokio::test]
