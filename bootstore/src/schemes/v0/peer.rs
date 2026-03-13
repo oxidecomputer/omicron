@@ -440,7 +440,7 @@ impl Node {
                 self.accepted_connections.insert(addr, handle);
             }
             Err(err) => {
-                error!(self.log, "Failed to accept a connection: {err:?}");
+                error!(self.log, "Failed to accept a connection"; InlineErrorChain::new(&err));
             }
         }
     }

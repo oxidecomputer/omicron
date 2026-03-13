@@ -71,19 +71,19 @@ pub struct RackInitializeRequest {
 
 #[derive(Debug, thiserror::Error)]
 pub enum RackInitializeRequestParseError {
-    #[error("Failed to read config from {path}: {err}")]
+    #[error("Failed to read config from {path}")]
     Io {
         path: Utf8PathBuf,
         #[source]
         err: std::io::Error,
     },
-    #[error("Failed to deserialize config from {path}: {err}")]
+    #[error("Failed to deserialize config from {path}")]
     Deserialize {
         path: Utf8PathBuf,
         #[source]
         err: anyhow::Error,
     },
-    #[error("Loading certificate: {0}")]
+    #[error("Loading certificate")]
     Certificate(#[source] anyhow::Error),
 }
 

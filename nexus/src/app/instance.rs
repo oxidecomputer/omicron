@@ -84,6 +84,7 @@ use sagas::instance_update;
 use sled_agent_client::types::DelegatedZvol;
 use sled_agent_client::types::InstanceMigrationTargetParams;
 use sled_agent_client::types::VmmPutStateBody;
+use slog_error_chain::InlineErrorChain;
 use std::collections::{HashMap, HashSet};
 use std::matches;
 use std::net::IpAddr;
@@ -135,7 +136,9 @@ impl From<SledAgentInstanceError> for dropshot::HttpError {
                 // a 4xx error. So, instead, we construct an internal error and
                 // then munge its status code.
                 // See https://github.com/oxidecomputer/dropshot/issues/693
-                let mut error = HttpError::for_internal_error(e.to_string());
+                let mut error = HttpError::for_internal_error(
+                    InlineErrorChain::new(&e).to_string(),
+                );
                 error.status_code = if e.is_timeout() {
                     ErrorStatusCode::GATEWAY_TIMEOUT
                 } else {

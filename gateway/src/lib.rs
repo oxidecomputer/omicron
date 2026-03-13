@@ -331,10 +331,9 @@ pub async fn start_server(
 ) -> Result<Server, String> {
     use slog::Drain;
     let (drain, registration) = slog_dtrace::with_drain(
-        config
-            .log
-            .to_logger("gateway")
-            .map_err(|message| format!("initializing logger: {}", message))?,
+        config.log.to_logger("gateway").map_err(|message| {
+            format!("initializing logger: {}", InlineErrorChain::new(&message))
+        })?,
     );
     let log = slog::Logger::root(drain.fuse(), slog::o!(FileKv));
     if let slog_dtrace::ProbeRegistration::Failed(err) = registration {
