@@ -123,7 +123,6 @@ impl NoopConvertInfo {
             // get updated later)
             match measurements {
                 // A missing manifest when we are requiring it is a hard error
-                // is a hard error
                 NoopConvertMeasurements::Ineligible(
                     NoopConvertMeasurementsIneligibleReason::ManifestRequiredAndMissing { message },
                 ) => {
