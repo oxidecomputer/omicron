@@ -2,7 +2,7 @@
 #:
 #: name = "helios / deploy"
 #: variety = "basic"
-#: target = "lab-3.0-opte-0.41"
+#: target = "lab-3.0-gimlet-opte-0.41"
 #: output_rules = [
 #:  "%/var/svc/log/oxide-*.log*",
 #:  "%/zone/oxz_*/root/var/svc/log/oxide-*.log*",
@@ -255,25 +255,19 @@ routeadm -e ipv4-forwarding -u
 PXA_START="$EXTRA_IP_START"
 PXA_END="$EXTRA_IP_END"
 
-# Enumerate the names of NVMe devices on on which one might place a zpool.
-#
-# N.B. that it is fine to do use "every NVMe device on the box" since this
-# script only runs on buildomat workers which do not have any disks used for
-# storing anything persistently, and which are PXE-booted...so we're not gonna
-# clobber anything that anyone might have cared about on sock and buskin, at
-# least.
-DISKS=( $(pfexec nvmeadm list -p -o disk) )
-pfexec zpool create -f scratch "${DISKS[@]}"
+# The gimlet factory creates a zpool on /pool/bsu/0 backed by the first M.2
+# disk. We use it to store large files that wouldn't fit in the ramdisk.
+SCRATCH_DIR=/pool/bsu/0/scratch
+pfexec mkdir $SCRATCH_DIR
 
 ptime -m \
     pfexec ./target/release/xtask virtual-hardware \
-    --vdev-dir /scratch \
+    --vdev-dir "$SCRATCH_DIR" \
     create \
     --gateway-ip "$GATEWAY_IP" \
     --gateway-mac "$GATEWAY_MAC" \
     --pxa-start "$PXA_START" \
     --pxa-end "$PXA_END"
-
 #
 # Generate a self-signed certificate to use as the initial TLS certificate for
 # the recovery Silo.  Its DNS name is determined by the silo name and the
@@ -284,7 +278,7 @@ ptime -m \
 tar xf out/omicron-sled-agent.tar pkg/config-rss.toml pkg/config.toml
 
 # Update the vdevs to point to where we've created them
-sed -E -i~ "s/(m2|u2)(.*\.vdev)/\/scratch\/\1\2/g" pkg/config.toml
+sed -E -i~ "s%(m2|u2)(.*\.vdev)%${SCRATCH_DIR}/\1\2%g" pkg/config.toml
 diff -u pkg/config.toml{~,} || true
 
 EXPECTED_ZPOOL_COUNT=$(grep -c -E 'u2.*\.vdev' pkg/config.toml)
@@ -378,8 +372,8 @@ OMICRON_NO_UNINSTALL=1 \
 retry=0
 until curl --max-time 1 --head --silent --show-error -o /dev/null "http://[fd00:1122:3344:101::2]:12224/"
 do
-	if [[ $retry -gt 30 ]]; then
-		echo "Failed to reach switch zone after 30 attempts"
+	if [[ $retry -gt 120 ]]; then
+		echo "Failed to reach switch zone after 120 attempts"
 		exit 1
 	fi
 	sleep 1
@@ -396,7 +390,7 @@ pfexec zlogin sidecar_softnpu /softnpu/scadm \
 retry=0
 while [[ $(pfexec svcs -z $(zoneadm list -n | grep oxz_ntp) \
     -Hostate oxide/ntp || true) != online ]]; do
-	if [[ $retry -gt 60 ]]; then
+	if [[ $retry -gt 120 ]]; then
 		echo "NTP zone chrony failed to come up after 60 seconds"
 		exit 1
 	fi
@@ -408,7 +402,7 @@ echo "Waited for chrony: ${retry}s"
 # Wait for at least one nexus zone to become available
 retry=0
 until zoneadm list | grep nexus; do
-	if [[ $retry -gt 300 ]]; then
+	if [[ $retry -gt 600 ]]; then
 		echo "Failed to start at least one nexus zone after 300 seconds"
 		exit 1
 	fi
@@ -422,7 +416,7 @@ echo "Waited for nexus: ${retry}s"
 # db.
 retry=0
 until grep "Handoff to Nexus is complete" /var/svc/log/oxide-sled-agent:default.log; do
-	if [[ $retry -gt 300 ]]; then
+	if [[ $retry -gt 600 ]]; then
 		echo "Failed to handoff to Nexus after 300 seconds"
 		exit 1
 	fi
@@ -437,7 +431,7 @@ echo "Waited for handoff: ${retry}s"
 retry=0
 INVENTORY_COLLECTION_COUNT=$(pfexec zlogin oxz_switch /opt/oxide/omdb/bin/omdb db inventory collections list | wc -l)
 until [[ "${INVENTORY_COLLECTION_COUNT}" -gt 1 ]]; do
-	if [[ $retry -gt 300 ]]; then
+	if [[ $retry -gt 600 ]]; then
 		echo "Failed to wait for inventory collection after 300 seconds"
 		exit 1
 	fi
@@ -453,7 +447,7 @@ ACTUAL_ZPOOL_COUNT=$(pfexec zlogin oxz_switch /opt/oxide/omdb/bin/omdb db zpool 
 until [[ "${ACTUAL_ZPOOL_COUNT}" -eq "${EXPECTED_ZPOOL_COUNT}" ]];
 do
 	pfexec zlogin oxz_switch /opt/oxide/omdb/bin/omdb db zpool list
-	if [[ $retry -gt 300 ]]; then
+	if [[ $retry -gt 600 ]]; then
 		echo "Failed to wait for ${EXPECTED_ZPOOL_COUNT} zpools after 300 seconds"
 		exit 1
 	fi
@@ -492,7 +486,7 @@ export OXIDE_HOST OXIDE_TOKEN
 #
 retry=0
 while ! curl -sSf "$OXIDE_HOST/v1/ping" --resolve "$OXIDE_RESOLVE" --cacert "$E2E_TLS_CERT"; do
-	if [[ $retry -gt 60 ]]; then
+	if [[ $retry -gt 120 ]]; then
 		echo "$OXIDE_RESOLVE failed to come up after 60 seconds"
 		exit 1
 	fi
