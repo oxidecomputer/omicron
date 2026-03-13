@@ -60,7 +60,7 @@ INFO added artifact, name: installinator_document, kind: installinator_document,
 set target release based on repo-1.0.0.zip
 
 
-> # On 4 sleds, update the install dataset.
+> # On all three sleds, update the install dataset.
 > # The blueprints should start with the measurements in an 'unknown' state
 > sled-update-install-dataset serial0 --to-target-release
 sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6: install dataset updated: to target release (system version 1.0.0)

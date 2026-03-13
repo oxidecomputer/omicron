@@ -11,7 +11,7 @@ tuf-assemble ../../update-common/manifests/fake.toml
 # Load the target release from the first TUF repository.
 set target-release repo-1.0.0.zip
 
-# On 4 sleds, update the install dataset.
+# On all three sleds, update the install dataset.
 # The blueprints should start with the measurements in an 'unknown' state
 sled-update-install-dataset serial0 --to-target-release
 sled-update-install-dataset serial1 --to-target-release
