@@ -25,7 +25,9 @@ Create the task module. The struct holds whatever state it needs (typically `Arc
 
 Logging conventions: `debug` when there's nothing to do, `info` when routine work was done, `warn` when the work done indicates something is wrong (e.g., cleaning up after a crash), `error` on failure.
 
-Include a unit test in the same file using `TestDatabase::new_with_datastore` that calls `actually_activate` directly. If the task has a datastore method, a single test exercising the task end-to-end (including the limit/batching behavior) is sufficient — don't add a redundant test for the datastore method separately unless it has complex logic worth testing in isolation.
+Include a unit test in the same file using `TestDatabase::new_with_datastore` that calls `actually_activate` directly. If the task has a datastore method, a single test exercising the task end-to-end is usually sufficient — don't add a redundant test for the datastore method separately unless it has complex logic worth testing in isolation.
+
+For tasks that mutate or delete a bounded set of rows, the test should prove which items were affected, not just how many. Seed a mix of rows that should be affected, rows that should be skipped because they're on the safe side of the cutoff or predicate, and rows that should be skipped because they're structurally ineligible. Assert exact identities of the affected and surviving rows after each activation. If the task uses ordering plus a per-activation limit, make the first activation hit the limit and verify that the highest-priority eligible items were chosen, then run a second activation to verify the remainder, and a final activation to verify the no-op case. When eligibility depends on time, set timestamps explicitly in the test rather than relying on sleeps. When selection depends on multiple sort keys, include a case that exercises the tiebreaker. Prefer assertions on row IDs or full records over aggregate counts and status fields.
 
 ### 3. Register the module (`nexus/src/app/background/tasks/mod.rs`)
 

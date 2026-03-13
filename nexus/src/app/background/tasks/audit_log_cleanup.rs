@@ -35,10 +35,24 @@ impl AuditLogCleanup {
         &mut self,
         opctx: &OpContext,
     ) -> AuditLogCleanupStatus {
-        let retention_delta =
-            TimeDelta::try_days(i64::from(self.retention_days.get()))
-                .expect("retention_days fits in TimeDelta");
-        let cutoff = Utc::now() - retention_delta;
+        let cutoff = TimeDelta::try_days(i64::from(self.retention_days.get()))
+            .and_then(|d| Utc::now().checked_sub_signed(d));
+        let cutoff = match cutoff {
+            Some(c) => c,
+            None => {
+                let msg = format!(
+                    "retention_days {} overflows date arithmetic",
+                    self.retention_days,
+                );
+                slog::error!(&opctx.log, "{msg}");
+                return AuditLogCleanupStatus {
+                    rows_deleted: 0,
+                    cutoff: Utc::now(),
+                    max_deleted_per_activation: self.max_deleted_per_activation,
+                    error: Some(msg),
+                };
+            }
+        };
 
         let rows_deleted = match self
             .datastore
@@ -168,16 +182,20 @@ mod tests {
         let (opctx, datastore) = (db.opctx(), db.datastore());
 
         let now = Utc::now();
-        let eight_days_ago = now - TimeDelta::try_days(8).unwrap();
-
+        // The task uses retention_days=7, so cutoff ≈ now - 7 days.
+        // Give each old entry a distinct time_completed so we can verify
+        // oldest-first deletion order.
         let completion = AuditLogCompletion::Success { http_status_code: 200 };
 
-        // Create 5 old completed entries (should be deleted)
-        for i in 0..5 {
+        // 5 old entries with distinct times, all before cutoff.
+        // Oldest first: 12d, 11d, 10d, 9d, 8d ago.
+        let mut old_ids = Vec::new();
+        for i in 0..5u32 {
+            let age_days = 12 - i; // 12, 11, 10, 9, 8
             let entry = datastore
                 .audit_log_entry_init(
                     opctx,
-                    make_entry(&format!("req-{i}")).into(),
+                    make_entry(&format!("old-{i}")).into(),
                 )
                 .await
                 .unwrap();
@@ -189,27 +207,38 @@ mod tests {
                 )
                 .await
                 .unwrap();
-            set_time_completed(datastore, entry.id, eight_days_ago).await;
+            let completed_at =
+                now - TimeDelta::try_days(i64::from(age_days)).unwrap();
+            set_time_completed(datastore, entry.id, completed_at).await;
+            old_ids.push(entry.id);
         }
 
-        // Create 1 recent completed entry (should not be deleted)
-        let recent = datastore
-            .audit_log_entry_init(opctx, make_entry("recent-req").into())
+        // 1 completed entry just inside the retention window (6d ago).
+        // With retention_days=7, cutoff ≈ now - 7d, so 6d ago is safely
+        // after the cutoff and must not be deleted.
+        let within_retention = datastore
+            .audit_log_entry_init(opctx, make_entry("within-retention").into())
             .await
             .unwrap();
         datastore
-            .audit_log_entry_complete(opctx, &recent, completion.into())
+            .audit_log_entry_complete(
+                opctx,
+                &within_retention,
+                completion.clone().into(),
+            )
             .await
             .unwrap();
+        let six_days_ago = now - TimeDelta::try_days(6).unwrap();
+        set_time_completed(datastore, within_retention.id, six_days_ago).await;
 
-        // Create 1 incomplete entry (should not be deleted)
+        // 1 incomplete entry (should not be deleted)
         let incomplete = datastore
             .audit_log_entry_init(opctx, make_entry("incomplete-req").into())
             .await
             .unwrap();
 
         let expected_survivors: BTreeSet<Uuid> =
-            [recent.id, incomplete.id].into();
+            [within_retention.id, incomplete.id].into();
 
         assert_eq!(get_audit_log_ids(&datastore).await.len(), 7);
 
@@ -221,25 +250,70 @@ mod tests {
             3,
         );
 
-        // first activation deletes 3 old, leaves 2 old and 2 new
+        // First activation deletes the 3 oldest (12d, 11d, 10d ago).
         let status = task.actually_activate(opctx).await;
         assert_eq!(status.rows_deleted, 3);
         assert!(status.error.is_none());
+
+        // The reported cutoff should be between our old entries and the
+        // within-retention entry.
+        let eight_days_ago = now - TimeDelta::try_days(8).unwrap();
+        assert!(
+            status.cutoff > eight_days_ago && status.cutoff < six_days_ago,
+            "cutoff {} should be between 8d ago ({}) and 6d ago ({})",
+            status.cutoff,
+            eight_days_ago,
+            six_days_ago,
+        );
+
         let remaining = get_audit_log_ids(&datastore).await;
         assert_eq!(remaining.len(), 4);
+        // The 3 oldest should be gone
+        for &id in &old_ids[..3] {
+            assert!(!remaining.contains(&id), "old entry should be deleted");
+        }
+        // The 2 newest old entries should still be present
+        for &id in &old_ids[3..] {
+            assert!(remaining.contains(&id), "newer old entry should remain");
+        }
         assert!(expected_survivors.is_subset(&remaining));
 
-        // second activation deletes remaining 2
+        // Second activation deletes remaining 2 old (9d, 8d ago).
         let status = task.actually_activate(opctx).await;
         assert_eq!(status.rows_deleted, 2);
         assert!(status.error.is_none());
         assert_eq!(get_audit_log_ids(&datastore).await, expected_survivors);
 
-        // third activation does nothing
+        // Third activation: within-retention entry survives.
         let status = task.actually_activate(opctx).await;
         assert_eq!(status.rows_deleted, 0);
         assert!(status.error.is_none());
         assert_eq!(get_audit_log_ids(&datastore).await, expected_survivors);
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_audit_log_cleanup_retention_days_overflow() {
+        let logctx = dev::test_setup_log(
+            "test_audit_log_cleanup_retention_days_overflow",
+        );
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, _datastore) = (db.opctx(), db.datastore());
+
+        let mut task = AuditLogCleanup::new(
+            db.datastore().clone(),
+            NonZeroU32::new(u32::MAX).unwrap(),
+            100,
+        );
+        let status = task.actually_activate(opctx).await;
+        assert_eq!(status.rows_deleted, 0);
+        assert!(
+            status.error.as_ref().unwrap().contains("overflows"),
+            "expected overflow error, got: {:?}",
+            status.error,
+        );
 
         db.terminate().await;
         logctx.cleanup_successful();

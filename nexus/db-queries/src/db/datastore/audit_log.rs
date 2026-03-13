@@ -162,8 +162,11 @@ impl DataStore {
     ) -> Result<usize, omicron_common::api::external::Error> {
         opctx.authorize(authz::Action::CreateChild, &authz::AUDIT_LOG).await?;
 
-        // Diesel's DeleteStatement doesn't support LIMIT, so we use raw
-        // SQL rather than the subquery workaround needed for the DSL.
+        // Diesel's DeleteStatement doesn't support ORDER BY or LIMIT, so we use
+        // raw SQL. We could use a subquery instead and use the DSL, but this
+        // feels like a more direct and literal a representation of what we're
+        // doing. The semantics of the query are checked by the integration test
+        // for the background task.
         diesel::sql_query(
             "DELETE FROM omicron.public.audit_log \
              WHERE time_completed IS NOT NULL \
