@@ -540,61 +540,17 @@ impl DataStore {
 
     /// Delete a `ServiceNetworkInterface` attached to a provided service.
     ///
-    /// To support idempotency, such as in saga operations, this method returns
-    /// an extra boolean. The meaning of return values are:
+    /// To support idempotency,  this method returns an extra boolean. The
+    /// meaning of return values are:
+    ///
     /// - `Ok(true)`: The record was deleted during this call
     /// - `Ok(false)`: The record was already deleted, such as by a previous
     /// call
     /// - `Err(_)`: Any other condition, including a non-existent record.
-    pub async fn service_delete_network_interface(
-        &self,
-        opctx: &OpContext,
-        service_id: Uuid,
-        network_interface_id: Uuid,
-    ) -> Result<bool, network_interface::DeleteError> {
-        // See the comment in `service_create_network_interface`. There's no
-        // obvious parent for a service network interface (as opposed to
-        // instance network interfaces, which require permissions on the
-        // instance). As a logical proxy, we check for listing children of the
-        // service IP pool.
-        //
-        // Note that the IP version here doesn't matter, both pools have the
-        // same permissions.
-        let (authz_service_ip_pool, _) = self
-            .ip_pools_service_lookup(opctx, IpVersion::V4)
-            .await
-            .map_err(network_interface::DeleteError::External)?;
-        opctx
-            .authorize(authz::Action::Delete, &authz_service_ip_pool)
-            .await
-            .map_err(network_interface::DeleteError::External)?;
-
-        let conn = self
-            .pool_connection_authorized(opctx)
-            .await
-            .map_err(network_interface::DeleteError::External)?;
-        self.service_delete_network_interface_on_connection(
-            &conn,
-            service_id,
-            network_interface_id,
-        )
-        .await
-        .map_err(|txn_error| match txn_error {
-            TransactionError::CustomError(err) => err,
-            TransactionError::Database(err) => {
-                let query = network_interface::DeleteQuery::new(
-                    NetworkInterfaceKind::Service,
-                    service_id,
-                    network_interface_id,
-                );
-                network_interface::DeleteError::from_diesel(err, &query)
-            }
-        })
-    }
-
-    /// Variant of [Self::service_delete_network_interface] which may be called
-    /// from a transaction context.
-    pub async fn service_delete_network_interface_on_connection(
+    ///
+    /// Should only be called from a transaction context which has already
+    /// performed any necessary auth checks.
+    pub(crate) async fn service_delete_network_interface_on_connection(
         &self,
         conn: &async_bb8_diesel::Connection<DbConnection>,
         service_id: Uuid,
@@ -1165,13 +1121,14 @@ mod tests {
         assert_eq!(nics, service_nics);
 
         // Delete a few, and ensure we don't see them anymore.
+        let conn = datastore.pool_connection_authorized(&opctx).await.unwrap();
         let mut removed_nic_ids = BTreeSet::new();
         for (i, nic) in service_nics.iter().enumerate() {
             if i % 3 == 0 {
                 let id = nic.id();
                 datastore
-                    .service_delete_network_interface(
-                        &opctx,
+                    .service_delete_network_interface_on_connection(
+                        &conn,
                         nic.service_id,
                         id,
                     )

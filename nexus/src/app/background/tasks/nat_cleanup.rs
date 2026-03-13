@@ -85,7 +85,7 @@ impl BackgroundTask for Ipv4NatGarbageCollector {
 
             for switch_slot in [SwitchSlot::Switch0, SwitchSlot::Switch1] {
                 if !dpd_clients.contains_key(&switch_slot) {
-                    let message = format!("dendrite for {switch_slot} is unavailable, cannot perform nat cleanup");
+                    let message = format!("dendrite for {switch_slot:?} is unavailable, cannot perform nat cleanup");
                     error!(log, "{message}");
                     return json!({"error": message});
                 }

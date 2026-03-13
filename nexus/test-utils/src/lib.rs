@@ -137,7 +137,7 @@ pub fn dpd_client<N: NexusServer>(
         tag: String::from("nexus-test"),
         log: cptestctx.logctx.log.new(slog::o!(
             "component" => "DpdClient",
-            "switch" => switch_slot.to_string()
+            "switch_slot" => format!("{switch_slot:?}"),
         )),
     };
 

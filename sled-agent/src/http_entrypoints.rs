@@ -1155,8 +1155,8 @@ impl SledAgentApi for SledAgentImpl {
                     .get_status()
                     .await
                     .map_err(|e| {
-                        HttpError::from(
-                            omicron_common::api::external::Error::from(e),
+                        HttpError::for_internal_error(
+                            InlineErrorChain::new(&e).to_string(),
                         )
                     })?
                     .into();

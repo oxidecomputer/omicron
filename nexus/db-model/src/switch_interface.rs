@@ -145,14 +145,13 @@ impl LoopbackAddress {
     }
 }
 
-impl Into<external::LoopbackAddress> for LoopbackAddress {
-    fn into(self) -> external::LoopbackAddress {
-        external::LoopbackAddress {
+impl Into<networking_types::LoopbackAddress> for LoopbackAddress {
+    fn into(self) -> networking_types::LoopbackAddress {
+        networking_types::LoopbackAddress {
             id: self.identity().id,
             address_lot_block_id: self.address_lot_block_id,
             rack_id: self.rack_id,
-            // TODO-correctness enum in external API
-            switch_location: SwitchSlot::from(self.switch_slot).to_string(),
+            switch_slot: self.switch_slot.into(),
             address: self.address.into(),
         }
     }

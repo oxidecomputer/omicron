@@ -36,6 +36,7 @@ use sled_agent_types::early_networking::BgpConfig;
 use sled_agent_types::early_networking::LldpAdminStatus;
 use sled_agent_types::early_networking::LldpPortConfig;
 use sled_agent_types::early_networking::RouteConfig;
+use sled_agent_types::early_networking::SwitchSlot;
 use std::borrow::Cow;
 use wicket_common::rack_setup::BgpAuthKeyInfo;
 use wicket_common::rack_setup::BgpAuthKeyStatus;
@@ -792,12 +793,17 @@ fn rss_config_text<'a>(
                 tx_eq,
             } = uplink;
 
+            let switch_description = match switch {
+                SwitchSlot::Switch0 => "0",
+                SwitchSlot::Switch1 => "1",
+            };
+
             let mut items = vec![
                 vec![
                     Span::styled("  • Port          : ", label_style),
                     Span::styled(port.to_string(), ok_style),
                     Span::styled(" on switch ", label_style),
-                    Span::styled(switch.to_string(), ok_style),
+                    Span::styled(switch_description, ok_style),
                 ],
                 vec![
                     Span::styled("  • Speed         : ", label_style),

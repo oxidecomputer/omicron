@@ -220,7 +220,7 @@ impl<N: NexusServer> ControlPlaneTestContext<N> {
     pub async fn stop_dendrite(&self, switch_slot: SwitchSlot) {
         use slog::debug;
         let log = &self.logctx.log;
-        debug!(log, "Stopping Dendrite for {switch_slot}");
+        debug!(log, "Stopping Dendrite"; "switch_slot" => ?switch_slot);
 
         let dendrite_opt =
             { self.dendrite.write().unwrap().remove(&switch_slot) };
