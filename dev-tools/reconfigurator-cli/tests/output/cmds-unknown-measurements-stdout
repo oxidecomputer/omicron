@@ -72,10 +72,13 @@ sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c: install dataset updated: to target re
 sled d81c6a84-79b8-4958-ae41-ea46c9b19763: install dataset updated: to target release (system version 1.0.0)
 
 
-> # Generate an inventory and run a blueprint planning step.
+> # Generate an inventory
 > inventory-generate
 generated inventory collection eb0796d5-ab8a-4f7b-a884-b4aeacb8ab51 from configured sleds
 
+> # Run a planning step. This should show the `noop` conversion skipping
+> # measurements and the planner modifying the measurements on all three
+> # sleds
 > blueprint-plan latest latest
 INFO performed noop zone image source checks on sled, sled_id: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c, num_total: 7, num_already_artifact: 0, num_eligible: 7, num_ineligible: 0
 INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c, slot: a, expected_hash: 0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a
@@ -103,8 +106,10 @@ Measurement updates:
 
 
 > # This diff should show all sleds with measurements as artifacts.
-> # This represents a reconfigurator based update from a system with
-> # no knowledge of measurements in blueprints.
+> # This is matching what we expect to happen from R18 (no measurements)
+> # to R19 (measurements) with an online update. This is explicitly
+> # _not_ a MUPdate override case because we are expecting an online
+> # update from R18 -> R19
 > blueprint-diff latest
 from: blueprint dbcbd3d6-41ff-48ae-ac0b-1becc9b2fd21
 to:   blueprint 8da82a8e-bf97-4fbd-8ddd-9f6462732cf1

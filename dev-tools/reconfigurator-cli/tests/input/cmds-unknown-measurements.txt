@@ -17,13 +17,18 @@ sled-update-install-dataset serial0 --to-target-release
 sled-update-install-dataset serial1 --to-target-release
 sled-update-install-dataset serial2 --to-target-release
 
-# Generate an inventory and run a blueprint planning step.
+# Generate an inventory
 inventory-generate
+# Run a planning step. This should show the `noop` conversion skipping
+# measurements and the planner modifying the measurements on all three
+# sleds
 blueprint-plan latest latest
 
 # This diff should show all sleds with measurements as artifacts.
-# This represents a reconfigurator based update from a system with
-# no knowledge of measurements in blueprints.
+# This is matching what we expect to happen from R18 (no measurements)
+# to R19 (measurements) with an online update. This is explicitly
+# _not_ a MUPdate override case because we are expecting an online
+# update from R18 -> R19
 blueprint-diff latest
 
 # Next plan should show waiting on inventory to have the measurements

@@ -130,12 +130,12 @@ blueprint-diff latest
 sled-update-install-dataset serial1 --to-target-release
 inventory-generate
 
-# First get our new measurements
+# Measurements will block further planning progress, run a planning step
 blueprint-plan latest latest
 blueprint-show latest
 blueprint-diff latest
 
-# Need to make sure measurements are up-to-date
+# Make sure the measurements are up to date for inventory
 sled-set serial0 omicron-config latest
 sled-set serial1 omicron-config latest
 sled-set serial2 omicron-config latest

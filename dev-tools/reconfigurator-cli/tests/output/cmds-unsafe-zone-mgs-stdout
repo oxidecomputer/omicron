@@ -119,7 +119,7 @@ sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c: install dataset updated: to target re
 sled d81c6a84-79b8-4958-ae41-ea46c9b19763: install dataset updated: to target release (system version 0.0.1)
 
 
-> # First get our new measurements
+> # Measurements will block further planning progress, run a planning step
 > inventory-generate
 generated inventory collection eb0796d5-ab8a-4f7b-a884-b4aeacb8ab51 from configured sleds
 
@@ -424,7 +424,7 @@ external DNS:
 
 
 
-> # Need to make sure measurements are up-to-date
+> # Make sure the measurements are up to date for inventory
 > sled-set serial0 omicron-config latest
 set sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 omicron config from latest blueprint (8da82a8e-bf97-4fbd-8ddd-9f6462732cf1)
 
