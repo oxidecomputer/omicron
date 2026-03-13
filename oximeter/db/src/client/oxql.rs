@@ -28,7 +28,7 @@ use slog::Logger;
 use slog::debug;
 use slog::trace;
 use std::collections::BTreeMap;
-use std::collections::HashMap;
+use std::collections::BTreeSet;
 use std::time::Duration;
 use std::time::Instant;
 use uuid::Uuid;
@@ -930,120 +930,102 @@ impl Client {
         preds: Option<&oxql::ast::table_ops::filter::Filter>,
     ) -> Result<String, Error> {
         // Filter down the fields to those which apply to this timeseries
-        // itself, and rewrite as a DB-safe WHERE clause.
+        // itself, and rewrite as a DB-safe clause.
         let preds_for_fields = preds
             .map(|p| Self::rewrite_predicate_for_fields(schema, p))
             .transpose()?
             .flatten();
-        let (already_has_where, mut query) = self.all_fields_query_raw(schema);
+        let mut query = self.all_fields_query_raw(schema);
         if let Some(preds) = preds_for_fields {
-            // If the raw field has only a single select query, then we've
-            // already added a "WHERE" clause. Simply tack these predicates onto
-            // that one.
-            if already_has_where {
-                query.push_str(" AND ");
-            } else {
-                query.push_str(" WHERE ");
-            }
+            query.push_str(" HAVING ");
             query.push_str(&preds);
         }
         Ok(query)
     }
 
-    // Build a reasonably efficient query to retrieve all fields for a given
-    // timeseries. Joins in ClickHouse are expensive, so aggregate all relevant
-    // fields from each relevant fields table in a single subquery, then join
-    // the results together. This results in n - 1 joins, where n is the number
-    // of relevant fields tables. Note that we may be able to improve
-    // performance in future ClickHouse versions, which have better support for
-    // Variant types, better support for the merge() table function, and faster
-    // joins.
-    fn all_fields_query_raw(
-        &self,
-        schema: &TimeseriesSchema,
-    ) -> (bool, String) {
+    // Build a query to retrieve all fields for a given timeseries. In
+    // ClickHouse, JOINs are slow, so we construct a query that doesn't use
+    // them. We identify all relevant field tables, and for each table, we
+    // select the relevant field values. We also select NULL for each other
+    // field type so that we can UNION ALL the results of our per-table
+    // subqueries. Then we pivot the unioned results to wide rows using anyIf.
+    fn all_fields_query_raw(&self, schema: &TimeseriesSchema) -> String {
         match schema.field_schema.len() {
             0 => unreachable!(),
             _ => {
-                // Build a vector of top-level select expressions, as well as a
-                // map from fields to lists of subquery select expressions.
-                let mut top_selects: Vec<String> = Vec::new();
-                let mut select_map: HashMap<oximeter::FieldType, Vec<String>> =
-                    HashMap::new();
-                for field_schema in schema.field_schema.iter() {
-                    select_map
-                        .entry(field_schema.field_type)
-                        .or_insert_with(|| vec![String::from("timeseries_key")])
-                        .push(format!(
-                            "anyIf(field_value, field_name = '{}') AS {}",
-                            field_schema.name, field_schema.name
-                        ));
-                    top_selects.push(format!(
-                        "{}_pivot.{} AS {}",
-                        field_table_name(field_schema.field_type),
-                        field_schema.name,
-                        field_schema.name
-                    ));
-                }
+                let field_types: Vec<oximeter::FieldType> = schema
+                    .field_schema
+                    .iter()
+                    .map(|f| f.field_type)
+                    .collect::<BTreeSet<_>>()
+                    .into_iter()
+                    .collect();
 
-                // Sort field tables by number of columns, descending.
-                // ClickHouse recommends joining larger tables to smaller
-                // tables, and doesn't currently reorder joins automatically.
-                let mut field_types: Vec<oximeter::FieldType> =
-                    select_map.keys().cloned().collect();
-                field_types.sort_by(|a, b| {
-                    select_map[b]
-                        .len()
-                        .cmp(&select_map[a].len())
-                        .then(field_table_name(*a).cmp(&field_table_name(*b)))
-                });
+                // Build top-level SELECT columns. For each field, we use
+                // anyIf to extract the value from the appropriate type column.
+                // We can use anyIf to take the first matching value because a
+                // given timeseries key is always associated with the same set
+                // of fields, so all rows with a given (timeseries_key,
+                // field_name) will have the same field_value.
+                //
+                // We wrap the result in assumeNotNull() because the UNION
+                // ALL with NULL placeholders causes anyIf to return Nullable
+                // types, but we know fields will always have values for
+                // matching keys.
+                let mut top_selects: Vec<String> = schema
+                    .field_schema
+                    .iter()
+                    .map(|f| {
+                        format!(
+                            "assumeNotNull(anyIf({}, field_name = '{}')) AS {}",
+                            field_table_name(f.field_type),
+                            f.name,
+                            f.name
+                        )
+                    })
+                    .collect();
+                top_selects.push(String::from("timeseries_key"));
 
-                // Build a map from field type to pivot subquery. We filter by
-                // timeseries_name, group by timeseries_key, and use anyIf to
-                // pivot fields to a wide table. We can use anyIf to take the
-                // first matching value because a given timeseries key is
-                // always associated with the same set of fields, so all rows
-                // with a given (timeseries_key, field_name) will have the same
-                // field_value.
-                let mut query_map: HashMap<oximeter::FieldType, String> =
-                    HashMap::new();
-                for field_type in field_types.clone() {
-                    let selects = &select_map[&field_type];
-                    let query = format!(
-                        "(
-                            SELECT
-                                {select}
-                            FROM {db_name}.{from}
-                            WHERE timeseries_name = '{timeseries_name}'
-                            GROUP BY timeseries_key
-                        ) AS {subquery_name}_pivot",
-                        select = selects.join(", "),
-                        db_name = crate::DATABASE_NAME,
-                        from = field_table_name(field_type),
-                        timeseries_name = schema.timeseries_name,
-                        subquery_name = field_table_name(field_type),
-                    );
-                    query_map.insert(field_type, query);
-                }
+                // Build UNION ALL subqueries, one per field type. Each
+                // subquery selects timeseries_key, field_name, and a value
+                // column for each relevant type (field_value for its own
+                // type, NULL for others). We emit NULLs so that we can UNION
+                // ALL the resulting subqueries.
+                let union_parts: Vec<String> = field_types
+                    .iter()
+                    .map(|&this_type| {
+                        let value_cols: Vec<String> = field_types
+                            .iter()
+                            .map(|&t| {
+                                if t == this_type {
+                                    format!(
+                                        "field_value AS {}",
+                                        field_table_name(t)
+                                    )
+                                } else {
+                                    format!("NULL AS {}", field_table_name(t))
+                                }
+                            })
+                            .collect();
 
-                // Assemble the final query.
-                let mut from = query_map[&field_types[0]].clone();
-                for field_type in field_types.iter().skip(1) {
-                    from = format!(
-                        "{from} JOIN {query} ON {source}_pivot.timeseries_key = {dest}_pivot.timeseries_key",
-                        from = from,
-                        query = query_map[field_type],
-                        source = field_table_name(field_types[0]),
-                        dest = field_table_name(*field_type),
-                    );
-                }
-                top_selects.push(format!(
-                    "{}_pivot.timeseries_key AS timeseries_key",
-                    field_table_name(field_types[0])
-                ));
-                let query =
-                    format!("SELECT {} FROM {}", top_selects.join(", "), from);
-                (false, query)
+                        format!(
+                            "SELECT timeseries_key, field_name, {} \
+                             FROM {}.{} \
+                             WHERE timeseries_name = '{}'",
+                            value_cols.join(", "),
+                            crate::DATABASE_NAME,
+                            field_table_name(this_type),
+                            schema.timeseries_name,
+                        )
+                    })
+                    .collect();
+
+                // Assemble final query.
+                format!(
+                    "SELECT {} FROM ({}) GROUP BY timeseries_key",
+                    top_selects.join(", "),
+                    union_parts.join(" UNION ALL "),
+                )
             }
         }
     }
@@ -1353,38 +1335,33 @@ mod tests {
             .unwrap()
             .unwrap();
         let query = ctx.client.all_fields_query(&schema, None).unwrap();
-        let want = "SELECT
-            fields_i32_pivot.foo AS foo,
-            fields_u32_pivot.index AS index,
-            fields_string_pivot.name AS name,
-            fields_i32_pivot.timeseries_key AS timeseries_key
-        FROM
-        (
-            SELECT
-                timeseries_key,
-                anyIf(field_value, field_name = 'foo') AS foo
-            FROM oximeter.fields_i32
-            WHERE timeseries_name = 'some_target:some_metric'
-            GROUP BY timeseries_key
-        ) AS fields_i32_pivot
-        JOIN
-        (
-            SELECT
-                timeseries_key,
-                anyIf(field_value, field_name = 'name') AS name
-            FROM oximeter.fields_string
-            WHERE timeseries_name = 'some_target:some_metric'
-            GROUP BY timeseries_key
-        ) AS fields_string_pivot ON fields_i32_pivot.timeseries_key = fields_string_pivot.timeseries_key
-        JOIN
-        (
-            SELECT
-                timeseries_key,
-                anyIf(field_value, field_name = 'index') AS index
-            FROM oximeter.fields_u32
-            WHERE timeseries_name = 'some_target:some_metric'
-            GROUP BY timeseries_key
-        ) AS fields_u32_pivot ON fields_i32_pivot.timeseries_key = fields_u32_pivot.timeseries_key";
+        // The UNION-based query pivots fields using anyIf over a combined
+        // result from all relevant field tables. Field types are ordered by
+        // BTreeSet (enum declaration order: String, I32, U32). Value columns
+        // in each UNION branch follow the same order.
+        //
+        // Note: The expected string must match the generated format exactly
+        // after whitespace normalization. In particular, parentheses must not
+        // be separated from adjacent tokens by whitespace.
+        let want = "SELECT \
+            assumeNotNull(anyIf(fields_i32, field_name = 'foo')) AS foo, \
+            assumeNotNull(anyIf(fields_u32, field_name = 'index')) AS index, \
+            assumeNotNull(anyIf(fields_string, field_name = 'name')) AS name, \
+            timeseries_key \
+            FROM (SELECT timeseries_key, field_name, \
+                field_value AS fields_string, NULL AS fields_i32, NULL AS fields_u32 \
+                FROM oximeter.fields_string \
+                WHERE timeseries_name = 'some_target:some_metric' \
+                UNION ALL \
+                SELECT timeseries_key, field_name, \
+                NULL AS fields_string, field_value AS fields_i32, NULL AS fields_u32 \
+                FROM oximeter.fields_i32 \
+                WHERE timeseries_name = 'some_target:some_metric' \
+                UNION ALL \
+                SELECT timeseries_key, field_name, \
+                NULL AS fields_string, NULL AS fields_i32, field_value AS fields_u32 \
+                FROM oximeter.fields_u32 \
+                WHERE timeseries_name = 'some_target:some_metric') GROUP BY timeseries_key";
         assert_eq!(
             want.split_whitespace().collect::<Vec<&str>>().join(" "),
             query.split_whitespace().collect::<Vec<&str>>().join(" ")
