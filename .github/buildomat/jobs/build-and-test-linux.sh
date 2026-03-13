@@ -28,8 +28,8 @@
 #:
 #: [[publish]]
 #: series = "build-info-linux"
-#: name = "cargo-timing.html"
-#: from_output = "/work/cargo-timing.html"
+#: name = "cargo-build-analysis.jsonl"
+#: from_output = "/work/cargo-build-analysis.jsonl"
 #:
 #: [[publish]]
 #: series = "nextest-recording-linux"
