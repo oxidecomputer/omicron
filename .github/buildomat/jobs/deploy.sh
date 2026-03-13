@@ -2,7 +2,7 @@
 #:
 #: name = "helios / deploy"
 #: variety = "basic"
-#: target = "lab-2.0-opte-0.39"
+#: target = "lab-2.0-gimlet-opte-0.39"
 #: output_rules = [
 #:  "%/var/svc/log/oxide-*.log*",
 #:  "%/zone/oxz_*/root/var/svc/log/oxide-*.log*",
@@ -246,7 +246,10 @@ routeadm -e ipv4-forwarding -u
 PXA_START="$EXTRA_IP_START"
 PXA_END="$EXTRA_IP_END"
 
-pfexec zpool create -f scratch c1t1d0 c2t1d0
+# Find usable disks to make a zpool on. Note that this only works on Oxide sled
+# runners such as `lab-2.0-gimlet`.
+disks=( $(pilot local disk list -H -o type,disk | grep -v 'M.2' | cut -f 2) )
+pfexec zpool create -f scratch ${disks[@]}
 
 ptime -m \
     pfexec ./target/release/xtask virtual-hardware \
