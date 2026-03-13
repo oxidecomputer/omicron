@@ -1389,7 +1389,7 @@ fn reincarnate_if_needed(osagactx: &SagaContext, state: &InstanceGestalt) {
              reincarnation.";
             "instance_id" => %state.instance.id(),
             "auto_restart_config" => ?state.instance.auto_restart,
-            "runtime_state" => ?state.instance.runtime_state,
+            "runtime_state" => ?state.instance.runtime(),
             "intended_state" => %state.instance.intended_state,
         );
         osagactx

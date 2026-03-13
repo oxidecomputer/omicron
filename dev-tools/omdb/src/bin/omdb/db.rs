@@ -4651,7 +4651,7 @@ async fn cmd_db_instance_info(
         .next()
         .ok_or_else(|| anyhow::anyhow!("no instance found with ID {id}"))?;
 
-    let active_vmm = if let Some(id) = instance.runtime_state.propolis_id {
+    let active_vmm = if let Some(id) = instance.propolis_id {
         let fetch_result = vmm_dsl::vmm
             .filter(vmm_dsl::id.eq(id))
             .select(Vmm::as_select())
@@ -4775,7 +4775,7 @@ async fn cmd_db_instance_info(
         nexus_state,
         generation,
         time_last_auto_restarted,
-    } = instance.runtime_state;
+    } = instance.runtime();
     println!("    {STATE:>WIDTH$}: {nexus_state:?}");
     let effective_state =
         InstanceStateComputer::new(&instance, active_vmm.as_ref())
