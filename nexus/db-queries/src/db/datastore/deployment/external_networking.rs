@@ -162,10 +162,20 @@ impl DataStore {
                     external_ip.id().into_untyped_uuid(),
                 )
                 .await?;
-            if deleted_ip {
-                info!(log, "successfully deleted Omicron zone external IP");
-            } else {
-                debug!(log, "Omicron zone external IP already deleted");
+            match deleted_ip {
+                SoftDeleteResult::SoftDeleteApplied => {
+                    info!(log, "successfully deleted Omicron zone external IP");
+                }
+                SoftDeleteResult::AlreadySoftDeleted => {
+                    debug!(log, "Omicron zone external IP already deleted");
+                }
+                SoftDeleteResult::NotFound => {
+                    debug!(
+                        log,
+                        "Skipped soft-deletion of Omicron zone external IP \
+                         (external IP does not exist)"
+                    );
+                }
             }
 
             let deleted_nic = self

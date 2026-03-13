@@ -12,6 +12,7 @@ use crate::db::collection_attach::AttachError;
 use crate::db::collection_attach::DatastoreAttachTarget;
 use crate::db::collection_detach::DatastoreDetachTarget;
 use crate::db::collection_detach::DetachError;
+use crate::db::datastore::SoftDeleteResult;
 use crate::db::model::ExternalIp;
 use crate::db::model::FloatingIp;
 use crate::db::model::IncompleteExternalIp;
@@ -30,6 +31,7 @@ use crate::db::update_and_check::UpdateStatus;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::Utc;
 use diesel::prelude::*;
+use diesel::result::Error as DieselError;
 use nexus_db_errors::ErrorHandler;
 use nexus_db_errors::TransactionError;
 use nexus_db_errors::public_error_from_diesel;
@@ -832,32 +834,44 @@ impl DataStore {
         ip_id: Uuid,
     ) -> Result<bool, Error> {
         let conn = self.pool_connection_authorized(opctx).await?;
-        self.deallocate_external_ip_on_connection(&conn, ip_id)
+        let soft_delete_result = self
+            .deallocate_external_ip_on_connection(&conn, ip_id)
             .await
-            .map_err(|err| err.into_public_ignore_retries())
+            .map_err(|err| err.into_public_ignore_retries())?;
+
+        // Squash `SoftDeleteResult::NotFound` into an error
+        soft_delete_result
+            .into_did_soft_delete_bool()
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 
     /// Variant of [Self::deallocate_external_ip] which may be called from a
-    /// transaction context.
+    /// transaction context and does not treat "row not found" as an error.
     pub(crate) async fn deallocate_external_ip_on_connection(
         &self,
         conn: &async_bb8_diesel::Connection<DbConnection>,
         ip_id: Uuid,
-    ) -> Result<bool, TransactionError<Error>> {
+    ) -> Result<SoftDeleteResult, TransactionError<Error>> {
         use nexus_db_schema::schema::external_ip::dsl;
         let now = Utc::now();
-        diesel::update(dsl::external_ip)
+        match diesel::update(dsl::external_ip)
             .filter(dsl::time_deleted.is_null())
             .filter(dsl::id.eq(ip_id))
             .set(dsl::time_deleted.eq(now))
             .check_if_exists::<ExternalIp>(ip_id)
             .execute_and_check(conn)
             .await
-            .map(|r| match r.status {
-                UpdateStatus::Updated => true,
-                UpdateStatus::NotUpdatedButExists => false,
-            })
-            .map_err(|e| e.into())
+            .map(|r| r.status)
+        {
+            Ok(UpdateStatus::Updated) => {
+                Ok(SoftDeleteResult::SoftDeleteApplied)
+            }
+            Ok(UpdateStatus::NotUpdatedButExists) => {
+                Ok(SoftDeleteResult::AlreadySoftDeleted)
+            }
+            Err(DieselError::NotFound) => Ok(SoftDeleteResult::NotFound),
+            Err(err) => Err(err.into()),
+        }
     }
 
     /// Moves an instance's ephemeral IP from 'Attached' to 'Detaching'.
@@ -1450,6 +1464,92 @@ mod tests {
         let ips = read_all_service_ips(&datastore, opctx).await;
         assert_eq!(ips, external_ips);
 
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_deallocate_external_ip_is_idempotent() {
+        let logctx =
+            dev::test_setup_log("test_deallocate_external_ip_is_idempotent");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        // Set up an service IP pool range with one IP in it.
+        let ip = Ipv4Addr::new(10, 0, 0, 1);
+        let ip_range = IpRange::try_from((ip, ip)).unwrap();
+        let (service_ip_pool, db_pool) = datastore
+            .ip_pools_service_lookup(opctx, IpVersion::V4)
+            .await
+            .expect("lookup service ip pool");
+        datastore
+            .ip_pool_add_range(opctx, &service_ip_pool, &db_pool, &ip_range)
+            .await
+            .expect("add range to service ip pool");
+
+        // Allocate that IP to a fake Nexus.
+        let external_ip =
+            OmicronZoneExternalIp::Floating(OmicronZoneExternalFloatingIp {
+                id: ExternalIpUuid::new_v4(),
+                ip: ip.into(),
+            });
+        let external_ip = datastore
+            .external_ip_allocate_omicron_zone(
+                opctx,
+                OmicronZoneUuid::new_v4(),
+                ZoneKind::Nexus,
+                external_ip,
+            )
+            .await
+            .expect("failed to allocate service IP");
+
+        // Ensure we see them it.
+        let read_ips = read_all_service_ips(&datastore, opctx).await;
+        assert_eq!(read_ips, vec![external_ip.clone()]);
+
+        // We should be able to delete twice, and be told that the first delete
+        // modified the row and the second did not.
+        let conn = datastore
+            .pool_connection_for_tests()
+            .await
+            .expect("got connection for tests");
+        let first_deleted = datastore
+            .deallocate_external_ip_on_connection(&conn, external_ip.id)
+            .await
+            .expect("deleted IP");
+        assert_eq!(
+            first_deleted,
+            SoftDeleteResult::SoftDeleteApplied,
+            "first delete removed IP"
+        );
+
+        // It should be gone after the first delete.
+        let read_ips = read_all_service_ips(&datastore, opctx).await;
+        assert_eq!(read_ips, Vec::new());
+
+        let second_deleted = datastore
+            .deallocate_external_ip_on_connection(&conn, external_ip.id)
+            .await
+            .expect("deleted IP");
+        assert_eq!(
+            second_deleted,
+            SoftDeleteResult::AlreadySoftDeleted,
+            "second delete did nothing"
+        );
+
+        // Attempting to delete a nonexist record should report that fact.
+        let bogus_id = Uuid::new_v4();
+        let bogus_delete_result = datastore
+            .deallocate_external_ip_on_connection(&conn, bogus_id)
+            .await
+            .expect("bogus delete did nothing");
+        assert_eq!(
+            bogus_delete_result,
+            SoftDeleteResult::NotFound,
+            "bogus delete should not have found a matching row"
+        );
+
+        // Deallocate the first IP.
         db.terminate().await;
         logctx.cleanup_successful();
     }
