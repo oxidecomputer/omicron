@@ -12,7 +12,7 @@ cp out/softnpu/scadm /opt/oxide/softnpu/stuff/
 
 zfs create -p -o mountpoint=/softnpu-zone rpool/softnpu-zone
 
-pkg set-publisher --search-first helios-dev
+pkg set-publisher --search-first helios
 
 zonecfg -z softnpu -f tools/scrimlet/softnpu-zone.txt
 zoneadm -z softnpu install
