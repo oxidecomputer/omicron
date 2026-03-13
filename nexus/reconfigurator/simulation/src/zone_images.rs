@@ -86,9 +86,6 @@ pub struct SimTufRepoSource {
     message: String,
     known_artifact_id_names: BTreeSet<String>,
     error_artifact_id_names: BTreeSet<String>,
-    // It's useful to simulate a missing measurement manifest
-    // separately from the zone
-    missing_measurement_manifest: Option<String>,
 }
 
 impl SimTufRepoSource {
@@ -140,18 +137,7 @@ impl SimTufRepoSource {
             message,
             known_artifact_id_names: known,
             error_artifact_id_names: BTreeSet::new(),
-            missing_measurement_manifest: None,
         })
-    }
-
-    pub fn simulate_missing_measurement_manifest(
-        &mut self,
-        simulate_error: bool,
-    ) {
-        if simulate_error {
-            self.missing_measurement_manifest =
-                Some("simulated error with measurement manifest".to_owned());
-        }
     }
 
     /// Simulates errors validating zones by the given artifact ID name.
