@@ -7,6 +7,7 @@ use std::fmt::{self, Write};
 use std::net::{IpAddr, Ipv6Addr};
 
 use camino::Utf8PathBuf;
+use chrono::Utc;
 use iddqd::IdOrdMap;
 use indent_write::fmt::IndentWriter;
 use omicron_common::api::external::Generation;
@@ -25,7 +26,8 @@ use crate::latest::inventory::{
     OmicronFileSourceResolverInventory, OmicronSledConfig, OmicronZoneConfig,
     OmicronZoneImageSource, OmicronZoneType, OmicronZonesConfig,
     RemoveMupdateOverrideBootSuccessInventory, RemoveMupdateOverrideInventory,
-    SingleMeasurementInventory, ZoneArtifactInventory, ZoneKind,
+    SingleMeasurementInventory, SvcsEnabledNotOnline, SvcsError,
+    ZoneArtifactInventory, ZoneKind,
 };
 
 impl ZoneKind {
@@ -581,6 +583,14 @@ impl MupdateOverrideInventory {
     }
 }
 
+impl SvcsEnabledNotOnline {
+    /// Returns a fake empty inventory that shows all services as successful
+    /// for tests.
+    pub fn new_fake() -> Self {
+        Self { services: vec![], errors: vec![], time_of_status: Utc::now() }
+    }
+}
+
 /// Display helper for [`OmicronFileSourceResolverInventory`].
 pub struct OmicronFileSourceResolverInventoryDisplay<'a> {
     inner: &'a OmicronFileSourceResolverInventory,
@@ -859,6 +869,37 @@ impl HostPhase2DesiredSlots {
         Self {
             slot_a: HostPhase2DesiredContents::CurrentContents,
             slot_b: HostPhase2DesiredContents::CurrentContents,
+        }
+    }
+}
+
+impl From<illumos_utils::svcs::SvcsResult> for SvcsEnabledNotOnline {
+    fn from(value: illumos_utils::svcs::SvcsResult) -> Self {
+        let illumos_utils::svcs::SvcsResult {
+            services,
+            errors,
+            time_of_status,
+        } = value;
+        Self { services, errors, time_of_status }
+    }
+}
+
+impl From<illumos_utils::ExecutionError> for SvcsError {
+    fn from(e: illumos_utils::ExecutionError) -> Self {
+        match e {
+            illumos_utils::ExecutionError::ExecutionStart { command, err } => {
+                Self::ExecutionStart { command, err: err.to_string() }
+            }
+            illumos_utils::ExecutionError::CommandFailure(e) => {
+                Self::CommandFailure(e.to_string())
+            }
+            illumos_utils::ExecutionError::ContractFailure { msg, err } => {
+                Self::ContractFailure { msg, err: err.to_string() }
+            }
+            illumos_utils::ExecutionError::ParseFailure(e) => {
+                Self::ParseFailure(e)
+            }
+            illumos_utils::ExecutionError::NotRunning => Self::NotRunning,
         }
     }
 }
