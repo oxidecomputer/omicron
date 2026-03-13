@@ -29,6 +29,25 @@ pub async fn blueprint_load_target_enabled(
     log: &slog::Logger,
     nexus: &nexus_lockstep_client::Client,
 ) -> Result<Blueprint, anyhow::Error> {
+    blueprint_load_target_impl(log, nexus, true).await
+}
+
+/// Return the current target blueprint
+///
+/// Also validates that it's disabled.  If an operator has enabled execution, we
+/// don't want to proceed with tests.
+pub async fn blueprint_load_target_disabled(
+    log: &slog::Logger,
+    nexus: &nexus_lockstep_client::Client,
+) -> Result<Blueprint, anyhow::Error> {
+    blueprint_load_target_impl(log, nexus, false).await
+}
+
+async fn blueprint_load_target_impl(
+    log: &slog::Logger,
+    nexus: &nexus_lockstep_client::Client,
+    expect_enabled: bool,
+) -> Result<Blueprint, anyhow::Error> {
     // Fetch the current target configuration.
     info!(log, "editing current target blueprint");
     let target_blueprint = nexus
@@ -40,9 +59,11 @@ pub async fn blueprint_load_target_enabled(
     debug!(log, "found current target blueprint";
         "blueprint_id" => %target_blueprint.target_id
     );
+
+    let expect_inverse = if !expect_enabled { "enabled" } else { "disabled" };
     ensure!(
-        target_blueprint.enabled,
-        "refusing to operate on a system with target blueprint disabled"
+        target_blueprint.enabled == expect_enabled,
+        "refusing to operate on a system with target blueprint {expect_inverse}"
     );
 
     let blueprint = nexus
@@ -78,14 +99,59 @@ pub async fn blueprint_load_target_enabled(
 /// case, a developer enables the initial target blueprint before running these
 /// tests and then doesn't need to think about it again for the lifetime of
 /// their test environment.
-pub async fn blueprint_edit_current_target(
+pub async fn blueprint_edit_current_target_enabled<F>(
     log: &slog::Logger,
     nexus: &nexus_lockstep_client::Client,
-    edit_fn: &dyn Fn(&mut BlueprintBuilder) -> Result<(), anyhow::Error>,
-) -> Result<(Blueprint, Blueprint), anyhow::Error> {
+    edit_fn: F,
+) -> Result<(Blueprint, Blueprint), anyhow::Error>
+where
+    F: FnOnce(&mut BlueprintBuilder) -> Result<(), anyhow::Error>,
+{
+    blueprint_edit_current_target_impl(log, nexus, true, edit_fn).await
+}
+
+/// Modify the system by editing the current target blueprint
+///
+/// More precisely, this function:
+///
+/// - fetches the current target blueprint
+/// - creates a new BlueprintBuilder based on it
+/// - invokes the caller's `edit_fn`, which may modify the builder however it
+///   likes
+/// - generates a new blueprint (thus based on the current target)
+/// - uploads the new blueprint
+/// - sets the new blueprint as the current target
+/// - disables the new blueprint
+///
+/// ## Errors
+///
+/// This function fails if the current target blueprint is not already disabled.
+/// Callers of this function expect execution to be - and remain -  disabled. If
+/// that isn't the case, we don't want to inadvertently proceed.
+pub async fn blueprint_edit_current_target_disabled<F>(
+    log: &slog::Logger,
+    nexus: &nexus_lockstep_client::Client,
+    edit_fn: F,
+) -> Result<(Blueprint, Blueprint), anyhow::Error>
+where
+    F: FnOnce(&mut BlueprintBuilder) -> Result<(), anyhow::Error>,
+{
+    blueprint_edit_current_target_impl(log, nexus, false, edit_fn).await
+}
+
+async fn blueprint_edit_current_target_impl<F>(
+    log: &slog::Logger,
+    nexus: &nexus_lockstep_client::Client,
+    expect_enabled: bool,
+    edit_fn: F,
+) -> Result<(Blueprint, Blueprint), anyhow::Error>
+where
+    F: FnOnce(&mut BlueprintBuilder) -> Result<(), anyhow::Error>,
+{
     // Fetch the current target configuration.
     info!(log, "editing current target blueprint");
-    let blueprint1 = blueprint_load_target_enabled(log, nexus).await?;
+    let blueprint1 =
+        blueprint_load_target_impl(log, nexus, expect_enabled).await?;
 
     // Make a new builder based on that blueprint and use `edit_fn` to edit it.
     let mut builder = BlueprintBuilder::new_based_on(
@@ -113,7 +179,7 @@ pub async fn blueprint_edit_current_target(
     );
     nexus
         .blueprint_target_set(&BlueprintTargetSet {
-            enabled: true,
+            enabled: expect_enabled,
             target_id: blueprint2.id,
         })
         .await
@@ -121,6 +187,7 @@ pub async fn blueprint_edit_current_target(
     info!(log, "finished editing target blueprint";
         "old_target_id" => %blueprint1.id,
         "new_target_id" => %blueprint2.id,
+        "enabled" => %expect_enabled,
     );
 
     Ok((blueprint1, blueprint2))
