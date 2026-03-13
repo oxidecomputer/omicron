@@ -461,6 +461,7 @@ fn process_command(
         Commands::BlueprintDiffDns(args) => cmd_blueprint_diff_dns(sim, args),
         Commands::BlueprintHistory(args) => cmd_blueprint_history(sim, args),
         Commands::BlueprintSave(args) => cmd_blueprint_save(sim, args),
+        Commands::BlueprintLoad(args) => cmd_blueprint_load(sim, args),
         Commands::Show => cmd_show(sim),
         Commands::Set(args) => cmd_set(sim, args),
         Commands::TufAssemble(args) => cmd_tuf_assemble(sim, args),
@@ -557,6 +558,8 @@ enum Commands {
     BlueprintHistory(BlueprintHistoryArgs),
     /// write one blueprint to a file
     BlueprintSave(BlueprintSaveArgs),
+    /// load one blueprint from a file
+    BlueprintLoad(BlueprintLoadArgs),
 
     /// show system properties
     Show,
@@ -1483,6 +1486,12 @@ struct BlueprintSaveArgs {
     /// id of the blueprint, "latest", or "target"
     blueprint_id: BlueprintIdOpt,
     /// output file
+    filename: Utf8PathBuf,
+}
+
+#[derive(Debug, Args)]
+struct BlueprintLoadArgs {
+    /// input file
     filename: Utf8PathBuf,
 }
 
@@ -3064,6 +3073,28 @@ fn cmd_blueprint_save(
     std::fs::write(&output_path, &output_str)
         .with_context(|| format!("write {:?}", output_path))?;
     Ok(Some(format!("saved {} to {:?}", resolved_id, output_path)))
+}
+
+fn cmd_blueprint_load(
+    sim: &mut ReconfiguratorSim,
+    args: BlueprintLoadArgs,
+) -> anyhow::Result<Option<String>> {
+    let filename = args.filename;
+    let blueprint: Blueprint = {
+        let contents = std::fs::read(&filename)
+            .with_context(|| format!("failed to read {filename}"))?;
+        serde_json::from_slice(&contents).with_context(|| {
+            format!("failed to parse {filename} as a blueprint")
+        })?
+    };
+    let blueprint_id = blueprint.id;
+
+    let mut state = sim.current_state().to_mut();
+    let system = state.system_mut();
+    system.add_blueprint(blueprint).context("failed to load blueprint")?;
+    sim.commit_and_bump("reconfigurator-cli blueprint-load".to_owned(), state);
+
+    Ok(Some(format!("loaded blueprint {blueprint_id} from {filename}")))
 }
 
 fn cmd_save(
