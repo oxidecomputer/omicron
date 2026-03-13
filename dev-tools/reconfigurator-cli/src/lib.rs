@@ -1040,7 +1040,8 @@ enum SledMeasurementTarget {
     Unknown,
     /// Set the blueprint to install dataset
     InstallDataset,
-    // We don't have a need for artifacts for now
+    // Unlike Omicron zones we don't have a need for the
+    // `Artifact` kind for now
 }
 
 #[derive(Debug, Subcommand)]
