@@ -229,6 +229,30 @@ impl OpContext {
         }
     }
 
+    /// Returns a context for use by omdb (the operator debug tool).
+    pub fn for_omdb(
+        log: slog::Logger,
+        datastore: Arc<dyn Storage>,
+    ) -> OpContext {
+        let created_instant = Instant::now();
+        let created_walltime = SystemTime::now();
+        let authn = Arc::new(authn::Context::omdb());
+        let authz = authz::Context::new(
+            Arc::clone(&authn),
+            Arc::new(authz::Authz::new(&log)),
+            Arc::clone(&datastore),
+        );
+        OpContext {
+            log,
+            authz,
+            authn,
+            created_instant,
+            created_walltime,
+            metadata: BTreeMap::new(),
+            kind: OpKind::Test,
+        }
+    }
+
     /// Creates a new `OpContext` with extra metadata (including log metadata)
     ///
     /// This is intended for cases where you want an OpContext that's
