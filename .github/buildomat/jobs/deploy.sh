@@ -2,7 +2,7 @@
 #:
 #: name = "helios / deploy"
 #: variety = "basic"
-#: target = "lab-2.0-opte-0.40"
+#: target = "lab-2.0-gimlet-opte-0.40"
 #: output_rules = [
 #:  "%/var/svc/log/oxide-*.log*",
 #:  "%/zone/oxz_*/root/var/svc/log/oxide-*.log*",
@@ -246,17 +246,19 @@ routeadm -e ipv4-forwarding -u
 PXA_START="$EXTRA_IP_START"
 PXA_END="$EXTRA_IP_END"
 
-pfexec zpool create -f scratch c1t1d0 c2t1d0
+# The gimlet factory creates a zpool on /pool/bsu/0 backed by the first M.2
+# disk. We use it to store large files that wouldn't fit in the ramdisk.
+SCRATCH_DIR=/pool/bsu/0/scratch
+pfexec mkdir $SCRATCH_DIR
 
 ptime -m \
     pfexec ./target/release/xtask virtual-hardware \
-    --vdev-dir /scratch \
+    --vdev-dir "$SCRATCH_DIR" \
     create \
     --gateway-ip "$GATEWAY_IP" \
     --gateway-mac "$GATEWAY_MAC" \
     --pxa-start "$PXA_START" \
     --pxa-end "$PXA_END"
-
 #
 # Generate a self-signed certificate to use as the initial TLS certificate for
 # the recovery Silo.  Its DNS name is determined by the silo name and the
@@ -267,10 +269,12 @@ ptime -m \
 tar xf out/omicron-sled-agent.tar pkg/config-rss.toml pkg/config.toml
 
 # Update the vdevs to point to where we've created them
-sed -E -i~ "s/(m2|u2)(.*\.vdev)/\/scratch\/\1\2/g" pkg/config.toml
+sed -E -i~ "s%(m2|u2)(.*\.vdev)%${SCRATCH_DIR}/\1\2%g" pkg/config.toml
 diff -u pkg/config.toml{~,} || true
 
-EXPECTED_ZPOOL_COUNT=$(grep -c -E 'u2.*\.vdev' pkg/config.toml)
+disks="$(pilot local disk list -H -o type | grep 'U.2' | wc -l)"
+pools="$(grep -c -E 'u2.*\.vdev' pkg/config.toml)"
+EXPECTED_ZPOOL_COUNT="$(( disks + pools ))"
 echo "expected number of zpools is ${EXPECTED_ZPOOL_COUNT}"
 
 SILO_NAME="$(sed -n 's/silo_name = "\(.*\)"/\1/p' pkg/config-rss.toml)"
@@ -361,8 +365,8 @@ OMICRON_NO_UNINSTALL=1 \
 retry=0
 until curl --max-time 1 --head --silent --show-error -o /dev/null "http://[fd00:1122:3344:101::2]:12224/"
 do
-	if [[ $retry -gt 30 ]]; then
-		echo "Failed to reach switch zone after 30 attempts"
+	if [[ $retry -gt 120 ]]; then
+		echo "Failed to reach switch zone after 120 attempts"
 		exit 1
 	fi
 	sleep 1
@@ -379,7 +383,7 @@ pfexec zlogin sidecar_softnpu /softnpu/scadm \
 retry=0
 while [[ $(pfexec svcs -z $(zoneadm list -n | grep oxz_ntp) \
     -Hostate oxide/ntp || true) != online ]]; do
-	if [[ $retry -gt 60 ]]; then
+	if [[ $retry -gt 120 ]]; then
 		echo "NTP zone chrony failed to come up after 60 seconds"
 		exit 1
 	fi
@@ -391,7 +395,7 @@ echo "Waited for chrony: ${retry}s"
 # Wait for at least one nexus zone to become available
 retry=0
 until zoneadm list | grep nexus; do
-	if [[ $retry -gt 300 ]]; then
+	if [[ $retry -gt 600 ]]; then
 		echo "Failed to start at least one nexus zone after 300 seconds"
 		exit 1
 	fi
@@ -405,7 +409,7 @@ echo "Waited for nexus: ${retry}s"
 # db.
 retry=0
 until grep "Handoff to Nexus is complete" /var/svc/log/oxide-sled-agent:default.log; do
-	if [[ $retry -gt 300 ]]; then
+	if [[ $retry -gt 600 ]]; then
 		echo "Failed to handoff to Nexus after 300 seconds"
 		exit 1
 	fi
@@ -420,7 +424,7 @@ echo "Waited for handoff: ${retry}s"
 retry=0
 INVENTORY_COLLECTION_COUNT=$(pfexec zlogin oxz_switch /opt/oxide/omdb/bin/omdb db inventory collections list | wc -l)
 until [[ "${INVENTORY_COLLECTION_COUNT}" -gt 1 ]]; do
-	if [[ $retry -gt 300 ]]; then
+	if [[ $retry -gt 600 ]]; then
 		echo "Failed to wait for inventory collection after 300 seconds"
 		exit 1
 	fi
@@ -436,7 +440,7 @@ ACTUAL_ZPOOL_COUNT=$(pfexec zlogin oxz_switch /opt/oxide/omdb/bin/omdb db zpool 
 until [[ "${ACTUAL_ZPOOL_COUNT}" -eq "${EXPECTED_ZPOOL_COUNT}" ]];
 do
 	pfexec zlogin oxz_switch /opt/oxide/omdb/bin/omdb db zpool list
-	if [[ $retry -gt 300 ]]; then
+	if [[ $retry -gt 600 ]]; then
 		echo "Failed to wait for ${EXPECTED_ZPOOL_COUNT} zpools after 300 seconds"
 		exit 1
 	fi
@@ -475,7 +479,7 @@ export OXIDE_HOST OXIDE_TOKEN
 #
 retry=0
 while ! curl -sSf "$OXIDE_HOST/v1/ping" --resolve "$OXIDE_RESOLVE" --cacert "$E2E_TLS_CERT"; do
-	if [[ $retry -gt 60 ]]; then
+	if [[ $retry -gt 120 ]]; then
 		echo "$OXIDE_RESOLVE failed to come up after 60 seconds"
 		exit 1
 	fi
