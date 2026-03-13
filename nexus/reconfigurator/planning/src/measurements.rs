@@ -84,7 +84,7 @@ pub(crate) fn plan_measurement_updates(
                 ));
             }
             let artifacts = BlueprintArtifactMeasurements::new(
-                current.into_iter().chain(previous.into_iter()).collect(),
+                current.into_iter().chain(previous).collect(),
             )
             .expect("we already checked both sets were non-empty");
 
