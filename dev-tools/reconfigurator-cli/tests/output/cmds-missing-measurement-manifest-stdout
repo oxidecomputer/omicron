@@ -308,10 +308,10 @@ external DNS:
 
 > # Now set the blueprints to use the install dataset
 > blueprint-edit latest set-measurements serial0 install-dataset
-blueprint 58d5e830-0884-47d8-a7cd-b2b3751adeb4 created from latest blueprint (8da82a8e-bf97-4fbd-8ddd-9f6462732cf1): set sled measurements to 'unknown' 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6
+blueprint 58d5e830-0884-47d8-a7cd-b2b3751adeb4 created from latest blueprint (8da82a8e-bf97-4fbd-8ddd-9f6462732cf1): set sled measurements to 'InstallDataset' 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6
 
 > blueprint-edit latest set-measurements serial1 install-dataset
-blueprint af934083-59b5-4bf6-8966-6fb5292c29e1 created from latest blueprint (58d5e830-0884-47d8-a7cd-b2b3751adeb4): set sled measurements to 'unknown' 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c
+blueprint af934083-59b5-4bf6-8966-6fb5292c29e1 created from latest blueprint (58d5e830-0884-47d8-a7cd-b2b3751adeb4): set sled measurements to 'InstallDataset' 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c
 
 
 > # And reset the install dataset

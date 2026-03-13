@@ -2818,7 +2818,7 @@ fn cmd_blueprint_edit(
                     }
                 },
             )?;
-            format!("set sled measurements to 'unknown' {}", sled_id)
+            format!("set sled measurements to '{command:?}' {sled_id}")
         }
 
         BlueprintEditCommands::Debug {
