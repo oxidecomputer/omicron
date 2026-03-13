@@ -86,7 +86,14 @@ pub fn is_oxide_sled() -> anyhow::Result<bool> {
     let Some(root) = node_walker.next().transpose()? else {
         anyhow::bail!("No nodes in device tree");
     };
-    Ok(OxideSled::try_from_root_node_name(&root.node_name()).is_some())
+
+    // TODO: this is extremely hacky, don't do that :(
+    let is_buildomat = std::fs::metadata("/opt/buildomat/etc/agent.json")
+        .map(|ok| ok.is_file())
+        .unwrap_or(false);
+
+    Ok(OxideSled::try_from_root_node_name(&root.node_name()).is_some()
+        && !is_buildomat)
 }
 
 impl TofinoSnapshot {
