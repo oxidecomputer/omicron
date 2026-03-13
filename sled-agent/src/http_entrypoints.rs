@@ -1853,9 +1853,11 @@ impl SledAgentApi for SledAgentImpl {
         path_params: Path<RotPathParams>,
     ) -> Result<HttpResponseOk<MeasurementLog>, HttpError> {
         let sa = request_context.context();
-        let rot = sa.rot_attestor(path_params.into_inner().rot);
         sa.latencies()
             .instrument_dropshot_handler(&request_context, async {
+                let remote_addr = request_context.request.remote_addr();
+                let rot =
+                    sa.rot_attestor(path_params.into_inner().rot, remote_addr)?;
                 let log = rot.get_measurement_log().await?;
                 Ok(HttpResponseOk(log.into()))
             })
@@ -1867,9 +1869,11 @@ impl SledAgentApi for SledAgentImpl {
         path_params: Path<RotPathParams>,
     ) -> Result<HttpResponseOk<CertificateChain>, HttpError> {
         let sa = request_context.context();
-        let rot = sa.rot_attestor(path_params.into_inner().rot);
         sa.latencies()
             .instrument_dropshot_handler(&request_context, async {
+                let remote_addr = request_context.request.remote_addr();
+                let rot =
+                    sa.rot_attestor(path_params.into_inner().rot, remote_addr)?;
                 let chain = rot.get_certificate_chain().await?;
                 Ok(HttpResponseOk(chain.into()))
             })
@@ -1882,10 +1886,12 @@ impl SledAgentApi for SledAgentImpl {
         body: TypedBody<Nonce>,
     ) -> Result<HttpResponseOk<Attestation>, HttpError> {
         let sa = request_context.context();
-        let rot = sa.rot_attestor(path_params.into_inner().rot);
         let nonce = body.into_inner();
         sa.latencies()
             .instrument_dropshot_handler(&request_context, async {
+                let remote_addr = request_context.request.remote_addr();
+                let rot =
+                    sa.rot_attestor(path_params.into_inner().rot, remote_addr)?;
                 let attestation = rot.attest(nonce.into()).await?;
                 Ok(HttpResponseOk(attestation.into()))
             })
