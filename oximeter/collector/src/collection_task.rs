@@ -440,6 +440,21 @@ impl CollectionTaskHandle {
         self.notifiers.producer_details_rx.borrow().clone()
     }
 
+    /// Return a watch receiver for producer details.
+    ///
+    /// This can be used to wait for changes to the producer's collection
+    /// state (e.g., waiting for a collection to complete).
+    ///
+    /// Note: the watch channel is notified for both collection completions
+    /// and producer info updates, so callers that only care about
+    /// collections should check `n_collections` to distinguish the two.
+    #[cfg(test)]
+    pub fn details_watcher(
+        &self,
+    ) -> tokio::sync::watch::Receiver<ProducerDetails> {
+        self.notifiers.producer_details_rx.clone()
+    }
+
     /// Explicitly request that the task collect from its producer.
     ///
     /// Note that this doesn't block. If it's able to notify the collection task
