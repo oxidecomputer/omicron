@@ -726,6 +726,8 @@ planning report:
 
 * adding zones despite being blocked, because: target release generation is 1
 * zone updates waiting on zone add blockers
+Measurement updates:
+Waiting on zone add/update blockers
 
 
 
@@ -2159,6 +2161,8 @@ planning report:
 
 * adding zones despite being blocked, because: target release generation is 1
 * zone updates waiting on zone add blockers
+Measurement updates:
+Waiting on zone add/update blockers
 
 
 
