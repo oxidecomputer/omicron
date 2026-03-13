@@ -24,92 +24,11 @@ use uuid::Uuid;
 /// This query is used when inserting a new IP range into an existing IP Pool.
 /// Those ranges must currently be unique globally, across all pools. This query
 /// selects the candidate range, _if_ it does not overlap with any existing
-/// range. I.e., it filters out the candidate if it overlaps. The query looks
-/// like
+/// range. I.e., it filters out the candidate if it overlaps.
 ///
-/// ```sql
-/// SELECT
-///     <candidate_range>
-/// WHERE
-///     -- Check for ranges that contain the candidate first address
-///     NOT EXISTS(
-///         SELECT
-///             id
-///         FROM
-///             ip_pool_range
-///         WHERE
-///             <candidate.first_address> >= first_address AND
-///             <candidate.first_address> <= last_address AND
-///             time_deleted IS NULL
-///         LIMIT 1
-///     )
-///     AND
-///     -- Check for ranges that contain the candidate last address
-///     NOT EXISTS(
-///         SELECT
-///             id
-///         FROM
-///             ip_pool_range
-///         WHERE
-///             <candidate.last_address> >= first_address AND
-///             <candidate.last_address> <= last_address AND
-///             time_deleted IS NULL
-///         LIMIT 1
-///     )
-///     AND
-///     -- Check for ranges whose first address is contained by the candidate
-///     -- range
-///     NOT EXISTS(
-///         SELECT
-///             id
-///         FROM
-///             ip_pool_range
-///         WHERE
-///             first_address >= <candidate.first_address> AND
-///             first_address <= <candidate.last_address> AND
-///             time_deleted IS NULL
-///         LIMIT 1
-///     )
-///     AND
-///     -- Check for ranges whose last address is contained by the candidate
-///     -- range
-///     NOT EXISTS(
-///         SELECT
-///             id
-///         FROM
-///             ip_pool_range
-///         WHERE
-///             last_address >= <candidate.first_address> AND
-///             last_address <= <candidate.last_address> AND
-///             time_deleted IS NULL
-///         LIMIT 1
-///     )
-///
-///     -- The query repeats the exact same 4 expressions above, but referring
-///     -- to the `subnet_pool_member` table. This ensures we have no overlap
-///     -- between external addresses within those tables or between them.
-/// ```
-///
-/// That's a lot of duplication, but it's to help with the scalability of the
-/// query. Collapsing those different `EXISTS()` subqueries into one set of
-/// `WHERE` clauses would require an `OR`. For example:
-///
-/// ```sql
-/// WHERE
-///     (
-///         <candidate.first_address> >= first_address AND
-///         <candidate.first_address> <= last_address
-///     )
-///     OR
-///     (
-///         <candidate.last_address> >= first_address AND
-///         <candidate.last_address> <= last_address
-///     )
-///     AND
-///     time_deleted IS NULL
-/// ```
-///
-/// That `OR` means the database cannot use the indexes we've supplied on the
+/// The query uses multiple separate `NOT EXISTS` subqueries rather than a
+/// single subquery with `OR` clauses. That's a lot of duplication, but it's
+/// to help with the scalability of the query. An `OR` means the database cannot use the indexes we've supplied on the
 /// `first_address` and `last_address` columns, and must resort to a full table
 /// scan.
 #[derive(Debug, Clone)]
@@ -332,5 +251,31 @@ impl QueryFragment<Pg> for FilterOverlappingIpRangesValues {
         mut out: AstPass<'_, 'a, Pg>,
     ) -> diesel::QueryResult<()> {
         self.0.walk_ast(out.reborrow())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::db::raw_query_builder::expectorate_query_contents;
+    use omicron_common::address::Ipv4Range;
+
+    #[tokio::test]
+    async fn expectorate_filter_overlapping_ip_ranges() {
+        let range = IpPoolRange::new(
+            &Ipv4Range::new(
+                std::net::Ipv4Addr::new(10, 0, 0, 1),
+                std::net::Ipv4Addr::new(10, 0, 0, 5),
+            )
+            .unwrap()
+            .into(),
+            Uuid::nil(),
+        );
+        let query = FilterOverlappingIpRanges { range };
+        expectorate_query_contents(
+            &query,
+            "tests/output/filter_overlapping_ip_ranges.sql",
+        )
+        .await;
     }
 }
