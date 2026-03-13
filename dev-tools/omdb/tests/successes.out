@@ -273,6 +273,10 @@ task: "attached_subnet_manager"
     distributes attached subnets to sleds and switch
 
 
+task: "audit_log_cleanup"
+    hard-deletes completed audit log entries older than the retention period
+
+
 task: "audit_log_timeout_incomplete"
     transitions stale incomplete audit log entries to timeout status so they
     become visible in the audit log
@@ -592,6 +596,14 @@ task: "attached_subnet_manager"
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
    no dendrite instances found
    no sleds found
+
+task: "audit_log_cleanup"
+  configured period: every <REDACTED_DURATION>m
+  last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    rows deleted:               0
+    cutoff:                     <REDACTED_TIMESTAMP>
+    max deleted per activation: 10000
 
 task: "audit_log_timeout_incomplete"
   configured period: every <REDACTED_DURATION>m
@@ -1195,6 +1207,14 @@ task: "attached_subnet_manager"
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
    no dendrite instances found
    no sleds found
+
+task: "audit_log_cleanup"
+  configured period: every <REDACTED_DURATION>m
+  last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    rows deleted:               0
+    cutoff:                     <REDACTED_TIMESTAMP>
+    max deleted per activation: 10000
 
 task: "audit_log_timeout_incomplete"
   configured period: every <REDACTED_DURATION>m

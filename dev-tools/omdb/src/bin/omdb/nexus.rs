@@ -52,6 +52,7 @@ use nexus_types::deployment::OximeterReadPolicy;
 use nexus_types::fm;
 use nexus_types::internal_api::background::AbandonedVmmReaperStatus;
 use nexus_types::internal_api::background::AttachedSubnetManagerStatus;
+use nexus_types::internal_api::background::AuditLogCleanupStatus;
 use nexus_types::internal_api::background::AuditLogTimeoutIncompleteStatus;
 use nexus_types::internal_api::background::BlueprintPlannerStatus;
 use nexus_types::internal_api::background::BlueprintRendezvousStats;
@@ -1220,6 +1221,9 @@ fn print_task_details(bgtask: &BackgroundTask, details: &serde_json::Value) {
         }
         "attached_subnet_manager" => {
             print_task_attached_subnet_manager_status(details);
+        }
+        "audit_log_cleanup" => {
+            print_task_audit_log_cleanup(details);
         }
         "audit_log_timeout_incomplete" => {
             print_task_audit_log_timeout_incomplete(details);
@@ -2681,6 +2685,36 @@ fn print_task_saga_recovery(details: &serde_json::Value) {
             }
         }
     }
+}
+
+fn print_task_audit_log_cleanup(details: &serde_json::Value) {
+    match serde_json::from_value::<AuditLogCleanupStatus>(details.clone()) {
+        Err(error) => eprintln!(
+            "warning: failed to interpret task details: {:?}: {:?}",
+            error, details
+        ),
+        Ok(status) => {
+            const DELETED: &str = "rows deleted:";
+            const CUTOFF: &str = "cutoff:";
+            const MAX_DELETE: &str = "max deleted per activation:";
+            const ERROR: &str = "error:";
+            const WIDTH: usize =
+                const_max_len(&[DELETED, CUTOFF, MAX_DELETE, ERROR]) + 1;
+
+            println!("    {DELETED:<WIDTH$}{}", status.rows_deleted);
+            println!(
+                "    {CUTOFF:<WIDTH$}{}",
+                status.cutoff.to_rfc3339_opts(SecondsFormat::AutoSi, true),
+            );
+            println!(
+                "    {MAX_DELETE:<WIDTH$}{}",
+                status.max_deleted_per_activation
+            );
+            if let Some(error) = &status.error {
+                println!("    {ERROR:<WIDTH$}{error}");
+            }
+        }
+    };
 }
 
 fn print_task_audit_log_timeout_incomplete(details: &serde_json::Value) {
