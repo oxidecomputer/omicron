@@ -2809,6 +2809,7 @@ table! {
         payload -> Jsonb,
         time_dispatched -> Nullable<Timestamptz>,
         num_dispatched -> Int8,
+        case_id -> Nullable<Uuid>,
     }
 }
 
@@ -3171,6 +3172,17 @@ table! {
 
 allow_tables_to_appear_in_same_query!(fm_ereport_in_case, ereport);
 allow_tables_to_appear_in_same_query!(fm_sitrep, fm_case);
+
+table! {
+    fm_alert_request (sitrep_id, id) {
+        id -> Uuid,
+        sitrep_id -> Uuid,
+        requested_sitrep_id -> Uuid,
+        case_id -> Uuid,
+        alert_class -> crate::enums::AlertClassEnum,
+        payload -> Jsonb,
+    }
+}
 
 table! {
     trust_quorum_configuration (rack_id, epoch) {
