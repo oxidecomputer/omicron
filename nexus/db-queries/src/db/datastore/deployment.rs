@@ -3025,110 +3025,8 @@ fn decode_target_insert_error(
 /// direct child of the previous current target. Enforcing the above has some
 /// subtleties (particularly around handling the "first blueprint with no
 /// parent" case). These are expanded on below through inline comments on the
-/// query we generate:
-///
-/// ```sql
-/// WITH
-///   -- Subquery to fetch the current target (i.e., the row with the max
-///   -- veresion in `bp_target`).
-///   current_target AS (
-///     SELECT
-///       version,
-///       blueprint_id
-///     FROM bp_target
-///     ORDER BY version DESC
-///     LIMIT 1
-///   ),
-///
-///   -- Error checking subquery: This uses similar tricks as elsewhere in
-///   -- this crate to `CAST(... AS UUID)` with non-UUID values that result
-///   -- in runtime errors in specific cases, allowing us to give accurate
-///   -- error messages.
-///   --
-///   -- These checks are not required for correct behavior by the insert
-///   -- below. If we removed them, the insert would insert 0 rows if
-///   -- these checks would have failed. But they make it easier to report
-///   -- specific problems to our caller.
-///   --
-///   -- The specific cases we check here are noted below.
-///   check_validity AS MATERIALIZED (
-///     SELECT CAST(IF(
-///       -- Return `no-such-blueprint` if the ID we're being told to
-///       -- set as the target doesn't exist in the blueprint table.
-///       (SELECT "id" FROM "blueprint" WHERE "id" = <new_target_id>) IS NULL,
-///       'no-such-blueprint',
-///       IF(
-///         -- Check for whether our new target's parent matches our current
-///         -- target. There are two cases here: The first is the common case
-///         -- (i.e., the new target has a parent: does it match the current
-///         -- target ID?). The second is the bootstrapping check: if we're
-///         -- trying to insert a new target that does not have a parent,
-///         -- we should not have a current target at all.
-///         --
-///         -- If either of these cases fails, we return `parent-not-target`.
-///         (
-///            SELECT "parent_blueprint_id" FROM "blueprint", current_target
-///            WHERE
-///              "id" = <new_target_id>
-///              AND current_target.blueprint_id = "parent_blueprint_id"
-///         ) IS NOT NULL
-///         OR
-///         (
-///            SELECT 1 FROM "blueprint"
-///            WHERE
-///              "id" = <new_target_id>
-///              AND "parent_blueprint_id" IS NULL
-///              AND NOT EXISTS (SELECT version FROM current_target)
-///         ) = 1,
-///         -- Sometime between v22.1.9 and v22.2.19, Cockroach's type checker
-///         -- became too smart for our `CAST(... as UUID)` error checking
-///         -- gadget: it can infer that `<new_target_id>` must be a UUID, so
-///         -- then tries to parse 'parent-not-target' and 'no-such-blueprint'
-///         -- as UUIDs _during typechecking_, which causes the query to always
-///         -- fail. We can defeat this by casting the UUID to text here, which
-///         -- will allow the 'parent-not-target' and 'no-such-blueprint'
-///         -- sentinels to survive type checking, making it to query execution
-///         -- where they will only be cast to UUIDs at runtime in the failure
-///         -- cases they're supposed to catch.
-///         CAST(<new_target_id> AS text),
-///         'parent-not-target'
-///       )
-///     ) AS UUID)
-///   ),
-///
-///   -- Determine the new version number to use: either 1 if this is the
-///   -- first blueprint being made the current target, or 1 higher than
-///   -- the previous target's version.
-///   --
-///   -- The final clauses of each of these WHERE clauses repeat the
-///   -- checks performed above in `check_validity`, and will cause this
-///   -- subquery to return no rows if we should not allow the new
-///   -- target to be set.
-///   new_target AS (
-///     SELECT 1 AS new_version FROM "blueprint"
-///       WHERE
-///         "id" = <new_target_id>
-///         AND "parent_blueprint_id" IS NULL
-///         AND NOT EXISTS (SELECT version FROM current_target)
-///     UNION
-///     SELECT current_target.version + 1 FROM current_target, "blueprint"
-///       WHERE
-///         "id" = <new_target_id>
-///         AND "parent_blueprint_id" IS NOT NULL
-///         AND "parent_blueprint_id" = current_target.blueprint_id
-///   )
-///
-///   -- Perform the actual insertion.
-///   INSERT INTO "bp_target"(
-///     "version","blueprint_id","enabled","time_made_target"
-///   )
-///   SELECT
-///     new_target.new_version,
-///     <new_target_id>,
-///     <new_target_enabled>,
-///     <new_target_time_made_target>
-///     FROM new_target
-/// ```
+/// query we generate. See `tests/output/insert_target_blueprint_query.sql`
+/// for the full generated SQL.
 fn insert_target_query(
     target_id: BlueprintUuid,
     enabled: bool,
@@ -3137,6 +3035,8 @@ fn insert_target_query(
     let mut builder = QueryBuilder::new();
     let target_id = *target_id.as_untyped_uuid();
 
+    // `current_target`: fetch the current target (row with max version
+    // in bp_target).
     builder.sql(
         "WITH \
         current_target AS ( \
@@ -3146,53 +3046,90 @@ fn insert_target_query(
           FROM bp_target \
           ORDER BY version DESC \
           LIMIT 1 \
-        ), \
-        check_validity AS MATERIALIZED ( \
+        ), ",
+    );
+
+    // `check_validity`: error-checking CTE. Uses the CAST(... AS UUID)
+    // trick with non-UUID sentinel values to produce runtime errors for
+    // specific failure cases. These checks aren't required for correct
+    // behavior by the insert below — if we removed them, the insert would
+    // simply insert 0 rows — but they make it easier to report specific
+    // problems to our caller.
+    //
+    // Cases checked:
+    //   - 'no-such-blueprint': the blueprint ID we're being told to set
+    //     as the target doesn't exist in the blueprint table.
+    //   - 'parent-not-target': checks whether the new target's parent
+    //     matches the current target. Two sub-cases: (1) common case —
+    //     the new target has a parent; does it match the current target
+    //     ID? (2) bootstrap — the new target has no parent; there must
+    //     be no current target at all. If either check fails, we return
+    //     'parent-not-target'.
+    builder
+        .sql(
+            "check_validity AS MATERIALIZED ( \
           SELECT \
             CAST( \
               IF( \
                 (SELECT id FROM blueprint WHERE id = ",
-    )
-    .param()
-    .bind::<sql_types::Uuid, _>(target_id)
-    .sql(") IS NULL, '")
-    .sql(NO_SUCH_BLUEPRINT_SENTINEL)
-    .sql(
-        "', \
+        )
+        .param()
+        .bind::<sql_types::Uuid, _>(target_id)
+        .sql(") IS NULL, '")
+        .sql(NO_SUCH_BLUEPRINT_SENTINEL)
+        .sql(
+            "', \
                 IF( \
                   (SELECT parent_blueprint_id FROM blueprint, current_target \
                    WHERE id = ",
-    )
-    .param()
-    .bind::<sql_types::Uuid, _>(target_id)
-    .sql(
-        " \
+        )
+        .param()
+        .bind::<sql_types::Uuid, _>(target_id)
+        .sql(
+            " \
                    AND current_target.blueprint_id = parent_blueprint_id \
                   ) IS NOT NULL \
                   OR \
                   (SELECT 1 FROM blueprint \
                    WHERE id = ",
-    )
-    .param()
-    .bind::<sql_types::Uuid, _>(target_id)
-    .sql(
-        " \
+        )
+        .param()
+        .bind::<sql_types::Uuid, _>(target_id)
+        .sql(
+            " \
                    AND parent_blueprint_id IS NULL \
                    AND NOT EXISTS (SELECT version FROM current_target) \
-                  ) = 1, \
-                  CAST(",
-    )
-    .param()
-    .bind::<sql_types::Uuid, _>(target_id)
-    .sql(" AS text), '")
-    .sql(PARENT_NOT_TARGET_SENTINEL)
-    .sql(
-        "' \
+                  ) = 1, ",
+        );
+
+    // Workaround: sometime between CRDB v22.1.9 and v22.2.19, the type
+    // checker became too smart for the CAST(... AS UUID) error-checking
+    // gadget — it infers that the target_id must be a UUID and tries to
+    // parse the sentinel strings as UUIDs during type checking, causing
+    // the query to always fail. Casting the UUID to text here defeats
+    // this inference, allowing the sentinels to survive type checking and
+    // only be cast to UUIDs at runtime in the failure cases.
+    builder
+        .sql("CAST(")
+        .param()
+        .bind::<sql_types::Uuid, _>(target_id)
+        .sql(" AS text), '")
+        .sql(PARENT_NOT_TARGET_SENTINEL)
+        .sql(
+            "' \
                 ) \
               ) AS UUID \
             ) \
-        ), \
-        new_target AS ( \
+        ), ",
+        );
+
+    // `new_target`: determine the new version number to use — either 1
+    // if this is the first blueprint being made the current target, or
+    // 1 higher than the previous target's version. The final clauses of
+    // each WHERE repeat the checks from `check_validity`, and will cause
+    // this subquery to return no rows if the new target should not be set.
+    builder.sql(
+        "new_target AS ( \
           SELECT 1 AS new_version FROM blueprint \
           WHERE id = ",
     )

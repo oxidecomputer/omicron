@@ -1601,85 +1601,6 @@ fn push_instance_state_verification_subquery<'a>(
 /// Second, while an instance may have zero or more interfaces, if it has one
 /// or more, exactly one of those must be the primary interface. That means
 /// we can only delete the primary interface if there are no secondary interfaces.
-/// The full query is:
-///
-/// ```sql
-/// WITH
-///     instance AS MATERIALIZED (SELECT CAST(
-///         CASE
-///             COALESCE(
-///                 (SELECT
-///                     state
-///                  FROM
-///                     instance
-///                  WHERE
-///                     id = <instance_id> AND
-///                     time_deleted IS NULL
-///                 ),
-///                 'destroyed'
-///             )
-///             WHEN 'stopped' THEN '<instance_id>'
-///             WHEN 'creating' THEN '<instanced_id>'
-///             WHEN 'failed' THEN '<instanced_id>'
-///             WHEN 'destroyed' THEN 'no-instance'
-///             ELSE 'bad-state'
-///         END
-///     AS UUID)),
-///     interface AS MATERIALIZED (
-///         SELECT CAST(IF(
-///             (
-///                 SELECT
-///                     NOT is_primary
-///                 FROM
-///                     network_interface
-///                 WHERE
-///                     id = <interface_id> AND
-///                     time_deleted IS NULL
-///             )
-///                 OR
-///             (
-///                 SELECT
-///                     COUNT(*)
-///                 FROM
-///                     network_interface
-///                 WHERE
-///                     parent_id = <parent_id> AND
-///                     kind = <kind> AND
-///                     time_deleted IS NULL
-///             ) <= 1,
-///             '<interface_id>',
-///             'secondaries'
-///         ) AS UUID)
-///     ),
-///     found_interface AS (
-///         SELECT
-///             id
-///         FROM
-///             network_interface
-///         WHERE
-///             id = <interface_id>
-///     ),
-///     updated AS (
-///         UPDATE
-///             network_interface
-///         SET
-///             time_deleted = NOW()
-///         WHERE
-///             id = <interface_id> AND
-///             time_deleted IS NULL
-///         RETURNING
-///             id
-///     )
-/// SELECT
-///     found_interface.id,
-///     updated.id
-/// FROM
-///     found_interface
-/// LEFT JOIN
-///     updated
-/// ON
-///     found_interface.id = updated.id
-/// ```
 ///
 /// Notes
 /// -----
@@ -1689,6 +1610,8 @@ fn push_instance_state_verification_subquery<'a>(
 /// `parent_id` as a string in this type.
 ///
 /// The `instance` CTE is only present if the interface is an instance-kind.
+///
+/// See `tests/output/delete_vnic_*_query.sql` for the full generated SQL.
 #[derive(Debug, Clone)]
 pub struct DeleteQuery {
     interface_id: Uuid,
@@ -1794,6 +1717,11 @@ impl QueryFragment<Pg> for DeleteQuery {
         out.push_bind_param::<sql_types::Text, &str>(
             &DeleteError::HAS_SECONDARIES_SENTINEL,
         )?;
+        // `found_interface` selects the interface (even if deleted) and
+        // `updated` performs the actual soft-delete. The final SELECT
+        // LEFT JOINs them so the caller can distinguish three cases:
+        // (found + deleted) = success, (found + NULL) = existed but
+        // couldn't delete, (NULL + NULL) = not found.
         out.push_sql(") AS UUID)), found_interface AS (SELECT ");
         out.push_identifier(dsl::id::NAME)?;
         out.push_sql(" FROM ");
