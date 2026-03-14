@@ -34,7 +34,6 @@ use omicron_uuid_kinds::SledUuid;
 use oximeter_collector::Oximeter;
 use oximeter_producer::Server as ProducerServer;
 use sled_agent_types::early_networking::SwitchSlot;
-use slog::debug;
 use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
@@ -358,7 +357,7 @@ pub async fn omicron_dev_setup_with_config<N: NexusServer>(
     let starter = ControlPlaneStarter::<N>::new("omicron-dev", config);
 
     let log = &starter.logctx.log;
-    debug!(log, "Ensuring seed tarball exists");
+    slog::debug!(log, "Ensuring seed tarball exists");
 
     // Start up a ControlPlaneTestContext, which tautologically sets up
     // everything needed for a simulated control plane.
