@@ -3147,6 +3147,23 @@ fn create_zone_artifacts_at_version(
             board: Some(sp_sim::SIM_ROT_BOARD.to_string()),
             sign: Some("sign-gimlet".into()),
         },
+        // We need at least one measurement in a repo to proceed with planning
+        // This value matches what we load from the example repo so that
+        // we can go ahead and proceed with zone planning without extra
+        // measurement steps
+        TufArtifactMeta {
+            id: ArtifactId {
+                name: "measurement-base".to_string(),
+                version: ArtifactVersion::new("1.0.0").unwrap(),
+                kind: ArtifactKind::MEASUREMENT_CORPUS,
+            },
+            hash: ArtifactHash(hex_literal::hex!(
+                "8a0e23157bae655fceec7376926c9758efee6511c7b7ff8355bbb49545a2257f"
+            )),
+            size: 0,
+            board: None,
+            sign: None,
+        },
     ]
 }
 
@@ -4760,7 +4777,7 @@ fn test_multiple_measurements() {
 
     let mut artifacts = BTreeSet::new();
 
-    // From our initial repo
+    // From our first upgrade repo
     artifacts.insert(BlueprintSingleMeasurement {
         version: BlueprintArtifactVersion::Available {
             version: ArtifactVersion::new_static("1.0.0").unwrap(),
@@ -4868,6 +4885,17 @@ fn test_multiple_measurements() {
     .unwrap();
 
     let mut artifacts = BTreeSet::new();
+
+    // From our generated zone artifacts
+    artifacts.insert(BlueprintSingleMeasurement {
+        version: BlueprintArtifactVersion::Available {
+            version: ArtifactVersion::new_static("1.0.0").unwrap(),
+        },
+        hash: ArtifactHash(hex_literal::hex!(
+            "8a0e23157bae655fceec7376926c9758efee6511c7b7ff8355bbb49545a2257f"
+        )),
+    });
+
     // From our previous repo
     artifacts.insert(BlueprintSingleMeasurement {
         version: BlueprintArtifactVersion::Available {
