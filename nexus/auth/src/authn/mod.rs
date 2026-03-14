@@ -34,6 +34,7 @@ pub use nexus_db_fixed_data::user_builtin::USER_DB_INIT;
 pub use nexus_db_fixed_data::user_builtin::USER_EXTERNAL_AUTHN;
 pub use nexus_db_fixed_data::user_builtin::USER_INTERNAL_API;
 pub use nexus_db_fixed_data::user_builtin::USER_INTERNAL_READ;
+pub use nexus_db_fixed_data::user_builtin::USER_OMDB;
 pub use nexus_db_fixed_data::user_builtin::USER_SAGA_RECOVERY;
 pub use nexus_db_fixed_data::user_builtin::USER_SERVICE_BALANCER;
 
@@ -240,6 +241,11 @@ impl Context {
     /// Returns an authenticated context for Nexus-driven service balancing.
     pub fn internal_service_balancer() -> Context {
         Context::context_for_builtin_user(USER_SERVICE_BALANCER.id)
+    }
+
+    /// Returns an authenticated context for omdb
+    pub fn omdb() -> Context {
+        Context::context_for_builtin_user(USER_OMDB.id)
     }
 
     fn context_for_builtin_user(user_builtin_id: BuiltInUserUuid) -> Context {

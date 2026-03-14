@@ -94,6 +94,16 @@ pub static USER_EXTERNAL_AUTHN: LazyLock<UserBuiltinConfig> =
         )
     });
 
+/// Built-in user for omdb (the Oxide operator debug tool)
+pub static USER_OMDB: LazyLock<UserBuiltinConfig> = LazyLock::new(|| {
+    UserBuiltinConfig::new_static(
+        // "00db" for "omdb"
+        "001de000-05e4-4000-8000-0000000000db",
+        "omdb",
+        "used by the omdb operator debug tool",
+    )
+});
+
 #[cfg(test)]
 mod test {
     use super::super::assert_valid_typed_uuid;
@@ -101,6 +111,7 @@ mod test {
     use super::USER_EXTERNAL_AUTHN;
     use super::USER_INTERNAL_API;
     use super::USER_INTERNAL_READ;
+    use super::USER_OMDB;
     use super::USER_SAGA_RECOVERY;
     use super::USER_SERVICE_BALANCER;
 
@@ -112,5 +123,6 @@ mod test {
         assert_valid_typed_uuid(&USER_EXTERNAL_AUTHN.id);
         assert_valid_typed_uuid(&USER_INTERNAL_READ.id);
         assert_valid_typed_uuid(&USER_SAGA_RECOVERY.id);
+        assert_valid_typed_uuid(&USER_OMDB.id);
     }
 }
