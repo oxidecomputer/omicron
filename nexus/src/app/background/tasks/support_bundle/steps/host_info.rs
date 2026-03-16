@@ -19,6 +19,7 @@ use futures::stream::FuturesUnordered;
 use nexus_db_model::Sled;
 use nexus_networking;
 use nexus_types::identity::Asset;
+use slog_error_chain::InlineErrorChain;
 use tokio::io::AsyncWriteExt;
 
 pub async fn spawn_query_all_sleds(
@@ -282,9 +283,9 @@ async fn save_zone_log_zip_or_error(
                     || format!("failed to create log zip file: {output_path}"),
                 )?;
 
-            let stream = bytestream.into_inner().map(|chunk| {
-                chunk.map_err(|e| std::io::Error::other(e.to_string()))
-            });
+            let stream = bytestream
+                .into_inner()
+                .map(|chunk| chunk.map_err(|e| std::io::Error::other(e)));
             let mut reader = tokio_util::io::StreamReader::new(stream);
             let _nbytes = tokio::io::copy(&mut reader, &mut file).await?;
             file.flush().await?;
@@ -306,7 +307,7 @@ async fn save_zone_log_zip_or_error(
                 error!(
                     logger,
                     "failed to cleanup temporary logs zip file";
-                    "error" => %e,
+                    InlineErrorChain::new(&e),
                     "file" => %output_path,
 
                 );

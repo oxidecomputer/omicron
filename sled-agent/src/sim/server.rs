@@ -16,7 +16,7 @@ use crate::rack_setup::{
     from_sockaddr_to_external_floating_addr,
 };
 use crate::sim::SimulatedUpstairs;
-use anyhow::{Context as _, anyhow, bail};
+use anyhow::{Context, anyhow, bail};
 use crucible_agent_client::types::State as RegionState;
 use iddqd::IdOrdMap;
 use illumos_utils::zpool::ZpoolName;
@@ -342,9 +342,7 @@ pub async fn run_standalone_server(
     rss_args: &RssArgs,
 ) -> Result<(), anyhow::Error> {
     let (drain, registration) = slog_dtrace::with_drain(
-        logging
-            .to_logger("sled-agent")
-            .map_err(|message| anyhow!("initializing logger: {}", message))?,
+        logging.to_logger("sled-agent").context("initializing logger")?,
     );
     let log = slog::Logger::root(drain.fuse(), slog::o!(FileKv));
     if let slog_dtrace::ProbeRegistration::Failed(e) = registration {

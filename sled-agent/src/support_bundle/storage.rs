@@ -761,7 +761,11 @@ impl<'a> SupportBundleManager<'a> {
             if let Err(unlink_err) =
                 tokio::fs::remove_file(support_bundle_path_tmp).await
             {
-                warn!(log, "Failed to unlink bundle after previous error"; "error" => ?unlink_err);
+                warn!(
+                    log,
+                    "Failed to unlink bundle after previous error";
+                    InlineErrorChain::new(&unlink_err),
+                );
             }
             return Err(err);
         }

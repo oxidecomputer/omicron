@@ -31,6 +31,7 @@ use internal_dns_types::config::Srv;
 use pretty_hex::*;
 use serde::Deserialize;
 use slog::{Logger, debug, error, info, o, trace};
+use slog_error_chain::InlineErrorChain;
 use std::net::SocketAddr;
 use std::str::FromStr;
 use std::sync::Arc;
@@ -507,10 +508,10 @@ where
         {
             error!(
                 &request.log,
-                "failed to send {} to {:?}: {:#}",
+                "failed to send {} to {:?}",
                 label,
-                request.client_addr.to_string(),
-                error
+                request.client_addr.to_string();
+                InlineErrorChain::new(&error),
             );
         }
 

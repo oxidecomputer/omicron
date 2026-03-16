@@ -247,11 +247,18 @@ pub enum WriteError {
     },
     #[error("error validating checksum of written file")]
     ChecksumValidationError(#[source] anyhow::Error),
-    #[error("error removing files from {path}: {error}")]
-    RemoveFilesError { path: Utf8PathBuf, error: std::io::Error },
-    #[error("error fsyncing output directory: {error}")]
-    SyncOutputDirError { error: std::io::Error },
-    #[error("error interacting with zpool: {error}")]
+    #[error("error removing files from {path}")]
+    RemoveFilesError {
+        path: Utf8PathBuf,
+        #[source]
+        error: std::io::Error,
+    },
+    #[error("error fsyncing output directory")]
+    SyncOutputDirError {
+        #[source]
+        error: std::io::Error,
+    },
+    #[error("error interacting with zpool")]
     ZpoolError {
         #[from]
         error: zpool::Error,

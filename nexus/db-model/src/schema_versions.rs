@@ -854,6 +854,7 @@ mod test {
     use super::*;
     use camino_tempfile::Utf8TempDir;
     use regex::Regex;
+    use slog_error_chain::InlineErrorChain;
     use sqlparser::ast::{
         AlterColumnOperation, AlterTableOperation, Statement, TableConstraint,
     };
@@ -1963,7 +1964,10 @@ mod test {
             // Read the up*.sql files from the directory.
             let mut up_files: Vec<_> = std::fs::read_dir(&version_path)
                 .unwrap_or_else(|e| {
-                    panic!("Cannot read directory {version_path}: {e}")
+                    panic!(
+                        "Cannot read directory {version_path}: {}",
+                        InlineErrorChain::new(&e)
+                    )
                 })
                 .filter_map(|entry| {
                     let entry = entry.unwrap();
@@ -1987,8 +1991,13 @@ mod test {
 
             for up_path in &up_files {
                 let label = up_path.file_name().unwrap();
-                let sql = std::fs::read_to_string(up_path)
-                    .unwrap_or_else(|e| panic!("Cannot read {up_path}: {e}"));
+                let sql =
+                    std::fs::read_to_string(up_path).unwrap_or_else(|e| {
+                        panic!(
+                            "Cannot read {up_path}: {}",
+                            InlineErrorChain::new(&e)
+                        )
+                    });
 
                 // Classify DDL statements.
                 let classified = classify_sql_statements(&sql, label)
