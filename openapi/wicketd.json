@@ -4639,9 +4639,6 @@
           "switch"
         ]
       },
-      "SpecifiedIpNet": {
-        "$ref": "#/components/schemas/IpNet"
-      },
       "StartUpdateOptions": {
         "type": "object",
         "properties": {
@@ -7426,66 +7423,6 @@
           }
         ]
       },
-      "UplinkAddress": {
-        "oneOf": [
-          {
-            "type": "object",
-            "properties": {
-              "type": {
-                "type": "string",
-                "enum": [
-                  "link_local"
-                ]
-              }
-            },
-            "required": [
-              "type"
-            ]
-          },
-          {
-            "type": "object",
-            "properties": {
-              "ip_net": {
-                "$ref": "#/components/schemas/SpecifiedIpNet"
-              },
-              "type": {
-                "type": "string",
-                "enum": [
-                  "address"
-                ]
-              }
-            },
-            "required": [
-              "ip_net",
-              "type"
-            ]
-          }
-        ]
-      },
-      "UplinkAddressConfig": {
-        "type": "object",
-        "properties": {
-          "address": {
-            "description": "The address to be used on the uplink.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/UplinkAddress"
-              }
-            ]
-          },
-          "vlan_id": {
-            "nullable": true,
-            "description": "The VLAN id (if any) associated with this address.",
-            "default": null,
-            "type": "integer",
-            "format": "uint16",
-            "minimum": 0
-          }
-        },
-        "required": [
-          "address"
-        ]
-      },
       "UplinkPreflightStepId": {
         "oneOf": [
           {
@@ -7621,10 +7558,8 @@
         "type": "object",
         "properties": {
           "addr": {
-            "nullable": true,
             "description": "Address of the peer.",
-            "type": "string",
-            "format": "ip"
+            "type": "string"
           },
           "allowed_export": {
             "description": "Apply export policy to this peer with an allow list.",
@@ -7765,6 +7700,7 @@
           }
         },
         "required": [
+          "addr",
           "asn",
           "port"
         ],
@@ -7784,7 +7720,7 @@
           "addresses": {
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/UplinkAddressConfig"
+              "$ref": "#/components/schemas/UserSpecifiedUplinkAddressConfig"
             }
           },
           "autoneg": {
@@ -7883,6 +7819,28 @@
           "infra_ip_last",
           "switch0",
           "switch1"
+        ],
+        "additionalProperties": false
+      },
+      "UserSpecifiedUplinkAddressConfig": {
+        "description": "User-specified version of [`sled_agent_types::early_networking::UplinkAddressConfig`].\n\nThis allows us to have a nicer TOML representation of [`UplinkAddress`].",
+        "type": "object",
+        "properties": {
+          "address": {
+            "description": "The address to be used on the uplink.",
+            "type": "string"
+          },
+          "vlan_id": {
+            "nullable": true,
+            "description": "The VLAN id (if any) associated with this address.",
+            "default": null,
+            "type": "integer",
+            "format": "uint16",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "address"
         ],
         "additionalProperties": false
       },
