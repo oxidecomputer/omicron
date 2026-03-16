@@ -18,7 +18,7 @@ use std::sync::Arc;
 
 pub struct AuditLogCleanup {
     datastore: Arc<DataStore>,
-    retention_days: NonZeroU32,
+    retention: TimeDelta,
     max_deleted_per_activation: u32,
 }
 
@@ -28,21 +28,23 @@ impl AuditLogCleanup {
         retention_days: NonZeroU32,
         max_deleted_per_activation: u32,
     ) -> Self {
-        Self { datastore, retention_days, max_deleted_per_activation }
+        let retention = TimeDelta::try_days(i64::from(retention_days.get()))
+            .expect("retention_days must be representable as a TimeDelta");
+        Self { datastore, retention, max_deleted_per_activation }
     }
 
     pub(crate) async fn actually_activate(
         &mut self,
         opctx: &OpContext,
     ) -> AuditLogCleanupStatus {
-        let cutoff = TimeDelta::try_days(i64::from(self.retention_days.get()))
-            .and_then(|d| Utc::now().checked_sub_signed(d));
-        let cutoff = match cutoff {
+        // retention was validated at construction time; only the
+        // subtraction from "now" can fail (effectively impossible).
+        let cutoff = match Utc::now().checked_sub_signed(self.retention) {
             Some(c) => c,
             None => {
                 let msg = format!(
-                    "retention_days {} overflows date arithmetic",
-                    self.retention_days,
+                    "retention {:?} overflows date arithmetic",
+                    self.retention,
                 );
                 slog::error!(&opctx.log, "{msg}");
                 return AuditLogCleanupStatus {
