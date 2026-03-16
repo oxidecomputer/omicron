@@ -58,7 +58,6 @@ pub mod early_networking {
     pub use crate::v1::early_networking::ImportExportPolicy;
     pub use crate::v1::early_networking::LldpAdminStatus;
     pub use crate::v1::early_networking::LldpPortConfig;
-    pub use crate::v1::early_networking::ParseLldpAdminStatusError;
     pub use crate::v1::early_networking::PortFec;
     pub use crate::v1::early_networking::PortSpeed;
     pub use crate::v1::early_networking::RouteConfig;
@@ -74,7 +73,6 @@ pub mod early_networking {
     pub use crate::v20::early_networking::RouterLifetimeConfig;
     pub use crate::v20::early_networking::RouterLifetimeConfigError;
     pub use crate::v20::early_networking::UplinkAddressConfig;
-    pub use crate::v20::early_networking::UplinkAddressConfigError;
 
     pub use crate::v26::early_networking::EarlyNetworkConfigBody;
     pub use crate::v26::early_networking::WriteNetworkConfigRequest;
@@ -149,8 +147,12 @@ pub mod inventory {
     pub use crate::v16::inventory::ConfigReconcilerInventory;
     pub use crate::v16::inventory::SingleMeasurementInventory;
 
-    pub use crate::v24::inventory::Inventory;
     pub use crate::v24::inventory::InventoryZpool;
+
+    pub use crate::v28::inventory::Inventory;
+    pub use crate::v28::inventory::SvcsEnabledNotOnline;
+    pub use crate::v28::inventory::SvcsEnabledNotOnlineResult;
+    pub use crate::v28::inventory::SvcsError;
 
     pub use crate::impls::inventory::ManifestBootInventoryDisplay;
     pub use crate::impls::inventory::ManifestInventoryDisplay;

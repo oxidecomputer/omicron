@@ -1089,7 +1089,7 @@ impl DataStore {
                     }
 
                     // Attempt during a migration.
-                    if collection.runtime_state.migration_id.is_some() {
+                    if collection.migration_id.is_some() {
                         return Err(Error::unavail(
                             "Cannot attach a subnet while instance is migrating"
                         ));
@@ -1097,11 +1097,11 @@ impl DataStore {
 
                     // Instance is in a transitory state, e.g., starting.
                     if !SAFE_TO_ATTACH_INSTANCE_STATES
-                        .contains(&collection.runtime_state.nexus_state)
+                        .contains(&collection.nexus_state)
                     {
                         return Err(Error::invalid_request(&format!(
                             "Cannot attach subnet to instance in {} state",
-                            collection.runtime_state.nexus_state,
+                            collection.nexus_state,
                         )));
                     }
 
@@ -1227,7 +1227,7 @@ impl DataStore {
                     }
 
                     // Attempt during a migration.
-                    if collection.runtime_state.migration_id.is_some() {
+                    if collection.migration_id.is_some() {
                         return Err(Error::unavail(
                             "Cannot detach a subnet while instance is migrating"
                         ));
@@ -1235,11 +1235,11 @@ impl DataStore {
 
                     // Instance is in a transitory state, e.g., starting.
                     if !SAFE_TO_ATTACH_INSTANCE_STATES
-                        .contains(&collection.runtime_state.nexus_state)
+                        .contains(&collection.nexus_state)
                     {
                         return Err(Error::invalid_request(&format!(
                             "Cannot detach subnet from instance in {} state",
-                            collection.runtime_state.nexus_state,
+                            collection.nexus_state,
                         )));
                     }
 

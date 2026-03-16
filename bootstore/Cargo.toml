@@ -16,7 +16,7 @@ ciborium.workspace = true
 derive_more.workspace = true
 hex.workspace = true
 hkdf.workspace = true
-omicron-common.workspace = true
+omicron-ledger.workspace = true
 omicron-workspace-hack.workspace = true
 # vsss-rs requires rand 0.8
 rand08 = { workspace = true, features = ["getrandom"] }

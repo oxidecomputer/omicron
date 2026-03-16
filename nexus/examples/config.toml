@@ -163,6 +163,10 @@ fm.sitrep_load_period_secs = 15
 # is activated every time the current sitrep changes. Periodic activations are
 # only necessary to ensure that it always happens eventually.
 fm.sitrep_gc_period_secs = 600
+# Updating database state to match the current sitrep is triggered whenever a
+# new sitrep is loaded, so we need not set the periodic activation interval
+# too high.
+fm.rendezvous_period_secs = 300
 probe_distributor.period_secs = 60
 multicast_reconciler.period_secs = 60
 # TTL for sled-to-backplane-port mapping cache
@@ -173,6 +177,8 @@ multicast_reconciler.period_secs = 60
 # multicast_reconciler.backplane_cache_ttl_secs = 86400
 trust_quorum.period_secs = 60
 attached_subnet_manager.period_secs = 60
+session_cleanup.period_secs = 300
+session_cleanup.max_delete_per_activation = 10000
 
 [default_region_allocation_strategy]
 # allocate region on 3 random distinct zpools, on 3 random distinct sleds.

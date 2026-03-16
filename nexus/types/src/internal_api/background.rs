@@ -897,15 +897,15 @@ pub struct SitrepGcStatus {
     pub errors: Vec<String>,
 }
 
-/// The status of a `fm_sitrep_execution` background task activation.
+/// The status of a `fm_rendezvous` background task activation.
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
-pub enum SitrepExecutionStatus {
+pub enum FmRendezvousStatus {
     NoSitrep,
-    Executed { sitrep_id: SitrepUuid, alerts: SitrepAlertRequestStatus },
+    Executed { sitrep_id: SitrepUuid, alerts: FmAlertStats },
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
-pub struct SitrepAlertRequestStatus {
+pub struct FmAlertStats {
     /// The total number of alerts requested by the current sitrep.
     pub total_alerts_requested: usize,
     /// The total number of alerts which were *first* requested in the current sitrep.
@@ -971,6 +971,19 @@ pub struct SledSubnetDetails {
     pub n_subnets: usize,
     /// Errors encountered when sending attached subnets.
     pub errors: Vec<String>,
+}
+
+/// The status of a `session_cleanup` background task activation.
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+pub struct SessionCleanupStatus {
+    /// Number of sessions deleted in this activation.
+    pub deleted: usize,
+    /// The cutoff time used: sessions created before this were eligible.
+    pub cutoff: DateTime<Utc>,
+    /// The per-activation delete limit.
+    pub limit: u32,
+    /// Errors encountered during this activation.
+    pub error: Option<String>,
 }
 
 #[cfg(test)]

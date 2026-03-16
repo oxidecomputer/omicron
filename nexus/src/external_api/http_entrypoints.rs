@@ -85,13 +85,11 @@ use omicron_common::api::external::InstanceNetworkInterface;
 use omicron_common::api::external::InternalContext;
 use omicron_common::api::external::LldpLinkConfig;
 use omicron_common::api::external::LldpNeighbor;
-use omicron_common::api::external::LoopbackAddress;
 use omicron_common::api::external::NameOrId;
 use omicron_common::api::external::Probe;
 use omicron_common::api::external::RouterRoute;
 use omicron_common::api::external::RouterRouteKind;
 use omicron_common::api::external::ServiceIcmpConfig;
-use omicron_common::api::external::SwitchPort;
 use omicron_common::api::external::SwitchPortSettingsIdentity;
 use omicron_common::api::external::VpcFirewallRuleUpdateParams;
 use omicron_common::api::external::VpcFirewallRules;
@@ -121,7 +119,6 @@ use propolis_client::support::tungstenite::protocol::{
 };
 use range_requests::PotentialRange;
 use ref_cast::RefCast;
-use sled_agent_types::early_networking::SwitchSlot;
 use trust_quorum_types::types::Epoch;
 
 type NexusApiDescription = ApiDescription<ApiContext>;
@@ -2600,13 +2597,23 @@ impl NexusExternalApi for NexusExternalApiImpl {
         .await
     }
 
+    // We do not audit log this endpoint despite it being a POST because it's
+    // called hundreds or thousands of times while uploading an image and
+    // provides no extra value over the many other operations involved in disk
+    // upload before and after -- disk create, putting the disk in the importing
+    // state, finalizing, creating snapshot, etc. Before this was excluded from
+    // logging, this operation alone was about 90% of the audit log on dogfood.
     async fn disk_bulk_write_import(
         rqctx: RequestContext<ApiContext>,
         path_params: Path<path_params::DiskPath>,
         query_params: Query<project::OptionalProjectSelector>,
         import_params: TypedBody<disk::ImportBlocksBulkWrite>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
-        audit_and_time(&rqctx, |opctx, nexus| async move {
+        let apictx = rqctx.context();
+        let handler = async {
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+            let nexus = &apictx.context.nexus;
             let path = path_params.into_inner();
             let query = query_params.into_inner();
             let import_params = import_params.into_inner();
@@ -2617,8 +2624,12 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 .disk_manual_import(&opctx, &disk_lookup, import_params)
                 .await?;
             Ok(HttpResponseUpdatedNoContent())
-        })
-        .await
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
     }
 
     async fn disk_bulk_write_import_stop(
@@ -3979,11 +3990,12 @@ impl NexusExternalApi for NexusExternalApiImpl {
     async fn networking_loopback_address_create(
         rqctx: RequestContext<ApiContext>,
         new_loopback_address: TypedBody<networking::LoopbackAddressCreate>,
-    ) -> Result<HttpResponseCreated<LoopbackAddress>, HttpError> {
+    ) -> Result<HttpResponseCreated<networking::LoopbackAddress>, HttpError>
+    {
         audit_and_time(&rqctx, |opctx, nexus| async move {
             let params = new_loopback_address.into_inner();
             let result = nexus.loopback_address_create(&opctx, params).await?;
-            let addr: LoopbackAddress = result.into();
+            let addr: networking::LoopbackAddress = result.into();
             Ok(HttpResponseCreated(addr))
         })
         .await
@@ -4001,15 +4013,12 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 "invalid ip address".into(),
             )),
         }?;
-        // TODO-correctness enum in external API
-        let switch_slot =
-            SwitchSlot::parse_from_external_api(&path.switch_location)?;
         audit_and_time(&rqctx, |opctx, nexus| async move {
             nexus
                 .loopback_address_delete(
                     &opctx,
                     path.rack_id,
-                    switch_slot,
+                    path.switch_slot,
                     addr.into(),
                 )
                 .await?;
@@ -4021,7 +4030,10 @@ impl NexusExternalApi for NexusExternalApiImpl {
     async fn networking_loopback_address_list(
         rqctx: RequestContext<ApiContext>,
         query_params: Query<PaginatedById>,
-    ) -> Result<HttpResponseOk<ResultsPage<LoopbackAddress>>, HttpError> {
+    ) -> Result<
+        HttpResponseOk<ResultsPage<networking::LoopbackAddress>>,
+        HttpError,
+    > {
         let apictx = rqctx.context();
         let handler = async {
             let nexus = &apictx.context.nexus;
@@ -4039,7 +4051,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
             Ok(HttpResponseOk(ScanById::results_page(
                 &query,
                 addrs,
-                &|_, x: &LoopbackAddress| x.id,
+                &|_, x: &networking::LoopbackAddress| x.id,
             )?))
         };
         apictx
@@ -4138,7 +4150,8 @@ impl NexusExternalApi for NexusExternalApiImpl {
     async fn networking_switch_port_list(
         rqctx: RequestContext<ApiContext>,
         query_params: Query<PaginatedById<networking::SwitchPortPageSelector>>,
-    ) -> Result<HttpResponseOk<ResultsPage<SwitchPort>>, HttpError> {
+    ) -> Result<HttpResponseOk<ResultsPage<networking::SwitchPort>>, HttpError>
+    {
         let apictx = rqctx.context();
         let handler = async {
             let nexus = &apictx.context.nexus;
@@ -4156,7 +4169,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
             Ok(HttpResponseOk(ScanById::results_page(
                 &query,
                 addrs,
-                &|_, x: &SwitchPort| x.id,
+                &|_, x: &networking::SwitchPort| x.id,
             )?))
         };
         apictx
@@ -4176,13 +4189,11 @@ impl NexusExternalApi for NexusExternalApiImpl {
             let nexus = &apictx.context.nexus;
             let query = query_params.into_inner();
             let path = path_params.into_inner();
-            let switch_slot =
-                SwitchSlot::parse_from_external_api(&query.switch_location)?;
             let opctx =
                 crate::context::op_context_for_external_api(&rqctx).await?;
             Ok(HttpResponseOk(
                 nexus
-                    .switch_port_status(&opctx, switch_slot, path.port)
+                    .switch_port_status(&opctx, query.switch_slot, path.port)
                     .await?,
             ))
         };
@@ -4237,11 +4248,13 @@ impl NexusExternalApi for NexusExternalApiImpl {
             let path = path_params.into_inner();
             let opctx =
                 crate::context::op_context_for_external_api(&rqctx).await?;
-            // TODO-correctness enum in external API
-            let switch_slot =
-                SwitchSlot::parse_from_external_api(&query.switch_location)?;
             let settings = nexus
-                .lldp_config_get(&opctx, query.rack_id, switch_slot, path.port)
+                .lldp_config_get(
+                    &opctx,
+                    query.rack_id,
+                    query.switch_slot,
+                    path.port,
+                )
                 .await?;
             Ok(HttpResponseOk(settings))
         };
@@ -4262,14 +4275,11 @@ impl NexusExternalApi for NexusExternalApiImpl {
             let query = query_params.into_inner();
             let path = path_params.into_inner();
             let config = config.into_inner();
-            // TODO-correctness enum in external API
-            let switch_slot =
-                SwitchSlot::parse_from_external_api(&query.switch_location)?;
             nexus
                 .lldp_config_update(
                     &opctx,
                     query.rack_id,
-                    switch_slot,
+                    query.switch_slot,
                     path.port,
                     config,
                 )
@@ -4295,16 +4305,13 @@ impl NexusExternalApi for NexusExternalApiImpl {
             let nexus = &apictx.context.nexus;
             let opctx =
                 crate::context::op_context_for_external_api(&rqctx).await?;
-            // TODO-correctness enum in external API
-            let switch_slot =
-                SwitchSlot::parse_from_external_api(&path.switch_location)?;
             let neighbors = nexus
                 .lldp_neighbors_get(
                     &opctx,
                     &prev,
                     limit,
                     path.rack_id,
-                    switch_slot,
+                    path.switch_slot,
                     &path.port,
                 )
                 .await?;

@@ -3412,19 +3412,25 @@ mod tests {
         assert_service_sled_ids(&datastore, &[]).await;
 
         // Delete the service NIC record so we can reuse this IP later.
-        datastore
-            .service_delete_network_interface(
-                &opctx,
-                bp1.sleds[&sled_ids[2]]
-                    .zones
-                    .first()
-                    .unwrap()
-                    .id
-                    .into_untyped_uuid(),
-                bp1_nic.id(),
-            )
-            .await
-            .expect("deleted bp1 nic");
+        {
+            let conn = datastore
+                .pool_connection_for_tests()
+                .await
+                .expect("got connection for tests");
+            datastore
+                .service_delete_network_interface_on_connection(
+                    &conn,
+                    bp1.sleds[&sled_ids[2]]
+                        .zones
+                        .first()
+                        .unwrap()
+                        .id
+                        .into_untyped_uuid(),
+                    bp1_nic.id(),
+                )
+                .await
+                .expect("deleted bp1 nic");
+        }
 
         // Create a blueprint with Nexus on all our sleds.
         let bp3 = {

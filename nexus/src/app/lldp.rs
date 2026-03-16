@@ -17,6 +17,7 @@ use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::Name;
 use omicron_common::api::external::UpdateResult;
 use sled_agent_types::early_networking::SwitchSlot;
+use slog_error_chain::InlineErrorChain;
 use uuid::Uuid;
 
 impl super::Nexus {
@@ -76,7 +77,7 @@ impl super::Nexus {
 
         let lldpd = lldpd_clients.get(&switch_slot).ok_or(
             Error::internal_error(&format!(
-                "no lldpd client for rack: {rack_id} switch {switch_slot}"
+                "no lldpd client for rack: {rack_id} switch {switch_slot:?}"
             )),
         )?;
 
@@ -86,7 +87,9 @@ impl super::Nexus {
             .await
             .map_err(|e| {
                 Error::internal_error(&format!(
-                    "failed to get neighbor list for {switch_slot}/{port}: {e}"
+                    "failed to get neighbor list for \
+                     {switch_slot:?}/{port}: {}",
+                    InlineErrorChain::new(&e),
                 ))
             })?;
 

@@ -188,9 +188,6 @@ pub struct UplinkAddressConfig {
     pub vlan_id: Option<u16>,
 }
 
-#[derive(Debug, PartialEq, Eq, Deserialize, Serialize)]
-pub struct UplinkAddressConfigError(pub(crate) String);
-
 #[derive(
     Clone,
     Debug,
@@ -211,9 +208,6 @@ pub enum LldpAdminStatus {
     RxOnly,
     TxOnly,
 }
-
-#[derive(Debug, PartialEq, Eq, Deserialize, Serialize)]
-pub struct ParseLldpAdminStatusError(pub(crate) String);
 
 /// Per-port LLDP configuration settings.  Only the "status" setting is
 /// mandatory.  All other fields have natural defaults or may be inherited from
@@ -293,7 +287,6 @@ pub struct PortConfig {
 #[derive(
     Clone,
     Copy,
-    Debug,
     Deserialize,
     Serialize,
     PartialEq,
@@ -302,6 +295,7 @@ pub struct PortConfig {
     Eq,
     PartialOrd,
     Ord,
+    strum::EnumIter,
 )]
 #[serde(rename_all = "snake_case")]
 pub enum SwitchSlot {

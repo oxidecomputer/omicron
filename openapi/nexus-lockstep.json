@@ -5232,7 +5232,7 @@
           },
           "boot_disk_id": {
             "nullable": true,
-            "description": "the ID of the disk used to boot this Instance, if a specific one is assigned.",
+            "description": "The ID of the disk used to boot this instance, if a specific one is assigned",
             "type": "string",
             "format": "uuid"
           },
@@ -5246,20 +5246,20 @@
             ]
           },
           "description": {
-            "description": "human-readable free-form text about a resource",
+            "description": "Human-readable free-form text about a resource",
             "type": "string"
           },
           "hostname": {
-            "description": "RFC1035-compliant hostname for the Instance.",
+            "description": "RFC1035-compliant hostname for the instance",
             "type": "string"
           },
           "id": {
-            "description": "unique, immutable, system-controlled identifier for each resource",
+            "description": "Unique, immutable, system-controlled identifier for each resource",
             "type": "string",
             "format": "uuid"
           },
           "memory": {
-            "description": "memory allocated for this Instance",
+            "description": "Memory allocated for this instance",
             "allOf": [
               {
                 "$ref": "#/components/schemas/ByteCount"
@@ -5267,7 +5267,7 @@
             ]
           },
           "name": {
-            "description": "unique, mutable, user-controlled identifier for each resource",
+            "description": "Unique, mutable, user-controlled identifier for each resource",
             "allOf": [
               {
                 "$ref": "#/components/schemas/Name"
@@ -5275,7 +5275,7 @@
             ]
           },
           "ncpus": {
-            "description": "number of CPUs allocated for this Instance",
+            "description": "Number of CPUs allocated for this instance",
             "allOf": [
               {
                 "$ref": "#/components/schemas/InstanceCpuCount"
@@ -5283,7 +5283,7 @@
             ]
           },
           "project_id": {
-            "description": "id for the project containing this Instance",
+            "description": "ID for the project containing this instance",
             "type": "string",
             "format": "uuid"
           },
@@ -5291,7 +5291,7 @@
             "$ref": "#/components/schemas/InstanceState"
           },
           "time_created": {
-            "description": "timestamp when this resource was created",
+            "description": "Timestamp when this resource was created",
             "type": "string",
             "format": "date-time"
           },
@@ -5302,7 +5302,7 @@
             "format": "date-time"
           },
           "time_modified": {
-            "description": "timestamp when this resource was last modified",
+            "description": "Timestamp when this resource was last modified",
             "type": "string",
             "format": "date-time"
           },
@@ -9720,7 +9720,7 @@
         "description": "Supported set of sort modes for scanning by id only.\n\nCurrently, we only support scanning in ascending order.",
         "oneOf": [
           {
-            "description": "sort in increasing order of \"id\"",
+            "description": "Sort in increasing order of \"id\"",
             "type": "string",
             "enum": [
               "id_ascending"
@@ -9732,14 +9732,14 @@
         "description": "Supported set of sort modes for scanning by timestamp and ID",
         "oneOf": [
           {
-            "description": "sort in increasing order of timestamp and ID, i.e., earliest first",
+            "description": "Sort in increasing order of timestamp and ID, i.e., earliest first",
             "type": "string",
             "enum": [
               "time_and_id_ascending"
             ]
           },
           {
-            "description": "sort in increasing order of timestamp and ID, i.e., most recent first",
+            "description": "Sort in increasing order of timestamp and ID, i.e., most recent first",
             "type": "string",
             "enum": [
               "time_and_id_descending"

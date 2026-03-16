@@ -930,9 +930,7 @@ impl super::Nexus {
             .await?;
         let (instance, vmm) = (state.instance(), state.vmm());
 
-        if vmm.is_none()
-            || vmm.as_ref().unwrap().runtime.state != DbVmmState::Running
-        {
+        if vmm.is_none() || vmm.as_ref().unwrap().state != DbVmmState::Running {
             return Err(Error::invalid_request(
                 "instance must be running before it can migrate",
             ));
@@ -1652,7 +1650,7 @@ impl super::Nexus {
         // state.
         let vmm_runtime = sled_agent_client::types::VmmRuntimeState {
             time_updated: chrono::Utc::now(),
-            gen_: initial_vmm.runtime.generation.next(),
+            gen_: initial_vmm.generation.next(),
             state: match operation {
                 InstanceRegisterReason::Migrate { .. } => {
                     sled_agent_client::types::VmmState::Migrating
@@ -1686,8 +1684,12 @@ impl super::Nexus {
         match instance_register_result {
             Ok(state) => {
                 self.notify_vmm_updated(opctx, *propolis_id, &state).await?;
+                let runtime: db::model::VmmRuntimeState =
+                    state.vmm_state.into();
                 Ok(db::model::Vmm {
-                    runtime: state.vmm_state.into(),
+                    time_state_updated: runtime.time_state_updated,
+                    generation: runtime.generation,
+                    state: runtime.state,
                     ..initial_vmm.clone()
                 })
             }
@@ -1740,7 +1742,7 @@ impl super::Nexus {
         let new_runtime = VmmRuntimeState {
             state: db::model::VmmState::Failed,
             time_state_updated: chrono::Utc::now(),
-            generation: db::model::Generation(vmm.runtime.generation.next()),
+            generation: db::model::Generation(vmm.generation.next()),
         };
 
         match self.db_datastore.vmm_update_runtime(&vmm_id, &new_runtime).await
@@ -2090,7 +2092,7 @@ impl super::Nexus {
             .await?;
 
         if let Some(vmm) = state.vmm() {
-            match vmm.runtime.state {
+            match vmm.state {
                 DbVmmState::Running
                 | DbVmmState::Rebooting
                 | DbVmmState::Migrating => Ok((
@@ -2887,7 +2889,7 @@ fn instance_start_allowed(
                 // If a previous start saga failed and left behind a VMM in the
                 // SagaUnwound state, allow a new start saga to try to overwrite
                 // it.
-                Some(vmm) if vmm.runtime.state == DbVmmState::SagaUnwound => {
+                Some(vmm) if vmm.state == DbVmmState::SagaUnwound => {
                     debug!(
                         log,
                         "instance's last VMM's start saga unwound, OK to start";
@@ -2905,7 +2907,7 @@ fn instance_start_allowed(
                             "instance is {s:?} but still has an active VMM";
                             "instance_id" => %instance.id(),
                             "propolis_id" => %vmm.id,
-                            "propolis_state" => ?vmm.runtime.state,
+                            "propolis_state" => ?vmm.state,
                             "start_reason" => ?reason);
 
                     Err(Error::InternalError {
@@ -2920,7 +2922,7 @@ fn instance_start_allowed(
         }
         InstanceState::Stopping => {
             let (propolis_id, propolis_state) = match vmm.as_ref() {
-                Some(vmm) => (Some(vmm.id), Some(vmm.runtime.state)),
+                Some(vmm) => (Some(vmm.id), Some(vmm.state)),
                 None => (None, None),
             };
             debug!(log, "instance's VMM is still in the process of stopping";
@@ -3102,7 +3104,7 @@ mod tests {
     fn test_instance_start_allowed_when_no_vmm() {
         let logctx = test_setup_log("test_instance_start_allowed_when_no_vmm");
         let (mut instance, _vmm) = make_instance_and_vmm();
-        instance.runtime_state.nexus_state = DbInstanceState::NoVmm;
+        instance.nexus_state = DbInstanceState::NoVmm;
         let state = InstanceAndActiveVmm::from((instance, None));
         assert!(
             instance_start_allowed(
@@ -3121,9 +3123,9 @@ mod tests {
             "test_instance_start_allowed_when_vmm_in_saga_unwound",
         );
         let (mut instance, mut vmm) = make_instance_and_vmm();
-        instance.runtime_state.nexus_state = DbInstanceState::Vmm;
-        instance.runtime_state.propolis_id = Some(vmm.id);
-        vmm.runtime.state = DbVmmState::SagaUnwound;
+        instance.nexus_state = DbInstanceState::Vmm;
+        instance.propolis_id = Some(vmm.id);
+        vmm.state = DbVmmState::SagaUnwound;
         let state = InstanceAndActiveVmm::from((instance, Some(vmm)));
         assert!(
             instance_start_allowed(
@@ -3141,7 +3143,7 @@ mod tests {
         let logctx =
             test_setup_log("test_instance_start_forbidden_while_creating");
         let (mut instance, _vmm) = make_instance_and_vmm();
-        instance.runtime_state.nexus_state = DbInstanceState::Creating;
+        instance.nexus_state = DbInstanceState::Creating;
         let state = InstanceAndActiveVmm::from((instance, None));
         assert!(
             instance_start_allowed(
@@ -3158,9 +3160,9 @@ mod tests {
     fn test_instance_start_idempotent_if_active() {
         let logctx = test_setup_log("test_instance_start_idempotent_if_active");
         let (mut instance, mut vmm) = make_instance_and_vmm();
-        instance.runtime_state.nexus_state = DbInstanceState::Vmm;
-        instance.runtime_state.propolis_id = Some(vmm.id);
-        vmm.runtime.state = DbVmmState::Starting;
+        instance.nexus_state = DbInstanceState::Vmm;
+        instance.propolis_id = Some(vmm.id);
+        vmm.state = DbVmmState::Starting;
         let state =
             InstanceAndActiveVmm::from((instance.clone(), Some(vmm.clone())));
         assert!(
@@ -3172,7 +3174,7 @@ mod tests {
             .is_ok()
         );
 
-        vmm.runtime.state = DbVmmState::Running;
+        vmm.state = DbVmmState::Running;
         let state =
             InstanceAndActiveVmm::from((instance.clone(), Some(vmm.clone())));
         assert!(
@@ -3184,7 +3186,7 @@ mod tests {
             .is_ok()
         );
 
-        vmm.runtime.state = DbVmmState::Rebooting;
+        vmm.state = DbVmmState::Rebooting;
         let state =
             InstanceAndActiveVmm::from((instance.clone(), Some(vmm.clone())));
         assert!(
@@ -3196,7 +3198,7 @@ mod tests {
             .is_ok()
         );
 
-        vmm.runtime.state = DbVmmState::Migrating;
+        vmm.state = DbVmmState::Migrating;
         let state = InstanceAndActiveVmm::from((instance, Some(vmm)));
         assert!(
             instance_start_allowed(

@@ -57,6 +57,8 @@ use nexus_types::internal_api::background::BlueprintRendezvousStats;
 use nexus_types::internal_api::background::BlueprintRendezvousStatus;
 use nexus_types::internal_api::background::DatasetsRendezvousStats;
 use nexus_types::internal_api::background::EreporterStatus;
+use nexus_types::internal_api::background::FmAlertStats;
+use nexus_types::internal_api::background::FmRendezvousStatus;
 use nexus_types::internal_api::background::InstanceReincarnationStatus;
 use nexus_types::internal_api::background::InstanceUpdaterStatus;
 use nexus_types::internal_api::background::InventoryLoadStatus;
@@ -69,6 +71,7 @@ use nexus_types::internal_api::background::RegionSnapshotReplacementFinishStatus
 use nexus_types::internal_api::background::RegionSnapshotReplacementGarbageCollectStatus;
 use nexus_types::internal_api::background::RegionSnapshotReplacementStartStatus;
 use nexus_types::internal_api::background::RegionSnapshotReplacementStepStatus;
+use nexus_types::internal_api::background::SessionCleanupStatus;
 use nexus_types::internal_api::background::SitrepGcStatus;
 use nexus_types::internal_api::background::SitrepLoadStatus;
 use nexus_types::internal_api::background::SupportBundleCleanupReport;
@@ -1294,6 +1297,9 @@ fn print_task_details(bgtask: &BackgroundTask, details: &serde_json::Value) {
         "service_firewall_rule_propagation" => {
             print_task_service_firewall_rule_propagation(details);
         }
+        "session_cleanup" => {
+            print_task_session_cleanup(details);
+        }
         "sp_ereport_ingester" => {
             print_task_sp_ereport_ingester(details);
         }
@@ -1317,6 +1323,9 @@ fn print_task_details(bgtask: &BackgroundTask, details: &serde_json::Value) {
         }
         "fm_sitrep_gc" => {
             print_task_fm_sitrep_gc(details);
+        }
+        "fm_rendezvous" => {
+            print_task_fm_rendezvous(details);
         }
         "trust_quorum_manager" => {
             print_task_trust_quorum_manager(details);
@@ -2260,8 +2269,8 @@ fn print_task_attached_subnet_manager_status(details: &serde_json::Value) {
             if dendrite.is_empty() {
                 println!("   no dendrite instances found");
             } else {
-                for (loc, details) in dendrite.iter() {
-                    println!("   dendrite instance on switch {loc}");
+                for (switch_slot, details) in dendrite.iter() {
+                    println!("   dendrite instance on switch {switch_slot:?}");
                     println!(
                         "     n_subnets_removed={}",
                         details.n_subnets_removed
@@ -2660,6 +2669,33 @@ fn print_task_saga_recovery(details: &serde_json::Value) {
             }
         }
     }
+}
+
+fn print_task_session_cleanup(details: &serde_json::Value) {
+    match serde_json::from_value::<SessionCleanupStatus>(details.clone()) {
+        Err(error) => eprintln!(
+            "warning: failed to interpret task details: {:?}: {:?}",
+            error, details
+        ),
+        Ok(status) => {
+            const DELETED: &str = "deleted:";
+            const CUTOFF: &str = "cutoff:";
+            const LIMIT: &str = "limit:";
+            const ERROR: &str = "error:";
+            const WIDTH: usize =
+                const_max_len(&[DELETED, CUTOFF, LIMIT, ERROR]) + 1;
+
+            println!("    {DELETED:<WIDTH$}{}", status.deleted);
+            println!(
+                "    {CUTOFF:<WIDTH$}{}",
+                status.cutoff.to_rfc3339_opts(SecondsFormat::AutoSi, true),
+            );
+            println!("    {LIMIT:<WIDTH$}{}", status.limit);
+            if let Some(error) = &status.error {
+                println!("    {ERROR:<WIDTH$}{error}");
+            }
+        }
+    };
 }
 
 fn print_task_service_firewall_rule_propagation(details: &serde_json::Value) {
@@ -3368,6 +3404,64 @@ fn print_task_fm_sitrep_gc(details: &serde_json::Value) {
     );
 }
 
+fn print_task_fm_rendezvous(details: &serde_json::Value) {
+    match serde_json::from_value::<FmRendezvousStatus>(details.clone()) {
+        Err(error) => {
+            eprintln!(
+                "warning: failed to interpret task details: {:?}: {:?}",
+                error, details
+            );
+            return;
+        }
+        Ok(FmRendezvousStatus::NoSitrep) => {
+            println!("    no FM situation report loaded");
+        }
+        Ok(FmRendezvousStatus::Executed { sitrep_id, alerts }) => {
+            println!("    current sitrep: {sitrep_id}");
+            display_fm_alert_stats(&alerts);
+        }
+    }
+}
+
+fn display_fm_alert_stats(stats: &FmAlertStats) {
+    let FmAlertStats {
+        total_alerts_requested,
+        current_sitrep_alerts_requested,
+        alerts_created,
+        errors,
+    } = stats;
+    let already_created =
+        total_alerts_requested - alerts_created - errors.len();
+    pub const REQUESTED: &str = "alerts requested:";
+    pub const REQUESTED_THIS_SITREP: &str = "  requested in this sitrep:";
+    pub const CREATED: &str = "  created in this activation:";
+    pub const ALREADY_CREATED: &str = "  already created:";
+    pub const ERRORS: &str = "  errors:";
+    pub const WIDTH: usize = const_max_len(&[
+        REQUESTED,
+        REQUESTED_THIS_SITREP,
+        CREATED,
+        ALREADY_CREATED,
+        ERRORS,
+    ]) + 1;
+    pub const NUM_WIDTH: usize = 4;
+    println!("    {REQUESTED:<WIDTH$}{total_alerts_requested:>NUM_WIDTH$}");
+    println!(
+        "    {REQUESTED_THIS_SITREP:<WIDTH$}{:>NUM_WIDTH$}",
+        current_sitrep_alerts_requested
+    );
+    println!("    {CREATED:<WIDTH$}{alerts_created:>NUM_WIDTH$}");
+    println!("    {ALREADY_CREATED:<WIDTH$}{already_created:>NUM_WIDTH$}");
+    println!(
+        "{} {ERRORS:<WIDTH$}{:>NUM_WIDTH$}",
+        warn_if_nonzero(errors.len()),
+        errors.len()
+    );
+    for error in errors {
+        println!("      > {error}");
+    }
+}
+
 fn print_task_trust_quorum_manager(details: &serde_json::Value) {
     let status = match serde_json::from_value::<TrustQuorumManagerStatus>(
         details.clone(),
@@ -3381,7 +3475,6 @@ fn print_task_trust_quorum_manager(details: &serde_json::Value) {
             return;
         }
     };
-
     match status {
         TrustQuorumManagerStatus::PerRackStatus { statuses, errors } => {
             if statuses.is_empty() && errors.is_empty() {
