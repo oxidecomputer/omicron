@@ -20,8 +20,6 @@ use sled_agent_types::early_networking::MaxPathConfig;
 use sled_agent_types::early_networking::RouterLifetimeConfig;
 use sled_agent_types::early_networking::RouterLifetimeConfigError;
 use sled_agent_types::early_networking::RouterPeerAddress;
-use sled_agent_types::early_networking::SpecifiedIpAddr;
-use sled_agent_types::early_networking::UnspecifiedIpError;
 use slog_error_chain::InlineErrorChain;
 use uuid::Uuid;
 
