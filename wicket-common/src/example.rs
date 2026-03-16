@@ -14,8 +14,8 @@ use omicron_common::{
 };
 use sled_agent_types::early_networking::{
     BgpConfig, BgpPeerConfig, LldpAdminStatus, LldpPortConfig, MaxPathConfig,
-    PortFec, PortSpeed, RouteConfig, RouterLifetimeConfig, TxEqConfig,
-    UplinkAddressConfig,
+    PortFec, PortSpeed, RouteConfig, RouterLifetimeConfig, RouterPeerAddress,
+    TxEqConfig,
 };
 use sled_hardware_types::Baseboard;
 
@@ -26,6 +26,7 @@ use crate::{
         CurrentRssUserConfigInsensitive, PutRssUserConfigInsensitive,
         UserSpecifiedBgpPeerConfig, UserSpecifiedImportExportPolicy,
         UserSpecifiedPortConfig, UserSpecifiedRackNetworkConfig,
+        UserSpecifiedUplinkAddressConfig,
     },
 };
 
@@ -99,7 +100,9 @@ impl ExampleRackSetupData {
         let switch0_port0_bgp_peers = vec![
             UserSpecifiedBgpPeerConfig {
                 asn: 47,
-                addr: Some("10.2.3.4".parse().unwrap()),
+                addr: RouterPeerAddress::Numbered {
+                    ip: "10.2.3.4".parse().unwrap(),
+                },
                 port: "port0".into(),
                 hold_time: Some(BgpPeerConfig::DEFAULT_HOLD_TIME),
                 idle_hold_time: Some(BgpPeerConfig::DEFAULT_IDLE_HOLD_TIME),
@@ -122,7 +125,9 @@ impl ExampleRackSetupData {
             },
             UserSpecifiedBgpPeerConfig {
                 asn: 28,
-                addr: Some("10.2.3.5".parse().unwrap()),
+                addr: RouterPeerAddress::Numbered {
+                    ip: "10.2.3.5".parse().unwrap(),
+                },
                 port: "port0".into(),
                 remote_asn: Some(200),
                 hold_time: Some(10),
@@ -148,7 +153,9 @@ impl ExampleRackSetupData {
 
         let switch1_port0_bgp_peers = vec![UserSpecifiedBgpPeerConfig {
             asn: 47,
-            addr: Some("10.2.3.4".parse().unwrap()),
+            addr: RouterPeerAddress::Numbered {
+                ip: "10.2.3.4".parse().unwrap(),
+            },
             port: "port0".into(),
             hold_time: Some(BgpPeerConfig::DEFAULT_HOLD_TIME),
             idle_hold_time: Some(BgpPeerConfig::DEFAULT_IDLE_HOLD_TIME),
@@ -208,7 +215,7 @@ impl ExampleRackSetupData {
             #[rustfmt::skip]
             switch0: btreemap! {
                 "port0".to_owned() => UserSpecifiedPortConfig {
-                    addresses: vec![UplinkAddressConfig::without_vlan(
+                    addresses: vec![UserSpecifiedUplinkAddressConfig::without_vlan(
                         "172.30.0.1/24".parse().unwrap(),
                     )],
                     routes: vec![RouteConfig {
@@ -230,7 +237,7 @@ impl ExampleRackSetupData {
                 // Use the same port name as in switch0 to test that it doesn't
                 // collide.
                 "port0".to_owned() => UserSpecifiedPortConfig {
-                    addresses: vec![UplinkAddressConfig::without_vlan(
+                    addresses: vec![UserSpecifiedUplinkAddressConfig::without_vlan(
                         "172.32.0.1/24".parse().unwrap(),
                     )],
                     routes: vec![RouteConfig {

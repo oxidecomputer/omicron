@@ -752,14 +752,11 @@ fn build_port_config(
     bgp_auth_keys: &BTreeMap<BgpAuthKeyId, Option<BgpAuthKey>>,
 ) -> PortConfig {
     use sled_agent_types::early_networking::BgpPeerConfig;
-    use sled_agent_types::early_networking::RouterPeerAddress;
-    use sled_agent_types::early_networking::SpecifiedIpAddr;
-    use sled_agent_types::early_networking::UnspecifiedIpError;
 
     PortConfig {
         port: port.to_owned(),
         routes: config.routes.clone(),
-        addresses: config.addresses.clone(),
+        addresses: config.addresses.iter().copied().map(From::from).collect(),
         bgp_peers: config
             .bgp_peers
             .iter()
@@ -784,13 +781,7 @@ fn build_port_config(
                 });
 
                 BgpPeerConfig {
-                    // TODO-john make `p.addr` stronger typed
-                    addr: match p.addr.map(SpecifiedIpAddr::try_from) {
-                        Some(Ok(ip)) => RouterPeerAddress::Numbered { ip },
-                        None | Some(Err(UnspecifiedIpError)) => {
-                            RouterPeerAddress::Unnumbered
-                        }
-                    },
+                    addr: p.addr,
                     asn: p.asn,
                     port: p.port.clone(),
                     hold_time: p.hold_time,

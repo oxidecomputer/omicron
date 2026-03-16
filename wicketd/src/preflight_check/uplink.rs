@@ -29,6 +29,7 @@ use sled_agent_types::early_networking::PortFec as OmicronPortFec;
 use sled_agent_types::early_networking::PortSpeed as OmicronPortSpeed;
 use sled_agent_types::early_networking::SwitchSlot;
 use sled_agent_types::early_networking::UplinkAddress;
+use sled_agent_types::early_networking::UplinkAddressConfig;
 use slog::Logger;
 use slog::error;
 use slog::o;
@@ -308,7 +309,9 @@ fn add_steps_for_single_local_uplink_preflight_check<'a>(
                 let uplink_property =
                     UplinkProperty(format!("uplinks/{}_0", port));
 
-                for addr in &uplink.addresses {
+                for &addr in &uplink.addresses {
+                    let addr = UplinkAddressConfig::from(addr);
+
                     // count current number of link-local addresses
                     let addrconf_count = match execute_command(&[
                         IPADM,

@@ -24,8 +24,11 @@ use sled_agent_types::early_networking::PortFec;
 use sled_agent_types::early_networking::PortSpeed;
 use sled_agent_types::early_networking::RouteConfig;
 use sled_agent_types::early_networking::RouterLifetimeConfig;
+use sled_agent_types::early_networking::RouterPeerAddress;
+use sled_agent_types::early_networking::SpecifiedIpNet;
 use sled_agent_types::early_networking::SwitchSlot;
 use sled_agent_types::early_networking::TxEqConfig;
+use sled_agent_types::early_networking::UplinkAddress;
 use sled_agent_types::early_networking::UplinkAddressConfig;
 use sled_hardware_types::Baseboard;
 use std::collections::BTreeMap;
@@ -180,7 +183,7 @@ impl UserSpecifiedRackNetworkConfig {
 #[serde(deny_unknown_fields)]
 pub struct UserSpecifiedPortConfig {
     pub routes: Vec<RouteConfig>,
-    pub addresses: Vec<UplinkAddressConfig>,
+    pub addresses: Vec<UserSpecifiedUplinkAddressConfig>,
     pub uplink_port_speed: PortSpeed,
     pub uplink_port_fec: Option<PortFec>,
     pub autoneg: bool,
@@ -190,6 +193,81 @@ pub struct UserSpecifiedPortConfig {
     pub lldp: Option<LldpPortConfig>,
     #[serde(default)]
     pub tx_eq: Option<TxEqConfig>,
+}
+
+/// User-specified version of
+/// [`sled_agent_types::early_networking::UplinkAddressConfig`].
+///
+/// This allows us to have a nicer TOML representation of [`UplinkAddress`].
+#[derive(
+    Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema,
+)]
+#[serde(deny_unknown_fields)]
+pub struct UserSpecifiedUplinkAddressConfig {
+    /// The address to be used on the uplink.
+    // This type is used in both JSON (via OpenAPI) and TOML (for operator
+    // uploads to wicket). For the TOML case specifically, we want to use a more
+    // user-friendly representation, so we serialize/deserialize this field as a
+    // string. See the `uplink_address_serde` module below for the specific
+    // mapping.
+    #[serde(with = "uplink_address_serde")]
+    #[schemars(with = "String")]
+    pub address: UplinkAddress,
+
+    /// The VLAN id (if any) associated with this address.
+    #[serde(default)]
+    pub vlan_id: Option<u16>,
+}
+
+impl From<UserSpecifiedUplinkAddressConfig> for UplinkAddressConfig {
+    fn from(value: UserSpecifiedUplinkAddressConfig) -> Self {
+        Self { address: value.address, vlan_id: value.vlan_id }
+    }
+}
+
+impl UserSpecifiedUplinkAddressConfig {
+    /// String representation for [`UplinkAddress::LinkLocal`] when
+    /// serializing/deserializing [`UserSpecifiedUplinkAddressConfig`].
+    pub const LINK_LOCAL: &str = "link-local";
+
+    /// Helper to construct a `UserSpecifiedUplinkAddressConfig` with a
+    /// specified IP net and no VLAN ID.
+    pub fn without_vlan(ip_net: SpecifiedIpNet) -> Self {
+        Self { address: UplinkAddress::Address { ip_net }, vlan_id: None }
+    }
+}
+
+/// Special handling to serialize/deserialize [`UplinkAddress`] as a flat
+/// string for a nicer TOML representation.
+mod uplink_address_serde {
+    use super::{UplinkAddress, UserSpecifiedUplinkAddressConfig};
+    use serde::{Deserialize, Deserializer, Serializer};
+
+    pub fn serialize<S: Serializer>(
+        addr: &UplinkAddress,
+        s: S,
+    ) -> Result<S::Ok, S::Error> {
+        match addr {
+            UplinkAddress::LinkLocal => {
+                s.serialize_str(UserSpecifiedUplinkAddressConfig::LINK_LOCAL)
+            }
+            UplinkAddress::Address { ip_net } => {
+                s.serialize_str(&ip_net.to_string())
+            }
+        }
+    }
+
+    pub fn deserialize<'de, D: Deserializer<'de>>(
+        d: D,
+    ) -> Result<UplinkAddress, D::Error> {
+        let s = String::deserialize(d)?;
+        if s == UserSpecifiedUplinkAddressConfig::LINK_LOCAL {
+            Ok(UplinkAddress::LinkLocal)
+        } else {
+            let ip_net = s.parse().map_err(serde::de::Error::custom)?;
+            Ok(UplinkAddress::Address { ip_net })
+        }
+    }
 }
 
 /// User-specified version of [`BgpPeerConfig`].
@@ -205,7 +283,14 @@ pub struct UserSpecifiedBgpPeerConfig {
     /// Switch port the peer is reachable on.
     pub port: String,
     /// Address of the peer.
-    pub addr: Option<IpAddr>,
+    // This type is used in both JSON (via OpenAPI) and TOML (for operator
+    // uploads to wicket). For the TOML case specifically, we want to use a more
+    // user-friendly representation, so we serialize/deserialize this field as a
+    // string. See the `bgp_peer_addr_serde` module below for the specific
+    // mapping.
+    #[serde(with = "bgp_peer_addr_serde")]
+    #[schemars(with = "String")]
+    pub addr: RouterPeerAddress,
     /// How long to keep a session alive without a keepalive in seconds.
     /// Defaults to 6 seconds.
     pub hold_time: Option<u64>,
@@ -256,7 +341,44 @@ pub struct UserSpecifiedBgpPeerConfig {
     pub router_lifetime: RouterLifetimeConfig,
 }
 
+/// Special handling to serialize/deserialize [`RouterPeerAddress`] as a flat
+/// string for a nicer TOML representation.
+mod bgp_peer_addr_serde {
+    use super::{RouterPeerAddress, UserSpecifiedBgpPeerConfig};
+    use serde::{Deserialize, Deserializer, Serializer};
+
+    pub fn serialize<S: Serializer>(
+        addr: &RouterPeerAddress,
+        s: S,
+    ) -> Result<S::Ok, S::Error> {
+        match addr {
+            RouterPeerAddress::Unnumbered => {
+                s.serialize_str(UserSpecifiedBgpPeerConfig::UNNUMBERED_PEER)
+            }
+            RouterPeerAddress::Numbered { ip } => {
+                s.serialize_str(&ip.to_string())
+            }
+        }
+    }
+
+    pub fn deserialize<'de, D: Deserializer<'de>>(
+        d: D,
+    ) -> Result<RouterPeerAddress, D::Error> {
+        let s = String::deserialize(d)?;
+        if s == UserSpecifiedBgpPeerConfig::UNNUMBERED_PEER {
+            Ok(RouterPeerAddress::Unnumbered)
+        } else {
+            let ip = s.parse().map_err(serde::de::Error::custom)?;
+            Ok(RouterPeerAddress::Numbered { ip })
+        }
+    }
+}
+
 impl UserSpecifiedBgpPeerConfig {
+    /// String representation for [`RouterPeerAddress::Unnumbered`] when
+    /// serializing/deserializing [`UserSpecifiedBgpPeerConfig`].
+    pub const UNNUMBERED_PEER: &str = "unnumbered";
+
     pub fn hold_time(&self) -> u64 {
         self.hold_time.unwrap_or(BgpPeerConfig::DEFAULT_HOLD_TIME)
     }

@@ -132,7 +132,7 @@ impl TryFrom<IpAddr> for SpecifiedIpAddr {
 }
 
 #[derive(
-    Clone, Debug, Deserialize, Serialize, PartialEq, Eq, JsonSchema, Hash,
+    Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq, JsonSchema, Hash,
 )]
 pub struct UplinkAddressConfig {
     /// The address to be used on the uplink.

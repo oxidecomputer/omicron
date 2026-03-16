@@ -36,9 +36,9 @@ use sled_agent_types::early_networking::BgpConfig;
 use sled_agent_types::early_networking::LldpAdminStatus;
 use sled_agent_types::early_networking::LldpPortConfig;
 use sled_agent_types::early_networking::RouteConfig;
+use sled_agent_types::early_networking::RouterPeerAddress;
 use sled_agent_types::early_networking::SwitchSlot;
 use sled_agent_types::early_networking::UplinkAddress;
-use sled_agent_types::early_networking::UplinkAddressConfig;
 use std::borrow::Cow;
 use wicket_common::rack_setup::BgpAuthKeyInfo;
 use wicket_common::rack_setup::BgpAuthKeyStatus;
@@ -47,6 +47,7 @@ use wicket_common::rack_setup::UserSpecifiedBgpPeerConfig;
 use wicket_common::rack_setup::UserSpecifiedImportExportPolicy;
 use wicket_common::rack_setup::UserSpecifiedPortConfig;
 use wicket_common::rack_setup::UserSpecifiedRackNetworkConfig;
+use wicket_common::rack_setup::UserSpecifiedUplinkAddressConfig;
 use wicketd_client::types::CurrentRssUserConfig;
 use wicketd_client::types::CurrentRssUserConfigSensitive;
 use wicketd_client::types::RackOperationStatus;
@@ -869,7 +870,7 @@ fn rss_config_text<'a>(
                 });
 
             let addresses = addresses.iter().map(|a| {
-                let UplinkAddressConfig { address, vlan_id } = a;
+                let UserSpecifiedUplinkAddressConfig { address, vlan_id } = a;
                 let addr_description = match address {
                     UplinkAddress::LinkLocal => Cow::Borrowed("link-local"),
                     UplinkAddress::Address { ip_net } => {
@@ -918,8 +919,8 @@ fn rss_config_text<'a>(
                 } = p;
 
                 let addr_string = match addr {
-                    Some(a) => a.to_string(),
-                    None => "unnumbered".to_string(),
+                    RouterPeerAddress::Unnumbered => "unnumbered".to_string(),
+                    RouterPeerAddress::Numbered { ip } => ip.to_string(),
                 };
 
                 let mut lines = vec![
