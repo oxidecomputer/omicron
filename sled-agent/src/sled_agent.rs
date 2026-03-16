@@ -803,7 +803,7 @@ impl SledAgent {
         // We currently only support the LPC55 RoT
         let Rot::Oxide = rot;
         // And we only serve sled-local clients
-        let _ = self.ensure_sled_local_request(remote_addr)?;
+        self.ensure_sled_local_request(remote_addr)?;
         Ok(&self.inner.rot_attestor)
     }
 
@@ -1113,13 +1113,19 @@ impl SledAgent {
         remote_addr: SocketAddr,
     ) -> Result<(), HttpError> {
         let SocketAddr::V6(remote_addr) = remote_addr else {
-            let err = String::from("unexpected non-v6 request");
-            return Err(HttpError::for_bad_request(None, err));
+            return Err(HttpError::for_client_error(
+                None,
+                dropshot::ClientErrorStatusCode::FORBIDDEN,
+                String::from("unexpected non-v6 request"),
+            ));
         };
         let underlay_subnet = self.inner.subnet.net();
         if !underlay_subnet.contains(*remote_addr.ip()) {
-            let err = String::from("non-sled-local request not allowed");
-            return Err(HttpError::for_bad_request(None, err));
+            return Err(HttpError::for_client_error(
+                None,
+                dropshot::ClientErrorStatusCode::FORBIDDEN,
+                String::from("non-sled-local request not allowed"),
+            ));
         }
         Ok(())
     }
