@@ -241,7 +241,9 @@ impl UserSpecifiedUplinkAddressConfig {
 /// string for a nicer TOML representation.
 mod uplink_address_serde {
     use super::{UplinkAddress, UserSpecifiedUplinkAddressConfig};
+    use oxnet::IpNet;
     use serde::{Deserialize, Deserializer, Serializer};
+    use sled_agent_types::early_networking::SpecifiedIpNet;
 
     pub fn serialize<S: Serializer>(
         addr: &UplinkAddress,
@@ -261,10 +263,23 @@ mod uplink_address_serde {
         d: D,
     ) -> Result<UplinkAddress, D::Error> {
         let s = String::deserialize(d)?;
-        if s == UserSpecifiedUplinkAddressConfig::LINK_LOCAL {
+        if s.eq_ignore_ascii_case(UserSpecifiedUplinkAddressConfig::LINK_LOCAL)
+        {
             Ok(UplinkAddress::LinkLocal)
         } else {
-            let ip_net = s.parse().map_err(serde::de::Error::custom)?;
+            let ip_net: IpNet = s.parse().map_err(|_| {
+                serde::de::Error::custom(format!(
+                    "invalid uplink address `{s}`: \
+                     expected `link-local` or an IP network",
+                ))
+            })?;
+            let ip_net = SpecifiedIpNet::try_from(ip_net).map_err(|_| {
+                serde::de::Error::custom(format!(
+                    "invalid uplink address `{s}`: \
+                     uplink addresses cannot have an unspecified IP; \
+                     use `link-local` for link local addresses",
+                ))
+            })?;
             Ok(UplinkAddress::Address { ip_net })
         }
     }
@@ -346,6 +361,8 @@ pub struct UserSpecifiedBgpPeerConfig {
 mod bgp_peer_addr_serde {
     use super::{RouterPeerAddress, UserSpecifiedBgpPeerConfig};
     use serde::{Deserialize, Deserializer, Serializer};
+    use sled_agent_types::early_networking::SpecifiedIpAddr;
+    use std::net::IpAddr;
 
     pub fn serialize<S: Serializer>(
         addr: &RouterPeerAddress,
@@ -365,10 +382,22 @@ mod bgp_peer_addr_serde {
         d: D,
     ) -> Result<RouterPeerAddress, D::Error> {
         let s = String::deserialize(d)?;
-        if s == UserSpecifiedBgpPeerConfig::UNNUMBERED_PEER {
+        if s.eq_ignore_ascii_case(UserSpecifiedBgpPeerConfig::UNNUMBERED_PEER) {
             Ok(RouterPeerAddress::Unnumbered)
         } else {
-            let ip = s.parse().map_err(serde::de::Error::custom)?;
+            let ip: IpAddr = s.parse().map_err(|_| {
+                serde::de::Error::custom(format!(
+                    "invalid BGP peer address `{s}`: \
+                     expected `unnumbered` or an IP address",
+                ))
+            })?;
+            let ip = SpecifiedIpAddr::try_from(ip).map_err(|_| {
+                serde::de::Error::custom(format!(
+                    "invalid BGP peer address `{s}`: \
+                     peer address cannot be an unspecified IP; \
+                     use `unnumbered` for unnumbered peers",
+                ))
+            })?;
             Ok(RouterPeerAddress::Numbered { ip })
         }
     }
@@ -710,13 +739,13 @@ mod tests {
         ];
 
         for input in &inputs {
-            let input = Wrapper { policy: input.clone() };
+            let input = ImportExportPolicyWrapper { policy: input.clone() };
 
             eprintln!("** input: {:?}, testing JSON", input);
             // Check that serialization to JSON and back works.
             let serialized = serde_json::to_string(&input).unwrap();
             eprintln!("serialized JSON: {serialized}");
-            let deserialized: Wrapper =
+            let deserialized: ImportExportPolicyWrapper =
                 serde_json::from_str(&serialized).unwrap();
             assert_eq!(input, deserialized);
 
@@ -724,14 +753,149 @@ mod tests {
             // Check that serialization to TOML and back works.
             let serialized = toml::to_string(&input).unwrap();
             eprintln!("serialized TOML: {serialized}");
-            let deserialized: Wrapper = toml::from_str(&serialized).unwrap();
+            let deserialized: ImportExportPolicyWrapper =
+                toml::from_str(&serialized).unwrap();
             assert_eq!(input, deserialized);
         }
     }
 
     #[derive(Debug, Deserialize, Serialize, PartialEq, Eq)]
-    struct Wrapper {
+    struct ImportExportPolicyWrapper {
         #[serde(default)]
         policy: UserSpecifiedImportExportPolicy,
+    }
+
+    #[test]
+    fn roundtrip_router_peer_address() {
+        let inputs = [
+            (RouterPeerAddress::Unnumbered, "unnumbered"),
+            (
+                RouterPeerAddress::Numbered { ip: "1.1.1.1".parse().unwrap() },
+                "1.1.1.1",
+            ),
+            (
+                RouterPeerAddress::Numbered { ip: "ff80::1".parse().unwrap() },
+                "ff80::1",
+            ),
+        ];
+
+        for (input, expected_str) in inputs {
+            let input = RouterPeerAddressWrapper { addr: input };
+
+            eprintln!("** input: {:?}, testing JSON", input);
+            // Check that serialization to JSON and back works.
+            let serialized = serde_json::to_string(&input).unwrap();
+            eprintln!("serialized JSON: {serialized}");
+            let deserialized: RouterPeerAddressWrapper =
+                serde_json::from_str(&serialized).unwrap();
+            assert_eq!(input, deserialized);
+
+            eprintln!("** input: {:?}, testing TOML", input);
+            // Check that serialization to TOML and back works.
+            let serialized = toml::to_string(&input).unwrap();
+            eprintln!("serialized TOML: {serialized}");
+            let deserialized: RouterPeerAddressWrapper =
+                toml::from_str(&serialized).unwrap();
+            assert_eq!(input, deserialized);
+
+            assert_eq!(serialized, format!("addr = \"{expected_str}\"\n"));
+        }
+    }
+
+    #[test]
+    fn invalid_router_peer_address() {
+        let invalid_inputs = ["0.0.0.0", "::", "foobar"];
+
+        for input in invalid_inputs {
+            let toml_input = format!("addr = \"{input}\"\n");
+            match toml::from_str::<RouterPeerAddressWrapper>(&toml_input) {
+                Ok(addr) => panic!("unexpected success: parsed {addr:?}"),
+                Err(err) => {
+                    let err = err.to_string();
+                    assert!(
+                        err.contains(&format!(
+                            "invalid BGP peer address `{input}`"
+                        )),
+                        "unexpected error for input `{input}`: {err}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[derive(Debug, Deserialize, Serialize, PartialEq, Eq)]
+    struct RouterPeerAddressWrapper {
+        // This attribute matches the one on `UserSpecifiedBgpPeerConfig::addr`
+        // above.
+        #[serde(with = "bgp_peer_addr_serde")]
+        pub addr: RouterPeerAddress,
+    }
+
+    #[test]
+    fn roundtrip_uplink_address() {
+        let inputs = [
+            (UplinkAddress::LinkLocal, "link-local"),
+            (
+                UplinkAddress::Address {
+                    ip_net: "1.1.1.0/24".parse().unwrap(),
+                },
+                "1.1.1.0/24",
+            ),
+            (
+                UplinkAddress::Address { ip_net: "ff80::/64".parse().unwrap() },
+                "ff80::/64",
+            ),
+        ];
+
+        for (input, expected_str) in inputs {
+            let input = UplinkAddressWrapper { addr: input };
+
+            eprintln!("** input: {:?}, testing JSON", input);
+            // Check that serialization to JSON and back works.
+            let serialized = serde_json::to_string(&input).unwrap();
+            eprintln!("serialized JSON: {serialized}");
+            let deserialized: UplinkAddressWrapper =
+                serde_json::from_str(&serialized).unwrap();
+            assert_eq!(input, deserialized);
+
+            eprintln!("** input: {:?}, testing TOML", input);
+            // Check that serialization to TOML and back works.
+            let serialized = toml::to_string(&input).unwrap();
+            eprintln!("serialized TOML: {serialized}");
+            let deserialized: UplinkAddressWrapper =
+                toml::from_str(&serialized).unwrap();
+            assert_eq!(input, deserialized);
+
+            assert_eq!(serialized, format!("addr = \"{expected_str}\"\n"));
+        }
+    }
+
+    #[test]
+    fn invalid_uplink_address() {
+        let invalid_inputs = ["0.0.0.0/0", "::/128", "foobar"];
+
+        for input in invalid_inputs {
+            let toml_input = format!("addr = \"{input}\"\n");
+            match toml::from_str::<UplinkAddressWrapper>(&toml_input) {
+                Ok(addr) => panic!("unexpected success: parsed {addr:?}"),
+                Err(err) => {
+                    let err = err.to_string();
+                    assert!(
+                        err.contains(&format!(
+                            "invalid uplink address `{input}`"
+                        )),
+                        "unexpected error for input `{input}`: {err}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[derive(Debug, Deserialize, Serialize, PartialEq, Eq)]
+    struct UplinkAddressWrapper {
+        // This attribute matches the one on
+        // `UserSpecifiedUplinkAddressConfig::address` above.
+        #[serde(with = "uplink_address_serde")]
+        pub addr: UplinkAddress,
     }
 }
