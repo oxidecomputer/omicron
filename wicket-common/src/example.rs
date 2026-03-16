@@ -15,7 +15,7 @@ use omicron_common::{
 use sled_agent_types::early_networking::{
     BgpConfig, BgpPeerConfig, LldpAdminStatus, LldpPortConfig, MaxPathConfig,
     PortFec, PortSpeed, RouteConfig, RouterLifetimeConfig, RouterPeerAddress,
-    TxEqConfig,
+    TxEqConfig, UplinkAddress,
 };
 use sled_hardware_types::Baseboard;
 
@@ -100,9 +100,7 @@ impl ExampleRackSetupData {
         let switch0_port0_bgp_peers = vec![
             UserSpecifiedBgpPeerConfig {
                 asn: 47,
-                addr: RouterPeerAddress::Numbered {
-                    ip: "10.2.3.4".parse().unwrap(),
-                },
+                addr: RouterPeerAddress::Unnumbered,
                 port: "port0".into(),
                 hold_time: Some(BgpPeerConfig::DEFAULT_HOLD_TIME),
                 idle_hold_time: Some(BgpPeerConfig::DEFAULT_IDLE_HOLD_TIME),
@@ -215,9 +213,10 @@ impl ExampleRackSetupData {
             #[rustfmt::skip]
             switch0: btreemap! {
                 "port0".to_owned() => UserSpecifiedPortConfig {
-                    addresses: vec![UserSpecifiedUplinkAddressConfig::without_vlan(
-                        "172.30.0.1/24".parse().unwrap(),
-                    )],
+                    addresses: vec![UserSpecifiedUplinkAddressConfig {
+                        address: UplinkAddress::LinkLocal,
+                        vlan_id: Some(1),
+                    }],
                     routes: vec![RouteConfig {
                         destination: "0.0.0.0/0".parse().unwrap(),
                         nexthop: "172.30.0.10".parse().unwrap(),
