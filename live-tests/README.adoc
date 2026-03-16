@@ -6,7 +6,7 @@ This package is not built or tested by default because the tests generally can't
 
 == Why a separate test suite?
 
-What makes these tests different from the rest of the test suite is that they require connectivity to the underlay network of the deployed system and they make API calls to various components in that system and they assume that this will behave like a real production system.  By contrast, the normal tests instead _set up_ a bunch of components using simulated sled agents and localhost networking, which is great for starting from a predictable state and running tests in parallel, but the simulated sled agents and networking make it impossible to exercise quite a lot of Reconfigurator's functionality.  
+What makes these tests different from the rest of the test suite is that they require connectivity to the underlay network of the deployed system and they make API calls to various components in that system and they assume that this will behave like a real production system.  By contrast, the normal tests instead _set up_ a bunch of components using simulated sled agents and localhost networking, which is great for starting from a predictable state and running tests in parallel, but the simulated sled agents and networking make it impossible to exercise quite a lot of Reconfigurator's functionality.
 
 There are also the `end-to-end-tests`.  That environment is more realistic than the main test suite, but not faithful enough for many Reconfigurator tests.
 
