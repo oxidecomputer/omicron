@@ -3103,12 +3103,11 @@ mod test {
                 )
                 .await;
 
-            if second_result.is_err() {
+            if let Err(err) = second_result {
                 eprintln!(
                     "test_add_column_concurrent_rejected: \
                      second connection correctly rejected \
-                     (attempt {attempt}): {:?}",
-                    second_result.unwrap_err()
+                     (attempt {attempt}): {err:?}",
                 );
                 second_errored = true;
                 break;

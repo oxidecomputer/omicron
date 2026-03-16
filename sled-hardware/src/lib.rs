@@ -168,7 +168,7 @@ pub fn detect_cpu_family(log: &Logger) -> sled_hardware_types::SledCpuFamily {
 
     // Read leaf 0 to figure out the processor's vendor and whether leaf 1
     // (which contains family, model, and stepping information) is available.
-    let leaf_0 = unsafe { __cpuid_count(0, 0) };
+    let leaf_0 = __cpuid_count(0, 0);
 
     info!(log, "read CPUID leaf 0 to detect CPU vendor"; "values" => ?leaf_0);
 
@@ -197,7 +197,7 @@ pub fn detect_cpu_family(log: &Logger) -> sled_hardware_types::SledCpuFamily {
     // - If the base family value is 0xF, eax[27:20] contains the "extended"
     //   family value, and the actual family value is the sum of the base and
     //   the extended values.
-    let leaf_1 = unsafe { __cpuid_count(1, 0) };
+    let leaf_1 = __cpuid_count(1, 0);
     let mut family = (leaf_1.eax & 0x00000F00) >> 8;
     if family == 0xF {
         family += (leaf_1.eax & 0x0FF00000) >> 20;
