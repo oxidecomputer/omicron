@@ -7,6 +7,17 @@
 //!
 //! See [RFD 603](https://rfd.shared.oxide.computer/rfd/0603) for details on the
 //! fault management sitrep.
+//!
+//! # Conventions
+//!
+//! Methods with an `_on_conn` suffix take an explicit database connection
+//! parameter. In other parts of the codebase this suffix sometimes implies the
+//! method is called within a transaction, but that isn't always the case here.
+//! In the FM datastore, `_on_conn` methods exist primarily so that multiple
+//! queries can share the same connection for consistency (e.g. loading a sitrep
+//! reads child records first and metadata last on the same connection, to
+//! detect concurrent deletes without requiring a transaction, see
+//! [`DataStore::fm_sitrep_read_on_conn`] and issue #9594).
 
 use super::DataStore;
 use crate::authz;
@@ -503,6 +514,13 @@ impl DataStore {
         // rather than doing smaller ones for each case in the sitrep. This uses
         // more memory in Nexus but reduces the number of small db queries we
         // perform.
+        //
+        // The ordering of inserts among case child records (ereports, alert
+        // requests) and case metadata doesn't matter: there are no foreign key
+        // constraints between these tables, and garbage collection is keyed on
+        // sitrep_id (which is inserted first above). If we crash partway
+        // through, orphaned child records will be cleaned up when the orphaned
+        // sitrep is garbage collected.
         let mut cases = Vec::with_capacity(sitrep.cases.len());
         let mut alerts_requested = Vec::new();
         let mut case_ereports = Vec::new();

@@ -12,6 +12,14 @@
 //! These types are used when inserting and reading sitreps in CRDB; when in
 //! use, the sitrep is represented as a [`nexus_types::fm::Sitrep`]. See the
 //! documentation in [`nexus_types::fm`] for more information.
+//!
+//! # Conventions
+//!
+//! Fields in `Queryable`/`Insertable` structs should be ordered to match the
+//! column order in `dbinit.sql`. Diesel maps `Queryable` fields positionally,
+//! so matching the schema column order prevents subtle bugs if a query ever
+//! omits `Selectable`, and keeps the Rust types easy to cross-reference with
+//! the schema definition.
 
 use crate::SqlU32;
 use crate::typed_uuid::DbTypedUuid;
