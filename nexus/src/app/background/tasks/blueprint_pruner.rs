@@ -94,6 +94,7 @@
 
 use crate::app::background::BackgroundTask;
 use anyhow::Context;
+use anyhow::anyhow;
 use futures::future::BoxFuture;
 use nexus_auth::authz;
 use nexus_db_model::BpTarget;
@@ -209,6 +210,7 @@ async fn prune_blueprints(
         datastore,
         log,
         keep_version,
+        nblueprints_found: target_table_status.nfound,
         max_delete_attempts: MAX_DELETE_ATTEMPTS_PER_ACTIVATION,
     })
     .await;
@@ -306,6 +308,96 @@ struct PruneArgs<'a> {
     log: &'a Logger,
     keep_version: u32,
     max_delete_attempts: usize,
+    nblueprints_found: usize,
+}
+
+/// Tracks progress and errors for the prune operation
+struct PruneOp {
+    last_stop_reason: BatchStopReason,
+    ntargets_removable: usize,
+    ntargets_deleted: usize,
+    deleted: Vec<DeletedBlueprint>,
+    errors: Vec<anyhow::Error>,
+    highest_version_deleted: Option<u32>,
+}
+
+impl PruneOp {
+    pub fn new() -> PruneOp {
+        PruneOp {
+            last_stop_reason: BatchStopReason::EndOfBatch, // XXX-dap
+            ntargets_removable: 0,
+            ntargets_deleted: 0,
+            deleted: vec![],
+            errors: vec![],
+            highest_version_deleted: None,
+        }
+    }
+
+    pub fn do_continue(&self) -> bool {
+        match self.last_stop_reason {
+            BatchStopReason::EndOfBatch => true,
+            BatchStopReason::OutOfPruneable
+            | BatchStopReason::DeleteLimit
+            | BatchStopReason::Error => false,
+        }
+    }
+
+    pub fn record_error(mut self, error: anyhow::Error) -> Result<Self, Self> {
+        self.errors.push(error);
+        self.last_stop_reason = BatchStopReason::Error;
+        Err(self)
+    }
+
+    pub fn record_batch(mut self, stop_reason: BatchStopReason) -> Self {
+        // XXX-dap interface could be better
+        self.last_stop_reason = stop_reason;
+        self
+    }
+
+    pub fn record_targets_deleted(
+        mut self,
+        version_deleted_up_to: u32,
+        count: usize,
+    ) -> Result<Self, Self> {
+        let Some(previous) = self.highest_version_deleted else {
+            // This should be impossible.
+            return self.record_error(anyhow!(
+                "recording having deleted up to version \
+                 {version_deleted_up_to} without having recorded deleting \
+                 blueprints",
+            ));
+        };
+
+        if previous < version_deleted_up_to {
+            // This should be impossible.
+            return self.record_error(anyhow!(
+                "recorded having deleted up to version \
+                 {version_deleted_up_to} but had only seen up to version \
+                 {previous}",
+            ));
+        }
+
+        self.ntargets_deleted += count;
+        self.highest_version_deleted = None;
+        Ok(self)
+    }
+
+    fn into_details(self) -> BlueprintPrunerDetails {
+        // XXX-dap need to thread `nkept` through, but also probably the logger,
+        // so maybe the `PruneArgs`?
+        let nkept = 0;
+        BlueprintPrunerDetails {
+            nkept,
+            deleted: self.deleted,
+            ntargets_removable: self.ntargets_removable,
+            ntargets_deleted: self.ntargets_deleted,
+            warnings: self
+                .errors
+                .into_iter()
+                .map(|e| InlineErrorChain::new(&*e).to_string())
+                .collect(),
+        }
+    }
 }
 
 /// Prune both blueprints and `bp_target` rows up to `bp_target` version
@@ -318,44 +410,19 @@ struct PruneArgs<'a> {
 async fn prune_blueprints_up_to(
     pargs: &PruneArgs<'_>,
 ) -> BlueprintPrunerDetails {
-    let mut details = BlueprintPrunerDetails {
-        deleted: vec![],
-        ntargets_removable: 0,
-        ntargets_deleted: 0,
-        // XXX-dap at the very least, `nkept` needs to be filled in correctly,
-        // maybe by having the caller provide it.
-        //
-        // But something else I'm considering at this point is building a helper
-        // struct (maybe pass that around *instead* of `details` everywhere)
-        // that tracks `nkept` as well as the first version to keep so that we
-        // can use this later in the helpers to record things like "blueprint
-        // deleted" or "bp_target rows deleted up to this point".  In that case,
-        // maybe I'd have the caller create that with `nkeep` and pass that down
-        // here and then at the end it could be converted into the details
-        // struct that we need.
-        nkept: 0,
-        warnings: vec![],
-    };
+    let mut pop = PruneOp::new();
 
-    // Walk through the `bp_target` table and clean up as much of it as we can.
-    // We're walking through the rows in increasing order of `version` and we
-    // will stop as soon as we find one that we can't prune, either because it's
-    // one we want to keep or because we run into some database problem.  Thus:
-    // we don't need a paginator here.  We're always looking at the first page.
     loop {
-        let stop_reason = prune_batch(pargs, &mut details).await;
-        info!(pargs.log, "pruned batch"; &details, "stop_reason" => ?stop_reason);
-        match stop_reason {
-            BatchStopReason::EndOfBatch => (),
-            BatchStopReason::OutOfPruneable
-            | BatchStopReason::DeleteLimit
-            | BatchStopReason::Error => {
+        match prune_batch(pargs, pop).await {
+            Ok(newpop) => pop = newpop,
+            Err(newpop) => {
+                pop = newpop;
                 break;
             }
         }
     }
 
-    details
+    pop.into_details()
 }
 
 /// what happened after we finished trying to prune a batch of `bp_target` rows
@@ -379,8 +446,8 @@ enum BatchStopReason {
 /// This keeps `details` updated with work done and errors encountered.
 async fn prune_batch(
     pargs: &PruneArgs<'_>,
-    details: &mut BlueprintPrunerDetails,
-) -> BatchStopReason {
+    mut pop: PruneOp,
+) -> Result<PruneOp, PruneOp> {
     let PruneArgs { opctx, datastore, log, .. } = pargs;
 
     // Fetch a page worth of the oldest `bp_target` rows
@@ -396,16 +463,15 @@ async fn prune_batch(
     {
         Ok(candidates) => candidates,
         Err(error) => {
-            details.warnings.push(InlineErrorChain::new(&*error).to_string());
-            return BatchStopReason::Error;
+            return pop.record_error(error);
         }
     };
 
     // Prune as many blueprints as we can from that page.  If we deleted no
     // blueprints, then there's nothing else to do here.
-    let batch_result = prune_batch_blueprints(pargs, details, candidates).await;
-
-    if let Some(deleted_up_to) = batch_result.highest_deleted {
+    let batch_result =
+        prune_batch_blueprints(pargs, &pop, candidates).await.into_inner();
+    if let Some(deleted_up_to) = batch_result.highest_version_deleted {
         // At this point, we know that the blueprints associated with
         // `bp_target` rows up to version `deleted_up_to` have been deleted.  We
         // can now delete these rows.
@@ -422,30 +488,117 @@ async fn prune_batch(
                     "max_version_deleted" => deleted_up_to,
                 );
 
-                details.ntargets_deleted += count;
+                pop = pop.record_targets_deleted(deleted_up_to, count)?;
             }
             Err(error) => {
-                let error = InlineErrorChain::new(&error);
+                let error = anyhow!(error).context(format!(
+                    "deleting bp_target rows up to {deleted_up_to}",
+                ));
+                // XXX-dap move logging
+                let log_error = InlineErrorChain::new(&*error);
                 warn!(
                     log,
                     "failed to delete oldest bp_target rows";
-                    &error,
+                    &log_error,
                 );
-                details.warnings.push(error.to_string());
 
-                // Whatever reason we previously had for stopping, we've now hit
-                // an error.
-                return BatchStopReason::Error;
+                return pop.record_error(error);
             }
         }
     }
 
-    batch_result.stop_reason
+    Ok(pop.record_batch(batch_result.stop_reason))
 }
 
-struct BatchPruneResult {
+/// Keeps track of the state of pruning blueprints from one batch of bp_target
+/// rows
+struct BatchPruneOp {
+    ntargets_removable: usize,
+    deleted: Vec<DeletedBlueprint>,
+    error: Option<anyhow::Error>,
+    highest_version_deleted: Option<u32>,
+}
+
+impl BatchPruneOp {
+    pub fn new(pop: &PruneOp) -> Self {
+        BatchPruneOp {
+            ntargets_removable: pop.ntargets_removable,
+            deleted: vec![],
+            error: None,
+            highest_version_deleted: None,
+        }
+    }
+
+    pub fn record_blueprint_deleted(
+        mut self,
+        target: BpTarget,
+    ) -> Result<Self, BatchPruneResult> {
+        // Record the deleted blueprint before checking the version because it
+        // was, in fact, deleted, whether that was correct or not.
+        let deleted = DeletedBlueprint {
+            id: BlueprintUuid::from(target.blueprint_id),
+            time_made_target: target.time_made_target,
+        };
+        self.deleted.push(deleted);
+        let mut rv = self.new_highest_version(*target.version)?;
+        rv.ntargets_removable += 1;
+        Ok(rv)
+    }
+
+    pub fn record_blueprint_already_deleted(
+        self,
+        target: BpTarget,
+    ) -> Result<Self, BatchPruneResult> {
+        let mut rv = self.new_highest_version(*target.version)?;
+        rv.ntargets_removable += 1;
+        Ok(rv)
+    }
+
+    fn new_highest_version(mut self, v: u32) -> Result<Self, BatchPruneResult> {
+        if let Some(old) = self.highest_version_deleted {
+            if old >= v {
+                return Err(self.record_error(anyhow!(
+                    "internal error: recorded blueprint version {v} \
+                     after having previously seen version {old}",
+                )));
+            }
+        }
+
+        self.highest_version_deleted = Some(v);
+        Ok(self)
+    }
+
+    pub fn record_error(
+        mut self,
+        error: anyhow::Error,
+    ) -> BatchPruneResult {
+        self.error = Some(error);
+        self.finish(BatchStopReason::Error)
+    }
+
+    pub fn finish(self, stop_reason: BatchStopReason) -> BatchPruneResult {
+        BatchPruneResult {
+            stop_reason,
+            ntargets_removable: self.ntargets_removable,
+            deleted: self.deleted,
+            error: self.error,
+            highest_version_deleted: self.highest_version_deleted,
+        }
+    }
+}
+
+// XXX-dap several of these fields aren't used.
+// I think maybe the better approach is to have this hold a mutable reference to
+// the BatchPruneOp and update that directly.
+// Alternatively (or in addition): the caller needs to update the BatchOp with
+// this BatchPruneResult.  But that's a little goofy since the function that
+// returns this (prune_batch_blueprints) already has access to `pop`.
+pub struct BatchPruneResult {
     stop_reason: BatchStopReason,
-    highest_deleted: Option<u32>,
+    ntargets_removable: usize,
+    deleted: Vec<DeletedBlueprint>,
+    error: Option<anyhow::Error>,
+    highest_version_deleted: Option<u32>,
 }
 
 /// Prunes as many blueprints as possible referenced by the given `bp_target`
@@ -461,21 +614,18 @@ struct BatchPruneResult {
 /// any blueprint that was deleted.  Otherwise, returns `None`.
 async fn prune_batch_blueprints(
     pargs: &PruneArgs<'_>,
-    details: &mut BlueprintPrunerDetails,
+    pop: &PruneOp,
     bp_target_rows: Vec<BpTarget>,
-) -> BatchPruneResult {
+) -> Result<BatchPruneResult, BatchPruneResult> {
     let PruneArgs { opctx, datastore, log, .. } = pargs;
-    let mut highest_deleted = None;
-    let mut stop_reason = BatchStopReason::EndOfBatch;
+    let mut batch = BatchPruneOp::new(pop);
     for row in bp_target_rows {
         if *row.version >= pargs.keep_version {
-            stop_reason = BatchStopReason::OutOfPruneable;
-            break;
+            return Err(batch.finish(BatchStopReason::OutOfPruneable));
         }
 
-        if details.ntargets_removable >= pargs.max_delete_attempts {
-            stop_reason = BatchStopReason::DeleteLimit;
-            break;
+        if batch.ntargets_removable >= pargs.max_delete_attempts {
+            return Err(batch.finish(BatchStopReason::DeleteLimit));
         }
 
         let blueprint_id = BlueprintUuid::from(row.blueprint_id);
@@ -490,6 +640,7 @@ async fn prune_batch_blueprints(
             blueprint_id.into_untyped_uuid(),
             LookupType::ById(blueprint_id.into_untyped_uuid()),
         );
+
         match datastore.blueprint_delete(opctx, &authz_blueprint).await {
             Ok(()) => {
                 info!(
@@ -498,23 +649,7 @@ async fn prune_batch_blueprints(
                     "version" => *row.version,
                     "blueprint_id" => blueprint_id.to_string(),
                 );
-                details.ntargets_removable += 1;
-                details.deleted.push(DeletedBlueprint {
-                    id: blueprint_id,
-                    time_made_target: row.time_made_target,
-                });
-                if let Some(previous_highest) = highest_deleted
-                    && previous_highest >= *row.version
-                {
-                    // This should be impossible, since we're doing this in
-                    // increasing order of version.
-                    details
-                        .warnings
-                        .push(format!("highest version seen went backwards"));
-                    stop_reason = BatchStopReason::Error;
-                    break;
-                }
-                highest_deleted = Some(*row.version);
+                batch = batch.record_blueprint_deleted(row)?;
             }
 
             Err(Error::ObjectNotFound {
@@ -529,43 +664,48 @@ async fn prune_batch_blueprints(
                     "version" => *row.version,
                     "blueprint_id" => blueprint_id.to_string(),
                 );
-                details.ntargets_removable += 1;
-                // XXX-dap consider a helper that keeps track of what's
-                // removable with semantic methods
-                if let Some(previous_highest) = highest_deleted
-                    && previous_highest >= *row.version
-                {
-                    // This should be impossible, since we're doing this in
-                    // increasing order of version.
-                    details
-                        .warnings
-                        .push(format!("highest version seen went backwards"));
-                    stop_reason = BatchStopReason::Error;
-                    break;
-                }
-                highest_deleted = Some(*row.version);
+                batch = batch.record_blueprint_already_deleted(row)?;
             }
 
             Err(error) => {
                 // For any other kind of error, stop.  We'll try again later
                 // when we're activated again.
-                let error = InlineErrorChain::new(&error);
+                let error = anyhow!(error).context(format!(
+                    "failed to delete former target blueprint {blueprint_id} \
+                     (version {})",
+                    *row.version
+                ));
+                let log_error = InlineErrorChain::new(&*error);
+                // XXX-dap move logging into PruneOp
                 warn!(
                     log,
                     "failed to delete former target blueprint";
                     "version" => *row.version,
                     "blueprint_id" => blueprint_id.to_string(),
-                    &error,
+                    &log_error,
                 );
-                details.warnings.push(format!(
-                    "failed to delete blueprint {blueprint_id}: {}",
-                    error,
-                ));
-                stop_reason = BatchStopReason::Error;
-                break;
+                return Err(batch.record_error(error));
             }
         }
     }
 
-    BatchPruneResult { stop_reason, highest_deleted }
+    Ok(batch.finish(BatchStopReason::EndOfBatch))
+}
+
+// XXX-dap do I like this enough to use it
+trait ResultExt {
+    type Inner;
+
+    fn into_inner(self) -> Self::Inner;
+}
+
+impl<T> ResultExt for Result<T, T> {
+    type Inner = T;
+
+    fn into_inner(self) -> Self::Inner {
+        match self {
+            Ok(val) => val,
+            Err(val) => val,
+        }
+    }
 }
