@@ -12,13 +12,13 @@ use crate::latest::early_networking::PortFec;
 use crate::latest::early_networking::PortSpeed;
 use crate::latest::early_networking::RouterLifetimeConfig;
 use crate::latest::early_networking::RouterLifetimeConfigError;
+use crate::latest::early_networking::RouterPeerAddress;
 use crate::latest::early_networking::SpecifiedIpAddr;
 use crate::latest::early_networking::SpecifiedIpNet;
 use crate::latest::early_networking::SwitchSlot;
 use crate::latest::early_networking::UnspecifiedIpError;
 use crate::latest::early_networking::UplinkAddress;
 use crate::latest::early_networking::UplinkAddressConfig;
-use crate::latest::early_networking::RouterPeerAddress;
 use omicron_common::api::external;
 use oxnet::IpNet;
 use oxnet::IpNetParseError;
@@ -182,13 +182,26 @@ impl RouterPeerAddress {
     ///
     /// Uses of this function probably indicate places where we could consider
     /// using stronger types.
-    pub fn from_ip_treating_unspecified_as_unnumbered(
-        ip: IpAddr,
-    ) -> Self {
+    pub fn from_ip_treating_unspecified_as_unnumbered(ip: IpAddr) -> Self {
         match SpecifiedIpAddr::try_from(ip) {
             Ok(ip) => Self::Numbered { ip },
             Err(UnspecifiedIpError) => Self::Unnumbered,
         }
+    }
+
+    /// Convert an arbitrary `Option<IpAddr>` into a [`RouterPeerAddress`] by
+    /// converting both `None` and `Some(UNSPECIFIED)`
+    /// [`RouterPeerAddress::Unnumbered`].
+    ///
+    /// Uses of this function probably indicate places where we could consider
+    /// using stronger types.
+    pub fn from_optional_ip_treating_unspecified_as_unnumbered(
+        ip: Option<IpAddr>,
+    ) -> Self {
+        let Some(ip) = ip else {
+            return Self::Unnumbered;
+        };
+        Self::from_ip_treating_unspecified_as_unnumbered(ip)
     }
 }
 

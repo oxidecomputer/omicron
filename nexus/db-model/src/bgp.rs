@@ -181,16 +181,14 @@ impl TryFrom<BgpPeerView> for BgpPeerConfig {
     fn try_from(value: BgpPeerView) -> Result<Self, Self::Error> {
         // For unnumbered peers (addr is None), use UNSPECIFIED
         //
-        // TODO-john stronger type? NULL?
-        let addr =
-            match value.addr.map(|addr| SpecifiedIpAddr::try_from(addr.ip())) {
-                Some(Ok(ip)) => RouterPeerAddress::Numbered { ip },
-                None | Some(Err(UnspecifiedIpError)) => {
-                    RouterPeerAddress::Unnumbered
-                }
-            };
+        // TODO-cleanup This allows any of three DB values (NULL, `0.0.0.0`,
+        // `::`) to be converted to `RouterPeerAddress::Unnumbered`. Should we
+        // add db constraints to squish that down to one (probably NULL)?
+        let addr = RouterPeerAddress::from_optional_ip_treating_unspecified_as_unnumbered(
+            value.addr.map(|addr| addr.ip()),
+        );
 
-        // TODO-correctness We should have db constraints to ensure these can't
+        // TODO-correctness We should have db constraints to ensure this can't
         // fail.
         let router_lifetime =
             RouterLifetimeConfig::new(value.router_lifetime.0)
