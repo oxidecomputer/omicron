@@ -5,7 +5,25 @@
 //! Types for network setup required to bring up the control plane.
 //!
 //! Changes in this version:
-//! * TODO-john
+//!
+//! * Introduce [`SpecifiedIpNet`], a newtype wrapper around [`IpNet`] that does
+//!   not allow unspecified IP addresses.
+//! * Introduce [`SpecifiedIpAddr`], a newtype wrapper around [`IpAddr`] that
+//!   does not allow unspecified IP addresses.
+//! * Introduce [`UplinkAddress`], a stronger type for specifying
+//!   possibly-link-local IP nets. This is the new type of
+//!   [`UplinkAddressConfig::address`], which was previously an [`IpNet`] where
+//!   a value with an unspecified IP address was treated as link-local.
+//! * Introduce [`RouterPeerAddress`], a stronger type for specifying
+//!   possibly-unnumbered BGP peer addresses. This is the new type of
+//!   [`BgpPeerConfig::addr`], which was previously an [`IpAddr`] where an
+//!   unspecified address was treated as unnumbered.
+//! * Update types that transitively contain the newly-updated
+//!   [`UplinkAddressConfig`] or [`BgpPeerConfig`]:
+//!     * [`EarlyNetworkConfigBody`]
+//!     * [`PortConfig`]
+//!     * [`RackNetworkConfig`]
+//!     * [`WriteNetworkConfigRequest`]
 
 use crate::v1::early_networking as v1;
 use crate::v20::early_networking as v20;

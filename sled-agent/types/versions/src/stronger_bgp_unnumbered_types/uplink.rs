@@ -5,9 +5,12 @@
 //! Uplink-related types for the Sled Agent API.
 //!
 //! Changes in this version:
-//! * TODO-john
+//! * New [`HostPortConfig`] to pick up new [`UplinkAddressConfig`].
+//! * New [`SwitchPorts`] to pick up new
 
-use crate::v1;
+use super::early_networking::UplinkAddressConfig;
+use crate::v1::early_networking::LldpPortConfig;
+use crate::v1::early_networking::TxEqConfig;
 use crate::v20;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -31,11 +34,11 @@ pub struct HostPortConfig {
 
     /// IP Address and prefix (e.g., `192.168.0.1/16`) to apply to switchport
     /// (must be in infra_ip pool).  May also include an optional VLAN ID.
-    pub addrs: Vec<super::early_networking::UplinkAddressConfig>,
+    pub addrs: Vec<UplinkAddressConfig>,
 
-    pub lldp: Option<v1::early_networking::LldpPortConfig>,
+    pub lldp: Option<LldpPortConfig>,
 
-    pub tx_eq: Option<v1::early_networking::TxEqConfig>,
+    pub tx_eq: Option<TxEqConfig>,
 }
 
 impl From<v20::uplink::HostPortConfig> for HostPortConfig {

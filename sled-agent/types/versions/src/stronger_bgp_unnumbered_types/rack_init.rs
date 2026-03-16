@@ -5,7 +5,9 @@
 //! Rack initialization types
 //!
 //! Changes in this version:
-//! * TODO-john
+//! * New [`RackInitializeRequest`] to pick up new [`RackNetworkConfig`].
+//! * New [`RackInitializeRequestParams`] to pick up new
+//!   [`RackInitializeRequest`].
 
 use super::early_networking::RackNetworkConfig;
 use crate::bootstrap_v1::rack_init::RecoverySiloConfig;

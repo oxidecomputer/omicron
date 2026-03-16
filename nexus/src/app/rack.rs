@@ -551,7 +551,8 @@ impl super::Nexus {
                 .iter()
                 .map(|a| networking::Address {
                     address_lot: NameOrId::Name(address_lot_name.clone()),
-                    // TODO-john do we want to update the external API?
+                    // TODO-cleanup Extend stronger types out to the external
+                    // API (omiron#9832).
                     address: a
                         .address
                         .ip_net_squashing_link_local_to_unspecified(),
@@ -591,11 +592,9 @@ impl super::Nexus {
                         format!("as{}", r.asn).parse().unwrap(),
                     ),
                     interface_name: link_name.clone(),
-                    // TODO-john do we want to update the external API?
-                    addr: match r.addr {
-                        RouterPeerAddress::Unnumbered => None,
-                        RouterPeerAddress::Numbered { ip } => Some(ip.into()),
-                    },
+                    // TODO-cleanup Extend stronger types out to the external
+                    // API (omiron#9832).
+                    addr: r.addr.ip_squashing_unnumbered_to_none(),
                     hold_time: r.hold_time() as u32,
                     idle_hold_time: r.idle_hold_time() as u32,
                     delay_open: r.delay_open() as u32,

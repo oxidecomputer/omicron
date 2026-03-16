@@ -177,6 +177,18 @@ impl FromStr for SpecifiedIpAddr {
 }
 
 impl RouterPeerAddress {
+    /// Squash this address down to an [`Option<IpAddr>`] by converting
+    /// [`RouterPeerAddress::Unnumbered`] to `None`.
+    ///
+    /// Uses of this function probably indicate places where we could consider
+    /// using stronger types.
+    pub fn ip_squashing_unnumbered_to_none(&self) -> Option<IpAddr> {
+        match *self {
+            Self::Unnumbered => None,
+            Self::Numbered { ip } => Some(ip.into()),
+        }
+    }
+
     /// Convert an arbitrary [`IpAddr`] into a [`RouterPeerAddress`] by
     /// converting an unspecified IP to [`RouterPeerAddress::Unnumbered`].
     ///
