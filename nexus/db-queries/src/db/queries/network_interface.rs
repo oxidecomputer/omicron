@@ -1981,6 +1981,7 @@ fn decode_delete_network_interface_database_error(
 #[cfg(test)]
 mod tests {
     use super::DeleteError;
+    use super::DeleteQuery;
     use super::InsertError;
     use super::MAX_NICS_PER_INSTANCE;
     use super::NUM_INITIAL_RESERVED_IP_ADDRESSES;
@@ -2000,9 +2001,11 @@ mod tests {
     use crate::db::queries::network_interface::first_available_ipv6_address;
     use crate::db::queries::network_interface::last_available_ipv4_address;
     use crate::db::queries::network_interface::last_available_ipv6_address;
+    use crate::db::raw_query_builder::expectorate_query_contents;
     use async_bb8_diesel::AsyncRunQueryDsl;
     use dropshot::test_util::LogContext;
     use model::NetworkInterfaceKind;
+    use nexus_db_errors::TransactionError;
     use nexus_db_lookup::LookupPath;
     use nexus_db_model::IpVersion;
     use nexus_types::external_api::instance::InstanceCreate;
@@ -2097,8 +2100,8 @@ mod tests {
         let new_runtime = model::InstanceRuntimeState {
             nexus_state: state,
             propolis_id,
-            generation: instance.runtime_state.generation.next().into(),
-            ..instance.runtime_state.clone()
+            generation: instance.state_generation.next().into(),
+            ..instance.runtime()
         };
         let res = db_datastore
             .instance_update_runtime(
@@ -2107,7 +2110,7 @@ mod tests {
             )
             .await;
         assert!(matches!(res, Ok(true)), "Failed to change instance state");
-        instance.runtime_state = new_runtime;
+        instance.set_runtime(new_runtime);
         instance
     }
 
@@ -2264,6 +2267,21 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn expectorate_query() {
+        for (kind, kind_description) in [
+            (NetworkInterfaceKind::Service, "service"),
+            (NetworkInterfaceKind::Instance, "instance"),
+            (NetworkInterfaceKind::Probe, "probe"),
+        ] {
+            let path = format!(
+                "tests/output/delete_vnic_{kind_description}_query.sql"
+            );
+            let query = DeleteQuery::new(kind, Uuid::nil(), Uuid::nil());
+            expectorate_query_contents(&query, &path).await;
+        }
+    }
+
+    #[tokio::test]
     async fn test_delete_service_is_idempotent() {
         let context =
             TestContext::new("test_delete_service_is_idempotent", 2).await;
@@ -2291,13 +2309,18 @@ mod tests {
             .service_create_network_interface_raw(context.opctx(), interface)
             .await
             .expect("Failed to insert interface");
+        let conn = context
+            .datastore()
+            .pool_connection_for_tests()
+            .await
+            .expect("got connection for tests");
 
         // We should be able to delete twice, and be told that the first delete
         // modified the row and the second did not.
         let first_deleted = context
             .datastore()
-            .service_delete_network_interface(
-                context.opctx(),
+            .service_delete_network_interface_on_connection(
+                &conn,
                 service_id,
                 inserted_interface.id(),
             )
@@ -2307,8 +2330,8 @@ mod tests {
 
         let second_deleted = context
             .datastore()
-            .service_delete_network_interface(
-                context.opctx(),
+            .service_delete_network_interface_on_connection(
+                &conn,
                 service_id,
                 inserted_interface.id(),
             )
@@ -2320,20 +2343,19 @@ mod tests {
         let bogus_id = Uuid::new_v4();
         let err = context
             .datastore()
-            .service_delete_network_interface(
-                context.opctx(),
-                service_id,
-                bogus_id,
+            .service_delete_network_interface_on_connection(
+                &conn, service_id, bogus_id,
             )
             .await
             .expect_err(
                 "unexpectedly succeeded deleting nonexistent interface",
             );
-        let expected_err =
+        let expected_err = TransactionError::CustomError(
             DeleteError::External(external::Error::ObjectNotFound {
                 type_name: external::ResourceType::ServiceNetworkInterface,
                 lookup_type: external::LookupType::ById(bogus_id),
-            });
+            }),
+        );
         assert_eq!(err, expected_err);
         context.success().await;
     }

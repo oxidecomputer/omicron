@@ -771,14 +771,15 @@ impl DataStore {
                     //  2. We are transitioning from preparing to committed state.
 
                     // Should we write secrets?
-                    if db_config.encrypted_rack_secrets_salt.is_none()
-                        && config.encrypted_rack_secrets.is_some()
-                    {
+                    if let (None, Some(encrypted_rack_secrets)) = (
+                        &db_config.encrypted_rack_secrets_salt,
+                        config.encrypted_rack_secrets,
+                    ) {
                         Self::update_tq_encrypted_rack_secrets_conn(
                             &c,
                             db_config.rack_id,
                             db_config.epoch,
-                            config.encrypted_rack_secrets.unwrap(),
+                            encrypted_rack_secrets,
                         )
                         .await
                         .map_err(|txn_error| txn_error.into_diesel(&err))?;

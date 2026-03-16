@@ -597,8 +597,8 @@ impl DebugCollectorWorker {
                     Err(err) => {
                         error!(
                             self.log,
-                            "Could not query zfs properties of debug dump dir: \
-                             {err:?}"
+                            "Could not query zfs properties of debug dump dir";
+                             err
                         );
                         // deprioritize anything we get errors querying.
                         (usize::MAX, u64::MAX, mountpoint.clone())
@@ -667,8 +667,8 @@ impl DebugCollectorWorker {
                         error!(
                             self.log,
                             "Previously-chosen debug/dump dir {x:?} couldn't \
-                             be queried for zfs properties!  Choosing another. \
-                             {err:?}"
+                             be queried for zfs properties!  Choosing another.";
+                             err
                         );
                         self.chosen_debug_dir = None;
                     }
@@ -716,7 +716,8 @@ impl DebugCollectorWorker {
                         error!(
                             self.log,
                             "Couldn't configure process core dump directory to \
-                            {core_dir:?}: {err:?}"
+                            {core_dir:?}";
+                            err,
                         );
                     }
                 }
@@ -751,7 +752,7 @@ impl DebugCollectorWorker {
                             debug!(
                                 self.log,
                                 "Dump slice {dump_slice:?} appears to be \
-                                 unused: {err:?}"
+                                 unused"; err
                             );
                         }
                     }
@@ -804,7 +805,8 @@ impl DebugCollectorWorker {
                                     warn!(
                                         self.log,
                                         "Could not configure {dump_slice:?} as \
-                                         dump device: {err:?}"
+                                         dump device";
+                                         err,
                                     );
                                 }
                             }
@@ -821,7 +823,7 @@ impl DebugCollectorWorker {
                             debug!(
                                 self.log,
                                 "Dump slice {dump_slice:?} appears to be \
-                                 unused : {err:?}",
+                                 unused"; err
                             );
                         }
                     }
@@ -857,7 +859,8 @@ impl DebugCollectorWorker {
                                 self.log,
                                 "Could not configure {dump_slice:?} as dump \
                                  device with {debug_dir:?} as savecore \
-                                 destination: {err:?}"
+                                 destination";
+                                 err,
                             );
                         }
                     }
@@ -875,8 +878,8 @@ impl DebugCollectorWorker {
                     {
                         error!(
                             self.log,
-                            "Could not restore dump slice to {dump_slice:?}: \
-                             {err:?}"
+                            "Could not restore dump slice to {dump_slice:?}";
+                            err,
                         );
                     }
                 }
@@ -1046,7 +1049,7 @@ impl DebugCollectorWorker {
                     error!(
                         self.log,
                         "Couldn't delete {path} from debug dataset, skipping \
-                         {dir:?}. {err:?}"
+                         {dir:?}"; InlineErrorChain::new(&err)
                     );
                     continue 'next_debug_dir;
                 }
@@ -1100,7 +1103,7 @@ impl DebugCollectorWorker {
                     warn!(
                         self.log,
                         "Debug auto-cleaner could not read metadata from path";
-                        "err" => %err,
+                        InlineErrorChain::new(&err),
                         "path" => %path
                     );
                     return Err(err.into());

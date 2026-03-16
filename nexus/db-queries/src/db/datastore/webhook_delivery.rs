@@ -448,6 +448,7 @@ impl DataStore {
 mod test {
     use super::*;
     use crate::db::explain::ExplainableAsync;
+    use crate::db::model;
     use crate::db::pagination::Paginator;
     use crate::db::pub_test_utils::TestDatabase;
     use crate::db::raw_query_builder::expectorate_query_contents;
@@ -485,17 +486,17 @@ mod test {
             .unwrap();
         let rx_id = rx.rx.identity.id.into();
         let alert_id = AlertUuid::new_v4();
+        let alert = model::Alert::new(
+            alert_id,
+            model::AlertClass::TestFoo,
+            serde_json::json!({
+                "answer": 42,
+            }),
+        );
         datastore
-            .alert_create(
-                &opctx,
-                alert_id,
-                AlertClass::TestFoo,
-                serde_json::json!({
-                    "answer": 42,
-                }),
-            )
+            .alert_create(&opctx, alert)
             .await
-            .expect("can't create ye event");
+            .expect("can't create ye alert");
 
         let dispatch1 = WebhookDelivery::new(
             &alert_id,

@@ -753,7 +753,7 @@ async fn send_subnet_attachments_to_dendrite_inner(
                 log,
                 "cannot find Dendrite client for boundary switch, \
                         will not send instance's attached subnets";
-                "switch" => %switch,
+                "switch" => ?switch,
             );
             continue;
         };
@@ -764,13 +764,13 @@ async fn send_subnet_attachments_to_dendrite_inner(
                     log,
                     "created instance attached subnet on switch";
                     "subnet" => %subnet,
-                    "switch" => %switch,
+                    "switch" => ?switch,
                 ),
                 Err(e) => error!(
                     log,
                     "failed to create instance attached subnet on switch";
                     "subnet" => %subnet,
-                    "switch" => %switch,
+                    "switch" => ?switch,
                     "error" => InlineErrorChain::new(&e),
                 ),
             }
@@ -821,7 +821,7 @@ async fn delete_attached_subnets_from_dendrite_inner(
                 log,
                 "cannot find Dendrite client for boundary switch, \
                 will not delete attached subnet";
-                "switch" => %switch,
+                "switch" => ?switch,
             );
             continue;
         };
@@ -831,13 +831,13 @@ async fn delete_attached_subnets_from_dendrite_inner(
                     log,
                     "deleted attached subnet from switch";
                     "subnet" => %subnet,
-                    "switch" => %switch,
+                    "switch" => ?switch,
                 ),
                 Err(e) => error!(
                     log,
                     "failed to delete attached subnet from switch";
                     "subnet" => %subnet,
-                    "switch" => %switch,
+                    "switch" => ?switch,
                     "error" => InlineErrorChain::new(&e),
                 ),
             }
@@ -889,9 +889,11 @@ pub(crate) async fn probe_delete_dpd_config(
     let boundary_switches = boundary_switches(datastore, opctx_alloc).await?;
 
     for switch in &boundary_switches {
-        debug!(log, "notifying dendrite of updates";
-                "probe_id" => %probe_id,
-                "switch" => switch.to_string());
+        debug!(
+            log, "notifying dendrite of updates";
+            "probe_id" => %probe_id,
+            "switch" => ?switch,
+        );
 
         let dpd_clients =
             super::dpd_clients(resolver, log).await.map_err(|e| {
@@ -902,7 +904,7 @@ pub(crate) async fn probe_delete_dpd_config(
 
         let client_result = dpd_clients.get(switch).ok_or_else(|| {
             Error::internal_error(&format!(
-                "unable to find dendrite client for {switch}"
+                "unable to find dendrite client for {switch:?}"
             ))
         });
 
@@ -1017,13 +1019,15 @@ async fn notify_dendrite_nat_state(
 
     let mut errors = vec![];
     for switch in &boundary_switches {
-        debug!(log, "notifying dendrite of updates";
-                    "instance_id" => ?instance_id,
-                    "switch" => switch.to_string());
+        debug!(
+            log, "notifying dendrite of updates";
+            "instance_id" => ?instance_id,
+            "switch" => ?switch,
+        );
 
         let client_result = clients.get(switch).ok_or_else(|| {
             Error::internal_error(&format!(
-                "unable to find dendrite client for {switch}"
+                "unable to find dendrite client for {switch:?}"
             ))
         });
 

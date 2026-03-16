@@ -647,7 +647,7 @@ impl DataStore {
                 }
 
                 // Attempt to attach during a migration.
-                if collection.runtime_state.migration_id.is_some() {
+                if collection.migration_id.is_some() {
                     return Err(Error::unavail(&format!(
                         "tried to attach {kind} IP while instance was migrating: \
                          detach will be safe to retry once migrate completes"
@@ -655,7 +655,7 @@ impl DataStore {
                 }
 
                 // Attach while instance is in an unsafe state.
-                let state = &collection.runtime_state.nexus_state;
+                let state = &collection.nexus_state;
                 if !safe_states.contains(state) {
                     return Err(Error::invalid_request(&format!(
                         "cannot attach {kind} IP to instance in {state} state"
@@ -790,14 +790,14 @@ impl DataStore {
                     IpAttachState::Attached => {},
                 }
 
-                if collection.runtime_state.migration_id.is_some() {
+                if collection.migration_id.is_some() {
                     return Err(Error::unavail(&format!(
                         "tried to detach {kind} IP while instance was migrating: \
                          detach will be safe to retry once migrate completes"
                     )))
                 }
 
-                match collection.runtime_state.nexus_state {
+                match collection.nexus_state {
                     state if SAFE_TO_ATTACH_INSTANCE_STATES.contains(&state) => {
                         Error::internal_error(&format!("failed to detach {kind} IP"))
                     },

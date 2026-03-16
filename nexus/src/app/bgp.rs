@@ -11,6 +11,7 @@ use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::{
     self, CreateResult, DeleteResult, ListResultVec, LookupResult, NameOrId,
 };
+use slog_error_chain::InlineErrorChain;
 
 impl super::Nexus {
     pub async fn bgp_config_create(
@@ -101,7 +102,7 @@ impl super::Nexus {
     ) -> ListResultVec<networking::BgpPeerStatus> {
         opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
         let mut result = Vec::new();
-        for (switch, client) in &self.mg_clients().await.map_err(|e| {
+        for (switch_slot, client) in self.mg_clients().await.map_err(|e| {
             external::Error::internal_error(&format!(
                 "failed to get mg clients: {e}"
             ))
@@ -110,8 +111,9 @@ impl super::Nexus {
                 Ok(result) => result.into_inner(),
                 Err(e) => {
                     error!(
-                        self.log,
-                        "failed to get routers from {switch}: {e}"
+                        self.log, "failed to get routers from switch";
+                        "switch_slot" => ?switch_slot,
+                        InlineErrorChain::new(&e),
                     );
                     continue;
                 }
@@ -124,14 +126,16 @@ impl super::Nexus {
                     Err(e) => {
                         error!(
                             self.log,
-                            "failed to get peers for asn {asn} from {switch}: {e}"
+                            "failed to get peers for asn {asn} from switch";
+                            "switch_slot" => ?switch_slot,
+                            InlineErrorChain::new(&e),
                         );
                         continue;
                     }
                 };
                 for (peer_id, info) in peers {
                     result.push(networking::BgpPeerStatus {
-                        switch: *switch,
+                        switch: switch_slot,
                         peer_id: peer_id.clone(),
                         addr: info.remote_ip,
                         local_asn: r.asn,
@@ -154,7 +158,7 @@ impl super::Nexus {
     ) -> LookupResult<Vec<networking::BgpExported>> {
         opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
         let mut result = vec![];
-        for (switch, client) in &self.mg_clients().await.map_err(|e| {
+        for (switch_slot, client) in self.mg_clients().await.map_err(|e| {
             external::Error::internal_error(&format!(
                 "failed to get mg clients: {e}"
             ))
@@ -163,8 +167,9 @@ impl super::Nexus {
                 Ok(result) => result.into_inner(),
                 Err(e) => {
                     error!(
-                        self.log,
-                        "failed to get routers from {switch}: {e}"
+                        self.log, "failed to get routers from switch";
+                        "switch_slot" => ?switch_slot,
+                        InlineErrorChain::new(&e),
                     );
                     continue;
                 }
@@ -183,7 +188,9 @@ impl super::Nexus {
                     Err(e) => {
                         error!(
                             self.log,
-                            "failed to get exports for asn {asn} from {switch}: {e}"
+                            "failed to get exports for asn {asn} from switch";
+                            "switch_slot" => ?switch_slot,
+                            InlineErrorChain::new(&e),
                         );
                         continue;
                     }
@@ -205,7 +212,7 @@ impl super::Nexus {
                         };
                         let export = networking::BgpExported {
                             peer_id: peer_id.clone(),
-                            switch: *switch,
+                            switch: switch_slot,
                             prefix,
                         };
                         result.push(export);
@@ -224,7 +231,7 @@ impl super::Nexus {
         opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
 
         let mut result = Vec::new();
-        for (switch, client) in &self.mg_clients().await.map_err(|e| {
+        for (switch_slot, client) in self.mg_clients().await.map_err(|e| {
             external::Error::internal_error(&format!(
                 "failed to get mg clients: {e}"
             ))
@@ -240,15 +247,16 @@ impl super::Nexus {
                 Ok(result) => result.into_inner().by_peer.clone(),
                 Err(e) => {
                     error!(
-                        self.log,
-                        "failed to get bgp history from {switch}: {e}"
+                        self.log, "failed to get bgp history from switch";
+                        "switch_slot" => ?switch_slot,
+                        InlineErrorChain::new(&e),
                     );
                     continue;
                 }
             };
 
             result.push(networking::SwitchBgpHistory {
-                switch: *switch,
+                switch: switch_slot,
                 history: history
                     .into_iter()
                     .map(|(k, v)| (k, networking::BgpMessageHistory::new(v)))
@@ -266,7 +274,7 @@ impl super::Nexus {
     ) -> ListResultVec<networking::BgpImported> {
         opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
         let mut result = Vec::new();
-        for (switch, client) in &self.mg_clients().await.map_err(|e| {
+        for (switch_slot, client) in self.mg_clients().await.map_err(|e| {
             external::Error::internal_error(&format!(
                 "failed to get mg clients: {e}"
             ))
@@ -287,7 +295,7 @@ impl super::Nexus {
                         };
                         for p in paths.iter() {
                             let x = networking::BgpImported {
-                                switch: *switch,
+                                switch: switch_slot,
                                 prefix: ipnet,
                                 id: p
                                     .bgp
@@ -302,8 +310,9 @@ impl super::Nexus {
                 }
                 Err(e) => {
                     error!(
-                        self.log,
-                        "failed to get BGP imported from {switch}: {e}"
+                        self.log, "failed to get BGP imported from switch";
+                        "switch_slot" => ?switch_slot,
+                        InlineErrorChain::new(&e),
                     );
                     continue;
                 }
