@@ -12,8 +12,9 @@
 //!   does not allow unspecified IP addresses.
 //! * Introduce [`UplinkAddress`], a stronger type for specifying
 //!   possibly-link-local IP nets. This is the new type of
-//!   [`UplinkAddressConfig::address`], which was previously an [`IpNet`] where
-//!   a value with an unspecified IP address was treated as link-local.
+//!   [`UplinkAddressConfig::address`], which was previously an
+//!   [`Option<IpNet>`] where both `None` and `Some(UNSPECIFIED)` were treated
+//!   as link-local.
 //! * Introduce [`RouterPeerAddress`], a stronger type for specifying
 //!   possibly-unnumbered BGP peer addresses. This is the new type of
 //!   [`BgpPeerConfig::addr`], which was previously an [`IpAddr`] where an
@@ -191,7 +192,7 @@ pub struct PortConfig {
     pub addresses: Vec<UplinkAddressConfig>,
     /// Switch the port belongs to.
     pub switch: v1::SwitchSlot,
-    /// Nmae of the port this config applies to.
+    /// Name of the port this config applies to.
     pub port: String,
     /// Port speed.
     pub uplink_port_speed: v1::PortSpeed,

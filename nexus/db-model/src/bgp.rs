@@ -177,7 +177,8 @@ impl TryFrom<BgpPeerView> for BgpPeerConfig {
     type Error = BgpPeerConfigDataError;
 
     fn try_from(value: BgpPeerView) -> Result<Self, Self::Error> {
-        // For unnumbered peers (addr is None), use UNSPECIFIED
+        // Convert weaker database representation IP address back to a
+        // strongly-typed `RouterPeerAddress`.
         //
         // TODO-cleanup This allows any of three DB values (NULL, `0.0.0.0`,
         // `::`) to be converted to `RouterPeerAddress::Unnumbered`. Should we

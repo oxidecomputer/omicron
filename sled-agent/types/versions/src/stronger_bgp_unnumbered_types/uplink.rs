@@ -6,7 +6,7 @@
 //!
 //! Changes in this version:
 //! * New [`HostPortConfig`] to pick up new [`UplinkAddressConfig`].
-//! * New [`SwitchPorts`] to pick up new
+//! * New [`SwitchPorts`] to pick up new [`HostPortConfig`].
 
 use super::early_networking::UplinkAddressConfig;
 use crate::v1::early_networking::LldpPortConfig;
