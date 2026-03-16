@@ -1549,7 +1549,6 @@ mod tests {
             "bogus delete should not have found a matching row"
         );
 
-        // Deallocate the first IP.
         db.terminate().await;
         logctx.cleanup_successful();
     }
