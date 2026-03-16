@@ -126,6 +126,7 @@ pub fn make_omicron_oso(log: &slog::Logger) -> Result<OsoInit, anyhow::Error> {
         AlertClassList::get_polar_class(),
         ScimClientBearerTokenList::get_polar_class(),
         MulticastGroupList::get_polar_class(),
+        TrustQuorumConfig::get_polar_class(),
     ];
     for c in classes {
         oso_builder = oso_builder.register_class(c)?;
