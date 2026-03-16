@@ -34,6 +34,7 @@ omicron-workspace-hack.workspace = true
 nix.workspace = true
 uuid.workspace = true
 zerocopy.workspace = true
+slog-error-chain.workspace = true
 
 [[bin]]
 name = "sp-sim"

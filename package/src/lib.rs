@@ -15,10 +15,18 @@ pub mod target;
 /// Errors which may be returned when parsing the server configuration.
 #[derive(Error, Debug)]
 pub enum ParseError {
-    #[error("Error deserializing toml from {path}: {err}")]
-    Toml { path: Utf8PathBuf, err: toml::de::Error },
-    #[error("IO error: {message}: {err}")]
-    Io { message: String, err: std::io::Error },
+    #[error("Error deserializing toml from {path}")]
+    Toml {
+        path: Utf8PathBuf,
+        #[source]
+        err: toml::de::Error,
+    },
+    #[error("IO error: {message}")]
+    Io {
+        message: String,
+        #[source]
+        err: std::io::Error,
+    },
 }
 
 pub fn parse<P: AsRef<Utf8Path>, C: DeserializeOwned>(
