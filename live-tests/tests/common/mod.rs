@@ -206,7 +206,7 @@ async fn check_hardware_environment(
 ) -> Result<(), anyhow::Error> {
     const ALLOWED_GIMLET_SERIALS: &[&str] = &[
         // Serial number lists can be generated with:
-        // inventron env system list -Hpo serial -F type=gimlet <ENVIRONMENT>
+        // inventron env system list -Hpo serial -F type=cosmo -F type=gimlet <ENVIRONMENT>
 
         // test rig: "madrid"
         "BRM42220081",
@@ -215,11 +215,11 @@ async fn check_hardware_environment(
         "BRM42220004",
         // test rig: "london"
         "BRM42220036",
-        "BRM42220062",
+        "2CN2M459",
         "BRM42220030",
-        "BRM44220007",
+        "2RGCFG10",
         // test rig: "dublin"
-        "BRM42220026",
+        "2F8JEXDK",
         "BRM27230037",
         "BRM23230018",
         "BRM23230010",
@@ -227,7 +227,7 @@ async fn check_hardware_environment(
         "BRM42220011",
         "BRM44220007",
         "BRM42220082",
-        "BRM06240029",
+        "271FVPY0",
     ];
 
     // Refuse to operate in an environment that might contain real Oxide
