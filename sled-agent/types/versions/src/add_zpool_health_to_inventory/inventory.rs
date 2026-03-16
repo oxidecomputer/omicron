@@ -3,7 +3,6 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use iddqd::IdOrdMap;
-use illumos_utils::svcs::SvcsInMaintenanceResult;
 use illumos_utils::zpool::ZpoolHealth;
 use omicron_common::api::external::ByteCount;
 use omicron_common::snake_case_result;
@@ -19,6 +18,7 @@ use crate::v1;
 use crate::v1::inventory::InventoryDataset;
 use crate::v1::inventory::InventoryDisk;
 use crate::v1::inventory::SledRole;
+use crate::v12::inventory::SvcsInMaintenanceResult;
 use crate::v14::inventory::ConfigReconcilerInventoryStatus;
 use crate::v14::inventory::OmicronFileSourceResolverInventory;
 use crate::v14::inventory::OmicronSledConfig;

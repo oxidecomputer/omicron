@@ -268,24 +268,8 @@ impl PlanningNoopImageSourceStepReport {
             && self.converted.is_empty()
     }
 
-    pub fn skip_sled_zones(
-        &mut self,
-        sled_id: SledUuid,
-        reason: PlanningNoopImageSourceSkipSledZonesReason,
-    ) {
-        self.skipped_sled_zones.insert(sled_id, reason);
-    }
-
     pub fn sled_zones_all_already_artifact(&mut self, sled_id: SledUuid) {
         self.sled_zones_all_already_artifact.insert(sled_id);
-    }
-
-    pub fn skip_sled_host_phase_2(
-        &mut self,
-        sled_id: SledUuid,
-        reason: PlanningNoopImageSourceSkipSledHostPhase2Reason,
-    ) {
-        self.skipped_sled_host_phase_2.insert(sled_id, reason);
     }
 
     pub fn sled_host_phase_2_both_already_artifact(
@@ -293,14 +277,6 @@ impl PlanningNoopImageSourceStepReport {
         sled_id: SledUuid,
     ) {
         self.sled_host_phase_2_both_already_artifact.insert(sled_id);
-    }
-
-    pub fn skip_zone(
-        &mut self,
-        zone_id: OmicronZoneUuid,
-        reason: PlanningNoopImageSourceSkipZoneReason,
-    ) {
-        self.skipped_zones.insert(zone_id, reason);
     }
 
     pub fn converted(

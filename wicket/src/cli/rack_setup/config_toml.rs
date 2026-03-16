@@ -545,7 +545,7 @@ fn populate_uplink_table(cfg: &UserSpecifiedPortConfig) -> Table {
             management_addrs,
         } = l;
         let mut lldp = Table::new();
-        lldp.insert("status", string_item(status));
+        lldp.insert("status", string_item(enum_to_toml_string(&status)));
         if let Some(x) = chassis_id {
             lldp.insert("chassis_id", string_item(x));
         }

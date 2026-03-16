@@ -43,9 +43,9 @@ SELECT
   oximeter.id,
   oximeter.time_created,
   oximeter.time_modified,
-  oximeter.time_expunged,
   oximeter.ip,
-  oximeter.port
+  oximeter.port,
+  oximeter.time_expunged
 FROM
   oximeter INNER JOIN inserted_producer ON oximeter.id = inserted_producer.oximeter_id
 WHERE

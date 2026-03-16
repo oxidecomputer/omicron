@@ -1803,6 +1803,12 @@ mod tests {
                     Box::pin(test_recall_of_all_fields_impl(db, client))
                 }),
             ),
+            (
+                "test_expunge_timeseries_by_name_replicated",
+                Box::new(move |db, client| {
+                    Box::pin(test_expunge_timeseries_by_name_impl(db, client))
+                }),
+            ),
         ];
         for (test_name, mut test) in futures {
             let testctx = test_setup_log(test_name);
@@ -4732,48 +4738,27 @@ mod tests {
     async fn test_expunge_timeseries_by_name_single_node() {
         const TEST_NAME: &str = "test_expunge_timeseries_by_name_single_node";
         let logctx = test_setup_log(TEST_NAME);
-        let log = &logctx.log;
         let mut db = ClickHouseDeployment::new_single_node(&logctx)
             .await
             .expect("Failed to start ClickHouse");
-        test_expunge_timeseries_by_name_impl(
-            log,
-            db.native_address().into(),
-            false,
-        )
-        .await;
+        let client = Client::new(db.native_address().into(), &logctx.log);
+        test_expunge_timeseries_by_name_impl(&db, client).await;
         db.cleanup().await.expect("Failed to cleanup ClickHouse server");
-        logctx.cleanup_successful();
-    }
-
-    #[tokio::test]
-    async fn test_expunge_timeseries_by_name_replicated() {
-        const TEST_NAME: &str = "test_expunge_timeseries_by_name_replicated";
-        let logctx = test_setup_log(TEST_NAME);
-        let mut cluster = create_cluster(&logctx).await;
-        test_expunge_timeseries_by_name_impl(
-            &logctx.log,
-            cluster.native_address().into(),
-            true,
-        )
-        .await;
-        cluster.cleanup().await.expect("Failed to cleanup ClickHouse cluster");
         logctx.cleanup_successful();
     }
 
     // Implementation of the test for expunging timeseries by name during an
     // upgrade.
     async fn test_expunge_timeseries_by_name_impl(
-        log: &Logger,
-        address: SocketAddr,
-        replicated: bool,
+        db: &ClickHouseDeployment,
+        client: Client,
     ) {
-        let client = Client::new(address, &log);
-
         const STARTING_VERSION: u64 = 1;
         const NEXT_VERSION: u64 = 2;
         const VERSIONS: [u64; 2] = [STARTING_VERSION, NEXT_VERSION];
 
+        // Initialize the database...
+        let replicated = db.is_cluster();
         // We need to actually have the oximeter DB here, and the version table,
         // since `ensure_schema()` writes out versions to the DB as they're
         // applied.

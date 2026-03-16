@@ -18,7 +18,6 @@ use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::{
     CreateResult, DeleteResult, ListResultVec,
 };
-use sled_agent_types::early_networking::SwitchSlot;
 use uuid::Uuid;
 
 impl DataStore {
@@ -45,9 +44,6 @@ impl DataStore {
         use nexus_db_schema::schema::bfd_session::dsl;
         let conn = self.pool_connection_authorized(opctx).await?;
 
-        // TODO-correctness enum in external API
-        let switch_slot = SwitchSlot::parse_from_external_api(&config.switch)?;
-
         let session = BfdSession {
             id: Uuid::new_v4(),
             local: config.local.map(Into::into),
@@ -60,7 +56,7 @@ impl DataStore {
             time_created: chrono::Utc::now(),
             time_modified: chrono::Utc::now(),
             time_deleted: None,
-            switch_slot: switch_slot.into(),
+            switch_slot: config.switch_slot.into(),
         };
 
         diesel::insert_into(dsl::bfd_session)
@@ -79,14 +75,9 @@ impl DataStore {
         use nexus_db_schema::schema::bfd_session::dsl;
         let conn = self.pool_connection_authorized(opctx).await?;
 
-        // TODO-correctness enum in external API
-        let switch_slot = DbSwitchSlot::from(
-            SwitchSlot::parse_from_external_api(&config.switch)?,
-        );
-
         diesel::update(dsl::bfd_session)
             .filter(dsl::remote.eq(IpNetwork::from(config.remote)))
-            .filter(dsl::switch_slot.eq(switch_slot))
+            .filter(dsl::switch_slot.eq(DbSwitchSlot::from(config.switch_slot)))
             .filter(dsl::time_deleted.is_null())
             .set(dsl::time_deleted.eq(chrono::Utc::now()))
             .execute_async(&*conn)

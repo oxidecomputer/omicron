@@ -96,8 +96,8 @@ use omicron_common::backoff::{
     BackoffError, retry_notify, retry_policy_internal_service_aggressive,
 };
 use omicron_common::disk::DatasetKind;
-use omicron_common::ledger::{self, Ledger, Ledgerable};
 use omicron_ddm_admin_client::{Client as DdmAdminClient, DdmError};
+use omicron_ledger::{self as ledger, Ledger, Ledgerable};
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::RackUuid;
 use omicron_uuid_kinds::ZpoolUuid;
@@ -1734,7 +1734,6 @@ mod test {
     use super::*;
     use crate::rack_setup::plan::service::{Plan as ServicePlan, SledInfo};
     use iddqd::IdOrdMap;
-    use illumos_utils::svcs::SvcsInMaintenanceResult;
     use nexus_reconfigurator_blippy::{Blippy, BlippyReportSortKey};
     use omicron_common::{
         address::{Ipv6Subnet, SLED_PREFIX, get_sled_address},
@@ -1745,7 +1744,7 @@ mod test {
     use sled_agent_types::inventory::{
         Baseboard, ConfigReconcilerInventoryStatus, Inventory, InventoryDisk,
         OmicronFileSourceResolverInventory, OmicronZoneType, SledCpuFamily,
-        SledRole,
+        SledRole, SvcsEnabledNotOnlineResult,
     };
     use sled_agent_types::rack_init::rack_initialize_request_test_config;
 
@@ -1791,7 +1790,8 @@ mod test {
                 last_reconciliation: None,
                 file_source_resolver:
                     OmicronFileSourceResolverInventory::new_fake(),
-                smf_services_in_maintenance: Ok(SvcsInMaintenanceResult::new()),
+                smf_services_enabled_not_online:
+                    SvcsEnabledNotOnlineResult::DataUnavailable,
                 reference_measurements: IdOrdMap::new(),
             },
             true,
