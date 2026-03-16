@@ -135,8 +135,21 @@ impl std::fmt::Display for SpecifiedIpAddr {
 }
 
 impl SpecifiedIpNet {
-    pub const fn addr(&self) -> IpAddr {
-        self.0.addr()
+    pub const fn addr(&self) -> SpecifiedIpAddr {
+        let ip = self.0.addr();
+
+        // We're bypassing `SpecifiedIpAddr::try_from()` so we can remain a
+        // `const` function, and because we enforce the same invariants. This
+        // check documents that fact and provides a runtime guard if we
+        // accidentally break it.
+        if ip.is_unspecified() {
+            panic!(
+                "SpecifiedIpNet contains an unspecified IP address \
+                 (this should be impossible!)"
+            );
+        }
+
+        SpecifiedIpAddr(ip)
     }
 }
 
@@ -226,7 +239,7 @@ impl UplinkAddress {
     pub fn addr_squashing_link_local_to_unspecified(&self) -> IpAddr {
         match self {
             UplinkAddress::LinkLocal => IpAddr::V6(Ipv6Addr::UNSPECIFIED),
-            UplinkAddress::Address { ip_net } => ip_net.addr(),
+            UplinkAddress::Address { ip_net } => ip_net.addr().into(),
         }
     }
 

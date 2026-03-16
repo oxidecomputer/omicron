@@ -643,9 +643,9 @@ fn validate_rack_network_config(
     // iterate through each port config
     for (_, _, port_config) in config.iter_uplinks() {
         for addr in &port_config.addresses {
-            let addr = match addr.address {
+            let addr: IpAddr = match addr.address {
                 UplinkAddress::LinkLocal => continue,
-                UplinkAddress::Address { ip_net } => ip_net.addr(),
+                UplinkAddress::Address { ip_net } => ip_net.addr().into(),
             };
             // ... and check that it contains `uplink_ip`.
             if addr < infra_ip_range.first_address()

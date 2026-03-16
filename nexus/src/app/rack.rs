@@ -46,7 +46,6 @@ use sled_agent_client::types::AddSledRequest;
 use sled_agent_client::types::StartSledAgentRequest;
 use sled_agent_client::types::StartSledAgentRequestBody;
 use sled_agent_types::early_networking::LldpAdminStatus;
-use sled_agent_types::early_networking::RouterPeerAddress;
 use sled_hardware_types::BaseboardId;
 
 use slog_error_chain::InlineErrorChain;
