@@ -23,6 +23,7 @@ use serde::Deserialize;
 use sled_agent_types::inventory::ZoneKind;
 use slog::Logger;
 use slog::info;
+use slog::warn;
 use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeSet;
 use std::time::Duration;
@@ -47,6 +48,13 @@ async fn test_execute_expunged_zone(lc: &LiveTestContext) {
                 continue;
             }
 
+            // Skip internal DNS for now - our test relies on the planner
+            // immediately replacing a zone we expunge. The planner (correctly!)
+            // does not do this for internal DNS: it has to wait for inventory
+            // to reflect that the zone has been expunged, which can't happen
+            // during our test because we've disabled execution.
+            ZoneKind::InternalDns => continue,
+
             // We expect all these zone types to exist, and we want to test what
             // happens if we execute a zone of this type with the `expunged`
             // disposition when we never executed that same zone with the
@@ -57,7 +65,6 @@ async fn test_execute_expunged_zone(lc: &LiveTestContext) {
             | ZoneKind::Crucible
             | ZoneKind::CruciblePantry
             | ZoneKind::ExternalDns
-            | ZoneKind::InternalDns
             | ZoneKind::InternalNtp
             | ZoneKind::Nexus
             | ZoneKind::Oximeter => {
@@ -234,7 +241,7 @@ async fn test_execute_expunged_zone_of_kind(
             struct BlueprintExecutorStatus {
                 target_id: BlueprintUuid,
                 execution_error: Option<NestedError>,
-                event_report: EventReport<NestedSpec>,
+                event_report: Result<EventReport<NestedSpec>, NestedError>,
             }
 
             // We won't be able to parse the `details` we expect if the
@@ -271,17 +278,35 @@ async fn test_execute_expunged_zone_of_kind(
             // Check that execution completely cleanly.
             if let Some(err) = details.execution_error {
                 return Err(CondCheckError::Failed(format!(
-                    "execution error: {err}"
+                    "execution error: {}",
+                    InlineErrorChain::new(&err),
                 )));
             }
 
-            if let Some(err) = event_report_has_problems(details.event_report) {
-                return Err(CondCheckError::Failed(format!(
-                    "execution problem: {err}"
-                )));
+            match details.event_report {
+                Ok(event_report) => {
+                    match event_report_problems(event_report, log) {
+                        // Success!
+                        None => Ok(()),
+                        // Some warnings when executing new zones are expected
+                        // (e.g., failure to talk to a zone immediately after
+                        // starting it), but we expect those to clear up
+                        // quickly.
+                        Some(EventReportProblems::HadWarnings) => {
+                            Err(CondCheckError::NotYet)
+                        }
+                        Some(EventReportProblems::Fatal(err)) => {
+                            Err(CondCheckError::Failed(format!(
+                                "execution problem: {err}"
+                            )))
+                        }
+                    }
+                }
+                Err(err) => Err(CondCheckError::Failed(format!(
+                    "no available event report: {}",
+                    InlineErrorChain::new(&err),
+                ))),
             }
-
-            Ok(())
         },
         &Duration::from_secs(1),
         &Duration::from_secs(120),
@@ -399,42 +424,63 @@ impl ZonesOfInterest {
     }
 }
 
-fn event_report_has_problems(
+enum EventReportProblems {
+    Fatal(&'static str),
+    HadWarnings,
+}
+
+fn event_report_problems(
     event_report: EventReport<NestedSpec>,
-) -> Option<&'static str> {
+    log: &Logger,
+) -> Option<EventReportProblems> {
     let mut buf = EventBuffer::default();
     buf.add_event_report(event_report);
 
     // Check for outright failure.
     let Some(summary) = buf.root_execution_summary() else {
-        return Some("missing root_execution_summary");
+        return Some(EventReportProblems::Fatal(
+            "missing root_execution_summary",
+        ));
     };
     match summary.execution_status {
         ExecutionStatus::Terminal(info) => match info.kind {
             TerminalKind::Completed => (),
-            TerminalKind::Failed => return Some("execution failed"),
-            TerminalKind::Aborted => return Some("execution aborted"),
+            TerminalKind::Failed => {
+                return Some(EventReportProblems::Fatal("execution failed"));
+            }
+            TerminalKind::Aborted => {
+                return Some(EventReportProblems::Fatal("execution aborted"));
+            }
         },
-        ExecutionStatus::NotStarted => return Some("execution not started"),
+        ExecutionStatus::NotStarted => {
+            return Some(EventReportProblems::Fatal("execution not started"));
+        }
         ExecutionStatus::Running { .. } => {
-            return Some("execution still running");
+            return Some(EventReportProblems::Fatal("execution still running"));
         }
     }
 
     // Also look for warnings.
+    let mut had_warnings = false;
     for (_, step_data) in buf.iter_steps_recursive() {
         if let Some(reason) = step_data.step_status().completion_reason() {
             if let Some(info) = reason.step_completed_info() {
-                match info.outcome {
+                match &info.outcome {
                     StepOutcome::Success { .. }
                     | StepOutcome::Skipped { .. } => (),
-                    StepOutcome::Warning { .. } => {
-                        return Some("execution has warnings");
+                    StepOutcome::Warning { message, .. } => {
+                        warn!(
+                            log,
+                            "exeucution warning";
+                            "message" => %message,
+                            "step" => %step_data.step_info().description,
+                        );
+                        had_warnings = true;
                     }
                 }
             }
         }
     }
 
-    None
+    if had_warnings { Some(EventReportProblems::HadWarnings) } else { None }
 }
