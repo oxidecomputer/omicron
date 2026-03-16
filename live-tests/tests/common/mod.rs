@@ -12,7 +12,6 @@ use nexus_config::PostgresConfigWithUrl;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
 use nexus_types::deployment::SledFilter;
-use omicron_common::address::Ipv6Subnet;
 use slog::info;
 use slog::o;
 use std::ffi::OsStr;
@@ -96,20 +95,14 @@ impl LiveTestContext {
 }
 
 fn create_resolver(log: &slog::Logger) -> Result<Resolver, anyhow::Error> {
-    // In principle, we should look at /etc/resolv.conf to find the DNS servers.
-    // In practice, this usually isn't populated today.  See
-    // oxidecomputer/omicron#2122.
-    //
-    // However, the address selected below should work for most existing Omicron
-    // deployments today.  That's because while the base subnet is in principle
-    // configurable in config-rss.toml, it's very uncommon to change it from the
-    // default value used here.
-    let subnet = Ipv6Subnet::new("fd00:1122:3344:0100::".parse().unwrap());
-    eprintln!("note: using DNS server for subnet {}", subnet.net());
-    internal_dns_resolver::Resolver::new_from_subnet(log.clone(), subnet)
-        .with_context(|| {
-            format!("creating DNS resolver for subnet {}", subnet.net())
-        })
+    // The internal DNS servers are populated in /etc/resolv.conf in the switch
+    // zone, which is where we expect live tests to run. Notify the user that
+    // we're going to attempt DNS resolution via the default system path.
+    eprintln!(
+        "note: using DNS from system config (typically /etc/resolv.conf)",
+    );
+    internal_dns_resolver::Resolver::new_from_system_conf(log.clone())
+        .context("creating DNS resolver from system config")
 }
 
 /// Creates a DataStore pointing at the CockroachDB cluster that's in DNS
