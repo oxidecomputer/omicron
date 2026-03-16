@@ -28,6 +28,7 @@ use diesel::pg::Pg;
 use diesel::prelude::*;
 use diesel::query_builder::{QueryFragment, QueryId};
 use diesel::query_dsl::methods::LoadQuery;
+use diesel::result::Error as DieselError;
 use diesel::{ExpressionMethods, QueryDsl};
 use iddqd::IdOrdMap;
 use nexus_db_errors::{ErrorHandler, public_error_from_diesel};
@@ -598,6 +599,42 @@ enum ValidateTransition {
     Yes,
     #[cfg(test)]
     No,
+}
+
+/// Result of a soft delete operation.
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum SoftDeleteResult {
+    /// The target row was updated by soft-deleting it.
+    SoftDeleteApplied,
+
+    /// The target row was already soft deleted.
+    AlreadySoftDeleted,
+
+    /// The target row does not exist.
+    ///
+    /// Depending on context, this may or may not be an error. See
+    /// [`SoftDeleteResult::into_did_soft_delete_bool()`] for a convenience
+    /// method to flatten this into an error.
+    NotFound,
+}
+
+impl SoftDeleteResult {
+    /// Flatten `self` into a `Result<_, _>` by the following mapping:
+    ///
+    /// * [`SoftDeleteResult::SoftDeleteApplied`] becomes `Ok(true)`
+    /// * [`SoftDeleteResult::AlreadySoftDeleted`] becomes `Ok(false)`
+    /// * [`SoftDeleteResult::NotFound`] becomes `Err(DieselError::NotFound)`
+    ///
+    /// This is consistent with existing APIs that want to return a
+    /// `Result<bool, _>` and treat an attempt to soft delete a nonexistent row
+    /// as an error.
+    pub fn into_did_soft_delete_bool(self) -> Result<bool, DieselError> {
+        match self {
+            Self::SoftDeleteApplied => Ok(true),
+            Self::AlreadySoftDeleted => Ok(false),
+            Self::NotFound => Err(DieselError::NotFound),
+        }
+    }
 }
 
 #[cfg(test)]
