@@ -49,7 +49,7 @@ async fn blueprint_load_target_impl(
     expect_enabled: bool,
 ) -> Result<Blueprint, anyhow::Error> {
     // Fetch the current target configuration.
-    info!(log, "editing current target blueprint");
+    info!(log, "loading current target blueprint");
     let target_blueprint = nexus
         .blueprint_target_view()
         .await

@@ -23,6 +23,7 @@ use serde::Deserialize;
 use sled_agent_types::inventory::ZoneKind;
 use slog::Logger;
 use slog::info;
+use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeSet;
 use std::time::Duration;
 use strum::IntoEnumIterator;
@@ -109,28 +110,38 @@ async fn test_execute_expunged_zone_of_kind(
     disable_blueprint_execution(nexus, log).await;
 
     let mut orig_zones_of_interest = None;
-    blueprint_edit_current_target_disabled(log, nexus, |builder| {
-        let zones_of_interest = ZonesOfInterest::from_zones(
-            builder.current_in_service_zones(),
-            zone_kind,
-        );
+    let (_, edit1) =
+        blueprint_edit_current_target_disabled(log, nexus, |builder| {
+            let zones_of_interest = ZonesOfInterest::from_zones(
+                builder.current_in_service_zones(),
+                zone_kind,
+            );
 
-        let (sled_id, zone_id) = zones_of_interest.pick_any_zone_to_expunge();
+            let (sled_id, zone_id) =
+                zones_of_interest.pick_any_zone_to_expunge();
 
-        builder
-            .sled_expunge_zone(sled_id, zone_id)
-            .context("expunging zone")?;
+            builder
+                .sled_expunge_zone(sled_id, zone_id)
+                .context("expunging zone")?;
 
-        orig_zones_of_interest = Some(zones_of_interest);
+            orig_zones_of_interest = Some(zones_of_interest);
 
-        Ok(())
-    })
-    .await
-    .expect("edited blueprint to expunge a zone");
+            Ok(())
+        })
+        .await
+        .expect("edited blueprint to expunge a zone");
     let orig_zones_of_interest = orig_zones_of_interest.unwrap();
+    info!(
+        log, "edited blueprint first time: expunged 1 zone";
+        "blueprint_id" => %edit1.id,
+    );
 
     // Run the planner.
     let planned_bp_1 = nexus.blueprint_regenerate().await.expect("ran planner");
+    info!(
+        log, "ran planner first time; expected one new zone to be placed";
+        "blueprint_id" => %planned_bp_1.id,
+    );
 
     // It should have added a new zone of the kind we care about.
     let plan1_zones_of_interest =
@@ -154,18 +165,28 @@ async fn test_execute_expunged_zone_of_kind(
         .expect("set new target");
 
     // Edit the newly-planned blueprint and expunge the zone it just added.
-    blueprint_edit_current_target_disabled(log, nexus, |builder| {
-        let (sled_id, zone_id) = plan1_zones_added.first().copied().unwrap();
-        builder
-            .sled_expunge_zone(sled_id, zone_id)
-            .context("expunging zone")?;
-        Ok(())
-    })
-    .await
-    .expect("edited blueprint to expunge a zone");
+    let (_, edit2) =
+        blueprint_edit_current_target_disabled(log, nexus, |builder| {
+            let (sled_id, zone_id) =
+                plan1_zones_added.first().copied().unwrap();
+            builder
+                .sled_expunge_zone(sled_id, zone_id)
+                .context("expunging zone")?;
+            Ok(())
+        })
+        .await
+        .expect("edited blueprint to expunge a zone");
+    info!(
+        log, "edited blueprint second time: expunged 1 zone";
+        "blueprint_id" => %edit2.id,
+    );
 
     // Run the planner again.
     let planned_bp_2 = nexus.blueprint_regenerate().await.expect("ran planner");
+    info!(
+        log, "ran planner second time; expected one new zone to be placed";
+        "blueprint_id" => %planned_bp_2.id,
+    );
 
     // It should have added a new zone of the kind we care about.
     let plan2_zones_of_interest =
@@ -179,7 +200,7 @@ async fn test_execute_expunged_zone_of_kind(
          but got {plan2_zones_added:?}"
     );
 
-    // Make that blueprint the target, but and finally enable execution.
+    // Make that blueprint the target, and finally enable execution.
     nexus
         .blueprint_target_set(&BlueprintTargetSet {
             enabled: true,
@@ -200,6 +221,10 @@ async fn test_execute_expunged_zone_of_kind(
 
             let details = match status {
                 LastResult::NeverCompleted => {
+                    info!(
+                        log,
+                        "still waiting for execution: task never completed"
+                    );
                     return Err(CondCheckError::NotYet);
                 }
                 LastResult::Completed(completed) => completed.details,
@@ -212,13 +237,34 @@ async fn test_execute_expunged_zone_of_kind(
                 event_report: EventReport<NestedSpec>,
             }
 
-            let details: BlueprintExecutorStatus =
-                serde_json::from_value(details)
-                    .expect("parsed details as JSON");
+            // We won't be able to parse the `details` we expect if the
+            // `bgtask_view()` we just executed is still returning the status
+            // from a previous execution attempt of a disabled blueprint, so
+            // return `NotYet` until we can parse them.
+            let details: BlueprintExecutorStatus = match serde_json::from_value(
+                details,
+            ) {
+                Ok(details) => details,
+                Err(err) => {
+                    info!(
+                        log,
+                        "still waiting for execution: failed to parse details";
+                        InlineErrorChain::new(&err),
+                    );
+                    return Err(CondCheckError::NotYet);
+                }
+            };
 
             // Make sure we're looking at the execution of the blueprint we care
             // about; otherwise, keep waiting.
             if details.target_id != planned_bp_2.id {
+                info!(
+                    log,
+                    "still waiting for execution: executed blueprint ID \
+                     does not match ID we're waiting for";
+                    "executed_id" => %details.target_id,
+                    "waiting_for_id" => %planned_bp_2.id,
+                );
                 return Err(CondCheckError::NotYet);
             }
 
@@ -266,6 +312,7 @@ async fn disable_blueprint_planning(
 
     if !current_config.config.planner_enabled {
         info!(log, "skipping disable of blueprint planning: already disabled");
+        return;
     }
 
     let new_config = ReconfiguratorConfigParam {
