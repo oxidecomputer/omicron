@@ -13,6 +13,7 @@ use nexus_db_queries::{authn, authz, db};
 use nexus_defaults as defaults;
 use nexus_types::external_api::{internet_gateway, vpc};
 use nexus_types::identity::Resource;
+use nexus_types::saga::saga_action_failed;
 use omicron_common::api::external;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::LookupType;
@@ -166,12 +167,12 @@ async fn svc_create_vpc(
         system_router_id,
         params.vpc_create.clone(),
     )
-    .map_err(ActionError::action_failed)?;
+    .map_err(saga_action_failed)?;
     let (authz_vpc, db_vpc) = osagactx
         .datastore()
         .project_create_vpc(&opctx, &params.authz_project, vpc)
         .await
-        .map_err(ActionError::action_failed)?;
+        .map_err(saga_action_failed)?;
     Ok((authz_vpc, db_vpc))
 }
 
@@ -228,7 +229,7 @@ async fn svc_create_router(
         .datastore()
         .vpc_create_router(&opctx, &authz_vpc, router)
         .await
-        .map_err(ActionError::action_failed)?;
+        .map_err(saga_action_failed)?;
     Ok(authz_router)
 }
 
@@ -316,7 +317,7 @@ async fn svc_create_route(
         .datastore()
         .router_create_route(&opctx, &authz_router, route)
         .await
-        .map_err(ActionError::action_failed)?;
+        .map_err(saga_action_failed)?;
     Ok(())
 }
 
@@ -363,7 +364,7 @@ async fn svc_create_subnet(
                 "Failed to allocate default IPv6 subnet",
             )
         })
-        .map_err(ActionError::action_failed)?;
+        .map_err(saga_action_failed)?;
 
     let subnet = db::model::VpcSubnet::new(
         default_subnet_id,
@@ -411,7 +412,7 @@ async fn svc_create_subnet(
             }
             InsertVpcSubnetError::External(e) => e,
         })
-        .map_err(ActionError::action_failed)
+        .map_err(saga_action_failed)
 }
 
 async fn svc_create_subnet_undo(
@@ -462,7 +463,7 @@ async fn svc_create_subnet_route(
             route_id,
         )
         .await
-        .map_err(ActionError::action_failed)
+        .map_err(saga_action_failed)
         .map(|(auth, ..)| auth)
 }
 
@@ -502,12 +503,12 @@ async fn svc_update_firewall(
             params.vpc_create.identity.name.clone().into(),
         )
         .await
-        .map_err(ActionError::action_failed)?;
+        .map_err(saga_action_failed)?;
     osagactx
         .datastore()
         .vpc_update_firewall_rules(&opctx, &authz_vpc, rules.clone())
         .await
-        .map_err(ActionError::action_failed)?;
+        .map_err(saga_action_failed)?;
 
     Ok(rules)
 }
@@ -560,7 +561,7 @@ async fn svc_create_gateway(
         .datastore()
         .vpc_create_internet_gateway(&opctx, &authz_vpc, igw)
         .await
-        .map_err(ActionError::action_failed)?;
+        .map_err(saga_action_failed)?;
 
     match osagactx.datastore().ip_pools_fetch_default(&opctx).await {
         Ok((authz_ip_pool, _db_ip_pool)) => {
@@ -584,7 +585,7 @@ async fn svc_create_gateway(
                     ),
                 )
                 .await
-                .map_err(ActionError::action_failed)?;
+                .map_err(saga_action_failed)?;
         }
         Err(e) => {
             warn!(
@@ -634,13 +635,13 @@ async fn svc_notify_sleds(
         .nexus()
         .send_sled_agents_firewall_rules(&opctx, &db_vpc, &rules, &[])
         .await
-        .map_err(ActionError::action_failed)?;
+        .map_err(saga_action_failed)?;
 
     osagactx
         .datastore()
         .vpc_increment_rpw_version(&opctx, db_vpc.id())
         .await
-        .map_err(ActionError::action_failed)?;
+        .map_err(saga_action_failed)?;
 
     Ok(())
 }

@@ -856,7 +856,7 @@ impl DiskAdopter for RealDiskAdopter<'_> {
                     log,
                     "Failed to read epoch from adopted disk";
                     "zpool" => %disk.zpool_name(),
-                    "error" => %e,
+                    InlineErrorChain::new(&e),
                 );
                 None
             }

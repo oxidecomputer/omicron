@@ -5,7 +5,7 @@
 //! Storage for the v0 bootstore scheme
 //!
 //! We write two pieces of data to M.2 devices in production via
-//! [`omicron_common::ledger::Ledger`]:
+//! [`omicron_ledger::Ledger`]:
 //!
 //!    1. [`super::State`] for bootstore state itself
 //!    2. A network config blob required for pre-rack-unlock configuration
@@ -15,7 +15,7 @@ use crate::schemes::v0::SharePkgCommon;
 
 use super::{Fsm, FsmConfig, State};
 use camino::Utf8PathBuf;
-use omicron_common::ledger::{Ledger, Ledgerable};
+use omicron_ledger::{Ledger, Ledgerable};
 use serde::{Deserialize, Serialize};
 use sled_hardware_types::Baseboard;
 use slog::{Logger, info, warn};

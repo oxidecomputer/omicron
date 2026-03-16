@@ -2,7 +2,7 @@
 #:
 #: name = "build-and-test (ubuntu-22.04)"
 #: variety = "basic"
-#: target = "ubuntu-22.04"
+#: target = "ubuntu-22.04-large"
 #: rust_toolchain = true
 #: output_rules = [
 #:	"%/work/*",
@@ -28,8 +28,8 @@
 #:
 #: [[publish]]
 #: series = "build-info-linux"
-#: name = "crate-build-timings.json"
-#: from_output = "/work/crate-build-timings.json"
+#: name = "cargo-build-analysis.jsonl"
+#: from_output = "/work/cargo-build-analysis.jsonl"
 #:
 #: [[publish]]
 #: series = "nextest-recording-linux"

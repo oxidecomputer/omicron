@@ -31,6 +31,7 @@ use sled_agent_config_reconciler::AvailableDatasetsReceiver;
 use sled_agent_config_reconciler::InternalDisksReceiver;
 use sled_agent_types::zone_bundle::*;
 use slog::Logger;
+use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::io::Cursor;
@@ -727,7 +728,7 @@ async fn create_zfs_snapshots(
                                     log,
                                     "failed to list datasets, will \
                                     unwind any previously created snapshots";
-                                    "error" => ?e,
+                                    &e,
                                 );
                                 assert!(
                                     maybe_err
@@ -776,7 +777,7 @@ async fn create_zfs_snapshots(
                     log,
                     "failed to get metadata for potential zone directory";
                     "zone_dir" => %zone_dir,
-                    "error" => ?e,
+                    InlineErrorChain::new(&e),
                 );
             }
         }
@@ -803,7 +804,7 @@ async fn cleanup_zfs_snapshots(log: &Logger, snapshots: &[Snapshot]) {
                 log,
                 "failed to destroy zone bundle ZFS snapshot";
                 "snapshot" => %snapshot,
-                "error" => ?e,
+                e,
             ),
         }
     }
@@ -943,7 +944,7 @@ async fn create(
                 "failed to create bundle file";
                 "zone" => zone.name(),
                 "file" => %full_path,
-                "error" => ?e,
+                InlineErrorChain::new(&e),
             );
             return Err(BundleError::OpenBundleFile {
                 path: full_path.to_owned(),
@@ -983,7 +984,7 @@ async fn create(
         );
         let output = match zone.run_cmd(cmd) {
             Ok(s) => s,
-            Err(e) => format!("{}", e),
+            Err(e) => InlineErrorChain::new(&e).to_string(),
         };
         let contents = format!("Command: {:?}\n{}", cmd, output).into_bytes();
         if let Err(e) = insert_data(&mut builder, cmd[0], &contents) {
@@ -1076,7 +1077,7 @@ async fn create(
             );
             let output = match zone.run_cmd(args) {
                 Ok(s) => s,
-                Err(e) => format!("{}", e),
+                Err(e) => InlineErrorChain::new(&e).to_string(),
             };
             let contents =
                 format!("Command: {:?}\n{}", args, output).into_bytes();
@@ -1139,7 +1140,7 @@ async fn create(
                         "failed to append log file to zone bundle";
                         "zone" => zone.name(),
                         "log_file" => %svc.log_file,
-                        "error" => ?e,
+                        InlineErrorChain::new(&e),
                     );
                 }
             }
@@ -1207,7 +1208,7 @@ async fn find_archived_log_files<'a, T: Iterator<Item = &'a Utf8PathBuf>>(
                         log,
                         "failed to read zone debug directory";
                         "directory" => ?dir,
-                        "reason" => ?e,
+                        "reason" => InlineErrorChain::new(&e),
                     );
                     continue;
                 }
@@ -1256,7 +1257,7 @@ async fn find_archived_log_files<'a, T: Iterator<Item = &'a Utf8PathBuf>>(
                             log,
                             "failed to fetch zone debug directory entry";
                             "directory" => ?dir,
-                            "reason" => ?e,
+                            "reason" => InlineErrorChain::new(&e),
                         );
                     }
                 }

@@ -34,101 +34,19 @@ pub struct EarlyNetworkConfig {
     pub body: EarlyNetworkConfigBody,
 }
 
-impl From<v1::EarlyNetworkConfig> for EarlyNetworkConfig {
-    fn from(value: v1::EarlyNetworkConfig) -> Self {
-        let rack_network_config =
-            value.body.rack_network_config.map(|v1_config| {
-                RackNetworkConfig {
-                    rack_subnet: v1_config.rack_subnet,
-                    infra_ip_first: std::net::IpAddr::V4(
-                        v1_config.infra_ip_first,
-                    ),
-                    infra_ip_last: std::net::IpAddr::V4(
-                        v1_config.infra_ip_last,
-                    ),
-                    ports: v1_config
-                        .ports
-                        .into_iter()
-                        .map(|p| PortConfig {
-                            routes: p.routes,
-                            addresses: p
-                                .addresses
-                                .into_iter()
-                                .map(|a| UplinkAddressConfig {
-                                    address: if a
-                                        .address
-                                        .addr()
-                                        .is_unspecified()
-                                    {
-                                        None
-                                    } else {
-                                        Some(a.address)
-                                    },
-                                    vlan_id: a.vlan_id,
-                                })
-                                .collect(),
-                            switch: p.switch,
-                            port: p.port,
-                            uplink_port_speed: p.uplink_port_speed,
-                            uplink_port_fec: p.uplink_port_fec,
-                            bgp_peers: p
-                                .bgp_peers
-                                .into_iter()
-                                .map(|peer| BgpPeerConfig {
-                                    asn: peer.asn,
-                                    port: peer.port,
-                                    addr: peer.addr.into(), // Ipv4Addr -> IpAddr
-                                    hold_time: peer.hold_time,
-                                    idle_hold_time: peer.idle_hold_time,
-                                    delay_open: peer.delay_open,
-                                    connect_retry: peer.connect_retry,
-                                    keepalive: peer.keepalive,
-                                    remote_asn: peer.remote_asn,
-                                    min_ttl: peer.min_ttl,
-                                    md5_auth_key: peer.md5_auth_key,
-                                    multi_exit_discriminator: peer
-                                        .multi_exit_discriminator,
-                                    communities: peer.communities,
-                                    local_pref: peer.local_pref,
-                                    enforce_first_as: peer.enforce_first_as,
-                                    allowed_import: peer.allowed_import,
-                                    allowed_export: peer.allowed_export,
-                                    vlan_id: peer.vlan_id,
-                                    router_lifetime: Default::default(),
-                                })
-                                .collect(),
-                            autoneg: p.autoneg,
-                            lldp: p.lldp,
-                            tx_eq: p.tx_eq,
-                        })
-                        .collect(),
-                    bgp: v1_config
-                        .bgp
-                        .into_iter()
-                        .map(|b| BgpConfig {
-                            asn: b.asn,
-                            originate: b
-                                .originate
-                                .iter()
-                                .map(|i| IpNet::V4(*i))
-                                .collect(),
-                            shaper: b.shaper,
-                            checker: b.checker,
-                            max_paths: MaxPathConfig::default(),
-                        })
-                        .collect(),
-                    bfd: v1_config.bfd,
-                }
-            });
+impl From<EarlyNetworkConfig> for bootstore::NetworkConfig {
+    fn from(value: EarlyNetworkConfig) -> Self {
+        // We're serializing in-memory; this can only fail if
+        // `EarlyNetworkConfig` contains types that can't be represented as
+        // JSON, which (a) should never happen and (b) we should catch
+        // immediately in tests.
+        let blob = serde_json::to_vec(&value)
+            .expect("EarlyNetworkConfig can always be serialized as JSON");
 
-        EarlyNetworkConfig {
-            generation: value.generation,
-            schema_version: value.schema_version,
-            body: EarlyNetworkConfigBody {
-                ntp_servers: value.body.ntp_servers,
-                rack_network_config,
-            },
-        }
+        // Yes this is duplicated, but that seems fine.
+        let generation = value.generation;
+
+        bootstore::NetworkConfig { generation, blob }
     }
 }
 
@@ -297,17 +215,10 @@ pub struct EarlyNetworkConfigBody {
     pub rack_network_config: Option<RackNetworkConfig>,
 }
 
-impl From<EarlyNetworkConfig> for bootstore::NetworkConfig {
-    fn from(value: EarlyNetworkConfig) -> Self {
-        // Can this ever actually fail?
-        // We literally just deserialized the same data in RSS
-        let blob = serde_json::to_vec(&value).unwrap();
-
-        // Yes this is duplicated, but that seems fine.
-        let generation = value.generation;
-
-        bootstore::NetworkConfig { generation, blob }
-    }
+// This impl must be here, not in the crate-level `impls` module, because every
+// version of `EarlyNetworkConfigBody` has its own distinct `SCHEMA_VERSION`.
+impl EarlyNetworkConfigBody {
+    pub const SCHEMA_VERSION: u32 = 2;
 }
 
 /// Initial network configuration
@@ -328,7 +239,9 @@ pub struct RackNetworkConfig {
     pub bfd: Vec<v1::BfdPeerConfig>,
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq, JsonSchema)]
+#[derive(
+    Clone, Debug, Deserialize, Serialize, PartialEq, Eq, Hash, JsonSchema,
+)]
 pub struct BgpPeerConfig {
     /// The autonomous system number of the router the peer belongs to.
     pub asn: u32,
@@ -383,14 +296,16 @@ pub struct BgpPeerConfig {
     pub router_lifetime: RouterLifetimeConfig,
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq, JsonSchema)]
+#[derive(
+    Clone, Debug, Deserialize, Serialize, PartialEq, Eq, Hash, JsonSchema,
+)]
 pub struct PortConfig {
     /// The set of routes associated with this port.
     pub routes: Vec<v1::RouteConfig>,
     /// This port's addresses and optional vlan IDs
     pub addresses: Vec<UplinkAddressConfig>,
     /// Switch the port belongs to.
-    pub switch: v1::SwitchLocation,
+    pub switch: v1::SwitchSlot,
     /// Nmae of the port this config applies to.
     pub port: String,
     /// Port speed.
@@ -433,10 +348,9 @@ impl From<v1::UplinkAddressConfig> for UplinkAddressConfig {
     }
 }
 
-#[derive(Debug, PartialEq, Eq, Deserialize, Serialize)]
-pub struct UplinkAddressConfigError(pub(crate) String);
-
-#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq, JsonSchema)]
+#[derive(
+    Clone, Debug, Deserialize, Serialize, PartialEq, Eq, Hash, JsonSchema,
+)]
 pub struct BgpConfig {
     /// The autonomous system number for the BGP configuration.
     pub asn: u32,
@@ -457,7 +371,7 @@ pub struct BgpConfig {
     pub max_paths: MaxPathConfig,
 }
 
-#[derive(Debug, Copy, Clone, Eq, PartialEq, Serialize)]
+#[derive(Debug, Copy, Clone, Eq, PartialEq, Hash, Serialize)]
 pub struct MaxPathConfig(u8);
 
 impl MaxPathConfig {
@@ -542,7 +456,7 @@ pub enum MaxPathConfigError {
 ///
 /// This value is used in IPv6 Router Advertisements to indicate how long
 /// the router should be considered valid by neighbors.
-#[derive(Debug, Copy, Clone, Eq, PartialEq, Serialize)]
+#[derive(Debug, Copy, Clone, Eq, PartialEq, Hash, Serialize)]
 pub struct RouterLifetimeConfig(u16);
 
 impl RouterLifetimeConfig {

@@ -16,7 +16,7 @@ use std::{collections::BTreeMap, sync::LazyLock};
 ///
 /// This must be updated when you change the database schema.  Refer to
 /// schema/crdb/README.adoc in the root of this repository for details.
-pub const SCHEMA_VERSION: Version = Version::new(234, 0, 0);
+pub const SCHEMA_VERSION: Version = Version::new(239, 0, 0);
 
 /// List of all past database schema versions, in *reverse* order
 ///
@@ -28,6 +28,14 @@ static KNOWN_VERSIONS: LazyLock<Vec<KnownVersion>> = LazyLock::new(|| {
         // |  leaving the first copy as an example for the next person.
         // v
         // KnownVersion::new(next_int, "unique-dirname-with-the-sql-files"),
+        KnownVersion::new(239, "fm-alert-request"),
+        KnownVersion::new(238, "fewer-nullable-columns"),
+        KnownVersion::new(237, "switch-slot-enum"),
+        KnownVersion::new(
+            236,
+            "remove-virtual-provisioning-time-modified-default",
+        ),
+        KnownVersion::new(235, "silo-user-group-provision-type-not-null"),
         KnownVersion::new(234, "inv-zpool-health"),
         KnownVersion::new(233, "measurement-blueprints"),
         KnownVersion::new(232, "index-backfill-batch-size"),
@@ -846,6 +854,7 @@ mod test {
     use super::*;
     use camino_tempfile::Utf8TempDir;
     use regex::Regex;
+    use slog_error_chain::InlineErrorChain;
     use sqlparser::ast::{
         AlterColumnOperation, AlterTableOperation, Statement, TableConstraint,
     };
@@ -1955,7 +1964,10 @@ mod test {
             // Read the up*.sql files from the directory.
             let mut up_files: Vec<_> = std::fs::read_dir(&version_path)
                 .unwrap_or_else(|e| {
-                    panic!("Cannot read directory {version_path}: {e}")
+                    panic!(
+                        "Cannot read directory {version_path}: {}",
+                        InlineErrorChain::new(&e)
+                    )
                 })
                 .filter_map(|entry| {
                     let entry = entry.unwrap();
@@ -1979,8 +1991,13 @@ mod test {
 
             for up_path in &up_files {
                 let label = up_path.file_name().unwrap();
-                let sql = std::fs::read_to_string(up_path)
-                    .unwrap_or_else(|e| panic!("Cannot read {up_path}: {e}"));
+                let sql =
+                    std::fs::read_to_string(up_path).unwrap_or_else(|e| {
+                        panic!(
+                            "Cannot read {up_path}: {}",
+                            InlineErrorChain::new(&e)
+                        )
+                    });
 
                 // Classify DDL statements.
                 let classified = classify_sql_statements(&sql, label)

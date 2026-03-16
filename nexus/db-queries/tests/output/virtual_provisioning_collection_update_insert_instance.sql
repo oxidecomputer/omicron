@@ -111,7 +111,7 @@ WITH
             ram_provisioned
           )
       VALUES
-        ($11, DEFAULT, $12, $13, $14, $15)
+        ($11, now(), $12, $13, $14, $15)
       ON CONFLICT
       DO
         NOTHING

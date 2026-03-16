@@ -7,6 +7,8 @@
 use nexus_db_queries::context::OpContext;
 use nexus_test_utils_macros::nexus_test;
 use nexus_types::identity::Asset;
+use omicron_test_utils::dev::poll::{CondCheckError, wait_for_condition};
+use std::time::Duration;
 
 type ControlPlaneTestContext =
     nexus_test_utils::ControlPlaneTestContext<omicron_nexus::Server>;
@@ -20,12 +22,21 @@ async fn test_sled_sp_inventory_matching(cptestctx: &ControlPlaneTestContext) {
     let opctx =
         OpContext::for_tests(cptestctx.logctx.log.new(o!()), datastore.clone());
 
-    // Get the latest inventory collection
-    let inventory = datastore
-        .inventory_get_latest_collection(&opctx)
-        .await
-        .expect("failed to get inventory collection")
-        .expect("no inventory collection available");
+    // Get the latest inventory collection. When running tests with high
+    // concurrency the inventory might not be ready yet, so we retry.
+    let inventory = wait_for_condition(
+        || async {
+            datastore
+                .inventory_get_latest_collection(&opctx)
+                .await
+                .expect("failed to get inventory collection")
+                .ok_or(CondCheckError::<()>::NotYet)
+        },
+        &Duration::from_millis(100),
+        &Duration::from_secs(30),
+    )
+    .await
+    .expect("no inventory collection available");
 
     // Get all sleds
     let sleds = datastore

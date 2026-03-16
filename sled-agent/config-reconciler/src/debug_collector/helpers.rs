@@ -13,6 +13,7 @@ use illumos_utils::dumpadm::{DumpAdm, DumpContentType};
 use illumos_utils::zone::ZONE_PREFIX;
 use illumos_utils::zpool::ZpoolName;
 use sled_storage::config::MountConfig;
+use slog_error_chain::SlogInlineError;
 use std::ffi::OsString;
 use zone::{Zone, ZoneError};
 
@@ -71,16 +72,16 @@ pub(super) trait ZfsInvoker {
     ) -> Utf8PathBuf;
 }
 
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug, thiserror::Error, SlogInlineError)]
 pub(super) enum ZfsGetError {
-    #[error("Error executing 'zfs get' command: {0}")]
+    #[error("Error executing 'zfs get' command")]
     IoError(#[from] std::io::Error),
     #[error(
         "Output of 'zfs get' was not only not an integer string, it wasn't \
-         even UTF-8: {0}"
+         even UTF-8"
     )]
     Utf8(#[from] std::string::FromUtf8Error),
-    #[error("Error parsing output of 'zfs get' command as integer: {0}")]
+    #[error("Error parsing output of 'zfs get' command as integer")]
     Parse(#[from] std::num::ParseIntError),
 }
 

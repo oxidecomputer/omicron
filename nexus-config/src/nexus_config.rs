@@ -22,7 +22,7 @@ use serde::{Deserialize, Serialize};
 use serde_with::DisplayFromStr;
 use serde_with::DurationSeconds;
 use serde_with::serde_as;
-use sled_agent_types::early_networking::SwitchLocation;
+use sled_agent_types::early_networking::SwitchSlot;
 use std::collections::HashMap;
 use std::fmt;
 use std::net::IpAddr;
@@ -435,6 +435,19 @@ pub struct BackgroundTaskConfig {
     pub trust_quorum: TrustQuorumConfig,
     /// configuration for the attached subnet manager
     pub attached_subnet_manager: AttachedSubnetManagerConfig,
+    /// configuration for console session cleanup task
+    pub session_cleanup: SessionCleanupConfig,
+}
+
+#[serde_as]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct SessionCleanupConfig {
+    /// period (in seconds) for periodic activations of the session cleanup task
+    #[serde_as(as = "DurationSeconds<u64>")]
+    pub period_secs: Duration,
+
+    /// maximum rows hard-deleted per activation
+    pub max_delete_per_activation: u32,
 }
 
 #[serde_as]
@@ -928,6 +941,11 @@ pub struct FmTasksConfig {
     /// garbage collects unneeded fault management sitreps in the database.
     #[serde_as(as = "DurationSeconds<u64>")]
     pub sitrep_gc_period_secs: Duration,
+    /// period (in seconds) for periodic activations of the background task that
+    /// updates externally-visible database tables to match the current situation
+    /// report.
+    #[serde_as(as = "DurationSeconds<u64>")]
+    pub rendezvous_period_secs: Duration,
 }
 
 impl Default for FmTasksConfig {
@@ -938,6 +956,9 @@ impl Default for FmTasksConfig {
             // time the current sitrep changes, and activating it more
             // frequently won't make things more responsive.
             sitrep_gc_period_secs: Duration::from_secs(600),
+            // This, too, is activated whenever a new sitrep is loaded, so we
+            // need not set the periodic activation interval too high.
+            rendezvous_period_secs: Duration::from_secs(300),
         }
     }
 }
@@ -1000,10 +1021,10 @@ pub struct PackageConfig {
     pub tunables: Tunables,
     /// `Dendrite` dataplane daemon configuration
     #[serde(default)]
-    pub dendrite: HashMap<SwitchLocation, DpdConfig>,
+    pub dendrite: HashMap<SwitchSlot, DpdConfig>,
     /// Maghemite mgd daemon configuration
     #[serde(default)]
-    pub mgd: HashMap<SwitchLocation, MgdConfig>,
+    pub mgd: HashMap<SwitchSlot, MgdConfig>,
     /// Initial reconfigurator config
     ///
     /// We use this hook to disable reconfigurator automation in the test suite
@@ -1250,8 +1271,11 @@ mod test {
             fm.sitrep_gc_period_secs = 49
             probe_distributor.period_secs = 50
             multicast_reconciler.period_secs = 60
+            fm.rendezvous_period_secs = 51
             trust_quorum.period_secs = 60
             attached_subnet_manager.period_secs = 60
+            session_cleanup.period_secs = 300
+            session_cleanup.max_delete_per_activation = 10000
             [default_region_allocation_strategy]
             type = "random"
             seed = 0
@@ -1335,14 +1359,14 @@ mod test {
                         load_timeout: None
                     },
                     dendrite: HashMap::from([(
-                        SwitchLocation::Switch0,
+                        SwitchSlot::Switch0,
                         DpdConfig {
                             address: SocketAddr::from_str("[::1]:12224")
                                 .unwrap(),
                         }
                     )]),
                     mgd: HashMap::from([(
-                        SwitchLocation::Switch0,
+                        SwitchSlot::Switch0,
                         MgdConfig {
                             address: SocketAddr::from_str("[::1]:4676")
                                 .unwrap(),
@@ -1500,6 +1524,7 @@ mod test {
                         fm: FmTasksConfig {
                             sitrep_load_period_secs: Duration::from_secs(48),
                             sitrep_gc_period_secs: Duration::from_secs(49),
+                            rendezvous_period_secs: Duration::from_secs(51),
                         },
                         probe_distributor: ProbeDistributorConfig {
                             period_secs: Duration::from_secs(50),
@@ -1514,6 +1539,10 @@ mod test {
                         },
                         attached_subnet_manager: AttachedSubnetManagerConfig {
                             period_secs: Duration::from_secs(60),
+                        },
+                        session_cleanup: SessionCleanupConfig {
+                            period_secs: Duration::from_secs(300),
+                            max_delete_per_activation: 10_000,
                         },
                     },
                     multicast: MulticastConfig { enabled: false },
@@ -1617,9 +1646,12 @@ mod test {
             fm.sitrep_load_period_secs = 45
             fm.sitrep_gc_period_secs = 46
             probe_distributor.period_secs = 47
+            fm.rendezvous_period_secs = 48
             multicast_reconciler.period_secs = 60
             trust_quorum.period_secs = 60
             attached_subnet_manager.period_secs = 60
+            session_cleanup.period_secs = 300
+            session_cleanup.max_delete_per_activation = 10000
 
             [default_region_allocation_strategy]
             type = "random"

@@ -552,32 +552,19 @@ async fn diesel_schema_matches_crdb_schema() {
     // investigated, not blindly regenerated.
 
     nullable_exceptions.sort();
-    let actual_nullable = format_list(&nullable_exceptions);
-    let expected_nullable =
-        std::fs::read_to_string("tests/output/schema_nullable_exceptions.txt")
-            .expect("failed to read schema_nullable_exceptions.txt");
-    similar_asserts::assert_eq!(
-        expected_nullable,
-        actual_nullable,
-        "Nullable exceptions list doesn't match expected.\n\n\
-         This file tracks columns where CRDB says NOT NULL but Diesel \
-         says Nullable. If this list changed, investigate whether the \
-         Diesel schema or CRDB schema should be fixed rather than \
-         updating the file."
+    assert!(
+        nullable_exceptions.is_empty(),
+        "Found columns where CRDB says NOT NULL but Diesel says Nullable. \
+         Fix the Diesel schema or CRDB schema rather than adding exceptions: \
+         {nullable_exceptions:?}"
     );
 
     column_order_drift.sort();
-    let actual_order = format_list(&column_order_drift);
-    let expected_order =
-        std::fs::read_to_string("tests/output/schema_column_order_drift.txt")
-            .expect("failed to read schema_column_order_drift.txt");
-    similar_asserts::assert_eq!(
-        expected_order,
-        actual_order,
-        "Column order drift list doesn't match expected.\n\n\
-         This file tracks tables where the column order in schema.rs \
-         differs from CRDB. If this list changed, investigate whether \
-         the column order should be fixed rather than updating the file."
+    assert!(
+        column_order_drift.is_empty(),
+        "Column order in schema.rs differs from CRDB for these tables: \
+         {column_order_drift:?}\n\n\
+         Fix the column order in schema.rs or dbinit.sql so they match."
     );
 
     mismatched_columns.sort();
@@ -596,16 +583,13 @@ async fn diesel_schema_matches_crdb_schema() {
     );
 
     // Print informational output about drift for visibility.
-    let total_drift = mismatched_columns.len() + column_order_drift.len();
-    if total_drift > 0 {
+    if !mismatched_columns.is_empty() {
         eprintln!(
-            "Known schema drift ({total_drift} item(s), fix when possible):"
+            "Known schema drift ({} item(s), fix when possible):",
+            mismatched_columns.len(),
         );
         for entry in &mismatched_columns {
             eprintln!("  {entry}");
-        }
-        for entry in &column_order_drift {
-            eprintln!("  {entry}: column ordering mismatch");
         }
     }
 

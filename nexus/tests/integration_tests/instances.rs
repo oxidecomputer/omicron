@@ -863,7 +863,6 @@ async fn test_instance_migrate(cptestctx: &ControlPlaneTestContext) {
             .instance_refetch(&opctx, &authz_instance)
             .await
             .unwrap()
-            .runtime_state
             .migration_id
             .expect("since we've started a migration, the instance record must have a migration id!")
     };
@@ -1056,7 +1055,6 @@ async fn test_instance_migrate_v2p_and_routes(
             .instance_refetch(&opctx, &authz_instance)
             .await
             .unwrap()
-            .runtime_state
             .migration_id
             .expect("since we've started a migration, the instance record must have a migration id!")
     };
@@ -1253,7 +1251,6 @@ async fn test_instance_migration_compatible_cpu_platforms(
             .instance_refetch(&opctx, &authz_instance)
             .await
             .unwrap()
-            .runtime_state
             .migration_id
             .expect("since we've started a migration, the instance record must have a migration id!")
     };
@@ -2376,7 +2373,6 @@ async fn test_instance_metrics_with_migration(
             .instance_refetch(&opctx, &authz_instance)
             .await
             .unwrap()
-            .runtime_state
             .migration_id
             .expect("since we've started a migration, the instance record must have a migration id!")
     };
@@ -8760,7 +8756,7 @@ pub async fn instance_wait_for_vmm_registration(
                 }
             };
 
-            if vmm.runtime.state == nexus_db_model::VmmState::Creating {
+            if vmm.state == nexus_db_model::VmmState::Creating {
                 debug!(
                     log,
                     "instance's active VMM is still Creating";
@@ -8773,7 +8769,7 @@ pub async fn instance_wait_for_vmm_registration(
                     "instance's active VMM is no longer Creating";
                     "instance_id" => %instance_id,
                     "vmm_id" => %vmm.id,
-                    "vmm_state" => ?vmm.runtime.state,
+                    "vmm_state" => ?vmm.state,
                 );
                 Ok(())
             }
@@ -9015,8 +9011,6 @@ pub async fn instance_simulate(nexus: &Arc<Nexus>, id: &InstanceUuid) {
 ///
 /// Returns an error instead of panicking if the sled agent communication fails.
 /// This is useful during test cleanup where the sled agent may be unavailable.
-// This is currently only consumed by tests behind the multicast feature gate.
-// If/when it has another consumer, this cfg can be removed.
 #[cfg(feature = "multicast")]
 pub async fn try_instance_simulate(
     nexus: &Arc<Nexus>,

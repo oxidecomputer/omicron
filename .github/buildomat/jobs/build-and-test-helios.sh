@@ -2,7 +2,7 @@
 #:
 #: name = "build-and-test (helios)"
 #: variety = "basic"
-#: target = "helios-2.0"
+#: target = "helios-2.0-32c256gb"
 #: rust_toolchain = true
 #: output_rules = [
 #:	"%/work/*",
@@ -29,8 +29,8 @@
 #:
 #: [[publish]]
 #: series = "build-info-helios"
-#: name = "crate-build-timings.json"
-#: from_output = "/work/crate-build-timings.json"
+#: name = "cargo-build-analysis.jsonl"
+#: from_output = "/work/cargo-build-analysis.jsonl"
 #:
 #: [[publish]]
 #: series = "live-tests"

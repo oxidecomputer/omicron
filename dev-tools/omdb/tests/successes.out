@@ -368,6 +368,11 @@ task: "external_endpoints"
     on each one
 
 
+task: "fm_rendezvous"
+    updates externally visible database tables to match the current fault
+    management sitrep
+
+
 task: "fm_sitrep_gc"
     garbage collects fault management situation reports
 
@@ -471,6 +476,10 @@ task: "service_firewall_rule_propagation"
 
 task: "service_zone_nat_tracker"
     ensures service zone nat records are recorded in NAT RPW table
+
+
+task: "session_cleanup"
+    hard-deletes expired console sessions based on absolute timeout
 
 
 task: "sp_ereport_ingester"
@@ -683,6 +692,12 @@ task: "external_endpoints"
 
     TLS certificates: 0
 
+task: "fm_rendezvous"
+  configured period: every <REDACTED_DURATION>m
+  last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    no FM situation report loaded
+
 task: "fm_sitrep_gc"
   configured period: every <REDACTED_DURATION>s
   last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
@@ -884,6 +899,14 @@ task: "service_zone_nat_tracker"
   last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     last completion reported error: inventory collection is None
+
+task: "session_cleanup"
+  configured period: every <REDACTED_DURATION>m
+  last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    deleted: 0
+    cutoff:  <REDACTED_TIMESTAMP>
+    limit:   10000
 
 task: "sp_ereport_ingester"
   configured period: every <REDACTED_DURATION>s
@@ -1275,6 +1298,12 @@ task: "external_endpoints"
 
     TLS certificates: 0
 
+task: "fm_rendezvous"
+  configured period: every <REDACTED_DURATION>m
+  last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    no FM situation report loaded
+
 task: "fm_sitrep_gc"
   configured period: every <REDACTED_DURATION>s
   last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
@@ -1476,6 +1505,14 @@ task: "service_zone_nat_tracker"
   last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     last completion reported error: inventory collection is None
+
+task: "session_cleanup"
+  configured period: every <REDACTED_DURATION>m
+  last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    deleted: 0
+    cutoff:  <REDACTED_TIMESTAMP>
+    limit:   10000
 
 task: "sp_ereport_ingester"
   configured period: every <REDACTED_DURATION>s

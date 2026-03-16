@@ -8,6 +8,7 @@ use crate::{ExecutionError, PFEXEC, execute_async};
 use camino::{Utf8Path, Utf8PathBuf};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use slog_error_chain::SlogInlineError;
 use std::fmt::Display;
 use std::str::FromStr;
 use tokio::process::Command;
@@ -22,9 +23,9 @@ pub const ZPOOL_MOUNTPOINT_ROOT: &str = "/";
 #[error("Failed to parse output: {0}")]
 pub struct ParseError(String);
 
-#[derive(thiserror::Error, Debug)]
+#[derive(thiserror::Error, Debug, SlogInlineError)]
 pub enum Error {
-    #[error("Zpool execution error: {0}")]
+    #[error("Zpool execution error")]
     Execution(#[from] crate::ExecutionError),
 
     #[error(transparent)]
@@ -35,28 +36,28 @@ pub enum Error {
 }
 
 #[derive(thiserror::Error, Debug)]
-#[error("Failed to create zpool: {err}")]
+#[error("Failed to create zpool")]
 pub struct CreateError {
     #[from]
     err: Error,
 }
 
 #[derive(thiserror::Error, Debug)]
-#[error("Failed to destroy zpool: {err}")]
+#[error("Failed to destroy zpool")]
 pub struct DestroyError {
     #[from]
     err: Error,
 }
 
 #[derive(thiserror::Error, Debug)]
-#[error("Failed to list zpools: {err}")]
+#[error("Failed to list zpools")]
 pub struct ListError {
     #[from]
     err: Error,
 }
 
 #[derive(thiserror::Error, Debug)]
-#[error("Failed to get info for zpool '{name}': {err}")]
+#[error("Failed to get info for zpool '{name}'")]
 pub struct GetInfoError {
     name: String,
     #[source]

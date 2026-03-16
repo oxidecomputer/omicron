@@ -26,6 +26,7 @@ use nexus_db_model::{MulticastGroup, UnderlayMulticastGroup};
 use nexus_db_queries::authn;
 use nexus_db_queries::db::datastore::multicast::members::SourceFilterState;
 use nexus_types::identity::Resource;
+use nexus_types::saga::saga_action_failed;
 use omicron_common::api::external::Error;
 use omicron_uuid_kinds::{GenericUuid, MulticastGroupUuid};
 
@@ -133,7 +134,7 @@ async fn mgde_fetch_group_data(
         .datastore()
         .pool_connection_authorized(&opctx)
         .await
-        .map_err(ActionError::action_failed)?;
+        .map_err(saga_action_failed)?;
 
     // Fetch both groups on same connection for consistent state view
     // (sequential fetches since using same connection)
@@ -141,13 +142,13 @@ async fn mgde_fetch_group_data(
         .datastore()
         .multicast_group_fetch_on_conn(&conn, params.external_group_id)
         .await
-        .map_err(ActionError::action_failed)?;
+        .map_err(saga_action_failed)?;
 
     let underlay_group = osagactx
         .datastore()
         .underlay_multicast_group_fetch_on_conn(&conn, params.underlay_group_id)
         .await
-        .map_err(ActionError::action_failed)?;
+        .map_err(saga_action_failed)?;
 
     // Validate groups are in correct state
     match external_group.state {
@@ -160,10 +161,10 @@ async fn mgde_fetch_group_data(
                 "external_group_name" => external_group.name().as_str(),
                 "current_state" => ?other_state
             );
-            return Err(ActionError::action_failed(format!(
+            return Err(saga_action_failed(Error::internal_error(&format!(
                 "External group {} is in state {other_state:?}, expected 'Creating'",
                 params.external_group_id
-            )));
+            ))));
         }
     }
 
@@ -176,7 +177,7 @@ async fn mgde_fetch_group_data(
         .datastore()
         .multicast_groups_source_filter_state(&opctx, &[group_id])
         .await
-        .map_err(ActionError::action_failed)?;
+        .map_err(saga_action_failed)?;
     let source_filter = filter_state_map
         .get(&params.external_group_id)
         .cloned()
@@ -212,7 +213,7 @@ async fn mgde_update_dataplane(
         osagactx.log().clone(),
     )
     .await
-    .map_err(ActionError::action_failed)?;
+    .map_err(saga_action_failed)?;
 
     debug!(
         osagactx.log(),
@@ -230,7 +231,7 @@ async fn mgde_update_dataplane(
     let (underlay_response, external_response) = dataplane
         .create_groups(&external_group, &underlay_group, &source_filter)
         .await
-        .map_err(ActionError::action_failed)?;
+        .map_err(saga_action_failed)?;
 
     debug!(
         osagactx.log(),
@@ -258,9 +259,7 @@ async fn mgde_rollback_dataplane(
         sagactx.lookup::<GroupData>("group_data")?;
 
     let multicast_tag = external_group.tag.clone().ok_or_else(|| {
-        ActionError::action_failed(Error::internal_error(
-            "multicast group missing tag",
-        ))
+        saga_action_failed(Error::internal_error("multicast group missing tag"))
     })?;
 
     // Use MulticastDataplaneClient for consistent cleanup
@@ -269,7 +268,7 @@ async fn mgde_rollback_dataplane(
         osagactx.log().clone(),
     )
     .await
-    .map_err(ActionError::action_failed)?;
+    .map_err(saga_action_failed)?;
 
     debug!(
         osagactx.log(),
@@ -322,7 +321,7 @@ async fn mgde_update_group_state(
             MulticastGroupUuid::from_untyped_uuid(params.external_group_id),
         )
         .await
-        .map_err(ActionError::action_failed)?;
+        .map_err(saga_action_failed)?;
 
     debug!(
         osagactx.log(),

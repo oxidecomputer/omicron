@@ -6,6 +6,7 @@ use super::{ActionRegistry, NexusActionContext, NexusSaga};
 use crate::app::sagas;
 use crate::app::sagas::declare_saga_actions;
 use nexus_db_queries::{authn, authz, db};
+use nexus_types::saga::saga_action_failed;
 use serde::Deserialize;
 use serde::Serialize;
 use steno::ActionError;
@@ -131,7 +132,7 @@ async fn ssd_delete_snapshot_record(
             ],
         )
         .await
-        .map_err(ActionError::action_failed)?;
+        .map_err(saga_action_failed)?;
     Ok(())
 }
 
@@ -153,7 +154,7 @@ async fn ssd_account_space(
             params.snapshot.size,
         )
         .await
-        .map_err(ActionError::action_failed)?;
+        .map_err(saga_action_failed)?;
     Ok(())
 }
 

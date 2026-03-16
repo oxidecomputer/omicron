@@ -26,6 +26,7 @@ wicket.workspace = true
 # used only by wicket-dbg binary
 reedline.workspace = true
 omicron-workspace-hack.workspace = true
+slog-error-chain.workspace = true
 
 [[bin]]
 name = "wicket-dbg"

@@ -232,6 +232,29 @@ where
         .unwrap()
 }
 
+/// Like [`object_put`], but expects 201 Created instead of 200 OK.
+pub async fn object_put_upsert<InputType, OutputType>(
+    client: &ClientTestContext,
+    path: &str,
+    input: &InputType,
+) -> OutputType
+where
+    InputType: serde::Serialize,
+    OutputType: serde::de::DeserializeOwned,
+{
+    NexusRequest::new(
+        RequestBuilder::new(client, Method::PUT, path)
+            .body(Some(input))
+            .expect_status(Some(StatusCode::CREATED)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap_or_else(|e| panic!("failed to make \"PUT\" request to {path}: {e}"))
+    .parsed_body()
+    .unwrap()
+}
+
 pub async fn object_put_error<InputType>(
     client: &ClientTestContext,
     path: &str,
@@ -1844,6 +1867,10 @@ impl<'a, N: NexusServer> DiskTest<'a, N> {
                 TestDataset {
                     id: DatasetUuid::new_v4(),
                     kind: DatasetKind::Debug,
+                },
+                TestDataset {
+                    id: DatasetUuid::new_v4(),
+                    kind: DatasetKind::LocalStorageUnencrypted,
                 },
             ],
             gibibytes,
