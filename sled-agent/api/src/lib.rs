@@ -862,7 +862,7 @@ pub trait SledAgentApi {
         versions = VERSION_STRONGER_BGP_UNNUMBERED_TYPES..,
         operation_id = "write_network_bootstore_config",
     }]
-    async fn write_network_bootstore_config_v28(
+    async fn write_network_bootstore_config_v29(
         rqctx: RequestContext<Self::Context>,
         body: TypedBody<v29::early_networking::WriteNetworkConfigRequest>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
