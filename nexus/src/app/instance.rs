@@ -84,6 +84,7 @@ use sagas::instance_update;
 use sled_agent_client::types::DelegatedZvol;
 use sled_agent_client::types::InstanceMigrationTargetParams;
 use sled_agent_client::types::VmmPutStateBody;
+use slog_error_chain::InlineErrorChain;
 use std::collections::{HashMap, HashSet};
 use std::matches;
 use std::net::IpAddr;
@@ -135,7 +136,9 @@ impl From<SledAgentInstanceError> for dropshot::HttpError {
                 // a 4xx error. So, instead, we construct an internal error and
                 // then munge its status code.
                 // See https://github.com/oxidecomputer/dropshot/issues/693
-                let mut error = HttpError::for_internal_error(e.to_string());
+                let mut error = HttpError::for_internal_error(
+                    InlineErrorChain::new(&e).to_string(),
+                );
                 error.status_code = if e.is_timeout() {
                     ErrorStatusCode::GATEWAY_TIMEOUT
                 } else {
@@ -3104,7 +3107,7 @@ mod tests {
     fn test_instance_start_allowed_when_no_vmm() {
         let logctx = test_setup_log("test_instance_start_allowed_when_no_vmm");
         let (mut instance, _vmm) = make_instance_and_vmm();
-        instance.runtime_state.nexus_state = DbInstanceState::NoVmm;
+        instance.nexus_state = DbInstanceState::NoVmm;
         let state = InstanceAndActiveVmm::from((instance, None));
         assert!(
             instance_start_allowed(
@@ -3123,8 +3126,8 @@ mod tests {
             "test_instance_start_allowed_when_vmm_in_saga_unwound",
         );
         let (mut instance, mut vmm) = make_instance_and_vmm();
-        instance.runtime_state.nexus_state = DbInstanceState::Vmm;
-        instance.runtime_state.propolis_id = Some(vmm.id);
+        instance.nexus_state = DbInstanceState::Vmm;
+        instance.propolis_id = Some(vmm.id);
         vmm.state = DbVmmState::SagaUnwound;
         let state = InstanceAndActiveVmm::from((instance, Some(vmm)));
         assert!(
@@ -3143,7 +3146,7 @@ mod tests {
         let logctx =
             test_setup_log("test_instance_start_forbidden_while_creating");
         let (mut instance, _vmm) = make_instance_and_vmm();
-        instance.runtime_state.nexus_state = DbInstanceState::Creating;
+        instance.nexus_state = DbInstanceState::Creating;
         let state = InstanceAndActiveVmm::from((instance, None));
         assert!(
             instance_start_allowed(
@@ -3160,8 +3163,8 @@ mod tests {
     fn test_instance_start_idempotent_if_active() {
         let logctx = test_setup_log("test_instance_start_idempotent_if_active");
         let (mut instance, mut vmm) = make_instance_and_vmm();
-        instance.runtime_state.nexus_state = DbInstanceState::Vmm;
-        instance.runtime_state.propolis_id = Some(vmm.id);
+        instance.nexus_state = DbInstanceState::Vmm;
+        instance.propolis_id = Some(vmm.id);
         vmm.state = DbVmmState::Starting;
         let state =
             InstanceAndActiveVmm::from((instance.clone(), Some(vmm.clone())));

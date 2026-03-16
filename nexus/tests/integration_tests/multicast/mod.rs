@@ -706,7 +706,7 @@ pub(crate) async fn wait_for_instance_sled_assignment(
                         log,
                         "instance exists but has no VMM yet";
                         "instance_id" => %instance_id,
-                        "instance_state" => ?instance.runtime_state.nexus_state.state()
+                        "instance_state" => ?instance.nexus_state.state()
                     );
                     Err(CondCheckError::<String>::NotYet)
                 }

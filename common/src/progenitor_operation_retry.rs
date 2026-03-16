@@ -5,6 +5,7 @@
 use futures::Future;
 use slog::Logger;
 use slog::warn;
+use slog_error_chain::InlineErrorChain;
 
 use crate::api::external::Error;
 use crate::backoff::BackoffError;
@@ -82,7 +83,7 @@ pub struct ProgenitorOperationRetry<
 
 impl<T, E, F, Fut, BF, BFut> ProgenitorOperationRetry<T, E, F, Fut, BF, BFut>
 where
-    E: std::fmt::Debug,
+    E: std::fmt::Debug + 'static,
     F: FnMut() -> Fut,
     Fut: Future<Output = Result<T, progenitor_client010::Error<E>>>,
     BF: FnMut() -> BFut,
@@ -123,8 +124,8 @@ where
                         Err(progenitor_client010::Error::CommunicationError(e)) => {
                             warn!(
                                 log,
-                                "saw transient communication error {}, retrying...",
-                                e,
+                                "saw transient communication error, retrying...";
+                                InlineErrorChain::new(&e),
                             );
 
                             Err(BackoffError::transient(
@@ -162,7 +163,7 @@ where
                         }
 
                         Err(e) => {
-                            warn!(log, "saw permanent error {}, aborting", e,);
+                            warn!(log, "saw permanent error, aborting"; InlineErrorChain::new(&e),);
 
                             Err(BackoffError::Permanent(
                                 ProgenitorOperationRetryError::ProgenitorError(e)
@@ -176,7 +177,7 @@ where
             |error: ProgenitorOperationRetryError<E>, delay| {
                 warn!(
                     log,
-                    "failed external call ({:?}), will retry in {:?}", error, delay,
+                    "failed external call, will retry in {:?}", delay; InlineErrorChain::new(&error),
                 );
             },
         )

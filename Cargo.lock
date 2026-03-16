@@ -1681,7 +1681,7 @@ version = "3.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "faf9468729b8cbcea668e36183cb69d317348c2e08e994829fb56ebfdfbaac34"
 dependencies = [
- "windows-sys 0.48.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -1718,7 +1718,7 @@ dependencies = [
 [[package]]
 name = "common"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/dendrite?rev=c0bf0a3b536baab0393c96fec3204b32e4f9368b#c0bf0a3b536baab0393c96fec3204b32e4f9368b"
+source = "git+https://github.com/oxidecomputer/dendrite?rev=b31ba90d14636ef6bba9dbb56d756efa249d4b4e#b31ba90d14636ef6bba9dbb56d756efa249d4b4e"
 dependencies = [
  "anyhow",
  "chrono",
@@ -2780,14 +2780,15 @@ dependencies = [
 
 [[package]]
 name = "diesel"
-version = "2.2.12"
+version = "2.3.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "229850a212cd9b84d4f0290ad9d294afc0ae70fccaa8949dbe8b43ffafa1e20c"
+checksum = "f4ae09a41a4b89f94ec1e053623da8340d996bc32c6517d325a9daad9b239358"
 dependencies = [
  "bitflags 2.11.0",
  "byteorder",
  "chrono",
  "diesel_derives",
+ "downcast-rs",
  "ipnetwork",
  "itoa",
  "libc",
@@ -2799,22 +2800,21 @@ dependencies = [
 
 [[package]]
 name = "diesel-dtrace"
-version = "0.4.2"
+version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2750c8bd7a42381620b57f370ca5f757a71d554814e02a43c1bf54ae2656e01d"
+checksum = "ad133aac01dc021635883f73c10aabdd8fa8fad689e7cadc3149a77f4b074d26"
 dependencies = [
  "diesel",
  "serde",
- "usdt 0.5.0",
+ "usdt 0.6.0",
  "uuid",
- "version_check",
 ]
 
 [[package]]
 name = "diesel_derives"
-version = "2.2.7"
+version = "2.3.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1b96984c469425cb577bf6f17121ecb3e4fe1e81de5d8f780dd372802858d756"
+checksum = "47618bf0fac06bb670c036e48404c26a865e6a71af4114dfd97dfe89936e404e"
 dependencies = [
  "diesel_table_macro_syntax",
  "dsl_auto_type",
@@ -2825,9 +2825,9 @@ dependencies = [
 
 [[package]]
 name = "diesel_table_macro_syntax"
-version = "0.2.0"
+version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "209c735641a413bc68c4923a9d6ad4bcb3ca306b794edaa7eb0b3228a99ffb25"
+checksum = "fe2444076b48641147115697648dc743c2c00b61adade0f01ce67133c7babe8c"
 dependencies = [
  "syn 2.0.117",
 ]
@@ -2944,6 +2944,7 @@ dependencies = [
  "slog",
  "slog-async",
  "slog-envlogger",
+ "slog-error-chain",
  "slog-term",
  "subprocess",
  "tempfile",
@@ -3021,6 +3022,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "downcast-rs"
+version = "2.0.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "117240f60069e65410b3ae1bb213295bd828f707b5bec6596a1afc8793ce0cbc"
+
+[[package]]
 name = "dpd-client"
 version = "0.1.0"
 source = "git+https://github.com/oxidecomputer/dendrite?branch=main#f20f786e67c86388dfaaf0ef3aa9d2693dfe1da4"
@@ -3047,11 +3054,11 @@ dependencies = [
 [[package]]
 name = "dpd-client"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/dendrite?rev=c0bf0a3b536baab0393c96fec3204b32e4f9368b#c0bf0a3b536baab0393c96fec3204b32e4f9368b"
+source = "git+https://github.com/oxidecomputer/dendrite?rev=b31ba90d14636ef6bba9dbb56d756efa249d4b4e#b31ba90d14636ef6bba9dbb56d756efa249d4b4e"
 dependencies = [
  "async-trait",
  "chrono",
- "common 0.1.0 (git+https://github.com/oxidecomputer/dendrite?rev=c0bf0a3b536baab0393c96fec3204b32e4f9368b)",
+ "common 0.1.0 (git+https://github.com/oxidecomputer/dendrite?rev=b31ba90d14636ef6bba9dbb56d756efa249d4b4e)",
  "crc8",
  "futures",
  "http",
@@ -3220,11 +3227,11 @@ dependencies = [
 
 [[package]]
 name = "dsl_auto_type"
-version = "0.1.3"
+version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "139ae9aca7527f85f26dd76483eb38533fd84bd571065da1739656ef71c5ff5b"
+checksum = "dd122633e4bef06db27737f21d3738fb89c8f6d5360d6d9d7635dda142a7757e"
 dependencies = [
- "darling 0.20.11",
+ "darling 0.21.3",
  "either",
  "heck 0.5.0",
  "proc-macro2",
@@ -3499,7 +3506,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -3930,6 +3937,7 @@ dependencies = [
  "serde_json",
  "slog",
  "slog-async",
+ "slog-error-chain",
  "slog-term",
  "termios",
  "tokio",
@@ -4042,6 +4050,7 @@ dependencies = [
  "omicron-workspace-hack",
  "qorb",
  "slog",
+ "slog-error-chain",
  "sp-sim",
  "tokio",
  "uuid",
@@ -4956,7 +4965,7 @@ dependencies = [
  "libc",
  "percent-encoding",
  "pin-project-lite",
- "socket2 0.5.10",
+ "socket2 0.6.2",
  "system-configuration",
  "tokio",
  "tower-layer",
@@ -5565,6 +5574,7 @@ dependencies = [
  "omicron-workspace-hack",
  "proptest",
  "serde",
+ "slog-error-chain",
  "test-strategy",
  "thiserror 2.0.18",
  "tufaceous-artifact",
@@ -5619,7 +5629,7 @@ checksum = "3640c1c38b8e4e43584d8df18be5fc6b0aa314ce6ebf51b53313d4306cca8e46"
 dependencies = [
  "hermit-abi 0.5.2",
  "libc",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -5696,7 +5706,7 @@ dependencies = [
  "portable-atomic",
  "portable-atomic-util",
  "serde_core",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -7537,7 +7547,7 @@ dependencies = [
  "crucible-agent-client",
  "dns-server",
  "dns-service-client",
- "dpd-client 0.1.0 (git+https://github.com/oxidecomputer/dendrite?rev=c0bf0a3b536baab0393c96fec3204b32e4f9368b)",
+ "dpd-client 0.1.0 (git+https://github.com/oxidecomputer/dendrite?rev=b31ba90d14636ef6bba9dbb56d756efa249d4b4e)",
  "dropshot",
  "futures",
  "gateway-messages",
@@ -7841,7 +7851,7 @@ version = "0.50.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7957b9740744892f114936ab4a57b3f487491bbeafaf8083688b16841a4240e5"
 dependencies = [
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -8401,6 +8411,7 @@ dependencies = [
  "serde",
  "serde_json",
  "slog",
+ "slog-error-chain",
  "thiserror 2.0.18",
  "tokio",
 ]
@@ -8491,7 +8502,7 @@ dependencies = [
  "display-error-chain",
  "dns-server",
  "dns-service-client",
- "dpd-client 0.1.0 (git+https://github.com/oxidecomputer/dendrite?rev=c0bf0a3b536baab0393c96fec3204b32e4f9368b)",
+ "dpd-client 0.1.0 (git+https://github.com/oxidecomputer/dendrite?rev=b31ba90d14636ef6bba9dbb56d756efa249d4b4e)",
  "dropshot",
  "ereport-types",
  "expectorate",
@@ -9128,6 +9139,7 @@ dependencies = [
  "serde",
  "sha2",
  "slog",
+ "slog-error-chain",
  "subprocess",
  "tar",
  "tempfile",
@@ -11317,7 +11329,7 @@ dependencies = [
  "quinn-udp",
  "rustc-hash",
  "rustls 0.23.37",
- "socket2 0.5.10",
+ "socket2 0.6.2",
  "thiserror 2.0.18",
  "tokio",
  "tracing",
@@ -11355,9 +11367,9 @@ dependencies = [
  "cfg_aliases 0.2.1",
  "libc",
  "once_cell",
- "socket2 0.5.10",
+ "socket2 0.6.2",
  "tracing",
- "windows-sys 0.52.0",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -12272,7 +12284,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys 0.11.0",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -12375,7 +12387,7 @@ dependencies = [
  "security-framework",
  "security-framework-sys",
  "webpki-root-certs",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -13509,6 +13521,7 @@ dependencies = [
  "serde",
  "sled-storage",
  "slog",
+ "slog-error-chain",
  "thiserror 2.0.18",
  "tokio",
  "zfs-test-harness",
@@ -13863,6 +13876,7 @@ dependencies = [
  "sha3",
  "slog",
  "slog-dtrace",
+ "slog-error-chain",
  "thiserror 2.0.18",
  "tokio",
  "toml 0.8.23",
@@ -14448,7 +14462,7 @@ dependencies = [
  "getrandom 0.4.1",
  "once_cell",
  "rustix 1.1.3",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -14468,7 +14482,7 @@ version = "1.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d8c27177b12a6399ffc08b98f76f7c9a1f4fe9fc967c784c5a071fa8d93cf7e1"
 dependencies = [
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -16552,6 +16566,7 @@ dependencies = [
  "slog",
  "slog-async",
  "slog-envlogger",
+ "slog-error-chain",
  "slog-term",
  "supports-color 3.0.2",
  "tempfile",
@@ -16575,7 +16590,7 @@ name = "wicket-common"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "dpd-client 0.1.0 (git+https://github.com/oxidecomputer/dendrite?rev=c0bf0a3b536baab0393c96fec3204b32e4f9368b)",
+ "dpd-client 0.1.0 (git+https://github.com/oxidecomputer/dendrite?rev=b31ba90d14636ef6bba9dbb56d756efa249d4b4e)",
  "dropshot",
  "gateway-client",
  "gateway-types",
@@ -16616,6 +16631,7 @@ dependencies = [
  "slog",
  "slog-async",
  "slog-envlogger",
+ "slog-error-chain",
  "slog-term",
  "tokio",
  "wicket",
@@ -16637,7 +16653,7 @@ dependencies = [
  "clap",
  "debug-ignore",
  "display-error-chain",
- "dpd-client 0.1.0 (git+https://github.com/oxidecomputer/dendrite?rev=c0bf0a3b536baab0393c96fec3204b32e4f9368b)",
+ "dpd-client 0.1.0 (git+https://github.com/oxidecomputer/dendrite?rev=b31ba90d14636ef6bba9dbb56d756efa249d4b4e)",
  "dropshot",
  "either",
  "expectorate",
@@ -16689,6 +16705,7 @@ dependencies = [
  "sled-storage",
  "slog",
  "slog-dtrace",
+ "slog-error-chain",
  "subprocess",
  "tar",
  "thiserror 2.0.18",
@@ -16782,7 +16799,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.48.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

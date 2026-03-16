@@ -473,13 +473,13 @@ derive-where = "1.5.0"
 dev-tools-common = { path = "dev-tools/common" }
 dice-verifier = { git = "https://github.com/oxidecomputer/dice-util", branch = "main", default-features = false }
 # Having the i-implement-... feature here makes diesel go away from the workspace-hack
-diesel = { version = "2.2.12", features = ["i-implement-a-third-party-backend-and-opt-into-breaking-changes", "postgres", "r2d2", "chrono", "serde_json", "network-address", "uuid"] }
-diesel-dtrace = "0.4.2"
+diesel = { version = "2.3.7", features = ["i-implement-a-third-party-backend-and-opt-into-breaking-changes", "postgres", "r2d2", "chrono", "serde_json", "network-address", "uuid"] }
+diesel-dtrace = "0.5.0"
 digest = "0.10.7"
 dns-server = { path = "dns-server" }
 dns-server-api = { path = "dns-server-api" }
 dns-service-client = { path = "clients/dns-service-client" }
-dpd-client = { git = "https://github.com/oxidecomputer/dendrite", rev = "c0bf0a3b536baab0393c96fec3204b32e4f9368b" }
+dpd-client = { git = "https://github.com/oxidecomputer/dendrite", rev = "b31ba90d14636ef6bba9dbb56d756efa249d4b4e" }
 dropshot = { version = "0.16.6", features = [ "usdt-probes" ] }
 dropshot-api-manager = "0.6.0"
 dropshot-api-manager-types = "0.6.0"

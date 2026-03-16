@@ -19,7 +19,8 @@ use crate::db::pagination::{paginated, paginated_multicolumn};
 use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::DateTime;
 use chrono::Utc;
-use diesel::dsl::{count_distinct, min};
+use diesel::AggregateExpressionMethods;
+use diesel::dsl::{count, min};
 use diesel::prelude::*;
 use nexus_db_errors::ErrorHandler;
 use nexus_db_errors::public_error_from_diesel;
@@ -242,7 +243,7 @@ impl DataStore {
                 dsl::restart_id,
                 model::Reporter::as_select(),
                 min(dsl::time_collected),
-                count_distinct(dsl::ena),
+                count(dsl::ena).aggregate_distinct(),
             ))
             .order_by(dsl::restart_id)
     }
