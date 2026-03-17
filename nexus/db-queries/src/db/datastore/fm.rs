@@ -6,18 +6,8 @@
 //! reports (sitreps).
 //!
 //! See [RFD 603](https://rfd.shared.oxide.computer/rfd/0603) for details on the
-//! fault management sitrep.
-//!
-//! # Conventions
-//!
-//! Methods with an `_on_conn` suffix take an explicit database connection
-//! parameter. In other parts of the codebase this suffix sometimes implies the
-//! method is called within a transaction, but that isn't always the case here.
-//! In the FM datastore, `_on_conn` methods exist primarily so that multiple
-//! queries can share the same connection for consistency (e.g. loading a sitrep
-//! reads child records first and metadata last on the same connection, to
-//! detect concurrent deletes without requiring a transaction, see
-//! [`DataStore::fm_sitrep_read_on_conn`] and issue #9594).
+//! fault management sitrep, and the [datastore module documentation](super) for
+//! general conventions.
 
 use super::DataStore;
 use crate::authz;

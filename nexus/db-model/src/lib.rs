@@ -2,7 +2,82 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! Structures stored to the database.
+// We only use rustdoc for internal documentation, including private items, so
+// it's expected that we'll have links to private items in the docs.
+#![allow(rustdoc::private_intra_doc_links)]
+
+//! Rust types that represent rows in the Omicron database (CockroachDB).
+//!
+//! Each struct in this crate maps to a database table. The table's columns and
+//! SQL types are declared in [`nexus_db_schema`] via Diesel's
+//! [`table!`](diesel::table) macro; the struct here provides the corresponding
+//! Rust types. `nexus_db_queries` then uses both to build and execute
+//! queries in its `DataStore` methods.
+//!
+//! # How the mapping works
+//!
+//! Consider the `vmm` table. The schema declares columns and SQL types:
+//!
+//! ```text
+//! // in nexus-db-schema
+//! table! {
+//!     vmm (id) {
+//!         id -> Uuid,
+//!         sled_id -> Uuid,
+//!         state_generation -> Int8,
+//!         state -> VmmStateEnum,
+//!         ...
+//!     }
+//! }
+//! ```
+//!
+//! The model struct provides the Rust representation of a row:
+//!
+//! ```text
+//! // in nexus-db-model
+//! #[derive(Queryable, Insertable, Selectable)]
+//! #[diesel(table_name = vmm)]
+//! pub struct Vmm {
+//!     pub id: Uuid,
+//!     pub sled_id: DbTypedUuid<SledKind>,
+//!     #[diesel(column_name = state_generation)]
+//!     pub generation: Generation,
+//!     pub state: VmmState,
+//!     ...
+//! }
+//! ```
+//!
+//! A few things to note:
+//!
+//! - **Type translation.** Each field's Rust type must implement Diesel's
+//!   [`FromSql`](diesel::deserialize::FromSql) and
+//!   [`ToSql`](diesel::serialize::ToSql) traits for the corresponding column's
+//!   SQL type. Diesel provides these impls for common types (`Uuid`,
+//!   `DateTime<Utc>`, `String`, etc.); this crate defines wrapper types like
+//!   [`DbTypedUuid`] for domain-specific conversions
+//!   (e.g. distinguishing a sled UUID from any other UUID).
+//! - **Column renaming.** Field names must match column names by default, but
+//!   `#[diesel(column_name = ...)]` allows the Rust name to differ (e.g.
+//!   `generation` for the `state_generation` column).
+//! - **Positional mapping.** [`diesel::Queryable`] maps SQL result columns to
+//!   struct fields by position, not by name. If the field order doesn't match
+//!   the column order in the query, fields will silently receive wrong values.
+//!   Deriving [`diesel::Selectable`] mitigates this by generating an explicit
+//!   column list, so the result columns are always in the order `Queryable`
+//!   expects. **Always derive both.**
+//!
+//! # Field ordering convention
+//!
+//! Fields in `Queryable`/`Insertable` structs should be ordered to match the
+//! column order in `dbinit.sql`. This keeps the Rust types easy to
+//! cross-reference with the schema definition and prevents subtle bugs if a
+//! query ever omits `Selectable`.
+//!
+//! # Representing enums
+//!
+//! For types that map to database enum columns, see the [`impl_enum_type!`]
+//! and [`impl_enum_wrapper!`] macros defined below. For string-backed enums,
+//! see the [`DatabaseString`] trait.
 
 #[macro_use]
 extern crate diesel;
