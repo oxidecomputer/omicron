@@ -281,9 +281,9 @@ impl UplinkAddressConfig {
 
     /// Format `self` appropriately for passing to `uplinkd`'s SMF properties.
     pub fn to_uplinkd_smf_property(&self) -> String {
-        let addr: &dyn fmt::Display = match self.address {
+        let addr: &dyn fmt::Display = match &self.address {
             UplinkAddress::LinkLocal => &"link-local",
-            UplinkAddress::Address { ip_net } => &ip_net.addr(),
+            UplinkAddress::Address { ip_net } => ip_net,
         };
 
         match self.vlan_id {
