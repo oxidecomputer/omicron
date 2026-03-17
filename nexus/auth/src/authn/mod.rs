@@ -372,6 +372,7 @@ mod test {
     use super::USER_DB_INIT;
     use super::USER_INTERNAL_API;
     use super::USER_INTERNAL_READ;
+    use super::USER_OMDB;
     use super::USER_SAGA_RECOVERY;
     use super::USER_SERVICE_BALANCER;
     use super::USER_TEST_PRIVILEGED;
@@ -419,6 +420,10 @@ mod test {
         let authn = Context::internal_api();
         let actor = authn.actor().unwrap();
         assert_eq!(actor.built_in_user_id(), Some(USER_INTERNAL_API.id));
+
+        let authn = Context::omdb();
+        let actor = authn.actor().unwrap();
+        assert_eq!(actor.built_in_user_id(), Some(USER_OMDB.id));
     }
 }
 

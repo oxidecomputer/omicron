@@ -229,7 +229,7 @@ impl OpContext {
         }
     }
 
-    /// Returns a context for use by omdb (the operator debug tool).
+    /// Returns a context for use by omdb (the debugging tool).
     pub fn for_omdb(
         log: slog::Logger,
         datastore: Arc<dyn Storage>,

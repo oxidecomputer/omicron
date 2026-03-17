@@ -122,16 +122,6 @@ impl oso::PolarClass for AuthenticatedActor {
                 },
                 "USER_INTERNAL_API",
             )
-            .add_constant(
-                AuthenticatedActor {
-                    actor: authn::Actor::UserBuiltin {
-                        user_builtin_id: authn::USER_OMDB.id,
-                    },
-                    roles: RoleSet::new(),
-                    silo_policy: None,
-                },
-                "USER_OMDB",
-            )
             // This is meant to guard against the SCIM actor being able to see
             // the full resource hierarchy due to implicit grants in the Polar
             // file. There are "if actor.is_user" guards to prevent this.

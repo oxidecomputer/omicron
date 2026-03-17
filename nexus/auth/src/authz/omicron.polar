@@ -804,15 +804,6 @@ has_role(USER_DB_INIT: AuthenticatedActor, "admin", _silo: Silo);
 # Allow the internal API admin permissions on all silos.
 has_role(USER_INTERNAL_API: AuthenticatedActor, "admin", _silo: Silo);
 
-# USER_OMDB is the identity omdb uses when constructing an OpContext for
-# datastore calls. This identity is only assumed in-process by the omdb binary
-# itself — it cannot be presented over HTTP or any external authentication
-# scheme. omdb itself connects directly to CockroachDB, so the authz checks are
-# not really a security boundary; they happen only because omdb calls datastore
-# functions and those contain authz checks. We grant fleet admin because some
-# omdb commands require it.
-has_role(USER_OMDB: AuthenticatedActor, "admin", _fleet: Fleet);
-
 resource WebhookSecret {
 	permissions = [ "read", "modify" ];
 	relations = { parent_alert_receiver: AlertReceiver };

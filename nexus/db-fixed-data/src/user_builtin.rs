@@ -94,13 +94,13 @@ pub static USER_EXTERNAL_AUTHN: LazyLock<UserBuiltinConfig> =
         )
     });
 
-/// Built-in user for omdb (the Oxide operator debug tool)
+/// Built-in user for omdb (the Omicron debugger)
 pub static USER_OMDB: LazyLock<UserBuiltinConfig> = LazyLock::new(|| {
     UserBuiltinConfig::new_static(
         // "00db" for "omdb"
         "001de000-05e4-4000-8000-0000000000db",
         "omdb",
-        "used by the omdb operator debug tool",
+        "used by the omdb debug tool",
     )
 });
 
