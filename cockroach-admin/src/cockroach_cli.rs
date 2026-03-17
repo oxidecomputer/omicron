@@ -170,12 +170,21 @@ impl CockroachCli {
                 "node status",
             )
             .await?;
-        for err in errs {
+        if !errs.is_empty() {
             warn!(
                 log,
-                "skipping row from `node status --all` due to parse error";
-                InlineErrorChain::new(&err),
+                "partial failure parsing `node status --all` output: \
+                 successfully parsed {} of {} rows",
+                statuses.len(),
+                statuses.len() + errs.len(),
             );
+            for err in errs {
+                warn!(
+                    log,
+                    "skipped row from `node status --all` due to parse error";
+                    InlineErrorChain::new(&err),
+                );
+            }
         }
         Ok(statuses)
     }

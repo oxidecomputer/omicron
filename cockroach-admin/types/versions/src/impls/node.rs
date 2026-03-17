@@ -63,9 +63,9 @@ impl NodeStatus {
 
         // We want to intentionally omit any decommissioned nodes: they
         // shouldn't be returned as either `NodeStatus` rows _or_ parse errors.
-        // We expect them to produce parse errors (they're report a socket
-        // address of `NULL`), so we'll check for decommissioned before
-        // attempting to parse.
+        // We expect them to produce parse errors (they report a socket address
+        // of `NULL`), so we'll check for decommissioned before attempting to
+        // parse.
         let headers =
             reader.headers().map_err(NodeStatusError::ParseHeaderRow)?.clone();
         let Some(membership_idx) =
