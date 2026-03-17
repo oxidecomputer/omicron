@@ -10,7 +10,8 @@ use sled_agent_types::early_networking::{
     BgpConfig, BgpPeerConfig, EarlyNetworkConfigBody,
     EarlyNetworkConfigEnvelope, ImportExportPolicy, LldpAdminStatus,
     LldpPortConfig, MaxPathConfig, PortConfig, PortFec, PortSpeed,
-    RackNetworkConfig, RouterPeerAddress, SwitchSlot, UplinkAddressConfig,
+    RackNetworkConfig, RouterPeerAddress, SwitchSlot, UplinkAddress,
+    UplinkAddressConfig,
 };
 
 const BLOB_PATH: &str = "tests/data/early_network_blobs.txt";
@@ -123,7 +124,7 @@ fn early_network_blobs_deserialize() {
 /// future, older blobs can still be deserialized correctly.
 fn current_config_example() -> (&'static str, EarlyNetworkConfigEnvelope) {
     // NOTE: the description must not contain commas or newlines.
-    let description = "2026-02-27 pre-r19";
+    let description = "2026-03-17 pre-r19";
     let config = EarlyNetworkConfigEnvelope::from(&EarlyNetworkConfigBody {
         rack_network_config: RackNetworkConfig {
             rack_subnet: "fd00:1122:3344:100::/56".parse().unwrap(),
@@ -164,9 +165,10 @@ fn current_config_example() -> (&'static str, EarlyNetworkConfigEnvelope) {
                 },
                 PortConfig {
                     routes: vec![],
-                    addresses: vec![UplinkAddressConfig::without_vlan(
-                        "172.20.15.53/29".parse().unwrap(),
-                    )],
+                    addresses: vec![UplinkAddressConfig {
+                        address: UplinkAddress::LinkLocal,
+                        vlan_id: Some(1),
+                    }],
                     switch: SwitchSlot::Switch1,
                     port: "qsfp18".to_owned(),
                     uplink_port_speed: PortSpeed::Speed100G,
@@ -174,9 +176,7 @@ fn current_config_example() -> (&'static str, EarlyNetworkConfigEnvelope) {
                     bgp_peers: vec![BgpPeerConfig {
                         asn: 65002,
                         port: "qsfp18".to_owned(),
-                        addr: RouterPeerAddress::Numbered {
-                            ip: "172.20.15.51".parse().unwrap(),
-                        },
+                        addr: RouterPeerAddress::Unnumbered,
                         hold_time: Some(6),
                         idle_hold_time: Some(3),
                         delay_open: Some(3),
@@ -194,7 +194,7 @@ fn current_config_example() -> (&'static str, EarlyNetworkConfigEnvelope) {
                             "172.20.52.0/22".parse().unwrap(),
                             "172.20.26.0/24".parse().unwrap(),
                         ]),
-                        vlan_id: None,
+                        vlan_id: Some(1),
                         router_lifetime: Default::default(),
                     }],
                     autoneg: false,
