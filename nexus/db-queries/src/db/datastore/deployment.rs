@@ -2387,13 +2387,12 @@ impl DataStore {
     /// Delete `bp_target` rows older than the given version
     pub async fn bp_target_delete_older(
         &self,
-        opctx: &OpContext,
-        version: u32,
+        _opctx: &OpContext,
+        _version: u32,
     ) -> Result<usize, Error> {
         // XXX-dap can this datastore function somehow predicate on this *NOT*
         // being the max version?
-        // XXX-dap
-        todo!();
+        todo!(); // XXX-dap
     }
 
 }

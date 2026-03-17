@@ -849,10 +849,9 @@ impl slog::KV for BlueprintPrunerDetails {
     fn serialize(
         &self,
         _record: &slog::Record,
-        serializer: &mut dyn slog::Serializer,
+        _serializer: &mut dyn slog::Serializer,
     ) -> slog::Result {
-        // XXX-dap
-        todo!();
+        todo!(); // XXX-dap
     }
 }
 
