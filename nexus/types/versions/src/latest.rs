@@ -233,7 +233,6 @@ pub mod multicast {
     pub use crate::v2026_01_08_00::multicast::MulticastGroupPath;
     pub use crate::v2026_01_08_00::multicast::MulticastGroupSelector;
 
-    // Types from MULTICAST_DROP_MVLAN (mvlan field removed).
     pub use crate::v2026_03_14_00::multicast::MulticastGroup;
     pub use crate::v2026_03_14_00::multicast::MulticastGroupCreate;
     pub use crate::v2026_03_14_00::multicast::MulticastGroupUpdate;

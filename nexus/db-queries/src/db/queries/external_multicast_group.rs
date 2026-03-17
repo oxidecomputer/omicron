@@ -298,3 +298,61 @@ impl Query for NextExternalMulticastGroup {
 }
 
 impl RunQueryDsl<DbConnection> for NextExternalMulticastGroup {}
+
+#[cfg(test)]
+mod tests {
+    use super::NextExternalMulticastGroup;
+
+    use omicron_common::api::external;
+
+    use crate::db::model::{
+        IncompleteExternalMulticastGroup,
+        IncompleteExternalMulticastGroupParams, Name, Vni,
+    };
+    use crate::db::raw_query_builder::expectorate_query_contents;
+
+    const GROUP_ID: uuid::Uuid =
+        uuid::uuid!("45633e04-3087-47eb-9d1e-8436fb090108");
+    const POOL_ID: uuid::Uuid =
+        uuid::uuid!("789fdb15-9790-4df1-9d06-c1ecd72c94ae");
+
+    #[tokio::test]
+    async fn expectorate_next_external_multicast_group_automatic() {
+        let group = IncompleteExternalMulticastGroup::new(
+            IncompleteExternalMulticastGroupParams {
+                id: GROUP_ID,
+                name: Name("mcast-test".parse().unwrap()),
+                description: String::from("test multicast group"),
+                ip_pool_id: POOL_ID,
+                explicit_address: None,
+                vni: Vni(external::Vni::DEFAULT_MULTICAST_VNI),
+            },
+        );
+        let query = NextExternalMulticastGroup::new(group);
+        expectorate_query_contents(
+            query,
+            "tests/output/next_external_multicast_group_automatic.sql",
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn expectorate_next_external_multicast_group_explicit() {
+        let group = IncompleteExternalMulticastGroup::new(
+            IncompleteExternalMulticastGroupParams {
+                id: GROUP_ID,
+                name: Name("mcast-test".parse().unwrap()),
+                description: String::from("test multicast group"),
+                ip_pool_id: POOL_ID,
+                explicit_address: Some("239.1.1.1".parse().unwrap()),
+                vni: Vni(external::Vni::DEFAULT_MULTICAST_VNI),
+            },
+        );
+        let query = NextExternalMulticastGroup::new(group);
+        expectorate_query_contents(
+            query,
+            "tests/output/next_external_multicast_group_explicit.sql",
+        )
+        .await;
+    }
+}
