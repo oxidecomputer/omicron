@@ -470,7 +470,7 @@ async fn prune_batch(
     // Prune as many blueprints as we can from that page.  If we deleted no
     // blueprints, then there's nothing else to do here.
     let batch_result =
-        prune_batch_blueprints(pargs, &pop, candidates).await.into_inner();
+        prune_batch_blueprints(pargs, &mut pop, candidates).await.into_inner();
     if let Some(deleted_up_to) = batch_result.highest_version_deleted {
         // At this point, we know that the blueprints associated with
         // `bp_target` rows up to version `deleted_up_to` have been deleted.  We
@@ -512,25 +512,18 @@ async fn prune_batch(
 
 /// Keeps track of the state of pruning blueprints from one batch of bp_target
 /// rows
-struct BatchPruneOp {
-    ntargets_removable: usize,
-    deleted: Vec<DeletedBlueprint>,
-    error: Option<anyhow::Error>,
+struct BatchPruneOp<'a> {
+    pop: &'a mut PruneOp,
     highest_version_deleted: Option<u32>,
 }
 
-impl BatchPruneOp {
-    pub fn new(pop: &PruneOp) -> Self {
-        BatchPruneOp {
-            ntargets_removable: pop.ntargets_removable,
-            deleted: vec![],
-            error: None,
-            highest_version_deleted: None,
-        }
+impl<'a> BatchPruneOp<'a> {
+    pub fn new(pop: &'a mut PruneOp) -> Self {
+        BatchPruneOp { pop, highest_version_deleted: None }
     }
 
     pub fn record_blueprint_deleted(
-        mut self,
+        self,
         target: BpTarget,
     ) -> Result<Self, BatchPruneResult> {
         // Record the deleted blueprint before checking the version because it
@@ -539,9 +532,9 @@ impl BatchPruneOp {
             id: BlueprintUuid::from(target.blueprint_id),
             time_made_target: target.time_made_target,
         };
-        self.deleted.push(deleted);
-        let mut rv = self.new_highest_version(*target.version)?;
-        rv.ntargets_removable += 1;
+        self.pop.deleted.push(deleted);
+        let rv = self.new_highest_version(*target.version)?;
+        rv.pop.ntargets_removable += 1;
         Ok(rv)
     }
 
@@ -549,8 +542,8 @@ impl BatchPruneOp {
         self,
         target: BpTarget,
     ) -> Result<Self, BatchPruneResult> {
-        let mut rv = self.new_highest_version(*target.version)?;
-        rv.ntargets_removable += 1;
+        let rv = self.new_highest_version(*target.version)?;
+        rv.pop.ntargets_removable += 1;
         Ok(rv)
     }
 
@@ -568,36 +561,22 @@ impl BatchPruneOp {
         Ok(self)
     }
 
-    pub fn record_error(
-        mut self,
-        error: anyhow::Error,
-    ) -> BatchPruneResult {
-        self.error = Some(error);
+    pub fn record_error(self, error: anyhow::Error) -> BatchPruneResult {
+        // XXX-dap use record_error()?
+        self.pop.errors.push(error);
         self.finish(BatchStopReason::Error)
     }
 
     pub fn finish(self, stop_reason: BatchStopReason) -> BatchPruneResult {
         BatchPruneResult {
             stop_reason,
-            ntargets_removable: self.ntargets_removable,
-            deleted: self.deleted,
-            error: self.error,
             highest_version_deleted: self.highest_version_deleted,
         }
     }
 }
 
-// XXX-dap several of these fields aren't used.
-// I think maybe the better approach is to have this hold a mutable reference to
-// the BatchPruneOp and update that directly.
-// Alternatively (or in addition): the caller needs to update the BatchOp with
-// this BatchPruneResult.  But that's a little goofy since the function that
-// returns this (prune_batch_blueprints) already has access to `pop`.
 pub struct BatchPruneResult {
     stop_reason: BatchStopReason,
-    ntargets_removable: usize,
-    deleted: Vec<DeletedBlueprint>,
-    error: Option<anyhow::Error>,
     highest_version_deleted: Option<u32>,
 }
 
@@ -614,7 +593,7 @@ pub struct BatchPruneResult {
 /// any blueprint that was deleted.  Otherwise, returns `None`.
 async fn prune_batch_blueprints(
     pargs: &PruneArgs<'_>,
-    pop: &PruneOp,
+    pop: &mut PruneOp,
     bp_target_rows: Vec<BpTarget>,
 ) -> Result<BatchPruneResult, BatchPruneResult> {
     let PruneArgs { opctx, datastore, log, .. } = pargs;
@@ -624,7 +603,7 @@ async fn prune_batch_blueprints(
             return Err(batch.finish(BatchStopReason::OutOfPruneable));
         }
 
-        if batch.ntargets_removable >= pargs.max_delete_attempts {
+        if batch.pop.ntargets_removable >= pargs.max_delete_attempts {
             return Err(batch.finish(BatchStopReason::DeleteLimit));
         }
 
