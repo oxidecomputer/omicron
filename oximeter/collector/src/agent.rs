@@ -703,18 +703,10 @@ mod tests {
     // collections which fail in the "unreachability" test below.
     const N_COLLECTIONS: u64 = 5;
 
-    /// Pause time and advance it one collection at a time, waiting for
-    /// each collection to complete before advancing to the next.
-    ///
-    /// This avoids the flake described in #8636, where blindly advancing
-    /// time could cause the collection timer to fire while a previous
-    /// collection was still in-flight, overflowing the bounded channel
-    /// and recording spurious `FailedCollection` entries.
-    ///
-    /// The approach: advance time in small increments until the details
-    /// watch channel signals that a collection completed, then repeat.
-    /// By waiting for each collection to finish before continuing, we
-    /// ensure the channel is drained before the next timer tick fires.
+    /// Maximum simulated time to wait for a collection to complete.
+    const COLLECTION_TIMEOUT: Duration = Duration::from_secs(60);
+
+    /// Return a watch receiver for the given producer's collection details.
     fn details_watcher(
         collector: &OximeterAgent,
         id: Uuid,
@@ -728,12 +720,27 @@ mod tests {
             .details_watcher()
     }
 
+    /// Pause time and advance it one collection at a time, waiting for each
+    /// collection to complete before advancing to the next. Time is
+    /// intentionally left paused when this function returns, since some callers
+    /// (e.g. `verify_producer_details`) continue to advance time manually
+    /// afterward.
+    ///
+    /// This avoids the flake described in #8636, where blindly advancing time
+    /// could cause the collection timer to fire while a previous collection was
+    /// still in-flight, overflowing the bounded channel and recording spurious
+    /// `FailedCollection` entries.
+    ///
+    /// The approach: advance time in small increments until the details watch
+    /// channel signals that a collection completed, then repeat. By waiting for
+    /// each collection to finish before continuing, we ensure the channel is
+    /// drained before the next timer tick fires.
     async fn advance_n_collections(
         collector: &OximeterAgent,
         id: Uuid,
         n: u64,
     ) {
-        const TIMEOUT: Duration = Duration::from_secs(60);
+        const TIMEOUT: Duration = COLLECTION_TIMEOUT;
         let mut details_rx = details_watcher(collector, id);
         // Mark current state as seen so has_changed() only reflects
         // new updates from this point forward.
@@ -750,7 +757,9 @@ mod tests {
                     start.elapsed(),
                 );
                 tokio::time::advance(TICK_INTERVAL).await;
-                if details_rx.has_changed().unwrap_or(false) {
+                if details_rx.has_changed().expect(
+                    "producer details watch channel closed unexpectedly",
+                ) {
                     details_rx.borrow_and_update();
                     break;
                 }
@@ -1006,9 +1015,8 @@ mod tests {
         assert_eq!(error_count, N_COLLECTIONS);
 
         let server_count = collection_count.load(Ordering::SeqCst);
-        assert!(
-            error_count as usize == server_count
-                || error_count as usize + 1 == server_count,
+        assert_eq!(
+            error_count as usize, server_count,
             "number of collections reported by the collection \
             task ({error_count}) differs from the number reported by the \
             always-ded producer server itself ({server_count})"
@@ -1171,24 +1179,21 @@ mod tests {
         );
 
         let mut details_rx = details_watcher(&collector, id);
-        // Use borrow() (not borrow_and_update()) so we don't clear the
-        // "seen" flag — we want has_changed() to fire for the upcoming
-        // update_producer_info notification from re-registration too.
-        let n_before = details_rx.borrow().n_collections;
         let start = Instant::now();
         loop {
             assert!(
-                start.elapsed() < Duration::from_secs(60),
+                start.elapsed() < COLLECTION_TIMEOUT,
                 "timed out waiting for collection from re-registered producer",
             );
             tokio::time::advance(TICK_INTERVAL).await;
-            if details_rx.has_changed().unwrap_or(false) {
-                let details = details_rx.borrow_and_update().clone();
+            if details_rx
+                .has_changed()
+                .expect("producer details watch channel closed unexpectedly")
+            {
+                details_rx.borrow_and_update();
                 // Only break once a new collection has actually completed
                 // (not just a producer info update).
-                if details.n_collections > n_before
-                    && collection_count.load(Ordering::SeqCst) >= 1
-                {
+                if collection_count.load(Ordering::SeqCst) >= 1 {
                     break;
                 }
             }
