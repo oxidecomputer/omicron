@@ -17,6 +17,8 @@ setup = 'crdb-seed'
 
 [profile.ci]
 fail-fast = false
+retries = 2
+flaky-result = "fail"
 
 [profile.ci.junit]
 path = "junit.xml"
