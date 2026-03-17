@@ -632,11 +632,27 @@ impl Client {
         //
         // To avoid this, we have to split large groups of keys into pages, and
         // concatenate the results ourself.
+        //
+        // However, if there are no field predicates, we can skip the IN clause
+        // entirely: the field lookup returns all keys for the timeseries, and
+        // without field predicates we want all of them anyway. This avoids
+        // chunking overhead (multiple round trips, SQL parsing) and reduces
+        // ClickHouse work (fewer overlapping granule scans).
+        let has_field_predicates = consistent_key_groups.iter().any(|g| {
+            g.predicates
+                .as_ref()
+                .and_then(|p| Self::rewrite_predicate_for_fields(schema, p).ok())
+                .flatten()
+                .is_some()
+        });
+        let chunks = if has_field_predicates {
+            chunk_consistent_key_groups(consistent_key_groups)
+        } else {
+            vec![consistent_key_groups.to_vec()]
+        };
         let mut n_measurements: u64 = 0;
         let mut summaries = Vec::new();
-        for key_group_chunk in
-            chunk_consistent_key_groups(consistent_key_groups)
-        {
+        for key_group_chunk in chunks {
             let measurements_query = self.measurements_query(
                 schema,
                 &key_group_chunk,
@@ -705,7 +721,11 @@ impl Client {
         let mut out = BTreeMap::new();
         for (key, measurements) in measurements_by_key.into_iter() {
             // Constuct a new timeseries, from the target/metric info.
-            let (target, metric) = info.get(&key).unwrap();
+            // When the IN clause is skipped (no field predicates), measurement
+            // rows may return keys not in the field lookup. Skip these silently.
+            let Some((target, metric)) = info.get(&key) else {
+                continue;
+            };
             let mut timeseries = oxql_types::Timeseries::new(
                 target
                     .fields
@@ -761,6 +781,11 @@ impl Client {
         //
         // We join all the consistent key groups with OR, which mirrors how they
         // were split originally.
+        //
+        // If there are no field predicates, we skip the IN clause entirely.
+        // The field lookup returns all keys for the timeseries, and without
+        // field predicates we want all of them anyway. This avoids SQL parsing
+        // overhead and reduces ClickHouse granule scans.
         let all_predicates = consistent_key_groups
             .iter()
             .map(|group| {
@@ -776,22 +801,35 @@ impl Client {
                     .transpose()?
                     .flatten();
 
+                // Check if there are field predicates for this group. Only
+                // include the IN clause when filtering by field predicates.
+                let has_field_predicates = group
+                    .predicates
+                    .as_ref()
+                    .map(|p| Self::rewrite_predicate_for_fields(schema, p))
+                    .transpose()?
+                    .flatten()
+                    .is_some();
+
                 // Push the predicate that selects the timeseries keys, which
-                // are unique to this group.
-                let maybe_key_set = if !group.consistent_keys.is_empty() {
-                    let mut chunk = String::from("timeseries_key IN (");
-                    let keys = group
-                        .consistent_keys
-                        .keys()
-                        .map(ToString::to_string)
-                        .collect::<Vec<_>>()
-                        .join(",");
-                    chunk.push_str(&keys);
-                    chunk.push(')');
-                    Some(chunk)
-                } else {
-                    None
-                };
+                // are unique to this group. Skip when there are no field
+                // predicates, since we want all keys in that case.
+                let maybe_key_set =
+                    if !group.consistent_keys.is_empty() && has_field_predicates
+                    {
+                        let mut chunk = String::from("timeseries_key IN (");
+                        let keys = group
+                            .consistent_keys
+                            .keys()
+                            .map(ToString::to_string)
+                            .collect::<Vec<_>>()
+                            .join(",");
+                        chunk.push_str(&keys);
+                        chunk.push(')');
+                        Some(chunk)
+                    } else {
+                        None
+                    };
 
                 let chunk = match (maybe_predicates, maybe_key_set) {
                     (Some(preds), None) => preds,
@@ -1905,5 +1943,58 @@ mod tests {
             )
         );
         logctx.cleanup_successful();
+    }
+
+    // Test that timestamp-only predicates don't produce field predicates.
+    // This is the foundation of the IN clause optimization: when there are
+    // no field predicates, we skip the `timeseries_key IN (...)` clause
+    // entirely to avoid chunking overhead and reduce ClickHouse work.
+    #[test]
+    fn timestamp_only_predicate_produces_no_field_predicate() {
+        let schema = test_schema();
+
+        // A simple timestamp predicate should not produce a field predicate
+        let filt = query_parser::filter("filter timestamp > @2024-01-01").unwrap();
+        let rewritten = Client::rewrite_predicate_for_fields(&schema, &filt)
+            .expect("Should not error");
+        assert!(
+            rewritten.is_none(),
+            "Timestamp-only predicate should not produce a field predicate"
+        );
+
+        // A compound timestamp predicate should also not produce a field predicate
+        let filt = query_parser::filter(
+            "filter timestamp > @2024-01-01 && timestamp < @2024-12-31"
+        ).unwrap();
+        let rewritten = Client::rewrite_predicate_for_fields(&schema, &filt)
+            .expect("Should not error");
+        assert!(
+            rewritten.is_none(),
+            "Compound timestamp predicate should not produce a field predicate"
+        );
+    }
+
+    // Test that field predicates do produce field predicates, ensuring the
+    // IN clause is included when needed for correctness.
+    #[test]
+    fn field_predicate_produces_field_predicate() {
+        let schema = test_schema();
+
+        // A field predicate should produce a field predicate
+        let filt = query_parser::filter("filter f0 == 42").unwrap();
+        let rewritten = Client::rewrite_predicate_for_fields(&schema, &filt)
+            .expect("Should not error")
+            .expect("Field predicate should produce a rewritten predicate");
+        assert_eq!(rewritten, "equals(f0, 42)");
+
+        // A mixed predicate (field AND timestamp) should still produce a
+        // field predicate for the field portion
+        let filt = query_parser::filter(
+            "filter f0 == 42 && timestamp > @2024-01-01"
+        ).unwrap();
+        let rewritten = Client::rewrite_predicate_for_fields(&schema, &filt)
+            .expect("Should not error")
+            .expect("Mixed predicate should produce a field predicate");
+        assert_eq!(rewritten, "equals(f0, 42)");
     }
 }
