@@ -20,10 +20,12 @@ pub enum ParseError {
 
 #[derive(Debug, thiserror::Error)]
 pub enum NodeStatusError {
-    #[error("missing `membership` header (found: {0:?})")]
-    MissingMembershipHeader(StringRecord),
     #[error("failed to parse header row")]
     ParseHeaderRow(#[source] csv::Error),
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum NodeStatusRowError {
     #[error("failed to parse record row")]
     ParseRecordRow(#[source] csv::Error),
     #[error("fewer fields than expected in status row: {0:?}")]
@@ -45,8 +47,16 @@ pub enum DecommissionError {
 }
 
 impl NodeStatus {
-    pub fn parse_from_csv(data: &[u8]) -> Result<Vec<Self>, ParseError> {
+    /// Parse output of `cockroach node status --all`
+    ///
+    /// Fails if we cannot parse the first (header) row. If parsing the header
+    /// row succeeds, returns two vectors containing all successfully-parsed
+    /// rows and errors for any row that failed to parse.
+    pub fn parse_from_csv(
+        data: &[u8],
+    ) -> Result<(Vec<Self>, Vec<NodeStatusRowError>), ParseError> {
         let mut statuses = Vec::new();
+        let mut row_errs = Vec::new();
         let mut reader = csv::Reader::from_reader(io::Cursor::new(data));
 
         // We can't naively deserialize every record as a `CliNodeStatus`
@@ -57,34 +67,30 @@ impl NodeStatus {
         // individually after checking first for whether it's decommissioned.
         let headers =
             reader.headers().map_err(NodeStatusError::ParseHeaderRow)?.clone();
-        let Some(membership_idx) =
-            headers.iter().position(|h| h == "membership")
-        else {
-            return Err(
-                NodeStatusError::MissingMembershipHeader(headers).into()
-            );
-        };
 
         for row in reader.into_records() {
-            let row = row.map_err(NodeStatusError::ParseRecordRow)?;
-
-            // Skip decommissioned nodes without attempting to parse them
-            // further, as noted above
-            let Some(membership) = row.get(membership_idx) else {
-                return Err(NodeStatusError::StatusRowMissingFields(row).into());
+            let row = match row {
+                Ok(row) => row,
+                Err(err) => {
+                    row_errs.push(NodeStatusRowError::ParseRecordRow(err));
+                    continue;
+                }
             };
-            if membership == "decommissioned" {
-                continue;
-            }
 
-            let record: CliNodeStatus =
-                row.deserialize(Some(&headers)).map_err(|err| {
-                    NodeStatusError::ParseStatusRow { row: row.clone(), err }
-                })?;
+            let record = match row.deserialize::<CliNodeStatus>(Some(&headers))
+            {
+                Ok(record) => record,
+                Err(err) => {
+                    row_errs
+                        .push(NodeStatusRowError::ParseStatusRow { row, err });
+                    continue;
+                }
+            };
+
             statuses.push(record.into());
         }
 
-        Ok(statuses)
+        Ok((statuses, row_errs))
     }
 }
 
@@ -287,6 +293,7 @@ where
 mod tests {
     use super::*;
     use chrono::NaiveDate;
+    use slog_error_chain::InlineErrorChain;
     use test_strategy::proptest;
 
     #[test]
@@ -331,8 +338,10 @@ mod tests {
             is_draining: false,
         };
 
-        let statuses = NodeStatus::parse_from_csv(input).expect("parsed input");
+        let (statuses, errs) =
+            NodeStatus::parse_from_csv(input).expect("parsed input");
         assert_eq!(statuses, vec![expected]);
+        assert!(errs.is_empty());
     }
 
     #[test]
@@ -457,10 +466,203 @@ mod tests {
             },
         ];
 
-        let statuses = NodeStatus::parse_from_csv(input).expect("parsed input");
+        let (statuses, errs) =
+            NodeStatus::parse_from_csv(input).expect("parsed input");
         assert_eq!(statuses.len(), expected.len());
         for (status, expected) in statuses.iter().zip(&expected) {
             assert_eq!(status, expected);
+        }
+        assert_eq!(errs.len(), 2);
+        for err in errs {
+            let err = InlineErrorChain::new(&err).to_string();
+            assert!(
+                err.contains("failed to parse node status row")
+                    && err.contains("invalid socket address syntax"),
+                "unexpected error: {err}"
+            );
+        }
+    }
+
+    // Test actual status from london racklette; omicron#10068
+    #[test]
+    fn test_node_status_invalid_rows_not_decommissioned() {
+        let input = br#"id,address,sql_address,build,started_at,updated_at,locality,is_available,is_live,replicas_leaders,replicas_leaseholders,ranges,ranges_unavailable,ranges_underreplicated,live_bytes,key_bytes,value_bytes,intent_bytes,system_bytes,gossiped_replicas,is_decommissioning,membership,is_draining
+1,NULL,NULL,NULL,NULL,2026-03-17 00:28:07.845312,NULL,false,false,50,50,244,0,0,232400764,76374197,322723215,0,166651,NULL,false,active,false
+2,[fd3e:7225:64f1:102::3]:32221,[fd3e:7225:64f1:102::3]:32221,v22.1.22-46-g367bca413b,2026-03-16 19:20:59.488975,2026-03-17 00:49:12.573435,,true,true,48,48,244,0,0,505851138,114074028,651318542,0,707599,244,false,active,false
+3,[fd3e:7225:64f1:104::3]:32221,[fd3e:7225:64f1:104::3]:32221,v22.1.22-46-g367bca413b,2026-03-16 19:21:00.330062,2026-03-17 00:49:12.320826,,true,true,49,49,244,0,0,505941788,114074052,651409236,0,707599,244,false,active,false
+4,[fd3e:7225:64f1:103::3]:32221,[fd3e:7225:64f1:103::3]:32221,v22.1.22-46-g367bca413b,2026-03-16 19:21:00.432083,2026-03-17 00:49:12.422705,,true,true,48,48,244,0,0,505987858,114074293,651455102,0,707599,244,false,active,false
+5,[fd3e:7225:64f1:104::4]:32221,[fd3e:7225:64f1:104::4]:32221,v22.1.22-46-g367bca413b,2026-03-16 19:21:00.683945,2026-03-17 00:49:12.67174,,true,true,45,45,244,0,0,505896463,114074052,651363911,0,707599,244,false,active,false
+6,NULL,NULL,NULL,NULL,2026-03-17 00:28:07.845325,NULL,false,false,54,54,227,0,21,241750790,74592314,326610733,0,275612,NULL,false,active,false
+7,NULL,NULL,NULL,NULL,2026-03-17 00:28:07.845326,NULL,false,false,54,54,244,0,0,274322449,84865180,370993320,0,433888,NULL,false,active,false
+8,[fd3e:7225:64f1:101::33]:32221,[fd3e:7225:64f1:101::33]:32221,v22.1.22-46-g367bca413b,2026-03-16 22:13:14.330106,2026-03-17 00:28:07.845328,,false,false,54,54,244,0,0,465351282,99646220,595058198,0,647190,0,false,active,false
+9,[fd3e:7225:64f1:101::3a]:32221,[fd3e:7225:64f1:101::3a]:32221,v22.1.22-46-g367bca413b,2026-03-17 00:26:13.672751,2026-03-17 00:49:15.258134,,true,true,54,54,244,0,0,505641887,114109608,651500710,0,707599,244,false,active,false"#;
+
+        let expected = vec![
+            NodeStatus {
+                node_id: "2".to_owned(),
+                address: "[fd3e:7225:64f1:102::3]:32221".parse().unwrap(),
+                sql_address: "[fd3e:7225:64f1:102::3]:32221".parse().unwrap(),
+                build: "v22.1.22-46-g367bca413b".to_owned(),
+                started_at: "2026-03-16T19:20:59.488975Z".parse().unwrap(),
+                updated_at: "2026-03-17T00:49:12.573435Z".parse().unwrap(),
+                locality: String::new(),
+                is_available: true,
+                is_live: true,
+                replicas_leaders: 48,
+                replicas_leaseholders: 48,
+                ranges: 244,
+                ranges_unavailable: 0,
+                ranges_underreplicated: 0,
+                live_bytes: 505851138,
+                key_bytes: 114074028,
+                value_bytes: 651318542,
+                intent_bytes: 0,
+                system_bytes: 707599,
+                gossiped_replicas: 244,
+                is_decommissioning: false,
+                membership: "active".to_owned(),
+                is_draining: false,
+            },
+            NodeStatus {
+                node_id: "3".to_owned(),
+                address: "[fd3e:7225:64f1:104::3]:32221".parse().unwrap(),
+                sql_address: "[fd3e:7225:64f1:104::3]:32221".parse().unwrap(),
+                build: "v22.1.22-46-g367bca413b".to_owned(),
+                started_at: "2026-03-16T19:21:00.330062Z".parse().unwrap(),
+                updated_at: "2026-03-17T00:49:12.320826Z".parse().unwrap(),
+                locality: String::new(),
+                is_available: true,
+                is_live: true,
+                replicas_leaders: 49,
+                replicas_leaseholders: 49,
+                ranges: 244,
+                ranges_unavailable: 0,
+                ranges_underreplicated: 0,
+                live_bytes: 505941788,
+                key_bytes: 114074052,
+                value_bytes: 651409236,
+                intent_bytes: 0,
+                system_bytes: 707599,
+                gossiped_replicas: 244,
+                is_decommissioning: false,
+                membership: "active".to_owned(),
+                is_draining: false,
+            },
+            NodeStatus {
+                node_id: "4".to_owned(),
+                address: "[fd3e:7225:64f1:103::3]:32221".parse().unwrap(),
+                sql_address: "[fd3e:7225:64f1:103::3]:32221".parse().unwrap(),
+                build: "v22.1.22-46-g367bca413b".to_owned(),
+                started_at: "2026-03-16T19:21:00.432083Z".parse().unwrap(),
+                updated_at: "2026-03-17T00:49:12.422705Z".parse().unwrap(),
+                locality: String::new(),
+                is_available: true,
+                is_live: true,
+                replicas_leaders: 48,
+                replicas_leaseholders: 48,
+                ranges: 244,
+                ranges_unavailable: 0,
+                ranges_underreplicated: 0,
+                live_bytes: 505987858,
+                key_bytes: 114074293,
+                value_bytes: 651455102,
+                intent_bytes: 0,
+                system_bytes: 707599,
+                gossiped_replicas: 244,
+                is_decommissioning: false,
+                membership: "active".to_owned(),
+                is_draining: false,
+            },
+            NodeStatus {
+                node_id: "5".to_owned(),
+                address: "[fd3e:7225:64f1:104::4]:32221".parse().unwrap(),
+                sql_address: "[fd3e:7225:64f1:104::4]:32221".parse().unwrap(),
+                build: "v22.1.22-46-g367bca413b".to_owned(),
+                started_at: "2026-03-16T19:21:00.683945Z".parse().unwrap(),
+                updated_at: "2026-03-17T00:49:12.671740Z".parse().unwrap(),
+                locality: String::new(),
+                is_available: true,
+                is_live: true,
+                replicas_leaders: 45,
+                replicas_leaseholders: 45,
+                ranges: 244,
+                ranges_unavailable: 0,
+                ranges_underreplicated: 0,
+                live_bytes: 505896463,
+                key_bytes: 114074052,
+                value_bytes: 651363911,
+                intent_bytes: 0,
+                system_bytes: 707599,
+                gossiped_replicas: 244,
+                is_decommissioning: false,
+                membership: "active".to_owned(),
+                is_draining: false,
+            },
+            NodeStatus {
+                node_id: "8".to_owned(),
+                address: "[fd3e:7225:64f1:101::33]:32221".parse().unwrap(),
+                sql_address: "[fd3e:7225:64f1:101::33]:32221".parse().unwrap(),
+                build: "v22.1.22-46-g367bca413b".to_owned(),
+                started_at: "2026-03-16T22:13:14.330106Z".parse().unwrap(),
+                updated_at: "2026-03-17T00:28:07.845328Z".parse().unwrap(),
+                locality: String::new(),
+                is_available: false,
+                is_live: false,
+                replicas_leaders: 54,
+                replicas_leaseholders: 54,
+                ranges: 244,
+                ranges_unavailable: 0,
+                ranges_underreplicated: 0,
+                live_bytes: 465351282,
+                key_bytes: 99646220,
+                value_bytes: 595058198,
+                intent_bytes: 0,
+                system_bytes: 647190,
+                gossiped_replicas: 0,
+                is_decommissioning: false,
+                membership: "active".to_owned(),
+                is_draining: false,
+            },
+            NodeStatus {
+                node_id: "9".to_owned(),
+                address: "[fd3e:7225:64f1:101::3a]:32221".parse().unwrap(),
+                sql_address: "[fd3e:7225:64f1:101::3a]:32221".parse().unwrap(),
+                build: "v22.1.22-46-g367bca413b".to_owned(),
+                started_at: "2026-03-17T00:26:13.672751Z".parse().unwrap(),
+                updated_at: "2026-03-17T00:49:15.258134Z".parse().unwrap(),
+                locality: String::new(),
+                is_available: true,
+                is_live: true,
+                replicas_leaders: 54,
+                replicas_leaseholders: 54,
+                ranges: 244,
+                ranges_unavailable: 0,
+                ranges_underreplicated: 0,
+                live_bytes: 505641887,
+                key_bytes: 114109608,
+                value_bytes: 651500710,
+                intent_bytes: 0,
+                system_bytes: 707599,
+                gossiped_replicas: 244,
+                is_decommissioning: false,
+                membership: "active".to_owned(),
+                is_draining: false,
+            },
+        ];
+        let (statuses, errs) =
+            NodeStatus::parse_from_csv(input).expect("parsed input");
+        assert_eq!(statuses.len(), expected.len());
+        for (status, expected) in statuses.iter().zip(&expected) {
+            assert_eq!(status, expected);
+        }
+        assert_eq!(errs.len(), 3);
+        for err in errs {
+            let err = InlineErrorChain::new(&err).to_string();
+            assert!(
+                err.contains("failed to parse node status row")
+                    && err.contains("invalid socket address syntax"),
+                "unexpected error: {err}"
+            );
         }
     }
 
