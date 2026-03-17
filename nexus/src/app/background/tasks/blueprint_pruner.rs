@@ -373,12 +373,9 @@ impl PruneOp {
         Ok(self)
     }
 
-    fn into_details(self) -> BlueprintPrunerDetails {
-        // XXX-dap need to thread `nkept` through, but also probably the logger,
-        // so maybe the `PruneArgs`?
-        let nkept = 0;
+    fn into_details(self, pargs: &PruneArgs) -> BlueprintPrunerDetails {
         BlueprintPrunerDetails {
-            nkept,
+            nkept: pargs.nblueprints_found,
             deleted: self.deleted,
             ntargets_removable: self.ntargets_removable,
             ntargets_deleted: self.ntargets_deleted,
@@ -413,7 +410,7 @@ async fn prune_blueprints_up_to(
         }
     }
 
-    pop.into_details()
+    pop.into_details(pargs)
 }
 
 /// what happened after we finished trying to prune a batch of `bp_target` rows
@@ -471,7 +468,13 @@ async fn prune_batch(
         // It's okay to do this even if `prune_batch_blueprints` ran into an
         // error because its contract is that there were no errors up through
         // `highest_deleted`.
-        match datastore.bp_target_delete_older(opctx, deleted_up_to).await {
+        let result = datastore
+            .bp_target_delete_older(opctx, deleted_up_to)
+            .await
+            .with_context(|| {
+                format!("deleting bp_target rows up to {deleted_up_to}")
+            });
+        match result {
             Ok(count) => {
                 info!(
                     log,
@@ -483,15 +486,10 @@ async fn prune_batch(
                 pop = pop.record_targets_deleted(deleted_up_to, count)?;
             }
             Err(error) => {
-                let error = anyhow!(error).context(format!(
-                    "deleting bp_target rows up to {deleted_up_to}",
-                ));
-                // XXX-dap move logging
-                let log_error = InlineErrorChain::new(&*error);
                 warn!(
                     log,
                     "failed to delete oldest bp_target rows";
-                    &log_error,
+                    InlineErrorChain::new(&*error),
                 );
 
                 return Err(pop.record_error(error));
@@ -647,14 +645,12 @@ async fn prune_batch_blueprints(
                      (version {})",
                     *row.version
                 ));
-                let log_error = InlineErrorChain::new(&*error);
-                // XXX-dap move logging into PruneOp
                 warn!(
                     log,
                     "failed to delete former target blueprint";
                     "version" => *row.version,
                     "blueprint_id" => blueprint_id.to_string(),
-                    &log_error,
+                    InlineErrorChain::new(&*error),
                 );
                 return Err(batch.record_error(error));
             }
