@@ -20,6 +20,8 @@ pub enum ParseError {
 
 #[derive(Debug, thiserror::Error)]
 pub enum NodeStatusError {
+    #[error("missing `membership` header (found: {0:?})")]
+    MissingMembershipHeader(StringRecord),
     #[error("failed to parse header row")]
     ParseHeaderRow(#[source] csv::Error),
 }
@@ -59,14 +61,20 @@ impl NodeStatus {
         let mut row_errs = Vec::new();
         let mut reader = csv::Reader::from_reader(io::Cursor::new(data));
 
-        // We can't naively deserialize every record as a `CliNodeStatus`
-        // directly, because the `node status --all` flag to get all details
-        // also causes cockroach to emit statuses for decommissioned nodes,
-        // which report `NULL` for most fields. For now, we want to skip
-        // decommissioned nodes entirely, so we'll parse each record
-        // individually after checking first for whether it's decommissioned.
+        // We want to intentionally omit any decommissioned nodes: they
+        // shouldn't be returned as either `NodeStatus` rows _or_ parse errors.
+        // We expect them to produce parse errors (they're report a socket
+        // address of `NULL`), so we'll check for decommissioned before
+        // attempting to parse.
         let headers =
             reader.headers().map_err(NodeStatusError::ParseHeaderRow)?.clone();
+        let Some(membership_idx) =
+            headers.iter().position(|h| h == "membership")
+        else {
+            return Err(
+                NodeStatusError::MissingMembershipHeader(headers).into()
+            );
+        };
 
         for row in reader.into_records() {
             let row = match row {
@@ -76,6 +84,16 @@ impl NodeStatus {
                     continue;
                 }
             };
+
+            // Skip decommissioned nodes without attempting to parse them
+            // further, as noted above.
+            let Some(membership) = row.get(membership_idx) else {
+                row_errs.push(NodeStatusRowError::StatusRowMissingFields(row));
+                continue;
+            };
+            if membership == "decommissioned" {
+                continue;
+            }
 
             let record = match row.deserialize::<CliNodeStatus>(Some(&headers))
             {
@@ -472,15 +490,10 @@ mod tests {
         for (status, expected) in statuses.iter().zip(&expected) {
             assert_eq!(status, expected);
         }
-        assert_eq!(errs.len(), 2);
-        for err in errs {
-            let err = InlineErrorChain::new(&err).to_string();
-            assert!(
-                err.contains("failed to parse node status row")
-                    && err.contains("invalid socket address syntax"),
-                "unexpected error: {err}"
-            );
-        }
+        // We have 2 rows we can't parse, but they both have a `membership` of
+        // `decommissioned`, so we should skip them instead of reporting them as
+        // parse errors.
+        assert_eq!(errs.len(), 0);
     }
 
     // Test actual status from london racklette; omicron#10068
