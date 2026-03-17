@@ -353,3 +353,104 @@ impl fmt::Display for PortFec {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use assert_matches::assert_matches;
+    use serde::{Deserialize, Serialize};
+    use test_strategy::proptest;
+
+    #[proptest]
+    fn test_specified_ip_parsing(ip: IpAddr) {
+        // Test both SpecifiedIpAddr and SpecifiedIpNet; we don't bother
+        // proptesting the network side of `IpNet` because that's not relevant
+        // to any of our specific parsing.
+        let ip_net = IpNet::new(ip, 24).unwrap();
+        let ip_string = ip.to_string();
+        let ip_net_string = ip_net.to_string();
+        let ip_result = ip_string.parse::<SpecifiedIpAddr>();
+        let ip_net_result = ip_net_string.parse::<SpecifiedIpNet>();
+
+        if ip.is_unspecified() {
+            assert_matches!(
+                ip_result,
+                Err(SpecifiedIpAddrParseError::UnspecifiedIpError(
+                    UnspecifiedIpError
+                ))
+            );
+            assert_matches!(
+                ip_net_result,
+                Err(SpecifiedIpNetParseError::UnspecifiedIpError(
+                    UnspecifiedIpError
+                ))
+            );
+        } else {
+            let parsed_ip = ip_result.expect("parsing succeeded");
+            assert_eq!(parsed_ip.0, ip);
+            let parsed_ip_net = ip_net_result.expect("parsing succeeded");
+            assert_eq!(parsed_ip_net.0, ip_net);
+        }
+    }
+
+    #[proptest]
+    fn test_specified_ip_serialization(ip: IpAddr) {
+        // Test both SpecifiedIpAddr and SpecifiedIpNet; we don't bother
+        // proptesting the network side of `IpNet` because that's not relevant
+        // to any of our specific serialization.
+        #[derive(Debug, Serialize, Deserialize)]
+        struct PlainWrapper {
+            ip: IpAddr,
+            ip_net: IpNet,
+        }
+        #[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
+        struct SpecifiedWrapper {
+            ip: SpecifiedIpAddr,
+            ip_net: SpecifiedIpNet,
+        }
+
+        let ip_net = IpNet::new(ip, 24).unwrap();
+        let plain_wrapped = PlainWrapper { ip, ip_net };
+
+        let jsonified = serde_json::to_string(&plain_wrapped).unwrap();
+        let tomlified = toml::to_string(&plain_wrapped).unwrap();
+
+        if ip.is_unspecified() {
+            // We should fail to deserialize unspecified IPs...
+            let json_result =
+                serde_json::from_str::<SpecifiedWrapper>(&jsonified);
+            let toml_result = toml::from_str::<SpecifiedWrapper>(&tomlified);
+            assert_matches!(
+                json_result,
+                Err(err)
+                    if err
+                        .to_string()
+                        .contains("must not be the unspecified address")
+            );
+            assert_matches!(
+                toml_result,
+                Err(err)
+                    if err
+                        .to_string()
+                        .contains("must not be the unspecified address")
+            );
+        } else {
+            // ... but successfully deserialize specified ones. And our
+            // serialized form should exactly match the wrapped types.
+            let json_result =
+                serde_json::from_str::<SpecifiedWrapper>(&jsonified)
+                    .expect("deserialized");
+            let toml_result = toml::from_str::<SpecifiedWrapper>(&tomlified)
+                .expect("deserialized");
+
+            assert_eq!(json_result, toml_result);
+            assert_eq!(json_result.ip.0, ip);
+            assert_eq!(json_result.ip_net.0, ip_net);
+
+            let jsonified2 = serde_json::to_string(&json_result).unwrap();
+            let tomlified2 = toml::to_string(&json_result).unwrap();
+            assert_eq!(jsonified, jsonified2);
+            assert_eq!(tomlified, tomlified2);
+        }
+    }
+}

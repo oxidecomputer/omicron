@@ -13462,6 +13462,7 @@ name = "sled-agent-types-versions"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "assert_matches",
  "async-trait",
  "bootstore",
  "camino",
@@ -13491,6 +13492,7 @@ dependencies = [
  "strum 0.27.2",
  "test-strategy",
  "thiserror 2.0.18",
+ "toml 0.8.23",
  "trust-quorum-types-versions",
  "tufaceous-artifact",
  "uuid",
