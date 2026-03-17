@@ -872,7 +872,9 @@ fn rss_config_text<'a>(
             let addresses = addresses.iter().map(|a| {
                 let UserSpecifiedUplinkAddressConfig { address, vlan_id } = a;
                 let addr_description = match address {
-                    UplinkAddress::LinkLocal => Cow::Borrowed("link-local"),
+                    UplinkAddress::LinkLocal => Cow::Borrowed(
+                        UserSpecifiedUplinkAddressConfig::LINK_LOCAL,
+                    ),
                     UplinkAddress::Address { ip_net } => {
                         Cow::Owned(ip_net.to_string())
                     }
@@ -919,8 +921,12 @@ fn rss_config_text<'a>(
                 } = p;
 
                 let addr_string = match addr {
-                    RouterPeerAddress::Unnumbered => "unnumbered".to_string(),
-                    RouterPeerAddress::Numbered { ip } => ip.to_string(),
+                    RouterPeerAddress::Unnumbered => Cow::Borrowed(
+                        UserSpecifiedBgpPeerConfig::UNNUMBERED_PEER,
+                    ),
+                    RouterPeerAddress::Numbered { ip } => {
+                        Cow::Owned(ip.to_string())
+                    }
                 };
 
                 let mut lines = vec![
