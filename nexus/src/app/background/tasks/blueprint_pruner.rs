@@ -118,6 +118,18 @@ use std::collections::BTreeSet;
 use std::ops::ControlFlow;
 use std::sync::Arc;
 
+/// Maximum number of recent target blueprints to keep in the database
+///
+/// (That is: stop pruning once there are this many blueprints left.)
+const MAX_NKEEP: usize = 1000;
+
+/// Max number of bp_target rows to consider deleting per activation of the task
+///
+/// Limiting this number gives us a chance to report status periodically.  It
+/// does mean it'll take a while to clean stuff up, but in general, we should be
+/// keeping up with what the system is producing.
+const MAX_DELETE_ATTEMPTS_PER_ACTIVATION: usize = 50;
+
 /// Background task that prunes old blueprints from the database
 pub struct BlueprintPruner {
     datastore: Arc<DataStore>,
@@ -159,16 +171,6 @@ async fn prune_blueprints(
     datastore: &DataStore,
     log: &Logger,
 ) -> Result<BlueprintPrunerStatus, anyhow::Error> {
-    // Keep up to MAX_NKEEP blueprints in the database.
-    // (That is: stop pruning once we reach this number.)
-    const MAX_NKEEP: usize = 1000;
-
-    // We won't delete more than this many per activation.  This gives us a
-    // chance to report status periodically.  It does mean it'll take a while to
-    // clean stuff up, but in general, we should be keeping up with what the
-    // system is producing.
-    const MAX_DELETE_ATTEMPTS_PER_ACTIVATION: usize = 50;
-
     // Figure out the maximum version that we'd consider pruning.
     let target_table_status =
         determine_bp_target_rows_to_keep(opctx, datastore, MAX_NKEEP).await?;
@@ -203,18 +205,30 @@ async fn prune_blueprints(
         }
     };
 
+    // Prune both blueprints and `bp_target` rows up to `bp_target` version
+    // `pargs.keep_version` in increasing order of `bp_target`.`version`.  Stops
+    // on any error, when running into the specified version, or when hitting
+    // MAX_DELETE_ATTEMPTS_PER_ACTIVATION.
+    //
     // We won't return an error after this point because even if we run into
-    // problems, we may have done some work, too.  So we'll return success with
-    // a status struct that reflects both the work done and any errors.
-    let details = prune_blueprints_up_to(&PruneArgs {
+    // problems, we may have done some useful work, too.  So after this point,
+    // we'll return a status struct that reflects both the work done and any
+    // errors.
+    let pargs = PruneArgs {
         opctx,
         datastore,
         log,
         keep_version,
         nblueprints_found: target_table_status.nfound,
         max_delete_attempts: MAX_DELETE_ATTEMPTS_PER_ACTIVATION,
-    })
-    .await;
+    };
+    let mut pop = PruneTracker::new();
+    let details = loop {
+        match prune_batch(&pargs, pop).await {
+            ControlFlow::Continue(newpop) => pop = newpop,
+            ControlFlow::Break(newpop) => break newpop.into_details(&pargs),
+        }
+    };
 
     Ok(BlueprintPrunerStatus::Enabled(details))
 }
@@ -241,35 +255,36 @@ enum KeepWhat {
 /// Look at the most recent rows from the `bp_target` table and determine which
 /// version(s) can be deleted, assuming we want to keep `nkeep` distinct
 /// blueprints.
-// There are lots of ways to do this.  We'll do it by paging backwards through
-// the table until we identify MAX_NKEEP distinct blueprints.
-//
-// Alternative considered: take MAX(version) and subtract MAX_NKEEP.  This is
-// easy to do, but might result in keeping fewer blueprints if some of those
-// rows just involve having enabled or disabled the target.  That's not a big
-// deal while MAX_NKEEP = 1000, given how uncommon it is to enable/disable the
-// target.  But it could also be *very* wrong if for whatever reason somebody
-// has already removed rows near the end of the table.  This too should be
-// impossible, but there's no need to rely on it.
-//
-// Alternative considered: have the database tell us the version that's
-// `MAX_NKEEP` rows from the end.  e.g., something like
-//
-//     SELECT version FROM bp_target ORDER BY version DESC OFFSET `MAX_NKEEP`
-//
-// That query is somewhat expensive (well, proportional to `MAX_NKEEP`) and
-// still has the problem of not keeping enough blueprints if some of these rows
-// correspond to just enabling/disabling the current target.
-//
-// By comparison, the approach we pick here is just a paginated scan (no exotic
-// SQL), each query's cost is proportional to the page size (rather than
-// `MAX_NKEEP`), and it allows us to keep the right number of distinct
-// blueprints.
 async fn determine_bp_target_rows_to_keep(
     opctx: &OpContext,
     datastore: &DataStore,
     nkeep: usize,
 ) -> Result<TargetTableStatus, anyhow::Error> {
+    // There are lots of ways to do this.  We'll do it by paging backwards
+    // through the table until we identify MAX_NKEEP distinct blueprints.
+    //
+    // Alternative considered: take MAX(version) and subtract MAX_NKEEP.  This
+    // is easy to do, but might result in keeping fewer blueprints if some of
+    // those rows just involve having enabled or disabled the target.  That's
+    // not a big deal while MAX_NKEEP = 1000, given how uncommon it is to
+    // enable/disable the target.  But it could also be *very* wrong if for
+    // whatever reason somebody has already removed rows near the end of the
+    // table.  This too should be impossible, but there's no need to rely on it.
+    //
+    // Alternative considered: have the database tell us the version that's
+    // `MAX_NKEEP` rows from the end.  e.g., something like
+    //
+    //     SELECT version FROM bp_target ORDER BY version DESC OFFSET `MAX_NKEEP`
+    //
+    // That query is somewhat expensive (well, proportional to `MAX_NKEEP`) and
+    // still has the problem of not keeping enough blueprints if some of these
+    // rows correspond to just enabling/disabling the current target.
+    //
+    // By comparison, the approach we pick here is just a paginated scan (no
+    // exotic SQL), each query's cost is proportional to the page size (rather
+    // than `MAX_NKEEP`), and it allows us to keep the right number of distinct
+    // blueprints.
+
     let mut nscanned = 0;
     let mut blueprint_ids_to_keep: BTreeSet<BlueprintUuid> = BTreeSet::new();
     let mut paginator =
@@ -312,8 +327,8 @@ struct PruneArgs<'a> {
     nblueprints_found: usize,
 }
 
-/// Tracks progress and errors for the prune operation
-struct PruneOp {
+/// Tracks progress and errors for the overall prune activation
+struct PruneTracker {
     ntargets_removable: usize,
     ntargets_deleted: usize,
     deleted: Vec<DeletedBlueprint>,
@@ -321,9 +336,9 @@ struct PruneOp {
     highest_version_deleted: Option<u32>,
 }
 
-impl PruneOp {
-    pub fn new() -> PruneOp {
-        PruneOp {
+impl PruneTracker {
+    pub fn new() -> PruneTracker {
+        PruneTracker {
             ntargets_removable: 0,
             ntargets_deleted: 0,
             deleted: vec![],
@@ -396,49 +411,19 @@ impl PruneOp {
     }
 }
 
-/// Prune both blueprints and `bp_target` rows up to `bp_target` version
-/// `pargs.keep_version`.
-///
-/// This prunes them in increasing order of `bp_target` `version` and stops upon
-/// any error or when running into the specified version.  Both the work done
-/// and any errors encountered are reported in the returned
-/// `BlueprintPrunerDetails`.
-async fn prune_blueprints_up_to(
-    pargs: &PruneArgs<'_>,
-) -> BlueprintPrunerDetails {
-    let mut pop = PruneOp::new();
-
-    loop {
-        match prune_batch(pargs, pop).await {
-            ControlFlow::Continue(newpop) => pop = newpop,
-            ControlFlow::Break(newpop) => return newpop.into_details(pargs),
-        }
-    }
-}
-
-/// what happened after we finished trying to prune a batch of `bp_target` rows
-#[derive(Debug, Clone, Copy)]
-enum BatchStopReason {
-    /// we ran out of rows in the batch (i.e., we can keep going with another
-    /// batch)
-    EndOfBatch,
-    /// we ran into an unpruneable row (i.e., there's nothing left to prune)
-    OutOfPruneable,
-    /// we deleted as many as we're willing to in this activation
-    DeleteLimit,
-    /// we ran into an error
-    Error,
-}
-
 /// Query for the oldest `bp_target` rows and prune both blueprints and
 /// `bp_target` rows up through (and not including) version `keep_version`.
 /// Stop on any error or when `pargs.max_delete_attempts` deletes have been
 /// attempted.
-/// This keeps `details` updated with work done and errors encountered.
+///
+/// This keeps `pop` updated with work done and errors encountered.
+///
+/// Returns a `ControlFlow` indicating whether the caller should proceed with
+/// another batch.
 async fn prune_batch(
     pargs: &PruneArgs<'_>,
-    pop: PruneOp,
-) -> ControlFlow<PruneOp, PruneOp> {
+    pop: PruneTracker,
+) -> ControlFlow<PruneTracker, PruneTracker> {
     let PruneArgs { opctx, datastore, log, .. } = pargs;
 
     // Fetch a page worth of the oldest `bp_target` rows
@@ -460,8 +445,7 @@ async fn prune_batch(
 
     // Prune as many blueprints as we can from that page.  If we deleted no
     // blueprints, then there's nothing else to do here.
-    let batch_result =
-        prune_batch_blueprints(pargs, pop, candidates).await.into_inner();
+    let batch_result = prune_batch_blueprints(pargs, pop, candidates).await;
     let mut pop = batch_result.pop;
     if let Some(deleted_up_to) = batch_result.highest_version_deleted {
         // At this point, we know that the blueprints associated with
@@ -503,22 +487,63 @@ async fn prune_batch(
     pop.record_batch(batch_result.stop_reason)
 }
 
-/// Keeps track of the state of pruning blueprints from one batch of bp_target
-/// rows
-struct BatchPruneOp {
-    pop: PruneOp,
+/// what happened after we finished trying to prune a batch of `bp_target` rows
+#[derive(Debug, Clone, Copy)]
+enum BatchStopReason {
+    /// we ran out of rows in the batch (i.e., we can keep going with another
+    /// batch)
+    EndOfBatch,
+    /// we ran into an unpruneable row (i.e., there's nothing left to prune)
+    OutOfPruneable,
+    /// we deleted as many as we're willing to in this activation
+    DeleteLimit,
+    /// we ran into an error
+    Error,
+}
+
+/// Tracks the state of pruning one batch of blueprints from `bp_target`
+///
+/// This object is generally immutable because the methods here consume `self`
+/// and return:
+///
+/// - another `BatchTracker`, when the method is infallible
+///
+/// - a `BatchResult` summarizing the final state, when the method you've called
+///   is the last one involved in processing a batch
+///
+/// - a `ControlFlow`, when the method decides whether the caller should proceed
+///   or stop (usually based on whether an error happened).  Generally the
+///   `Continue` variant will provide another `BatchTracker` and the `Break`
+///   variant will provide a `BatchResult`.
+///
+/// We use `ControlFlow` rather than `Result` because it's confusing to think of
+/// these as reflecting success or failure.  In general, the batch processing
+/// operation can successfully do work (that we want to report) *and* produce an
+/// error.  So in the end, we'll wind up reporting both.  Hence: it's really a
+/// question of whether we proceed (`ControlFlow::Continue`) or stop
+/// (`ControlFlow::Break`).
+struct BatchTracker {
+    /// used to track activity like deletes, errors, etc.
+    pop: PruneTracker,
+    /// tracks the highest bp_target version deleted from this batch
     highest_version_deleted: Option<u32>,
 }
 
-impl BatchPruneOp {
-    pub fn new(pop: PruneOp) -> Self {
-        BatchPruneOp { pop, highest_version_deleted: None }
+impl BatchTracker {
+    pub fn new(pop: PruneTracker) -> Self {
+        BatchTracker { pop, highest_version_deleted: None }
     }
 
+    /// Record that the given bp_target row's blueprint was deleted.  Returns:
+    ///
+    /// - `ControlFlow::Break(result)` if this was not the next `bp_target` row
+    ///   to delete.  This is generally a bug.  But we handle it gracefully to
+    ///   avoid crashing all of Nexus just for this problem.
+    /// - `ControlFlow::Continue(self)` otherwise
     pub fn record_blueprint_deleted(
         mut self,
         target: BpTarget,
-    ) -> ControlFlow<BatchPruneResult, Self> {
+    ) -> ControlFlow<BatchResult, Self> {
         // Record the deleted blueprint before checking the version because it
         // was, in fact, deleted, whether that was correct or not.
         let deleted = DeletedBlueprint {
@@ -531,19 +556,22 @@ impl BatchPruneOp {
         ControlFlow::Continue(rv)
     }
 
+    /// Record that the given `bp_target` row's blueprint had already been
+    /// deleted by the time we went to delete it.  Returns the same values as
+    /// `record_blueprint_deleted`, for the same reasons.
     pub fn record_blueprint_already_deleted(
         self,
         target: BpTarget,
-    ) -> ControlFlow<BatchPruneResult, Self> {
+    ) -> ControlFlow<BatchResult, Self> {
         let mut rv = self.new_highest_version(*target.version)?;
         rv.pop.ntargets_removable += 1;
         ControlFlow::Continue(rv)
     }
 
-    fn new_highest_version(
-        mut self,
-        v: u32,
-    ) -> ControlFlow<BatchPruneResult, Self> {
+    /// Internally, record that we've got a new highest-bp_target-version seen.
+    /// This produces an error if the value appears to go backwards.  This would
+    /// be a bug.
+    fn new_highest_version(mut self, v: u32) -> ControlFlow<BatchResult, Self> {
         if let Some(old) = self.highest_version_deleted {
             if old >= v {
                 return ControlFlow::Break(self.record_error(anyhow!(
@@ -557,23 +585,32 @@ impl BatchPruneOp {
         ControlFlow::Continue(self)
     }
 
-    pub fn record_error(mut self, error: anyhow::Error) -> BatchPruneResult {
+    /// Record an error.  The error winds up in the top-level `PruneTracker`.
+    ///
+    /// This finishes processing of the batch, returning a `BatchPruneResult`
+    /// summarizing the work done.
+    pub fn record_error(mut self, error: anyhow::Error) -> BatchResult {
         self.pop = self.pop.record_error(error);
         self.finish_value(BatchStopReason::Error)
     }
 
-    fn finish_value(self, stop_reason: BatchStopReason) -> BatchPruneResult {
-        BatchPruneResult {
+    fn finish_value(self, stop_reason: BatchStopReason) -> BatchResult {
+        BatchResult {
             stop_reason,
             pop: self.pop,
             highest_version_deleted: self.highest_version_deleted,
         }
     }
 
+    /// Finish processing the batch of `bp_target` rows due to the given
+    /// `stop_reason`.
+    ///
+    /// Returns a `ControlFlow` telling the caller that's processing this batch
+    /// whether they should proceed with processing another batch.
     pub fn finish(
         self,
         stop_reason: BatchStopReason,
-    ) -> ControlFlow<BatchPruneResult, BatchPruneResult> {
+    ) -> ControlFlow<BatchResult, BatchResult> {
         let value = self.finish_value(stop_reason);
         match stop_reason {
             BatchStopReason::EndOfBatch => ControlFlow::Continue(value),
@@ -584,9 +621,16 @@ impl BatchPruneOp {
     }
 }
 
-pub struct BatchPruneResult {
-    pop: PruneOp,
+/// Summarizes the result of pruning one batch of `bp_target` rows
+pub struct BatchResult {
+    /// tracks overall operation state (actions taken, errors, etc.)
+    pop: PruneTracker,
+
+    /// why processing of this batch terminated
     stop_reason: BatchStopReason,
+
+    /// All `bp_target` rows with this version or less have their corresponding
+    /// blueprint pruned
     highest_version_deleted: Option<u32>,
 }
 
@@ -597,17 +641,33 @@ pub struct BatchPruneResult {
 /// - we reach `pargs.max_delete_attempts` total rows deleted
 /// - we run into an error
 ///
-/// Keeps `details` updated with work done.
+/// Activity (blueprints deleted, rows processed, and errors) are recorded into
+/// `pop`.  See `PruneTracker`.
 ///
-/// If any blueprints were deleted, returns the highest-numbered `version` of
-/// any blueprint that was deleted.  Otherwise, returns `None`.
+/// The result is summarized in a `BatchResult`.  This operation can both do
+/// useful work (that needs to be reported and acted upon) and produce an error
+/// so it always returns the same `BatchResult`.
 async fn prune_batch_blueprints(
     pargs: &PruneArgs<'_>,
-    pop: PruneOp,
+    pop: PruneTracker,
     bp_target_rows: Vec<BpTarget>,
-) -> ControlFlow<BatchPruneResult, BatchPruneResult> {
+) -> BatchResult {
+    // The caller doesn't care about the different `ControlFlow` variants here.
+    // This type is only used here to make the helper function cleaner and less
+    // brittle.
+    prune_batch_blueprints_impl(pargs, pop, bp_target_rows).await.into_inner()
+}
+
+// This helper implements the body of `prune_batch_blueprints`.  Returning
+// `ControlFlow` makes it cleaner (and less error-prone) to return early in all
+// the cases that it should.
+async fn prune_batch_blueprints_impl(
+    pargs: &PruneArgs<'_>,
+    pop: PruneTracker,
+    bp_target_rows: Vec<BpTarget>,
+) -> ControlFlow<BatchResult, BatchResult> {
     let PruneArgs { opctx, datastore, log, .. } = pargs;
-    let mut batch = BatchPruneOp::new(pop);
+    let mut batch = BatchTracker::new(pop);
     for row in bp_target_rows {
         if *row.version >= pargs.keep_version {
             return batch.finish(BatchStopReason::OutOfPruneable);
@@ -664,7 +724,7 @@ async fn prune_batch_blueprints(
                     "failed to delete former target blueprint";
                     "version" => *row.version,
                     "blueprint_id" => blueprint_id.to_string(),
-                    InlineErrorChain::new(&*error),
+                    InlineErrorChain::new(&error),
                 );
                 let error = anyhow!(error).context(format!(
                     "failed to delete former target blueprint {blueprint_id} \
@@ -679,17 +739,13 @@ async fn prune_batch_blueprints(
     batch.finish(BatchStopReason::EndOfBatch)
 }
 
-// XXX-dap do I like this enough to use it
-// XXX-dap TODO-doc this is just like `into_value()`
+// This is a non-nightly implementation of Rust's `ControlFlow::into_value()`.
 trait ControlFlowExt {
     type Inner;
-
     fn into_inner(self) -> Self::Inner;
 }
-
 impl<T> ControlFlowExt for ControlFlow<T, T> {
     type Inner = T;
-
     fn into_inner(self) -> Self::Inner {
         match self {
             ControlFlow::Continue(val) => val,
