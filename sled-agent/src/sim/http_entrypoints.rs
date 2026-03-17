@@ -26,7 +26,11 @@ use dropshot::TypedBody;
 use dropshot::endpoint;
 use omicron_common::api::internal::nexus::DiskRuntimeState;
 use omicron_common::api::internal::nexus::SledVmmState;
+use omicron_common::api::internal::shared::ClearMcast2Phys;
+use omicron_common::api::internal::shared::ClearMcastForwarding;
 use omicron_common::api::internal::shared::ExternalIpGatewayMap;
+use omicron_common::api::internal::shared::Mcast2PhysMapping;
+use omicron_common::api::internal::shared::McastForwardingEntry;
 use omicron_common::api::internal::shared::SledIdentifiers;
 use omicron_common::api::internal::shared::VirtualNetworkInterfaceHost;
 use omicron_common::api::internal::shared::{
@@ -56,7 +60,7 @@ use sled_agent_types::disk::{DiskEnsureBody, DiskPathParam};
 use sled_agent_types::early_networking::EarlyNetworkConfigEnvelope;
 use sled_agent_types::firewall_rules::VpcFirewallRulesEnsureBody;
 use sled_agent_types::instance::{
-    InstanceEnsureBody, InstanceExternalIpBody, InstanceMulticastBody,
+    InstanceEnsureBody, InstanceExternalIpBody, InstanceMulticastMembership,
     VmmIssueDiskSnapshotRequestBody, VmmIssueDiskSnapshotRequestPathParam,
     VmmIssueDiskSnapshotRequestResponse, VmmPathParam, VmmPutStateBody,
     VmmPutStateResponse, VmmUnregisterResponse, VpcPathParam,
@@ -189,52 +193,24 @@ impl SledAgentApi for SledAgentSimImpl {
     async fn vmm_join_multicast_group(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<VmmPathParam>,
-        body: TypedBody<InstanceMulticastBody>,
+        body: TypedBody<InstanceMulticastMembership>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
         let sa = rqctx.context();
         let propolis_id = path_params.into_inner().propolis_id;
-        let body_args = body.into_inner();
-
-        match body_args {
-            InstanceMulticastBody::Join(membership) => {
-                sa.instance_join_multicast_group(propolis_id, &membership)
-                    .await?;
-            }
-            InstanceMulticastBody::Leave(_) => {
-                // This endpoint is for joining - reject leave operations
-                return Err(HttpError::for_bad_request(
-                    None,
-                    "Join endpoint cannot process Leave operations".to_string(),
-                ));
-            }
-        }
-
+        let membership = body.into_inner();
+        sa.instance_join_multicast_group(propolis_id, &membership).await?;
         Ok(HttpResponseUpdatedNoContent())
     }
 
     async fn vmm_leave_multicast_group(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<VmmPathParam>,
-        body: TypedBody<InstanceMulticastBody>,
+        body: TypedBody<InstanceMulticastMembership>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
         let sa = rqctx.context();
         let propolis_id = path_params.into_inner().propolis_id;
-        let body_args = body.into_inner();
-
-        match body_args {
-            InstanceMulticastBody::Leave(membership) => {
-                sa.instance_leave_multicast_group(propolis_id, &membership)
-                    .await?;
-            }
-            InstanceMulticastBody::Join(_) => {
-                // This endpoint is for leaving - reject join operations
-                return Err(HttpError::for_bad_request(
-                    None,
-                    "Leave endpoint cannot process Join operations".to_string(),
-                ));
-            }
-        }
-
+        let membership = body.into_inner();
+        sa.instance_leave_multicast_group(propolis_id, &membership).await?;
         Ok(HttpResponseUpdatedNoContent())
     }
 
@@ -386,6 +362,66 @@ impl SledAgentApi for SledAgentSimImpl {
         let vnics = sa.list_virtual_nics().map_err(HttpError::from)?;
 
         Ok(HttpResponseOk(vnics))
+    }
+
+    async fn set_mcast_m2p(
+        rqctx: RequestContext<Self::Context>,
+        body: TypedBody<Mcast2PhysMapping>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        let sa = rqctx.context();
+        sa.set_mcast_m2p(&body.into_inner())
+            .map_err(|e| HttpError::for_internal_error(e.to_string()))?;
+        Ok(HttpResponseUpdatedNoContent())
+    }
+
+    async fn clear_mcast_m2p(
+        rqctx: RequestContext<Self::Context>,
+        body: TypedBody<ClearMcast2Phys>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        let sa = rqctx.context();
+        sa.clear_mcast_m2p(&body.into_inner())
+            .map_err(|e| HttpError::for_internal_error(e.to_string()))?;
+        Ok(HttpResponseUpdatedNoContent())
+    }
+
+    async fn set_mcast_fwd(
+        rqctx: RequestContext<Self::Context>,
+        body: TypedBody<McastForwardingEntry>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        let sa = rqctx.context();
+        sa.set_mcast_fwd(&body.into_inner())
+            .map_err(|e| HttpError::for_internal_error(e.to_string()))?;
+        Ok(HttpResponseUpdatedNoContent())
+    }
+
+    async fn clear_mcast_fwd(
+        rqctx: RequestContext<Self::Context>,
+        body: TypedBody<ClearMcastForwarding>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        let sa = rqctx.context();
+        sa.clear_mcast_fwd(&body.into_inner())
+            .map_err(|e| HttpError::for_internal_error(e.to_string()))?;
+        Ok(HttpResponseUpdatedNoContent())
+    }
+
+    async fn list_mcast_m2p(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<Vec<Mcast2PhysMapping>>, HttpError> {
+        let sa = rqctx.context();
+        let m2p = sa
+            .list_mcast_m2p()
+            .map_err(|e| HttpError::for_internal_error(e.to_string()))?;
+        Ok(HttpResponseOk(m2p))
+    }
+
+    async fn list_mcast_fwd(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<Vec<McastForwardingEntry>>, HttpError> {
+        let sa = rqctx.context();
+        let fwd = sa
+            .list_mcast_fwd()
+            .map_err(|e| HttpError::for_internal_error(e.to_string()))?;
+        Ok(HttpResponseOk(fwd))
     }
 
     async fn uplink_ensure(

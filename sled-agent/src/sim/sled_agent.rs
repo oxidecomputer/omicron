@@ -33,8 +33,10 @@ use omicron_common::api::internal::nexus::{
     DiskRuntimeState, MigrationRuntimeState, MigrationState, SledVmmState,
 };
 use omicron_common::api::internal::shared::{
-    ResolvedVpcRoute, ResolvedVpcRouteSet, ResolvedVpcRouteState, RouterId,
-    RouterKind, RouterVersion, VirtualNetworkInterfaceHost,
+    ClearMcast2Phys, ClearMcastForwarding, Mcast2PhysMapping,
+    McastForwardingEntry, McastForwardingNextHop, ResolvedVpcRoute,
+    ResolvedVpcRouteSet, ResolvedVpcRouteState, RouterId, RouterKind,
+    RouterVersion, VirtualNetworkInterfaceHost,
 };
 use omicron_common::disk::{
     DatasetsConfig, DatasetsManagementResult, DiskIdentity, DiskVariant,
@@ -99,6 +101,8 @@ pub struct SledAgent {
     pub nexus_client: Arc<NexusClient>,
     pub simulated_upstairs: Arc<SimulatedUpstairs>,
     pub v2p_mappings: Mutex<HashSet<VirtualNetworkInterfaceHost>>,
+    pub m2p_mappings: Mutex<HashSet<(IpAddr, Ipv6Addr)>>,
+    pub mcast_fwd: Mutex<HashMap<Ipv6Addr, Vec<McastForwardingNextHop>>>,
     mock_propolis: futures::lock::Mutex<
         Option<(propolis_mock_server::Server, PropolisClient)>,
     >,
@@ -188,6 +192,8 @@ impl SledAgent {
             nexus_client,
             simulated_upstairs,
             v2p_mappings: Mutex::new(HashSet::new()),
+            m2p_mappings: Mutex::new(HashSet::new()),
+            mcast_fwd: Mutex::new(HashMap::new()),
             external_ips: Mutex::new(HashMap::new()),
             attached_subnets: Mutex::new(HashMap::new()),
             multicast_groups: Mutex::new(HashMap::new()),
@@ -674,6 +680,58 @@ impl SledAgent {
     ) -> Result<Vec<VirtualNetworkInterfaceHost>, Error> {
         let v2p_mappings = self.v2p_mappings.lock().unwrap();
         Ok(Vec::from_iter(v2p_mappings.clone()))
+    }
+
+    pub fn set_mcast_m2p(&self, req: &Mcast2PhysMapping) -> Result<(), Error> {
+        let mut m2p = self.m2p_mappings.lock().unwrap();
+        m2p.insert((req.group, req.underlay));
+        Ok(())
+    }
+
+    pub fn clear_mcast_m2p(&self, req: &ClearMcast2Phys) -> Result<(), Error> {
+        let mut m2p = self.m2p_mappings.lock().unwrap();
+        m2p.remove(&(req.group, req.underlay));
+        Ok(())
+    }
+
+    pub fn set_mcast_fwd(
+        &self,
+        req: &McastForwardingEntry,
+    ) -> Result<(), Error> {
+        let mut fwd = self.mcast_fwd.lock().unwrap();
+        fwd.insert(req.underlay, req.next_hops.clone());
+        Ok(())
+    }
+
+    pub fn clear_mcast_fwd(
+        &self,
+        req: &ClearMcastForwarding,
+    ) -> Result<(), Error> {
+        let mut fwd = self.mcast_fwd.lock().unwrap();
+        fwd.remove(&req.underlay);
+        Ok(())
+    }
+
+    pub fn list_mcast_m2p(&self) -> Result<Vec<Mcast2PhysMapping>, Error> {
+        let m2p = self.m2p_mappings.lock().unwrap();
+        Ok(m2p
+            .iter()
+            .map(|(group, underlay)| Mcast2PhysMapping {
+                group: *group,
+                underlay: *underlay,
+            })
+            .collect())
+    }
+
+    pub fn list_mcast_fwd(&self) -> Result<Vec<McastForwardingEntry>, Error> {
+        let fwd = self.mcast_fwd.lock().unwrap();
+        Ok(fwd
+            .iter()
+            .map(|(underlay, next_hops)| McastForwardingEntry {
+                underlay: *underlay,
+                next_hops: next_hops.clone(),
+            })
+            .collect())
     }
 
     pub async fn instance_put_external_ip(

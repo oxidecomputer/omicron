@@ -236,16 +236,17 @@ impl<S: Simulatable + 'static> SimCollection<S> {
 
         while should_step {
             let (new_state, to_destroy) = {
-                // The object must be present in `objects` because it only gets
-                // removed when it comes to rest in the "Destroyed" state, but
-                // we can only get here if there's an asynchronous state
-                // transition desired.
-                //
                 // We do as little as possible with the lock held.  In
                 // particular, we want to finish this work before calling out to
                 // notify the nexus.
                 let mut objects = self.objects.lock().await;
-                let mut object = objects.remove(&id).unwrap();
+
+                // The object may already have been destroyed and removed by a
+                // concurrent poke (e.g., sim_step racing with an explicit poke
+                // from a test). In that case there is nothing left to do.
+                let Some(mut object) = objects.remove(&id) else {
+                    return;
+                };
                 object.transition_finish();
                 let after = object.object.current().clone();
 

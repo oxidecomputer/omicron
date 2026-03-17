@@ -2,26 +2,40 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! Mock / dummy versions of the OPTE module, for non-illumos platforms
+//! Mock / dummy versions of the OPTE module, for non-illumos platforms.
+//!
+//! Most methods are either `unimplemented!()` or silent no-ops.
+//! Multicast subscribe/unsubscribe is an exception,as it maintains real
+//! in-memory state because port manager tests assert on subscription contents.
 
 use crate::addrobj::AddrObject;
 use omicron_common::api::internal::shared::NetworkInterfaceKind;
 use oxide_vpc::api::AddRouterEntryReq;
+use oxide_vpc::api::ClearMcast2PhysReq;
+use oxide_vpc::api::ClearMcastForwardingReq;
 use oxide_vpc::api::ClearVirt2PhysReq;
 use oxide_vpc::api::DelRouterEntryReq;
 use oxide_vpc::api::DetachSubnetResp;
 use oxide_vpc::api::Direction;
+use oxide_vpc::api::DumpMcast2PhysResp;
+use oxide_vpc::api::DumpMcastForwardingResp;
 use oxide_vpc::api::DumpVirt2PhysResp;
 use oxide_vpc::api::IpCfg;
 use oxide_vpc::api::IpCidr;
 use oxide_vpc::api::ListPortsResp;
+use oxide_vpc::api::McastSubscribeReq;
+use oxide_vpc::api::McastUnsubscribeReq;
 use oxide_vpc::api::NoResp;
 use oxide_vpc::api::PortInfo;
+use oxide_vpc::api::RemoveCidrResp;
 use oxide_vpc::api::RouterClass;
 use oxide_vpc::api::RouterTarget;
 use oxide_vpc::api::SetExternalIpsReq;
 use oxide_vpc::api::SetFwRulesReq;
+use oxide_vpc::api::SetMcast2PhysReq;
+use oxide_vpc::api::SetMcastForwardingReq;
 use oxide_vpc::api::SetVirt2PhysReq;
+use oxide_vpc::api::SourceFilter;
 use oxide_vpc::api::VpcCfg;
 use slog::Logger;
 use std::collections::HashMap;
@@ -76,6 +90,21 @@ pub enum Error {
         "Tried to update attached subnets on non-existent port ({0}, {1:?})"
     )]
     AttachedSubnetUpdateMissingPort(uuid::Uuid, NetworkInterfaceKind),
+
+    #[error("Failed to set multicast-to-physical mapping: {0}")]
+    SetMcastM2p(String),
+
+    #[error("Failed to clear multicast-to-physical mapping: {0}")]
+    ClearMcastM2p(String),
+
+    #[error("Failed to set multicast forwarding: {0}")]
+    SetMcastFwd(String),
+
+    #[error("Failed to clear multicast forwarding: {0}")]
+    ClearMcastFwd(String),
+
+    #[error("Failed to list multicast forwarding: {0}")]
+    ListMcastFwd(String),
 }
 
 pub fn initialize_xde_driver(
@@ -172,6 +201,8 @@ pub(crate) struct PortData {
     pub port: PortInfo,
     /// The routes for this port. This simulates the router layer.
     pub routes: Vec<RouteInfo>,
+    /// Multicast group subscriptions: group IP → source filter.
+    pub mcast_subscriptions: HashMap<IpAddr, SourceFilter>,
 }
 
 #[derive(Debug)]
@@ -237,7 +268,11 @@ impl Handle {
                 return Err(OpteError::DuplicatePort(entry.key().to_string()));
             }
             Entry::Vacant(entry) => {
-                entry.insert(PortData { port, routes: Vec::new() });
+                entry.insert(PortData {
+                    port,
+                    routes: Vec::new(),
+                    mcast_subscriptions: HashMap::new(),
+                });
             }
         }
         Ok(NO_RESPONSE)
@@ -277,7 +312,59 @@ impl Handle {
         _: IpCidr,
         _: Direction,
     ) -> Result<NoResp, OpteError> {
-        unimplemented!("Not yet used in tests")
+        Ok(NO_RESPONSE)
+    }
+
+    /// Remove a CIDR allow rule from a port.
+    pub fn remove_cidr(
+        &self,
+        _: &str,
+        cidr: IpCidr,
+        _: Direction,
+    ) -> Result<RemoveCidrResp, OpteError> {
+        Ok(RemoveCidrResp::Ok(cidr))
+    }
+
+    /// Subscribe a port to a multicast group.
+    pub fn mcast_subscribe(
+        &self,
+        req: &McastSubscribeReq,
+    ) -> Result<NoResp, OpteError> {
+        let mut inner = opte_state().lock().unwrap();
+        let Some(port_data) = inner.ports.get_mut(&req.port_name) else {
+            return Err(OpteError::NoPort(req.port_name.clone()));
+        };
+        let group_ip: IpAddr = match req.group {
+            oxide_vpc::api::IpAddr::Ip4(v4) => {
+                std::net::Ipv4Addr::from(v4).into()
+            }
+            oxide_vpc::api::IpAddr::Ip6(v6) => {
+                std::net::Ipv6Addr::from(v6).into()
+            }
+        };
+        port_data.mcast_subscriptions.insert(group_ip, req.filter.clone());
+        Ok(NO_RESPONSE)
+    }
+
+    /// Unsubscribe a port from a multicast group.
+    pub fn mcast_unsubscribe(
+        &self,
+        req: &McastUnsubscribeReq,
+    ) -> Result<NoResp, OpteError> {
+        let mut inner = opte_state().lock().unwrap();
+        let Some(port_data) = inner.ports.get_mut(&req.port_name) else {
+            return Err(OpteError::NoPort(req.port_name.clone()));
+        };
+        let group_ip: IpAddr = match req.group {
+            oxide_vpc::api::IpAddr::Ip4(v4) => {
+                std::net::Ipv4Addr::from(v4).into()
+            }
+            oxide_vpc::api::IpAddr::Ip6(v6) => {
+                std::net::Ipv6Addr::from(v6).into()
+            }
+        };
+        port_data.mcast_subscriptions.remove(&group_ip);
+        Ok(NO_RESPONSE)
     }
 
     /// Delete a router entry from a port.
@@ -321,6 +408,45 @@ impl Handle {
         _: &ClearVirt2PhysReq,
     ) -> Result<NoResp, OpteError> {
         unimplemented!("Not yet used in tests")
+    }
+
+    /// Set a multicast-to-physical mapping.
+    pub fn set_m2p(&self, _: &SetMcast2PhysReq) -> Result<NoResp, OpteError> {
+        Ok(NO_RESPONSE)
+    }
+
+    /// Clear a multicast-to-physical mapping.
+    pub fn clear_m2p(
+        &self,
+        _: &ClearMcast2PhysReq,
+    ) -> Result<NoResp, OpteError> {
+        Ok(NO_RESPONSE)
+    }
+
+    /// Set multicast forwarding for a port.
+    pub fn set_mcast_fwd(
+        &self,
+        _: &SetMcastForwardingReq,
+    ) -> Result<NoResp, OpteError> {
+        Ok(NO_RESPONSE)
+    }
+
+    /// Clear multicast forwarding for a port.
+    pub fn clear_mcast_fwd(
+        &self,
+        _: &ClearMcastForwardingReq,
+    ) -> Result<NoResp, OpteError> {
+        Ok(NO_RESPONSE)
+    }
+
+    /// Dump all multicast-to-physical mappings.
+    pub fn dump_m2p(&self) -> Result<DumpMcast2PhysResp, OpteError> {
+        Ok(DumpMcast2PhysResp { ip4: Vec::new(), ip6: Vec::new() })
+    }
+
+    /// Dump all multicast forwarding entries.
+    pub fn dump_mcast_fwd(&self) -> Result<DumpMcastForwardingResp, OpteError> {
+        Ok(DumpMcastForwardingResp { entries: Vec::new() })
     }
 
     /// List ports on the current system.
