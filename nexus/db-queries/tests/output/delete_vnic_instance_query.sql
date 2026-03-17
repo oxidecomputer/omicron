@@ -43,6 +43,7 @@ WITH
           )
             AS UUID
         )
+          AS id
     ),
   found_interface AS (SELECT id FROM network_interface WHERE id = $18),
   updated
@@ -59,4 +60,6 @@ WITH
 SELECT
   found_interface.id, updated.id
 FROM
-  found_interface LEFT JOIN updated ON found_interface.id = updated.id
+  interface
+  LEFT JOIN found_interface ON interface.id = found_interface.id
+  LEFT JOIN updated ON found_interface.id = updated.id

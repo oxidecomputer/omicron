@@ -34,6 +34,7 @@ use nexus_reconfigurator_simulation::{
 };
 use nexus_reconfigurator_simulation::{SimStateBuilder, SimTufRepoSource};
 use nexus_reconfigurator_simulation::{SimTufRepoDescription, Simulator};
+use nexus_types::deployment::BlueprintMeasurements;
 use nexus_types::deployment::CockroachDbSettings;
 use nexus_types::deployment::ExpectedVersion;
 use nexus_types::deployment::execution::blueprint_external_dns_config;
@@ -724,8 +725,12 @@ struct SledMupdateSource {
     mupdate_id: Option<MupdateUuid>,
 
     /// simulate an error reading the zone manifest
-    #[clap(long, conflicts_with = "sled-mupdate-valid-source")]
+    #[clap(long, conflicts_with_all = ["sled-mupdate-valid-source", "with_measurement_manifest_error"])]
     with_manifest_error: bool,
+
+    /// simulate an error reading the measurement manifest
+    #[clap(long, conflicts_with = "with_manifest_error")]
+    with_measurement_manifest_error: bool,
 
     /// simulate an error validating zones by this artifact ID name
     ///
@@ -1020,6 +1025,23 @@ enum BlueprintEditCommands {
     BumpNexusGeneration,
     /// make a new blueprint from an existing one without any changes
     Noop,
+    /// Set a sled's measurements to either `unknown` or `install-dataset`
+    SetMeasurements {
+        /// sled to set the field on
+        sled_id: SledOpt,
+        #[command(subcommand)]
+        command: SledMeasurementTarget,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum SledMeasurementTarget {
+    /// Set the blueprint to unknown measurements
+    Unknown,
+    /// Set the blueprint to install dataset
+    InstallDataset,
+    // Unlike Omicron zones we don't have a need for the
+    // `Artifact` kind for now
 }
 
 #[derive(Debug, Subcommand)]
@@ -2784,6 +2806,22 @@ fn cmd_blueprint_edit(
             builder.pending_mgs_update_delete(baseboard_id);
             format!("deleted configured update for serial {serial}")
         }
+        BlueprintEditCommands::SetMeasurements { sled_id, command } => {
+            let sled_id = sled_id.to_sled_id(system.description())?;
+            builder.sled_set_measurements(
+                sled_id,
+                match command {
+                    SledMeasurementTarget::InstallDataset => {
+                        BlueprintMeasurements::InstallDataset
+                    }
+                    SledMeasurementTarget::Unknown => {
+                        BlueprintMeasurements::Unknown
+                    }
+                },
+            )?;
+            format!("set sled measurements to '{command:?}' {sled_id}")
+        }
+
         BlueprintEditCommands::Debug {
             command: BlueprintEditDebugCommands::RemoveSled { sled },
         } => {
@@ -3576,6 +3614,11 @@ fn mupdate_source_to_description(
             format!("from repo at {repo_path}"),
         )?;
         sim_source.simulate_zone_errors(&source.with_zone_error)?;
+        if source.with_measurement_manifest_error {
+            sim_source.simulate_measurement_error(
+                "simulated error with measurement manifest",
+            );
+        }
         Ok(SimTufRepoDescription::new(sim_source))
     } else if source.valid.to_target_release {
         let description = sim
@@ -3599,6 +3642,11 @@ fn mupdate_source_to_description(
                     "to target release".to_owned(),
                 )?;
                 sim_source.simulate_zone_errors(&source.with_zone_error)?;
+                if source.with_measurement_manifest_error {
+                    sim_source.simulate_measurement_error(
+                        "simulated error with measurement manifest",
+                    );
+                }
                 Ok(SimTufRepoDescription::new(sim_source))
             }
         }

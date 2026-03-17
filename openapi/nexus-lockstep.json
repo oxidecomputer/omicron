@@ -2067,7 +2067,7 @@
         ]
       },
       "BlueprintArtifactMeasurements": {
-        "description": "This is a private inner type to ensure the measurment set is always non-empty",
+        "description": "This is a private inner type to ensure the measurement set is always non-empty",
         "type": "array",
         "items": {
           "$ref": "#/components/schemas/BlueprintSingleMeasurement"
@@ -2640,6 +2640,9 @@
               "expunge": {
                 "$ref": "#/components/schemas/PlanningExpungeStepReport"
               },
+              "measurement_updates": {
+                "$ref": "#/components/schemas/PlanningMeasurementUpdatesStepReport"
+              },
               "mgs_updates": {
                 "$ref": "#/components/schemas/PlanningMgsUpdatesStepReport"
               },
@@ -2672,6 +2675,7 @@
               "cockroachdb_settings",
               "decommission",
               "expunge",
+              "measurement_updates",
               "mgs_updates",
               "nexus_generation_bump",
               "noop_image_source",
@@ -7111,6 +7115,140 @@
           "orphan_disks"
         ]
       },
+      "PlanningMeasurementUpdatesStepReport": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "count": {
+                "type": "integer",
+                "format": "uint",
+                "minimum": 0
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "modified"
+                ]
+              }
+            },
+            "required": [
+              "count",
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "blocked_add_update"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "empty_measurements"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "sled_id": {
+                "$ref": "#/components/schemas/SledUuid"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "no_sled_agent_in_inventory"
+                ]
+              }
+            },
+            "required": [
+              "sled_id",
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "sled_id": {
+                "$ref": "#/components/schemas/SledUuid"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "no_sled_config"
+                ]
+              }
+            },
+            "required": [
+              "sled_id",
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "sled_id": {
+                "$ref": "#/components/schemas/SledUuid"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "still_install_dataset"
+                ]
+              }
+            },
+            "required": [
+              "sled_id",
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "waiting_on_inventory"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "matches_inventory"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          }
+        ]
+      },
       "PlanningMgsUpdatesStepReport": {
         "type": "object",
         "properties": {
@@ -7196,6 +7334,9 @@
           "host_phase_2_slot_b_eligible": {
             "type": "boolean"
           },
+          "measurement_eligible": {
+            "type": "boolean"
+          },
           "num_dataset": {
             "type": "integer",
             "format": "uint",
@@ -7210,12 +7351,45 @@
         "required": [
           "host_phase_2_slot_a_eligible",
           "host_phase_2_slot_b_eligible",
+          "measurement_eligible",
           "num_dataset",
           "num_eligible"
         ]
       },
       "PlanningNoopImageSourceSkipSledHostPhase2Reason": {
         "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "sled_not_in_inventory"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          }
+        ]
+      },
+      "PlanningNoopImageSourceSkipSledMeasurementsReason": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "both_slots_already_artifact"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
           {
             "type": "object",
             "properties": {
@@ -7383,6 +7557,12 @@
               "$ref": "#/components/schemas/PlanningNoopImageSourceSkipSledHostPhase2Reason"
             }
           },
+          "skipped_sled_measurements": {
+            "type": "object",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/PlanningNoopImageSourceSkipSledMeasurementsReason"
+            }
+          },
           "skipped_sled_zones": {
             "type": "object",
             "additionalProperties": {
@@ -7402,6 +7582,13 @@
             },
             "uniqueItems": true
           },
+          "sled_measurements_already_artifact": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SledUuid"
+            },
+            "uniqueItems": true
+          },
           "sled_zones_all_already_artifact": {
             "type": "array",
             "items": {
@@ -7414,9 +7601,11 @@
           "converted",
           "no_target_release",
           "skipped_sled_host_phase_2",
+          "skipped_sled_measurements",
           "skipped_sled_zones",
           "skipped_zones",
           "sled_host_phase_2_both_already_artifact",
+          "sled_measurements_already_artifact",
           "sled_zones_all_already_artifact"
         ]
       },
@@ -9731,6 +9920,21 @@
                 "type": "string",
                 "enum": [
                   "zone_add_blockers"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "description": "Waiting on measurements",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "measurements"
                 ]
               }
             },
