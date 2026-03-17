@@ -14,6 +14,7 @@ use nexus_lockstep_client::types::LastResult;
 use nexus_types::deployment::BlueprintZoneConfig;
 use nexus_types::deployment::ReconfiguratorConfig;
 use nexus_types::deployment::ReconfiguratorConfigParam;
+use omicron_common::policy::COCKROACHDB_REDUNDANCY;
 use omicron_test_utils::dev::poll::CondCheckError;
 use omicron_test_utils::dev::poll::wait_for_condition;
 use omicron_uuid_kinds::BlueprintUuid;
@@ -39,6 +40,53 @@ use update_engine::events::StepOutcome;
 #[live_test]
 async fn test_execute_expunged_zone(lc: &LiveTestContext) {
     let log = lc.log();
+    let opctx = lc.opctx();
+    let datastore = lc.datastore();
+
+    // Safety check: If running this test multiple times, we may leave behind
+    // underreplicated cockroach ranges. We shouldn't attempt to proceed if
+    // those haven't been repair yet. Get the latest inventory collection and
+    // check.
+    match datastore.inventory_get_latest_collection(opctx).await {
+        Ok(Some(collection)) => {
+            let expected_nodes = COCKROACHDB_REDUNDANCY;
+            let db_status = collection.cockroach_status;
+            if db_status.len() < expected_nodes {
+                panic!(
+                    "refusing to run live test: \
+                    latest inventory only has status from {} cockroach nodes; \
+                    expected {expected_nodes}",
+                    db_status.len()
+                );
+            }
+            for (node_id, status) in db_status {
+                match status.ranges_underreplicated {
+                    Some(0) => (),
+                    _ => panic!(
+                        "refusing to run live test: inventory reports {:?} \
+                         for ranges underreplicated on CRDB node {node_id}",
+                        status.ranges_underreplicated,
+                    ),
+                }
+                match status.liveness_live_nodes {
+                    Some(n) if n == expected_nodes as u64 => (),
+                    _ => panic!(
+                        "refusing to run live test: inventory reports {:?} \
+                         for live nodes on CRDB node {node_id}",
+                        status.liveness_live_nodes,
+                    ),
+                }
+            }
+        }
+        Ok(None) => panic!(
+            "refusing to run live test: no inventory collections exist yet"
+        ),
+        Err(err) => panic!(
+            "refusing to run live test: \
+             error fetching inventory collection: {}",
+            InlineErrorChain::new(&err),
+        ),
+    }
 
     for zone_kind in ZoneKind::iter() {
         match zone_kind {
