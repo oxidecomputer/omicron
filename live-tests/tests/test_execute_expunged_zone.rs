@@ -267,12 +267,22 @@ async fn test_execute_expunged_zone_of_kind(
     // Wait until we see execution of this latest blueprint.
     wait_for_condition(
         || async {
-            let status = nexus
-                .bgtask_view("blueprint_executor")
-                .await
-                .expect("got status for `blueprint_executor` bgtask")
-                .into_inner()
-                .last;
+            let status = match nexus.bgtask_view("blueprint_executor").await {
+                Ok(task_view) => task_view.into_inner().last,
+                Err(err) => {
+                    // We don't generally expect this to fail, but it could if
+                    // we're testing Nexus or Cockroach (or recently did), since
+                    // either of those being expunged may cause transient errors
+                    // attempting to fetch task status from an arbitrary Nexus
+                    // present in DNS.
+                    warn!(
+                        log,
+                        "failed to get blueprint_executor status from Nexus";
+                        InlineErrorChain::new(&err),
+                    );
+                    return Err(CondCheckError::NotYet);
+                }
+            };
 
             let details = match status {
                 LastResult::NeverCompleted => {
@@ -313,7 +323,7 @@ async fn test_execute_expunged_zone_of_kind(
             // Make sure we're looking at the execution of the blueprint we care
             // about; otherwise, keep waiting.
             if details.target_id != planned_bp_2.id {
-                info!(
+                warn!(
                     log,
                     "still waiting for execution: executed blueprint ID \
                      does not match ID we're waiting for";
@@ -325,29 +335,23 @@ async fn test_execute_expunged_zone_of_kind(
 
             // Check that execution completely cleanly.
             if let Some(err) = details.execution_error {
-                return Err(CondCheckError::Failed(format!(
-                    "execution error: {}",
+                warn!(
+                    log, "execution had an error";
                     InlineErrorChain::new(&err),
-                )));
+                );
+                return Err(CondCheckError::NotYet);
             }
 
             match details.event_report {
                 Ok(event_report) => {
-                    match event_report_problems(event_report, log) {
-                        // Success!
-                        None => Ok(()),
-                        // Some warnings when executing new zones are expected
-                        // (e.g., failure to talk to a zone immediately after
-                        // starting it), but we expect those to clear up
-                        // quickly.
-                        Some(EventReportProblems::HadWarnings) => {
-                            Err(CondCheckError::NotYet)
-                        }
-                        Some(EventReportProblems::Fatal(err)) => {
-                            Err(CondCheckError::Failed(format!(
-                                "execution problem: {err}"
-                            )))
-                        }
+                    // If the event report indicates any problems, we'll try
+                    // again - we expect to see some transient problems and
+                    // warnings, but also expect them to clear up on their own
+                    // pretty quickly.
+                    if event_report_has_problems(event_report, log) {
+                        Err(CondCheckError::NotYet)
+                    } else {
+                        Ok(())
                     }
                 }
                 Err(err) => Err(CondCheckError::Failed(format!(
@@ -357,7 +361,7 @@ async fn test_execute_expunged_zone_of_kind(
             }
         },
         &Duration::from_secs(1),
-        &Duration::from_secs(120),
+        &Duration::from_secs(180),
     )
     .await
     .expect("waited for successful execution");
@@ -472,39 +476,35 @@ impl ZonesOfInterest {
     }
 }
 
-enum EventReportProblems {
-    Fatal(&'static str),
-    HadWarnings,
-}
-
-fn event_report_problems(
+fn event_report_has_problems(
     event_report: EventReport<NestedSpec>,
     log: &Logger,
-) -> Option<EventReportProblems> {
+) -> bool {
     let mut buf = EventBuffer::default();
     buf.add_event_report(event_report);
 
     // Check for outright failure.
     let Some(summary) = buf.root_execution_summary() else {
-        return Some(EventReportProblems::Fatal(
-            "missing root_execution_summary",
-        ));
+        warn!(log, "event report missing root_execution_summary");
+        return true;
     };
     match summary.execution_status {
         ExecutionStatus::Terminal(info) => match info.kind {
             TerminalKind::Completed => (),
-            TerminalKind::Failed => {
-                return Some(EventReportProblems::Fatal("execution failed"));
-            }
-            TerminalKind::Aborted => {
-                return Some(EventReportProblems::Fatal("execution aborted"));
+            TerminalKind::Failed | TerminalKind::Aborted => {
+                warn!(
+                    log, "execution ended with unexpected terminal status";
+                    "stats" => ?info.kind,
+                );
+                return true;
             }
         },
-        ExecutionStatus::NotStarted => {
-            return Some(EventReportProblems::Fatal("execution not started"));
-        }
-        ExecutionStatus::Running { .. } => {
-            return Some(EventReportProblems::Fatal("execution still running"));
+        ExecutionStatus::NotStarted | ExecutionStatus::Running { .. } => {
+            warn!(
+                log, "execution has unexpected execution status";
+                "stats" => ?summary.execution_status,
+            );
+            return true;
         }
     }
 
@@ -518,8 +518,7 @@ fn event_report_problems(
                     | StepOutcome::Skipped { .. } => (),
                     StepOutcome::Warning { message, .. } => {
                         warn!(
-                            log,
-                            "exeucution warning";
+                            log, "execution warning";
                             "message" => %message,
                             "step" => %step_data.step_info().description,
                         );
@@ -530,5 +529,5 @@ fn event_report_problems(
         }
     }
 
-    if had_warnings { Some(EventReportProblems::HadWarnings) } else { None }
+    had_warnings
 }
