@@ -451,7 +451,9 @@ mod test {
     use nexus_db_model::Zpool;
     use nexus_test_utils::SLED_AGENT_UUID;
     use nexus_test_utils_macros::nexus_test;
-    use nexus_types::fm::ereport::{EreportData, EreportId, Reporter, ReporterKind};
+    use nexus_types::fm::ereport::{
+        EreportData, EreportId, Reporter, ReporterKind,
+    };
     use nexus_types::identity::Asset;
     use nexus_types::internal_api::background::SupportBundleCollectionStep;
     use nexus_types::internal_api::background::SupportBundleEreportStatus;
@@ -627,7 +629,11 @@ mod test {
         datastore
             .ereports_insert(
                 &opctx,
-                Reporter { slot_type: SpType::Switch, slot: 1, kind: ReporterKind::Sp },
+                Reporter {
+                    slot_type: SpType::Switch,
+                    slot: 1,
+                    kind: ReporterKind::Sp,
+                },
                 vec![EreportData {
                     id: EreportId {
                         restart_id: EreporterRestartUuid::new_v4(),
@@ -648,7 +654,11 @@ mod test {
         datastore
             .ereports_insert(
                 &opctx,
-                Reporter { slot_type: SpType::Sled, slot: 0, kind: ReporterKind::HostOs { sled: SledUuid::new_v4() } },
+                Reporter {
+                    slot_type: SpType::Sled,
+                    slot: 0,
+                    kind: ReporterKind::HostOs { sled: SledUuid::new_v4() },
+                },
                 vec![
                     EreportData {
                         id: EreportId {

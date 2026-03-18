@@ -4671,10 +4671,7 @@ fn after_241_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
             "host ereport should have slot_type='sled'"
         );
         let slot: i32 = rows[0].get("slot");
-        assert_eq!(
-            slot, 7,
-            "host ereport slot should match inventory sp_slot"
-        );
+        assert_eq!(slot, 7, "host ereport slot should match inventory sp_slot");
         let sled_id: Option<Uuid> = rows[0].get("sled_id");
         assert_eq!(sled_id, Some(EREPORT_241_SLED));
 
@@ -4866,9 +4863,7 @@ fn get_migration_checks() -> BTreeMap<Version, DataMigrationFns> {
     );
     map.insert(
         Version::new(241, 0, 0),
-        DataMigrationFns::new()
-            .before(before_241_0_0)
-            .after(after_241_0_0),
+        DataMigrationFns::new().before(before_241_0_0).after(after_241_0_0),
     );
     map
 }
