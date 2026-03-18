@@ -3156,7 +3156,10 @@ CREATE TABLE IF NOT EXISTS omicron.public.support_bundle (
     -- and later managing its storage.
     assigned_nexus UUID,
 
-    user_comment TEXT
+    user_comment TEXT,
+
+    -- If this bundle was requested by an FM case, the case UUID.
+    fm_case_id UUID
 
 );
 
@@ -7440,6 +7443,70 @@ CREATE INDEX IF NOT EXISTS
     lookup_fm_alert_requests_for_case
 ON omicron.public.fm_alert_request (sitrep_id, case_id);
 
+CREATE TABLE IF NOT EXISTS omicron.public.fm_support_bundle_request (
+    -- Requested support bundle UUID.
+    id UUID NOT NULL,
+    -- UUID of the current sitrep that this request record is part of.
+    --
+    -- Note that this is *not* the sitrep in which the bundle was requested.
+    sitrep_id UUID NOT NULL,
+    -- UUID of the original sitrep in which the bundle was first requested.
+    requested_sitrep_id UUID NOT NULL,
+    -- UUID of the case to which this request belongs.
+    case_id UUID NOT NULL,
+
+    PRIMARY KEY (sitrep_id, id)
+);
+
+CREATE INDEX IF NOT EXISTS
+    lookup_fm_support_bundle_requests_for_case
+ON omicron.public.fm_support_bundle_request (sitrep_id, case_id);
+
+-- Per-variant data selection tables for fm_support_bundle_request.
+-- Row existence = "include this category in the bundle."
+-- No rows in any variant table = "collect everything."
+
+CREATE TABLE IF NOT EXISTS omicron.public.fm_sb_req_reconfigurator (
+    sitrep_id UUID NOT NULL,
+    request_id UUID NOT NULL,
+
+    PRIMARY KEY (sitrep_id, request_id)
+);
+
+CREATE TABLE IF NOT EXISTS omicron.public.fm_sb_req_sled_cubby_info (
+    sitrep_id UUID NOT NULL,
+    request_id UUID NOT NULL,
+
+    PRIMARY KEY (sitrep_id, request_id)
+);
+
+CREATE TABLE IF NOT EXISTS omicron.public.fm_sb_req_sp_dumps (
+    sitrep_id UUID NOT NULL,
+    request_id UUID NOT NULL,
+
+    PRIMARY KEY (sitrep_id, request_id)
+);
+
+CREATE TABLE IF NOT EXISTS omicron.public.fm_sb_req_host_info (
+    sitrep_id UUID NOT NULL,
+    request_id UUID NOT NULL,
+    all_sleds BOOL NOT NULL,
+    sled_ids UUID[] NOT NULL DEFAULT ARRAY[],
+
+    PRIMARY KEY (sitrep_id, request_id)
+);
+
+CREATE TABLE IF NOT EXISTS omicron.public.fm_sb_req_ereports (
+    sitrep_id UUID NOT NULL,
+    request_id UUID NOT NULL,
+    start_time TIMESTAMPTZ,
+    end_time TIMESTAMPTZ,
+    only_serials TEXT[] NOT NULL DEFAULT ARRAY[],
+    only_classes TEXT[] NOT NULL DEFAULT ARRAY[],
+
+    PRIMARY KEY (sitrep_id, request_id)
+);
+
 /*
  * List of datasets available to be sliced up and passed to VMMs for encrypted
  * instance local storage.
@@ -8270,7 +8337,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '240.0.0', NULL)
+    (TRUE, NOW(), NOW(), '241.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

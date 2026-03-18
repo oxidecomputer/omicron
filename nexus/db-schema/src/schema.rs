@@ -1590,6 +1590,7 @@ table! {
 
         assigned_nexus -> Nullable<Uuid>,
         user_comment -> Nullable<Text>,
+        fm_case_id -> Nullable<Uuid>,
     }
 }
 
@@ -3182,6 +3183,80 @@ table! {
         payload -> Jsonb,
     }
 }
+
+// FM support bundle requests, stored per-sitrep like alert requests.
+table! {
+    fm_support_bundle_request (sitrep_id, id) {
+        id -> Uuid,
+        sitrep_id -> Uuid,
+        requested_sitrep_id -> Uuid,
+        case_id -> Uuid,
+    }
+}
+
+// Per-variant data selection tables for fm_support_bundle_request.
+// Each table corresponds to a BundleData variant. Row existence means
+// "include this category in the bundle." No rows across any variant
+// table means "collect everything."
+
+// BundleData::Reconfigurator (unit variant, no filter columns)
+table! {
+    fm_sb_req_reconfigurator (sitrep_id, request_id) {
+        sitrep_id -> Uuid,
+        request_id -> Uuid,
+    }
+}
+
+// BundleData::SledCubbyInfo (unit variant, no filter columns)
+table! {
+    fm_sb_req_sled_cubby_info (sitrep_id, request_id) {
+        sitrep_id -> Uuid,
+        request_id -> Uuid,
+    }
+}
+
+// BundleData::SpDumps (unit variant, no filter columns)
+table! {
+    fm_sb_req_sp_dumps (sitrep_id, request_id) {
+        sitrep_id -> Uuid,
+        request_id -> Uuid,
+    }
+}
+
+// BundleData::HostInfo(HashSet<SledSelection>)
+table! {
+    fm_sb_req_host_info (sitrep_id, request_id) {
+        sitrep_id -> Uuid,
+        request_id -> Uuid,
+        all_sleds -> Bool,
+        sled_ids -> Array<Uuid>,
+    }
+}
+
+// BundleData::Ereports(EreportFilters)
+table! {
+    fm_sb_req_ereports (sitrep_id, request_id) {
+        sitrep_id -> Uuid,
+        request_id -> Uuid,
+        start_time -> Nullable<Timestamptz>,
+        end_time -> Nullable<Timestamptz>,
+        only_serials -> Array<Text>,
+        only_classes -> Array<Text>,
+    }
+}
+
+// The per-variant tables use composite keys (sitrep_id, request_id)
+// matching fm_support_bundle_request's (sitrep_id, id), so joinable!
+// cannot be used (it requires single-column FKs). Queries must use
+// explicit .on() clauses instead.
+allow_tables_to_appear_in_same_query!(
+    fm_support_bundle_request,
+    fm_sb_req_reconfigurator,
+    fm_sb_req_sled_cubby_info,
+    fm_sb_req_sp_dumps,
+    fm_sb_req_host_info,
+    fm_sb_req_ereports,
+);
 
 table! {
     trust_quorum_configuration (rack_id, epoch) {
