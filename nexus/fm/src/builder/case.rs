@@ -51,7 +51,7 @@ impl AllCases {
     pub fn open_case(
         &mut self,
         de: fm::DiagnosisEngineKind,
-    ) -> anyhow::Result<iddqd::id_ord_map::RefMut<'_, CaseBuilder>> {
+    ) -> iddqd::id_ord_map::RefMut<'_, CaseBuilder> {
         let (id, case_rng) = self.rng.next_case();
         let sitrep_id = self.sitrep_id;
         let case = match self.cases.entry(&id) {
@@ -81,7 +81,7 @@ impl AllCases {
             "de" => %de
         );
 
-        Ok(case)
+        case
     }
 
     pub fn case(&self, id: &CaseUuid) -> Option<&CaseBuilder> {
