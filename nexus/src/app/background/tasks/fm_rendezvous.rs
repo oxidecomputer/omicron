@@ -17,7 +17,9 @@ use nexus_types::fm::SitrepVersion;
 use nexus_types::fm::case::AlertRequest;
 use nexus_types::internal_api::background::FmAlertStats as AlertStats;
 use nexus_types::internal_api::background::FmRendezvousStatus as Status;
+use nexus_types::internal_api::background::FmSupportBundleStats as SupportBundleStats;
 use omicron_common::api::external::Error;
+use omicron_uuid_kinds::OmicronZoneUuid;
 use serde_json::json;
 use slog_error_chain::InlineErrorChain;
 use std::sync::Arc;
@@ -27,6 +29,8 @@ pub struct FmRendezvous {
     datastore: Arc<DataStore>,
     sitrep_watcher: watch::Receiver<CurrentSitrep>,
     alert_dispatcher: Activator,
+    support_bundle_collector: Activator,
+    nexus_id: OmicronZoneUuid,
 }
 
 impl BackgroundTask for FmRendezvous {
@@ -55,8 +59,16 @@ impl FmRendezvous {
         datastore: Arc<DataStore>,
         rx: watch::Receiver<CurrentSitrep>,
         alert_dispatcher: Activator,
+        support_bundle_collector: Activator,
+        nexus_id: OmicronZoneUuid,
     ) -> Self {
-        Self { datastore, sitrep_watcher: rx, alert_dispatcher }
+        Self {
+            datastore,
+            sitrep_watcher: rx,
+            alert_dispatcher,
+            support_bundle_collector,
+            nexus_id,
+        }
     }
 
     async fn actually_activate(&mut self, opctx: &OpContext) -> Status {
@@ -65,11 +77,13 @@ impl FmRendezvous {
             return Status::NoSitrep;
         };
 
-        // TODO(eliza): as we start doing other things (i.e. requesting support
-        // bundles, updating problems), consider spawning these in their own tasks...
+        // TODO(eliza): as we start doing other things (i.e. updating
+        // problems), consider spawning these in their own tasks...
         let alerts = self.create_requested_alerts(&sitrep, opctx).await;
+        let support_bundles =
+            self.create_requested_support_bundles(&sitrep, opctx).await;
 
-        Status::Executed { sitrep_id: sitrep.1.id(), alerts }
+        Status::Executed { sitrep_id: sitrep.1.id(), alerts, support_bundles }
     }
 
     async fn create_requested_alerts(
@@ -162,6 +176,110 @@ impl FmRendezvous {
 
         status
     }
+
+    async fn create_requested_support_bundles(
+        &self,
+        sitrep: &Arc<(SitrepVersion, Sitrep)>,
+        opctx: &OpContext,
+    ) -> SupportBundleStats {
+        let (_, ref sitrep) = **sitrep;
+        let mut status = SupportBundleStats::default();
+
+        for (case, req) in sitrep.support_bundles_requested() {
+            let bundle_id = req.id;
+            status.total_bundles_requested += 1;
+            if req.requested_sitrep_id == sitrep.id() {
+                status.current_sitrep_bundles_requested += 1;
+            }
+
+            let reason = format!(
+                "Requested by {:?} diagnosis engine for case {}",
+                case.de, case.id,
+            );
+            match self
+                .datastore
+                .support_bundle_create_for_fm(
+                    opctx,
+                    bundle_id,
+                    self.nexus_id,
+                    case.id,
+                    reason,
+                )
+                .await
+            {
+                // Bundle already exists (idempotent retry), that's fine.
+                Err(Error::Conflict { .. }) => {}
+                Err(Error::InsufficientCapacity { .. }) => {
+                    slog::warn!(
+                        opctx.log,
+                        "insufficient capacity for support bundle";
+                        "case_id" => %case.id,
+                        "bundle_id" => %bundle_id,
+                    );
+                    status.capacity_errors += 1;
+                }
+                Err(e) => {
+                    slog::warn!(
+                        opctx.log,
+                        "failed to create requested support bundle";
+                        "case_id" => %case.id,
+                        "bundle_id" => %bundle_id,
+                        "error" => %e,
+                    );
+                    status
+                        .errors
+                        .push(format!("support bundle {bundle_id}: {e}"));
+                }
+                Ok(_) => status.bundles_created += 1,
+            }
+        }
+
+        let n_errors = status.errors.len();
+        if n_errors > 0 || status.capacity_errors > 0 {
+            slog::warn!(
+                opctx.log,
+                "created {} support bundles requested by the current \
+                 sitrep, but {} requests could not be fulfilled!",
+                status.bundles_created,
+                n_errors + status.capacity_errors;
+                "sitrep_id" => %sitrep.id(),
+                "total_bundles_requested" => status.total_bundles_requested,
+                "bundles_created" => status.bundles_created,
+                "capacity_errors" => status.capacity_errors,
+                "errors" => n_errors,
+            );
+        } else if status.bundles_created > 0 {
+            slog::info!(
+                opctx.log,
+                "created {} support bundles requested by the current sitrep",
+                status.bundles_created;
+                "sitrep_id" => %sitrep.id(),
+                "total_bundles_requested" => status.total_bundles_requested,
+                "bundles_created" => status.bundles_created,
+            );
+        } else if status.total_bundles_requested > 0 {
+            slog::debug!(
+                opctx.log,
+                "all support bundles requested by the current sitrep \
+                 already exist";
+                "sitrep_id" => %sitrep.id(),
+                "total_bundles_requested" => status.total_bundles_requested,
+            );
+        } else {
+            slog::debug!(
+                opctx.log,
+                "current sitrep requests no support bundles";
+                "sitrep_id" => %sitrep.id(),
+            );
+        }
+
+        // We created some bundles, so let the collector know.
+        if status.bundles_created > 0 {
+            self.support_bundle_collector.activate();
+        }
+
+        status
+    }
 }
 
 #[cfg(test)]
@@ -182,6 +300,7 @@ mod tests {
     use omicron_uuid_kinds::GenericUuid;
     use omicron_uuid_kinds::OmicronZoneUuid;
     use omicron_uuid_kinds::SitrepUuid;
+    use omicron_uuid_kinds::SupportBundleUuid;
 
     async fn fetch_alert(
         datastore: &DataStore,
@@ -209,10 +328,15 @@ mod tests {
         // we must actually wire it up first.
         alert_dispatcher_activator.mark_wired_up().unwrap();
 
+        let support_bundle_collector_activator = Activator::new();
+        support_bundle_collector_activator.mark_wired_up().unwrap();
+
         let mut task = FmRendezvous::new(
             datastore.clone(),
             sitrep_rx,
             alert_dispatcher_activator.clone(),
+            support_bundle_collector_activator.clone(),
+            OmicronZoneUuid::new_v4(),
         );
 
         // Initial activation should do nothing.
@@ -270,7 +394,7 @@ mod tests {
             .unwrap();
 
         let status = dbg!(task.actually_activate(opctx).await);
-        let Status::Executed { sitrep_id, alerts } = status else {
+        let Status::Executed { sitrep_id, alerts, .. } = status else {
             panic!("rendezvous should have executed, as there is a sitrep");
         };
         assert_eq!(sitrep_id, sitrep1_id);
@@ -357,7 +481,7 @@ mod tests {
             .unwrap();
 
         let status = dbg!(task.actually_activate(opctx).await);
-        let Status::Executed { sitrep_id, alerts } = status else {
+        let Status::Executed { sitrep_id, alerts, .. } = status else {
             panic!("rendezvous should have executed, as there is a sitrep");
         };
         assert_eq!(sitrep_id, sitrep2_id);
@@ -397,6 +521,360 @@ mod tests {
             db_alert3.case_id.map(|id| id.into()),
             Some(case1_id),
             "alert3 should have case_id set to case1"
+        );
+
+        // Cleanup
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    /// Create a sled with zpools and debug datasets so support bundle
+    /// allocation can succeed.
+    async fn create_sled_with_zpools(
+        datastore: &DataStore,
+        opctx: &OpContext,
+        pool_count: usize,
+    ) {
+        use nexus_db_model::Generation;
+        use nexus_db_model::RendezvousDebugDataset;
+        use nexus_db_model::SledBaseboard;
+        use nexus_db_model::SledCpuFamily;
+        use nexus_db_model::SledSystemHardware;
+        use nexus_db_model::SledUpdate;
+        use nexus_db_model::Zpool;
+        use omicron_common::api::external::ByteCount;
+        use omicron_uuid_kinds::BlueprintUuid;
+        use omicron_uuid_kinds::DatasetUuid;
+        use omicron_uuid_kinds::PhysicalDiskUuid;
+        use omicron_uuid_kinds::SledUuid;
+        use omicron_uuid_kinds::ZpoolUuid;
+        use std::net::Ipv6Addr;
+
+        let sled_id = SledUuid::new_v4();
+        let sled = SledUpdate::new(
+            sled_id,
+            "[::1]:0".parse().unwrap(),
+            SledBaseboard {
+                serial_number: format!("test-sled-{sled_id}"),
+                part_number: "test-part".to_string(),
+                revision: 0,
+            },
+            SledSystemHardware {
+                is_scrimlet: false,
+                usable_hardware_threads: 4,
+                usable_physical_ram: ByteCount::from(1024 * 1024),
+                reservoir_size: ByteCount::from(0),
+                cpu_family: SledCpuFamily::AmdMilan,
+            },
+            omicron_common::api::external::MacAddr(macaddr::MacAddr6::nil()),
+            Ipv6Addr::LOCALHOST,
+            Generation::new(),
+        );
+        datastore.sled_upsert(sled).await.unwrap();
+
+        let blueprint_id = BlueprintUuid::new_v4();
+        for _ in 0..pool_count {
+            let zpool_id = ZpoolUuid::new_v4();
+            let zpool = Zpool::new(
+                zpool_id,
+                sled_id,
+                PhysicalDiskUuid::new_v4(),
+                ByteCount::from(0).into(),
+            );
+            datastore.zpool_insert(opctx, zpool).await.unwrap();
+
+            let dataset = RendezvousDebugDataset::new(
+                DatasetUuid::new_v4(),
+                zpool_id,
+                blueprint_id,
+            );
+            datastore
+                .debug_dataset_insert_if_not_exists(opctx, dataset)
+                .await
+                .unwrap();
+        }
+    }
+
+    async fn fetch_support_bundle(
+        datastore: &DataStore,
+        bundle_id: SupportBundleUuid,
+    ) -> Result<db::model::SupportBundle, diesel::result::Error> {
+        use nexus_db_schema::schema::support_bundle::dsl as sb_dsl;
+        let conn = datastore.pool_connection_for_tests().await.unwrap();
+        sb_dsl::support_bundle
+            .filter(sb_dsl::id.eq(bundle_id.into_untyped_uuid()))
+            .select(db::model::SupportBundle::as_select())
+            .first_async(&*conn)
+            .await
+    }
+
+    #[tokio::test]
+    async fn test_support_bundle_requests() {
+        let logctx = dev::test_setup_log("test_support_bundle_requests");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        let (sitrep_tx, sitrep_rx) = watch::channel(None);
+
+        let alert_dispatcher_activator = Activator::new();
+        alert_dispatcher_activator.mark_wired_up().unwrap();
+        let support_bundle_collector_activator = Activator::new();
+        support_bundle_collector_activator.mark_wired_up().unwrap();
+
+        let nexus_id = OmicronZoneUuid::new_v4();
+        let mut task = FmRendezvous::new(
+            datastore.clone(),
+            sitrep_rx,
+            alert_dispatcher_activator.clone(),
+            support_bundle_collector_activator.clone(),
+            nexus_id,
+        );
+
+        // Create zpools/datasets so support bundle allocation can succeed.
+        create_sled_with_zpools(&datastore, &opctx, 3).await;
+
+        // Build a sitrep with a case containing a support bundle request.
+        let sitrep1_id = SitrepUuid::new_v4();
+        let case1_id = CaseUuid::new_v4();
+        let bundle1_id = SupportBundleUuid::new_v4();
+
+        let mut case1 = fm::Case {
+            id: case1_id,
+            created_sitrep_id: sitrep1_id,
+            closed_sitrep_id: None,
+            de: fm::DiagnosisEngineKind::PowerShelf,
+            alerts_requested: iddqd::IdOrdMap::new(),
+            ereports: iddqd::IdOrdMap::new(),
+            support_bundles_requested: iddqd::IdOrdMap::new(),
+            comment: "case with support bundle request".to_string(),
+        };
+        case1
+            .support_bundles_requested
+            .insert_unique(fm::case::SupportBundleRequest {
+                id: bundle1_id,
+                requested_sitrep_id: sitrep1_id,
+
+                data_selection: None,
+            })
+            .unwrap();
+
+        let sitrep1 = {
+            let mut cases = iddqd::IdOrdMap::new();
+            cases.insert_unique(case1.clone()).unwrap();
+            fm::Sitrep {
+                metadata: fm::SitrepMetadata {
+                    id: sitrep1_id,
+                    inv_collection_id: CollectionUuid::new_v4(),
+                    parent_sitrep_id: None,
+                    creator_id: OmicronZoneUuid::new_v4(),
+                    comment: "test sitrep 1".to_string(),
+                    time_created: Utc::now(),
+                },
+                cases,
+            }
+        };
+
+        sitrep_tx
+            .send(Some(Arc::new((
+                fm::SitrepVersion {
+                    id: sitrep1_id,
+                    version: 1,
+                    time_made_current: Utc::now(),
+                },
+                sitrep1,
+            ))))
+            .unwrap();
+
+        // First activation: should create the support bundle.
+        let status = dbg!(task.actually_activate(opctx).await);
+        let Status::Executed { sitrep_id, support_bundles, .. } = status else {
+            panic!("rendezvous should have executed, as there is a sitrep");
+        };
+        assert_eq!(sitrep_id, sitrep1_id);
+        assert_eq!(support_bundles.total_bundles_requested, 1);
+        assert_eq!(support_bundles.current_sitrep_bundles_requested, 1);
+        assert_eq!(support_bundles.bundles_created, 1);
+        assert!(support_bundles.errors.is_empty());
+        assert_eq!(support_bundles.capacity_errors, 0);
+
+        // The bundle should exist in the database in Collecting state.
+        let db_bundle = fetch_support_bundle(&datastore, bundle1_id)
+            .await
+            .expect("bundle1 must have been created");
+        assert_eq!(db_bundle.state, db::model::SupportBundleState::Collecting,);
+        assert_eq!(db_bundle.fm_case_id.map(|id| id.into()), Some(case1_id),);
+
+        // The collector should have been activated.
+        assert!(
+            support_bundle_collector_activator.is_activated(),
+            "collector should be activated when bundles are created"
+        );
+
+        // Second activation: same sitrep, bundle already exists (conflict
+        // is no-op).
+        let status = dbg!(task.actually_activate(opctx).await);
+        let Status::Executed { support_bundles, .. } = status else {
+            panic!("rendezvous should have executed");
+        };
+        assert_eq!(support_bundles.bundles_created, 0);
+        assert_eq!(support_bundles.total_bundles_requested, 1);
+
+        // Build a second sitrep adding another bundle request.
+        let sitrep2_id = SitrepUuid::new_v4();
+        let bundle2_id = SupportBundleUuid::new_v4();
+        case1
+            .support_bundles_requested
+            .insert_unique(fm::case::SupportBundleRequest {
+                id: bundle2_id,
+                requested_sitrep_id: sitrep2_id,
+
+                data_selection: None,
+            })
+            .unwrap();
+
+        let sitrep2 = {
+            let mut cases = iddqd::IdOrdMap::new();
+            cases.insert_unique(case1.clone()).unwrap();
+            fm::Sitrep {
+                metadata: fm::SitrepMetadata {
+                    id: sitrep2_id,
+                    inv_collection_id: CollectionUuid::new_v4(),
+                    parent_sitrep_id: Some(sitrep1_id),
+                    creator_id: OmicronZoneUuid::new_v4(),
+                    comment: "test sitrep 2".to_string(),
+                    time_created: Utc::now(),
+                },
+                cases,
+            }
+        };
+
+        sitrep_tx
+            .send(Some(Arc::new((
+                fm::SitrepVersion {
+                    id: sitrep2_id,
+                    version: 2,
+                    time_made_current: Utc::now(),
+                },
+                sitrep2,
+            ))))
+            .unwrap();
+
+        // Third activation: should create only the new bundle.
+        let status = dbg!(task.actually_activate(opctx).await);
+        let Status::Executed { support_bundles, .. } = status else {
+            panic!("rendezvous should have executed");
+        };
+        assert_eq!(support_bundles.total_bundles_requested, 2);
+        assert_eq!(support_bundles.current_sitrep_bundles_requested, 1);
+        assert_eq!(support_bundles.bundles_created, 1);
+        assert!(support_bundles.errors.is_empty());
+
+        // Verify the second bundle exists.
+        let db_bundle2 = fetch_support_bundle(&datastore, bundle2_id)
+            .await
+            .expect("bundle2 must have been created");
+        assert_eq!(db_bundle2.state, db::model::SupportBundleState::Collecting,);
+
+        // Cleanup
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_support_bundle_requests_capacity_error() {
+        let logctx =
+            dev::test_setup_log("test_support_bundle_requests_capacity_error");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        let (sitrep_tx, sitrep_rx) = watch::channel(None);
+
+        let alert_dispatcher_activator = Activator::new();
+        alert_dispatcher_activator.mark_wired_up().unwrap();
+        let support_bundle_collector_activator = Activator::new();
+        support_bundle_collector_activator.mark_wired_up().unwrap();
+
+        let nexus_id = OmicronZoneUuid::new_v4();
+        let mut task = FmRendezvous::new(
+            datastore.clone(),
+            sitrep_rx,
+            alert_dispatcher_activator.clone(),
+            support_bundle_collector_activator.clone(),
+            nexus_id,
+        );
+
+        // Do NOT create any zpools/datasets, so bundle allocation will fail
+        // due to insufficient capacity.
+
+        let sitrep_id = SitrepUuid::new_v4();
+        let case_id = CaseUuid::new_v4();
+        let bundle_id = SupportBundleUuid::new_v4();
+
+        let mut case = fm::Case {
+            id: case_id,
+            created_sitrep_id: sitrep_id,
+            closed_sitrep_id: None,
+            de: fm::DiagnosisEngineKind::PowerShelf,
+            alerts_requested: iddqd::IdOrdMap::new(),
+            ereports: iddqd::IdOrdMap::new(),
+            support_bundles_requested: iddqd::IdOrdMap::new(),
+            comment: "case with no capacity".to_string(),
+        };
+        case.support_bundles_requested
+            .insert_unique(fm::case::SupportBundleRequest {
+                id: bundle_id,
+                requested_sitrep_id: sitrep_id,
+
+                data_selection: None,
+            })
+            .unwrap();
+
+        let sitrep = {
+            let mut cases = iddqd::IdOrdMap::new();
+            cases.insert_unique(case).unwrap();
+            fm::Sitrep {
+                metadata: fm::SitrepMetadata {
+                    id: sitrep_id,
+                    inv_collection_id: CollectionUuid::new_v4(),
+                    parent_sitrep_id: None,
+                    creator_id: OmicronZoneUuid::new_v4(),
+                    comment: "test sitrep no capacity".to_string(),
+                    time_created: Utc::now(),
+                },
+                cases,
+            }
+        };
+
+        sitrep_tx
+            .send(Some(Arc::new((
+                fm::SitrepVersion {
+                    id: sitrep_id,
+                    version: 1,
+                    time_made_current: Utc::now(),
+                },
+                sitrep,
+            ))))
+            .unwrap();
+
+        let status = dbg!(task.actually_activate(opctx).await);
+        let Status::Executed { support_bundles, .. } = status else {
+            panic!("rendezvous should have executed");
+        };
+        assert_eq!(support_bundles.capacity_errors, 1);
+        assert_eq!(support_bundles.bundles_created, 0);
+        assert_eq!(support_bundles.total_bundles_requested, 1);
+
+        // The bundle should NOT exist in the database.
+        let result = fetch_support_bundle(&datastore, bundle_id).await;
+        assert!(
+            result.is_err(),
+            "bundle should not exist when capacity is exhausted"
+        );
+
+        // The collector should NOT have been activated (no bundles created).
+        assert!(
+            !support_bundle_collector_activator.is_activated(),
+            "collector should not be activated when no bundles were created"
         );
 
         // Cleanup

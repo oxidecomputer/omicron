@@ -901,7 +901,11 @@ pub struct SitrepGcStatus {
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 pub enum FmRendezvousStatus {
     NoSitrep,
-    Executed { sitrep_id: SitrepUuid, alerts: FmAlertStats },
+    Executed {
+        sitrep_id: SitrepUuid,
+        alerts: FmAlertStats,
+        support_bundles: FmSupportBundleStats,
+    },
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
@@ -912,6 +916,22 @@ pub struct FmAlertStats {
     pub current_sitrep_alerts_requested: usize,
     /// The number of alerts created by this activation.
     pub alerts_created: usize,
+    /// Errors that occurred during this activation.
+    pub errors: Vec<String>,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
+pub struct FmSupportBundleStats {
+    /// The total number of support bundles requested by the current sitrep.
+    pub total_bundles_requested: usize,
+    /// The total number of support bundles which were *first* requested in the
+    /// current sitrep.
+    pub current_sitrep_bundles_requested: usize,
+    /// The number of support bundles created by this activation.
+    pub bundles_created: usize,
+    /// The number of support bundle requests that failed due to insufficient
+    /// capacity (no free debug datasets).
+    pub capacity_errors: usize,
     /// Errors that occurred during this activation.
     pub errors: Vec<String>,
 }
