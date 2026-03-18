@@ -4,8 +4,6 @@
 
 //! Integration tests for operating on Ports
 
-use std::str::FromStr;
-
 use http::StatusCode;
 use http::method::Method;
 use nexus_test_utils::http_testing::{AuthnMode, NexusRequest, RequestBuilder};
@@ -24,8 +22,10 @@ use omicron_common::api::external::{
     NameOrId,
 };
 use oxnet::IpNet;
-use sled_agent_types::early_networking::ImportExportPolicy;
-use sled_agent_types::early_networking::SwitchSlot;
+use sled_agent_types::early_networking::{ImportExportPolicy, RouterPeerType};
+use sled_agent_types::early_networking::{RouterLifetimeConfig, SwitchSlot};
+use std::net::IpAddr;
+use std::str::FromStr;
 
 type ControlPlaneTestContext =
     nexus_test_utils::ControlPlaneTestContext<omicron_nexus::Server>;
@@ -316,7 +316,9 @@ async fn test_port_settings_basic_crud(ctx: &ControlPlaneTestContext) {
             BgpPeer {
                 bgp_config: NameOrId::Name("as47".parse().unwrap()),
                 interface_name: "phy0".parse().unwrap(),
-                addr: Some("1.2.3.4".parse().unwrap()),
+                addr: RouterPeerType::Numbered {
+                    ip: "1.2.3.4".parse().unwrap(),
+                },
                 hold_time: 6,
                 idle_hold_time: 6,
                 delay_open: 0,
@@ -332,13 +334,14 @@ async fn test_port_settings_basic_crud(ctx: &ControlPlaneTestContext) {
                 allowed_export: ImportExportPolicy::NoFiltering,
                 allowed_import: ImportExportPolicy::NoFiltering,
                 vlan_id: None,
-                router_lifetime: 0,
             },
-            // Unnumbered peer - identified by interface only (addr is None)
+            // Unnumbered peer - identified by interface only
             BgpPeer {
                 bgp_config: NameOrId::Name("as47".parse().unwrap()),
                 interface_name: "phy0".parse().unwrap(),
-                addr: None,
+                addr: RouterPeerType::Unnumbered {
+                    router_lifetime: RouterLifetimeConfig::default(),
+                },
                 hold_time: 6,
                 idle_hold_time: 6,
                 delay_open: 0,
@@ -358,7 +361,6 @@ async fn test_port_settings_basic_crud(ctx: &ControlPlaneTestContext) {
                     "192.168.0.0/16".parse().unwrap(),
                 ]),
                 vlan_id: None,
-                router_lifetime: 0,
             },
         ],
     });
@@ -381,11 +383,11 @@ async fn test_port_settings_basic_crud(ctx: &ControlPlaneTestContext) {
     let numbered_peer = created
         .bgp_peers
         .iter()
-        .find(|p| p.addr.is_some())
+        .find_map(|p| p.addr.ip_squashing_unnumbered_to_none())
         .expect("Should have a numbered peer");
     assert_eq!(
-        numbered_peer.addr,
-        Some("1.2.3.4".parse().unwrap()),
+        numbered_peer,
+        "1.2.3.4".parse::<IpAddr>().unwrap(),
         "Numbered peer should have addr 1.2.3.4"
     );
 
@@ -393,12 +395,8 @@ async fn test_port_settings_basic_crud(ctx: &ControlPlaneTestContext) {
     let unnumbered_peer = created
         .bgp_peers
         .iter()
-        .find(|p| p.addr.is_none())
+        .find(|p| p.addr.is_unnumbered())
         .expect("Should have an unnumbered peer");
-    assert_eq!(
-        unnumbered_peer.addr, None,
-        "Unnumbered peer should have no addr"
-    );
     assert_eq!(
         unnumbered_peer.remote_asn,
         Some(65000),
@@ -451,7 +449,7 @@ async fn test_port_settings_basic_crud(ctx: &ControlPlaneTestContext) {
     let roundtrip_unnumbered = roundtrip
         .bgp_peers
         .iter()
-        .find(|p| p.addr.is_none())
+        .find(|p| p.addr.is_unnumbered())
         .expect("Roundtrip should have an unnumbered peer");
     assert_eq!(roundtrip_unnumbered.remote_asn, Some(65000));
     assert_eq!(roundtrip_unnumbered.communities, vec![65000]);
