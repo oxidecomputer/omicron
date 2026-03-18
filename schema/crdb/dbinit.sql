@@ -7267,6 +7267,42 @@ ON omicron.public.ereport (
 WHERE
     time_deleted IS NULL;
 
+
+/*
+ * Table listing ereporter restart generations by reporter location.
+ */
+CREATE TABLE IF NOT EXISTS omicron.public.ereporter_restart (
+    /* The restart ID */
+    id UUID PRIMARY KEY,
+    /*
+     * The restart generation for this reporter represented by this restart ID.
+     */
+    generation INT8 NOT NULL,
+
+    /*
+     * The location of the reporter.
+     */
+    reporter_type omicron.public.ereporter_type NOT NULL,
+    slot_type omicron.public.sp_type NOT NULL,
+    slot INT4 NOT NULL,
+
+    time_first_seen TIMESTAMPTZ NOT NULL,
+
+    CONSTRAINT reporter_identity_validity CHECK (
+        (slot_type = 'sled' AND reporter_type = 'host') OR
+        reporter_type != 'host'
+    )
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS
+    lookup_ereporter_restart_generations_by_location
+ON omicron.public.ereporter_restart (
+    reporter_type,
+    slot_type,
+    slot,
+    generation
+);
+
 /*
     * Fault management situation reports (and accessories)
     *
