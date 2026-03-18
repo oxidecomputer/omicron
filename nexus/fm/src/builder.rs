@@ -60,7 +60,7 @@ impl<'a> SitrepBuilder<'a> {
         slog::info!(
             &log,
             "preparing sitrep {sitrep_id:?}";
-            "existing_open_cases" => cases.cases.len(),
+            "existing_open_cases" => cases.len(),
         );
 
         SitrepBuilder {

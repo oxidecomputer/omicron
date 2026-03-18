@@ -14,8 +14,8 @@ use std::sync::Arc;
 #[derive(Debug)]
 pub struct CaseBuilder {
     pub log: slog::Logger,
-    pub case: fm::Case,
-    pub sitrep_id: SitrepUuid,
+    case: fm::Case,
+    sitrep_id: SitrepUuid,
     rng: rng::CaseBuilderRng,
 }
 
@@ -23,7 +23,7 @@ pub struct CaseBuilder {
 pub struct AllCases {
     log: slog::Logger,
     sitrep_id: SitrepUuid,
-    pub cases: IdOrdMap<CaseBuilder>,
+    pub(super) cases: IdOrdMap<CaseBuilder>,
     rng: rng::SitrepBuilderRng,
 }
 
@@ -93,6 +93,14 @@ impl AllCases {
         id: &CaseUuid,
     ) -> Option<id_ord_map::RefMut<'_, CaseBuilder>> {
         self.cases.get_mut(id)
+    }
+
+    pub fn len(&self) -> usize {
+        self.cases.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.cases.is_empty()
     }
 }
 
@@ -190,6 +198,11 @@ impl CaseBuilder {
             }
         })
     }
+
+    /// Mutably borrows the case's `comment` field (i.e. to append to it).
+    pub fn comment_mut(&mut self) -> &mut String {
+        &mut self.case.comment
+    }
 }
 
 impl From<CaseBuilder> for fm::Case {
@@ -202,12 +215,6 @@ impl core::ops::Deref for CaseBuilder {
     type Target = fm::Case;
     fn deref(&self) -> &Self::Target {
         &self.case
-    }
-}
-
-impl core::ops::DerefMut for CaseBuilder {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.case
     }
 }
 
