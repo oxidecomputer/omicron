@@ -73,6 +73,14 @@ impl<'a> SitrepBuilder<'a> {
         }
     }
 
+    pub fn comment(&self) -> &str {
+        &self.comment
+    }
+
+    pub fn comment_mut(&mut self) -> &mut str {
+        &mut self.comment
+    }
+
     pub fn build(
         self,
         creator_id: OmicronZoneUuid,
