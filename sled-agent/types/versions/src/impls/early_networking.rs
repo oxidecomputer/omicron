@@ -358,8 +358,46 @@ impl fmt::Display for PortFec {
 mod tests {
     use super::*;
     use assert_matches::assert_matches;
+    use oxnet::Ipv4Net;
     use serde::{Deserialize, Serialize};
     use test_strategy::proptest;
+
+    #[test]
+    fn test_uplink_smf_property_formatting() {
+        for (address, expected_addr) in [
+            (
+                UplinkAddress::Address {
+                    ip_net: SpecifiedIpNet::try_from(IpNet::V6(
+                        Ipv6Net::new("ff80::123".parse().unwrap(), 16).unwrap(),
+                    ))
+                    .unwrap(),
+                },
+                "ff80::123/16",
+            ),
+            (
+                UplinkAddress::Address {
+                    ip_net: SpecifiedIpNet::try_from(IpNet::V4(
+                        Ipv4Net::new("10.0.0.1".parse().unwrap(), 8).unwrap(),
+                    ))
+                    .unwrap(),
+                },
+                "10.0.0.1/8",
+            ),
+            (UplinkAddress::LinkLocal, "link-local"),
+        ] {
+            for (vlan_id, expected_vlan) in
+                [(Some(1), ";1"), (Some(1234), ";1234"), (None, "")]
+            {
+                let config = UplinkAddressConfig { address, vlan_id };
+                let expected = format!("{expected_addr}{expected_vlan}");
+                assert_eq!(
+                    config.to_uplinkd_smf_property(),
+                    expected,
+                    "unexpected SMF property for {config:?}"
+                );
+            }
+        }
+    }
 
     #[proptest]
     fn test_specified_ip_parsing(ip: IpAddr) {
