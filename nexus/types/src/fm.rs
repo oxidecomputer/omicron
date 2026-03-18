@@ -81,6 +81,17 @@ impl Sitrep {
             case.alerts_requested.iter().map(move |alert| (case_id, alert))
         })
     }
+
+    /// Iterate over all support bundles requested by cases in this sitrep.
+    pub fn support_bundles_requested(
+        &self,
+    ) -> impl Iterator<Item = (CaseUuid, &'_ case::SupportBundleRequest)> + '_
+    {
+        self.cases.iter().flat_map(|case| {
+            let case_id = case.id;
+            case.support_bundles_requested.iter().map(move |req| (case_id, req))
+        })
+    }
 }
 
 /// Metadata describing a sitrep.

@@ -5,8 +5,11 @@
 use crate::alert::AlertClass;
 use crate::fm::DiagnosisEngineKind;
 use crate::fm::Ereport;
+use crate::support_bundle::BundleDataSelection;
 use iddqd::{IdOrdItem, IdOrdMap};
-use omicron_uuid_kinds::{AlertUuid, CaseEreportUuid, CaseUuid, SitrepUuid};
+use omicron_uuid_kinds::{
+    AlertUuid, CaseEreportUuid, CaseUuid, SitrepUuid, SupportBundleUuid,
+};
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::sync::Arc;
@@ -21,6 +24,7 @@ pub struct Case {
 
     pub ereports: IdOrdMap<CaseEreport>,
     pub alerts_requested: IdOrdMap<AlertRequest>,
+    pub support_bundles_requested: IdOrdMap<SupportBundleRequest>,
 
     pub comment: String,
 }
@@ -88,6 +92,23 @@ impl iddqd::IdOrdItem for AlertRequest {
     iddqd::id_upcast!();
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SupportBundleRequest {
+    pub id: SupportBundleUuid,
+    pub requested_sitrep_id: SitrepUuid,
+    pub reason: String,
+    pub data_selection: Option<BundleDataSelection>,
+}
+
+impl iddqd::IdOrdItem for SupportBundleRequest {
+    type Key<'a> = &'a SupportBundleUuid;
+    fn key(&self) -> Self::Key<'_> {
+        &self.id
+    }
+
+    iddqd::id_upcast!();
+}
+
 struct DisplayCase<'a> {
     case: &'a Case,
     indent: usize,
@@ -120,6 +141,7 @@ impl fmt::Display for DisplayCase<'_> {
                     ereports,
                     comment,
                     alerts_requested,
+                    support_bundles_requested,
                 },
             indent,
             sitrep_id,
@@ -225,6 +247,34 @@ impl fmt::Display for DisplayCase<'_> {
 
                 writeln!(f, "{BULLET:>indent$}alert {id}",)?;
                 writeln!(f, "{:>indent$}{CLASS:<WIDTH$} {class}", "",)?;
+                writeln!(
+                    f,
+                    "{:>indent$}{REQUESTED_IN:<WIDTH$} {requested_sitrep_id}{}\n",
+                    "",
+                    this_sitrep(*requested_sitrep_id)
+                )?;
+            }
+        }
+
+        if !support_bundles_requested.is_empty() {
+            writeln!(f, "\n{:>indent$}support bundles requested:", "")?;
+            writeln!(f, "{:>indent$}-------------------------", "")?;
+
+            let indent = indent + 2;
+            for SupportBundleRequest {
+                id,
+                requested_sitrep_id,
+                reason,
+                data_selection: _,
+            } in support_bundles_requested.iter()
+            {
+                const REASON: &str = "reason:";
+                const REQUESTED_IN: &str = "requested in:";
+
+                const WIDTH: usize = const_max_len(&[REASON, REQUESTED_IN]);
+
+                writeln!(f, "{BULLET:>indent$}bundle {id}",)?;
+                writeln!(f, "{:>indent$}{REASON:<WIDTH$} {reason}", "",)?;
                 writeln!(
                     f,
                     "{:>indent$}{REQUESTED_IN:<WIDTH$} {requested_sitrep_id}{}\n",
@@ -357,6 +407,7 @@ mod tests {
             de: DiagnosisEngineKind::PowerShelf,
             ereports,
             alerts_requested,
+            support_bundles_requested: IdOrdMap::new(),
             comment: "Power shelf rectifier added and removed here :-)"
                 .to_string(),
         };
