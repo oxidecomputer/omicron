@@ -68,6 +68,23 @@ impl LiveTestContext {
         &self.datastore
     }
 
+    /// Establish a new `DataStore` connection pointed at this deployed system's
+    /// database
+    ///
+    /// Most consumers should prefer `datastore()`, which returns a reference to
+    /// a `DataStore` constructed when this context was created. This method is
+    /// useful if a caller needs to reevaluate what Cockroach instances are
+    /// available in DNS (e.g., due to zone expungement) or needs a `DataStore`
+    /// instance that is not shared.
+    pub async fn new_datastore_connection(
+        &self,
+    ) -> anyhow::Result<(OpContext, Arc<DataStore>)> {
+        let log = &self.logctx.log;
+        let datastore = create_datastore(log, &self.resolver).await?;
+        let opctx = OpContext::for_tests(log.clone(), datastore.clone());
+        Ok((opctx, datastore))
+    }
+
     /// Returns a client for a Nexus internal API at the given socket address
     pub fn specific_internal_nexus_client(
         &self,

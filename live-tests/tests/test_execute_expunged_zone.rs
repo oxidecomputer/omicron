@@ -6,19 +6,24 @@ pub mod common;
 
 use crate::common::reconfigurator::blueprint_load_target_enabled;
 use anyhow::Context;
+use anyhow::bail;
+use chrono::Utc;
 use common::LiveTestContext;
 use common::reconfigurator::blueprint_edit_current_target_disabled;
+use dns_service_client::ClientInfo;
 use live_tests_macros::live_test;
+use nexus_lockstep_client::types::BackgroundTasksActivateRequest;
 use nexus_lockstep_client::types::BlueprintTargetSet;
 use nexus_lockstep_client::types::LastResult;
 use nexus_types::deployment::BlueprintZoneConfig;
+use nexus_types::deployment::BlueprintZoneType;
 use nexus_types::deployment::ReconfiguratorConfig;
 use nexus_types::deployment::ReconfiguratorConfigParam;
+use nexus_types::inventory::Collection;
 use omicron_common::policy::COCKROACHDB_REDUNDANCY;
 use omicron_test_utils::dev::poll::CondCheckError;
 use omicron_test_utils::dev::poll::wait_for_condition;
 use omicron_uuid_kinds::BlueprintUuid;
-use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::SledUuid;
 use serde::Deserialize;
 use sled_agent_types::inventory::ZoneKind;
@@ -49,33 +54,12 @@ async fn test_execute_expunged_zone(lc: &LiveTestContext) {
     // check.
     match datastore.inventory_get_latest_collection(opctx).await {
         Ok(Some(collection)) => {
-            let expected_nodes = COCKROACHDB_REDUNDANCY;
-            let db_status = collection.cockroach_status;
-            if db_status.len() < expected_nodes {
-                panic!(
-                    "refusing to run live test: \
-                    latest inventory only has status from {} cockroach nodes; \
-                    expected {expected_nodes}",
-                    db_status.len()
-                );
-            }
-            for (node_id, status) in db_status {
-                match status.ranges_underreplicated {
-                    Some(0) => (),
-                    _ => panic!(
-                        "refusing to run live test: inventory reports {:?} \
-                         for ranges underreplicated on CRDB node {node_id}",
-                        status.ranges_underreplicated,
-                    ),
-                }
-                match status.liveness_live_nodes {
-                    Some(n) if n == expected_nodes as u64 => (),
-                    _ => panic!(
-                        "refusing to run live test: inventory reports {:?} \
-                         for live nodes on CRDB node {node_id}",
-                        status.liveness_live_nodes,
-                    ),
-                }
+            if let Err(err) =
+                validate_cockroach_is_healthy_according_to_inventory(
+                    &collection,
+                )
+            {
+                panic!("refusing to run live test: {err:#}");
             }
         }
         Ok(None) => panic!(
@@ -133,7 +117,8 @@ async fn test_execute_expunged_zone_of_kind(
     let log = lc.log();
 
     let initial_nexus_clients = lc.all_internal_nexus_clients().await.unwrap();
-    let nexus = initial_nexus_clients.first().expect("internal Nexus client");
+    let mut nexus =
+        initial_nexus_clients.first().expect("internal Nexus client");
 
     // Safety check: We expect the going-in state to be "blueprint execution is
     // enabled". If it isn't, bail out and don't attempt to run this test.
@@ -172,12 +157,34 @@ async fn test_execute_expunged_zone_of_kind(
                 zone_kind,
             );
 
-            let (sled_id, zone_id) =
-                zones_of_interest.pick_any_zone_to_expunge();
+            let (sled_id, zone) = zones_of_interest.pick_any_zone_to_expunge();
 
             builder
-                .sled_expunge_zone(sled_id, zone_id)
+                .sled_expunge_zone(sled_id, zone.id)
                 .context("expunging zone")?;
+
+            // If we're expunging a Nexus, check and see if we should switch to
+            // a different Nexus for the remainder of this test. This is pretty
+            // hacky.
+            if let BlueprintZoneType::Nexus(nexus_cfg) = &zone.zone_type {
+                let client_baseurl = nexus.baseurl();
+                let expunged_host =
+                    format!("[{}]", nexus_cfg.lockstep_address().ip());
+                info!(
+                    log,
+                    "checking current Nexus client's `baseurl` \
+                     against the Nexus zone we're expunging";
+                    "client_baseurl" => %client_baseurl,
+                    "expunged_host" => %expunged_host,
+                );
+
+                if client_baseurl.contains(&expunged_host) {
+                    nexus = initial_nexus_clients
+                        .get(1)
+                        .expect("at least two Nexus clients available");
+                    info!(log, "swapping to another Nexus client");
+                }
+            }
 
             orig_zones_of_interest = Some(zones_of_interest);
 
@@ -222,10 +229,9 @@ async fn test_execute_expunged_zone_of_kind(
     // Edit the newly-planned blueprint and expunge the zone it just added.
     let (_, edit2) =
         blueprint_edit_current_target_disabled(log, nexus, |builder| {
-            let (sled_id, zone_id) =
-                plan1_zones_added.first().copied().unwrap();
+            let (sled_id, zone) = plan1_zones_added.first().unwrap();
             builder
-                .sled_expunge_zone(sled_id, zone_id)
+                .sled_expunge_zone(*sled_id, zone.id)
                 .context("expunging zone")?;
             Ok(())
         })
@@ -367,14 +373,20 @@ async fn test_execute_expunged_zone_of_kind(
     .expect("waited for successful execution");
 
     // Log the IDs of the zone in this state.
-    let (sled_id, zone_id) = plan1_zones_added.first().copied().unwrap();
+    let (sled_id, zone) = plan1_zones_added.first().unwrap();
     info!(
         log,
         "got successful execution of blueprint with \
          expunged-and-never-in-service zone";
         "sled_id" => %sled_id,
-        "zone_id" => %zone_id,
+        "zone_id" => %zone.id,
     );
+
+    // If we just expunged a cockroach node, wait for the cluster to be healthy
+    // again before we return.
+    if zone_kind == ZoneKind::CockroachDb {
+        wait_for_cockroach_cluster_to_be_healthy(nexus, lc, log).await;
+    }
 }
 
 async fn disable_blueprint_planning(
@@ -437,7 +449,7 @@ async fn disable_blueprint_execution(
 }
 
 struct ZonesOfInterest {
-    in_service_zones: BTreeSet<(SledUuid, OmicronZoneUuid)>,
+    in_service_zones: BTreeSet<(SledUuid, BlueprintZoneConfig)>,
 }
 
 impl ZonesOfInterest {
@@ -452,26 +464,26 @@ impl ZonesOfInterest {
                 continue;
             }
 
-            in_service_zones.insert((sled_id, zone_cfg.id));
+            in_service_zones.insert((sled_id, zone_cfg.clone()));
         }
 
         Self { in_service_zones }
     }
 
-    fn pick_any_zone_to_expunge(&self) -> (SledUuid, OmicronZoneUuid) {
+    fn pick_any_zone_to_expunge(&self) -> (SledUuid, BlueprintZoneConfig) {
         self.in_service_zones
             .first()
-            .copied()
+            .cloned()
             .expect("no zones of relevant kind found")
     }
 
     fn zones_added_since(
         &self,
         other: &Self,
-    ) -> BTreeSet<(SledUuid, OmicronZoneUuid)> {
+    ) -> BTreeSet<(SledUuid, BlueprintZoneConfig)> {
         self.in_service_zones
             .difference(&other.in_service_zones)
-            .copied()
+            .cloned()
             .collect()
     }
 }
@@ -530,4 +542,140 @@ fn event_report_has_problems(
     }
 
     had_warnings
+}
+
+async fn wait_for_cockroach_cluster_to_be_healthy(
+    nexus: &nexus_lockstep_client::Client,
+    lc: &LiveTestContext,
+    log: &Logger,
+) {
+    let wait_start_time = Utc::now();
+    let inventory_collector_bgtask = vec!["inventory_collection".to_string()];
+
+    info!(log, "starting to wait for cockroachdb to be reported healthy");
+    wait_for_condition(
+        || async {
+            // Attempt to activate inventory collection; ignore any errors here,
+            // since activation might fail transiently.
+            match nexus
+                .bgtask_activate(&BackgroundTasksActivateRequest {
+                    bgtask_names: inventory_collector_bgtask.clone(),
+                })
+                .await
+            {
+                Ok(_) => (),
+                Err(err) => {
+                    warn!(
+                        log, "failed to activate inventory collector bg task";
+                        InlineErrorChain::new(&err),
+                    );
+                }
+            }
+
+            // Get a new datastore - if we're waiting for cockroach to be
+            // healthy, it's possible we expunged the cockroach that `lc` cached
+            // and returns via its `.datastore()` method. Look up cockroach in
+            // DNS again in every iteration of this check.
+            let (opctx, datastore) = match lc.new_datastore_connection().await {
+                Ok((opctx, datastore)) => (opctx, datastore),
+                Err(err) => {
+                    warn!(
+                        log, "failed to establish new datastore connection";
+                        InlineErrorChain::new(&*err),
+                    );
+                    return Err(CondCheckError::NotYet);
+                }
+            };
+
+            // Load the latest inventory collection.
+            let collection_result =
+                datastore.inventory_get_latest_collection(&opctx).await;
+
+            // Cleanly terminate this newly-created datastore.
+            datastore.terminate().await;
+
+            let collection = match collection_result {
+                Ok(Some(collection)) => collection,
+                // This should never happen: we know from starting the test
+                // that at least one inventory collection already existed.
+                Ok(None) => {
+                    return Err(CondCheckError::Failed(
+                        "no inventory collections exist?!",
+                    ));
+                }
+                Err(err) => {
+                    warn!(
+                        log, "failed to load latest inventory collection";
+                        InlineErrorChain::new(&err),
+                    );
+                    return Err(CondCheckError::NotYet);
+                }
+            };
+
+            // Wait until the inventory collection is sufficiently new.
+            if collection.time_started < wait_start_time {
+                info!(
+                    log, "waiting for new inventory collection";
+                    "latest-collection-started-at" => %collection.time_started,
+                    "must-be-newer-than" => %wait_start_time,
+                );
+                return Err(CondCheckError::NotYet);
+            }
+
+            // Is cockroach healthy?
+            match validate_cockroach_is_healthy_according_to_inventory(
+                &collection,
+            ) {
+                Ok(()) => Ok(()),
+                Err(err) => {
+                    warn!(
+                        log, "cockroach cluster is not yet healthy";
+                        InlineErrorChain::new(&*err),
+                    );
+                    Err(CondCheckError::NotYet)
+                }
+            }
+        },
+        &Duration::from_secs(1),
+        // Even on freshly-set-up systems, it can take more than 10 minutes for
+        // CRDB to become healthy after an expungement. Is 20 generous enough?
+        &Duration::from_secs(20 * 60),
+    )
+    .await
+    .expect("cockroach cluster failed to become healthy sufficently quickly");
+}
+
+fn validate_cockroach_is_healthy_according_to_inventory(
+    collection: &Collection,
+) -> anyhow::Result<()> {
+    let expected_nodes = COCKROACHDB_REDUNDANCY;
+
+    let db_status = &collection.cockroach_status;
+    if db_status.len() < expected_nodes {
+        bail!(
+            "latest inventory only has status from {} cockroach nodes; \
+             expected {expected_nodes}",
+            db_status.len()
+        );
+    }
+
+    for (node_id, status) in db_status {
+        match status.ranges_underreplicated {
+            Some(0) => (),
+            _ => bail!(
+                "inventory reports {:?} for ranges underreplicated on \
+                 CRDB node {node_id}",
+                status.ranges_underreplicated,
+            ),
+        }
+        match status.liveness_live_nodes {
+            Some(n) if n == expected_nodes as u64 => (),
+            _ => bail!(
+                "inventory reports {:?} for live nodes on CRDB node {node_id}",
+                status.liveness_live_nodes,
+            ),
+        }
+    }
+
+    Ok(())
 }
