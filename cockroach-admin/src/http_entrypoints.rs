@@ -48,8 +48,11 @@ impl CockroachAdminApi for CockroachAdminImpl {
         rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<ClusterNodeStatus>, HttpError> {
         let ctx = rqctx.context();
-        let all_nodes =
-            ctx.cockroach_cli().node_status().await.map_err(HttpError::from)?;
+        let all_nodes = ctx
+            .cockroach_cli()
+            .node_status(ctx.log())
+            .await
+            .map_err(HttpError::from)?;
         Ok(HttpResponseOk(ClusterNodeStatus { all_nodes }))
     }
 
