@@ -7188,12 +7188,12 @@ ON omicron.public.user_data_export (state);
      */
     reporter omicron.public.ereporter_type NOT NULL,
 
+    /* sled UUID for host OS reporters. */
+    sled_id UUID,
+
     /* physical slot location of the reporter. */
     slot_type omicron.public.sp_type NOT NULL,
     slot INT4 NOT NULL,
-
-    /* sled UUID for host OS reporters. */
-    sled_id UUID,
 
     CONSTRAINT reporter_identity_validity CHECK (
     (
