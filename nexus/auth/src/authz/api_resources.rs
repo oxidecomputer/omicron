@@ -42,6 +42,7 @@ use futures::future::BoxFuture;
 use nexus_db_fixed_data::FLEET_ID;
 use nexus_types::external_api::policy::{FleetRole, ProjectRole, SiloRole};
 use omicron_common::api::external::{Error, LookupType, ResourceType};
+use omicron_uuid_kinds::{BlueprintUuid, GenericUuid};
 use oso::PolarClass;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -1518,6 +1519,16 @@ authz_resource! {
     primary_key = Uuid,
     roles_allowed = false,
     polar_snippet = FleetChild,
+}
+
+impl Blueprint {
+    pub fn new_for_id(id: BlueprintUuid) -> Self {
+        Self::new(
+            FLEET,
+            *id.as_untyped_uuid(),
+            LookupType::ById(*id.as_untyped_uuid()),
+        )
+    }
 }
 
 authz_resource! {

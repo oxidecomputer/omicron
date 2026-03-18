@@ -72,6 +72,7 @@ use nexus_db_model::Ipv6Addr;
 use nexus_db_model::SpMgsSlot;
 use nexus_db_model::SpType;
 use nexus_db_model::SqlU16;
+use nexus_db_model::SqlU32;
 use nexus_db_model::TufArtifact;
 use nexus_db_model::to_db_typed_uuid;
 use nexus_db_schema::enums::HwM2SlotEnum;
@@ -122,7 +123,6 @@ use thiserror::Error;
 use tufaceous_artifact::ArtifactKind;
 use tufaceous_artifact::KnownArtifactKind;
 use uuid::Uuid;
-use nexus_db_model::SqlU32;
 
 mod external_networking;
 
@@ -2384,17 +2384,27 @@ impl DataStore {
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 
-    /// Delete `bp_target` rows older than the given version
-    pub async fn bp_target_delete_older(
+    /// Delete `bp_target` rows not newer than the specified version
+    pub async fn bp_target_delete_up_to(
         &self,
-        _opctx: &OpContext,
-        _version: u32,
+        opctx: &OpContext,
+        version: u32,
     ) -> Result<usize, Error> {
         // XXX-dap can this datastore function somehow predicate on this *NOT*
         // being the max version?
-        todo!(); // XXX-dap
+        // XXX-dap edit this!  this is a prototype.  it should make sure it's
+        // not deleting the last row
+        // XXX-dap authz
+        use nexus_db_schema::schema::bp_target::dsl;
+        let conn = self.pool_connection_authorized(&opctx).await?;
+        let ndeleted = diesel::delete(
+            dsl::bp_target.filter(dsl::version.le(SqlU32(version))),
+        )
+        .execute_async(&*conn)
+        .await
+        .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+        Ok(ndeleted)
     }
-
 }
 
 // Helper for reporting "should never happen" errors while inserting blueprints.

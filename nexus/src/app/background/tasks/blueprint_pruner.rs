@@ -147,16 +147,27 @@ impl BackgroundTask for BlueprintPruner {
         opctx: &'a OpContext,
     ) -> BoxFuture<'a, serde_json::Value> {
         Box::pin(async move {
-            match prune_blueprints(opctx, &self.datastore, &opctx.log).await {
-                Ok(status) => match serde_json::to_value(status) {
-                    Ok(val) => val,
-                    Err(err) => json!({
-                        "error": format!(
-                            "could not serialize task status: {}",
-                            InlineErrorChain::new(&err)
-                        ),
-                    }),
-                },
+            match prune_blueprints(
+                opctx,
+                &self.datastore,
+                &opctx.log,
+                MAX_NKEEP,
+                MAX_DELETE_ATTEMPTS_PER_ACTIVATION,
+            )
+            .await
+            {
+                Ok(details) => {
+                    let status = BlueprintPrunerStatus::Enabled(details);
+                    match serde_json::to_value(status) {
+                        Ok(val) => val,
+                        Err(err) => json!({
+                            "error": format!(
+                                "could not serialize task status: {}",
+                                InlineErrorChain::new(&err)
+                            ),
+                        }),
+                    }
+                }
                 Err(error) => json!({
                     "error": InlineErrorChain::new(&*error).to_string(),
                 }),
@@ -170,10 +181,14 @@ async fn prune_blueprints(
     opctx: &OpContext,
     datastore: &DataStore,
     log: &Logger,
-) -> Result<BlueprintPrunerStatus, anyhow::Error> {
+    nkeep: usize,
+    max_delete_attempts: usize,
+) -> Result<BlueprintPrunerDetails, anyhow::Error> {
+    // Clamp `nkeep` at 3 on the low end.
+    let nkeep = nkeep.clamp(3, usize::MAX);
     // Figure out the maximum version that we'd consider pruning.
     let target_table_status =
-        determine_bp_target_rows_to_keep(opctx, datastore, MAX_NKEEP).await?;
+        determine_bp_target_rows_to_keep(opctx, datastore, nkeep).await?;
     let keep_version = match target_table_status.keep {
         KeepWhat::All => {
             info!(
@@ -182,15 +197,13 @@ async fn prune_blueprints(
                 "nfound" => target_table_status.nfound,
                 "nscanned" => target_table_status.nscanned,
             );
-            return Ok(BlueprintPrunerStatus::Enabled(
-                BlueprintPrunerDetails {
-                    nkept: target_table_status.nfound,
-                    deleted: vec![],
-                    ntargets_deleted: 0,
-                    ntargets_removable: 0,
-                    warnings: vec![],
-                },
-            ));
+            return Ok(BlueprintPrunerDetails {
+                nkept: target_table_status.nfound,
+                deleted: vec![],
+                ntargets_deleted: 0,
+                ntargets_removable: 0,
+                warnings: vec![],
+            });
         }
         KeepWhat::StartingFromVersion(version) => {
             info!(
@@ -220,7 +233,7 @@ async fn prune_blueprints(
         log,
         keep_version,
         nblueprints_found: target_table_status.nfound,
-        max_delete_attempts: MAX_DELETE_ATTEMPTS_PER_ACTIVATION,
+        max_delete_attempts,
     };
     let mut pop = PruneTracker::new();
     let details = loop {
@@ -230,7 +243,7 @@ async fn prune_blueprints(
         }
     };
 
-    Ok(BlueprintPrunerStatus::Enabled(details))
+    Ok(details)
 }
 
 /// Summarizes the most recent rows of the `bp_target` table
@@ -333,7 +346,6 @@ struct PruneTracker {
     ntargets_deleted: usize,
     deleted: Vec<DeletedBlueprint>,
     errors: Vec<anyhow::Error>,
-    highest_version_deleted: Option<u32>,
 }
 
 impl PruneTracker {
@@ -343,7 +355,6 @@ impl PruneTracker {
             ntargets_deleted: 0,
             deleted: vec![],
             errors: vec![],
-            highest_version_deleted: None,
         }
     }
 
@@ -368,32 +379,9 @@ impl PruneTracker {
         }
     }
 
-    pub fn record_targets_deleted(
-        mut self,
-        version_deleted_up_to: u32,
-        count: usize,
-    ) -> ControlFlow<Self, Self> {
-        let Some(previous) = self.highest_version_deleted else {
-            // This should be impossible.
-            return ControlFlow::Break(self.record_error(anyhow!(
-                "recording having deleted up to version \
-                 {version_deleted_up_to} without having recorded deleting \
-                 blueprints",
-            )));
-        };
-
-        if previous < version_deleted_up_to {
-            // This should be impossible.
-            return ControlFlow::Break(self.record_error(anyhow!(
-                "recorded having deleted up to version \
-                 {version_deleted_up_to} but had only seen up to version \
-                 {previous}",
-            )));
-        }
-
+    pub fn record_targets_deleted(mut self, count: usize) -> Self {
         self.ntargets_deleted += count;
-        self.highest_version_deleted = None;
-        ControlFlow::Continue(self)
+        self
     }
 
     fn into_details(self, pargs: &PruneArgs) -> BlueprintPrunerDetails {
@@ -456,7 +444,7 @@ async fn prune_batch(
         // error because its contract is that there were no errors up through
         // `highest_deleted`.
         let result = datastore
-            .bp_target_delete_older(opctx, deleted_up_to)
+            .bp_target_delete_up_to(opctx, deleted_up_to)
             .await
             .with_context(|| {
                 format!("deleting bp_target rows up to {deleted_up_to}")
@@ -470,7 +458,7 @@ async fn prune_batch(
                     "max_version_deleted" => deleted_up_to,
                 );
 
-                pop = pop.record_targets_deleted(deleted_up_to, count)?;
+                pop = pop.record_targets_deleted(count);
             }
             Err(error) => {
                 warn!(
@@ -678,16 +666,12 @@ async fn prune_batch_blueprints_impl(
         }
 
         let blueprint_id = BlueprintUuid::from(row.blueprint_id);
+        let authz_blueprint = authz::Blueprint::new_for_id(blueprint_id);
         debug!(
             log,
             "deleting old target blueprint";
             "version" => *row.version,
             "blueprint_id" => blueprint_id.to_string(),
-        );
-        let authz_blueprint = authz::Blueprint::new(
-            authz::FLEET,
-            blueprint_id.into_untyped_uuid(),
-            LookupType::ById(blueprint_id.into_untyped_uuid()),
         );
 
         match datastore.blueprint_delete(opctx, &authz_blueprint).await {
@@ -751,5 +735,420 @@ impl<T> ControlFlowExt for ControlFlow<T, T> {
             ControlFlow::Continue(val) => val,
             ControlFlow::Break(val) => val,
         }
+    }
+}
+
+// XXX-dap test plan:
+// - write a helper that loads N blueprints into the database as noops based on
+//   the current one
+//   (result: blueprint versions 1-(N+1) in the database?)
+// - write a verification helper:
+//   - input: final version number to expect
+//   - input: set of versions to expect or blueprint ids (unclear which)
+//   - input: blueprints / bp_target rows expected to be gone
+//   - loads all bp_target rows
+//   - loads all referenced blueprints
+//   - verifies that there are no gaps in the range
+//   - verifies that the range ends with the specific version
+//   - verifies a specific set of rows / blueprints exist:
+//     - none of the blueprints created by the test that shouldn't be here are
+//       here
+//     - all of the blueprints that the caller says should be here are here
+// - things we want to test:
+//   - very basic behavior:
+//     - multiple iterations
+//       (max_prune > batch_size and nblueprints - nkeep > max_prune)
+//     - keeps the correct number
+//     - stops when hitting max_prune
+//     - noop when nblueprints < nkeep
+//   - recover from backlog (multiple iterations eventually converges and keeps
+//     the right number)
+//   - case where bp_target row references missing blueprint
+//   - extra blueprints (not referenced) are not touched
+//   - case: gap in bp_target table
+//   - common steady-state behavior (adding/pruning one at a time)
+//   - same blueprint enabled/disabled
+#[cfg(test)]
+mod test {
+    use super::prune_blueprints;
+    use chrono::Utc;
+    use nexus_auth::authz;
+    use nexus_auth::context::OpContext;
+    use nexus_db_model::BpTarget;
+    use nexus_db_queries::db::DataStore;
+    use nexus_db_queries::db::datastore::SQL_BATCH_SIZE;
+    use nexus_db_queries::db::pagination::Paginator;
+    use nexus_reconfigurator_planning::blueprint_builder::BlueprintBuilder;
+    use nexus_reconfigurator_planning::planner::PlannerRng;
+    use nexus_test_utils::db::TestDatabase;
+    use nexus_types::deployment::BlueprintMetadata;
+    use nexus_types::deployment::BlueprintSource;
+    use nexus_types::deployment::BlueprintTarget;
+    use omicron_test_utils::dev;
+    use omicron_uuid_kinds::BlueprintUuid;
+    use omicron_uuid_kinds::GenericUuid;
+    use std::collections::BTreeSet;
+    use std::collections::VecDeque;
+
+    /// Describes the `bp_target` rows and blueprints stored in the database
+    #[derive(Eq, PartialEq, Debug)]
+    struct BlueprintDatabaseState {
+        all_blueprint_ids: BTreeSet<BlueprintUuid>,
+        target_rows: VecDeque<TargetRow>,
+    }
+
+    #[derive(Eq, PartialEq, Debug)]
+    struct TargetRow {
+        id: BlueprintUuid,
+        version: u32,
+        enabled: bool,
+    }
+
+    impl BlueprintDatabaseState {
+        pub async fn load(
+            opctx: &OpContext,
+            datastore: &DataStore,
+        ) -> BlueprintDatabaseState {
+            // We load:
+            //
+            // - all bp_target rows
+            // - all blueprints that exist, whether or not they're referenced in
+            //   `bp_target`
+            //
+            // This gives us ground truth about which blueprints are in the
+            // database and which bp_target rows are there.  Normally we can
+            // make certain assumptions (like if a `bp_target` row is deleted,
+            // then its blueprint is also gone, or its blueprint is at least
+            // irrelevant), but this is the very behavior we're testing here so
+            // we avoid assuming stuff like that.
+            //
+            // Note that we're not testing blueprint deletion itself here.  We
+            // assume that a blueprint is either fully present (if its row
+            // exists in `blueprint`) or it's fully deleted (if not).  Other
+            // code in the datastore tests that deletion is atomic across the
+            // various blueprint-related tables.
+            let mut all_blueprint_ids = BTreeSet::new();
+            let mut paginator = Paginator::new(
+                SQL_BATCH_SIZE,
+                dropshot::PaginationOrder::Ascending,
+            );
+            while let Some(p) = paginator.next() {
+                let records_batch = datastore
+                    .blueprints_list(opctx, &p.current_pagparams())
+                    .await
+                    .expect("fetching page of blueprint table");
+                paginator = p
+                    .found_batch(&records_batch, &|m: &BlueprintMetadata| {
+                        m.id.into_untyped_uuid()
+                    });
+                for row in records_batch {
+                    all_blueprint_ids.insert(row.id);
+                }
+            }
+
+            let mut target_rows = VecDeque::new();
+            let mut paginator = Paginator::new(
+                SQL_BATCH_SIZE,
+                dropshot::PaginationOrder::Ascending,
+            );
+
+            while let Some(p) = paginator.next() {
+                let records_batch = datastore
+                    .bp_target_list_page(opctx, &p.current_pagparams())
+                    .await
+                    .expect("fetching page of bp_target rows");
+                paginator =
+                    p.found_batch(&records_batch, &|m: &BpTarget| m.version);
+                for row in records_batch {
+                    target_rows.push_back(TargetRow {
+                        id: BlueprintUuid::from(row.blueprint_id),
+                        version: *row.version,
+                        enabled: row.enabled,
+                    });
+                }
+            }
+
+            BlueprintDatabaseState { all_blueprint_ids, target_rows }
+        }
+
+        /// Verifies that all blueprints referenced by bp_target rows do exist.
+        ///
+        /// Note that this is not always expected to be true.  Systems that have
+        /// previously cleaned up old blueprints may have bp_target rows that
+        /// refer to blueprints that have been deleted.
+        pub fn verify_blueprints_referenced_by_targets(&self) {
+            for t in &self.target_rows {
+                let id = t.id;
+                if !self.all_blueprint_ids.contains(&id) {
+                    panic!(
+                        "expected blueprint id {id} from `bp_target` row to be \
+                         present in `blueprint`, but it wasn't"
+                    );
+                }
+            }
+        }
+
+        /// Verifies that all blueprints that exist are referenced by a
+        /// `bp_target` row.
+        ///
+        /// Note that this is not always expected to be true.  Blueprints can be
+        /// created and never made the target.
+        pub fn verify_targets_referenced_by_blueprints(&self) {
+            let mut unreferenced = self.all_blueprint_ids.clone();
+            for row in &self.target_rows {
+                // It's possible for a blueprint to be referenced multiple times
+                // in `bp_target` (if it's been enabled/disabled), so it's okay
+                // if `remove()` doesn't find the id.
+                unreferenced.remove(&row.id);
+            }
+
+            if !unreferenced.is_empty() {
+                panic!(
+                    "blueprints found in `blueprint` that are not referenced \
+                     by `bp_target`: {:?}",
+                    unreferenced,
+                );
+            }
+        }
+
+        /// Re-loads the database state and verifies that it exactly matches
+        /// the state reflected by this object.
+        pub async fn verify_database_matches(
+            &self,
+            opctx: &OpContext,
+            datastore: &DataStore,
+        ) {
+            let other = Self::load(opctx, datastore).await;
+            assert_eq!(*self, other);
+        }
+
+        /// Creates a new blueprint based on the current target, inserts it, and
+        /// sets it as the new target.
+        pub async fn add_target_blueprint(
+            &mut self,
+            opctx: &OpContext,
+            datastore: &DataStore,
+        ) {
+            // Find the highest-versioned target blueprint that we loaded and
+            // read the whole blueprint.
+            let parent_blueprint_target = self
+                .target_rows
+                .iter()
+                .last()
+                .expect("at least one bp_target row");
+            let enabled = parent_blueprint_target.enabled;
+            let parent_blueprint = datastore
+                .blueprint_read(
+                    opctx,
+                    &authz::Blueprint::new_for_id(parent_blueprint_target.id),
+                )
+                .await
+                .expect("loaded blueprint");
+
+            // Build a new blueprint with no meaningful changes from that one.
+            // Insert it and make it the new target.
+            let builder = BlueprintBuilder::new_based_on(
+                &opctx.log,
+                &parent_blueprint,
+                "test-suite",
+                // It would be nice to use a seeded RNG for the tests, but the
+                // builder takes ownership of the RNG (and for good reason --
+                // its state changes as it's used).  It's technically cloneable,
+                // but that doesn't have the semantics we want (we don't want
+                // clones to generate the same random sequences).  Really what
+                // we need is an interface through which the builder has a
+                // mutable borrow of the RNG or else returns it back to us when
+                // it's done.
+                PlannerRng::from_entropy(),
+            )
+            .expect("creating BlueprintBuilder");
+
+            let new_blueprint = builder.build(BlueprintSource::Test);
+            datastore
+                .blueprint_insert(opctx, &new_blueprint)
+                .await
+                .expect("inserting new blueprint");
+            datastore
+                .blueprint_target_set_current(
+                    opctx,
+                    BlueprintTarget {
+                        target_id: new_blueprint.id,
+                        enabled,
+                        time_made_target: Utc::now(),
+                    },
+                )
+                .await
+                .expect("setting new blueprint as target");
+
+            // Update our state to reflect the new blueprint.
+            self.all_blueprint_ids.insert(new_blueprint.id);
+            self.target_rows.push_back(TargetRow {
+                id: new_blueprint.id,
+                version: parent_blueprint_target.version + 1,
+                enabled,
+            });
+        }
+
+        /// Removes the oldest N target rows and their associated blueprints
+        /// from just the in-memory state.
+        // XXX-dap is it a problem that we assume we can delete a blueprint if
+        // we find a bp_target row referencing it because what if a different,
+        // *later* row references it?  I guess we can say that such rows must be
+        // contiguous, at least.
+        pub fn drop_oldest(&mut self, count: usize) -> Vec<TargetRow> {
+            assert!(
+                count < self.target_rows.len(),
+                "test attempted to drop more target rows than there are"
+            );
+            let rv: Vec<_> = self.target_rows.drain(0..count).collect();
+            for t in &rv {
+                // It's possible that this blueprint id isn't present in
+                // `all_blueprint_ids`, as in the case where manual cleanup had
+                // been run on this system (or, more accurately here, when we're
+                // testing that scenario).
+                self.all_blueprint_ids.remove(&t.id);
+            }
+            rv
+        }
+    }
+
+    #[tokio::test]
+    async fn test_basic() {
+        let logctx = dev::test_setup_log("blueprint_pruner_basic");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+        let log = &opctx.log;
+
+        // Verify the initial state set up by the test suite.
+        let blueprints = BlueprintDatabaseState::load(opctx, datastore).await;
+        assert!(blueprints.all_blueprint_ids.is_empty());
+        assert!(blueprints.target_rows.is_empty());
+
+        // Insert an initial blueprint.
+        let blueprint = BlueprintBuilder::build_empty_seeded(
+            "test-suite",
+            PlannerRng::from_entropy(),
+        );
+        datastore
+            .blueprint_insert(opctx, &blueprint)
+            .await
+            .expect("inserting initial blueprint");
+        datastore
+            .blueprint_target_set_current(
+                opctx,
+                BlueprintTarget {
+                    target_id: blueprint.id,
+                    enabled: false,
+                    time_made_target: Utc::now(),
+                },
+            )
+            .await
+            .expect("inserting initial blueprint target");
+
+        // Verify that newly loaded state reflects that.
+        let mut blueprints =
+            BlueprintDatabaseState::load(opctx, datastore).await;
+        assert_eq!(blueprints.all_blueprint_ids.len(), 1);
+        assert_eq!(blueprints.target_rows.len(), 1);
+        blueprints.verify_blueprints_referenced_by_targets();
+        blueprints.verify_targets_referenced_by_blueprints();
+
+        // Pruning at this point should do nothing, even if we choose to keep 0.
+        // That's because we'll never remove the last few blueprints.
+        let details = prune_blueprints(opctx, datastore, log, 0, 10)
+            .await
+            .expect("successful prune");
+        println!("{details:?}");
+        blueprints.verify_database_matches(opctx, datastore).await;
+        assert!(details.deleted.is_empty());
+        assert_eq!(details.nkept, 1);
+        assert_eq!(details.ntargets_removable, 0);
+        assert_eq!(details.ntargets_deleted, 0);
+        assert!(details.warnings.is_empty());
+
+        // Add several more blueprints and make sure our representation of the
+        // database state matches up with the real thing.
+        let nnew = 12;
+        for _ in 0..nnew {
+            blueprints.add_target_blueprint(opctx, datastore).await;
+        }
+        blueprints.verify_blueprints_referenced_by_targets();
+        blueprints.verify_targets_referenced_by_blueprints();
+        blueprints.verify_database_matches(opctx, datastore).await;
+
+        // Next, we'll do this:
+        //
+        // - prune(nkeep = 0, max_deletes = 4);
+        //   (should clamp `nkeep` at 3 and delete 4, leaving the latest 9)
+        // - prune(nkeep = 0, max_deletes = 4);
+        //   (should clamp `nkeep` at 3 and delete 4, leaving the latest 5)
+        // - prune(nkeep = 0, max_deletes = 4);
+        //   (should clamp `nkeep` at 3 and delete 2, leaving the latest 3)
+        // - prune(nkeep = 0, max_deletes = 4);
+        //   (should clamp `nkeep` at 3 and delete nothing)
+        //
+        // This tests a few things:
+        //
+        // - basic pruning behavior
+        //   - no blueprints left around
+        //   - no bp_target rows left around
+        //   - *correct* blueprints/bp_target rows were deleted
+        // - `nkeep` clamped at 3 and is honored
+        // - `max_deletes` is honored
+        let mut nleft = blueprints.target_rows.len();
+        for _ in 0..2 {
+            let ndelete = 4;
+            let oldest = blueprints.drop_oldest(ndelete);
+            let details = prune_blueprints(opctx, datastore, log, 0, ndelete)
+                .await
+                .expect("successful prune");
+            println!("{details:?}");
+            assert!(details.warnings.is_empty());
+            assert_eq!(details.deleted.len(), oldest.len());
+            assert_eq!(details.nkept, 3);
+            assert_eq!(details.ntargets_removable, ndelete);
+            assert_eq!(details.ntargets_deleted, ndelete);
+            for (old, pruned) in oldest.iter().zip(details.deleted.iter()) {
+                assert_eq!(old.id, pruned.id);
+            }
+            nleft -= ndelete;
+            assert_eq!(blueprints.target_rows.len(), nleft);
+            blueprints.verify_database_matches(opctx, datastore).await;
+        }
+
+        // At this point, there are only 5 left.  Attempting to prune another 4
+        // will hit the lower bound and remove only 2.
+        let oldest = blueprints.drop_oldest(2);
+        let details = prune_blueprints(opctx, datastore, log, 0, 4)
+            .await
+            .expect("successful prune");
+        println!("{details:?}");
+        assert_eq!(details.deleted.len(), oldest.len());
+        assert_eq!(details.nkept, 3);
+        assert_eq!(details.ntargets_removable, 2);
+        assert_eq!(details.ntargets_deleted, 2);
+        assert!(details.warnings.is_empty());
+        for (old, pruned) in oldest.iter().zip(details.deleted.iter()) {
+            assert_eq!(old.id, pruned.id);
+        }
+        nleft -= 2;
+        assert_eq!(blueprints.target_rows.len(), nleft);
+        blueprints.verify_database_matches(opctx, datastore).await;
+
+        // Pruning again will remove nothing, since we hit the end.
+        let details = prune_blueprints(opctx, datastore, log, 0, 4)
+            .await
+            .expect("successful prune");
+        println!("{details:?}");
+        assert!(details.deleted.is_empty());
+        assert_eq!(details.nkept, 3);
+        assert_eq!(details.ntargets_removable, 0);
+        assert_eq!(details.ntargets_deleted, 0);
+        assert!(details.warnings.is_empty());
+        assert_eq!(blueprints.target_rows.len(), 3);
+        blueprints.verify_database_matches(opctx, datastore).await;
+
+        db.terminate().await;
+        logctx.cleanup_successful();
     }
 }
